@@ -5,17 +5,35 @@ import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits, refundCredits } from '@/lib/credits';
+import { calculateConfiguredCreditCost, consumeCredits, refundCredits } from '@/lib/credits';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { validateImageUrl, validatePrompt } from '@/lib/input-validation';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import type { EditTask } from '@/lib/edit-task-store';
-import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
+import {
+  isTaskCancelled,
+  registerTask,
+  registerTaskAbortController,
+  unregisterTaskAbortController,
+  updateTaskProgress,
+} from '@/lib/task-registry';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { translateApiError } from '@/lib/api-error-translate';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, extractImageUrl } from '@/lib/api-compatibility';
+import {
+  AnnotationIdempotencyConflictError,
+  claimAnnotationEditTask,
+  createAnnotationRequestHash,
+} from '@/lib/annotation-idempotency';
+import {
+  chargeCloudTaskCredits,
+  completeCloudTask,
+  terminateCloudTaskAndRefund,
+  updateCloudTask,
+} from '@/lib/cloud-task-storage';
+import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
@@ -39,6 +57,21 @@ interface EditTaskResult {
   status?: number;
 }
 
+interface EditRequestBody {
+  image?: string;
+  prompt?: string;
+  mask?: string;
+  size?: string;
+  quality?: string;
+  apiKey?: string;
+  model?: string;
+  providerId?: string;
+  count?: number;
+  llmModelId?: string;
+  llmProviderId?: string;
+  referenceImages?: Array<string | { url?: string }>;
+}
+
 // 重新导出供 poll-task 使用（保持兼容）
 // Re-exports removed - import directly from '@/lib/edit-task-store' instead
 // export { getEditTask, deleteEditTask };
@@ -60,32 +93,14 @@ const EDITABLE_MODELS = [
 ];
 
 /** 将图片 URL/data 转换为 Buffer + mimeType */
-async function resolveImageToBuffer(imageSrc: string): Promise<{ buffer: Buffer; mimeType: string }> {
-  if (imageSrc.startsWith('data:')) {
-    const commaIndex = imageSrc.indexOf(',');
-    const header = imageSrc.substring(0, commaIndex);
-    const base64Data = imageSrc.substring(commaIndex + 1);
-    const mimeMatch = header.match(/data:([^;]+)/);
-    return { buffer: Buffer.from(base64Data, 'base64'), mimeType: mimeMatch?.[1] || 'image/png' };
-  } else if (imageSrc.startsWith('http://') || imageSrc.startsWith('https://')) {
-    const response = await fetch(imageSrc, { signal: AbortSignal.timeout(30000) });
-    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
-    const arrayBuffer = await response.arrayBuffer();
-    const contentType = response.headers.get('content-type');
-    return { buffer: Buffer.from(arrayBuffer), mimeType: contentType || 'image/png' };
-  } else if (imageSrc.startsWith('/')) {
-    const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-    const domainBase = domain.replace(/\/+$/, '');
-    const base = domainBase.startsWith('http') ? domainBase : (domainBase ? `https://${domainBase}` : '');
-    const fullUrl = base ? `${base}${imageSrc}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageSrc}`;
-    const response = await fetch(fullUrl, { signal: AbortSignal.timeout(30000) });
-    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
-    const arrayBuffer = await response.arrayBuffer();
-    const contentType = response.headers.get('content-type');
-    return { buffer: Buffer.from(arrayBuffer), mimeType: contentType || 'image/png' };
-  } else {
-    return { buffer: Buffer.from(imageSrc, 'base64'), mimeType: 'image/png' };
-  }
+async function resolveImageToBuffer(
+  imageSrc: string,
+  signal: AbortSignal,
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  return loadSafeImageInput(imageSrc, {
+    allowRawBase64: true,
+    signal,
+  });
 }
 
 /**
@@ -277,9 +292,41 @@ export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
+  const annotationIdempotencyKey = request.headers.get('x-idempotency-key')?.trim() || '';
+  if (annotationIdempotencyKey.length > 256) {
+    return NextResponse.json({
+      success: false,
+      code: 'ANNOTATION_COMPLEXITY_INVALID',
+      error: 'Annotation idempotency key exceeds 256 characters',
+    }, { status: 400 });
+  }
   let deductedCredits = 0;
   let sessionUser: import('@/lib/user-types').User | null = null;
+  let annotationTaskId = '';
   try {
+    const annotationBodyLimit = 64 * 1024 * 1024;
+    const declaredBodySize = Number(request.headers.get('content-length') || 0);
+    if (annotationIdempotencyKey && declaredBodySize > annotationBodyLimit) {
+      return NextResponse.json({
+        success: false,
+        code: 'ANNOTATION_COMPLEXITY_INVALID',
+        error: 'Annotation edit request body exceeds 64 MB',
+      }, { status: 413 });
+    }
+    let parsedRequestBody: EditRequestBody;
+    if (annotationIdempotencyKey) {
+      const rawBody = await request.text();
+      if (Buffer.byteLength(rawBody, 'utf8') > annotationBodyLimit) {
+        return NextResponse.json({
+          success: false,
+          code: 'ANNOTATION_COMPLEXITY_INVALID',
+          error: 'Annotation edit request body exceeds 64 MB',
+        }, { status: 413 });
+      }
+      parsedRequestBody = JSON.parse(rawBody) as EditRequestBody;
+    } else {
+      parsedRequestBody = await request.json() as EditRequestBody;
+    }
     const {
       image,         // base64 data URL（客户端已转换）
       prompt,        // 编辑指令（自然语言）
@@ -293,7 +340,10 @@ export async function POST(request: NextRequest) {
       llmModelId,    // 可选，LLM辅助模型ID
       llmProviderId, // 可选，LLM辅助模型提供商ID
       referenceImages, // 可选，参考图URL数组（多图模式）
-    } = await request.json();
+    } = parsedRequestBody;
+    const usableReferenceImages = (referenceImages || [])
+      .map((reference) => typeof reference === 'string' ? reference : reference.url || '')
+      .filter(Boolean);
 
     if (!image) {
       return NextResponse.json({ success: false, error: '请先添加图片' }, { status: 400 });
@@ -322,7 +372,7 @@ export async function POST(request: NextRequest) {
     let previewProvider: ApiProvider | null = null;
     if (extractedProviderId || providerId) {
       try {
-        previewProvider = await findProviderById(extractedProviderId || providerId);
+        previewProvider = await findProviderById(extractedProviderId || providerId || '');
       } catch {}
     }
     // 候选API模型名初始为pureModel，provider精确匹配后保留原始名（如PearAPI的gpt-image-2-4k）
@@ -363,7 +413,7 @@ export async function POST(request: NextRequest) {
 
     if (!effectiveApiKey && (extractedProviderId || providerId)) {
       try {
-        imageProvider = await findProviderById(extractedProviderId || providerId);
+        imageProvider = await findProviderById(extractedProviderId || providerId || '');
         if (imageProvider?.apiKey) {
           effectiveApiKey = imageProvider.apiKey;
           effectiveBaseUrl = normalizeApiBaseUrl(imageProvider.baseUrl || '');
@@ -389,103 +439,133 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    if (annotationIdempotencyKey) {
+      const claim = await claimAnnotationEditTask({
+        userId: authResult.userId,
+        idempotencyKey: annotationIdempotencyKey,
+        requestHash: createAnnotationRequestHash(parsedRequestBody),
+        providerId: extractedProviderId || providerId || imageProvider?.id || '',
+        model: pureModel,
+      });
+      annotationTaskId = claim.taskId;
+      if (!claim.owner) {
+        return NextResponse.json({
+          success: true,
+          mode: 'polling',
+          taskId: claim.taskId,
+          replayed: true,
+        });
+      }
+    }
+
     // 积分扣除（在凭证验证通过后）
     if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { quality, providerId: providerId || undefined });
+      const creditResult = annotationTaskId
+        ? await (async () => {
+            const cost = await calculateConfiguredCreditCost(
+              'image_retouch',
+              model,
+              { quality, providerId: providerId || undefined },
+            );
+            const result = await chargeCloudTaskCredits(
+              annotationTaskId,
+              sessionUser.id,
+              cost,
+              `Annotation edit [${pureModel}]`,
+            );
+            return {
+              success: result.charged,
+              balance: result.balance || 0,
+              cost: result.creditCost,
+              message: result.charged ? undefined : '积分不足或批注任务已结算',
+            };
+          })()
+        : await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { quality, providerId: providerId || undefined });
       if (!creditResult.success) {
+        if (annotationTaskId) {
+          await updateCloudTask(annotationTaskId, {
+            status: 'failed',
+            error: creditResult.message || 'Insufficient credits',
+            creditStatus: 'not-applicable',
+          });
+        }
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
       deductedCredits = creditResult.cost;
     }
 
     // ========== 1.5 创建异步任务（提交+轮询模式，避免CDN/FaaS代理超时） ==========
-    const taskId = `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const taskId = annotationTaskId || `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    if (annotationTaskId) {
+      await updateCloudTask(taskId, {
+        status: 'processing',
+        progress: 0,
+      });
+    }
     setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
     // ★ 注册到统一任务中心（SSE推送 + 取消支持）
     registerTask(taskId, 'edit', '语言修图', sessionUser?.id);
+    const taskController = new AbortController();
+    const taskSignal = taskController.signal;
+    registerTaskAbortController(taskId, taskController);
     console.info(`[edit] ★ taskId=${taskId} 创建成功, model=${pureModel}, providerId=${providerId || 'auto'}`);
 
     // 后台异步执行编辑流程（5分钟全局超时兜底）
     // ★ 使用 after() 确保 Next.js 不会在响应返回后终止 IIFE
     const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
     after(async () => {
-      // 全局超时：确保 IIFE 不会无限运行
       const timeoutId = setTimeout(() => {
-        const task = getEditTask(taskId);
-        if (task && task.status === 'processing') {
-          failTask(taskId, '编辑超时，请稍后重试');
+        if (!taskSignal.aborted) {
+          const timeoutError = new Error('编辑超时，请稍后重试');
+          timeoutError.name = 'TimeoutError';
+          taskController.abort(timeoutError);
         }
       }, EDIT_GLOBAL_TIMEOUT_MS);
 
+      const finishTask = async (result: Record<string, unknown>): Promise<boolean> => {
+        taskSignal.throwIfAborted();
+        if (annotationTaskId) {
+          const committed = await completeCloudTask(taskId, {
+            requestHash: createAnnotationRequestHash(parsedRequestBody),
+            ...result,
+          });
+          if (!committed) return false;
+        }
+        updateTaskProgress(taskId, { status: 'completed', progress: 100 });
+        setEditTask(taskId, {
+          id: taskId,
+          status: 'completed',
+          progress: 100,
+          stage: '完成',
+          result,
+          createdAt: getEditTask(taskId)?.createdAt || Date.now(),
+          completedAt: Date.now(),
+        });
+        return true;
+      };
+
       try {
+        taskSignal.throwIfAborted();
         // ★ 检查任务是否已被取消
         if (isTaskCancelled(taskId)) {
           failTask(taskId, '任务已被取消');
           return;
         }
         // ========== 2. 解析原图为 Buffer ==========
-        let imageBuffer: Buffer;
-        let mimeType = 'image/png';
-
-    if (image.startsWith('data:')) {
-      const commaIndex = image.indexOf(',');
-      const header = image.substring(0, commaIndex);
-      const base64Data = image.substring(commaIndex + 1);
-      const mimeMatch = header.match(/data:([^;]+)/);
-      if (mimeMatch) mimeType = mimeMatch[1];
-      imageBuffer = Buffer.from(base64Data, 'base64');
-    } else if (image.startsWith('http://') || image.startsWith('https://')) {
-      try {
-        const response = await fetch(image);
-        if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
-        const arrayBuffer = await response.arrayBuffer();
-        imageBuffer = Buffer.from(arrayBuffer);
-        const contentType = response.headers.get('content-type');
-        if (contentType) mimeType = contentType;
-      } catch (fetchError: unknown) {
-        const errMsg = fetchError instanceof Error ? fetchError.message : 'Unknown error';
-        failTask(taskId, `无法下载图片: ${errMsg}`);
-        return;
-      }
-    } else if (image.startsWith('/')) {
-      const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-      const domainBase = domain.replace(/\/+$/, '');
-      const base = domainBase.startsWith('http') ? domainBase : (domainBase ? `https://${domainBase}` : '');
-      const fullUrl = base ? `${base}${image}` : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${image}`;
-      try {
-        const response = await fetch(fullUrl);
-        if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
-        const arrayBuffer = await response.arrayBuffer();
-        imageBuffer = Buffer.from(arrayBuffer);
-        const contentType = response.headers.get('content-type');
-        if (contentType) mimeType = contentType;
-      } catch (fetchError: unknown) {
-        const errMsg = fetchError instanceof Error ? fetchError.message : 'Unknown error';
-        failTask(taskId, `无法下载图片: ${errMsg}`);
-        return;
-      }
-    } else {
-      imageBuffer = Buffer.from(image, 'base64');
-    }
+    const loadedImage = await loadSafeImageInput(image, {
+      allowRawBase64: true,
+      signal: taskSignal,
+    });
+    const imageBuffer = loadedImage.buffer;
+    const mimeType = loadedImage.mimeType;
 
     // ========== 3. 解析 mask ==========
     let maskBuffer: Buffer | undefined;
     if (mask) {
-      if (mask.startsWith('data:')) {
-        maskBuffer = Buffer.from(mask.split(',')[1], 'base64');
-      } else if (mask.startsWith('http://') || mask.startsWith('https://')) {
-        try {
-          const response = await fetch(mask);
-          if (!response.ok) throw new Error(`Failed to fetch mask: ${response.status}`);
-          maskBuffer = Buffer.from(await response.arrayBuffer());
-        } catch (fetchError: unknown) {
-          const errMsg = fetchError instanceof Error ? fetchError.message : 'Unknown error';
-          failTask(taskId, `无法下载mask: ${errMsg}`);
-          return;
-        }
-      } else {
-        maskBuffer = Buffer.from(mask, 'base64');
-      }
+      maskBuffer = (await loadSafeImageInput(mask, {
+        allowRawBase64: true,
+        signal: taskSignal,
+      })).buffer;
     }
 
     // ========== 3.5 画面比例拓展提示 ==========
@@ -494,7 +574,7 @@ export async function POST(request: NextRequest) {
     let aspectRatioExtendHint = '';
     if (size && size !== '1:1') {
       try {
-        const sharpImg = sharp(imageBuffer);
+        const sharpImg = safeSharp(imageBuffer, { signal: taskSignal });
         const meta = await sharpImg.metadata();
         const origW = meta.width || 1;
         const origH = meta.height || 1;
@@ -543,12 +623,12 @@ export async function POST(request: NextRequest) {
     if (maskBuffer) {
       try {
         // 先获取原图尺寸
-        const imageMeta = await sharp(imageBuffer).metadata();
+        const imageMeta = await safeSharp(imageBuffer, { signal: taskSignal }).metadata();
         const imgW = imageMeta.width || 1;
         const imgH = imageMeta.height || 1;
 
         // ★ 将 mask resize 到与 image 完全一致的尺寸
-        const resizedMaskBuffer = await sharp(maskBuffer)
+        const resizedMaskBuffer = await safeSharp(maskBuffer, { signal: taskSignal })
           .resize(imgW, imgH, { fit: 'fill', kernel: 'nearest' })
           .ensureAlpha()
           .raw()
@@ -571,7 +651,7 @@ export async function POST(request: NextRequest) {
         console.info(`[edit] taskId=${taskId} mask已转换, 尺寸=${imgW}x${imgH}(与原图一致), OpenAI格式=透明编辑`);
 
         // 同时生成一个带标注的蒙版参考图（红色高亮编辑区域），用于 LLM 协作和非 images.edit 路径的视觉参考
-        const annotatedMask = await sharp(maskBuffer)
+        const annotatedMask = await safeSharp(maskBuffer, { signal: taskSignal })
           .resize(imgW, imgH, { fit: 'fill', kernel: 'nearest' })
           .ensureAlpha()
           .raw()
@@ -648,14 +728,14 @@ ${maskBuffer ? '\nMASK INFO: The user has painted a mask on the image to indicat
 INSTRUCTIONS:
 1. Analyze the original image: describe its content, composition, style, colors, and key elements
 2. ${maskBuffer ? 'Analyze the mask: identify what is in the red-highlighted (masked) region that needs to be modified. Describe what content is currently there and what should replace it.' : 'No mask provided - the edit applies to the entire image or the AI should determine the best region.'}
-3. ${referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0 ? 'Analyze the reference image(s): describe how they relate to the editing goal and what aspects should be referenced (style, composition, character, etc.)' : 'No reference image provided.'}
+3. ${usableReferenceImages.length > 0 ? 'Analyze the reference image(s): describe how they relate to the editing goal and what aspects should be referenced (style, composition, character, etc.)' : 'No reference image provided.'}
 4. Generate a detailed editing instruction that will produce the best result for the user's request
 
 OUTPUT FORMAT (respond with ONLY a JSON object, no markdown):
 {
   "originalAnalysis": "Brief description of the original image",
   "maskAnalysis": ${maskBuffer ? '"What is in the masked region and what should change there"' : 'null'},
-  "referenceAnalysis": ${referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0 ? '"Brief description of reference image aspects to apply"' : 'null'},
+  "referenceAnalysis": ${usableReferenceImages.length > 0 ? '"Brief description of reference image aspects to apply"' : 'null'},
   "editInstruction": "Detailed editing instruction optimized for image generation AI${maskBuffer ? ', explicitly describing what to change in the masked region only' : ''}",
   "suggestedRegions": ["optional: regions that should be modified"],
   "autoMaskPrompt": "optional: description of regions to mask for precise editing"
@@ -683,24 +763,13 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         }
 
         // 添加参考图到消息
-        if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-          for (const refImg of referenceImages.slice(0, 3)) {
+        if (usableReferenceImages.length > 0) {
+          for (const refImg of usableReferenceImages.slice(0, 3)) {
             try {
-              let refBase64: string;
-              const refImgUrl = typeof refImg === 'string' ? refImg : refImg?.url || '';
+              const refImgUrl = refImg;
               if (!refImgUrl) continue;
-              if (refImgUrl.startsWith('data:')) {
-                refBase64 = refImgUrl;
-              } else {
-                const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-                const refDomainBase = domain.replace(/\/+$/, '');
-                const refFullUrl = refImgUrl.startsWith('/')
-                  ? `${refDomainBase.startsWith('http') ? refDomainBase : 'https://' + refDomainBase}${refImgUrl}`
-                  : refImgUrl;
-                const refImgResp = await fetch(refFullUrl);
-                const refImgBuf = Buffer.from(await refImgResp.arrayBuffer());
-                refBase64 = `data:image/jpeg;base64,${refImgBuf.toString('base64')}`;
-              }
+              const ref = await resolveImageToBuffer(refImgUrl, taskSignal);
+              const refBase64 = `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}`;
               contentParts.push({
                 type: 'image_url',
                 image_url: { url: refBase64, detail: 'high' }
@@ -722,7 +791,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             max_tokens: 2000,
             temperature: 0.7,
           }),
-          signal: AbortSignal.timeout(20000),
+          signal: AbortSignal.any([taskSignal, AbortSignal.timeout(20000)]),
         });
 
         // ★ 403 时自动降级到 /responses 端点（部分提供商仅支持 Responses API）
@@ -743,7 +812,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               method: 'POST',
               headers: llmHeaders,
               body: JSON.stringify(respBody),
-              signal: AbortSignal.timeout(20000),
+              signal: AbortSignal.any([taskSignal, AbortSignal.timeout(20000)]),
             });
           }
         }
@@ -779,7 +848,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             }
           } catch {}
 
-          if (parsed?.editInstruction) {
+          if (typeof parsed?.editInstruction === 'string' && parsed.editInstruction) {
             effectivePrompt = parsed.editInstruction;
             llmInstruction = parsed.editInstruction;
             if (parsed?.suggestedRegions && Array.isArray(parsed.suggestedRegions)) {
@@ -894,7 +963,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Length': String(formBuffer.length),
             },
             body: formBuffer as unknown as BodyInit,
-            signal: AbortSignal.timeout(30000), // ★ 30秒超时（images/edits端点多数代理不支持，快速跳过走images/generations）
+            signal: AbortSignal.any([taskSignal, AbortSignal.timeout(30000)]),
           },
         );
 
@@ -930,7 +999,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                     'Content-Length': String(extraFormBuffer.length),
                   },
                   body: extraFormBuffer as unknown as BodyInit,
-                  signal: AbortSignal.timeout(30000),
+                  signal: AbortSignal.any([taskSignal, AbortSignal.timeout(30000)]),
                 })
                 .then(async r => {
                   if (!r.ok) return null;
@@ -943,24 +1012,15 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               const extraResults = await Promise.all(extraPromises);
               for (const r of extraResults) { if (r) images.push(r); }
             }
-            // ★ 更新任务注册中心
-            updateTaskProgress(taskId, { status: 'completed', progress: 100 });
-            setEditTask(taskId, {
-              id: taskId,
-              status: 'completed',
-              progress: 100,
-              stage: '完成',
-              result: {
-                success: true,
-                image: images[0],
-                images,
-                model: pureModel,                provider: 'openai-images-edit',
-                llmInstruction,
-                editRegions: llmEditRegions,
-                autoMaskGenerated: llmEditRegions.length > 0,
-              },
-              createdAt: getEditTask(taskId)?.createdAt || Date.now(),
-              completedAt: Date.now(),
+            await finishTask({
+              success: true,
+              image: images[0],
+              images,
+              model: pureModel,
+              provider: 'openai-images-edit',
+              llmInstruction,
+              editRegions: llmEditRegions,
+              autoMaskGenerated: llmEditRegions.length > 0,
             });
             return;
           }
@@ -995,7 +1055,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         // 如果原图太大，先压缩
         if (imageBuffer.length > 4 * 1024 * 1024) {
           try {
-            const compressed = await sharp(imageBuffer)
+            const compressed = await safeSharp(imageBuffer, { signal: taskSignal })
               .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
               .jpeg({ quality: 85 })
               .toBuffer();
@@ -1010,14 +1070,14 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           imageUrls.push(maskImageUrl);
           console.info(`[edit] taskId=${taskId} images/generations: 蒙版参考图已添加到image_urls`);
         }
-        if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-          for (const refUrl of referenceImages) {
+        if (usableReferenceImages.length > 0) {
+          for (const refUrl of usableReferenceImages) {
             try {
-              const ref = await resolveImageToBuffer(refUrl);
+              const ref = await resolveImageToBuffer(refUrl, taskSignal);
               let refDataUrl = `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}`;
               if (ref.buffer.length > 4 * 1024 * 1024) {
                 try {
-                  const compressed = await sharp(ref.buffer)
+                  const compressed = await safeSharp(ref.buffer, { signal: taskSignal })
                     .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
                     .jpeg({ quality: 85 })
                     .toBuffer();
@@ -1074,7 +1134,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(adjustedBody),
-            signal: AbortSignal.timeout(600000), // ★ 10分钟超时（与generate一致，带参考图的编辑耗时长）
+            signal: taskSignal,
           },
         );
 
@@ -1111,7 +1171,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                     'Content-Type': 'application/json',
                   },
                   body: JSON.stringify({ ...adjustedBody, n: 1 }),
-                  signal: AbortSignal.timeout(120000), // ★ 120秒超时（图像编辑耗时长）
+                  signal: AbortSignal.any([taskSignal, AbortSignal.timeout(120000)]),
                 })
                 .then(async r => {
                   if (!r.ok) return null;
@@ -1130,23 +1190,15 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               for (const r of extraResults) { if (r) images.push(r); }
             }
 
-            updateTaskProgress(taskId, { status: 'completed', progress: 100 });
-            setEditTask(taskId, {
-              id: taskId,
-              status: 'completed',
-              progress: 100,
-              stage: '完成',
-              result: {
-                success: true,
-                image: images[0],
-                images,
-                model: pureModel,                provider: effectiveBaseUrl || 'unknown',
-                llmInstruction,
-                editRegions: llmEditRegions,
-                autoMaskGenerated: llmEditRegions.length > 0,
-              },
-              createdAt: getEditTask(taskId)?.createdAt || Date.now(),
-              completedAt: Date.now(),
+            await finishTask({
+              success: true,
+              image: images[0],
+              images,
+              model: pureModel,
+              provider: effectiveBaseUrl || 'unknown',
+              llmInstruction,
+              editRegions: llmEditRegions,
+              autoMaskGenerated: llmEditRegions.length > 0,
             });
             return; // 成功，退出
           }
@@ -1215,10 +1267,10 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     });
 
     // 参考图
-    if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-      for (const refUrl of referenceImages) {
+    if (usableReferenceImages.length > 0) {
+      for (const refUrl of usableReferenceImages) {
         try {
-          const ref = await resolveImageToBuffer(refUrl);
+          const ref = await resolveImageToBuffer(refUrl, taskSignal);
           contentParts.push({
             type: 'image_url',
             image_url: { url: `data:${ref.mimeType};base64,${ref.buffer.toString('base64')}` },
@@ -1229,7 +1281,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       }
       contentParts.push({
         type: 'text',
-        text: `[System: There are ${referenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]`,
+        text: `[System: There are ${usableReferenceImages.length} reference image(s) above. Use them as style/composition/subject references when editing the main image.]`,
       });
     }
 
@@ -1293,7 +1345,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(chatRequestBody),
-        signal: AbortSignal.timeout(120000), // ★ 120秒超时（图像编辑耗时长）
+        signal: AbortSignal.any([taskSignal, AbortSignal.timeout(120000)]),
       },
     );
 
@@ -1334,37 +1386,28 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         // 400 可能是模型不支持图片输入，尝试降级到 /images/generations
         if (isImageEditModel(pureModel)) {
           try {
-            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1);
+            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1, taskSignal);
             if (genUrl) {
               const images: Array<{ url: string; revisedPrompt: string }> = [{ url: genUrl, revisedPrompt: effectivePrompt }];
               // count > 1 时额外并行生成
               if (count > 1) {
                 const extraPromises = Array.from({ length: count - 1 }, () =>
-                  tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1)
+                  tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1, taskSignal)
                     .then(url => url ? { url, revisedPrompt: effectivePrompt } : null)
                     .catch(() => null)
                 );
                 const extraResults = await Promise.all(extraPromises);
                 for (const r of extraResults) { if (r) images.push(r); }
               }
-              // ★ 更新任务注册中心
-              updateTaskProgress(taskId, { status: 'completed', progress: 100 });
-              setEditTask(taskId, {
-                id: taskId,
-                status: 'completed',
-                progress: 100,
-                stage: '完成',
-                result: {
-                  success: true,
-                  image: images[0],
-                  images,
-                  model: pureModel,                  provider: 'images-generations-fallback',
-                  llmInstruction,
-                  editRegions: llmEditRegions,
-                  autoMaskGenerated: false,
-                },
-                createdAt: getEditTask(taskId)?.createdAt || Date.now(),
-                completedAt: Date.now(),
+              await finishTask({
+                success: true,
+                image: images[0],
+                images,
+                model: pureModel,
+                provider: 'images-generations-fallback',
+                llmInstruction,
+                editRegions: llmEditRegions,
+                autoMaskGenerated: false,
               });
               return;
             }
@@ -1408,7 +1451,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       try {
         console.info(`[edit] taskId=${taskId} chat/completions未返回图片, 尝试images/generations降级`);
         const fallbackStart = Date.now();
-        const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1);
+        const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1, taskSignal);
         if (genUrl) resultImageUrl = genUrl;
         console.info(`[edit] taskId=${taskId} images/generations降级: ${genUrl ? '成功' : '失败'}, 耗时=${Date.now() - fallbackStart}ms`);
       } catch { /* 忽略 */ }
@@ -1451,7 +1494,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 ...(outputSize ? { size: outputSize } : {}),
                 ...(quality ? { quality } : {}),
               }),
-              signal: AbortSignal.timeout(60000), // ★ 60秒超时
+              signal: AbortSignal.any([taskSignal, AbortSignal.timeout(60000)]),
             });
             if (extraResp.ok) {
               const extraText = await extraResp.text();
@@ -1467,7 +1510,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             return null;
           } else {
             // OpenAI 模型：使用 images/generations
-            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1);
+            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1, taskSignal);
             return genUrl ? { url: genUrl, revisedPrompt: effectivePrompt } : null;
           }
         } catch { return null; }
@@ -1482,24 +1525,15 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     // ★ 更新任务注册中心
     const elapsedSec = Math.round((Date.now() - (getEditTask(taskId)?.createdAt || Date.now())) / 1000);
     console.info(`[edit] taskId=${taskId} 编辑完成, 耗时=${elapsedSec}s, images=${images.length}`);
-    updateTaskProgress(taskId, { status: 'completed', progress: 100 });
-    setEditTask(taskId, {
-      id: taskId,
-      status: 'completed',
-      progress: 100,
-      stage: '完成',
-      result: {
-        success: true,
-        image: images[0],
-        images,
-        model: pureModel,
-        provider: effectiveBaseUrl || 'unknown',
-        llmInstruction,
-        editRegions: llmEditRegions,
-        autoMaskGenerated: llmEditRegions.length > 0,
-      },
-      createdAt: getEditTask(taskId)?.createdAt || Date.now(),
-      completedAt: Date.now(),
+    await finishTask({
+      success: true,
+      image: images[0],
+      images,
+      model: pureModel,
+      provider: effectiveBaseUrl || 'unknown',
+      llmInstruction,
+      editRegions: llmEditRegions,
+      autoMaskGenerated: llmEditRegions.length > 0,
     });
     console.info(`[edit] ★ taskId=${taskId} 结果已存储到 edit-task-store, image[0]=${images[0]?.url?.substring(0, 80)}`);
 
@@ -1510,9 +1544,34 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       if (stack) console.error(`[edit] Stack: ${stack}`);
 
       const isNetworkError = errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND');
-      failTask(taskId, isNetworkError ? '网络连接失败：无法访问 API 服务' : (errMsg || '图片编辑失败'), isNetworkError);
+      if (!isTaskCancelled(taskId)) {
+        failTask(taskId, isNetworkError ? '网络连接失败：无法访问 API 服务' : (errMsg || '图片编辑失败'), isNetworkError);
+      }
     } finally {
+      const finalTask = getEditTask(taskId);
+      if (annotationTaskId) {
+        const timeoutAborted = taskSignal.aborted
+          && taskSignal.reason instanceof Error
+          && taskSignal.reason.name === 'TimeoutError';
+        const terminalStatus = timeoutAborted
+          ? 'timeout'
+          : (isTaskCancelled(taskId) || finalTask?.status === 'cancelled')
+            ? 'cancelled'
+            : finalTask?.status === 'failed'
+              ? 'failed'
+              : null;
+        if (terminalStatus) {
+          await terminateCloudTaskAndRefund(
+            taskId,
+            terminalStatus,
+            finalTask?.error
+              || (taskSignal.reason instanceof Error ? taskSignal.reason.message : '')
+              || 'Annotation edit failed',
+          );
+        }
+      }
       clearTimeout(timeoutId);
+      unregisterTaskAbortController(taskId, taskController);
     }
   });
 
@@ -1534,10 +1593,27 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       durationMs: opTimer.end(),
     });
     // 退款：任务创建失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
+    if (annotationTaskId) {
+      try {
+        await terminateCloudTaskAndRefund(
+          annotationTaskId,
+          'failed',
+          message.substring(0, 100),
+        );
+      } catch (refundErr) {
+        console.error('[edit] Atomic annotation refund failed:', refundErr);
+      }
+    } else if (deductedCredits > 0 && sessionUser) {
       try {
         await refundCredits(sessionUser.id, deductedCredits, `语言修图任务创建失败退款: ${message.substring(0, 100)}`);
       } catch (refundErr) { console.error('[edit] Refund failed:', refundErr); }
+    }
+    if (error instanceof AnnotationIdempotencyConflictError) {
+      return NextResponse.json({
+        success: false,
+        code: error.code,
+        error: error.message,
+      }, { status: 409 });
     }
     return NextResponse.json({ success: false, error: `任务创建失败: ${message}` }, { status: 500 });
   }
@@ -1555,6 +1631,7 @@ async function tryImagesGenerations(
   size: string,
   quality: string,
   count: number,
+  signal: AbortSignal,
 ): Promise<string | null> {
   // 根据质量参数动态计算像素尺寸
   const outputSize = (() => {
@@ -1580,7 +1657,7 @@ async function tryImagesGenerations(
         n: Math.min(count, 4),
         response_format: 'url',
       }),
-      signal: AbortSignal.timeout(60000), // ★ 60秒超时，避免无限等待
+      signal: AbortSignal.any([signal, AbortSignal.timeout(60000)]),
     },
   );
 

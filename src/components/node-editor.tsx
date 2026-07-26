@@ -18,12 +18,22 @@ import {
   getQualityLevelOptions,
   getResolutionTierOptions,
 } from '@/lib/canvas-generation-group';
+import { modelSupports } from '@/lib/model-capabilities';
 import { getPromptTemplates, searchTemplates, addPromptTemplate } from '@/lib/prompt-templates';
 import {
   getVisibleWorkflowNodeIds,
   resolveWorkflowCullingBounds,
   selectVisibleWorkflowConnections,
 } from '@/lib/node-canvas-virtualization';
+import {
+  NodeAnnotationWorkspace,
+  type NodeAnnotationSource,
+} from '@/features/annotations/node-annotation-workspace';
+import {
+  collectNodeAnnotationCandidates,
+  type NodeAnnotationCandidate,
+} from '@/features/annotations/node-annotation-candidates';
+import type { EditIntentBundle } from '@/features/annotations/annotation-types';
 import {
   Image as ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
@@ -101,6 +111,34 @@ interface CanvasImageRef {
   label?: string;
   width?: number;
   height?: number;
+  versionId?: string;
+}
+
+interface NodeAnnotationSession {
+  source: NodeAnnotationSource;
+  anchorNodeId: string;
+  connectionNodeId: string;
+  connectionPortId: string;
+  editingNodeId?: string;
+  existingBundle?: EditIntentBundle | null;
+}
+
+interface NodeAnnotationCandidatePicker {
+  sourceNodeId: string;
+  candidates: NodeAnnotationCandidate[];
+  existingBundle?: EditIntentBundle | null;
+}
+
+function parseAnnotationBundle(value: unknown): EditIntentBundle | null {
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as EditIntentBundle;
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as EditIntentBundle;
 }
 
 interface MentionPopup {
@@ -561,6 +599,7 @@ const WORKFLOW_PRESETS: WorkflowPreset[] = [
 interface NodeEditorProps {
   workflow?: WorkflowData | null;
   userId?: string;
+  projectId?: string;
   onBack?: () => void;
   onWorkflowChange?: (wf: WorkflowData | null) => void;
   onOpenWorkflowHub?: () => void;
@@ -720,7 +759,7 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 
-export default function NodeEditor({ workflow, userId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
+export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   // CSS自定义属性，供Tailwind中 var(--ne-xxx) 引用
   const neVars = {
@@ -864,6 +903,9 @@ export default function NodeEditor({ workflow, userId, onBack, onWorkflowChange,
   const [clipboard, setClipboard] = useState<{ nodes: WorkflowNode[]; connections: WorkflowConnection[] } | null>(null);
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ type: 'canvas' | 'node'; x: number; y: number; nodeId?: string } | null>(null);
+  const [nodeAnnotationSession, setNodeAnnotationSession] = useState<NodeAnnotationSession | null>(null);
+  const [nodeAnnotationError, setNodeAnnotationError] = useState<string | null>(null);
+  const [nodeAnnotationCandidates, setNodeAnnotationCandidates] = useState<NodeAnnotationCandidatePicker | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');
@@ -1239,6 +1281,12 @@ ${contextInfo}
   const { models, loading: modelsLoading } = useModelList();
   const chatModels = useMemo(() => models.filter(m => m.type === 'chat'), [models]);
   const imageModels = useMemo(() => models.filter(m => m.type === 'image'), [models]);
+  const annotationModels = useMemo(() => imageModels
+    .filter((model) => modelSupports(model.id, 'supportsMask'))
+    .map((model) => ({
+      id: model.providerId ? `${model.providerId}::${model.id}` : model.id,
+      label: `${model.apiDisplayName || model.name || model.id}${model.provider ? ` · ${model.provider}` : ''}`,
+    })), [imageModels]);
 
   // 工作流节点图片列表 (用于 @mention 引用和输入引用阻断)
   // 合并: 画布传入的图片 + 工作流内节点输出的图片
@@ -1275,6 +1323,207 @@ ${contextInfo}
   const isBoxSelectingRef = useRef(false);
 
   const selectedNode = useMemo(() => wf.nodes.find(n => n.id === selectedNodeId) || null, [wf.nodes, selectedNodeId]);
+
+  const getNodeAnnotationCandidates = useCallback((
+    node: WorkflowNode,
+    existingBundle?: EditIntentBundle | null,
+  ): NodeAnnotationCandidate[] => {
+    return collectNodeAnnotationCandidates({
+      node,
+      nodes: wf.nodes,
+      connections: wf.connections,
+      results: execResults,
+      canvasImages: (canvasImages || []).map((image) => ({
+        id: image.id,
+        url: image.url,
+        versionId: image.versionId,
+      })),
+      existingBundle,
+    });
+  }, [canvasImages, execResults, wf.connections, wf.nodes]);
+
+  const openNodeAnnotation = useCallback((
+    sourceNode: WorkflowNode,
+    candidate: NodeAnnotationCandidate,
+    existingBundle: EditIntentBundle | null = null,
+  ) => {
+    if (!projectId) {
+      setNodeAnnotationError('请先保存项目，再使用批注修改');
+      return;
+    }
+    const ownedImage = candidate.sourceImageId
+      ? canvasImages?.find((image) =>
+          image.id === candidate.sourceImageId
+          && image.url === candidate.url,
+        )
+      : (() => {
+          const matches = canvasImages?.filter(
+            (image) => image.url === candidate.url,
+          ) || [];
+          return matches.length === 1 ? matches[0] : undefined;
+        })();
+    if (!ownedImage?.versionId) {
+      setNodeAnnotationError('请先将图片保存到项目画布');
+      return;
+    }
+    if (
+      candidate.sourceVersionId
+      && candidate.sourceVersionId !== ownedImage.versionId
+    ) {
+      setNodeAnnotationError('来源图片版本已变化，请重新创建批注');
+      return;
+    }
+    if (
+      existingBundle
+      && (
+        existingBundle.sourceImageId !== ownedImage.id
+        || existingBundle.sourceVersionId !== ownedImage.versionId
+      )
+    ) {
+      setNodeAnnotationError('来源图片版本已变化，请重新创建批注');
+      return;
+    }
+
+    const connectionNode = wf.nodes.find(
+      (node) => node.id === candidate.sourceNodeId,
+    );
+    if (!connectionNode?.ports.some((port) =>
+      port.id === candidate.sourcePortId
+      && port.direction === 'out'
+      && port.type === 'image',
+    )) {
+      setNodeAnnotationError('请选择包含单张图片的节点');
+      return;
+    }
+
+    setNodeAnnotationSession({
+      source: {
+        projectId,
+        sourceNodeId: candidate.sourceNodeId,
+        sourceImageId: ownedImage.id,
+        sourceVersionId: ownedImage.versionId,
+        imageUrl: candidate.url,
+        label: candidate.label || sourceNode.label,
+      },
+      anchorNodeId: sourceNode.id,
+      connectionNodeId: candidate.sourceNodeId,
+      connectionPortId: candidate.sourcePortId,
+      editingNodeId: sourceNode.type === 'ai-annotation-edit'
+        ? sourceNode.id
+        : undefined,
+      existingBundle,
+    });
+    setNodeAnnotationCandidates(null);
+    setNodeAnnotationError(null);
+  }, [canvasImages, projectId, wf.nodes]);
+
+  const requestNodeAnnotation = useCallback((sourceNode: WorkflowNode | null) => {
+    if (!sourceNode) {
+      setNodeAnnotationError('请选择包含单张图片的节点');
+      return;
+    }
+    const existingBundle = sourceNode.type === 'ai-annotation-edit'
+      ? parseAnnotationBundle(sourceNode.config?.annotationBundle)
+      : null;
+    if (sourceNode.type === 'ai-annotation-edit' && !existingBundle) {
+      setNodeAnnotationError('当前批注节点的数据无效，无法重新编辑');
+      return;
+    }
+    const candidates = getNodeAnnotationCandidates(sourceNode, existingBundle);
+    if (candidates.length === 0) {
+      setNodeAnnotationError('请选择包含单张图片的节点');
+      return;
+    }
+    if (candidates.length > 1) {
+      setNodeAnnotationCandidates({
+        sourceNodeId: sourceNode.id,
+        candidates,
+        existingBundle,
+      });
+      setNodeAnnotationError(null);
+      return;
+    }
+    openNodeAnnotation(sourceNode, candidates[0], existingBundle);
+  }, [getNodeAnnotationCandidates, openNodeAnnotation]);
+
+  const handleCreateAnnotationNode = useCallback((bundle: EditIntentBundle) => {
+    const session = nodeAnnotationSession;
+    if (!session) return;
+    if (session.editingNodeId) {
+      setWf((prev) => ({
+        ...prev,
+        nodes: prev.nodes.map((node) => node.id === session.editingNodeId
+          ? {
+              ...node,
+              label: '批注修改',
+              config: {
+                ...node.config,
+                annotationBundle: bundle,
+                prompt: bundle.prompt,
+                model: bundle.modelId,
+                providerId: bundle.providerId,
+                sourceImageId: bundle.sourceImageId,
+                sourceVersionId: bundle.sourceVersionId,
+                sourceImageUrl: session.source.imageUrl,
+              },
+            }
+          : node),
+      }));
+      setNodeAnnotationSession(null);
+      setNodeAnnotationError(null);
+      return;
+    }
+
+    const anchorNode = wf.nodes.find((node) => node.id === session.anchorNodeId);
+    const connectionNode = wf.nodes.find(
+      (node) => node.id === session.connectionNodeId,
+    );
+    const outputPort = connectionNode?.ports.find(
+      (port) => port.id === session.connectionPortId,
+    );
+    if (!anchorNode || !connectionNode || !outputPort) {
+      setNodeAnnotationError('无法建立批注节点的图片连线');
+      return;
+    }
+
+    const annotationNode = createWorkflowNode('ai-annotation-edit',
+      anchorNode.x + anchorNode.width + 80,
+      anchorNode.y,
+    );
+    annotationNode.config = {
+      ...annotationNode.config,
+      annotationBundle: bundle,
+      prompt: bundle.prompt,
+      model: bundle.modelId,
+      providerId: bundle.providerId,
+      sourceImageId: bundle.sourceImageId,
+      sourceVersionId: bundle.sourceVersionId,
+      sourceImageUrl: session.source.imageUrl,
+    };
+    const inputPort = annotationNode.ports.find((port) =>
+      port.id === 'in-image',
+    );
+    if (!inputPort) {
+      setNodeAnnotationError('批注节点缺少图片输入端口');
+      return;
+    }
+    const connection = createConnection(
+      connectionNode.id,
+      outputPort.id,
+      annotationNode.id,
+      inputPort.id,
+      'image',
+    );
+    setWf((prev) => ({
+      ...prev,
+      nodes: [...prev.nodes, annotationNode],
+      connections: [...prev.connections, connection],
+    }));
+    setSelectedNodeIds(new Set([annotationNode.id]));
+    setSidebarTab('props');
+    setNodeAnnotationSession(null);
+    setNodeAnnotationError(null);
+  }, [nodeAnnotationSession, setWf, wf.nodes]);
 
   // 避免循环更新：记录最近一次传出的 wf 引用，跳过自身回写
   const lastEmittedRef = useRef<WorkflowData | null>(null);
@@ -1394,7 +1643,13 @@ ${contextInfo}
     const nodeH = Math.max(140, Math.min(320, nodeW / ratio));
 
     const node = createWorkflowNode('input-image', cx - nodeW / 2, cy - nodeH / 2);
-    node.config = { ...node.config, imageUrl, source: 'canvas-ref' };
+    node.config = {
+      ...node.config,
+      imageUrl,
+      source: 'canvas-ref',
+      sourceImageId: refImage?.id,
+      sourceVersionId: refImage?.versionId,
+    };
     node.width = nodeW;
     node.height = nodeH;
     setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
@@ -1551,8 +1806,23 @@ ${contextInfo}
   // P1: 键盘快捷键 (复制/粘贴/删除)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const event = e;
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable) return;
+
+      if (event.key === 'Escape' && nodeAnnotationCandidates) {
+        event.preventDefault();
+        setNodeAnnotationCandidates(null);
+        return;
+      }
+
+      if (event.code === 'KeyC' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        if (nodeAnnotationCandidates) setNodeAnnotationCandidates(null);
+        else if (nodeAnnotationSession) setNodeAnnotationSession(null);
+        else requestNodeAnnotation(selectedNode);
+        return;
+      }
 
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') {
         e.preventDefault();
@@ -1612,7 +1882,7 @@ ${contextInfo}
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeIds, selectedNodeId, clipboard, wf, handleDeleteNode, handleUndo, handleRedo, setWf]);
+  }, [selectedNodeIds, selectedNodeId, selectedNode, clipboard, wf, handleDeleteNode, handleUndo, handleRedo, setWf, nodeAnnotationCandidates, nodeAnnotationSession, requestNodeAnnotation]);
 
   // ─── 连线操作 (含端口类型约束) ───
 
@@ -1881,6 +2151,10 @@ ${contextInfo}
     } else if (contextMenu?.type === 'node' && contextMenu.nodeId) {
       const nodeId = contextMenu.nodeId;
       switch (action) {
+        case 'annotate': {
+          requestNodeAnnotation(wf.nodes.find((node) => node.id === nodeId) || null);
+          break;
+        }
         case 'copy': {
           const selIds = selectedNodeIds.has(nodeId) ? selectedNodeIds : new Set([nodeId]);
           const selNodes = wf.nodes.filter(n => selIds.has(n.id));
@@ -1930,7 +2204,7 @@ ${contextInfo}
       }
     }
     closeContextMenu();
-  }, [contextMenu, closeContextMenu, setWf, clipboard, wf.nodes, wf.connections, selectedNodeIds]);
+  }, [contextMenu, closeContextMenu, setWf, clipboard, wf.nodes, wf.connections, selectedNodeIds, requestNodeAnnotation]);
 
   // ─── 执行工作流 ───
 
@@ -2742,10 +3016,44 @@ ${contextInfo}
                 collapsedNodes={collapsedNodes}
                 onToggleCollapse={toggleNodeCollapse}
                 onContextMenu={(e) => handleNodeContextMenu(e, node.id)}
+                onDoubleClickAnnotation={() => {
+                  if (node.type === 'ai-annotation-edit') {
+                    requestNodeAnnotation(node);
+                  }
+                }}
               />
             ))}
           </div>
         </div>
+
+        <button
+          type="button"
+          data-toolbar="node-annotation-entry"
+          className={`absolute bottom-3 left-1/2 z-20 inline-flex h-9 -translate-x-1/2 items-center gap-2 rounded-md border px-3 text-xs font-medium shadow-lg transition-colors ${
+            nodeAnnotationSession
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'border-border bg-card/95 text-muted-foreground hover:border-primary/50 hover:text-foreground'
+          }`}
+          onClick={() => {
+            if (nodeAnnotationSession) setNodeAnnotationSession(null);
+            else requestNodeAnnotation(selectedNode);
+          }}
+          title="批注修改 (C)"
+          aria-label="批注修改"
+          aria-pressed={Boolean(nodeAnnotationSession)}
+        >
+          <MessageSquare size={15} />
+          批注修改
+        </button>
+
+        {nodeAnnotationError && !nodeAnnotationSession && (
+          <div
+            className="absolute bottom-14 left-1/2 z-30 max-w-[min(420px,calc(100vw-32px))] -translate-x-1/2 rounded-md border border-destructive/40 bg-card px-3 py-2 text-xs text-destructive shadow-lg"
+            role="alert"
+          >
+            {nodeAnnotationError}
+          </div>
+        )}
 
         {/* 端口类型图例 */}
         <div className="absolute bottom-3 left-3 bg-card/90 border border-border rounded px-3 py-2 flex items-center gap-3 text-xs">
@@ -2936,7 +3244,18 @@ ${contextInfo}
           </div>
           <div className="flex gap-2 px-4 pb-2 overflow-x-auto">
             {(canvasImages || []).map((img, i) => (
-              <div key={i} className="shrink-0 w-14 h-14 rounded border border-border/20 overflow-hidden bg-muted/30 relative group cursor-pointer" title={img.description || img.name || `图片 ${i+1}`}>
+              <div
+                key={img.id}
+                data-node-canvas-image={img.id}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'copy';
+                  event.dataTransfer.setData('text/uri-list', img.url);
+                  event.dataTransfer.setData('text/plain', img.url);
+                }}
+                className="shrink-0 w-14 h-14 rounded border border-border/20 overflow-hidden bg-muted/30 relative group cursor-grab active:cursor-grabbing"
+                title={img.description || img.name || `图片 ${i+1}`}
+              >
                 <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-full h-full object-cover" />
                 <span className="absolute bottom-0 left-0 right-0 text-[7px] text-center text-muted-foreground bg-card/80 py-px">
                   {(img.url?.split('.').pop() || 'PNG').toUpperCase()}
@@ -2987,6 +3306,81 @@ ${contextInfo}
         </div>
         )}
       </div>
+      {nodeAnnotationCandidates && (
+        <div
+          className="fixed inset-0 z-[205] flex items-center justify-center bg-black/65 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="node-annotation-image-picker-title"
+          onClick={() => setNodeAnnotationCandidates(null)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-md border border-border bg-card p-4 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 id="node-annotation-image-picker-title" className="text-sm font-semibold">
+                选择要批注的图片
+              </h2>
+              <button
+                type="button"
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => setNodeAnnotationCandidates(null)}
+                aria-label="关闭图片选择"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="grid max-h-[60vh] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">
+              {nodeAnnotationCandidates.candidates.map((candidate) => (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  className="overflow-hidden rounded-md border border-border bg-muted text-left transition-colors hover:border-primary"
+                  onClick={() => {
+                    const sourceNode = wf.nodes.find(
+                      (node) => node.id === nodeAnnotationCandidates.sourceNodeId,
+                    );
+                    if (!sourceNode) return;
+                    if (nodeAnnotationCandidates.existingBundle) {
+                      openNodeAnnotation(
+                        sourceNode,
+                        candidate,
+                        nodeAnnotationCandidates.existingBundle,
+                      );
+                    } else {
+                      openNodeAnnotation(sourceNode, candidate);
+                    }
+                  }}
+                >
+                  <span className="relative block aspect-square bg-[#0d1117]">
+                    <NextImage
+                      unoptimized
+                      fill
+                      sizes="220px"
+                      src={candidate.url}
+                      alt={candidate.label}
+                      className="object-contain"
+                    />
+                  </span>
+                  <span className="block truncate px-2 py-1.5 text-xs">
+                    {candidate.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {nodeAnnotationSession && (
+        <NodeAnnotationWorkspace
+          source={nodeAnnotationSession.source}
+          models={annotationModels}
+          initialBundle={nodeAnnotationSession.existingBundle}
+          onCreateNode={handleCreateAnnotationNode}
+          onClose={() => setNodeAnnotationSession(null)}
+        />
+      )}
       {aiBuildOpen && (
         <div
           className="fixed inset-0 z-[220] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
@@ -3158,6 +3552,11 @@ ${contextInfo}
               </>
             ) : (
               <>
+                <div className="context-menu-item" onClick={() => handleContextAction('annotate')}>
+                  <MessageSquare size={16} className="text-muted-foreground" />
+                  批注修改
+                </div>
+                <div className="context-menu-divider" />
                 <div className="context-menu-item" onClick={() => handleContextAction('copy')}>
                   <Copy size={16} className="text-muted-foreground" />
                   复制
@@ -3222,6 +3621,7 @@ interface NodeCardProps {
   collapsedNodes?: Set<string>;
   onToggleCollapse?: (nodeId: string) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
+  onDoubleClickAnnotation?: () => void;
 }
 
 /** output-image-group 节点内容: 多图分页浏览 */
@@ -3289,7 +3689,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu }: NodeCardProps) {
+const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
@@ -3404,6 +3804,11 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
       onMouseEnter={() => onHover(node.id)}
       onMouseLeave={() => onHover(null)}
       onContextMenu={onContextMenu}
+      onDoubleClick={(event) => {
+        if (node.type !== 'ai-annotation-edit') return;
+        event.stopPropagation();
+        onDoubleClickAnnotation?.();
+      }}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -3992,9 +4397,17 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
 
   const renderField = (field: PropertyField) => {
     const externalValue = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
+    const serializedExternalValue = (
+      externalValue
+      && typeof externalValue === 'object'
+    )
+      ? JSON.stringify(externalValue, null, 2)
+      : String(externalValue);
     // 聚焦时使用本地缓存值，避免每次按键触发 onUpdate → 重渲染 → 闪烁
     const isFocused = focusedField === `${node.id}:${field.key}`;
-    const displayValue = isFocused ? (localTextValues[field.key] ?? String(externalValue)) : String(externalValue);
+    const displayValue = isFocused
+      ? (localTextValues[field.key] ?? serializedExternalValue)
+      : serializedExternalValue;
 
     const onChangeText = (val: string) => {
       // 更新本地缓存
@@ -4003,14 +4416,18 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
 
     const onFocusField = () => {
       setFocusedField(`${node.id}:${field.key}`);
-      setLocalTextValues(prev => ({ ...prev, [field.key]: String(externalValue) }));
+      setLocalTextValues(prev => ({
+        ...prev,
+        [field.key]: serializedExternalValue,
+      }));
     };
 
     const onBlurField = () => {
       setFocusedField(null);
+      if (field.readOnly) return;
       // 失焦时同步到父组件
       const localVal = localTextValues[field.key];
-      if (localVal !== undefined && localVal !== String(externalValue)) {
+      if (localVal !== undefined && localVal !== serializedExternalValue) {
         onUpdate(node.id, { config: { [field.key]: localVal } });
       }
       setLocalTextValues(prev => {
@@ -4029,8 +4446,9 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             onChange={e => onChangeText(e.target.value)}
             onFocus={onFocusField}
             onBlur={onBlurField}
+            readOnly={field.readOnly}
             placeholder={field.placeholder}
-            className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
+            className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 read-only:cursor-default read-only:opacity-75"
           />
         );
 
@@ -4066,9 +4484,10 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
               }}
               onFocus={onFocusField}
               onBlur={onBlurField}
+              readOnly={field.readOnly}
               placeholder={isPromptField && canvasImages && canvasImages.length > 0 ? `${field.placeholder} (输入@引用画布图片)` : field.placeholder}
               rows={3}
-              className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 resize-y"
+              className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 resize-y read-only:cursor-default read-only:opacity-75"
             />
             {/* P0: @图片引用弹窗 */}
             {isPromptField && mentionPopup.visible && mentionPopup.nodeId === node.id && mentionPopup.fieldKey === field.key && (

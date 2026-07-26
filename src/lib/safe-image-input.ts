@@ -1,0 +1,266 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import sharp, { type Sharp } from 'sharp';
+
+import { downloadPublicImage } from '@/lib/safe-image-download';
+import { getServerDataRoot } from '@/lib/server-data-root';
+
+const DEFAULT_MAX_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MAX_PIXELS = 40_000_000;
+
+const MIME_BY_FORMAT: Record<string, string> = {
+  avif: 'image/avif',
+  gif: 'image/gif',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+};
+
+export class SafeImageInputError extends Error {
+  readonly code = 'UNSAFE_IMAGE_INPUT';
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'SafeImageInputError';
+  }
+}
+
+export interface DecodedSafeImage {
+  buffer: Buffer;
+  mimeType: string;
+}
+
+export interface SafeImageInputOptions {
+  allowRawBase64?: boolean;
+  maxBytes?: number;
+  maxPixels?: number;
+  signal?: AbortSignal;
+}
+
+export interface ManagedMediaPath {
+  namespace: 'uploads';
+  relativePath: string;
+}
+
+function detectImageMimeType(buffer: Buffer): string | null {
+  if (
+    buffer.length >= 8
+    && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  ) return 'image/png';
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    buffer.length >= 12
+    && buffer.toString('ascii', 0, 4) === 'RIFF'
+    && buffer.toString('ascii', 8, 12) === 'WEBP'
+  ) return 'image/webp';
+  if (
+    buffer.length >= 6
+    && ['GIF87a', 'GIF89a'].includes(buffer.toString('ascii', 0, 6))
+  ) return 'image/gif';
+  if (
+    buffer.length >= 12
+    && buffer.toString('ascii', 4, 8) === 'ftyp'
+    && ['avif', 'avis'].includes(buffer.toString('ascii', 8, 12))
+  ) return 'image/avif';
+  return null;
+}
+
+function decodeStrictBase64(value: string, maxBytes: number): Buffer {
+  if (
+    value.length === 0
+    || value.length % 4 !== 0
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+  ) {
+    throw new SafeImageInputError('Image base64 is malformed');
+  }
+  const estimatedBytes = Math.floor((value.length * 3) / 4);
+  if (estimatedBytes > maxBytes + 2) {
+    throw new SafeImageInputError('Image exceeds the decoded size limit');
+  }
+  const buffer = Buffer.from(value, 'base64');
+  if (buffer.byteLength === 0 || buffer.byteLength > maxBytes) {
+    throw new SafeImageInputError('Image exceeds the decoded size limit');
+  }
+  return buffer;
+}
+
+export function decodeSafeImageInput(
+  input: string,
+  options: Pick<SafeImageInputOptions, 'allowRawBase64' | 'maxBytes'> = {},
+): DecodedSafeImage {
+  const value = input.trim();
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  const dataUrl = value.match(
+    /^data:(image\/(?:avif|gif|jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/i,
+  );
+  if (dataUrl) {
+    const declaredMime = dataUrl[1].toLowerCase();
+    const buffer = decodeStrictBase64(dataUrl[2], maxBytes);
+    const detectedMime = detectImageMimeType(buffer);
+    if (!detectedMime || detectedMime !== declaredMime) {
+      throw new SafeImageInputError('Image MIME does not match its decoded format');
+    }
+    return { buffer, mimeType: detectedMime };
+  }
+  if (value.startsWith('data:')) {
+    throw new SafeImageInputError('Image data URL MIME is not allowed');
+  }
+  if (!options.allowRawBase64) {
+    throw new SafeImageInputError('Raw image base64 is not allowed');
+  }
+  const buffer = decodeStrictBase64(value, maxBytes);
+  const mimeType = detectImageMimeType(buffer);
+  if (!mimeType) {
+    throw new SafeImageInputError('Decoded input is not a supported image');
+  }
+  return { buffer, mimeType };
+}
+
+export function assertSafePixelDimensions(
+  width: number | undefined,
+  height: number | undefined,
+  maxPixels: number = DEFAULT_MAX_PIXELS,
+): void {
+  if (
+    !Number.isSafeInteger(width)
+    || !Number.isSafeInteger(height)
+    || !width
+    || !height
+    || width < 1
+    || height < 1
+    || width * height > maxPixels
+  ) {
+    throw new SafeImageInputError('Image pixel dimensions exceed the safe pixel limit');
+  }
+}
+
+export function resolveManagedMediaPath(input: string): ManagedMediaPath {
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(input.split(/[?#]/, 1)[0]);
+  } catch (error) {
+    throw new SafeImageInputError('Managed image path encoding is invalid', { cause: error });
+  }
+  const prefixes = ['/uploads/', '/api/serve-upload/'];
+  const prefix = prefixes.find((candidate) => decodedPath.startsWith(candidate));
+  if (!prefix || decodedPath.includes('\\')) {
+    throw new SafeImageInputError('Only managed upload paths are allowed');
+  }
+  const segments = decodedPath.slice(prefix.length).split('/');
+  if (
+    segments.length === 0
+    || segments.some((segment) => !segment || segment === '.' || segment === '..')
+  ) {
+    throw new SafeImageInputError('Managed image path contains traversal');
+  }
+  return { namespace: 'uploads', relativePath: segments.join('/') };
+}
+
+export function safeSharp(
+  buffer: Buffer,
+  options: Pick<SafeImageInputOptions, 'maxPixels' | 'signal'> = {},
+): Sharp {
+  options.signal?.throwIfAborted();
+  const pipeline = sharp(buffer, {
+    failOn: 'error',
+    limitInputPixels: options.maxPixels ?? DEFAULT_MAX_PIXELS,
+  });
+  const abortPipeline = () => {
+    pipeline.destroy(options.signal?.reason instanceof Error
+      ? options.signal.reason
+      : new SafeImageInputError('Image processing was aborted'));
+  };
+  options.signal?.addEventListener('abort', abortPipeline, { once: true });
+  pipeline.once('close', () => options.signal?.removeEventListener('abort', abortPipeline));
+  if (options.signal?.aborted) abortPipeline();
+  return pipeline;
+}
+
+async function validateDecodedImage(
+  image: DecodedSafeImage,
+  options: SafeImageInputOptions,
+): Promise<DecodedSafeImage> {
+  try {
+    const metadata = await safeSharp(image.buffer, options).metadata();
+    options.signal?.throwIfAborted();
+    assertSafePixelDimensions(metadata.width, metadata.height, options.maxPixels);
+    const sharpMime = metadata.format ? MIME_BY_FORMAT[metadata.format] : undefined;
+    if (!sharpMime || sharpMime !== image.mimeType) {
+      throw new SafeImageInputError('Image format validation failed');
+    }
+    return image;
+  } catch (error) {
+    if (error instanceof SafeImageInputError) throw error;
+    throw new SafeImageInputError('Image cannot be decoded safely', { cause: error });
+  }
+}
+
+async function loadManagedMedia(
+  input: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<DecodedSafeImage> {
+  const managed = resolveManagedMediaPath(input);
+  const relativePath = managed.relativePath.split('/').join(path.sep);
+  const dataRoot = path.resolve(getServerDataRoot(), managed.namespace);
+  const publicRoot = path.resolve(process.cwd(), 'public', managed.namespace);
+  const roots = input.startsWith('/api/serve-upload/')
+    ? [dataRoot, publicRoot]
+    : [publicRoot, dataRoot];
+
+  for (const root of roots) {
+    signal?.throwIfAborted();
+    const candidate = path.resolve(root, relativePath);
+    if (candidate === root || !candidate.startsWith(`${root}${path.sep}`)) continue;
+    try {
+      const buffer = await readFile(candidate);
+      if (buffer.byteLength === 0 || buffer.byteLength > maxBytes) {
+        throw new SafeImageInputError('Managed image exceeds the size limit');
+      }
+      const mimeType = detectImageMimeType(buffer);
+      if (!mimeType) throw new SafeImageInputError('Managed file is not a supported image');
+      return { buffer, mimeType };
+    } catch (error) {
+      if (error instanceof SafeImageInputError) throw error;
+    }
+  }
+  throw new SafeImageInputError('Managed image could not be read');
+}
+
+export async function loadSafeImageInput(
+  input: string,
+  options: SafeImageInputOptions = {},
+): Promise<DecodedSafeImage> {
+  const value = input.trim();
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  options.signal?.throwIfAborted();
+
+  let image: DecodedSafeImage;
+  if (value.startsWith('data:') || options.allowRawBase64 && !/^(?:https?:|\/)/i.test(value)) {
+    image = decodeSafeImageInput(value, {
+      allowRawBase64: options.allowRawBase64,
+      maxBytes,
+    });
+  } else if (value.startsWith('/uploads/') || value.startsWith('/api/serve-upload/')) {
+    image = await loadManagedMedia(value, maxBytes, options.signal);
+  } else if (value.startsWith('http://') || value.startsWith('https://')) {
+    const downloaded = await downloadPublicImage(value, {
+      maxBytes,
+      timeoutMs: 30_000,
+      signal: options.signal,
+    });
+    const detectedMime = detectImageMimeType(downloaded.buffer);
+    if (!detectedMime || detectedMime !== downloaded.mimeType) {
+      throw new SafeImageInputError('Remote image MIME does not match its bytes');
+    }
+    image = { buffer: downloaded.buffer, mimeType: detectedMime };
+  } else {
+    throw new SafeImageInputError('Image input must use managed media, data URL, or public HTTP(S)');
+  }
+
+  return validateDecodedImage(image, { ...options, maxBytes });
+}

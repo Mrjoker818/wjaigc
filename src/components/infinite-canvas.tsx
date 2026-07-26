@@ -16,6 +16,23 @@ import {
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationExecutionResult } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, computeAnnotationRegion, BRUSH_COLOR_PALETTE, applyMergedAnnotationExecutionResult } from '@/lib/canvas-annotation';
+import { AnnotationComposer } from '@/features/annotations/annotation-composer';
+import { AnnotationOverlay } from '@/features/annotations/annotation-overlay';
+import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
+import { buildEditIntentBundle } from '@/features/annotations/annotation-bundle';
+import { markStaleAnnotations } from '@/features/annotations/annotation-persistence';
+import {
+  AnnotationClientError,
+  cancelAnnotationTask,
+  executeAnnotationBundle,
+  resolveSemanticAnnotation,
+} from '@/features/annotations/annotation-client';
+import { waitForAnnotationTaskResult } from '@/features/annotations/annotation-task-client';
+import {
+  buildAnnotationSourceVersionId,
+  type AnnotationGesture,
+  useAnnotationController,
+} from '@/features/annotations/use-annotation-controller';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, QUALITY_DISPLAY_NAMES, getProviderAspectRatios, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
@@ -134,6 +151,11 @@ export interface CanvasImage {
   modelName?: string;
   /** ID of the source image that this image was generated from (for SVG connection lines) */
   generatedFromImageId?: string;
+  annotationVersionId?: string;
+  annotationSourceImageId?: string;
+  annotationSourceVersionId?: string;
+  annotationBundleId?: string;
+  annotationIds?: string[];
   apiProvider?: string;
   apiBaseUrl?: string;
   thumbnailUrl?: string; // 缩略图URL，用于画布渲染（4K图片性能优化）
@@ -303,6 +325,9 @@ interface InfiniteCanvasProps {
   versionHistoryManager?: import('@/lib/canvas-tree-history').TreeHistoryManager;
   /** Open floating video generation panel */
   onOpenVideoPanel?: () => void;
+  projectId?: string;
+  initialAnnotations?: CanvasAnnotationV2[];
+  onAnnotationsChange?: (annotations: CanvasAnnotationV2[]) => void;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'colorAdjust' | 'panorama';
@@ -396,7 +421,7 @@ function ElapsedTime({ startTime, className }: { startTime: number; className?: 
   return <span className={className}>{formatted}</span>;
 }
 
-export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, onUndo, onRedo, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, projectId, initialAnnotations = [], onAnnotationsChange }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
   // Stable refs for callbacks used in effects (avoid stale closures)
@@ -1141,7 +1166,67 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // ChatCanvas 批注模式
   const [annotationMode, setAnnotationMode] = useState(false);
+  const [annotationModelId, setAnnotationModelId] = useState('');
+  const annotationController = useAnnotationController(initialAnnotations);
+  const {
+    state: annotationV2State,
+    setState: setAnnotationV2State,
+    selectTool: selectAnnotationV2Tool,
+    pointerDown: beginAnnotationV2Gesture,
+    pointerMove: updateAnnotationV2Gesture,
+    pointerUp: commitAnnotationV2Gesture,
+    commitText: commitAnnotationV2Text,
+    commitResolvedSemantic,
+    updateInstruction: updateAnnotationV2Instruction,
+    moveText: moveAnnotationV2Text,
+    remove: removeAnnotationV2,
+    escape: escapeAnnotationV2,
+  } = annotationController;
+  useEffect(() => {
+    onAnnotationsChange?.(annotationV2State.annotations);
+  }, [annotationV2State.annotations, onAnnotationsChange]);
+  const annotationPointerIdRef = useRef<number | null>(null);
+  const annotationObservedImagesRef = useRef(images.length > 0);
+  const annotationSemanticRequestRef = useRef(0);
+  const annotationTaskAbortRef = useRef<AbortController | null>(null);
+  const [annotationTaskId, setAnnotationTaskId] = useState<string | null>(null);
+  const [annotationExecutionError, setAnnotationExecutionError] = useState<string | null>(null);
+  useEffect(() => {
+    if (images.length > 0) annotationObservedImagesRef.current = true;
+    if (!annotationObservedImagesRef.current) return;
+    const sources = images.map((image) => ({
+      imageId: image.id,
+      url: image.url,
+      versionId: image.annotationVersionId
+        || buildAnnotationSourceVersionId(
+          image.id,
+          image.createdAt,
+          image.url,
+        ),
+    }));
+    setAnnotationV2State((current) => {
+      const annotations = markStaleAnnotations(current.annotations, sources);
+      return JSON.stringify(annotations) === JSON.stringify(current.annotations)
+        ? current
+        : { ...current, annotations };
+    });
+  }, [images, setAnnotationV2State]);
+  const movingTextAnnotationIdRef = useRef<string | null>(null);
   const [annotations, setAnnotations] = useState<CanvasAnnotation[]>([]);
+  const setAnnotationV2Mode = useCallback((nextOpen: boolean) => {
+    setAnnotationMode(nextOpen);
+    setAnnotationV2State(current => ({
+      ...current,
+      isOpen: nextOpen,
+      gesture: { kind: 'idle' },
+    }));
+    if (nextOpen) {
+      setEditMode('none');
+    }
+  }, [setAnnotationV2State]);
+  const toggleAnnotationV2Mode = useCallback(() => {
+    setAnnotationV2Mode(!annotationMode);
+  }, [annotationMode, setAnnotationV2Mode]);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
 
   // Snap guides state - alignment assist lines during drag
@@ -1697,6 +1782,227 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     return { model: 'gemini-3-pro-image-preview' };
   }, []);
 
+  const resolveActiveSemanticGesture = useCallback(async (
+    gesture: Extract<AnnotationGesture, { kind: 'semantic-object' }>,
+  ) => {
+    const requestSequence = ++annotationSemanticRequestRef.current;
+    const sourceImage = imagesRef.current.find(
+      (image) => image.id === gesture.source.imageId,
+    );
+    if (!sourceImage || !projectId) {
+      setAnnotationV2State((current) => ({
+        ...current,
+        gesture: { kind: 'idle' },
+      }));
+      toast.error('请先保存项目，并确认来源图片仍在画布中');
+      return;
+    }
+
+    const point = {
+      x: Math.min(1, Math.max(
+        0,
+        (gesture.point.x - gesture.source.imageRect.x)
+          / gesture.source.imageRect.width,
+      )),
+      y: Math.min(1, Math.max(
+        0,
+        (gesture.point.y - gesture.source.imageRect.y)
+          / gesture.source.imageRect.height,
+      )),
+    };
+    const toastId = toast.loading('正在识别点击对象');
+    try {
+      const result = await resolveSemanticAnnotation({
+        projectId,
+        sourceImageId: sourceImage.id,
+        sourceVersionId: gesture.source.versionId,
+        point,
+      });
+      if (requestSequence !== annotationSemanticRequestRef.current) return;
+      if (result.requiresConfirmation) {
+        setAnnotationV2State((current) => ({
+          ...current,
+          gesture: { kind: 'idle' },
+        }));
+        selectAnnotationV2Tool('region');
+        toast.warning('对象识别置信度较低，请改用框选确认区域');
+        return;
+      }
+      commitResolvedSemantic(result.target);
+    } catch (error) {
+      if (requestSequence !== annotationSemanticRequestRef.current) return;
+      setAnnotationV2State((current) => ({
+        ...current,
+        gesture: { kind: 'idle' },
+      }));
+      selectAnnotationV2Tool('region');
+      const baseMessage = error instanceof AnnotationClientError
+        ? error.message
+        : '对象识别失败，请改用框选工具';
+      const message = baseMessage.includes('框选')
+        ? baseMessage
+        : `${baseMessage}，请改用框选工具`;
+      toast.error(message);
+    } finally {
+      toast.dismiss(toastId);
+    }
+  }, [
+    commitResolvedSemantic,
+    projectId,
+    selectAnnotationV2Tool,
+    setAnnotationV2State,
+  ]);
+
+  const handleAnnotationExecute = useCallback(async () => {
+    if (annotationTaskId) return;
+    const sourceAnnotation = annotationV2State.annotations[0];
+    const sourceImage = imagesRef.current.find(
+      (image) => image.id === sourceAnnotation?.sourceImageId,
+    );
+    if (!sourceAnnotation || !sourceImage || !projectId) {
+      setAnnotationExecutionError('请先保存项目，并确认来源图片仍在画布中');
+      return;
+    }
+
+    const selectedModel = annotationModelId || (() => {
+      const current = getCurrentModel();
+      return current.providerId
+        ? `${current.providerId}::${current.model}`
+        : current.model;
+    })();
+    const separatorIndex = selectedModel.indexOf('::');
+    const currentModel = getCurrentModel();
+    const providerId = separatorIndex >= 0
+      ? selectedModel.slice(0, separatorIndex)
+      : currentModel.providerId || '';
+    const modelId = separatorIndex >= 0
+      ? selectedModel.slice(separatorIndex + 2)
+      : selectedModel;
+    if (!providerId || !modelId) {
+      setAnnotationExecutionError('请选择已配置提供商的图像编辑模型');
+      return;
+    }
+
+    let bundle;
+    try {
+      bundle = buildEditIntentBundle(annotationV2State.annotations, {
+        prompt: annotationV2State.prompt,
+        providerId,
+        modelId,
+      });
+    } catch (error) {
+      setAnnotationExecutionError(
+        error instanceof Error ? error.message : '批注数据无效',
+      );
+      return;
+    }
+
+    const abortController = new AbortController();
+    annotationTaskAbortRef.current = abortController;
+    setAnnotationExecutionError(null);
+    setAnnotationV2State((current) => ({
+      ...current,
+      annotations: current.annotations.map((annotation) => ({
+        ...annotation,
+        status: 'running',
+      })),
+    }));
+
+    try {
+      const submitted = await executeAnnotationBundle({
+        bundle,
+      });
+      setAnnotationTaskId(submitted.taskId);
+      const completed = await waitForAnnotationTaskResult(submitted.taskId, {
+        signal: abortController.signal,
+      });
+      const now = Date.now();
+      const resultImage: CanvasImage = {
+        id: `annotation-result-${now}`,
+        url: completed.imageUrl,
+        x: sourceImage.x + sourceImage.width + 40,
+        y: sourceImage.y,
+        width: sourceImage.width,
+        height: sourceImage.height,
+        originalWidth: sourceImage.originalWidth,
+        originalHeight: sourceImage.originalHeight,
+        createdAt: now,
+        annotationVersionId: buildAnnotationSourceVersionId(
+          `annotation-result-${now}`,
+          now,
+          completed.imageUrl,
+        ),
+        prompt: annotationV2State.prompt,
+        model: modelId,
+        modelName: modelId,
+        apiProvider: providerId,
+        generatedFromImageId: sourceImage.id,
+        annotationSourceImageId: sourceImage.id,
+        annotationSourceVersionId: bundle.sourceVersionId,
+        annotationBundleId: bundle.id,
+        annotationIds: bundle.annotationIds,
+      };
+      onImagesChange([...imagesRef.current, resultImage]);
+      setAnnotationV2State((current) => ({
+        ...current,
+        annotations: current.annotations.map((annotation) => ({
+          ...annotation,
+          status: 'done',
+          updatedAt: now,
+        })),
+      }));
+      toast.success('批注修改已完成，结果已添加到原图右侧');
+    } catch (error) {
+      const cancelled = abortController.signal.aborted;
+      const message = error instanceof AnnotationClientError
+        ? error.message
+        : '批注修改失败';
+      setAnnotationExecutionError(message);
+      setAnnotationV2State((current) => ({
+        ...current,
+        annotations: current.annotations.map((annotation) => ({
+          ...annotation,
+          status: cancelled ? 'ready' : 'failed',
+          updatedAt: Date.now(),
+        })),
+      }));
+      if (!cancelled) toast.error(message);
+    } finally {
+      annotationTaskAbortRef.current = null;
+      setAnnotationTaskId(null);
+    }
+  }, [
+    annotationModelId,
+    annotationTaskId,
+    annotationV2State.annotations,
+    annotationV2State.prompt,
+    getCurrentModel,
+    onImagesChange,
+    projectId,
+    setAnnotationV2State,
+  ]);
+
+  const handleAnnotationCancel = useCallback(async () => {
+    annotationTaskAbortRef.current?.abort();
+    const taskId = annotationTaskId;
+    if (taskId) {
+      try {
+        await cancelAnnotationTask(taskId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '取消任务失败';
+        toast.error(message);
+      }
+    }
+    setAnnotationV2State((current) => ({
+      ...current,
+      annotations: current.annotations.map((annotation) =>
+        annotation.status === 'running'
+          ? { ...annotation, status: 'ready' }
+          : annotation,
+      ),
+    }));
+  }, [annotationTaskId, setAnnotationV2State]);
+
   // Helper: check if keyboard event target is an input field (should not trigger canvas shortcuts)
   const isInputFocused = useCallback((e: KeyboardEvent): boolean => {
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -2053,20 +2359,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (inputFocused) return;
         e.preventDefault();
-        setAnnotationMode(prev => !prev);
-        if (!annotationMode) { setAnnotationTool('pin'); setEditMode('none'); } // reset to pin + exit any edit mode when entering
+        toggleAnnotationV2Mode();
         return;
       }
       // B key to toggle brush tool in annotation mode
       if (e.code === 'KeyB' && annotationMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (inputFocused) return;
-        setAnnotationTool(prev => prev === 'brush' ? 'pin' : 'brush');
+        selectAnnotationV2Tool(annotationV2State.tool === 'brush' ? 'semantic-object' : 'brush');
         return;
       }
       // R key to toggle region tool in annotation mode
       if (e.code === 'KeyR' && annotationMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (inputFocused) return;
-        setAnnotationTool(prev => prev === 'region' ? 'pin' : 'region');
+        selectAnnotationV2Tool(annotationV2State.tool === 'region' ? 'semantic-object' : 'region');
         return;
       }
       if (e.code === 'Space' && !e.repeat) {
@@ -2077,8 +2382,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (e.code === 'Escape') {
         // 退出批注模式
         if (annotationMode) {
-          setAnnotationMode(false);
-          setEditingAnnotationId(null);
+          if (annotationV2State.gesture.kind !== 'idle') {
+            escapeAnnotationV2();
+            return;
+          }
+          setAnnotationV2Mode(false);
         }
         // 退出图片对比选择模式
         if (compareSelecting) {
@@ -2237,7 +2545,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId]);
+  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, toggleAnnotationV2Mode, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode]);
 
   // Click outside to close menus
   useEffect(() => {
@@ -2505,8 +2813,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setCropDragOrigin(null);
   }, [cropDragMode]);
 
-  // Mouse handlers
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+  // Unified pointer handlers keep annotation gestures active for mouse, pen, and touch.
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     // Skip if event originates from a floating panel/popup/modal/toolbar
     const target = e.target as HTMLElement;
     if (target?.closest?.('[data-floating-panel], [data-popup], [data-modal], [data-toolbar], [data-compare-dialog]')) {
@@ -2536,8 +2844,95 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       return;
     }
 
-    // ChatCanvas annotation mode: click=pin, drag=region/brush
-    if (annotationMode && e.button === 0) {
+    // ChatCanvas V2: selecting a tool never creates an annotation. A completed
+    // gesture (or a successful semantic resolution) is the only commit point.
+    if (
+      annotationMode
+      && annotationV2State.isOpen
+      && e.isPrimary
+      && e.button === 0
+    ) {
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      const targetImageId = hitTestImage(canvasPos.x, canvasPos.y);
+      const targetImage = targetImageId
+        ? images.find((image) => image.id === targetImageId)
+        : null;
+
+      if (!targetImage) {
+        toast.error('请在图片上创建批注');
+        return;
+      }
+      if (annotationV2State.annotations.length >= 10) {
+        toast.error('最多支持 10 个批注标记');
+        return;
+      }
+
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+      const source = {
+        projectId: projectId || brandProject?.id || 'canvas-local',
+        imageId: targetImage.id,
+        versionId: targetImage.annotationVersionId
+          || buildAnnotationSourceVersionId(
+            targetImage.id,
+            targetImage.createdAt,
+            targetImage.url,
+          ),
+        imageRect: {
+          x: (canvasRect?.left || 0) + targetImage.x * zoom + viewOffset.x,
+          y: (canvasRect?.top || 0) + targetImage.y * zoom + viewOffset.y,
+          width: targetImage.width * zoom,
+          height: targetImage.height * zoom,
+        },
+      };
+      const sourceLock = annotationV2State.sourceLock;
+      const sourceMatchesLock = !sourceLock || (
+        sourceLock.projectId === source.projectId
+        && sourceLock.imageId === source.imageId
+        && sourceLock.versionId === source.versionId
+      );
+      if (!sourceMatchesLock) {
+        beginAnnotationV2Gesture(source, { x: e.clientX, y: e.clientY });
+        toast.error('Annotations in one edit must use the same source image version');
+        return;
+      }
+
+      setSelectedIds(new Set([targetImage.id]));
+      selectImage(targetImage.id);
+
+      if (annotationV2State.tool === 'text') {
+        const textAnnotation = annotationV2State.annotations.find((annotation) => {
+          if (
+            annotation.sourceImageId !== targetImage.id
+            || annotation.geometry.kind !== 'text'
+          ) {
+            return false;
+          }
+          const markerX = source.imageRect.x
+            + annotation.geometry.point.x * source.imageRect.width;
+          const markerY = source.imageRect.y
+            + annotation.geometry.point.y * source.imageRect.height;
+          return Math.hypot(e.clientX - markerX, e.clientY - markerY) <= 18;
+        });
+        if (textAnnotation) {
+          movingTextAnnotationIdRef.current = textAnnotation.id;
+          annotationPointerIdRef.current = e.pointerId;
+          setAnnotationV2State((current) => ({
+            ...current,
+            selectedAnnotationId: textAnnotation.id,
+          }));
+          e.currentTarget.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
+
+      beginAnnotationV2Gesture(source, { x: e.clientX, y: e.clientY });
+      annotationPointerIdRef.current = e.pointerId;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // Legacy ChatCanvas path remains as a fallback for restored V1 data.
+    if (annotationMode && !annotationV2State.isOpen && e.button === 0) {
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
       // Brush mode: use selected image (preferred) or hit-test image
       let targetImageId: string | null = null;
@@ -2708,9 +3103,45 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       setBoxSelectStart({ x: e.clientX, y: e.clientY });
       setBoxSelectEnd({ x: e.clientX, y: e.clientY });
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, updatePanPreview]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, updatePanPreview, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State]);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (
+      annotationMode
+      && movingTextAnnotationIdRef.current
+      && annotationPointerIdRef.current === e.pointerId
+    ) {
+      const annotation = annotationV2State.annotations.find(
+        (candidate) => candidate.id === movingTextAnnotationIdRef.current,
+      );
+      const targetImage = images.find(
+        (image) => image.id === annotation?.sourceImageId,
+      );
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+      if (targetImage) {
+        moveAnnotationV2Text(
+          annotation!.id,
+          { x: e.clientX, y: e.clientY },
+          {
+            x: (canvasRect?.left || 0) + targetImage.x * zoom + viewOffset.x,
+            y: (canvasRect?.top || 0) + targetImage.y * zoom + viewOffset.y,
+            width: targetImage.width * zoom,
+            height: targetImage.height * zoom,
+          },
+        );
+      }
+      return;
+    }
+
+    if (
+      annotationMode
+      && annotationV2State.gesture.kind !== 'idle'
+      && annotationPointerIdRef.current === e.pointerId
+    ) {
+      updateAnnotationV2Gesture({ x: e.clientX, y: e.clientY });
+      return;
+    }
+
     // Annotation region drag tracking or brush drawing
     if (annotationMode && (annotationRegionStart || isBrushDrawingRef.current)) {
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
@@ -2928,9 +3359,64 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         });
       }
     }
-  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, boxSelectStart, resizingImage, resizeCorner, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, panStart.x, panStart.y, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, dragStart.x, dragStart.y, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, updatePanPreview]);
+  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, boxSelectStart, resizingImage, resizeCorner, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, panStart.x, panStart.y, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, dragStart.x, dragStart.y, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, updatePanPreview, annotationV2State.annotations, annotationV2State.gesture.kind, updateAnnotationV2Gesture, moveAnnotationV2Text]);
 
-  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const releaseAnnotationPointer = () => {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      if (annotationPointerIdRef.current === e.pointerId) {
+        annotationPointerIdRef.current = null;
+      }
+    };
+
+    if (
+      annotationMode
+      && movingTextAnnotationIdRef.current
+      && annotationPointerIdRef.current === e.pointerId
+    ) {
+      const annotationId = movingTextAnnotationIdRef.current;
+      const annotation = annotationV2State.annotations.find(
+        (candidate) => candidate.id === annotationId,
+      );
+      const targetImage = images.find(
+        (image) => image.id === annotation?.sourceImageId,
+      );
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+      if (targetImage) {
+        moveAnnotationV2Text(
+          annotationId,
+          { x: e.clientX, y: e.clientY },
+          {
+            x: (canvasRect?.left || 0) + targetImage.x * zoom + viewOffset.x,
+            y: (canvasRect?.top || 0) + targetImage.y * zoom + viewOffset.y,
+            width: targetImage.width * zoom,
+            height: targetImage.height * zoom,
+          },
+        );
+      }
+      movingTextAnnotationIdRef.current = null;
+      releaseAnnotationPointer();
+      return;
+    }
+
+    if (
+      annotationMode
+      && annotationV2State.gesture.kind !== 'idle'
+      && annotationPointerIdRef.current === e.pointerId
+    ) {
+      if (annotationV2State.gesture.kind === 'text') {
+        commitAnnotationV2Text(annotationV2State.prompt);
+      } else if (annotationV2State.gesture.kind === 'semantic-object') {
+        void resolveActiveSemanticGesture(annotationV2State.gesture);
+      } else {
+        commitAnnotationV2Gesture({ x: e.clientX, y: e.clientY });
+      }
+      releaseAnnotationPointer();
+      return;
+    }
+
     // Brush drawing completion
     const activeBrushDrawingAnnId = brushDrawingAnnIdRef.current;
     if (isBrushDrawingRef.current && activeBrushDrawingAnnId && brushCanvasRef.current) {
@@ -3266,9 +3752,22 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, zoom, commitPanPreview]);
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, zoom, viewOffset.x, viewOffset.y, commitPanPreview, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture]);
 
-  const handleMouseLeave = useCallback(() => {
+  const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (annotationPointerIdRef.current !== e.pointerId) return;
+    movingTextAnnotationIdRef.current = null;
+    annotationPointerIdRef.current = null;
+    if (annotationV2State.gesture.kind !== 'idle') {
+      escapeAnnotationV2();
+    }
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }, [annotationV2State.gesture.kind, escapeAnnotationV2]);
+
+  const handlePointerLeave = useCallback(() => {
+    if (annotationPointerIdRef.current !== null) return;
     if (editMode !== 'none') {
       handleEditMouseUp();
       return;
@@ -8650,6 +9149,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       <div
         ref={(el) => { canvasRef.current = el; canvasContainerRef.current = el; }}
         data-canvas-viewport
+        style={{ touchAction: annotationMode ? 'none' : 'auto' }}
         className={`absolute inset-0 overflow-hidden select-none ${
           annotationMode
             ? 'cursor-crosshair'
@@ -8671,10 +9171,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             ? 'cursor-grabbing'
             : 'cursor-default'
         }`}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseLeave}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onPointerLeave={handlePointerLeave}
         onWheel={handleWheel}
         onAuxClick={handleAuxClick}
         onContextMenu={handleContextMenu}
@@ -12324,8 +12825,81 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           );
         })()}
 
-        {/* ====== ANNOTATION PIN SVG OVERLAY ====== */}
-        {annotations.length > 0 && (
+        {annotationMode && annotationV2State.isOpen && (
+          <>
+            <AnnotationOverlay
+              annotations={annotationV2State.annotations}
+              images={images.map(({ id, x, y, width, height }) => ({
+                id,
+                x,
+                y,
+                width,
+                height,
+              }))}
+              zoom={zoom}
+              viewOffset={viewOffset}
+              gesture={annotationV2State.gesture}
+              brushSize={annotationV2State.brushSize}
+              brushScreenWidths={annotationV2State.brushScreenWidths}
+              viewportOrigin={{
+                x: canvasRef.current?.getBoundingClientRect().left || 0,
+                y: canvasRef.current?.getBoundingClientRect().top || 0,
+              }}
+              selectedAnnotationId={annotationV2State.selectedAnnotationId}
+            />
+            <AnnotationComposer
+              annotations={annotationV2State.annotations}
+              selectedAnnotationId={annotationV2State.selectedAnnotationId}
+              tool={annotationV2State.tool}
+              prompt={annotationV2State.prompt}
+              modelId={annotationModelId || (() => {
+                const current = getCurrentModel();
+                return current.providerId
+                  ? `${current.providerId}::${current.model}`
+                  : current.model;
+              })()}
+              models={canvasGenModels.map((model) => ({
+                id: model.providerId ? `${model.providerId}::${model.id}` : model.id,
+                label: `${model.apiDisplayName || model.id}${model.providerName ? ` · ${model.providerName}` : ''}`,
+              }))}
+              rightInset={isPanelCollapsed ? 20 : 480}
+              sourceLabel={(() => {
+                const selectedAnnotation = annotationV2State.annotations.find(
+                  (annotation) => annotation.id === annotationV2State.selectedAnnotationId,
+                );
+                const sourceImage = images.find(
+                  (image) => image.id === selectedAnnotation?.sourceImageId,
+                );
+                return sourceImage?.name || sourceImage?.prompt || '当前图片';
+              })()}
+              onToolChange={selectAnnotationV2Tool}
+              onPromptChange={(prompt) => {
+                setAnnotationV2State((current) => ({ ...current, prompt }));
+              }}
+              onModelChange={setAnnotationModelId}
+              onSelectAnnotation={(annotationId) => {
+                setAnnotationV2State((current) => ({
+                  ...current,
+                  selectedAnnotationId: annotationId,
+                }));
+              }}
+              onRemoveAnnotation={(annotationId) => {
+                removeAnnotationV2(annotationId);
+              }}
+              onUpdateInstruction={updateAnnotationV2Instruction}
+              isExecuting={Boolean(annotationTaskId)}
+              onExecute={() => void handleAnnotationExecute()}
+              onCancel={() => void handleAnnotationCancel()}
+              error={annotationV2State.sourceMismatch
+                ? 'All annotations in this edit must use the same source image version.'
+                : annotationExecutionError}
+              onClose={() => setAnnotationV2Mode(false)}
+            />
+          </>
+        )}
+
+        {/* ====== LEGACY ANNOTATION PIN SVG OVERLAY ====== */}
+        {annotations.length > 0 && !annotationV2State.isOpen && (
           <svg
             className="absolute inset-0 pointer-events-none"
             style={{ width: '100%', height: '100%', overflow: 'visible' }}
@@ -12701,7 +13275,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         })}
 
         {/* ====== ANNOTATION MODE BANNER ====== */}
-        {annotationMode && (
+        {annotationMode && !annotationV2State.isOpen && (
           <div
             data-toolbar="annotation-tools"
             onMouseDown={(e) => e.stopPropagation()}
@@ -12779,7 +13353,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         )}
 
         {/* ====== ANNOTATION LIST PANEL ====== */}
-        {annotations.length > 0 && (() => {
+        {annotations.length > 0 && !annotationV2State.isOpen && (() => {
           const panelPos = annotationPanelPos;
           const dragging = annotationPanelDragging;
           const dragStart = annotationPanelDragStart;
@@ -15917,6 +16491,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">图像生成器</span>
         </button>
 
+        {/* ChatCanvas 批注始终位于折叠区，避免展开工具被右侧面板遮挡 */}
+        <button
+          data-toolbar="bottom-annotation-entry"
+          onClick={toggleAnnotationV2Mode}
+          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${annotationMode ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+          title="ChatCanvas 批注 (C)"
+        >
+          <MessageCircle className="h-4 w-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">ChatCanvas (C)</span>
+        </button>
+
         <div className={`w-px h-5 mx-1.5 ${separatorCls}`} />
 
         {/* ── Right: Feature buttons (collapsible) ── */}
@@ -16123,15 +16708,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">六面体</span>
           </button>
 
-          {/* ChatCanvas 批注模式 */}
-          <button
-            onClick={() => setAnnotationMode(prev => !prev)}
-            className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${annotationMode ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
-            title="ChatCanvas 批注 (C)"
-          >
-            <MessageCircle className="h-4 w-4" />
-            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">ChatCanvas (C)</span>
-          </button>
         </div>
 
         {/* ── Far-right: Auxiliary controls (always visible) ── */}

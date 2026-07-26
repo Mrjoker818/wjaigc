@@ -1,5 +1,7 @@
 // 用户相关的类型定义
 
+import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
+
 export interface User {
   id: string;
   name: string;
@@ -60,6 +62,7 @@ export interface Project {
   };
   metadata?: {
     groups?: ImageGroupData[];
+    annotationsV2?: CanvasAnnotationV2[];
     [key: string]: unknown;
   };
 }
@@ -116,6 +119,11 @@ export interface CanvasImage {
     startTime?: number;
   };
   generatedFromImageId?: string;
+  annotationVersionId?: string;
+  annotationSourceImageId?: string;
+  annotationSourceVersionId?: string;
+  annotationBundleId?: string;
+  annotationIds?: string[];
   svgDataUrl?: string;
   svgUrl?: string; // SVG服务器文件URL（轻量级，用于下载矢量图，避免存储超大svgDataUrl）
   // 视频媒体扩展

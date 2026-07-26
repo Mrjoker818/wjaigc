@@ -5,6 +5,7 @@ const { execSql } = vi.hoisted(() => ({ execSql: vi.fn() }));
 vi.mock('@/lib/db-client', () => ({ execSql }));
 
 import {
+  chargeCloudTaskCredits,
   claimCloudTaskLease,
   createCloudTask,
   getCloudTaskForUser,
@@ -171,5 +172,26 @@ describe('cloud-task-storage', () => {
     expect(settlement?.[0]).toContain("credit_status = 'pending'");
     expect(settlement?.[0]).toContain("SET credit_status = 'refunded'");
     expect(refund).toEqual({ refunded: true, creditCost: 6, balance: 94, userId: 'user-a' });
+  });
+
+  it('charges credits and marks the idempotent task in one atomic statement', async () => {
+    execSql.mockResolvedValueOnce({
+      rows: [{ user_id: 'user-a', credit_cost: 6, balance: 88 }],
+      rowCount: 1,
+    });
+
+    const charge = await chargeCloudTaskCredits(
+      'task-charge-once',
+      'user-a',
+      6,
+      'Annotation edit',
+    );
+
+    const settlement = execSql.mock.calls.find(([sql]) => String(sql).includes('WITH chargeable AS'));
+    expect(settlement).toBeDefined();
+    expect(settlement?.[0]).toContain("credit_status = 'not-applicable'");
+    expect(settlement?.[0]).toContain("credit_status = 'pending'");
+    expect(settlement?.[0]).toContain('balance >= chargeable.credit_cost');
+    expect(charge).toEqual({ charged: true, creditCost: 6, balance: 88, userId: 'user-a' });
   });
 });

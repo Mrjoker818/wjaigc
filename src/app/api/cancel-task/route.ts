@@ -4,7 +4,11 @@ import { cancelEditTask } from '@/lib/edit-task-store';
 import { getSessionUser as getAuthUser } from '@/lib/server-auth';
 import { refundCredits } from '@/lib/credits';
 import { recordCloudTaskCancelled } from '@/lib/cloud-task-persistence';
-import { getCloudTaskForUser, refundCloudTaskCredits } from '@/lib/cloud-task-storage';
+import {
+  getCloudTaskForUser,
+  refundCloudTaskCredits,
+  terminateCloudTaskAndRefund,
+} from '@/lib/cloud-task-storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,6 +78,9 @@ export async function POST(request: NextRequest) {
     })() : null;
 
     if (isTaskCancelled(taskId)) {
+      if (persistedTask?.type === 'annotation-edit') {
+        await terminateCloudTaskAndRefund(taskId, 'cancelled', 'Annotation edit cancelled');
+      }
       return NextResponse.json({
         success: true,
         message: '任务已取消',
@@ -88,9 +95,22 @@ export async function POST(request: NextRequest) {
 
     // ★ 退款：取消任务时退还已扣除的积分
     let refunded = false;
+    let annotationTerminalSettled = false;
     const creditCost = taskInfo?.creditCost ?? persistedTask?.creditCost ?? 0;
     const creditOwnerId = taskInfo?.userId ?? persistedTask?.userId;
-    if (persistedTask && creditCost > 0) {
+    if (persistedTask?.type === 'annotation-edit') {
+      try {
+        const settlement = await terminateCloudTaskAndRefund(
+          taskId,
+          'cancelled',
+          `Annotation edit cancelled (taskId: ${taskId})`,
+        );
+        refunded = settlement.refunded || persistedTask.creditStatus === 'refunded';
+        annotationTerminalSettled = true;
+      } catch (refundErr) {
+        console.error('[cancel-task] Annotation cancellation settlement failed:', refundErr);
+      }
+    } else if (persistedTask && creditCost > 0) {
       try {
         const refund = await refundCloudTaskCredits(
           taskId,
@@ -114,8 +134,10 @@ export async function POST(request: NextRequest) {
         console.error('[cancel-task] Refund failed:', refundErr);
       }
     }
-    void recordCloudTaskCancelled(taskId, refunded)
-      .catch((error) => console.warn('[cancel-task] Cloud task cancellation persistence failed:', error));
+    if (!annotationTerminalSettled) {
+      void recordCloudTaskCancelled(taskId, refunded)
+        .catch((error) => console.warn('[cancel-task] Cloud task cancellation persistence failed:', error));
+    }
 
     return NextResponse.json({
       success: true,

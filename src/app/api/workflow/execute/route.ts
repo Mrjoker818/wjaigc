@@ -43,11 +43,25 @@ interface WorkflowExecutionState {
   completedAt: number | null;
   error?: string;
   userId?: string;
+  userRole?: 'user' | 'admin';
   totalNodes: number;
 }
 
 // 内存中的执行状态
 const executionCache = new Map<string, WorkflowExecutionState>();
+const ASYNC_WORKFLOW_ENDPOINTS = new Set([
+  '/api/generate',
+  '/api/image-edit',
+  '/api/edit',
+  '/api/agent-edit',
+  '/api/annotations/execute',
+  '/api/video/generate',
+  '/api/video/extend',
+]);
+
+function isAsyncWorkflowEndpoint(endpoint: string): boolean {
+  return ASYNC_WORKFLOW_ENDPOINTS.has(endpoint);
+}
 
 // 30分钟后自动清理
 const CLEANUP_MS = 30 * 60 * 1000;
@@ -251,9 +265,38 @@ export async function POST(request: NextRequest) {
         const apiUrl = isInternal
           ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${req.endpoint}`
           : baseUrl ? `${baseUrl.replace(/\/+$/, '')}${req.endpoint}` : req.endpoint;
+        const retryHeaders = isInternal
+          ? await getInternalRequestHeaders(
+              auth.userId,
+              auth.userRole === 'admin' ? 'admin' : 'user',
+            )
+          : (apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {});
+        if (isAsyncWorkflowEndpoint(req.endpoint)) {
+          const retryResult = await executeAsyncTask(
+            apiUrl,
+            req.body,
+            {
+              method: req.method,
+              headers: {
+                'Content-Type': 'application/json',
+                ...retryHeaders,
+              },
+            },
+            nodeId,
+            retryNode.type as NodeType,
+          );
+          exec.results[nodeId] = retryResult;
+          await persistWorkflowExecution(executionId, exec);
+          return NextResponse.json({
+            success: retryResult.status === 'success',
+            nodeId,
+            output: retryResult.output,
+            error: retryResult.error,
+          });
+        }
         const apiRes = await fetch(apiUrl, {
           method: req.method,
-          headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) },
+          headers: { 'Content-Type': 'application/json', ...retryHeaders },
           body: JSON.stringify(req.body),
           signal: AbortSignal.timeout(300000),
         });
@@ -290,6 +333,7 @@ export async function POST(request: NextRequest) {
       startedAt: Date.now(),
       completedAt: null,
       userId: auth.userId,
+      userRole: auth.userRole === 'admin' ? 'admin' : 'user',
       totalNodes: nodes.length,
     };
     executionCache.set(executionIdNew, execState);
@@ -527,6 +571,8 @@ async function executeWorkflow(
             currentNodeId: null,
             startedAt: Date.now(),
             completedAt: null,
+            userId: execState.userId,
+            userRole: execState.userRole,
             totalNodes: inlineSubgraph.nodes.length,
           };
           const childNodes = hydrateInlineSubgraphInputs(inlineSubgraph.nodes, inputs);
@@ -576,6 +622,8 @@ async function executeWorkflow(
               currentNodeId: null,
               startedAt: Date.now(),
               completedAt: null,
+              userId: execState.userId,
+              userRole: execState.userRole,
               totalNodes: 1,
             };
             await executeWorkflow(`${executionId}:${node.id}:${branch.id}`, branchState, [branchNode], [], depth);
@@ -674,12 +722,18 @@ async function executeWorkflow(
                     : dsBaseUrl
                       ? `${dsBaseUrl.replace(/\/+$/, '')}${dsReq.endpoint}`
                       : dsReq.endpoint;
+                  const downstreamHeaders = isInternal
+                    ? await getInternalRequestHeaders(
+                        execState.userId!,
+                        execState.userRole || 'user',
+                      )
+                    : (dsApiKey ? { 'Authorization': `Bearer ${dsApiKey}` } : {});
 
                   const dsRes = await fetch(apiUrl, {
                     method: dsReq.method,
                     headers: {
                       'Content-Type': 'application/json',
-                      ...(dsApiKey ? { 'Authorization': `Bearer ${dsApiKey}` } : {}),
+                      ...downstreamHeaders,
                     },
                     body: JSON.stringify(dsReq.body),
                     signal: AbortSignal.timeout(300000),
@@ -752,6 +806,12 @@ async function executeWorkflow(
         : baseUrl
           ? `${baseUrl}${req.endpoint}`
           : req.endpoint;
+      const workflowHeaders = isInternalApi
+        ? await getInternalRequestHeaders(
+            execState.userId!,
+            execState.userRole || 'user',
+          )
+        : (apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {});
 
       console.debug(`[Workflow] 执行节点 ${node.label}(${node.type}) → ${req.endpoint}`);
 
@@ -759,7 +819,7 @@ async function executeWorkflow(
         method: req.method,
         headers: {
           'Content-Type': 'application/json',
-          ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}),
+          ...workflowHeaders,
         },
       };
 
@@ -768,7 +828,7 @@ async function executeWorkflow(
       }
 
       // 对于异步API (generate, image-edit, edit, agent-edit, video/generate, video/extend)，使用提交+轮询模式
-      const isAsyncApi = ['/api/generate', '/api/image-edit', '/api/edit', '/api/agent-edit', '/api/video/generate', '/api/video/extend'].includes(req.endpoint);
+      const isAsyncApi = isAsyncWorkflowEndpoint(req.endpoint);
 
       // P1: 分镜串行 — 多场景按序生成
       if (node.type === 'storyboard-sequence' && req.body._storyboard) {
@@ -998,7 +1058,7 @@ async function executeAsyncTask(
       try {
         const pollRes = await fetch(`http://localhost:${port}/api/poll-task`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: fetchOptions.headers,
           body: JSON.stringify({ taskId: tid, model: body.model, providerId: body.providerId }),
           signal: AbortSignal.timeout(10000),
         });

@@ -64,6 +64,15 @@ export function deleteEditTask(taskId: string): boolean {
 }
 
 export function setEditTask(taskId: string, task: EditTask): void {
+  const existing = editTaskStore.get(taskId);
+  const terminalStatuses: EditTask['status'][] = ['completed', 'failed', 'cancelled'];
+  if (
+    existing
+    && terminalStatuses.includes(existing.status)
+    && task.status !== existing.status
+  ) {
+    return;
+  }
   // 超过上限时清理最老的任务
   if (!editTaskStore.has(taskId) && editTaskStore.size >= MAX_EDIT_TASKS) {
     let oldestId = '';
@@ -81,12 +90,14 @@ export function setEditTask(taskId: string, task: EditTask): void {
 
 export function updateTaskStage(taskId: string, stage: string): void {
   const task = editTaskStore.get(taskId);
-  if (task) {
+  if (task?.status === 'processing') {
     editTaskStore.set(taskId, { ...task, stage });
   }
 }
 
 export function failEditTask(taskId: string, error: string, networkError = false): void {
+  const existing = editTaskStore.get(taskId);
+  if (existing && existing.status !== 'processing') return;
   editTaskStore.set(taskId, {
     id: taskId,
     status: 'failed',
@@ -94,7 +105,7 @@ export function failEditTask(taskId: string, error: string, networkError = false
     stage: '失败',
     error,
     result: { success: false, error, networkError },
-    createdAt: editTaskStore.get(taskId)?.createdAt || Date.now(),
+    createdAt: existing?.createdAt || Date.now(),
     completedAt: Date.now(),
   });
 }

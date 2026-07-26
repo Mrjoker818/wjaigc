@@ -20,7 +20,7 @@ import { getModelParamType } from './canvas-generation-group';
 
 export type NodeType =
   | 'input-image' | 'input-text' | 'input-param' | 'input-video' | 'audio-input'
-  | 'ai-generate' | 'ai-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
+  | 'ai-generate' | 'ai-edit' | 'ai-annotation-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
   | 'ai-font-design' | 'ai-refine-engine' | 'ai-human-repair' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model' | 'ai-panorama'
   | 'ai-video-generate' | 'ai-video-i2v'
   | 'ai-llm' | 'ai-audio'
@@ -77,7 +77,7 @@ export function getNodeCategory(type: NodeType): NodeCategory {
 /** 判断节点类型是否会输出图片（需要自动添加输出节点） */
 export function isImageGeneratingNode(type: NodeType): boolean {
   return [
-    'ai-generate', 'ai-edit', 'ai-retouch', 'ai-upscale', 'ai-removebg',
+    'ai-generate', 'ai-edit', 'ai-annotation-edit', 'ai-retouch', 'ai-upscale', 'ai-removebg',
     'ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment',
     'ai-multi-angle', 'ai-3d-model', 'ai-style-transfer', 'ai-color-adjust',
     'ai-vectorize', 'storyboard-sequence', 'ai-panorama', 'manual-color-adjust',
@@ -107,6 +107,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'input-param': '参数输入',
   'ai-generate': '图像生成',
   'ai-edit': '图像编辑',
+  'ai-annotation-edit': '批注修改',
   'ai-upscale': '无损放大',
   'ai-removebg': '移除背景',
   'ai-vectorize': '矢量化',
@@ -161,6 +162,7 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'input-param': 'SlidersHorizontal',
   'ai-generate': 'Wand2',
   'ai-edit': 'Pencil',
+  'ai-annotation-edit': 'MessageSquare',
   'ai-upscale': 'Maximize',
   'ai-removebg': 'Scissors',
   'ai-vectorize': 'PenTool',
@@ -319,6 +321,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'ai-llm', category: 'ai', label: 'AI文案策划', desc: 'LLM文本生成/文案策划/提示词优化' },
   { type: 'ai-generate', category: 'ai', label: '图像生成', desc: 'AI生成新图片' },
   { type: 'ai-edit', category: 'ai', label: '图像编辑', desc: '修图/擦除/扩展' },
+  { type: 'ai-annotation-edit', category: 'ai', label: '批注修改', desc: '根据版本化批注精确修改图片' },
   { type: 'ai-upscale', category: 'ai', label: '无损放大', desc: '超分辨率放大' },
   { type: 'ai-removebg', category: 'ai', label: '移除背景', desc: '智能抠图去背景' },
   { type: 'ai-vectorize', category: 'ai', label: '矢量化', desc: '位图转矢量图' },
@@ -381,6 +384,9 @@ function createDefaultPorts(type: NodeType): NodePort[] {
         ports.push({ id: 'in-text', label: '文案', type: 'prompt', direction: 'in' });
       } else {
         ports.push({ id: 'in-prompt', label: '提示词', type: 'prompt', direction: 'in' });
+      }
+      if (type === 'ai-annotation-edit') {
+        ports.push({ id: 'in-reference', label: '参考图', type: 'image', direction: 'in' });
       }
       // 3D模型节点额外添加多图输入端口
       if (type === 'ai-3d-model') {
@@ -588,6 +594,7 @@ export interface PropertyField {
   modelFilter?: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video'; // model-select 字段过滤模型类型
   placeholder?: string;
   hint?: string; // 字段提示文字
+  readOnly?: boolean;
 }
 
 /** 获取节点类型的属性面板字段 */
@@ -660,6 +667,29 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '扩展画面', value: 'extend' }, { label: '语言修图', value: 'edit' }
     ], defaultValue: 'edit' });
     fields.push({ key: 'strength', label: '强度', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 75 });
+  }
+
+  if (type === 'ai-annotation-edit') {
+    fields.push({
+      key: 'annotationBundle',
+      label: '批注包',
+      type: 'textarea',
+      placeholder: '由批注修改工具自动生成',
+      hint: '包含版本化批注意图，请双击节点重新编辑',
+      readOnly: true,
+    });
+    fields.push({
+      key: 'providerId',
+      label: '供应商',
+      type: 'text',
+      readOnly: true,
+    });
+    fields.push({
+      key: 'sourceVersionId',
+      label: '源图片版本',
+      type: 'text',
+      readOnly: true,
+    });
   }
 
   if (type === 'ai-upscale') {
@@ -1450,6 +1480,16 @@ export function getNodeInputs(
       case 'image':
         // 图片连线: 优先传递imageUrl
         appendImageInputs(upstreamOutput);
+        if (conn.toPortId === 'in-image') {
+          const upstreamSourceVersionId = typeof upstreamOutput.annotationVersionId === 'string'
+            ? upstreamOutput.annotationVersionId
+            : (typeof upstreamOutput.sourceVersionId === 'string'
+                ? upstreamOutput.sourceVersionId
+                : '');
+          if (upstreamSourceVersionId) {
+            inputs.sourceVersionId = upstreamSourceVersionId;
+          }
+        }
         break;
       case 'prompt':
         // 提示词连线: 传递prompt/text/textContent
@@ -1610,6 +1650,55 @@ export function buildNodeExecutionRequest(
           strength: config.strength || 75,
         }
       };
+
+    case 'ai-annotation-edit': {
+      const rawBundle = config.annotationBundle;
+      let bundle: Record<string, unknown>;
+      if (typeof rawBundle === 'string') {
+        try {
+          bundle = JSON.parse(rawBundle) as Record<string, unknown>;
+        } catch {
+          throw new Error('ANNOTATION_BUNDLE_INVALID');
+        }
+      } else if (rawBundle && typeof rawBundle === 'object' && !Array.isArray(rawBundle)) {
+        bundle = rawBundle as Record<string, unknown>;
+      } else {
+        throw new Error('ANNOTATION_BUNDLE_INVALID');
+      }
+
+      const expectedSourceVersionId = typeof bundle.sourceVersionId === 'string'
+        ? bundle.sourceVersionId
+        : '';
+      const currentSourceVersionId = typeof config.sourceVersionId === 'string'
+        ? config.sourceVersionId
+        : '';
+      const expectedSourceImageUrl = typeof node.config.sourceImageUrl === 'string'
+        ? node.config.sourceImageUrl
+        : '';
+      const currentSourceImageUrl = typeof inputs.imageUrl === 'string'
+        ? inputs.imageUrl
+        : '';
+      if (
+        expectedSourceVersionId
+        && currentSourceVersionId
+        && currentSourceVersionId !== expectedSourceVersionId
+      ) {
+        throw new Error('ANNOTATION_SOURCE_STALE');
+      }
+      if (
+        expectedSourceImageUrl
+        && currentSourceImageUrl
+        && currentSourceImageUrl !== expectedSourceImageUrl
+      ) {
+        throw new Error('ANNOTATION_SOURCE_STALE');
+      }
+
+      return {
+        endpoint: '/api/annotations/execute',
+        method: 'POST',
+        body: { bundle },
+      };
+    }
 
     case 'ai-upscale':
       return {

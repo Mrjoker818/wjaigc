@@ -12,6 +12,14 @@
 import { findProviderForFeature, getApiProviders } from './server-api-config';
 import { fetchWithV1Retry } from './api-helpers';
 import type { ModelInfo } from './universal-api-types';
+import sharp from 'sharp';
+
+import type { AnnotationRegion } from '@/features/annotations/annotation-types';
+import { loadAnnotationImageBuffer } from '@/lib/annotation-mask';
+import { parseIdentifiedImageTargetPayload } from '@/lib/annotation-target-parser';
+import { dbGetUserById } from '@/lib/db-storage';
+import { isModelAssignedToUser } from '@/lib/model-defaults';
+import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
 
 const IDENTIFY_PROMPT = `Identify the main product/object in this image. Focus on: what is it exactly (product type, specific category), NOT what it resembles. For example: "a white medicine bottle with blue label", NOT "a cosmetic container". Be precise about the product category — distinguish between medicine, cosmetics, food, beverages, chemicals, etc.
 
@@ -28,6 +36,12 @@ interface IdentifyResult {
   en: string;
   /** Chinese subject description */
   zh: string;
+}
+
+export interface IdentifiedImageTarget {
+  label: string;
+  confidence: number;
+  region: AnnotationRegion;
 }
 
 /** Extract model ID strings from provider's model lists */
@@ -154,66 +168,182 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
   return null;
 }
 
+async function findStrictVisionProvider(identity?: {
+  userId: string;
+  userRole: string;
+}): Promise<{
+  providerId: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+} | null> {
+  const providers = await getApiProviders();
+  const enabled = providers.filter((provider) => provider.isEnabled && provider.apiKey);
+  const user = identity && identity.userRole !== 'admin'
+    ? await dbGetUserById(identity.userId)
+    : null;
+  const chatModels = (user as (typeof user & { chat_models?: string[] }) | null)
+    ?.chat_models;
+  for (const provider of enabled) {
+    const model = getModelIds(provider).find((modelId) =>
+      isVisionModel(modelId)
+      && (
+        !identity
+        || identity.userRole === 'admin'
+        || isModelAssignedToUser(
+          chatModels,
+          provider.id,
+          modelId,
+        )
+      )
+    );
+    if (model) {
+      return {
+        providerId: provider.id,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model,
+      };
+    }
+  }
+  return null;
+}
+
+function parseVisionContent(responseText: string): string {
+  try {
+    const parsed = JSON.parse(responseText) as {
+      choices?: Array<{ message?: { content?: unknown } }>;
+    };
+    const content = parsed.choices?.[0]?.message?.content;
+    if (typeof content === 'string') return content;
+  } catch {
+    // Continue with SSE parsing.
+  }
+
+  let content = '';
+  for (const line of responseText.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:') || trimmed === 'data: [DONE]') continue;
+    try {
+      const chunk = JSON.parse(trimmed.slice(5).trim()) as {
+        choices?: Array<{ delta?: { content?: unknown } }>;
+      };
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (typeof delta === 'string') content += delta;
+    } catch {
+      // Ignore malformed stream fragments; the final strict schema still applies.
+    }
+  }
+  return content;
+}
+
+export async function identifyImageTargetAtPoint(
+  imageUrl: string,
+  point: { x: number; y: number },
+  timeoutMs = 30_000,
+  identity?: { userId: string; userRole: string },
+): Promise<IdentifiedImageTarget | null> {
+  if (
+    !Number.isFinite(point.x)
+    || !Number.isFinite(point.y)
+    || point.x < 0
+    || point.x > 1
+    || point.y < 0
+    || point.y > 1
+  ) {
+    return null;
+  }
+
+  const provider = await findStrictVisionProvider(identity);
+  if (!provider) return null;
+
+  try {
+    const source = await loadAnnotationImageBuffer(imageUrl);
+    const normalized = await safeSharp(source)
+      .rotate()
+      .resize({
+        width: 2048,
+        height: 2048,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .ensureAlpha()
+      .png()
+      .toBuffer({ resolveWithObject: true });
+    const markerX = Math.round(point.x * normalized.info.width);
+    const markerY = Math.round(point.y * normalized.info.height);
+    const markerSvg = Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${normalized.info.width}" height="${normalized.info.height}">`
+      + `<circle cx="${markerX}" cy="${markerY}" r="22" fill="none" stroke="#ff2d55" stroke-width="7"/>`
+      + `<line x1="${markerX - 30}" y1="${markerY}" x2="${markerX + 30}" y2="${markerY}" stroke="#ff2d55" stroke-width="5"/>`
+      + `<line x1="${markerX}" y1="${markerY - 30}" x2="${markerX}" y2="${markerY + 30}" stroke="#ff2d55" stroke-width="5"/>`
+      + '</svg>',
+    );
+    const markedImage = await sharp(normalized.data)
+      .composite([{ input: markerSvg }])
+      .png()
+      .toBuffer();
+    const markedDataUrl = `data:image/png;base64,${markedImage.toString('base64')}`;
+    const prompt = [
+      'Identify the single visible object directly under the red crosshair.',
+      'Return exactly one JSON object and no markdown or explanation.',
+      '{"label":"short object name","confidence":0.0,"region":{"x":0.0,"y":0.0,"w":0.0,"h":0.0}}',
+      'region must be the tight normalized bounding box of that object in the full image.',
+      `The clicked normalized point is x=${point.x.toFixed(4)}, y=${point.y.toFixed(4)}.`,
+      'If no coherent object is under the crosshair, return confidence below 0.3.',
+    ].join('\n');
+
+    const response = await fetchWithV1Retry(
+      provider.baseUrl,
+      '/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${provider.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: markedDataUrl, detail: 'high' } },
+            ],
+          }],
+          response_format: { type: 'json_object' },
+          max_tokens: 400,
+          temperature: 0,
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+      true,
+      timeoutMs,
+    );
+    if (!response.ok) return null;
+
+    const content = parseVisionContent(await response.text());
+    if (!content) return null;
+    return parseIdentifiedImageTargetPayload(content);
+  } catch (error) {
+    console.warn(
+      '[identify-subject] Target-at-point resolution failed:',
+      error instanceof Error ? error.message : String(error),
+    );
+    return null;
+  }
+}
+
 /**
  * Convert an image URL to base64 data URL for vision API
  */
 async function imageToBase64(imageUrl: string): Promise<string | null> {
   try {
-    // Already a data URL
-    if (imageUrl.startsWith('data:')) return imageUrl;
-
-    // Local file path
-    if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/uploads/')) {
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-      const publicDir = path.join(workspacePath, 'public');
-
-      // Extract relative path (e.g. "uploads/gen-xxx.png")
-      let relativePath = '';
-      if (imageUrl.startsWith('/api/serve-upload/')) {
-        relativePath = imageUrl.replace('/api/serve-upload/', '');
-      } else {
-        relativePath = imageUrl.replace(/^\//, '');
-      }
-
-      // Try multiple directories (same logic as serve-upload route)
-      const possiblePaths = [
-        path.join(publicDir, relativePath),                          // public/uploads/gen-xxx.png
-        path.join(publicDir, 'uploads', relativePath),              // public/uploads/uploads/gen-xxx.png (legacy)
-      ];
-      // Also try server data root if available
-      try {
-        const { getServerDataRoot } = await import('./server-data-root');
-        const dataRoot = getServerDataRoot();
-        possiblePaths.push(
-          path.join(dataRoot, relativePath),                        // dataRoot/uploads/gen-xxx.png
-          path.join(dataRoot, 'uploads', path.basename(relativePath)), // dataRoot/uploads/gen-xxx.png
-        );
-      } catch { /* server-data-root not available */ }
-
-      for (const filePath of possiblePaths) {
-        try {
-          const buffer = await fs.readFile(filePath);
-          const ext = path.extname(filePath).toLowerCase();
-          const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png';
-          return `data:${mime};base64,${buffer.toString('base64')}`;
-        } catch { /* try next path */ }
-      }
-      console.warn(`[identify-subject] File not found in any location for: ${imageUrl}`);
-      return null;
-    }
-
-    // HTTP URL
-    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(8000) });
-      if (!resp.ok) return null;
-      const contentType = resp.headers.get('content-type') || 'image/png';
-      const buffer = Buffer.from(await resp.arrayBuffer());
-      return `data:${contentType};base64,${buffer.toString('base64')}`;
-    }
-
-    return null;
+    const image = await loadSafeImageInput(imageUrl, {
+      maxBytes: 25 * 1024 * 1024,
+    });
+    return `data:${image.mimeType};base64,${image.buffer.toString('base64')}`;
   } catch (err) {
     console.warn('[identify-subject] Failed to convert image to base64:', err);
     return null;

@@ -11,7 +11,16 @@ import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
-import { isTaskCancelled, updateTaskProgress, getTaskInfo, registerTask, releaseQueueSlot, type TaskType } from '@/lib/task-registry';
+import {
+  getTaskInfo,
+  isTaskCancelled,
+  registerTask,
+  registerTaskAbortController,
+  releaseQueueSlot,
+  unregisterTaskAbortController,
+  updateTaskProgress,
+  type TaskType,
+} from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -22,7 +31,14 @@ import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
 import { isPendingLocalAsyncGenerateTask, isRecoverableSubmitOnlySubmission, shouldPollRemoteAsyncGenerateTask } from '@/lib/async-generate-task';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
-import { claimCloudTaskLease, getCloudTaskForUser, refundCloudTaskCredits, updateCloudTask } from '@/lib/cloud-task-storage';
+import {
+  claimCloudTaskLease,
+  completeCloudTask,
+  getCloudTaskForUser,
+  refundCloudTaskCredits,
+  terminateCloudTaskAndRefund,
+  updateCloudTask,
+} from '@/lib/cloud-task-storage';
 import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
 import { resolveVideoCompatProfile } from '@/lib/video-api';
 
@@ -140,6 +156,10 @@ export async function POST(request: NextRequest) {
     // 检查是否为本地语言修图任务
     if (taskId.startsWith('edit_')) {
       const task = getEditTask(taskId);
+      const persistedEditTask = sessionUser
+        ? await getCloudTaskForUser(taskId, sessionUser.id)
+        : null;
+      const isAnnotationEdit = persistedEditTask?.type === 'annotation-edit';
       console.info(`[poll-task] edit任务查询: taskId=${taskId}, status=${task?.status}, stage=${task?.stage}, hasRemotePoll=${!!task?.remotePollInfo}`);
       if (!task) {
         return NextResponse.json({
@@ -177,6 +197,8 @@ export async function POST(request: NextRequest) {
       const remotePollInfo = task.remotePollInfo;
 
       if (remotePollInfo && task.status === 'processing') {
+        const remotePollController = new AbortController();
+        registerTaskAbortController(taskId, remotePollController);
         try {
           const { taskId: remoteTaskId, apiBaseUrl, model: remoteModel, compatProfile: remoteCompat } = remotePollInfo;
           // 从服务端配置查找 API Key（不再从前端传入的 remotePollInfo 获取）
@@ -219,7 +241,7 @@ export async function POST(request: NextRequest) {
             {
               method: 'GET',
               headers: { 'Authorization': `Bearer ${pollApiKey}` },
-              signal: AbortSignal.timeout(30000),
+              signal: AbortSignal.any([request.signal, remotePollController.signal, AbortSignal.timeout(30000)]),
             },
           );
 
@@ -388,22 +410,43 @@ export async function POST(request: NextRequest) {
 
               if (images.length > 0) {
                 console.info(`[poll-task] edit remote completed! images=${images.length}, firstUrl=${images[0].url?.substring(0, 80)}...`);
+                const completedResult = {
+                  success: true,
+                  image: images[0],
+                  images,
+                  model: remoteModel,
+                  provider: apiBaseUrl || 'unknown',
+                  llmInstruction: remotePollInfo.prompt,
+                  editRegions: [],
+                  autoMaskGenerated: false,
+                };
+                if (isAnnotationEdit) {
+                  const committed = await completeCloudTask(taskId, completedResult);
+                  if (!committed) {
+                    const current = await getCloudTaskForUser(taskId, sessionUser!.id);
+                    if (current?.status === 'completed') {
+                      return NextResponse.json({
+                        success: true,
+                        status: 'completed',
+                        stage: '完成',
+                        result: current.result,
+                      }, { status: 200 });
+                    }
+                    return NextResponse.json({
+                      success: false,
+                      status: current?.status || 'failed',
+                      error: current?.error || '批注任务终态已由其他请求更新',
+                      retryable: false,
+                    }, { status: 200 });
+                  }
+                }
                 updateTaskProgress(taskId, { status: 'completed', progress: 100 });
                 setEditTask(taskId, {
                   id: taskId,
                   status: 'completed',
                   progress: 100,
                   stage: '完成',
-                  result: {
-                    success: true,
-                    image: images[0],
-                    images,
-                    model: remoteModel,
-                    provider: apiBaseUrl || 'unknown',
-                    llmInstruction: remotePollInfo.prompt,
-                    editRegions: [],
-                    autoMaskGenerated: false,
-                  },
+                  result: completedResult,
                   createdAt: task.createdAt || Date.now(),
                   completedAt: Date.now(),
                 });
@@ -429,17 +472,38 @@ export async function POST(request: NextRequest) {
                 if (deepUrl) {
                   console.info(`[poll-task] edit deep search found image: ${deepUrl.substring(0, 100)}...`);
                   const existingTask = getEditTask(taskId);
+                  const completedResult = {
+                    success: true,
+                    image: { url: deepUrl },
+                    images: [{ url: deepUrl }],
+                    model: remotePollInfo.model || model,
+                    provider: remotePollInfo.apiBaseUrl || 'unknown',
+                  };
+                  if (isAnnotationEdit) {
+                    const committed = await completeCloudTask(taskId, completedResult);
+                    if (!committed) {
+                      const current = await getCloudTaskForUser(taskId, sessionUser!.id);
+                      if (current?.status === 'completed') {
+                        return NextResponse.json({
+                          success: true,
+                          status: 'completed',
+                          stage: '完成',
+                          result: current.result,
+                        }, { status: 200 });
+                      }
+                      return NextResponse.json({
+                        success: false,
+                        status: current?.status || 'failed',
+                        error: current?.error || '批注任务终态已由其他请求更新',
+                        retryable: false,
+                      }, { status: 200 });
+                    }
+                  }
                   setEditTask(taskId, {
                     ...(existingTask || { id: taskId, progress: 0, createdAt: Date.now() }),
                     status: 'completed',
                     stage: '完成',
-                    result: {
-                      success: true,
-                      image: { url: deepUrl },
-                      images: [{ url: deepUrl }],
-                      model: remotePollInfo.model || model,
-                      provider: remotePollInfo.apiBaseUrl || 'unknown',
-                    },
+                    result: completedResult,
                     completedAt: Date.now(),
                   });
                   return NextResponse.json({
@@ -457,6 +521,13 @@ export async function POST(request: NextRequest) {
                 }
                 // 深度搜索也没找到 — 标记失败避免无限轮询
                 console.error(`[poll-task] edit remote SUCCESS but NO image found anywhere. rawResponse=${JSON.stringify(pollData).substring(0, 500)}`);
+                if (isAnnotationEdit) {
+                  await terminateCloudTaskAndRefund(
+                    taskId,
+                    'failed',
+                    '远程任务成功但未找到图片结果',
+                  );
+                }
                 failEditTask(taskId, '远程任务成功但未找到图片结果');
                 return NextResponse.json({
                   success: false,
@@ -474,6 +545,9 @@ export async function POST(request: NextRequest) {
               const classifiedErr = classifyApiError(rawError);
               const translatedErrMsg = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
               const isCfTimeout = isCloudflareTimeoutError(rawError);
+              if (isAnnotationEdit) {
+                await terminateCloudTaskAndRefund(taskId, 'failed', translatedErrMsg);
+              }
               failEditTask(taskId, translatedErrMsg);
               return NextResponse.json({
                 success: false,
@@ -502,6 +576,8 @@ export async function POST(request: NextRequest) {
         } catch (remoteErr) {
           console.warn('[poll-task] edit remote poll error:', remoteErr instanceof Error ? remoteErr.message : remoteErr);
           // 远程轮询失败，返回当前本地状态
+        } finally {
+          unregisterTaskAbortController(taskId, remotePollController);
         }
       }
 

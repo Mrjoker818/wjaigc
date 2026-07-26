@@ -7,6 +7,12 @@ import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
 import { applyTaskIdsToProcessingPlaceholders, shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
 import { findUniqueLegacyTaskMatch, type RecoverableLegacyTask } from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
+import {
+  restoreAnnotations,
+  serializeAnnotations,
+} from '@/features/annotations/annotation-persistence';
+import { buildAnnotationSourceVersionId } from '@/features/annotations/annotation-source-version';
+import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
 import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
@@ -540,7 +546,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           if (!projectId) {
             setCurrentUser(sessionUser);
             setAuthChecked(true);
-            setAppMode(initialLoginModeRef.current === 'canvas' ? 'canvas' : 'dashboard');
+            const sessionInitialMode = initialLoginModeRef.current === 'canvas'
+              ? 'canvas'
+              : 'dashboard';
+            setAppMode(currentMode => (
+              currentMode === 'dashboard' ? sessionInitialMode : currentMode
+            ));
             return;
           }
 
@@ -752,6 +763,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);
   const shotTaskIdMapRef = useRef<Map<string, string>>(new Map());
   const groupsRef = useRef<ImageGroupData[]>([]);
+  const [annotationRevision, setAnnotationRevision] = useState(0);
 
   const stabilizeCanvasImages = useCallback((items: Array<{ id: string; url: string }>) => {
     const toStabilize = items.filter(({ url }) => url && !url.startsWith('data:'));
@@ -844,6 +856,56 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // Keep a ref to latest images to avoid stale closure in setTimeout
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
+  const initialCanvasAnnotations = useMemo(() => {
+    if (!currentProject) return [];
+    const sources = currentProject.canvasImages
+      .filter((image) => Boolean(image.id && image.url))
+      .map((image) => ({
+        imageId: image.id,
+        url: image.url,
+        versionId: image.annotationVersionId
+          || buildAnnotationSourceVersionId(
+            image.id,
+            image.createdAt,
+            image.url,
+          ),
+      }));
+    return restoreAnnotations(
+      currentProject.metadata?.annotationsV2,
+      {
+        projectId: currentProject.id,
+        sources,
+      },
+    );
+  }, [currentProject]);
+  const annotationRecordsRef = useRef<CanvasAnnotationV2[]>(
+    initialCanvasAnnotations,
+  );
+  const annotationSignatureRef = useRef('');
+  const annotationProjectIdRef = useRef<string | null>(currentProject?.id ?? null);
+  const annotationsDirtyRef = useRef(false);
+  useEffect(() => {
+    const nextProjectId = currentProject?.id ?? null;
+    const projectChanged = annotationProjectIdRef.current !== nextProjectId;
+    if (!projectChanged && annotationsDirtyRef.current) return;
+
+    annotationProjectIdRef.current = nextProjectId;
+    annotationsDirtyRef.current = false;
+    annotationRecordsRef.current = initialCanvasAnnotations;
+    annotationSignatureRef.current = JSON.stringify(initialCanvasAnnotations);
+  }, [currentProject?.id, initialCanvasAnnotations]);
+  const handleAnnotationsChange = useCallback(
+    (annotations: CanvasAnnotationV2[]) => {
+      const serialized = serializeAnnotations(annotations);
+      const signature = JSON.stringify(serialized);
+      if (signature === annotationSignatureRef.current) return;
+      annotationRecordsRef.current = serialized;
+      annotationSignatureRef.current = signature;
+      annotationsDirtyRef.current = true;
+      setAnnotationRevision((revision) => revision + 1);
+    },
+    [],
+  );
   const currentUserRef = useRef(currentUser);
   currentUserRef.current = currentUser;
 
@@ -1089,6 +1151,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             apiBaseUrl: img.apiBaseUrl || '',
             sourceUrl: img.sourceUrl || '',
             generatedFromImageId: img.generatedFromImageId || '',
+            annotationVersionId: img.annotationVersionId || '',
+            annotationSourceImageId: img.annotationSourceImageId || '',
+            annotationSourceVersionId: img.annotationSourceVersionId || '',
+            annotationBundleId: img.annotationBundleId || '',
+            annotationIds: img.annotationIds || undefined,
             svgDataUrl: img.svgDataUrl || '',
             svgUrl: img.svgUrl || '',
             mediaType: img.mediaType || '',
@@ -1103,6 +1170,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           ...(project.metadata || {}),
           groups: groupsRef.current,
           viewState: viewStateRef.current,
+          annotationsV2: annotationRecordsRef.current,
         };
         const saveSignature = JSON.stringify({
           projectId: project.id,
@@ -1128,6 +1196,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             metadata: {
               ...(project.metadata || {}),
               groups: groupsRef.current,
+              annotationsV2: annotationRecordsRef.current,
             },
             savedAt: Date.now(),
           }, null, 2),
@@ -1140,7 +1209,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     return () => {
       if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     };
-  }, [images, currentProject?.id, currentUser?.id, setImages]);
+  }, [annotationRevision, images, currentProject?.id, currentUser?.id, setImages]);
 
   // 页面关闭/刷新前同步保存（localStorage + sendBeacon到服务器）
   // 使用 ref 避免每次 images 变化都重建 beforeunload 监听器
@@ -1184,6 +1253,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             apiBaseUrl: img.apiBaseUrl || '',
             sourceUrl: img.sourceUrl || '',
             generatedFromImageId: img.generatedFromImageId || '',
+            annotationVersionId: img.annotationVersionId || '',
+            annotationSourceImageId: img.annotationSourceImageId || '',
+            annotationSourceVersionId: img.annotationSourceVersionId || '',
+            annotationBundleId: img.annotationBundleId || '',
+            annotationIds: img.annotationIds || undefined,
             svgDataUrl: img.svgDataUrl || '',
             svgUrl: img.svgUrl || '',
             mediaType: img.mediaType || '',
@@ -1201,6 +1275,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             ...(proj.metadata || {}),
             groups: groupsRef.current,
             viewState: viewStateRef.current,
+            annotationsV2: annotationRecordsRef.current,
           },
         });
         // 2. sendBeacon 异步发送到服务器，确保云部署不丢数据
@@ -1212,7 +1287,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               name: p.name,
               description: p.description,
               canvasImages: p.id === proj.id ? persistableCanvasImages : p.canvasImages,
-              metadata: p.id === proj.id ? { ...(proj.metadata || {}), groups: groupsRef.current } : p.metadata,
+              metadata: p.id === proj.id ? {
+                ...(proj.metadata || {}),
+                groups: groupsRef.current,
+                annotationsV2: annotationRecordsRef.current,
+              } : p.metadata,
               settings: p.settings,
               createdAt: p.createdAt,
               updatedAt: p.id === proj.id ? Date.now() : p.updatedAt,
@@ -4186,10 +4265,23 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       <NodeEditor
         workflow={nodeWorkflow}
         userId={currentUser?.id}
+        projectId={currentProject?.id}
         onBack={() => setAppMode('canvas')}
         onWorkflowChange={setNodeWorkflow}
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
-        canvasImages={images.map(img => ({ id: img.id, url: img.url, name: img.prompt?.slice(0, 30) || '图片', description: img.prompt || '', width: img.width, height: img.height }))}
+        canvasImages={images.map(img => ({
+          id: img.id,
+          url: img.url,
+          name: img.prompt?.slice(0, 30) || '图片',
+          description: img.prompt || '',
+          width: img.width,
+          height: img.height,
+          versionId: img.annotationVersionId || buildAnnotationSourceVersionId(
+            img.id,
+            img.createdAt,
+            img.url,
+          ),
+        }))}
         themeStyle={themeStyle}
         onAddImages={(urls, meta) => handleAddImages(urls, undefined, meta)}
       />
@@ -4275,6 +4367,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   apiBaseUrl: img.apiBaseUrl || '',
                   sourceUrl: img.sourceUrl || '',
                   generatedFromImageId: img.generatedFromImageId || '',
+                  annotationVersionId: img.annotationVersionId || '',
+                  annotationSourceImageId: img.annotationSourceImageId || '',
+                  annotationSourceVersionId: img.annotationSourceVersionId || '',
+                  annotationBundleId: img.annotationBundleId || '',
+                  annotationIds: img.annotationIds || undefined,
                   svgDataUrl: img.svgDataUrl || '',
                   svgUrl: img.svgUrl || '',
                   mediaType: img.mediaType || '',
@@ -4287,7 +4384,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 .filter(img => img.url || img.videoUrl || img.isProcessingPlaceholder) as PersistableCanvasImage[];
               mgr.updateProject(currentProject.id, {
                 canvasImages: persistableCanvasImages,
-                metadata: { ...(currentProject.metadata || {}), groups: groupsRef.current },
+                metadata: {
+                  ...(currentProject.metadata || {}),
+                  groups: groupsRef.current,
+                  annotationsV2: annotationRecordsRef.current,
+                },
               });
             }
           } catch { /* save failed - non-blocking */ }
@@ -4449,6 +4550,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       {/* Canvas - 全屏 */}
       <div className="absolute inset-0">
         <InfiniteCanvas
+          key={currentProject?.id || 'canvas-local'}
           images={images}
           onImagesChange={setImages}
           onUndo={handleUndo}
@@ -4497,6 +4599,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             tone: '',
             brandDna: null,
           } : null}
+          projectId={currentProject?.id}
+          initialAnnotations={initialCanvasAnnotations}
+          onAnnotationsChange={handleAnnotationsChange}
           onSwitchToNodeMode={() => safeSwitchMode('node')}
           onSwitchToWorkflowHub={() => safeSwitchMode('workflow-hub')}
           onSwitchToDashboard={() => safeSwitchMode('dashboard')}
@@ -4530,11 +4635,33 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   originalWidth: img.originalWidth || img.width,
                   originalHeight: img.originalHeight || img.height,
                   rotation: 0, zIndex: 0,
-                  createdAt: img.createdAt || Date.now(),
-                  prompt: img.prompt || '',
-                  ...(img.groupId ? { groupId: img.groupId } : {}),
-                }));
-                mgr.updateProject(currentProject.id, { canvasImages: persistable });
+                   createdAt: img.createdAt || Date.now(),
+                   prompt: img.prompt || '',
+                   ...(img.groupId ? { groupId: img.groupId } : {}),
+                   ...(img.annotationVersionId ? {
+                     annotationVersionId: img.annotationVersionId,
+                   } : {}),
+                   ...(img.annotationSourceImageId ? {
+                     annotationSourceImageId: img.annotationSourceImageId,
+                   } : {}),
+                   ...(img.annotationSourceVersionId ? {
+                     annotationSourceVersionId: img.annotationSourceVersionId,
+                   } : {}),
+                   ...(img.annotationBundleId ? {
+                     annotationBundleId: img.annotationBundleId,
+                   } : {}),
+                   ...(img.annotationIds ? {
+                     annotationIds: img.annotationIds,
+                   } : {}),
+                 }));
+                mgr.updateProject(currentProject.id, {
+                  canvasImages: persistable,
+                  metadata: {
+                    ...(currentProject.metadata || {}),
+                    groups: groupsRef.current,
+                    annotationsV2: annotationRecordsRef.current,
+                  },
+                });
               }
             } catch {}
           }}

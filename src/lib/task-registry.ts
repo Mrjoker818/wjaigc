@@ -47,6 +47,7 @@ export interface TaskEvent {
 interface GlobalTaskStore {
   registry: Map<string, TaskInfo>;
   cancelled: Map<string, number>;
+  abortControllers: Map<string, AbortController>;
   eventBus: EventEmitter;
   userQueues: Map<string, string[]>;
   userActiveCount: Map<string, number>;
@@ -59,6 +60,7 @@ function getGlobalTaskStore(): GlobalTaskStore {
     (globalThis as Record<string, unknown>)[key] = {
       registry: new Map<string, TaskInfo>(),
       cancelled: new Map<string, number>(),
+      abortControllers: new Map<string, AbortController>(),
       eventBus: new EventEmitter(),
       userQueues: new Map<string, string[]>(),
       userActiveCount: new Map<string, number>(),
@@ -66,11 +68,14 @@ function getGlobalTaskStore(): GlobalTaskStore {
     };
     ((globalThis as Record<string, unknown>)[key] as GlobalTaskStore).eventBus.setMaxListeners(200);
   }
-  return (globalThis as Record<string, unknown>)[key] as GlobalTaskStore;
+  const store = (globalThis as Record<string, unknown>)[key] as GlobalTaskStore;
+  store.abortControllers ||= new Map<string, AbortController>();
+  return store;
 }
 
 const taskRegistry = getGlobalTaskStore().registry;
 const cancelledTasks = getGlobalTaskStore().cancelled;
+const taskAbortControllers = getGlobalTaskStore().abortControllers;
 const taskEventBus = getGlobalTaskStore().eventBus;
 const userQueues = getGlobalTaskStore().userQueues;
 const userActiveCount = getGlobalTaskStore().userActiveCount;
@@ -155,7 +160,12 @@ export function updateTaskProgress(
   const task = taskRegistry.get(taskId);
   if (!task) return;
 
-  if (task.status === 'cancelled' && update.status && update.status !== 'cancelled') {
+  const terminalStatuses: TaskStatus[] = ['completed', 'failed', 'cancelled'];
+  if (
+    terminalStatuses.includes(task.status)
+    && update.status
+    && update.status !== task.status
+  ) {
     return;
   }
 
@@ -164,8 +174,7 @@ export function updateTaskProgress(
   Object.assign(task, { ...update, updatedAt: Date.now() });
 
   // ★ 任务进入终态（completed/failed/cancelled）时，清理 cancelledTasks 中的记录
-  const TERMINAL_STATUSES: TaskStatus[] = ['completed', 'failed', 'cancelled'];
-  const reachedTerminalState = TERMINAL_STATUSES.includes(task.status) && !TERMINAL_STATUSES.includes(oldStatus);
+  const reachedTerminalState = terminalStatuses.includes(task.status) && !terminalStatuses.includes(oldStatus);
   if (task.status === 'completed' || task.status === 'failed') {
     cancelledTasks.delete(taskId);
   }
@@ -197,7 +206,37 @@ export function getTaskInfo(taskId: string): TaskInfo | undefined {
 export function cancelTask(taskId: string): boolean {
   if (cancelledTasks.has(taskId)) return true;
   cancelledTasks.set(taskId, Date.now());
+  abortTaskExecution(taskId, new Error(`Task ${taskId} was cancelled`));
   updateTaskProgress(taskId, { status: 'cancelled' });
+  return true;
+}
+
+/** Register the controller that owns the live backend work for a task. */
+export function registerTaskAbortController(taskId: string, controller: AbortController): void {
+  const existing = taskAbortControllers.get(taskId);
+  if (existing && existing !== controller && !existing.signal.aborted) {
+    existing.abort(new Error(`Task ${taskId} execution was replaced`));
+  }
+  taskAbortControllers.set(taskId, controller);
+}
+
+/** Remove a controller only if the caller still owns the registration. */
+export function unregisterTaskAbortController(
+  taskId: string,
+  controller?: AbortController,
+): void {
+  if (!controller || taskAbortControllers.get(taskId) === controller) {
+    taskAbortControllers.delete(taskId);
+  }
+}
+
+/** Actively stop the network and image work associated with a task. */
+export function abortTaskExecution(taskId: string, reason?: unknown): boolean {
+  const controller = taskAbortControllers.get(taskId);
+  if (!controller) return false;
+  if (!controller.signal.aborted) {
+    controller.abort(reason);
+  }
   return true;
 }
 
@@ -373,6 +412,7 @@ function evictOldestTerminalTasks(): void {
     releaseQueueSlot(id);
     taskRegistry.delete(id);
     cancelledTasks.delete(id);
+    taskAbortControllers.delete(id);
   }
 }
 
@@ -401,6 +441,7 @@ export function cleanupExpiredTasks(now: number = Date.now()): void {
 
     taskRegistry.delete(id);
     cancelledTasks.delete(id);
+    taskAbortControllers.delete(id);
   }
 
   // Unknown IDs may be cancelled after a restart. Bound their recovery marker.

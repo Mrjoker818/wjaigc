@@ -81,6 +81,20 @@ export interface CloudTaskCreditRefundResult {
   userId?: string;
 }
 
+export interface CloudTaskCreditChargeResult {
+  charged: boolean;
+  creditCost: number;
+  balance?: number;
+  userId?: string;
+}
+
+export type CloudTaskFailureStatus = Extract<CloudTaskStatus, 'failed' | 'timeout' | 'cancelled'>;
+
+export interface CloudTaskTerminationResult extends CloudTaskCreditRefundResult {
+  status?: CloudTaskFailureStatus;
+  transitioned: boolean;
+}
+
 let tablesEnsured = false;
 
 export async function ensureCloudTaskTables(): Promise<void> {
@@ -182,6 +196,122 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
 }
 
 /**
+ * Commits a successful result only while the persisted task is processing.
+ * A cancellation, timeout, or failure that wins first is therefore terminal.
+ */
+export async function completeCloudTask(
+  taskId: string,
+  result: Record<string, unknown>,
+): Promise<boolean> {
+  await ensureCloudTaskTables();
+  const completed = await execSql(`
+    UPDATE cloud_tasks
+    SET status = 'completed',
+        progress = 100,
+        result = $2,
+        error = '',
+        credit_status = CASE
+          WHEN credit_status = 'pending' THEN 'charged'
+          ELSE credit_status
+        END,
+        updated_at = $3
+    WHERE id = $1 AND status = 'processing'
+    RETURNING id
+  `, [taskId, JSON.stringify(result), Date.now()]);
+  return (completed.rowCount ?? completed.rows.length) > 0;
+}
+
+/**
+ * Moves a live task to a failure terminal state and claims any refund in the
+ * same database statement. Repeated or concurrent calls cannot claim twice.
+ */
+export async function terminateCloudTaskAndRefund(
+  taskId: string,
+  status: CloudTaskFailureStatus,
+  reason: string,
+): Promise<CloudTaskTerminationResult> {
+  await ensureCloudTaskTables();
+  const now = Date.now();
+  const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
+  const result = await execSql(`
+    WITH transitioned AS (
+      UPDATE cloud_tasks
+      SET status = $2,
+          error = $3,
+          updated_at = $4
+      WHERE id = $1
+        AND status IN ('pending', 'processing')
+      RETURNING id, user_id, status, credit_status, credit_cost
+    ), terminal_task AS (
+      SELECT id, user_id, status, credit_status, credit_cost, TRUE AS transitioned
+      FROM transitioned
+      UNION ALL
+      SELECT id, user_id, status, credit_status, credit_cost, FALSE AS transitioned
+      FROM cloud_tasks
+      WHERE id = $1
+        AND status IN ('failed', 'timeout', 'cancelled')
+        AND NOT EXISTS (SELECT 1 FROM transitioned)
+    ), claimed_refund AS (
+      UPDATE cloud_tasks task
+      SET credit_status = 'refunded',
+          updated_at = $4
+      FROM terminal_task terminal
+      WHERE task.id = terminal.id
+        AND task.status IN ('failed', 'timeout', 'cancelled')
+        AND task.credit_status = 'pending'
+        AND task.credit_cost > 0
+        AND EXISTS (
+          SELECT 1 FROM wujie_credits credit WHERE credit.user_id = task.user_id
+        )
+      RETURNING task.id, task.user_id, task.credit_cost
+    ), refunded_balance AS (
+      UPDATE wujie_credits credit
+      SET balance = credit.balance + claimed.credit_cost,
+          total_used = GREATEST(credit.total_used - claimed.credit_cost, 0),
+          updated_at = $4
+      FROM claimed_refund claimed
+      WHERE credit.user_id = claimed.user_id
+      RETURNING claimed.id AS task_id, claimed.user_id, claimed.credit_cost, credit.balance
+    ), recorded_refund AS (
+      INSERT INTO wujie_credit_transactions (
+        id, user_id, amount, type, balance_after, description, reference_id, created_at
+      )
+      SELECT $5, user_id, credit_cost, 'refund', balance, $3, task_id, $4
+      FROM refunded_balance
+      RETURNING reference_id
+    )
+    SELECT terminal.status,
+           terminal.user_id,
+           terminal.credit_cost,
+           terminal.transitioned,
+           EXISTS (
+             SELECT 1 FROM refunded_balance refunded WHERE refunded.task_id = terminal.id
+           ) AS refunded,
+           (
+             SELECT refunded.balance
+             FROM refunded_balance refunded
+             WHERE refunded.task_id = terminal.id
+           ) AS balance
+    FROM terminal_task terminal
+    LIMIT 1
+  `, [taskId, status, reason, now, transactionId]);
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row) {
+    return { status: undefined, transitioned: false, refunded: false, creditCost: 0 };
+  }
+  return {
+    status: row.status as CloudTaskFailureStatus,
+    transitioned: row.transitioned === true,
+    refunded: row.refunded === true,
+    creditCost: Number(row.credit_cost || 0),
+    balance: row.balance === null || row.balance === undefined
+      ? undefined
+      : Number(row.balance),
+    userId: String(row.user_id || '') || undefined,
+  };
+}
+
+/**
  * Settles a task refund exactly once. The task state, credit balance, and
  * transaction record are updated in one database statement guarded by the
  * task's pending credit status.
@@ -226,6 +356,78 @@ export async function refundCloudTaskCredits(taskId: string, reason: string): Pr
   return {
     refunded: true,
     creditCost: Number(row.credit_cost || 0),
+    balance: Number(row.balance || 0),
+    userId: String(row.user_id || '') || undefined,
+  };
+}
+
+/**
+ * Charges a claimed idempotent task exactly once. The balance deduction,
+ * task credit state, and transaction history are committed atomically.
+ */
+export async function chargeCloudTaskCredits(
+  taskId: string,
+  userId: string,
+  creditCost: number,
+  description: string,
+): Promise<CloudTaskCreditChargeResult> {
+  await ensureCloudTaskTables();
+  const normalizedCost = Math.max(0, Math.ceil(creditCost));
+  if (normalizedCost === 0) {
+    await updateCloudTask(taskId, {
+      status: 'processing',
+      creditStatus: 'not-applicable',
+      creditCost: 0,
+    });
+    return { charged: true, creditCost: 0, userId };
+  }
+
+  const now = Date.now();
+  const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
+  const result = await execSql(`
+    WITH chargeable AS (
+      SELECT task.id, task.user_id, $3::numeric AS credit_cost
+      FROM cloud_tasks task
+      WHERE task.id = $1
+        AND task.user_id = $2
+        AND task.status = 'pending'
+        AND task.credit_status = 'not-applicable'
+      FOR UPDATE
+    ), deducted AS (
+      UPDATE wujie_credits credit
+      SET balance = credit.balance - chargeable.credit_cost,
+          total_used = credit.total_used + chargeable.credit_cost,
+          updated_at = $4
+      FROM chargeable
+      WHERE credit.user_id = chargeable.user_id
+        AND credit.balance >= chargeable.credit_cost
+      RETURNING chargeable.id AS task_id, chargeable.user_id,
+        chargeable.credit_cost, credit.balance
+    ), marked_task AS (
+      UPDATE cloud_tasks task
+      SET status = 'processing',
+          credit_status = 'pending',
+          credit_cost = deducted.credit_cost,
+          updated_at = $4
+      FROM deducted
+      WHERE task.id = deducted.task_id
+      RETURNING task.id AS task_id, deducted.user_id,
+        deducted.credit_cost, deducted.balance
+    ), recorded_charge AS (
+      INSERT INTO wujie_credit_transactions (
+        id, user_id, amount, type, balance_after, description, reference_id, created_at
+      )
+      SELECT $5, user_id, -credit_cost, 'consume', balance, $6, task_id, $4
+      FROM marked_task
+      RETURNING user_id
+    )
+    SELECT user_id, credit_cost, balance FROM marked_task
+  `, [taskId, userId, normalizedCost, now, transactionId, description]);
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row) return { charged: false, creditCost: normalizedCost };
+  return {
+    charged: true,
+    creditCost: Number(row.credit_cost || normalizedCost),
     balance: Number(row.balance || 0),
     userId: String(row.user_id || '') || undefined,
   };

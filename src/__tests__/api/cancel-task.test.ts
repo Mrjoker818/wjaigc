@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   cancelEditTask: vi.fn(),
   refundCredits: vi.fn(),
   getCloudTaskForUser: vi.fn(),
+  refundCloudTaskCredits: vi.fn(),
+  terminateCloudTaskAndRefund: vi.fn(),
   recordCloudTaskCancelled: vi.fn(),
 }));
 
@@ -20,7 +22,11 @@ vi.mock('@/lib/task-registry', () => ({
 }));
 vi.mock('@/lib/edit-task-store', () => ({ cancelEditTask: mocks.cancelEditTask }));
 vi.mock('@/lib/credits', () => ({ refundCredits: mocks.refundCredits }));
-vi.mock('@/lib/cloud-task-storage', () => ({ getCloudTaskForUser: mocks.getCloudTaskForUser }));
+vi.mock('@/lib/cloud-task-storage', () => ({
+  getCloudTaskForUser: mocks.getCloudTaskForUser,
+  refundCloudTaskCredits: mocks.refundCloudTaskCredits,
+  terminateCloudTaskAndRefund: mocks.terminateCloudTaskAndRefund,
+}));
 vi.mock('@/lib/cloud-task-persistence', () => ({ recordCloudTaskCancelled: mocks.recordCloudTaskCancelled }));
 
 import { POST } from '@/app/api/cancel-task/route';
@@ -38,6 +44,12 @@ describe('POST /api/cancel-task', () => {
     Object.values(mocks).forEach(mock => mock.mockReset());
     mocks.isTaskCancelled.mockReturnValue(false);
     mocks.recordCloudTaskCancelled.mockResolvedValue(undefined);
+    mocks.terminateCloudTaskAndRefund.mockResolvedValue({
+      status: 'cancelled',
+      transitioned: true,
+      refunded: true,
+      creditCost: 8,
+    });
   });
 
   it('rejects an unauthenticated cancellation', async () => {
@@ -71,5 +83,33 @@ describe('POST /api/cancel-task', () => {
     expect(response.status).toBe(200);
     expect(mocks.cancelTask).toHaveBeenCalledWith('task-owned');
     expect(mocks.recordCloudTaskCancelled).toHaveBeenCalledWith('task-owned', false);
+  });
+
+  it('settles annotation cancellation and refund from the database terminal state', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'annotation-task',
+      userId: 'user-a',
+      type: 'edit',
+      creditCost: 8,
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'annotation-task',
+      userId: 'user-a',
+      type: 'annotation-edit',
+      creditCost: 8,
+      creditStatus: 'pending',
+    });
+
+    const response = await POST(request('annotation-task'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith(
+      'annotation-task',
+      'cancelled',
+      'Annotation edit cancelled (taskId: annotation-task)',
+    );
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
   });
 });

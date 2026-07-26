@@ -167,7 +167,7 @@ export function buildAnnotationPrompt(annotation: CanvasAnnotation): string {
     prompt = `[用户已用画笔标记了需要修改的具体区域] ${prompt}`;
   } else if (annotation.region) {
     // 如果有框选区域，补充位置描述
-    const { x, y, w, h } = annotation.region;
+    const { x, y } = annotation.region;
     // 判断区域大致位置
     const posH = y < 0.33 ? '上方' : y > 0.66 ? '下方' : '中间';
     const posV = x < 0.33 ? '左侧' : x > 0.66 ? '右侧' : '中间';
@@ -224,3 +224,24 @@ export const BRUSH_COLOR_PALETTE = [
   '#ec4899', // 粉色
   '#ffffff', // 白色
 ] as const;
+
+// V2 annotation domain exports. Legacy imports remain valid while the canvas
+// migrates to the versioned edit-intent model.
+export {
+  buildEditIntentBundle,
+  migrateLegacyAnnotation,
+  validateEditIntentBundle,
+} from '@/features/annotations/annotation-bundle';
+export {
+  clampNormalizedRegion,
+  normalizeScreenPath,
+  normalizedRegionFromScreenPoints,
+  shouldCommitGesture,
+} from '@/features/annotations/annotation-geometry';
+export type {
+  AnnotationType as AnnotationTypeV2,
+  CanvasAnnotationV2,
+  EditIntentBundle,
+  NormalizedAnnotationGeometry,
+  NormalizedPoint,
+} from '@/features/annotations/annotation-types';
