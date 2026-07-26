@@ -7234,13 +7234,18 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, completeProcessingFrame, onImagesChange]);
 
   const handleOpenDisplayDecompose = useCallback(() => {
-    // Use selectedImageData directly to avoid stale editImageId blocking panel open
-    const img = selectedImageData || (selectedIds.size === 1 ? imagesRef.current.find(i => selectedIds.has(i.id)) : null);
+    // Snapshot selection directly from ref to avoid React state timing issues
+    // (canvas mousedown may clear selectedIds before React batches the new render)
+    const selArr = Array.from(selectedIds);
+    const img =
+      (editImageId ? imagesRef.current.find(i => i.id === editImageId) : null) ||
+      (selArr.length === 1 ? imagesRef.current.find(i => i.id === selArr[0]) : null) ||
+      (selectedIds.size === 1 ? selectedImageData : null);
     if (!img) return;
     setEditImageId(img.id);
     setShowDisplayDecomposePanel(true);
     setShowToolbarCustomize(false);
-  }, [selectedImageData, selectedIds]);
+  }, [editImageId, selectedIds, selectedImageData]);
 
   const handleDisplayDecomposeConfirm = useCallback(async () => {
     const img = getActiveImageData();
@@ -15784,79 +15789,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 </button>
               </div>
 
-              {/* 美陈拆解浮动面板 */}
-              {showDisplayDecomposePanel && (
-                <div
-                  className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-72 p-3 rounded-xl border shadow-2xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#141418] border-white/[0.12]'}`}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onWheel={(e) => e.stopPropagation()}
-                  data-popup="display-decompose"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <LayoutGrid size={14} className={isMonochrome ? 'text-emerald-500' : 'text-gold'} />
-                      <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>元素拆解</span>
-                    </div>
-                    <button
-                      onClick={() => setShowDisplayDecomposePanel(false)}
-                      className={`p-1 rounded-lg ${isMonochrome ? 'text-gray-400 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted/70 hover:text-white hover:bg-white/10'}`}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                  <div className={`text-[11px] leading-relaxed mb-3 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>
-                    识别画面中的视觉元素与设计构件，提取关键材质、色彩与样式，生成可复用的元素拆解板。开启自动去背景后输出透明 PNG。
-                  </div>
-                  {/* 自动去背景开关 */}
-                  <button
-                    onClick={() => setDisplayDecomposeAutoRemoveBg(v => !v)}
-                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg border mb-3 transition-all ${
-                      displayDecomposeAutoRemoveBg
-                        ? isMonochrome ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gold/10 border-gold/30 text-gold'
-                        : isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/[0.1] text-gold-muted/60'
-                    }`}
-                  >
-                    <span className="text-[11px] font-medium">自动去背景（透明 PNG）</span>
-                    <div className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${
-                      displayDecomposeAutoRemoveBg
-                        ? isMonochrome ? 'bg-emerald-500' : 'bg-gold'
-                        : isMonochrome ? 'bg-gray-300' : 'bg-white/20'
-                    }`}>
-                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-all ${
-                        displayDecomposeAutoRemoveBg ? 'left-[18px]' : 'left-0.5'
-                      }`} />
-                    </div>
-                  </button>
-                  <div className="grid grid-cols-3 gap-1.5 mb-3">
-                    {DISPLAY_DECOMPOSE_SUPPORTED_RATIOS.map((ratio) => (
-                      <button
-                        key={ratio}
-                        onClick={() => setDisplayDecomposeRatio(ratio)}
-                        className={`px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                          displayDecomposeRatio === ratio
-                            ? isMonochrome ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-gold/20 border-gold/60 text-gold'
-                            : isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100' : 'bg-white/5 border-white/[0.1] text-gold-muted hover:bg-white/10'
-                        }`}
-                      >
-                        {ratio}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={handleDisplayDecomposeConfirm}
-                    disabled={displayDecomposeProcessing}
-                    className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      displayDecomposeProcessing
-                        ? isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-white/5 text-gold-muted/50'
-                        : isMonochrome ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gold text-black hover:bg-gold/90'
-                    }`}
-                  >
-                    <Sparkles size={13} />
-                    {displayDecomposeProcessing ? '拆解中...' : '生成拆解板'}
-                  </button>
-                </div>
-              )}
-
               {/* 工具栏自定义弹窗 */}
               {showToolbarCustomize && (
                 <div
@@ -15919,6 +15851,83 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             </div>
           );
         })()}
+
+        {/* 元素拆解面板 — 独立 fixed 浮层，不依赖 toolbar 条件 */}
+        {showDisplayDecomposePanel && (
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-none"
+          >
+            <div
+              className={`pointer-events-auto w-72 p-3 rounded-xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#141418] border-white/[0.12]'}`}
+              onMouseDown={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
+              data-popup="display-decompose"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <LayoutGrid size={14} className={isMonochrome ? 'text-emerald-500' : 'text-gold'} />
+                  <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>元素拆解</span>
+                </div>
+                <button
+                  onClick={() => setShowDisplayDecomposePanel(false)}
+                  className={`p-1 rounded-lg ${isMonochrome ? 'text-gray-400 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted/70 hover:text-white hover:bg-white/10'}`}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className={`text-[11px] leading-relaxed mb-3 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>
+                识别画面中的视觉元素与设计构件，提取关键材质、色彩与样式，生成可复用的元素拆解板。开启自动去背景后输出透明 PNG。
+              </div>
+              {/* 自动去背景开关 */}
+              <button
+                onClick={() => setDisplayDecomposeAutoRemoveBg(v => !v)}
+                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg border mb-3 transition-all ${
+                  displayDecomposeAutoRemoveBg
+                    ? isMonochrome ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gold/10 border-gold/30 text-gold'
+                    : isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/[0.1] text-gold-muted/60'
+                }`}
+              >
+                <span className="text-[11px] font-medium">自动去背景（透明 PNG）</span>
+                <div className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${
+                  displayDecomposeAutoRemoveBg
+                    ? isMonochrome ? 'bg-emerald-500' : 'bg-gold'
+                    : isMonochrome ? 'bg-gray-300' : 'bg-white/20'
+                }`}>
+                  <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-all ${
+                    displayDecomposeAutoRemoveBg ? 'left-[18px]' : 'left-0.5'
+                  }`} />
+                </div>
+              </button>
+              <div className="grid grid-cols-3 gap-1.5 mb-3">
+                {DISPLAY_DECOMPOSE_SUPPORTED_RATIOS.map((ratio) => (
+                  <button
+                    key={ratio}
+                    onClick={() => setDisplayDecomposeRatio(ratio)}
+                    className={`px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                      displayDecomposeRatio === ratio
+                        ? isMonochrome ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-gold/20 border-gold/60 text-gold'
+                        : isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100' : 'bg-white/5 border-white/[0.1] text-gold-muted hover:bg-white/10'
+                    }`}
+                  >
+                    {ratio}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={handleDisplayDecomposeConfirm}
+                disabled={displayDecomposeProcessing}
+                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                  displayDecomposeProcessing
+                    ? isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-white/5 text-gold-muted/50'
+                    : isMonochrome ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gold text-black hover:bg-gold/90'
+                }`}
+              >
+                <Sparkles size={13} />
+                {displayDecomposeProcessing ? '拆解中...' : '生成拆解板'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Image context menu */}
         {showContextMenu && (
