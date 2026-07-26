@@ -469,6 +469,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [showDisplayDecomposePanel, setShowDisplayDecomposePanel] = useState(false);
   const [displayDecomposeRatio, setDisplayDecomposeRatio] = useState<DisplayDecomposeRatio>('16:9');
   const [displayDecomposeProcessing, setDisplayDecomposeProcessing] = useState(false);
+  const [displayDecomposeAutoRemoveBg, setDisplayDecomposeAutoRemoveBg] = useState(true);
 
   // Image compare state
   const [showCompareDialog, setShowCompareDialog] = useState(false);
@@ -6738,12 +6739,52 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       let resultUrl = data.imageUrl ? String(data.imageUrl) : '';
       if (!resultUrl && data.taskId) {
         resultUrl = await pollForResult(String(data.taskId), usedModelName, (progress, status) => {
-          updateProcessingFrame(placeholderId, { progress, status });
+          // 拆解阶段占进度条前 55%
+          const scaled = displayDecomposeAutoRemoveBg ? Math.round(progress * 0.55) : progress;
+          updateProcessingFrame(placeholderId, { progress: scaled, status });
         }) || '';
       }
 
       if (!resultUrl) {
         throw new Error(lastPollErrorRef.current || '美陈拆解超时，请重试');
+      }
+
+      // 第二阶段：自动去背景，输出透明 PNG（拆解质量与透明背景解耦，保证两者都最优）
+      if (displayDecomposeAutoRemoveBg) {
+        updateProcessingFrame(placeholderId, { progress: 58, status: '拆解完成，正在移除背景生成透明 PNG...' });
+        try {
+          const rbgRes = await fetch('/api/image-edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'removebg',
+              imageUrl: resultUrl,
+              model: modelInfo.model,
+              providerId: modelInfo.providerId || getCurrentProviderId(),
+            }),
+          });
+          const rbgData = await rbgRes.json().catch(() => ({} as Record<string, unknown>));
+          if (rbgRes.ok && rbgData.success !== false) {
+            const rbgModelName = String(rbgData.usedModel || usedModelName);
+            let rbgUrl = rbgData.imageUrl ? String(rbgData.imageUrl) : '';
+            if (!rbgUrl && rbgData.taskId) {
+              rbgUrl = await pollForResult(String(rbgData.taskId), rbgModelName, (progress, status) => {
+                // 去背景阶段占进度条 58% - 95%
+                updateProcessingFrame(placeholderId, { progress: 58 + Math.round(progress * 0.37), status: `移除背景：${status}` });
+              }) || '';
+            }
+            if (rbgUrl) {
+              resultUrl = rbgUrl;
+            } else {
+              console.warn('[display-decompose] removebg 未返回结果，使用原拆解图');
+            }
+          } else {
+            console.warn('[display-decompose] removebg 请求失败，使用原拆解图:', rbgData.error);
+          }
+        } catch (rbgError) {
+          // 去背景失败时优雅降级：仍使用拆解结果（不透明），不让整个流程失败
+          console.warn('[display-decompose] removebg 阶段异常，使用原拆解图:', rbgError);
+        }
       }
 
       updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入美陈拆解板...' });
@@ -6770,7 +6811,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       setIsEditProcessing(false);
       setActiveTool('none');
     }
-  }, [getActiveImageData, displayDecomposeProcessing, displayDecomposeRatio, getCurrentModel, getCurrentProviderId, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame, pollForResult]);
+  }, [getActiveImageData, displayDecomposeProcessing, displayDecomposeRatio, displayDecomposeAutoRemoveBg, getCurrentModel, getCurrentProviderId, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame, pollForResult]);
 
   // 3. SVG智能描摹 - Sharp + VTracer (彩色) / ImageMagick + Potrace (黑白) / Sharp (压缩/缩略图)
   const handleOpenSvgTrace = useCallback(() => {
@@ -15133,8 +15174,28 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     </button>
                   </div>
                   <div className={`text-[11px] leading-relaxed mb-3 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>
-                    识别画面中的展陈、广告物料、道具与装饰，生成浅灰背景的平面元素拆解板。
+                    识别画面中的展陈、广告物料、道具与装饰，生成平面元素拆解板。开启自动去背景后输出透明 PNG。
                   </div>
+                  {/* 自动去背景开关 */}
+                  <button
+                    onClick={() => setDisplayDecomposeAutoRemoveBg(v => !v)}
+                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg border mb-3 transition-all ${
+                      displayDecomposeAutoRemoveBg
+                        ? isMonochrome ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gold/10 border-gold/30 text-gold'
+                        : isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/[0.1] text-gold-muted/60'
+                    }`}
+                  >
+                    <span className="text-[11px] font-medium">自动去背景（透明 PNG）</span>
+                    <div className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${
+                      displayDecomposeAutoRemoveBg
+                        ? isMonochrome ? 'bg-emerald-500' : 'bg-gold'
+                        : isMonochrome ? 'bg-gray-300' : 'bg-white/20'
+                    }`}>
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-all ${
+                        displayDecomposeAutoRemoveBg ? 'left-[18px]' : 'left-0.5'
+                      }`} />
+                    </div>
+                  </button>
                   <div className="grid grid-cols-3 gap-1.5 mb-3">
                     {DISPLAY_DECOMPOSE_SUPPORTED_RATIOS.map((ratio) => (
                       <button
