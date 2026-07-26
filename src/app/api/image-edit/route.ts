@@ -2880,10 +2880,10 @@ export async function POST(request: NextRequest) {
           negative_prompt: removeBgNegativePrompt,
           size: bgSize,
           n: 1,
-          image: imageBase64ForBg || undefined,
+          // 不传 image: 字段，避免触发 hasImageField=true → PearAPI 路由到 /images/edits (404)
+          // 使用 image_urls 传递参考图，走 /images/generations 端点
           image_urls: [imageBase64ForBg || imageUrl],
           response_format: 'url',
-          background: 'transparent',
           output_format: 'png',
           input_fidelity: 'high',
         }), '移除背景');
