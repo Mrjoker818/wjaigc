@@ -47,7 +47,7 @@ BoundlessAI is an AI image generation and collaboration platform built on Next.j
 
 ### 📊 PSD 图层编辑器 / PSD Layer Editor
 
-**中文** — v2.0.0 全新核心功能，参考 [bggg-creator-image2psd](https://github.com/binggandata/bggg-skills/tree/main/bggg-creator-image2psd) 开源项目方法论：
+**中文** — v4.0.0 全新核心功能 — AI 图像/视频生成协作平台，参考 [bggg-creator-image2psd](https://github.com/binggandata/bggg-skills/tree/main/bggg-creator-image2psd) 开源项目方法论：
 
 - **背景移除分割**：取代像素级颜色分割，保证元素完整性
 - **5 种背景模式**：none / white / corner / color / white-preserve
@@ -56,7 +56,7 @@ BoundlessAI is an AI image generation and collaboration platform built on Next.j
 - **全画布透明 PNG**：每个图层 (0,0) 定位，Photoshop 零偏移叠加
 - **V4 图层命名**：bg/main, subject/{idx}/{label}, text/{idx}/{excerpt}, deco/{idx}/{label}, fx/shadow/{idx}
 
-**English** — Brand new core feature in v2.0.0, following the methodology of [bggg-creator-image2psd](https://github.com/binggandata/bggg-skills/tree/main/bggg-creator-image2psd):
+**English** — v4.0.0 — AI Image/Video Generation Collaboration Platform, following the methodology of [bggg-creator-image2psd](https://github.com/binggandata/bggg-skills/tree/main/bggg-creator-image2psd):
 
 - **Background Removal Segmentation**: Replaces pixel-level color splitting, preserving element integrity
 - **5 Background Modes**: none / white / corner / color / white-preserve

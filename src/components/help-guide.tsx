@@ -599,6 +599,18 @@ function ChangelogSection() {
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">更新内容</h3>
 
+      <SubTitle>v4.0.0</SubTitle>
+      <FeatureItem>元素拆解全面升级：通用化 prompt 适配任意画面 + 两阶段流程 + 透明PNG输出</FeatureItem>
+      <FeatureItem>ChatCanvas 批注融合升级：r3/r4 批注升级包 + Shift+数字快捷键</FeatureItem>
+      <FeatureItem>品牌 IP 设计工场修复与增强：三栏界面恢复 + 资产生命周期 + 异步任务隔离</FeatureItem>
+      <FeatureItem>用户注册系统：含防恶意注册措施（验证码/频率限制），管理员可开关</FeatureItem>
+      <FeatureItem>Oh My Prompt 灵感工坊识词升级：分类显示 + 按类发送/复制</FeatureItem>
+      <FeatureItem>AI Link 视频协议适配器 + 4K/8K 放大预设</FeatureItem>
+      <FeatureItem>超时主动推送预计剩余时间（P1）</FeatureItem>
+      <FeatureItem>修复：Midjourney quality 参数、视频链路（PearAPI/APImart）、积分系统、设置保存</FeatureItem>
+      <FeatureItem>修复：CSP 安全、底部工具栏选择工具、API 管理面板模型显示</FeatureItem>
+      <FeatureItem>18 个工具后端 API 冒烟测试全量通过</FeatureItem>
+
       <SubTitle>v3.5.0</SubTitle>
       <FeatureItem>API 错误中文翻译：9 类错误码结构化翻译，友好提示+建议+是否可重试</FeatureItem>
       <FeatureItem>尺寸自动修复：检测 Invalid Size 错误后自动修正为 16 对齐合法尺寸</FeatureItem>
