@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminUser } from '@/lib/server-auth';
-import { getApiProviders } from '@/lib/server-api-config';
+import { getApiProviders, inferModelType } from '@/lib/server-api-config';
 import { getChatModelCredits, getImageModelCredits, getVideoModelCreditsPerSecond } from '@/lib/credits';
 import { loadCreditPricingConfig, saveCreditPricingConfig, buildPricingKey, type ModelCreditEntry } from '@/lib/credit-pricing';
 import { getBillingModelCategory } from '@/lib/billing-model-category';
@@ -41,7 +41,8 @@ export async function GET(request: NextRequest) {
   const models = providers
     .filter(provider => provider.isEnabled !== false)
     .flatMap(provider => (provider.selectedModels || []).map(model => {
-      const modelType = provider.modelType || provider.type || 'image';
+      const providerType = provider.modelType || provider.type || 'image';
+      const modelType = inferModelType(model, providerType as any);
       const billingCategory = getBillingModelCategory(modelType);
       const fallback = defaultCredits(modelType, model);
       const compoundKey = buildPricingKey(provider.id, model);
