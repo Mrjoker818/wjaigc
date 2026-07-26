@@ -10,13 +10,13 @@ describe('display-decompose feature wiring', () => {
   it('registers and persists asynchronous display-decompose tasks', () => {
     expect(registrySource).toContain("'display-decompose'");
     expect(routeSource).toContain("action === 'display_decompose'");
-    expect(routeSource).toContain("registerTask(result.taskId, 'display-decompose', '美陈拆解', sessionUser?.id)");
+    expect(routeSource).toContain("registerTask(result.taskId, 'display-decompose', '元素拆解', sessionUser?.id)");
     expect(routeSource).toContain("type: 'display-decompose'");
     expect(routeSource).toContain("engine: 'ai-display-decompose'");
   });
 
   it('exposes the image toolbar and image context-menu entry', () => {
-    expect(canvasSource).toContain("label: '美陈拆解'");
+    expect(canvasSource).toContain("label: '元素拆解'");
     expect(canvasSource).toContain("action: 'display_decompose'");
     expect(canvasSource).toContain('handleDisplayDecomposeConfirm');
     expect(canvasSource).toContain('DISPLAY_DECOMPOSE_SUPPORTED_RATIOS');

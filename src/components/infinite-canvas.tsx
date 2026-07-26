@@ -6703,7 +6703,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     const placeholderId = createProcessingFrameRightOf(
       img,
-      '美陈拆解',
+      '元素拆解',
       frameW,
       frameH,
       '正在拆解美陈元素...'
@@ -6791,7 +6791,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       completeProcessingFrame(placeholderId, resultUrl, frameW, frameH, {
         originalWidth: Math.round(frameW),
         originalHeight: Math.round(frameH),
-        prompt: '美陈拆解',
+        prompt: '元素拆解',
         modifyPrompt: `美陈拆解 / 元素物料板 / ${displayDecomposeRatio}`,
         modelName: usedModelName,
         apiProvider: modelInfo.providerName || '',
@@ -8319,7 +8319,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // Action toolbar items with distinct monochrome colors
   const monoColors: Record<string, string> = {
-    '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-blue-500', '美陈拆解': 'text-emerald-500',
+    '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-blue-500', '元素拆解': 'text-emerald-500',
     '擦除': 'text-orange-500', '蒙版': 'text-violet-500', '编辑元素': 'text-cyan-500',
     '多角度': 'text-teal-500', '图转3D工厂': 'text-indigo-500', '扩展': 'text-amber-500',
     '裁切': 'text-rose-500', '精修引擎': 'text-violet-500', '人物精修大师': 'text-emerald-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
@@ -8329,7 +8329,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { icon: <ZoomIn size={14} className={isMonochrome ? monoColors['放大'] : ''} />, label: '放大', desc: '智能补细节放大，变大变高清，不改内容', action: handleOpenUpscale },
     { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => setShowRemoveBgPicker(true) },
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
-    { icon: <LayoutGrid size={14} className={isMonochrome ? monoColors['美陈拆解'] : ''} />, label: '美陈拆解', desc: '拆出美陈物料与设计元素，生成平面陈列板', action: handleOpenDisplayDecompose },
+    { icon: <LayoutGrid size={14} className={isMonochrome ? monoColors['元素拆解'] : ''} />, label: '元素拆解', desc: '拆出美陈物料与设计元素，生成平面陈列板', action: handleOpenDisplayDecompose },
     { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase },
     { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask },
     { icon: <Palette size={14} className={isMonochrome ? '' : 'text-pink-500'} />, label: '调色', desc: '亮度/对比度/饱和度/色温/色相参数调节', action: handleOpenColorAdjust },
@@ -8354,16 +8354,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // 确保新增的工具项（localStorage中可能没有）也能显示
   const allActionLabels = imageActions.map(a => a.label);
   const fullOrder = [...toolbarItemOrder].filter(label => allActionLabels.includes(label));
-  if (!fullOrder.includes('美陈拆解')) {
+  if (!fullOrder.includes('元素拆解')) {
     const svgIndex = fullOrder.findIndex(label => label === 'SVG智能描摹');
-    if (svgIndex >= 0) fullOrder.splice(svgIndex + 1, 0, '美陈拆解');
+    if (svgIndex >= 0) fullOrder.splice(svgIndex + 1, 0, '元素拆解');
   }
   for (const label of allActionLabels) {
     if (!fullOrder.includes(label)) fullOrder.push(label);
   }
   // 根据媒体类型过滤可用工具
   const getAvailableToolsByMediaType = (mediaType?: 'image' | 'video' | '3d'): string[] => {
-    const imageTools = ['放大', '移除背景', 'SVG智能描摹', '美陈拆解', '擦除', '蒙版', '调色', '编辑元素', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '人物精修大师', '语言修图', 'Agent编排', '下载'];
+    const imageTools = ['放大', '移除背景', 'SVG智能描摹', '元素拆解', '擦除', '蒙版', '调色', '编辑元素', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '人物精修大师', '语言修图', 'Agent编排', '下载'];
     const videoTools = ['视频抽帧', 'AI配音', '转 GIF', '视频压缩', '下载'];
     const model3DTools = ['下载'];
 
@@ -8610,7 +8610,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { label: '删除', shortcut: 'Delete', action: () => { const deletingIds = selectedIds; onImagesChange(images.filter(i => !deletingIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); if (editImageId && deletingIds.has(editImageId)) { setEditImageId(null); setEditMode('none'); } } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
-    { label: '美陈拆解', action: handleOpenDisplayDecompose },
+    { label: '元素拆解', action: handleOpenDisplayDecompose },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
     { label: '人物精修大师', action: () => { const img = selectedImageData; setHumanRepairImageUrl(img?.url || ''); setShowHumanRepair(true); } },
     { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },

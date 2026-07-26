@@ -1688,7 +1688,7 @@ export async function POST(request: NextRequest) {
           aspectRatio: decomposeAspectRatio,
           extraPrompt: prompt,
         }),
-      }), '美陈拆解', '/images/generations');
+      }), '元素拆解', '/images/generations');
 
       if (result.directUrl) {
         return NextResponse.json({
@@ -1706,14 +1706,14 @@ export async function POST(request: NextRequest) {
 
       if (result.taskId) {
         const decomposeCandidate = candidateModels.find(candidate => candidate.model === result.usedModel) || candidateModels[0];
-        registerTask(result.taskId, 'display-decompose', '美陈拆解', sessionUser?.id);
+        registerTask(result.taskId, 'display-decompose', '元素拆解', sessionUser?.id);
         void recordImageTaskSubmitted({
           taskId: result.taskId,
           userId: sessionUser?.id,
           type: 'display-decompose',
           providerId: effectiveProviderId,
           model: result.usedModel || decomposeCandidate?.model,
-          label: '美陈拆解',
+          label: '元素拆解',
         }).catch(error => console.warn('[image-edit] 美陈拆解云端任务记录创建失败:', error));
         updateTaskProgress(result.taskId, {
           status: 'processing',

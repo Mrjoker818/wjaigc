@@ -7,12 +7,12 @@ import {
 describe('image toolbar preference migration', () => {
   it('restores new tools that a legacy order did not know about', () => {
     const legacyOrder = DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER.filter(
-      label => label !== '美陈拆解' && label !== '人物精修大师'
+      label => label !== '元素拆解' && label !== '人物精修大师'
     );
 
     const preferences = normalizeImageToolbarPreferences(
       legacyOrder,
-      ['蒙版', '美陈拆解', '人物精修大师']
+      ['蒙版', '元素拆解', '人物精修大师']
     );
 
     expect(preferences.order).toEqual(DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER);
