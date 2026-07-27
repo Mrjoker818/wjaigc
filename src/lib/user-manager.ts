@@ -42,6 +42,16 @@ interface SnapshotUserData {
   projects?: SnapshotProject[];
 }
 
+interface ProjectSyncResponse {
+  success?: boolean;
+  error?: string;
+  projectIdMap?: Record<string, string>;
+}
+
+export interface ProjectSyncResult {
+  projectIdMap: Record<string, string>;
+}
+
 export class UserManager {
   private static instance: UserManager;
   private multiUserData: MultiUserData | null = null;
@@ -439,48 +449,115 @@ export class UserManager {
     }, UserManager.SYNC_DEBOUNCE_MS);
   }
 
+  private buildProjectsSyncPayload(strict: boolean): Project[] | null {
+    if (!this.currentUserId || !this.multiUserData) {
+      if (strict) throw new Error('登录状态已失效，请重新登录');
+      return null;
+    }
+    const userData = this.multiUserData.userData[this.currentUserId];
+    if (!userData) {
+      if (strict) throw new Error('当前用户项目数据不可用');
+      return null;
+    }
+    if (!this._serverSyncReady) {
+      if (strict) throw new Error('项目数据尚未完成服务器校验，请稍后重试');
+      console.log('[Sync] project sync blocked until server data has loaded');
+      return null;
+    }
+
+    const currentUserId = this.currentUserId;
+    const projectsPayload = userData.projects
+      .filter((project) => {
+        if (project.userId && project.userId !== currentUserId) {
+          console.warn(`[DataIsolation] project sync skipped cross-user project "${project.name}"`);
+          return false;
+        }
+        return true;
+      })
+      .map((project) => ({ ...project, userId: project.userId || currentUserId }));
+    const payloadImageCount = projectsPayload.reduce((sum, project) => sum + (project.canvasImages?.length || 0), 0);
+    const memoryImageCount = userData.projects.reduce((sum, project) => sum + (project.canvasImages?.length || 0), 0);
+    if (memoryImageCount > 0 && payloadImageCount === 0) {
+      const message = `项目同步已阻止：待提交快照缺少内存中的 ${memoryImageCount} 张图片`;
+      if (strict) throw new Error(message);
+      console.warn(`[Sync] ${message}`);
+      return null;
+    }
+    return projectsPayload;
+  }
+
+  private applyProjectIdMap(projectIdMap: Record<string, string>): void {
+    if (!this.currentUserId || !this.multiUserData || Object.keys(projectIdMap).length === 0) return;
+    const userData = this.multiUserData.userData[this.currentUserId];
+    if (!userData) return;
+    userData.projects = userData.projects.map((project) => {
+      const nextId = projectIdMap[project.id];
+      if (!nextId) return project;
+      const annotations = project.metadata?.annotationsV2;
+      const nextMetadata = Array.isArray(annotations)
+        ? {
+            ...project.metadata,
+            annotationsV2: annotations.map((annotation) => (
+              annotation && typeof annotation === 'object'
+                ? { ...annotation, projectId: nextId }
+                : annotation
+            )),
+          }
+        : project.metadata;
+      return { ...project, id: nextId, metadata: nextMetadata, updatedAt: Date.now() };
+    });
+    if (this.canUseStorage()) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.multiUserData));
+      } catch (error) {
+        throw new Error(error instanceof Error ? `项目 ID 映射保存失败：${error.message}` : '项目 ID 映射保存失败');
+      }
+    }
+    this.notifyProjectsChanged();
+  }
+
+  /** 强制将当前项目快照提交到数据库；任何失败都会抛错并阻断依赖该快照的操作。 */
+  async flushProjectsToServer(): Promise<ProjectSyncResult> {
+    if (this.serverSyncTimer) {
+      clearTimeout(this.serverSyncTimer);
+      this.serverSyncTimer = null;
+    }
+    const projectsPayload = this.buildProjectsSyncPayload(true);
+    if (!projectsPayload) {
+      throw new Error('项目数据尚未准备完成');
+    }
+    const response = await fetch('/api/user-data/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)
+        : undefined,
+      body: JSON.stringify({ key: 'projects', value: projectsPayload }),
+    });
+    const data = await response.json().catch(() => null) as ProjectSyncResponse | null;
+    if (!response.ok || !data?.success) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('登录状态已失效，请重新登录');
+      }
+      throw new Error(data?.error || `项目数据库同步失败 (${response.status})`);
+    }
+    const projectIdMap = data.projectIdMap && typeof data.projectIdMap === 'object'
+      ? data.projectIdMap
+      : {};
+    this.applyProjectIdMap(projectIdMap);
+    this._recentlyDeletedImageIds.clear();
+    return { projectIdMap };
+  }
+
   /** 将当前用户的项目数据同步到服务器数据库
    * @param immediate 是否立即同步（跳过防抖），用于删除等关键操作
    * @param silent 静默模式（退出登录时使用），不向 console.error 输出 fetch 失败
    */
   private async syncToServer(immediate: boolean = false, silent: boolean = false): Promise<void> {
-    if (!this.currentUserId || !this.multiUserData) return;
-    const userData = this.multiUserData.userData[this.currentUserId];
-    if (!userData) return;
-    if (!this._serverSyncReady) {
-      console.log('[Sync] syncToServer: blocked — server data not yet loaded, skip to prevent overwrite');
-      return;
-    }
-
     try {
-      // 只同步当前用户自己的项目，强制附带userId确保数据隔离
-      // 双重过滤：先移除不属于当前用户的项目（防止跨用户泄露），再附加 userId
-      const currentUserId = this.currentUserId;
-      const projectsPayload = userData.projects
-        .filter(p => {
-          // 严格隔离：只同步属于当前用户的项目
-          // 如果项目有 userId 且不属于当前用户，完全跳过（不覆盖、不同步）
-          if (p.userId && p.userId !== currentUserId) {
-            console.warn(`[DataIsolation] syncToServer: skipping cross-user project "${p.name}" (owner=${p.userId}, current=${currentUserId})`);
-            return false;
-          }
-          // 如果项目没有 userId，视为当前用户的项目（历史数据兼容）
-          return true;
-        })
-        .map(p => ({
-          ...p,
-          userId: p.userId || currentUserId, // 仅对无 userId 的历史数据补充当前用户ID
-        }));
-
-      // ★ 数据保护：本地项目总数大于0且服务器项目总数大于0时，防止空数据覆盖
-      // 如果准备上传的所有项目图片数总和为0，但内存中存在有图项目，判定为异常状态，放弃同步
-      const localTotalImgs = projectsPayload.reduce((sum, p) => sum + (p.canvasImages?.length || 0), 0);
-      const memTotalImgs = userData.projects.reduce((sum, p) => sum + (p.canvasImages?.length || 0), 0);
-      if (memTotalImgs > 0 && localTotalImgs === 0) {
-        console.warn('[Sync] syncToServer: BLOCKED — payload has 0 images but memory has', memTotalImgs, 'images. Aborting to prevent data loss.');
-        return;
-      }
-
+      const projectsPayload = this.buildProjectsSyncPayload(false);
+      if (!projectsPayload) return;
       const syncRes = await fetch('/api/user-data/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -494,9 +571,14 @@ export class UserManager {
       if (!syncRes.ok) {
         console.warn('[Sync] syncToServer: server returned', syncRes.status);
       } else {
-        console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
-        // ★ 同步成功后清除已删除图片ID记录（服务器已有最新数据）
-        this._recentlyDeletedImageIds.clear();
+        const data = await syncRes.json().catch(() => null) as ProjectSyncResponse | null;
+        if (data?.success) {
+          this.applyProjectIdMap(data.projectIdMap || {});
+          console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
+          this._recentlyDeletedImageIds.clear();
+        } else {
+          console.warn('[Sync] syncToServer: invalid success response');
+        }
       }
     } catch (error) {
       if (!silent) {

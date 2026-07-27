@@ -515,7 +515,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
           dimensions, budget, materialStyle, lightingStyle,
           crowdStyle, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, prompt,
           model: selectedModel, providerId: selectedProviderId,
-          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
+          quality: outputQuality === '超高' ? '4K' : outputQuality === '高' ? '2K' : '1K',
           aspectRatio: generateAspectRatio,
         }),
       });

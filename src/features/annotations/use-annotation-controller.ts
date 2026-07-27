@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import {
   clampNormalizedRegion,
@@ -104,6 +104,76 @@ function sourcesMatch(
     first.projectId === second.projectId
     && first.imageId === second.imageId
   );
+}
+
+function sourceIdentityEquals(
+  first: AnnotationSourceIdentity,
+  second: AnnotationSourceIdentity,
+): boolean {
+  return (
+    first.projectId === second.projectId
+    && first.imageId === second.imageId
+    && first.versionId === second.versionId
+  );
+}
+
+function migrateSourceIdentity(
+  identity: AnnotationSourceIdentity,
+  from: AnnotationSourceIdentity,
+  to: AnnotationSourceIdentity,
+): AnnotationSourceIdentity {
+  return sourceIdentityEquals(identity, from) ? { ...to } : identity;
+}
+
+export function migrateAnnotationControllerSource(
+  state: AnnotationControllerState,
+  from: AnnotationSourceIdentity,
+  to: AnnotationSourceIdentity,
+): AnnotationControllerState {
+  if (sourceIdentityEquals(from, to)) return state;
+
+  const annotations = state.annotations.map((annotation) => {
+    const identity = annotationSourceIdentity(annotation);
+    if (!sourceIdentityEquals(identity, from)) return annotation;
+    return {
+      ...annotation,
+      projectId: to.projectId,
+      sourceImageId: to.imageId,
+      sourceVersionId: to.versionId,
+      updatedAt: Date.now(),
+    };
+  });
+  const gesture = state.gesture.kind === 'idle'
+    ? state.gesture
+    : sourceIdentityEquals(sourceIdentity(state.gesture.source), from)
+      ? {
+          ...state.gesture,
+          source: {
+            ...state.gesture.source,
+            projectId: to.projectId,
+            imageId: to.imageId,
+            versionId: to.versionId,
+          },
+        }
+      : state.gesture;
+  const sourceLock = state.sourceLock
+    ? migrateSourceIdentity(state.sourceLock, from, to)
+    : null;
+  const sourceMismatch = state.sourceMismatch
+    ? {
+        ...state.sourceMismatch,
+        expected: migrateSourceIdentity(state.sourceMismatch.expected, from, to),
+        received: migrateSourceIdentity(state.sourceMismatch.received, from, to),
+      }
+    : null;
+
+  return {
+    ...state,
+    annotations,
+    gesture,
+    sourceLock,
+    sourceMismatch,
+  };
 }
 
 export function createInitialAnnotationControllerState(
@@ -500,31 +570,47 @@ function createClientAnnotationId(): string {
 }
 
 export function useAnnotationController(initialAnnotations: CanvasAnnotationV2[] = []) {
-  const [state, setState] = useState<AnnotationControllerState>(() =>
+  const [state, setReactState] = useState<AnnotationControllerState>(() =>
     createInitialAnnotationControllerState(initialAnnotations),
   );
+  const stateRef = useRef(state);
+
+  const updateState = useCallback((
+    update: AnnotationControllerState | ((current: AnnotationControllerState) => AnnotationControllerState),
+  ): AnnotationControllerState => {
+    const next = typeof update === 'function' ? update(stateRef.current) : update;
+    stateRef.current = next;
+    setReactState(next);
+    return next;
+  }, []);
+  const getState = useCallback((): AnnotationControllerState => stateRef.current, []);
+  const migrateSource = useCallback((
+    from: AnnotationSourceIdentity,
+    to: AnnotationSourceIdentity,
+  ): AnnotationControllerState => updateState((current) =>
+    migrateAnnotationControllerSource(current, from, to)), [updateState]);
 
   const selectTool = useCallback((tool: AnnotationType) => {
-    setState((current) => selectAnnotationTool(current, tool));
-  }, []);
+    updateState((current) => selectAnnotationTool(current, tool));
+  }, [updateState]);
   const pointerDown = useCallback((source: AnnotationSource, point: ScreenPoint) => {
-    setState((current) => beginAnnotationGesture(current, source, point));
-  }, []);
+    updateState((current) => beginAnnotationGesture(current, source, point));
+  }, [updateState]);
   const pointerMove = useCallback((point: ScreenPoint) => {
-    setState((current) => updateAnnotationGesture(current, point));
-  }, []);
+    updateState((current) => updateAnnotationGesture(current, point));
+  }, [updateState]);
   const pointerUp = useCallback((point: ScreenPoint) => {
-    setState((current) =>
+    updateState((current) =>
       commitAnnotationGesture(current, point, createClientAnnotationId(), Date.now()),
     );
-  }, []);
+  }, [updateState]);
   const commitText = useCallback((text: string) => {
-    setState((current) =>
+    updateState((current) =>
       commitTextAnnotation(current, text, createClientAnnotationId(), Date.now()),
     );
-  }, []);
+  }, [updateState]);
   const commitResolvedSemantic = useCallback((target: ResolvedSemanticTarget) => {
-    setState((current) =>
+    updateState((current) =>
       commitResolvedSemanticAnnotation(
         current,
         target,
@@ -532,31 +618,33 @@ export function useAnnotationController(initialAnnotations: CanvasAnnotationV2[]
         Date.now(),
       ),
     );
-  }, []);
+  }, [updateState]);
   const escape = useCallback(() => {
-    setState((current) => cancelGestureOrCloseMode(current));
-  }, []);
+    updateState((current) => cancelGestureOrCloseMode(current));
+  }, [updateState]);
   const updateInstruction = useCallback((annotationId: string, instruction: string) => {
-    setState((current) =>
+    updateState((current) =>
       updateAnnotationInstruction(current, annotationId, instruction, Date.now()),
     );
-  }, []);
+  }, [updateState]);
   const moveText = useCallback((
     annotationId: string,
     point: ScreenPoint,
     imageRect: ScreenRect,
   ) => {
-    setState((current) =>
+    updateState((current) =>
       moveTextAnnotation(current, annotationId, point, imageRect, Date.now()),
     );
-  }, []);
+  }, [updateState]);
   const remove = useCallback((annotationId: string) => {
-    setState((current) => removeAnnotation(current, annotationId));
-  }, []);
+    updateState((current) => removeAnnotation(current, annotationId));
+  }, [updateState]);
 
   return {
     state,
-    setState,
+    setState: updateState,
+    getState,
+    migrateSource,
     selectTool,
     pointerDown,
     pointerMove,

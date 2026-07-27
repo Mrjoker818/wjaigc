@@ -141,6 +141,7 @@ export async function POST(request: NextRequest) {
     }
 
     let value: unknown = body.value ?? null;
+    const projectIdMap: Record<string, string> = {};
 
     // 【数据隔离】对 projects 类型数据做服务端验证和清洗
     // 1. 强制过滤只保留属于当前会话用户的项目
@@ -158,15 +159,16 @@ export async function POST(request: NextRequest) {
       const conflictingIds = await findProjectIdsOwnedByOtherUsers(projectIds, sessionUser.id);
       if (conflictingIds.size > 0) {
         let reassigned = 0;
-        for (const p of (value as Record<string, unknown>[])) {
+        const reassignmentNonce = Date.now();
+        for (const [index, p] of (value as Record<string, unknown>[]).entries()) {
           const id = String(p.id);
           if (conflictingIds.has(id)) {
-            // 重新分配项目 ID：添加当前用户 ID 后缀避免冲突
-            const oldId = p.id;
-            const newId = `${id}__${sessionUser.id}_${Date.now()}`;
+            // 重新分配项目 ID：添加当前用户 ID 后缀避免冲突，并把最终映射返回客户端。
+            const oldId = id;
+            const newId = `${id}__${sessionUser.id}_${reassignmentNonce}_${index}`;
             p.id = newId;
-            // 如果项目名引用了旧 ID，也需更新
             if (p.groupId === oldId) p.groupId = newId;
+            projectIdMap[oldId] = newId;
             reassigned++;
           }
         }
@@ -182,7 +184,7 @@ export async function POST(request: NextRequest) {
     }
 
     await dbSetUserData(sessionUser.id, key, value);
-    return NextResponse.json({ success: true, key });
+    return NextResponse.json({ success: true, key, projectIdMap });
   } catch (error) {
     return NextResponse.json({
       success: false,

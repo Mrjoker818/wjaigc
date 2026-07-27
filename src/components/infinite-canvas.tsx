@@ -1820,6 +1820,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         projectId: effectiveProjectId,
         sourceImageId: sourceImage.id,
         sourceVersionId: gesture.source.versionId,
+        sourceImageUrl: sourceImage.url || '',
         point,
       });
       if (requestSequence !== annotationSemanticRequestRef.current) return;
@@ -1917,6 +1918,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     try {
       const submitted = await executeAnnotationBundle({
         bundle,
+        sourceImageUrl: sourceImage.url || '',
       });
       setAnnotationTaskId(submitted.taskId);
       const completed = await waitForAnnotationTaskResult(submitted.taskId, {

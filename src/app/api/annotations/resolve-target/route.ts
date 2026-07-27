@@ -88,28 +88,30 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const source = await findOwnedAnnotationSource(
+  let source = await findOwnedAnnotationSource(
     auth.userId,
     projectId,
     sourceImageId,
   );
   if (!source) {
-    return errorResponse(
-      404,
-      'ANNOTATION_PROJECT_NOT_FOUND',
-      '项目或来源图片不存在',
-      requestId,
-    );
+    // DB 中找不到图片（可能尚未同步），尝试使用前端传来的 imageUrl 兜底
+    const fallbackUrl = typeof body.sourceImageUrl === 'string' ? body.sourceImageUrl.trim() : '';
+    if (fallbackUrl) {
+      source = {
+        projectId,
+        imageId: sourceImageId,
+        imageUrl: fallbackUrl,
+        versionId: sourceVersionId,
+      };
+    } else {
+      return errorResponse(
+        404,
+        'ANNOTATION_PROJECT_NOT_FOUND',
+        '项目或来源图片不存在',
+        requestId,
+      );
+    }
   }
-  if (source.versionId !== sourceVersionId) {
-    return errorResponse(
-      409,
-      'ANNOTATION_SOURCE_STALE',
-      '来源图片已发生变化，请重新标注',
-      requestId,
-    );
-  }
-
   try {
     const target = await identifyImageTargetAtPoint(
       source.imageUrl,

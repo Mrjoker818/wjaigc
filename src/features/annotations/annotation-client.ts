@@ -54,6 +54,7 @@ export interface ResolveSemanticAnnotationInput {
   projectId: string;
   sourceImageId: string;
   sourceVersionId: string;
+  sourceImageUrl?: string;
   point: { x: number; y: number };
 }
 
@@ -91,6 +92,7 @@ export async function resolveSemanticAnnotation(
 
 export interface ExecuteAnnotationBundleInput {
   bundle: EditIntentBundle;
+  sourceImageUrl?: string;
 }
 
 export interface ExecuteAnnotationBundleResult {

@@ -6,6 +6,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
+import sharp from 'sharp';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -186,10 +187,44 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     void (async (): Promise<void> => {
       try {
         updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '正在拆解方案...' });
+
+        // Composite transparent PNG onto white background so the vision model
+        // sees the actual subject instead of a checkerboard pattern.
+        let processedImageUrl = typeof imageUrl === 'string' && imageUrl ? imageUrl : '';
+        if (processedImageUrl) {
+          try {
+            let imgBuffer: Buffer | null = null;
+            if (processedImageUrl.startsWith('data:')) {
+              const commaIdx = processedImageUrl.indexOf(',');
+              if (commaIdx > 0) {
+                imgBuffer = Buffer.from(processedImageUrl.slice(commaIdx + 1), 'base64');
+              }
+            } else if (processedImageUrl.startsWith('http')) {
+              const imgResp = await fetch(processedImageUrl, { signal: AbortSignal.timeout(15000) });
+              if (imgResp.ok) {
+                imgBuffer = Buffer.from(await imgResp.arrayBuffer());
+              }
+            }
+            if (imgBuffer) {
+              const meta = await sharp(imgBuffer).metadata();
+              if (meta.hasAlpha) {
+                const composited = await sharp(imgBuffer)
+                  .flatten({ background: '#ffffff' })
+                  .png()
+                  .toBuffer();
+                processedImageUrl = `data:image/png;base64,${composited.toString('base64')}`;
+                console.log(`[display-3d/decompose] Flattened transparent image (${meta.width}x${meta.height}) onto white background`);
+              }
+            }
+          } catch (imgErr) {
+            console.warn('[display-3d/decompose] Image preprocessing failed, using original:', imgErr instanceof Error ? imgErr.message : imgErr);
+          }
+        }
+
         const messages: Array<{ role: string; content: unknown }> = [{
           role: 'user',
-          content: typeof imageUrl === 'string' && imageUrl
-            ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: imageUrl } }]
+          content: processedImageUrl
+            ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: processedImageUrl } }]
             : prompt,
         }];
         let apiBase = provider.baseUrl.replace(/\/+$/, '');
