@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { findOwnedAnnotationSource } from '@/lib/annotation-project-source';
 import { identifyImageTargetAtPoint } from '@/lib/identify-subject';
+import { normalizeTrustedManagedMediaInput } from '@/lib/safe-image-input';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -39,6 +40,14 @@ function isNormalizedPoint(value: unknown): value is { x: number; y: number } {
     && point.y >= 0
     && point.y <= 1
   );
+}
+
+function trustedRequestHosts(request: NextRequest): string[] {
+  return [
+    request.nextUrl.host,
+    request.headers.get('host') || '',
+    request.headers.get('x-forwarded-host')?.split(',')[0]?.trim() || '',
+  ].filter(Boolean);
 }
 
 export async function POST(request: NextRequest) {
@@ -121,8 +130,12 @@ export async function POST(request: NextRequest) {
     );
   }
   try {
-    const target = await identifyImageTargetAtPoint(
+    const sourceImageInput = normalizeTrustedManagedMediaInput(
       source.imageUrl,
+      trustedRequestHosts(request),
+    );
+    const target = await identifyImageTargetAtPoint(
+      sourceImageInput,
       body.point,
       30_000,
       { userId: auth.userId, userRole: auth.userRole },

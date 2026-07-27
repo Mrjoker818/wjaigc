@@ -1,5 +1,8 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import sharp from 'sharp';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 
 import type { CanvasAnnotationV2, EditIntentBundle } from '@/features/annotations/annotation-types';
@@ -89,6 +92,17 @@ async function sourceDataUrl(): Promise<string> {
   }).png().toBuffer();
   return `data:image/png;base64,${buffer.toString('base64')}`;
 }
+
+const MANAGED_FIXTURE_DIR = path.join(
+  process.cwd(),
+  'public',
+  'uploads',
+  'annotation-execute-test',
+);
+
+afterEach(async () => {
+  await rm(MANAGED_FIXTURE_DIR, { recursive: true, force: true });
+});
 
 describe('annotation asset and provider compilation', () => {
   it('preserves every annotation ID in the numbered instruction list', async () => {
@@ -352,6 +366,37 @@ describe('POST /api/annotations/execute', () => {
           idempotencyKey: 'idem-1',
           requestId: 'req-test-1',
           annotationIds: ['ann-1', 'ann-2'],
+        }),
+      }),
+    );
+  });
+
+  it('executes an absolute same-origin managed source through the local media path', async () => {
+    await mkdir(MANAGED_FIXTURE_DIR, { recursive: true });
+    const source = Buffer.from(
+      (await sourceDataUrl()).split(',')[1],
+      'base64',
+    );
+    await writeFile(path.join(MANAGED_FIXTURE_DIR, 'source.png'), source);
+    mocks.dbGetUserData.mockResolvedValue([{
+      id: 'project-1',
+      userId: 'user-1',
+      canvasImages: [{
+        id: 'image-1',
+        url: 'http://localhost/api/serve-upload/annotation-execute-test/source.png',
+        annotationVersionId: 'version-1',
+      }],
+    }]);
+
+    const response = await POST(request({
+      bundle: bundle([annotation('ann-1')]),
+    }));
+
+    expect(response.status).toBe(202);
+    expect(mocks.submitAnnotationEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          image: '/api/serve-upload/annotation-execute-test/source.png',
         }),
       }),
     );

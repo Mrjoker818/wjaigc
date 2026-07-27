@@ -322,6 +322,24 @@ describe('InfiniteCanvas annotation gesture integration', () => {
     expect(canvasSource).not.toContain("toast.info('鎵规敞鎵ц閾捐矾姝ｅ湪鍒濆鍖?)");
   });
 
+  it('clears a stale execution error when the user starts a new edit', () => {
+    const composerStart = canvasSource.indexOf('<AnnotationComposer');
+    const composerEnd = canvasSource.indexOf('/>', composerStart);
+    const composerWiring = canvasSource.slice(composerStart, composerEnd);
+
+    expect(composerWiring).toContain('onToolChange={(tool) => {');
+    expect(composerWiring).toContain('onPromptChange={(prompt) => {');
+    expect(composerWiring).toContain('onModelChange={(modelId) => {');
+    expect(composerWiring).toContain('onRemoveAnnotation={(annotationId) => {');
+    expect(composerWiring).toContain('onUpdateInstruction={(annotationId, instruction) => {');
+    expect(
+      composerWiring.match(/setAnnotationExecutionError\(null\);/g),
+    ).toHaveLength(5);
+    expect(canvasSource).toContain(
+      'beginCanvasAnnotationV2Gesture(source, { x: e.clientX, y: e.clientY });',
+    );
+  });
+
   it('falls back to region selection after semantic resolution errors in both modes', () => {
     expect(canvasSource).toContain("selectAnnotationV2Tool('region');");
     expect(canvasSource).toContain("baseMessage.includes('框选')");

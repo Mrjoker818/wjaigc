@@ -13,6 +13,7 @@ import {
   buildAnnotationProviderRequest,
   resolveAnnotationProvider,
 } from '@/lib/annotation-provider-adapter';
+import { normalizeTrustedManagedMediaInput } from '@/lib/safe-image-input';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -58,6 +59,14 @@ function validationStatus(code: string): number {
     return 409;
   }
   return 422;
+}
+
+function trustedRequestHosts(request: NextRequest): string[] {
+  return [
+    request.nextUrl.host,
+    request.headers.get('host') || '',
+    request.headers.get('x-forwarded-host')?.split(',')[0]?.trim() || '',
+  ].filter(Boolean);
 }
 
 export async function POST(request: NextRequest) {
@@ -148,14 +157,18 @@ export async function POST(request: NextRequest) {
       providerId: resolved.providerId,
       modelId: resolved.modelId,
     };
+    const sourceImageInput = normalizeTrustedManagedMediaInput(
+      source.imageUrl,
+      trustedRequestHosts(request),
+    );
     const assets = await compileAnnotationAssets({
-      imageUrl: source.imageUrl,
+      imageUrl: sourceImageInput,
       annotations: effectiveBundle.annotations,
       signal: request.signal,
     });
     const providerRequest = buildAnnotationProviderRequest({
       bundle: effectiveBundle,
-      imageUrl: source.imageUrl,
+      imageUrl: sourceImageInput,
       assets,
       requestId,
     });

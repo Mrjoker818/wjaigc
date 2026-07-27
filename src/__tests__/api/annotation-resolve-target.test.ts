@@ -180,6 +180,37 @@ describe('POST /api/annotations/resolve-target', () => {
       { userId: 'user-1', userRole: 'user' },
     );
   });
+
+  it('normalizes a same-origin managed source before vision analysis', async () => {
+    mocks.dbGetUserData.mockResolvedValue([{
+      id: 'project-1',
+      userId: 'user-1',
+      canvasImages: [{
+        id: 'image-1',
+        url: 'http://localhost/api/serve-upload/generated/source.png?cache=1',
+        annotationVersionId: 'version-1',
+      }],
+    }]);
+    mocks.identifyImageTargetAtPoint.mockResolvedValue({
+      label: 'cup',
+      confidence: 0.9,
+      region: { x: 0.2, y: 0.2, w: 0.3, h: 0.4 },
+    });
+
+    await POST(request({
+      projectId: 'project-1',
+      sourceImageId: 'image-1',
+      sourceVersionId: 'version-1',
+      point: { x: 0.3, y: 0.4 },
+    }));
+
+    expect(mocks.identifyImageTargetAtPoint).toHaveBeenCalledWith(
+      '/api/serve-upload/generated/source.png',
+      { x: 0.3, y: 0.4 },
+      30_000,
+      { userId: 'user-1', userRole: 'user' },
+    );
+  });
 });
 
 describe('semantic target strict JSON parsing', () => {

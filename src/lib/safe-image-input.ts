@@ -44,6 +44,8 @@ export interface ManagedMediaPath {
   relativePath: string;
 }
 
+const MANAGED_MEDIA_PREFIXES = ['/uploads/', '/api/serve-upload/'];
+
 function detectImageMimeType(buffer: Buffer): string | null {
   if (
     buffer.length >= 8
@@ -145,8 +147,9 @@ export function resolveManagedMediaPath(input: string): ManagedMediaPath {
   } catch (error) {
     throw new SafeImageInputError('Managed image path encoding is invalid', { cause: error });
   }
-  const prefixes = ['/uploads/', '/api/serve-upload/'];
-  const prefix = prefixes.find((candidate) => decodedPath.startsWith(candidate));
+  const prefix = MANAGED_MEDIA_PREFIXES.find(
+    (candidate) => decodedPath.startsWith(candidate),
+  );
   if (!prefix || decodedPath.includes('\\')) {
     throw new SafeImageInputError('Only managed upload paths are allowed');
   }
@@ -158,6 +161,39 @@ export function resolveManagedMediaPath(input: string): ManagedMediaPath {
     throw new SafeImageInputError('Managed image path contains traversal');
   }
   return { namespace: 'uploads', relativePath: segments.join('/') };
+}
+
+export function normalizeTrustedManagedMediaInput(
+  input: string,
+  trustedHosts: Iterable<string>,
+): string {
+  const value = input.trim();
+  if (MANAGED_MEDIA_PREFIXES.some((prefix) => value.startsWith(prefix))) {
+    return value;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return input;
+  }
+  if (
+    !['http:', 'https:'].includes(parsed.protocol)
+    || parsed.username
+    || parsed.password
+    || !MANAGED_MEDIA_PREFIXES.some((prefix) => parsed.pathname.startsWith(prefix))
+  ) {
+    return input;
+  }
+
+  const allowedHosts = new Set(
+    Array.from(trustedHosts, (host) => host.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return allowedHosts.has(parsed.host.toLowerCase())
+    ? parsed.pathname
+    : input;
 }
 
 export function safeSharp(

@@ -3044,6 +3044,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }
       }
 
+      setAnnotationExecutionError(null);
       beginCanvasAnnotationV2Gesture(source, { x: e.clientX, y: e.clientY });
       annotationPointerIdRef.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -13002,11 +13003,18 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 );
                 return sourceImage?.name || sourceImage?.prompt || '当前图片';
               })()}
-              onToolChange={selectAnnotationV2Tool}
+              onToolChange={(tool) => {
+                setAnnotationExecutionError(null);
+                selectAnnotationV2Tool(tool);
+              }}
               onPromptChange={(prompt) => {
+                setAnnotationExecutionError(null);
                 setAnnotationV2State((current) => ({ ...current, prompt }));
               }}
-              onModelChange={setAnnotationModelId}
+              onModelChange={(modelId) => {
+                setAnnotationExecutionError(null);
+                setAnnotationModelId(modelId);
+              }}
               onSelectAnnotation={(annotationId) => {
                 setAnnotationV2State((current) => ({
                   ...current,
@@ -13014,9 +13022,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 }));
               }}
               onRemoveAnnotation={(annotationId) => {
+                setAnnotationExecutionError(null);
                 removeAnnotationV2(annotationId);
               }}
-              onUpdateInstruction={updateAnnotationV2Instruction}
+              onUpdateInstruction={(annotationId, instruction) => {
+                setAnnotationExecutionError(null);
+                updateAnnotationV2Instruction(annotationId, instruction);
+              }}
               isExecuting={Boolean(annotationExecution)}
               executionProgress={annotationExecution?.progress}
               executionStage={annotationExecution?.stage}

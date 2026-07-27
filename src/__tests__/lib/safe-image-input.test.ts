@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertSafePixelDimensions,
   decodeSafeImageInput,
+  normalizeTrustedManagedMediaInput,
   resolveManagedMediaPath,
 } from '@/lib/safe-image-input';
 
@@ -49,5 +50,25 @@ describe('safe edit image inputs', () => {
     });
     expect(() => resolveManagedMediaPath('/uploads/../secret.png')).toThrow();
     expect(() => resolveManagedMediaPath('/api/serve-upload/%2e%2e/secret.png')).toThrow();
+  });
+
+  it('normalizes only same-host managed media URLs to local managed paths', () => {
+    expect(normalizeTrustedManagedMediaInput(
+      'https://preview.example:8443/api/serve-upload/generated/image.png?download=1',
+      ['preview.example:8443'],
+    )).toBe('/api/serve-upload/generated/image.png');
+    expect(normalizeTrustedManagedMediaInput(
+      'https://preview.example/uploads/image.png',
+      ['preview.example'],
+    )).toBe('/uploads/image.png');
+  });
+
+  it.each([
+    'https://attacker.example/api/serve-upload/image.png',
+    'https://preview.example.attacker.test/api/serve-upload/image.png',
+    'https://user@preview.example/api/serve-upload/image.png',
+    'https://preview.example/not-managed/image.png',
+  ])('does not trust an external or malformed managed-looking URL: %s', (input) => {
+    expect(normalizeTrustedManagedMediaInput(input, ['preview.example'])).toBe(input);
   });
 });
