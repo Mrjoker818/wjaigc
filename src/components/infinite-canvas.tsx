@@ -2926,9 +2926,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         return;
       }
 
+      // 批注功能依赖服务端项目/图片查找，必须有真实 projectId。
+      // 若没有已保存/选中的项目，'canvas-local' 这类假 ID 会让服务端
+      // findOwnedAnnotationSource 查不到记录，返回 404「项目或来源图片不存在」。
+      // 因此这里提前拦截，给出明确提示，而不是继续创建注定失败的批注。
+      const effectiveAnnotationProjectId = projectId || brandProject?.id;
+      if (!effectiveAnnotationProjectId) {
+        toast.error('请先保存或选择一个项目后再使用批注功能');
+        return;
+      }
+
       const canvasRect = canvasRef.current?.getBoundingClientRect();
       const source = {
-        projectId: projectId || brandProject?.id || 'canvas-local',
+        projectId: effectiveAnnotationProjectId,
         imageId: targetImage.id,
         versionId: targetImage.annotationVersionId
           || buildAnnotationSourceVersionId(

@@ -325,6 +325,8 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
   const [outputResolution, setOutputResolution] = useState('3840×2160');
   const [outputFormat, setOutputFormat] = useState('PNG');
   const [outputQuality, setOutputQuality] = useState('高');
+  // 元素拆解生成比例——独立于主生成面板，默认 16:9 适合展陈效果图
+  const [generateAspectRatio, setGenerateAspectRatio] = useState('16:9');
 
   // === Model selection state ===
   const [availableModels, setAvailableModels] = useState<{ providerId: string; model: string; displayName?: string; providerName?: string }[]>([]);
@@ -514,7 +516,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
           crowdStyle, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, prompt,
           model: selectedModel, providerId: selectedProviderId,
           quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
-          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
+          aspectRatio: generateAspectRatio,
         }),
       });
       const data = await res.json();
@@ -573,7 +575,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
       console.error('[display-3d] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, selectedModel, selectedProviderId, brandColor, focusProduct]);
+  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, selectedModel, selectedProviderId, brandColor, focusProduct, generateAspectRatio]);
 
   // === Decompose handler ===
   const handleDecompose = useCallback(async () => {
@@ -584,7 +586,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
       return;
     }
     if (!selectedChatModel || !selectedChatProviderId) {
-      setErrorMsg('请选择已授权的分析模型后再进行美陈拆解');
+      setErrorMsg('请选择已授权的分析模型后再进行元素拆解');
       return;
     }
 
@@ -609,7 +611,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
       });
       const data = await res.json().catch(() => ({})) as { taskId?: string; error?: string };
       if (!res.ok || data.error || !data.taskId) {
-        throw new Error(data.error || '美陈拆解任务提交失败');
+        throw new Error(data.error || '元素拆解任务提交失败');
       }
 
       const poll = async (): Promise<void> => {
@@ -645,22 +647,22 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
               notes: Array.isArray(result.notes) ? result.notes : [],
               rawAnalysis: result.rawAnalysis || taskData.result?.rawAnalysis,
             });
-            setSuccessMsg('美陈拆解已完成，以下内容均来自本次分析结果。');
+            setSuccessMsg('元素拆解已完成，以下内容均来自本次分析结果。');
             setIsDecomposing(false);
             setActivePreviewTab('decompose');
           } else if (taskData.status === 'failed' || !taskRes.ok) {
-            throw new Error(taskData.error || '美陈拆解任务失败');
+            throw new Error(taskData.error || '元素拆解任务失败');
           } else {
             window.setTimeout(() => { void poll(); }, 3000);
           }
         } catch (error) {
-          setErrorMsg(error instanceof Error ? error.message : '美陈拆解轮询失败，请重试');
+          setErrorMsg(error instanceof Error ? error.message : '元素拆解轮询失败，请重试');
           setIsDecomposing(false);
         }
       };
       void poll();
     } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : '美陈拆解失败，请重试');
+      setErrorMsg(error instanceof Error ? error.message : '元素拆解失败，请重试');
       setIsDecomposing(false);
     }
   }, [brandName, sceneType, dimensions, results, selectedChatModel, selectedChatProviderId, sourceImage]);
@@ -1855,7 +1857,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                   </section>
 
                   {/* Output settings (inline) */}
-                  <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div className="grid grid-cols-3 gap-2 mb-2">
                     <div>
                       <label className="block text-[12px] mb-1" style={{ color: textMuted }}>分辨率</label>
                       <select className={selectCls} value={outputResolution} onChange={e => setOutputResolution(e.target.value)}>
@@ -1873,6 +1875,32 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                       <select className={selectCls} value={outputQuality} onChange={e => setOutputQuality(e.target.value)}>
                         {OUTPUT_QUALITIES.map(q => <option key={q} value={q}>{q}</option>)}
                       </select>
+                    </div>
+                  </div>
+                  {/* Aspect ratio selector for generation */}
+                  <div className="mb-3">
+                    <label className="block text-[12px] mb-1" style={{ color: textMuted }}>生成比例</label>
+                    <div className="flex gap-1 flex-wrap">
+                      {(['16:9', '4:3', '1:1', '3:4', '9:16'] as const).map(ratio => (
+                        <button
+                          key={ratio}
+                          onClick={() => setGenerateAspectRatio(ratio)}
+                          className="px-2 py-1 rounded text-[11px] transition-colors"
+                          style={{
+                            background: generateAspectRatio === ratio
+                              ? (isMonochrome ? '#111827' : '#d4af37')
+                              : (isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.07)'),
+                            color: generateAspectRatio === ratio
+                              ? (isMonochrome ? '#fff' : '#111')
+                              : textMuted,
+                            border: generateAspectRatio === ratio
+                              ? 'none'
+                              : `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.1)'}`,
+                          }}
+                        >
+                          {ratio}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
