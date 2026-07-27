@@ -1701,6 +1701,39 @@ ${contextInfo}
     }
   }, [wf.nodes, handleNodeUpdate]);
 
+  const startWorkflowExecution = useCallback(async (payload: {
+    nodes: WorkflowNode[];
+    connections: WorkflowConnection[];
+    startNodeId?: string;
+    tailNodeId?: string;
+  }) => {
+    setExecStatus('running');
+    setExecutionId(null);
+    setExecResults({});
+    setExecLogs([]);
+    try {
+      const res = await fetch('/api/workflow/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start', ...payload }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.executionId) {
+        setExecStatus('failed');
+        return;
+      }
+      setExecutionId(data.executionId);
+      localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({
+        executionId: data.executionId,
+        execStatus: 'running',
+        execResults: {},
+        execLogs: [],
+      }));
+    } catch {
+      setExecStatus('failed');
+    }
+  }, []);
+
   // P0: 级联一键运行 — 找到当前节点的整条链，从上游到下游依次执行
   const handleCascadeRun = useCallback(async (startNodeId: string) => {
     // 找到链尾（最下游的图片输出节点）
@@ -1712,15 +1745,13 @@ ${contextInfo}
       return findChainTail(downstream[0].toNodeId, visited);
     };
     const tailId = findChainTail(startNodeId, new Set());
-    // 直接调用工作流执行API
-    try {
-      await fetch('/api/workflow/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start', startNodeId, tailNodeId: tailId, nodes: wf.nodes, connections: wf.connections }),
-      });
-    } catch (e) { console.error('Cascade run failed:', e); }
-  }, [wf.connections, wf.nodes]);
+    await startWorkflowExecution({
+      startNodeId,
+      tailNodeId: tailId,
+      nodes: wf.nodes,
+      connections: wf.connections,
+    });
+  }, [startWorkflowExecution, wf.connections, wf.nodes]);
   useEffect(() => { handleCascadeRunRef.current = handleCascadeRun; }, [handleCascadeRun]);
 
 
@@ -2210,29 +2241,8 @@ ${contextInfo}
   // ─── 执行工作流 ───
 
   const handleRunWorkflow = useCallback(async () => {
-    setExecStatus('running');
-    setExecResults({});
-    setExecLogs([]);
-    try {
-      const res = await fetch('/api/workflow/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start', nodes: wf.nodes, connections: wf.connections }),
-      });
-      const data = await res.json();
-      if (data.executionId) {
-        setExecutionId(data.executionId);
-        // B1: 持久化执行状态（切页不丢失）
-        localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({
-          executionId: data.executionId, execStatus: 'running', execResults: {}, execLogs: [],
-        }));
-      } else {
-        setExecStatus('failed');
-      }
-    } catch {
-      setExecStatus('failed');
-    }
-  }, [wf]);
+    await startWorkflowExecution({ nodes: wf.nodes, connections: wf.connections });
+  }, [startWorkflowExecution, wf.connections, wf.nodes]);
 
   const handleStopWorkflow = useCallback(async () => {
     if (executionId) {
@@ -4708,7 +4718,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                   <span className="text-[10px] mt-0.5">上传</span>
                 </div>
                 {canvasImages && canvasImages.length > 0 && (
-                  <div className="relative group/canvas">
+                  <div className="relative flex-1 group/canvas">
                     <div
                       className="flex-1 h-16 border-2 border-dashed border-border rounded flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 transition-colors text-muted-foreground hover:text-muted-foreground"
                       onClick={(e) => {
@@ -4719,7 +4729,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                       <ImageIcon size={14} />
                       <span className="text-[10px] mt-0.5">画布</span>
                     </div>
-                    <div style={{ display: 'none' }} className="absolute left-0 top-full mt-1 w-full max-h-40 overflow-y-auto bg-muted border border-border rounded shadow-lg z-50">
+                    <div style={{ display: 'none' }} className="absolute right-0 top-full mt-1 w-64 max-h-40 overflow-y-auto bg-muted border border-border rounded shadow-lg z-50">
                       {canvasImages.map((img, idx) => (
                         <button
                           key={img.id}
