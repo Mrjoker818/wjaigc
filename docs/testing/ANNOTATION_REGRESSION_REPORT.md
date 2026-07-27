@@ -114,7 +114,7 @@ Playwright 证据：
 
 | 验证项 | 结果 | 证据 |
 | --- | --- | --- |
-| 批注专项 Vitest | 通过 | `pnpm vitest run annotation`：20 个文件、144 项通过，1 项 PostgreSQL 用例跳过 |
+| 批注专项 Vitest | 通过 | `pnpm vitest run annotation`：21 个文件、146 项通过，1 项 PostgreSQL 用例跳过 |
 | 新增及直接关联回归 | 通过 | 6 个文件、45 项通过 |
 | 来源版本冲突回归 | 通过 | 修复前稳定返回 422；修复后返回 409 且不调用视觉识别 |
 | TypeScript | 通过 | `pnpm ts-check` |
