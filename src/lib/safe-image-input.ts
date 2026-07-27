@@ -45,6 +45,7 @@ export interface ManagedMediaPath {
 }
 
 const MANAGED_MEDIA_PREFIXES = ['/uploads/', '/api/serve-upload/'];
+const PRIVATE_MEDIA_ROOTS = new Set(['system', 'users']);
 
 function detectImageMimeType(buffer: Buffer): string | null {
   if (
@@ -157,6 +158,7 @@ export function resolveManagedMediaPath(input: string): ManagedMediaPath {
   if (
     segments.length === 0
     || segments.some((segment) => !segment || segment === '.' || segment === '..')
+    || PRIVATE_MEDIA_ROOTS.has(segments[0].toLowerCase())
   ) {
     throw new SafeImageInputError('Managed image path contains traversal');
   }
@@ -242,11 +244,12 @@ async function loadManagedMedia(
 ): Promise<DecodedSafeImage> {
   const managed = resolveManagedMediaPath(input);
   const relativePath = managed.relativePath.split('/').join(path.sep);
-  const dataRoot = path.resolve(getServerDataRoot(), managed.namespace);
+  const serverDataRoot = path.resolve(getServerDataRoot());
+  const dataUploadsRoot = path.resolve(serverDataRoot, managed.namespace);
   const publicRoot = path.resolve(process.cwd(), 'public', managed.namespace);
   const roots = input.startsWith('/api/serve-upload/')
-    ? [dataRoot, publicRoot]
-    : [publicRoot, dataRoot];
+    ? [dataUploadsRoot, serverDataRoot, publicRoot]
+    : [publicRoot, dataUploadsRoot];
 
   for (const root of roots) {
     signal?.throwIfAborted();

@@ -50,6 +50,8 @@ describe('safe edit image inputs', () => {
     });
     expect(() => resolveManagedMediaPath('/uploads/../secret.png')).toThrow();
     expect(() => resolveManagedMediaPath('/api/serve-upload/%2e%2e/secret.png')).toThrow();
+    expect(() => resolveManagedMediaPath('/api/serve-upload/system/private.png')).toThrow();
+    expect(() => resolveManagedMediaPath('/api/serve-upload/users/private.png')).toThrow();
   });
 
   it('normalizes only same-host managed media URLs to local managed paths', () => {

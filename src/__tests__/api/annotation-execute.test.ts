@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   dbGetUserById: vi.fn(),
   findProviderById: vi.fn(),
   submitAnnotationEdit: vi.fn(),
+  dataRoot: `${process.cwd()}/.test-data/annotation-execute`,
 }));
 
 vi.mock('@/lib/api-auth', () => ({
@@ -27,6 +28,9 @@ vi.mock('@/lib/server-api-config', () => ({
 }));
 vi.mock('@/features/annotations/annotation-executor', () => ({
   submitAnnotationEdit: mocks.submitAnnotationEdit,
+}));
+vi.mock('@/lib/server-data-root', () => ({
+  getServerDataRoot: () => mocks.dataRoot,
 }));
 
 import { POST } from '@/app/api/annotations/execute/route';
@@ -94,10 +98,8 @@ async function sourceDataUrl(): Promise<string> {
 }
 
 const MANAGED_FIXTURE_DIR = path.join(
-  process.cwd(),
-  'public',
-  'uploads',
-  'annotation-execute-test',
+  mocks.dataRoot,
+  'generate',
 );
 
 afterEach(async () => {
@@ -168,7 +170,9 @@ describe('annotation asset and provider compilation', () => {
 
 describe('POST /api/annotations/execute', () => {
   beforeEach(async () => {
-    Object.values(mocks).forEach((mock) => mock.mockReset());
+    Object.values(mocks).forEach((mock) => {
+      if (typeof mock !== 'string') mock.mockReset();
+    });
     mocks.requireApiAuthOrReject.mockResolvedValue({
       authenticated: true,
       userId: 'user-1',
@@ -383,7 +387,7 @@ describe('POST /api/annotations/execute', () => {
       userId: 'user-1',
       canvasImages: [{
         id: 'image-1',
-        url: 'http://localhost/api/serve-upload/annotation-execute-test/source.png',
+        url: 'http://localhost/api/serve-upload/generate/source.png',
         annotationVersionId: 'version-1',
       }],
     }]);
@@ -396,7 +400,7 @@ describe('POST /api/annotations/execute', () => {
     expect(mocks.submitAnnotationEdit).toHaveBeenCalledWith(
       expect.objectContaining({
         request: expect.objectContaining({
-          image: '/api/serve-upload/annotation-execute-test/source.png',
+          image: '/api/serve-upload/generate/source.png',
         }),
       }),
     );
