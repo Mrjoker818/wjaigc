@@ -7286,7 +7286,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     try {
       const modelInfo = getCurrentModel();
-      updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交美陈拆解任务...' });
+      updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交元素拆解任务...' });
       const res = await fetch('/api/image-edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -7302,7 +7302,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
       const data = await res.json().catch(() => ({} as Record<string, unknown>));
       if (!res.ok || data.success === false) {
-        throw new Error(translateErrorFrontend(String(data.error || `美陈拆解失败 (${res.status})`)));
+        throw new Error(translateErrorFrontend(String(data.error || `元素拆解失败 (${res.status})`)));
       }
 
       updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在识别物料、道具与设计元素...' });
@@ -7317,7 +7317,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
 
       if (!resultUrl) {
-        throw new Error(lastPollErrorRef.current || '美陈拆解超时，请重试');
+        throw new Error(lastPollErrorRef.current || '元素拆解超时，请重试');
       }
 
       // 第二阶段：自动去背景，输出透明 PNG（拆解质量与透明背景解耦，保证两者都最优）
@@ -7358,7 +7358,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }
       }
 
-      updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入美陈拆解板...' });
+      updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入元素拆解结果...' });
       completeProcessingFrame(placeholderId, resultUrl, frameW, frameH, {
         originalWidth: Math.round(frameW),
         originalHeight: Math.round(frameH),
@@ -7367,12 +7367,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         modelName: usedModelName,
         apiProvider: modelInfo.providerName || '',
       }, 'edit');
-      toast.success('美陈拆解完成');
+      toast.success('元素拆解完成');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '美陈拆解失败';
+      const message = error instanceof Error ? error.message : '元素拆解失败';
       updateProcessingFrame(placeholderId, {
         progress: -1,
-        status: `美陈拆解失败：${message}`,
+        status: `元素拆解失败：${message}`,
         error: message,
       });
       setTimeout(() => removeProcessingFrame(placeholderId), 5000);
