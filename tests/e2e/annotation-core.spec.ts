@@ -278,7 +278,32 @@ test.describe('ChatCanvas fused annotation', () => {
       await expect(inputNode).toBeVisible();
       await inputNode.click({ position: { x: 48, y: 20 } });
       await page.locator('[data-toolbar="node-annotation-entry"]').click();
-      await expect(page.getByTestId('node-annotation-workspace')).toBeVisible();
+      const nodeWorkspace = page.getByTestId('node-annotation-workspace');
+      await expect(nodeWorkspace).toBeVisible();
+      const nodeSourceImage = nodeWorkspace.locator('img').first();
+      await expect(nodeSourceImage).toBeVisible();
+      await drawMark(
+        page,
+        nodeSourceImage,
+        'region',
+        'region',
+        { x: 0.4, y: 0.4 },
+        { x: 0.62, y: 0.62 },
+      );
+      await drawMark(
+        page,
+        nodeSourceImage,
+        'brush',
+        'brush',
+        { x: 0.38, y: 0.58 },
+        { x: 0.64, y: 0.44 },
+      );
+      await expect(
+        nodeWorkspace.locator('[data-annotation-kind="region"][data-annotation-id]'),
+      ).toHaveCount(1);
+      await expect(
+        nodeWorkspace.locator('[data-annotation-kind="brush"][data-annotation-id]'),
+      ).toHaveCount(1);
 
       await saveBrowserEvidence(page, testInfo, evidence, 'annotation-node-regression');
     } catch (error) {

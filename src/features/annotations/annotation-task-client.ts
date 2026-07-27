@@ -17,7 +17,7 @@ export interface WaitForAnnotationTaskOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   pollIntervalMs?: number;
-  onProgress?: (progress: number) => void;
+  onProgress?: (progress: number, stage: string) => void;
 }
 
 function asRecord(value: unknown): JsonRecord | undefined {
@@ -29,16 +29,19 @@ function asRecord(value: unknown): JsonRecord | undefined {
 function taskState(payload: unknown): {
   status: string;
   progress?: number;
+  stage?: string;
   error?: string;
 } {
   const root = asRecord(payload);
   const task = asRecord(root?.task);
   const status = String(task?.status || root?.status || '').toLowerCase();
   const progressValue = task?.progress ?? root?.progress;
+  const stageValue = task?.stage ?? task?.label ?? root?.stage ?? root?.label;
   const errorValue = task?.error ?? root?.error ?? root?.message;
   return {
     status,
     progress: typeof progressValue === 'number' ? progressValue : undefined,
+    stage: typeof stageValue === 'string' ? stageValue : undefined,
     error: typeof errorValue === 'string' ? errorValue : undefined,
   };
 }
@@ -64,6 +67,7 @@ export function waitForAnnotationTaskResult(
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let lastProgress = 0;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -81,8 +85,23 @@ export function waitForAnnotationTaskResult(
     };
     const handlePayload = (payload: unknown) => {
       const state = taskState(payload);
-      if (state.progress !== undefined) options.onProgress?.(state.progress);
-      if (state.status === 'completed' || state.status === 'success' || state.status === 'succeeded') {
+      const completed = state.status === 'completed'
+        || state.status === 'success'
+        || state.status === 'succeeded';
+      if (completed) {
+        lastProgress = 100;
+        options.onProgress?.(100, '修改完成');
+      } else if (state.progress !== undefined) {
+        lastProgress = Math.max(
+          lastProgress,
+          Math.min(95, Math.max(0, Math.round(state.progress))),
+        );
+        options.onProgress?.(
+          lastProgress,
+          state.stage || '模型正在处理',
+        );
+      }
+      if (completed) {
         finish(() => {
           try {
             resolve(completedResult(taskId, payload));

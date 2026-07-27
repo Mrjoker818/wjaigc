@@ -4305,6 +4305,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // Mode switching - early return for non-canvas modes
   if (appMode === 'node') {
+    const currentAnnotationModel = getCurrentImageModel();
+    const preferredAnnotationModelId = currentAnnotationModel.model.includes('::')
+      ? currentAnnotationModel.model
+      : currentAnnotationModel.providerId && currentAnnotationModel.model
+        ? `${currentAnnotationModel.providerId}::${currentAnnotationModel.model}`
+        : currentAnnotationModel.model;
     return (
       <NodeEditor
         workflow={nodeWorkflow}
@@ -4327,6 +4333,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           ),
         }))}
         themeStyle={themeStyle}
+        preferredAnnotationModelId={preferredAnnotationModelId}
         onAddImages={(urls, meta) => handleAddImages(urls, undefined, meta)}
       />
     );

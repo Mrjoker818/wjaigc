@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import {
   ArrowUpRight,
   Crosshair,
@@ -33,6 +34,9 @@ interface AnnotationComposerProps {
   executeLabel?: string;
   rightInset?: number;
   isExecuting?: boolean;
+  executionProgress?: number;
+  executionStage?: string;
+  executionStartedAt?: number | null;
   error?: string | null;
   onToolChange: (tool: AnnotationType) => void;
   onPromptChange: (prompt: string) => void;
@@ -65,6 +69,29 @@ function toolClass(active: boolean): string {
   }`;
 }
 
+function formatElapsedTime(startedAt: number | null | undefined, now: number): string {
+  if (!startedAt) return '0s';
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return minutes > 0
+    ? `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+    : `${remainingSeconds}s`;
+}
+
+function AnnotationElapsedTime({ startedAt }: { startedAt?: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!startedAt) return undefined;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+
+  return <span>已用 {formatElapsedTime(startedAt, now)}</span>;
+}
+
 export function AnnotationComposer({
   annotations,
   selectedAnnotationId,
@@ -76,6 +103,9 @@ export function AnnotationComposer({
   executeLabel = '执行修改',
   rightInset = 0,
   isExecuting = false,
+  executionProgress = 0,
+  executionStage = '正在准备任务',
+  executionStartedAt = null,
   error = null,
   onToolChange,
   onPromptChange,
@@ -93,6 +123,7 @@ export function AnnotationComposer({
   const hasInstruction = prompt.trim().length > 0
     || annotations.some((annotation) => annotation.instruction?.trim());
   const canExecute = annotations.length > 0 && hasInstruction && !isExecuting;
+  const visibleProgress = Math.min(100, Math.max(0, Math.round(executionProgress)));
 
   return (
     <section
@@ -249,14 +280,41 @@ export function AnnotationComposer({
         )}
 
         {isExecuting ? (
-          <button
-            type="button"
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-3 text-sm text-destructive hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-            onClick={onCancel}
-          >
-            <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-            取消
-          </button>
+          <>
+            <div
+              className="flex h-9 min-w-[220px] flex-[0_1_280px] flex-col justify-center gap-1"
+              aria-label="批注修改进度"
+            >
+              <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                <span className="min-w-0 truncate text-foreground">{executionStage}</span>
+                <span className="flex shrink-0 items-center gap-2 font-mono">
+                  <span>{visibleProgress}%</span>
+                  <AnnotationElapsedTime startedAt={executionStartedAt} />
+                </span>
+              </div>
+              <div
+                role="progressbar"
+                aria-label="批注修改进度（估算）"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={visibleProgress}
+                className="h-1.5 overflow-hidden rounded-full bg-muted"
+              >
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+                  style={{ width: `${visibleProgress}%` }}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-3 text-sm text-destructive hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+              onClick={onCancel}
+            >
+              <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              取消
+            </button>
+          </>
         ) : (
           <button
             type="button"

@@ -1193,7 +1193,34 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const annotationSemanticRequestRef = useRef(0);
   const annotationTaskAbortRef = useRef<AbortController | null>(null);
   const [annotationTaskId, setAnnotationTaskId] = useState<string | null>(null);
+  const [annotationExecution, setAnnotationExecution] = useState<{
+    progress: number;
+    reportedProgress: number;
+    stage: string;
+    startedAt: number;
+  } | null>(null);
   const [annotationExecutionError, setAnnotationExecutionError] = useState<string | null>(null);
+  const annotationReportedProgress = annotationExecution?.reportedProgress ?? null;
+  useEffect(() => {
+    if (annotationReportedProgress === null || annotationReportedProgress >= 100) return;
+    const timer = window.setInterval(() => {
+      setAnnotationExecution((current) => {
+        if (!current || current.reportedProgress >= 100) return current;
+        const cap = current.reportedProgress >= 90
+          ? 95
+          : current.reportedProgress >= 45
+            ? 89
+            : current.reportedProgress >= 30
+              ? 44
+              : current.reportedProgress >= 15
+                ? 29
+                : 14;
+        if (current.progress >= cap) return current;
+        return { ...current, progress: Math.min(cap, current.progress + 1) };
+      });
+    }, 1_200);
+    return () => window.clearInterval(timer);
+  }, [annotationReportedProgress]);
   useEffect(() => {
     if (images.length > 0) annotationObservedImagesRef.current = true;
     if (!annotationObservedImagesRef.current) return;
@@ -1860,7 +1887,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   ]);
 
   const handleAnnotationExecute = useCallback(async () => {
-    if (annotationTaskId) return;
+    if (annotationTaskId || annotationExecution) return;
     const sourceAnnotation = annotationV2State.annotations[0];
     const sourceImage = imagesRef.current.find(
       (image) => image.id === sourceAnnotation?.sourceImageId,
@@ -1907,6 +1934,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const abortController = new AbortController();
     annotationTaskAbortRef.current = abortController;
     setAnnotationExecutionError(null);
+    setAnnotationExecution({
+      progress: 5,
+      reportedProgress: 5,
+      stage: '正在校验批注',
+      startedAt: Date.now(),
+    });
     setAnnotationV2State((current) => ({
       ...current,
       annotations: current.annotations.map((annotation) => ({
@@ -1923,6 +1956,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       setAnnotationTaskId(submitted.taskId);
       const completed = await waitForAnnotationTaskResult(submitted.taskId, {
         signal: abortController.signal,
+        onProgress: (progress, stage) => {
+          setAnnotationExecution((current) => current
+            ? {
+                ...current,
+                progress: Math.max(current.progress, progress),
+                reportedProgress: Math.max(current.reportedProgress, progress),
+                stage,
+              }
+            : current);
+        },
       });
       const now = Date.now();
       const resultImage: CanvasImage = {
@@ -1978,8 +2021,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     } finally {
       annotationTaskAbortRef.current = null;
       setAnnotationTaskId(null);
+      setAnnotationExecution(null);
     }
   }, [
+    annotationExecution,
     annotationModelId,
     annotationTaskId,
     annotationV2State.annotations,
@@ -1993,6 +2038,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   const handleAnnotationCancel = useCallback(async () => {
     annotationTaskAbortRef.current?.abort();
+    setAnnotationExecution(null);
     const taskId = annotationTaskId;
     if (taskId) {
       try {
@@ -12971,7 +13017,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 removeAnnotationV2(annotationId);
               }}
               onUpdateInstruction={updateAnnotationV2Instruction}
-              isExecuting={Boolean(annotationTaskId)}
+              isExecuting={Boolean(annotationExecution)}
+              executionProgress={annotationExecution?.progress}
+              executionStage={annotationExecution?.stage}
+              executionStartedAt={annotationExecution?.startedAt}
               onExecute={() => void handleAnnotationExecute()}
               onCancel={() => void handleAnnotationCancel()}
               error={annotationV2State.sourceMismatch

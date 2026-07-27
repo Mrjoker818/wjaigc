@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { resolveNodeAnnotationModelId } from '@/features/annotations/node-annotation-workspace';
+
 function readSource(path: string): string {
   const absolutePath = resolve(process.cwd(), path);
   return existsSync(absolutePath) ? readFileSync(absolutePath, 'utf8') : '';
@@ -68,8 +70,57 @@ describe('node-mode annotation wiring', () => {
     expect(workspaceSource).toContain('创建修改节点');
   });
 
+  it('keeps the displayed source image out of native drag and pointer handling', () => {
+    expect(workspaceSource).toContain('draggable={false}');
+    expect(workspaceSource).toContain('pointer-events-none');
+    expect(workspaceSource).toContain('select-none');
+  });
+
+  it('preserves an existing model before considering preferred and fallback models', () => {
+    const models = [
+      { id: 'provider-a::model-a', label: 'Model A' },
+      { id: 'provider-b::model-b', label: 'Model B' },
+    ];
+
+    expect(resolveNodeAnnotationModelId({
+      models,
+      currentId: 'provider-b::model-b',
+      preferredId: 'provider-a::model-a',
+      bundleId: '',
+    })).toBe('provider-b::model-b');
+    expect(resolveNodeAnnotationModelId({
+      models,
+      currentId: '',
+      preferredId: 'provider-b::model-b',
+      bundleId: '',
+    })).toBe('provider-b::model-b');
+    expect(resolveNodeAnnotationModelId({
+      models,
+      currentId: '',
+      preferredId: 'missing::model',
+      bundleId: '',
+    })).toBe('provider-a::model-a');
+  });
+
+  it('gives an existing annotation bundle model highest priority', () => {
+    expect(resolveNodeAnnotationModelId({
+      models: [
+        { id: 'provider-a::model-a', label: 'Model A' },
+        { id: 'provider-b::model-b', label: 'Model B' },
+      ],
+      currentId: 'provider-a::model-a',
+      preferredId: 'provider-a::model-a',
+      bundleId: 'provider-b::model-b',
+    })).toBe('provider-b::model-b');
+  });
+
   it('filters annotation models by spatial edit capability', () => {
     expect(editorSource).toContain("modelSupports(model.id, 'supportsMask')");
+  });
+
+  it('passes the current canvas model into the node annotation workspace', () => {
+    expect(editorSource).toContain('preferredAnnotationModelId');
+    expect(editorSource).toContain('preferredModelId={preferredAnnotationModelId}');
   });
 
   it('renders the structured annotation bundle as read-only JSON', () => {

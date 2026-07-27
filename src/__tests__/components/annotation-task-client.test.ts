@@ -94,4 +94,39 @@ describe('annotation task client', () => {
       retryable: true,
     });
   });
+
+  it('reports bounded processing progress and only reaches 100 on completion', async () => {
+    mocks.isConnected.mockReturnValue(true);
+    vi.stubGlobal('fetch', vi.fn());
+    const onProgress = vi.fn();
+
+    const pending = waitForAnnotationTaskResult('task-4', { onProgress });
+    taskHandler?.({
+      taskId: 'task-4',
+      type: 'progress',
+      task: {
+        status: 'processing',
+        progress: 150,
+        label: '模型正在处理',
+      },
+    });
+    taskHandler?.({
+      taskId: 'task-4',
+      type: 'completed',
+      task: {
+        status: 'completed',
+        progress: 90,
+        label: '正在保存结果',
+        result: { imageUrl: 'https://example.com/result.png' },
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      imageUrl: 'https://example.com/result.png',
+    });
+    expect(onProgress.mock.calls).toEqual([
+      [95, '模型正在处理'],
+      [100, '修改完成'],
+    ]);
+  });
 });

@@ -83,6 +83,19 @@ function failTask(taskId: string, error: string, networkError = false) {
   updateTaskProgress(taskId, { status: 'failed', error });
 }
 
+async function reportEditTaskProgress(
+  taskId: string,
+  progress: number,
+  stage: string,
+  persistCloud: boolean,
+): Promise<void> {
+  updateTaskStage(taskId, stage, progress);
+  updateTaskProgress(taskId, { status: 'processing', progress, label: stage });
+  if (persistCloud) {
+    await updateCloudTask(taskId, { status: 'processing', progress, label: stage });
+  }
+}
+
 // 支持编辑的模型列表（用于降级静态列表）
 const EDITABLE_MODELS = [
   'gpt-image-2',
@@ -524,6 +537,12 @@ export async function POST(request: NextRequest) {
 
       const finishTask = async (result: Record<string, unknown>): Promise<boolean> => {
         taskSignal.throwIfAborted();
+        await reportEditTaskProgress(
+          taskId,
+          90,
+          '正在保存结果',
+          Boolean(annotationTaskId),
+        );
         if (annotationTaskId) {
           const committed = await completeCloudTask(taskId, {
             requestHash: createAnnotationRequestHash(parsedRequestBody),
@@ -552,6 +571,12 @@ export async function POST(request: NextRequest) {
           return;
         }
         // ========== 2. 解析原图为 Buffer ==========
+    await reportEditTaskProgress(
+      taskId,
+      15,
+      '正在准备图片和蒙版',
+      Boolean(annotationTaskId),
+    );
     const loadedImage = await loadSafeImageInput(image, {
       allowRawBase64: true,
       signal: taskSignal,
@@ -890,6 +915,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
     console.info(`[edit] taskId=${taskId} LLM协作阶段耗时=${Date.now() - llmStartTime}ms, effectivePrompt长度=${effectivePrompt.length}`);
 
+    await reportEditTaskProgress(
+      taskId,
+      30,
+      '正在提交模型',
+      Boolean(annotationTaskId),
+    );
     let editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${aspectRatioExtendHint ? ` ${aspectRatioExtendHint}` : ''}${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
     // 蒙版语义增强：所有路径统一添加蒙版描述
     if (maskBuffer) {
@@ -902,7 +933,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       failTask(taskId, '任务已被取消');
       return;
     }
-    updateTaskStage(taskId, '编辑中');
+    await reportEditTaskProgress(
+      taskId,
+      45,
+      '模型正在处理',
+      Boolean(annotationTaskId),
+    );
     const editStartTime = Date.now();
 
     // ★ mask 预处理已在 LLM 协作之前完成（openaiMaskBuffer / maskImageUrl 已就绪）

@@ -151,6 +151,41 @@ describe('fused annotation component behavior', () => {
     expect(onRemoveAnnotation).toHaveBeenCalledWith('text-1');
   });
 
+  it('renders stage, elapsed time, and bounded progress while executing', () => {
+    const tree = AnnotationComposer({
+      annotations: [brushAnnotation],
+      selectedAnnotationId: brushAnnotation.id,
+      tool: 'brush',
+      prompt: '只修改画笔标记区域',
+      modelId: 'provider::model',
+      isExecuting: true,
+      executionProgress: 45,
+      executionStage: '模型正在处理',
+      executionStartedAt: Date.now() - 5_000,
+      onToolChange: vi.fn(),
+      onPromptChange: vi.fn(),
+      onModelChange: vi.fn(),
+      onSelectAnnotation: vi.fn(),
+      onRemoveAnnotation: vi.fn(),
+      onUpdateInstruction: vi.fn(),
+      onExecute: vi.fn(),
+      onCancel: vi.fn(),
+      onClose: vi.fn(),
+    });
+    const progress = findElement(
+      tree,
+      (element) => element.props.role === 'progressbar',
+    );
+    const markup = renderToStaticMarkup(tree);
+
+    expect(progress?.props['aria-valuenow']).toBe(45);
+    expect(progress?.props['aria-valuemax']).toBe(100);
+    expect(markup).toContain('模型正在处理');
+    expect(markup).toContain('45%');
+    expect(markup).toContain('已用');
+    expect(markup).toContain('取消');
+  });
+
   it('renders committed brush width in constant screen pixels at every zoom', () => {
     const renderAtZoom = (zoom: number): string => renderToStaticMarkup(createElement(
       AnnotationOverlay,

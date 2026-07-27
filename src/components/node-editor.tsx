@@ -609,6 +609,7 @@ interface NodeEditorProps {
   themeStyle?: 'gold' | 'monochrome';
   /** 生成图片后回调，将图片添加到项目 */
   onAddImages?: (imageUrls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
+  preferredAnnotationModelId?: string;
 }
 
 // ==================== 双主题配色 ====================
@@ -759,7 +760,7 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 
-export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
+export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '' }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   // CSS自定义属性，供Tailwind中 var(--ne-xxx) 引用
   const neVars = {
@@ -3377,6 +3378,7 @@ ${contextInfo}
           source={nodeAnnotationSession.source}
           models={annotationModels}
           initialBundle={nodeAnnotationSession.existingBundle}
+          preferredModelId={preferredAnnotationModelId}
           onCreateNode={handleCreateAnnotationNode}
           onClose={() => setNodeAnnotationSession(null)}
         />

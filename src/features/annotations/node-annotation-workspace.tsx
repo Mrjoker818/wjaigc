@@ -39,6 +39,7 @@ interface NodeAnnotationWorkspaceProps {
   source: NodeAnnotationSource;
   models: AnnotationModelOption[];
   initialBundle?: EditIntentBundle | null;
+  preferredModelId?: string;
   onCreateNode: (bundle: EditIntentBundle) => void;
   onClose: () => void;
 }
@@ -60,10 +61,31 @@ function pointInside(
     && point.y <= bounds.top + bounds.height;
 }
 
+interface ResolveNodeAnnotationModelInput {
+  models: AnnotationModelOption[];
+  currentId?: string;
+  preferredId?: string;
+  bundleId?: string;
+}
+
+export function resolveNodeAnnotationModelId({
+  models,
+  currentId = '',
+  preferredId = '',
+  bundleId = '',
+}: ResolveNodeAnnotationModelInput): string {
+  const candidates = [bundleId, currentId, preferredId].filter(Boolean);
+  if (models.length === 0) return candidates[0] || '';
+  return candidates.find((candidate) =>
+    models.some((model) => model.id === candidate),
+  ) || models[0]?.id || '';
+}
+
 export function NodeAnnotationWorkspace({
   source,
   models,
   initialBundle = null,
+  preferredModelId = '',
   onCreateNode,
   onClose,
 }: NodeAnnotationWorkspaceProps) {
@@ -72,10 +94,15 @@ export function NodeAnnotationWorkspace({
   const semanticRequestRef = useRef(0);
   const [naturalSize, setNaturalSize] = useState({ width: 1, height: 1 });
   const [imageBounds, setImageBounds] = useState<MeasuredImageBounds | null>(null);
-  const [modelId, setModelId] = useState(
-    initialBundle?.providerId
-      ? `${initialBundle.providerId}::${initialBundle.modelId}`
-      : models[0]?.id || '',
+  const bundleModelId = initialBundle?.providerId
+    ? `${initialBundle.providerId}::${initialBundle.modelId}`
+    : '';
+  const [modelId, setModelId] = useState(() =>
+    resolveNodeAnnotationModelId({
+      models,
+      preferredId: preferredModelId,
+      bundleId: bundleModelId,
+    }),
   );
   const [error, setError] = useState<string | null>(null);
   const {
@@ -100,19 +127,22 @@ export function NodeAnnotationWorkspace({
       ...nextState,
       prompt: initialBundle?.prompt || '',
     });
-    setModelId(
-      initialBundle?.providerId
-        ? `${initialBundle.providerId}::${initialBundle.modelId}`
-        : models[0]?.id || '',
-    );
     setError(null);
   }, [
     initialBundle,
-    models,
     setState,
     source.sourceImageId,
     source.sourceVersionId,
   ]);
+
+  useEffect(() => {
+    setModelId((currentId) => resolveNodeAnnotationModelId({
+      models,
+      currentId,
+      preferredId: preferredModelId,
+      bundleId: bundleModelId,
+    }));
+  }, [bundleModelId, models, preferredModelId]);
 
   const measureImage = useCallback(() => {
     const frame = imageFrameRef.current?.getBoundingClientRect();
@@ -339,10 +369,12 @@ export function NodeAnnotationWorkspace({
         <NextImage
           unoptimized
           fill
+          draggable={false}
           sizes="76vw"
           src={source.imageUrl}
           alt={source.label}
-          className="object-contain"
+          className="pointer-events-none select-none object-contain"
+          onDragStart={(event) => event.preventDefault()}
           onLoad={(event) => {
             setNaturalSize({
               width: event.currentTarget.naturalWidth || 1,

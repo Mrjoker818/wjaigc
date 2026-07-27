@@ -88,10 +88,18 @@ export function setEditTask(taskId: string, task: EditTask): void {
   editTaskStore.set(taskId, task);
 }
 
-export function updateTaskStage(taskId: string, stage: string): void {
+export function updateTaskStage(
+  taskId: string,
+  stage: string,
+  progress?: number,
+): void {
   const task = editTaskStore.get(taskId);
   if (task?.status === 'processing') {
-    editTaskStore.set(taskId, { ...task, stage });
+    const nextProgress = progress === undefined
+      ? task.progress
+      : Math.min(99, Math.max(0, Math.round(progress)));
+    if (nextProgress < task.progress) return;
+    editTaskStore.set(taskId, { ...task, stage, progress: nextProgress });
   }
 }
 

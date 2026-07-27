@@ -112,6 +112,14 @@ export async function POST(request: NextRequest) {
       );
     }
   }
+  if (source.versionId !== sourceVersionId) {
+    return errorResponse(
+      409,
+      'ANNOTATION_SOURCE_STALE',
+      'Source image version has changed. Refresh the annotation and try again.',
+      requestId,
+    );
+  }
   try {
     const target = await identifyImageTargetAtPoint(
       source.imageUrl,
