@@ -233,7 +233,7 @@ describe('InfiniteCanvas annotation gesture integration', () => {
     expect(canvasSource).toContain("e.code === 'KeyC'");
   });
 
-  it('keeps the annotation entry before the hover-expanded tool group', () => {
+  it('keeps the annotation entry at the end of the hover-expanded tool group', () => {
     const entryIndex = canvasSource.indexOf(
       'data-toolbar="bottom-annotation-entry"',
     );
@@ -243,7 +243,7 @@ describe('InfiniteCanvas annotation gesture integration', () => {
 
     expect(entryIndex).toBeGreaterThan(-1);
     expect(expandedGroupIndex).toBeGreaterThan(-1);
-    expect(entryIndex).toBeLessThan(expandedGroupIndex);
+    expect(entryIndex).toBeGreaterThan(expandedGroupIndex);
   });
 
   it('reserves the visible right-panel width for the annotation composer', () => {
@@ -265,6 +265,18 @@ describe('InfiniteCanvas annotation gesture integration', () => {
 
   it('does not trigger state side effects inside the annotationMode functional updater', () => {
     expect(canvasSource).not.toContain('setAnnotationMode(current => {');
+  });
+
+  it('starts a fresh canvas annotation session instead of blocking another image', () => {
+    expect(canvasSource).toContain(
+      'pointerDownCanvas: beginCanvasAnnotationV2Gesture',
+    );
+    expect(canvasSource).toContain(
+      "toast.info('已切换批注图片，请在当前图片上重新标记')",
+    );
+    expect(canvasSource).not.toContain(
+      "toast.error('同一次批注编辑中只能标注同一张图片，请先完成当前批注')",
+    );
   });
 
   it('wires semantic resolution and bundle execution instead of placeholder actions', () => {

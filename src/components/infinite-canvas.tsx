@@ -1175,7 +1175,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     state: annotationV2State,
     setState: setAnnotationV2State,
     selectTool: selectAnnotationV2Tool,
-    pointerDown: beginAnnotationV2Gesture,
+    pointerDownCanvas: beginCanvasAnnotationV2Gesture,
     pointerMove: updateAnnotationV2Gesture,
     pointerUp: commitAnnotationV2Gesture,
     commitText: commitAnnotationV2Text,
@@ -2956,23 +2956,23 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         },
       };
       const sourceLock = annotationV2State.sourceLock;
-      // 只比较 projectId + imageId，不比较 versionId：
-      // 图片编辑/重新保存后 URL 会变，导致基于 URL 计算的 versionId 失效，
-      // 进而触发跨版本报错。实际业务中只需防止跨图批注，同一张图允许继续标注。
+      const switchesAnnotationImage = Boolean(sourceLock && (
+        sourceLock.projectId !== source.projectId
+        || sourceLock.imageId !== source.imageId
+      ));
+      if (switchesAnnotationImage) {
+        setAnnotationExecutionError(null);
+        toast.info('已切换批注图片，请在当前图片上重新标记');
+      }
       const sourceMatchesLock = !sourceLock || (
         sourceLock.projectId === source.projectId
         && sourceLock.imageId === source.imageId
       );
-      if (!sourceMatchesLock) {
-        beginAnnotationV2Gesture(source, { x: e.clientX, y: e.clientY });
-        toast.error('同一次批注编辑中只能标注同一张图片，请先完成当前批注');
-        return;
-      }
 
       setSelectedIds(new Set([targetImage.id]));
       selectImage(targetImage.id);
 
-      if (annotationV2State.tool === 'text') {
+      if (sourceMatchesLock && annotationV2State.tool === 'text') {
         const textAnnotation = annotationV2State.annotations.find((annotation) => {
           if (
             annotation.sourceImageId !== targetImage.id
@@ -2998,7 +2998,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }
       }
 
-      beginAnnotationV2Gesture(source, { x: e.clientX, y: e.clientY });
+      beginCanvasAnnotationV2Gesture(source, { x: e.clientX, y: e.clientY });
       annotationPointerIdRef.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
@@ -3176,7 +3176,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       setBoxSelectStart({ x: e.clientX, y: e.clientY });
       setBoxSelectEnd({ x: e.clientX, y: e.clientY });
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, updatePanPreview, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, updatePanPreview, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (

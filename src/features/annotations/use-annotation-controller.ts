@@ -287,6 +287,34 @@ export function beginAnnotationGesture(
   };
 }
 
+/**
+ * The canvas is an image browser, so clicking another image means starting a
+ * new edit session. Keep the strict beginAnnotationGesture behavior for node
+ * workflows, but release the previous canvas source and its transient marks.
+ */
+export function beginCanvasAnnotationGesture(
+  state: AnnotationControllerState,
+  source: AnnotationSource,
+  point: ScreenPoint,
+): AnnotationControllerState {
+  const received = sourceIdentity(source);
+  const expected = state.sourceLock
+    ?? (state.annotations[0] ? annotationSourceIdentity(state.annotations[0]) : null);
+  if (!expected || sourcesMatch(expected, received)) {
+    return beginAnnotationGesture(state, source, point);
+  }
+
+  return beginAnnotationGesture({
+    ...state,
+    annotations: [],
+    gesture: { kind: 'idle' },
+    selectedAnnotationId: null,
+    brushScreenWidths: {},
+    sourceLock: null,
+    sourceMismatch: null,
+  }, source, point);
+}
+
 export function updateAnnotationGesture(
   state: AnnotationControllerState,
   point: ScreenPoint,
@@ -596,6 +624,9 @@ export function useAnnotationController(initialAnnotations: CanvasAnnotationV2[]
   const pointerDown = useCallback((source: AnnotationSource, point: ScreenPoint) => {
     updateState((current) => beginAnnotationGesture(current, source, point));
   }, [updateState]);
+  const pointerDownCanvas = useCallback((source: AnnotationSource, point: ScreenPoint) => {
+    updateState((current) => beginCanvasAnnotationGesture(current, source, point));
+  }, [updateState]);
   const pointerMove = useCallback((point: ScreenPoint) => {
     updateState((current) => updateAnnotationGesture(current, point));
   }, [updateState]);
@@ -647,6 +678,7 @@ export function useAnnotationController(initialAnnotations: CanvasAnnotationV2[]
     migrateSource,
     selectTool,
     pointerDown,
+    pointerDownCanvas,
     pointerMove,
     pointerUp,
     commitText,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   beginAnnotationGesture,
+  beginCanvasAnnotationGesture,
   buildAnnotationSourceVersionId,
   cancelGestureOrCloseMode,
   commitAnnotationGesture,
@@ -121,6 +122,29 @@ describe('annotation controller state machine', () => {
     expect(state.gesture.kind).toBe('brush');
     expect(state.sourceMismatch?.code).toBe('source-mismatch');
     expect(state.sourceLock?.imageId).toBe('image-1');
+  });
+
+  it('starts a fresh canvas annotation session when the user switches images', () => {
+    const otherSource: AnnotationSource = {
+      ...source,
+      imageId: 'image-2',
+      versionId: 'version-2',
+      imageRect: { x: 600, y: 100, width: 400, height: 300 },
+    };
+    let state = selectAnnotationTool(createInitialAnnotationControllerState(), 'region');
+    state = beginAnnotationGesture(state, source, { x: 120, y: 120 });
+    state = commitAnnotationGesture(state, { x: 220, y: 220 }, 'ann-1', 1);
+
+    state = beginCanvasAnnotationGesture(state, otherSource, { x: 620, y: 120 });
+
+    expect(state.annotations).toHaveLength(0);
+    expect(state.gesture.kind).toBe('region');
+    expect(state.sourceLock).toEqual({
+      projectId: 'project-1',
+      imageId: 'image-2',
+      versionId: 'version-2',
+    });
+    expect(state.sourceMismatch).toBeNull();
   });
 
   it('carries the current prompt onto a committed arrow', () => {
