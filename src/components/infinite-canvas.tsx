@@ -15729,7 +15729,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           return (
             <div
               className="absolute z-50 pointer-events-auto"
+              data-toolbar="image-action-toolbar"
               style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -100%)' }}
+              onPointerDown={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
