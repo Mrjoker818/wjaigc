@@ -136,12 +136,15 @@ export async function downloadPublicImage(
     const requestFn = url.protocol === 'https:' ? httpsRequest : httpRequest;
     const req = requestFn(url, {
       method: 'GET',
-      autoSelectFamily: false,
       headers: {
         Accept: [...IMAGE_MIME_TYPES].join(','),
         'User-Agent': 'WujieAI-SafeImageDownloader/1.0',
       },
-      lookup: (_hostname, _options, callback) => {
+      lookup: (_hostname, lookupOptions, callback) => {
+        if (lookupOptions.all) {
+          callback(null, [pinned]);
+          return;
+        }
         callback(null, pinned.address, pinned.family);
       },
       ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
