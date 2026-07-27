@@ -2,6 +2,7 @@ import path from 'path';
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  turbopack: {},
   outputFileTracingRoot: path.resolve(__dirname),
   serverExternalPackages: [
     'wasm_vtracer',
