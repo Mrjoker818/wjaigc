@@ -19,6 +19,7 @@ import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-
 import type { GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import type { VideoGenerationPanelHandle } from '@/components/video-generation-panel';
 import type { QuickCreateCompileViewState, QuickCreateRequest } from '@/components/quick-create-panel';
+import type { VectorDesignAsset } from '@/components/vector-design/vector-editor-dialog';
 import {
   resolveQuickCreateModel,
   type QuickCreateModelCandidate,
@@ -75,6 +76,7 @@ const VideoGenerationPanel = dynamic(() => import('@/components/video-generation
 const ImagePreview = dynamic(() => import('@/components/image-preview').then(m => m.ImagePreview), { loading: () => null });
 const ChatPanel = dynamic(() => import('@/components/chat-panel').then(m => m.ChatPanel), { loading: () => null });
 const QuickCreatePanel = dynamic(() => import('@/components/quick-create-panel').then(m => m.QuickCreatePanel), { loading: () => null });
+const VectorDesignPanel = dynamic(() => import('@/components/vector-design/vector-design-panel').then(m => m.VectorDesignPanel), { loading: () => null });
 const PromptEquation = dynamic(() => import('@/components/prompt-equation').then(m => m.PromptEquation), { loading: () => null });
 const NodeEditor = dynamic(() => import('@/components/node-editor'), { loading: () => null });
 const WorkflowHub = dynamic(() => import('@/components/workflow-hub'), { loading: () => null });
@@ -87,7 +89,7 @@ const PromptTemplatePanel = dynamic(() => import('@/components/prompt-template-p
 
 type ThemeStyle = 'gold' | 'monochrome';
 type ActivePanel = 'generate' | 'video' | 'chat';
-type CreateMode = 'quick' | 'professional';
+type CreateMode = 'quick' | 'professional' | 'vector';
 
 interface QuickCreateModelPolicy {
   autoModelRouting: boolean;
@@ -2482,6 +2484,48 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     }
   }, [images, currentUser?.id, setImages, autoLayoutImages, stabilizeCanvasImages]);
 
+  const handleAddVectorAsset = useCallback(async (asset: VectorDesignAsset, sourceImageId?: string) => {
+    const sourceImage = sourceImageId ? latestImagesRef.current.find(img => img.id === sourceImageId) : undefined;
+    const baseSize = sourceImage
+      ? await loadCanvasImageSize(sourceImage.url)
+      : { width: asset.width, height: asset.height };
+    const display = getCanvasImageDisplaySize(baseSize.width, baseSize.height);
+    const baseX = sourceImage ? sourceImage.x + sourceImage.width + 20 : 0;
+    const baseY = sourceImage ? sourceImage.y : 0;
+    const newImage: CanvasImage = {
+      id: `vector-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      url: asset.previewUrl,
+      svgUrl: asset.svgUrl,
+      svgDataUrl: asset.svg,
+      prompt: 'AI 矢量设计',
+      x: baseX,
+      y: baseY,
+      width: display.width,
+      height: display.height,
+      originalWidth: baseSize.width,
+      originalHeight: baseSize.height,
+      createdAt: Date.now(),
+      modelName: asset.model || 'AI 矢量设计',
+      apiProvider: asset.providerName || asset.providerId,
+      generatedFromImageId: sourceImage?.id,
+    };
+    setImages(prev => [...prev, newImage]);
+    if (sourceImage) {
+      setCanvasConnections(prev => [...prev, createAutoConnection(sourceImage.id, newImage.id, 'edit', 'AI 矢量')]);
+    }
+    stabilizeCanvasImages([{ id: newImage.id, url: newImage.url }]);
+    recordUserData({
+      userId: currentUser?.id,
+      area: 'images',
+      type: 'vector-design-add',
+      metadata: { model: asset.model, provider: asset.providerName || asset.providerId },
+    });
+    toast.success('矢量图已插入画布', {
+      description: 'PNG 预览用于画布展示，SVG 原件已保存，可在矢量面板继续编辑或下载',
+      className: 'bg-[#141414] border-[#2a2a2a] text-white',
+    });
+  }, [currentUser?.id, getCanvasImageDisplaySize, loadCanvasImageSize, setCanvasConnections, setImages, stabilizeCanvasImages]);
+
   // 提取图片关键词
   const handleExtractPrompt = useCallback(async (imageUrl: string) => {
     try {
@@ -4808,6 +4852,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 >
                   专业创作
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setCreateMode('vector')}
+                  className={`min-h-9 flex-1 rounded-lg px-3 text-xs font-semibold transition-colors ${createMode === 'vector' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                >
+                  AI 矢量
+                </button>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto scroll-smooth" style={{
                 scrollbarWidth: 'thin',
@@ -4828,6 +4879,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     onOpenProfessional={handleOpenQuickProfessional}
                     onOpenChat={handleOpenQuickChat}
                     onOpenVideo={handleOpenVideoPanel}
+                  />
+                ) : createMode === 'vector' ? (
+                  <VectorDesignPanel
+                    themeStyle={themeStyle}
+                    selectedImage={selectedImage ? {
+                      id: selectedImage.id,
+                      url: selectedImage.url,
+                      svgUrl: selectedImage.svgUrl,
+                      svgDataUrl: selectedImage.svgDataUrl,
+                    } : null}
+                    onAddVector={handleAddVectorAsset}
                   />
                 ) : (
                   <GenerationPanel
