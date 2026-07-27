@@ -87,6 +87,18 @@ export function isPublicIpAddress(address: string): boolean {
   ) && firstHextet >= 0x2000 && firstHextet <= 0x3fff;
 }
 
+export function isAllowedRemoteImageAddress(
+  hostname: string,
+  address: string,
+  options: { allowCozeEgressProxy?: boolean } = {},
+): boolean {
+  if (isPublicIpAddress(address)) return true;
+  if (!options.allowCozeEgressProxy || isIP(hostname) !== 0) return false;
+
+  const value = ipv4Number(address);
+  return value !== null && inIpv4Range(value, '198.18.0.0', 15);
+}
+
 export async function downloadPublicImage(
   input: string | URL,
   options: { maxBytes?: number; timeoutMs?: number; signal?: AbortSignal } = {},
@@ -102,7 +114,18 @@ export async function downloadPublicImage(
 
   const addresses = await lookup(url.hostname, { all: true, verbatim: true });
   options.signal?.throwIfAborted();
-  if (addresses.length === 0 || addresses.some(({ address }) => !isPublicIpAddress(address))) {
+  const allowCozeEgressProxy = Boolean(
+    process.env.COZE_PROJECT_ENV?.trim()
+    || process.env.COZE_PROJECT_DOMAIN_DEFAULT?.trim(),
+  );
+  if (
+    addresses.length === 0
+    || addresses.some(({ address }) => !isAllowedRemoteImageAddress(
+      url.hostname,
+      address,
+      { allowCozeEgressProxy },
+    ))
+  ) {
     throw new SafeImageDownloadError('The image host resolves to a private or reserved address');
   }
   const pinned = addresses[0];
@@ -113,6 +136,7 @@ export async function downloadPublicImage(
     const requestFn = url.protocol === 'https:' ? httpsRequest : httpRequest;
     const req = requestFn(url, {
       method: 'GET',
+      autoSelectFamily: false,
       headers: {
         Accept: [...IMAGE_MIME_TYPES].join(','),
         'User-Agent': 'WujieAI-SafeImageDownloader/1.0',

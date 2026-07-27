@@ -129,6 +129,14 @@ export async function POST(request: NextRequest) {
       );
     }
   }
+  if (source.versionId !== bundle.sourceVersionId) {
+    return errorResponse(
+      409,
+      'ANNOTATION_SOURCE_STALE',
+      '批注源图版本已变化，请重新标注后再执行修改',
+      requestId,
+    );
+  }
   try {
     const resolved = await resolveAnnotationProvider(
       bundle.providerId,

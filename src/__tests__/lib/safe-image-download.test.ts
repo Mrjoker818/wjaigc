@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { isPublicIpAddress } from '@/lib/safe-image-download';
+import {
+  isAllowedRemoteImageAddress,
+  isPublicIpAddress,
+} from '@/lib/safe-image-download';
 
 describe('safe remote image download address policy', () => {
   it.each([
@@ -28,5 +31,26 @@ describe('safe remote image download address policy', () => {
     '2606:4700:4700::1111',
   ])('allows public address %s', (address) => {
     expect(isPublicIpAddress(address)).toBe(true);
+  });
+
+  it('allows the Coze transparent egress proxy only for a domain name', () => {
+    expect(isAllowedRemoteImageAddress(
+      'images.unsplash.com',
+      '198.18.0.241',
+      { allowCozeEgressProxy: true },
+    )).toBe(true);
+    expect(isAllowedRemoteImageAddress(
+      '198.18.0.241',
+      '198.18.0.241',
+      { allowCozeEgressProxy: true },
+    )).toBe(false);
+  });
+
+  it('keeps the Coze proxy range blocked outside the Coze runtime', () => {
+    expect(isAllowedRemoteImageAddress(
+      'images.unsplash.com',
+      '198.18.0.241',
+      { allowCozeEgressProxy: false },
+    )).toBe(false);
   });
 });
