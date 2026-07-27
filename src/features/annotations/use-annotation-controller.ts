@@ -98,10 +98,11 @@ function sourcesMatch(
   first: AnnotationSourceIdentity,
   second: AnnotationSourceIdentity,
 ): boolean {
+  // 只比较 projectId + imageId，不比较 versionId：
+  // 图片编辑后 URL 变化会导致 versionId 失效，但用户仍应能在同一张图上继续批注。
   return (
     first.projectId === second.projectId
     && first.imageId === second.imageId
-    && first.versionId === second.versionId
   );
 }
 

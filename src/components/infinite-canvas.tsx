@@ -1036,6 +1036,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Context menu
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [showContextMenu, setShowContextMenu] = useState(false);
+  // 记录右键命中的图片 id，供上下文菜单动作（如元素拆解）精确定位目标图片，
+  // 避免因 selectedIds/editImageId 状态时序问题导致取到错误或空图片
+  const contextMenuTargetRef = useRef<string | null>(null);
 
   // Canvas context menu
   const [canvasMenuPos, setCanvasMenuPos] = useState({ x: 0, y: 0 });
@@ -2941,14 +2944,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         },
       };
       const sourceLock = annotationV2State.sourceLock;
+      // 只比较 projectId + imageId，不比较 versionId：
+      // 图片编辑/重新保存后 URL 会变，导致基于 URL 计算的 versionId 失效，
+      // 进而触发跨版本报错。实际业务中只需防止跨图批注，同一张图允许继续标注。
       const sourceMatchesLock = !sourceLock || (
         sourceLock.projectId === source.projectId
         && sourceLock.imageId === source.imageId
-        && sourceLock.versionId === source.versionId
       );
       if (!sourceMatchesLock) {
         beginAnnotationV2Gesture(source, { x: e.clientX, y: e.clientY });
-        toast.error('Annotations in one edit must use the same source image version');
+        toast.error('同一次批注编辑中只能标注同一张图片，请先完成当前批注');
         return;
       }
 
@@ -3926,6 +3931,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const hitId = hitTestImage(canvasPos.x, canvasPos.y);
 
     if (hitId) {
+      // 记录右键命中的图片 id，供菜单动作（元素拆解等）精确定位目标
+      contextMenuTargetRef.current = hitId;
       if (!selectedIds.has(hitId)) {
         // If multi-select is active, add the clicked image to selection instead of replacing
         if (selectedIds.size > 1) {
@@ -7234,14 +7241,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, completeProcessingFrame, onImagesChange]);
 
   const handleOpenDisplayDecompose = useCallback(() => {
-    // Snapshot selection directly from ref to avoid React state timing issues
-    // (canvas mousedown may clear selectedIds before React batches the new render)
+    // 优先使用右键时记录的命中图片 id（通过 ref 规避 React 批量更新时序问题），
+    // 其次从 selectedIds/editImageId 兜底
+    const targetId = contextMenuTargetRef.current;
     const selArr = Array.from(selectedIds);
     const img =
-      (editImageId ? imagesRef.current.find(i => i.id === editImageId) : null) ||
+      (targetId ? imagesRef.current.find(i => i.id === targetId) : null) ||
       (selArr.length === 1 ? imagesRef.current.find(i => i.id === selArr[0]) : null) ||
+      (editImageId ? imagesRef.current.find(i => i.id === editImageId) : null) ||
       (selectedIds.size === 1 ? selectedImageData : null);
     if (!img) return;
+    contextMenuTargetRef.current = null; // 使用后清空，避免影响下次工具栏触发
     setEditImageId(img.id);
     setShowDisplayDecomposePanel(true);
     setShowToolbarCustomize(false);
