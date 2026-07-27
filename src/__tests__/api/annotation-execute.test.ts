@@ -366,6 +366,7 @@ describe('POST /api/annotations/execute', () => {
     expect(mocks.submitAnnotationEdit).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
+        signal: expect.any(AbortSignal),
         request: expect.objectContaining({
           idempotencyKey: 'idem-1',
           requestId: 'req-test-1',

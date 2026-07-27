@@ -6,6 +6,7 @@ interface SubmitAnnotationEditInput {
   request: AnnotationProviderRequest;
   userId: string;
   userRole: string;
+  signal?: AbortSignal;
 }
 
 interface SubmitAnnotationEditResult {
@@ -17,7 +18,9 @@ export async function submitAnnotationEdit({
   request,
   userId,
   userRole,
+  signal,
 }: SubmitAnnotationEditInput): Promise<SubmitAnnotationEditResult> {
+  const timeoutSignal = AbortSignal.timeout(120_000);
   const response = await fetch(getInternalApiUrl('/api/edit'), {
     method: 'POST',
     headers: {
@@ -40,7 +43,7 @@ export async function submitAnnotationEdit({
       quality: request.quality,
       count: 1,
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
   });
 
   const payload = await response.json().catch(() => null) as {

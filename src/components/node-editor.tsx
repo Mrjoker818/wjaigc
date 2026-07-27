@@ -167,6 +167,34 @@ interface HistoryEntry {
   label: string;
 }
 
+interface WorkflowExecutionLog {
+  time: number;
+  nodeId: string;
+  label: string;
+  status: string;
+  message: string;
+  duration?: number;
+  nodeType?: string;
+}
+
+function mergeExecutionLogs(
+  current: WorkflowExecutionLog[],
+  incoming: WorkflowExecutionLog[],
+): WorkflowExecutionLog[] {
+  const seen = new Set(
+    current.map(log => `${log.nodeId}\u0000${log.status}\u0000${log.message}`),
+  );
+  return [
+    ...current,
+    ...incoming.filter(log => {
+      const key = `${log.nodeId}\u0000${log.status}\u0000${log.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  ];
+}
+
 // ==================== 工作流预设模板 ====================
 
 interface WorkflowPreset {
@@ -878,7 +906,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const [aiBuildOpen, setAiBuildOpen] = useState(false);
 
   // P1: 执行日志
-  const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string; duration?: number; nodeType?: string }[]>([]);
+  const [execLogs, setExecLogs] = useState<WorkflowExecutionLog[]>([]);
 
   // B1: 工作流执行状态持久化 — 切页/刷新后恢复执行进度
   const WORKFLOW_EXEC_STATE_KEY = 'wujie_workflow_exec_state';
@@ -2296,22 +2324,23 @@ ${contextInfo}
         if (data.status === 'completed' || data.status === 'failed') {
           setExecStatus(data.status === 'completed' ? 'completed' : 'failed');
           setExecResults(data.results || {});
+          // P1: 记录执行日志
+          let finalLogs: WorkflowExecutionLog[] = [];
+          if (data.results) {
+            finalLogs = Object.entries(data.results as Record<string, { status: string; output?: Record<string, unknown>; error?: string }>).map(([nodeId, result]) => {
+              const node = wf.nodes.find(n => n.id === nodeId);
+              return { time: Date.now(), nodeId, label: node?.label || nodeId, status: result.status, message: result.error || (result.output ? '完成' : '未知') };
+            });
+            setExecLogs(prev => mergeExecutionLogs(prev, finalLogs));
+          }
           // B1: 持久化最终结果，3秒后清除
-          const finalState = { executionId, execStatus: data.status, execResults: data.results || {}, execLogs };
+          const finalState = { executionId, execStatus: data.status, execResults: data.results || {}, execLogs: finalLogs };
           localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify(finalState));
           setTimeout(() => {
             if (localStorage.getItem(WORKFLOW_EXEC_STATE_KEY) === JSON.stringify(finalState)) {
               localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
             }
           }, 3000);
-          // P1: 记录执行日志
-          if (data.results) {
-            const newLogs = Object.entries(data.results as Record<string, { status: string; output?: Record<string, unknown>; error?: string }>).map(([nodeId, result]) => {
-              const node = wf.nodes.find(n => n.id === nodeId);
-              return { time: Date.now(), nodeId, label: node?.label || nodeId, status: result.status, message: result.error || (result.output ? '完成' : '未知') };
-            });
-            setExecLogs(prev => [...prev, ...newLogs]);
-          }
           // 持久化: 将工作流生成的图片添加到项目
           if (data.status === 'completed' && onAddImages && data.results) {
             const generatedUrls: string[] = [];
@@ -2358,7 +2387,7 @@ ${contextInfo}
               const node = wf.nodes.find(n => n.id === nodeId);
               return { time: Date.now(), nodeId, label: node?.label || nodeId, status: result.status, message: result.error || (result.output ? '完成' : '运行中') };
             });
-          if (newLogs.length > 0) setExecLogs(prev => [...prev, ...newLogs]);
+          if (newLogs.length > 0) setExecLogs(prev => mergeExecutionLogs(prev, newLogs));
         }
       } catch (err) {
         // 临时网络错误不直接终止轮询，允许重试
@@ -2382,7 +2411,7 @@ ${contextInfo}
     };
     poll();
     return () => { if (timerId) clearTimeout(timerId); };
-  }, [execLogs, execStatus, executionId, onAddImages, wf.nodes]);
+  }, [execStatus, executionId, onAddImages, wf.nodes]);
 
   // ─── 保存工作流 ───
 

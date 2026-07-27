@@ -23,6 +23,13 @@ describe('node editor execution wiring', () => {
     expect(source).toContain('setExecStatus(\'failed\')');
   });
 
+  it('does not restart polling when logs change and deduplicates settled node logs', () => {
+    expect(source).not.toContain(
+      '}, [execLogs, execStatus, executionId, onAddImages, wf.nodes]);',
+    );
+    expect(source).toContain('mergeExecutionLogs(prev, newLogs)');
+  });
+
   it('keeps the canvas image picker wide enough to select an owned source image', () => {
     expect(source).toContain('className="relative flex-1 group/canvas"');
     expect(source).toContain(

@@ -45,6 +45,12 @@ describe('workflow annotation internal authentication wiring', () => {
     );
   });
 
+  it('allows annotation submission enough time to compile assets and create the edit task', () => {
+    expect(source).toMatch(
+      /const isGenerateEndpoint = [^\n]+submitUrl\.includes\('\/api\/annotations\/execute'\)/,
+    );
+  });
+
   it('reuses signed workflow headers while polling an asynchronous task', () => {
     expect(source).toMatch(
       /fetch\(`http:\/\/localhost:\$\{port\}\/api\/poll-task`, \{[\s\S]+?headers: fetchOptions\.headers/,

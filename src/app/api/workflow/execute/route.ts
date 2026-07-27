@@ -986,7 +986,7 @@ async function executeAsyncTask(
   const start = Date.now();
 
   // 提交任务（/api/generate 在 direct 模式下可能同步等待数分钟，需要足够长的超时）
-  const isGenerateEndpoint = submitUrl.includes('/api/generate') || submitUrl.includes('/api/edit') || submitUrl.includes('/api/image-edit') || submitUrl.includes('/api/video/generate') || submitUrl.includes('/api/video/extend');
+  const isGenerateEndpoint = submitUrl.includes('/api/generate') || submitUrl.includes('/api/edit') || submitUrl.includes('/api/image-edit') || submitUrl.includes('/api/annotations/execute') || submitUrl.includes('/api/video/generate') || submitUrl.includes('/api/video/extend');
   const submitTimeoutMs = isGenerateEndpoint ? 600000 : 30000; // 生成/编辑类接口10分钟，其他30秒
   const submitRes = await fetch(submitUrl, {
     ...fetchOptions,

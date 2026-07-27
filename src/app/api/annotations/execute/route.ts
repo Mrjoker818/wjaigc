@@ -16,7 +16,7 @@ import {
 import { normalizeTrustedManagedMediaInput } from '@/lib/safe-image-input';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 180;
 const MAX_REQUEST_BYTES = 512 * 1024;
 
 function errorResponse(
@@ -176,6 +176,7 @@ export async function POST(request: NextRequest) {
       request: providerRequest,
       userId: auth.userId,
       userRole: auth.userRole,
+      signal: request.signal,
     });
 
     return NextResponse.json({
