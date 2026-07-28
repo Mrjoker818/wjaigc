@@ -169,3 +169,25 @@ pnpm lint --quiet → 0 errors
 ## 结论
 
 全部 109 项回归测试 **100% 通过**，无回归问题。修复的 6 个缺陷（1个P0 + 2个P1 + 3个P2）均未引入新的回归。跨浏览器兼容性验证通过（Chromium/Firefox/WebKit 三浏览器 E2E 全绿）。
+
+## 2026-07-29 Task 9 增量回归结果
+
+> 基线提交：`aefb36e91eb4f4d08a8d9dcceeaf11feb64ad310`
+> 本地地址：`http://127.0.0.1:5000`
+> 云端基线：`https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9-5000.dev.coze.site/`
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| `node scripts/doctor.mjs` | PASS WITH WARNINGS | 23 passed / 10 warnings / 0 failed；缺少本地生产密钥、数据库、对象存储和部署 URL |
+| Pear/分层专项 Vitest | PASS WITH SKIP | 68 passed / 1 skipped；PostgreSQL 并发测试因无测试数据库跳过 |
+| 分层 Playwright Chromium | UNVERIFIED | 4 skipped；缺少 `E2E_TEST_USERNAME` / `E2E_TEST_PASSWORD`，真实 Pear 还需 provider/model/付费开关 |
+| 云端 Chrome 基线 | PARTIAL | 已登录，图片工具栏存在“编辑元素”；点击后直接进入旧的 4 层 PSD 编辑器，未显示本地 Task 9 的三模式入口 |
+| 全仓 Vitest | FAIL | 1085 passed / 48 failed / 23 skipped，17 个测试文件失败 |
+
+云端检查仅用于部署前基线，不是新版本验收。当前云端尚未包含本地领先提交，不能用旧版界面证明 `smart`、`cloud`、`local` 三模式通过。
+
+**本次回归结论：不通过。** 分层专项代码门禁通过，但全仓门禁、真实 Pear 云端完成链路和 PostgreSQL 并发验证均未满足发布标准。
+
+Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Next.js 16.2.10 生产构建通过并生成 110 个静态页面。CI 已接入 Chromium 真实 Pear 用例和 Firefox/WebKit 非付费分层回归；这些 CI 用例仍需在 GitHub Secrets 与新云端部署就绪后实际运行。
+
+补充回归已覆盖快速双击同步互斥、干净 CI runner 数据目录和非受信任 PR 不读取付费 Secrets。GitHub Actions YAML 已使用结构化解析器验证。

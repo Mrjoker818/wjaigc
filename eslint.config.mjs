@@ -44,9 +44,14 @@ const eslintConfig = defineConfig([
     // Build artifacts:
     'server.js',
     'dist/**',
+    // Nested checkouts are independent repositories and may contain their own build output.
+    '.worktrees/**',
     // Generated Playwright reports and captured evidence contain third-party bundled code.
+    '.playwright-cli/**',
+    '.playwright-output/**',
     'playwright-report/**',
     'test-results/**',
+    'output/**',
     // Script files (CommonJS):
     'scripts/**/*.js',
     // User assets (upgrade packages etc):

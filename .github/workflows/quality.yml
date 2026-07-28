@@ -1,0 +1,137 @@
+name: Quality gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-and-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PGDATABASE_URL: ${{ secrets.PGDATABASE_URL }}
+      WUJIE_AUTH_SECRET: ${{ secrets.WUJIE_AUTH_SECRET }}
+      INTERNAL_API_SECRET: ${{ secrets.INTERNAL_API_SECRET }}
+      PAYMENT_TOKEN_SECRET: ${{ secrets.PAYMENT_TOKEN_SECRET }}
+      WUJIE_ADMIN_PASSWORD: ${{ secrets.WUJIE_ADMIN_PASSWORD }}
+      MANDATORY_API_AUTH: 'true'
+      WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare doctor data directory
+        run: mkdir -p "$WUJIE_DATA_DIR"
+      - name: Environment doctor (production)
+        if: >-
+          github.event_name != 'pull_request' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]')
+        run: pnpm doctor -- --production
+      - name: Environment doctor (untrusted pull request)
+        if: >-
+          github.event_name == 'pull_request' &&
+          (github.event.pull_request.head.repo.full_name != github.repository ||
+          github.actor == 'dependabot[bot]')
+        run: pnpm doctor
+      - name: TypeScript
+        run: pnpm ts-check
+      - name: ESLint
+        run: pnpm lint:build
+      - name: Unit and integration tests
+        run: pnpm test
+      - name: API tests
+        run: pnpm test:api
+      - name: Production dependency audit
+        run: pnpm audit --prod --json --registry=https://registry.npmjs.org
+      - name: Production build
+        run: pnpm build
+      - name: Upload unit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            test-results/
+            coverage/
+          if-no-files-found: ignore
+
+  real-p0-browser:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+      E2E_TEST_USERNAME: ${{ secrets.E2E_TEST_USERNAME }}
+      E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+      E2E_GENERATION_MODEL: ${{ secrets.E2E_GENERATION_MODEL }}
+      E2E_ENABLE_PAID_GENERATION: ${{ secrets.E2E_ENABLE_PAID_GENERATION }}
+      E2E_LAYER_PROVIDER_ID: ${{ secrets.E2E_LAYER_PROVIDER_ID }}
+      E2E_LAYER_MODEL_ID: ${{ secrets.E2E_LAYER_MODEL_ID }}
+      E2E_ENABLE_PAID_LAYERING: ${{ secrets.E2E_ENABLE_PAID_LAYERING }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate real P0 E2E configuration
+        shell: bash
+        run: |
+          missing=0
+          for name in E2E_BASE_URL E2E_TEST_USERNAME E2E_TEST_PASSWORD E2E_GENERATION_MODEL E2E_ENABLE_PAID_GENERATION E2E_LAYER_PROVIDER_ID E2E_LAYER_MODEL_ID E2E_ENABLE_PAID_LAYERING; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing E2E configuration::$name is required"
+              missing=1
+            fi
+          done
+          if [ "$E2E_ENABLE_PAID_GENERATION" != "1" ]; then
+            echo "::error title=Paid E2E disabled::E2E_ENABLE_PAID_GENERATION must be 1"
+            missing=1
+          fi
+          if [ "$E2E_ENABLE_PAID_LAYERING" != "1" ]; then
+            echo "::error title=Paid layer E2E disabled::E2E_ENABLE_PAID_LAYERING must be 1"
+            missing=1
+          fi
+          exit "$missing"
+      - name: Install browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Run real P0 and Pear Chromium journeys
+        run: pnpm exec playwright test tests/e2e/p0-core.spec.ts tests/e2e/layer-editing.spec.ts --project=chromium
+      - name: Run non-billable cross-browser layer regression
+        env:
+          LAYER_E2E_SKIP_PROVIDER_CALL: '1'
+        run: pnpm exec playwright test tests/e2e/layer-editing.spec.ts --project=firefox --project=webkit
+      - name: Collect immutable browser evidence
+        if: always()
+        run: pnpm test:artifacts
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-browser-evidence
+          path: |
+            playwright-report/
+            test-results/
+            .playwright-output/
+          if-no-files-found: warn

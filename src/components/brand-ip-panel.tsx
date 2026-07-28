@@ -1083,7 +1083,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                     <div className="bi-analysis-state">
                       <div className="bi-orb-loader" style={{ animation: 'none', opacity: 0.4 }}><span /></div>
                       <strong style={{ color: '#646770' }}>等待策略分析</strong>
-                      <p>填写左侧品牌目标后点击"生成策略与方向"</p>
+                      <p>填写左侧品牌目标后点击&quot;生成策略与方向&quot;</p>
                     </div>
                   )}
 
@@ -1364,7 +1364,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                   <span>!</span>
                   <div>
                     <strong>风险提示</strong>
-                    <p>系统输出的商标、版权和原创性判断均为"待核验"状态，不构成法律结论。请在商用前完成专业检索和法务审查。</p>
+                    <p>系统输出的商标、版权和原创性判断均为&quot;待核验&quot;状态，不构成法律结论。请在商用前完成专业检索和法务审查。</p>
                   </div>
                 </div>
               </div>

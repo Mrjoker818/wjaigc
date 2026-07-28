@@ -8955,7 +8955,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     '裁切': 'text-rose-500', '精修引擎': 'text-violet-500', '人物精修大师': 'text-emerald-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
     '下载': 'text-gray-600',
   };
-  const imageActions = [
+  const imageActions: Array<{
+    icon: React.ReactNode;
+    label: string;
+    desc: string;
+    action: () => void;
+    testId?: string;
+  }> = [
     { icon: <ZoomIn size={14} className={isMonochrome ? monoColors['放大'] : ''} />, label: '放大', desc: '智能补细节放大，变大变高清，不改内容', action: handleOpenUpscale },
     { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => setShowRemoveBgPicker(true) },
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
@@ -8963,7 +8969,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase },
     { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask },
     { icon: <Palette size={14} className={isMonochrome ? '' : 'text-pink-500'} />, label: '调色', desc: '亮度/对比度/饱和度/色温/色相参数调节', action: handleOpenColorAdjust },
-    { icon: <Layers size={14} className={isMonochrome ? monoColors['编辑元素'] : ''} />, label: '编辑元素', desc: '按元素分层，独立编辑', action: handleEditElements },
+    { icon: <Layers size={14} className={isMonochrome ? monoColors['编辑元素'] : ''} />, label: '编辑元素', desc: '按元素分层，独立编辑', action: handleEditElements, testId: 'canvas-edit-elements' },
     { icon: <RotateCcw size={14} className={isMonochrome ? monoColors['多角度'] : ''} />, label: '多角度', desc: '多视角生成', action: handleOpenMultiAngle },
     { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['图转3D工厂'] : ''} />, label: '图转3D工厂', desc: '生成3D模型预览', action: handleOpen3D },
     { icon: <Expand size={14} className={isMonochrome ? monoColors['扩展'] : ''} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
@@ -15812,6 +15818,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {displayedActions.map((action, idx) => (
                   <div key={action.label} className="relative">
                     <button
+                      data-testid={action.testId}
                       onClick={(e) => { e.stopPropagation(); action.action(); }}
                       className={`flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-medium transition-all ${
                         isMonochrome
@@ -16620,7 +16627,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         <div className={`w-px h-5 mx-1 ${separatorCls}`} />
 
-        <input ref={uploadFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleCanvasImageUpload} />
+        <input data-testid="canvas-image-upload-input" ref={uploadFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleCanvasImageUpload} />
         <button
           aria-label="图片上传"
           onClick={() => uploadFileInputRef.current?.click()}

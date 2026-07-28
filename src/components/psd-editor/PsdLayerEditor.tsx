@@ -49,6 +49,7 @@ export function LayerModeControl({ value, disabled, onChange }: LayerModeControl
         <button
           key={item.value}
           type="button"
+          data-layer-engine={item.value}
           aria-pressed={value === item.value}
           disabled={disabled}
           onClick={() => onChange(item.value)}
@@ -99,6 +100,7 @@ export default function PsdLayerEditor({
   const [showInspector, setShowInspector] = useState(true);
   const taskIdRef = useRef<string | null>(null);
   const taskControllerRef = useRef<AbortController | null>(null);
+  const layeringInFlightRef = useRef(false);
 
   // Drag state for floating panel
   const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
@@ -147,6 +149,8 @@ export default function PsdLayerEditor({
   }, [isDragging]);
 
   const startLayering = useCallback(async () => {
+    if (layeringInFlightRef.current) return;
+    layeringInFlightRef.current = true;
     taskControllerRef.current?.abort();
     const controller = new AbortController();
     taskControllerRef.current = controller;
@@ -190,6 +194,7 @@ export default function PsdLayerEditor({
       setErrorMessage(error instanceof Error ? error.message : '图像分层失败');
       setStage('error');
     } finally {
+      layeringInFlightRef.current = false;
       if (taskControllerRef.current === controller) taskControllerRef.current = null;
     }
   }, [imageUrl, layerEngine, modelId, providerId]);
@@ -267,6 +272,7 @@ export default function PsdLayerEditor({
 
   return (
     <div
+      data-testid="layer-editor"
       className="fixed inset-0 z-[100] flex items-center justify-center"
       style={{ pointerEvents: 'auto' }}
     >
@@ -294,7 +300,9 @@ export default function PsdLayerEditor({
             <h2 className="text-sm font-medium text-white/90">PSD 分层编辑器</h2>
             {(stage === 'editing' || stage === 'exporting' || stage === 'done') && (
               <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/60">
+                <span data-testid="layer-count">
                 {layers.length} 个图层
+                </span>
               </span>
             )}
             {stage !== 'editing' && stage !== 'loading' && stage !== 'choosing' && (
@@ -394,6 +402,7 @@ export default function PsdLayerEditor({
                   </div>
                   <button
                     type="button"
+                    data-testid="layer-start"
                     onClick={() => void startLayering()}
                     className="inline-flex h-10 items-center gap-2 rounded-lg bg-amber-500 px-5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900"
                   >
@@ -406,7 +415,7 @@ export default function PsdLayerEditor({
 
             {(stage === 'loading' || stage === 'cancelling') && (
               <div className="w-full h-full flex items-center justify-center">
-                <div className="w-72 rounded-xl bg-neutral-800 p-6 text-center">
+                <div data-testid="layer-progress" className="w-72 rounded-xl bg-neutral-800 p-6 text-center">
                   <div className="mx-auto mb-4 h-2 w-36 overflow-hidden rounded-full bg-neutral-700">
                     <div className="h-full rounded-full bg-amber-500 transition-[width] duration-200" style={{ width: `${progress}%` }} />
                   </div>
@@ -417,6 +426,7 @@ export default function PsdLayerEditor({
                   {stage === 'loading' && (
                     <button
                       type="button"
+                      data-testid="layer-cancel"
                       onClick={() => void handleCancelLayering()}
                       className="mt-5 inline-flex h-9 items-center gap-2 rounded-lg bg-neutral-700 px-4 text-sm text-neutral-100 transition-colors hover:bg-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                     >
@@ -429,12 +439,13 @@ export default function PsdLayerEditor({
             )}
 
             {stage === 'error' && (
-              <div className="w-full h-full flex items-center justify-center">
+              <div data-testid="layer-error" className="w-full h-full flex items-center justify-center">
                 <div className="max-w-sm rounded-xl bg-neutral-800 p-6 text-center">
                   <p className="mb-5 text-sm text-red-300">{errorMessage}</p>
                   <div className="flex justify-center gap-3">
                     <button
                       type="button"
+                      data-testid="layer-retry"
                       onClick={() => void startLayering()}
                       className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-semibold text-neutral-950 hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                     >

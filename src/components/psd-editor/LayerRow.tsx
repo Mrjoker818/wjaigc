@@ -45,6 +45,7 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
 
   return (
     <div
+      data-layer-row={layer.id}
       onClick={onSelect}
       onDoubleClick={handleDoubleClick}
       className={`flex items-center gap-1.5 px-2 py-1.5 cursor-pointer transition-colors group ${
@@ -76,6 +77,7 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
       )}
 
       <button
+        data-layer-action="visibility"
         onClick={(e) => { e.stopPropagation(); onToggleVisibility(); }}
         className="w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
         title={layer.visible ? '隐藏' : '显示'}
@@ -84,6 +86,7 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
       </button>
 
       <button
+        data-layer-action="lock"
         onClick={(e) => { e.stopPropagation(); onToggleLock(); }}
         className={`w-5 h-5 flex items-center justify-center text-xs transition-opacity ${
           layer.locked ? 'opacity-100 text-amber-400' : 'opacity-0 group-hover:opacity-100'

@@ -6,6 +6,10 @@ const workflow = readFileSync(
   resolve(process.cwd(), '.github/workflows/quality.yml'),
   'utf8',
 );
+const playwrightConfig = readFileSync(
+  resolve(process.cwd(), 'playwright.config.ts'),
+  'utf8',
+);
 
 describe('quality workflow contract', () => {
   it('runs the official production dependency audit before build acceptance', () => {
@@ -31,5 +35,34 @@ describe('quality workflow contract', () => {
     ]) {
       expect(workflow).toContain(variable);
     }
+  });
+
+  it('runs the layer editing browser regression in CI', () => {
+    expect(workflow).toContain('tests/e2e/layer-editing.spec.ts');
+  });
+
+  it('runs doctor in production-strict mode', () => {
+    expect(workflow).toContain('pnpm doctor -- --production');
+  });
+
+  it('creates a writable doctor data directory on a clean runner', () => {
+    expect(workflow).toContain('WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-data');
+    expect(workflow).toContain('mkdir -p "$WUJIE_DATA_DIR"');
+  });
+
+  it('does not require paid browser secrets for untrusted pull requests', () => {
+    expect(workflow).toContain("github.event_name != 'pull_request'");
+    expect(workflow).toContain("github.actor != 'dependabot[bot]'");
+    expect(workflow).toContain('github.event.pull_request.head.repo.full_name == github.repository');
+  });
+
+  it('keeps an environment doctor check available to untrusted pull requests', () => {
+    expect(workflow).toContain('name: Environment doctor (untrusted pull request)');
+    expect(workflow).toContain("github.event_name == 'pull_request'");
+  });
+
+  it('lets Playwright resolve its installed Chromium unless CHROMIUM_PATH is explicit', () => {
+    expect(playwrightConfig).not.toContain('/root/.cache/ms-playwright');
+    expect(playwrightConfig).toContain('process.env.CHROMIUM_PATH');
   });
 });

@@ -191,7 +191,7 @@ export function ModelCompare({ isMonochrome, prompt, models, onClose }: ModelCom
 
           {results.length === 0 && (
             <div className={"flex flex-1 items-center justify-center text-sm " + subText}>
-              选择模型并输入问题后点击"对比"
+              选择模型并输入问题后点击&quot;对比&quot;
             </div>
           )}
         </div>

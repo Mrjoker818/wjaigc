@@ -2807,6 +2807,7 @@ ${contextInfo}
               {templates.map(t => (
                 <button
                   key={t.type}
+                  data-node-type={t.type}
                   onClick={() => handleAddNode(t.type)}
                   className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm transition-all duration-200 cursor-pointer group hover:bg-muted/60 active:scale-[0.98]"
                 >
@@ -4821,7 +4822,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
 
       {/* 属性字段 — 与原型对齐: 逐字段垂直排列, px-4 py-2 间距 */}
       {fields.map(field => (
-        <div key={field.key} className="px-4 py-2">
+        <div key={field.key} data-node-field={field.key} className="px-4 py-2">
           <label className="block text-xs font-medium text-muted-foreground mb-1.5">{field.label}</label>
           {field.key === 'aspectRatio' ? (
             /* 比例选择器 — 与原型对齐: 4列grid + ratio-btn样式 */

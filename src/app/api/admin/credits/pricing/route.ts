@@ -4,6 +4,7 @@ import { getApiProviders, inferModelType } from '@/lib/server-api-config';
 import { getChatModelCredits, getImageModelCredits, getVideoModelCreditsPerSecond } from '@/lib/credits';
 import { loadCreditPricingConfig, saveCreditPricingConfig, buildPricingKey, type ModelCreditEntry } from '@/lib/credit-pricing';
 import { getBillingModelCategory } from '@/lib/billing-model-category';
+import { IMAGE_MODEL_CREDITS } from '@/lib/credits-constants';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,6 @@ function defaultCredits(modelType: string, model: string): { credits: number; un
 
 function defaultQualityTiers(modelType: string, model: string): Record<string, number> | undefined {
   if (modelType !== 'image') return undefined;
-  const { IMAGE_MODEL_CREDITS } = require('@/lib/credits-constants');
   const entry = IMAGE_MODEL_CREDITS[model];
   if (entry?.quality && typeof entry.quality === 'object') {
     return entry.quality as Record<string, number>;
@@ -25,7 +25,6 @@ function defaultQualityTiers(modelType: string, model: string): Record<string, n
 
 function defaultResolutionTiers(modelType: string, model: string): Record<string, number> | undefined {
   if (modelType !== 'image') return undefined;
-  const { IMAGE_MODEL_CREDITS } = require('@/lib/credits-constants');
   const entry = IMAGE_MODEL_CREDITS[model];
   if (entry?.resolution && typeof entry.resolution === 'object') {
     return entry.resolution as Record<string, number>;
@@ -42,7 +41,16 @@ export async function GET(request: NextRequest) {
     .filter(provider => provider.isEnabled !== false)
     .flatMap(provider => (provider.selectedModels || []).map(model => {
       const providerType = provider.modelType || provider.type || 'image';
-      const modelType = inferModelType(model, providerType as any);
+      const supportedFallbacks = new Set<Parameters<typeof inferModelType>[1]>([
+        'image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm', 'upscaler', 'removebg', 'audio',
+      ]);
+      const normalizedProviderType = providerType.trim().toLowerCase();
+      const fallbackType = normalizedProviderType === 'general' || normalizedProviderType === 'universal'
+        ? 'chat'
+        : supportedFallbacks.has(normalizedProviderType as Parameters<typeof inferModelType>[1])
+          ? normalizedProviderType as Parameters<typeof inferModelType>[1]
+          : 'image';
+      const modelType = inferModelType(model, fallbackType);
       const billingCategory = getBillingModelCategory(modelType);
       const fallback = defaultCredits(modelType, model);
       const compoundKey = buildPricingKey(provider.id, model);

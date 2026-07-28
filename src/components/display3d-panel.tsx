@@ -1614,7 +1614,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                           {venueVersions.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-20 text-xs" style={{ color: textMuted }}>
                               <Box size={32} className="mb-3 opacity-20" />
-                              <div>点击"生成效果图"按钮生成展陈效果图</div>
+                              <div>点击&quot;生成效果图&quot;按钮生成展陈效果图</div>
                               <div className="mt-1 text-[10px] opacity-60">基于锁定的 DesignID 生成</div>
                             </div>
                           ) : (

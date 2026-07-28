@@ -956,8 +956,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                                       full += new TextDecoder().decode(value);
                                     }
                                     setResearchSuggestion(full.replace(/^data:\s*/gm, '').replace(/\[DONE\]/g, '').trim());
-                                  } catch (e: any) {
-                                    setResearchSuggestion(`调研失败：${e.message}`);
+                                  } catch (e: unknown) {
+                                    setResearchSuggestion(`调研失败：${e instanceof Error ? e.message : String(e)}`);
                                   } finally {
                                     setResearchLoading(false);
                                   }
@@ -1126,8 +1126,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                                   setCmfSuggestion(fullText);
                                   setShowCmfSuggestion(true);
                                 }
-                              } catch (e: any) {
-                                alert(`CMF 推荐失败：${e.message}`);
+                              } catch (e: unknown) {
+                                alert(`CMF 推荐失败：${e instanceof Error ? e.message : String(e)}`);
                               } finally {
                                 setCmfLoading(false);
                               }

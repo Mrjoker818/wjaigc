@@ -21,7 +21,7 @@ async function ensureCanvasInit(): Promise<void> {
   if (canvasInitialized) return;
   try {
     // Use webpackIgnore to bypass webpack bundling and get the native module at runtime (P3-1: replaced eval)
-    const canvasModule = /* webpackIgnore: true */ require('@napi-rs/canvas') as typeof import('@napi-rs/canvas');
+    const canvasModule = await import(/* webpackIgnore: true */ '@napi-rs/canvas');
     initializeCanvas(
       canvasModule.createCanvas as unknown as (width: number, height: number) => HTMLCanvasElement,
       (width: number, height: number) => new canvasModule.ImageData(width, height) as unknown as ImageData

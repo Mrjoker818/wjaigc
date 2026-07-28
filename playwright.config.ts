@@ -1,6 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const baseURL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
+const chromiumLaunchOptions = process.env.CHROMIUM_PATH
+  ? { executablePath: process.env.CHROMIUM_PATH }
+  : undefined;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -26,8 +29,8 @@ export default defineConfig({
     navigationTimeout: 30_000,
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium', launchOptions: { executablePath: process.env.CHROMIUM_PATH || '/root/.cache/ms-playwright/chromium-1161/chrome-linux/chrome' } } },
-    { name: 'chromium-1080p', use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: { width: 1920, height: 1080 }, launchOptions: { executablePath: process.env.CHROMIUM_PATH || '/root/.cache/ms-playwright/chromium-1161/chrome-linux/chrome' } } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium', launchOptions: chromiumLaunchOptions } },
+    { name: 'chromium-1080p', use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: { width: 1920, height: 1080 }, launchOptions: chromiumLaunchOptions } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
