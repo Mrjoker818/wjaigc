@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
 
 const canvasSource = readSource('src/components/infinite-canvas.tsx');
-const appPageSource = readSource('src/app/page.tsx');
+const canvasWorkspaceSource = readSource('src/components/canvas-workspace.tsx');
 const humanRepairSource = readSource('src/components/human-repair-panel.tsx');
 const layerPanelSource = readSource('src/components/layer-panel.tsx');
 const versionHistorySource = readSource('src/components/version-history-panel.tsx');
@@ -32,8 +32,8 @@ describe('canvas toolbar floating windows', () => {
     expect(versionHistorySource).toContain('floating?: boolean');
     expect(versionHistorySource).toContain('fixed left-1/2 top-1/2');
     expect(versionHistorySource).toContain('-translate-x-1/2 -translate-y-1/2');
-    expect(canvasSource).toContain('<LayerPanel\n            floating');
-    expect(canvasSource).toContain('<VersionHistoryPanel\n            floating');
+    expect(canvasSource).toMatch(/<LayerPanel\s+floating/);
+    expect(canvasSource).toMatch(/<VersionHistoryPanel\s+floating/);
   });
 
   it('keeps core canvas controls visible while the extended bottom-toolbar tools can collapse', () => {
@@ -61,18 +61,18 @@ describe('canvas toolbar floating windows', () => {
   it('force-saves the post-delete snapshot so removed images cannot be restored', () => {
     expect(canvasSource).toContain('onForceSave?: (images: CanvasImage[]) => void;');
     expect(canvasSource).toContain('onForceSave?.(newImages);');
-    expect(appPageSource).toContain('onForceSave={(nextImages) => {');
-    expect(appPageSource).toContain('const persistable = nextImages.map(img => ({');
-    expect(appPageSource).not.toContain('if (currentProject?.id && images.length > 0)');
+    expect(canvasWorkspaceSource).toContain('onForceSave={(nextImages) => {');
+    expect(canvasWorkspaceSource).toContain('const persistable = nextImages.map(img => ({');
+    expect(canvasWorkspaceSource).not.toContain('if (currentProject?.id && images.length > 0)');
   });
 
   it('keeps selected-image actions above the open right workspace panel', () => {
-    expect(appPageSource).toContain('z-[70] flex transition-all');
+    expect(canvasWorkspaceSource).toContain('z-[70] flex transition-all');
     expect(canvasSource).toContain('className="absolute z-[80] pointer-events-auto"');
   });
 
   it('keeps the right panel collapse control inside a narrow viewport', () => {
-    expect(appPageSource).toContain("panelCollapsed ? '20px' : 'min(480px, 100vw)'");
+    expect(canvasWorkspaceSource).toContain("panelCollapsed ? '20px' : 'min(480px, 100vw)'");
   });
 
   it('opens one bottom-toolbar tool at a time and allows Escape to close external editors', () => {
@@ -80,8 +80,8 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('onClickCapture={closeCanvasToolPanels}');
     expect(canvasSource).toContain("new Event('wujie:canvas-tool-opened')");
     expect(canvasSource).toContain("window.addEventListener('wujie:close-canvas-tool-panels'");
-    expect(appPageSource).toContain("window.addEventListener('wujie:canvas-tool-opened'");
-    expect(appPageSource).toContain("new Event('wujie:close-canvas-tool-panels')");
+    expect(canvasWorkspaceSource).toContain("window.addEventListener('wujie:canvas-tool-opened'");
+    expect(canvasWorkspaceSource).toContain("new Event('wujie:close-canvas-tool-panels')");
     expect(imageEditorSource).toContain("if (event.key === 'Escape' && !event.defaultPrevented)");
     expect(videoPanelSource).toContain('fixed z-[210]');
   });

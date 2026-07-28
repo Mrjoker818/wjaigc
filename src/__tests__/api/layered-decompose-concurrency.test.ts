@@ -276,6 +276,42 @@ describe('layer decomposition service concurrency', () => {
     expect(status.result?.engine).toBe('local');
     expect(mocks.refundCloudTaskCredits).toHaveBeenCalledTimes(1);
     expect(mocks.completeCloudTask).toHaveBeenCalledTimes(1);
+    expect(mocks.updateCloudTask).toHaveBeenCalledWith('layer-task-1', expect.objectContaining({
+      result: expect.objectContaining({ phase: 'extracting-psd' }),
+    }));
+    expect(mocks.updateCloudTask).toHaveBeenCalledWith('layer-task-1', expect.objectContaining({
+      result: expect.objectContaining({ phase: 'checking-quality' }),
+    }));
     expect(mocks.releaseCloudTaskLease).toHaveBeenCalledWith('layer-task-1', 'worker-1');
+  });
+
+  it('falls back locally after a smart-mode Pear PSD decode failure', async () => {
+    mocks.task = createTask({
+      status: 'processing',
+      creditStatus: 'pending',
+      creditCost: 5,
+      result: {
+        requestHash: 'hash', request, phase: 'downloading-psd', remotePsdUrl: 'https://cdn.example/broken.psd',
+      },
+    });
+    mocks.downloadPearPsd.mockResolvedValue({ buffer: Buffer.from('broken'), mimeType: 'application/octet-stream' });
+    mocks.extractEditableLayersFromPsd.mockRejectedValue(
+      Object.assign(new Error('PSD could not be decoded safely'), { code: 'PSD_DECODE_FAILED' }),
+    );
+    mocks.runLocalLayerPipeline.mockResolvedValue({
+      width: 4,
+      height: 4,
+      layers: [{ ...layer, source: 'local-enhanced' }],
+      buffers: new Map(),
+      quality: { status: 'warning', score: 80, warnings: ['LOCAL_REVIEW_REQUIRED'], metrics: {} },
+    });
+
+    const status = await getLayerTaskStatus({
+      taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
+    });
+
+    expect(status.status).toBe('completed');
+    expect(status.result?.engine).toBe('local');
+    expect(mocks.refundCloudTaskCredits).toHaveBeenCalledTimes(1);
   });
 });

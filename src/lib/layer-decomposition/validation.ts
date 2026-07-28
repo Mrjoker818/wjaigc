@@ -126,6 +126,17 @@ export function parseLayerRequest(value: unknown): LayerDecompositionRequest {
     MAX_MODEL_ID_LENGTH,
   );
 
+  const hasExactCloudTarget = Boolean(providerId && modelId);
+  if (
+    (engine === 'cloud' && !hasExactCloudTarget)
+    || (engine !== 'local' && Boolean(providerId) !== Boolean(modelId))
+  ) {
+    throw new LayerRequestValidationError(
+      'LAYER_PROVIDER_REQUIRED',
+      'providerId and modelId must be selected together for cloud layering',
+    );
+  }
+
   return { imageUrl, engine, providerId, modelId };
 }
 

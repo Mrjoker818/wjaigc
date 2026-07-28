@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPublicApiProviders, getPublicModels } from '@/lib/server-api-config';
 import type { ApiKind, ModelInfo } from '@/lib/server-api-config';
+import { isModelAssignedToUser } from '@/lib/model-defaults';
 import { getSessionUser } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,11 @@ function filterModelsForUser(models: ModelInfo[], user: Awaited<ReturnType<typeo
     }
     if (model.type === 'chat' && user.chatModels?.length) {
       return user.chatModels.includes(model.id);
+    }
+    if (model.type === 'layer') {
+      const apiPermissions = user.apiPermissions;
+      if (apiPermissions?.layer !== true) return false;
+      return isModelAssignedToUser(user.imageModels, model.providerId, model.id);
     }
     return true;
   });

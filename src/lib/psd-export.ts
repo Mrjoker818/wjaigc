@@ -1,6 +1,8 @@
 'use client';
 
 import type { DesignScene, DesignSceneLayer } from '@/types/psdLayer';
+import { editableLayerAssetsToDesignLayers } from '@/lib/editable-layer-adapter';
+import type { LayerDecompositionResult } from '@/lib/layer-decomposition/types';
 
 /**
  * PSD SKILL V4 — AI 自动分层导出 PSD
@@ -71,7 +73,7 @@ interface ManifestLayer {
   reconstructMode: 'raster-safe' | 'editable-experimental';
   fontCandidates?: Array<{ name: string; score: number }>;
   derivedFrom?: string;
-  source?: 'original' | 'inpainted' | 'estimated';
+  source?: 'original' | 'inpainted' | 'estimated' | 'pear-psd' | 'local-enhanced';
   warnings?: string[];
 }
 
@@ -97,6 +99,7 @@ export interface BBox { x: number; y: number; width: number; height: number; }
 
 export interface DesignLayer {
   id: string;
+  parentId?: string;
   role: LayerRole;
   name: string;
   visible: boolean;
@@ -123,7 +126,7 @@ export interface DesignLayer {
   reconstructMode: 'raster-safe' | 'editable-experimental';
   fontCandidates?: Array<{ name: string; score: number }>;
   derivedFrom?: string;
-  source?: 'original' | 'inpainted' | 'estimated';
+  source?: 'original' | 'inpainted' | 'estimated' | 'pear-psd' | 'local-enhanced';
 }
 
 /** Internal design group */
@@ -1453,6 +1456,63 @@ export interface SceneBuildResult {
   exportNotes: ExportNote[];
   width: number;
   height: number;
+}
+
+function safeLayerGroupId(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80) || 'layers';
+}
+
+export function buildSceneFromEditableLayerAssets(
+  result: LayerDecompositionResult,
+): SceneBuildResult {
+  const layers = editableLayerAssetsToDesignLayers(
+    result.layers,
+    result.width,
+    result.height,
+  );
+  const groupedLayerIds = new Map<string, string[]>();
+  for (const layer of layers) {
+    const key = layer.parentId || layer.role;
+    const ids = groupedLayerIds.get(key) || [];
+    ids.push(layer.id);
+    groupedLayerIds.set(key, ids);
+  }
+  const groups: DesignGroup[] = Array.from(groupedLayerIds.entries()).map(([key, layerIds]) => ({
+    id: `group-${safeLayerGroupId(key)}`,
+    name: `group/${key}`,
+    role: key,
+    layerIds,
+    visible: true,
+  }));
+  const normalizedScore = Math.max(0, Math.min(1, result.quality.score / 100));
+  const qualityMetrics: QualityMetrics = {
+    maskBoundary: normalizedScore,
+    ocr: result.layers.some((layer) => layer.role === 'text') ? normalizedScore : 1,
+    fontMatch: result.layers.some((layer) => layer.role === 'text') ? 0.75 : 1,
+    inpaint: normalizedScore,
+    layerConsistency: normalizedScore,
+    openability: result.psdUrl ? 0.98 : 0.9,
+  };
+  const exportNotes: ExportNote[] = result.quality.warnings.map((message) => ({
+    level: 'warning',
+    message,
+    stage: 'layer_quality',
+  }));
+  return {
+    layers,
+    groups,
+    fallbacks: result.engine === 'local'
+      ? [{
+          stage: 'layer_decomposition',
+          reason: 'Pear was not used or did not produce an accepted result',
+          action: 'Used enhanced local CPU layer decomposition',
+        }]
+      : [],
+    qualityMetrics,
+    exportNotes,
+    width: result.width,
+    height: result.height,
+  };
 }
 
 async function buildPhotoshopEditableScene(

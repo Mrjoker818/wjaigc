@@ -165,11 +165,29 @@ function normalizeServiceError(error: unknown): LayerServiceError {
       cause: error,
     });
   }
+  const codedError = error && typeof error === 'object' && 'code' in error
+    ? String(error.code)
+    : '';
+  if (/^[A-Z][A-Z0-9_]{2,63}$/.test(codedError)) {
+    return new LayerServiceError(
+      codedError,
+      error instanceof Error ? error.message : 'Layer task failed',
+      { cause: error },
+    );
+  }
   return new LayerServiceError(
     'LAYER_TASK_ERROR',
     error instanceof Error ? error.message : 'Layer task failed',
     { cause: error },
   );
+}
+
+function isSmartPearFallbackPhase(phase: LayerTaskPhase | undefined): boolean {
+  return phase === 'waiting-for-pear'
+    || phase === 'downloading-psd'
+    || phase === 'extracting-psd'
+    || phase === 'refining-layers'
+    || phase === 'checking-quality';
 }
 
 export async function submitLayerDecomposition(
@@ -346,6 +364,10 @@ async function processPearArtifact(
     `${task.id.replace(/[^A-Za-z0-9_-]/g, '_')}.psd`,
     'layer-decomposition',
   );
+  await updateTaskState(await freshTask(task.id, task.userId), {
+    phase: 'extracting-psd',
+    progress: 62,
+  });
   const extracted = await extractEditableLayersFromPsd(downloaded.buffer, {
     taskId: task.id,
   });
@@ -363,6 +385,10 @@ async function processPearArtifact(
       `${task.id.replace(/[^A-Za-z0-9_-]/g, '_')}_${filename}`,
       'layer-decomposition',
     ),
+  });
+  await updateTaskState(await freshTask(task.id, task.userId), {
+    phase: 'checking-quality',
+    progress: 86,
   });
   const source = await resolveLayerSourceImage(request.imageUrl, { signal });
   const quality = await evaluateLayerQuality(source.buffer, refined.layers, {
@@ -474,7 +500,7 @@ export async function getLayerTaskStatus(
     task = await freshTask(task.id, identity.userId);
     if (!['completed', 'failed', 'cancelled', 'timeout'].includes(task.status)) {
       const request = requestFromTask(task);
-      if (request.engine === 'smart' && normalized.code.startsWith('PEAR_')) {
+      if (request.engine === 'smart' && isSmartPearFallbackPhase(phaseFromTask(task))) {
         await fallbackToLocal(task, request, normalized.message, controller.signal);
       } else {
         await failTask(task.id, normalized.code, normalized.message);

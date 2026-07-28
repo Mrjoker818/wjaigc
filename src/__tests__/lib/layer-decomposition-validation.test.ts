@@ -7,12 +7,30 @@ import {
 
 describe('layer decomposition request validation', () => {
   it('accepts the three explicit engine modes', () => {
-    for (const engine of ['smart', 'cloud', 'local'] as const) {
+    for (const engine of ['smart', 'local'] as const) {
       expect(parseLayerRequest({
         imageUrl: '/api/serve-upload/source.png',
         engine,
       }).engine).toBe(engine);
     }
+    expect(parseLayerRequest({
+      imageUrl: '/api/serve-upload/source.png',
+      engine: 'cloud',
+      providerId: 'pear',
+      modelId: 'Image-Layered',
+    }).engine).toBe('cloud');
+  });
+
+  it('rejects cloud mode without an exact provider and model pair', () => {
+    expect(() => parseLayerRequest({
+      imageUrl: '/api/serve-upload/source.png',
+      engine: 'cloud',
+    })).toThrow(/provider.*model/i);
+    expect(() => parseLayerRequest({
+      imageUrl: '/api/serve-upload/source.png',
+      engine: 'smart',
+      providerId: 'pear',
+    })).toThrow(/provider.*model/i);
   });
 
   it('applies safe defaults and trims exact provider selection', () => {

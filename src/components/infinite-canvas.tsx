@@ -16513,6 +16513,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       {showLayerPanel && (
         <Suspense fallback={null}>
           <LayerPanel
+            floating
             position="right"
             width={320}
             images={images}
@@ -16548,6 +16549,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       {showVersionHistory && versionHistoryManager && (
         <Suspense fallback={null}>
           <VersionHistoryPanel
+            floating
             position="right"
             width={360}
             manager={versionHistoryManager}
