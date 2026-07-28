@@ -102,7 +102,7 @@
 - [x] **Step 4: Run `pnpm build`.**
 - [ ] **Step 5: Start the local application and use a real browser to verify panel layout, mode switching, conflicts, responsive width, and disabled capability states.**
 - [x] **Step 6: Review the diff for unrelated changes and mark this plan's completed checkboxes.**
-- [ ] **Step 7: Merge the feature branch into `main`, push the exact tested commit, and verify local and remote heads match.**
+- [x] **Step 7: Merge the feature branch into `main`, push the exact tested commit, and verify local and remote heads match.**
 
 ## Verification Record
 
