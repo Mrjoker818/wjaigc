@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
       filteredModels = models.filter(model => (
         isModelAssignedToUser(user.chatModels, model.providerId, model.id)
       ));
-    } else if (type === 'image') {
+    } else if (type === 'image' || type === 'vectorize') {
       filteredModels = models.filter(model => (
         isModelAssignedToUser(user.imageModels, model.providerId, model.id)
       ));

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   isAllowedRemoteImageAddress,
+  isAllowedRemoteMimeType,
   isPublicIpAddress,
 } from '@/lib/safe-image-download';
 
@@ -52,5 +53,11 @@ describe('safe remote image download address policy', () => {
       '198.18.0.241',
       { allowCozeEgressProxy: false },
     )).toBe(false);
+  });
+
+  it('keeps SVG blocked by default and allows it only through an explicit safe allowlist', () => {
+    expect(isAllowedRemoteMimeType('image/svg+xml')).toBe(false);
+    expect(isAllowedRemoteMimeType('image/svg+xml', ['image/svg+xml'])).toBe(true);
+    expect(isAllowedRemoteMimeType('text/html', ['text/html'])).toBe(false);
   });
 });

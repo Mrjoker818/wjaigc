@@ -12,6 +12,12 @@ const IMAGE_MIME_TYPES = new Set([
   'image/png',
   'image/webp',
 ]);
+const SAFE_REMOTE_ASSET_MIME_TYPES = new Set([
+  ...IMAGE_MIME_TYPES,
+  'application/xml',
+  'image/svg+xml',
+  'text/xml',
+]);
 
 export class SafeImageDownloadError extends Error {
   readonly code = 'UNSAFE_REMOTE_IMAGE';
@@ -25,6 +31,16 @@ export class SafeImageDownloadError extends Error {
 export interface DownloadedPublicImage {
   buffer: Buffer;
   mimeType: string;
+}
+
+export function isAllowedRemoteMimeType(
+  mimeType: string,
+  allowedMimeTypes?: readonly string[],
+): boolean {
+  const normalized = mimeType.trim().toLowerCase();
+  if (!SAFE_REMOTE_ASSET_MIME_TYPES.has(normalized)) return false;
+  if (!allowedMimeTypes) return IMAGE_MIME_TYPES.has(normalized);
+  return allowedMimeTypes.some(value => value.trim().toLowerCase() === normalized);
 }
 
 function ipv4Number(address: string): number | null {
@@ -101,7 +117,12 @@ export function isAllowedRemoteImageAddress(
 
 export async function downloadPublicImage(
   input: string | URL,
-  options: { maxBytes?: number; timeoutMs?: number; signal?: AbortSignal } = {},
+  options: {
+    maxBytes?: number;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    allowedMimeTypes?: readonly string[];
+  } = {},
 ): Promise<DownloadedPublicImage> {
   options.signal?.throwIfAborted();
   const url = input instanceof URL ? input : new URL(input);
@@ -131,13 +152,19 @@ export async function downloadPublicImage(
   const pinned = addresses[0];
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const acceptedMimeTypes = options.allowedMimeTypes
+    ? options.allowedMimeTypes.filter(type => SAFE_REMOTE_ASSET_MIME_TYPES.has(type.trim().toLowerCase()))
+    : [...IMAGE_MIME_TYPES];
+  if (acceptedMimeTypes.length === 0) {
+    throw new SafeImageDownloadError('No supported remote asset MIME types were requested');
+  }
 
   return new Promise<DownloadedPublicImage>((resolve, reject) => {
     const requestFn = url.protocol === 'https:' ? httpsRequest : httpRequest;
     const req = requestFn(url, {
       method: 'GET',
       headers: {
-        Accept: [...IMAGE_MIME_TYPES].join(','),
+        Accept: acceptedMimeTypes.join(','),
         'User-Agent': 'WujieAI-SafeImageDownloader/1.0',
       },
       lookup: (_hostname, lookupOptions, callback) => {
@@ -164,7 +191,7 @@ export async function downloadPublicImage(
         .split(';', 1)[0]
         .trim()
         .toLowerCase();
-      if (!IMAGE_MIME_TYPES.has(mimeType)) {
+      if (!isAllowedRemoteMimeType(mimeType, acceptedMimeTypes)) {
         response.resume();
         reject(new SafeImageDownloadError('Remote response is not an allowed image type'));
         return;

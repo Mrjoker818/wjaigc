@@ -20,6 +20,7 @@ export interface VectorDesignAsset {
   providerId: string;
   providerName: string;
   sourceType: string;
+  sourceImageId?: string;
 }
 
 interface VectorEditorDialogProps {
@@ -110,7 +111,10 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
     try {
       const response = await fetch('/api/vector-design', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID(),
+        },
         body: JSON.stringify({
           action: 'edit',
           providerId: asset.providerId,
