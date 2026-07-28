@@ -65,6 +65,9 @@ function validatePsdHeader(buffer: Buffer): { width: number; height: number } {
   if (version !== 1) {
     throw new PsdExtractionError('PSD_VERSION_UNSUPPORTED', 'Only standard PSD version 1 is supported');
   }
+  if (buffer.readUInt16BE(22) !== 8) {
+    throw new PsdExtractionError('PSD_BIT_DEPTH_UNSUPPORTED', 'Only 8-bit PSD documents are supported');
+  }
   const height = buffer.readUInt32BE(14);
   const width = buffer.readUInt32BE(18);
   if (
@@ -92,7 +95,7 @@ function inferRole(name: string): EditableLayerRole {
   return 'unknown';
 }
 
-function hasVisiblePixels(data: Uint8ClampedArray | Uint8Array): boolean {
+function hasVisiblePixels(data: ArrayLike<number>): boolean {
   for (let index = 3; index < data.length; index += 4) {
     if (data[index] > 0) return true;
   }
@@ -173,12 +176,14 @@ export async function extractEditableLayersFromPsd(
 
       const width = layer.imageData.width;
       const height = layer.imageData.height;
+      const pixelData = layer.imageData.data;
       if (
         width <= 0
         || height <= 0
         || width > MAX_DIMENSION
         || height > MAX_DIMENSION
-        || layer.imageData.data.length !== width * height * 4
+        || !(pixelData instanceof Uint8Array || pixelData instanceof Uint8ClampedArray)
+        || pixelData.length !== width * height * 4
       ) {
         throw new PsdExtractionError('PSD_LAYER_PIXEL_INVALID', 'PSD layer pixel data is invalid');
       }
@@ -186,15 +191,15 @@ export async function extractEditableLayersFromPsd(
       if (aggregatePixels > MAX_AGGREGATE_LAYER_PIXELS) {
         throw new PsdExtractionError('PSD_AGGREGATE_PIXEL_LIMIT', 'PSD aggregate layer pixels exceed the safety limit');
       }
-      if (!hasVisiblePixels(layer.imageData.data)) {
+      if (!hasVisiblePixels(pixelData)) {
         warnings.push(`Skipped empty layer: ${layer.name || 'unnamed'}`);
         continue;
       }
 
       const raw = Buffer.from(
-        layer.imageData.data.buffer,
-        layer.imageData.data.byteOffset,
-        layer.imageData.data.byteLength,
+        pixelData.buffer,
+        pixelData.byteOffset,
+        pixelData.byteLength,
       );
       const png = await sharp(raw, {
         raw: { width, height, channels: 4 },

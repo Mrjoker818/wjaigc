@@ -13,6 +13,7 @@ import {
   listCloudTasks,
   getCloudTaskProviderSummary,
   refundCloudTaskCredits,
+  releaseCloudTaskLease,
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
 
@@ -148,6 +149,16 @@ describe('cloud-task-storage', () => {
     execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
     await expect(claimCloudTaskLease('task-live', 'worker-b', 4000, 1000)).resolves.toBeNull();
+  });
+
+  it('releases a task lease only for its current owner', async () => {
+    execSql.mockResolvedValueOnce({ rows: [{ id: 'task-lease' }], rowCount: 1 });
+
+    await expect(releaseCloudTaskLease('task-lease', 'worker-a')).resolves.toBe(true);
+
+    const update = execSql.mock.calls.find(([sql]) => String(sql).includes("lease_owner = ''"));
+    expect(update?.[0]).toContain('lease_owner = $2');
+    expect(update?.[1]).toEqual(['task-lease', 'worker-a', expect.any(Number)]);
   });
 
   it('finds an existing task by owner and idempotency key', async () => {

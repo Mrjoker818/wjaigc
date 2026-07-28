@@ -42,6 +42,7 @@ describe('Pear PSD extraction', () => {
     bomb.writeUInt16BE(1, 4);
     bomb.writeUInt32BE(20_000, 14);
     bomb.writeUInt32BE(20_000, 18);
+    bomb.writeUInt16BE(8, 22);
     await expect(extractEditableLayersFromPsd(bomb, {
       persistLayer: vi.fn(),
     })).rejects.toThrow(/pixel|dimension/i);

@@ -466,6 +466,24 @@ export async function claimCloudTaskLease(
   };
 }
 
+/** Releases a lease only when it is still owned by the calling worker. */
+export async function releaseCloudTaskLease(
+  taskId: string,
+  owner: string,
+): Promise<boolean> {
+  await ensureCloudTaskTables();
+  const result = await execSql(`
+    UPDATE cloud_tasks
+    SET lease_owner = '',
+        lease_expires_at = 0,
+        updated_at = $3
+    WHERE id = $1
+      AND lease_owner = $2
+    RETURNING id
+  `, [taskId, owner, Date.now()]);
+  return (result.rowCount ?? result.rows.length) > 0;
+}
+
 export async function getCloudTaskForUser(taskId: string, userId: string): Promise<CloudTask | null> {
   await ensureCloudTaskTables();
   const result = await execSql('SELECT * FROM cloud_tasks WHERE id = $1 AND user_id = $2', [taskId, userId]);
