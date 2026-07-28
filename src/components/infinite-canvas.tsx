@@ -1458,7 +1458,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [videoDubTarget, dubText, dubVoice, dubSpeed, onAddImages]);
 
   // Whether any floating panel is open (used to auto-hide connections & image toolbar)
-  const localMediaToolWindowOpen = showRemoveBgPicker || show3DModal || showVideoExtractPanel || showPsdEditor;
+  const localMediaToolWindowOpen = showRemoveBgPicker || showDisplayDecomposePanel || show3DModal || showVideoExtractPanel || showPsdEditor;
   const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showBrandIp || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
 
   // Video tools handler

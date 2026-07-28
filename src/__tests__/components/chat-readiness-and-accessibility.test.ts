@@ -10,8 +10,12 @@ describe('chat readiness and panel accessibility', () => {
     expect(chatSource).toContain('const [isAgentMode, setIsAgentMode] = useState(false);');
     expect(chatSource).toContain('const availableChatModels = useMemo(() => {');
     expect(chatSource).toContain('const isChatModelReady = availableChatModels.some((candidate) => candidate.id === model);');
-    expect(chatSource).toContain('if (!isChatModelReady) {\n      setShowThirdPartyDialog(true);\n      return;\n    }');
-    expect(chatSource).toContain('onClick={() => {\n                setIsAgentMode((enabled) => !enabled);\n              }}');
+    expect(chatSource).toMatch(
+      /if \(!isChatModelReady\) \{\s+setShowThirdPartyDialog\(true\);\s+return;\s+\}/,
+    );
+    expect(chatSource).toMatch(
+      /onClick=\{\(\) => \{\s+setIsAgentMode\(\(enabled\) => !enabled\);\s+\}\}/,
+    );
     expect(chatSource).toContain('disabled={!input.trim() || isLoading || !isChatModelReady}');
   });
 

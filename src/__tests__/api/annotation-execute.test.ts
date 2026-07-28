@@ -1,7 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -85,16 +85,14 @@ function request(body: unknown) {
   });
 }
 
-async function sourceDataUrl(): Promise<string> {
-  const buffer = await sharp({
-    create: {
-      width: 64,
-      height: 64,
-      channels: 4,
-      background: { r: 240, g: 240, b: 240, alpha: 1 },
-    },
-  }).png().toBuffer();
-  return `data:image/png;base64,${buffer.toString('base64')}`;
+const SOURCE_FIXTURE = readFileSync(path.resolve(
+  process.cwd(),
+  'tests/fixtures/annotation-source.png',
+));
+const SOURCE_DATA_URL = `data:image/png;base64,${SOURCE_FIXTURE.toString('base64')}`;
+
+function sourceDataUrl(): string {
+  return SOURCE_DATA_URL;
 }
 
 const MANAGED_FIXTURE_DIR = path.join(

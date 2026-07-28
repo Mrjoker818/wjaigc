@@ -116,6 +116,8 @@ jobs:
           exit "$missing"
       - name: Install browsers
         run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Run real HTTP API, security, and chaos tests
+        run: pnpm test:http-api
       - name: Run real P0 and Pear Chromium journeys
         run: pnpm exec playwright test tests/e2e/p0-core.spec.ts tests/e2e/layer-editing.spec.ts --project=chromium
       - name: Run non-billable cross-browser layer regression

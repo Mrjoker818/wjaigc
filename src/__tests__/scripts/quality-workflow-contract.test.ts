@@ -10,6 +10,17 @@ const playwrightConfig = readFileSync(
   resolve(process.cwd(), 'playwright.config.ts'),
   'utf8',
 );
+const vitestConfig = readFileSync(
+  resolve(process.cwd(), 'vitest.config.ts'),
+  'utf8',
+);
+const httpVitestConfig = readFileSync(
+  resolve(process.cwd(), 'vitest.http.config.ts'),
+  'utf8',
+);
+const packageJson = JSON.parse(
+  readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'),
+) as { scripts?: Record<string, string> };
 
 describe('quality workflow contract', () => {
   it('runs the official production dependency audit before build acceptance', () => {
@@ -39,6 +50,20 @@ describe('quality workflow contract', () => {
 
   it('runs the layer editing browser regression in CI', () => {
     expect(workflow).toContain('tests/e2e/layer-editing.spec.ts');
+  });
+
+  it('runs deployed HTTP API tests only in the credentialed real-environment gate', () => {
+    expect(vitestConfig).not.toContain("'tests/api/**/*.test.ts'");
+    expect(httpVitestConfig).toContain("include: ['tests/api/**/*.test.ts']");
+    expect(packageJson.scripts?.['test:http-api']).toBe(
+      'vitest run --config vitest.http.config.ts',
+    );
+    expect(workflow).toContain('pnpm test:http-api');
+  });
+
+  it('serializes native image integration tests instead of increasing timeouts', () => {
+    expect(vitestConfig).toContain('fileParallelism: false');
+    expect(vitestConfig).not.toContain('testTimeout:');
   });
 
   it('runs doctor in production-strict mode', () => {

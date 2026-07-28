@@ -1277,6 +1277,15 @@ function parsePearApiVideoPoll(data: unknown): VideoTaskPollResult {
       const url = getApiValue(video, 'url');
       videoUrl = Array.isArray(url) ? getApiString(url[0]) : getApiString(url) || getApiString(video, 'video_url');
     }
+    if (!videoUrl) {
+      const resultData = getApiValue(result, 'data');
+      if (Array.isArray(resultData) && resultData.length > 0) {
+        const firstResult = resultData[0];
+        videoUrl = typeof firstResult === 'string'
+          ? firstResult
+          : getApiString(firstResult, 'url') || getApiString(firstResult, 'video_url');
+      }
+    }
     if (!videoUrl) videoUrl = getApiString(result, 'video_url') || getApiString(result, 'url') || getApiString(item, 'video_url');
     return {
       status: 'succeeded',

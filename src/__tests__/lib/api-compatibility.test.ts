@@ -149,7 +149,7 @@ describe('provider request contracts', () => {
       seed: 42,
       stylize: 250,
       chaos: 20,
-      quality: 2,
+      quality: '2',
       no: 'text, watermark',
       tile: true,
       weird: 15,

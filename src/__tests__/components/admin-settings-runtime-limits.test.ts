@@ -9,7 +9,8 @@ describe('administrator settings runtime limits', () => {
       'utf8',
     );
 
-    expect(source).toContain("numeric('maxVideoDuration', '视频最长时长', '秒', 1, 15)");
-    expect(source).not.toContain("numeric('maxVideoDuration', '视频最长时长', '秒', 1, 600)");
+    expect(source).toMatch(/numInput\('maxVideoDuration', 'w-24', '[^']+', 1, 15\)/);
+    expect(source).toContain('min={min} max={max}');
+    expect(source).not.toMatch(/numInput\('maxVideoDuration', 'w-24', '[^']+', 1, 600\)/);
   });
 });

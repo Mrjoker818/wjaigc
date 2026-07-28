@@ -67,7 +67,7 @@ describe('media toolbar video contracts', () => {
 
   it('centers the display decomposition panel with the other floating tool windows', () => {
     expect(canvasSource).toContain('data-popup="display-decompose"');
-    expect(canvasSource).toContain('fixed left-1/2 top-1/2 z-[190]');
-    expect(canvasSource).toContain('-translate-x-1/2 -translate-y-1/2');
+    expect(canvasSource).toContain('fixed inset-0 z-[200] flex items-center justify-center pointer-events-none');
+    expect(canvasSource).toContain('pointer-events-auto w-72');
   });
 });

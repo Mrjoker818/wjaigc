@@ -89,7 +89,7 @@ describe('admin runtime settings', () => {
   it('rejects non-boolean quick create auto routing values', async () => {
     const response = await POST(new NextRequest('http://localhost/api/admin/settings', {
       method: 'POST',
-      body: JSON.stringify({ quickCreateAutoModelRouting: 'true' }),
+      body: JSON.stringify({ quickCreateAutoModelRouting: 'enabled' }),
     }));
 
     expect(response.status).toBe(400);

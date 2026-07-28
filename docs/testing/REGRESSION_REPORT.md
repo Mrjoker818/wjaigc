@@ -180,14 +180,17 @@ pnpm lint --quiet → 0 errors
 |--------|------|------|
 | `node scripts/doctor.mjs` | PASS WITH WARNINGS | 23 passed / 10 warnings / 0 failed；缺少本地生产密钥、数据库、对象存储和部署 URL |
 | Pear/分层专项 Vitest | PASS WITH SKIP | 68 passed / 1 skipped；PostgreSQL 并发测试因无测试数据库跳过 |
-| 分层 Playwright Chromium | UNVERIFIED | 4 skipped；缺少 `E2E_TEST_USERNAME` / `E2E_TEST_PASSWORD`，真实 Pear 还需 provider/model/付费开关 |
-| 云端 Chrome 基线 | PARTIAL | 已登录，图片工具栏存在“编辑元素”；点击后直接进入旧的 4 层 PSD 编辑器，未显示本地 Task 9 的三模式入口 |
-| 全仓 Vitest | FAIL | 1085 passed / 48 failed / 23 skipped，17 个测试文件失败 |
+| 分层 Playwright Chromium | BLOCKED | 在本地生产构建真实执行并生成 screenshot/video/trace/console/network；`POST /api/auth/login` 返回 503，缺少 PostgreSQL/生产鉴权配置 |
+| 云端 Chrome 基线 | PARTIAL | `https://wjaigc.coze.site/` 已登录；图片工具栏存在“编辑元素”，但打开的是旧“PSD 分层编辑器”，未包含新版三模式契约 |
+| 全仓 Vitest | PASS WITH SKIP | 关闭文件级并行以隔离 Sharp/fontconfig 原生资源竞争；233 files passed / 2 skipped；1066 tests passed / 2 skipped；0 failed；140.73s |
+| TypeScript | PASS | `next typegen` 与 `tsc -p tsconfig.json` 通过，0 errors |
+| ESLint | PASS WITH WARNINGS | 0 errors / 944 warnings；存量警告未伪装为零 |
+| Next.js 生产构建 | PASS | Next.js 16.2.10，110 个静态页面，退出码 0 |
 
 云端检查仅用于部署前基线，不是新版本验收。当前云端尚未包含本地领先提交，不能用旧版界面证明 `smart`、`cloud`、`local` 三模式通过。
 
-**本次回归结论：不通过。** 分层专项代码门禁通过，但全仓门禁、真实 Pear 云端完成链路和 PostgreSQL 并发验证均未满足发布标准。
+**本次回归结论：有条件通过。** 本地自包含测试、类型、Lint 和生产构建已通过；真实 Pear 云端完成链路、PostgreSQL 并发幂等以及部署后跨浏览器证据尚未满足发布标准。
 
-Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Next.js 16.2.10 生产构建通过并生成 110 个静态页面。CI 已接入 Chromium 真实 Pear 用例和 Firefox/WebKit 非付费分层回归；这些 CI 用例仍需在 GitHub Secrets 与新云端部署就绪后实际运行。
+Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Next.js 16.2.10 生产构建通过并生成 110 个静态页面。ESLint 同时报告 944 个历史 warning。CI 已接入 Chromium 真实 Pear 用例、Firefox/WebKit 非付费分层回归和独立 HTTP API 套件；这些 CI 用例仍需在 GitHub Secrets 与新云端部署就绪后实际运行。
 
 补充回归已覆盖快速双击同步互斥、干净 CI runner 数据目录和非受信任 PR 不读取付费 Secrets。GitHub Actions YAML 已使用结构化解析器验证。

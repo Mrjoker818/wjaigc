@@ -118,8 +118,8 @@ export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTe
         imageUrls,
         maskUrl: maskUrls[0] || '',
         maskUrls,
-        gridImageUrl: input.gridImageUrl || '',
-        buttons: input.buttons || [],
+        ...(input.gridImageUrl ? { gridImageUrl: input.gridImageUrl } : {}),
+        ...(input.buttons?.length ? { buttons: input.buttons } : {}),
       }
     : undefined;
 

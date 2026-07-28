@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:api": "vitest run src/__tests__/api",
+    "test:http-api": "vitest run --config vitest.http.config.ts",
     "test:regression": "vitest run src/__tests__/components src/__tests__/lib",
     "test:e2e": "playwright test",
     "test:e2e:p0": "playwright test tests/e2e/p0-core.spec.ts",

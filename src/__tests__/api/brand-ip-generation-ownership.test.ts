@@ -16,6 +16,7 @@ vi.mock('@/lib/api-auth', () => ({
 }));
 vi.mock('@/lib/brand-ip-storage', () => ({ getBrandIpProject: mocks.getBrandIpProject }));
 vi.mock('@/lib/brand-ip-generation', () => ({
+  BRAND_IP_ASSET_TYPES: ['标准角色图', '单色版', '小尺寸', '表情包'],
   createBrandIpGenerationTask: mocks.createBrandIpGenerationTask,
   executeBrandIpGeneration: mocks.executeBrandIpGeneration,
 }));
@@ -49,7 +50,11 @@ describe('brand IP generation boundaries', () => {
     const response = await generate(new NextRequest('http://localhost/api/brand-ip/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: 'project-a', prompt: '角色三视图' }),
+      body: JSON.stringify({
+        projectId: 'project-a',
+        prompt: '角色三视图',
+        assetType: '标准角色图',
+      }),
     }));
     const payload = await response.json();
 

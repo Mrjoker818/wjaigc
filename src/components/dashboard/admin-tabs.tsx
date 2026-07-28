@@ -1964,9 +1964,9 @@ export default function AdminTabs(props: AdminTabsProps) {
       );
     };
 
-    const numInput = (key: string, w = 'w-32', unit?: string) => (
+    const numInput = (key: string, w = 'w-32', unit?: string, min?: number, max?: number) => (
       <div className="flex items-center gap-2">
-        <input type="number" value={s(key)} onChange={e => { setSystemSettings(prev => ({ ... prev, [key]: e.target.value })); setSettingsDirty(true); }}
+        <input type="number" value={s(key)} min={min} max={max} onChange={e => { setSystemSettings(prev => ({ ... prev, [key]: e.target.value })); setSettingsDirty(true); }}
           className={`${w} bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors`} />
         {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
       </div>
@@ -2108,7 +2108,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="text-sm font-medium text-foreground">视频最大时长</div>
                   <div className="text-xs text-muted-foreground mt-0.5">用户可生成的视频最大时长</div>
                 </div>
-                {numInput('maxVideoDuration', 'w-24', '秒')}
+                {numInput('maxVideoDuration', 'w-24', '秒', 1, 15)}
               </div>
             </div>
           </div>

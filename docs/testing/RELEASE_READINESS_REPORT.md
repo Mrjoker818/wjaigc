@@ -172,18 +172,19 @@
 
 ## 2026-07-29 Pear 混合分层发布复核
 
-此前 v3.8.0 的历史结论不适用于当前 v4.0.0 工作区。当前复核基于提交 `aefb36e91eb4f4d08a8d9dcceeaf11feb64ad310` 和未提交的 Task 9 验证改动。
+此前 v3.8.0 的历史结论不适用于当前 v4.0.0 工作区。当前复核基于 Pear 混合分层 Task 1-9 提交链及本轮已提交的回归门禁修复，具体版本以同一工作区的 `git log` 为准。
 
 ### 当前门禁
 
 | 门禁 | 状态 | 证据 |
 |------|------|------|
 | Doctor | 有条件通过 | 23 passed / 10 warnings / 0 failed |
-| TypeScript | 已通过（前序执行） | 0 errors |
-| ESLint | 已通过（前序执行） | 0 errors |
+| TypeScript | 已通过 | `next typegen` + `tsc`，0 errors |
+| ESLint | 有条件通过 | 0 errors / 944 warnings |
 | Pear/分层专项测试 | 有条件通过 | 68 passed / 1 PostgreSQL skip |
-| 生产构建 | 已通过（前序执行） | Next.js 16.2.10，110 静态页面 |
-| 全仓测试 | 失败 | 48 failed / 1085 passed / 23 skipped |
+| 生产构建 | 已通过 | Next.js 16.2.10，110 静态页面 |
+| 全仓测试 | 有条件通过 | 文件级串行门禁；233 files passed / 2 skipped；1066 tests passed / 2 skipped；0 failed；140.73s |
+| Chromium 本地分层冒烟 | 阻塞 | 已生成完整 Playwright 证据；登录 API 因本地缺少数据库/鉴权配置返回 503 |
 | Chromium 真实 Pear | 未验证 | 当前部署未包含本地提交，且 E2E provider/model 变量未配置 |
 | Firefox/WebKit 分层回归 | 未验证 | 本地缺少真实登录凭据 |
 | PostgreSQL 并发幂等 | 未验证 | 无独立测试数据库 |
@@ -192,9 +193,9 @@
 
 发布阻断原因：
 
-1. 全仓测试仍有 48 项失败，违反“全量自动化测试通过”的发布标准。
-2. 新分层版本尚未部署，云端只验证到旧 PSD 编辑器入口。
-3. 真实 Pear `/v1/images/edits` -> task -> PSD -> 2+ 可编辑图层链路没有部署后证据。
-4. PostgreSQL 多实例并发幂等、一次扣费和一次退款仍缺少真实数据库验证。
+1. 新分层版本尚未部署，云端只验证到旧 PSD 编辑器入口。
+2. 真实 Pear `/v1/images/edits` -> task -> PSD -> 2+ 可编辑图层链路没有部署后证据。
+3. PostgreSQL 多实例并发幂等、一次扣费和一次退款仍缺少真实数据库验证。
+4. Firefox/WebKit 分层回归和凭据化 HTTP API 套件尚未在目标部署运行。
 
 在这些项目完成前，不推送“可发布”结论，不把跳过测试或旧云端页面计为通过。
