@@ -60,4 +60,16 @@ describe('safe remote image download address policy', () => {
     expect(isAllowedRemoteMimeType('image/svg+xml', ['image/svg+xml'])).toBe(true);
     expect(isAllowedRemoteMimeType('text/html', ['text/html'])).toBe(false);
   });
+
+  it('keeps PSD blocked by default and allows it only through an explicit safe allowlist', () => {
+    expect(isAllowedRemoteMimeType('image/vnd.adobe.photoshop')).toBe(false);
+    expect(isAllowedRemoteMimeType(
+      'image/vnd.adobe.photoshop',
+      ['image/vnd.adobe.photoshop'],
+    )).toBe(true);
+    expect(isAllowedRemoteMimeType(
+      'application/octet-stream',
+      ['application/octet-stream'],
+    )).toBe(true);
+  });
 });
