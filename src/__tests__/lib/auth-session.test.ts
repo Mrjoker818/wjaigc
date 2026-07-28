@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchSessionPayload } from '@/lib/auth-session';
+import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
+import type { User } from '@/lib/user-types';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -25,5 +26,30 @@ describe('fetchSessionPayload', () => {
       cache: 'no-store',
       credentials: 'include',
     }));
+  });
+
+  it('preserves an authenticated user when the session service returns a transient failure', () => {
+    const authenticatedUser = {
+      id: 'user-1',
+      name: 'Authenticated user',
+      role: 'user',
+    } as User;
+
+    expect(resolveSessionUser(authenticatedUser, {
+      success: false,
+    })).toEqual({ status: 'indeterminate', user: authenticatedUser });
+  });
+
+  it('clears an authenticated user only when the session service explicitly reports no user', () => {
+    const authenticatedUser = {
+      id: 'user-1',
+      name: 'Authenticated user',
+      role: 'user',
+    } as User;
+
+    expect(resolveSessionUser(authenticatedUser, {
+      success: true,
+      user: null,
+    })).toEqual({ status: 'unauthenticated', user: null });
   });
 });

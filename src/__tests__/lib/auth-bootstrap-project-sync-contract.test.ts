@@ -34,7 +34,7 @@ describe('authentication bootstrap project sync', () => {
   });
 
   it('does not subscribe the auth bootstrap to Next router state during first hydration', () => {
-    const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    const source = readFileSync(path.resolve(process.cwd(), 'src/components/canvas-workspace.tsx'), 'utf8');
     const authInitializer = source.indexOf('const initCurrentUser = async () => {');
     const authEffectEnd = source.indexOf('const [currentUser, setCurrentUser]', authInitializer);
     const authEffect = source.slice(authInitializer, authEffectEnd);
@@ -43,12 +43,12 @@ describe('authentication bootstrap project sync', () => {
     expect(source).toContain('function getInitialProjectId(): string | null {');
     expect(source).toContain('const initialProjectIdRef = useRef(getInitialProjectId());');
     expect(authEffect).toContain('const projectId = initialProjectIdRef.current;');
-    expect(authEffect).toContain('}, [setImages]);');
+    expect(authEffect).toContain('}, [initialUser, onLoggedOut, setImages]);');
     expect(authEffect).not.toContain('searchParams');
   });
 
   it('makes a no-project authenticated session interactive before client cache hydration', () => {
-    const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    const source = readFileSync(path.resolve(process.cwd(), 'src/components/canvas-workspace.tsx'), 'utf8');
     const authInitializer = source.indexOf('const initCurrentUser = async () => {');
     const projectId = source.indexOf('const projectId = initialProjectIdRef.current;');
     const noProjectBranch = source.indexOf('if (!projectId) {', projectId);
@@ -70,17 +70,15 @@ describe('authentication bootstrap project sync', () => {
   });
 
   it('does not synchronously construct the local cache manager when session bootstrap fails', () => {
-    const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    const source = readFileSync(path.resolve(process.cwd(), 'src/components/canvas-workspace.tsx'), 'utf8');
     const authInitializer = source.indexOf('const initCurrentUser = async () => {');
-    const failureMarker = source.indexOf('shouldClearLocalSessionRef.current = true;', authInitializer);
-    const failureAuthChecked = source.indexOf('setAuthChecked(true);', failureMarker);
-    const localCacheClear = source.indexOf('Clear the local auth cache only after the unauthenticated UI has rendered.');
-    const deferredLogout = source.indexOf('then(() => UserManagerCore.getInstance().logout())', localCacheClear);
+    const unauthenticatedBranch = source.indexOf("sessionResolution.status === 'unauthenticated'", authInitializer);
+    const deferredLogout = source.indexOf('then(() => UserManagerCore.getInstance().logout())', unauthenticatedBranch);
+    const workspaceLogout = source.indexOf('onLoggedOut();', deferredLogout);
 
-    expect(failureMarker).toBeGreaterThan(authInitializer);
-    expect(failureAuthChecked).toBeGreaterThan(failureMarker);
-    expect(localCacheClear).toBeGreaterThan(failureAuthChecked);
-    expect(deferredLogout).toBeGreaterThan(localCacheClear);
+    expect(unauthenticatedBranch).toBeGreaterThan(authInitializer);
+    expect(deferredLogout).toBeGreaterThan(unauthenticatedBranch);
+    expect(workspaceLogout).toBeGreaterThan(deferredLogout);
   });
 
   it('starts project sync in the background after the local user session is ready', () => {
@@ -95,13 +93,12 @@ describe('authentication bootstrap project sync', () => {
 
   it('keeps the authenticated workspace out of the initial loading render', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
-    const workflowState = source.indexOf('const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);');
-    const authGate = source.indexOf('if (!authChecked) {', workflowState);
-    const workspaceReturn = source.indexOf('h-screen w-screen relative overflow-hidden', authGate);
+    const authGate = source.indexOf('if (!authChecked) {');
+    const workspaceReturn = source.indexOf('return <CanvasWorkspace initialUser={currentUser}', authGate);
 
-    expect(authGate).toBeGreaterThan(workflowState);
+    expect(authGate).toBeGreaterThan(-1);
     expect(workspaceReturn).toBeGreaterThan(authGate);
-    expect(source).toContain('data-testid="auth-loading-shell"');
+    expect(source).toContain('<AuthLoadingScreen message=');
     expect(source).not.toContain('{!authChecked && (');
   });
 

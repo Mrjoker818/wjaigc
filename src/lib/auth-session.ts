@@ -5,9 +5,27 @@ export interface SessionPayload {
   user?: User | null;
 }
 
+export type SessionResolution =
+  | { status: 'authenticated'; user: User }
+  | { status: 'unauthenticated'; user: null }
+  | { status: 'indeterminate'; user: User | null };
+
 type SessionFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export const AUTH_SESSION_TIMEOUT_MS = 8_000;
+
+export function resolveSessionUser(
+  currentUser: User | null,
+  payload: SessionPayload,
+): SessionResolution {
+  if (payload.success === true && payload.user) {
+    return { status: 'authenticated', user: payload.user };
+  }
+  if (payload.success === true && payload.user === null) {
+    return { status: 'unauthenticated', user: null };
+  }
+  return { status: 'indeterminate', user: currentUser };
+}
 
 /**
  * Browser extensions may replace fetch and leave its Promise pending without

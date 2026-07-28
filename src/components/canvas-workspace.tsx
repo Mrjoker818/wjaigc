@@ -65,7 +65,7 @@ import { User, Project, ImageGroupData, CanvasImage as PersistableCanvasImage } 
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
-import { fetchSessionPayload } from '@/lib/auth-session';
+import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
 
 import { LoginPanel } from '@/components/dashboard/login-panel';
 
@@ -541,8 +541,26 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const initCurrentUser = async () => {
       try {
         const data = await fetchSessionPayload() as { success?: boolean; user?: User | null };
-        if (!cancelled && data.success && data.user) {
-          const sessionUser = data.user;
+        if (cancelled) return;
+        const sessionResolution = resolveSessionUser(initialUser, data);
+        if (sessionResolution.status === 'indeterminate') {
+          console.warn('[auth] session revalidation was indeterminate; preserving authenticated workspace');
+          setAuthChecked(true);
+          return;
+        }
+        if (sessionResolution.status === 'unauthenticated') {
+          void Promise.resolve()
+            .then(() => UserManagerCore.getInstance().logout())
+            .catch((error: unknown) => {
+              console.warn('[auth] background local session cleanup failed', error);
+            });
+          setAuthChecked(true);
+          onLoggedOut();
+          return;
+        }
+
+        if (sessionResolution.status === 'authenticated') {
+          const sessionUser = sessionResolution.user;
 
           const projectId = initialProjectIdRef.current;
           if (!projectId) {
@@ -651,22 +669,20 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           setAuthChecked(true);
           return;
         }
-      } catch {}
-
-      if (!cancelled) {
-        shouldClearLocalSessionRef.current = true;
-        setCurrentUser(null);
-        setAuthChecked(true);
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[auth] session revalidation failed; preserving authenticated workspace', error);
+          setAuthChecked(true);
+        }
       }
     };
     void initCurrentUser();
     return () => {
       cancelled = true;
     };
-  }, [setImages]);
+  }, [initialUser, onLoggedOut, setImages]);
   const [currentUser, setCurrentUser] = useState<User | null>(initialUser);
   const cacheHydrationUserIdRef = useRef<string | null>(null);
-  const shouldClearLocalSessionRef = useRef(false);
 
   // Hydrate the local project cache only after the authenticated workspace has rendered.
   useEffect(() => {
@@ -744,18 +760,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       cancelled = true;
       controller.abort();
     };
-  }, [authChecked, currentUser]);
-
-  // Clear the local auth cache only after the unauthenticated UI has rendered.
-  useEffect(() => {
-    if (!authChecked || currentUser || !shouldClearLocalSessionRef.current) return;
-
-    shouldClearLocalSessionRef.current = false;
-    void Promise.resolve()
-      .then(() => UserManagerCore.getInstance().logout())
-      .catch((error: unknown) => {
-        console.warn('[auth] background local session cleanup failed', error);
-      });
   }, [authChecked, currentUser]);
 
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
