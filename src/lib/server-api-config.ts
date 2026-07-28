@@ -8,7 +8,11 @@ import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
 import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
-import { get302UpscaleModelsForProvider, resolve302UpscaleModelId } from './302-upscale-models';
+import {
+  get302UpscaleModelsForProvider,
+  resolve302UpscaleModelId,
+  resolve302UpscaleModelSelection,
+} from './302-upscale-models';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
@@ -1005,10 +1009,13 @@ export async function findAllProvidersForType(modelType: ApiKind): Promise<Array
   return enabled.map(provider => {
     const selected = provider.selectedModels || [];
     const discovered = provider.discoveredModels || [];
+    const resolved302Models = effectiveType === 'upscaler'
+      ? resolve302UpscaleModelSelection(provider.baseUrl, selected)
+      : null;
     // If admin has explicitly selected models, use only those
-    const models = selected.length > 0
+    const models = resolved302Models ?? (selected.length > 0
       ? selected
-      : discovered.map(m => m.id);
+      : discovered.map(m => m.id));
     // Filter models by the requested type when provider is general/universal
     // This prevents chat models from being used for image operations
     const isGeneral = provider.modelType === 'universal' || provider.modelType === 'general';
@@ -1035,6 +1042,15 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
     .flatMap(provider => {
       const selected = new Set(provider.selectedModels || []);
       const discovered = provider.discoveredModels || [];
+      const resolved302Models = modelType === 'upscaler'
+        ? resolve302UpscaleModelSelection(provider.baseUrl, Array.from(selected))
+        : null;
+      if (resolved302Models) {
+        const catalog = get302UpscaleModelsForProvider(provider.baseUrl, 'upscaler');
+        return catalog
+          .filter(model => resolved302Models.some(modelId => modelId === model.id))
+          .map(model => ({ ...model, providerId: provider.id }));
+      }
       // If admin has explicitly selected models, show only those
       if (selected.size > 0) {
         const visible = discovered.filter(model => selected.has(model.id));

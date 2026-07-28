@@ -41,10 +41,31 @@ export function resolve302UpscaleModelId(modelId: string): ThreeOhTwoUpscaleMode
 export function is302AiUpscaleBaseUrl(baseUrl: string): boolean {
   try {
     const host = new URL(baseUrl).hostname.toLowerCase();
-    return host === '302.ai' || host.endsWith('.302.ai');
+    return host === '302.ai'
+      || host.endsWith('.302.ai')
+      || host === '302ai.cn'
+      || host.endsWith('.302ai.cn');
   } catch {
     return false;
   }
+}
+
+export function resolve302UpscaleModelSelection(
+  baseUrl: string,
+  selectedModels: readonly string[],
+): ThreeOhTwoUpscaleModelId[] | null {
+  if (!is302AiUpscaleBaseUrl(baseUrl)) return null;
+
+  const exactSelections = selectedModels
+    .map(resolve302UpscaleModelId)
+    .filter((modelId): modelId is ThreeOhTwoUpscaleModelId => Boolean(modelId));
+  if (exactSelections.length > 0) return [...new Set(exactSelections)];
+
+  const usesUnifiedCatalog = selectedModels.length === 0
+    || selectedModels.some(modelId => modelId.trim().toLowerCase() === '302');
+  return usesUnifiedCatalog
+    ? THREE_O_TWO_UPSCALE_MODELS.map(model => model.id)
+    : [];
 }
 
 export function get302UpscaleModelsForProvider(baseUrl: string, modelType: ApiKind): ModelInfo[] {
