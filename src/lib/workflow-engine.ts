@@ -630,7 +630,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   // ─── AI节点 (通用) ───
   if (cat === 'ai') {
     // 不为有专用model字段的节点添加通用model
-    if (type !== 'ai-removebg' && type !== 'ai-font-design' && type !== 'ai-refine-engine' && type !== 'ai-brand-ecommerce') {
+    if (type !== 'ai-removebg' && type !== 'ai-font-design' && type !== 'ai-refine-engine' && type !== 'ai-brand-ecommerce' && type !== 'ai-segment') {
       fields.push({ key: 'model', label: '模型', type: 'model-select', modelFilter: 'image' });
     }
     fields.push({ key: 'prompt', label: '提示词', type: 'textarea', placeholder: '描述你想要的图像效果' });
@@ -826,6 +826,11 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   }
 
   if (type === 'ai-segment') {
+    fields.push({ key: 'engine', label: '分层引擎', type: 'select', options: [
+      { label: '智能', value: 'smart' },
+      { label: '云端', value: 'cloud' },
+      { label: '本地', value: 'local' },
+    ], defaultValue: 'smart' });
     fields.push({ key: 'model', label: '分层模型', type: 'model-select', modelFilter: 'layer' });
     fields.push({ key: 'exportFormat', label: '导出格式', type: 'select', options: [
       { label: 'PSD (Pro)', value: 'psd-pro' }, { label: 'PSD (Studio)', value: 'psd-studio' },
@@ -1153,7 +1158,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
 
 export interface ExecutionResult {
   nodeId: string;
-  status: 'success' | 'failed' | 'skipped';
+  status: 'running' | 'success' | 'failed' | 'skipped';
   output?: Record<string, unknown>;
   error?: string;
   durationMs: number;
@@ -1878,14 +1883,20 @@ export function buildNodeExecutionRequest(
     }
 
     case 'ai-segment': {
+      const engine = config.engine === 'cloud' || config.engine === 'local'
+        ? config.engine
+        : 'smart';
       const segBody: Record<string, unknown> = {
         imageUrl: config.imageUrl || '',
-        model: config.model || '',
+        engine,
         exportFormat: config.exportFormat || 'psd-pro',
       };
-      if (config.providerId) segBody.providerId = config.providerId;
+      if (engine !== 'local' && config.providerId && config.model) {
+        segBody.providerId = config.providerId;
+        segBody.modelId = config.model;
+      }
       return {
-        endpoint: '/api/segment-elements',
+        endpoint: '/api/layered-decompose',
         method: 'POST',
         body: segBody,
       };

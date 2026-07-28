@@ -32,6 +32,11 @@ import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logError, OP_ACTIONS } from '@/lib/op-log';
 import { createCloudTask, getCloudTaskForUser, updateCloudTask } from '@/lib/cloud-task-storage';
+import {
+  buildWorkflowLayerIdempotencyKey,
+  cancelLayerWorkflowTask,
+  executeLayerWorkflowTask,
+} from '@/lib/workflow-layer-task';
 
 type WorkflowExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -45,6 +50,8 @@ interface WorkflowExecutionState {
   userId?: string;
   userRole?: 'user' | 'admin';
   totalNodes: number;
+  activeLayerTasks?: Record<string, string>;
+  retryAttempts?: Record<string, number>;
 }
 
 // 内存中的执行状态
@@ -57,10 +64,58 @@ const ASYNC_WORKFLOW_ENDPOINTS = new Set([
   '/api/annotations/execute',
   '/api/video/generate',
   '/api/video/extend',
+  '/api/layered-decompose',
 ]);
 
 function isAsyncWorkflowEndpoint(endpoint: string): boolean {
   return ASYNC_WORKFLOW_ENDPOINTS.has(endpoint);
+}
+
+async function executeTrackedWorkflowTask(
+  submitUrl: string,
+  endpoint: string,
+  body: Record<string, unknown>,
+  fetchOptions: RequestInit,
+  node: WorkflowNode,
+  executionId: string,
+  execState: WorkflowExecutionState,
+  attemptCount: number,
+): Promise<ExecutionResult> {
+  if (endpoint !== '/api/layered-decompose') {
+    return executeAsyncTask(submitUrl, body, fetchOptions, node.id, node.type as NodeType);
+  }
+
+  execState.activeLayerTasks ||= {};
+  try {
+    return await executeLayerWorkflowTask({
+      submitUrl,
+      body,
+      fetchOptions,
+      nodeId: node.id,
+      idempotencyKey: buildWorkflowLayerIdempotencyKey(executionId, node.id, attemptCount),
+      onTaskId: async (taskId) => {
+        execState.activeLayerTasks![node.id] = taskId;
+        await persistWorkflowExecution(executionId, execState);
+      },
+      onProgress: async (task) => {
+        execState.results[node.id] = {
+          nodeId: node.id,
+          status: 'running',
+          output: {
+            taskId: task.taskId,
+            status: task.status,
+            phase: task.phase,
+            progress: task.progress,
+            engine: body.engine,
+          },
+          durationMs: Date.now() - execState.startedAt,
+        };
+        await persistWorkflowExecution(executionId, execState);
+      },
+    });
+  } finally {
+    delete execState.activeLayerTasks[node.id];
+  }
 }
 
 // 30分钟后自动清理
@@ -208,6 +263,25 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '无权取消该执行记录' }, { status: 403 });
       }
       if (exec && exec.status === 'running') {
+        const activeLayerTaskIds = Object.values(exec.activeLayerTasks || {});
+        if (activeLayerTaskIds.length > 0) {
+          const internalHeaders = await getInternalRequestHeaders(
+            auth.userId,
+            auth.userRole === 'admin' ? 'admin' : 'user',
+          );
+          const cancelResults = await Promise.allSettled(activeLayerTaskIds.map(taskId => (
+            cancelLayerWorkflowTask(
+              getInternalApiUrl('/api/layered-decompose'),
+              taskId,
+              { headers: internalHeaders },
+            )
+          )));
+          for (const result of cancelResults) {
+            if (result.status === 'rejected') {
+              console.warn('[Workflow] 取消图片分层子任务失败:', result.reason);
+            }
+          }
+        }
         exec.status = 'cancelled';
         exec.completedAt = Date.now();
         await persistWorkflowExecution(executionId, exec);
@@ -243,6 +317,9 @@ export async function POST(request: NextRequest) {
       try {
         const retryResultMap = new Map(Object.entries(exec.results || {}));
         const nodeInputs = getNodeInputs(retryNode, body.connections || [], retryResultMap);
+        exec.retryAttempts ||= {};
+        const retryAttempt = (exec.retryAttempts[nodeId] || 0) + 1;
+        exec.retryAttempts[nodeId] = retryAttempt;
         const req = buildNodeExecutionRequest(retryNode, nodeInputs);
         if (!req) {
           // 纯逻辑节点：直接成功
@@ -272,8 +349,9 @@ export async function POST(request: NextRequest) {
             )
           : (apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {});
         if (isAsyncWorkflowEndpoint(req.endpoint)) {
-          const retryResult = await executeAsyncTask(
+          const retryResult = await executeTrackedWorkflowTask(
             apiUrl,
+            req.endpoint,
             req.body,
             {
               method: req.method,
@@ -282,8 +360,10 @@ export async function POST(request: NextRequest) {
                 ...retryHeaders,
               },
             },
-            nodeId,
-            retryNode.type as NodeType,
+            retryNode,
+            executionId,
+            exec,
+            retryAttempt,
           );
           exec.results[nodeId] = retryResult;
           await persistWorkflowExecution(executionId, exec);
@@ -335,6 +415,8 @@ export async function POST(request: NextRequest) {
       userId: auth.userId,
       userRole: auth.userRole === 'admin' ? 'admin' : 'user',
       totalNodes: nodes.length,
+      activeLayerTasks: {},
+      retryAttempts: {},
     };
     executionCache.set(executionIdNew, execState);
 
@@ -883,7 +965,16 @@ async function executeWorkflow(
         resultMap.set(node.id, result);
         execState.results[node.id] = result;
       } else if (isAsyncApi) {
-        const result = await executeAsyncTask(apiUrl, req.body, fetchOptions, node.id, node.type as NodeType);
+        const result = await executeTrackedWorkflowTask(
+          apiUrl,
+          req.endpoint,
+          req.body,
+          fetchOptions,
+          node,
+          executionId,
+          execState,
+          0,
+        );
         resultMap.set(node.id, result);
         execState.results[node.id] = result;
       } else {
@@ -959,6 +1050,11 @@ async function executeWorkflow(
       console.error(`[Workflow] 节点 ${node.label} 异常:`, err);
     }
     await persistWorkflowExecution(executionId, execState);
+  }
+
+  if (execState.status === 'cancelled') {
+    await persistWorkflowExecution(executionId, execState);
+    return;
   }
 
   // 3. 完成
