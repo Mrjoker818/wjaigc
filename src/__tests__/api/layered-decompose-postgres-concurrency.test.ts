@@ -143,8 +143,8 @@ suite('layer decomposition PostgreSQL concurrency', () => {
           SELECT COUNT(*)::int AS count
           FROM pg_stat_activity
           WHERE datname = current_database()
-            AND query LIKE '%WITH candidate AS (%'
-            AND wait_event_type = 'Lock'
+            AND pid <> pg_backend_pid()
+            AND cardinality(pg_blocking_pids(pid)) > 0
         `);
         settlementWaitingOnLock = Number(waiting.rows[0]?.count || 0) > 0;
         if (settlementWaitingOnLock) break;
