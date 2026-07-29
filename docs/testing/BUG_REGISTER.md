@@ -256,3 +256,42 @@ await page.evaluate(() => {
 - **空 catch 块**：无 `as any` 的空 catch 块
 - **eval/Function**：无 `eval()` 或 `new Function()` 使用
 - **认证检查**：所有受保护 API 路由都有 `requireApiAuthOrReject` 或 `requireAdminUser` 检查
+
+---
+
+## 2026-07-29 Pear 云端回归新增缺陷
+
+### BUG-011: Coze 反向代理下同源受控媒体被当作远程图片回抓
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1 |
+| **发现环境** | Chrome，Coze 预览环境，Git `09850e396c12a53ea2157a0c5fe46c4ecb859d11` |
+| **稳定复现** | 选择画布内同源 `/api/serve-upload/generate/...png` 图片，打开 PSD 分层编辑器，选择云端 Pear 并重试 |
+| **实际结果** | 任务在 `reading-source` 5% 失败，错误为 `UNSAFE_REMOTE_IMAGE: Remote image returned HTTP 403` |
+| **预期结果** | 同源受控媒体归一化为服务器管理路径，不经过外部 HTTP 回抓 |
+| **根因** | 路由只信任 Next.js 请求 URL 与 `Host`；Coze 代理把二者改为内部地址，外部预览域名仅保留在浏览器 `Origin` |
+| **修复文件** | `src/app/api/layered-decompose/route.ts` |
+| **新增测试** | `layered-decompose.test.ts`：代理内部 Host + `COZE_PROJECT_DOMAIN_DEFAULT` 的 RED/GREEN 用例；同时证明伪造 `Origin`、`Host` 和 `x-forwarded-host` 均不被信任 |
+| **本地回归** | 路由专项 8/8，通过 |
+| **状态** | 本地已修复，等待部署后真实 Pear 重测 |
+
+证据：`test-results/screenshots/pear-layer-failed-tasks-09850e3.png`
+
+### BUG-012: Pear 分层读取失败后任务终止但积分未退款
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P0（错误扣费） |
+| **发现环境** | Chrome，Coze 预览环境，Git `09850e396c12a53ea2157a0c5fe46c4ecb859d11` |
+| **稳定复现** | 2026-07-29 10:05 与 10:10 两次 Pear 云端分层均在受控媒体读取阶段 403 |
+| **实际结果** | 两个任务均进入 `failed`，每次扣除 15 积分；积分明细没有对应 `+15` 退款 |
+| **预期结果** | 失败终态只结算一次退款，余额、任务状态和退款流水一致 |
+| **根因** | `terminateCloudTaskAndRefund` 在同一 PostgreSQL 语句中先后两次更新同一 `cloud_tasks` 行；云端完成失败状态转换，但第二次退款认领未生效 |
+| **修复文件** | `src/lib/cloud-task-storage.ts` |
+| **新增测试** | `cloud-task-storage.test.ts`：失败结算 SQL 只允许一次任务行更新并锁定积分账户；真实 PostgreSQL 套件新增账户并发删除竞态 |
+| **本地回归** | 路由与结算专项 20/20，通过；真实 PostgreSQL 新用例等待 CI |
+| **历史影响** | 已观测至少 10:05、10:10 两笔错误扣费，共 30 积分；08:13 记录也需在部署后核对是否属于同一问题 |
+| **状态** | 本地已修复；新 SQL 需 GitHub PostgreSQL 并发门禁与云端失败退款实测，历史错误扣费尚未补偿 |
+
+证据：`test-results/screenshots/pear-layer-missing-refunds-09850e3.png`

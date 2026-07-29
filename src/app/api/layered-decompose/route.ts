@@ -15,9 +15,34 @@ import {
 } from '@/lib/layer-decomposition/validation';
 
 function trustedRequestHosts(request: NextRequest): string[] {
+  let configuredPublicHost = '';
+  const configuredDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT?.trim();
+  if (configuredDomain) {
+    try {
+      const parsedDomain = new URL(
+        /^[a-z][a-z\d+.-]*:\/\//i.test(configuredDomain)
+          ? configuredDomain
+          : `https://${configuredDomain}`,
+      );
+      if (
+        ['http:', 'https:'].includes(parsedDomain.protocol)
+        && !parsedDomain.username
+        && !parsedDomain.password
+      ) {
+        configuredPublicHost = parsedDomain.host;
+      }
+    } catch {
+      // Invalid deployment configuration must not expand the media trust boundary.
+    }
+  }
+  const requestHostname = request.nextUrl.hostname.toLowerCase();
+  const localDevelopmentHost = process.env.NODE_ENV !== 'production'
+    && ['localhost', '127.0.0.1', '[::1]', '::1'].includes(requestHostname)
+    ? request.nextUrl.host
+    : '';
   return [
-    request.nextUrl.host,
-    request.headers.get('host') || '',
+    configuredPublicHost,
+    localDevelopmentHost,
   ].filter(Boolean);
 }
 

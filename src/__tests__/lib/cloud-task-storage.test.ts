@@ -14,6 +14,7 @@ import {
   getCloudTaskProviderSummary,
   refundCloudTaskCredits,
   releaseCloudTaskLease,
+  terminateCloudTaskAndRefund,
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
 
@@ -183,6 +184,40 @@ describe('cloud-task-storage', () => {
     expect(settlement?.[0]).toContain("credit_status = 'pending'");
     expect(settlement?.[0]).toContain("SET credit_status = 'refunded'");
     expect(refund).toEqual({ refunded: true, creditCost: 6, balance: 94, userId: 'user-a' });
+  });
+
+  it('settles a failure without updating the same cloud task row twice', async () => {
+    execSql.mockResolvedValueOnce({
+      rows: [{
+        status: 'failed',
+        user_id: 'user-a',
+        credit_cost: 6,
+        transitioned: true,
+        refunded: true,
+        balance: 100,
+      }],
+      rowCount: 1,
+    });
+
+    const termination = await terminateCloudTaskAndRefund(
+      'task-failed-after-charge',
+      'failed',
+      'Remote image returned HTTP 403',
+    );
+
+    const settlement = execSql.mock.calls.find(([sql]) => String(sql).includes('recorded_refund'));
+    const taskUpdates = String(settlement?.[0]).match(/UPDATE\s+cloud_tasks\b/gi) || [];
+    expect(taskUpdates).toHaveLength(1);
+    expect(settlement?.[0]).toContain('FOR UPDATE');
+    expect(settlement?.[0]).toMatch(/FOR UPDATE OF credit/i);
+    expect(termination).toEqual({
+      status: 'failed',
+      transitioned: true,
+      refunded: true,
+      creditCost: 6,
+      balance: 100,
+      userId: 'user-a',
+    });
   });
 
   it('charges credits and marks the idempotent task in one atomic statement', async () => {

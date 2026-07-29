@@ -216,3 +216,21 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 - `test-results/console/pear-layering-cloud-provider-missing.json`
 - PostgreSQL 用例输出：2 tests skipped
 - Firefox/WebKit 启动输出：`E2E server warmup failed with HTTP 404`
+
+## 2026-07-29 09850e3 云端回归与本地修复
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| 云端版本 | CONFIRMED | 本地与云端基线均为 `09850e396c12a53ea2157a0c5fe46c4ecb859d11` |
+| Pear 模型可见性 | PASS | 云端可选择 `pear分层 / Image-Layered`，任务进入读取源图阶段 |
+| Coze 同源媒体读取 | FAIL / LOCAL FIXED | 10:05、10:10 均在 5% 返回远程图片 403；改用部署配置公共域名后路由专项 8/8 |
+| 失败任务终态 | PASS | 管理员云端任务监控显示两笔任务均为 `failed`，错误码 `UNSAFE_REMOTE_IMAGE` |
+| 失败退款 | FAIL / LOCAL FIXED | 两笔各扣 15，无对应退款；结算 SQL 改为单次更新任务行并先锁积分账户，路由与结算专项 20/20 |
+| TypeScript | PASS | `next typegen` 与 `tsc --noEmit` 通过 |
+| 变更文件 ESLint | PASS | 0 error |
+| 全仓 Vitest 首轮 | FAIL THEN FIXED | 1070 passed / 3 failed / 2 skipped；3 个失败为旧终态 SQL 契约，拆分活动与终态条件后专项已恢复 |
+| 全仓 Vitest 最终 | PASS | 235 个测试文件、1075 项通过、0 失败；3 项真实 PostgreSQL 测试因本地无 `TEST_POSTGRES_URL` 跳过 |
+| PostgreSQL 并发 | PENDING CI | 新增积分账户并发删除竞态；新单更新结算 SQL 必须重新跑 PostgreSQL 16 门禁 |
+| Firefox/WebKit | BLOCKED | GitHub 未配置独立 E2E 地址、账号、密码与付费模型 Secrets |
+
+当前结论仍为 **不通过**。必须部署新提交后完成 Pear 成功链路、失败退款和 PSD/2+ 图层验证。

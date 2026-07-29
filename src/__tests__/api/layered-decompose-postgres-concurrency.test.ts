@@ -9,6 +9,8 @@ const suite = databaseUrl ? describe : describe.skip;
 
 suite('layer decomposition PostgreSQL concurrency', () => {
   const userId = `layer-pg-${randomUUID()}`;
+  const refundRaceUserId = `layer-refund-race-${randomUUID()}`;
+  const refundRaceTaskId = `layer-refund-race-task-${randomUUID()}`;
   const idempotencyKey = `layer-idem-${randomUUID()}`;
   const request: LayerDecompositionRequest = {
     imageUrl: '/api/serve-upload/concurrency.png',
@@ -18,13 +20,14 @@ suite('layer decomposition PostgreSQL concurrency', () => {
   };
   let taskId = '';
   let execSql: typeof import('@/lib/db-client').execSql;
+  let getPool: typeof import('@/lib/db-client').getPool;
   let dbStorage: typeof import('@/lib/db-storage');
   let storage: typeof import('@/lib/cloud-task-storage');
   let idempotency: typeof import('@/lib/layer-decomposition/idempotency');
 
   beforeAll(async () => {
     process.env.PGDATABASE_URL = databaseUrl;
-    ({ execSql } = await import('@/lib/db-client'));
+    ({ execSql, getPool } = await import('@/lib/db-client'));
     dbStorage = await import('@/lib/db-storage');
     storage = await import('@/lib/cloud-task-storage');
     idempotency = await import('@/lib/layer-decomposition/idempotency');
@@ -39,7 +42,10 @@ suite('layer decomposition PostgreSQL concurrency', () => {
       await execSql('DELETE FROM wujie_credit_transactions WHERE reference_id = $1', [taskId]);
       await execSql('DELETE FROM cloud_tasks WHERE id = $1', [taskId]);
     }
+    await execSql('DELETE FROM wujie_credit_transactions WHERE reference_id = $1', [refundRaceTaskId]);
+    await execSql('DELETE FROM cloud_tasks WHERE id = $1', [refundRaceTaskId]);
     await execSql('DELETE FROM wujie_credits WHERE user_id = $1', [userId]);
+    await execSql('DELETE FROM wujie_credits WHERE user_id = $1', [refundRaceUserId]);
   });
 
   it('creates, charges, and refunds one task under concurrent duplicate requests', async () => {
@@ -94,5 +100,80 @@ suite('layer decomposition PostgreSQL concurrency', () => {
     );
     expect(Number(credits.rows[0].balance)).toBe(100);
     expect(Number(credits.rows[0].total_used)).toBe(0);
+  });
+
+  it('does not mark a task refunded when its credit account is concurrently removed', async () => {
+    await dbStorage.dbInitCredits(refundRaceUserId, 100);
+    await storage.createCloudTask({
+      id: refundRaceTaskId,
+      userId: refundRaceUserId,
+      type: 'layer-decomposition',
+      status: 'processing',
+      progress: 5,
+      creditStatus: 'not-applicable',
+      creditCost: 0,
+      idempotencyKey: `idem-${refundRaceTaskId}`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    const charge = await storage.chargeCloudTaskCredits(
+      refundRaceTaskId,
+      refundRaceUserId,
+      7,
+      'Pear layer refund race test',
+    );
+    expect(charge.charged).toBe(true);
+
+    const deletingClient = await getPool().connect();
+    let deletionCommitted = false;
+    let terminationPromise: ReturnType<typeof storage.terminateCloudTaskAndRefund> | undefined;
+    try {
+      await deletingClient.query('BEGIN');
+      await deletingClient.query('DELETE FROM wujie_credits WHERE user_id = $1', [refundRaceUserId]);
+
+      terminationPromise = storage.terminateCloudTaskAndRefund(
+        refundRaceTaskId,
+        'failed',
+        'forced concurrent account deletion',
+      );
+      const deadline = Date.now() + 5_000;
+      let settlementWaitingOnLock = false;
+      while (Date.now() < deadline) {
+        const waiting = await execSql(`
+          SELECT COUNT(*)::int AS count
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND query LIKE '%WITH candidate AS (%'
+            AND wait_event_type = 'Lock'
+        `);
+        settlementWaitingOnLock = Number(waiting.rows[0]?.count || 0) > 0;
+        if (settlementWaitingOnLock) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(settlementWaitingOnLock).toBe(true);
+
+      await deletingClient.query('COMMIT');
+      deletionCommitted = true;
+      const termination = await terminationPromise;
+      expect(termination).toMatchObject({
+        status: 'failed',
+        transitioned: true,
+        refunded: false,
+      });
+
+      const task = await storage.getCloudTaskForUser(refundRaceTaskId, refundRaceUserId);
+      expect(task?.creditStatus).toBe('pending');
+      const refunds = await execSql(
+        `SELECT COUNT(*)::int AS count
+         FROM wujie_credit_transactions
+         WHERE reference_id = $1 AND type = 'refund'`,
+        [refundRaceTaskId],
+      );
+      expect(Number(refunds.rows[0]?.count || 0)).toBe(0);
+    } finally {
+      if (!deletionCommitted) await deletingClient.query('ROLLBACK').catch(() => undefined);
+      await terminationPromise?.catch(() => undefined);
+      deletingClient.release();
+    }
   });
 });

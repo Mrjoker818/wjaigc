@@ -234,44 +234,67 @@ export async function terminateCloudTaskAndRefund(
   const now = Date.now();
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
   const result = await execSql(`
-    WITH transitioned AS (
-      UPDATE cloud_tasks
-      SET status = $2,
-          error = $3,
-          updated_at = $4
-      WHERE id = $1
-        AND status IN ('pending', 'processing')
-      RETURNING id, user_id, status, credit_status, credit_cost
-    ), terminal_task AS (
-      SELECT id, user_id, status, credit_status, credit_cost, TRUE AS transitioned
-      FROM transitioned
-      UNION ALL
-      SELECT id, user_id, status, credit_status, credit_cost, FALSE AS transitioned
-      FROM cloud_tasks
-      WHERE id = $1
-        AND status IN ('failed', 'timeout', 'cancelled')
-        AND NOT EXISTS (SELECT 1 FROM transitioned)
-    ), claimed_refund AS (
-      UPDATE cloud_tasks task
-      SET credit_status = 'refunded',
-          updated_at = $4
-      FROM terminal_task terminal
-      WHERE task.id = terminal.id
-        AND task.status IN ('failed', 'timeout', 'cancelled')
-        AND task.credit_status = 'pending'
-        AND task.credit_cost > 0
-        AND EXISTS (
-          SELECT 1 FROM wujie_credits credit WHERE credit.user_id = task.user_id
+    WITH candidate AS (
+      SELECT task.id,
+             task.user_id,
+             task.status AS previous_status,
+             task.credit_status AS previous_credit_status,
+             task.credit_cost
+      FROM cloud_tasks task
+      WHERE task.id = $1
+        AND (
+          task.status IN ('pending', 'processing')
+          OR task.status IN ('failed', 'timeout', 'cancelled')
         )
-      RETURNING task.id, task.user_id, task.credit_cost
+      FOR UPDATE
+    ), locked_credit AS (
+      SELECT credit.user_id
+      FROM wujie_credits credit
+      JOIN candidate ON credit.user_id = candidate.user_id
+      WHERE candidate.previous_credit_status = 'pending'
+        AND candidate.credit_cost > 0
+      FOR UPDATE OF credit
+    ), settled_task AS (
+      UPDATE cloud_tasks task
+      SET status = CASE
+            WHEN candidate.previous_status IN ('pending', 'processing') THEN $2
+            ELSE candidate.previous_status
+          END,
+          error = CASE
+            WHEN candidate.previous_status IN ('pending', 'processing') THEN $3
+            ELSE task.error
+          END,
+          credit_status = CASE
+            WHEN candidate.previous_credit_status = 'pending'
+              AND candidate.credit_cost > 0
+              AND EXISTS (
+                SELECT 1
+                FROM locked_credit credit
+                WHERE credit.user_id = candidate.user_id
+              )
+            THEN 'refunded'
+            ELSE candidate.previous_credit_status
+          END,
+          updated_at = $4
+      FROM candidate
+      WHERE task.id = candidate.id
+      RETURNING task.id,
+                task.user_id,
+                task.status,
+                task.credit_status,
+                task.credit_cost,
+                candidate.previous_status IN ('pending', 'processing') AS transitioned,
+                candidate.previous_credit_status = 'pending'
+                  AND task.credit_status = 'refunded' AS refund_claimed
     ), refunded_balance AS (
       UPDATE wujie_credits credit
-      SET balance = credit.balance + claimed.credit_cost,
-          total_used = GREATEST(credit.total_used - claimed.credit_cost, 0),
+      SET balance = credit.balance + settled.credit_cost,
+          total_used = GREATEST(credit.total_used - settled.credit_cost, 0),
           updated_at = $4
-      FROM claimed_refund claimed
-      WHERE credit.user_id = claimed.user_id
-      RETURNING claimed.id AS task_id, claimed.user_id, claimed.credit_cost, credit.balance
+      FROM settled_task settled
+      WHERE settled.refund_claimed
+        AND credit.user_id = settled.user_id
+      RETURNING settled.id AS task_id, settled.user_id, settled.credit_cost, credit.balance
     ), recorded_refund AS (
       INSERT INTO wujie_credit_transactions (
         id, user_id, amount, type, balance_after, description, reference_id, created_at
@@ -280,19 +303,19 @@ export async function terminateCloudTaskAndRefund(
       FROM refunded_balance
       RETURNING reference_id
     )
-    SELECT terminal.status,
-           terminal.user_id,
-           terminal.credit_cost,
-           terminal.transitioned,
+    SELECT settled.status,
+           settled.user_id,
+           settled.credit_cost,
+           settled.transitioned,
            EXISTS (
-             SELECT 1 FROM refunded_balance refunded WHERE refunded.task_id = terminal.id
+             SELECT 1 FROM refunded_balance refunded WHERE refunded.task_id = settled.id
            ) AS refunded,
            (
              SELECT refunded.balance
              FROM refunded_balance refunded
-             WHERE refunded.task_id = terminal.id
+             WHERE refunded.task_id = settled.id
            ) AS balance
-    FROM terminal_task terminal
+    FROM settled_task settled
     LIMIT 1
   `, [taskId, status, reason, now, transactionId]);
   const row = result.rows[0] as Record<string, unknown> | undefined;

@@ -27,6 +27,7 @@ import { DELETE, GET, POST } from '@/app/api/layered-decompose/route';
 
 describe('layered decomposition route', () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
     vi.clearAllMocks();
     mocks.requireApiAuthOrReject.mockResolvedValue({
       authenticated: true,
@@ -81,6 +82,7 @@ describe('layered decomposition route', () => {
   });
 
   it('normalizes a same-origin managed media URL before service execution', async () => {
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', 'https://preview.example');
     mocks.submitLayerDecomposition.mockResolvedValue({
       success: true,
       taskId: 'layer-managed-media',
@@ -110,6 +112,144 @@ describe('layered decomposition route', () => {
       request: expect.objectContaining({
         imageUrl: '/api/serve-upload/generate/source.png',
       }),
+    }));
+  });
+
+  it('normalizes managed media against the configured public domain behind a reverse proxy', async () => {
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', 'https://preview.example');
+    mocks.submitLayerDecomposition.mockResolvedValue({
+      success: true,
+      taskId: 'layer-proxy-origin',
+      status: 'processing',
+      phase: 'reading-source',
+      progress: 5,
+    });
+    const response = await POST(new NextRequest(
+      'http://internal-service:5000/api/layered-decompose',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          imageUrl: 'https://preview.example/api/serve-upload/generate/source.png?cache=1',
+          engine: 'cloud',
+          providerId: 'pear',
+          modelId: 'Image-Layered',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          host: 'internal-service:5000',
+          origin: 'https://preview.example',
+          'idempotency-key': 'layer-proxy-origin-1',
+        },
+      },
+    ));
+
+    expect(response.status).toBe(202);
+    expect(mocks.submitLayerDecomposition).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        imageUrl: '/api/serve-upload/generate/source.png',
+      }),
+    }));
+  });
+
+  it('does not trust an arbitrary browser origin as a managed-media host', async () => {
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', 'https://preview.example');
+    mocks.submitLayerDecomposition.mockResolvedValue({
+      success: true,
+      taskId: 'layer-untrusted-origin',
+      status: 'processing',
+      phase: 'reading-source',
+      progress: 5,
+    });
+    const externalImageUrl = 'https://attacker.example/api/serve-upload/source.png';
+    const response = await POST(new NextRequest(
+      'http://internal-service:5000/api/layered-decompose',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          imageUrl: externalImageUrl,
+          engine: 'cloud',
+          providerId: 'pear',
+          modelId: 'Image-Layered',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          origin: 'https://attacker.example',
+          'idempotency-key': 'layer-untrusted-origin-1',
+        },
+      },
+    ));
+
+    expect(response.status).toBe(202);
+    expect(mocks.submitLayerDecomposition).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({ imageUrl: externalImageUrl }),
+    }));
+  });
+
+  it('does not trust a forwarded host without a matching request origin', async () => {
+    mocks.submitLayerDecomposition.mockResolvedValue({
+      success: true,
+      taskId: 'layer-untrusted-forwarded-host',
+      status: 'processing',
+      phase: 'reading-source',
+      progress: 5,
+    });
+    const externalImageUrl = 'https://attacker.example/api/serve-upload/source.png';
+    const response = await POST(new NextRequest(
+      'http://internal-service:5000/api/layered-decompose',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          imageUrl: externalImageUrl,
+          engine: 'cloud',
+          providerId: 'pear',
+          modelId: 'Image-Layered',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          host: 'internal-service:5000',
+          'x-forwarded-host': 'attacker.example',
+          'idempotency-key': 'layer-untrusted-forwarded-host-1',
+        },
+      },
+    ));
+
+    expect(response.status).toBe(202);
+    expect(mocks.submitLayerDecomposition).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({ imageUrl: externalImageUrl }),
+    }));
+  });
+
+  it('does not trust a client-supplied host header as a managed-media host', async () => {
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', 'https://preview.example');
+    mocks.submitLayerDecomposition.mockResolvedValue({
+      success: true,
+      taskId: 'layer-untrusted-host',
+      status: 'processing',
+      phase: 'reading-source',
+      progress: 5,
+    });
+    const externalImageUrl = 'https://attacker.example/api/serve-upload/source.png';
+    const response = await POST(new NextRequest(
+      'http://internal-service:5000/api/layered-decompose',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          imageUrl: externalImageUrl,
+          engine: 'cloud',
+          providerId: 'pear',
+          modelId: 'Image-Layered',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          host: 'attacker.example',
+          'idempotency-key': 'layer-untrusted-host-1',
+        },
+      },
+    ));
+
+    expect(response.status).toBe(202);
+    expect(mocks.submitLayerDecomposition).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({ imageUrl: externalImageUrl }),
     }));
   });
 
