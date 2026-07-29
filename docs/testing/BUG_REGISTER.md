@@ -376,3 +376,19 @@ await page.evaluate(() => {
 | **本地回归** | ZIP/PSD 与安全下载 39/39；分层专项 72/72；TypeScript、ESLint `--quiet`、全量 Vitest、Next.js 生产构建均退出 0 |
 | **截图证据** | `test-results/screenshots/pear-layer-zip-mime-failure-fd253a1.png` |
 | **状态** | 本地已修复并完成门禁；等待部署后复跑真实 ZIP、主 PSD 与编辑器图层终态 |
+
+### BUG-017: Coze 双栈出口 DNS 导致安全下载器拒绝 Pear ZIP
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1（Pear ZIP 无法进入 PSD 解析链路） |
+| **发现环境** | 最新 GitHub 程序 + Coze/沙箱透明出口，2026-07-29 |
+| **稳定复现** | `cdn.pearapi.ai` 同时解析为允许的 Coze IPv4 代理 `198.18.1.22` 与保留 IPv6 `fdfe:dcba:9876::f8`，调用 `downloadPearPsd()` |
+| **实际结果** | 下载器使用 `addresses.some(...)`，只要 DNS 集合中有一个不允许地址便整体拒绝，尽管实际 HTTP 请求会固定到另一个已验证地址 |
+| **预期结果** | 从 DNS 结果中选择一个明确允许的地址并固定请求；没有允许地址时才拒绝 |
+| **根因** | DNS 安全判定与实际 pinned lookup 选择规则不一致，Coze 双栈代理返回的不可用保留 IPv6 误伤了允许的 IPv4 出口 |
+| **修复文件** | `src/lib/safe-image-download.ts` |
+| **新增测试** | `safe-image-download.test.ts`：双栈结果包含 Coze IPv4 与保留 IPv6 时必须固定允许的 IPv4；测试先 RED 后 GREEN |
+| **真实制品验证** | 同一下载器成功获取 Pear ZIP，提取 `7,738,844` 字节主 PSD，签名 `8BPS`；`ag-psd` 解析为 `1280x1280`、5 个可编辑图层、0 警告 |
+| **安全边界** | 请求仍禁用重定向并固定到已验证地址；纯私网/保留地址集合仍拒绝，不放宽 MIME、大小或 ZIP 解压限制 |
+| **状态** | 本地修复并通过真实 Pear 制品回放；待推送部署后在预览页执行编辑器终态回归 |

@@ -120,6 +120,23 @@ export function isAllowedRemoteImageAddress(
   return value !== null && inIpv4Range(value, '198.18.0.0', 15);
 }
 
+interface RemoteLookupAddress {
+  address: string;
+  family: number;
+}
+
+export function selectAllowedRemoteAddress<T extends RemoteLookupAddress>(
+  hostname: string,
+  addresses: readonly T[],
+  options: { allowCozeEgressProxy?: boolean } = {},
+): T | undefined {
+  return addresses.find(({ address }) => isAllowedRemoteImageAddress(
+    hostname,
+    address,
+    options,
+  ));
+}
+
 export async function downloadPublicImage(
   input: string | URL,
   options: {
@@ -144,17 +161,14 @@ export async function downloadPublicImage(
     process.env.COZE_PROJECT_ENV?.trim()
     || process.env.COZE_PROJECT_DOMAIN_DEFAULT?.trim(),
   );
-  if (
-    addresses.length === 0
-    || addresses.some(({ address }) => !isAllowedRemoteImageAddress(
-      url.hostname,
-      address,
-      { allowCozeEgressProxy },
-    ))
-  ) {
+  const pinned = selectAllowedRemoteAddress(
+    url.hostname,
+    addresses,
+    { allowCozeEgressProxy },
+  );
+  if (!pinned) {
     throw new SafeImageDownloadError('The image host resolves to a private or reserved address');
   }
-  const pinned = addresses[0];
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const acceptedMimeTypes = options.allowedMimeTypes

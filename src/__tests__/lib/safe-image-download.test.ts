@@ -4,6 +4,7 @@ import {
   isAllowedRemoteImageAddress,
   isAllowedRemoteMimeType,
   isPublicIpAddress,
+  selectAllowedRemoteAddress,
 } from '@/lib/safe-image-download';
 
 describe('safe remote image download address policy', () => {
@@ -53,6 +54,17 @@ describe('safe remote image download address policy', () => {
       '198.18.0.241',
       { allowCozeEgressProxy: false },
     )).toBe(false);
+  });
+
+  it('pins an allowed Coze proxy address when DNS also returns an unusable private IPv6 address', () => {
+    expect(selectAllowedRemoteAddress(
+      'cdn.pearapi.ai',
+      [
+        { address: '198.18.1.22', family: 4 },
+        { address: 'fdfe:dcba:9876::f8', family: 6 },
+      ],
+      { allowCozeEgressProxy: true },
+    )).toEqual({ address: '198.18.1.22', family: 4 });
   });
 
   it('keeps SVG blocked by default and allows it only through an explicit safe allowlist', () => {

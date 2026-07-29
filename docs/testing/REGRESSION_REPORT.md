@@ -312,3 +312,16 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | Production build | PASS | Next.js 16.2.10 编译成功并生成 110 个路由 |
 
 当前结论仍为 **不通过**。异步提交已取得真实云端证据，但新 MIME 修复尚未部署；主 PSD 提取、可编辑图层、成功单次扣费和失败单次退款仍需部署后验证。
+
+## 2026-07-29 Pear 双栈 DNS、ZIP 与 PSD 真实制品回归
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| 双栈 DNS RED/GREEN | PASS | Coze 透明出口同时返回 `198.18.1.22` 与 `fdfe:...`；下载器现选择并固定允许地址，纯保留地址仍拒绝 |
+| 真实 GET MIME | PASS | Pear CDN 返回 HTTP 200、`Content-Type: application/zip`、`Content-Length: 625723` |
+| ZIP 安全下载 | PASS | 使用生产 `downloadPublicImage()` 与显式 ZIP 白名单完成下载，无重定向 |
+| 主 PSD 提取 | PASS | 跳过 depth PSD，得到 `7,738,844` 字节主 PSD，签名为 `8BPS` |
+| PSD 真实解析 | PASS | `ag-psd` 解析为 `1280x1280`、5 个可编辑图层，持久化 5 个 PNG，0 警告 |
+| 编辑器云端终态 | PENDING DEPLOY | 需要部署本次提交后在预览页确认图层选择、隐藏、移动和导出 |
+
+当前修复已在本地贯通 MIME、地址选择、ZIP 解压和 PSD 解析。发布结论仍为 **不通过**，直到预览页编辑器终态、一次扣费/退款、PostgreSQL 并发和 Firefox/WebKit 门禁完成。
