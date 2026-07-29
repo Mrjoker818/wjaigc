@@ -300,3 +300,22 @@
 5. Firefox/WebKit Secrets 配置完成后执行真实跨浏览器回归。
 
 ### 发布决策：不通过
+## 2026-07-29 Pear ZIP MIME 修复后的发布门禁
+
+### 已解除
+
+1. 云端 `/api/layered-decompose` 初始 POST 已真实验证快速返回 HTTP 202 与应用 taskId。
+2. Pear 调用已真实进入异步 `waiting-for-pear` 阶段，浏览器不再因 4m30s 同步等待而 `Failed to fetch`。
+3. 本地已补齐仅供显式允许调用方使用的 ZIP MIME 安全集合，HTML、脚本及其他非白名单类型仍被拒绝。
+4. 分层专项、TypeScript、ESLint、全量 Vitest 和生产构建均通过。
+
+### 仍阻断
+
+1. ZIP MIME 修复尚未部署到 Coze，真实 ZIP 下载、主 PSD 提取和 2+ 可编辑图层尚未通过。
+2. 本次失败任务的积分退款和 Pear 侧单次扣费需要在管理员流水中核对。
+3. 缺少隔离 `TEST_POSTGRES_URL`，多实例幂等、终态竞争和一次性退款仍缺真实数据库证据。
+4. Firefox/WebKit 核心流程仍未执行。
+
+### 发布决策：不通过
+
+允许推送此最小修复并部署复测；在真实编辑器图层、结算一致性、PostgreSQL 并发与跨浏览器门禁全部取得证据前，不标记为可发布。

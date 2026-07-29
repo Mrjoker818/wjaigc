@@ -72,4 +72,12 @@ describe('safe remote image download address policy', () => {
       ['application/octet-stream'],
     )).toBe(true);
   });
+
+  it.each([
+    'application/zip',
+    'application/x-zip-compressed',
+  ])('allows Pear ZIP artifacts only through an explicit safe allowlist: %s', (mimeType) => {
+    expect(isAllowedRemoteMimeType(mimeType)).toBe(false);
+    expect(isAllowedRemoteMimeType(mimeType, [mimeType])).toBe(true);
+  });
 });

@@ -297,3 +297,18 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | 独立代码复审 | PASS | P0=0、P1=0；未发现本次 diff 的代码级发布阻断项 |
 
 本轮未执行云端新代码的真实 Pear 异步成功/取消链路，因此发布结论仍不能升级为通过。
+## 2026-07-29 Pear ZIP MIME 云端回归
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| Chrome 初始提交 | PASS | `/api/layered-decompose` 约 1 秒返回 HTTP 202 和无界 taskId，不再同步等待 4m30s |
+| 异步阶段 | PASS | 首次响应为 `waiting-for-pear` 15%，首轮轮询为 27%，UI 显示 Pear 正在生成 PSD |
+| ZIP 下载终态 | FAIL / LOCAL FIXED | 约 166 秒进入 `downloading-psd` 后被内部 MIME 集合拒绝，返回 `UNSAFE_REMOTE_IMAGE` |
+| MIME RED/GREEN | PASS | `application/zip` 与 `application/x-zip-compressed` 两项测试先失败，再由最小白名单修复通过 |
+| ZIP/PSD 与安全下载 | PASS | 2 files / 39 tests passed |
+| 分层专项 | PASS | 6 files / 72 tests passed |
+| TypeScript / ESLint | PASS | `next typegen`、`tsc`、`eslint --quiet` 均退出 0 |
+| 全量 Vitest | PASS WITH ENVIRONMENT SKIPS | `pnpm test` 退出 0；真实 PostgreSQL 环境用例仍按既有规则跳过 |
+| Production build | PASS | Next.js 16.2.10 编译成功并生成 110 个路由 |
+
+当前结论仍为 **不通过**。异步提交已取得真实云端证据，但新 MIME 修复尚未部署；主 PSD 提取、可编辑图层、成功单次扣费和失败单次退款仍需部署后验证。

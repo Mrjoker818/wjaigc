@@ -15,6 +15,8 @@ const IMAGE_MIME_TYPES = new Set([
 const SAFE_REMOTE_ASSET_MIME_TYPES = new Set([
   ...IMAGE_MIME_TYPES,
   'application/octet-stream',
+  'application/x-zip-compressed',
+  'application/zip',
   'application/x-photoshop',
   'application/xml',
   'image/vnd.adobe.photoshop',

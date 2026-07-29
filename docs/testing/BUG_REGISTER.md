@@ -360,3 +360,18 @@ await page.evaluate(() => {
 - ZIP/PSD 下载、解压和解析共享单槽内存门；取消或失租会清理本次 attempt 文件，不得写入终态。
 - 最终本地回归：535/535 个测试文件通过；1105 项通过、3 项真实环境测试跳过、0 失败；TypeScript、ESLint `--quiet`、生产构建通过。
 - 独立最终复审：P0=0、P1=0。云端真实异步任务、PostgreSQL 并发结算和 Firefox/WebKit 仍属于发布门禁，不把本地结果标记为云端通过。
+### BUG-016: Pear ZIP 被通用安全下载器的内部 MIME 集合拒绝
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1（真实 Pear 分层结果无法进入编辑器） |
+| **发现环境** | Chrome + Coze 预览环境，Git `fd253a1e920884b2b0245fe984acb65b5fecc285`，2026-07-29 |
+| **稳定复现** | 选择“示例项目”中的 400x300 山景图片，打开“编辑元素”，选择云端并点击“开始分层” |
+| **真实任务** | 无界 taskId `layer_1904e57f-2385-44f1-92a2-038908a0bd36` |
+| **实际结果** | 初始 POST 约 1 秒返回 HTTP 202，阶段进入 `waiting-for-pear`；约 166 秒后在 `downloading-psd` 失败，错误码 `UNSAFE_REMOTE_IMAGE`，消息 `Remote response is not an allowed image type` |
+| **预期结果** | 仅在调用方显式允许 ZIP 时下载 Pear ZIP，随后提取非 `_depth.psd` 的主 PSD 并打开图层编辑器 |
+| **根因** | 分层模块已请求允许 `application/zip` 与 `application/x-zip-compressed`，但 `safe-image-download.ts` 的内部安全资产 MIME 集合缺少这两项，导致允许列表在发起请求前被过滤 |
+| **修复文件** | `src/lib/safe-image-download.ts` |
+| **新增测试** | `safe-image-download.test.ts`：ZIP 默认仍禁止，仅在显式白名单中允许；先验证 2 项 RED，再实施最小修复 |
+| **本地回归** | ZIP/PSD 与安全下载 39/39；分层专项 72/72；TypeScript、ESLint `--quiet`、全量 Vitest、Next.js 生产构建均退出 0 |
+| **状态** | 本地已修复并完成门禁；等待部署后复跑真实 ZIP、主 PSD 与编辑器图层终态 |
