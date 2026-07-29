@@ -374,4 +374,5 @@ await page.evaluate(() => {
 | **修复文件** | `src/lib/safe-image-download.ts` |
 | **新增测试** | `safe-image-download.test.ts`：ZIP 默认仍禁止，仅在显式白名单中允许；先验证 2 项 RED，再实施最小修复 |
 | **本地回归** | ZIP/PSD 与安全下载 39/39；分层专项 72/72；TypeScript、ESLint `--quiet`、全量 Vitest、Next.js 生产构建均退出 0 |
+| **截图证据** | `test-results/screenshots/pear-layer-zip-mime-failure-fd253a1.png` |
 | **状态** | 本地已修复并完成门禁；等待部署后复跑真实 ZIP、主 PSD 与编辑器图层终态 |
