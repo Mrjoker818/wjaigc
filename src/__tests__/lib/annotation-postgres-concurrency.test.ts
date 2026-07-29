@@ -9,19 +9,17 @@ suite('annotation PostgreSQL concurrency', () => {
   const userId = `annotation-pg-${randomUUID()}`;
   const taskId = `annotation-pg-task-${randomUUID()}`;
   let execSql: typeof import('@/lib/db-client').execSql;
+  let dbStorage: typeof import('@/lib/db-storage');
   let storage: typeof import('@/lib/cloud-task-storage');
 
   beforeAll(async () => {
     process.env.PGDATABASE_URL = databaseUrl;
     ({ execSql } = await import('@/lib/db-client'));
+    dbStorage = await import('@/lib/db-storage');
     storage = await import('@/lib/cloud-task-storage');
+    await dbStorage.ensureCoreTables();
     await storage.ensureCloudTaskTables();
-    await execSql(
-      `INSERT INTO wujie_credits (user_id, balance, total_used, total_recharged, created_at, updated_at)
-       VALUES ($1, 100, 0, 100, $2, $2)
-       ON CONFLICT (user_id) DO UPDATE SET balance = 100, total_used = 0, updated_at = $2`,
-      [userId, Date.now()],
-    );
+    await dbStorage.dbInitCredits(userId, 100);
     await storage.createCloudTask({
       id: taskId,
       userId,

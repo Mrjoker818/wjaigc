@@ -192,6 +192,7 @@ export async function ensureCoreTables(): Promise<void> {
         description TEXT DEFAULT '',
         model TEXT DEFAULT '',
         task_id TEXT DEFAULT '',
+        reference_id TEXT DEFAULT '',
         created_at BIGINT NOT NULL
       )
     `);
@@ -220,6 +221,7 @@ export async function ensureCoreTables(): Promise<void> {
       ['wujie_recharge_orders', 'paid_at', 'BIGINT'],
       ['wujie_api_providers', 'balance_username', 'TEXT DEFAULT \'\''],
       ['wujie_api_providers', 'balance_password', 'TEXT DEFAULT \'\''],
+      ['wujie_credit_transactions', 'reference_id', 'TEXT DEFAULT \'\''],
       // 操作日志扩展列
       ['wujie_audit_log', 'level', 'TEXT DEFAULT \'info\''],
       ['wujie_audit_log', 'error_message', 'TEXT DEFAULT \'\''],

@@ -18,21 +18,19 @@ suite('layer decomposition PostgreSQL concurrency', () => {
   };
   let taskId = '';
   let execSql: typeof import('@/lib/db-client').execSql;
+  let dbStorage: typeof import('@/lib/db-storage');
   let storage: typeof import('@/lib/cloud-task-storage');
   let idempotency: typeof import('@/lib/layer-decomposition/idempotency');
 
   beforeAll(async () => {
     process.env.PGDATABASE_URL = databaseUrl;
     ({ execSql } = await import('@/lib/db-client'));
+    dbStorage = await import('@/lib/db-storage');
     storage = await import('@/lib/cloud-task-storage');
     idempotency = await import('@/lib/layer-decomposition/idempotency');
+    await dbStorage.ensureCoreTables();
     await storage.ensureCloudTaskTables();
-    await execSql(
-      `INSERT INTO wujie_credits (user_id, balance, total_used, total_recharged, created_at, updated_at)
-       VALUES ($1, 100, 0, 100, $2, $2)
-       ON CONFLICT (user_id) DO UPDATE SET balance = 100, total_used = 0, updated_at = $2`,
-      [userId, Date.now()],
-    );
+    await dbStorage.dbInitCredits(userId, 100);
   });
 
   afterAll(async () => {
