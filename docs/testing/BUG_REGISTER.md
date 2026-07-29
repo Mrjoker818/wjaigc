@@ -57,6 +57,41 @@
 | **回归结果** | 组件/契约测试通过；真实 Pear 双击链路待新版本部署后验证 |
 | **状态** | 本地代码已修复，云端未验证 |
 
+### BUG-009: 同源受控媒体绝对 URL 被误当作公网资源下载
+
+| 字段 | 内容 |
+|------|------|
+| **ID** | BUG-009 |
+| **级别** | P1（真实 Pear 链路阻断） |
+| **发现环境** | 云端 Chrome，v4.0.0，`b0ab810` 基线 |
+| **稳定复现** | 选中 `/api/serve-upload/generate/...` 图片，打开“编辑元素”，选择“云端”并执行 |
+| **实际结果** | 服务端回源请求返回 `Remote image returned HTTP 403`，Pear 尚未收到任务 |
+| **根因** | 路由只把相对受控媒体路径交给本地读取；同源绝对 URL 被传给公网安全下载器，服务端回源缺少浏览器会话 |
+| **修复文件** | `src/app/api/layered-decompose/route.ts` |
+| **新增测试** | `normalizes a same-origin managed media URL before service execution` |
+| **回归结果** | 路由测试 4/4 通过；云端重试已越过 403 并进入模型解析阶段 |
+| **状态** | 本地修复通过；当前云端行为已不再复现 403 |
+
+证据：`test-results/screenshots/pear-layering-cloud-403.png`、`test-results/console/pear-layering-cloud-403.json`。
+
+### BUG-010: 专用 Pear 分层供应商被历史模型类型错误过滤
+
+| 字段 | 内容 |
+|------|------|
+| **ID** | BUG-010 |
+| **级别** | P1（真实 Pear 链路阻断） |
+| **发现环境** | 云端 Chrome，2026-07-29 |
+| **稳定复现** | 管理员已启用 `pear分层`，类型为 `layer`，选中模型为 `Image-Layered`；云端模式重试 |
+| **实际结果** | UI 报“未找到可用的 Pear 图片分层提供商”；供应商调用前结束 |
+| **根因** | 历史 `discovered_models.type=image` 优先于供应商的专用 `model_type=layer`，`getPublicModels('layer')` 最终把管理员已明确勾选的模型过滤掉 |
+| **修复文件** | `src/lib/server-api-config.ts` |
+| **新增测试** | `server-api-config-layer-models.test.ts`，先红后绿 |
+| **回归结果** | 模型过滤、工作流模型、授权与分层路由共 13/13 通过；全仓 1068/1068 已执行测试通过，另 2 项 PostgreSQL 测试跳过 |
+| **积分结果** | 失败前后均为 `9,987,596`，确认本次供应商提交前失败未扣费 |
+| **状态** | 本地修复通过；等待推送并部署后执行真实 Pear 终态验收 |
+
+证据：`test-results/screenshots/pear-layering-cloud-provider-missing.jpg`、`test-results/console/pear-layering-cloud-provider-missing.json`。
+
 ---
 
 ## P0 缺陷详情

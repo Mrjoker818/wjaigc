@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { normalizeTrustedManagedMediaInput } from '@/lib/safe-image-input';
 import {
   cancelLayerTask,
   getLayerTaskStatus,
@@ -12,6 +13,13 @@ import {
   readLayerRequest,
   validateLayerIdempotencyKey,
 } from '@/lib/layer-decomposition/validation';
+
+function trustedRequestHosts(request: NextRequest): string[] {
+  return [
+    request.nextUrl.host,
+    request.headers.get('host') || '',
+  ].filter(Boolean);
+}
 
 function errorResponse(error: unknown): NextResponse {
   if (error instanceof LayerRequestValidationError || error instanceof LayerServiceError) {
@@ -35,7 +43,14 @@ export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const layerRequest = await readLayerRequest(request);
+    const parsedRequest = await readLayerRequest(request);
+    const layerRequest = {
+      ...parsedRequest,
+      imageUrl: normalizeTrustedManagedMediaInput(
+        parsedRequest.imageUrl,
+        trustedRequestHosts(request),
+      ),
+    };
     const idempotencyKey = validateLayerIdempotencyKey(
       request.headers.get('idempotency-key'),
     );

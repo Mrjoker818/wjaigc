@@ -1054,20 +1054,26 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
       // If admin has explicitly selected models, show only those
       if (selected.size > 0) {
         const visible = discovered.filter(model => selected.has(model.id));
-        return (visible.length ? visible : Array.from(selected).map(id => ({
+        const selectedModels = visible.length ? visible : Array.from(selected).map(id => ({
           id,
           name: '', // will be resolved below
           providerId: provider.id,
           type: inferModelType(id, modelTypeForProvider(provider)),
           displayName: undefined,
-        } satisfies ModelInfo))).map(model => {
+        } satisfies ModelInfo));
+        return selectedModels.map(model => {
+          // Older provider rows may retain `image` on discovered models even after
+          // the administrator reclassifies the dedicated provider as `layer`.
+          const effectiveModel = provider.modelType === 'layer'
+            ? { ...model, type: 'layer' as const }
+            : model;
           // 优先级：管理员手动设置的 displayName > 第三方 API 供应商名称 > 本地映射
-          const adminDisplayName = model.displayName || '';
-          const providerName = (model as ModelInfo).name && (model as ModelInfo).name !== model.id ? (model as ModelInfo).name : '';
-          const mappedName = getModelDisplayName(model.id);
+          const adminDisplayName = effectiveModel.displayName || '';
+          const providerName = effectiveModel.name && effectiveModel.name !== effectiveModel.id ? effectiveModel.name : '';
+          const mappedName = getModelDisplayName(effectiveModel.id);
           const name = adminDisplayName || providerName || mappedName;
           const apiDisplayName = providerName || mappedName; // 原始API名称（用于回退）
-          return { ...model, providerId: provider.id, name, apiDisplayName, displayName: adminDisplayName || undefined };
+          return { ...effectiveModel, providerId: provider.id, name, apiDisplayName, displayName: adminDisplayName || undefined };
         });
       }
       // If no models explicitly selected, show all discovered models

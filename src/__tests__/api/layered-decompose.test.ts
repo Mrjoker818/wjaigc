@@ -80,6 +80,39 @@ describe('layered decomposition route', () => {
     }));
   });
 
+  it('normalizes a same-origin managed media URL before service execution', async () => {
+    mocks.submitLayerDecomposition.mockResolvedValue({
+      success: true,
+      taskId: 'layer-managed-media',
+      status: 'processing',
+      phase: 'reading-source',
+      progress: 5,
+    });
+    const response = await POST(new NextRequest(
+      'https://preview.example/api/layered-decompose',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          imageUrl: 'https://preview.example/api/serve-upload/generate/source.png?cache=1',
+          engine: 'cloud',
+          providerId: 'pear',
+          modelId: 'Image-Layered',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'layer-managed-media-1',
+        },
+      },
+    ));
+
+    expect(response.status).toBe(202);
+    expect(mocks.submitLayerDecomposition).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        imageUrl: '/api/serve-upload/generate/source.png',
+      }),
+    }));
+  });
+
   it('delegates status and cancellation with task ownership identity', async () => {
     mocks.getLayerTaskStatus.mockResolvedValue({
       success: true,
