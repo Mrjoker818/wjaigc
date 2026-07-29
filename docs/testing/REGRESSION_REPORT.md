@@ -250,3 +250,17 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | 生产构建 | PASS | Next.js 16.2.10，110 个静态页面，退出码 0 |
 
 本轮没有把本地测试当作云端 Pear 成功证据。新客户端代码部署前，PSD、2+ 图层、一次扣费、取消退款仍未验证。
+
+## 2026-07-29 活动图片目标错位修复
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| Chrome 请求取证 | FAIL / ROOT CAUSE CONFIRMED | 当前选中纸鹤，但请求提交了历史 Hunyuan 3D URL；403 发生在 Pear 调用前 |
+| 目标解析 RED/GREEN | PASS | 新增 2 项测试，证明当前单选优先且历史锁定目标保留兜底 |
+| Pear/分层专项 | PASS | 10 files / 40 tests passed |
+| 全仓 Vitest | PASS WITH SKIP | 236 files passed / 2 skipped；1079 tests passed / 3 PostgreSQL skipped；0 failed |
+| TypeScript | PASS | `next typegen` + `tsc -p tsconfig.json --noEmit` 通过 |
+| ESLint | PASS | `eslint . --quiet`，0 error |
+| 生产构建 | PASS | Next.js 16.2.10，110 个页面生成完成，退出码 0 |
+
+本地修复只证明目标选择逻辑和既有分层契约没有回归。云端仍需确认 POST 使用当前 `/api/serve-upload/...` 路径，并取得真实 Pear PSD、至少 2 个可编辑图层及结算证据。

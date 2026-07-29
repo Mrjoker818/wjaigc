@@ -314,3 +314,20 @@ await page.evaluate(() => {
 | **状态** | 本地已修复；等待提交、部署后重新执行真实 Pear 成功与取消退款链路 |
 
 证据：`test-results/network/pear-layer-retry-f8f7cef.json`；真实 Chrome 截图已在本轮测试记录中捕获。
+
+### BUG-014: 图片工具错误优先使用历史编辑目标
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1 |
+| **发现环境** | Chrome，Coze 预览环境，Git `2a2d99c6c28597f4d61fee60edd3a12eff9d07c2`，2026-07-29 |
+| **稳定复现** | 在项目“视频测试”中选择黄色纸鹤图片 `1783849133634-0`，打开“编辑元素”并提交云端分层 |
+| **实际请求** | `/api/layered-decompose` 收到的 `imageUrl` 是历史 Hunyuan 3D 预览地址，而不是当前纸鹤的 `/api/serve-upload/generate/img_1783849131687_22nasq.png` |
+| **实际结果** | 历史签名已过期，安全下载器返回 `UNSAFE_REMOTE_IMAGE: Remote image returned HTTP 403`；请求尚未到达 Pear |
+| **预期结果** | 当前有效单选图片优先；仅在没有当前单选时，才使用面板锁定的历史 `editImageId` |
+| **根因** | `getActiveImageData()` 无条件优先读取 `editImageId`，历史工具状态覆盖了用户当前单选 |
+| **影响范围** | 放大、擦除、蒙版、调色、扩展、多角度、编辑元素及其他复用活动图片解析的工具均可能操作旧图片 |
+| **修复文件** | `src/lib/canvas-active-image.ts`、`src/components/infinite-canvas.tsx` |
+| **新增测试** | `canvas-active-image.test.ts`：当前单选覆盖历史目标；无单选时仍可回退到锁定目标 |
+| **本地回归** | 专项 40/40；全仓 236 files / 1079 tests 通过，3 项 PostgreSQL 测试跳过；TypeScript、ESLint 0 error、生产构建通过 |
+| **状态** | 本地已修复；必须部署后确认请求改为当前纸鹤路径，并继续验证 Pear task、PSD 与 2+ 图层 |

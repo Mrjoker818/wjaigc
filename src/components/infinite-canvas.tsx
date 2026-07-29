@@ -50,6 +50,7 @@ import { } from '@/config/app-meta';
 import { getCanvasViewportMarginFactor, PAN_VIEWPORT_SYNC_INTERVAL_MS, resolveCanvasCullingBounds, resolveCanvasRenderOffset } from '@/lib/canvas-pan-virtualization';
 import { CanvasSpatialIndex } from '@/lib/canvas-spatial-index';
 import { applyCanvasGenerationResults } from '@/lib/canvas-generation-results';
+import { resolveActiveCanvasImage } from '@/lib/canvas-active-image';
 import {
   THREE_D_POLL_INTERVAL_MS,
   THREE_D_TASK_TIMEOUT_MS,
@@ -5268,12 +5269,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   const selectedImageData = getSelectedImageData();
 
-  // 获取当前编辑的图片数据：优先用 editImageId（面板打开后选择可能丢失），fallback 到 selectedImageData
+  // 当前单选必须覆盖历史编辑目标；面板导致选择丢失时再回退到锁定目标。
   const getActiveImageData = useCallback((): CanvasImage | null => {
-    if (editImageId) {
-      return images.find(i => i.id === editImageId) || null;
-    }
-    return selectedImageData;
+    return resolveActiveCanvasImage(images, selectedImageData, editImageId);
   }, [editImageId, images, selectedImageData]);
 
   // 3D model name to friendly Chinese label mapping
