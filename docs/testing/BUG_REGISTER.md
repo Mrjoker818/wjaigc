@@ -295,3 +295,22 @@ await page.evaluate(() => {
 | **状态** | 本地已修复；新 SQL 需 GitHub PostgreSQL 并发门禁与云端失败退款实测，历史错误扣费尚未补偿 |
 
 证据：`test-results/screenshots/pear-layer-missing-refunds-09850e3.png`
+
+### BUG-013: 动态 Coze 预览域名仍使同源托管图片走公网回抓
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1 |
+| **发现环境** | Chrome，Coze 预览环境，Git `f8f7cef43914bcd2dc7e947e3104452f33e55eb8`，2026-07-29 |
+| **稳定复现** | 选择黄色纸鹤画布图片，其地址为当前页面同源 `/api/serve-upload/generate/img_1783849131687_22nasq.png`；打开 PSD 分层编辑器，选择云端，点击重试 |
+| **实际结果** | UI 从“正在准备图片分层 0%”立即进入错误终态：`Remote image returned HTTP 403` |
+| **预期结果** | 当前浏览器同源且位于受控媒体命名空间的图片应提交为相对托管路径，并直接从服务器媒体根目录读取 |
+| **根因** | 浏览器持久化的画布图片 URL 是完整绝对 URL；动态预览域名未必与 `COZE_PROJECT_DOMAIN_DEFAULT` 一致，后端未能归一化并通过 Coze 公网网关回抓自身资源，网关返回 403 |
+| **修复文件** | `src/lib/layer-decomposition-client.ts`、`src/lib/layer-decomposition/pear-adapter.ts` |
+| **安全边界** | 仅浏览器当前同源且路径以 `/uploads/` 或 `/api/serve-upload/` 开头时改为相对路径；跨域和非托管 URL 不改写；后端仍不信任客户端 `Origin`、`Host` 或 `x-forwarded-host` |
+| **协议核对** | Pear 官方文档 `POST /v1/images/edits`，请求体只保留 `model=image-layered` 与 `image`；移除未在该接口文档中要求的 `response_format` |
+| **新增测试** | 同源托管媒体、跨域/非托管不改写、Pear 官方请求体，共 3 项 RED/GREEN 回归 |
+| **本地回归** | 分层专项 43/43；全仓 1077/1077 已执行测试通过，另 3 项 PostgreSQL 测试跳过；TypeScript、ESLint 0 error、生产构建通过 |
+| **状态** | 本地已修复；等待提交、部署后重新执行真实 Pear 成功与取消退款链路 |
+
+证据：`test-results/network/pear-layer-retry-f8f7cef.json`；真实 Chrome 截图已在本轮测试记录中捕获。

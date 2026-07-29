@@ -234,3 +234,19 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | Firefox/WebKit | BLOCKED | GitHub 未配置独立 E2E 地址、账号、密码与付费模型 Secrets |
 
 当前结论仍为 **不通过**。必须部署新提交后完成 Pear 成功链路、失败退款和 PSD/2+ 图层验证。
+
+## 2026-07-29 f8f7cef 云端复测与协议修正
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| 真实 Chrome 重试 | FAIL / LOCAL FIXED | 同源黄色纸鹤图片仍在 0% 立即返回 `Remote image returned HTTP 403` |
+| 根因验证 | CONFIRMED | 图片为当前预览页同源 `/api/serve-upload/...`；失败发生在 Pear 提交前 |
+| 客户端媒体归一化 | PASS | 仅当前同源托管媒体转相对路径，跨域和非托管 URL 保持原样 |
+| Pear 官方协议 | PASS | 主接口为 `/v1/images/edits`；请求体仅含 `model` 与 `image`；同步 PSD、异步 task 两类返回解析保留 |
+| 分层专项 | PASS | 6 files / 43 tests passed |
+| 全仓 Vitest | PASS WITH SKIP | 235 files passed / 2 skipped；1077 tests passed / 3 PostgreSQL skipped；0 failed |
+| TypeScript | PASS | `next typegen` + `tsc` 通过 |
+| ESLint | PASS WITH WARNINGS | 0 errors / 944 历史 warnings |
+| 生产构建 | PASS | Next.js 16.2.10，110 个静态页面，退出码 0 |
+
+本轮没有把本地测试当作云端 Pear 成功证据。新客户端代码部署前，PSD、2+ 图层、一次扣费、取消退款仍未验证。

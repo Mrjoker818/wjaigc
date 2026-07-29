@@ -4,6 +4,7 @@ import {
   cancelLayerDecomposition,
   getLayerPhasePresentation,
   LayerClientError,
+  normalizeLayerImageUrlForSubmission,
   runLayerDecomposition,
 } from '@/lib/layer-decomposition-client';
 
@@ -18,6 +19,24 @@ describe('layer decomposition client', () => {
     expect(getLayerPhasePresentation('ready')).toEqual({
       label: '正在打开图层编辑器', progress: 100,
     });
+  });
+
+  it('submits current-origin managed media as a server-owned relative path', () => {
+    expect(normalizeLayerImageUrlForSubmission(
+      'https://preview.example/api/serve-upload/generate/source.png?cache=1',
+      'https://preview.example',
+    )).toBe('/api/serve-upload/generate/source.png');
+  });
+
+  it('does not rewrite external or unmanaged image URLs', () => {
+    expect(normalizeLayerImageUrlForSubmission(
+      'https://cdn.example/api/serve-upload/generate/source.png',
+      'https://preview.example',
+    )).toBe('https://cdn.example/api/serve-upload/generate/source.png');
+    expect(normalizeLayerImageUrlForSubmission(
+      'https://preview.example/public/source.png',
+      'https://preview.example',
+    )).toBe('https://preview.example/public/source.png');
   });
 
   it('submits once and polls until persisted layers are completed', async () => {

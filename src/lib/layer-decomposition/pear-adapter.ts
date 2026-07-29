@@ -228,7 +228,6 @@ async function submitAtEndpoint(
       body: JSON.stringify({
         model: 'image-layered',
         image: input.image,
-        response_format: 'url',
       }),
       signal: input.signal,
     });

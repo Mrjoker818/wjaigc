@@ -1,0 +1,13 @@
+{
+  "testedAt": "2026-07-29T12:47:00+08:00",
+  "gitCommit": "f8f7cef43914bcd2dc7e947e3104452f33e55eb8",
+  "deploymentUrl": "https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9-5000.dev.coze.site/",
+  "browser": "Google Chrome",
+  "sourceImage": "https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9-5000.dev.coze.site/api/serve-upload/generate/img_1783849131687_22nasq.png",
+  "engine": "cloud",
+  "initialState": "正在准备图片分层 0%",
+  "terminalState": "error",
+  "error": "Remote image returned HTTP 403",
+  "providerReached": false,
+  "conclusion": "Failure occurred while reading current-origin managed media before Pear submission"
+}

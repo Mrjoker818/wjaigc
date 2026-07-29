@@ -50,7 +50,6 @@ describe('Pear layered image adapter', () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       model: 'image-layered',
       image: 'https://media.example.com/source.png',
-      response_format: 'url',
     });
   });
 

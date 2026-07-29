@@ -58,6 +58,28 @@ const ERROR_MESSAGES: Record<string, string> = {
   LAYER_LOCAL_QUALITY_FAILED: '本地增强分层未通过质量检查。',
 };
 
+const MANAGED_LAYER_MEDIA_PREFIXES = ['/uploads/', '/api/serve-upload/'] as const;
+
+export function normalizeLayerImageUrlForSubmission(
+  imageUrl: string,
+  currentOrigin?: string,
+): string {
+  const value = imageUrl.trim();
+  if (!currentOrigin) return value;
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.origin === new URL(currentOrigin).origin
+      && MANAGED_LAYER_MEDIA_PREFIXES.some(prefix => parsed.pathname.startsWith(prefix))
+    ) {
+      return parsed.pathname;
+    }
+  } catch {
+    // Relative and malformed values are validated by the server.
+  }
+  return value;
+}
+
 export class LayerClientError extends Error {
   readonly code: string;
   readonly retryable: boolean;
@@ -211,7 +233,10 @@ export async function runLayerDecomposition(
       'idempotency-key': options.idempotencyKey || createIdempotencyKey(),
     },
     body: JSON.stringify({
-      imageUrl: options.imageUrl,
+      imageUrl: normalizeLayerImageUrlForSubmission(
+        options.imageUrl,
+        typeof window !== 'undefined' ? window.location.origin : undefined,
+      ),
       engine: options.engine,
       ...(providerId && modelId ? { providerId, modelId } : {}),
     }),
