@@ -24,7 +24,7 @@ jobs:
       PAYMENT_TOKEN_SECRET: ${{ secrets.PAYMENT_TOKEN_SECRET }}
       WUJIE_ADMIN_PASSWORD: ${{ secrets.WUJIE_ADMIN_PASSWORD }}
       MANDATORY_API_AUTH: 'true'
-      WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-data
+      WUJIE_DATA_DIR: .wujie-data
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -69,6 +69,42 @@ jobs:
             test-results/
             coverage/
           if-no-files-found: ignore
+
+  postgres-concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wujie_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wujie_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGDATABASE_URL: postgresql://postgres:postgres@localhost:5432/wujie_test
+      TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/wujie_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run PostgreSQL concurrency and settlement tests
+        run: >-
+          pnpm exec vitest run
+          src/__tests__/api/layered-decompose-postgres-concurrency.test.ts
+          src/__tests__/lib/annotation-postgres-concurrency.test.ts
+          --pool=forks --poolOptions.forks.singleFork=true
 
   real-p0-browser:
     if: >-

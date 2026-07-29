@@ -71,8 +71,16 @@ describe('quality workflow contract', () => {
   });
 
   it('creates a writable doctor data directory on a clean runner', () => {
-    expect(workflow).toContain('WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-data');
+    expect(workflow).not.toContain('WUJIE_DATA_DIR: ${{ runner.temp }}');
+    expect(workflow).toContain('WUJIE_DATA_DIR: .wujie-data');
     expect(workflow).toContain('mkdir -p "$WUJIE_DATA_DIR"');
+  });
+
+  it('runs database concurrency gates against an isolated PostgreSQL service', () => {
+    expect(workflow).toContain('postgres:16-alpine');
+    expect(workflow).toContain('TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/wujie_test');
+    expect(workflow).toContain('src/__tests__/api/layered-decompose-postgres-concurrency.test.ts');
+    expect(workflow).toContain('src/__tests__/lib/annotation-postgres-concurrency.test.ts');
   });
 
   it('does not require paid browser secrets for untrusted pull requests', () => {
