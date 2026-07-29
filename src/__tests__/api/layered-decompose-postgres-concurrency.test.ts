@@ -108,7 +108,7 @@ suite('layer decomposition PostgreSQL concurrency', () => {
       id: refundRaceTaskId,
       userId: refundRaceUserId,
       type: 'layer-decomposition',
-      status: 'processing',
+      status: 'pending',
       progress: 5,
       creditStatus: 'not-applicable',
       creditCost: 0,
