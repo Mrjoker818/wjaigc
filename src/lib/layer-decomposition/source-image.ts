@@ -1,21 +1,27 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+import JSZip, { type JSZipObject } from 'jszip';
 import sharp from 'sharp';
 
 import {
   downloadPublicImage,
   type DownloadedPublicImage,
 } from '@/lib/safe-image-download';
+import { withLayerPsdMemorySlot } from '@/lib/layer-decomposition/memory-gate';
 import { getServerDataRoot } from '@/lib/server-data-root';
 
 const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
-const MAX_PSD_BYTES = 80 * 1024 * 1024;
+const MAX_EXTRACTED_PSD_BYTES = 128 * 1024 * 1024;
+const MAX_ARTIFACT_BYTES = MAX_EXTRACTED_PSD_BYTES;
+const MAX_ZIP_ENTRIES = 16;
 const MAX_SOURCE_PIXELS = 67_108_864;
 const SOURCE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
-const PSD_MIME_TYPES = [
+const LAYER_ARTIFACT_MIME_TYPES = [
   'image/vnd.adobe.photoshop',
   'application/x-photoshop',
+  'application/zip',
+  'application/x-zip-compressed',
   'application/octet-stream',
 ] as const;
 
@@ -43,6 +49,184 @@ export class LayerSourceImageError extends Error {
     this.name = 'LayerSourceImageError';
     this.code = code;
   }
+}
+
+function isPsdBuffer(buffer: Buffer): boolean {
+  return buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === '8BPS';
+}
+
+function isZipBuffer(buffer: Buffer): boolean {
+  if (buffer.length < 4) return false;
+  const signature = buffer.subarray(0, 4).toString('hex');
+  return signature === '504b0304' || signature === '504b0506' || signature === '504b0708';
+}
+
+function assertSafeZipEntryName(name: string): void {
+  const normalized = name.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  if (
+    !normalized
+    || normalized.startsWith('/')
+    || /^[A-Za-z]:\//.test(normalized)
+    || segments.some((segment) => segment === '..' || segment === '.' || segment.includes('\0'))
+  ) {
+    throw new LayerSourceImageError(
+      'LAYER_ZIP_PATH_INVALID',
+      'Pear ZIP contains an unsafe file path',
+    );
+  }
+}
+
+interface JSZipObjectWithSize extends JSZipObject {
+  _data?: {
+    uncompressedSize?: unknown;
+  };
+}
+
+function abortReason(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  const error = new Error('Layer task was cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+function zipEntrySize(entry: JSZipObject): number {
+  const value = (entry as JSZipObjectWithSize)._data?.uncompressedSize;
+  if (!Number.isSafeInteger(value) || Number(value) <= 0) {
+    throw new LayerSourceImageError(
+      'LAYER_ZIP_DECODE_FAILED',
+      'Pear ZIP has invalid PSD size metadata',
+    );
+  }
+  const size = Number(value);
+  if (size > MAX_EXTRACTED_PSD_BYTES) {
+    throw new LayerSourceImageError(
+      'LAYER_PSD_TOO_LARGE',
+      'Pear PSD exceeds the extracted size limit',
+    );
+  }
+  return size;
+}
+
+function extractZipEntryBounded(entry: JSZipObject, signal?: AbortSignal): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortReason(signal));
+      return;
+    }
+    const expectedBytes = zipEntrySize(entry);
+    const output = Buffer.allocUnsafe(expectedBytes);
+    let totalBytes = 0;
+    let settled = false;
+    const stream = entry.nodeStream('nodebuffer') as NodeJS.ReadableStream & {
+      destroy?: (error?: Error) => void;
+    };
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      stream.pause();
+      reject(error);
+    };
+    const onAbort = () => {
+      const error = abortReason(signal as AbortSignal);
+      fail(error);
+      stream.destroy?.();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    stream.on('data', (chunk: Buffer | Uint8Array) => {
+      if (settled) return;
+      const source = Buffer.isBuffer(chunk)
+        ? chunk
+        : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+      if (totalBytes + source.length > expectedBytes) {
+        fail(new LayerSourceImageError(
+          'LAYER_PSD_TOO_LARGE',
+          'Pear PSD exceeds the extracted size limit',
+        ));
+        return;
+      }
+      source.copy(output, totalBytes);
+      totalBytes += source.length;
+    });
+    stream.on('error', (error: Error) => {
+      fail(new LayerSourceImageError(
+        'LAYER_ZIP_DECODE_FAILED',
+        'Pear ZIP could not be decoded safely',
+        { cause: error },
+      ));
+    });
+    stream.on('end', () => {
+      if (settled) return;
+      if (totalBytes !== expectedBytes) {
+        fail(new LayerSourceImageError(
+          'LAYER_ZIP_DECODE_FAILED',
+          'Pear ZIP PSD size did not match its metadata',
+        ));
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(output);
+    });
+    stream.resume();
+  });
+}
+
+async function extractPrimaryPsdFromZip(buffer: Buffer, signal?: AbortSignal): Promise<Buffer> {
+  if (signal?.aborted) throw abortReason(signal);
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(buffer, { createFolders: false });
+  } catch (error) {
+    throw new LayerSourceImageError(
+      'LAYER_ZIP_DECODE_FAILED',
+      'Pear ZIP could not be decoded safely',
+      { cause: error },
+    );
+  }
+  const entries = Object.values(zip.files).filter((entry) => !entry.dir);
+  if (entries.length === 0 || entries.length > MAX_ZIP_ENTRIES) {
+    throw new LayerSourceImageError(
+      'LAYER_ZIP_ENTRY_LIMIT',
+      'Pear ZIP has an invalid number of files',
+    );
+  }
+  entries.forEach((entry) => {
+    if (entry.unsafeOriginalName) assertSafeZipEntryName(entry.unsafeOriginalName);
+    assertSafeZipEntryName(entry.name);
+  });
+  const psdEntries = entries.filter((entry) => entry.name.toLowerCase().endsWith('.psd'));
+  if (psdEntries.length === 0) {
+    throw new LayerSourceImageError(
+      'LAYER_ZIP_PSD_MISSING',
+      'Pear ZIP does not contain a PSD artifact',
+    );
+  }
+  const primaryEntries = psdEntries.filter((entry) => !/(?:^|[_-])depth(?:[_-]|\.|$)/i.test(
+    path.posix.basename(entry.name),
+  ));
+  if (primaryEntries.length === 0) {
+    throw new LayerSourceImageError(
+      'LAYER_ZIP_PSD_MISSING',
+      'Pear ZIP does not contain a primary PSD artifact',
+    );
+  }
+  if (primaryEntries.length > 1) {
+    throw new LayerSourceImageError(
+      'LAYER_ZIP_PSD_AMBIGUOUS',
+      'Pear ZIP contains multiple possible primary PSD files',
+    );
+  }
+  const psd = await extractZipEntryBounded(primaryEntries[0], signal);
+  if (!isPsdBuffer(psd)) {
+    throw new LayerSourceImageError(
+      'LAYER_PSD_SIGNATURE_INVALID',
+      'Pear ZIP contains a file with an invalid PSD signature',
+    );
+  }
+  return psd;
 }
 
 function decodedBase64Size(payload: string): number {
@@ -213,20 +397,32 @@ export async function resolveLayerSourceImage(
 }
 
 export async function downloadPearPsd(
-  psdUrl: string,
+  artifactUrl: string,
   options: { signal?: AbortSignal; download?: DownloadFunction } = {},
 ): Promise<DownloadedPublicImage> {
-  const downloaded = await (options.download || downloadPublicImage)(psdUrl, {
-    maxBytes: MAX_PSD_BYTES,
-    timeoutMs: 60_000,
-    signal: options.signal,
-    allowedMimeTypes: PSD_MIME_TYPES,
-  });
-  if (downloaded.buffer.length < 4 || downloaded.buffer.subarray(0, 4).toString('ascii') !== '8BPS') {
+  return withLayerPsdMemorySlot(options.signal, async () => {
+    const downloaded = await (options.download || downloadPublicImage)(artifactUrl, {
+      maxBytes: MAX_ARTIFACT_BYTES,
+      timeoutMs: 60_000,
+      signal: options.signal,
+      allowedMimeTypes: LAYER_ARTIFACT_MIME_TYPES,
+    });
+    if (downloaded.buffer.length <= 0 || downloaded.buffer.length > MAX_ARTIFACT_BYTES) {
+      throw new LayerSourceImageError(
+        'LAYER_ARTIFACT_TOO_LARGE',
+        'Pear artifact is empty or exceeds the 128 MiB size limit',
+      );
+    }
+    if (isPsdBuffer(downloaded.buffer)) return downloaded;
+    if (isZipBuffer(downloaded.buffer)) {
+      return {
+        buffer: await extractPrimaryPsdFromZip(downloaded.buffer, options.signal),
+        mimeType: 'image/vnd.adobe.photoshop',
+      };
+    }
     throw new LayerSourceImageError(
       'LAYER_PSD_SIGNATURE_INVALID',
-      'Pear artifact has an invalid PSD signature',
+      'Pear artifact is neither a valid PSD nor a supported ZIP',
     );
-  }
-  return downloaded;
+  });
 }

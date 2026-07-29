@@ -32,6 +32,79 @@ function minimalLayeredPsd(): Buffer {
 }
 
 describe('Pear PSD extraction', () => {
+  it('serializes concurrent PSD decodes to protect process memory', async () => {
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstPersist = vi.fn(async () => {
+      markFirstStarted();
+      await firstBlocked;
+      return '/api/serve-upload/first.png';
+    });
+    const secondPersist = vi.fn(async () => '/api/serve-upload/second.png');
+
+    const first = extractEditableLayersFromPsd(minimalLayeredPsd(), {
+      persistLayer: firstPersist,
+    });
+    await firstStarted;
+    const second = extractEditableLayersFromPsd(minimalLayeredPsd(), {
+      persistLayer: secondPersist,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(secondPersist).not.toHaveBeenCalled();
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(secondPersist).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes a cancelled extraction from the process queue', async () => {
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = extractEditableLayersFromPsd(minimalLayeredPsd(), {
+      persistLayer: async () => {
+        markFirstStarted();
+        await firstBlocked;
+        return '/api/serve-upload/first.png';
+      },
+    });
+    await firstStarted;
+    const controller = new AbortController();
+    const queued = extractEditableLayersFromPsd(minimalLayeredPsd(), {
+      signal: controller.signal,
+      persistLayer: vi.fn(),
+    });
+    controller.abort(new Error('cancelled while queued'));
+
+    await expect(queued).rejects.toThrow('cancelled while queued');
+    releaseFirst();
+    await first;
+  });
+
+  it('accepts a valid PSD above the previous 80 MiB limit', async () => {
+    const minimal = minimalLayeredPsd();
+    const pearSized = Buffer.allocUnsafe(80 * 1024 * 1024 + 1);
+    pearSized.fill(0);
+    minimal.copy(pearSized);
+
+    const result = await extractEditableLayersFromPsd(pearSized, {
+      persistLayer: vi.fn(async () => '/api/serve-upload/layer.png'),
+    });
+
+    expect(result.layers).toHaveLength(1);
+  });
+
   it('rejects a fake PSD and a header pixel bomb', async () => {
     await expect(extractEditableLayersFromPsd(Buffer.from('not-a-psd'), {
       persistLayer: vi.fn(),

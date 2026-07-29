@@ -55,11 +55,11 @@ export interface PearPollInput extends PearRequestContext {
 
 export type PearSubmitResult =
   | { kind: 'async'; remoteTaskId: string; endpoint: PearEndpoint }
-  | { kind: 'sync'; psdUrl: string; endpoint: PearEndpoint };
+  | { kind: 'sync'; artifactUrl: string; endpoint: PearEndpoint };
 
 export type PearPollResult =
   | { status: 'queued' | 'running'; progress: number }
-  | { status: 'completed'; progress: 100; psdUrl: string }
+  | { status: 'completed'; progress: 100; artifactUrl: string }
   | { status: 'failed' | 'cancelled' | 'timeout'; progress: number; error: string };
 
 interface ParsedResponse {
@@ -145,37 +145,66 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-function extractPsdUrl(body: Record<string, unknown>): string | undefined {
+function isLayerArtifactUrl(value: string): boolean {
+  if (!isHttpUrl(value)) return false;
+  try {
+    const pathname = new URL(value).pathname.toLowerCase();
+    return pathname.endsWith('.psd') || pathname.endsWith('.zip');
+  } catch {
+    return false;
+  }
+}
+
+function extractArtifactUrl(body: Record<string, unknown>): string | undefined {
   const dataObject = nestedRecord(body, 'data');
   const output = nestedRecord(body, 'output');
   const result = nestedRecord(body, 'result');
   const explicitUrl = firstString(
     body.psd_url,
     body.psdUrl,
+    body.zip_url,
+    body.zipUrl,
+    body.artifact_url,
+    body.artifactUrl,
     dataObject?.psd_url,
     dataObject?.psdUrl,
+    dataObject?.zip_url,
+    dataObject?.zipUrl,
+    dataObject?.artifact_url,
+    dataObject?.artifactUrl,
     output?.psd_url,
     output?.psdUrl,
+    output?.zip_url,
+    output?.zipUrl,
+    output?.artifact_url,
+    output?.artifactUrl,
     result?.psd_url,
     result?.psdUrl,
+    result?.zip_url,
+    result?.zipUrl,
+    result?.artifact_url,
+    result?.artifactUrl,
   );
-  if (explicitUrl && isHttpUrl(explicitUrl)) return explicitUrl;
+  if (explicitUrl && isLayerArtifactUrl(explicitUrl)) return explicitUrl;
 
   const candidates = [
     ...arrayRecords(body.data),
     ...arrayRecords(output?.data),
     ...arrayRecords(result?.data),
-  ].map((item) => firstString(item.url, item.psd_url, item.psdUrl));
+  ].map((item) => firstString(
+    item.url,
+    item.psd_url,
+    item.psdUrl,
+    item.zip_url,
+    item.zipUrl,
+    item.artifact_url,
+    item.artifactUrl,
+  ));
 
   const outputUrls = Array.isArray(output?.image_urls) ? output.image_urls : [];
   const resultUrls = Array.isArray(result?.image_urls) ? result.image_urls : [];
   for (const candidate of [...candidates, ...outputUrls, ...resultUrls]) {
-    if (typeof candidate !== 'string' || !isHttpUrl(candidate)) continue;
-    try {
-      if (new URL(candidate).pathname.toLowerCase().endsWith('.psd')) return candidate;
-    } catch {
-      // isHttpUrl already validated this candidate.
-    }
+    if (typeof candidate === 'string' && isLayerArtifactUrl(candidate)) return candidate;
   }
   return undefined;
 }
@@ -228,6 +257,8 @@ async function submitAtEndpoint(
       body: JSON.stringify({
         model: 'image-layered',
         image: input.image,
+        task_type: 'async',
+        response_format: 'url',
       }),
       signal: input.signal,
     });
@@ -243,9 +274,9 @@ async function submitAtEndpoint(
       result: { kind: 'async', remoteTaskId, endpoint },
     };
   }
-  const psdUrl = extractPsdUrl(parsed.body);
-  if (response.ok && psdUrl) {
-    return { accepted: true, result: { kind: 'sync', psdUrl, endpoint } };
+  const artifactUrl = extractArtifactUrl(parsed.body);
+  if (response.ok && artifactUrl) {
+    return { accepted: true, result: { kind: 'sync', artifactUrl, endpoint } };
   }
   if (!response.ok) {
     return {
@@ -259,7 +290,7 @@ async function submitAtEndpoint(
     unsupported: false,
     error: new PearProtocolError(
       'PEAR_SUBMISSION_RESULT_INVALID',
-      'Pear submission returned neither a task ID nor a PSD artifact',
+      'Pear submission returned neither a task ID nor a layer artifact',
     ),
   };
 }
@@ -346,14 +377,14 @@ export async function pollPearLayerTask(
   const progress = normalizeProgress(parsed.body.progress ?? data?.progress, status);
 
   if (status === 'completed') {
-    const psdUrl = extractPsdUrl(parsed.body);
-    if (!psdUrl) {
+    const artifactUrl = extractArtifactUrl(parsed.body);
+    if (!artifactUrl) {
       throw new PearProtocolError(
         'PEAR_EMPTY_COMPLETED_RESULT',
-        'Pear completed the task without a PSD artifact',
+        'Pear completed the task without a PSD or ZIP artifact',
       );
     }
-    return { status, progress: 100, psdUrl };
+    return { status, progress: 100, artifactUrl };
   }
   if (status === 'queued' || status === 'running') return { status, progress };
 

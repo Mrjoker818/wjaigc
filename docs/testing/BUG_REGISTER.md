@@ -331,3 +331,32 @@ await page.evaluate(() => {
 | **新增测试** | `canvas-active-image.test.ts`：当前单选覆盖历史目标；无单选时仍可回退到锁定目标 |
 | **本地回归** | 专项 40/40；全仓 236 files / 1079 tests 通过，3 项 PostgreSQL 测试跳过；TypeScript、ESLint 0 error、生产构建通过 |
 | **状态** | 本地已修复；必须部署后确认请求改为当前纸鹤路径，并继续验证 Pear task、PSD 与 2+ 图层 |
+
+### BUG-015: Pear Image-Layered 同步等待超时且 ZIP 产物无法解析
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1（核心分层链路无法完成） |
+| **发现环境** | Chrome + Coze 预览环境，Git `c983e5b48c23d31a693dbe4d698752540769370e`，2026-07-29 |
+| **稳定复现** | 选择可见的 800x800 图片“测试”，打开“编辑元素”，选择云端 `pear分层 / Image-Layered` 后提交 |
+| **实际请求** | `/api/layered-decompose` 已提交正确的当前图片；Pear 后台任务模式为“同步”，耗时 4m30s |
+| **实际结果** | Pear 任务成功并扣费 0.3，但浏览器侧请求在等待期间变为 `Failed to fetch`；产物 URL 为 `.zip`，现有适配器只接受 `.psd` |
+| **Pear 证据** | taskId `bd589fcd-4301-445f-ab29-1173b4a003ad`；模型 `Image-Layered`；产物包含 `Image-Layered_00001.psd` 与 `Image-Layered_00001_depth.psd` |
+| **根因** | Pear 请求未强制 `task_type=async`；适配器和下载器仅识别 PSD URL，不识别 Pear 实际返回的 ZIP 包 |
+| **修复文件** | `src/lib/layer-decomposition/pear-adapter.ts`、`source-image.ts`、`service.ts` |
+| **修复方案** | 提交时固定异步任务与 URL 响应；状态中持久化通用 artifact URL；安全下载 ZIP，限制压缩包条目与解压后大小，拒绝路径穿越，跳过 `_depth.psd` 并验证主 PSD 的 `8BPS` 签名；兼容旧 `remotePsdUrl` 任务 |
+| **新增测试** | `pear-layer-adapter.test.ts`、`layer-source-image.test.ts`，先确认 6 项 RED，再实施修复 |
+| **本地回归** | 分层专项 34/34；全仓 236 files / 1083 tests 通过，2 files / 3 tests 跳过；TypeScript 0 error；ESLint 0 error / 944 warnings；Next.js 生产构建退出 0 |
+| **状态** | 本地修复通过；等待提交、部署后执行真实 Pear 异步终态、ZIP 解包、2+ 图层及结算验收 |
+
+截图证据：`C:/Users/ADMINI~1/AppData/Local/Temp/codex-clipboard-f6f6f0fe-5d00-4722-81c8-2c650f3b1faa.png`。
+
+#### 2026-07-29 最终本地修复补充
+
+- 真实 Pear ZIP 已下载验证：归档 `12,961,882` 字节，主 PSD 与 depth PSD 均为 `117,970,772` 字节。
+- 主 PSD 本地解析结果：`1280x1280`、29 个可编辑图层、0 条解析警告；整段下载、解压、解析和细化链路峰值 RSS 约 `373 MiB`。
+- 新增提交期数据库租约及 heartbeat，阻止重复幂等请求在 Pear 返回 taskId 前抢占并错误退款。
+- smart fallback 现以单条 owner-fenced PostgreSQL CTE 同时写入 `running-local-fallback`、恢复积分并记录退款流水，关闭进程崩溃窗口。
+- ZIP/PSD 下载、解压和解析共享单槽内存门；取消或失租会清理本次 attempt 文件，不得写入终态。
+- 最终本地回归：535/535 个测试文件通过；1105 项通过、3 项真实环境测试跳过、0 失败；TypeScript、ESLint `--quiet`、生产构建通过。
+- 独立最终复审：P0=0、P1=0。云端真实异步任务、PostgreSQL 并发结算和 Firefox/WebKit 仍属于发布门禁，不把本地结果标记为云端通过。

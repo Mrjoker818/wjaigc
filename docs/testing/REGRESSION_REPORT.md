@@ -264,3 +264,36 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | 生产构建 | PASS | Next.js 16.2.10，110 个页面生成完成，退出码 0 |
 
 本地修复只证明目标选择逻辑和既有分层契约没有回归。云端仍需确认 POST 使用当前 `/api/serve-upload/...` 路径，并取得真实 Pear PSD、至少 2 个可编辑图层及结算证据。
+
+## 2026-07-29 Pear 同步 ZIP 产物适配回归
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| 当前图片请求 | PASS | Chrome 捕获的 POST 使用 `/api/serve-upload/uploads/gen-1784785107873-34qv4b.png`，不再使用历史 3D URL |
+| Pear 后台取证 | ROOT CAUSE CONFIRMED | task `bd589fcd-4301-445f-ab29-1173b4a003ad` 同步运行 4m30s，成功返回 ZIP，浏览器侧连接先失败 |
+| 协议 RED/GREEN | PASS | 强制 `task_type=async`、`response_format=url`；接受同步/异步返回的 PSD 或 ZIP artifact |
+| ZIP 安全解析 | PASS | 主 PSD 选择、depth PSD 排除、条目/路径/解压大小限制、`8BPS` 签名校验均进入受测实现 |
+| 分层专项 | PASS | 5 files / 34 tests passed |
+| 全仓 Vitest | PASS WITH SKIP | 236 files / 1083 tests passed；2 files / 3 tests skipped；0 failed |
+| TypeScript | PASS | `next typegen` + `tsc -p tsconfig.json`，退出 0 |
+| ESLint | PASS WITH WARNINGS | 0 errors / 944 existing warnings，退出 0 |
+| Production build | PASS | Next.js 16.2.10，110 个静态页面，退出 0 |
+
+本地回归证明适配器不再把 Pear ZIP 当成无效 PSD，也不会让已知长任务默认走同步等待。部署后仍必须取得真实异步 taskId、阶段进度、ZIP 解包、2+ 可编辑图层以及单次扣费证据。
+
+## 2026-07-29 Pear ZIP、租约与结算最终回归
+
+| 检查项 | 结果 | 说明 |
+|--------|------|------|
+| 真实 ZIP 离线回放 | PASS | 12,961,882 字节 ZIP；提取 117,970,772 字节主 PSD；1280x1280、29 图层、0 解析警告 |
+| 内存边界 | PASS | ZIP 下载、解压、PSD 解析及细化共享单槽内存门；真实制品回放峰值 RSS 约 373 MiB |
+| 初始提交幂等竞态 | PASS | 首次 Pear 提交租约随任务 INSERT 原子持久化；重复客户端轮询不能抢占或提前退款 |
+| worker 租约 | PASS | heartbeat、owner-fenced 进度/完成/失败、失租中止和 attempt 文件清理均有回归 |
+| smart fallback 结算 | PASS | fallback 阶段、余额退款和退款流水由同一 owner-fenced CTE 提交 |
+| 分层及关联专项 | PASS WITH SKIP | 22 个测试文件；118 项通过，2 项 PostgreSQL 测试因无隔离测试库跳过 |
+| 全仓 Vitest | PASS WITH SKIP | 535/535 个测试文件通过；1105 项通过、3 项跳过、0 失败 |
+| TypeScript / ESLint | PASS | `next typegen`、`tsc`、`eslint . --quiet` 均退出 0 |
+| Production build | PASS WITH WARNINGS | Next.js 16.2.10，110 个页面生成；存在既有动态文件追踪和超大组件告警 |
+| 独立代码复审 | PASS | P0=0、P1=0；未发现本次 diff 的代码级发布阻断项 |
+
+本轮未执行云端新代码的真实 Pear 异步成功/取消链路，因此发布结论仍不能升级为通过。

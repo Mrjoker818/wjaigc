@@ -10,9 +10,10 @@ import type {
   EditableLayerAsset,
   EditableLayerRole,
 } from '@/lib/layer-decomposition/types';
+import { withLayerPsdMemorySlot } from '@/lib/layer-decomposition/memory-gate';
 import { saveImageFile } from '@/lib/server-data-root';
 
-const MAX_PSD_BYTES = 80 * 1024 * 1024;
+const MAX_PSD_BYTES = 128 * 1024 * 1024;
 const MAX_DIMENSION = 8_192;
 const MAX_DOCUMENT_PIXELS = 67_108_864;
 const MAX_LAYER_COUNT = 64;
@@ -44,6 +45,7 @@ export class PsdExtractionError extends Error {
 
 export interface ExtractPsdOptions {
   taskId?: string;
+  signal?: AbortSignal;
   persistLayer?: (buffer: Buffer, filename: string) => string | Promise<string>;
 }
 
@@ -59,7 +61,7 @@ function validatePsdHeader(buffer: Buffer): { width: number; height: number } {
     throw new PsdExtractionError('PSD_SIGNATURE_INVALID', 'PSD signature is invalid');
   }
   if (buffer.length > MAX_PSD_BYTES) {
-    throw new PsdExtractionError('PSD_FILE_TOO_LARGE', 'PSD file exceeds 80 MiB');
+    throw new PsdExtractionError('PSD_FILE_TOO_LARGE', 'PSD file exceeds 128 MiB');
   }
   const version = buffer.readUInt16BE(4);
   if (version !== 1) {
@@ -112,7 +114,7 @@ function safeTaskName(taskId: string | undefined): string {
   return (taskId || 'layer').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
 }
 
-export async function extractEditableLayersFromPsd(
+async function extractEditableLayersWithoutGate(
   buffer: Buffer,
   options: ExtractPsdOptions = {},
 ): Promise<ExtractedPsdLayers> {
@@ -237,4 +239,13 @@ export async function extractEditableLayersFromPsd(
     throw new PsdExtractionError('PSD_NO_EDITABLE_LAYERS', 'PSD contains no editable pixel layers');
   }
   return { width: psd.width, height: psd.height, layers, warnings };
+}
+
+export async function extractEditableLayersFromPsd(
+  buffer: Buffer,
+  options: ExtractPsdOptions = {},
+): Promise<ExtractedPsdLayers> {
+  return withLayerPsdMemorySlot(options.signal, () => (
+    extractEditableLayersWithoutGate(buffer, options)
+  ));
 }

@@ -52,6 +52,8 @@ export interface UpdateCloudTaskInput {
   creditStatus?: CloudTaskCreditStatus;
   creditCost?: number;
   remoteTaskId?: string;
+  expectedStatuses?: CloudTaskStatus[];
+  leaseOwner?: string;
 }
 
 export interface CloudTaskListFilters {
@@ -92,6 +94,10 @@ export type CloudTaskFailureStatus = Extract<CloudTaskStatus, 'failed' | 'timeou
 
 export interface CloudTaskTerminationResult extends CloudTaskCreditRefundResult {
   status?: CloudTaskFailureStatus;
+  transitioned: boolean;
+}
+
+export interface CloudTaskFallbackTransitionResult extends CloudTaskCreditRefundResult {
   transitioned: boolean;
 }
 
@@ -147,10 +153,11 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
   const result = await execSql(`
     INSERT INTO cloud_tasks (
       id, user_id, project_id, session_id, message_id, type, status, provider_id, model, remote_task_id,
-      progress, label, result, error, credit_status, credit_cost, idempotency_key, created_at, updated_at
+      progress, label, result, error, credit_status, credit_cost, lease_owner, lease_expires_at,
+      attempt_count, idempotency_key, created_at, updated_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17, $18, $19
+      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
     ) ON CONFLICT DO NOTHING
   `, [
     input.id,
@@ -169,6 +176,9 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
     input.error || '',
     input.creditStatus || 'pending',
     input.creditCost || 0,
+    input.leaseOwner || '',
+    input.leaseExpiresAt || 0,
+    input.attemptCount || 0,
     input.idempotencyKey || '',
     input.createdAt,
     input.updatedAt,
@@ -176,7 +186,7 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInput): Promise<void> {
+export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInput): Promise<boolean> {
   await ensureCloudTaskTables();
 
   const sets: string[] = ['updated_at = $2'];
@@ -192,7 +202,20 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.creditCost !== undefined) { sets.push(`credit_cost = $${index++}`); params.push(input.creditCost); }
   if (input.remoteTaskId !== undefined) { sets.push(`remote_task_id = $${index++}`); params.push(input.remoteTaskId); }
 
-  await execSql(`UPDATE cloud_tasks SET ${sets.join(', ')} WHERE id = $1`, params);
+  const conditions = ['id = $1'];
+  if (input.expectedStatuses?.length) {
+    conditions.push(`status = ANY($${index++}::text[])`);
+    params.push(input.expectedStatuses);
+  }
+  if (input.leaseOwner) {
+    conditions.push(`lease_owner = $${index++}`);
+    params.push(input.leaseOwner);
+  }
+  const result = await execSql(`UPDATE cloud_tasks SET ${sets.join(', ')}
+    WHERE ${conditions.join(' AND ')}
+    RETURNING id
+  `, params);
+  return (result.rowCount ?? result.rows.length) > 0;
 }
 
 /**
@@ -202,6 +225,7 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
 export async function completeCloudTask(
   taskId: string,
   result: Record<string, unknown>,
+  leaseOwner?: string,
 ): Promise<boolean> {
   await ensureCloudTaskTables();
   const completed = await execSql(`
@@ -216,8 +240,9 @@ export async function completeCloudTask(
         END,
         updated_at = $3
     WHERE id = $1 AND status = 'processing'
+      AND ($4::text IS NULL OR lease_owner = $4)
     RETURNING id
-  `, [taskId, JSON.stringify(result), Date.now()]);
+  `, [taskId, JSON.stringify(result), Date.now(), leaseOwner || null]);
   return (completed.rowCount ?? completed.rows.length) > 0;
 }
 
@@ -229,6 +254,7 @@ export async function terminateCloudTaskAndRefund(
   taskId: string,
   status: CloudTaskFailureStatus,
   reason: string,
+  leaseOwner?: string,
 ): Promise<CloudTaskTerminationResult> {
   await ensureCloudTaskTables();
   const now = Date.now();
@@ -242,6 +268,7 @@ export async function terminateCloudTaskAndRefund(
              task.credit_cost
       FROM cloud_tasks task
       WHERE task.id = $1
+        AND ($6::text IS NULL OR task.lease_owner = $6)
         AND (
           task.status IN ('pending', 'processing')
           OR task.status IN ('failed', 'timeout', 'cancelled')
@@ -317,7 +344,7 @@ export async function terminateCloudTaskAndRefund(
            ) AS balance
     FROM settled_task settled
     LIMIT 1
-  `, [taskId, status, reason, now, transactionId]);
+  `, [taskId, status, reason, now, transactionId, leaseOwner || null]);
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) {
     return { status: undefined, transitioned: false, refunded: false, creditCost: 0 };
@@ -339,7 +366,11 @@ export async function terminateCloudTaskAndRefund(
  * transaction record are updated in one database statement guarded by the
  * task's pending credit status.
  */
-export async function refundCloudTaskCredits(taskId: string, reason: string): Promise<CloudTaskCreditRefundResult> {
+export async function refundCloudTaskCredits(
+  taskId: string,
+  reason: string,
+  options: { leaseOwner?: string } = {},
+): Promise<CloudTaskCreditRefundResult> {
   await ensureCloudTaskTables();
   const now = Date.now();
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
@@ -351,6 +382,10 @@ export async function refundCloudTaskCredits(taskId: string, reason: string): Pr
       WHERE task.id = $1
         AND task.credit_status = 'pending'
         AND task.credit_cost > 0
+        AND ($5::text IS NULL OR (
+          task.status = 'processing'
+          AND task.lease_owner = $5
+        ))
       FOR UPDATE OF task, credit
     ), refunded_balance AS (
       UPDATE wujie_credits credit
@@ -373,13 +408,130 @@ export async function refundCloudTaskCredits(taskId: string, reason: string): Pr
       RETURNING user_id
     )
     SELECT user_id, credit_cost, balance FROM settled_task
-  `, [taskId, now, transactionId, reason]);
+  `, [taskId, now, transactionId, reason, options.leaseOwner || null]);
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) return { refunded: false, creditCost: 0 };
   return {
     refunded: true,
     creditCost: Number(row.credit_cost || 0),
     balance: Number(row.balance || 0),
+    userId: String(row.user_id || '') || undefined,
+  };
+}
+
+/**
+ * Atomically leaves the Pear path, claims its refund, and persists the local
+ * fallback phase. A replacement worker can therefore never resume Pear after
+ * the refund has committed.
+ */
+export async function transitionCloudTaskToLocalFallbackAndRefund(
+  taskId: string,
+  result: Record<string, unknown>,
+  reason: string,
+  leaseOwner: string,
+): Promise<CloudTaskFallbackTransitionResult> {
+  await ensureCloudTaskTables();
+  const now = Date.now();
+  const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
+  const transition = await execSql(`
+    WITH candidate AS (
+      SELECT task.id,
+             task.user_id,
+             task.credit_status AS previous_credit_status,
+             task.credit_cost
+      FROM cloud_tasks task
+      WHERE task.id = $1
+        AND task.status = 'processing'
+        AND task.lease_owner = $6
+      FOR UPDATE
+    ), locked_credit AS (
+      SELECT credit.user_id
+      FROM wujie_credits credit
+      JOIN candidate ON credit.user_id = candidate.user_id
+      WHERE candidate.previous_credit_status = 'pending'
+        AND candidate.credit_cost > 0
+      FOR UPDATE OF credit
+    ), settled_task AS (
+      UPDATE cloud_tasks task
+      SET result = $2,
+          progress = 65,
+          credit_status = CASE
+            WHEN candidate.previous_credit_status = 'pending'
+              AND candidate.credit_cost > 0
+            THEN 'refunded'
+            ELSE candidate.previous_credit_status
+          END,
+          updated_at = $3
+      FROM candidate
+      WHERE task.id = candidate.id
+        AND (
+          candidate.previous_credit_status <> 'pending'
+          OR candidate.credit_cost <= 0
+          OR EXISTS (
+            SELECT 1
+            FROM locked_credit credit
+            WHERE credit.user_id = candidate.user_id
+          )
+        )
+      RETURNING task.id,
+                task.user_id,
+                task.credit_cost,
+                candidate.previous_credit_status = 'pending'
+                  AND candidate.credit_cost > 0 AS refund_claimed
+    ), refunded_balance AS (
+      UPDATE wujie_credits credit
+      SET balance = credit.balance + settled.credit_cost,
+          total_used = GREATEST(credit.total_used - settled.credit_cost, 0),
+          updated_at = $3
+      FROM settled_task settled
+      WHERE settled.refund_claimed
+        AND credit.user_id = settled.user_id
+      RETURNING settled.id AS task_id,
+                settled.user_id,
+                settled.credit_cost,
+                credit.balance
+    ), recorded_refund AS (
+      INSERT INTO wujie_credit_transactions (
+        id, user_id, amount, type, balance_after, description, reference_id, created_at
+      )
+      SELECT $4, user_id, credit_cost, 'refund', balance, $5, task_id, $3
+      FROM refunded_balance
+      RETURNING reference_id
+    )
+    SELECT TRUE AS transitioned,
+           settled.user_id,
+           settled.credit_cost,
+           EXISTS (
+             SELECT 1
+             FROM refunded_balance refunded
+             WHERE refunded.task_id = settled.id
+           ) AS refunded,
+           (
+             SELECT refunded.balance
+             FROM refunded_balance refunded
+             WHERE refunded.task_id = settled.id
+           ) AS balance
+    FROM settled_task settled
+    LIMIT 1
+  `, [
+    taskId,
+    JSON.stringify(result),
+    now,
+    transactionId,
+    reason,
+    leaseOwner,
+  ]);
+  const row = transition.rows[0] as Record<string, unknown> | undefined;
+  if (!row) {
+    return { transitioned: false, refunded: false, creditCost: 0 };
+  }
+  return {
+    transitioned: row.transitioned === true,
+    refunded: row.refunded === true,
+    creditCost: Number(row.credit_cost || 0),
+    balance: row.balance === null || row.balance === undefined
+      ? undefined
+      : Number(row.balance),
     userId: String(row.user_id || '') || undefined,
   };
 }
@@ -393,15 +545,19 @@ export async function chargeCloudTaskCredits(
   userId: string,
   creditCost: number,
   description: string,
+  leaseOwner?: string,
 ): Promise<CloudTaskCreditChargeResult> {
   await ensureCloudTaskTables();
   const normalizedCost = Math.max(0, Math.ceil(creditCost));
   if (normalizedCost === 0) {
-    await updateCloudTask(taskId, {
+    const updated = await updateCloudTask(taskId, {
       status: 'processing',
       creditStatus: 'not-applicable',
       creditCost: 0,
+      expectedStatuses: ['pending'],
+      ...(leaseOwner ? { leaseOwner } : {}),
     });
+    if (!updated) return { charged: false, creditCost: 0 };
     return { charged: true, creditCost: 0, userId };
   }
 
@@ -415,6 +571,7 @@ export async function chargeCloudTaskCredits(
         AND task.user_id = $2
         AND task.status = 'pending'
         AND task.credit_status = 'not-applicable'
+        AND ($7::text IS NULL OR task.lease_owner = $7)
       FOR UPDATE
     ), deducted AS (
       UPDATE wujie_credits credit
@@ -445,7 +602,15 @@ export async function chargeCloudTaskCredits(
       RETURNING user_id
     )
     SELECT user_id, credit_cost, balance FROM marked_task
-  `, [taskId, userId, normalizedCost, now, transactionId, description]);
+  `, [
+    taskId,
+    userId,
+    normalizedCost,
+    now,
+    transactionId,
+    description,
+    leaseOwner || null,
+  ]);
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) return { charged: false, creditCost: normalizedCost };
   return {
@@ -487,6 +652,26 @@ export async function claimCloudTaskLease(
     expiresAt: Number(row.lease_expires_at),
     attemptCount: Number(row.attempt_count),
   };
+}
+
+/** Extends a live lease only while the same worker still owns it. */
+export async function renewCloudTaskLease(
+  taskId: string,
+  owner: string,
+  ttlMs: number,
+  now: number = Date.now(),
+): Promise<boolean> {
+  await ensureCloudTaskTables();
+  const result = await execSql(`
+    UPDATE cloud_tasks
+    SET lease_expires_at = $3,
+        updated_at = $4
+    WHERE id = $1
+      AND lease_owner = $2
+      AND status IN ('queued', 'pending', 'processing')
+    RETURNING id
+  `, [taskId, owner, now + Math.max(1_000, ttlMs), now]);
+  return (result.rowCount ?? result.rows.length) > 0;
 }
 
 /** Releases a lease only when it is still owned by the calling worker. */

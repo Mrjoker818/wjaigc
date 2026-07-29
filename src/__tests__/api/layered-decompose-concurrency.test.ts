@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { EditableLayerAsset, LayerDecompositionRequest } from '@/lib/layer-decomposition/types';
@@ -13,7 +13,9 @@ const mocks = vi.hoisted(() => ({
   getCloudTaskForUser: vi.fn(),
   refundCloudTaskCredits: vi.fn(),
   releaseCloudTaskLease: vi.fn(),
+  renewCloudTaskLease: vi.fn(),
   terminateCloudTaskAndRefund: vi.fn(),
+  transitionCloudTaskToLocalFallbackAndRefund: vi.fn(),
   updateCloudTask: vi.fn(),
   calculateConfiguredCreditCost: vi.fn(),
   resolveLayerProvider: vi.fn(),
@@ -26,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   evaluateLayerQuality: vi.fn(),
   runLocalLayerPipeline: vi.fn(),
   saveImageFile: vi.fn(),
+  deleteImageFile: vi.fn(),
 }));
 
 vi.mock('@/lib/cloud-task-storage', () => ({
@@ -35,7 +38,9 @@ vi.mock('@/lib/cloud-task-storage', () => ({
   getCloudTaskForUser: mocks.getCloudTaskForUser,
   refundCloudTaskCredits: mocks.refundCloudTaskCredits,
   releaseCloudTaskLease: mocks.releaseCloudTaskLease,
+  renewCloudTaskLease: mocks.renewCloudTaskLease,
   terminateCloudTaskAndRefund: mocks.terminateCloudTaskAndRefund,
+  transitionCloudTaskToLocalFallbackAndRefund: mocks.transitionCloudTaskToLocalFallbackAndRefund,
   updateCloudTask: mocks.updateCloudTask,
 }));
 
@@ -92,6 +97,7 @@ vi.mock('@/lib/layer-decomposition/local-pipeline', () => ({
 
 vi.mock('@/lib/server-data-root', () => ({
   saveImageFile: mocks.saveImageFile,
+  deleteImageFile: mocks.deleteImageFile,
 }));
 
 import {
@@ -141,18 +147,46 @@ function createTask(overrides: Partial<CloudTask> = {}): CloudTask {
 }
 
 describe('layer decomposition service concurrency', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.claimCount = 0;
     mocks.task = createTask();
-    mocks.claimLayerTask.mockImplementation(async () => ({
-      owner: mocks.claimCount++ === 0,
-      taskId: 'layer-task-1',
-    }));
+    mocks.claimLayerTask.mockImplementation(async (input: {
+      initialLease?: { owner: string; expiresAt: number };
+    }) => {
+      const owner = mocks.claimCount++ === 0;
+      if (owner && input.initialLease && mocks.task) {
+        mocks.task = {
+          ...mocks.task,
+          leaseOwner: input.initialLease.owner,
+          leaseExpiresAt: input.initialLease.expiresAt,
+          attemptCount: 1,
+        };
+      }
+      return { owner, taskId: 'layer-task-1' };
+    });
     mocks.getCloudTaskForUser.mockImplementation(async () => mocks.task);
-    mocks.updateCloudTask.mockImplementation(async (_taskId: string, patch: Partial<CloudTask>) => {
+    mocks.updateCloudTask.mockImplementation(async (
+      _taskId: string,
+      patch: Partial<CloudTask> & {
+        expectedStatuses?: string[];
+        leaseOwner?: string;
+      },
+    ) => {
       if (!mocks.task) return;
-      mocks.task = { ...mocks.task, ...patch, updatedAt: Date.now() };
+      const {
+        expectedStatuses,
+        leaseOwner,
+        ...changes
+      } = patch;
+      if (expectedStatuses && !expectedStatuses.includes(mocks.task.status)) return false;
+      if (leaseOwner && mocks.task.leaseOwner !== leaseOwner) return false;
+      mocks.task = { ...mocks.task, ...changes, updatedAt: Date.now() };
+      return true;
     });
     mocks.chargeCloudTaskCredits.mockImplementation(async () => {
       if (!mocks.task || mocks.task.status !== 'pending') return { charged: false, creditCost: 5 };
@@ -163,8 +197,12 @@ describe('layer decomposition service concurrency', () => {
       _taskId: string,
       status: 'failed' | 'timeout' | 'cancelled',
       reason: string,
+      leaseOwner?: string,
     ) => {
       if (!mocks.task || !['pending', 'processing'].includes(mocks.task.status)) {
+        return { transitioned: false, refunded: false, creditCost: 0 };
+      }
+      if (leaseOwner && mocks.task.leaseOwner !== leaseOwner) {
         return { transitioned: false, refunded: false, creditCost: 0 };
       }
       const refunded = mocks.task.creditStatus === 'pending';
@@ -176,20 +214,63 @@ describe('layer decomposition service concurrency', () => {
       };
       return { transitioned: true, refunded, creditCost: mocks.task.creditCost || 0 };
     });
-    mocks.refundCloudTaskCredits.mockImplementation(async () => {
+    mocks.refundCloudTaskCredits.mockImplementation(async (
+      _taskId: string,
+      _reason: string,
+      options?: { leaseOwner?: string },
+    ) => {
       if (!mocks.task || mocks.task.creditStatus !== 'pending') return { refunded: false, creditCost: 0 };
+      if (options?.leaseOwner && mocks.task.leaseOwner !== options.leaseOwner) {
+        return { refunded: false, creditCost: 0 };
+      }
       mocks.task = { ...mocks.task, creditStatus: 'refunded' };
       return { refunded: true, creditCost: mocks.task.creditCost || 0 };
     });
-    mocks.completeCloudTask.mockImplementation(async (_taskId: string, result: Record<string, unknown>) => {
+    mocks.transitionCloudTaskToLocalFallbackAndRefund.mockImplementation(async (
+      _taskId: string,
+      result: Record<string, unknown>,
+      _reason: string,
+      leaseOwner: string,
+    ) => {
+      if (
+        !mocks.task
+        || mocks.task.status !== 'processing'
+        || mocks.task.leaseOwner !== leaseOwner
+      ) {
+        return { transitioned: false, refunded: false, creditCost: 0 };
+      }
+      const refunded = mocks.task.creditStatus === 'pending';
+      mocks.task = {
+        ...mocks.task,
+        progress: 65,
+        result,
+        creditStatus: refunded ? 'refunded' : mocks.task.creditStatus,
+      };
+      return {
+        transitioned: true,
+        refunded,
+        creditCost: mocks.task.creditCost || 0,
+      };
+    });
+    mocks.completeCloudTask.mockImplementation(async (
+      _taskId: string,
+      result: Record<string, unknown>,
+      leaseOwner?: string,
+    ) => {
       if (!mocks.task || mocks.task.status !== 'processing') return false;
+      if (leaseOwner && mocks.task.leaseOwner !== leaseOwner) return false;
       mocks.task = { ...mocks.task, status: 'completed', progress: 100, result };
       return true;
     });
-    mocks.claimCloudTaskLease.mockResolvedValue({
-      taskId: 'layer-task-1', owner: 'worker-1', expiresAt: 1000, attemptCount: 1,
+    mocks.claimCloudTaskLease.mockImplementation(async () => {
+      if (mocks.task?.leaseOwner) return null;
+      if (mocks.task) mocks.task = { ...mocks.task, leaseOwner: 'worker-1' };
+      return {
+        taskId: 'layer-task-1', owner: 'worker-1', expiresAt: 1000, attemptCount: 1,
+      };
     });
     mocks.releaseCloudTaskLease.mockResolvedValue(true);
+    mocks.renewCloudTaskLease.mockResolvedValue(true);
     mocks.calculateConfiguredCreditCost.mockResolvedValue(5);
     mocks.resolveLayerProvider.mockResolvedValue({
       provider: { id: 'pear-provider', baseUrl: 'https://pear.example', apiKey: 'secret' },
@@ -219,6 +300,74 @@ describe('layer decomposition service concurrency', () => {
     expect(mocks.submitPearLayerTask).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the initial Pear submission leased while duplicate clients poll', async () => {
+    let finishSubmission: ((value: {
+      kind: 'async';
+      remoteTaskId: string;
+      endpoint: string;
+    }) => void) | undefined;
+    mocks.submitPearLayerTask.mockImplementation(() => new Promise((resolve) => {
+      finishSubmission = resolve;
+    }));
+
+    const primary = submitLayerDecomposition({
+      userId: 'user-1',
+      userRole: 'user',
+      idempotencyKey: 'layer-request-1',
+      request,
+    });
+    const primaryOutcome = primary.then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+    await vi.waitFor(() => expect(mocks.submitPearLayerTask).toHaveBeenCalledTimes(1));
+
+    const duplicate = await submitLayerDecomposition({
+      userId: 'user-1',
+      userRole: 'user',
+      idempotencyKey: 'layer-request-1',
+      request,
+    });
+    const status = await getLayerTaskStatus({
+      taskId: duplicate.taskId,
+      userId: 'user-1',
+      userRole: 'user',
+    });
+    finishSubmission?.({
+      kind: 'async',
+      remoteTaskId: 'pear-task-1',
+      endpoint: '/v1/images/edits',
+    });
+    const submitted = await primaryOutcome;
+
+    expect(status.status).toBe('processing');
+    expect(status.phase).toBe('submitting-pear');
+    expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled();
+    expect(submitted).toHaveProperty('value.status', 'processing');
+  });
+
+  it('reports a lost submission lease instead of insufficient credits for a zero-cost task', async () => {
+    mocks.calculateConfiguredCreditCost.mockResolvedValue(0);
+    mocks.chargeCloudTaskCredits.mockImplementationOnce(async () => {
+      if (mocks.task) mocks.task = { ...mocks.task, leaseOwner: 'worker-2' };
+      return { charged: false, creditCost: 0 };
+    });
+
+    const outcome = await submitLayerDecomposition({
+      userId: 'user-1',
+      userRole: 'user',
+      idempotencyKey: 'layer-request-1',
+      request,
+    }).then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+
+    expect(outcome).toHaveProperty('error.code', 'LAYER_TASK_LEASE_LOST');
+    expect(outcome).toHaveProperty('error.status', 409);
+    expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled();
+  });
+
   it('cannot complete after cancellation wins', async () => {
     mocks.task = createTask({
       status: 'processing',
@@ -240,6 +389,215 @@ describe('layer decomposition service concurrency', () => {
     expect(status.status).toBe('cancelled');
     expect(mocks.completeCloudTask).not.toHaveBeenCalled();
     expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refund or fail a live task after this worker loses its lease', async () => {
+    vi.useFakeTimers();
+    mocks.task = createTask({
+      status: 'processing',
+      creditStatus: 'pending',
+      result: {
+        requestHash: 'hash',
+        request,
+        phase: 'downloading-psd',
+        remoteArtifactUrl: 'https://cdn.example/result.zip',
+      },
+    });
+    mocks.renewCloudTaskLease.mockImplementation(async () => {
+      if (mocks.task) mocks.task = { ...mocks.task, leaseOwner: 'worker-2' };
+      return false;
+    });
+    mocks.downloadPearPsd.mockImplementation((
+      _url: string,
+      options: { signal?: AbortSignal },
+    ) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+        once: true,
+      });
+    }));
+
+    const statusPromise = getLayerTaskStatus({
+      taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
+    });
+    const observed = statusPromise.then(
+      (status) => ({ status }),
+      (error: unknown) => ({ error }),
+    );
+    await vi.waitFor(() => expect(mocks.downloadPearPsd).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(100_000);
+    const outcome = await observed;
+
+    expect(outcome).not.toHaveProperty('error');
+    expect(outcome).toHaveProperty('status.status', 'processing');
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+    expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled();
+    expect(mocks.runLocalLayerPipeline).not.toHaveBeenCalled();
+  });
+
+  it('removes local layer files when cancellation wins during persistence', async () => {
+    mocks.task = createTask({
+      status: 'processing',
+      creditStatus: 'not-applicable',
+      result: {
+        requestHash: 'hash',
+        request: { ...request, engine: 'local' },
+        phase: 'running-local-fallback',
+      },
+    });
+    mocks.runLocalLayerPipeline.mockImplementation(async (
+      _buffer: Buffer,
+      options: {
+        taskId?: string;
+        persistLayer?: (
+          buffer: Buffer,
+          filename: string,
+          layerAsset: EditableLayerAsset,
+        ) => Promise<string>;
+      },
+    ) => {
+      await options.persistLayer?.(
+        Buffer.from('layer'),
+        `${options.taskId}_background.png`,
+        layer,
+      );
+      return {
+        width: 4,
+        height: 4,
+        layers: [layer],
+        buffers: new Map([[layer.id, Buffer.from('layer')]]),
+        quality: { status: 'pass', score: 100, warnings: [], metrics: {} },
+      };
+    });
+    mocks.saveImageFile.mockImplementation(() => {
+      mocks.task = {
+        ...mocks.task!,
+        status: 'cancelled',
+        error: 'LAYER_TASK_CANCELLED: cancelled during local persistence',
+      };
+      return '/api/serve-upload/layer-decomposition/background.png';
+    });
+
+    const status = await getLayerTaskStatus({
+      taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
+    });
+
+    expect(status.status).toBe('cancelled');
+    expect(mocks.saveImageFile).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteImageFile).toHaveBeenCalledWith(
+      expect.stringMatching(/^layer-task-1_[A-Za-z0-9_-]+_background\.png$/),
+      'layer-decomposition',
+    );
+    expect(mocks.completeCloudTask).not.toHaveBeenCalled();
+  });
+
+  it('does not persist a Pear PSD after cancellation wins during artifact download', async () => {
+    mocks.task = createTask({
+      status: 'processing',
+      creditStatus: 'pending',
+      result: {
+        requestHash: 'hash',
+        request,
+        phase: 'downloading-psd',
+        remoteArtifactUrl: 'https://cdn.example/result.zip',
+      },
+    });
+    mocks.downloadPearPsd.mockImplementation((
+      _url: string,
+      options: { signal?: AbortSignal },
+    ) => new Promise((resolve) => {
+      options.signal?.addEventListener('abort', () => {
+        resolve({ buffer: Buffer.from('8BPS-result'), mimeType: 'image/vnd.adobe.photoshop' });
+      }, { once: true });
+    }));
+
+    const statusPromise = getLayerTaskStatus({
+      taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
+    });
+    await vi.waitFor(() => expect(mocks.downloadPearPsd).toHaveBeenCalled());
+    const cancelled = await cancelLayerTask({
+      taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
+    });
+    const status = await statusPromise;
+
+    expect(cancelled.status).toBe('cancelled');
+    expect(status.status).toBe('cancelled');
+    expect(mocks.saveImageFile).not.toHaveBeenCalled();
+    expect(mocks.extractEditableLayersFromPsd).not.toHaveBeenCalled();
+    expect(mocks.completeCloudTask).not.toHaveBeenCalled();
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not persist artifacts when another instance cancels the task', async () => {
+    mocks.task = createTask({
+      status: 'processing',
+      creditStatus: 'pending',
+      result: {
+        requestHash: 'hash',
+        request,
+        phase: 'downloading-psd',
+        remoteArtifactUrl: 'https://cdn.example/result.zip',
+      },
+    });
+    mocks.downloadPearPsd.mockImplementation(async () => {
+      mocks.task = {
+        ...mocks.task!,
+        status: 'cancelled',
+        creditStatus: 'refunded',
+        error: 'LAYER_TASK_CANCELLED: cancelled by another instance',
+      };
+      return {
+        buffer: Buffer.from('8BPS-result'),
+        mimeType: 'image/vnd.adobe.photoshop',
+      };
+    });
+
+    const status = await getLayerTaskStatus({
+      taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
+    });
+
+    expect(status.status).toBe('cancelled');
+    expect(mocks.saveImageFile).not.toHaveBeenCalled();
+    expect(mocks.extractEditableLayersFromPsd).not.toHaveBeenCalled();
+    expect(mocks.completeCloudTask).not.toHaveBeenCalled();
+  });
+
+  it('removes a persisted PSD when another instance cancels during the write boundary', async () => {
+    mocks.task = createTask({
+      status: 'processing',
+      creditStatus: 'pending',
+      result: {
+        requestHash: 'hash',
+        request,
+        phase: 'downloading-psd',
+        remoteArtifactUrl: 'https://cdn.example/result.psd',
+      },
+    });
+    mocks.downloadPearPsd.mockResolvedValue({
+      buffer: Buffer.from('8BPS-result'),
+      mimeType: 'image/vnd.adobe.photoshop',
+    });
+    mocks.saveImageFile.mockImplementation(() => {
+      mocks.task = {
+        ...mocks.task!,
+        status: 'cancelled',
+        creditStatus: 'refunded',
+        error: 'LAYER_TASK_CANCELLED: cancelled during persistence',
+      };
+      return '/api/serve-upload/layer-decomposition/layer-task-1.psd';
+    });
+
+    const status = await getLayerTaskStatus({
+      taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
+    });
+
+    expect(status.status).toBe('cancelled');
+    expect(mocks.saveImageFile).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteImageFile).toHaveBeenCalledWith(
+      'layer-task-1_worker-1.psd',
+      'layer-decomposition',
+    );
+    expect(mocks.extractEditableLayersFromPsd).not.toHaveBeenCalled();
+    expect(mocks.completeCloudTask).not.toHaveBeenCalled();
   });
 
   it('refunds Pear cost once then completes with local output after smart quality failure', async () => {
@@ -274,7 +632,8 @@ describe('layer decomposition service concurrency', () => {
 
     expect(status.status).toBe('completed');
     expect(status.result?.engine).toBe('local');
-    expect(mocks.refundCloudTaskCredits).toHaveBeenCalledTimes(1);
+    expect(mocks.transitionCloudTaskToLocalFallbackAndRefund).toHaveBeenCalledTimes(1);
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
     expect(mocks.completeCloudTask).toHaveBeenCalledTimes(1);
     expect(mocks.updateCloudTask).toHaveBeenCalledWith('layer-task-1', expect.objectContaining({
       result: expect.objectContaining({ phase: 'extracting-psd' }),
@@ -312,6 +671,7 @@ describe('layer decomposition service concurrency', () => {
 
     expect(status.status).toBe('completed');
     expect(status.result?.engine).toBe('local');
-    expect(mocks.refundCloudTaskCredits).toHaveBeenCalledTimes(1);
+    expect(mocks.transitionCloudTaskToLocalFallbackAndRefund).toHaveBeenCalledTimes(1);
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
   });
 });

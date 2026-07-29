@@ -19,6 +19,10 @@ export interface ClaimLayerTaskInput {
   userId: string;
   idempotencyKey: string;
   requestHash: string;
+  initialLease?: {
+    owner: string;
+    expiresAt: number;
+  };
   providerId?: string;
   modelId?: string;
   request: LayerDecompositionRequest;
@@ -66,6 +70,9 @@ export async function claimLayerTask(
     },
     creditStatus: 'not-applicable',
     creditCost: 0,
+    leaseOwner: input.initialLease?.owner,
+    leaseExpiresAt: input.initialLease?.expiresAt,
+    attemptCount: input.initialLease ? 1 : 0,
     idempotencyKey: input.idempotencyKey,
     createdAt: now,
     updatedAt: now,

@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import JSZip from 'jszip';
 import sharp from 'sharp';
 
 import {
@@ -98,5 +99,230 @@ describe('layer source image loading', () => {
       'https://attacker.example/result.psd',
       { download },
     )).rejects.toThrow(/private|reserved/i);
+  });
+
+  it('allows direct PSD artifacts up to the same 128 MiB extraction limit', async () => {
+    const psd = Buffer.from('8BPS-direct');
+    const download = vi.fn().mockResolvedValue({
+      buffer: psd,
+      mimeType: 'image/vnd.adobe.photoshop',
+    });
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.psd',
+      { download },
+    )).resolves.toMatchObject({ buffer: psd });
+    expect(download).toHaveBeenCalledWith(
+      'https://cdn.example.com/result.psd',
+      expect.objectContaining({ maxBytes: 128 * 1024 * 1024 }),
+    );
+  });
+
+  it('serializes concurrent Pear artifact downloads under one memory budget', async () => {
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstDownload = vi.fn(async () => {
+      markFirstStarted();
+      await firstBlocked;
+      return {
+        buffer: Buffer.from('8BPS-first'),
+        mimeType: 'image/vnd.adobe.photoshop',
+      };
+    });
+    const secondDownload = vi.fn(async () => ({
+      buffer: Buffer.from('8BPS-second'),
+      mimeType: 'image/vnd.adobe.photoshop',
+    }));
+
+    const first = downloadPearPsd('https://cdn.example.com/first.psd', {
+      download: firstDownload,
+    });
+    await firstStarted;
+    const second = downloadPearPsd('https://cdn.example.com/second.psd', {
+      download: secondDownload,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(secondDownload).not.toHaveBeenCalled();
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(secondDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('extracts the primary PSD from a bounded Pear ZIP artifact', async () => {
+    const primaryPsd = Buffer.concat([Buffer.from('8BPS'), Buffer.from('primary')]);
+    const depthPsd = Buffer.concat([Buffer.from('8BPS'), Buffer.from('depth')]);
+    const zip = new JSZip();
+    zip.file('Image-Layered_00001.psd', primaryPsd);
+    zip.file('Image-Layered_00001_depth.psd', depthPsd);
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+    const download = vi.fn().mockResolvedValue({
+      buffer: zipBuffer,
+      mimeType: 'application/zip',
+    });
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.zip',
+      { download },
+    )).resolves.toMatchObject({
+      buffer: primaryPsd,
+      mimeType: 'image/vnd.adobe.photoshop',
+    });
+    expect(download).toHaveBeenCalledWith(
+      'https://cdn.example.com/result.zip',
+      expect.objectContaining({
+        allowedMimeTypes: expect.arrayContaining(['application/zip']),
+      }),
+    );
+  });
+
+  it('rejects a Pear ZIP artifact without a PSD', async () => {
+    const zip = new JSZip();
+    zip.file('preview.png', Buffer.from('not-a-psd'));
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.zip',
+      {
+        download: vi.fn().mockResolvedValue({
+          buffer: zipBuffer,
+          mimeType: 'application/zip',
+        }),
+      },
+    )).rejects.toMatchObject({ code: 'LAYER_ZIP_PSD_MISSING' });
+  });
+
+  it('does not decompress an unselected depth PSD while loading the ZIP index', async () => {
+    const primaryPsd = Buffer.concat([Buffer.from('8BPS'), Buffer.from('primary')]);
+    const depthPayload = Buffer.from('8BPS-depth-payload-that-will-be-corrupted');
+    const zip = new JSZip();
+    zip.file('Image-Layered_00001.psd', primaryPsd);
+    zip.file('Image-Layered_00001_depth.psd', depthPayload);
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE' });
+    const depthOffset = zipBuffer.indexOf(depthPayload);
+    expect(depthOffset).toBeGreaterThan(-1);
+    zipBuffer[depthOffset + depthPayload.length - 1] ^= 0xff;
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.zip',
+      {
+        download: vi.fn().mockResolvedValue({
+          buffer: zipBuffer,
+          mimeType: 'application/zip',
+        }),
+      },
+    )).resolves.toMatchObject({
+      buffer: primaryPsd,
+      mimeType: 'image/vnd.adobe.photoshop',
+    });
+  });
+
+  it('rejects the original unsafe ZIP path even when JSZip sanitizes the entry name', async () => {
+    const zip = new JSZip();
+    zip.file('../Image-Layered_00001.psd', Buffer.from('8BPS-primary'));
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.zip',
+      {
+        download: vi.fn().mockResolvedValue({
+          buffer: zipBuffer,
+          mimeType: 'application/zip',
+        }),
+      },
+    )).rejects.toMatchObject({ code: 'LAYER_ZIP_PATH_INVALID' });
+  });
+
+  it('rejects a ZIP that contains only a depth PSD', async () => {
+    const zip = new JSZip();
+    zip.file('Image-Layered_00001_depth.psd', Buffer.from('8BPS-depth'));
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.zip',
+      {
+        download: vi.fn().mockResolvedValue({
+          buffer: zipBuffer,
+          mimeType: 'application/zip',
+        }),
+      },
+    )).rejects.toMatchObject({ code: 'LAYER_ZIP_PSD_MISSING' });
+  });
+
+  it('rejects a ZIP with multiple possible primary PSD files', async () => {
+    const zip = new JSZip();
+    zip.file('first.psd', Buffer.from('8BPS-first'));
+    zip.file('second.psd', Buffer.from('8BPS-second'));
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.zip',
+      {
+        download: vi.fn().mockResolvedValue({
+          buffer: zipBuffer,
+          mimeType: 'application/zip',
+        }),
+      },
+    )).rejects.toMatchObject({ code: 'LAYER_ZIP_PSD_AMBIGUOUS' });
+  });
+
+  it('rejects a ZIP with more than the allowed number of files', async () => {
+    const zip = new JSZip();
+    zip.file('Image-Layered_00001.psd', Buffer.from('8BPS-primary'));
+    for (let index = 0; index < 16; index += 1) {
+      zip.file(`preview-${index}.txt`, Buffer.from('preview'));
+    }
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.zip',
+      {
+        download: vi.fn().mockResolvedValue({
+          buffer: zipBuffer,
+          mimeType: 'application/zip',
+        }),
+      },
+    )).rejects.toMatchObject({ code: 'LAYER_ZIP_ENTRY_LIMIT' });
+  });
+
+  it('rejects a ZIP whose selected PSD has an invalid signature', async () => {
+    const zip = new JSZip();
+    zip.file('Image-Layered_00001.psd', Buffer.from('not-a-psd'));
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.zip',
+      {
+        download: vi.fn().mockResolvedValue({
+          buffer: zipBuffer,
+          mimeType: 'application/zip',
+        }),
+      },
+    )).rejects.toMatchObject({ code: 'LAYER_PSD_SIGNATURE_INVALID' });
+  });
+
+  it('stops before ZIP extraction when the task has been cancelled', async () => {
+    const zip = new JSZip();
+    zip.file('Image-Layered_00001.psd', Buffer.from('8BPS-primary'));
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled by test'));
+
+    await expect(downloadPearPsd(
+      'https://cdn.example.com/result.zip',
+      {
+        signal: controller.signal,
+        download: vi.fn().mockResolvedValue({
+          buffer: zipBuffer,
+          mimeType: 'application/zip',
+        }),
+      },
+    )).rejects.toThrow('cancelled by test');
   });
 });

@@ -50,6 +50,8 @@ describe('Pear layered image adapter', () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       model: 'image-layered',
       image: 'https://media.example.com/source.png',
+      task_type: 'async',
+      response_format: 'url',
     });
   });
 
@@ -60,7 +62,19 @@ describe('Pear layered image adapter', () => {
 
     await expect(submitPearLayerTask(input)).resolves.toEqual({
       kind: 'sync',
-      psdUrl: 'https://cdn.example.com/result.psd',
+      artifactUrl: 'https://cdn.example.com/result.psd',
+      endpoint: 'edits',
+    });
+  });
+
+  it('accepts the ZIP artifact returned by Image-Layered', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      data: [{ url: 'https://cdn.example.com/Image-Layered_00001.zip' }],
+    }));
+
+    await expect(submitPearLayerTask(input)).resolves.toEqual({
+      kind: 'sync',
+      artifactUrl: 'https://cdn.example.com/Image-Layered_00001.zip',
       endpoint: 'edits',
     });
   });
@@ -122,10 +136,10 @@ describe('Pear layered image adapter', () => {
     })).rejects.toMatchObject({ code: 'PEAR_EMPTY_COMPLETED_RESULT' });
   });
 
-  it('returns the PSD URL from a completed task', async () => {
+  it('returns the ZIP artifact URL from a completed task', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       status: 'completed',
-      output: { data: [{ url: 'https://cdn.example.com/task-result.psd' }] },
+      output: { data: [{ url: 'https://cdn.example.com/task-result.zip' }] },
     }));
 
     await expect(pollPearLayerTask({
@@ -134,7 +148,7 @@ describe('Pear layered image adapter', () => {
     })).resolves.toEqual({
       status: 'completed',
       progress: 100,
-      psdUrl: 'https://cdn.example.com/task-result.psd',
+      artifactUrl: 'https://cdn.example.com/task-result.zip',
     });
     expect(fetchMock.mock.calls[0][0])
       .toBe('https://api.pearapi.ai/v1/images/tasks/pear%20%2F%201');

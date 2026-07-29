@@ -171,6 +171,31 @@ export function saveImageFile(
  * @param subDir 子目录名
  * @returns 目录的绝对路径
  */
+/** Removes one generated file without allowing paths outside the managed data root. */
+export function deleteImageFile(filename: string, subDir: string): boolean {
+  if (
+    !filename
+    || filename !== path.basename(filename)
+    || !subDir
+    || subDir.includes('\0')
+  ) {
+    return false;
+  }
+  const root = path.resolve(getServerDataRoot());
+  const filePath = path.resolve(root, subDir, filename);
+  const relative = path.relative(root, filePath);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return false;
+  }
+  try {
+    fs.rmSync(filePath, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Returns a writable subdirectory under the managed server data root. */
 export function getImageWriteDir(subDir: string): string {
   const root = getServerDataRoot();
   const dir = path.join(root, subDir);

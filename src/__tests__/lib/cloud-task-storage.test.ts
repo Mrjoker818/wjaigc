@@ -14,9 +14,11 @@ import {
   getCloudTaskProviderSummary,
   refundCloudTaskCredits,
   releaseCloudTaskLease,
+  renewCloudTaskLease,
   terminateCloudTaskAndRefund,
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
+import * as cloudTaskStorage from '@/lib/cloud-task-storage';
 
 describe('cloud-task-storage', () => {
   beforeEach(() => {
@@ -152,6 +154,26 @@ describe('cloud-task-storage', () => {
     await expect(claimCloudTaskLease('task-live', 'worker-b', 4000, 1000)).resolves.toBeNull();
   });
 
+  it('guards worker progress updates by live status and lease owner', async () => {
+    execSql.mockResolvedValueOnce({ rows: [{ id: 'task-guarded' }], rowCount: 1 });
+
+    await expect(updateCloudTask('task-guarded', {
+      progress: 62,
+      result: { phase: 'extracting-psd' },
+      expectedStatuses: ['processing'],
+      leaseOwner: 'worker-a',
+    })).resolves.toBe(true);
+
+    const update = execSql.mock.calls.find(([sql]) => String(sql).includes('status = ANY'));
+    expect(update?.[0]).toContain('lease_owner = $');
+    expect(update?.[0]).toContain('RETURNING id');
+    expect(update?.[1]).toEqual(expect.arrayContaining([
+      'task-guarded',
+      ['processing'],
+      'worker-a',
+    ]));
+  });
+
   it('releases a task lease only for its current owner', async () => {
     execSql.mockResolvedValueOnce({ rows: [{ id: 'task-lease' }], rowCount: 1 });
 
@@ -160,6 +182,18 @@ describe('cloud-task-storage', () => {
     const update = execSql.mock.calls.find(([sql]) => String(sql).includes("lease_owner = ''"));
     expect(update?.[0]).toContain('lease_owner = $2');
     expect(update?.[1]).toEqual(['task-lease', 'worker-a', expect.any(Number)]);
+  });
+
+  it('renews a live task lease only for its current owner', async () => {
+    execSql.mockResolvedValueOnce({ rows: [{ id: 'task-lease' }], rowCount: 1 });
+
+    await expect(renewCloudTaskLease('task-lease', 'worker-a', 4000, 1000))
+      .resolves.toBe(true);
+
+    const update = execSql.mock.calls.find(([sql]) => String(sql).includes('lease_expires_at = $3'));
+    expect(update?.[0]).toContain('lease_owner = $2');
+    expect(update?.[0]).toContain("status IN ('queued', 'pending', 'processing')");
+    expect(update?.[1]).toEqual(['task-lease', 'worker-a', 5000, 1000]);
   });
 
   it('finds an existing task by owner and idempotency key', async () => {
@@ -184,6 +218,62 @@ describe('cloud-task-storage', () => {
     expect(settlement?.[0]).toContain("credit_status = 'pending'");
     expect(settlement?.[0]).toContain("SET credit_status = 'refunded'");
     expect(refund).toEqual({ refunded: true, creditCost: 6, balance: 94, userId: 'user-a' });
+  });
+
+  it('switches to local fallback and refunds in one owner-fenced statement', async () => {
+    execSql.mockResolvedValueOnce({
+      rows: [{
+        transitioned: true,
+        refunded: true,
+        credit_cost: 6,
+        balance: 94,
+        user_id: 'user-a',
+      }],
+      rowCount: 1,
+    });
+    const transition = (
+      cloudTaskStorage as typeof cloudTaskStorage & {
+        transitionCloudTaskToLocalFallbackAndRefund: (
+          taskId: string,
+          result: Record<string, unknown>,
+          reason: string,
+          leaseOwner: string,
+        ) => Promise<{
+          transitioned: boolean;
+          refunded: boolean;
+          creditCost: number;
+          balance?: number;
+          userId?: string;
+        }>;
+      }
+    ).transitionCloudTaskToLocalFallbackAndRefund;
+
+    const outcome = await transition(
+      'task-fallback',
+      { phase: 'running-local-fallback', fallbackReason: 'bad PSD' },
+      'Pear fallback refund',
+      'worker-a',
+    );
+
+    const statement = execSql.mock.calls.find(([sql]) => (
+      String(sql).includes('SET result = $2')
+      && String(sql).includes('refund_claimed')
+    ));
+    expect(statement).toBeDefined();
+    expect(statement?.[0]).toContain("status = 'processing'");
+    expect(statement?.[0]).toContain('lease_owner = $');
+    expect(statement?.[0]).toContain('INSERT INTO wujie_credit_transactions');
+    expect(statement?.[1]).toEqual(expect.arrayContaining([
+      expect.stringContaining('"phase":"running-local-fallback"'),
+      'worker-a',
+    ]));
+    expect(outcome).toEqual({
+      transitioned: true,
+      refunded: true,
+      creditCost: 6,
+      balance: 94,
+      userId: 'user-a',
+    });
   });
 
   it('settles a failure without updating the same cloud task row twice', async () => {
@@ -239,5 +329,22 @@ describe('cloud-task-storage', () => {
     expect(settlement?.[0]).toContain("credit_status = 'pending'");
     expect(settlement?.[0]).toContain('balance >= chargeable.credit_cost');
     expect(charge).toEqual({ charged: true, creditCost: 6, balance: 88, userId: 'user-a' });
+  });
+
+  it('does not report a zero-cost charge when the guarded task update loses its lease', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    const charge = await chargeCloudTaskCredits(
+      'task-zero-cost',
+      'user-a',
+      0,
+      'Free layer model',
+      'worker-a',
+    );
+
+    expect(charge).toEqual({ charged: false, creditCost: 0 });
+    const update = execSql.mock.calls.find(([sql]) => String(sql).startsWith('UPDATE cloud_tasks SET'));
+    expect(update?.[0]).toContain('lease_owner = $');
+    expect(update?.[1]).toEqual(expect.arrayContaining(['worker-a']));
   });
 });

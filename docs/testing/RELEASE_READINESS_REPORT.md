@@ -191,6 +191,45 @@
 
 ### 发布决策：不通过
 
+## 2026-07-29 Pear 分层最终本地门禁
+
+### 已完成
+
+1. Pear `Image-Layered` 强制异步 URL 响应，兼容直接 PSD 与 ZIP 制品。
+2. 真实 ZIP 在本地成功提取主 PSD并解析出 29 个可编辑图层。
+3. 提交期租约、heartbeat、worker owner fence、取消清理和共享内存门已进入自动化回归。
+4. smart fallback 的阶段切换、积分恢复和退款流水已合并为单条数据库事务。
+5. 全仓 535/535 个测试文件通过；1105 项通过、0 失败、3 项跳过。
+6. TypeScript、ESLint `--quiet`、Next.js 生产构建均退出 0。
+7. 独立代码复审确认本次修改 P0=0、P1=0。
+
+### 仍阻断
+
+1. 新提交尚未部署到 Coze，未证明云端初始 POST 快速返回、异步阶段完整推进并打开 2+ 图层编辑器。
+2. 缺少隔离 `TEST_POSTGRES_URL`，2 项 PostgreSQL 并发用例被明确跳过；一次扣费、一次退款和终态竞争尚缺真实数据库证据。
+3. Firefox/WebKit 的真实登录、分层、保存和恢复链路尚未执行。
+4. 生产构建仍有既有动态文件追踪和超大 `infinite-canvas.tsx` 告警，当前非编译阻断，但应另行治理。
+
+### 发布决策：不通过
+
+允许推送本地修复供云端部署和下一轮验收；在上述三项真实环境门禁解除前，不建议正式发布。
+
+## 2026-07-29 Pear ZIP 适配后的发布门禁
+
+本地代码门禁已通过：分层专项 34/34、全仓 1083 项已执行测试通过、TypeScript 0 error、ESLint 0 error（944 条存量 warning）、Next.js 生产构建退出 0。
+
+已确认 Pear 实际产物为包含主 PSD 与 depth PSD 的 ZIP，且同步模式耗时 4m30s。当前修复改为异步任务并安全提取主 PSD，但尚未部署到云端，因此不能把 Pear 后台的“成功”视为无界编辑器链路成功。
+
+### 发布决策：不通过
+
+解除门禁必须同时满足：
+
+1. 初始 `/api/layered-decompose` POST 快速返回无界 taskId。
+2. 任务依次进入 `submitting-pear`、`waiting-for-pear`、`downloading-psd`。
+3. ZIP 主 PSD 成功解析，编辑器显示至少 2 个可编辑图层。
+4. 单个成功任务仅扣费一次；失败或取消仅退款一次。
+5. PostgreSQL 并发门禁和 Firefox/WebKit 回归取得真实执行证据。
+
 ## 2026-07-29 活动图片目标修复后的门禁
 
 - 已确认云端 403 的直接输入不是当前选中图片，而是遗留 `editImageId` 指向的过期 Hunyuan 3D 预览地址；Pear 在该次请求中没有被调用。
