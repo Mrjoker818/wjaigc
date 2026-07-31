@@ -9,6 +9,7 @@ import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { resolveCompatProfile, buildPollUrl, extractImageUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
+import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
 import {
@@ -1949,44 +1950,57 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // ★ 蒙版修图/擦除异步结果：AI API 返回的已是最终结果，无需蒙版合成
-        // AI 模型（DALL-E / GPT Image 等）在收到蒙版+原图后，返回的图片已经是完整的修改结果
-        // 直接使用 AI 返回的结果，不需要再做蒙版 alpha 合成
-        // 对于有 cropInfo 的蒙版修图，AI 只返回裁剪区域的结果，需要贴回原图对应位置
         const cropInfoReg = getTaskInfo(taskId);
         const cropInfoResult = (cropInfoReg?.result as Record<string, unknown>) || {};
         const cropInfoData = cropInfoResult.cropInfo as Record<string, number> | undefined;
-        if (cropInfoData && cropInfoData.cropW && cropInfoData.cropH && pollResult.imageUrl) {
+        const originalImageUrl = cropInfoResult.originalImageUrl as string | undefined;
+        const maskImageUrl = cropInfoResult.maskImageUrl as string | undefined;
+        if (originalImageUrl && maskImageUrl && pollResult.imageUrl) {
           try {
-            const originalImageUrl = cropInfoResult.originalImageUrl as string | undefined;
-            if (originalImageUrl) {
-              const sharp = (await import('sharp')).default;
-              const cropX = cropInfoData.cropX;
-              const cropY = cropInfoData.cropY;
-              const cropW = cropInfoData.cropW;
-              const cropH = cropInfoData.cropH;
+            const sharp = (await import('sharp')).default;
+            const originalBuf = await fetchImageBuffer(originalImageUrl);
+            const maskBuf = await fetchImageBuffer(maskImageUrl);
+            let editedFullSize = await fetchImageBuffer(pollResult.imageUrl as string);
 
-              // 获取原图和 AI 结果
-              const originalBuf = await fetchImageBuffer(originalImageUrl);
-              const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
-
-              // 将 AI 结果 resize 到裁剪区域尺寸，直接贴回原图
-              const resizedResult = await sharp(aiResultBuf)
-                .resize(cropW, cropH, { fit: 'fill' })
+            if (cropInfoData?.cropW && cropInfoData?.cropH) {
+              const resizedResult = await sharp(editedFullSize)
+                .resize(cropInfoData.cropW, cropInfoData.cropH, { fit: 'fill' })
                 .png()
                 .toBuffer();
-
-              const compositeResult = await sharp(originalBuf)
-                .composite([{ input: resizedResult, left: cropX, top: cropY, blend: 'over' }])
-                .jpeg({ quality: 92 })
+              editedFullSize = await sharp(originalBuf)
+                .composite([{
+                  input: resizedResult,
+                  left: cropInfoData.cropX,
+                  top: cropInfoData.cropY,
+                  blend: 'over',
+                }])
+                .png()
                 .toBuffer();
-
-              const compositeDataUrl = `data:image/jpeg;base64,${compositeResult.toString('base64')}`;
-              pollResult.imageUrl = compositeDataUrl;
-              console.log(`[poll-task] Crop paste-back: ${cropW}x${cropH} at (${cropX},${cropY}) → JPEG (${(compositeResult.length / 1024).toFixed(0)}KB)`);
+            } else {
+              const originalMeta = await sharp(originalBuf).metadata();
+              editedFullSize = await sharp(editedFullSize)
+                .resize(originalMeta.width, originalMeta.height, { fit: 'fill' })
+                .png()
+                .toBuffer();
             }
+
+            const compositeResult = await compositeMaskedEdit({
+              source: originalBuf,
+              edited: editedFullSize,
+              mask: maskBuf,
+            });
+            pollResult.imageUrl = `data:image/png;base64,${compositeResult.toString('base64')}`;
+            console.log(`[poll-task] Applied lossless masked edit for task ${taskId} (${(compositeResult.length / 1024).toFixed(0)}KB)`);
           } catch (cropErr) {
-            console.warn('[poll-task] Crop paste-back failed, using raw AI result:', cropErr instanceof Error ? cropErr.message : cropErr);
+            const message = cropErr instanceof Error ? cropErr.message : String(cropErr);
+            console.warn('[poll-task] Masked edit composite failed closed:', message);
+            pollResult.imageUrl = undefined;
+            pollResult.imageUrls = [];
+            pollResult.status = 'failed';
+            pollResult.success = false;
+            pollResult.code = 'MASKED_COMPOSITE_FAILED';
+            pollResult.error = '蒙版合成失败，无法保证未编辑区域保持不变，请重试';
+            pollResult.retryable = true;
           }
         }
 

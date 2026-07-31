@@ -4,24 +4,13 @@ import { validateApiInputs } from '@/lib/api-validator';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { saveImageFile } from '@/lib/server-data-root';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import {
+  isNeutralColorAdjustParams,
+  normalizeColorAdjustParams,
+} from '@/lib/image-tools/color-adjust-params';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-interface ColorAdjustParams {
-  brightness?: number;   // -100 ~ 100
-  contrast?: number;     // -100 ~ 100
-  saturation?: number;   // -100 ~ 100
-  temperature?: number;  // -100 ~ 100 (冷→暖)
-  hue?: number;          // -180 ~ 180
-  highlights?: number;   // -100 ~ 100
-  shadows?: number;      // -100 ~ 100
-}
-
-function normalizeRange(value: number | undefined, min: number, max: number, def: number): number {
-  if (value === undefined || value === null || isNaN(value)) return def;
-  return Math.max(min, Math.min(max, value));
-}
 
 /**
  * 参数化色彩调整 API（纯 sharp 操作，不调用 AI 模型）
@@ -43,7 +32,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { imageUrl } = body;
-    const params: ColorAdjustParams = body.params || body;
+    const params = normalizeColorAdjustParams(body.params || body);
 
     if (!imageUrl) {
       return NextResponse.json({ error: '缺少 imageUrl 参数' }, { status: 400 });
@@ -61,13 +50,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. 标准化参数
-    const brightness = normalizeRange(params.brightness, -100, 100, 0);
-    const contrast = normalizeRange(params.contrast, -100, 100, 0);
-    const saturation = normalizeRange(params.saturation, -100, 100, 0);
-    const temperature = normalizeRange(params.temperature, -100, 100, 0);
-    const hue = normalizeRange(params.hue, -180, 180, 0);
-    const highlights = normalizeRange(params.highlights, -100, 100, 0);
-    const shadows = normalizeRange(params.shadows, -100, 100, 0);
+    const { brightness, contrast, saturation, temperature, hue, highlights, shadows } = params;
 
     // 3. sharp 处理管线
     let pipeline = sharp(imageBuffer, { failOn: 'none' });
@@ -125,7 +108,9 @@ export async function POST(req: NextRequest) {
     // 4. 输出 PNG（保留透明通道）或 JPEG
     const isTransparent = metadata.format === 'png' && metadata.hasAlpha;
     let outputBuffer: Buffer;
-    if (isTransparent) {
+    if (isNeutralColorAdjustParams(params)) {
+      outputBuffer = imageBuffer;
+    } else if (isTransparent) {
       outputBuffer = await pipeline.png({ quality: 95 }).toBuffer();
     } else {
       outputBuffer = await pipeline.jpeg({ quality: 92 }).toBuffer();

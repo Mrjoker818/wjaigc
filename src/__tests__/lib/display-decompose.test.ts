@@ -22,6 +22,8 @@ describe('display-decompose request contract', () => {
     const request = buildDisplayDecomposeRequestBody({
       model: 'gemini-image-model',
       imageUrl: 'https://example.com/display.jpg',
+      sourceHash: 'source-sha-256',
+      background: 'light-gray',
       aspectRatio: '3:4',
       extraPrompt: '保留品牌主视觉',
     });
@@ -34,8 +36,25 @@ describe('display-decompose request contract', () => {
       strength: 0.72,
       input_fidelity: 'high',
       response_format: 'url',
+      source_hash: 'source-sha-256',
     });
+    expect(request.prompt).toContain('浅灰色极简背景');
     expect(request.prompt).toContain('保留品牌主视觉');
     expect(buildDisplayDecomposePrompt()).not.toContain('undefined');
+  });
+
+  it('builds a real transparent-alpha variant without checkerboard instructions', () => {
+    const request = buildDisplayDecomposeRequestBody({
+      model: 'gemini-image-model',
+      imageUrl: '/api/serve-upload/frozen-source.png',
+      sourceHash: 'frozen-source-hash',
+      background: 'transparent',
+    });
+
+    expect(request.image_urls).toEqual(['/api/serve-upload/frozen-source.png']);
+    expect(request.source_hash).toBe('frozen-source-hash');
+    expect(request.prompt).toContain('真实透明 alpha=0');
+    expect(request.prompt).not.toContain('棋盘格');
+    expect(request.prompt).not.toContain('浅灰色极简展示背景');
   });
 });

@@ -81,7 +81,17 @@ const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ 
 import { computeSnapGuides, findBestSnapOffset, type SnapGuide } from '@/lib/canvas-snap-guides';
 import { type CanvasConnection, type ConnectionRelationType, createAutoConnection, computeConnectionEndpoints, buildConnectionPath, buildArrowHead, RELATION_TYPE_CONFIG } from '@/lib/canvas-connections';
 import { EngineSelectDialog, type EditEngine } from '@/components/engine-select-dialog';
-import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, DEFAULT_DISPLAY_DECOMPOSE_RATIO, type DisplayDecomposeRatio } from '@/lib/display-decompose';
+import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, type DisplayDecomposeRatio } from '@/lib/display-decompose';
+import {
+  cancelElementDecomposition,
+  createElementDecompositionRequest,
+  pollElementDecomposition,
+  retryElementDecompositionBranch,
+  submitElementDecomposition,
+  type ElementDecomposeTaskResponse,
+} from '@/lib/element-decomposition/client';
+import type { ElementDecomposeOutputMode } from '@/lib/element-decomposition/types';
+import type { LayerDecompositionResult } from '@/lib/layer-decomposition/types';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 const HumanRepairPanel = lazy(() => import('@/components/human-repair-panel'));
@@ -496,6 +506,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [displayDecomposeRatio, setDisplayDecomposeRatio] = useState<DisplayDecomposeRatio>('16:9');
   const [displayDecomposeProcessing, setDisplayDecomposeProcessing] = useState(false);
   const [displayDecomposeAutoRemoveBg, setDisplayDecomposeAutoRemoveBg] = useState(true);
+  const [elementDecomposeOutputMode, setElementDecomposeOutputMode] = useState<ElementDecomposeOutputMode>('both');
+  const [elementDecomposeTask, setElementDecomposeTask] = useState<ElementDecomposeTaskResponse | null>(null);
+  const elementDecomposeControllerRef = useRef<AbortController | null>(null);
+  const elementDecomposePlaceholderRef = useRef<string | null>(null);
 
   // Image compare state
   const [showCompareDialog, setShowCompareDialog] = useState(false);
@@ -1071,6 +1085,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [videoExtractProcessing, setVideoExtractProcessing] = useState(false);
   const [showPsdEditor, setShowPsdEditor] = useState(false);
   const [psdEditorImageUrl, setPsdEditorImageUrl] = useState<string>('');
+  const [psdEditorInitialResult, setPsdEditorInitialResult] = useState<LayerDecompositionResult | null>(null);
   const [, ] = useState<PsdLayerItem[]>([]);
   const [psdEditorMode, setPsdEditorMode] = useState<'basic' | 'standard' | 'advanced' | 'studio'>('standard');
   const [showRemoveBgPicker, setShowRemoveBgPicker] = useState(false);
@@ -1700,6 +1715,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [eraseModelId, setEraseModelId] = useState<string>('lama');
   // RemoveBG model selection
   const [removeBgModelId, setRemoveBgModelId] = useState<string>('birefnet-general');
+  const [addRemoveBgMaskToCanvas, setAddRemoveBgMaskToCanvas] = useState(false);
   // Floating window canvas zoom/pan
   const [editCanvasZoom, setEditCanvasZoom] = useState(1);
   const [editCanvasPan, setEditCanvasPan] = useState({ x: 0, y: 0 });
@@ -7264,7 +7280,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }, 'removebg');
 
         // 同时添加黑白蒙版图到画布（紧邻主体图右侧）
-        if (maskResultUrl && completedImage) {
+        if (addRemoveBgMaskToCanvas && maskResultUrl && completedImage) {
           try {
             const stableMaskUrl = await awaitStableImageUrl(maskResultUrl);
             const gap = 10;
@@ -7295,7 +7311,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       alert(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
     }
     setIsEditProcessing(false);
-  }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, completeProcessingFrame, onImagesChange]);
+  }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, addRemoveBgMaskToCanvas, completeProcessingFrame, onImagesChange]);
 
   const handleOpenDisplayDecompose = useCallback(() => {
     // 优先使用右键时记录的命中图片 id（通过 ref 规避 React 批量更新时序问题），
@@ -7310,11 +7326,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (!img) return;
     contextMenuTargetRef.current = null; // 使用后清空，避免影响下次工具栏触发
     setEditImageId(img.id);
+    setElementDecomposeTask(null);
     setShowDisplayDecomposePanel(true);
     setShowToolbarCustomize(false);
   }, [editImageId, selectedIds, selectedImageData]);
 
-  const handleDisplayDecomposeConfirm = useCallback(async () => {
+  const handleDisplayDecomposeLegacy = useCallback(async () => {
     const img = getActiveImageData();
     if (!img || displayDecomposeProcessing) return;
 
@@ -7440,6 +7457,177 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       setActiveTool('none');
     }
   }, [getActiveImageData, displayDecomposeProcessing, displayDecomposeRatio, displayDecomposeAutoRemoveBg, getCurrentModel, getCurrentProviderId, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame, pollForResult]);
+  void handleDisplayDecomposeLegacy;
+
+  const completeElementBoardResult = useCallback((
+    task: ElementDecomposeTaskResponse,
+    branch: 'board' | 'layers',
+  ): boolean => {
+    if (branch !== 'board') return false;
+    const result = task.branches.board?.result;
+    const imageUrl = result && typeof result.imageUrl === 'string' ? result.imageUrl : '';
+    if (!imageUrl) return false;
+
+    const sourceImage = imagesRef.current.find(image => image.id === task.source.sourceImageId);
+    if (!sourceImage) return false;
+    let placeholderId = elementDecomposePlaceholderRef.current;
+    if (!placeholderId || !imagesRef.current.some(image => image.id === placeholderId)) {
+      placeholderId = createProcessingFrameRightOf(
+        sourceImage,
+        '元素拆解',
+        sourceImage.width,
+        sourceImage.height,
+        '正在完成元素拆解板...',
+      );
+      elementDecomposePlaceholderRef.current = placeholderId;
+    }
+    completeProcessingFrame(placeholderId, imageUrl, sourceImage.width, sourceImage.height, {
+      originalWidth: task.source.width,
+      originalHeight: task.source.height,
+      prompt: '元素拆解',
+      modifyPrompt: '美陈拆解 / 元素物料板',
+    }, 'edit');
+    elementDecomposePlaceholderRef.current = null;
+    return true;
+  }, [completeProcessingFrame, createProcessingFrameRightOf]);
+
+  const handleDisplayDecomposeConfirm = useCallback(async () => {
+    const img = getActiveImageData();
+    if (!img || displayDecomposeProcessing) return;
+    const effectiveProjectId = projectId || brandProject?.id;
+    if (!effectiveProjectId) {
+      toast.error('请先保存项目，再进行元素拆解');
+      return;
+    }
+
+    const sourceSnapshot = Object.freeze({
+      projectId: effectiveProjectId,
+      sourceImageId: img.id,
+      sourceVersionId: img.annotationVersionId || buildAnnotationSourceVersionId(
+        img.id,
+        img.createdAt,
+        img.url,
+      ),
+      imageUrl: img.url,
+      width: img.originalWidth || Math.round(img.width),
+      height: img.originalHeight || Math.round(img.height),
+    });
+    const modelInfo = getCurrentModel();
+    const elementRequest = createElementDecompositionRequest(sourceSnapshot, {
+      outputMode: elementDecomposeOutputMode,
+      aspectRatio: displayDecomposeRatio,
+      background: displayDecomposeAutoRemoveBg ? 'transparent' : 'light-gray',
+      engine: 'smart',
+      boardProviderId: modelInfo.providerId || getCurrentProviderId() || undefined,
+      boardModelId: modelInfo.model || undefined,
+    });
+    const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const idempotencyKey = `element-${sourceSnapshot.sourceImageId}-${randomPart}`.slice(0, 128);
+    const [rw, rh] = displayDecomposeRatio.split(':').map(Number);
+    const maxSide = Math.max(img.width, img.height);
+    const frameW = Math.max(180, rh > rw ? Math.round(maxSide * rw / rh) : maxSide);
+    const frameH = Math.max(120, rw >= rh ? Math.round(maxSide * rh / rw) : maxSide);
+    const placeholderId = elementDecomposeOutputMode === 'layers'
+      ? null
+      : createProcessingFrameRightOf(img, '元素拆解', frameW, frameH, '正在冻结原始图片...');
+    elementDecomposePlaceholderRef.current = placeholderId;
+    elementDecomposeControllerRef.current?.abort();
+    const controller = new AbortController();
+    elementDecomposeControllerRef.current = controller;
+    setDisplayDecomposeProcessing(true);
+    setIsEditProcessing(true);
+    setElementDecomposeTask(null);
+
+    try {
+      const parent = await submitElementDecomposition(elementRequest, idempotencyKey, controller.signal);
+      setElementDecomposeTask(parent);
+      const finalTask = await pollElementDecomposition(parent.taskId, (task) => {
+        setElementDecomposeTask(task);
+        if (placeholderId) {
+          updateProcessingFrame(placeholderId, {
+            progress: task.progress,
+            status: task.branches.layers?.status === 'processing'
+              ? '正在生成并解析可编辑图层...'
+              : '正在生成元素拆解板...',
+          });
+        }
+      }, controller.signal);
+      setElementDecomposeTask(finalTask);
+
+      const boardResult = finalTask.branches.board?.result;
+      const boardUrl = boardResult && typeof boardResult.imageUrl === 'string' ? boardResult.imageUrl : '';
+      if (placeholderId && boardUrl) {
+        completeElementBoardResult(finalTask, 'board');
+      } else if (placeholderId) {
+        removeProcessingFrame(placeholderId);
+        elementDecomposePlaceholderRef.current = null;
+      }
+
+      const layerResult = finalTask.branches.layers?.result as LayerDecompositionResult | undefined;
+      if (layerResult?.layers?.length) {
+        setPsdEditorImageUrl(sourceSnapshot.imageUrl);
+        setPsdEditorInitialResult(layerResult);
+        setPsdEditorMode('studio');
+        setShowPsdEditor(true);
+      }
+      if (finalTask.overallStatus === 'partial') {
+        toast.warning('元素拆解部分完成，可在状态面板重试失败分支');
+      } else if (finalTask.overallStatus === 'completed') {
+        toast.success('元素拆解完成');
+      } else {
+        toast.error('元素拆解未完成，请查看分支状态');
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const message = error instanceof Error ? error.message : '元素拆解失败';
+      if (placeholderId) {
+        updateProcessingFrame(placeholderId, { progress: -1, status: `元素拆解失败：${message}`, error: message });
+      }
+      toast.error(message);
+    } finally {
+      if (elementDecomposeControllerRef.current === controller) elementDecomposeControllerRef.current = null;
+      setDisplayDecomposeProcessing(false);
+      setIsEditProcessing(false);
+      setActiveTool('none');
+    }
+  }, [brandProject?.id, completeElementBoardResult, createProcessingFrameRightOf, displayDecomposeAutoRemoveBg, elementDecomposeOutputMode, displayDecomposeProcessing, displayDecomposeRatio, getActiveImageData, getCurrentModel, getCurrentProviderId, projectId, removeProcessingFrame, updateProcessingFrame]);
+
+  const handleRetryElementBranch = useCallback(async (branch: 'board' | 'layers') => {
+    if (!elementDecomposeTask) return;
+    try {
+      const retried = await retryElementDecompositionBranch(elementDecomposeTask.taskId, branch);
+      setElementDecomposeTask(retried);
+      const finalTask = await pollElementDecomposition(retried.taskId, setElementDecomposeTask);
+      setElementDecomposeTask(finalTask);
+      completeElementBoardResult(finalTask, branch);
+      const layerResult = finalTask.branches.layers?.result as LayerDecompositionResult | undefined;
+      if (branch === 'layers' && layerResult?.layers?.length) {
+        setPsdEditorImageUrl(elementDecomposeTask.source.managedUrl || elementDecomposeTask.source.canonicalUrl);
+        setPsdEditorInitialResult(layerResult);
+        setShowPsdEditor(true);
+      }
+      toast.success(branch === 'board' ? '拆解板分支重试完成' : '可编辑图层分支重试完成');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '分支重试失败');
+    }
+  }, [completeElementBoardResult, elementDecomposeTask]);
+
+  const handleCancelElementDecomposition = useCallback(async () => {
+    if (!elementDecomposeTask) return;
+    elementDecomposeControllerRef.current?.abort(new Error('用户取消元素拆解'));
+    try {
+      const cancelled = await cancelElementDecomposition(elementDecomposeTask.taskId);
+      setElementDecomposeTask(cancelled);
+      const placeholderId = elementDecomposePlaceholderRef.current;
+      if (placeholderId) removeProcessingFrame(placeholderId);
+      elementDecomposePlaceholderRef.current = null;
+      toast.success('元素拆解任务已取消');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '取消元素拆解失败');
+    }
+  }, [elementDecomposeTask, removeProcessingFrame]);
 
   // 3. SVG智能描摹 - Sharp + VTracer (彩色) / ImageMagick + Potrace (黑白) / Sharp (压缩/缩略图)
   const handleOpenSvgTrace = useCallback(() => {
@@ -8121,6 +8309,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (!img) return;
     colorAdjustingRef.current = true;
     setColorAdjustProcessing(true);
+    const placeholderId = createProcessingFrameRightOf(
+      img,
+      '调色中',
+      img.width,
+      img.height,
+      '正在应用调色参数...'
+    );
     try {
       const res = await fetch('/api/image/color-adjust', {
         method: 'POST',
@@ -8140,19 +8335,26 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (!res.ok || !data.success) throw new Error(data.error || '调色失败');
       if (data.url) {
         // API直接返回可访问URL，直接替换图片
-        onImagesChange(images.map(i => i.id === img.id ? { ...i, url: data.url } : i));
+        updateProcessingFrame(placeholderId, { progress: 94, status: '正在载入调色结果...' });
+        const stableUrl = await awaitStableImageUrl(data.url);
+        completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
+          originalWidth: img.originalWidth || Math.round(img.width),
+          originalHeight: img.originalHeight || Math.round(img.height),
+          modifyPrompt: '参数调色',
+        }, 'edit');
         toast.success('调色完成');
         setEditMode('none');
       } else {
         throw new Error('返回结果为空');
       }
     } catch (e) {
+      removeProcessingFrame(placeholderId);
       toast.error(e instanceof Error ? e.message : '调色失败');
     } finally {
       colorAdjustingRef.current = false;
       setColorAdjustProcessing(false);
     }
-  }, [getActiveImageData, colorBrightness, colorContrast, colorSaturation, colorTemperature, colorHue, onImagesChange, images]);
+  }, [getActiveImageData, colorBrightness, colorContrast, colorSaturation, colorTemperature, colorHue, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   const handleConfirmColorAdjust = applyColorAdjust;
 
@@ -8964,9 +9166,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => setShowRemoveBgPicker(true) },
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
     { icon: <LayoutGrid size={14} className={isMonochrome ? monoColors['元素拆解'] : ''} />, label: '元素拆解', desc: '拆出美陈物料与设计元素，生成平面陈列板', action: handleOpenDisplayDecompose },
-    { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase },
-    { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask },
-    { icon: <Palette size={14} className={isMonochrome ? '' : 'text-pink-500'} />, label: '调色', desc: '亮度/对比度/饱和度/色温/色相参数调节', action: handleOpenColorAdjust },
+    { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase, testId: 'canvas-erase' },
+    { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask, testId: 'canvas-mask-edit' },
+    { icon: <Palette size={14} className={isMonochrome ? '' : 'text-pink-500'} />, label: '调色', desc: '亮度/对比度/饱和度/色温/色相参数调节', action: handleOpenColorAdjust, testId: 'canvas-color-adjust' },
     { icon: <Layers size={14} className={isMonochrome ? monoColors['编辑元素'] : ''} />, label: '编辑元素', desc: '按元素分层，独立编辑', action: handleEditElements, testId: 'canvas-edit-elements' },
     { icon: <RotateCcw size={14} className={isMonochrome ? monoColors['多角度'] : ''} />, label: '多角度', desc: '多视角生成', action: handleOpenMultiAngle },
     { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['图转3D工厂'] : ''} />, label: '图转3D工厂', desc: '生成3D模型预览', action: handleOpen3D },
@@ -12332,10 +12534,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     className="max-w-full max-h-full object-contain transition-all duration-100"
                     crossOrigin="anonymous"
                     style={{
-                      filter: `brightness(${1 + colorBrightness / 200}) contrast(${1 + colorContrast / 100}) saturate(${1 + colorSaturation / 100}) hue-rotate(${colorHue * 1.8}deg)${colorTemperature > 0 ? ` sepia(${colorTemperature / 200}) saturate(${1 + colorTemperature / 300})` : colorTemperature < 0 ? ` hue-rotate(${-colorTemperature * 0.5}deg) saturate(${1 - colorTemperature / 500})` : ''}`,
+                      filter: `brightness(${1 + colorBrightness / 200}) contrast(${1 + colorContrast / 100}) saturate(${1 + colorSaturation / 100}) hue-rotate(${colorHue}deg)${colorTemperature > 0 ? ` sepia(${colorTemperature / 200}) saturate(${1 + colorTemperature / 300})` : colorTemperature < 0 ? ` hue-rotate(${-colorTemperature * 0.5}deg) saturate(${1 - colorTemperature / 500})` : ''}`,
                     }}
                   />
-                  <div className="absolute bottom-2 left-2 text-[10px] text-white/70 bg-black/50 px-2 py-0.5 rounded">实时预览</div>
+                  <div className="absolute bottom-2 left-2 text-[10px] text-white/70 bg-black/50 px-2 py-0.5 rounded">近似预览</div>
                   {isProcessing && (
                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                       <Loader2 className="animate-spin text-[#d4af37]" size={28} />
@@ -12383,7 +12585,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       <span className="text-xs text-[#aaa]">色相</span>
                       <span className="text-xs text-[#d4af37] font-mono">{colorHue > 0 ? '+' : ''}{colorHue}</span>
                     </div>
-                    <input type="range" min={-100} max={100} value={colorHue} onChange={e => setColorHue(Number(e.target.value))} className="w-full accent-[#d4af37]" />
+                    <input type="range" min={-180} max={180} value={colorHue} onChange={e => setColorHue(Number(e.target.value))} className="w-full accent-[#d4af37]" />
                   </div>
                 </div>
 
@@ -12479,6 +12681,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       {removeBgModels.find(m => m.id === removeBgModelId)?.label || removeBgModelId}
                     </span>
                   </div>
+                  <label className={`mb-3 flex cursor-pointer items-center gap-2 text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#bbb]'}`}>
+                    <input
+                      type="checkbox"
+                      aria-label="同时将黑白蒙版加入画布"
+                      checked={addRemoveBgMaskToCanvas}
+                      onChange={(event) => setAddRemoveBgMaskToCanvas(event.target.checked)}
+                      className="h-4 w-4 accent-[#d4af37]"
+                    />
+                    同时将黑白蒙版加入画布
+                  </label>
                   <button
                     onClick={() => {
                       setShowRemoveBgPicker(false);
@@ -15187,7 +15399,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             <PsdLayerEditor
               imageUrl={psdEditorImageUrl}
               mode={psdEditorMode}
-              onClose={() => setShowPsdEditor(false)}
+              initialResult={psdEditorInitialResult || undefined}
+              onClose={() => {
+                setShowPsdEditor(false);
+                setPsdEditorInitialResult(null);
+              }}
             />
           </div>
         )}
@@ -15943,7 +16159,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         })()}
 
         {/* 元素拆解面板 — 独立 fixed 浮层，不依赖 toolbar 条件 */}
-        {showDisplayDecomposePanel && (
+        {(showDisplayDecomposePanel || elementDecomposeTask) && (
           <div
             className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-none"
           >
@@ -15967,6 +16183,26 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               </div>
               <div className={`text-[11px] leading-relaxed mb-3 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>
                 识别画面中的视觉元素与设计构件，提取关键材质、色彩与样式，生成可复用的元素拆解板。开启自动去背景后输出透明 PNG。
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 mb-3" aria-label="元素拆解输出方式">
+                {([
+                  ['board', '拆解板'],
+                  ['layers', '可编辑图层'],
+                  ['both', '双输出'],
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setElementDecomposeOutputMode(mode)}
+                    className={`px-2 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
+                      elementDecomposeOutputMode === mode
+                        ? isMonochrome ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-gold/20 border-gold/60 text-gold'
+                        : isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-600' : 'bg-white/5 border-white/[0.1] text-gold-muted'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
               {/* 自动去背景开关 */}
               <button
@@ -16015,6 +16251,51 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 <Sparkles size={13} />
                 {displayDecomposeProcessing ? '拆解中...' : '生成拆解板'}
               </button>
+              {elementDecomposeTask && (
+                <div className="mt-3 space-y-2" data-element-status={elementDecomposeTask.overallStatus}>
+                  {elementDecomposeTask.overallStatus === 'partial' && (
+                    <div className="text-[11px] text-amber-500">部分完成：已保留成功结果，可单独重试失败分支。</div>
+                  )}
+                  {(['board', 'layers'] as const).map((branch) => {
+                    const state = elementDecomposeTask.branches[branch];
+                    if (!state) return null;
+                    const retryable = ['failed', 'cancelled', 'timeout'].includes(state.status);
+                    return (
+                      <div
+                        key={branch}
+                        data-element-branch={branch}
+                        className={`rounded-lg border px-2.5 py-2 ${isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/10 bg-white/5'}`}
+                      >
+                        <div className="flex items-center justify-between gap-2 text-[11px]">
+                          <span>{branch === 'board' ? '拆解板' : '可编辑图层'}</span>
+                          <span>{state.status} · {state.progress}%</span>
+                        </div>
+                        <div className={`mt-1 h-1 overflow-hidden rounded ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`}>
+                          <div className="h-full bg-emerald-500" style={{ width: `${Math.max(0, Math.min(100, state.progress))}%` }} />
+                        </div>
+                        {retryable && (
+                          <button
+                            type="button"
+                            onClick={() => void handleRetryElementBranch(branch)}
+                            className="mt-2 text-[11px] text-amber-500 hover:underline"
+                          >
+                            仅重试此分支
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {['pending', 'processing'].includes(elementDecomposeTask.overallStatus) && (
+                    <button
+                      type="button"
+                      onClick={() => void handleCancelElementDecomposition()}
+                      className="w-full rounded-lg border border-red-500/30 px-2.5 py-1.5 text-[11px] text-red-500"
+                    >
+                      取消任务
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

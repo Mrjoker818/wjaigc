@@ -6,6 +6,8 @@ import type {
 
 function mapRole(role: EditableLayerRole): DesignLayer['role'] {
   if (role === 'decoration' || role === 'unknown') return 'deco';
+  if (role === 'reconstruction-correction') return 'deco';
+  if (role === 'reconstruction-reference') return 'original';
   return role;
 }
 

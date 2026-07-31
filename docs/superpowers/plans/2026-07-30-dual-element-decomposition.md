@@ -8,6 +8,13 @@
 
 **Tech Stack:** Next.js 16, React 19, TypeScript 5, PostgreSQL cloud task storage, Sharp, ag-psd, JSZip, Vitest, Playwright/Chrome
 
+## Execution Status (2026-07-31)
+
+- Local implementation and focused regression coverage for Tasks 1-7 are complete.
+- The full local suite currently reports 1220 passed tests and 4 PostgreSQL environment tests skipped; TypeScript, lint (0 errors), and the production build pass.
+- Task 8 browser cases exist, but deployed Pear ZIP/PSD inspection, PostgreSQL multi-instance settlement, and Firefox/WebKit execution remain unverified.
+- Final plan status: local implementation complete; production evidence gates pending.
+
 ## Global Constraints
 
 - Output mode is `board`, `layers`, or `both`; `both` is the default.

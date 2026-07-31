@@ -53,6 +53,7 @@ export function ExportToolbar({ mode, onModeChange, onExport, isExporting, progr
       )}
 
       <button
+        data-testid="layer-export-psd"
         onClick={onExport}
         disabled={isExporting}
         className={`w-full py-2 text-xs font-semibold rounded transition-colors ${

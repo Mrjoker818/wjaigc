@@ -17,6 +17,8 @@ export type EditableLayerRole =
   | 'text'
   | 'decoration'
   | 'shadow'
+  | 'reconstruction-correction'
+  | 'reconstruction-reference'
   | 'unknown';
 
 export interface LayerDecompositionRequest {
@@ -49,6 +51,24 @@ export interface LayerQualityResult {
   warnings: string[];
 }
 
+export interface ReconstructionMetrics {
+  widthMatches: boolean;
+  heightMatches: boolean;
+  alphaMae: number;
+  rgbMae: number;
+  maxChannelError: number;
+  mismatchedPixelRatio: number;
+  ssim: number;
+}
+
+export interface ReconstructionReport {
+  native: ReconstructionMetrics;
+  corrected: ReconstructionMetrics;
+  correctionApplied: boolean;
+  correctionLayer?: EditableLayerAsset;
+  pixelPerfectReferenceLayer?: EditableLayerAsset;
+}
+
 export interface LayerDecompositionResult {
   width: number;
   height: number;
@@ -56,6 +76,7 @@ export interface LayerDecompositionResult {
   psdUrl?: string;
   engine: 'pear' | 'local';
   quality: LayerQualityResult;
+  reconstruction?: ReconstructionReport;
 }
 
 export interface LayerTaskResponse {

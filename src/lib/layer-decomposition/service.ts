@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { evaluateAndCorrectReconstruction } from '@/lib/element-decomposition/reconstruction';
 import {
   chargeCloudTaskCredits,
   claimCloudTaskLease,
@@ -508,16 +509,35 @@ async function runLocalAndComplete(
         );
         return;
       }
+      const reconstruction = await evaluateAndCorrectReconstruction({
+        source: source.buffer,
+        layers: local.layers,
+        loadLayer: async (layer) => {
+          const buffer = local.buffers.get(layer.id);
+          if (!buffer) throw new Error(`Missing local layer buffer: ${layer.id}`);
+          return buffer;
+        },
+        persistLayer: async (buffer, filename) => persistLayer(
+          buffer,
+          `${artifactPrefix}_${filename}`,
+        ),
+      });
+      await assertTaskActive(task.id, task.userId, signal, leaseOwner);
+      const reconstructionAssets = [
+        reconstruction.correctionLayer,
+        reconstruction.pixelPerfectReferenceLayer,
+      ].filter((asset): asset is NonNullable<typeof asset> => Boolean(asset));
       const decomposition: LayerDecompositionResult = {
         width: local.width,
         height: local.height,
-        layers: local.layers,
+        layers: [...local.layers, ...reconstructionAssets],
         engine: 'local',
         quality: {
           status: local.quality.status,
           score: local.quality.score,
           warnings: local.quality.warnings,
         },
+        reconstruction,
       };
       committed = await completeCloudTask(task.id, {
         phase: 'ready',
@@ -676,10 +696,29 @@ async function processPearArtifact(
         return;
       }
 
+      const reconstruction = await evaluateAndCorrectReconstruction({
+        source: source.buffer,
+        layers: refined.layers,
+        loadLayer: async (layer) => {
+          const buffer = refined.buffers.get(layer.id);
+          if (!buffer) throw new Error(`Missing refined layer buffer: ${layer.id}`);
+          return buffer;
+        },
+        persistLayer: async (buffer, filename) => persistTaskFile(
+          buffer,
+          `${artifactPrefix}_${filename}`,
+        ),
+      });
+      await assertTaskActive(task.id, task.userId, signal, attemptId);
+      const reconstructionAssets = [
+        reconstruction.correctionLayer,
+        reconstruction.pixelPerfectReferenceLayer,
+      ].filter((asset): asset is NonNullable<typeof asset> => Boolean(asset));
+
       const decomposition: LayerDecompositionResult = {
         width: extracted.width,
         height: extracted.height,
-        layers: refined.layers,
+        layers: [...refined.layers, ...reconstructionAssets],
         psdUrl: storedPsdUrl,
         engine: 'pear',
         quality: {
@@ -687,6 +726,7 @@ async function processPearArtifact(
           score: quality.score,
           warnings: [...extracted.warnings, ...quality.warnings],
         },
+        reconstruction,
       };
       committed = await completeCloudTask(
         task.id,

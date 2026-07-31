@@ -26,6 +26,7 @@ export interface CloudTask {
   leaseExpiresAt?: number;
   attemptCount?: number;
   idempotencyKey?: string;
+  revision?: number;
 }
 
 export interface CloudTaskLease {
@@ -54,6 +55,7 @@ export interface UpdateCloudTaskInput {
   remoteTaskId?: string;
   expectedStatuses?: CloudTaskStatus[];
   leaseOwner?: string;
+  expectedRevision?: number;
 }
 
 export interface CloudTaskListFilters {
@@ -128,6 +130,7 @@ export async function ensureCloudTaskTables(): Promise<void> {
       lease_expires_at BIGINT DEFAULT 0,
       attempt_count INTEGER NOT NULL DEFAULT 0,
       idempotency_key TEXT DEFAULT '',
+      revision INTEGER NOT NULL DEFAULT 0,
       created_at BIGINT NOT NULL,
       updated_at BIGINT NOT NULL
     )
@@ -141,6 +144,7 @@ export async function ensureCloudTaskTables(): Promise<void> {
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0');
   await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS idempotency_key TEXT DEFAULT ''");
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS credit_cost NUMERIC NOT NULL DEFAULT 0');
+  await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 0');
   await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_user_idempotency ON cloud_tasks(user_id, idempotency_key) WHERE idempotency_key <> ''");
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_user_created ON cloud_tasks(user_id, created_at DESC)');
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_status_updated ON cloud_tasks(status, updated_at DESC)');
@@ -154,10 +158,10 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
     INSERT INTO cloud_tasks (
       id, user_id, project_id, session_id, message_id, type, status, provider_id, model, remote_task_id,
       progress, label, result, error, credit_status, credit_cost, lease_owner, lease_expires_at,
-      attempt_count, idempotency_key, created_at, updated_at
+      attempt_count, idempotency_key, revision, created_at, updated_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
     ) ON CONFLICT DO NOTHING
   `, [
     input.id,
@@ -180,6 +184,7 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
     input.leaseExpiresAt || 0,
     input.attemptCount || 0,
     input.idempotencyKey || '',
+    input.revision || 0,
     input.createdAt,
     input.updatedAt,
   ]);
@@ -189,7 +194,7 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
 export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInput): Promise<boolean> {
   await ensureCloudTaskTables();
 
-  const sets: string[] = ['updated_at = $2'];
+  const sets: string[] = ['updated_at = $2', 'revision = revision + 1'];
   const params: unknown[] = [taskId, Date.now()];
   let index = 3;
 
@@ -210,6 +215,10 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.leaseOwner) {
     conditions.push(`lease_owner = $${index++}`);
     params.push(input.leaseOwner);
+  }
+  if (input.expectedRevision !== undefined) {
+    conditions.push(`revision = $${index++}`);
+    params.push(input.expectedRevision);
   }
   const result = await execSql(`UPDATE cloud_tasks SET ${sets.join(', ')}
     WHERE ${conditions.join(' AND ')}
@@ -778,6 +787,7 @@ function rowToCloudTask(row: Record<string, unknown>): CloudTask {
     leaseExpiresAt: Number(row.lease_expires_at || 0) || undefined,
     attemptCount: Number(row.attempt_count || 0) || undefined,
     idempotencyKey: String(row.idempotency_key || '') || undefined,
+    revision: Number(row.revision || 0),
   };
 }
 

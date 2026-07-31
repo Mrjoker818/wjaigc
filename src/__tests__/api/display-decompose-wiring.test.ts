@@ -15,6 +15,16 @@ describe('display-decompose feature wiring', () => {
     expect(routeSource).toContain("engine: 'ai-display-decompose'");
   });
 
+  it('hashes the safely resolved source and keeps internal metadata out of the provider payload', () => {
+    expect(routeSource).toContain("resolveLayerSourceImage(imageUrl)");
+    expect(routeSource).toContain("createHash('sha256').update(decomposeSource.buffer).digest('hex')");
+    expect(routeSource).toContain("const displayBackground = body.displayBackground === 'transparent' ? 'transparent' : 'light-gray'");
+    expect(routeSource).toContain('sourceHash: decomposeSourceHash');
+    expect(routeSource).toContain('background: displayBackground');
+    expect(routeSource).toContain('const { source_hash: _internalSourceHash, ...providerRequest } = requestBody');
+    expect(routeSource).toContain('sourceHash: decomposeSourceHash');
+  });
+
   it('exposes the image toolbar and image context-menu entry', () => {
     expect(canvasSource).toContain("label: '元素拆解'");
     expect(canvasSource).toContain("action: 'display_decompose'");

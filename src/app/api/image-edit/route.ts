@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import { findProviderForModel, findProviderById, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -30,6 +31,9 @@ import { validateUpscaleTargetDimensions, type UpscaleTargetPreset } from '@/lib
 import { createUpscaleExecutionPlan, type UpscaleProductMode, type UpscaleProviderCapability } from '@/lib/upscale-orchestrator';
 import { executeOverlapTileUpscale } from '@/lib/upscale-tile-executor';
 import { buildDisplayDecomposePrompt, buildDisplayDecomposeRequestBody, normalizeDisplayDecomposeRatio } from '@/lib/display-decompose';
+import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';
+import { evaluateRemoveBgOutput } from '@/lib/image-tools/remove-bg-quality';
+import { resolveLayerSourceImage } from '@/lib/layer-decomposition/source-image';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -420,6 +424,7 @@ interface EditRequest {
   outputFormat?: 'png' | 'jpg' | 'webp'; // 输出格式
   compression?: number; // 压缩质量 (0-100)
   engine?: 'auto' | 'ai' | 'local' | 'cpu' | 'ai-only' | 'fidelity'; // 智能推荐/仅AI/保真放大，兼容旧值
+  displayBackground?: 'light-gray' | 'transparent';
 }
 
 // Helper: submit a task to the images/generations API and return taskId or directUrl
@@ -1676,19 +1681,26 @@ export async function POST(request: NextRequest) {
 
     if (action === 'display_decompose') {
       const decomposeAspectRatio = normalizeDisplayDecomposeRatio(aspectRatio);
-      const displayDecomposePrompt = buildDisplayDecomposePrompt(prompt);
+      const decomposeSource = await resolveLayerSourceImage(imageUrl);
+      const decomposeSourceHash = createHash('sha256').update(decomposeSource.buffer).digest('hex');
+      const displayBackground = body.displayBackground === 'transparent' ? 'transparent' : 'light-gray';
+      const displayDecomposePrompt = buildDisplayDecomposePrompt(prompt, displayBackground);
       // Note: image_urls is already included in buildDisplayDecomposeRequestBody.
       // Do NOT add `image: imageBase64` — it triggers hasImageField=true in submitImageTask,
       // which causes adjustRequestForProfile to select profile.editEndpoint (/images/edits)
       // instead of /images/generations, breaking providers like PearAPI that return 404 on /images/edits.
-      const result = await autoTrySubmitImageTask(candidateModels, (candidateModel) => ({
-        ...buildDisplayDecomposeRequestBody({
+      const result = await autoTrySubmitImageTask(candidateModels, (candidateModel) => {
+        const requestBody = buildDisplayDecomposeRequestBody({
           model: candidateModel,
           imageUrl,
+          sourceHash: decomposeSourceHash,
           aspectRatio: decomposeAspectRatio,
+          background: displayBackground,
           extraPrompt: prompt,
-        }),
-      }), '元素拆解', '/images/generations');
+        });
+        const { source_hash: _internalSourceHash, ...providerRequest } = requestBody;
+        return providerRequest;
+      }, '元素拆解', '/images/generations');
 
       if (result.directUrl) {
         return NextResponse.json({
@@ -1701,6 +1713,8 @@ export async function POST(request: NextRequest) {
           engine: 'ai-display-decompose',
           source: 'image-edit:display-decompose',
           qualityLevel: 'display-material-board',
+          sourceHash: decomposeSourceHash,
+          background: displayBackground,
         });
       }
 
@@ -1727,6 +1741,8 @@ export async function POST(request: NextRequest) {
             source: 'image-edit:display-decompose',
             qualityLevel: 'display-material-board',
             aspectRatio: decomposeAspectRatio,
+            sourceHash: decomposeSourceHash,
+            background: displayBackground,
           },
         });
         return NextResponse.json({
@@ -1739,6 +1755,8 @@ export async function POST(request: NextRequest) {
           engine: 'ai-display-decompose',
           source: 'image-edit:display-decompose',
           qualityLevel: 'display-material-board',
+          sourceHash: decomposeSourceHash,
+          background: displayBackground,
         });
       }
 
@@ -2825,17 +2843,23 @@ export async function POST(request: NextRequest) {
           const sourceBuffer = await fetchImageBuffer(imageUrl);
           const rembgResult = await generateRembgMask(sourceBuffer, rembgModel);
           if (rembgResult.success && rembgResult.rgbaBase64) {
-            const result = await postProcessLocalRemoveBG(rembgResult.rgbaBase64, rembgResult.maskBase64);
+            const result = await postProcessLocalRemoveBG(
+              rembgResult.rgbaBase64,
+              rembgResult.maskBase64,
+              sourceBuffer,
+            );
             if (result) {
               return NextResponse.json({
                 success: true,
                 imageUrl: result.imageUrl,
                 maskUrl: result.maskUrl,
+                quality: result.quality,
                 action,
                 engine: 'rembg-cpu',
                 usedModel: rembgResult.model || rembgModel,
               });
             }
+            console.warn('[remove_background] rembg CPU output failed quality validation; trying configured fallback');
           }
           if (engineMode === 'cpu') {
             return NextResponse.json({ success: false, error: rembgResult.error || 'rembg CPU 去背景失败' }, { status: 502 });
@@ -2951,6 +2975,16 @@ export async function POST(request: NextRequest) {
       try {
         const sourceBuffer = await fetchImageBuffer(imageUrl);
         const localBuffer = await createLocalBackgroundAlpha(sourceBuffer);
+        const fallbackQuality = await evaluateRemoveBgOutput(sourceBuffer, localBuffer);
+        if (!fallbackQuality.ok) {
+          return NextResponse.json({
+            success: false,
+            code: 'REMOVE_BG_QUALITY_FAILED',
+            error: `本地移除背景结果未通过质量检查：${fallbackQuality.code || 'UNKNOWN'}`,
+            quality: fallbackQuality,
+            retryable: true,
+          }, { status: 422 });
+        }
         // 同时生成黑白蒙版图
         const localMaskBuffer = await createLocalBackgroundMask(sourceBuffer);
         const timestamp = Date.now();
@@ -2959,7 +2993,15 @@ export async function POST(request: NextRequest) {
         const fallbackUrl = saveImageFile(localBuffer, rgbaFilename, 'removebg');
         const fallbackMaskUrl = localMaskBuffer ? saveImageFile(localMaskBuffer, maskFilename, 'removebg') : '';
         console.log(`[remove_background] Local fallback completed: ${fallbackUrl}, mask: ${fallbackMaskUrl || 'N/A'}`);
-        return NextResponse.json({ success: true, imageUrl: fallbackUrl, maskUrl: fallbackMaskUrl || '', action, engine: 'local-background-alpha' });
+        return NextResponse.json({
+          success: true,
+          imageUrl: fallbackUrl,
+          maskUrl: fallbackMaskUrl || '',
+          action,
+          engine: 'local-background-alpha',
+          usedModel: 'local-background-alpha',
+          quality: fallbackQuality,
+        });
       } catch (localErr) {
         console.error('[remove_background] local fallback failed:', localErr);
         return NextResponse.json({ success: false, error: '移除背景失败：AI模型不可用，且本地透明化兜底失败' }, { status: 500 });
@@ -2972,6 +3014,13 @@ export async function POST(request: NextRequest) {
       // 擦除 (无提示词): 本地 BFS 边界扩散 + 高斯平滑，速度快无黑白块
       // 蒙版修图 (有提示词): AI 智能修复 + 裁剪优化 + 合成回原图
       // ============================================================
+      if (editMode !== 'erase' && editMode !== 'mask') {
+        return NextResponse.json(
+          { success: false, error: 'inpaint 请求必须明确指定 editMode: erase 或 mask' },
+          { status: 400 },
+        );
+      }
+
       if (!maskImage) {
         return NextResponse.json({ success: false, error: '需要提供蒙版图像' }, { status: 400 });
       }
@@ -3033,7 +3082,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: modeLabel }, { status: 400 });
       }
 
-      const isErase = !prompt || !prompt.trim();
+      const isErase = editMode === 'erase';
       const totalPixels = origW * origH;
       const maskRatio = (maskPixelCount / totalPixels * 100).toFixed(1);
       console.log(`[inpaint] ${isErase ? 'ERASE' : 'MASK'} mode, image ${origW}x${origH}, mask pixels ${maskPixelCount}/${totalPixels} (${maskRatio}%)`);
@@ -3200,11 +3249,13 @@ export async function POST(request: NextRequest) {
                 resultOrigSize = resultBuffer;
               }
 
-              // 直接使用 AI 返回的结果，不做蒙版合成
-              // AI 模型（DALL-E/GPT Image等）返回的已经是完整修改后的图片
-              const compositeJpeg = await sharp(resultOrigSize).jpeg({ quality: 92 }).toBuffer();
-              const resultDataUrl = `data:image/jpeg;base64,${compositeJpeg.toString('base64')}`;
-              console.log(`[inpaint] AI erase result (no composite): JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB)`);
+              const compositePng = await compositeMaskedEdit({
+                source: imageBuffer,
+                edited: resultOrigSize,
+                mask: maskBuffer,
+              });
+              const resultDataUrl = `data:image/png;base64,${compositePng.toString('base64')}`;
+              console.log(`[inpaint] AI erase masked result: PNG base64 (${(compositePng.length / 1024).toFixed(0)}KB)`);
               return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase' });
             } else if (eraseResult.taskId) {
               // 异步模式：服务器端短时间轮询（30秒），超时则返回taskId让前端poll-task接管
@@ -3225,6 +3276,8 @@ export async function POST(request: NextRequest) {
                   apiBaseUrl: eraseUsedCandidate?.apiBaseUrl,
                   apiKey: eraseUsedCandidate?.apiKey,
                   advancedParams: eraseUsedCandidate?.advancedParams,
+                  originalImageUrl: imageUrl,
+                  maskImageUrl: maskImage,
                 }
               });
 
@@ -3307,10 +3360,13 @@ export async function POST(request: NextRequest) {
                             resultOrigSize = resultBuffer;
                           }
 
-                          // 直接使用 AI 返回的结果，不做蒙版合成
-                          const compositeJpeg = await sharp(resultOrigSize).jpeg({ quality: 92 }).toBuffer();
-                          const resultDataUrl = `data:image/jpeg;base64,${compositeJpeg.toString('base64')}`;
-                          console.log(`[inpaint] AI erase async result (no composite): JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB)`);
+                          const compositePng = await compositeMaskedEdit({
+                            source: imageBuffer,
+                            edited: resultOrigSize,
+                            mask: maskBuffer,
+                          });
+                          const resultDataUrl = `data:image/png;base64,${compositePng.toString('base64')}`;
+                          console.log(`[inpaint] AI erase async masked result: PNG base64 (${(compositePng.length / 1024).toFixed(0)}KB)`);
 
                           // 更新任务注册中心
                           updateTaskProgress(eraseResult.taskId, { status: 'completed', progress: 100, result: { imageUrl: resultDataUrl } });
@@ -3355,6 +3411,8 @@ export async function POST(request: NextRequest) {
                     apiBaseUrl: eraseCandidate?.apiBaseUrl,
                     apiKey: eraseCandidate?.apiKey,
                     advancedParams: eraseCandidate?.advancedParams,
+                    originalImageUrl: imageUrl,
+                    maskImageUrl: maskImage,
                   }
                 });
 
@@ -3499,37 +3557,28 @@ export async function POST(request: NextRequest) {
             resizedResult = resultBuffer;
           }
 
-          // AI 返回的已经是正确的修图结果，直接贴回原图裁剪区域即可
-          // 不再做蒙版alpha合成——AI模型已根据蒙版生成正确内容，蒙版合成会产生涂抹痕迹
-
-          // 将裁剪区域的 AI 结果直接合成回原图（直接覆盖裁剪区域）
-          const compositeResult = await sharp(imageBuffer)
+          const editedFullSize = await sharp(imageBuffer)
             .composite([{ input: resizedResult, left: cropInfo.cropX, top: cropInfo.cropY }])
             .png()
             .toBuffer();
-          // 直接返回 base64 data URL，彻底避免文件路径可达性问题
-          // 输出用 JPEG 压缩减少传输体积
-          const compositeJpeg = await sharp(compositeResult).jpeg({ quality: 92 }).toBuffer();
-          const compositeDataUrl = `data:image/jpeg;base64,${compositeJpeg.toString('base64')}`;
-          console.log(`[inpaint] AI composite result: JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB, was PNG ${(compositeResult.length / 1024).toFixed(0)}KB)`);
+          const compositeResult = await compositeMaskedEdit({
+            source: imageBuffer,
+            edited: editedFullSize,
+            mask: maskBuffer,
+          });
+          const compositeDataUrl = `data:image/png;base64,${compositeResult.toString('base64')}`;
+          console.log(`[inpaint] AI masked composite result: PNG base64 (${(compositeResult.length / 1024).toFixed(0)}KB)`);
 
           return NextResponse.json({ success: true, imageUrl: compositeDataUrl, action, engine: 'ai-crop-composite', cropInfo });
         } catch (compositeErr) {
-          console.error('[inpaint] Composite failed, returning raw AI result as base64:', compositeErr);
-          try {
-            const rawBuf = await fetchImageBuffer(result.directUrl);
-            const rawDataUrl = `data:image/png;base64,${rawBuf.toString('base64')}`;
-            return NextResponse.json({ success: true, imageUrl: rawDataUrl, action, engine: 'ai-raw' });
-          } catch {
-            // ★ 最后兜底：尝试持久化远程URL，避免浏览器无法加载
-            let fallbackUrl = result.directUrl;
-            try {
-              const { persistRemoteImage } = await import('@/lib/s3-storage');
-              const localUrl = await persistRemoteImage(result.directUrl, 'generate/crop');
-              if (localUrl) fallbackUrl = localUrl;
-            } catch {}
-            return NextResponse.json({ success: true, imageUrl: fallbackUrl, action, engine: 'ai-raw' });
-          }
+          const message = compositeErr instanceof Error ? compositeErr.message : String(compositeErr);
+          console.error('[inpaint] Masked composite failed closed:', message);
+          return NextResponse.json({
+            success: false,
+            code: 'MASKED_COMPOSITE_FAILED',
+            error: '蒙版合成失败，无法保证未编辑区域保持不变，请重试',
+            retryable: true,
+          }, { status: 502 });
         }
       }
 
@@ -3549,8 +3598,8 @@ export async function POST(request: NextRequest) {
             apiKey: usedCandidate?.apiKey,
             advancedParams: usedCandidate?.advancedParams,
             cropInfo,
-            // AI返回的结果已经是完整的修图结果，无需蒙版合成
-            // 保留裁剪信息供前端将AI结果贴回原图位置
+            originalImageUrl: imageUrl,
+            maskImageUrl: maskImage,
           }
         });
       }

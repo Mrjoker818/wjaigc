@@ -325,3 +325,24 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | 编辑器云端终态 | PENDING DEPLOY | 需要部署本次提交后在预览页确认图层选择、隐藏、移动和导出 |
 
 当前修复已在本地贯通 MIME、地址选择、ZIP 解压和 PSD 解析。发布结论仍为 **不通过**，直到预览页编辑器终态、一次扣费/退款、PostgreSQL 并发和 Firefox/WebKit 门禁完成。
+
+## 2026-07-31 图片工具质量与双输出元素拆解本地门禁
+
+测试基线为本地 `main`，HEAD `7bff3c0` 加当前未提交实现；最终部署提交将在本轮验证后生成。未将本地测试结果冒充云端结果。
+
+| 检查项 | 结果 | 证据与边界 |
+|--------|------|------------|
+| 图片工具质量专项 | PASS | 9 files / 24 tests；透明 RGBA、去背景质量降级、显式擦除/蒙版、蒙版外像素保持、调色 alpha 与独立结果 |
+| 双输出元素拆解专项 | PASS WITH SKIP | 9 files passed / 1 skipped；84 tests passed / 2 PostgreSQL tests skipped |
+| TypeScript | PASS | `pnpm ts-check`，退出 0 |
+| ESLint | PASS WITH WARNINGS | `pnpm lint`，0 errors / 945 warnings；存量 warning 未隐藏 |
+| 全仓 Vitest | PASS WITH ENVIRONMENT SKIPS | 258 files passed / 3 skipped；1220 tests passed / 4 skipped；0 failed |
+| Next.js 生产构建 | PASS WITH WARNINGS | Next.js 16.2.10；编译、TypeScript、111 个静态页面生成完成；本地持久化与 Node localStorage 参数有非阻断警告 |
+| Git 差异检查 | PASS | `git diff --check` 退出 0；仅换行转换提示 |
+| Chromium/Firefox/WebKit 用例发现 | PASS FOR DISCOVERY ONLY | 2 个新 spec、4 个项目共发现 48 个用例；未作为执行通过证据 |
+| 云端图片工具像素结果 | NOT RUN | 必须部署后下载真实 PNG，用 Sharp 检查 alpha、蒙版外像素和持久化恢复 |
+| 云端 Pear 双输出 | NOT RUN | 必须验证父请求、双分支、ZIP/PSD、2+ 图层、编辑与导出 |
+| PostgreSQL 并发和结算 | BLOCKED | 缺少隔离 `TEST_POSTGRES_URL`，3 项真实数据库测试明确跳过 |
+| Firefox/WebKit 真回归 | NOT RUN | 需部署版本和可访问测试凭据后执行 |
+
+本地阶段结论：**有条件通过**。源代码、自包含测试和生产构建门禁通过；真实云端产物、数据库结算和跨浏览器门禁尚未完成。

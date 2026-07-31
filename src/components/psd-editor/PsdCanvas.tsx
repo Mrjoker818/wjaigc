@@ -307,6 +307,7 @@ export function PsdCanvas({
   return (
     <div ref={containerRef} className="absolute inset-0">
       <canvas
+        data-testid="layer-canvas"
         ref={canvasRef}
         className="w-full h-full cursor-grab active:cursor-grabbing"
         onMouseDown={handleMouseDown}

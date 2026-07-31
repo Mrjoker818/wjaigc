@@ -9,7 +9,7 @@ import {
   getLayerPhasePresentation,
   runLayerDecomposition,
 } from '@/lib/layer-decomposition-client';
-import type { LayerEngineMode, LayerTaskPhase } from '@/lib/layer-decomposition/types';
+import type { LayerDecompositionResult, LayerEngineMode, LayerTaskPhase } from '@/lib/layer-decomposition/types';
 import { PsdCanvas } from './PsdCanvas';
 import { LayerPanel } from './LayerPanel';
 import { LayerInspector } from './LayerInspector';
@@ -21,6 +21,7 @@ interface PsdLayerEditorProps {
   mode?: 'basic' | 'standard' | 'advanced' | 'studio';
   providerId?: string;
   modelId?: string;
+  initialResult?: LayerDecompositionResult;
   onClose: () => void;
 }
 
@@ -78,9 +79,10 @@ export default function PsdLayerEditor({
   mode = 'standard',
   providerId,
   modelId,
+  initialResult,
   onClose,
 }: PsdLayerEditorProps) {
-  const [stage, setStage] = useState<EditorStage>('choosing');
+  const [stage, setStage] = useState<EditorStage>(initialResult ? 'editing' : 'choosing');
   const [layerEngine, setLayerEngine] = useState<LayerEngineMode>(() => {
     if (typeof window === 'undefined') return 'smart';
     const stored = window.localStorage.getItem('wujie-layer-engine');
@@ -101,6 +103,24 @@ export default function PsdLayerEditor({
   const taskIdRef = useRef<string | null>(null);
   const taskControllerRef = useRef<AbortController | null>(null);
   const layeringInFlightRef = useRef(false);
+
+  const applyLayerResult = useCallback((result: LayerDecompositionResult) => {
+    const scene = buildSceneFromEditableLayerAssets(result);
+    const editableLayers = scene.layers.map((layer) => ({
+      ...layer,
+      offsetX: layer.offsetX ?? 0,
+      offsetY: layer.offsetY ?? 0,
+    }));
+    setSceneResult(scene);
+    setLayers(editableLayers);
+    setQualityWarnings(result.quality.warnings);
+    setSelectedLayerId(
+      editableLayers.find((layer) => layer.visible)?.id
+      ?? editableLayers[0]?.id
+      ?? null,
+    );
+    setStage('editing');
+  }, []);
 
   // Drag state for floating panel
   const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
@@ -127,6 +147,10 @@ export default function PsdLayerEditor({
   useEffect(() => {
     window.localStorage.setItem('wujie-layer-engine', layerEngine);
   }, [layerEngine]);
+
+  useEffect(() => {
+    if (initialResult) applyLayerResult(initialResult);
+  }, [applyLayerResult, initialResult]);
 
   const handleTitleMouseDown = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -174,21 +198,7 @@ export default function PsdLayerEditor({
         },
       });
       if (controller.signal.aborted) return;
-      const scene = buildSceneFromEditableLayerAssets(result);
-      const editableLayers = scene.layers.map((layer) => ({
-        ...layer,
-        offsetX: layer.offsetX ?? 0,
-        offsetY: layer.offsetY ?? 0,
-      }));
-      setSceneResult(scene);
-      setLayers(editableLayers);
-      setQualityWarnings(result.quality.warnings);
-      setSelectedLayerId(
-        editableLayers.find((layer) => layer.visible)?.id
-        ?? editableLayers[0]?.id
-        ?? null,
-      );
-      setStage('editing');
+      applyLayerResult(result);
     } catch (error) {
       if (controller.signal.aborted) return;
       setErrorMessage(error instanceof Error ? error.message : '图像分层失败');
@@ -197,7 +207,7 @@ export default function PsdLayerEditor({
       layeringInFlightRef.current = false;
       if (taskControllerRef.current === controller) taskControllerRef.current = null;
     }
-  }, [imageUrl, layerEngine, modelId, providerId]);
+  }, [applyLayerResult, imageUrl, layerEngine, modelId, providerId]);
 
   const handleCancelLayering = useCallback(async () => {
     const taskId = taskIdRef.current;

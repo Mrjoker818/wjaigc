@@ -16,6 +16,10 @@
 import sharp from 'sharp';
 import { saveImageFile } from './server-data-root';
 import { fetchImageBuffer } from './fetch-image-buffer';
+import {
+  evaluateRemoveBgOutput,
+  type RemoveBgQualityResult,
+} from './image-tools/remove-bg-quality';
 
 /** 计算数组中位数 */
 function median(arr: number[]): number {
@@ -90,6 +94,7 @@ export interface RemoveBGResult {
   imageUrl: string;
   /** 黑白蒙版 PNG URL（白色=前景主体，黑色=背景） */
   maskUrl: string;
+  quality: RemoveBgQualityResult;
 }
 
 /**
@@ -104,6 +109,7 @@ export interface RemoveBGResult {
 export async function postProcessLocalRemoveBG(
   rgbaBase64: string,
   maskBase64?: string,
+  sourceBuffer?: Buffer,
 ): Promise<RemoveBGResult | null> {
   try {
     // 解码 base64 → PNG Buffer
@@ -127,24 +133,23 @@ export async function postProcessLocalRemoveBG(
     }
 
     // 将透明背景合成到白色背景上（用户要求：主体图不要透明背景，只显示主体）
-    let subjectBuffer: Buffer;
     try {
-      const meta = await sharp(rgbaBuffer).metadata();
-      const w = meta.width || 1;
-      const h = meta.height || 1;
-      subjectBuffer = await sharp({ create: { width: w, height: h, channels: 3, background: { r: 255, g: 255, b: 255 } } })
-        .composite([{ input: rgbaBuffer, blend: 'over' }])
-        .png()
-        .toBuffer();
+      await sharp(rgbaBuffer).metadata();
     } catch {
       // 合成失败时 fallback 到原始 RGBA
-      subjectBuffer = rgbaBuffer;
+      return null;
     }
 
     // 保存主体图（白色背景，无透明）
+    const quality = await evaluateRemoveBgOutput(sourceBuffer ?? rgbaBuffer, rgbaBuffer);
+    if (!quality.ok) {
+      console.warn('[postProcessLocalRemoveBG] Rejected invalid transparent output:', quality);
+      return null;
+    }
+
     const timestamp = Date.now();
     const imageFilename = `removebg-${timestamp}.png`;
-    const imageUrl = saveImageFile(subjectBuffer, imageFilename, 'removebg');
+    const imageUrl = saveImageFile(rgbaBuffer, imageFilename, 'removebg');
 
     // 保存黑白蒙版图
     let maskUrl: string | null = null;
@@ -159,11 +164,12 @@ export async function postProcessLocalRemoveBG(
       return null;
     }
 
-    console.log(`[postProcessLocalRemoveBG] Saved subject PNG (white bg): ${imageUrl} (${subjectBuffer.length} bytes), mask: ${maskUrl || 'N/A'}`);
+    console.log(`[postProcessLocalRemoveBG] Saved transparent RGBA PNG: ${imageUrl} (${rgbaBuffer.length} bytes), mask: ${maskUrl || 'N/A'}`);
     
     return {
       imageUrl,
       maskUrl: maskUrl || '',
+      quality,
     };
   } catch (err) {
     console.error('[postProcessLocalRemoveBG] Error:', err);

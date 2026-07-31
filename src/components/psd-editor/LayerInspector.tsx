@@ -50,7 +50,7 @@ export function LayerInspector({ layer }: LayerInspectorProps) {
         {box && (
           <div className="flex justify-between">
             <span className="text-neutral-400">位置</span>
-            <span className="text-neutral-300">{x},{y}</span>
+            <span data-testid="layer-position" className="text-neutral-300">{x},{y}</span>
           </div>
         )}
         {box && (

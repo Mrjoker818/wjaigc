@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   extractEditableLayersFromPsd: vi.fn(),
   refineLayerAssets: vi.fn(),
   evaluateLayerQuality: vi.fn(),
+  evaluateAndCorrectReconstruction: vi.fn(),
   runLocalLayerPipeline: vi.fn(),
   saveImageFile: vi.fn(),
   deleteImageFile: vi.fn(),
@@ -89,6 +90,10 @@ vi.mock('@/lib/layer-decomposition/post-process', () => ({
 
 vi.mock('@/lib/layer-decomposition/quality-gate', () => ({
   evaluateLayerQuality: mocks.evaluateLayerQuality,
+}));
+
+vi.mock('@/lib/element-decomposition/reconstruction', () => ({
+  evaluateAndCorrectReconstruction: mocks.evaluateAndCorrectReconstruction,
 }));
 
 vi.mock('@/lib/layer-decomposition/local-pipeline', () => ({
@@ -601,6 +606,17 @@ describe('layer decomposition service concurrency', () => {
   });
 
   it('refunds Pear cost once then completes with local output after smart quality failure', async () => {
+    const localReconstruction = {
+      native: {
+        widthMatches: true, heightMatches: true, alphaMae: 0, rgbMae: 0.01,
+        maxChannelError: 0.1, mismatchedPixelRatio: 0.05, ssim: 0.98,
+      },
+      corrected: {
+        widthMatches: true, heightMatches: true, alphaMae: 0, rgbMae: 0,
+        maxChannelError: 0, mismatchedPixelRatio: 0, ssim: 1,
+      },
+      correctionApplied: false,
+    };
     mocks.task = createTask({
       status: 'processing',
       creditStatus: 'pending',
@@ -625,6 +641,7 @@ describe('layer decomposition service concurrency', () => {
       buffers: new Map(),
       quality: { status: 'warning', score: 82, warnings: ['LOCAL_REVIEW_REQUIRED'], metrics: {} },
     });
+    mocks.evaluateAndCorrectReconstruction.mockResolvedValue(localReconstruction);
 
     const status = await getLayerTaskStatus({
       taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
@@ -632,6 +649,7 @@ describe('layer decomposition service concurrency', () => {
 
     expect(status.status).toBe('completed');
     expect(status.result?.engine).toBe('local');
+    expect(status.result?.reconstruction).toEqual(localReconstruction);
     expect(mocks.transitionCloudTaskToLocalFallbackAndRefund).toHaveBeenCalledTimes(1);
     expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
     expect(mocks.completeCloudTask).toHaveBeenCalledTimes(1);
@@ -642,6 +660,66 @@ describe('layer decomposition service concurrency', () => {
       result: expect.objectContaining({ phase: 'checking-quality' }),
     }));
     expect(mocks.releaseCloudTaskLease).toHaveBeenCalledWith('layer-task-1', 'worker-1');
+  });
+
+  it('attaches reconstruction metrics and correction assets to a completed Pear result', async () => {
+    const correctionLayer: EditableLayerAsset = {
+      ...layer,
+      id: 'reconstruction-correction',
+      name: 'reconstruction/correction',
+      role: 'reconstruction-correction',
+      imageUrl: '/api/serve-upload/layer-decomposition/correction.png',
+      source: 'local-enhanced',
+    };
+    const reconstruction = {
+      native: {
+        widthMatches: true,
+        heightMatches: true,
+        alphaMae: 0,
+        rgbMae: 0.02,
+        maxChannelError: 0.2,
+        mismatchedPixelRatio: 0.1,
+        ssim: 0.96,
+      },
+      corrected: {
+        widthMatches: true,
+        heightMatches: true,
+        alphaMae: 0,
+        rgbMae: 0,
+        maxChannelError: 0,
+        mismatchedPixelRatio: 0,
+        ssim: 1,
+      },
+      correctionApplied: true,
+      correctionLayer,
+    };
+    mocks.task = createTask({
+      status: 'processing',
+      creditStatus: 'pending',
+      creditCost: 5,
+      result: {
+        requestHash: 'hash', request, phase: 'downloading-psd', remoteArtifactUrl: 'https://cdn.example/result.psd',
+      },
+    });
+    mocks.downloadPearPsd.mockResolvedValue({ buffer: Buffer.from('psd'), mimeType: 'image/vnd.adobe.photoshop' });
+    mocks.extractEditableLayersFromPsd.mockResolvedValue({ width: 4, height: 4, layers: [layer], warnings: [] });
+    mocks.refineLayerAssets.mockResolvedValue({
+      layers: [layer], buffers: new Map([[layer.id, Buffer.from('layer')]]),
+      metrics: { edgeContamination: 0, alphaCoverage: { [layer.id]: 1 }, removedFragments: 0 },
+    });
+    mocks.evaluateLayerQuality.mockResolvedValue({
+      status: 'pass', score: 96, warnings: [], metrics: {},
+    });
+    mocks.evaluateAndCorrectReconstruction.mockResolvedValue(reconstruction);
+
+    const status = await getLayerTaskStatus({
+      taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
+    });
+
+    expect(status.status).toBe('completed');
+    expect(status.result?.reconstruction).toEqual(reconstruction);
+    expect(status.result?.layers).toContainEqual(correctionLayer);
+    expect(mocks.evaluateAndCorrectReconstruction).toHaveBeenCalledTimes(1);
   });
 
   it('falls back locally after a smart-mode Pear PSD decode failure', async () => {
