@@ -82,6 +82,8 @@ import { computeSnapGuides, findBestSnapOffset, type SnapGuide } from '@/lib/can
 import { type CanvasConnection, type ConnectionRelationType, createAutoConnection, computeConnectionEndpoints, buildConnectionPath, buildArrowHead, RELATION_TYPE_CONFIG } from '@/lib/canvas-connections';
 import { EngineSelectDialog, type EditEngine } from '@/components/engine-select-dialog';
 import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, type DisplayDecomposeRatio } from '@/lib/display-decompose';
+import { type AspectRecomposeRatio } from '@/lib/aspect-recompose';
+import { AspectRecomposePanel } from '@/components/aspect-recompose-panel';
 import {
   cancelElementDecomposition,
   createElementDecompositionRequest,
@@ -506,6 +508,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [displayDecomposeRatio, setDisplayDecomposeRatio] = useState<DisplayDecomposeRatio>('16:9');
   const [displayDecomposeProcessing, setDisplayDecomposeProcessing] = useState(false);
   const [displayDecomposeAutoRemoveBg, setDisplayDecomposeAutoRemoveBg] = useState(true);
+  const [showAspectRecomposePanel, setShowAspectRecomposePanel] = useState(false);
+  const [aspectRecomposeRatio, setAspectRecomposeRatio] = useState<AspectRecomposeRatio>('1:1');
+  const [aspectRecomposeProcessing, setAspectRecomposeProcessing] = useState(false);
   const [elementDecomposeOutputMode, setElementDecomposeOutputMode] = useState<ElementDecomposeOutputMode>('both');
   const [elementDecomposeTask, setElementDecomposeTask] = useState<ElementDecomposeTaskResponse | null>(null);
   const elementDecomposeControllerRef = useRef<AbortController | null>(null);
@@ -7596,6 +7601,51 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
   }, [brandProject?.id, completeElementBoardResult, createProcessingFrameRightOf, displayDecomposeAutoRemoveBg, elementDecomposeOutputMode, displayDecomposeProcessing, displayDecomposeRatio, getActiveImageData, getCurrentModel, getCurrentProviderId, projectId, removeProcessingFrame, updateProcessingFrame]);
 
+  const handleOpenAspectRecompose = useCallback(() => {
+    const selectedImage = getActiveImageData();
+    if (!selectedImage) return;
+    setAspectRecomposeRatio('1:1');
+    setShowAspectRecomposePanel(true);
+  }, [getActiveImageData]);
+
+  const handleAspectRecomposeConfirm = useCallback(async (ratio: string) => {
+    const selectedImage = getActiveImageData();
+    if (!selectedImage || aspectRecomposeProcessing) return;
+    setAspectRecomposeProcessing(true);
+    setIsEditProcessing(true);
+    const placeholderId = createProcessingFrameRightOf(selectedImage, '横竖重组', 180, 180, '正在分析...');
+    try {
+      const model = getCurrentModel();
+      const providerId = getCurrentProviderId() || undefined;
+      const [w, h] = ratio.split(':').map(Number);
+      if (!w || !h) throw new Error('无效的比例参数');
+      const targetWidth = Math.round(Math.min(selectedImage.width, Math.max(selectedImage.width, 512)));
+      const targetHeight = Math.round(targetWidth * h / w);
+      const response = await fetch('/api/aspect-recompose', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: selectedImage.url, targetWidth, targetHeight, model: model.model, providerId: model.providerId }),
+      });
+      if (!response.ok) throw new Error(`横竖重组失败：HTTP ${response.status}`);
+      const data = await response.json();
+      if (placeholderId && data.taskId) {
+        updateProcessingFrame(placeholderId, { status: '已提交，等待生成...' });
+        const resultUrl = await pollForResult(data.taskId, model.model, (progress, status) => {
+          if (placeholderId) updateProcessingFrame(placeholderId, { progress, status });
+        });
+        if (resultUrl && placeholderId) {
+          completeProcessingFrame(placeholderId, resultUrl, targetWidth, targetHeight, undefined, 'edit');
+          setShowAspectRecomposePanel(false);
+        }
+      }
+    } catch (err: any) {
+      toast.error(err?.message || '横竖重组失败');
+      if (placeholderId) removeProcessingFrame(placeholderId);
+    } finally {
+      setAspectRecomposeProcessing(false);
+      setIsEditProcessing(false);
+    }
+  }, [getActiveImageData, aspectRecomposeProcessing, setIsEditProcessing, createProcessingFrameRightOf, getCurrentModel, getCurrentProviderId, updateProcessingFrame, pollForResult, completeProcessingFrame, removeProcessingFrame, toast]);
+
   const handleRetryElementBranch = useCallback(async (branch: 'board' | 'layers') => {
     if (!elementDecomposeTask) return;
     try {
@@ -9168,6 +9218,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => { setRemoveBgTargetImage(getActiveImageData()); setShowRemoveBgPicker(true); } },
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
     { icon: <LayoutGrid size={14} className={isMonochrome ? monoColors['元素拆解'] : ''} />, label: '元素拆解', desc: '拆出美陈物料与设计元素，生成平面陈列板', action: handleOpenDisplayDecompose },
+    { icon: <LayoutDashboard size={14} className={isMonochrome ? monoColors['横竖重组'] : ''} />, label: '横竖重组', desc: '一键转换图片横竖比例', action: () => { if (selectedImage) { setAspectRecomposeRatio('1:1'); setShowAspectRecomposePanel(true); } } },
     { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase, testId: 'canvas-erase' },
     { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask, testId: 'canvas-mask-edit' },
     { icon: <Palette size={14} className={isMonochrome ? '' : 'text-pink-500'} />, label: '调色', desc: '亮度/对比度/饱和度/色温/色相参数调节', action: handleOpenColorAdjust, testId: 'canvas-color-adjust' },
@@ -16301,6 +16352,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               )}
             </div>
           </div>
+        )}
+
+        {showAspectRecomposePanel && (
+          <AspectRecomposePanel
+            targetRatio={aspectRecomposeRatio}
+            processing={aspectRecomposeProcessing}
+            onTargetRatioChange={setAspectRecomposeRatio}
+            onConfirm={handleAspectRecomposeConfirm}
+            onClose={() => { setShowAspectRecomposePanel(false); }}
+        />
         )}
 
         {/* Image context menu */}
