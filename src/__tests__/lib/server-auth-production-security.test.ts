@@ -7,6 +7,11 @@ import path from 'path';
 vi.mock('server-only', () => ({}));
 
 const originalEnvironment = { ...process.env };
+// 立即隔离数据库：authSecret() 回退链为 env → DB → 文件，
+// 若保留 PGDATABASE_URL/DATABASE_URL，第一个用例会从真实数据库恢复
+// auth_secret，导致"无凭据应拒绝"断言失效。测试必须全程无数据库连接。
+delete process.env.PGDATABASE_URL;
+delete process.env.DATABASE_URL;
 let temporaryDataDir: string | null = null;
 
 afterEach(async () => {
@@ -18,6 +23,11 @@ afterEach(async () => {
     if (!(key in originalEnvironment)) delete process.env[key];
   }
   Object.assign(process.env, originalEnvironment);
+  // 隔离数据库：authSecret() 的回退链是 env → DB → 文件，
+  // 若保留 PGDATABASE_URL/DATABASE_URL 会从真实数据库恢复 auth_secret，
+  // 使"无凭据应拒绝"的生产安全断言失效。这些用例必须运行在无数据库连接的环境。
+  delete process.env.PGDATABASE_URL;
+  delete process.env.DATABASE_URL;
   vi.resetModules();
 });
 

@@ -6,8 +6,12 @@ import dotenv from 'dotenv';
 import { Client } from 'pg';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 
-dotenv.config({ path: '.env.local', quiet: true });
-dotenv.config({ path: '.env', quiet: true });
+// Test isolation: DOCTOR_SKIP_ENV_FILE=1 skips loading .env/.env.local so
+// production-credential checks run against a clean environment.
+if (process.env.DOCTOR_SKIP_ENV_FILE !== '1') {
+  dotenv.config({ path: '.env.local', quiet: true });
+  dotenv.config({ path: '.env', quiet: true });
+}
 
 const production = process.argv.includes('--production') || process.env.COZE_PROJECT_ENV === 'PROD' || process.env.NODE_ENV === 'production';
 const startup = process.argv.includes('--startup');

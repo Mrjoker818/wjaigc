@@ -31,7 +31,9 @@ export async function checkRembgHealth(): Promise<{ available: boolean; error?: 
   if (!LOCAL_AI_ENABLED) return { available: false, error: 'LOCAL_AI_ENABLED 未启用' };
 
   return new Promise(resolve => {
-    const child = spawn(PYTHON_BIN, ['-c', 'import rembg'], { stdio: 'ignore' });
+    // 使用 importlib.util.find_spec 快速探测模块存在性（约1.6s），
+    // 避免直接 import rembg 触发 torch/onnxruntime 重量级加载（约16s）导致健康检测超时误报
+    const child = spawn(PYTHON_BIN, ['-c', "import importlib.util; import sys; sys.exit(0 if importlib.util.find_spec('rembg') else 1)"], { stdio: 'ignore' });
     const timeout = setTimeout(() => {
       child.kill();
       resolve({ available: false, error: 'rembg 环境检测超时' });

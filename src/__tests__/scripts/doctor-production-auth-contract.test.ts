@@ -20,6 +20,7 @@ describe('production doctor authentication contract', () => {
       PAYMENT_TOKEN_SECRET: 'p'.repeat(32),
       WUJIE_ADMIN_PASSWORD: 'administrator-password',
       MANDATORY_API_AUTH: 'true',
+      DOCTOR_SKIP_ENV_FILE: '1',
     };
     delete environment.WUJIE_AUTH_SECRET;
     delete environment.PGDATABASE_URL;
@@ -41,6 +42,7 @@ describe('production doctor authentication contract', () => {
       ...process.env,
       COZE_PROJECT_ENV: 'PROD',
       NODE_ENV: 'production',
+      DOCTOR_SKIP_ENV_FILE: '1',
     };
     delete environment.WUJIE_AUTH_SECRET;
     delete environment.NEXTAUTH_SECRET;
@@ -69,6 +71,7 @@ describe('production doctor authentication contract', () => {
       NODE_ENV: 'production',
       COZE_BUCKET_ENDPOINT_URL: 'https://bucket.example.test',
       COZE_BUCKET_NAME: 'managed-bucket',
+      DOCTOR_SKIP_ENV_FILE: '1',
     };
     delete environment.COZE_BUCKET_ACCESS_KEY;
     delete environment.COZE_BUCKET_SECRET_KEY;
