@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Expand, Palette, RefreshCw, Save, Sparkles, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -76,6 +76,19 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
   const [instruction, setInstruction] = useState('');
   const [isApplying, setIsApplying] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  // ★ 选中元素视觉反馈：为选中的 SVG 元素添加高亮 filter
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    // 清除之前的高亮
+    stage.querySelectorAll('.vector-selected').forEach(el => el.classList.remove('vector-selected'));
+    if (!selectedElementId) return;
+    // 为当前选中元素添加高亮 class
+    const target = stage.querySelector(`[data-vector-element-id="${selectedElementId}"]`);
+    if (target) target.classList.add('vector-selected');
+  }, [selectedElementId, svg]);
 
   const selectedLabel = useMemo(
     () => selectedElementId ? selectedElementId.replace('vector-element-', '元素 ') : '尚未选择元素',
@@ -248,7 +261,21 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
           <div className="absolute left-4 top-4 rounded-full border border-white/8 bg-black/25 px-3 py-1 text-[11px] text-gray-400">
             点击任意形状进行选择
           </div>
+          <style>{`
+            .vector-edit-stage .vector-selected {
+              filter: drop-shadow(0 0 6px #d4af37) drop-shadow(0 0 2px #d4af37);
+              cursor: pointer;
+            }
+            .vector-edit-stage [data-vector-element-id] {
+              cursor: pointer;
+              transition: filter 0.15s ease;
+            }
+            .vector-edit-stage [data-vector-element-id]:hover {
+              filter: drop-shadow(0 0 3px rgba(212,175,55,0.5));
+            }
+          `}</style>
           <div
+            ref={stageRef}
             className="vector-edit-stage max-h-full max-w-full overflow-hidden rounded-xl bg-[linear-gradient(45deg,#eee_25%,transparent_25%),linear-gradient(-45deg,#eee_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#eee_75%),linear-gradient(-45deg,transparent_75%,#eee_75%)] bg-[length:20px_20px] bg-white shadow-2xl [&>svg]:block [&>svg]:h-auto [&>svg]:max-h-[68vh] [&>svg]:max-w-full"
             onClick={event => {
               const target = event.target as Element;

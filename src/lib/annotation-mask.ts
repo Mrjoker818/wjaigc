@@ -4,6 +4,8 @@ import type { CanvasAnnotationV2, NormalizedPoint } from '@/features/annotations
 import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
 
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+// 大多数图像编辑 API 限制最长边不超过 2048px
+const ANNOTATION_MAX_EDGE = 2048;
 
 export class AnnotationAssetError extends Error {
   readonly code = 'ANNOTATION_ASSET_INVALID';
@@ -161,13 +163,29 @@ export async function compileAnnotationAssets({
       .ensureAlpha()
       .png()
       .toBuffer({ resolveWithObject: true });
-    const width = normalized.info.width;
-    const height = normalized.info.height;
+    let width = normalized.info.width;
+    let height = normalized.info.height;
     if (!width || !height) throw new Error('image dimensions are unavailable');
+
+    // ★ 如果图片最长边超过 API 限制，等比缩小后再构建蒙版和参考图
+    let workingBuffer = normalized.data;
+    const maxEdge = Math.max(width, height);
+    if (maxEdge > ANNOTATION_MAX_EDGE) {
+      const scale = ANNOTATION_MAX_EDGE / maxEdge;
+      const newWidth = Math.round(width * scale);
+      const newHeight = Math.round(height * scale);
+      console.debug(`[annotation-mask] image ${width}x${height} exceeds max edge ${ANNOTATION_MAX_EDGE}, resizing to ${newWidth}x${newHeight}`);
+      workingBuffer = await safeSharp(normalized.data, { signal })
+        .resize(newWidth, newHeight, { kernel: 'lanczos3' })
+        .png()
+        .toBuffer();
+      width = newWidth;
+      height = newHeight;
+    }
 
     const mask = buildMaskSvg(annotations, width, height);
     const maskBuffer = await sharp(mask.svg).png().toBuffer();
-    const referenceImage = await safeSharp(normalized.data, { signal })
+    const referenceImage = await safeSharp(workingBuffer, { signal })
       .composite([{ input: buildReferenceSvg(annotations, width, height) }])
       .png()
       .toBuffer();

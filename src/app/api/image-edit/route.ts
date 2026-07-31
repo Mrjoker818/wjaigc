@@ -1168,6 +1168,108 @@ async function submit302aiUpscaleV6Task(
 }
 
 /**
+ * 302.AI Image Upscale 基础放大 API 适配器
+ * 端点: /302/submit/image-upscale
+ * 特点: 基础放大，速度快，适合日常使用
+ */
+async function submit302aiImageUpscaleTask(
+  baseUrl: string,
+  apiKey: string,
+  imageUrl: string,
+  scale: number = 2,
+): Promise<{ directUrl?: string; width?: number; height?: number; usedModel?: string }> {
+  const endpoint = '/302/submit/image-upscale';
+  const url = `${baseUrl.replace(/\/+$/, '')}${endpoint}`;
+  const factor = Math.min(4, Math.max(1, Math.round(scale)));
+
+  const requestBody = {
+    image_url: imageUrl,
+    upscale_factor: factor,
+  };
+
+  console.debug(`[image-edit] 302.AI image-upscale: POST ${url}, factor=${factor}`);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`302.AI image-upscale failed: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+  console.debug(`[image-edit] 302.AI image-upscale response keys:`, Object.keys(result));
+
+  if (result.image && result.image.url) {
+    return {
+      directUrl: result.image.url,
+      width: result.image.width,
+      height: result.image.height,
+      usedModel: '302-image-upscale',
+    };
+  }
+
+  throw new Error('302.AI image-upscale response missing image.url');
+}
+
+/**
+ * 302.AI ESRGAN 高清放大 API 适配器
+ * 端点: /302/submit/esrgan
+ * 特点: ESRGAN高清放大，增强细节和纹理
+ */
+async function submit302aiEsrganTask(
+  baseUrl: string,
+  apiKey: string,
+  imageUrl: string,
+  scale: number = 4,
+): Promise<{ directUrl?: string; width?: number; height?: number; usedModel?: string }> {
+  const endpoint = '/302/submit/esrgan';
+  const url = `${baseUrl.replace(/\/+$/, '')}${endpoint}`;
+  const factor = Math.min(4, Math.max(2, Math.round(scale)));
+
+  const requestBody = {
+    image_url: imageUrl,
+    upscale_factor: factor,
+  };
+
+  console.debug(`[image-edit] 302.AI esrgan: POST ${url}, factor=${factor}`);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`302.AI esrgan failed: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+  console.debug(`[image-edit] 302.AI esrgan response keys:`, Object.keys(result));
+
+  if (result.image && result.image.url) {
+    return {
+      directUrl: result.image.url,
+      width: result.image.width,
+      height: result.image.height,
+      usedModel: '302-esrgan',
+    };
+  }
+
+  throw new Error('302.AI esrgan response missing image.url');
+}
+
+/**
  * 自动尝试提交图像任务 - 遍历候选模型直到成功
  * 遇到 ModelCapabilityError 时自动切换下一个候选模型
  */
@@ -2043,7 +2145,7 @@ export async function POST(request: NextRequest) {
       if (body.upscaleModel && !requested302UpscaleModel) {
         return NextResponse.json({
           success: false,
-          error: '仅支持 302 Super-Upscale V2 和 302 Upscale V6',
+          error: '仅支持 302 Super-Upscale V2、302 Upscale V6、302 Image Upscale 和 302 ESRGAN',
         }, { status: 400 });
       }
 
@@ -2183,12 +2285,26 @@ export async function POST(request: NextRequest) {
                 imageUrl,
                 requestedScale,
               )
-              : await submit302aiUpscaleV6Task(
-                selectedProvider.apiBaseUrl,
-                selectedProvider.apiKey,
-                imageUrl,
-                requestedScale,
-              );
+              : selectedModel === '302-upscale-v6'
+                ? await submit302aiUpscaleV6Task(
+                  selectedProvider.apiBaseUrl,
+                  selectedProvider.apiKey,
+                  imageUrl,
+                  requestedScale,
+                )
+                : selectedModel === '302-image-upscale'
+                  ? await submit302aiImageUpscaleTask(
+                    selectedProvider.apiBaseUrl,
+                    selectedProvider.apiKey,
+                    imageUrl,
+                    requestedScale,
+                  )
+                  : await submit302aiEsrganTask(
+                    selectedProvider.apiBaseUrl,
+                    selectedProvider.apiKey,
+                    imageUrl,
+                    requestedScale,
+                  );
 
             if (!response.directUrl) throw new Error('AI 超分响应缺少图片地址');
             const aiBuffer = await fetchImageBuffer(response.directUrl);
@@ -2308,12 +2424,26 @@ export async function POST(request: NextRequest) {
                     tileUrl,
                     passScale,
                   )
-                  : await submit302aiUpscaleV6Task(
-                    selectedProvider.apiBaseUrl,
-                    selectedProvider.apiKey,
-                    tileUrl,
-                    passScale,
-                  );
+                  : selectedModel === '302-upscale-v6'
+                    ? await submit302aiUpscaleV6Task(
+                      selectedProvider.apiBaseUrl,
+                      selectedProvider.apiKey,
+                      tileUrl,
+                      passScale,
+                    )
+                    : selectedModel === '302-image-upscale'
+                      ? await submit302aiImageUpscaleTask(
+                        selectedProvider.apiBaseUrl,
+                        selectedProvider.apiKey,
+                        tileUrl,
+                        passScale,
+                      )
+                      : await submit302aiEsrganTask(
+                        selectedProvider.apiBaseUrl,
+                        selectedProvider.apiKey,
+                        tileUrl,
+                        passScale,
+                      );
                 if (!response.directUrl) throw new Error('AI 超分瓦片响应缺少图片地址');
                 currentBuffer = await fetchImageBuffer(response.directUrl);
                 currentMetadata = await sharp(currentBuffer).metadata();
@@ -2529,6 +2659,22 @@ export async function POST(request: NextRequest) {
                 c.apiKey,
                 imageUrl,
                 calcScale, // upscale_factor: 1-4
+              );
+            } else if (modelId === '302-image-upscale') {
+              // Image-Upscale: 基础放大，速度快
+              aiResult302 = await submit302aiImageUpscaleTask(
+                c.apiBaseUrl,
+                c.apiKey,
+                imageUrl,
+                calcScale,
+              );
+            } else if (modelId === '302-esrgan') {
+              // ESRGAN: 高清增强放大
+              aiResult302 = await submit302aiEsrganTask(
+                c.apiBaseUrl,
+                c.apiKey,
+                imageUrl,
+                calcScale,
               );
             }
 

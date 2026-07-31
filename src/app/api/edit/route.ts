@@ -979,6 +979,19 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           outputSize = `${size}x${size}`;
         }
 
+        // ★ 安全限制：如果 outputSize 是 "WxH" 格式且最长边超过 2048，等比缩小到 2048 以内
+        const sizeMatch = outputSize.match(/^(\d+)x(\d+)$/);
+        if (sizeMatch) {
+          const sw = parseInt(sizeMatch[1], 10);
+          const sh = parseInt(sizeMatch[2], 10);
+          const maxDim = Math.max(sw, sh);
+          if (maxDim > 2048) {
+            const downScale = 2048 / maxDim;
+            outputSize = `${Math.round(sw * downScale)}x${Math.round(sh * downScale)}`;
+            console.debug(`[edit] size ${sw}x${sh} exceeds 2048 limit, capping to ${outputSize}`);
+          }
+        }
+
         form.append('size', outputSize);
         form.append('quality', quality);
         form.append('n', String(Math.min(count, 4)));

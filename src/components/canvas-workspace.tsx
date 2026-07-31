@@ -4000,6 +4000,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     };
 
     try {
+      // ★ 添加超时保护：SSE 流最多等待 120 秒，防止 LLM 卡住导致面板永远停在"正在编译"
+      const compileTimeoutMs = 120000;
+      const timeoutController = new AbortController();
+      const timeoutId = setTimeout(() => timeoutController.abort(), compileTimeoutMs);
+      // 将超时 abort 和用户手动 abort 合并
+      const combinedController = new AbortController();
+      controller.signal.addEventListener('abort', () => combinedController.abort());
+      timeoutController.signal.addEventListener('abort', () => {
+        if (!controller.signal.aborted) {
+          combinedController.abort(new Error('快速创作编译超时，请检查网络或更换模型后重试'));
+        }
+      });
+
       const response = await fetch('/api/quick-create/compile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4012,8 +4025,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           chatModelOverride: request.chatModelOverride,
           recentChatModel: recentQuickCreateChatModel || undefined,
         }),
-        signal: controller.signal,
+        signal: combinedController.signal,
       });
+      clearTimeout(timeoutId);
 
       if (!response.body) {
         throw new Error('快速创作服务未返回可读取的流');
@@ -4077,7 +4091,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       return true;
     } catch (error) {
       if (controller.signal.aborted) return false;
-      const message = error instanceof Error ? error.message : '快速创作编译失败，请重试';
+      let message = error instanceof Error ? error.message : '快速创作编译失败，请重试';
+      // 处理超时 abort
+      if (message.includes('aborted') || message.includes('超时')) {
+        message = '快速创作编译超时（120秒），请检查网络或更换模型后重试';
+      }
       setQuickCreateCompileState((current: QuickCreateCompileViewState) => ({
         ...current,
         error: message,

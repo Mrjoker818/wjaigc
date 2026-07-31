@@ -16,12 +16,13 @@ export type DisplayBoardBackground = 'light-gray' | 'transparent';
 export const DEFAULT_DISPLAY_DECOMPOSE_RATIO: DisplayDecomposeRatio = '16:9';
 
 const DISPLAY_DECOMPOSE_BASE_PROMPT = [
-  '对参考图进行专业元素拆解，识别画面中所有可区分的视觉元素，不要照搬原始场景构图。',
-  '识别图中所有主体对象、附属配件、文字标识、图案纹理、装饰元素、背景结构和可复用的视觉素材。',
-  '将每个元素转换为干净的平面展示素材，单独陈列，不重叠、无遮挡，元素之间留出整齐间距。',
-  '统一使用正视平面视角，矫正透视和倾斜，增强边缘清晰度、细节表现和画质。',
-  '保留原图的主色调、整体视觉风格和材质质感，但输出必须是完整的元素拆解展示版。',
-  '不要生成水印，不要生成多余杂乱元素，不要让元素互相遮挡，不要输出低清模糊图片。',
+  '对参考图进行专业元素拆解，识别画面中已有的所有视觉元素，必须忠于原图中真实存在的元素，不得凭空创造新元素或改变元素外观。',
+  '逐一识别图中所有主体对象、附属配件、文字标识、图案纹理、装饰元素、背景结构和可复用的视觉素材。',
+  '将每个识别到的元素从原图中提取出来，以干净的平面展示素材形式单独陈列，元素之间不重叠、留出整齐间距。',
+  '每个元素的形态、颜色、材质、比例必须与原图中保持一致，仅做视角矫正和边缘清理，不得重新设计或改写。',
+  '统一使用正视平面视角展示每个元素，轻微矫正透视和倾斜，增强边缘清晰度。',
+  '保留原图元素的主色调、材质质感和细节特征，输出必须是忠实于原图的元素拆解展示版。',
+  '严禁生成原图中不存在的新元素，严禁改变元素的颜色/形状/材质/风格，严禁添加水印或多余装饰。',
 ].join('\n');
 
 const DISPLAY_BACKGROUND_PROMPTS: Record<DisplayBoardBackground, string> = {
@@ -60,7 +61,7 @@ export function buildDisplayDecomposeRequestBody(params: {
     n: 1,
     size: aspectRatio,
     image_urls: [params.imageUrl],
-    strength: 0.72,
+    strength: 0.45,
     input_fidelity: 'high',
     response_format: 'url',
     source_hash: params.sourceHash,

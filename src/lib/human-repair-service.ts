@@ -6,6 +6,7 @@ import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { saveImageFile } from '@/lib/server-data-root';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { findProviderById, findProviderForFeature } from '@/lib/server-api-config';
+import { getInternalRequestHeaders } from '@/lib/api-auth';
 import {
   analyzeHumanImage,
   buildHumanMaskSpec,
@@ -44,7 +45,6 @@ export interface StartHumanRepairInput {
   providerId?: string;
   mode?: 'auto' | 'gpt-image-edit' | 'flux-edit';
   manualMaskImage?: string;
-  requestCookie?: string;
 }
 
 interface GlobalHumanTaskStore {
@@ -84,14 +84,20 @@ async function detectHumanWithVision(
   imageUrl: string,
   imageWidth: number,
   imageHeight: number,
-  cookie?: string,
+  userId?: string,
 ): Promise<VisionDetectResult | null> {
   try {
     // 找一个支持 Vision 的 chat / vlm 模型
     const provider = await findProviderForFeature('chat');
-    if (!provider) return null;
+    if (!provider) {
+      console.warn('[human-repair] No chat provider configured, falling back to mock detector');
+      return null;
+    }
     const visionModels: string[] = (provider as { selectedModels?: string[]; models?: string[] }).selectedModels ?? (provider as { selectedModels?: string[]; models?: string[] }).models ?? [];
-    if (visionModels.length === 0) return null;
+    if (visionModels.length === 0) {
+      console.warn('[human-repair] No chat models selected, falling back to mock detector');
+      return null;
+    }
 
     const origin = `http://127.0.0.1:${process.env.DEPLOY_RUN_PORT || 5000}`;
     const systemPrompt = `You are a professional human anatomy quality analyst for AI-generated images.
@@ -110,9 +116,13 @@ Respond ONLY with a valid JSON object matching this schema:
   "targets": [{"type":"face","x":0.35,"y":0.05,"width":0.3,"height":0.25,"qualityScore":72,"issues":["blur"]}]
 }`;
 
+    // 使用内部认证头部替代 cookie，确保服务间调用可靠通过认证
+    const internalHeaders = userId
+      ? await getInternalRequestHeaders(userId, 'user')
+      : {};
     const response = await fetch(`${origin}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}) },
+      headers: { 'Content-Type': 'application/json', ...internalHeaders },
       body: JSON.stringify({
         messages: [
           { role: 'system', content: systemPrompt },
@@ -130,12 +140,19 @@ Respond ONLY with a valid JSON object matching this schema:
       }),
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      console.warn(`[human-repair] /api/chat returned ${response.status}: ${errText.slice(0, 200)}, falling back to mock detector`);
+      return null;
+    }
     const data = await response.json() as { content?: string; message?: { content: string } };
     const raw = data.content || data.message?.content || '';
     // 从响应中提取 JSON（LLM 有时会附加说明文字）
     const match = raw.match(/\{[\s\S]*"targets"[\s\S]*\}/);
-    if (!match) return null;
+    if (!match) {
+      console.warn('[human-repair] Vision LLM response did not contain valid JSON targets, falling back to mock');
+      return null;
+    }
     const parsed = JSON.parse(match[0]) as VisionDetectResult;
     if (!Array.isArray(parsed.targets) || parsed.targets.length === 0) return null;
     // 验证归一化坐标在合法范围内
@@ -145,12 +162,13 @@ Respond ONLY with a valid JSON object matching this schema:
     );
     if (validTargets.length === 0) return null;
     return { persons: parsed.persons || [], targets: validTargets };
-  } catch {
+  } catch (err) {
+    console.error('[human-repair] detectHumanWithVision failed:', err);
     return null;
   }
 }
 
-export async function analyzeHumanImageUrl(sourceImageId: string, sourceImageUrl: string, cookie?: string): Promise<HumanAnalysis> {
+export async function analyzeHumanImageUrl(sourceImageId: string, sourceImageUrl: string, userId?: string): Promise<HumanAnalysis> {
   const buffer = await fetchImageBuffer(sourceImageUrl);
   const metadata = await sharp(buffer).metadata();
   const width = metadata.width || 1024;
@@ -158,7 +176,7 @@ export async function analyzeHumanImageUrl(sourceImageId: string, sourceImageUrl
   const image: HumanImageDescriptor = { id: sourceImageId, url: sourceImageUrl, width, height };
 
   // 尝试 Vision LLM 真实检测
-  const visionResult = await detectHumanWithVision(sourceImageUrl, width, height, cookie);
+  const visionResult = await detectHumanWithVision(sourceImageUrl, width, height, userId);
   if (visionResult) {
     const VALID_TYPES = new Set(['face','left_hand','right_hand','body','feet','hair','clothes','interaction']);
     const persons = visionResult.persons.length > 0
@@ -302,12 +320,12 @@ async function realCandidate(
 ): Promise<string> {
   if (!input.model) throw new Error('真实人物精修需要选择已配置的图像编辑模型');
   const origin = `http://127.0.0.1:${process.env.DEPLOY_RUN_PORT || 5000}`;
+  const internalHeaders = input.userId
+    ? await getInternalRequestHeaders(input.userId, 'user')
+    : {};
   const response = await fetch(`${origin}/api/image-edit`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(input.requestCookie ? { cookie: input.requestCookie } : {}),
-    },
+    headers: { 'Content-Type': 'application/json', ...internalHeaders },
     body: JSON.stringify({
       action: 'inpaint',
       imageUrl: input.sourceImageUrl,
@@ -387,7 +405,7 @@ export async function startHumanRepair(input: StartHumanRepairInput): Promise<Hu
   if (!provider || !(provider.selectedModels || []).includes(input.model)) {
     throw new Error('所选图像编辑模型未授权或已停用');
   }
-  const analysis = await analyzeHumanImageUrl(input.sourceImageId, input.sourceImageUrl, input.requestCookie);
+  const analysis = await analyzeHumanImageUrl(input.sourceImageId, input.sourceImageUrl, input.userId);
   const id = `human-${crypto.randomUUID()}`;
   const task: HumanRepairTask = {
     id,

@@ -35,7 +35,6 @@ export async function POST(request: NextRequest) {
     providerId,
     mode: body.mode === 'gpt-image-edit' || body.mode === 'flux-edit' ? body.mode : 'auto',
     manualMaskImage: typeof body.manualMaskImage === 'string' ? body.manualMaskImage : undefined,
-    requestCookie: request.headers.get('cookie') || undefined,
   });
   return NextResponse.json({ success: true, taskId: task.id, status: task.status, analysis: task.analysis });
 }

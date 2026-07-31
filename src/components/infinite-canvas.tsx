@@ -1716,6 +1716,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // RemoveBG model selection
   const [removeBgModelId, setRemoveBgModelId] = useState<string>('birefnet-general');
   const [addRemoveBgMaskToCanvas, setAddRemoveBgMaskToCanvas] = useState(false);
+  // Cache the target image when opening the remove-bg picker so the correct image is used even if selection changes
+  const [removeBgTargetImage, setRemoveBgTargetImage] = useState<CanvasImage | null>(null);
   // Floating window canvas zoom/pan
   const [editCanvasZoom, setEditCanvasZoom] = useState(1);
   const [editCanvasPan, setEditCanvasPan] = useState({ x: 0, y: 0 });
@@ -7148,7 +7150,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // 2. REMOVE BACKGROUND - auto, result to the right
   const handleRemoveBackground = useCallback(async () => {
-    const img = getActiveImageData();
+    const img = removeBgTargetImage || getActiveImageData();
     if (!img) return;
     const placeholderId = createProcessingFrameRightOf(
       img,
@@ -7311,7 +7313,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       alert(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
     }
     setIsEditProcessing(false);
-  }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, addRemoveBgMaskToCanvas, completeProcessingFrame, onImagesChange]);
+  }, [removeBgTargetImage, getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, addRemoveBgMaskToCanvas, completeProcessingFrame, onImagesChange]);
 
   const handleOpenDisplayDecompose = useCallback(() => {
     // 优先使用右键时记录的命中图片 id（通过 ref 规避 React 批量更新时序问题），
@@ -9163,7 +9165,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     testId?: string;
   }> = [
     { icon: <ZoomIn size={14} className={isMonochrome ? monoColors['放大'] : ''} />, label: '放大', desc: '智能补细节放大，变大变高清，不改内容', action: handleOpenUpscale },
-    { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => setShowRemoveBgPicker(true) },
+    { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => { setRemoveBgTargetImage(getActiveImageData()); setShowRemoveBgPicker(true); } },
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
     { icon: <LayoutGrid size={14} className={isMonochrome ? monoColors['元素拆解'] : ''} />, label: '元素拆解', desc: '拆出美陈物料与设计元素，生成平面陈列板', action: handleOpenDisplayDecompose },
     { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase, testId: 'canvas-erase' },
@@ -12695,6 +12697,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     onClick={() => {
                       setShowRemoveBgPicker(false);
                       handleRemoveBackground();
+                      setRemoveBgTargetImage(null);
                     }}
                     className={`w-full py-2.5 text-sm font-semibold rounded-xl active:scale-[0.98] transition-all ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gold text-black hover:bg-[#e5c047]'}`}
                   >

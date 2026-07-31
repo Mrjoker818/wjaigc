@@ -453,26 +453,134 @@ export async function POST(request: NextRequest) {
 
           // 如果有直接返回的图片URL（直接模式），标记完成
           if (bgData.directImageUrls?.length > 0) {
+            const directUrls: string[] = bgData.directImageUrls;
+            // ★ 检查是否还有异步 taskIds 需要轮询（混合模式：部分直接返回 + 部分异步）
+            const asyncOnlyTaskIds: string[] = (bgData.taskIds || []).filter(
+              (id: string) => !id.startsWith('direct-')
+            );
+
+            if (asyncOnlyTaskIds.length === 0) {
+              // 纯直接模式：所有图片都已返回
+              updateTaskProgress(asyncTaskId, {
+                status: 'completed',
+                progress: 100,
+                label: `生成完成 (${directUrls.length}张)`,
+                result: {
+                  imageUrl: directUrls[0],
+                  imageUrls: directUrls,
+                  usedModel: bgData.model,
+                  modelName: bgData.modelName,
+                  providerName: bgData.providerName,
+                  apiBaseUrl: bgData.apiBaseUrl,
+                  providerId: bgData.providerId,
+                }
+              });
+              recordSubmitOnlyTerminal({
+                status: 'completed',
+                imageUrl: directUrls[0],
+                imageUrls: directUrls,
+                creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+              });
+              console.log(`[generate] submitOnly direct mode: ${directUrls.length} images for ${asyncTaskId}`);
+              return;
+            }
+
+            // 混合模式：有直接返回的图片 + 还有异步任务需要轮询
+            // 先标记已有图片，等异步任务完成后再合并
+            console.log(`[generate] submitOnly mixed mode: ${directUrls.length} direct + ${asyncOnlyTaskIds.length} async for ${asyncTaskId}`);
+            const mixedCollectedUrls: string[] = [...directUrls];
             updateTaskProgress(asyncTaskId, {
-              status: 'completed',
-              progress: 100,
-              label: '生成完成',
+              status: 'processing',
+              progress: Math.round((directUrls.length / (directUrls.length + asyncOnlyTaskIds.length)) * 80),
+              label: `生成中 (${directUrls.length}/${directUrls.length + asyncOnlyTaskIds.length})`,
               result: {
-                imageUrl: bgData.directImageUrls[0],
-                imageUrls: bgData.directImageUrls,
+                submissionPayload,
                 usedModel: bgData.model,
                 modelName: bgData.modelName,
                 providerName: bgData.providerName,
                 apiBaseUrl: bgData.apiBaseUrl,
+                apiKey: bgData.apiKey,
                 providerId: bgData.providerId,
+                advancedParams: bgData.advancedParams,
               }
             });
-            recordSubmitOnlyTerminal({
-              status: 'completed',
-              imageUrl: bgData.directImageUrls[0],
-              imageUrls: bgData.directImageUrls,
-              creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
-            });
+
+            // 轮询异步任务
+            const mixedBgModel = bgData.model || model;
+            const mixedBgProviderId = bgData.providerId || effectiveProviderId;
+            let mixedAttempts = 0;
+            const mixedMaxAttempts = 120;
+            const mixedPending = new Set(asyncOnlyTaskIds);
+            const mixedResults = new Map<string, string[]>();
+
+            while (mixedAttempts < mixedMaxAttempts && mixedPending.size > 0) {
+              mixedAttempts++;
+              await new Promise(r => setTimeout(r, mixedAttempts <= 3 ? 2000 : 5000));
+              const pendingArr = Array.from(mixedPending);
+              const roundResults = await Promise.all(pendingArr.map(async (taskId: string) => {
+                try {
+                  const pollRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/poll-task`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ taskId, model: mixedBgModel, providerId: mixedBgProviderId, apiBaseUrl: bgData.apiBaseUrl, apiKey: bgData.apiKey }),
+                  });
+                  const pollData = await pollRes.json() as Record<string, unknown>;
+                  const urls: string[] = [];
+                  const pushValue = (value: unknown): void => {
+                    if (typeof value === 'string' && value.length > 0) { urls.push(value); return; }
+                    if (Array.isArray(value)) { value.forEach(pushValue); return; }
+                    if (value && typeof value === 'object') {
+                      const item = value as Record<string, unknown>;
+                      pushValue(item.url || item.image_url || item.imageUrl || item.b64_json);
+                    }
+                  };
+                  const resultObj = pollData.result as Record<string, unknown> | undefined;
+                  pushValue(pollData.imageUrls);
+                  pushValue(resultObj?.imageUrls);
+                  pushValue(pollData.imageUrl || resultObj?.imageUrl);
+                  if (pollData.status === 'completed' && urls.length > 0) return { completed: true, urls };
+                  if (pollData.status === 'failed') return { completed: true, urls: [] };
+                  return { completed: false, urls: [] };
+                } catch { return { completed: false, urls: [] }; }
+              }));
+              for (let ri = 0; ri < roundResults.length; ri++) {
+                if (roundResults[ri].completed) {
+                  mixedResults.set(pendingArr[ri], roundResults[ri].urls);
+                  mixedPending.delete(pendingArr[ri]);
+                  mixedCollectedUrls.push(...roundResults[ri].urls);
+                }
+              }
+              if (isTaskCancelled(asyncTaskId)) return;
+            }
+
+            // 合并所有结果
+            const allUrls = Array.from(new Set(mixedCollectedUrls.filter(u => typeof u === 'string' && u.length > 0)));
+            if (allUrls.length > 0) {
+              updateTaskProgress(asyncTaskId, {
+                status: 'completed',
+                progress: 100,
+                label: `生成完成 (${allUrls.length}张)`,
+                result: {
+                  imageUrl: allUrls[0],
+                  imageUrls: allUrls,
+                  usedModel: bgData.model,
+                  modelName: bgData.modelName,
+                  providerName: bgData.providerName,
+                  apiBaseUrl: bgData.apiBaseUrl,
+                  providerId: bgData.providerId,
+                }
+              });
+              recordSubmitOnlyTerminal({
+                status: 'completed',
+                imageUrl: allUrls[0],
+                imageUrls: allUrls,
+                creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+              });
+              console.log(`[generate] submitOnly mixed mode completed: ${allUrls.length} images for ${asyncTaskId}`);
+            } else {
+              updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成失败', label: '生成失败' });
+              recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
+            }
             return;
           }
 
@@ -2557,6 +2665,9 @@ export async function POST(request: NextRequest) {
       success: true,
       mode: 'polling',
       taskIds,
+      // ★ 关键修复：同时返回 directImageUrls，确保 submitOnly 后台处理器能直接获取所有图片 URL
+      // 而不依赖从 task-registry 查找 direct- 任务（可能在 dev 模式或 registry 不共享时失败）
+      directImageUrls: directImageUrls.length > 0 ? directImageUrls : undefined,
       model: usedModelId,
       modelName: usedModelName,
       providerName: usedProviderName,

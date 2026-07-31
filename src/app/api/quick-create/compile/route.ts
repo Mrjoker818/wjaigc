@@ -23,6 +23,7 @@ import type { User } from '@/lib/user-types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120; // 防止 LLM 卡住导致 serverless 函数超时
 
 interface AuthorizedChatModel extends QuickCreateModelCandidate {
   provider: ApiProvider;
@@ -238,8 +239,17 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         let completeText = '';
         let announcedStrategy = false;
-        for await (const chunk of llmStream) {
+        // ★ 流级超时看门狗：如果 LLM 流 90 秒内没有新 chunk，主动中断
+        const STREAM_TIMEOUT_MS = 90_000;
+        const streamTimeout = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('LLM 流式响应超时，请检查模型可用性或网络连接')), STREAM_TIMEOUT_MS);
+        });
+        const chunkIterator = llmStream[Symbol.asyncIterator]();
+        for (;;) {
           if (request.signal.aborted) throw new Error('请求已取消');
+          const result = await Promise.race([chunkIterator.next(), streamTimeout]);
+          if (result.done) break;
+          const chunk = result.value;
           if (!chunk.content) continue;
           const content = chunk.content.toString();
           if (!content) continue;
