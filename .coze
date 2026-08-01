@@ -13,5 +13,5 @@ run = [ "bash", "./scripts/coze-start.sh" ]
 validate = [ "bash", "./scripts/validate.sh" ]
 
 [deploy]
-build = [ "pnpm", "run", "build" ]
+build = [ "bash", "./scripts/coze-deploy-build.sh" ]
 run = [ "bash", "./scripts/coze-start.sh" ]
