@@ -25,9 +25,12 @@ import {
   type QuickCreateModelCandidate,
   type ResolvedQuickCreateModel,
 } from '@/lib/model-defaults';
-import type {
-  QuickCreateCompileResult,
-  QuickCreateCompileSseEvent,
+import {
+  createQuickCreateFallbackResult,
+  shouldFallbackQuickCreateCompile,
+  type QuickCreateModelSource,
+  type QuickCreateCompileResult,
+  type QuickCreateCompileSseEvent,
 } from '@/lib/quick-create-compile';
 import {
   flushQuickCreateSseBuffer,
@@ -3946,7 +3949,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       models: quickCreateImageModels,
       allowFirstAvailable: quickCreateImagePolicy.autoModelRouting,
     });
-    if (!resolvedImageModel.model) {
+    const quickCreateImageModel = resolvedImageModel.model;
+    if (!quickCreateImageModel) {
       notifyMissingQuickCreateImageModel();
       return false;
     }
@@ -3965,6 +3969,46 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
     let compileResult: QuickCreateCompileResult | null = null;
     let compileError = '';
+    let compileErrorCode: string | null = null;
+    let compileTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const submitTransportFallback = (): boolean => {
+      const fallbackChatModel = resolvedQuickCreateChatModel.model;
+      const fallbackModelSource: QuickCreateModelSource = resolvedQuickCreateChatModel.source === 'none'
+        ? 'first-available'
+        : resolvedQuickCreateChatModel.source;
+      const finalResult = createQuickCreateFallbackResult(request, {
+        model: fallbackChatModel?.modelId || 'compiler-unavailable',
+        providerId: fallbackChatModel?.providerId || 'client-fallback',
+        providerName: fallbackChatModel?.providerName || '本地降级',
+        modelSource: fallbackModelSource,
+      });
+
+      setQuickCreateCompileState((current: QuickCreateCompileViewState) => ({
+        ...current,
+        phase: 'ready',
+        statusMessage: '专业提示词编译暂不可用，已按原始需求提交图片生成。',
+        result: finalResult,
+        error: '',
+        isCompiling: false,
+      }));
+
+      void handleGenerate({
+        prompt: finalResult.positivePrompt,
+        outputCount: finalResult.outputCount,
+        aspectRatio: finalResult.aspectRatio,
+        size: '',
+        referenceImages: request.referenceImages,
+        referenceMode: 'style',
+        imageCategory: '',
+        productCategory: '',
+        stylePreset: '',
+        quality: finalResult.quality,
+        model: quickCreateImageModel.modelId,
+        providerId: quickCreateImageModel.providerId,
+      });
+      return true;
+    };
 
     const handleCompileEvent = (event: QuickCreateCompileSseEvent): void => {
       if (event.type === 'status') {
@@ -3992,6 +4036,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
       if (event.type === 'error') {
         compileError = event.message;
+        compileErrorCode = event.code || null;
         setQuickCreateCompileState((current: QuickCreateCompileViewState) => ({
           ...current,
           error: event.message,
@@ -4003,7 +4048,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       // ★ 添加超时保护：SSE 流最多等待 120 秒，防止 LLM 卡住导致面板永远停在"正在编译"
       const compileTimeoutMs = 120000;
       const timeoutController = new AbortController();
-      const timeoutId = setTimeout(() => timeoutController.abort(), compileTimeoutMs);
+      compileTimeoutId = setTimeout(
+        () => timeoutController.abort(),
+        compileTimeoutMs,
+      );
       // 将超时 abort 和用户手动 abort 合并
       const combinedController = new AbortController();
       controller.signal.addEventListener('abort', () => combinedController.abort());
@@ -4027,7 +4075,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }),
         signal: combinedController.signal,
       });
-      clearTimeout(timeoutId);
+      clearTimeout(compileTimeoutId);
+      compileTimeoutId = null;
 
       if (!response.body) {
         throw new Error('快速创作服务未返回可读取的流');
@@ -4085,12 +4134,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         productCategory: '',
         stylePreset: '',
         quality: finalResult.quality,
-        model: resolvedImageModel.model.modelId,
-        providerId: resolvedImageModel.model.providerId,
+        model: quickCreateImageModel.modelId,
+        providerId: quickCreateImageModel.providerId,
       });
       return true;
     } catch (error) {
       if (controller.signal.aborted) return false;
+      if (shouldFallbackQuickCreateCompile(error, compileErrorCode)) {
+        return submitTransportFallback();
+      }
       let message = error instanceof Error ? error.message : '快速创作编译失败，请重试';
       // 处理超时 abort
       if (message.includes('aborted') || message.includes('超时')) {
@@ -4104,6 +4156,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }));
       return false;
     } finally {
+      if (compileTimeoutId) clearTimeout(compileTimeoutId);
       if (quickCreateCompileControllerRef.current === controller) {
         quickCreateCompileControllerRef.current = null;
       }
@@ -4113,6 +4166,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     notifyMissingQuickCreateImageModel,
     quickCreateImageModels,
     quickCreateImagePolicy,
+    resolvedQuickCreateChatModel,
     recentQuickCreateChatModel,
     recentQuickCreateImageModel,
   ]);

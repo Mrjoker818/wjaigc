@@ -223,6 +223,20 @@ export function createQuickCreateFallbackResult(
   };
 }
 
+export function shouldFallbackQuickCreateCompile(
+  error: unknown,
+  terminalCode?: string | null,
+): boolean {
+  if (terminalCode) return false;
+
+  const message = error instanceof Error
+    ? error.message.toLowerCase()
+    : String(error).toLowerCase();
+
+  return error instanceof TypeError
+    || /network error|网络错误|failed to fetch|load failed|未返回可读取的流/.test(message);
+}
+
 const VISION_MODEL_PATTERNS = [
   /doubao-seed-(?:1-8|2-0)/i,
   /kimi-k2-5/i,
