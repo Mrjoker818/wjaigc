@@ -33,7 +33,7 @@ describe('display-decompose request contract', () => {
       n: 1,
       size: '3:4',
       image_urls: ['https://example.com/display.jpg'],
-      strength: 0.72,
+      strength: 0.45,
       input_fidelity: 'high',
       response_format: 'url',
       source_hash: 'source-sha-256',

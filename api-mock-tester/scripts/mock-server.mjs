@@ -262,23 +262,37 @@ let serverPort = 3456;
 const requestLog = [];
 
 function matchRoute(method, url, patterns) {
-  for (const [pattern, handler] of Object.entries(patterns)) {
-    const [pMethod, pPath] = pattern.split(' ', 2);
-    if (pMethod !== method) continue;
-    
-    // 简单路径匹配: 支持前缀匹配和 :param 通配
-    const pParts = pPath.split('/');
-    const uParts = url.split('?')[0].split('/');
-    if (pParts.length !== uParts.length) continue;
-    
-    let match = true;
-    for (let i = 0; i < pParts.length; i++) {
-      if (pParts[i].startsWith(':')) continue; // 通配段
-      if (pParts[i] !== uParts[i]) { match = false; break; }
+  const tryMatch = (path) => {
+    for (const [pattern, handler] of Object.entries(patterns)) {
+      const [pMethod, pPath] = pattern.split(' ', 2);
+      if (pMethod !== method) continue;
+      
+      // 简单路径匹配: 支持前缀匹配和 :param 通配
+      const pParts = pPath.split('/');
+      const uParts = path.split('?')[0].split('/');
+      if (pParts.length !== uParts.length) continue;
+      
+      let match = true;
+      for (let i = 0; i < pParts.length; i++) {
+        if (pParts[i].startsWith(':')) continue; // 通配段
+        if (pParts[i] !== uParts[i]) { match = false; break; }
+      }
+      if (match) return handler;
     }
-    if (match) return handler;
+    return null;
+  };
+  // 1) 先按原路径匹配（保持既有行为优先）
+  let handler = tryMatch(url);
+  if (handler) return handler;
+  // 2) 容忍 /v1 前缀差异：模式带 /v1 而请求不带（或反之）
+  //    真实提供商 base_url 可能带或不带 /v1，服务端拼接后路径可能与 mock 定义不一致
+  const pathOnly = url.split('?')[0];
+  if (!pathOnly.startsWith('/v1/')) {
+    handler = tryMatch(`/v1${url}`);
+  } else {
+    handler = tryMatch(url.replace(/^\/v1/, ''));
   }
-  return null;
+  return handler;
 }
 
 const server = http.createServer(async (req, res) => {

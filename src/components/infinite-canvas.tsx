@@ -9201,7 +9201,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // Action toolbar items with distinct monochrome colors
   const monoColors: Record<string, string> = {
-    '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-blue-500', '元素拆解': 'text-emerald-500',
+    '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-blue-500', '元素拆解': 'text-emerald-500', '横竖重组': 'text-lime-600',
     '擦除': 'text-orange-500', '蒙版': 'text-violet-500', '编辑元素': 'text-cyan-500',
     '多角度': 'text-teal-500', '图转3D工厂': 'text-indigo-500', '扩展': 'text-amber-500',
     '裁切': 'text-rose-500', '精修引擎': 'text-violet-500', '人物精修大师': 'text-emerald-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
@@ -9252,7 +9252,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }
   // 根据媒体类型过滤可用工具
   const getAvailableToolsByMediaType = (mediaType?: 'image' | 'video' | '3d'): string[] => {
-    const imageTools = ['放大', '移除背景', 'SVG智能描摹', '元素拆解', '擦除', '蒙版', '调色', '编辑元素', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '人物精修大师', '语言修图', 'Agent编排', '下载'];
+    const imageTools = ['放大', '移除背景', 'SVG智能描摹', '元素拆解', '横竖重组', '擦除', '蒙版', '调色', '编辑元素', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '人物精修大师', '语言修图', 'Agent编排', '下载'];
     const videoTools = ['视频抽帧', 'AI配音', '转 GIF', '视频压缩', '下载'];
     const model3DTools = ['下载'];
 

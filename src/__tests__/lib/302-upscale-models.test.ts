@@ -9,10 +9,12 @@ import {
 } from '@/lib/302-upscale-models';
 
 describe('302.AI upscale model catalog', () => {
-  it('exposes exactly the two documented 302.AI upscale models', () => {
+  it('exposes exactly the four documented 302.AI upscale models', () => {
     expect(THREE_O_TWO_UPSCALE_MODELS.map(model => model.id)).toEqual([
       '302-super-upscale-v2',
       '302-upscale-v6',
+      '302-image-upscale',
+      '302-esrgan',
     ]);
     expect(THREE_O_TWO_UPSCALE_MODELS.every(model => model.category === '302')).toBe(true);
   });
@@ -30,16 +32,18 @@ describe('302.AI upscale model catalog', () => {
     expect(is302AiUpscaleBaseUrl('https://api.302.ai')).toBe(true);
     expect(is302AiUpscaleBaseUrl('https://api.302ai.cn')).toBe(true);
     expect(is302AiUpscaleBaseUrl('https://evil302ai.cn')).toBe(false);
-    expect(get302UpscaleModelsForProvider('https://api.302.ai', 'upscaler')).toHaveLength(2);
-    expect(get302UpscaleModelsForProvider('https://api.302ai.cn', 'upscaler')).toHaveLength(2);
+    expect(get302UpscaleModelsForProvider('https://api.302.ai', 'upscaler')).toHaveLength(4);
+    expect(get302UpscaleModelsForProvider('https://api.302ai.cn', 'upscaler')).toHaveLength(4);
     expect(get302UpscaleModelsForProvider('https://api.302.ai', 'image')).toEqual([]);
     expect(get302UpscaleModelsForProvider('https://api.example.com', 'upscaler')).toEqual([]);
   });
 
-  it('expands the unified 302 catalog entry into the two native upscale models', () => {
+  it('expands the unified 302 catalog entry into the four native upscale models', () => {
     expect(resolve302UpscaleModelSelection('https://api.302ai.cn', ['302'])).toEqual([
       '302-super-upscale-v2',
       '302-upscale-v6',
+      '302-image-upscale',
+      '302-esrgan',
     ]);
   });
 

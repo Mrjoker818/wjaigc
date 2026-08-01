@@ -518,9 +518,12 @@ const TEST_GROUPS = [
   {
     name: '任务管理',
     tests: [
-      { name: 'SSE事件流连接', fn: async () => {
+      { name: 'SSE事件流连接', fn: async (ctx) => {
+        if (!ctx.loggedIn) return skip('SSE事件流连接', '未登录');
         try {
+          // task-events 在 MANDATORY_API_AUTH 下要求认证会话，需携带登录 Cookie
           const r = await fetch(`${CONFIG.target}/api/task-events?taskId=test-nonexistent`, {
+            headers: { Cookie: CONFIG.authCookie },
             signal: AbortSignal.timeout(3000),
           });
           assert('返回200', r.ok, `status=${r.status}`);
