@@ -233,6 +233,10 @@ export function shouldFallbackQuickCreateCompile(
     ? error.message.toLowerCase()
     : String(error).toLowerCase();
 
+  // The proxy can return a malformed SSE frame without a terminal backend code.
+  // In that case, submit the original request through the established generator.
+  if (message.includes('sse')) return true;
+
   return error instanceof TypeError
     || /network error|网络错误|failed to fetch|load failed|未返回可读取的流/.test(message);
 }
