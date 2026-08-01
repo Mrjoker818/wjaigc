@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createQuickCreateFallbackResult,
   extractFirstJsonObject,
   parseQuickCreateCompilePayload,
   parseQuickCreateCompileRequest,
@@ -98,6 +99,31 @@ describe('quick create request validation', () => {
   });
 });
 
+describe('quick create fallback plan', () => {
+  it('preserves the original prompt and all user-selected image parameters', () => {
+    const request = {
+      prompt: '生成三张纯白背景上的青绿色立方体产品图',
+      aspectRatio: '1:1' as const,
+      quality: 'standard' as const,
+      outputCount: 3,
+      referenceImages: [],
+    };
+
+    expect(createQuickCreateFallbackResult(request, {
+      model: 'chat-model',
+      providerId: 'provider-1',
+      providerName: 'Provider One',
+      modelSource: 'quick-create-default',
+    })).toMatchObject({
+      mode: 'fallback',
+      positivePrompt: request.prompt,
+      aspectRatio: request.aspectRatio,
+      quality: request.quality,
+      outputCount: request.outputCount,
+    });
+  });
+});
+
 describe('quick create SSE event validation', () => {
   it('accepts a valid result event', () => {
     expect(parseQuickCreateCompileSseEvent({
@@ -108,6 +134,7 @@ describe('quick create SSE event validation', () => {
         providerId: 'provider-1',
         providerName: 'Provider One',
         modelSource: 'task-override',
+        mode: 'compiled',
       },
     })).toMatchObject({ type: 'result' });
   });
@@ -116,7 +143,7 @@ describe('quick create SSE event validation', () => {
     expect(() => parseQuickCreateCompileSseEvent({ type: 'unknown' })).toThrow('无效的 SSE');
     expect(() => parseQuickCreateCompileSseEvent({
       type: 'result',
-      result: { ...validPayload, model: '', providerId: 'p', providerName: 'P', modelSource: 'first-available' },
+      result: { ...validPayload, model: '', providerId: 'p', providerName: 'P', modelSource: 'first-available', mode: 'compiled' },
     })).toThrow('无效的 SSE');
   });
 });

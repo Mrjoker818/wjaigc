@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const routeSource = readFileSync(
   resolve(process.cwd(), 'src/app/api/image-edit/route.ts'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 
 describe('remove-background quality routing', () => {
   it('evaluates the CPU result against the original source image', () => {

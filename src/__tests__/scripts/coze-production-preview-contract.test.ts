@@ -20,7 +20,9 @@ describe('Coze preview runtime contract', () => {
 
     const startScript = readFileSync(resolve(process.cwd(), 'scripts/coze-start.sh'), 'utf8');
     expect(packageJson.scripts?.doctor).toBe('node scripts/doctor.mjs');
-    expect(startScript).toContain('pnpm run doctor -- --startup');
-    expect(startScript).toContain('exec pnpm run start');
+    expect(startScript).toContain('exec ./node_modules/.bin/next start -p "${PORT:-5000}" -H 0.0.0.0');
+    expect(startScript).not.toContain('pnpm install');
+    expect(startScript).not.toContain('pnpm run build');
+    expect(startScript).not.toContain('pnpm run doctor');
   });
 });

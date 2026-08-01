@@ -59,6 +59,7 @@ export interface QuickCreateCompileResult {
   providerId: string;
   providerName: string;
   modelSource: QuickCreateModelSource;
+  mode: 'compiled' | 'fallback';
 }
 
 export type QuickCreateCompileSseEvent =
@@ -96,6 +97,7 @@ const compileResultSchema = compilePayloadSchema.extend({
     'recent-selection',
     'first-available',
   ]),
+  mode: z.enum(['compiled', 'fallback']),
 }).strict();
 
 export const quickCreateCompileSseEventSchema = z.discriminatedUnion('type', [
@@ -197,6 +199,28 @@ export function parseQuickCreateCompilePayload(value: string): QuickCreateCompil
   }
 
   return result.data;
+}
+
+export function createQuickCreateFallbackResult(
+  request: QuickCreateCompileRequest,
+  metadata: Pick<QuickCreateCompileResult, 'model' | 'providerId' | 'providerName' | 'modelSource'>,
+): QuickCreateCompileResult {
+  return {
+    summary: '已按原始创作需求提交生成。',
+    strategy: '专业提示词编译暂不可用，保留原始提示词和已选生成参数。',
+    directions: [{
+      title: '原始需求',
+      description: request.prompt,
+      visualKeywords: ['原始提示词'],
+    }],
+    positivePrompt: request.prompt,
+    negativePrompt: '',
+    aspectRatio: request.aspectRatio,
+    quality: request.quality,
+    outputCount: request.outputCount,
+    ...metadata,
+    mode: 'fallback',
+  };
 }
 
 const VISION_MODEL_PATTERNS = [

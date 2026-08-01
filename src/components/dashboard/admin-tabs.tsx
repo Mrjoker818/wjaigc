@@ -269,6 +269,20 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserGroupId, setNewUserGroupId] = useState('');
+  const resetNewUserForm = useCallback((): void => {
+    setNewUserName('');
+    setNewUserPassword('');
+    setNewUserEmail('');
+    setNewUserGroupId('');
+  }, []);
+  const openUserAddDrawer = useCallback((): void => {
+    resetNewUserForm();
+    setShowUserAddDrawer(true);
+  }, [resetNewUserForm]);
+  const closeUserAddDrawer = useCallback((): void => {
+    resetNewUserForm();
+    setShowUserAddDrawer(false);
+  }, [resetNewUserForm]);
   const [userFilterGroup, setUserFilterGroup] = useState('all');
   const [showResetPasswordDialog, setShowResetPasswordDialog] = useState(false);
   const [resetPasswordUserId, setResetPasswordUserId] = useState<string | null>(null);
@@ -831,7 +845,7 @@ export default function AdminTabs(props: AdminTabsProps) {
             <button onClick={() => handleBatchToggleUsers(false)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><Ban className="w-3.5 h-3.5" />批量禁用</button>
             <button onClick={() => void handleBatchDeleteUsers()} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-destructive cursor-pointer'}`}><Trash2 className="w-3.5 h-3.5" />批量删除</button>
             <div className="w-px h-6 bg-border/30 mx-1" />
-            <button onClick={() => setShowUserAddDrawer(true)} className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2"><UserPlus className="w-4 h-4" />添加用户</button>
+            <button onClick={openUserAddDrawer} className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2"><UserPlus className="w-4 h-4" />添加用户</button>
           </div>
         </div>
         {/* 选中提示 */}
@@ -1225,16 +1239,25 @@ export default function AdminTabs(props: AdminTabsProps) {
         {/* 新建用户抽屉 */}
         {showUserAddDrawer && (
           <div className="fixed inset-0 z-[200] flex">
-            <div className="absolute inset-0 bg-black/50" onClick={() => setShowUserAddDrawer(false)} />
+            <div className="absolute inset-0 bg-black/50" onClick={closeUserAddDrawer} />
             <div className="ml-auto relative z-10 w-[380px] h-full bg-card border-l border-border overflow-y-auto">
               <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between">
                 <h3 className="text-base font-semibold text-foreground">新建用户</h3>
-                <button onClick={() => setShowUserAddDrawer(false)} aria-label="关闭添加用户面板" className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <button onClick={closeUserAddDrawer} aria-label="关闭添加用户面板" className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
-              <div className="p-6 space-y-4">
-                <div><label className="text-sm font-medium text-foreground mb-1.5 block">用户名</label><input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="输入用户名" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
-                <div><label className="text-sm font-medium text-foreground mb-1.5 block">密码</label><input type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="输入密码" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
-                <div><label className="text-sm font-medium text-foreground mb-1.5 block">邮箱 (可选)</label><input value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="输入邮箱" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+              <form
+                autoComplete="off"
+                className="p-6 space-y-4"
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  if (!newUserName || !newUserPassword) return;
+                  await props.onCreateUser(newUserName, newUserPassword, newUserEmail, newUserGroupId || undefined);
+                  closeUserAddDrawer();
+                }}
+              >
+                <div><label htmlFor="new-user-name" className="text-sm font-medium text-foreground mb-1.5 block">用户名</label><input id="new-user-name" name="new-user-name" autoComplete="new-username" value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="输入用户名" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div><label htmlFor="new-user-password" className="text-sm font-medium text-foreground mb-1.5 block">密码</label><input id="new-user-password" name="new-user-password" autoComplete="new-password" type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="输入密码" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div><label htmlFor="new-user-email" className="text-sm font-medium text-foreground mb-1.5 block">邮箱 (可选)</label><input id="new-user-email" name="new-user-email" autoComplete="email" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="输入邮箱" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
                 <div><label className="text-sm font-medium text-foreground mb-1.5 block">分组 (可选)</label>
                   <select value={newUserGroupId} onChange={e => setNewUserGroupId(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
                     <option value="">无分组</option>
@@ -1243,8 +1266,8 @@ export default function AdminTabs(props: AdminTabsProps) {
                     ))}
                   </select>
                 </div>
-                <button onClick={async () => { if (newUserName && newUserPassword) { await props.onCreateUser(newUserName, newUserPassword, newUserEmail, newUserGroupId || undefined); setShowUserAddDrawer(false); setNewUserName(''); setNewUserPassword(''); setNewUserEmail(''); setNewUserGroupId(''); } }} className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">创建用户</button>
-              </div>
+                <button type="submit" className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">创建用户</button>
+              </form>
             </div>
           </div>
         )}

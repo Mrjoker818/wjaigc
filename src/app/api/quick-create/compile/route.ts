@@ -2,6 +2,7 @@ import { Config, HeaderUtils, LLMClient } from 'coze-coding-dev-sdk';
 import { NextRequest } from 'next/server';
 import {
   buildQuickCreateCompilerPrompt,
+  createQuickCreateFallbackResult,
   parseQuickCreateCompilePayload,
   parseQuickCreateCompileRequest,
   supportsQuickCreateVision,
@@ -271,15 +272,41 @@ export async function POST(request: NextRequest): Promise<Response> {
             providerId: selected.providerId,
             providerName: selected.providerName || provider.name,
             modelSource,
+            mode: 'compiled',
           },
         });
         send({ type: 'status', phase: 'ready', message: '创作方案已编译完成' });
         finish();
       } catch (error: unknown) {
+        if (request.signal.aborted) {
+          send({
+            type: 'error',
+            message: compileErrorMessage(error, true),
+            code: 'REQUEST_CANCELLED',
+          });
+          finish();
+          return;
+        }
+
+        console.warn('[quick-create/compile] compiler fallback', {
+          userId: user.id,
+          providerId: selected.providerId,
+          modelId: selected.modelId,
+          errorName: error instanceof Error ? error.name : 'unknown',
+        });
         send({
-          type: 'error',
-          message: compileErrorMessage(error, request.signal.aborted),
-          code: request.signal.aborted ? 'REQUEST_CANCELLED' : 'COMPILE_FAILED',
+          type: 'result',
+          result: createQuickCreateFallbackResult(body, {
+            model: selected.modelId,
+            providerId: selected.providerId,
+            providerName: selected.providerName || provider.name,
+            modelSource,
+          }),
+        });
+        send({
+          type: 'status',
+          phase: 'ready',
+          message: '专业提示词编译暂不可用，已按原始需求提交生成。',
         });
         finish();
       }

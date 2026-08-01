@@ -166,7 +166,9 @@ function eventTypes(events: Array<Record<string, unknown>>): unknown[] {
 
 describe('POST /api/quick-create/compile', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.getSessionUser.mockResolvedValue(activeUser);
     mocks.getApiProviders.mockResolvedValue([providerA, providerB]);
     mocks.getRuntimeSettings.mockResolvedValue({
@@ -355,16 +357,17 @@ describe('POST /api/quick-create/compile', () => {
     expect(events.at(-2)).toEqual(expect.objectContaining({ type: 'status', phase: 'ready' }));
   });
 
-  it('returns a validation error for invalid model JSON without emitting a result event', async () => {
+  it('falls back to the original request when the model returns invalid plan JSON', async () => {
     mocks.stream.mockImplementation(() => successfulStream('{invalid-json'));
 
     const events = await readSse(await POST(request()));
 
-    expect(eventTypes(events)).not.toContain('result');
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'error',
-      code: 'COMPILE_FAILED',
-      message: '模型未返回完整的 JSON 对象',
+      type: 'result',
+      result: expect.objectContaining({
+        mode: 'fallback',
+        positivePrompt: '创建一张高级产品主视觉',
+      }),
     }));
     expect(events.at(-1)).toEqual({ type: 'done' });
   });
@@ -380,7 +383,24 @@ describe('POST /api/quick-create/compile', () => {
     expect(text).not.toContain('secret-provider-a');
     expect(text).not.toContain('provider-a.example');
     expect(text).not.toContain('upstream');
-    expect(text).toContain('快速创作编译失败，请稍后重试');
+    expect(text).toContain('专业提示词编译暂不可用，已按原始需求提交生成。');
+  });
+
+  it('emits a fallback result instead of an error when the authorized compiler stream fails', async () => {
+    mocks.stream.mockImplementation(() => {
+      throw new Error('upstream network failure');
+    });
+
+    const events = await readSse(await POST(request({ outputCount: 3 })));
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'result',
+      result: expect.objectContaining({
+        mode: 'fallback',
+        outputCount: 3,
+      }),
+    }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'error' }));
   });
 
   it('returns the safe cancellation error code when the request is aborted', async () => {

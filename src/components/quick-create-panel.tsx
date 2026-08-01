@@ -543,6 +543,7 @@ export function QuickCreatePanel({
   };
 
   const isMonochrome = themeStyle === 'monochrome';
+  const isFallbackPlan = compileState.result?.mode === 'fallback';
   const selectClassName = 'min-h-9 w-full rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15';
 
   return (
@@ -796,16 +797,19 @@ export function QuickCreatePanel({
             )}
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-xs font-semibold text-foreground">
-                  {compileState.error ? '专业方案编译失败' : compileState.result ? '专业创作方案已就绪' : '正在编译专业创作方案'}
-                </h3>
+                 <h3 className="text-xs font-semibold text-foreground">
+                   {compileState.error ? '专业方案编译失败' : isFallbackPlan ? '已按原始需求提交' : compileState.result ? '专业创作方案已就绪' : '正在编译专业创作方案'}
+                 </h3>
                 <span className={`rounded-md px-1.5 py-0.5 text-[10px] ${compileState.error ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'}`}>
                   {getCompilePhaseLabel(compileState.phase)}
                 </span>
               </div>
-              {compileState.statusMessage && !compileState.error && (
-                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{compileState.statusMessage}</p>
-              )}
+               {compileState.statusMessage && !compileState.error && (
+                 <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{compileState.statusMessage}</p>
+               )}
+               {isFallbackPlan && (
+                 <p className="mt-1 text-[11px] leading-5 text-amber-600 dark:text-amber-300">专业提示词编译暂不可用，已按原始需求提交图像生成。</p>
+               )}
               {compileState.error && (
                 <p className="mt-1 text-[11px] leading-5 text-destructive" role="alert">{compileState.error}</p>
               )}

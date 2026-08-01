@@ -7637,8 +7637,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           setShowAspectRecomposePanel(false);
         }
       }
-    } catch (err: any) {
-      toast.error(err?.message || '横竖重组失败');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '横竖重组失败');
       if (placeholderId) removeProcessingFrame(placeholderId);
     } finally {
       setAspectRecomposeProcessing(false);
