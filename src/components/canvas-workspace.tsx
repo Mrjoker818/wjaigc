@@ -72,6 +72,7 @@ interface FavoriteItem {
 import { User, Project, ImageGroupData, CanvasImage as PersistableCanvasImage } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
+import { buildProjectWorkspaceUrl } from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
@@ -365,6 +366,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const projects = userMgr.getProjects();
       const targetProject = projects.find((p: Project) => p.id === projectId);
       if (targetProject) {
+        window.history.replaceState(
+          null,
+          '',
+          buildProjectWorkspaceUrl(window.location, targetProject.id),
+        );
         setCurrentProject(targetProject);
         const restoredViewState = normalizeCanvasViewState(targetProject.metadata?.viewState);
         viewStateRef.current = restoredViewState;

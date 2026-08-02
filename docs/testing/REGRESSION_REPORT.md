@@ -376,6 +376,44 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | TypeScript | PASS | `pnpm ts-check` 退出 0。 |
 | ESLint | PASS WITH WARNINGS | `pnpm lint`：0 errors / 949 warnings，均为既有存量。 |
 | 全仓 Vitest | PASS WITH ENVIRONMENT SKIPS | 296 files / 1340 tests passed，3 files / 4 PostgreSQL tests skipped，0 failed。 |
+
+### 2026-08-02 部署产物核对
+
+`6eb061a93b43f60743f827a00fb1b8a94e4abd4d` 已推送至 GitHub `main`。部署后通过公开静态产物核对发现：
+
+| 检查项 | 结果 | 证据 |
+|--------|------|------|
+| 云端核心画布动态模块 | PASS | `https://wjaigc.coze.site/_next/static/chunks/1211.1104380f59eeaf6e.js` 与本地 `6eb061a` 构建的同名文件 SHA-256 均为 `27CB4FBBB762827E31EA757E78BFF3AE6912CE60FD8332504ADB3B603B1F6C48`。 |
+| 槽位归并产物 | PASS | 云端模块包含已完成占位替换与结果 ID 去重路径。 |
+| 供应商回填产物 | PASS | 云端模块包含 `providerName || providerId` 回退路径。 |
+| 已登录 Chrome 真实 UI 回归 | BLOCKED | Chrome 进程、扩展和 native-host 检查均通过；但读取已登录预览标签、截图和控制台日志均在 30 秒内超时，无法取得浏览器交互证据。 |
+
+### 2026-08-02 Pear `n=2` 云端修复验收
+
+在同一 Chrome 用户会话中创建空项目 `project_1785672740345_w0o09zyjz`，选择 `Gpt Image 2 · PearAPI 图像`，设定 `3:4 / 2 张 / 高清`，并提交提示词“金色机械猫头鹰”。快速创作编译器所选 `deepseek-v4-flash / APImartLLM` 未给出可用编译结果，但产品正确降级为原始提示词，未阻断图像生成。
+
+| 验收项 | 结果 | 真实证据 |
+|--------|------|----------|
+| 编译器不可用降级 | PASS | 面板显示“专业提示词编译暂不可用，已按原始需求提交图像生成”，随后进入生图，不将 LLM 供应商不可用误报为 Pear 图像模型错误。 |
+| Pear `n=2` 最终结果数 | PASS | DOM 仅有两张猫头鹰图片；项目同步日志为 `project_1785672740345_w0o09zyjz ... canvasImages: 2`。 |
+| 重复与重叠 | PASS | 结果 URL 分别为 `gen-1785673016023-ol4seq.png` 和 `gen-1785673016017-w0aer2.png`；位置分别为 `(810,232)` 与 `(1130,232)`，没有 `(0,0)` 追加或重复层。 |
+| 供应商徽标 | PASS | 两张图均显示 `gpt-image-2 / PearAPI 图像`，没有 FHL 误标。 |
+| 浏览器错误与弹窗 | PASS | Console `error`/`warn` 为空，未发现 JavaScript dialog。 |
+
+结论：BUG-025 与 BUG-026 已取得真实云端 Chrome 通过证据。该结果不解除 PostgreSQL 并发结算、单子任务取消、`n=3/4`、真实视频及 Firefox/WebKit 等其余发布门禁。
+
+### 2026-08-02 项目刷新恢复 BUG-027 本地修复
+
+真实 Chrome 已稳定复现：项目 `project_1785672740345_w0o09zyjz` 成功保存两张 Pear 结果后，在画布直接刷新会回到“我的项目”；仪表盘仍显示该项目有 2 张图片。故障是当前项目路由状态缺失，不是项目数据或图片保存失败。
+
+| 检查项 | 结果 | 证据 |
+|--------|------|------|
+| 失败复现 | PASS | 刷新前为画布；刷新后 URL 仍为 `/?e2e=6eb061a`，页面为仪表盘；项目卡片仍显示 2 张图片。 |
+| URL 回归测试 | PASS | 新增 `project-workspace-url.test.ts`，先验证模块缺失导致 RED，再实现并通过。 |
+| 修复行为 | PASS（本地） | 成功 `loadProjectById()` 后使用 `history.replaceState` 写入 `projectId`，保留 `e2e` 等无关查询参数并移除 `view=dashboard`。 |
+| 定向回归 | PASS | `project-workspace-url.test.ts` 与 `canvas-project-reopen-contract.test.ts` 共 4/4 通过。 |
+| 全量质量门禁 | PASS WITH ENVIRONMENT SKIPS | Vitest 297 files / 1341 tests 通过；3 files / 4 PostgreSQL 环境用例跳过；TypeScript、生产构建通过；ESLint 0 error / 949 历史 warning。 |
+| 部署后 Chrome 验收 | PENDING | 需要将本次修复部署后，用同一已保存项目刷新，确认 URL 含 `projectId` 且保持画布。 |
 | Production build | PASS | `pnpm build` 退出 0，Next.js 16.2.10 生成 111 个路由；仅有既有 localStorage 路径警告。 |
 
 结论：供应商多任务提交与逐张返回已取得真实证据；画布归并与供应商归属修复尚未部署，当前发布结论仍为**不通过**。

@@ -503,7 +503,8 @@ await page.evaluate(() => {
 | **修复文件** | `src/components/canvas-workspace.tsx`、`src/lib/canvas-generation-reconciliation.ts`。 |
 | **新增测试** | `canvas-generation-reconciliation.test.ts` 覆盖占位替换、已渲染结果去重及恢复场景的位置回退；`canvas-progressive-generation-contract.test.ts` 锁定批次收尾必须调用归并器。 |
 | **本地结果** | 定向回归 11/11 通过；完整 Vitest 为 296 files / 1340 tests passed、3 files / 4 PostgreSQL tests skipped、0 failed；`pnpm ts-check` 通过；`pnpm lint` 为 0 errors / 949 historical warnings；`pnpm build` 生成 111 个路由并退出 0。 |
-| **状态** | 本地已修复，待推送、部署后在真实 Pear `n=2` 链路复验。 |
+| **云端复验** | 2026-08-02，已登录 Chrome 新建项目 `project_1785672740345_w0o09zyjz`，同一 Pear `gpt-image-2` `n=2` 请求最终只得到两张图片；持久化 URL 分别为 `gen-1785673016023-ol4seq.png` 与 `gen-1785673016017-w0aer2.png`，画布位置为 `(810,232)`、`(1130,232)`，项目同步日志为 `canvasImages: 2`。 |
+| **状态** | 已修复并完成真实云端 Chrome 回归。 |
 
 ### BUG-026: 轮询结果缺少展示名时将 Pear 误标为 FHL
 
@@ -518,4 +519,21 @@ await page.evaluate(() => {
 | **修复文件** | `src/components/canvas-workspace.tsx`。 |
 | **修复方案** | 在单任务完成、即时替换和批次收尾三个路径中均以请求中明确的 `params.providerId` 作为 `providerName` 缺失时的回退。 |
 | **新增测试** | `canvas-progressive-generation-contract.test.ts` 锁定完成路径保留 `params.providerId`。 |
-| **状态** | 本地已修复，待部署后的真实 UI 归属复验。 |
+| **云端复验** | 与 BUG-025 同一真实请求。两张图像的画布元数据和可视徽标均为 `gpt-image-2 / PearAPI 图像`，未再显示 FHL；浏览器未出现 JavaScript 弹窗，Console `error`/`warn` 为空。 |
+| **状态** | 已修复并完成真实云端 Chrome 回归。 |
+
+### BUG-027: 已保存项目刷新后回到项目仪表盘
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1（项目连续性：刷新后不能直接回到正在编辑的画布） |
+| **发现环境** | 已部署 Chrome，`https://wjaigc.coze.site/?e2e=6eb061a`，2026-08-02。 |
+| **前置条件** | 已登录用户在新建项目中使用 Pear `gpt-image-2` 成功生成并保存两张图片。 |
+| **稳定复现** | 在画布中打开已保存项目后直接刷新浏览器。 |
+| **实际结果** | 地址中没有 `projectId`，初始化逻辑返回“我的项目”仪表盘；仪表盘仍显示该项目有 2 张图片，证明数据已经保存但当前画布上下文丢失。 |
+| **预期结果** | 打开或新建项目后，地址栏保留当前 `projectId`；刷新后直接恢复相同项目画布及其已保存图片。 |
+| **根因** | `loadProjectById()` 只更新 React 内存状态，未同步 URL；`getInitialWorkspaceMode()` 仅在 URL 含 `projectId` 时进入画布。 |
+| **修复文件** | `src/lib/project-workspace-url.ts`、`src/components/canvas-workspace.tsx`。 |
+| **新增测试** | `project-workspace-url.test.ts` 先 RED：断言保留无关查询参数、清理 `view=dashboard` 并写入 `projectId`；随后 GREEN。 |
+| **本地回归** | 定向 4/4 通过；全量 Vitest 297 files / 1341 tests 通过，3 files / 4 PostgreSQL 环境用例跳过；TypeScript 通过；ESLint 0 error / 949 historical warnings；生产构建通过。 |
+| **状态** | 本地已修复，待推送、部署后执行 Chrome 刷新恢复验收。 |
