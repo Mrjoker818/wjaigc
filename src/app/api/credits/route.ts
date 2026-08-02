@@ -5,6 +5,7 @@ import { execSql, isDatabaseConfigured } from '@/lib/db-client';
 import { CREDITS_TO_CNY, CNY_TO_CREDITS, IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS, RECHARGE_PACKAGES, getModelPricingInfo } from '@/lib/credits';
 import { getPaymentStatus } from '@/lib/payment-config';
 import { loadCreditPricingConfig, resolveConfiguredCreditCost } from '@/lib/credit-pricing';
+import { normalizePaymentTimestamp } from '@/lib/payment-order-time';
 
 type RechargeOrder = {
   order_id: string;
@@ -77,9 +78,9 @@ export async function GET(request: NextRequest) {
             bonus: row.bonus,
             paymentMethod: row.payment_method,
             status: row.payment_status,
-            createdAt: row.created_at,
-            paidAt: row.paid_at,
-            updatedAt: row.updated_at,
+            createdAt: normalizePaymentTimestamp(row.created_at),
+            paidAt: normalizePaymentTimestamp(row.paid_at),
+            updatedAt: normalizePaymentTimestamp(row.updated_at),
           })),
         });
       } catch (dbErr) {
@@ -113,9 +114,9 @@ export async function GET(request: NextRequest) {
             bonus: row.bonus,
             paymentMethod: row.payment_method,
             status: row.payment_status,
-            createdAt: row.created_at,
-            submittedAt: row.submitted_at,
-            expiresAt: row.expires_at,
+            createdAt: normalizePaymentTimestamp(row.created_at),
+            submittedAt: normalizePaymentTimestamp(row.submitted_at),
+            expiresAt: normalizePaymentTimestamp(row.expires_at),
           })),
         });
       } catch (dbErr) {
@@ -347,8 +348,8 @@ export async function POST(request: NextRequest) {
             paymentMethod: r.payment_method,
             paymentStatus: r.payment_status === 'failed' ? 'rejected' : r.payment_status,
             rejectReason: r.admin_note || r.payment_note || null,
-            createdAt: Number(r.created_at) || 0,
-            paidAt: r.paid_at ? Number(r.paid_at) : undefined,
+            createdAt: normalizePaymentTimestamp(r.created_at),
+            paidAt: normalizePaymentTimestamp(r.paid_at),
           },
         });
       } catch (dbErr) {
@@ -591,8 +592,8 @@ export async function POST(request: NextRequest) {
             bonus: Number(r.bonus) || 0,
             paymentMethod: r.payment_method,
             status: r.payment_status === 'failed' ? 'rejected' : r.payment_status,
-            createdAt: Number(r.created_at) || 0,
-            paidAt: r.paid_at ? Number(r.paid_at) : undefined,
+            createdAt: normalizePaymentTimestamp(r.created_at),
+            paidAt: normalizePaymentTimestamp(r.paid_at),
             remark: r.payment_note as string | null,
           })),
         });

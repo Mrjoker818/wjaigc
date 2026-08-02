@@ -125,6 +125,15 @@ export function parseLayerRequest(value: unknown): LayerDecompositionRequest {
     'modelId',
     MAX_MODEL_ID_LENGTH,
   );
+  if (
+    body.requireTransparentSubject !== undefined
+    && typeof body.requireTransparentSubject !== 'boolean'
+  ) {
+    throw new LayerRequestValidationError(
+      'LAYER_TRANSPARENCY_INVALID',
+      'requireTransparentSubject must be a boolean',
+    );
+  }
 
   const hasExactCloudTarget = Boolean(providerId && modelId);
   if (
@@ -137,7 +146,13 @@ export function parseLayerRequest(value: unknown): LayerDecompositionRequest {
     );
   }
 
-  return { imageUrl, engine, providerId, modelId };
+  return {
+    imageUrl,
+    engine,
+    providerId,
+    modelId,
+    requireTransparentSubject: body.requireTransparentSubject === true,
+  };
 }
 
 export function validateLayerIdempotencyKey(value: unknown): string {

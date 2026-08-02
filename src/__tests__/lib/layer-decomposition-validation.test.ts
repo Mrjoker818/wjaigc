@@ -43,7 +43,22 @@ describe('layer decomposition request validation', () => {
       engine: 'smart',
       providerId: 'pear',
       modelId: 'Image-Layered',
+      requireTransparentSubject: false,
     });
+  });
+
+  it('preserves an explicit transparent subject requirement', () => {
+    expect(parseLayerRequest({
+      imageUrl: '/api/serve-upload/source.png',
+      requireTransparentSubject: true,
+    }).requireTransparentSubject).toBe(true);
+  });
+
+  it('rejects a non-boolean transparent subject requirement', () => {
+    expect(() => parseLayerRequest({
+      imageUrl: '/api/serve-upload/source.png',
+      requireTransparentSubject: 'yes',
+    })).toThrow(/transparent.*boolean/i);
   });
 
   it('rejects oversized data URLs and unknown modes', () => {

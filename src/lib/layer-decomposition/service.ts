@@ -31,6 +31,7 @@ import { refineLayerAssets } from '@/lib/layer-decomposition/post-process';
 import { extractEditableLayersFromPsd } from '@/lib/layer-decomposition/psd-extractor';
 import { resolveLayerProvider, LayerProviderError } from '@/lib/layer-decomposition/provider';
 import { evaluateLayerQuality } from '@/lib/layer-decomposition/quality-gate';
+import { evaluateTransparentSubject } from '@/lib/layer-decomposition/transparency-gate';
 import {
   downloadPearPsd,
   resolveLayerSourceImage,
@@ -509,6 +510,25 @@ async function runLocalAndComplete(
         );
         return;
       }
+      if (request.requireTransparentSubject) {
+        const transparency = await evaluateTransparentSubject(local.layers, {
+          loadLayer: async (layer) => {
+            const buffer = local.buffers.get(layer.id);
+            if (!buffer) throw new Error(`Missing local layer buffer: ${layer.id}`);
+            return buffer;
+          },
+        });
+        if (!transparency.ok) {
+          await failTask(
+            task.id,
+            'LAYER_TRANSPARENT_SUBJECT_UNAVAILABLE',
+            'The transparent output option requires a subject layer with real alpha-zero background pixels',
+            'failed',
+            leaseOwner,
+          );
+          return;
+        }
+      }
       const reconstruction = await evaluateAndCorrectReconstruction({
         source: source.buffer,
         layers: local.layers,
@@ -675,6 +695,35 @@ async function processPearArtifact(
         edgeContamination: refined.metrics.edgeContamination,
       });
       await assertTaskActive(task.id, task.userId, signal, attemptId);
+      if (request.requireTransparentSubject) {
+        const transparency = await evaluateTransparentSubject(refined.layers, {
+          loadLayer: async (layer) => {
+            const buffer = refined.buffers.get(layer.id);
+            if (!buffer) throw new Error(`Missing refined layer buffer: ${layer.id}`);
+            return buffer;
+          },
+        });
+        if (!transparency.ok) {
+          if (request.engine === 'smart') {
+            await fallbackToLocal(
+              task,
+              request,
+              'Pear output did not contain a subject layer with real transparency',
+              signal,
+              attemptId,
+            );
+          } else {
+            await failTask(
+              task.id,
+              'LAYER_TRANSPARENT_SUBJECT_UNAVAILABLE',
+              'The transparent output option requires a subject layer with real alpha-zero background pixels',
+              'failed',
+              attemptId,
+            );
+          }
+          return;
+        }
+      }
       if (quality.status === 'fail') {
         if (request.engine === 'smart') {
           await fallbackToLocal(

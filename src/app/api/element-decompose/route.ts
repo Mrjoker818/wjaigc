@@ -145,6 +145,9 @@ function parseRequest(value: unknown, request: NextRequest): ElementDecomposeReq
   }
   const engine = layers.engine ?? 'smart';
   if (!['smart', 'cloud', 'local'].includes(String(engine))) return badRequest('ELEMENT_LAYER_MODE_INVALID', 'layer engine is invalid');
+  if (layers.requireTransparentSubject !== undefined && typeof layers.requireTransparentSubject !== 'boolean') {
+    return badRequest('ELEMENT_LAYER_TRANSPARENCY_INVALID', 'layers.requireTransparentSubject must be a boolean');
+  }
   const providerId = stringField(layers.providerId, 'providerId', 128, false);
   const modelId = stringField(layers.modelId, 'modelId', 256, false);
   if ((engine === 'cloud' && (!providerId || !modelId)) || Boolean(providerId) !== Boolean(modelId)) {
@@ -162,7 +165,12 @@ function parseRequest(value: unknown, request: NextRequest): ElementDecomposeReq
       providerId: boardProviderId,
       modelId: boardModelId,
     },
-    layers: { engine: engine as ElementDecomposeRequest['layers']['engine'], providerId, modelId },
+    layers: {
+      engine: engine as ElementDecomposeRequest['layers']['engine'],
+      providerId,
+      modelId,
+      requireTransparentSubject: layers.requireTransparentSubject === true || background === 'transparent',
+    },
   };
 }
 

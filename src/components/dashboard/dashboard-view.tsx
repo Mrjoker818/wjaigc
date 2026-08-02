@@ -7,6 +7,7 @@ import DataManagerTab from './data-manager-tab';
 import DesktopAdminTab from './desktop-admin-tab';
 import UserSettingsTab from './user-settings-tab';
 import UserCreditsTab from './user-credits-tab';
+import { formatPaymentTimestamp } from '@/lib/payment-order-time';
 import {
   FolderOpen, Plus, Search, Star, Trash2, MoreVertical, MoreHorizontal, Image,
   Sparkles, LayoutTemplate, Layers, Clock, ChevronRight, ArrowRight,
@@ -203,7 +204,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   // ─── Admin: User management state ───
   const [adminUsers, setAdminUsers] = useState<User[]>([]);
   const [newUserName, setNewUserName] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('123456');
+  const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -380,7 +381,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [configSaving, setConfigSaving] = useState(false);
   const [configSaveMsg, setConfigSaveMsg] = useState<string | null>(null);
   // Admin pending orders
-  const [auditOrders, setAuditOrders] = useState<Array<{ id: string; userId: string; userName: string; amount: number; priceCny: number; bonus: number; paymentMethod: string; status: string; createdAt: string; paidAt: string; updatedAt: string }>>([]);
+  const [auditOrders, setAuditOrders] = useState<Array<{ id: string; userId: string; userName: string; amount: number; priceCny: number; bonus: number; paymentMethod: string; status: string; createdAt?: unknown; paidAt?: unknown; updatedAt?: unknown }>>([]);
   const [creditsPricing, setCreditsPricing] = useState<{
     creditsToCNY: number;
     cnyToCredits: number;
@@ -1391,7 +1392,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       credentials: 'include',
       body: JSON.stringify({ action: 'create', name: newUserName.trim(), password: newUserPassword.trim(), email: newUserEmail.trim() || undefined }),
     });
-    setNewUserName(''); setNewUserPassword('123456'); setNewUserEmail('');
+    setNewUserName(''); setNewUserPassword(''); setNewUserEmail('');
     await refreshAdmin();
     window.dispatchEvent(new Event('wujie-admin-users-updated'));
   };
@@ -4057,7 +4058,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             </span>
                           </div>
                           <div className={`text-xs ${textSecondary} mt-0.5`}>
-                              {order.userId ? `用户: ${order.userId}` : ''} {order.createdAt ? new Date(order.createdAt).toLocaleString('zh-CN') : ''}
+                              {order.userId ? `用户: ${order.userId}` : ''} {formatPaymentTimestamp(order.createdAt)}
                             </div>
                           </div>
                           <div className="text-right">

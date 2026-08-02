@@ -24,6 +24,7 @@ export interface ElementDecomposeRequest {
     engine: 'smart' | 'cloud' | 'local';
     providerId?: string;
     modelId?: string;
+    requireTransparentSubject?: boolean;
   };
 }
 

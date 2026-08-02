@@ -5,8 +5,10 @@ const mocks = vi.hoisted(() => ({
   requireAdminUser: vi.fn(),
   listManagedUsers: vi.fn(),
   dbGetUserData: vi.fn(),
+  dbGetDashboardStats: vi.fn(),
   execSql: vi.fn(),
   isDatabaseConfigured: vi.fn(),
+  getApiProviders: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -16,13 +18,18 @@ vi.mock('@/lib/server-auth', () => ({
 }));
 vi.mock('@/lib/db-storage', () => ({
   dbGetUserData: mocks.dbGetUserData,
+  dbGetDashboardStats: mocks.dbGetDashboardStats,
 }));
 vi.mock('@/lib/db-client', () => ({
   execSql: mocks.execSql,
   isDatabaseConfigured: mocks.isDatabaseConfigured,
 }));
+vi.mock('@/lib/server-api-config', () => ({
+  getApiProviders: mocks.getApiProviders,
+}));
 
 import { GET as getCreditsOverview } from '@/app/api/admin/credits/overview/route';
+import { GET as getDashboardStats } from '@/app/api/admin/dashboard-stats/route';
 import { GET as getUserImages } from '@/app/api/admin/user-images/route';
 
 const managedUsers = [
@@ -93,5 +100,36 @@ describe('admin user count consistency', () => {
         projectCount: 0,
       }),
     ]);
+  });
+
+  it('uses the managed-user count in dashboard statistics and preserves the legacy stats envelope', async () => {
+    mocks.dbGetDashboardStats.mockResolvedValue({
+      totalUsers: 1,
+      weekActive: 1,
+      totalCredits: 50,
+      creditsRecharged: 50,
+      creditsConsumed: 0,
+      todayGenerations: 0,
+      totalApiCalls: 0,
+      userTrend: [],
+      creditTrend: [],
+      modelRank: [],
+      providerStatus: [],
+      alerts: [],
+      recentUsers: [],
+    });
+    mocks.getApiProviders.mockResolvedValue([]);
+
+    const response = await getDashboardStats(
+      new NextRequest('http://localhost/api/admin/dashboard-stats?period=7'),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.totalUsers).toBe(managedUsers.length);
+    expect(body.stats).toEqual(expect.objectContaining({
+      totalUsers: managedUsers.length,
+      totalCredits: 50,
+    }));
   });
 });

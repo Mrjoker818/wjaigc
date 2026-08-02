@@ -5,6 +5,7 @@ import {
   type CloudTaskStatus,
   type CloudTask,
 } from '@/lib/cloud-task-storage';
+import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 
 interface ImageTaskSubmission {
   taskId: string;
@@ -32,6 +33,7 @@ interface ImageTaskTerminal {
   buttons?: unknown[];
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
+  generationRouteAudit?: GenerationRouteAudit | null;
   persist?: boolean;
 }
 
@@ -120,6 +122,7 @@ export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTe
         maskUrls,
         ...(input.gridImageUrl ? { gridImageUrl: input.gridImageUrl } : {}),
         ...(input.buttons?.length ? { buttons: input.buttons } : {}),
+        ...(input.generationRouteAudit ? { generationRouteAudit: input.generationRouteAudit } : {}),
       }
     : undefined;
 

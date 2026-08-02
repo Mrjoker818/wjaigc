@@ -187,7 +187,10 @@ describe('element decomposition parent idempotency', () => {
       sourceHash: 'a'.repeat(64),
     }));
     expect(layers.submit).toHaveBeenCalledWith(expect.objectContaining({
-      request: expect.objectContaining({ imageUrl: managedUrl }),
+      request: expect.objectContaining({
+        imageUrl: managedUrl,
+        requireTransparentSubject: true,
+      }),
     }));
   });
 

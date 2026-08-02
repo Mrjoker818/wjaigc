@@ -1,6 +1,8 @@
 // 用户相关的类型定义
 
 import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
+import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
+import type { VideoRetryPayload } from '@/lib/video-processing-state';
 
 export interface User {
   id: string;
@@ -105,6 +107,7 @@ export interface CanvasImage {
   modelName?: string;
   apiProvider?: string;
   apiBaseUrl?: string;
+  generationRouteAudit?: GenerationRouteAudit;
   threeDModelUrl?: string;
   threeDModelUrls?: Record<string, string>;
   threeDThumbnailUrls?: Record<string, string>;
@@ -116,7 +119,11 @@ export interface CanvasImage {
     status: string;
     progress: number;
     taskId?: string;
+    sourceUrl?: string;
+    error?: string;
     startTime?: number;
+    retryable?: boolean;
+    retryPayload?: VideoRetryPayload;
   };
   generatedFromImageId?: string;
   annotationVersionId?: string;

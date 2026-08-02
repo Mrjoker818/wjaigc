@@ -974,9 +974,13 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const [, ] = useState('通用');
 
   // P2: 撤销重做
-  const [historyStack, setHistoryStack] = useState<HistoryEntry[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const historyIndexRef = useRef(-1);
+  const [historyStack, setHistoryStack] = useState<HistoryEntry[]>(() => [{
+    nodes: wf.nodes,
+    connections: wf.connections,
+    label: '初始状态',
+  }]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const historyIndexRef = useRef(0);
   const isUndoRedoRef = useRef(false);
   const handleCascadeRunRef = useRef<(nodeId: string) => Promise<void>>(async () => {});
   const handleDeleteNodeRef = useRef<(nodeId: string) => void>(() => {});

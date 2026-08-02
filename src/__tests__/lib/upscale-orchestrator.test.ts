@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createUpscaleExecutionPlan,
+  resolveUpscaleProductMode,
   type UpscaleProviderCapability,
 } from '@/lib/upscale-orchestrator';
 
@@ -21,6 +22,12 @@ const localAi: UpscaleProviderCapability = {
 };
 
 describe('upscale execution planning', () => {
+  it('forces an exact 302 selection into AI-only mode', () => {
+    expect(resolveUpscaleProductMode('auto', true)).toBe('ai-only');
+    expect(resolveUpscaleProductMode('fidelity', true)).toBe('ai-only');
+    expect(resolveUpscaleProductMode('auto', false)).toBe('auto');
+  });
+
   it('uses a dedicated AI provider and overlapping tiles for 8K', () => {
     const plan = createUpscaleExecutionPlan({
       mode: 'auto',

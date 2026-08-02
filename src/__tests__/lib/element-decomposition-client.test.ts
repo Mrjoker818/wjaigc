@@ -44,7 +44,7 @@ describe('element decomposition client', () => {
       imageUrl: '/api/serve-upload/uploads/source.png',
       outputMode: 'both',
       board: { aspectRatio: '16:9', background: 'transparent' },
-      layers: { engine: 'smart' },
+      layers: { engine: 'smart', requireTransparentSubject: true },
     });
   });
 
@@ -68,6 +68,7 @@ describe('element decomposition client', () => {
       engine: 'cloud',
       providerId: 'pear-provider',
       modelId: 'Image-Layered',
+      requireTransparentSubject: false,
     });
   });
 

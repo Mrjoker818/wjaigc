@@ -878,6 +878,7 @@ export async function POST(request: NextRequest) {
           maskUrls: Array.isArray(safeResult?.maskUrls) ? safeResult.maskUrls : undefined,
           modelName: (safeResult?.usedModel as string) || (safeResult?.modelName as string) || '',
           providerName: (safeResult?.providerName as string) || (safeResult?.providerId as string) || '',
+          generationRouteAudit: safeResult?.generationRouteAudit,
         }, { status: 200 });
       }
       if (registryTask.status === 'failed') {
@@ -2083,7 +2084,7 @@ export async function POST(request: NextRequest) {
       });
       const gridImageUrl = typeof pollResult.gridImageUrl === 'string' ? pollResult.gridImageUrl : '';
       const buttons = Array.isArray(pollResult.buttons) ? pollResult.buttons : [];
-      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: imageUrls[0], imageUrls, maskUrl: maskUrls[0] || '', maskUrls, gridImageUrl, buttons, usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName } });
+      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: imageUrls[0], imageUrls, maskUrl: maskUrls[0] || '', maskUrls, gridImageUrl, buttons, usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName, generationRouteAudit: existingResult.generationRouteAudit } });
       void recordImageTaskTerminal(taskId, {
         status: 'completed',
         imageUrl: imageUrls[0],
@@ -2093,6 +2094,7 @@ export async function POST(request: NextRequest) {
         gridImageUrl,
         buttons,
         creditStatus: regInfo?.creditCost && regInfo.creditCost > 0 ? 'charged' : 'not-applicable',
+        generationRouteAudit: existingResult.generationRouteAudit as import('@/lib/generation-route-audit').GenerationRouteAudit | undefined,
       }).catch(error => console.warn('[poll-task] 云端任务完成记录失败:', error));
 
       // ★ 将 cropInfo（蒙版修图需要）和 targetWidth/Height（扩展需要）等元数据附加到 pollResult
@@ -2109,6 +2111,7 @@ export async function POST(request: NextRequest) {
       (pollResult as Record<string, unknown>).usedModel = model || regUsedModel || existingResult.usedModel;
       (pollResult as Record<string, unknown>).modelName = finalModelName;
       (pollResult as Record<string, unknown>).providerName = finalProviderName;
+      (pollResult as Record<string, unknown>).generationRouteAudit = existingResult.generationRouteAudit;
 
       // ★ 同时更新本地完成缓存（Next.js dev模式下 registry 实例可能不一致）
       const cachedImageUrl = imageUrls[0];

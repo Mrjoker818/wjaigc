@@ -7,7 +7,7 @@ const password = process.env.E2E_TEST_PASSWORD;
 // The UI displays duplicate model labels across providers. Keep the provider
 // identity in the test input so it cannot silently select a different vendor.
 const model = process.env.E2E_GENERATION_MODEL;
-const paidGenerationApproved = process.env.E2E_ENABLE_PAID_GENERATION === 'true';
+const paidGenerationApproved = ['true', '1'].includes((process.env.E2E_ENABLE_PAID_GENERATION || '').toLowerCase());
 async function createUploadFixture(): Promise<Buffer> {
   return sharp({
     create: {
@@ -85,8 +85,13 @@ test.describe('P0 real user journey', () => {
       const canvasImage = canvasImages.last().locator('..');
       await canvasImage.click();
       // Use keyboard Delete for cross-browser reliability (hover-toolbar buttons are flaky in Firefox/WebKit)
+      const imageCountBeforeDelete = await canvasImages.count();
       await page.keyboard.press('Delete');
-      await expect.poll(() => canvasImages.count(), { timeout: 10_000 }).toBeLessThanOrEqual(beforeUpload);
+      await expect.poll(() => canvasImages.count(), { timeout: 10_000 }).toBe(imageCountBeforeDelete - 1);
+      await page.keyboard.press('Control+z');
+      await expect.poll(() => canvasImages.count(), { timeout: 10_000 }).toBe(imageCountBeforeDelete);
+      await page.keyboard.press('Control+Shift+z');
+      await expect.poll(() => canvasImages.count(), { timeout: 10_000 }).toBe(imageCountBeforeDelete - 1);
 
       // Upload once more so the movement and keyboard-delete checks remain
       // independent from the hover-toolbar deletion regression above.

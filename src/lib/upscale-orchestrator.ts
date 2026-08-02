@@ -33,6 +33,26 @@ export interface UpscaleExecutionPlan {
   targetScale: number;
 }
 
+/**
+ * A user-selected 302 model is an explicit provider choice, not a preference.
+ * It must never silently fall back to the local fidelity path after charging.
+ */
+export function resolveUpscaleProductMode(
+  requestedMode: string | undefined,
+  hasExact302Selection: boolean,
+): UpscaleProductMode {
+  if (hasExact302Selection) return 'ai-only';
+  if (requestedMode === 'ai' || requestedMode === 'ai-only') return 'ai-only';
+  if (
+    requestedMode === 'cpu'
+    || requestedMode === 'local'
+    || requestedMode === 'fidelity'
+  ) {
+    return 'fidelity';
+  }
+  return 'auto';
+}
+
 function assertDimensions(input: UpscaleExecutionPlanInput): void {
   const dimensions = [input.sourceWidth, input.sourceHeight, input.targetWidth, input.targetHeight];
   if (dimensions.some(value => !Number.isInteger(value) || value <= 0)) {

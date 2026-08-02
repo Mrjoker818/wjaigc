@@ -2,6 +2,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import type { DesignLayer } from '@/lib/psd-export';
+import { drawPsdCanvasSurface } from '@/lib/psd-canvas-surface';
 
 interface PsdCanvasProps {
   layers: DesignLayer[];
@@ -140,14 +141,7 @@ export function PsdCanvas({
     ctx.translate(pan.x, pan.y);
     ctx.scale(scale, scale);
 
-    // Draw canvas area shadow
-    ctx.shadowColor = 'rgba(0,0,0,0.15)';
-    ctx.shadowBlur = 20;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 4;
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, width, height);
-    ctx.shadowColor = 'transparent';
+    drawPsdCanvasSurface(ctx, width, height, checkerPatternRef.current);
 
     // Draw layers bottom to top
     for (const layer of layers) {

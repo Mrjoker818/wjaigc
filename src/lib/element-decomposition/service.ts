@@ -117,6 +117,22 @@ function resultOf(task: CloudTask): Record<string, unknown> {
   return task.result && typeof task.result === 'object' ? task.result : {};
 }
 
+function layerRequestForElement(
+  request: ElementDecomposeRequest,
+  imageUrl: string,
+) {
+  return {
+    imageUrl,
+    engine: request.layers.engine,
+    providerId: request.layers.providerId,
+    modelId: request.layers.modelId,
+    requireTransparentSubject: (
+      request.layers.requireTransparentSubject === true
+      || request.board.background === 'transparent'
+    ),
+  };
+}
+
 function parentResponse(task: CloudTask): ElementParentState {
   const result = resultOf(task);
   const rawBranches = result.branches && typeof result.branches === 'object' ? result.branches as Partial<Record<ElementBranch, ElementBranchState>> : {};
@@ -180,12 +196,7 @@ export async function submitElementDecomposition(input: {
           userId: input.userId,
           userRole: input.userRole,
           idempotencyKey: key,
-          request: {
-            imageUrl: persistedSource.managedUrl,
-            engine: input.request.layers.engine,
-            providerId: input.request.layers.providerId,
-            modelId: input.request.layers.modelId,
-          },
+          request: layerRequestForElement(input.request, persistedSource.managedUrl),
         });
         branches.layers = { branch, taskId: child.taskId, idempotencyKey: key, status: mapStatus(child.status), progress: child.progress, result: child.result as Record<string, unknown> | undefined, attempt: 1, previousTaskIds: [] };
       } else {
@@ -305,7 +316,12 @@ export async function retryElementBranch(input: { taskId: string; branch: Elemen
   let updated: ElementBranchState;
   try {
     if (input.branch === 'layers') {
-      const child = await submitLayerDecomposition({ userId: input.userId, userRole: input.userRole, idempotencyKey: attemptKey, request: { imageUrl: source.managedUrl, engine: request.layers.engine, providerId: request.layers.providerId, modelId: request.layers.modelId } });
+      const child = await submitLayerDecomposition({
+        userId: input.userId,
+        userRole: input.userRole,
+        idempotencyKey: attemptKey,
+        request: layerRequestForElement(request, source.managedUrl),
+      });
       updated = { ...reserved, taskId: child.taskId, status: mapStatus(child.status), progress: child.progress, result: child.result as Record<string, unknown> | undefined, submissionPending: false };
     } else {
       const child = await submitElementBoard({ userId: input.userId, userRole: input.userRole, idempotencyKey: attemptKey, sourceUrl: source.managedUrl, sourceHash: source.sha256, aspectRatio: request.board.aspectRatio, background: request.board.background, providerId: request.board.providerId, modelId: request.board.modelId });

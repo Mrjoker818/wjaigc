@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Loader2, Check, X, RefreshCw, Clock, Ban, CheckCircle2 } from 'lucide-react';
+import { formatPaymentTimestamp } from '@/lib/payment-order-time';
 
 interface RechargeOrder {
   orderId: string;
@@ -14,8 +15,8 @@ interface RechargeOrder {
   credits: number;
   paymentMethod: string;
   status: 'pending' | 'submitted' | 'paid' | 'cancelled' | 'rejected';
-  createdAt: number;
-  paidAt?: number;
+  createdAt?: unknown;
+  paidAt?: unknown;
   remark?: string;
   screenshotUrl?: string;
 }
@@ -176,7 +177,7 @@ export function AdminRechargeOrders() {
                   <td className="p-3">{getMethodLabel(order.paymentMethod)}</td>
                   <td className="p-3">{getStatusBadge(order.status)}</td>
                   <td className="p-3 text-xs text-muted-foreground">
-                    {new Date(order.createdAt).toLocaleString('zh-CN')}
+                    {formatPaymentTimestamp(order.createdAt)}
                   </td>
                   <td className="p-3 text-right">
                     {order.status === 'submitted' && (

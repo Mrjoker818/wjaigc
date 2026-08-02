@@ -4,6 +4,10 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS, shouldStartResumedTaskPolling } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
+import {
+  buildVideoFailureProcessing,
+  createVideoRetryPayload,
+} from '@/lib/video-processing-state';
 import { applyTaskIdsToProcessingPlaceholders, shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
 import { findUniqueLegacyTaskMatch, type RecoverableLegacyTask } from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
@@ -66,6 +70,7 @@ interface FavoriteItem {
 }
 import { User, Project, ImageGroupData, CanvasImage as PersistableCanvasImage } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
+import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
@@ -118,6 +123,15 @@ const EMPTY_QUICK_CREATE_MODEL_POLICY: QuickCreateModelPolicy = {
   autoModelRouting: true,
   globalDefault: '',
   quickCreateDefault: '',
+};
+
+const EMPTY_QUICK_CREATE_COMPILE_STATE: QuickCreateCompileViewState = {
+  phase: null,
+  statusMessage: '',
+  streamText: '',
+  result: null,
+  error: '',
+  isCompiling: false,
 };
 
 function getInitialProjectId(): string | null {
@@ -333,14 +347,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [quickCreateChatPolicy, setQuickCreateChatPolicy] = useState<QuickCreateModelPolicy>(EMPTY_QUICK_CREATE_MODEL_POLICY);
   const [quickCreateModelsLoading, setQuickCreateModelsLoading] = useState(false);
   const [quickCreateModelsError, setQuickCreateModelsError] = useState('');
-  const [quickCreateCompileState, setQuickCreateCompileState] = useState<QuickCreateCompileViewState>({
-    phase: null,
-    statusMessage: '',
-    streamText: '',
-    result: null,
-    error: '',
-    isCompiling: false,
-  });
+  const [quickCreateCompileState, setQuickCreateCompileState] = useState<QuickCreateCompileViewState>(EMPTY_QUICK_CREATE_COMPILE_STATE);
   const quickCreateCompileControllerRef = useRef<AbortController | null>(null);
   // 从工作台加载指定项目
   const loadProjectById = useCallback(async (projectId: string) => {
@@ -349,12 +356,18 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       skipHistoryRef.current = true;
       incrementalHistoryRef.current.clear();
       prevImagesRef.current = [];
+      quickCreateCompileControllerRef.current?.abort();
+      quickCreateCompileControllerRef.current = null;
+      setQuickCreateCompileState(EMPTY_QUICK_CREATE_COMPILE_STATE);
 
       const userMgr = UserManagerCore.getInstance();
       const projects = userMgr.getProjects();
       const targetProject = projects.find((p: Project) => p.id === projectId);
       if (targetProject) {
         setCurrentProject(targetProject);
+        const restoredViewState = normalizeCanvasViewState(targetProject.metadata?.viewState);
+        viewStateRef.current = restoredViewState;
+        setViewState(restoredViewState);
         // ★ 调试日志：追踪项目加载
         console.log('[page] loadProjectById:', targetProject.id, targetProject.name, 'canvasImages:', targetProject.canvasImages?.length || 0);
         if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
@@ -388,6 +401,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             // Metadata fields — must be preserved for display
             modelName: img.modelName || undefined,
             apiProvider: img.apiProvider || undefined,
+            generationRouteAudit: img.generationRouteAudit || undefined,
             generatedFromImageId: img.generatedFromImageId || undefined,
             relationType: img.relationType || undefined,
             isProcessingPlaceholder: img.isProcessingPlaceholder || false,
@@ -620,6 +634,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     modelName: img.modelName || '',
                     apiProvider: img.apiProvider || '',
                     apiBaseUrl: img.apiBaseUrl || '',
+                    generationRouteAudit: img.generationRouteAudit || undefined,
                     // Video fields — must be preserved to avoid data loss on project load
                     videoUrl: img.videoUrl || undefined,
                     videoDuration: img.videoDuration || undefined,
@@ -1158,6 +1173,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             modelName: img.modelName || '',
             apiProvider: img.apiProvider || '',
             apiBaseUrl: img.apiBaseUrl || '',
+            generationRouteAudit: img.generationRouteAudit || undefined,
             sourceUrl: img.sourceUrl || '',
             generatedFromImageId: img.generatedFromImageId || '',
             annotationVersionId: img.annotationVersionId || '',
@@ -1202,10 +1218,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           content: JSON.stringify({
             projectId: project.id,
             canvasImages: persistableCanvasImages,
-            metadata: {
-              ...(project.metadata || {}),
-              groups: groupsRef.current,
-              annotationsV2: annotationRecordsRef.current,
+          metadata: {
+            ...(project.metadata || {}),
+            groups: groupsRef.current,
+            viewState: viewStateRef.current,
+            annotationsV2: annotationRecordsRef.current,
             },
             savedAt: Date.now(),
           }, null, 2),
@@ -1260,6 +1277,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             modelName: img.modelName || '',
             apiProvider: img.apiProvider || '',
             apiBaseUrl: img.apiBaseUrl || '',
+            generationRouteAudit: img.generationRouteAudit || undefined,
             sourceUrl: img.sourceUrl || '',
             generatedFromImageId: img.generatedFromImageId || '',
             annotationVersionId: img.annotationVersionId || '',
@@ -1777,6 +1795,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 modelName: modelName || model,
                 apiProvider: providerName || '',
                 apiBaseUrl: apiBaseUrl || '',
+                generationRouteAudit: data.generationRouteAudit,
               } : img
             ));
           }
@@ -1820,7 +1839,21 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         const perTaskMaxPollTime = Math.min(600, Math.max(120, estimatedTime * 4 + 120)) * 1000;
         const globalStartTime = Date.now();
 
-        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string; modelName?: string; apiProvider?: string }> = [];
+        const completedImages: Array<{
+          id: string;
+          url: string;
+          prompt: string;
+          model?: string;
+          quality?: string;
+          aspectRatio?: string;
+          stylePreset?: string;
+          category?: string;
+          size?: string;
+          sourceUrl?: string;
+          modelName?: string;
+          apiProvider?: string;
+          generationRouteAudit?: CanvasImage['generationRouteAudit'];
+        }> = [];
         let consecutiveErrors = 0;
         let terminalTaskCount = 0;
 
@@ -1937,6 +1970,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     sourceUrl: rawImageUrl,
                     modelName: pollData.modelName || undefined,
                     apiProvider: pollData.providerName || undefined,
+                    generationRouteAudit: pollData.generationRouteAudit,
                   });
                 });
                 taskCompleted = true;
@@ -2058,6 +2092,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               modelName: img.modelName || pollingModelName || img.model,
               apiProvider: img.apiProvider || pollingProviderName || '',
               apiBaseUrl: pollingApiBaseUrl || '',
+              generationRouteAudit: img.generationRouteAudit,
             };
           });
 
@@ -2810,6 +2845,22 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     directorIntent?: string;
     _vgenReqId?: string;
   }) => {
+    const markVideoPlaceholderFailed = (
+      placeholderId: string,
+      message: string | null | undefined,
+      label = '视频生成失败',
+    ) => {
+      setImages(prev => prev.map((image): CanvasImage => (
+        image.id === placeholderId
+          ? {
+            ...image,
+            isProcessingPlaceholder: true,
+            processing: buildVideoFailureProcessing(image.processing, message, label),
+          }
+          : image
+      )));
+    };
+
     // ★ 链式多片段生成：当 chainContinuity=true 且有多个场景时，顺序生成每个片段
     if (params.chainContinuity && params.multiShotScenes && params.multiShotScenes.length > 1) {
       console.log(`[handleVideoGenerate] Chain mode: ${params.multiShotScenes.length} scenes`);
@@ -2954,6 +3005,20 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             status: 'submitting',
             progress: 5,
             startTime: Date.now(),
+            retryPayload: createVideoRetryPayload({
+              ...params,
+              prompt: scene.prompt,
+              imageUrl: chainFirstFrame || (isFirstScene ? (params.firstFrameUrl || params.imageUrl) : undefined),
+              firstFrameUrl: undefined,
+              lastFrameUrl: undefined,
+              referenceImages: params.useGlobalReferences ? params.referenceImages : undefined,
+              characterReferences: params.useGlobalReferences ? params.characterReferences : undefined,
+              mode: 'image2video-first',
+              duration: scene.duration || params.duration,
+              cameraControl: scene.cameraControl,
+              multiShotScenes: undefined,
+              chainContinuity: false,
+            }),
           },
           aspectRatio: params.aspectRatio,
           model: params.model,
@@ -3066,14 +3131,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
           } else {
             // 场景失败，移除占位符
-            setImages(prev => prev.filter(img => img.id !== phId));
+            markVideoPlaceholderFailed(phId, sceneResult.error, `${sceneLabel} 视频生成失败`);
             toast.error(`${sceneLabel}生成失败`, { description: sceneResult.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
             // 链式生成：一个场景失败后停止后续场景
             break;
           }
         } catch (err: unknown) {
           const errorMsg = err instanceof Error ? err.message : '场景生成失败';
-          setImages(prev => prev.filter(img => img.id !== phId));
+          markVideoPlaceholderFailed(phId, errorMsg, `${sceneLabel} 视频生成失败`);
           toast.error(`${sceneLabel}生成失败`, { description: errorMsg, className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
           break;
         }
@@ -3121,6 +3186,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         status: 'submitting',
         progress: 5,
         startTime: Date.now(),
+        retryPayload: createVideoRetryPayload(params),
       },
       aspectRatio: params.aspectRatio,
       model: params.model,
@@ -3200,7 +3266,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const videoPollStartTime = Date.now();
       const pollVideoResult = async (attempt = 0): Promise<void> => {
         if (hasDirectVideoPollingTimedOut(attempt, Date.now() - videoPollStartTime)) {
-          setImages(prev => prev.filter(img => img.id !== phId));
+          markVideoPlaceholderFailed(phId, '已超过最大等待时间', '视频生成超时');
           toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
           setActiveGenerationCount(prev => Math.max(0, prev - 1));
           return;
@@ -3289,12 +3355,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 }
               } catch {}
             } else {
-              setImages(prev => prev.filter(img => img.id !== phId));
+              markVideoPlaceholderFailed(phId, '未获取到视频地址');
               toast.error('视频生成失败', { description: '未获取到视频地址', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
             }
             setActiveGenerationCount(prev => Math.max(0, prev - 1));
           } else if (pollData.status === 'failed') {
-            setImages(prev => prev.filter(img => img.id !== phId));
+            markVideoPlaceholderFailed(phId, pollData.error || '未知错误');
             toast.error('视频生成失败', { description: pollData.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
             setActiveGenerationCount(prev => Math.max(0, prev - 1));
             // 通知视频面板：shot 失败（解开 waitForShotTask 的等待）
@@ -3327,7 +3393,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : '视频生成失败';
-      setImages(prev => prev.filter(img => img.id !== phId));
+      markVideoPlaceholderFailed(phId, errorMsg);
       toast.error('视频生成失败', {
         description: errorMsg,
         className: themeStyle === 'monochrome'
@@ -3337,6 +3403,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       setActiveGenerationCount(prev => Math.max(0, prev - 1));
     }
   }, [setImages, themeStyle]);
+
+  const handleRetryVideoProcessing = useCallback((image: CanvasImage) => {
+    const retryPayload = image.processing?.retryPayload;
+    if (!retryPayload) {
+      toast.error('无法重新生成', { description: '该任务没有可恢复的原始参数' });
+      return;
+    }
+
+    setImages(prev => prev.filter(candidate => candidate.id !== image.id));
+    void handleVideoGenerate(retryPayload);
+  }, [handleVideoGenerate, setImages]);
 
   const handleAnalyzeImage = useCallback(async (imageData: string): Promise<string> => {
     try {
@@ -4492,6 +4569,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   threeDModelUrls: img.threeDModelUrls || undefined,
                   modelName: img.modelName || '', apiProvider: img.apiProvider || '',
                   apiBaseUrl: img.apiBaseUrl || '',
+                  generationRouteAudit: img.generationRouteAudit || undefined,
                   sourceUrl: img.sourceUrl || '',
                   generatedFromImageId: img.generatedFromImageId || '',
                   annotationVersionId: img.annotationVersionId || '',
@@ -4511,10 +4589,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 .filter(img => img.url || img.videoUrl || img.isProcessingPlaceholder) as PersistableCanvasImage[];
               mgr.updateProject(currentProject.id, {
                 canvasImages: persistableCanvasImages,
-                metadata: {
-                  ...(currentProject.metadata || {}),
-                  groups: groupsRef.current,
-                  annotationsV2: annotationRecordsRef.current,
+              metadata: {
+                ...(currentProject.metadata || {}),
+                groups: groupsRef.current,
+                viewState: viewStateRef.current,
+                annotationsV2: annotationRecordsRef.current,
                 },
               });
             }
@@ -4764,6 +4843,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   rotation: 0, zIndex: 0,
                    createdAt: img.createdAt || Date.now(),
                    prompt: img.prompt || '',
+                   ...(img.generationRouteAudit ? { generationRouteAudit: img.generationRouteAudit } : {}),
                    ...(img.groupId ? { groupId: img.groupId } : {}),
                    ...(img.annotationVersionId ? {
                      annotationVersionId: img.annotationVersionId,
@@ -4786,6 +4866,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   metadata: {
                     ...(currentProject.metadata || {}),
                     groups: groupsRef.current,
+                    viewState: viewStateRef.current,
                     annotationsV2: annotationRecordsRef.current,
                   },
                 });
@@ -4801,6 +4882,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onConnectionsChange={setCanvasConnections}
           versionHistoryManager={treeHistoryRef.current}
           onOpenVideoPanel={handleOpenVideoPanel}
+          onRetryProcessing={handleRetryVideoProcessing}
         />
       </div>
 

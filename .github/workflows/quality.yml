@@ -141,8 +141,8 @@ jobs:
               missing=1
             fi
           done
-          if [ "$E2E_ENABLE_PAID_GENERATION" != "1" ]; then
-            echo "::error title=Paid E2E disabled::E2E_ENABLE_PAID_GENERATION must be 1"
+          if [ "$E2E_ENABLE_PAID_GENERATION" != "1" ] && [ "$E2E_ENABLE_PAID_GENERATION" != "true" ]; then
+            echo "::error title=Paid E2E disabled::E2E_ENABLE_PAID_GENERATION must be 1 or true"
             missing=1
           fi
           if [ "$E2E_ENABLE_PAID_LAYERING" != "1" ]; then

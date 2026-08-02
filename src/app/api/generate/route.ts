@@ -24,6 +24,7 @@ import { getCloudTaskForUserByIdempotencyKey, updateCloudTask } from '@/lib/clou
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, getProviderAspectRatios, normalizeImageGenerationSelection, ModelParamType } from '@/lib/canvas-generation-group';
+import { buildGenerationRouteAudit } from '@/lib/generation-route-audit';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -429,6 +430,7 @@ export async function POST(request: NextRequest) {
           });
           console.log(`[generate] submitOnly bgRes status: ${bgRes.status}, ok: ${bgRes.ok}`);
           const bgData = await bgRes.json();
+          const bgGenerationRouteAudit = bgData.generationRouteAudit;
           console.log(`[generate] submitOnly bgData keys: ${Object.keys(bgData).join(',')}, success: ${bgData.success}, taskIds: ${bgData.taskIds?.length || 0}`);
 
           if (!bgRes.ok || !bgData.success) {
@@ -471,6 +473,7 @@ export async function POST(request: NextRequest) {
                   usedModel: bgData.model,
                   modelName: bgData.modelName,
                   providerName: bgData.providerName,
+                  generationRouteAudit: bgGenerationRouteAudit,
                   apiBaseUrl: bgData.apiBaseUrl,
                   providerId: bgData.providerId,
                 }
@@ -480,6 +483,7 @@ export async function POST(request: NextRequest) {
                 imageUrl: directUrls[0],
                 imageUrls: directUrls,
                 creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+                generationRouteAudit: bgGenerationRouteAudit,
               });
               console.log(`[generate] submitOnly direct mode: ${directUrls.length} images for ${asyncTaskId}`);
               return;
@@ -498,6 +502,7 @@ export async function POST(request: NextRequest) {
                 usedModel: bgData.model,
                 modelName: bgData.modelName,
                 providerName: bgData.providerName,
+                generationRouteAudit: bgGenerationRouteAudit,
                 apiBaseUrl: bgData.apiBaseUrl,
                 apiKey: bgData.apiKey,
                 providerId: bgData.providerId,
@@ -566,6 +571,7 @@ export async function POST(request: NextRequest) {
                   usedModel: bgData.model,
                   modelName: bgData.modelName,
                   providerName: bgData.providerName,
+                  generationRouteAudit: bgGenerationRouteAudit,
                   apiBaseUrl: bgData.apiBaseUrl,
                   providerId: bgData.providerId,
                 }
@@ -575,6 +581,7 @@ export async function POST(request: NextRequest) {
                 imageUrl: allUrls[0],
                 imageUrls: allUrls,
                 creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+                generationRouteAudit: bgGenerationRouteAudit,
               });
               console.log(`[generate] submitOnly mixed mode completed: ${allUrls.length} images for ${asyncTaskId}`);
             } else {
@@ -619,11 +626,12 @@ export async function POST(request: NextRequest) {
                   usedModel: bgData.model || directResult?.usedModel,
                   modelName: bgData.modelName || directResult?.modelName,
                   providerName: bgData.providerName || directResult?.providerName,
+                  generationRouteAudit: bgGenerationRouteAudit || directResult?.generationRouteAudit,
                   apiBaseUrl: bgData.apiBaseUrl || directResult?.apiBaseUrl,
                   providerId: bgData.providerId || directResult?.providerId,
                 }
               });
-              recordSubmitOnlyTerminal({ status: 'completed', imageUrl: imageUrls[0], imageUrls, creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable' });
+              recordSubmitOnlyTerminal({ status: 'completed', imageUrl: imageUrls[0], imageUrls, creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable', generationRouteAudit: bgGenerationRouteAudit || directResult?.generationRouteAudit });
             };
             const immediateDirect = collectDirectResults();
             if (immediateDirect.imageUrls.length > 0) {
@@ -660,6 +668,7 @@ export async function POST(request: NextRequest) {
                 usedModel: bgData.model,
                 modelName: bgData.modelName,
                 providerName: bgData.providerName,
+                generationRouteAudit: bgGenerationRouteAudit,
                 apiBaseUrl: bgData.apiBaseUrl,
                 apiKey: bgData.apiKey,
                 providerId: bgData.providerId,
@@ -937,6 +946,13 @@ export async function POST(request: NextRequest) {
     
     const providerHint = `${provider?.id || effectiveProviderId} ${provider?.displayName || provider?.name || ''} ${provider?.baseUrl || apiBaseUrl}`;
     let modelConfig = inferModelConfig(model, initialProfile, provider?.displayName, providerHint);
+    const requestedRoute = {
+      providerId: effectiveProviderId || provider?.id || 'unresolved-provider',
+      providerName: provider?.displayName || provider?.name || effectiveProviderId || '未匹配提供商',
+      modelId: rawModelId || model,
+      modelName: rawModelId || model,
+    };
+    let fallbackReason: string | undefined;
 
     // 构建备选模型列表（排除当前模型，优先管理员配置的模型）
     const candidateModels: { modelId: string; apiKey: string; baseUrl: string; providerId: string; displayName: string; advancedParams?: Record<string, string> }[] = [];
@@ -960,6 +976,7 @@ export async function POST(request: NextRequest) {
       if (candidateModels.length > 0) {
         const fallback = candidateModels.shift()!;
         console.log(`指定模型 ${model} 无凭证，自动切换到 ${fallback.modelId}`);
+        fallbackReason = `请求的提供商或模型未配置可用凭证，已切换到 ${fallback.displayName} / ${fallback.modelId}`;
         serverApiKey = fallback.apiKey;
         apiBaseUrl = normalizeApiBaseUrl(fallback.baseUrl);
         const fallbackProfile = resolveCompatProfile({ baseUrl: fallback.baseUrl, advancedParams: fallback.advancedParams });
@@ -2499,6 +2516,7 @@ export async function POST(request: NextRequest) {
               usedProviderId = result.usedProviderId;
               usedProviderName = candidate.displayName || candidate.modelId;
               usedApiBaseUrl = candidate.baseUrl;
+              fallbackReason = `请求路由返回可重试错误：${errMsg}`;
               try {
                 await appendUserJsonl(userId, 'images', {
                   type: 'submit',
@@ -2559,6 +2577,17 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
+    const generationRouteAudit = buildGenerationRouteAudit({
+      requested: requestedRoute,
+      actual: {
+        providerId: usedProviderId || 'unresolved-provider',
+        providerName: usedProviderName || usedProviderId || '未识别提供商',
+        modelId: usedModelId || model,
+        modelName: usedModelName || usedModelId || model,
+      },
+      fallbackReason,
+    });
+
     // ★ 统一使用 polling 模式返回，避免直接模式导致前端 fetch 长时间等待超时
     // 即使是直接返回的图片 URL，也注册到 task-registry 并返回 taskIds，
     // 让前端通过 poll-task 获取结果，确保请求快速响应
@@ -2588,6 +2617,7 @@ export async function POST(request: NextRequest) {
             usedModel: usedModelId,
             modelName: usedModelName,
             providerName: usedProviderName,
+            generationRouteAudit,
             apiBaseUrl: usedApiBaseUrl,
             apiKey: provider?.apiKey || serverApiKey,
             providerId: usedProviderId,
@@ -2598,12 +2628,14 @@ export async function POST(request: NextRequest) {
           status: 'completed',
           imageUrl: rawUrl,
           creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+          generationRouteAudit,
           persist: !_skipCloudTaskPersistence,
         }).catch(error => console.warn('[generate] 云端任务完成记录失败:', error));
         // 后台异步持久化：不阻塞响应，完成后更新 task 结果为持久化 URL
         const tid = directTid;
         const providerInfo = {
           usedModel: usedModelId, modelName: usedModelName, providerName: usedProviderName,
+          generationRouteAudit,
           apiBaseUrl: usedApiBaseUrl, apiKey: provider?.apiKey || serverApiKey,
           providerId: usedProviderId, advancedParams: provider?.advancedParams,
         };
@@ -2643,6 +2675,7 @@ export async function POST(request: NextRequest) {
         messageId: typeof messageId === 'string' ? messageId : undefined,
         providerId: usedProviderId,
         model: usedModelId,
+        submissionPayload: generationRouteAudit ? { generationRouteAudit } : undefined,
         persist: !_skipCloudTaskPersistence,
       }).catch(error => console.warn('[generate] 云端任务记录创建失败:', error));
       // ★ 关键修复：存储提供商信息到 task-registry，确保 poll-task 能直接使用正确的提供商
@@ -2654,6 +2687,7 @@ export async function POST(request: NextRequest) {
           usedModel: usedModelId,
           modelName: usedModelName,
           providerName: usedProviderName,
+          generationRouteAudit,
           apiBaseUrl: usedApiBaseUrl,
           apiKey: provider?.apiKey || serverApiKey,
           providerId: usedProviderId,
@@ -2672,6 +2706,7 @@ export async function POST(request: NextRequest) {
       modelName: usedModelName,
       providerName: usedProviderName,
       providerId: usedProviderId,
+      generationRouteAudit,
       apiBaseUrl: usedApiBaseUrl,
       apiKey: provider?.apiKey || serverApiKey,
       estimatedTime: modelConfig.estimatedTime,

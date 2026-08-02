@@ -26,9 +26,15 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateImageUrl } from '@/lib/input-validation';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
+import { completeCloudTask, terminateCloudTaskAndRefund } from '@/lib/cloud-task-storage';
 import { is302AiUpscaleBaseUrl, resolve302UpscaleModelId } from '@/lib/302-upscale-models';
+import { parse302UpscaleProviderError, UpscaleProviderError } from '@/lib/upscale-provider-error';
 import { validateUpscaleTargetDimensions, type UpscaleTargetPreset } from '@/lib/upscale-target';
-import { createUpscaleExecutionPlan, type UpscaleProductMode, type UpscaleProviderCapability } from '@/lib/upscale-orchestrator';
+import {
+  createUpscaleExecutionPlan,
+  resolveUpscaleProductMode,
+  type UpscaleProviderCapability,
+} from '@/lib/upscale-orchestrator';
 import { executeOverlapTileUpscale } from '@/lib/upscale-tile-executor';
 import { buildDisplayDecomposePrompt, buildDisplayDecomposeRequestBody, normalizeDisplayDecomposeRatio } from '@/lib/display-decompose';
 import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';
@@ -1093,7 +1099,7 @@ async function submit302aiUpscaleTask(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`302.AI upscale failed: ${response.status} - ${errorText}`);
+    throw parse302UpscaleProviderError(response.status, errorText);
   }
 
   const result = await response.json();
@@ -1148,7 +1154,7 @@ async function submit302aiUpscaleV6Task(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`302.AI upscale-v6 failed: ${response.status} - ${errorText}`);
+    throw parse302UpscaleProviderError(response.status, errorText);
   }
 
   const result = await response.json();
@@ -1200,7 +1206,7 @@ async function submit302aiImageUpscaleTask(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`302.AI image-upscale failed: ${response.status} - ${errorText}`);
+    throw parse302UpscaleProviderError(response.status, errorText);
   }
 
   const result = await response.json();
@@ -1251,7 +1257,7 @@ async function submit302aiEsrganTask(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`302.AI esrgan failed: ${response.status} - ${errorText}`);
+    throw parse302UpscaleProviderError(response.status, errorText);
   }
 
   const result = await response.json();
@@ -2127,20 +2133,19 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const requested302UpscaleModel = body.upscaleModel
+        ? resolve302UpscaleModelId(body.upscaleModel)
+        : null;
       const requestedMode = engineMode !== 'auto' ? engineMode : (body.upscaleMode || 'auto');
-      const productMode: UpscaleProductMode = requestedMode === 'ai' || requestedMode === 'ai-only'
-        ? 'ai-only'
-        : requestedMode === 'cpu' || requestedMode === 'local' || requestedMode === 'fidelity'
-          ? 'fidelity'
-          : 'auto';
+      const productMode = resolveUpscaleProductMode(
+        requestedMode,
+        Boolean(requested302UpscaleModel),
+      );
       const upscaleMode: 'auto' | 'ai' | 'cpu' = productMode === 'ai-only'
         ? 'ai'
         : productMode === 'fidelity'
           ? 'cpu'
           : 'auto';
-      const requested302UpscaleModel = body.upscaleModel
-        ? resolve302UpscaleModelId(body.upscaleModel)
-        : null;
 
       if (body.upscaleModel && !requested302UpscaleModel) {
         return NextResponse.json({
@@ -2269,6 +2274,79 @@ export async function POST(request: NextRequest) {
         return `${domainBase}${savedPath.startsWith('/') ? savedPath : `/${savedPath}`}`;
       };
 
+      // Explicit 302 selections are charged before the provider call. Persist a
+      // task before dispatch so a provider rejection can be refunded exactly once.
+      let upscaleCreditTaskId: string | null = null;
+      const beginRequested302CreditTask = async (): Promise<void> => {
+        if (!requested302UpscaleModel || !sessionUser || deductedCredits <= 0 || upscaleCreditTaskId) return;
+
+        const taskId = `upscale-302-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const recorded = await recordImageTaskSubmitted({
+          taskId,
+          userId: sessionUser.id,
+          type: 'upscale',
+          providerId: effectiveProviderId,
+          model: requested302UpscaleModel,
+          label: '302.AI 超分',
+          creditCost: deductedCredits,
+          submissionPayload: {
+            sourceWidth: origW,
+            sourceHeight: origH,
+            targetWidth: targetW,
+            targetHeight: targetH,
+            requestedModel: requested302UpscaleModel,
+          },
+        });
+        if (!recorded) {
+          throw new Error('无法记录 302.AI 超分任务，已中止请求以防止扣费状态不一致');
+        }
+        upscaleCreditTaskId = taskId;
+      };
+
+      const completeRequested302CreditTask = async (imageUrlResult: string): Promise<void> => {
+        if (!upscaleCreditTaskId) return;
+        await completeCloudTask(upscaleCreditTaskId, {
+          imageUrl: imageUrlResult,
+          action: 'upscale',
+          providerId: effectiveProviderId,
+          model: requested302UpscaleModel,
+        });
+      };
+
+      const settleRequested302Failure = async (error: unknown) => {
+        const providerError = error instanceof UpscaleProviderError ? error : null;
+        const message = providerError?.message
+          || (error instanceof Error ? error.message : String(error));
+        let refunded = false;
+
+        if (upscaleCreditTaskId) {
+          const terminal = await terminateCloudTaskAndRefund(
+            upscaleCreditTaskId,
+            'failed',
+            message,
+          );
+          refunded = terminal.refunded;
+          if (terminal.refunded) deductedCredits = 0;
+        } else if (sessionUser && deductedCredits > 0) {
+          await refundCredits(sessionUser.id, deductedCredits, `302.AI 超分失败退款: ${message.slice(0, 100)}`);
+          deductedCredits = 0;
+          refunded = true;
+        }
+
+        return {
+          success: false,
+          error: message,
+          code: providerError?.code || 'UPSCALE_PROVIDER_UNAVAILABLE',
+          providerStatus: providerError?.status || 502,
+          providerCode: providerError?.providerCode || null,
+          retryable: providerError?.retryable ?? true,
+          refunded,
+          taskId: upscaleCreditTaskId,
+        };
+      };
+
+      await beginRequested302CreditTask();
+
       // 单次倍率可覆盖目标时，直接调用编排器选中的专用 AI 超分模型。
       // AI 输出必须真实达到目标尺寸；Sharp 只允许下采样或格式归一，禁止补足缺失像素。
       if (!executionPlan.tiled && executionPlan.providerId) {
@@ -2325,10 +2403,12 @@ export async function POST(request: NextRequest) {
             const outputMetadata = await sharp(finalBuffer).metadata();
             const filename = `upscale_ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`;
             const imagePath = await saveBufferToPublic(finalBuffer, filename);
+            const publicImageUrl = toPublicUrl(imagePath);
+            await completeRequested302CreditTask(publicImageUrl);
 
             return NextResponse.json({
               success: true,
-              imageUrl: toPublicUrl(imagePath),
+              imageUrl: publicImageUrl,
               action,
               engine: executionPlan.engine,
               providerId: executionPlan.providerId,
@@ -2344,6 +2424,10 @@ export async function POST(request: NextRequest) {
             });
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
+            if (requested302UpscaleModel) {
+              const failure = await settleRequested302Failure(error);
+              return NextResponse.json(failure, { status: failure.providerStatus });
+            }
             if (executionPlan.fallbackAllowed) {
               console.warn(`[image-edit] dedicated AI upscale failed, falling back to fidelity: ${errorMessage}`);
               const fidelityResult = await runLocalCpuUpscale(`专用 AI 超分失败，已降级到保真模式：${errorMessage}`);
@@ -2465,6 +2549,7 @@ export async function POST(request: NextRequest) {
           const filename = `upscale_ai_tiled_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`;
           const imagePath = await saveBufferToPublic(finalBuffer, filename);
           const imageUrlResult = toPublicUrl(imagePath);
+          await completeRequested302CreditTask(imageUrlResult);
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
@@ -2491,6 +2576,17 @@ export async function POST(request: NextRequest) {
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
+          if (requested302UpscaleModel) {
+            updateTaskProgress(taskId, { status: 'failed', error: errorMessage });
+            const failure = await settleRequested302Failure(error);
+            return NextResponse.json({
+              ...failure,
+              taskId,
+              engine: executionPlan.engine,
+              providerId: executionPlan.providerId,
+              tiled: executionPlan.tiled,
+            }, { status: failure.providerStatus });
+          }
           if (isTaskCancelled(taskId)) {
             updateTaskProgress(taskId, { status: 'cancelled', error: errorMessage });
             return NextResponse.json({
@@ -2621,10 +2717,15 @@ export async function POST(request: NextRequest) {
       });
 
       if (requested302UpscaleModel && aiUpscaler302Candidates.length === 0) {
-        return NextResponse.json({
-          success: false,
-          error: `未找到已启用的 302.AI 放大模型：${requested302UpscaleModel}`,
-        }, { status: 400 });
+        const failure = await settleRequested302Failure(
+          new UpscaleProviderError(
+            `未找到已启用的 302.AI 放大模型：${requested302UpscaleModel}`,
+            400,
+            'UPSCALE_PROVIDER_REJECTED',
+            false,
+          ),
+        );
+        return NextResponse.json(failure, { status: failure.providerStatus });
       }
 
       if (aiUpscaler302Candidates.length > 0) {
@@ -2697,10 +2798,15 @@ export async function POST(request: NextRequest) {
       }
 
       if (requested302UpscaleModel && !aiResult) {
-        return NextResponse.json({
-          success: false,
-          error: `302.AI 放大失败：${aiError?.message || requested302UpscaleModel}`,
-        }, { status: 502 });
+        const failure = await settleRequested302Failure(
+          aiError || new UpscaleProviderError(
+            `302.AI 未返回结果：${requested302UpscaleModel}`,
+            502,
+            'UPSCALE_PROVIDER_UNAVAILABLE',
+            true,
+          ),
+        );
+        return NextResponse.json(failure, { status: failure.providerStatus });
       }
 
       // Step A: 先用专用upscaler模型尝试（如果有，且302.AI未成功）
@@ -2904,6 +3010,7 @@ export async function POST(request: NextRequest) {
         }
 
         const normalizedFinal = await resizeAiResultToTarget(finalUrl);
+        await completeRequested302CreditTask(normalizedFinal.url);
 
         return NextResponse.json({
           success: true,

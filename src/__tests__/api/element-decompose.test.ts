@@ -90,6 +90,7 @@ describe('/api/element-decompose', () => {
         layers: expect.objectContaining({
           providerId: 'pear',
           modelId: 'Image-Layered',
+          requireTransparentSubject: true,
         }),
       }),
     }));

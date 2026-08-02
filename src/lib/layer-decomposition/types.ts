@@ -26,6 +26,7 @@ export interface LayerDecompositionRequest {
   engine: LayerEngineMode;
   providerId?: string;
   modelId?: string;
+  requireTransparentSubject?: boolean;
 }
 
 export interface EditableLayerAsset {

@@ -1,5 +1,6 @@
 import { calculateActualPixels } from './canvas-generation-group';
 import { getInternalRequestHeaders } from './api-auth';
+import { fetchWithV1Retry } from './api-helpers';
 
 // 服务器端口，所有服务器间 fetch 调用统一使用 localhost + 此端口
 const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
@@ -756,7 +757,7 @@ async function executeAnalyzeImage(
     const chatBaseUrl = chatProvider.baseUrl?.replace(/\/+$/, '') || context.chatBaseUrl;
     const chatModel = chatProvider.selectedModels?.[0] || 'gpt-4o';
 
-    const response = await fetch(`${chatBaseUrl}/v1/chat/completions`, {
+    const response = await fetchWithV1Retry(chatBaseUrl, '/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

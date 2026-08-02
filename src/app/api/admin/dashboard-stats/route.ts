@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdminUser } from '@/lib/server-auth';
+import { listManagedUsers, requireAdminUser } from '@/lib/server-auth';
 import { dbGetDashboardStats } from '@/lib/db-storage';
 import { getApiProviders } from '@/lib/server-api-config';
 
@@ -21,7 +21,10 @@ export async function GET(request: NextRequest) {
     }
 
     const period = request.nextUrl.searchParams.get('period') || '7';
-    const stats = await dbGetDashboardStats(Number(period));
+    const [stats, managedUsers] = await Promise.all([
+      dbGetDashboardStats(Number(period)),
+      listManagedUsers(),
+    ]);
 
     // Enrich with real provider status
     const providers = await getApiProviders();
@@ -53,9 +56,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({
-      success: true,
-      totalUsers: stats.totalUsers,
+    const payload = {
+      // User management is the authoritative user directory. The database
+      // aggregate can lag behind it during user creation or cloud recovery.
+      totalUsers: managedUsers.length,
       weekActive: stats.weekActive,
       totalCredits: stats.totalCredits,
       creditsRecharged: stats.creditsRecharged || 0,
@@ -68,6 +72,13 @@ export async function GET(request: NextRequest) {
       providerStatus: stats.providerStatus && stats.providerStatus.length > 0 ? stats.providerStatus : providerStatus,
       alerts: stats.alerts && stats.alerts.length > 0 ? stats.alerts : alerts,
       recentUsers: stats.recentUsers || [],
+    };
+
+    return NextResponse.json({
+      success: true,
+      ...payload,
+      // dashboard-view still consumes the original nested response shape.
+      stats: payload,
     });
   } catch (error) {
     console.error('[admin/dashboard-stats] GET error:', error);

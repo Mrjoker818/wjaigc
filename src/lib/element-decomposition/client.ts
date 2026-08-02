@@ -85,6 +85,7 @@ export function createElementDecompositionRequest(
       engine: options.engine ?? 'smart',
       providerId: options.layerProviderId,
       modelId: options.layerModelId,
+      requireTransparentSubject: (options.background ?? 'light-gray') === 'transparent',
     },
   };
 }
