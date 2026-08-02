@@ -19,8 +19,7 @@ function requiresAtomicTerminalSettlement(task: Awaited<ReturnType<typeof getClo
   if (!submissionPayload || typeof submissionPayload !== 'object') return false;
 
   const payload = submissionPayload as Record<string, unknown>;
-  return task?.type === 'generate-async'
-    && typeof payload.batchId === 'string'
+  return typeof payload.batchId === 'string'
     && typeof payload.slotId === 'string'
     && typeof payload.slotIndex === 'number';
 }
@@ -94,11 +93,38 @@ export async function POST(request: NextRequest) {
       return rest;
     })() : null;
 
+    if (atomicTerminalTask) {
+      const settlement = await terminateCloudTaskAndRefund(
+        taskId,
+        'cancelled',
+        atomicCancellationReason,
+      );
+      if (!settlement.transitioned) {
+        const current = await getCloudTaskForUser(taskId, user.id);
+        if (current?.status !== 'cancelled') {
+          return NextResponse.json(
+            {
+              success: false,
+              error: '任务状态已变化，无法取消',
+              status: current?.status || 'unknown',
+            },
+            { status: 409 },
+          );
+        }
+      }
+
+      cancelTask(taskId);
+      cancelEditTask(taskId);
+      return NextResponse.json({
+        success: true,
+        message: '任务已取消',
+        task: safeTaskInfo,
+      });
+    }
+
     if (isTaskCancelled(taskId)) {
       if (persistedTask?.type === 'annotation-edit') {
         await terminateCloudTaskAndRefund(taskId, 'cancelled', 'Annotation edit cancelled');
-      } else if (atomicTerminalTask) {
-        await terminateCloudTaskAndRefund(taskId, 'cancelled', atomicCancellationReason);
       }
       return NextResponse.json({
         success: true,
@@ -117,19 +143,7 @@ export async function POST(request: NextRequest) {
     let terminalSettled = false;
     const creditCost = taskInfo?.creditCost ?? persistedTask?.creditCost ?? 0;
     const creditOwnerId = taskInfo?.userId ?? persistedTask?.userId;
-    if (atomicTerminalTask) {
-      try {
-        const settlement = await terminateCloudTaskAndRefund(
-          taskId,
-          'cancelled',
-          atomicCancellationReason,
-        );
-        refunded = settlement.refunded || persistedTask?.creditStatus === 'refunded';
-        terminalSettled = true;
-      } catch (refundErr) {
-        console.error('[cancel-task] Atomic provider task cancellation settlement failed:', refundErr);
-      }
-    } else if (persistedTask?.type === 'annotation-edit') {
+    if (persistedTask?.type === 'annotation-edit') {
       try {
         const settlement = await terminateCloudTaskAndRefund(
           taskId,

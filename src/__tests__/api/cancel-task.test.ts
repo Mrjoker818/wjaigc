@@ -155,6 +155,47 @@ describe('POST /api/cancel-task', () => {
     expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
   });
 
+  it('does not report a durable generation slot as cancelled when its database terminal transition loses', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'generation-slot-race',
+      userId: 'user-a',
+      type: 'generate-async',
+      creditCost: 6,
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'generation-slot-race',
+      userId: 'user-a',
+      type: 'generate-async',
+      status: 'processing',
+      creditCost: 6,
+      creditStatus: 'pending',
+      result: {
+        submissionPayload: {
+          batchId: 'batch-1',
+          slotId: 'batch-1:0',
+          slotIndex: 0,
+        },
+      },
+    });
+    mocks.terminateCloudTaskAndRefund.mockResolvedValue({
+      status: 'completed',
+      transitioned: false,
+      refunded: false,
+      creditCost: 0,
+    });
+
+    const response = await POST(request('generation-slot-race'));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: '任务状态已变化，无法取消',
+    });
+    expect(mocks.cancelTask).not.toHaveBeenCalled();
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+  });
+
   it('settles a durable video task atomically before its remote poll can complete', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
     mocks.getTaskInfo.mockReturnValue({

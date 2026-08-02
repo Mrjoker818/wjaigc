@@ -450,3 +450,21 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | 云端真实取消、退款、迟到完成 | PENDING DEPLOY | 必须部署后提交 Pear `n=2`，取消一个槽位，确认 `/api/cancel-task` 成功、仅幸存槽位完成、被取消槽位不被迟到结果覆盖，并核对一扣一退账务流水。 |
 
 本阶段不把本地契约测试当作真实供应商结算通过证据。发布结论仍为 **不通过**，直到上述部署验证、PostgreSQL 并发与跨浏览器回归完成。
+
+## 2026-08-02 云端单槽取消复验失败与二次修复（待部署）
+
+测试基线：云端为 GitHub `main` 的 `98ba6c2`；本地工作树为 `fix/provider-generation-reliability`，包含待随本次提交部署的最小修复。
+
+| 检查项 | 结果 | 证据 |
+|------|------|------|
+| Pear `n=2` 单槽取消 | FAIL（云端） | 在项目 `project_1785676375816_qvjpfv81z` 提交两个槽位 `async-1785680404674-0-wa2qo6`、`async-1785680404748-1-7ruits`。5% 时取消第一个槽位，页面短暂只保留一个卡片；重新打开项目后仍出现两张机械怀表结果。 |
+| 供应商展示归属 | PASS（同次观察） | 两张实际结果均显示 `gpt-image-2 / PearAPI 图像`，未出现旧 FHL 名称。 |
+| 失败证据 | CAPTURED | `test-results/screenshots/cloud-cancel-n2-2026-08-02.png`；Chrome Console 持续轮询两个 taskId，证明被隐藏槽位没有完成持久化取消。 |
+| 取消冲突回归（RED） | PASS | 新用例先在旧行为下失败：预期 `409`，实际取得 `200`。 |
+| 取消冲突回归（GREEN） | PASS | `cancel-task.test.ts` 7/7 通过：数据库终态转换未成功时返回 `409`，不调用内存取消。 |
+| 供应商可靠性组合回归 | PASS | `cancel-task`、渐进回填、取消 UI 契约、云任务存储、输出数量共 5 files / 35 tests 通过。 |
+| TypeScript | PASS | `pnpm ts-check` 退出 0。 |
+| 全量测试、Lint、构建 | PASS WITH KNOWN LIMITS | `pnpm test`：299 files / 1349 tests 通过，3 files / 4 PostgreSQL 并发用例因无隔离数据库跳过；`pnpm lint`：0 errors / 949 warnings；`pnpm build`：111 条路由构建完成。 |
+| 自动保存快照配额 | NEW P2 | 项目恢复 Console 重复出现 `wujie_autosave_snapshots_v1` 的 `QuotaExceededError`，已登记为 BUG-031，未与本次 P1 修复混合。 |
+
+结论：`98ba6c2` 未通过真实单槽取消门禁。新的本地状态机修复必须先完成全量门禁、推送与部署，然后以同一真实 Pear `n=2` 场景重新验证“仅幸存槽位落图、取消槽位不回写、账务一次扣费/一次退款”。

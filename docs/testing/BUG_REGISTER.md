@@ -597,3 +597,31 @@ await page.evaluate(() => {
 | **新增测试** | `task-provider-display.test.ts` 覆盖 Pear ID 覆盖历史 FHL 名称；`poll-task-progressive-generation-contract.test.ts` 锁定 durable 任务、恢复路径和终态路径都使用统一解析器。 |
 | **本地回归** | 与 BUG-028 相同的 22 项专项测试通过；TypeScript 通过。 |
 | **状态** | 本地已修复；需随 BUG-028 的云端 `n=2` 取消回归确认仍显示 `PearAPI 图像`。 |
+
+### BUG-030: 条件式取消未成功时仍向前端报告“取消成功”
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1（已取消的图像子任务仍可能落图并计费，用户无法辨别真实终态） |
+| **发现环境** | 已部署 Chrome，`https://wjaigc.coze.site/?projectId=project_1785676375816_qvjpfv81z`，2026-08-02；部署基线 `98ba6c2`。 |
+| **前置条件** | 已登录用户 `Mr.joker`；专业创作选择 `PearAPI 图像 / gpt-image-2`，数量为 2。 |
+| **稳定复现** | 提交“银色机械怀表，放置在深蓝色天鹅绒上，工作室产品摄影，柔和高光，无文字，无水印”；两个槽位均显示约 5% 后取消第一个槽位。 |
+| **真实证据** | 请求创建 `async-1785680404674-0-wa2qo6` 与 `async-1785680404748-1-7ruits`。取消后页面只保留一个进行中槽位，但重新打开同一项目后仍有两张 Pear 生成图（800x800 与 1024x1024）。截图：`test-results/screenshots/cloud-cancel-n2-2026-08-02.png`。 |
+| **预期结果** | 数据库已条件式进入 `cancelled` 且退款结算完成后，前端才能移除槽位；若完成先赢得终态，取消接口必须返回冲突并保留槽位。 |
+| **根因** | `/api/cancel-task` 先执行内存取消，并且没有检查 `terminateCloudTaskAndRefund()` 的 `transitioned` 结果；数据库终态转换失败或已被完成占用时，接口仍返回成功。原子取消识别还仅接受 `generate-async` 类型，遗漏带有效槽位签名的旧持久化记录。 |
+| **修复文件** | `src/app/api/cancel-task/route.ts`。 |
+| **新增测试** | `cancel-task.test.ts` 先 RED：模拟持久化子任务的条件式取消输给 `completed`，断言返回 `409`、不调用内存取消；随后 GREEN。 |
+| **本地回归** | 取消路由定向 7/7 通过；供应商可靠性组合回归 5 files / 35 tests 通过；全量 Vitest 299 files / 1349 tests 通过，3 files / 4 PostgreSQL 环境用例跳过；TypeScript 通过；ESLint 为 0 errors / 949 warnings；Next.js 生产构建通过并生成 111 条路由。 |
+| **状态** | 本地已修复，将随本次提交推送；当前线上版本不通过该 P1 门禁，仍需部署后复验。 |
+
+### BUG-031: 项目读取时自动保存快照超过浏览器本地存储配额
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P2（画布项目较大时产生重复控制台异常，可能拖慢加载并削弱数据保护快照） |
+| **发现环境** | 已部署 Chrome，同一项目恢复页，2026-08-02。 |
+| **稳定复现** | 打开包含多张生成图的项目仪表盘与画布恢复页，观察 Console。 |
+| **实际结果** | 重复出现 `QuotaExceededError: Failed to execute 'setItem' on 'Storage': Setting the value of 'wujie_autosave_snapshots_v1' exceeded the quota.`，调用栈来自 `protectAgainstDataLoss -> saveData -> loadProjectsFromServer`。 |
+| **预期结果** | 自动保存快照必须有容量预算、裁剪/淘汰策略和可观测提示，不能在项目加载过程中反复写入超过浏览器配额的数据。 |
+| **根因** | 待定位；已确认错误发生在本地快照写入边界，而非远端项目读取失败。 |
+| **状态** | 已登记，待在画布/项目可靠性阶段单独复现、限额设计和回归测试。 |
