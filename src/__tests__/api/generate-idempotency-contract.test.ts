@@ -3,29 +3,51 @@ import { readFileSync } from 'fs';
 import path from 'path';
 
 describe('generate submitOnly idempotency contract', () => {
-  it('looks up an Idempotency-Key before registering a new async task', () => {
+  it('looks up a child Idempotency-Key before registering its async task', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
     const branch = source.indexOf('if (submitOnly)');
     const lookup = source.indexOf('getCloudTaskForUserByIdempotencyKey', branch);
-    const register = source.indexOf('registerTask(asyncTaskId', branch);
+    const register = source.indexOf('registerTask(', lookup);
 
     expect(lookup).toBeGreaterThan(branch);
     expect(register).toBeGreaterThan(lookup);
     expect(source).toContain("request.headers.get('idempotency-key')");
   });
 
-  it('starts submitOnly background work only after an atomic persistent task insert succeeds', () => {
+  it('binds child idempotency keys to a stable batch and slot index', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    const branch = source.indexOf('if (submitOnly)');
+    const batch = source.indexOf('const generationBatch = buildGenerationBatch', branch);
+    const slotLoop = source.indexOf('for (const slot of generationBatch.slots)', batch);
+
+    expect(batch).toBeGreaterThan(branch);
+    expect(slotLoop).toBeGreaterThan(batch);
+    expect(source).toContain('`${idempotencyKey}:${slot.index}`');
+    expect(source).toContain('batchId: generationBatch.batchId');
+  });
+
+  it('creates billable child slots before using the atomic cloud-task charge', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    const branch = source.indexOf('if (submitOnly)');
+    const childPersistence = source.indexOf('deferCreditCharge: true', branch);
+    const atomicCharge = source.indexOf('chargeCloudTaskCredits(', childPersistence);
+
+    expect(childPersistence).toBeGreaterThan(branch);
+    expect(atomicCharge).toBeGreaterThan(childPersistence);
+  });
+
+  it('only schedules a child for recovery after durable creation and atomic charging', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
     const branch = source.indexOf('if (submitOnly)');
     const persisted = source.indexOf('const taskCreated = await recordImageTaskSubmitted', branch);
-    const collision = source.indexOf('if (!taskCreated)', persisted);
-    const reusedLookup = source.indexOf('getCloudTaskForUserByIdempotencyKey', collision);
-    const register = source.indexOf('registerTask(asyncTaskId', branch);
+    const created = source.indexOf('if (taskCreated)', persisted);
+    const atomicCharge = source.indexOf('const charge = await chargeCloudTaskCredits', created);
+    const register = source.indexOf('registerTask(', atomicCharge);
 
     expect(persisted).toBeGreaterThan(branch);
-    expect(collision).toBeGreaterThan(persisted);
-    expect(reusedLookup).toBeGreaterThan(collision);
-    expect(register).toBeGreaterThan(collision);
+    expect(created).toBeGreaterThan(persisted);
+    expect(atomicCharge).toBeGreaterThan(created);
+    expect(register).toBeGreaterThan(atomicCharge);
   });
 
   it('persists a sanitized submission payload so cloud polling can resume a worker that was interrupted after the response', () => {
@@ -101,14 +123,13 @@ describe('generate submitOnly idempotency contract', () => {
     expect(taskType).toBeGreaterThan(persisted);
   });
 
-  it('deducts credits before a submitOnly task is persisted and returned', () => {
+  it('creates a child task before its atomic credit charge', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
     const branch = source.indexOf('if (submitOnly)');
-    const deduction = source.indexOf("const creditResult = await consumeCredits");
     const persisted = source.indexOf('const taskCreated = await recordImageTaskSubmitted', branch);
+    const deduction = source.indexOf('const charge = await chargeCloudTaskCredits', persisted);
 
-    expect(deduction).toBeGreaterThan(0);
-    expect(deduction).toBeGreaterThan(branch);
-    expect(persisted).toBeGreaterThan(deduction);
+    expect(persisted).toBeGreaterThan(branch);
+    expect(deduction).toBeGreaterThan(persisted);
   });
 });

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import { createHash } from 'node:crypto';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, findProviderById } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
@@ -15,16 +16,22 @@ import { streamResponsesApiSSE, buildResponsesApiPayload, extractImageUrlFromMar
 import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, shouldUseResponsesAPIForProvider, type ModelCapabilities, normalizeModelForApi } from '@/lib/model-capabilities';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { validateImageUrl } from '@/lib/input-validation';
-import { consumeCredits } from '@/lib/credits';
+import { calculateConfiguredCreditCost, checkCredits, consumeCredits } from '@/lib/credits';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
-import { getCloudTaskForUserByIdempotencyKey, updateCloudTask } from '@/lib/cloud-task-storage';
+import {
+  chargeCloudTaskCredits,
+  getCloudTaskForUserByIdempotencyKey,
+  terminateCloudTaskAndRefund,
+  updateCloudTask,
+} from '@/lib/cloud-task-storage';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, getProviderAspectRatios, normalizeImageGenerationSelection, ModelParamType } from '@/lib/canvas-generation-group';
 import { buildGenerationRouteAudit } from '@/lib/generation-route-audit';
+import { buildGenerationBatch } from '@/lib/generation-batch';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -298,7 +305,7 @@ export async function POST(request: NextRequest) {
 
     // ★ submitOnly 模式：立即注册任务并返回 taskId，后台执行实际生成
     // 解决 chat-tools 调用 /api/generate 时因第三方 API 响应慢（2-11分钟）导致 120s 超时的问题
-    if (submitOnly) {
+    if (submitOnly && process.env.WUJIE_ENABLE_LEGACY_SUBMIT_ONLY_WRAPPER === 'true') {
       const idempotencyKey = request.headers.get('idempotency-key')?.trim() || '';
       if (idempotencyKey) {
         const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, idempotencyKey);
@@ -914,6 +921,209 @@ export async function POST(request: NextRequest) {
         taskIds: [asyncTaskId],
         model: model,
         modelName: '',
+        providerId: effectiveProviderId,
+        estimatedTime: 90,
+        submitOnly: true,
+      });
+    }
+
+    if (submitOnly) {
+      const idempotencyKey = request.headers.get('idempotency-key')?.trim() || '';
+      const requestedSlotCount = typeof requestedOutputCount === 'number'
+        ? requestedOutputCount
+        : Number(requestedOutputCount || 1);
+      const batchSeed = idempotencyKey
+        ? createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 24)
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const generationBatch = buildGenerationBatch(`batch-${batchSeed}`, requestedSlotCount);
+      const requestDigest = createHash('sha256').update(JSON.stringify({
+        prompt,
+        aspectRatio,
+        size: requestedPixelSize,
+        referenceImages: accessibleReferenceImages,
+        referenceMode,
+        referenceCategories,
+        referenceStrengths,
+        referenceDescriptions,
+        imageCategory,
+        productCategory,
+        stylePreset,
+        model,
+        providerId: effectiveProviderId,
+        strength,
+        quality,
+        resolution: resolutionTier,
+        projectId,
+      })).digest('hex');
+      const childCreditCost = sessionUser && !_skipCredits
+        ? await calculateConfiguredCreditCost(
+            'image_generate',
+            model || '',
+            { quality, resolution: resolutionTier, providerId: effectiveProviderId || undefined },
+          )
+        : 0;
+
+      if (sessionUser && childCreditCost > 0) {
+        const creditCheck = await checkCredits(
+          sessionUser.id,
+          'image_generate',
+          childCreditCost * generationBatch.slots.length,
+        );
+        if (!creditCheck.sufficient) {
+          return NextResponse.json({
+            error: `积分不足，需要 ${childCreditCost * generationBatch.slots.length} 积分，当前余额 ${creditCheck.balance} 积分`,
+          }, { status: 402 });
+        }
+      }
+
+      const submissionPayload: Record<string, unknown> = {
+        prompt,
+        aspectRatio,
+        size: requestedPixelSize,
+        referenceImages: accessibleReferenceImages,
+        referenceMode,
+        referenceCategories,
+        referenceStrengths,
+        referenceDescriptions,
+        imageCategory,
+        productCategory,
+        stylePreset,
+        outputCount: 1,
+        n: 1,
+        model,
+        providerId: effectiveProviderId,
+        strength,
+        quality,
+        resolution: resolutionTier,
+        projectId,
+        sessionId,
+        messageId,
+        requestDigest,
+        workerMode: 'recovery',
+      };
+      const submittedSlots: Array<{
+        slotId: string;
+        slotIndex: number;
+        taskId: string;
+        status: 'submitting' | 'queued' | 'processing';
+      }> = [];
+      const pendingCharges: Array<{ taskId: string; slotId: string; slotIndex: number }> = [];
+
+      for (const slot of generationBatch.slots) {
+        const asyncTaskId = `async-${Date.now()}-${slot.index}-${Math.random().toString(36).slice(2, 8)}`;
+        const childIdempotencyKey = idempotencyKey ? `${idempotencyKey}:${slot.index}` : undefined;
+        const childPayload = {
+          ...submissionPayload,
+          batchId: generationBatch.batchId,
+          slotId: slot.slotId,
+          slotIndex: slot.index,
+        };
+        const taskCreated = await recordImageTaskSubmitted({
+          taskId: asyncTaskId,
+          userId: authResult.userId,
+          projectId: typeof projectId === 'string' ? projectId : undefined,
+          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+          messageId: typeof messageId === 'string' ? messageId : undefined,
+          providerId: effectiveProviderId,
+          model,
+          type: 'generate-async',
+          label: `生成图片 ${slot.index + 1}/${generationBatch.slots.length}`,
+          idempotencyKey: childIdempotencyKey,
+          submissionPayload: childPayload,
+          batchId: generationBatch.batchId,
+          slotId: slot.slotId,
+          slotIndex: slot.index,
+          deferCreditCharge: true,
+        });
+
+        if (taskCreated) {
+          submittedSlots.push({
+            slotId: slot.slotId,
+            slotIndex: slot.index,
+            taskId: asyncTaskId,
+            status: 'submitting',
+          });
+          pendingCharges.push({ taskId: asyncTaskId, slotId: slot.slotId, slotIndex: slot.index });
+          continue;
+        }
+
+        const existing = childIdempotencyKey
+          ? await getCloudTaskForUserByIdempotencyKey(authResult.userId, childIdempotencyKey)
+          : null;
+        const existingPayload = existing?.result?.submissionPayload as Record<string, unknown> | undefined;
+        if (!existing || existingPayload?.requestDigest !== requestDigest) {
+          await Promise.allSettled(pendingCharges.map(({ taskId }) => (
+            terminateCloudTaskAndRefund(taskId, 'cancelled', '图像生成批次创建冲突，已取消未启动子任务')
+          )));
+          return NextResponse.json({
+            success: false,
+            error: '任务创建发生冲突，请使用新的请求键重试',
+            retryable: true,
+          }, { status: 409 });
+        }
+
+        submittedSlots.push({
+          slotId: String(existingPayload.slotId || slot.slotId),
+          slotIndex: typeof existingPayload.slotIndex === 'number' ? existingPayload.slotIndex : slot.index,
+          taskId: existing.id,
+          status: existing.status === 'pending' || existing.status === 'queued' ? 'submitting' : 'processing',
+        });
+        if (existing.status === 'pending' && existing.creditStatus === 'not-applicable') {
+          pendingCharges.push({
+            taskId: existing.id,
+            slotId: String(existingPayload.slotId || slot.slotId),
+            slotIndex: typeof existingPayload.slotIndex === 'number' ? existingPayload.slotIndex : slot.index,
+          });
+        }
+      }
+
+      for (const pendingCharge of pendingCharges) {
+        const charge = await chargeCloudTaskCredits(
+          pendingCharge.taskId,
+          authResult.userId,
+          childCreditCost,
+          `图像生成 ${pendingCharge.slotIndex + 1}/${generationBatch.slots.length}`,
+        );
+        if (!charge.charged) {
+          await Promise.allSettled(pendingCharges.map(({ taskId }) => (
+            terminateCloudTaskAndRefund(taskId, 'cancelled', '图像生成批次扣费未完成，已取消未启动子任务')
+          )));
+          return NextResponse.json({
+            success: false,
+            error: '积分扣除未完成，未向供应商提交任务',
+            retryable: true,
+          }, { status: 402 });
+        }
+
+        registerTask(
+          pendingCharge.taskId,
+          'generate-async',
+          `生成图片 ${pendingCharge.slotIndex + 1}/${generationBatch.slots.length}`,
+          userId,
+        );
+        updateTaskProgress(pendingCharge.taskId, {
+          status: 'processing',
+          progress: 0,
+          creditCost: charge.creditCost,
+          result: {
+            submissionPayload: {
+              ...submissionPayload,
+              batchId: generationBatch.batchId,
+              slotId: pendingCharge.slotId,
+              slotIndex: pendingCharge.slotIndex,
+            },
+          },
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        mode: 'polling',
+        batchId: generationBatch.batchId,
+        slots: submittedSlots,
+        taskId: submittedSlots[0]?.taskId,
+        taskIds: submittedSlots.map((slot) => slot.taskId),
+        model,
         providerId: effectiveProviderId,
         estimatedTime: 90,
         submitOnly: true,

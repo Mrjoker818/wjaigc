@@ -24,6 +24,7 @@ interface ImageTaskSubmission {
   batchId?: string;
   slotId?: string;
   slotIndex?: number;
+  deferCreditCharge?: boolean;
 }
 
 interface ImageTaskTerminal {
@@ -100,14 +101,15 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
     sessionId: input.sessionId,
     messageId: input.messageId,
     type: input.type || 'generate',
-    status: 'processing',
+    status: input.deferCreditCharge ? 'pending' : 'processing',
     providerId: input.providerId,
     model: input.model,
     remoteTaskId: input.taskId,
-    progress: 5,
+    progress: input.deferCreditCharge ? 0 : 5,
     label: input.label || '生成图片',
     result: submissionPayload ? { submissionPayload } : undefined,
-    creditCost: input.creditCost,
+    creditStatus: input.deferCreditCharge ? 'not-applicable' : undefined,
+    creditCost: input.deferCreditCharge ? 0 : input.creditCost,
     idempotencyKey: input.idempotencyKey,
     createdAt: now,
     updatedAt: now,

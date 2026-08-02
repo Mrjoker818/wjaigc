@@ -78,6 +78,25 @@ describe('cloud-task-persistence', () => {
     expect(JSON.stringify(createCloudTask.mock.calls[0][0])).not.toContain('apiKey');
   });
 
+  it('creates a billable child task as pending until the atomic charge succeeds', async () => {
+    await recordImageTaskSubmitted({
+      taskId: 'remote-task-billable-child',
+      userId: 'user-a',
+      batchId: 'batch-a',
+      slotId: 'batch-a:0',
+      slotIndex: 0,
+      deferCreditCharge: true,
+    });
+
+    expect(createCloudTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'remote-task-billable-child',
+      status: 'pending',
+      progress: 0,
+      creditStatus: 'not-applicable',
+      creditCost: 0,
+    }));
+  });
+
   it('preserves the editing task type for recovery and filtering', async () => {
     await recordImageTaskSubmitted({
       taskId: 'edit-task-1',

@@ -11,4 +11,14 @@ describe('image generation output-count contract', () => {
     expect(source).toContain('for (let i = 0; i < totalCount; i++)');
     expect(source).toContain('submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || \'env\', 1, provider)');
   });
+
+  it('returns one durable submitOnly child task for each requested output slot', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+
+    expect(source).toContain('const generationBatch = buildGenerationBatch');
+    expect(source).toContain('for (const slot of generationBatch.slots)');
+    expect(source).toContain('slotId: slot.slotId');
+    expect(source).toContain('slotIndex: slot.index');
+    expect(source).toContain('slots: submittedSlots');
+  });
 });
