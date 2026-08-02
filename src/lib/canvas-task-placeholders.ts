@@ -1,3 +1,5 @@
+import { isTerminalGenerationStatus } from '@/lib/generation-batch';
+
 interface ProcessingPlaceholder {
   id?: string;
   isProcessingPlaceholder?: boolean;
@@ -32,6 +34,7 @@ export function applyTaskIdsToProcessingPlaceholders<T extends ProcessingPlaceho
   return images.map((image) => {
     const taskId = image.id ? taskByPlaceholderId.get(image.id) : undefined;
     if (!image.isProcessingPlaceholder || !taskId || !image.processing) return image;
+    if (isTerminalGenerationStatus(image.processing.status)) return image;
 
     return {
       ...image,

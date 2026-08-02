@@ -26,4 +26,16 @@ describe('canvas-task-placeholders', () => {
       { id: 'already-an-image', isProcessingPlaceholder: false, processing: { status: 'submitting', progress: 5 } },
     ]);
   });
+
+  it('does not overwrite a terminal placeholder during a later project sync', () => {
+    const images = [
+      { id: 'frame-a', isProcessingPlaceholder: true, processing: { status: 'failed', taskId: 'task-a', progress: 0 } },
+    ];
+
+    expect(applyTaskIdsToProcessingPlaceholders(
+      images,
+      ['frame-a'],
+      ['task-a'],
+    )).toEqual(images);
+  });
 });

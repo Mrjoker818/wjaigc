@@ -57,6 +57,27 @@ describe('cloud-task-persistence', () => {
     })).resolves.toBe(false);
   });
 
+  it('persists batch and slot metadata without provider credentials', async () => {
+    await recordImageTaskSubmitted({
+      taskId: 'remote-task-slot-2',
+      userId: 'user-a',
+      batchId: 'batch-a',
+      slotId: 'batch-a:1',
+      slotIndex: 1,
+    });
+
+    expect(createCloudTask).toHaveBeenCalledWith(expect.objectContaining({
+      result: {
+        submissionPayload: {
+          batchId: 'batch-a',
+          slotId: 'batch-a:1',
+          slotIndex: 1,
+        },
+      },
+    }));
+    expect(JSON.stringify(createCloudTask.mock.calls[0][0])).not.toContain('apiKey');
+  });
+
   it('preserves the editing task type for recovery and filtering', async () => {
     await recordImageTaskSubmitted({
       taskId: 'edit-task-1',

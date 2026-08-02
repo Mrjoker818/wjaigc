@@ -21,6 +21,9 @@ interface ImageTaskSubmission {
   idempotencyKey?: string;
   submissionPayload?: Record<string, unknown>;
   creditCost?: number;
+  batchId?: string;
+  slotId?: string;
+  slotIndex?: number;
 }
 
 interface ImageTaskTerminal {
@@ -81,6 +84,15 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
   if (input.persist === false) return true;
 
   const now = Date.now();
+  const slotPayload = input.slotId ? {
+    batchId: input.batchId,
+    slotId: input.slotId,
+    slotIndex: input.slotIndex,
+  } : {};
+  const submissionPayload = input.submissionPayload || input.slotId
+    ? { ...input.submissionPayload, ...slotPayload }
+    : undefined;
+
   return createCloudTask({
     id: input.taskId,
     userId: input.userId || 'anonymous',
@@ -94,7 +106,7 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
     remoteTaskId: input.taskId,
     progress: 5,
     label: input.label || '生成图片',
-    result: input.submissionPayload ? { submissionPayload: input.submissionPayload } : undefined,
+    result: submissionPayload ? { submissionPayload } : undefined,
     creditCost: input.creditCost,
     idempotencyKey: input.idempotencyKey,
     createdAt: now,
