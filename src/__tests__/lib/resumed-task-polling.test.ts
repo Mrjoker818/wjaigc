@@ -14,14 +14,22 @@ describe('getResumedTaskPollingOutcome', () => {
 describe('shouldStartResumedTaskPolling', () => {
   it('starts a recovered task only once while it remains processing across React renders', () => {
     expect(shouldStartResumedTaskPolling({
+      taskId: 'newly-created-task',
+      status: 'processing',
+      wasStarted: false,
+      isResumed: false,
+    })).toBe(false);
+    expect(shouldStartResumedTaskPolling({
       taskId: 'async-recovered-task',
       status: 'processing',
       wasStarted: false,
+      isResumed: true,
     })).toBe(true);
     expect(shouldStartResumedTaskPolling({
       taskId: 'async-recovered-task',
       status: 'processing',
       wasStarted: true,
+      isResumed: true,
     })).toBe(false);
   });
 });

@@ -15,7 +15,7 @@ describe('infinite canvas generation cancellation contract', () => {
       'await taskEventsClient.cancelTask(taskId)',
       handler,
     );
-    const frameRemoval = source.indexOf('removeProcessingFrame(image.id)', handler);
+    const frameRemoval = source.indexOf('removeProcessingFrame(image.id)', persistedCancellation);
 
     expect(handler).toBeGreaterThan(-1);
     expect(persistedCancellation).toBeGreaterThan(handler);
@@ -25,7 +25,7 @@ describe('infinite canvas generation cancellation contract', () => {
   it('keeps the processing frame visible when the server rejects cancellation', () => {
     const handler = source.indexOf('const handleCancelProcessingFrame = useCallback');
     const failureGuard = source.indexOf('if (!cancellation.success)', handler);
-    const frameRemoval = source.indexOf('removeProcessingFrame(image.id)', handler);
+    const frameRemoval = source.indexOf('removeProcessingFrame(image.id)', failureGuard);
 
     expect(failureGuard).toBeGreaterThan(handler);
     expect(frameRemoval).toBeGreaterThan(failureGuard);
@@ -35,5 +35,18 @@ describe('infinite canvas generation cancellation contract', () => {
     const genericButtons = source.match(/void handleCancelProcessingFrame\(image\)/g) || [];
 
     expect(genericButtons).toHaveLength(2);
+  });
+
+  it('uses a per-task abort controller for direct-generation slots instead of cancelling an unrelated global poller', () => {
+    const generator = source.indexOf('const handleCanvasGenerate = useCallback');
+    const directPoller = source.indexOf('const pollForSlot = async', generator);
+    const directPollerEnd = source.indexOf('const results = await Promise.all', directPoller);
+    const directPollerSource = source.slice(directPoller, directPollerEnd);
+    const visibleCancelCards = source.slice(source.indexOf('onClick={(e) => {', 10000));
+
+    expect(source.indexOf('canvasGenerationAbortControllersRef')).toBeGreaterThan(-1);
+    expect(directPollerSource).toContain('const abortController = new AbortController()');
+    expect(directPollerSource).toContain('signal: abortController.signal');
+    expect(visibleCancelCards).not.toContain('pollingAbortRef.current.abort()');
   });
 });

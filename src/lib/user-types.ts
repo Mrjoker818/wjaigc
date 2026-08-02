@@ -105,6 +105,8 @@ export interface CanvasImage {
   sourceUrl?: string;
   // AI 模型与提供商信息
   modelName?: string;
+  /** Stable provider identity used for task polling and routing. */
+  apiProviderId?: string;
   apiProvider?: string;
   apiBaseUrl?: string;
   generationRouteAudit?: GenerationRouteAudit;
@@ -119,6 +121,8 @@ export interface CanvasImage {
     status: string;
     progress: number;
     taskId?: string;
+    /** True only after a processing placeholder was restored from persisted project data. */
+    isResumed?: boolean;
     sourceUrl?: string;
     error?: string;
     startTime?: number;

@@ -501,3 +501,13 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | 全量质量门禁 | 通过但含环境跳过 | Vitest 301 files / 1355 tests passed；3 个 PostgreSQL 专用文件 / 4 项跳过；TypeScript 通过；ESLint 0 errors / 949 historical warnings；生产构建完成 111 条路由。 |
 
 结论：云端已证明多槽位实现生效，但 BUG-034 说明该部署版本未通过连续生成门禁。必须部署本次终态归一化修复，之后再尝试单槽取消场景。
+## 2026-08-02 Provider Generation Reliability Follow-up
+
+| Check | Result | Evidence |
+|---|---|---|
+| Provider ID is persisted separately from the display label | PASS (local) | 6 direct-generation contract assertions passed. |
+| Recovery polling ignores fresh in-memory placeholders | PASS (local) | `resumed-task-polling.test.ts` passed. |
+| Cancellation is isolated per canvas task slot | PASS (local) | 4 cancellation contract assertions plus 7 cancel API tests passed. |
+| Autosave snapshots do not retain raw data/blob image payloads | PASS (local) | 2 quota contract assertions passed. |
+| Full regression | PASS WITH ENVIRONMENT SKIPS | `pnpm test`: 302 files / 1359 tests passed; 3 PostgreSQL files / 4 tests skipped because an isolated test database is not configured. |
+| Deployment evidence | PENDING | Must repeat a real Pear `n=2` flow, cancel exactly one slot, verify provider attribution, refresh recovery, ledger settlement, and browser console. |

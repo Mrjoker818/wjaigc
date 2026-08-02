@@ -471,3 +471,12 @@ GitHub `main` 的 `98ba6c2` 已部署并执行真实 Chrome 复验，但 Pear `n
 3. 新建一轮 `n=2` 后立即取消其中一个槽位，并让另一个槽位完成。
 4. 保存 `/api/cancel-task`、迟到结果拒绝与一次扣费/一次退款的账务证据。
 5. 完成既有 PostgreSQL 并发及 Firefox/WebKit 验证。
+## 2026-08-02 Release Gate Update
+
+The local reliability patch is ready for deployment verification, not release approval.
+
+- Local gate: `pnpm test` passed with 302 test files and 1359 tests; 4 PostgreSQL-dependent tests remain skipped without `TEST_POSTGRES_URL`.
+- New P1 changes: provider identity is no longer derived from a display label; only restored placeholders use recovery polling; each direct-generation slot now has independent cancellation control.
+- New P2 change: autosave snapshots are compacted and storage writes evict oldest snapshots before giving up.
+
+**Decision: Not approved for release yet.** The deployed application must provide real browser and billing evidence for a Pear `n=2` run where one slot is cancelled and the other completes.

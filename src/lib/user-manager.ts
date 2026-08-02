@@ -354,7 +354,7 @@ export class UserManager {
     try {
       if (!this.multiUserData?.userData) return;
       const AUTOSAVE_KEY = 'wujie_autosave_snapshots_v1';
-      const MAX_SNAPSHOTS = 8;
+      const MAX_SNAPSHOTS = 4;
       // 读取历史快照
       let snapshots: Array<{ t: number; payload: string }> = [];
       try {
@@ -398,11 +398,22 @@ export class UserManager {
 
       // 写新快照（在恢复后写，这样快照里是恢复后的健康数据）
       try {
-        snapshots.push({ t: Date.now(), payload: JSON.stringify(this.multiUserData) });
+        const snapshotData = JSON.parse(JSON.stringify(this.multiUserData));
+        this.trimDataUrls(snapshotData);
+        snapshots.push({ t: Date.now(), payload: JSON.stringify(snapshotData) });
         if (snapshots.length > MAX_SNAPSHOTS) snapshots = snapshots.slice(-MAX_SNAPSHOTS);
         localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snapshots));
       } catch (e) {
         // 快照写失败不影响主流程
+        while (snapshots.length > 1) {
+          snapshots = snapshots.slice(1);
+          try {
+            localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snapshots));
+            return;
+          } catch {
+            // Keep evicting the oldest recovery point until a bounded snapshot fits.
+          }
+        }
         console.warn('[DataLossGuard] Failed to write autosave snapshot:', e);
       }
     } catch (e) {

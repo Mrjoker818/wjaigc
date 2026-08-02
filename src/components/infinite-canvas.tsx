@@ -188,6 +188,8 @@ export interface CanvasImage {
     status: string;
     progress: number;
     taskId?: string;
+    /** True only after a processing placeholder was restored from persisted project data. */
+    isResumed?: boolean;
     sourceUrl?: string;
     error?: string;
     startTime?: number; // 生图开始时间戳(ms)，用于显示已用时间
@@ -210,6 +212,8 @@ export interface CanvasImage {
   annotationSourceVersionId?: string;
   annotationBundleId?: string;
   annotationIds?: string[];
+  /** Stable provider identity used for task polling and routing. */
+  apiProviderId?: string;
   apiProvider?: string;
   apiBaseUrl?: string;
   generationRouteAudit?: GenerationRouteAudit;
@@ -5424,16 +5428,38 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   const handleCancelProcessingFrame = useCallback(async (image: CanvasImage) => {
     const taskId = image.processing?.taskId;
-    if (taskId) {
+    if (!taskId) {
+      removeProcessingFrame(image.id);
+      return;
+    }
+    if (cancellingTaskIdsRef.current.has(taskId)) {
+      return;
+    }
+
+    cancellingTaskIdsRef.current.add(taskId);
+    updateProcessingFrame(image.id, {
+      label: '取消中…',
+      status: 'cancelling',
+      progress: image.processing?.progress || 0,
+    });
+    try {
       const cancellation = await taskEventsClient.cancelTask(taskId);
       if (!cancellation.success) {
         toast.error(cancellation.message || '取消任务失败，请稍后重试');
+        updateProcessingFrame(image.id, {
+          label: image.processing?.label || '生成中…',
+          status: 'processing',
+          progress: image.processing?.progress || 0,
+        });
         return;
       }
-    }
 
-    removeProcessingFrame(image.id);
-  }, [removeProcessingFrame]);
+      canvasGenerationAbortControllersRef.current.get(taskId)?.abort();
+      removeProcessingFrame(image.id);
+    } finally {
+      cancellingTaskIdsRef.current.delete(taskId);
+    }
+  }, [removeProcessingFrame, updateProcessingFrame]);
 
   // Get selected image data
   const getSelectedImageData = (): CanvasImage | null => {
@@ -6081,6 +6107,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // ★ 取消控制器：当前正在轮询的任务可通过 cancelTask 取消
   const pollingAbortRef = useRef<AbortController | null>(null);
+  const canvasGenerationAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const cancellingTaskIdsRef = useRef<Set<string>>(new Set());
 
   const pollForResult = useCallback(async (
     taskId: string,
@@ -6358,6 +6386,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           aspectRatio: canvasGenAspectRatio,
           modelName: typeof data.modelName === 'string' ? data.modelName : actualGenModel,
           apiProvider: actualProviderName,
+          apiProviderId: pollProviderId,
           generationRouteAudit: data.generationRouteAudit,
           createdAt,
         }));
@@ -6419,6 +6448,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           aspectRatio: canvasGenAspectRatio,
           modelName: typeof data.modelName === 'string' ? data.modelName : actualGenModel,
           apiProvider: actualProviderName,
+          apiProviderId: pollProviderId,
           generationRouteAudit: data.generationRouteAudit,
           createdAt: startedAt,
         };
@@ -6430,14 +6460,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
       const pollForSlot = async (slot: { taskId: string; frameId: string; slotIndex: number }): Promise<string | null> => {
         const maxAttempts = 300;
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const abortController = new AbortController();
+        canvasGenerationAbortControllersRef.current.set(slot.taskId, abortController);
+        try {
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
           const delay = attempt <= 5 ? 200 : attempt <= 15 ? 500 : attempt <= 30 ? 1000 : 2000;
           await new Promise(resolve => setTimeout(resolve, delay));
+          if (abortController.signal.aborted) return null;
           try {
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ taskId: slot.taskId, model: actualGenModel, providerId: pollProviderId }),
+              signal: abortController.signal,
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
@@ -6460,6 +6495,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 aspectRatio: canvasGenAspectRatio,
                 modelName: typeof pollData.modelName === 'string' ? pollData.modelName : actualGenModel,
                 apiProvider: typeof pollData.providerName === 'string' ? pollData.providerName : actualProviderName,
+                apiProviderId: typeof pollData.providerId === 'string' ? pollData.providerId : pollProviderId,
                 generationRouteAudit: pollData.generationRouteAudit || data.generationRouteAudit,
               });
               return savedUrl;
@@ -6482,11 +6518,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             });
             setCanvasGenProgress(progress);
           } catch {
+            if (abortController.signal.aborted) return null;
             // Keep the slot visible and let the next polling iteration recover transient failures.
           }
         }
         updateProcessingFrame(slot.frameId, { label: '生成超时', status: 'failed', progress: 0 });
         return null;
+        } finally {
+          if (canvasGenerationAbortControllersRef.current.get(slot.taskId) === abortController) {
+            canvasGenerationAbortControllersRef.current.delete(slot.taskId);
+          }
+        }
       };
 
       const results = await Promise.all(canvasGenerationSlots.map(async (slot) => pollForSlot(slot)));
@@ -10398,10 +10440,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             className="pointer-events-auto mt-0.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (pollingAbortRef.current) {
-                                pollingAbortRef.current.abort();
-                                pollingAbortRef.current = null;
-                              }
                               void handleCancelProcessingFrame(image);
                             }}
                           >
@@ -10439,10 +10477,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             className="pointer-events-auto mt-0.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (pollingAbortRef.current) {
-                                pollingAbortRef.current.abort();
-                                pollingAbortRef.current = null;
-                              }
                               void handleCancelProcessingFrame(image);
                             }}
                           >

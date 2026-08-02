@@ -7,12 +7,16 @@ export interface ResumedTaskPollingState {
   taskId?: string;
   status?: string;
   wasStarted: boolean;
+  isResumed: boolean;
 }
 
 export const RESUMED_TASK_MAX_POLL_ATTEMPTS = 400;
 
 export function shouldStartResumedTaskPolling(state: ResumedTaskPollingState): boolean {
-  return Boolean(state.taskId) && state.status === 'processing' && !state.wasStarted;
+  return state.isResumed
+    && Boolean(state.taskId)
+    && state.status === 'processing'
+    && !state.wasStarted;
 }
 
 export function getResumedTaskPollingOutcome(

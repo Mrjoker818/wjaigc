@@ -303,3 +303,11 @@
 |------|----------|----------|
 | `success` / `succeeded` 成功终态后的生成器解锁 | 待部署 | 完成真实 Pear `n=2` 批次后，提交按钮必须从“生成中…”恢复为可用状态，且无需刷新页面。 |
 | 立即取消时机 | 待部署 | 在同一次浏览器操作中发现两个新建槽位后立刻取消，避免先检查大量日志导致供应商已完成全部任务。 |
+## 2026-08-02 Newly Pending Deployment Checks
+
+| Item | Why it is still unverified | Acceptance evidence |
+|---|---|---|
+| Pear `n=2` provider attribution after recovery | Requires the deployed task service and real provider response. | All `/api/poll-task` requests carry the configured provider ID and final cards show Pear, never FHL. |
+| Per-slot cancellation | Requires a live provider task that remains active long enough to cancel. | One `/api/cancel-task` success, one cancelled slot that never reappears after refresh, and one surviving completed slot. |
+| Charge/refund consistency | Requires access to the deployed billing ledger. | Exactly one charge for the successful slot and at most one refund for the cancelled slot. |
+| Browser storage quota regression | Requires a large real project in the deployed browser. | No `QuotaExceededError` for `wujie_autosave_snapshots_v1` after project load, save, and refresh. |

@@ -676,3 +676,36 @@ await page.evaluate(() => {
 | **新增测试** | `src/__tests__/components/infinite-canvas-direct-generation-contract.test.ts`，先 RED 后 GREEN，锁定成功终态别名。 |
 | **本地回归** | 定向 6 文件 / 31 测试通过；全量 Vitest 301 files / 1355 tests passed，3 files / 4 PostgreSQL 环境测试 skipped；TypeScript、Lint（0 errors / 949 historical warnings）与生产构建均通过。 |
 | **状态** | 本地已修复，待部署后复验：结果完成后按钮恢复可点击，并立即执行单槽取消验证。 |
+## 2026-08-02 Follow-up: Canvas Provider Identity, Slot Cancellation, and Autosave Quota
+
+### BUG-035: Fresh canvas tasks were polled as restored tasks with a provider display name
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite canvas direct generation / project recovery |
+| Reproduction | Select `PearAPI 图像 / gpt-image-2`, submit `n=2`, then inspect task polling requests. A recovery poll used `providerId: "PearAPI 图像"` instead of the configured provider ID. |
+| Root cause | `apiProvider` mixed a UI display label with the provider routing identity. `CanvasWorkspace` started recovery polling for new in-memory placeholders as well as persisted placeholders. |
+| Fix | Added persisted `apiProviderId`, marked only hydrated placeholders as `processing.isResumed`, and made recovery polling use the identity field only. |
+| Regression tests | `infinite-canvas-direct-generation-contract`, `resumed-task-polling`, project reopen and completed-image sync contracts. |
+| Status | Fixed locally; pending deployed Chrome verification. |
+
+### BUG-036: One canvas slot could not reliably cancel its own polling request
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite canvas direct generation |
+| Reproduction | Submit `n=2`, press Cancel on one visible slot, and inspect network activity. The old UI used one global abort controller and the server cancellation request was not proven to occur. |
+| Root cause | Direct slots shared an unrelated global polling controller; cancellation was not isolated per task. |
+| Fix | Added a taskId-to-AbortController map, cancellation de-duplication, a visible cancelling state, server cancellation before frame removal, and task-specific poll aborting. |
+| Regression tests | `infinite-canvas-generation-cancel-contract`, `cancel-task.test.ts`. |
+| Status | Fixed locally; pending deployed Chrome verification and billing-ledger evidence. |
+
+### BUG-031 Update: Autosave snapshot storage quota exhaustion
+
+| Field | Detail |
+|---|---|
+| Fix | Autosave snapshots now strip `data:` and `blob:` image URLs before serialization, retain at most four snapshots, and evict oldest snapshots before retrying a failed storage write. |
+| Regression tests | `user-manager-autosave-quota-contract.test.ts`. |
+| Status | Fixed locally; pending deployed browser-console verification. |

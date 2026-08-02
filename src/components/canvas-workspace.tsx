@@ -407,12 +407,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             isPlaying: img.isPlaying || false,
             // Metadata fields — must be preserved for display
             modelName: img.modelName || undefined,
+            apiProviderId: img.apiProviderId || undefined,
             apiProvider: img.apiProvider || undefined,
             generationRouteAudit: img.generationRouteAudit || undefined,
             generatedFromImageId: img.generatedFromImageId || undefined,
             relationType: img.relationType || undefined,
             isProcessingPlaceholder: img.isProcessingPlaceholder || false,
-            processing: img.processing || undefined,
+            processing: img.processing ? { ...img.processing, isResumed: true } : undefined,
           })) as CanvasImage[]);
         } else {
           setImages([]);
@@ -639,6 +640,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     originalHeight: img.originalHeight || 512,
                     createdAt: img.createdAt || Date.now(),
                     modelName: img.modelName || '',
+                    apiProviderId: img.apiProviderId || '',
                     apiProvider: img.apiProvider || '',
                     apiBaseUrl: img.apiBaseUrl || '',
                     generationRouteAudit: img.generationRouteAudit || undefined,
@@ -652,7 +654,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     generatedFromImageId: img.generatedFromImageId || undefined,
                     relationType: img.relationType || undefined,
                     isProcessingPlaceholder: img.isProcessingPlaceholder || false,
-                    processing: img.processing || undefined,
+                    processing: img.processing ? { ...img.processing, isResumed: true } : undefined,
                   })) as CanvasImage[]);
                   // 恢复分组数据
                   const metaGroups = targetProject.metadata?.groups;
@@ -975,10 +977,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           return {
             ...image,
             model: image.model || match.model,
-            apiProvider: image.apiProvider || match.providerId,
+            apiProviderId: image.apiProviderId || match.providerId,
             processing: {
               ...image.processing,
               taskId: match.id,
+              isResumed: true,
               status: 'processing',
               progress: Math.max(image.processing.progress || 0, match.progress || 10),
               label: match.label || '已恢复，等待生成',
@@ -1011,7 +1014,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const taskId = image.processing?.taskId;
       if (!taskId) continue;
       const wasStarted = Boolean(taskId && resumedTaskIdsRef.current.has(taskId));
-      if (!shouldStartResumedTaskPolling({ taskId, status: image.processing?.status, wasStarted })) continue;
+      if (!shouldStartResumedTaskPolling({
+        taskId,
+        status: image.processing?.status,
+        wasStarted,
+        isResumed: image.processing?.isResumed === true,
+      })) continue;
       resumedTaskIdsRef.current.add(taskId);
 
       void (async () => {
@@ -1020,7 +1028,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             const response = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: image.model || image.modelName, providerId: image.apiProvider }),
+              body: JSON.stringify({ taskId, model: image.model || image.modelName, providerId: image.apiProviderId }),
             });
             const data = await response.json();
             const videoUrl = data.videoUrl || data.result?.videoUrl;
@@ -1178,6 +1186,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             threeDModelUrl: img.threeDModelUrl || '',
             threeDModelUrls: img.threeDModelUrls || undefined,
             modelName: img.modelName || '',
+            apiProviderId: img.apiProviderId || '',
             apiProvider: img.apiProvider || '',
             apiBaseUrl: img.apiBaseUrl || '',
             generationRouteAudit: img.generationRouteAudit || undefined,
@@ -1282,6 +1291,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             threeDModelUrl: img.threeDModelUrl || '',
             threeDModelUrls: img.threeDModelUrls || undefined,
             modelName: img.modelName || '',
+            apiProviderId: img.apiProviderId || '',
             apiProvider: img.apiProvider || '',
             apiBaseUrl: img.apiBaseUrl || '',
             generationRouteAudit: img.generationRouteAudit || undefined,
@@ -4612,7 +4622,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   category: img.category || '', size: img.size || '',
                   groupId: img.groupId || '', threeDModelUrl: img.threeDModelUrl || '',
                   threeDModelUrls: img.threeDModelUrls || undefined,
-                  modelName: img.modelName || '', apiProvider: img.apiProvider || '',
+                  modelName: img.modelName || '', apiProviderId: img.apiProviderId || '', apiProvider: img.apiProvider || '',
                   apiBaseUrl: img.apiBaseUrl || '',
                   generationRouteAudit: img.generationRouteAudit || undefined,
                   sourceUrl: img.sourceUrl || '',

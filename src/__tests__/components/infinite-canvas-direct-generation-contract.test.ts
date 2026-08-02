@@ -48,6 +48,17 @@ describe('canvas embedded image generator durable slot contract', () => {
     expect(taskBinding).toBeGreaterThan(processingFlag);
   });
 
+  it('persists the provider route id separately from the display name for every direct slot', () => {
+    const generator = canvasSource.indexOf('const handleCanvasGenerate = useCallback');
+    const placeholderCreation = canvasSource.indexOf('const placeholders: CanvasImage[] = submittedSlots.map', generator);
+    const providerDisplayName = canvasSource.indexOf('apiProvider: actualProviderName', placeholderCreation);
+    const providerRouteId = canvasSource.indexOf('apiProviderId: pollProviderId', placeholderCreation);
+
+    expect(placeholderCreation).toBeGreaterThan(generator);
+    expect(providerDisplayName).toBeGreaterThan(placeholderCreation);
+    expect(providerRouteId).toBeGreaterThan(providerDisplayName);
+  });
+
   it('polls and settles each slot independently using the resolved provider id', () => {
     const generator = canvasSource.indexOf('const handleCanvasGenerate = useCallback');
     const slotCreation = canvasSource.indexOf('const canvasGenerationSlots =', generator);
