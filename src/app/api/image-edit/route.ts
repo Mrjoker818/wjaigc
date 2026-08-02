@@ -27,7 +27,11 @@ import { validateImageUrl } from '@/lib/input-validation';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 import { completeCloudTask, terminateCloudTaskAndRefund } from '@/lib/cloud-task-storage';
-import { is302AiUpscaleBaseUrl, resolve302UpscaleModelId } from '@/lib/302-upscale-models';
+import {
+  is302AiUpscaleBaseUrl,
+  resolve302UpscaleModelId,
+  resolve302UpscaleModelSelection,
+} from '@/lib/302-upscale-models';
 import { parse302UpscaleProviderError, UpscaleProviderError } from '@/lib/upscale-provider-error';
 import { validateUpscaleTargetDimensions, type UpscaleTargetPreset } from '@/lib/upscale-target';
 import {
@@ -1528,6 +1532,10 @@ export async function POST(request: NextRequest) {
       console.debug(`[image-edit] Stripped provider prefix from model: "${rawModel}" → "${modelStr}" (providerId via field: "${providerId || 'none'}")`);
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
+    const requestedUpscaleModel = body.upscaleModel?.trim() || null;
+    const requested302UpscaleModel = requestedUpscaleModel
+      ? resolve302UpscaleModelId(requestedUpscaleModel)
+      : null;
     const engineMode = (
       enginePref === 'ai'
       || enginePref === 'local'
@@ -1544,6 +1552,42 @@ export async function POST(request: NextRequest) {
       const urlError = validateImageUrl(imageUrl);
       if (urlError) {
         return NextResponse.json({ success: false, error: urlError }, { status: 400 });
+      }
+    }
+
+    if (action === 'upscale' && requestedUpscaleModel) {
+      const selectedProvider = effectiveProviderId
+        ? await findProviderById(effectiveProviderId)
+        : null;
+      if (!selectedProvider) {
+        return NextResponse.json({
+          success: false,
+          error: '请选择管理员已配置的放大模型和供应商。',
+        }, { status: 400 });
+      }
+
+      const selectedModels = selectedProvider.selectedModels || [];
+      const discoveredModels = (selectedProvider.discoveredModels || []).map(model => model.id);
+      const resolved302Models = resolve302UpscaleModelSelection(
+        selectedProvider.baseUrl,
+        selectedModels,
+      );
+      const allowedModels = new Set(
+        resolved302Models || (selectedModels.length > 0 ? selectedModels : discoveredModels),
+      );
+      if (!allowedModels.has(requestedUpscaleModel)) {
+        return NextResponse.json({
+          success: false,
+          error: '所选放大模型不属于当前已启用的供应商。',
+        }, { status: 403 });
+      }
+
+      if (requestedUpscaleModel === 'SeedVR2-Upscaler') {
+        return NextResponse.json({
+          success: false,
+          error: 'SeedVR2-Upscaler 尚未完成当前 Pear 接口协议验证，暂不可提交。',
+          retryable: false,
+        }, { status: 422 });
       }
     }
 
@@ -2133,13 +2177,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const requested302UpscaleModel = body.upscaleModel
-        ? resolve302UpscaleModelId(body.upscaleModel)
-        : null;
       const requestedMode = engineMode !== 'auto' ? engineMode : (body.upscaleMode || 'auto');
       const productMode = resolveUpscaleProductMode(
         requestedMode,
-        Boolean(requested302UpscaleModel),
+        Boolean(requestedUpscaleModel),
       );
       const upscaleMode: 'auto' | 'ai' | 'cpu' = productMode === 'ai-only'
         ? 'ai'
@@ -2147,7 +2188,7 @@ export async function POST(request: NextRequest) {
           ? 'cpu'
           : 'auto';
 
-      if (body.upscaleModel && !requested302UpscaleModel) {
+      if (requestedUpscaleModel && !requested302UpscaleModel && requestedUpscaleModel !== 'Real-ESRGAN') {
         return NextResponse.json({
           success: false,
           error: '仅支持 302 Super-Upscale V2、302 Upscale V6、302 Image Upscale 和 302 ESRGAN',
@@ -2698,7 +2739,13 @@ export async function POST(request: NextRequest) {
       const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, painting, oil painting, illustration, cartoon, anime, over-smoothed, plastic skin, waxy, airbrushed, soft focus, smoothed, gaussian blur, changed content, new elements, different colors, altered composition, deformed, watermark, text, makeup change, flat, cartoonish, drawn, sketch, CG, 3d render, unnatural, noise, grain, speckle, color splotch, compression block, ringing, halo, chromatic aberration, moire, added texture, fake skin pores, fake hair strands, invented details, painted over, retouched, HDR, oversaturated, shifted, misaligned, moved, position change, content drift, creative interpretation, style change';
 
       // 分离候选: 专用upscaler模型走/images/edits(参考图编辑)，通用模型走/images/generations
-      const specialUpscalerCandidates = candidateModels.filter(c => isUpscalerModel(c.model));
+      const specialUpscalerCandidates = candidateModels.filter(c => (
+        isUpscalerModel(c.model)
+        && (!requestedUpscaleModel || (
+          c.model === requestedUpscaleModel
+          && c.source === 'specified-provider'
+        ))
+      ));
       const generalImageCandidates = candidateModels.filter(c => !isUpscalerModel(c.model));
 
       let aiResult: (Awaited<ReturnType<typeof submitImageTask>> & {
@@ -2817,6 +2864,11 @@ export async function POST(request: NextRequest) {
       const origMaxEdge = Math.max(origW, origH);
       // 检查专用模型是否来自支持/images/edits的提供商（排除PearAPI等不支持此端点的）
       // 同时排除302.AI模型（已在上一步处理）
+      const isPearRealEsrganUpscaleCandidate = (candidate: typeof specialUpscalerCandidates[number]): boolean => {
+        const baseUrl = candidate.apiBaseUrl.toLowerCase();
+        return (baseUrl.includes('pearapi.ai') || baseUrl.includes('pearapi'))
+          && candidate.model === 'Real-ESRGAN';
+      };
       const supportedUpscalerCandidates = specialUpscalerCandidates.filter(c => {
         // 302.AI模型已在上一步处理，跳过
         if (resolve302UpscaleModelId(c.model) && is302AiUpscaleBaseUrl(c.apiBaseUrl)) {
@@ -2825,8 +2877,7 @@ export async function POST(request: NextRequest) {
         // PearAPI不支持/images/edits端点，直接排除
         const baseUrl = c.apiBaseUrl || '';
         if (baseUrl.includes('pearapi.ai') || baseUrl.includes('pearapi')) {
-          console.debug(`[image-edit] upscale: skipping ${c.model} from PearAPI (does not support /images/edits endpoint)`);
-          return false;
+          return isPearRealEsrganUpscaleCandidate(c);
         }
         return true;
       });
@@ -2881,7 +2932,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Step B: 专用模型失败或不存在时，用通用image模型放大
-      if (!aiResult && generalImageCandidates.length > 0) {
+      if (!aiResult && !requestedUpscaleModel && generalImageCandidates.length > 0) {
         try {
           console.debug(`[image-edit] upscale: trying ${generalImageCandidates.length} general image models for upscale`);
           aiResult = await autoTrySubmitImageTask(generalImageCandidates, (m: string) => ({
@@ -2902,6 +2953,10 @@ export async function POST(request: NextRequest) {
       }
 
       // Step C: 处理AI放大结果
+      if (requestedUpscaleModel && !aiResult) {
+        throw aiError || new Error(`${requestedUpscaleModel} 放大失败，未获得可用结果。`);
+      }
+
       if (aiResult) {
         // AI结果尺寸后处理函数（原逻辑保留）
         const resizeAiResultToTarget = async (aiImageUrl: string): Promise<{ url: string; actualW: number; actualH: number }> => {

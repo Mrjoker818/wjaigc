@@ -24,6 +24,27 @@ describe('302 upscale provider errors', () => {
     expect(error.message).toContain('Content rejected');
   });
 
+  it('preserves the documented nested 302 error code and Chinese provider message', () => {
+    const error = parse302UpscaleProviderError(
+      422,
+      JSON.stringify({
+        error: {
+          err_code: -10021,
+          message: 'The content could not be processed because it contained material flagged by a content checker',
+          message_cn: '内容因包含被内容检查器标记的材料而无法处理',
+        },
+      }),
+    );
+
+    expect(error).toMatchObject({
+      status: 422,
+      code: 'UPSCALE_PROVIDER_REJECTED',
+      providerCode: '-10021',
+      retryable: false,
+    });
+    expect(error.message).toContain('内容因包含被内容检查器标记的材料而无法处理');
+  });
+
   it.each([
     [401, 'UPSCALE_PROVIDER_AUTH', false],
     [403, 'UPSCALE_PROVIDER_AUTH', false],

@@ -33,6 +33,7 @@ function parseProviderPayload(rawBody: string): {
       ? payload.error as Record<string, unknown>
       : undefined;
     const message = [
+      nestedError?.message_cn,
       payload.err_msg,
       payload.message,
       payload.msg,
@@ -42,6 +43,7 @@ function parseProviderPayload(rawBody: string): {
       payload.err_code,
       payload.error_code,
       payload.code,
+      nestedError?.err_code,
       nestedError?.code,
     ].find((value): value is string | number => typeof value === 'string' || typeof value === 'number');
 

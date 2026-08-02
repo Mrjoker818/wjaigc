@@ -16,7 +16,9 @@ describe('upscale terminal state contract', () => {
     expect(handlerSource).toContain('const failUpscale');
     expect(handlerSource).toContain('buildFailedProcessingFrame');
     expect(handlerSource).toContain('toast.error(failure.error)');
+    expect(handlerSource).toContain('extractImageEditErrorMessage(JSON.stringify(data), res.status)');
     expect(handlerSource).not.toContain('alert(');
+    expect(handlerSource).not.toContain('String(data.error');
     expect(handlerSource).not.toContain('setTimeout(() => removeProcessingFrame(placeholderId), 5000)');
     expect((handlerSource.match(/failUpscale\(/g) || []).length).toBeGreaterThanOrEqual(6);
   });

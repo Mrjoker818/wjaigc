@@ -12,6 +12,7 @@ The remediation worktree contains concrete source and regression-test repairs, b
 - Requested-vs-actual generation route audit persistence and canvas disclosure.
 - Typed 302 upscale provider failures with durable terminal/refund handling.
 - Explicit 302 selections constrained to AI-only execution after a billing boundary.
+- Dynamic configured-upscaler discovery, exact provider-model routing, and pre-charge model ownership checks.
 - Pear asynchronous layered task submission and secure ZIP/PSD extraction.
 - Image toolbar failure-card preservation for long-running image/video/3D/decomposition operations.
 - Transparent subject alpha quality gate.
@@ -24,6 +25,7 @@ The remediation worktree contains concrete source and regression-test repairs, b
 3. Deployed 302 rejection behavior has not proven HTTP/code preservation and exactly-once refund.
 4. Canvas persistence, routing audit, file upload/download and toolbar behavior require current deployment evidence.
 5. Firefox and WebKit core P0 browser checks remain outstanding.
+6. The release still requires deployed browser/provider evidence despite the completed local production build.
 
 ## Non-Blocking Technical Debt
 

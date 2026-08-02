@@ -46,6 +46,15 @@ export const THREE_O_TWO_UPSCALE_MODELS: readonly ThreeOhTwoUpscaleModelDefiniti
   },
 ] as const;
 
+/**
+ * Older provider rows used one catch-all `302` selection. Preserve that
+ * legacy configuration without silently exposing unverified variants.
+ */
+const DEFAULT_302_UPSCALE_MODEL_IDS: readonly ThreeOhTwoUpscaleModelId[] = [
+  '302-super-upscale-v2',
+  '302-upscale-v6',
+] as const;
+
 const UPSCALE_MODEL_ALIASES: Record<string, ThreeOhTwoUpscaleModelId> = {
   '302-super-upscale-v2': '302-super-upscale-v2',
   'super-upscale-v2': '302-super-upscale-v2',
@@ -87,7 +96,7 @@ export function resolve302UpscaleModelSelection(
   const usesUnifiedCatalog = selectedModels.length === 0
     || selectedModels.some(modelId => modelId.trim().toLowerCase() === '302');
   return usesUnifiedCatalog
-    ? THREE_O_TWO_UPSCALE_MODELS.map(model => model.id)
+    ? [...DEFAULT_302_UPSCALE_MODEL_IDS]
     : [];
 }
 

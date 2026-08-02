@@ -374,6 +374,10 @@ test.describe('P0 real user journey', () => {
           !tolerablePatterns.some((p) => p.test(item.text)),
       );
       expect(realErrors, `Unexpected console errors after logout: ${JSON.stringify(realErrors)}`).toEqual([]);
+      expect(
+        evidence.dialogs,
+        `Unexpected native browser dialogs during P0 journey: ${JSON.stringify(evidence.dialogs)}`,
+      ).toEqual([]);
     } finally {
       await saveBrowserEvidence(page, testInfo, evidence, 'p0-real-user-journey');
     }

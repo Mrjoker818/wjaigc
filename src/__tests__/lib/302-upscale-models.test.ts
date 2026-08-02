@@ -38,12 +38,10 @@ describe('302.AI upscale model catalog', () => {
     expect(get302UpscaleModelsForProvider('https://api.example.com', 'upscaler')).toEqual([]);
   });
 
-  it('expands the unified 302 catalog entry into the four native upscale models', () => {
+  it('expands the legacy unified 302 entry into only the two verified toolbar models', () => {
     expect(resolve302UpscaleModelSelection('https://api.302ai.cn', ['302'])).toEqual([
       '302-super-upscale-v2',
       '302-upscale-v6',
-      '302-image-upscale',
-      '302-esrgan',
     ]);
   });
 

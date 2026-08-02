@@ -64,7 +64,6 @@ import {
   THREE_D_TASK_TIMEOUT_MS,
   isMeshyThreeDProvider,
 } from '@/lib/three-d-task-performance';
-import { THREE_O_TWO_UPSCALE_MODELS, type ThreeOhTwoUpscaleModelId } from '@/lib/302-upscale-models';
 import {
   UPSCALE_TARGET_PRESETS,
   calculateUpscaleTargetDimensions,
@@ -128,6 +127,39 @@ export interface ImageGroup {
   x: number;
   y: number;
   collapsed: boolean;
+}
+
+interface ConfiguredUpscaleModel {
+  key: string;
+  providerId: string;
+  modelId: string;
+  label: string;
+  unavailableReason?: string;
+}
+
+interface UpscaleModelsResponse {
+  models?: Array<{
+    id?: string;
+    name?: string;
+    displayName?: string;
+    providerId?: string;
+  }>;
+  providers?: Array<{
+    id?: string;
+    name?: string;
+    displayName?: string;
+  }>;
+}
+
+function getUpscaleOptionKey(providerId: string, modelId: string): string {
+  return `${providerId}::${modelId}`;
+}
+
+function getUpscaleModelUnavailableReason(modelId: string): string | undefined {
+  if (modelId === 'SeedVR2-Upscaler') {
+    return 'Pear SeedVR2 的当前接口协议尚未完成验证，暂不可提交，避免产生错误任务或扣费。';
+  }
+  return undefined;
 }
 
 export interface CanvasImage {
@@ -1403,7 +1435,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [upscalePreset, setUpscalePreset] = useState<UpscaleTargetPreset>('2x');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
   const [upscaleMode, setUpscaleMode] = useState<UpscaleProductMode>('auto');
-  const [selected302UpscaleModel, setSelected302UpscaleModel] = useState<ThreeOhTwoUpscaleModelId>('302-super-upscale-v2');
+  const [configuredUpscaleModels, setConfiguredUpscaleModels] = useState<ConfiguredUpscaleModel[]>([]);
+  const [selectedUpscaleModelKey, setSelectedUpscaleModelKey] = useState('');
+  const [isLoadingUpscaleModels, setIsLoadingUpscaleModels] = useState(false);
+  const [upscaleModelsLoadError, setUpscaleModelsLoadError] = useState('');
+  const selectedUpscaleModel = useMemo(
+    () => configuredUpscaleModels.find(model => model.key === selectedUpscaleModelKey) || null,
+    [configuredUpscaleModels, selectedUpscaleModelKey],
+  );
   // Engine preference for tools: auto/ai/local (persisted in localStorage)
   const getEnginePref = (key: string): 'auto' | 'ai' | 'local' => {
     try { const v = localStorage.getItem(`wujie_engine_${key}`); if (v === 'ai' || v === 'local' || v === 'auto') return v; } catch {}
@@ -1452,6 +1491,63 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         setUpscaylChecking(false);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadConfiguredUpscaleModels = async () => {
+      setIsLoadingUpscaleModels(true);
+      setUpscaleModelsLoadError('');
+      try {
+        const response = await fetch('/api/models?type=upscaler');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json() as UpscaleModelsResponse;
+        const providerNames = new Map(
+          (payload.providers || [])
+            .filter(provider => Boolean(provider.id))
+            .map(provider => [provider.id as string, provider.displayName || provider.name || '已配置供应商']),
+        );
+        const models = (payload.models || [])
+          .filter(model => Boolean(model.id && model.providerId))
+          .map(model => {
+            const providerId = model.providerId as string;
+            const modelId = model.id as string;
+            const providerName = providerNames.get(providerId) || '已配置供应商';
+            const modelName = model.displayName || model.name || modelId;
+            return {
+              key: getUpscaleOptionKey(providerId, modelId),
+              providerId,
+              modelId,
+              label: `${providerName} · ${modelName}`,
+              unavailableReason: getUpscaleModelUnavailableReason(modelId),
+            };
+          });
+
+        if (cancelled) return;
+        setConfiguredUpscaleModels(models);
+        setSelectedUpscaleModelKey(current => (
+          current && models.some(model => model.key === current)
+            ? current
+            : models.find(model => !model.unavailableReason)?.key || models[0]?.key || ''
+        ));
+      } catch (error) {
+        if (!cancelled) {
+          setConfiguredUpscaleModels([]);
+          setSelectedUpscaleModelKey('');
+          setUpscaleModelsLoadError(
+            error instanceof Error ? error.message : '无法读取已配置的放大模型',
+          );
+        }
+      } finally {
+        if (!cancelled) setIsLoadingUpscaleModels(false);
+      }
+    };
+
+    void loadConfiguredUpscaleModels();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Multi-angle state
@@ -6962,6 +7058,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const handleUpscaleConfirm = useCallback(async () => {
     const img = getActiveImageData();
     if (!img) return;
+    if (upscaleMode === 'ai-only' && (!selectedUpscaleModel || selectedUpscaleModel.unavailableReason)) {
+      toast.error(selectedUpscaleModel?.unavailableReason || '请先选择可用的 AI 放大模型。');
+      return;
+    }
 
     // Use actual pixel dimensions loaded from the image element
     const origW = Math.round(upscaleActualW || img.originalWidth || img.width);
@@ -7031,13 +7131,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             targetHeight: targetDim.height,
             targetPreset: upscalePreset,
             aspectRatio: findClosestStandardRatio(origW, origH),
-            model: modelInfo.model,
-            providerId: modelInfo.providerId || getCurrentProviderId(),
+            model: upscaleMode === 'ai-only' ? selectedUpscaleModel?.modelId || modelInfo.model : modelInfo.model,
+            providerId: upscaleMode === 'ai-only' ? selectedUpscaleModel?.providerId : (modelInfo.providerId || getCurrentProviderId()),
             scale: targetDim.engineScale,
             originalWidth: origW,
             originalHeight: origH,
             upscaleMode,
-            upscaleModel: upscaleMode === 'ai-only' ? selected302UpscaleModel : undefined,
+            upscaleModel: upscaleMode === 'ai-only' ? selectedUpscaleModel?.modelId : undefined,
             engine: upscaleMode,
             localModel: upscaylSelectedModel,
           }),
@@ -7073,10 +7173,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
 
       if (!data.success) {
-        const providerCode = typeof data.providerCode === 'string'
-          ? ` [302:${data.providerCode}]`
-          : '';
-        failUpscale(`${String(data.error || '放大失败')}${providerCode}`);
+        failUpscale(extractImageEditErrorMessage(JSON.stringify(data), res.status));
         return;
       }
 
@@ -7092,7 +7189,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           : '正在进行 AI 超分与画质归一...';
       updateProcessingFrame(placeholderId, { progress: 22, status: executionLabel });
 
-      let usedModelName = String(data.usedModel || data.model || modelInfo.apiDisplayName || modelInfo.model);
+      let usedModelName = String(data.usedModel || data.model || selectedUpscaleModel?.label || modelInfo.apiDisplayName || modelInfo.model);
       let resultUrl = (data.url as string) || (data.imageUrl as string) || null;
       if (!resultUrl && data.taskId) {
         resultUrl = await pollForResult(String(data.taskId), usedModelName, (progress, status) => {
@@ -7135,7 +7232,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
     setIsEditProcessing(false);
     setActiveTool('none');
-  }, [getActiveImageData, upscaleActualW, upscaleActualH, upscalePreset, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, upscaleMode, selected302UpscaleModel, upscaylSelectedModel, getCurrentProviderId, pollForResult, completeProcessingFrame]);
+  }, [getActiveImageData, upscaleActualW, upscaleActualH, upscalePreset, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, upscaleMode, selectedUpscaleModel, upscaylSelectedModel, getCurrentProviderId, pollForResult, completeProcessingFrame]);
 
   // Engine selection helper: if pref saved, run directly; else open dialog
   const triggerWithEngine = useCallback((tool: 'upscale'|'removebg'|'svg'|'segment', doExecute: (engine: 'auto'|'ai'|'local') => void) => {
@@ -11899,7 +11996,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           const targetValidationError = isSizeLoaded
             ? validateUpscaleTargetDimensions(origW, origH, targetDim.width, targetDim.height)
             : null;
-          const canExecute = isSizeLoaded && targetDim.canUpscale && !targetValidationError;
+          const canExecute = isSizeLoaded
+            && targetDim.canUpscale
+            && !targetValidationError
+            && (upscaleMode !== 'ai-only' || Boolean(selectedUpscaleModel && !selectedUpscaleModel.unavailableReason));
 
           return (
             <div
@@ -11968,22 +12068,42 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   )}
                 </div>
                 {upscaleMode === 'ai-only' && (
-                  <select
-                    aria-label="302 AI 放大模型"
-                    value={selected302UpscaleModel}
-                    onChange={(e) => setSelected302UpscaleModel(e.target.value as ThreeOhTwoUpscaleModelId)}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className={`h-7 max-w-44 border px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-                      isMonochrome
-                        ? 'border-gray-300 bg-white text-gray-700'
-                        : 'border-[#454545] bg-[#252525] text-text-bright'
-                    }`}
-                    title="302.AI 放大模型"
-                  >
-                    {THREE_O_TWO_UPSCALE_MODELS.map(model => (
-                      <option key={model.id} value={model.id}>{model.displayName}</option>
-                    ))}
-                  </select>
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <select
+                      aria-label="AI 放大模型"
+                      value={selectedUpscaleModelKey}
+                      disabled={isLoadingUpscaleModels || configuredUpscaleModels.length === 0}
+                      onChange={(e) => setSelectedUpscaleModelKey(e.target.value)}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className={`h-7 max-w-64 border px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                        isMonochrome
+                          ? 'border-gray-300 bg-white text-gray-700'
+                          : 'border-[#454545] bg-[#252525] text-text-bright'
+                      }`}
+                      title="仅显示管理员已启用的放大模型"
+                    >
+                      {isLoadingUpscaleModels && <option value="">正在加载模型…</option>}
+                      {!isLoadingUpscaleModels && configuredUpscaleModels.length === 0 && (
+                        <option value="">暂无可用 AI 放大模型</option>
+                      )}
+                      {configuredUpscaleModels.map(model => (
+                        <option
+                          key={model.key}
+                          value={model.key}
+                          disabled={Boolean(model.unavailableReason)}
+                        >
+                          {model.label}{model.unavailableReason ? '（待协议验证）' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {(upscaleModelsLoadError || selectedUpscaleModel?.unavailableReason) && (
+                      <span className={`max-w-64 text-[10px] leading-4 ${
+                        isMonochrome ? 'text-amber-700' : 'text-amber-300'
+                      }`}>
+                        {selectedUpscaleModel?.unavailableReason || `模型读取失败：${upscaleModelsLoadError}`}
+                      </span>
+                    )}
+                  </div>
                 )}
                 <div className={panelDividerClass} />
                 {/* Upscale product mode selector */}
