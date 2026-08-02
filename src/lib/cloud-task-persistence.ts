@@ -50,6 +50,7 @@ interface VideoTaskSubmission {
   model?: string;
   label?: string;
   creditCost?: number;
+  deferCreditCharge?: boolean;
 }
 
 interface VideoTaskTerminal {
@@ -156,13 +157,14 @@ export async function recordVideoTaskSubmitted(input: VideoTaskSubmission): Prom
     userId: input.userId || 'anonymous',
     projectId: input.projectId,
     type: input.type || 'video',
-    status: 'processing',
+    status: input.deferCreditCharge ? 'pending' : 'processing',
     providerId: input.providerId,
     model: input.model,
     remoteTaskId: input.taskId,
-    progress: 5,
+    progress: input.deferCreditCharge ? 0 : 5,
     label: input.label || 'Video generation',
-    creditCost: input.creditCost,
+    creditStatus: input.deferCreditCharge ? 'not-applicable' : undefined,
+    creditCost: input.deferCreditCharge ? 0 : input.creditCost,
     createdAt: now,
     updatedAt: now,
   });

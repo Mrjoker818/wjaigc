@@ -12,6 +12,19 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+function requiresAtomicTerminalSettlement(task: Awaited<ReturnType<typeof getCloudTaskForUser>>): boolean {
+  if (task?.type === 'video' || task?.type === 'video-extend') return true;
+
+  const submissionPayload = task?.result?.submissionPayload;
+  if (!submissionPayload || typeof submissionPayload !== 'object') return false;
+
+  const payload = submissionPayload as Record<string, unknown>;
+  return task?.type === 'generate-async'
+    && typeof payload.batchId === 'string'
+    && typeof payload.slotId === 'string'
+    && typeof payload.slotIndex === 'number';
+}
+
 /**
  * POST /api/cancel-task
  * 取消正在进行的任务
@@ -43,6 +56,10 @@ export async function POST(request: NextRequest) {
     // 检查任务是否存在于注册中心
     const taskInfo = getTaskInfo(taskId);
     const persistedTask = await getCloudTaskForUser(taskId, user.id);
+    const atomicTerminalTask = requiresAtomicTerminalSettlement(persistedTask);
+    const atomicCancellationReason = persistedTask?.type === 'video' || persistedTask?.type === 'video-extend'
+      ? `视频任务已取消 (taskId: ${taskId})`
+      : `图像生成槽位已取消 (taskId: ${taskId})`;
 
     // After a restart the in-memory registry may be empty. Use the persisted
     // task owner before allowing a normal user to cancel a historical task.
@@ -80,6 +97,8 @@ export async function POST(request: NextRequest) {
     if (isTaskCancelled(taskId)) {
       if (persistedTask?.type === 'annotation-edit') {
         await terminateCloudTaskAndRefund(taskId, 'cancelled', 'Annotation edit cancelled');
+      } else if (atomicTerminalTask) {
+        await terminateCloudTaskAndRefund(taskId, 'cancelled', atomicCancellationReason);
       }
       return NextResponse.json({
         success: true,
@@ -95,10 +114,22 @@ export async function POST(request: NextRequest) {
 
     // ★ 退款：取消任务时退还已扣除的积分
     let refunded = false;
-    let annotationTerminalSettled = false;
+    let terminalSettled = false;
     const creditCost = taskInfo?.creditCost ?? persistedTask?.creditCost ?? 0;
     const creditOwnerId = taskInfo?.userId ?? persistedTask?.userId;
-    if (persistedTask?.type === 'annotation-edit') {
+    if (atomicTerminalTask) {
+      try {
+        const settlement = await terminateCloudTaskAndRefund(
+          taskId,
+          'cancelled',
+          atomicCancellationReason,
+        );
+        refunded = settlement.refunded || persistedTask?.creditStatus === 'refunded';
+        terminalSettled = true;
+      } catch (refundErr) {
+        console.error('[cancel-task] Atomic provider task cancellation settlement failed:', refundErr);
+      }
+    } else if (persistedTask?.type === 'annotation-edit') {
       try {
         const settlement = await terminateCloudTaskAndRefund(
           taskId,
@@ -106,7 +137,7 @@ export async function POST(request: NextRequest) {
           `Annotation edit cancelled (taskId: ${taskId})`,
         );
         refunded = settlement.refunded || persistedTask.creditStatus === 'refunded';
-        annotationTerminalSettled = true;
+        terminalSettled = true;
       } catch (refundErr) {
         console.error('[cancel-task] Annotation cancellation settlement failed:', refundErr);
       }
@@ -134,7 +165,7 @@ export async function POST(request: NextRequest) {
         console.error('[cancel-task] Refund failed:', refundErr);
       }
     }
-    if (!annotationTerminalSettled) {
+    if (!terminalSettled) {
       void recordCloudTaskCancelled(taskId, refunded)
         .catch((error) => console.warn('[cancel-task] Cloud task cancellation persistence failed:', error));
     }

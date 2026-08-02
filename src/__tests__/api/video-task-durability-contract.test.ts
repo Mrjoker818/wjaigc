@@ -1,0 +1,57 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+function readSource(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), 'utf8');
+}
+
+describe('video task durability contract', () => {
+  for (const routePath of [
+    'src/app/api/video/generate/route.ts',
+    'src/app/api/video/extend/route.ts',
+  ]) {
+    it(`${routePath} persists and atomically charges before scheduling provider work`, () => {
+      const source = readSource(routePath);
+      const persisted = source.indexOf('await recordVideoTaskSubmitted({');
+      const deferredCharge = source.indexOf('deferCreditCharge: true', persisted);
+      const atomicCharge = source.indexOf('await chargeCloudTaskCredits(', deferredCharge);
+      const scheduledWork = source.indexOf('after(async () => {', atomicCharge);
+
+      expect(persisted).toBeGreaterThan(-1);
+      expect(deferredCharge).toBeGreaterThan(persisted);
+      expect(atomicCharge).toBeGreaterThan(deferredCharge);
+      expect(scheduledWork).toBeGreaterThan(atomicCharge);
+    });
+
+    it(`${routePath} settles provider failures and direct completions through conditional database transitions`, () => {
+      const source = readSource(routePath);
+
+      expect(source).toContain('completeCloudTask(');
+      expect(source).toContain('terminateCloudTaskAndRefund(');
+      expect(source).toContain('registerTaskAbortController(taskId, submitController)');
+      expect(source).toContain('unregisterTaskAbortController(taskId, submitController)');
+    });
+
+    it(`${routePath} handles a direct provider video result before requiring a remote task ID`, () => {
+      const source = readSource(routePath);
+      const directCompletion = source.indexOf(
+        "if (submitResult.status === 'succeeded' && submitResult.videoUrl)",
+      );
+      const missingTaskId = source.indexOf('if (!submitResult.taskId)');
+
+      expect(directCompletion).toBeGreaterThan(-1);
+      expect(missingTaskId).toBeGreaterThan(directCompletion);
+    });
+
+    it(`${routePath} durably records the provider task ID before exposing it to the in-memory poller`, () => {
+      const source = readSource(routePath);
+      const providerTaskPersistence = source.indexOf('await recordVideoTaskRemotePolling(taskId,');
+      const inMemoryPollState = source.indexOf('updateTaskProgress(taskId, {\n          progress: 10,', providerTaskPersistence);
+
+      expect(providerTaskPersistence).toBeGreaterThan(-1);
+      expect(inMemoryPollState).toBeGreaterThan(providerTaskPersistence);
+    });
+  }
+});

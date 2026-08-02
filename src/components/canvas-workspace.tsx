@@ -1841,6 +1841,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
         const completedImages: Array<{
           id: string;
+          slotIndex: number;
           url: string;
           prompt: string;
           model?: string;
@@ -1854,7 +1855,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           apiProvider?: string;
           generationRouteAudit?: CanvasImage['generationRouteAudit'];
         }> = [];
-        let consecutiveErrors = 0;
         let terminalTaskCount = 0;
 
         const updateBatchProgress = (): void => {
@@ -1881,10 +1881,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           }));
         };
 
-        for (let taskIdx = 0; taskIdx < taskIds.length; taskIdx++) {
-          const currentTaskId = taskIds[taskIdx];
+        await Promise.all(taskIds.map(async (currentTaskId: string, taskIdx: number) => {
           let pollCount = 0;
           let taskCompleted = false;
+          let consecutiveErrors = 0;
           const taskStartTime = Date.now(); // ★ 每个任务独立的开始时间
 
           while (!taskCompleted && isMountedRef.current) {
@@ -1959,6 +1959,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 completedImageUrls.forEach((rawImageUrl, imageIdx) => {
                   completedImages.push({
                     id: `${Date.now()}-${taskIdx}-${imageIdx}`,
+                    slotIndex: taskIdx,
                     url: rawImageUrl,
                     prompt: enhancedPrompt || params.prompt,
                     model: params.model,
@@ -1973,6 +1974,33 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     generationRouteAudit: pollData.generationRouteAudit,
                   });
                 });
+                const completedSlotImage = completedImages.find(image => image.slotIndex === taskIdx);
+                const phId = placeholderIds[taskIdx];
+                if (completedSlotImage && phId) {
+                  setImages(prev => prev.map(img => (
+                    img.id === phId && img.isProcessingPlaceholder
+                      ? {
+                        ...img,
+                        id: completedSlotImage.id,
+                        url: completedSlotImage.url,
+                        prompt: completedSlotImage.prompt,
+                        model: completedSlotImage.model,
+                        quality: completedSlotImage.quality,
+                        aspectRatio: completedSlotImage.aspectRatio,
+                        stylePreset: completedSlotImage.stylePreset,
+                        category: completedSlotImage.category,
+                        size: completedSlotImage.size,
+                        sourceUrl: completedSlotImage.sourceUrl,
+                        modelName: completedSlotImage.modelName || pollingModelName || completedSlotImage.model,
+                        apiProvider: completedSlotImage.apiProvider || pollingProviderName || '',
+                        apiBaseUrl: pollingApiBaseUrl || '',
+                        generationRouteAudit: completedSlotImage.generationRouteAudit,
+                        isProcessingPlaceholder: false,
+                        processing: undefined,
+                      }
+                      : img
+                  )));
+                }
                 taskCompleted = true;
                 consecutiveErrors = 0;
                 terminalTaskCount++;
@@ -2021,7 +2049,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               // 否则继续轮询
             }
           }
-        }
+        }));
 
         // 处理完成的图片 - 自动排列布局
         if (completedImages.length > 0) {
@@ -2066,12 +2094,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           const actualSizes = await Promise.all(completedImages.map(img => loadActualSize(img.url)));
 
           const displayScale = 0.5;
-          const completedCanvasImages: CanvasImage[] = completedImages.map((img, idx) => {
+          const completedCanvasImages = completedImages.map((img, idx) => {
             const displaySize = getDisplaySize(params.size);
             // 优先使用图片真实像素尺寸，fallback到请求尺寸
             const finalW = actualSizes[idx]?.w > 0 ? actualSizes[idx].w : displaySize.w;
             const finalH = actualSizes[idx]?.h > 0 ? actualSizes[idx].h : displaySize.h;
             return {
+              slotIndex: img.slotIndex,
+              image: {
               id: img.id,
               url: img.url,
               prompt: img.prompt,
@@ -2093,14 +2123,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               apiProvider: img.apiProvider || pollingProviderName || '',
               apiBaseUrl: pollingApiBaseUrl || '',
               generationRouteAudit: img.generationRouteAudit,
+              },
             };
           });
 
           // 替换尚未被逐个替换的占位框为实际图片
           setImages(prev => {
             let updated = [...prev];
-            for (let i = 0; i < completedCanvasImages.length; i++) {
-              const phId = placeholderIds[i];
+            for (const { slotIndex, image } of completedCanvasImages) {
+              const phId = placeholderIds[slotIndex];
               if (phId) {
                 const phIdx = updated.findIndex(img => img.id === phId);
                 if (phIdx >= 0) {
@@ -2108,17 +2139,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   if (existing.isProcessingPlaceholder) {
                     // 尚未被逐个替换的占位框，现在替换
                     updated[phIdx] = {
-                      ...completedCanvasImages[i],
+                      ...image,
                       x: existing.x,
                       y: existing.y,
                     };
                   }
                   // 已被逐个替换的，保留（可能URL已持久化，尺寸更准确）
                 } else {
-                  updated.push(completedCanvasImages[i]);
+                  updated.push(image);
                 }
               } else {
-                updated.push(completedCanvasImages[i]);
+                updated.push(image);
               }
             }
             // 移除多余的占位框（如轮询失败或超时残留的）

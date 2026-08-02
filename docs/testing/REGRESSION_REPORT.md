@@ -346,3 +346,20 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | Firefox/WebKit 真回归 | NOT RUN | 需部署版本和可访问测试凭据后执行 |
 
 本地阶段结论：**有条件通过**。源代码、自包含测试和生产构建门禁通过；真实云端产物、数据库结算和跨浏览器门禁尚未完成。
+
+## 2026-08-02 供应商任务可靠性回归
+
+测试基线：工作树 `fix/provider-generation-reliability`，提交基线 `501a188` 加本轮未提交改动。
+
+| 检查项 | 结果 | 证据 |
+|------|------|------|
+| 图像多输出专项 | PASS | 每张输出一个 durable 子任务、独立 slot、取消与逐张回填；专项 83 项通过。 |
+| 视频同步/异步终态 | PASS | 同步视频 URL 直接完成；远端 ID 持久化后才进入内存轮询；失败/取消走原子退款。 |
+| 视频重启边界 | PASS WITH SAFE FALLBACK | 未取得远端 ID 的持久化视频任务不会误轮询本地 ID，会终止并单次退款。 |
+| 3D 事件流契约 | PASS | 断言已规范化换行符，仍验证关闭 `EventSource` 在失败回调之前。 |
+| 全仓 Vitest | PASS WITH ENVIRONMENT SKIPS | `pnpm test`：295 files passed、1335 tests passed、3 files / 4 tests skipped、0 failed。 |
+| TypeScript | PASS | 本轮代码完成后的 `pnpm ts-check` 已通过。 |
+| ESLint | PASS WITH WARNINGS | 本轮代码完成后的 `pnpm lint`：0 errors / 949 warnings；warning 为存量，未静默隐藏。 |
+| 生产构建 | PASS | 本轮代码完成后的 `pnpm build` 退出 0。 |
+
+未执行或不能替代的项目：真实 PostgreSQL 多实例并发、真实供应商逐张图像返回/扣费退款、真实视频供应商同步与异步返回、已部署 Chrome/Firefox/WebKit 回归。

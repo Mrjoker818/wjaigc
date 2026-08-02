@@ -85,7 +85,81 @@ async function refundTaskCredits(
   }
 }
 
+function withGenerationSlotMetadata<T extends Record<string, unknown>>(
+  payload: T,
+  taskResult: Record<string, unknown> | undefined,
+): T {
+  const submissionPayload = taskResult?.submissionPayload as Record<string, unknown> | undefined;
+  if (!submissionPayload || typeof submissionPayload !== 'object') return payload;
+
+  if (
+    typeof submissionPayload.batchId !== 'string'
+    || typeof submissionPayload.slotId !== 'string'
+    || typeof submissionPayload.slotIndex !== 'number'
+  ) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    batchId: submissionPayload.batchId,
+    slotId: submissionPayload.slotId,
+    slotIndex: submissionPayload.slotIndex,
+  };
+}
+
 // 定期清理过期缓存（5分钟以上的缓存清除）
+function isDurableGenerationSlot(taskResult: Record<string, unknown>): boolean {
+  const submissionPayload = taskResult.submissionPayload as Record<string, unknown> | undefined;
+  return Boolean(
+    submissionPayload
+    && typeof submissionPayload.batchId === 'string'
+    && typeof submissionPayload.slotId === 'string'
+    && typeof submissionPayload.slotIndex === 'number',
+  );
+}
+
+async function getDurableGenerationSlotResponse(
+  taskId: string,
+  userId: string,
+): Promise<NextResponse | null> {
+  const persistedTask = await getCloudTaskForUser(taskId, userId);
+  if (!persistedTask) return null;
+
+  const result = (persistedTask.result as Record<string, unknown>) || {};
+  if (persistedTask.status === 'completed' && typeof result.imageUrl === 'string' && result.imageUrl) {
+    return NextResponse.json(withGenerationSlotMetadata({
+      success: true,
+      status: 'completed',
+      progress: 100,
+      imageUrl: result.imageUrl,
+      imageUrls: Array.isArray(result.imageUrls) ? result.imageUrls : [result.imageUrl],
+      maskUrl: typeof result.maskUrl === 'string' ? result.maskUrl : '',
+      maskUrls: Array.isArray(result.maskUrls) ? result.maskUrls : [],
+      modelName: typeof result.modelName === 'string' ? result.modelName : '',
+      providerName: typeof result.providerName === 'string' ? result.providerName : '',
+      generationRouteAudit: result.generationRouteAudit,
+    }, result));
+  }
+
+  if (['failed', 'cancelled', 'timeout'].includes(persistedTask.status)) {
+    return NextResponse.json(withGenerationSlotMetadata({
+      success: false,
+      status: persistedTask.status,
+      progress: persistedTask.progress,
+      error: persistedTask.error || '任务未完成',
+      retryable: persistedTask.status === 'failed',
+    }, result));
+  }
+
+  return NextResponse.json(withGenerationSlotMetadata({
+    success: true,
+    status: 'processing',
+    progress: persistedTask.progress,
+    label: persistedTask.label || '正在生成图片',
+  }, result));
+}
+
 const MAX_CACHE_SIZE = 1000;
 
 if (typeof setInterval !== 'undefined') {
@@ -648,7 +722,7 @@ export async function POST(request: NextRequest) {
       const persistedTask = await getCloudTaskForUser(taskId, sessionUser.id);
       if (persistedTask) {
         if (persistedTask.status === 'completed' && persistedTask.result?.imageUrl) {
-          return NextResponse.json({
+          return NextResponse.json(withGenerationSlotMetadata({
             success: true,
             status: 'completed',
             progress: 100,
@@ -660,7 +734,7 @@ export async function POST(request: NextRequest) {
             maskUrls: Array.isArray(persistedTask.result.maskUrls)
               ? persistedTask.result.maskUrls
               : (persistedTask.result.maskUrl ? [persistedTask.result.maskUrl] : []),
-          }, { status: 200 });
+          }, persistedTask.result), { status: 200 });
         }
         if (persistedTask.status === 'completed' && persistedTask.result?.videoUrl) {
           return NextResponse.json({
@@ -673,12 +747,12 @@ export async function POST(request: NextRequest) {
           }, { status: 200 });
         }
         if (['failed', 'cancelled', 'timeout'].includes(persistedTask.status)) {
-          return NextResponse.json({
+          return NextResponse.json(withGenerationSlotMetadata({
             success: false,
             status: persistedTask.status,
             error: persistedTask.error || '任务未完成',
             retryable: persistedTask.status === 'failed',
-          }, { status: 200 });
+          }, persistedTask.result), { status: 200 });
         }
 
         const recovery = buildRecoveredTaskContext(persistedTask);
@@ -691,6 +765,27 @@ export async function POST(request: NextRequest) {
           remoteTaskId,
           result: { submissionPayload },
         });
+        const lostVideoSubmissionBeforeRemoteId = recovery.type.startsWith('video')
+          && remoteTaskId === persistedTask.id;
+        if (lostVideoSubmissionBeforeRemoteId) {
+          const error = '视频任务在服务重启前未取得供应商任务标识，已自动退款，请重新提交';
+          const settled = await terminateCloudTaskAndRefund(recovery.taskId, 'failed', error);
+          if (!settled.transitioned) {
+            return NextResponse.json({
+              success: false,
+              status: 'failed',
+              error,
+              retryable: true,
+            }, { status: 200 });
+          }
+          failedTaskCache.set(recovery.taskId, { error, timestamp: Date.now() });
+          return NextResponse.json({
+            success: false,
+            status: 'failed',
+            error,
+            retryable: true,
+          }, { status: 200 });
+        }
         const lease = await claimCloudTaskLease(
           recovery.taskId,
           TASK_RECOVERY_WORKER_ID,
@@ -707,7 +802,11 @@ export async function POST(request: NextRequest) {
         }
         const recovered = registerTask(
           recovery.taskId,
-          (requiresSubmissionRecovery ? 'generate-async' : recovery.type) as TaskType,
+          (requiresSubmissionRecovery
+            ? 'generate-async'
+            : recovery.type.startsWith('video')
+              ? 'video'
+              : recovery.type) as TaskType,
           recovery.label,
           recovery.userId,
         );
@@ -740,7 +839,11 @@ export async function POST(request: NextRequest) {
           },
         });
         if (requiresSubmissionRecovery) {
-          try {
+          after(async () => {
+            const recoveryController = new AbortController();
+            registerTaskAbortController(recovered.taskId, recoveryController);
+            try {
+            if (isTaskCancelled(recovered.taskId)) return;
             const resumed = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
               method: 'POST',
               headers: {
@@ -753,7 +856,7 @@ export async function POST(request: NextRequest) {
                 _skipCredits: true,
                 _skipCloudTaskPersistence: true,
               }),
-              signal: AbortSignal.timeout(600000),
+              signal: AbortSignal.any([recoveryController.signal, AbortSignal.timeout(600000)]),
             });
             const resumedData = await resumed.json().catch(() => null) as Record<string, unknown> | null;
             if (!resumed.ok || !resumedData?.success) {
@@ -765,24 +868,31 @@ export async function POST(request: NextRequest) {
               ...(Array.isArray(resumedData.directImageUrls) ? resumedData.directImageUrls : []),
             ].filter((url): url is string => typeof url === 'string' && url.length > 0);
             if (directImageUrls.length > 0) {
+              const completedResult = {
+                ...(submissionPayload as Record<string, unknown>),
+                submissionPayload,
+                imageUrl: directImageUrls[0],
+                imageUrls: directImageUrls,
+              };
+              const committed = await completeCloudTask(
+                recovered.taskId,
+                completedResult,
+                TASK_RECOVERY_WORKER_ID,
+              );
+              if (!committed) return;
+
               updateTaskProgress(recovered.taskId, {
                 status: 'completed',
                 progress: 100,
-                result: { imageUrl: directImageUrls[0], imageUrls: directImageUrls },
+                result: completedResult,
               });
-              await recordImageTaskTerminal(recovered.taskId, {
-                status: 'completed',
+              completedTaskCache.set(recovered.taskId, {
                 imageUrl: directImageUrls[0],
                 imageUrls: directImageUrls,
-                creditStatus: persistedTask.creditCost && persistedTask.creditCost > 0 ? 'charged' : 'not-applicable',
+                timestamp: Date.now(),
               });
-              return NextResponse.json({
-                success: true,
-                status: 'completed',
-                progress: 100,
-                imageUrl: directImageUrls[0],
-                imageUrls: directImageUrls,
-              }, { status: 200 });
+              releaseQueueSlot(recovered.taskId);
+              return;
             }
 
             const remoteTaskIds = Array.isArray(resumedData.taskIds)
@@ -793,6 +903,7 @@ export async function POST(request: NextRequest) {
             }
 
             const recoveredResult = {
+              ...(submissionPayload as Record<string, unknown>),
               submissionPayload,
               remoteTaskId: remoteTaskIds[0],
               remoteTaskIds,
@@ -801,32 +912,39 @@ export async function POST(request: NextRequest) {
               modelName: resumedData.modelName || recovery.model,
               providerName: resumedData.providerName,
             };
-            updateTaskProgress(recovered.taskId, { status: 'processing', progress: 10, result: recoveredResult });
-            await updateCloudTask(recovered.taskId, {
+            const updated = await updateCloudTask(recovered.taskId, {
               remoteTaskId: remoteTaskIds[0],
               progress: 10,
               result: recoveredResult,
+              expectedStatuses: ['processing'],
+              leaseOwner: TASK_RECOVERY_WORKER_ID,
             });
+            if (!updated) return;
+            updateTaskProgress(recovered.taskId, { status: 'processing', progress: 10, result: recoveredResult });
           } catch (error) {
             const message = error instanceof Error ? error.message : '任务恢复提交失败';
-            let creditStatus: 'pending' | 'refunded' | 'not-applicable' = persistedTask.creditCost && persistedTask.creditCost > 0
-              ? 'pending'
-              : 'not-applicable';
-            if (persistedTask.creditCost && persistedTask.creditCost > 0 && persistedTask.creditStatus !== 'refunded') {
-              try {
-                const refund = await refundCloudTaskCredits(
-                  recovered.taskId,
-                  `图像生成恢复失败退款 (taskId: ${recovered.taskId})`,
-                );
-                creditStatus = refund.refunded ? 'refunded' : 'pending';
-              } catch (refundError) {
-                console.error('[poll-task] Resumed generation refund failed:', refundError);
-              }
-            }
+            const termination = await terminateCloudTaskAndRefund(
+              recovered.taskId,
+              'failed',
+              message,
+              TASK_RECOVERY_WORKER_ID,
+            );
+            if (!termination.transitioned) return;
+
             updateTaskProgress(recovered.taskId, { status: 'failed', progress: 0, error: message });
-            await recordImageTaskTerminal(recovered.taskId, { status: 'failed', error: message, creditStatus });
-            return NextResponse.json({ success: false, status: 'failed', error: translateApiError(message), retryable: true }, { status: 200 });
+            failedTaskCache.set(recovered.taskId, { error: message, timestamp: Date.now() });
+            releaseQueueSlot(recovered.taskId);
+          } finally {
+            unregisterTaskAbortController(recovered.taskId, recoveryController);
           }
+          });
+          return NextResponse.json(withGenerationSlotMetadata({
+            success: true,
+            status: 'processing',
+            progress: Math.max(recovery.progress, 1),
+            label: '正在提交生成任务...',
+            recoveryPending: true,
+          }, persistedResult), { status: 200 });
         }
         registryTask = getTaskInfo(taskId);
       }
@@ -914,6 +1032,36 @@ export async function POST(request: NextRequest) {
       // ★ 视频任务轮询：使用 video-api 协议适配器
       if (registryTask.type === 'video') {
         const regResult = (registryTask.result as Record<string, unknown>) || {};
+        const persistedVideoTask = await getCloudTaskForUser(taskId, userId);
+        const hasDurableVideoTask = Boolean(persistedVideoTask);
+        const getDurableVideoTerminalResponse = async (): Promise<NextResponse> => {
+          const current = await getCloudTaskForUser(taskId, userId);
+          if (current?.status === 'completed' && current.result?.videoUrl) {
+            return NextResponse.json({
+              success: true,
+              status: 'completed',
+              progress: 100,
+              mediaType: 'video',
+              videoUrl: current.result.videoUrl,
+              imageUrl: current.result.videoUrl,
+            }, { status: 200 });
+          }
+          if (current && ['failed', 'cancelled', 'timeout'].includes(current.status)) {
+            return NextResponse.json({
+              success: false,
+              status: current.status,
+              progress: current.progress,
+              error: current.error || '视频任务未完成',
+              retryable: current.status === 'failed',
+            }, { status: 200 });
+          }
+          return NextResponse.json({
+            success: true,
+            status: 'processing',
+            progress: current?.progress ?? registryTask.progress,
+            label: current?.label || registryTask.label,
+          }, { status: 200 });
+        };
         const thirdPartyTaskId = regResult.thirdPartyTaskId as string | undefined;
         const videoProfile = regResult.profile as string | undefined;
         const videoBaseUrl = regResult.baseUrl as string | undefined;
@@ -1023,14 +1171,19 @@ export async function POST(request: NextRequest) {
               const errorMsg = errorBody.includes('not found') || errorBody.includes('Not Found')
                 ? '视频任务不存在或已过期'
                 : `API 返回错误: ${errorBody.slice(0, 200)}`;
+              if (hasDurableVideoTask) {
+                const settled = await terminateCloudTaskAndRefund(taskId, 'failed', errorMsg);
+                if (!settled.transitioned) return getDurableVideoTerminalResponse();
+              } else {
+                const videoPoll4xxCreditStatus = await refundTaskCredits(
+                  taskId,
+                  getTaskInfo(taskId)?.creditCost,
+                  `视频生成失败退款 (API ${pollResp.status}, taskId: ${taskId})`,
+                );
+                void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg, creditStatus: videoPoll4xxCreditStatus })
+                  .catch((error) => console.warn('[poll-task] Video failure persistence failed:', error));
+              }
               updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
-              const videoPoll4xxCreditStatus = await refundTaskCredits(
-                taskId,
-                getTaskInfo(taskId)?.creditCost,
-                `视频生成失败退款 (API ${pollResp.status}, taskId: ${taskId})`,
-              );
-              void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg, creditStatus: videoPoll4xxCreditStatus })
-                .catch((error) => console.warn('[poll-task] Video failure persistence failed:', error));
               releaseQueueSlot(taskId);
               failedTaskCache.set(taskId, { error: errorMsg, timestamp: Date.now() });
               return NextResponse.json({
@@ -1124,19 +1277,25 @@ export async function POST(request: NextRequest) {
                 console.warn('[poll-task] Video persist failed, using source URL:', persistErr);
               }
 
+              const completedResult = {
+                ...regResult,
+                videoUrl: persistedVideoUrl,
+                videoDuration: videoResult.duration,
+              };
+              if (hasDurableVideoTask) {
+                const completed = await completeCloudTask(taskId, completedResult);
+                if (!completed) return getDurableVideoTerminalResponse();
+              } else {
+                void recordVideoTaskTerminal(taskId, {
+                  status: 'completed',
+                  videoUrl: persistedVideoUrl,
+                }).catch((error) => console.warn('[poll-task] Video completion persistence failed:', error));
+              }
               updateTaskProgress(taskId, {
                 status: 'completed',
                 progress: 100,
-                result: {
-                  ...regResult,
-                  videoUrl: persistedVideoUrl,
-                  videoDuration: videoResult.duration,
-                },
+                result: completedResult,
               });
-              void recordVideoTaskTerminal(taskId, {
-                status: 'completed',
-                videoUrl: persistedVideoUrl,
-              }).catch((error) => console.warn('[poll-task] Video completion persistence failed:', error));
               releaseQueueSlot(taskId);
               completedTaskCache.set(taskId, { imageUrl: persistedVideoUrl, modelName: '', providerName: '', timestamp: Date.now() });
 
@@ -1155,31 +1314,41 @@ export async function POST(request: NextRequest) {
             // 视频完成但无URL — 视为失败并退款
             const noUrlError = '视频生成已完成但未返回可用地址，请稍后重试';
             console.warn(`[poll-task/video] Task ${taskId} completed but no videoUrl found in response`);
-            const noUrlCreditStatus = await refundTaskCredits(
-              taskId,
-              getTaskInfo(taskId)?.creditCost,
-              `视频完成无URL退款 (taskId: ${taskId})`,
-            );
+            if (hasDurableVideoTask) {
+              const settled = await terminateCloudTaskAndRefund(taskId, 'failed', noUrlError);
+              if (!settled.transitioned) return getDurableVideoTerminalResponse();
+            } else {
+              const noUrlCreditStatus = await refundTaskCredits(
+                taskId,
+                getTaskInfo(taskId)?.creditCost,
+                `视频完成无URL退款 (taskId: ${taskId})`,
+              );
+              void recordVideoTaskTerminal(taskId, { status: 'failed', error: noUrlError, creditStatus: noUrlCreditStatus })
+                .catch((err) => console.warn('[poll-task] Video no-url persistence failed:', err));
+            }
             updateTaskProgress(taskId, { status: 'failed', error: noUrlError, progress: 0 });
-            void recordVideoTaskTerminal(taskId, { status: 'failed', error: noUrlError, creditStatus: noUrlCreditStatus })
-              .catch((err) => console.warn('[poll-task] Video no-url persistence failed:', err));
             releaseQueueSlot(taskId);
             failedTaskCache.set(taskId, { error: noUrlError, timestamp: Date.now() });
           }
 
           if (videoResult.status === 'failed') {
             const videoFailedError = translateApiError(videoResult.error || '视频生成失败');
+            if (hasDurableVideoTask) {
+              const settled = await terminateCloudTaskAndRefund(taskId, 'failed', videoFailedError);
+              if (!settled.transitioned) return getDurableVideoTerminalResponse();
+            } else {
+              const videoFailedCreditStatus = await refundTaskCredits(
+                taskId,
+                getTaskInfo(taskId)?.creditCost,
+                `视频生成失败退款 (taskId: ${taskId})`,
+              );
+              void recordVideoTaskTerminal(taskId, {
+                status: 'failed',
+                error: videoFailedError,
+                creditStatus: videoFailedCreditStatus,
+              }).catch((error) => console.warn('[poll-task] Video failure persistence failed:', error));
+            }
             updateTaskProgress(taskId, { status: 'failed', error: videoFailedError, progress: 0 });
-            const videoFailedCreditStatus = await refundTaskCredits(
-              taskId,
-              getTaskInfo(taskId)?.creditCost,
-              `视频生成失败退款 (taskId: ${taskId})`,
-            );
-            void recordVideoTaskTerminal(taskId, {
-              status: 'failed',
-              error: videoFailedError,
-              creditStatus: videoFailedCreditStatus,
-            }).catch((error) => console.warn('[poll-task] Video failure persistence failed:', error));
             releaseQueueSlot(taskId);
             failedTaskCache.set(taskId, { error: videoFailedError, timestamp: Date.now() });
             return NextResponse.json({
@@ -2014,6 +2183,7 @@ export async function POST(request: NextRequest) {
       // ★ 保留模型名称和供应商信息到 result，确保后续 poll 和前端能获取到
       const finalModelName = (existingResult.modelName as string) || regModelName || (model || regUsedModel || '');
       const finalProviderName = (existingResult.providerName as string) || regProviderName || '';
+      const durableGenerationSlot = isDurableGenerationSlot(existingResult);
 
       if (!pollResult.imageUrl) {
         const taskError = taskData?.error as Record<string, unknown> | undefined;
@@ -2029,13 +2199,30 @@ export async function POST(request: NextRequest) {
           || translateApiError(errorDetail)
           || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
 
-        const creditStatus = await refundTaskCredits(
-          taskId,
-          regInfo?.creditCost,
-          `图像生成无结果退款 (taskId: ${taskId})`,
-        );
+        const durableTermination = durableGenerationSlot
+          ? await terminateCloudTaskAndRefund(taskId, 'failed', terminalError)
+          : null;
+        if (durableGenerationSlot && !durableTermination?.transitioned) {
+          const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
+          if (persistedResponse) return persistedResponse;
+          return NextResponse.json({
+            success: false,
+            status: 'failed',
+            error: '持久化任务状态不可用，未覆盖原有终态',
+            retryable: true,
+          }, { status: 409 });
+        }
+        const creditStatus = durableTermination?.refunded
+          ? 'refunded'
+          : await refundTaskCredits(
+            taskId,
+            regInfo?.creditCost,
+            `图像生成无结果退款 (taskId: ${taskId})`,
+          );
         updateTaskProgress(taskId, { status: 'failed', progress: 100, error: terminalError });
-        await recordImageTaskTerminal(taskId, { status: 'failed', error: terminalError, creditStatus });
+        if (!durableGenerationSlot) {
+          await recordImageTaskTerminal(taskId, { status: 'failed', error: terminalError, creditStatus });
+        }
         failedTaskCache.set(taskId, { error: terminalError, timestamp: Date.now() });
         releaseQueueSlot(taskId);
         pollResult.status = 'failed';
@@ -2074,6 +2261,34 @@ export async function POST(request: NextRequest) {
       pollResult.imageUrl = imageUrls[0];
       (pollResult as Record<string, unknown>).imageUrls = imageUrls;
       (pollResult as Record<string, unknown>).maskUrls = maskUrls;
+      const gridImageUrl = typeof pollResult.gridImageUrl === 'string' ? pollResult.gridImageUrl : '';
+      const buttons = Array.isArray(pollResult.buttons) ? pollResult.buttons : [];
+      const completedTaskResult = {
+        ...existingResult,
+        imageUrl: imageUrls[0],
+        imageUrls,
+        maskUrl: maskUrls[0] || '',
+        maskUrls,
+        gridImageUrl,
+        buttons,
+        usedModel: model || regUsedModel || existingResult.usedModel,
+        modelName: finalModelName,
+        providerName: finalProviderName,
+        generationRouteAudit: existingResult.generationRouteAudit,
+      };
+      if (durableGenerationSlot) {
+        const generationCompletion = await completeCloudTask(taskId, completedTaskResult);
+        if (!generationCompletion) {
+          const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
+          if (persistedResponse) return persistedResponse;
+          return NextResponse.json({
+            success: false,
+            status: 'failed',
+            error: '持久化任务状态不可用，未覆盖原有终态',
+            retryable: true,
+          }, { status: 409 });
+        }
+      }
       await appendUserJsonl(userId, 'images', {
         type: 'completed',
         providerId: providerName,
@@ -2082,20 +2297,20 @@ export async function POST(request: NextRequest) {
         imageUrl: imageUrls[0],
         imageUrls,
       });
-      const gridImageUrl = typeof pollResult.gridImageUrl === 'string' ? pollResult.gridImageUrl : '';
-      const buttons = Array.isArray(pollResult.buttons) ? pollResult.buttons : [];
-      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: imageUrls[0], imageUrls, maskUrl: maskUrls[0] || '', maskUrls, gridImageUrl, buttons, usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName, generationRouteAudit: existingResult.generationRouteAudit } });
-      void recordImageTaskTerminal(taskId, {
-        status: 'completed',
-        imageUrl: imageUrls[0],
-        imageUrls,
-        maskUrl: maskUrls[0],
-        maskUrls,
-        gridImageUrl,
-        buttons,
-        creditStatus: regInfo?.creditCost && regInfo.creditCost > 0 ? 'charged' : 'not-applicable',
-        generationRouteAudit: existingResult.generationRouteAudit as import('@/lib/generation-route-audit').GenerationRouteAudit | undefined,
-      }).catch(error => console.warn('[poll-task] 云端任务完成记录失败:', error));
+      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: completedTaskResult });
+      if (!durableGenerationSlot) {
+        void recordImageTaskTerminal(taskId, {
+          status: 'completed',
+          imageUrl: imageUrls[0],
+          imageUrls,
+          maskUrl: maskUrls[0],
+          maskUrls,
+          gridImageUrl,
+          buttons,
+          creditStatus: regInfo?.creditCost && regInfo.creditCost > 0 ? 'charged' : 'not-applicable',
+          generationRouteAudit: existingResult.generationRouteAudit as import('@/lib/generation-route-audit').GenerationRouteAudit | undefined,
+        }).catch(error => console.warn('[poll-task] 云端任务完成记录失败:', error));
+      }
 
       // ★ 将 cropInfo（蒙版修图需要）和 targetWidth/Height（扩展需要）等元数据附加到 pollResult
       if (existingResult.cropInfo) {
@@ -2130,6 +2345,8 @@ export async function POST(request: NextRequest) {
       }
       }
     } else if (normalizedStatus === 'failed') {
+      const durableFailureResult = (getTaskInfo(taskId)?.result as Record<string, unknown>) || {};
+      const durableGenerationSlot = isDurableGenerationSlot(durableFailureResult);
       const taskError = taskData?.error as Record<string, unknown> | undefined;
       const rawError = (taskData?.fail_reason as string)
         || (taskData?.failReason as string)
@@ -2139,17 +2356,34 @@ export async function POST(request: NextRequest) {
       const classifiedErr = classifyApiError(rawError);
       const translatedError = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
       const isCfTimeout = isCloudflareTimeoutError(rawError);
-      const creditStatus = await refundTaskCredits(
-        taskId,
-        getTaskInfo(taskId)?.creditCost,
-        `图像生成失败退款 (taskId: ${taskId})`,
-      );
+      const durableTermination = durableGenerationSlot
+        ? await terminateCloudTaskAndRefund(taskId, 'failed', translatedError)
+        : null;
+      if (durableGenerationSlot && !durableTermination?.transitioned) {
+        const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
+        if (persistedResponse) return persistedResponse;
+        return NextResponse.json({
+          success: false,
+          status: 'failed',
+          error: '持久化任务状态不可用，未覆盖原有终态',
+          retryable: true,
+        }, { status: 409 });
+      }
+      const creditStatus = durableTermination?.refunded
+        ? 'refunded'
+        : await refundTaskCredits(
+          taskId,
+          getTaskInfo(taskId)?.creditCost,
+          `图像生成失败退款 (taskId: ${taskId})`,
+        );
       updateTaskProgress(taskId, { status: 'failed', error: translatedError });
-      await recordImageTaskTerminal(taskId, {
-        status: 'failed',
-        error: translatedError,
-        creditStatus,
-      }).catch(error => console.warn('[poll-task] 云端任务失败记录失败:', error));
+      if (!durableGenerationSlot) {
+        await recordImageTaskTerminal(taskId, {
+          status: 'failed',
+          error: translatedError,
+          creditStatus,
+        }).catch(error => console.warn('[poll-task] 云端任务失败记录失败:', error));
+      }
       failedTaskCache.set(taskId, { error: translatedError, timestamp: Date.now() });
       releaseQueueSlot(taskId);
       pollResult.error = translatedError;
@@ -2158,17 +2392,36 @@ export async function POST(request: NextRequest) {
       (pollResult as Record<string, unknown>).isRetryable = classifiedErr.isRetryable;
       (pollResult as Record<string, unknown>).isCfTimeout = isCfTimeout;
     } else if (normalizedStatus === 'cancelled') {
-      const creditStatus = await refundTaskCredits(
-        taskId,
-        getTaskInfo(taskId)?.creditCost,
-        `图像生成取消退款 (taskId: ${taskId})`,
-      );
+      const durableCancelledResult = (getTaskInfo(taskId)?.result as Record<string, unknown>) || {};
+      const durableGenerationSlot = isDurableGenerationSlot(durableCancelledResult);
+      const durableTermination = durableGenerationSlot
+        ? await terminateCloudTaskAndRefund(taskId, 'cancelled', '任务已被取消')
+        : null;
+      if (durableGenerationSlot && !durableTermination?.transitioned) {
+        const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
+        if (persistedResponse) return persistedResponse;
+        return NextResponse.json({
+          success: false,
+          status: 'failed',
+          error: '持久化任务状态不可用，未覆盖原有终态',
+          retryable: true,
+        }, { status: 409 });
+      }
+      const creditStatus = durableTermination?.refunded
+        ? 'refunded'
+        : await refundTaskCredits(
+          taskId,
+          getTaskInfo(taskId)?.creditCost,
+          `图像生成取消退款 (taskId: ${taskId})`,
+        );
       updateTaskProgress(taskId, { status: 'cancelled', progress: 100, error: '任务已被取消' });
-      await recordImageTaskTerminal(taskId, {
-        status: 'cancelled',
-        error: '任务已被取消',
-        creditStatus,
-      }).catch(error => console.warn('[poll-task] 云端任务取消记录失败:', error));
+      if (!durableGenerationSlot) {
+        await recordImageTaskTerminal(taskId, {
+          status: 'cancelled',
+          error: '任务已被取消',
+          creditStatus,
+        }).catch(error => console.warn('[poll-task] 云端任务取消记录失败:', error));
+      }
       releaseQueueSlot(taskId);
       pollResult.error = '任务已被取消';
       pollResult.success = false;

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const componentSource = readFileSync(
   resolve(process.cwd(), 'src/components/infinite-canvas.tsx'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 
 describe('image-to-3d terminal state contract', () => {
   it('keeps failed 3D tasks visible instead of deleting their processing card', () => {

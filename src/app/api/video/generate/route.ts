@@ -6,9 +6,15 @@
  * 异步提交 + 轮询模式，复用 task-registry
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
-import { registerTask, updateTaskProgress } from '@/lib/task-registry';
+import {
+  registerTask,
+  registerTaskAbortController,
+  unregisterTaskAbortController,
+  isTaskCancelled,
+  updateTaskProgress,
+} from '@/lib/task-registry';
 import {
   buildVideoSubmitRequest,
   parseVideoSubmitResponse,
@@ -17,16 +23,19 @@ import {
   ratioToSize,
   validateVideoDuration,
   type VideoGenerateParams,
-  type VideoCompatProfile,
 } from '@/lib/video-api';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
 import { getSessionUser } from '@/lib/server-auth';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
-import { consumeCredits, refundCredits } from '@/lib/credits';
+import { calculateConfiguredCreditCost } from '@/lib/credits';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { validateApiInputs } from '@/lib/api-validator';
-import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
+import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted } from '@/lib/cloud-task-persistence';
+import {
+  chargeCloudTaskCredits,
+  completeCloudTask,
+  terminateCloudTaskAndRefund,
+} from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
 import type { VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
@@ -39,7 +48,7 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
-  let deductedCredits = 0;
+  let plannedCreditCost = 0;
   let sessionUser: User | null = null;
   try {
     // 积分扣除（按模型差异化扣分）
@@ -113,16 +122,9 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 积分扣除（登录用户才扣积分，按模型差异化扣分）
+    // 仅确认用户身份。积分在持久化任务创建后以数据库原子语句扣除，
+    // 防止任务未落库或并发请求时产生不可追溯的重复扣费。
     sessionUser = await getSessionUser(request);
-    deductedCredits = 0;
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'video_generate', undefined, undefined, model, { durationSeconds: Number(duration) });
-      if (!creditResult.success) {
-        return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-      deductedCredits = creditResult.cost;
-    }
 
     // 1. 查找视频 API 提供商
     let provider;
@@ -314,18 +316,18 @@ export async function POST(request: NextRequest) {
       characterReferences,
       motionStrength,
     };
+    plannedCreditCost = sessionUser
+      ? await calculateConfiguredCreditCost('video_generate', pureModel, {
+          durationSeconds: Number(duration),
+          providerId: provider.id,
+        })
+      : 0;
 
     // 5. 注册任务
     const taskId = `video_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const modeLabel = imageUrl ? '图生视频' : '文生视频';
     const modelName = modelInfo?.name || model;
     registerTask(taskId, 'video', `${modeLabel} · ${modelName}`, sessionUser?.id);
-    // 写入积分成本到 task-registry，用于任务失败/取消时退款
-    if (deductedCredits > 0) {
-      updateTaskProgress(taskId, { creditCost: deductedCredits });
-    }
-    // Persist before returning the task ID. Cloud function runtimes may stop work
-    // scheduled with `void` as soon as this route responds.
     try {
       await recordVideoTaskSubmitted({
         taskId,
@@ -334,28 +336,47 @@ export async function POST(request: NextRequest) {
         providerId: provider.id,
         model: pureModel,
         label: `${modeLabel} - ${modelName}`,
-        creditCost: deductedCredits > 0 ? deductedCredits : undefined,
+        creditCost: plannedCreditCost,
+        deferCreditCharge: true,
       });
     } catch (error) {
-      console.warn('[video/generate] Cloud task submit persistence failed:', error);
+      console.error('[video/generate] Cloud task submit persistence failed:', error);
+      return NextResponse.json({
+        error: '任务持久化失败，未向视频供应商提交请求',
+        retryable: true,
+      }, { status: 503 });
     }
+    const charge = await chargeCloudTaskCredits(
+      taskId,
+      sessionUser?.id || 'anonymous',
+      plannedCreditCost,
+      `视频生成 - ${modelName}`,
+    );
+    if (!charge.charged) {
+      await terminateCloudTaskAndRefund(taskId, 'cancelled', '视频生成积分扣费未完成，未向供应商提交任务');
+      return NextResponse.json({
+        error: '积分不足或积分服务暂不可用，未向视频供应商提交请求',
+        retryable: true,
+      }, { status: 402 });
+    }
+    updateTaskProgress(taskId, { status: 'processing', progress: 0, creditCost: charge.creditCost });
 
     // 6. 异步提交到第三方 API
-    // 使用 IIFE 异步执行，不阻塞响应
-    (async () => {
+    after(async () => {
+      const submitController = new AbortController();
+      registerTaskAbortController(taskId, submitController);
       try {
         updateTaskProgress(taskId, { progress: 5, label: `${modeLabel} · ${modelName} · 提交中...` });
 
         const req = buildVideoSubmitRequest(profile, videoParams);
         console.log(`[video/generate] Submit request: url=${req.url}, method=${req.method}`);
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000); // 30s 提交超时
+        const submitSignal = AbortSignal.any([submitController.signal, AbortSignal.timeout(30000)]);
 
         let response = await fetch(req.url, {
           method: req.method,
           headers: req.headers,
           body: req.body,
-          signal: controller.signal,
+          signal: submitSignal,
         });
 
         let usedImagesEndpoint = req.url.includes('/v1/images/');
@@ -384,13 +405,11 @@ export async function POST(request: NextRequest) {
               method: req.method,
               headers: req.headers,
               body: JSON.stringify(fallbackBody),
-              signal: controller.signal,
+              signal: submitSignal,
             });
             usedImagesEndpoint = true;
           }
         }
-
-        clearTimeout(timeout);
 
         console.log(`[video/generate] Submit response: status=${response.status}, ok=${response.ok}`);
 
@@ -402,9 +421,9 @@ export async function POST(request: NextRequest) {
             const errorJson = JSON.parse(errorText);
             errorMessage = errorJson.message || errorJson.error?.message || errorJson.msg || errorMessage;
           } catch { /* ignore */ }
+          const settled = await terminateCloudTaskAndRefund(taskId, 'failed', errorMessage);
+          if (!settled.transitioned) return;
           updateTaskProgress(taskId, { status: 'failed', error: errorMessage, progress: 0 });
-          void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMessage })
-            .catch((error) => console.warn('[video/generate] Cloud task failure persistence failed:', error));
           return;
         }
 
@@ -413,40 +432,46 @@ export async function POST(request: NextRequest) {
         console.log(`[video/generate] Parse submit result: taskId=${submitResult.taskId}, status=${submitResult.status}, videoUrl=${submitResult.videoUrl ? '(has url)' : '(none)'}, raw keys=${Object.keys(data).join(',')}`);
         console.log(`[video/generate] Raw submit response (first 500 chars): ${JSON.stringify(data).slice(0, 500)}`);
 
-        if (!submitResult.taskId) {
-          updateTaskProgress(taskId, {
-            status: 'failed',
-            error: '提交视频生成任务失败：未获取到任务ID',
-            progress: 0,
-          });
-          void recordVideoTaskTerminal(taskId, { status: 'failed', error: '提交视频生成任务失败：未获取到任务ID' })
-            .catch((error) => console.warn('[video/generate] Cloud task failure persistence failed:', error));
-          return;
-        }
-
         // 同步返回：API直接返回了视频URL，无需轮询
         if (submitResult.status === 'succeeded' && submitResult.videoUrl) {
+          const completedResult = {
+            videoUrl: submitResult.videoUrl,
+            model,
+            modelName,
+            providerId: provider.id,
+            type: 'video',
+          };
+          const completed = await completeCloudTask(taskId, completedResult);
+          if (!completed) return;
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
             label: `${modeLabel} · ${modelName} · 已完成`,
-            result: {
-              videoUrl: submitResult.videoUrl,
-              model,
-              modelName,
-              providerId: provider.id,
-              type: 'video',
-            },
+            result: completedResult,
           });
-          void recordVideoTaskTerminal(taskId, {
-            status: 'completed',
-            videoUrl: submitResult.videoUrl,
-          }).catch((error) => console.warn('[video/generate] Cloud task completion persistence failed:', error));
+          return;
+        }
+
+        if (!submitResult.taskId) {
+          const missingTaskError = '提交视频生成任务失败：未获取到任务ID';
+          const settled = await terminateCloudTaskAndRefund(taskId, 'failed', missingTaskError);
+          if (!settled.transitioned) return;
+          updateTaskProgress(taskId, {
+            status: 'failed',
+            error: missingTaskError,
+            progress: 0,
+          });
           return;
         }
 
         // 存储轮询所需信息到任务结果中
         // 注意：记录提交端点类型，以便轮询时选择正确的端点
+        if (isTaskCancelled(taskId)) return;
+        await recordVideoTaskRemotePolling(taskId, {
+          remoteTaskId: submitResult.taskId,
+          usedImagesEndpoint,
+        });
+        if (isTaskCancelled(taskId)) return;
         updateTaskProgress(taskId, {
           progress: 10,
           label: `${modeLabel} · ${modelName} · 排队中...`,
@@ -461,19 +486,17 @@ export async function POST(request: NextRequest) {
             usedImagesEndpoint,
           },
         });
-        void recordVideoTaskRemotePolling(taskId, {
-          remoteTaskId: submitResult.taskId,
-          usedImagesEndpoint,
-        }).catch((error) => console.warn('[video/generate] Cloud task remote ID persistence failed:', error));
       } catch (err: unknown) {
         const errorMsg = err instanceof Error && err.name === 'AbortError'
           ? '提交超时，请稍后重试'
           : errorMessage(err, '提交视频生成任务失败');
+        const settled = await terminateCloudTaskAndRefund(taskId, 'failed', errorMsg);
+        if (!settled.transitioned) return;
         updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
-        void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg })
-          .catch((error) => console.warn('[video/generate] Cloud task failure persistence failed:', error));
+      } finally {
+        unregisterTaskAbortController(taskId, submitController);
       }
-    })();
+    });
 
     // 7. 立即返回任务ID
     return NextResponse.json({
@@ -495,12 +518,6 @@ export async function POST(request: NextRequest) {
       targetType: 'video',
       durationMs: opTimer.end(),
     });
-    // 退款：视频生成失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
-      try {
-        await refundCredits(sessionUser.id, deductedCredits, `视频生成失败退款: ${errorMessage(err, '').substring(0, 100)}`);
-      } catch (refundErr) { console.error('[video/generate] Refund failed:', refundErr); }
-    }
     return NextResponse.json(
       { error: errorMessage(err, '视频生成请求失败') },
       { status: 500 },

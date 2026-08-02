@@ -258,6 +258,25 @@ describe('cloud-task-persistence', () => {
     }));
   });
 
+  it('creates a video task as pending until its atomic credit charge succeeds', async () => {
+    await recordVideoTaskSubmitted({
+      taskId: 'video-task-pending-charge',
+      userId: 'user-a',
+      providerId: 'provider-video',
+      model: 'video-model-a',
+      creditCost: 25,
+      deferCreditCharge: true,
+    });
+
+    expect(createCloudTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'video-task-pending-charge',
+      status: 'pending',
+      progress: 0,
+      creditStatus: 'not-applicable',
+      creditCost: 0,
+    }));
+  });
+
   it('persists the third-party video task ID required after a server restart', async () => {
     await recordVideoTaskRemotePolling('video-task-1', {
       remoteTaskId: 'supplier-video-task-9',

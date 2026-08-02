@@ -112,4 +112,74 @@ describe('POST /api/cancel-task', () => {
     expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
     expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
   });
+
+  it('settles a durable generation slot atomically so a late provider completion cannot win', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'generation-slot-task',
+      userId: 'user-a',
+      type: 'generate-async',
+      creditCost: 6,
+      result: {
+        submissionPayload: {
+          batchId: 'batch-1',
+          slotId: 'batch-1:0',
+          slotIndex: 0,
+        },
+      },
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'generation-slot-task',
+      userId: 'user-a',
+      type: 'generate-async',
+      creditCost: 6,
+      creditStatus: 'pending',
+      result: {
+        submissionPayload: {
+          batchId: 'batch-1',
+          slotId: 'batch-1:0',
+          slotIndex: 0,
+        },
+      },
+    });
+
+    const response = await POST(request('generation-slot-task'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith(
+      'generation-slot-task',
+      'cancelled',
+      '图像生成槽位已取消 (taskId: generation-slot-task)',
+    );
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+  });
+
+  it('settles a durable video task atomically before its remote poll can complete', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'video-task',
+      userId: 'user-a',
+      type: 'video',
+      creditCost: 50,
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'video-task',
+      userId: 'user-a',
+      type: 'video',
+      creditCost: 50,
+      creditStatus: 'pending',
+    });
+
+    const response = await POST(request('video-task'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith(
+      'video-task',
+      'cancelled',
+      '视频任务已取消 (taskId: video-task)',
+    );
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+  });
 });

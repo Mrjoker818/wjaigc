@@ -14,13 +14,13 @@ describe('poll-task recovery lease contract', () => {
     expect(register).toBeGreaterThan(leaseClaim);
   });
 
-  it('restores a persisted credit cost and refunds it when resumed submission fails', () => {
+  it('restores a persisted credit cost and atomically settles it when resumed submission fails', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
     const recoveryStart = source.indexOf('const recovery = buildRecoveredTaskContext');
     const resumedFailure = source.indexOf("const message = error instanceof Error ? error.message : '任务恢复提交失败'", recoveryStart);
 
     expect(source.indexOf('creditCost: persistedTask.creditCost', recoveryStart)).toBeGreaterThan(recoveryStart);
-    expect(source.indexOf('refundCloudTaskCredits(', resumedFailure)).toBeGreaterThan(resumedFailure);
+    expect(source.indexOf('terminateCloudTaskAndRefund(', resumedFailure)).toBeGreaterThan(resumedFailure);
   });
 
   it('refunds a recovered task when provider polling reaches a terminal failure', () => {
@@ -53,12 +53,14 @@ describe('poll-task recovery lease contract', () => {
     expect(source.indexOf('releaseQueueSlot(taskId)', cancelled)).toBeGreaterThan(cancelled);
   });
 
-  it('marks a recovered task as charged before returning a successful image', () => {
+  it('uses an atomic success transition before exposing a recovered image in memory', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
     const directResult = source.indexOf('if (directImageUrls.length > 0)');
-    const completed = source.indexOf("recordImageTaskTerminal(recovered.taskId, { status: 'completed'", directResult);
+    const completed = source.indexOf('const committed = await completeCloudTask(', directResult);
+    const memoryUpdate = source.indexOf("updateTaskProgress(recovered.taskId, {\n                status: 'completed'", completed);
 
-    expect(source.indexOf("creditStatus: persistedTask.creditCost && persistedTask.creditCost > 0 ? 'charged' : 'not-applicable'", completed)).toBeGreaterThan(completed);
+    expect(completed).toBeGreaterThan(directResult);
+    expect(memoryUpdate).toBeGreaterThan(completed);
   });
 
   it('does not treat a recovered generate-async task with a remote task id as local-only work', () => {
