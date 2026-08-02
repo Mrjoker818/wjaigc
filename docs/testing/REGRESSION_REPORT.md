@@ -6,6 +6,20 @@
 
 ---
 
+## 2026-08-02 云端 Chrome：专业创作多图生成回归
+
+| 场景 | 结果 | 关键验证点 |
+|------|------|------------|
+| 专业创作 x3 | 通过 | 3 个独立占位任务；首张先显示；最终仅 3 张结果。 |
+| 专业创作 x4 | 通过 | 4 个独立占位任务；最终仅 4 张结果，无重复写入或空白框。 |
+| 供应商归属 | 通过 | 全部结果显示 `gpt-image-2 / PearAPI 图像`。 |
+| 刷新恢复 | 通过 | 保留 `projectId`，项目恢复后画布中 7 张刚生成图均存在。 |
+| 浏览器异常 | 通过 | 任务开始、处理中、完成和刷新恢复阶段均未捕获 console `error` 或 `warn`。 |
+
+本次使用真实已登录 Chrome 与真实 Pear `gpt-image-2` 供应商任务，未使用 Mock。
+
+---
+
 ## 回归测试总览
 
 | 测试类别 | 测试框架 | 测试用例 | 通过 | 失败 | 通过率 |
@@ -417,3 +431,22 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | Production build | PASS | `pnpm build` 退出 0，Next.js 16.2.10 生成 111 个路由；仅有既有 localStorage 路径警告。 |
 
 结论：供应商多任务提交与逐张返回已取得真实证据；画布归并与供应商归属修复尚未部署，当前发布结论仍为**不通过**。
+
+## 2026-08-02 供应商子任务取消与供应商归属修复（待部署）
+
+测试基线：工作树 `fix/provider-generation-reliability`，基线提交 `cd0084f` 加本轮未提交修复。
+
+| 检查项 | 结果 | 证据 |
+|------|------|------|
+| 单槽取消失败复现 | FAIL（已复现） | 云端专业创作 `n=2` 中取消第一个槽位后，`async-1785677224469-0-v7lzrk` 和 `async-1785677224475-1-lv1r88` 均被轮询为 `completed`。 |
+| 前端取消接线 | PASS（本地） | 进度卡片取消统一通过 `taskEventsClient.cancelTask(taskId)`；仅在后端确认成功后才删除占位框。 |
+| durable 取消/退款终态 | PASS（本地） | `cancel-task.test.ts` 覆盖数据库条件式取消、终态保护和一次性退款。 |
+| 供应商名称规范化 | PASS（本地） | 持久化任务以 `providerId` 为主反查展示名，历史 `FHL图像模型` 不能覆盖 Pear ID。 |
+| 专项回归 | PASS | 5 files / 22 tests passed：取消 UI 契约、取消 API、逐张回填、轮询持久化恢复、展示名解析。 |
+| 全仓 Vitest | PASS WITH ENVIRONMENT SKIPS | `pnpm test`：299 files / 1348 tests passed；3 files / 4 PostgreSQL 环境用例 skipped；0 failed。 |
+| TypeScript | PASS | `pnpm ts-check` 退出 0。 |
+| ESLint | PASS WITH WARNINGS | `pnpm lint`：0 errors / 949 warnings；没有新增 lint error。 |
+| 生产构建 | PASS | `pnpm build`：Next.js 16.2.10 完成编译、类型检查与 111 个路由构建。 |
+| 云端真实取消、退款、迟到完成 | PENDING DEPLOY | 必须部署后提交 Pear `n=2`，取消一个槽位，确认 `/api/cancel-task` 成功、仅幸存槽位完成、被取消槽位不被迟到结果覆盖，并核对一扣一退账务流水。 |
+
+本阶段不把本地契约测试当作真实供应商结算通过证据。发布结论仍为 **不通过**，直到上述部署验证、PostgreSQL 并发与跨浏览器回归完成。

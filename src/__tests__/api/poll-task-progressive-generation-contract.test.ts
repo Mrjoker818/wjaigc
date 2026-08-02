@@ -38,6 +38,21 @@ describe('progressive generation recovery contract', () => {
     expect(source).toContain('slotIndex: submissionPayload.slotIndex');
   });
 
+  it('uses the durable provider id to correct stale provider display names before completing a slot', () => {
+    const durableResponse = source.indexOf('async function getDurableGenerationSlotResponse');
+    const terminalResult = source.indexOf('const completedTaskResult = {');
+
+    expect(source).toContain("import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';");
+    expect(source.indexOf('await findProviderById', durableResponse)).toBeGreaterThan(durableResponse);
+    expect(source.indexOf('resolveTaskProviderDisplayName(', durableResponse)).toBeGreaterThan(durableResponse);
+    const terminalProviderResolution = source.lastIndexOf(
+      'await resolveCanonicalTaskProviderName(',
+      terminalResult,
+    );
+    expect(terminalProviderResolution).toBeGreaterThan(durableResponse);
+    expect(terminalProviderResolution).toBeLessThan(terminalResult);
+  });
+
   it('binds recovery submission to task cancellation instead of letting a detached request continue', () => {
     const recoveryStart = source.indexOf('if (requiresSubmissionRecovery)');
     const controller = source.indexOf('const recoveryController = new AbortController()', recoveryStart);

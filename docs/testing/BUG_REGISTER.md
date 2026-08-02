@@ -536,4 +536,64 @@ await page.evaluate(() => {
 | **修复文件** | `src/lib/project-workspace-url.ts`、`src/components/canvas-workspace.tsx`。 |
 | **新增测试** | `project-workspace-url.test.ts` 先 RED：断言保留无关查询参数、清理 `view=dashboard` 并写入 `projectId`；随后 GREEN。 |
 | **本地回归** | 定向 4/4 通过；全量 Vitest 297 files / 1341 tests 通过，3 files / 4 PostgreSQL 环境用例跳过；TypeScript 通过；ESLint 0 error / 949 historical warnings；生产构建通过。 |
-| **状态** | 本地已修复，待推送、部署后执行 Chrome 刷新恢复验收。 |
+| **状态** | 已修复并完成 2026-08-02 云端 Chrome 刷新恢复验收。 |
+
+#### 2026-08-02 云端回归补充：专业创作多图生成与刷新恢复
+
+- 部署地址：`https://wjaigc.coze.site/`
+- 浏览器：已登录 Chrome，用户 `Mr.joker`
+- 测试项目：`project_1785676375816_qvjpfv81z`
+- 选择模型：`api_1780630178347_rjqlmam::gpt-image-2`（`PearAPI 图像`）
+
+**专业创作 x3**
+
+1. 点击 `x3` 后，画布立即创建 3 个独立占位框，分别显示 `生成图片 1/3`、`2/3`、`3/3`。
+2. 首张完成时，画布已出现一张 Pear CDN 图片，另外两格仍处于独立 `processing` 状态，证明不是等待整个批次收尾后统一回填。
+3. 最终状态：3 个占位框全部消失，新增图片恰好 3 张，均为 `gpt-image-2 / PearAPI 图像`，控制台无 `error` 或 `warn`。
+
+**专业创作 x4**
+
+1. 点击 `x4` 后，画布立即创建 4 个独立占位框，分别显示 `生成图片 1/4` 至 `4/4`。
+2. 最终状态：新增图片恰好 4 张；与前一轮 x3 合并，项目画布共保留 7 张新生成图，无重复写入、无空白框、无残留状态框。
+3. 四张结果均归属 `gpt-image-2 / PearAPI 图像`，没有发生 provider 误标。
+
+**刷新恢复**
+
+1. 在画布 URL `?projectId=project_1785676375816_qvjpfv81z` 刷新。
+2. 初始水合阶段短暂渲染入口视图；认证与项目数据加载完成后恢复同一无限画布，7 张已生成图片均在。
+3. URL 保留同一 `projectId`，无控制台错误或警告。
+
+**结论**
+
+- BUG-022 的云端验证范围已覆盖专业创作 `n=3`、`n=4`，并确认逐槽位状态、逐张回填、最终数量与刷新恢复。
+- BUG-027 已完成云端 Chrome 刷新恢复验收。
+
+### BUG-028: 多图生成取消按钮只移除画布占位框，未取消供应商子任务
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1（用户取消无效，可能继续消耗供应商额度并产生迟到结果） |
+| **发现环境** | 已部署 Chrome，`https://wjaigc.coze.site/`，2026-08-02；已登录用户 `Mr.joker`。 |
+| **前置条件** | 专业创作面板选择 `PearAPI 图像 / gpt-image-2`，数量设为 2。 |
+| **稳定复现** | 提交“红色陶瓷碗”后，等待两个独立进度框出现，点击第一个进度框的“取消”。 |
+| **实际结果** | 第一个进度框从画布消失，但浏览器轮询日志显示 `async-1785677224469-0-v7lzrk` 与 `async-1785677224475-1-lv1r88` 均随后进入 `completed`；说明前端没有发出真实的 `/api/cancel-task`。 |
+| **预期结果** | 取消操作必须先由后端将该槽位条件式转为 `cancelled` 并完成一次性退款；仅在取消确认成功后移除该槽位。其余槽位不受影响并可正常完成。 |
+| **根因** | 无限画布的通用进度卡片取消处理器仅终止本地轮询并调用 `removeProcessingFrame(image.id)`，没有使用任务 ID 调用 `taskEventsClient.cancelTask()`。 |
+| **修复文件** | `src/components/infinite-canvas.tsx`。 |
+| **新增测试** | `infinite-canvas-generation-cancel-contract.test.ts`：取消前必须调用 `taskEventsClient.cancelTask(taskId)`；取消失败不删除占位框；两类可见进度卡片均接入统一处理器。 |
+| **本地回归** | 供应商任务可靠性专项 5 files / 22 tests 通过；`cancel-task.test.ts` 已覆盖持久化子任务原子取消与退款终态。`pnpm ts-check` 通过，ESLint 为 0 error / 949 存量 warning。 |
+| **状态** | 本地已修复；必须部署后执行真实 `n=2` 单槽取消、账务流水与迟到完成拒绝验证。 |
+
+### BUG-029: 已持久化任务的旧供应商名称可覆盖实际 providerId
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P2（任务归属显示与审计不准确，可能误导用户和管理员排障） |
+| **发现环境** | 与 BUG-028 同一已部署 Chrome 多图任务。 |
+| **实际结果** | 明确选择 Pear `gpt-image-2` 后，个别结果卡片仍显示“FHL图像模型”。此前的前端回退已经修复，但轮询路由仍优先使用持久化结果中的旧 `providerName`。 |
+| **预期结果** | 只要任务保存了有效 `providerId`，展示名必须由该 ID 反查当前供应商；旧名称只能在没有 ID 或查询失败时兜底。 |
+| **根因** | `/api/poll-task` 终态合成使用旧 `result.providerName` 的优先级高于 `providerId`，同模型跨供应商时会沿用陈旧名称。 |
+| **修复文件** | `src/lib/task-provider-display.ts`、`src/app/api/poll-task/route.ts`。 |
+| **新增测试** | `task-provider-display.test.ts` 覆盖 Pear ID 覆盖历史 FHL 名称；`poll-task-progressive-generation-contract.test.ts` 锁定 durable 任务、恢复路径和终态路径都使用统一解析器。 |
+| **本地回归** | 与 BUG-028 相同的 22 项专项测试通过；TypeScript 通过。 |
+| **状态** | 本地已修复；需随 BUG-028 的云端 `n=2` 取消回归确认仍显示 `PearAPI 图像`。 |

@@ -5423,6 +5423,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     onImagesChange(nextImages);
   }, [onImagesChange]);
 
+  const handleCancelProcessingFrame = useCallback(async (image: CanvasImage) => {
+    const taskId = image.processing?.taskId;
+    if (taskId) {
+      const cancellation = await taskEventsClient.cancelTask(taskId);
+      if (!cancellation.success) {
+        toast.error(cancellation.message || '取消任务失败，请稍后重试');
+        return;
+      }
+    }
+
+    removeProcessingFrame(image.id);
+  }, [removeProcessingFrame]);
+
   // Get selected image data
   const getSelectedImageData = (): CanvasImage | null => {
     if (selectedIds.size !== 1) return null;
@@ -10404,7 +10417,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                 pollingAbortRef.current.abort();
                                 pollingAbortRef.current = null;
                               }
-                              removeProcessingFrame(image.id);
+                              void handleCancelProcessingFrame(image);
                             }}
                           >
                             取消
@@ -10445,7 +10458,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                 pollingAbortRef.current.abort();
                                 pollingAbortRef.current = null;
                               }
-                              removeProcessingFrame(image.id);
+                              void handleCancelProcessingFrame(image);
                             }}
                           >
                             取消

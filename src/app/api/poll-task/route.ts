@@ -42,6 +42,7 @@ import {
 } from '@/lib/cloud-task-storage';
 import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
 import { resolveVideoCompatProfile } from '@/lib/video-api';
+import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,6 +109,24 @@ function withGenerationSlotMetadata<T extends Record<string, unknown>>(
   };
 }
 
+async function resolveCanonicalTaskProviderName(
+  providerId: unknown,
+  legacyName: unknown,
+): Promise<string> {
+  const normalizedProviderId = typeof providerId === 'string' ? providerId.trim() : '';
+  if (!normalizedProviderId) {
+    return resolveTaskProviderDisplayName('', null, legacyName);
+  }
+
+  try {
+    const provider = await findProviderById(normalizedProviderId);
+    return resolveTaskProviderDisplayName(normalizedProviderId, provider, legacyName);
+  } catch (error) {
+    console.warn('[poll-task] Failed to resolve canonical provider display name:', error);
+    return resolveTaskProviderDisplayName(normalizedProviderId, null, legacyName);
+  }
+}
+
 // 定期清理过期缓存（5分钟以上的缓存清除）
 function isDurableGenerationSlot(taskResult: Record<string, unknown>): boolean {
   const submissionPayload = taskResult.submissionPayload as Record<string, unknown> | undefined;
@@ -128,6 +147,10 @@ async function getDurableGenerationSlotResponse(
 
   const result = (persistedTask.result as Record<string, unknown>) || {};
   if (persistedTask.status === 'completed' && typeof result.imageUrl === 'string' && result.imageUrl) {
+    const providerName = await resolveCanonicalTaskProviderName(
+      persistedTask.providerId,
+      result.providerName,
+    );
     return NextResponse.json(withGenerationSlotMetadata({
       success: true,
       status: 'completed',
@@ -137,7 +160,7 @@ async function getDurableGenerationSlotResponse(
       maskUrl: typeof result.maskUrl === 'string' ? result.maskUrl : '',
       maskUrls: Array.isArray(result.maskUrls) ? result.maskUrls : [],
       modelName: typeof result.modelName === 'string' ? result.modelName : '',
-      providerName: typeof result.providerName === 'string' ? result.providerName : '',
+      providerName,
       generationRouteAudit: result.generationRouteAudit,
     }, result));
   }
@@ -722,6 +745,10 @@ export async function POST(request: NextRequest) {
       const persistedTask = await getCloudTaskForUser(taskId, sessionUser.id);
       if (persistedTask) {
         if (persistedTask.status === 'completed' && persistedTask.result?.imageUrl) {
+          const providerName = await resolveCanonicalTaskProviderName(
+            persistedTask.providerId,
+            persistedTask.result.providerName,
+          );
           return NextResponse.json(withGenerationSlotMetadata({
             success: true,
             status: 'completed',
@@ -734,6 +761,7 @@ export async function POST(request: NextRequest) {
             maskUrls: Array.isArray(persistedTask.result.maskUrls)
               ? persistedTask.result.maskUrls
               : (persistedTask.result.maskUrl ? [persistedTask.result.maskUrl] : []),
+            providerName,
           }, persistedTask.result), { status: 200 });
         }
         if (persistedTask.status === 'completed' && persistedTask.result?.videoUrl) {
@@ -834,6 +862,11 @@ export async function POST(request: NextRequest) {
               usedImagesEndpoint: persistedTask.result?.usedImagesEndpoint === true,
             } : {}),
             providerId: recovery.providerId,
+            providerName: resolveTaskProviderDisplayName(
+              recovery.providerId,
+              recoveredProvider,
+              '',
+            ),
             usedModel: recovery.model,
             modelName: recovery.model,
           },
@@ -977,6 +1010,10 @@ export async function POST(request: NextRequest) {
         }
         // ★ 过滤敏感字段，防止 apiKey/apiBaseUrl 等泄露到前端
         const { apiKey: _ak, apiBaseUrl: _abu, advancedParams: _ap, ...safeResult } = (taskResult as Record<string, unknown>) || {};
+        const providerName = await resolveCanonicalTaskProviderName(
+          safeResult?.providerId,
+          safeResult?.providerName,
+        );
         const completedVideo = registryTask.type === 'video'
           ? getCompletedVideoTaskResult(safeResult)
           : undefined;
@@ -995,7 +1032,7 @@ export async function POST(request: NextRequest) {
           maskUrl: safeResult?.maskUrl as string | undefined,
           maskUrls: Array.isArray(safeResult?.maskUrls) ? safeResult.maskUrls : undefined,
           modelName: (safeResult?.usedModel as string) || (safeResult?.modelName as string) || '',
-          providerName: (safeResult?.providerName as string) || (safeResult?.providerId as string) || '',
+          providerName,
           generationRouteAudit: safeResult?.generationRouteAudit,
         }, { status: 200 });
       }
@@ -2182,7 +2219,13 @@ export async function POST(request: NextRequest) {
       const maskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;
       // ★ 保留模型名称和供应商信息到 result，确保后续 poll 和前端能获取到
       const finalModelName = (existingResult.modelName as string) || regModelName || (model || regUsedModel || '');
-      const finalProviderName = (existingResult.providerName as string) || regProviderName || '';
+      const finalProviderId = (existingResult.providerId as string)
+        || regProviderId
+        || effectiveProviderId;
+      const finalProviderName = await resolveCanonicalTaskProviderName(
+        finalProviderId,
+        (existingResult.providerName as string) || regProviderName || '',
+      );
       const durableGenerationSlot = isDurableGenerationSlot(existingResult);
 
       if (!pollResult.imageUrl) {
@@ -2273,6 +2316,7 @@ export async function POST(request: NextRequest) {
         buttons,
         usedModel: model || regUsedModel || existingResult.usedModel,
         modelName: finalModelName,
+        providerId: finalProviderId,
         providerName: finalProviderName,
         generationRouteAudit: existingResult.generationRouteAudit,
       };
@@ -2291,7 +2335,7 @@ export async function POST(request: NextRequest) {
       }
       await appendUserJsonl(userId, 'images', {
         type: 'completed',
-        providerId: providerName,
+        providerId: finalProviderId || providerName,
         model: model || regUsedModel || '',
         taskId,
         imageUrl: imageUrls[0],
