@@ -139,6 +139,7 @@ export async function POST(request: NextRequest) {
       strength,
       providerId,
       submitOnly,
+      generationChannel,
       projectId,
       sessionId,
       messageId,
@@ -305,7 +306,11 @@ export async function POST(request: NextRequest) {
 
     // ★ submitOnly 模式：立即注册任务并返回 taskId，后台执行实际生成
     // 解决 chat-tools 调用 /api/generate 时因第三方 API 响应慢（2-11分钟）导致 120s 超时的问题
-    if (submitOnly && process.env.WUJIE_ENABLE_LEGACY_SUBMIT_ONLY_WRAPPER === 'true') {
+    if (
+      submitOnly
+      && generationChannel !== 'canvas-direct'
+      && process.env.WUJIE_ENABLE_LEGACY_SUBMIT_ONLY_WRAPPER === 'true'
+    ) {
       const idempotencyKey = request.headers.get('idempotency-key')?.trim() || '';
       if (idempotencyKey) {
         const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, idempotencyKey);
@@ -1182,6 +1187,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (!serverApiKey || !apiBaseUrl) {
+      if (effectiveProviderId) {
+        return NextResponse.json({
+          success: false,
+          error: '所选供应商或模型当前不可用，请检查管理员后台的模型配置和凭证后重试',
+          requiresApiKey: true,
+          providerId: effectiveProviderId,
+          modelName: modelConfig.name,
+        }, { status: 400 });
+      }
       // 没有找到指定模型的凭证，尝试使用第一个可用的备选模型
       if (candidateModels.length > 0) {
         const fallback = candidateModels.shift()!;

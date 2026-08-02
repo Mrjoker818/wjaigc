@@ -468,3 +468,23 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | 自动保存快照配额 | NEW P2 | 项目恢复 Console 重复出现 `wujie_autosave_snapshots_v1` 的 `QuotaExceededError`，已登记为 BUG-031，未与本次 P1 修复混合。 |
 
 结论：`98ba6c2` 未通过真实单槽取消门禁。新的本地状态机修复必须先完成全量门禁、推送与部署，然后以同一真实 Pear `n=2` 场景重新验证“仅幸存槽位落图、取消槽位不回写、账务一次扣费/一次退款”。
+
+## 2026-08-02 底部图像生成器多图槽位与显式提供商路由
+
+测试基线：工作树 `fix/provider-generation-reliability`，待提交源码；云端此前部署版本已针对 Pear `gpt-image-2` / 数量 2 稳定复现。
+
+| 检查项 | 结果 | 证据 |
+|------|------|------|
+| 失败复现：单占位框 | PASS（已复现） | 底部图像生成器设置数量 2 后，旧云端仅显示一个处理框，不能代表两个可取消子任务。 |
+| 失败复现：显式 Pear 路由风险 | PASS（已复现） | 旧客户端路径可丢失明确提供商约束，历史真实观察中出现 Pear 选择与 FHL 标识/路由不一致。 |
+| 每槽位独立处理框契约 | PASS（本地） | `infinite-canvas-direct-generation-contract.test.ts` 断言每个 `slots` 返回值创建一张带 `processing.taskId` 的画布卡片。 |
+| 旧包装器隔离 | PASS（本地） | `generationChannel: "canvas-direct"` 不再进入 `WUJIE_ENABLE_LEGACY_SUBMIT_ONLY_WRAPPER` 外层包装分支。 |
+| 显式提供商不跨路由 | PASS（本地） | `generate-explicit-provider-contract.test.ts` 断言显式 provider 缺失凭证时直接失败，不能选择候选列表中无关提供商。 |
+| 定向回归 | PASS | 6 files / 30 tests passed。 |
+| TypeScript | PASS | `pnpm ts-check` exit 0。 |
+| ESLint | PASS WITH WARNINGS | `pnpm lint` exit 0；0 errors / 949 historical warnings。 |
+| 全量 Vitest | PASS WITH ENVIRONMENT SKIPS | 301 files / 1354 tests passed；3 files / 4 PostgreSQL 环境测试 skipped。 |
+| 生产构建 | PASS | `pnpm build` exit 0；Next.js 16.2.10 构建完成 111 条路由。 |
+| 云端 Chrome 验收 | PENDING DEPLOY | 当前“云端已部署”发生在本地新修复推送之前；需要推送、拉取并重新部署后执行。 |
+
+本轮结论：本地回归通过，但完整平台发布结论仍为 **不通过**。不得用构建成功替代真实 `n=2` 子任务取消、账务一次性结算和提供商归属验收。

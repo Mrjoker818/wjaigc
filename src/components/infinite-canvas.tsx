@@ -57,7 +57,6 @@ import { translateApiError } from '@/lib/api-error-translator';
 import { } from '@/config/app-meta';
 import { getCanvasViewportMarginFactor, PAN_VIEWPORT_SYNC_INTERVAL_MS, resolveCanvasCullingBounds, resolveCanvasRenderOffset } from '@/lib/canvas-pan-virtualization';
 import { CanvasSpatialIndex } from '@/lib/canvas-spatial-index';
-import { applyCanvasGenerationResults } from '@/lib/canvas-generation-results';
 import { resolveActiveCanvasImage } from '@/lib/canvas-active-image';
 import {
   THREE_D_POLL_INTERVAL_MS,
@@ -6264,48 +6263,24 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   const handleCanvasGenerate = useCallback(async () => {
     if (!canvasGenPrompt.trim() || canvasGenGenerating) return;
+
+    const canvasGenerationSlots: Array<{ taskId: string; frameId: string; slotIndex: number }> = [];
     setCanvasGenGenerating(true);
     setCanvasGenPreviewUrl(null);
     setCanvasGenProgress(0);
 
-    // Create a processing frame on the canvas (if not already existing)
-    let currentFrameId = canvasGenFrameId;
-    if (!currentFrameId) {
-      const container = canvasRef.current?.getBoundingClientRect();
-      const centerX = container ? (container.width / 2 - viewOffset.x) / zoom : 100;
-      const centerY = container ? (container.height / 2 - viewOffset.y) / zoom : 100;
-      const frameId = `gen-frame-${Date.now()}`;
-      const newFrame: CanvasImage = {
-        id: frameId,
-        url: '',
-        x: centerX - canvasGenFrameWidth / 2,
-        y: centerY - canvasGenFrameHeight / 2,
-        width: canvasGenFrameWidth,
-        height: canvasGenFrameHeight,
-        isProcessingPlaceholder: true,
-        processing: { label: '生成中...', status: 'processing', progress: 10, startTime: Date.now() },
-      };
-      onImagesChange([...imagesRef.current, newFrame]);
-      setCanvasGenFrameId(frameId);
-      setCanvasGenFramePos({ x: newFrame.x, y: newFrame.y });
-      currentFrameId = frameId;
-    } else {
-      // Update existing frame to processing state
-      onImagesChange(images.map(img => {
-        if (img.id === currentFrameId) {
-          return { ...img, processing: { label: '生成中...', status: 'processing', progress: 10, startTime: img.processing?.startTime || Date.now() } };
-        }
-        return img;
-      }));
-    }
-
     try {
-      const canvasGenPureModel = canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel || undefined;
-      const canvasGenProviderId = canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : undefined;
-      // 提交生成请求（带超时保护）
-      // 超时需匹配后端 maxDuration (600s=10分钟)，部分第三方API出图可达90秒+
+      const canvasGenPureModel = canvasGenModel?.includes('::')
+        ? canvasGenModel.split('::')[1]
+        : canvasGenModel || undefined;
+      const canvasGenProviderId = canvasGenModel?.includes('::')
+        ? canvasGenModel.split('::')[0]
+        : undefined;
+      const selectedProviderName = canvasGenModels.find(
+        candidate => candidate.providerId === canvasGenProviderId && candidate.id === canvasGenPureModel,
+      )?.providerName;
       const canvasGenController = new AbortController();
-      const canvasGenTimeout = setTimeout(() => canvasGenController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
+      const canvasGenTimeout = setTimeout(() => canvasGenController.abort(), 600000);
 
       let res: Response;
       try {
@@ -6321,7 +6296,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             resolution: canvasGenResolution,
             quality: canvasGenQuality,
             n: canvasGenCount,
-            submitOnly: true,  // 异步提交模式：立即返回taskId，前端轮询
+            outputCount: canvasGenCount,
+            generationChannel: 'canvas-direct',
+            submitOnly: true,
             referenceImages: canvasGenRefImages.length > 0 ? canvasGenRefImages : undefined,
           }),
           signal: canvasGenController.signal,
@@ -6330,197 +6307,201 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         clearTimeout(canvasGenTimeout);
       }
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || '生成失败');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '生成失败');
       }
 
-      const data = await res.json();
-
-      // === 直接返回模式：API 直接返回图片 ===
-      // 支持两种格式：
-      // 1. { success: true, mode: 'direct', imageUrls: [...] }
-      // 2. { taskIds: [], directImageUrls: [...], usedModel, usedProviderId } (Responses API)
-      const directUrls: string[] = (data.success && data.mode === 'direct')
+      const actualGenModel = typeof data.model === 'string' && data.model
+        ? data.model
+        : canvasGenPureModel;
+      const pollProviderId = data.providerId || canvasGenProviderId;
+      const actualProviderName = typeof data.providerName === 'string' && data.providerName.trim()
+        ? data.providerName
+        : selectedProviderName;
+      const persistGeneratedUrl = async (imageUrl: string): Promise<string> => {
+        try {
+          const saveRes = await fetch('/api/save-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl }),
+          });
+          const saveData = saveRes.ok ? await saveRes.json() : null;
+          return saveData?.success && typeof saveData.url === 'string' ? saveData.url : imageUrl;
+        } catch {
+          return imageUrl;
+        }
+      };
+      const directUrls: string[] = Array.isArray(data.imageUrls) && data.mode === 'direct'
         ? data.imageUrls
-        : (data.directImageUrls && data.directImageUrls.length > 0)
+        : Array.isArray(data.directImageUrls)
           ? data.directImageUrls
           : [];
 
       if (directUrls.length > 0) {
-        const imageUrls = directUrls;
-        // 并行持久化所有图片URL
-        const savedUrls = await Promise.all(imageUrls.map(async (imageUrl: string) => {
-          let savedUrl = imageUrl;
-          try {
-            const saveRes = await fetch('/api/save-image', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ imageUrl }),
-            });
-            if (saveRes.ok) {
-              const saveData = await saveRes.json();
-              if (saveData.success && saveData.url) savedUrl = saveData.url;
-            }
-          } catch {}
-          return savedUrl;
+        const savedUrls = await Promise.all(directUrls.map(persistGeneratedUrl));
+        const container = canvasRef.current?.getBoundingClientRect();
+        const centerX = container ? (container.width / 2 - viewOffset.x) / zoom : 100;
+        const centerY = container ? (container.height / 2 - viewOffset.y) / zoom : 100;
+        const startX = centerX - ((savedUrls.length * canvasGenFrameWidth) + ((savedUrls.length - 1) * 20)) / 2;
+        const createdAt = Date.now();
+        const directImages: CanvasImage[] = savedUrls.map((url, index) => ({
+          id: `canvas-gen-${createdAt}-${index}`,
+          url,
+          x: startX + index * (canvasGenFrameWidth + 20),
+          y: centerY - canvasGenFrameHeight / 2,
+          width: canvasGenFrameWidth,
+          height: canvasGenFrameHeight,
+          prompt: canvasGenPrompt,
+          model: actualGenModel,
+          quality: canvasGenQuality,
+          aspectRatio: canvasGenAspectRatio,
+          modelName: typeof data.modelName === 'string' ? data.modelName : actualGenModel,
+          apiProvider: actualProviderName,
+          generationRouteAudit: data.generationRouteAudit,
+          createdAt,
         }));
-        const nextImages = applyCanvasGenerationResults(
-          imagesRef.current, currentFrameId, savedUrls,
-          (frame, url) => ({ ...frame, url, isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt, modelName: data.usedModel || data.modelName || canvasGenPureModel, apiProvider: data.usedProviderId || data.providerName }),
-          (frame, url, index) => ({ id: `canvas-gen-${Date.now()}-${index}`, url, x: frame ? frame.x + frame.width + 20 + index * (canvasGenFrameWidth + 20) : 100, y: frame?.y ?? 100, width: canvasGenFrameWidth, height: canvasGenFrameHeight, prompt: canvasGenPrompt, modelName: data.usedModel || data.modelName || canvasGenPureModel, apiProvider: data.usedProviderId || data.providerName } as CanvasImage),
-        );
+        const nextImages = [...imagesRef.current, ...directImages];
         imagesRef.current = nextImages;
         onImagesChange(nextImages);
-        setCanvasGenGenerating(false);
-        // 设置预览URL，保持面板打开让用户查看结果
-        if (savedUrls[0]) {
-          setCanvasGenPreviewUrl(savedUrls[0]);
-          setCanvasGenProgress(100);
-        }
-        // 不自动关闭面板，让用户查看结果
+        setCanvasGenFrameId(null);
+        setCanvasGenPreviewUrl(savedUrls[0] || null);
+        setCanvasGenProgress(100);
+        setCanvasGenPartialFailCount(Math.max(0, canvasGenCount - savedUrls.length));
         return;
       }
 
-      const taskIds: string[] = data.taskIds || (data.taskId ? [data.taskId] : []);
-      // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
-      const actualGenModel = data.model || (canvasGenModel?.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel) || undefined;
-
+      const taskIds: string[] = Array.isArray(data.taskIds)
+        ? data.taskIds.filter((taskId: unknown): taskId is string => typeof taskId === 'string' && taskId.length > 0)
+        : typeof data.taskId === 'string'
+          ? [data.taskId]
+          : [];
       if (taskIds.length === 0) {
         throw new Error('未获取到任务ID');
       }
 
-      // Poll for results
-      let lastPollData: Record<string, unknown> | null = null;
-      const pollForResult = async (taskId: string): Promise<string | null> => {
-        const maxAttempts = 300; // 兼容慢速API
-        const getPollInterval = (attempt: number) => {
-          if (attempt <= 5) return 200;   // 快速检测任务完成
-          if (attempt <= 15) return 500;
-          if (attempt <= 30) return 1000;
-          if (attempt <= 50) return 1500;
-          return 2000;
+      const submittedSlots: Array<{ taskId: string; slotIndex: number }> = Array.isArray(data.slots) && data.slots.length > 0
+        ? data.slots.map((slot: { taskId?: unknown; slotIndex?: unknown }, index: number) => ({
+          taskId: typeof slot.taskId === 'string' ? slot.taskId : taskIds[index],
+          slotIndex: typeof slot.slotIndex === 'number' ? slot.slotIndex : index,
+        })).filter((slot: { taskId?: string }): slot is { taskId: string; slotIndex: number } => Boolean(slot.taskId))
+        : taskIds.map((taskId, slotIndex) => ({ taskId, slotIndex }));
+      if (submittedSlots.length === 0) {
+        throw new Error('未获取到可执行的任务槽位');
+      }
+
+      const container = canvasRef.current?.getBoundingClientRect();
+      const centerX = container ? (container.width / 2 - viewOffset.x) / zoom : 100;
+      const centerY = container ? (container.height / 2 - viewOffset.y) / zoom : 100;
+      const startX = centerX - ((submittedSlots.length * canvasGenFrameWidth) + ((submittedSlots.length - 1) * 20)) / 2;
+      const startedAt = Date.now();
+      const placeholders: CanvasImage[] = submittedSlots.map((slot, index) => {
+        const frameId = `gen-frame-${startedAt}-${slot.slotIndex}`;
+        canvasGenerationSlots.push({ taskId: slot.taskId, frameId, slotIndex: slot.slotIndex });
+        return {
+          id: frameId,
+          url: '',
+          x: startX + index * (canvasGenFrameWidth + 20),
+          y: centerY - canvasGenFrameHeight / 2,
+          width: canvasGenFrameWidth,
+          height: canvasGenFrameHeight,
+          isProcessingPlaceholder: true,
+          processing: {
+            label: `生成中 ${index + 1}/${submittedSlots.length}`,
+            status: 'processing',
+            progress: 5,
+            taskId: slot.taskId,
+            startTime: startedAt,
+          },
+          prompt: canvasGenPrompt,
+          model: actualGenModel,
+          quality: canvasGenQuality,
+          aspectRatio: canvasGenAspectRatio,
+          modelName: typeof data.modelName === 'string' ? data.modelName : actualGenModel,
+          apiProvider: actualProviderName,
+          generationRouteAudit: data.generationRouteAudit,
+          createdAt: startedAt,
         };
+      });
+      const nextImages = [...imagesRef.current, ...placeholders];
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
+      setCanvasGenFrameId(null);
+
+      const pollForSlot = async (slot: { taskId: string; frameId: string; slotIndex: number }): Promise<string | null> => {
+        const maxAttempts = 300;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          // ★ SSE加速：同时等待定时器和SSE完成事件
-          const pollDelay = getPollInterval(attempt);
-          await Promise.race([
-            new Promise(r => setTimeout(r, pollDelay)),
-            new Promise(resolve => {
-              if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
-              const unsub = taskEventsClient.onTaskEvent(event => {
-                if (event.taskId === taskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
-                  unsub();
-                  resolve(undefined);
-                }
-              });
-              setTimeout(() => { unsub(); resolve(undefined); }, pollDelay + 2000);
-            })
-          ]);
+          const delay = attempt <= 5 ? 200 : attempt <= 15 ? 500 : attempt <= 30 ? 1000 : 2000;
+          await new Promise(resolve => setTimeout(resolve, delay));
           try {
             const pollRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: actualGenModel, providerId: canvasGenProviderId }),
+              body: JSON.stringify({ taskId: slot.taskId, model: actualGenModel, providerId: pollProviderId }),
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
-            // ★ 兼容多种返回格式：
-            // 1. 顶层 imageUrl (completedTaskCache路径)
-            // 2. result.image.url (异步轮询路径)
-            // 3. result.images[0].url (多图返回路径)
-            // 4. result.url (本地任务路径)
             const resultUrl = pollData.imageUrl
               || pollData.result?.url
               || pollData.result?.imageUrl
               || (pollData.result?.image as Record<string, unknown>)?.url
-              || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
-            // ★ 支持 submitOnly 模式返回的 imageUrls 数组（单 taskId → 多张图）
-            const imageUrlsArr = pollData.result?.imageUrls as string[] | undefined;
-            if (pollData.status === 'completed') {
-              if (imageUrlsArr && imageUrlsArr.length > 0) {
-                lastPollData = pollData;
-                // 返回特殊标记，由上层展开
-                return `__multi__${JSON.stringify(imageUrlsArr)}`;
-              }
-              if (resultUrl) {
-                lastPollData = pollData;
-                return resultUrl as string;
-              }
+              || (pollData.result?.images as Array<Record<string, unknown>> | undefined)?.[0]?.url
+              || (pollData.result?.imageUrls as string[] | undefined)?.[0];
+            if (pollData.status === 'completed' && typeof resultUrl === 'string' && resultUrl) {
+              const savedUrl = await persistGeneratedUrl(resultUrl);
+              completeProcessingFrame(slot.frameId, savedUrl, canvasGenFrameWidth, canvasGenFrameHeight, {
+                prompt: canvasGenPrompt,
+                model: actualGenModel,
+                quality: canvasGenQuality,
+                aspectRatio: canvasGenAspectRatio,
+                modelName: typeof pollData.modelName === 'string' ? pollData.modelName : actualGenModel,
+                apiProvider: typeof pollData.providerName === 'string' ? pollData.providerName : actualProviderName,
+                generationRouteAudit: pollData.generationRouteAudit || data.generationRouteAudit,
+              });
+              return savedUrl;
             }
             if (pollData.status === 'failed' || pollData.status === 'cancelled') {
+              updateProcessingFrame(slot.frameId, {
+                label: pollData.status === 'cancelled' ? '已取消' : (pollData.error || '生成失败'),
+                status: pollData.status,
+                progress: 0,
+              });
               return null;
             }
-            // Update progress
-            const progress = Math.min(90, 10 + (attempt / maxAttempts) * 80);
+            const progress = typeof pollData.progress === 'number'
+              ? pollData.progress
+              : Math.min(90, 8 + Math.round((attempt / maxAttempts) * 82));
+            updateProcessingFrame(slot.frameId, {
+              label: `生成中 ${slot.slotIndex + 1}/${submittedSlots.length}`,
+              status: 'processing',
+              progress,
+            });
             setCanvasGenProgress(progress);
-            if (currentFrameId) {
-              onImagesChange(imagesRef.current.map(img => {
-                if (img.id === currentFrameId) {
-                  return { ...img, processing: { label: '生成中...', status: 'processing', progress } };
-                }
-                return img;
-              }));
-            }
-          } catch { /* continue polling */ }
+          } catch {
+            // Keep the slot visible and let the next polling iteration recover transient failures.
+          }
         }
+        updateProcessingFrame(slot.frameId, { label: '生成超时', status: 'failed', progress: 0 });
         return null;
       };
 
-      const results = await Promise.all(taskIds.map(pollForResult));
-      // ★ 展开 submitOnly 模式返回的多图数组（__multi__[...]）
-      const validUrls: string[] = [];
-      for (const url of results) {
-        if (url && typeof url === 'string') {
-          if (url.startsWith('__multi__')) {
-            try {
-              const urlsArr = JSON.parse(url.slice(9)) as string[];
-              validUrls.push(...urlsArr);
-            } catch { /* ignore parse error */ }
-          } else {
-            validUrls.push(url);
-          }
-        }
-      }
-
-      if (validUrls.length > 0) {
-        const completedPollData = lastPollData as Record<string, unknown> | null;
-        const nextImages = applyCanvasGenerationResults(
-          imagesRef.current, currentFrameId, validUrls,
-          (frame, url) => ({ ...frame, url, isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt, model: canvasGenPureModel, quality: canvasGenQuality, aspectRatio: canvasGenAspectRatio, modelName: typeof completedPollData?.modelName === 'string' ? completedPollData.modelName : canvasGenPureModel, apiProvider: typeof completedPollData?.providerName === 'string' ? completedPollData.providerName : undefined }),
-          (frame, url, index) => ({ id: `gen-result-${Date.now()}-${index}`, url, x: frame ? frame.x + frame.width + 20 + index * (canvasGenFrameWidth + 20) : 100, y: frame?.y ?? 100, width: canvasGenFrameWidth, height: canvasGenFrameHeight, prompt: canvasGenPrompt, model: canvasGenPureModel, quality: canvasGenQuality, aspectRatio: canvasGenAspectRatio, modelName: typeof completedPollData?.modelName === 'string' ? completedPollData.modelName : canvasGenPureModel, apiProvider: typeof completedPollData?.providerName === 'string' ? completedPollData.providerName : undefined } as CanvasImage),
-        );
-        imagesRef.current = nextImages;
-        onImagesChange(nextImages);
-        // 设置面板预览框的结果
-        setCanvasGenPreviewUrl(validUrls[0]);
+      const results = await Promise.all(canvasGenerationSlots.map(async (slot) => pollForSlot(slot)));
+      const completedUrls = results.filter((url): url is string => typeof url === 'string' && url.length > 0);
+      setCanvasGenPartialFailCount(canvasGenerationSlots.length - completedUrls.length);
+      if (completedUrls.length > 0) {
+        setCanvasGenPreviewUrl(completedUrls[0]);
         setCanvasGenProgress(100);
-        // 不自动关闭面板，让用户查看结果并继续操作
-        setCanvasGenFrameId(null);
-        // B3: 部分失败追踪
-        if (validUrls.length < taskIds.length) {
-          setCanvasGenPartialFailCount(taskIds.length - validUrls.length);
-        } else {
-          setCanvasGenPartialFailCount(0);
-        }
-      } else {
-        throw new Error('生成超时或失败');
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : '生成失败';
-      // Show error on frame
-      if (currentFrameId) {
-        onImagesChange(imagesRef.current.map(img => {
-          if (img.id === currentFrameId) {
-            return { ...img, processing: { label: errorMsg, status: 'failed', progress: 0 } };
-          }
-          return img;
-        }));
+      for (const slot of canvasGenerationSlots) {
+        updateProcessingFrame(slot.frameId, { label: errorMsg, status: 'failed', progress: 0 });
       }
+      toast.error('生成失败', { description: errorMsg });
     } finally {
       setCanvasGenGenerating(false);
     }
-  }, [canvasGenPrompt, canvasGenGenerating, canvasGenFrameId, viewOffset.x, viewOffset.y, zoom, onImagesChange, images, canvasGenModel, canvasGenNegativePrompt, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages]);
+  }, [canvasGenPrompt, canvasGenGenerating, canvasGenModel, canvasGenModels, canvasGenNegativePrompt, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages, viewOffset.x, viewOffset.y, zoom, onImagesChange, completeProcessingFrame, updateProcessingFrame]);
 
   // Update frame position when images change
   useEffect(() => {
