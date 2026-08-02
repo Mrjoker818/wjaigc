@@ -9,6 +9,7 @@ import {
   createVideoRetryPayload,
 } from '@/lib/video-processing-state';
 import { applyTaskIdsToProcessingPlaceholders, shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
+import { reconcileCompletedGenerationSlot } from '@/lib/canvas-generation-reconciliation';
 import { findUniqueLegacyTaskMatch, type RecoverableLegacyTask } from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import {
@@ -1597,6 +1598,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const phHeight = arRatio >= 1 ? Math.round(placeholderBaseSize / arRatio) : placeholderBaseSize;
 
     const placeholderIds: string[] = [];
+    const placeholderPositions = new Map<string, { x: number; y: number }>();
     // 计算视口中心位置用于放置占位框
     const canvasEl = document.querySelector('[data-canvas-viewport]') as HTMLElement | null;
     const viewportWidth = canvasEl ? canvasEl.clientWidth : 1200;
@@ -1617,10 +1619,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const phId = `gen-ph-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
       placeholderIds.push(phId);
       const offsetX = i * (phWidth + 20);
+      const placeholderPosition = { x: phStartX + offsetX, y: phStartY };
+      placeholderPositions.set(phId, placeholderPosition);
       setImages(prev => [...prev, {
         id: phId,
         url: '',
-        x: phStartX + offsetX, y: phStartY,
+        x: placeholderPosition.x, y: placeholderPosition.y,
         width: phWidth, height: phHeight,
         originalWidth: phWidth * 2, originalHeight: phHeight * 2,
         isProcessingPlaceholder: true,
@@ -1970,7 +1974,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     size: params.size,
                     sourceUrl: rawImageUrl,
                     modelName: pollData.modelName || undefined,
-                    apiProvider: pollData.providerName || undefined,
+                    apiProvider: pollData.providerName || params.providerId || undefined,
                     generationRouteAudit: pollData.generationRouteAudit,
                   });
                 });
@@ -1992,7 +1996,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                         size: completedSlotImage.size,
                         sourceUrl: completedSlotImage.sourceUrl,
                         modelName: completedSlotImage.modelName || pollingModelName || completedSlotImage.model,
-                        apiProvider: completedSlotImage.apiProvider || pollingProviderName || '',
+                        apiProvider: completedSlotImage.apiProvider || pollingProviderName || params.providerId || '',
                         apiBaseUrl: pollingApiBaseUrl || '',
                         generationRouteAudit: completedSlotImage.generationRouteAudit,
                         isProcessingPlaceholder: false,
@@ -2120,7 +2124,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               originalHeight: finalH,
               createdAt: Date.now(),
               modelName: img.modelName || pollingModelName || img.model,
-              apiProvider: img.apiProvider || pollingProviderName || '',
+              apiProvider: img.apiProvider || pollingProviderName || params.providerId || '',
               apiBaseUrl: pollingApiBaseUrl || '',
               generationRouteAudit: img.generationRouteAudit,
               },
@@ -2129,7 +2133,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
           // 替换尚未被逐个替换的占位框为实际图片
           setImages(prev => {
-            let updated = [...prev];
+            let updated: CanvasImage[] = [...prev];
             for (const { slotIndex, image } of completedCanvasImages) {
               const phId = placeholderIds[slotIndex];
               if (phId) {
@@ -2146,7 +2150,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   }
                   // 已被逐个替换的，保留（可能URL已持久化，尺寸更准确）
                 } else {
-                  updated.push(image);
+                  updated = reconcileCompletedGenerationSlot(updated, {
+                    placeholderId: phId,
+                    result: image,
+                    fallbackPosition: placeholderPositions.get(phId),
+                  });
                 }
               } else {
                 updated.push(image);

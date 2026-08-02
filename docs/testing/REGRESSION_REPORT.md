@@ -363,3 +363,19 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | 生产构建 | PASS | 本轮代码完成后的 `pnpm build` 退出 0。 |
 
 未执行或不能替代的项目：真实 PostgreSQL 多实例并发、真实供应商逐张图像返回/扣费退款、真实视频供应商同步与异步返回、已部署 Chrome/Firefox/WebKit 回归。
+
+## 2026-08-02 多图生成真实云端回归与后续修复
+
+| 检查项 | 结果 | 证据 |
+|------|------|------|
+| Pear `n=2` 真实提交 | PASS | 同一请求创建两个独立子任务：`async-1785669800411-0-j3ne6f`、`async-1785669800501-1-ezl1j5`。 |
+| 两张结果逐张返回 | PASS | 两个不同 Pear CDN PNG URL 分别完成保存，时间不同；未将供应商结果误判为失败。 |
+| UI 结果归并 | FAIL / LOCAL FIXED | 部署版本将两张结果重复为四层并在 `(0,0)` 重叠；已建立 RED/GREEN 回归并改为按结果 ID 去重的槽位归并。 |
+| 供应商显示归属 | FAIL / LOCAL FIXED | 真实请求选 Pear，但 UI 显示 FHL；已在缺少 `providerName` 时保留显式 `providerId`。 |
+| 定向回归 | PASS | 3 files / 11 tests passed。 |
+| TypeScript | PASS | `pnpm ts-check` 退出 0。 |
+| ESLint | PASS WITH WARNINGS | `pnpm lint`：0 errors / 949 warnings，均为既有存量。 |
+| 全仓 Vitest | PASS WITH ENVIRONMENT SKIPS | 296 files / 1340 tests passed，3 files / 4 PostgreSQL tests skipped，0 failed。 |
+| Production build | PASS | `pnpm build` 退出 0，Next.js 16.2.10 生成 111 个路由；仅有既有 localStorage 路径警告。 |
+
+结论：供应商多任务提交与逐张返回已取得真实证据；画布归并与供应商归属修复尚未部署，当前发布结论仍为**不通过**。

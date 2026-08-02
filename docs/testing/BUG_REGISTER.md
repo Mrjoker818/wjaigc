@@ -489,3 +489,33 @@ await page.evaluate(() => {
 | **预期结果** | 不得伪造远端轮询；无法安全恢复时原子终止并只退款一次，向用户显示可重试状态。 |
 | **修复方案** | 恢复逻辑识别该边界状态并执行原子失败/退款，而非错误轮询。完整的“重启后自动重放提交”需后续引入持久化请求载荷与租约 worker。 |
 | **状态** | 安全降级已实现并有本地契约测试；自动重放不是本轮完成项，列入未验证/后续改进。 |
+
+### BUG-025: 多图生成在批次收尾阶段重复写入已完成结果
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1 |
+| **发现环境** | 已部署 Chrome，`https://wjaigc.coze.site/`，2026-08-02；基线提交 `ce084ca8d6effe4414fd184fcc8fd8f91c1b9536`。 |
+| **稳定复现** | 新建空项目，选择 Pear `Gpt Image 2 · PearAPI 图像`，将数量设为 2 并发起生成。 |
+| **真实证据** | `/api/generate` 创建两个不同任务 `async-1785669800411-0-j3ne6f` 与 `async-1785669800501-1-ezl1j5`；Pear 返回两个不同 PNG URL，且分别持久化。画布与项目卡片却显示 4 张图片，图层列表为“图层 1、图层 2、图层 2、图层 1”。 |
+| **预期结果** | 每个输出槽位只显示并持久化一次；先完成的图片即时进入对应槽位，批次收尾不能再次新增。 |
+| **根因** | 单任务轮询已将占位框替换为新结果 ID；批次收尾仍只用旧占位框 ID 查找，查找失败后又将同一结果以 `(0,0)` 追加。 |
+| **修复文件** | `src/components/canvas-workspace.tsx`、`src/lib/canvas-generation-reconciliation.ts`。 |
+| **新增测试** | `canvas-generation-reconciliation.test.ts` 覆盖占位替换、已渲染结果去重及恢复场景的位置回退；`canvas-progressive-generation-contract.test.ts` 锁定批次收尾必须调用归并器。 |
+| **本地结果** | 定向回归 11/11 通过；完整 Vitest 为 296 files / 1340 tests passed、3 files / 4 PostgreSQL tests skipped、0 failed；`pnpm ts-check` 通过；`pnpm lint` 为 0 errors / 949 historical warnings；`pnpm build` 生成 111 个路由并退出 0。 |
+| **状态** | 本地已修复，待推送、部署后在真实 Pear `n=2` 链路复验。 |
+
+### BUG-026: 轮询结果缺少展示名时将 Pear 误标为 FHL
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1 |
+| **发现环境** | 与 BUG-025 相同的已部署 Chrome 真实生成。 |
+| **稳定复现** | 明确选择 providerId `api_1780630178347_rjqlmam`（Pear）和模型 `gpt-image-2`，完成后检查画布图层/图片徽标。 |
+| **实际结果** | 网络请求使用 Pear providerId，结果图片也来自 Pear CDN，但 UI 徽标显示“FHL图像模型”。 |
+| **预期结果** | UI 显示实际选定的供应商；同模型 ID 被多个供应商提供时不得按模型 ID 猜测第一个匹配项。 |
+| **根因** | 轮询响应未总是包含 `providerName`，前端写入空 `apiProvider`，渲染层随后按 `gpt-image-2` 的首个匹配 provider 兜底。 |
+| **修复文件** | `src/components/canvas-workspace.tsx`。 |
+| **修复方案** | 在单任务完成、即时替换和批次收尾三个路径中均以请求中明确的 `params.providerId` 作为 `providerName` 缺失时的回退。 |
+| **新增测试** | `canvas-progressive-generation-contract.test.ts` 锁定完成路径保留 `params.providerId`。 |
+| **状态** | 本地已修复，待部署后的真实 UI 归属复验。 |

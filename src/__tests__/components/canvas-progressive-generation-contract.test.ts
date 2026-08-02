@@ -24,4 +24,23 @@ describe('canvas progressive generation contract', () => {
     expect(immediateCanvasUpdate).toBeGreaterThan(slotPlaceholder);
     expect(source).toContain('slotIndex: taskIdx');
   });
+
+  it('does not append a second image after the matching slot was already replaced', () => {
+    const batchReconciliation = source.slice(
+      source.indexOf('const completedCanvasImages = completedImages.map'),
+      source.indexOf('toast.success(`', source.indexOf('const completedCanvasImages = completedImages.map')),
+    );
+
+    expect(batchReconciliation).toContain('reconcileCompletedGenerationSlot');
+    expect(batchReconciliation).toContain('fallbackPosition: placeholderPositions.get(phId)');
+  });
+
+  it('retains the explicit provider id when polling omits a display name', () => {
+    const completion = source.slice(
+      source.indexOf("if (pollData.status === 'completed' && completedImageUrls.length > 0)"),
+      source.indexOf('taskCompleted = true;', source.indexOf("if (pollData.status === 'completed' && completedImageUrls.length > 0)")),
+    );
+
+    expect(completion).toContain('params.providerId');
+  });
 });
