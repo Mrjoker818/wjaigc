@@ -659,3 +659,20 @@ await page.evaluate(() => {
 | **新增测试** | `src/__tests__/api/generate-explicit-provider-contract.test.ts` |
 | **本地回归** | 显式路由契约 2/2；TypeScript、ESLint、全量 Vitest 和 Next.js 生产构建均通过。 |
 | **状态** | 本地已修复；等待部署后在真实 Pear 请求中确认结果提供商仍为 `PearAPI 图像`，且无 FHL 跨路由。 |
+
+### BUG-034: 底部图像生成器在成功终态后保持“生成中”
+
+| 字段 | 内容 |
+|------|------|
+| **级别** | P1 |
+| **所属模块** | 无限画布底部工具栏 -> 图像生成器 |
+| **发现环境** | 已部署 Chrome，`https://wjaigc.coze.site/?projectId=project_1785676375816_qvjpfv81z`，2026-08-02 |
+| **稳定复现** | 选择 `PearAPI 图像 / gpt-image-2`，设置 `1:1 / 1K / 2 张`，提交商品图提示词并等待两个结果进入画布。 |
+| **实际结果** | 页面先创建 `生成图片 1/2` 与 `生成图片 2/2` 两个独立槽位，两个 Pear CDN 结果进入画布后处理框已消失；但提交按钮仍禁用并显示“生成中…”，无法创建下一批任务。 |
+| **预期结果** | 每个槽位进入任何受支持成功终态后均完成结算；所有槽位结束后，生成器必须解除提交锁定。 |
+| **根因** | `pollForSlot()` 只识别 `completed`。部分供应商或恢复路径返回 `success` 或 `succeeded`，导致这一轮 `Promise.all()` 不结束，`finally { setCanvasGenGenerating(false) }` 不会执行。 |
+| **修复文件** | `src/components/infinite-canvas.tsx` |
+| **修复方案** | 轮询统一归一化终态：成功接受 `completed/success/succeeded`；失败接受 `failed/error`；取消接受 `cancelled/canceled`。 |
+| **新增测试** | `src/__tests__/components/infinite-canvas-direct-generation-contract.test.ts`，先 RED 后 GREEN，锁定成功终态别名。 |
+| **本地回归** | 定向 6 文件 / 31 测试通过；全量 Vitest 301 files / 1355 tests passed，3 files / 4 PostgreSQL 环境测试 skipped；TypeScript、Lint（0 errors / 949 historical warnings）与生产构建均通过。 |
+| **状态** | 本地已修复，待部署后复验：结果完成后按钮恢复可点击，并立即执行单槽取消验证。 |

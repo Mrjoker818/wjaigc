@@ -59,4 +59,16 @@ describe('canvas embedded image generator durable slot contract', () => {
     expect(provider).toBeGreaterThan(slotCreation);
     expect(completion).toBeGreaterThan(slotCreation);
   });
+
+  it('treats success-style provider terminal statuses as completed so the batch unlocks', () => {
+    const generator = canvasSource.indexOf('const handleCanvasGenerate = useCallback');
+    const pollForSlot = canvasSource.indexOf('const pollForSlot = async', generator);
+    const completedStatus = canvasSource.indexOf(
+      "['completed', 'success', 'succeeded'].includes",
+      pollForSlot,
+    );
+
+    expect(pollForSlot).toBeGreaterThan(generator);
+    expect(completedStatus).toBeGreaterThan(pollForSlot);
+  });
 });

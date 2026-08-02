@@ -6447,7 +6447,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               || (pollData.result?.image as Record<string, unknown>)?.url
               || (pollData.result?.images as Array<Record<string, unknown>> | undefined)?.[0]?.url
               || (pollData.result?.imageUrls as string[] | undefined)?.[0];
-            if (pollData.status === 'completed' && typeof resultUrl === 'string' && resultUrl) {
+            const normalizedStatus = String(pollData.status || '').toLowerCase();
+            const completedStatus = ['completed', 'success', 'succeeded'].includes(normalizedStatus);
+            const cancelledStatus = ['cancelled', 'canceled'].includes(normalizedStatus);
+            const failedStatus = ['failed', 'error'].includes(normalizedStatus);
+            if (completedStatus && typeof resultUrl === 'string' && resultUrl) {
               const savedUrl = await persistGeneratedUrl(resultUrl);
               completeProcessingFrame(slot.frameId, savedUrl, canvasGenFrameWidth, canvasGenFrameHeight, {
                 prompt: canvasGenPrompt,
@@ -6460,10 +6464,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               });
               return savedUrl;
             }
-            if (pollData.status === 'failed' || pollData.status === 'cancelled') {
+            if (failedStatus || cancelledStatus) {
               updateProcessingFrame(slot.frameId, {
-                label: pollData.status === 'cancelled' ? '已取消' : (pollData.error || '生成失败'),
-                status: pollData.status,
+                label: cancelledStatus ? '已取消' : (pollData.error || '生成失败'),
+                status: cancelledStatus ? 'cancelled' : 'failed',
                 progress: 0,
               });
               return null;
