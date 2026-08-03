@@ -12,6 +12,25 @@ robust_install() {
   fi
 }
 
+# Wait for any existing next build process to finish (avoid "Another next build already running")
+if [ -f ".next/lock" ]; then
+  echo "[coze-start] Build lock detected, waiting for existing build to finish..."
+  for i in $(seq 1 60); do
+    if [ ! -f ".next/lock" ]; then
+      echo "[coze-start] Build lock released."
+      break
+    fi
+    # Check if a next build process is actually running
+    if ! pgrep -f "next build" > /dev/null 2>&1; then
+      echo "[coze-start] No active build process found, removing stale lock."
+      rm -f .next/lock
+      break
+    fi
+    echo "[coze-start] Waiting for build... (${i}/60)"
+    sleep 5
+  done
+fi
+
 if [ ! -s ".next/BUILD_ID" ]; then
   echo "[coze-start] Production build is missing; installing dependencies and rebuilding."
   robust_install
