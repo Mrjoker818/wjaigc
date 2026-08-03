@@ -511,3 +511,26 @@ Task 9 审查修复后补充验证：TypeScript 0 errors、ESLint 0 errors、Nex
 | Autosave snapshots do not retain raw data/blob image payloads | PASS (local) | 2 quota contract assertions passed. |
 | Full regression | PASS WITH ENVIRONMENT SKIPS | `pnpm test`: 302 files / 1359 tests passed; 3 PostgreSQL files / 4 tests skipped because an isolated test database is not configured. |
 | Deployment evidence | PENDING | Must repeat a real Pear `n=2` flow, cancel exactly one slot, verify provider attribution, refresh recovery, ledger settlement, and browser console. |
+
+## 2026-08-03 Cloud Regression: provider attribution failure reproduced
+
+| Check | Result | Evidence |
+|---|---|---|
+| Direct submission route | PASS | `/api/generate` sent `providerId: api_1780630178347_rjqlmam`, `model: gpt-image-2`, `n: 2`, `generationChannel: canvas-direct`. |
+| Two durable slots | PASS | Two distinct task IDs were created and independently polled with the same Pear provider ID. |
+| Provider attribution after completion | FAIL, BUG-037 | Both results returned from Pear CDN, but final poll payloads carried empty `providerName` and canvas cards displayed FHL. |
+| Browser console | PASS | No error-level console entries were observed during this run. |
+| Cancellation timing | UNVERIFIED | Both 1K tasks completed before a single cancel action could be issued; no cancellation outcome is claimed from this run. |
+
+The follow-up patch preserves the configured provider when the completion response omits or blanks provider metadata. Local focused regression is green; deployment verification remains required.
+
+## 2026-08-03 BUG-037 Local Verification Gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Empty completion provider metadata regression | PASS (local) | `infinite-canvas-direct-generation-contract.test.ts` asserts that blank `providerName` falls back to the selected provider label. The test was observed failing before the non-empty guard was implemented. |
+| Full Vitest suite | PASS WITH ENVIRONMENT SKIPS | `pnpm test`: 302 test files / 1360 tests passed; 3 PostgreSQL-specific files / 4 tests skipped because no isolated `TEST_POSTGRES_URL` is configured. |
+| TypeScript | PASS | `pnpm ts-check` exited 0. |
+| ESLint | PASS WITH HISTORICAL WARNINGS | `pnpm lint` exited 0 with 0 errors and 949 existing warnings. |
+| Production build | PASS | `pnpm build` completed compilation, TypeScript validation, and 111 routes. |
+| Cloud verification | PENDING DEPLOYMENT | The deployed `2270162` build cannot contain this local BUG-037 patch until it is pushed and redeployed. |

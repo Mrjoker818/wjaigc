@@ -59,6 +59,20 @@ describe('canvas embedded image generator durable slot contract', () => {
     expect(providerRouteId).toBeGreaterThan(providerDisplayName);
   });
 
+  it('does not replace the selected provider with an empty completion response field', () => {
+    const generator = canvasSource.indexOf('const handleCanvasGenerate = useCallback');
+    const completion = canvasSource.indexOf('completeProcessingFrame(slot.frameId', generator);
+    const emptyProviderGuard = canvasSource.indexOf(
+      "typeof pollData.providerName === 'string' && pollData.providerName.trim()",
+      completion,
+    );
+    const providerFallback = canvasSource.indexOf(': actualProviderName', emptyProviderGuard);
+
+    expect(completion).toBeGreaterThan(generator);
+    expect(emptyProviderGuard).toBeGreaterThan(completion);
+    expect(providerFallback).toBeGreaterThan(emptyProviderGuard);
+  });
+
   it('polls and settles each slot independently using the resolved provider id', () => {
     const generator = canvasSource.indexOf('const handleCanvasGenerate = useCallback');
     const slotCreation = canvasSource.indexOf('const canvasGenerationSlots =', generator);

@@ -480,3 +480,18 @@ The local reliability patch is ready for deployment verification, not release ap
 - New P2 change: autosave snapshots are compacted and storage writes evict oldest snapshots before giving up.
 
 **Decision: Not approved for release yet.** The deployed application must provide real browser and billing evidence for a Pear `n=2` run where one slot is cancelled and the other completes.
+
+## 2026-08-03 Cloud Finding: provider attribution remains a P1 release blocker
+
+The deployed `2270162` build created and completed two real Pear tasks with the correct request provider ID, but displayed the completed cards as FHL because the provider returned an empty `providerName`. This is recorded as BUG-037 and fixed locally with a non-empty-field guard.
+
+The current release decision remains **Not approved**. The next deployed verification must prove all of the following in one run:
+
+1. Pear `n=2` results remain labeled Pear when task completion metadata is empty.
+2. One still-processing slot can be cancelled without affecting the other slot.
+3. A cancelled slot cannot reappear after a refresh.
+4. The billing ledger records exactly one charge for the successful slot and no duplicate charge or refund.
+
+## 2026-08-03 Local Gate Update
+
+The BUG-037 patch has passed the local regression, full Vitest suite, TypeScript check, ESLint error gate, and production build. This is not cloud acceptance evidence. The release decision remains **Not approved** until the deployed build proves provider attribution, per-slot cancellation, refresh recovery, and billing settlement with real provider tasks.

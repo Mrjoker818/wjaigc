@@ -709,3 +709,18 @@ await page.evaluate(() => {
 | Fix | Autosave snapshots now strip `data:` and `blob:` image URLs before serialization, retain at most four snapshots, and evict oldest snapshots before retrying a failed storage write. |
 | Regression tests | `user-manager-autosave-quota-contract.test.ts`. |
 | Status | Fixed locally; pending deployed browser-console verification. |
+
+### BUG-037: Empty provider metadata from task polling was displayed as the default FHL provider
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite canvas direct generation / completed image metadata |
+| Environment | Deployed Chrome at `https://wjaigc.coze.site/?projectId=project_1785676375816_qvjpfv81z`, 2026-08-03, GitHub baseline `2270162`. |
+| Reproduction | Select `PearAPI 图像 / gpt-image-2`, submit `n=2` with `1:1 / 1K`, and wait for both result cards. |
+| Evidence | `/api/generate` and both `/api/poll-task` calls carried `providerId: "api_1780630178347_rjqlmam"`; both completed URLs were Pear CDN URLs. The final poll responses contained `providerName: ""`, while the canvas cards displayed `FHL图像模型`. |
+| Root cause | Completion code accepted every string value, including an empty `pollData.providerName`, and overwrote the resolved provider display name. The UI then fell back by model name and selected the first same-model provider. |
+| Fix | Treat empty completion `providerName` and `providerId` values as absent; retain the provider identity resolved at submission time. |
+| Files | `src/components/infinite-canvas.tsx`, `src/__tests__/components/infinite-canvas-direct-generation-contract.test.ts`. |
+| Regression | New RED/GREEN contract requires a non-empty provider response field before it can override the submitted provider. |
+| Status | Fixed locally; requires one deployed Pear `n=2` recheck before closure. |

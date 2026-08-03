@@ -6494,8 +6494,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 quality: canvasGenQuality,
                 aspectRatio: canvasGenAspectRatio,
                 modelName: typeof pollData.modelName === 'string' ? pollData.modelName : actualGenModel,
-                apiProvider: typeof pollData.providerName === 'string' ? pollData.providerName : actualProviderName,
-                apiProviderId: typeof pollData.providerId === 'string' ? pollData.providerId : pollProviderId,
+                apiProvider: typeof pollData.providerName === 'string' && pollData.providerName.trim()
+                  ? pollData.providerName
+                  : actualProviderName,
+                apiProviderId: typeof pollData.providerId === 'string' && pollData.providerId.trim()
+                  ? pollData.providerId
+                  : pollProviderId,
                 generationRouteAudit: pollData.generationRouteAudit || data.generationRouteAudit,
               });
               return savedUrl;

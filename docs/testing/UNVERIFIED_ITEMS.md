@@ -311,3 +311,12 @@
 | Per-slot cancellation | Requires a live provider task that remains active long enough to cancel. | One `/api/cancel-task` success, one cancelled slot that never reappears after refresh, and one surviving completed slot. |
 | Charge/refund consistency | Requires access to the deployed billing ledger. | Exactly one charge for the successful slot and at most one refund for the cancelled slot. |
 | Browser storage quota regression | Requires a large real project in the deployed browser. | No `QuotaExceededError` for `wujie_autosave_snapshots_v1` after project load, save, and refresh. |
+
+## 2026-08-03 Additional Deployed Verification
+
+| Item | Current status | Acceptance evidence |
+|---|---|---|
+| Pear completion metadata with empty provider fields | BUG-037 fixed locally, pending deployment | A completed Pear `gpt-image-2` card keeps the configured Pear label even when `/api/poll-task` returns empty `providerName` or `providerId`. |
+| Single-slot cancellation under a long-running task | Still unverified | Use a task that remains processing long enough to cancel one of two slots, then verify the sibling slot completes and only the cancelled slot is absent after refresh. |
+
+| BUG-037 cloud provider-label verification | Pending deployment | Deploy the non-empty provider metadata guard, submit Pear `gpt-image-2`, and verify completed canvas cards remain labeled Pear when the provider poll response is blank. |
