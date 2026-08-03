@@ -320,3 +320,4 @@
 | Single-slot cancellation under a long-running task | Still unverified | Use a task that remains processing long enough to cancel one of two slots, then verify the sibling slot completes and only the cancelled slot is absent after refresh. |
 
 | BUG-037 cloud provider-label verification | Pending deployment | Deploy the non-empty provider metadata guard, submit Pear `gpt-image-2`, and verify completed canvas cards remain labeled Pear when the provider poll response is blank. |
+| BUG-038 precise cancellation rejection | Pending deployment | Submit a live Pear `n=2` task, cancel the first active slot, and record the exact server rejection message, sibling task outcome, refresh recovery, and billing ledger state. |

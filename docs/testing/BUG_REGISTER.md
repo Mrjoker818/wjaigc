@@ -724,3 +724,21 @@ await page.evaluate(() => {
 | Files | `src/components/infinite-canvas.tsx`, `src/__tests__/components/infinite-canvas-direct-generation-contract.test.ts`. |
 | Regression | New RED/GREEN contract requires a non-empty provider response field before it can override the submitted provider. |
 | Status | Fixed locally; requires one deployed Pear `n=2` recheck before closure. |
+## 2026-08-03 Deployed Direct-Canvas Regression Update
+
+### BUG-038: Browser cancellation dropped the server rejection reason
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite canvas direct generation / cancellation |
+| Reproduction | Select Pear `gpt-image-2`, submit `n=2`, then click the first Cancel button while both cards are `processing 0%`. |
+| Observed result | Both slots continued and completed. The browser did not expose the server-side cancellation rejection reason. |
+| Root cause | `TaskEventsClient.cancelTask()` returned the raw failure payload, but the canvas only consumes `message`; the API failure field is named `error`. |
+| Local fix | Normalize a cancellation failure payload to `{ success: false, message }`, using `payload.error` and an HTTP-status fallback. |
+| Regression | A new RED/GREEN test verifies that a `404` response with `error: "任务不存在或无权取消"` reaches the canvas as `message`. |
+| Status | The diagnostic client fix is local and ready for deployment. The underlying live cancellation rejection remains open until the next cloud test reveals its precise reason. |
+
+### BUG-037 Cloud Closure
+
+A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cobalt-blue cup outputs. Both completed image cards displayed `PearAPI 图像`, with no FHL mislabel. BUG-037 is closed for the direct-canvas route. Historical cards were not used as evidence.

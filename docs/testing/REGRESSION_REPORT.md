@@ -534,3 +534,13 @@ The follow-up patch preserves the configured provider when the completion respon
 | ESLint | PASS WITH HISTORICAL WARNINGS | `pnpm lint` exited 0 with 0 errors and 949 existing warnings. |
 | Production build | PASS | `pnpm build` completed compilation, TypeScript validation, and 111 routes. |
 | Cloud verification | PENDING DEPLOYMENT | The deployed `2270162` build cannot contain this local BUG-037 patch until it is pushed and redeployed. |
+## 2026-08-03 Deployed Provider and Cancellation Check
+
+| Check | Result | Evidence |
+|---|---|---|
+| Provider attribution | PASS (cloud) | A fresh direct-canvas Pear `gpt-image-2` `n=2` run completed two cobalt-blue cup cards, both labelled `PearAPI 图像`. |
+| Independent task slots | PASS (cloud) | Two visible cards appeared at `processing 0%`, each with a separate Cancel action. |
+| Single-slot cancellation | FAIL, BUG-038 | Cancel was clicked on the first slot while both were processing. Both tasks subsequently completed. |
+| Server error visibility | PASS (local), pending deployment | The cancellation client now preserves an API `error` field as the UI-facing message. Focused suite: 14 tests passed. |
+
+The cancellation failure is an application release blocker, not a provider failure: the Pear provider completed both tasks normally.

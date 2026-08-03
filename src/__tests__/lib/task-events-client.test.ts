@@ -48,4 +48,21 @@ describe('TaskEventsClient', () => {
     await vi.waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
     expect(MockEventSource.instances[0].url).toBe('/api/task-events');
   });
+
+  it('preserves a server cancellation error so the canvas can show the real rejection reason', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      error: '任务不存在或无权取消',
+    }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    const result = await new TaskEventsClient().cancelTask('missing-task');
+
+    expect(result).toEqual({
+      success: false,
+      message: '任务不存在或无权取消',
+    });
+  });
 });

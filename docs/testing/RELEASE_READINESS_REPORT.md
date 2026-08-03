@@ -495,3 +495,8 @@ The current release decision remains **Not approved**. The next deployed verific
 ## 2026-08-03 Local Gate Update
 
 The BUG-037 patch has passed the local regression, full Vitest suite, TypeScript check, ESLint error gate, and production build. This is not cloud acceptance evidence. The release decision remains **Not approved** until the deployed build proves provider attribution, per-slot cancellation, refresh recovery, and billing settlement with real provider tasks.
+## 2026-08-03 Cloud Retest
+
+BUG-037 is verified in the deployed direct-canvas generator: fresh Pear `n=2` output cards retained the Pear label.
+
+The same live test reproduced a P1 cancellation failure. A first-slot cancellation click at `processing 0%` did not cancel either slot. The next deployment carries an observability-only repair that surfaces the server's exact rejection reason; it does not claim cancellation success. The release decision remains **Not approved**.

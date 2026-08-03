@@ -14,6 +14,12 @@ interface SessionResponse {
   user?: { id?: string } | null;
 }
 
+interface CancellationResponse {
+  success?: boolean;
+  message?: string;
+  error?: string;
+}
+
 export class TaskEventsClient {
   private eventSource: EventSource | null = null;
   private handlers = new Set<TaskEventHandler>();
@@ -61,7 +67,17 @@ export class TaskEventsClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId }),
       });
-      return await response.json();
+      const payload = await response.json() as CancellationResponse;
+      if (payload.success !== true) {
+        return {
+          success: false,
+          message: payload.message || payload.error || `取消请求失败 (${response.status})`,
+        };
+      }
+      return {
+        success: true,
+        message: payload.message,
+      };
     } catch (error) {
       console.error('[TaskEventsClient] cancelTask error:', error);
       return { success: false, message: 'Failed to cancel task' };
