@@ -65,7 +65,7 @@ describe('model defaults', () => {
     });
   });
 
-  it('returns no chat models for a user without explicit chat model assignments', async () => {
+  it('returns the enabled chat catalog when a user has no explicit chat allowlist', async () => {
     mocks.getPublicModels.mockResolvedValue([
       { id: 'chat-a', name: 'Chat A', providerId: 'provider-a' },
     ]);
@@ -79,11 +79,13 @@ describe('model defaults', () => {
     const response = await GET(new NextRequest('http://localhost/api/models?type=chat'));
     const data = await response.json();
 
-    expect(data.models).toEqual([]);
+    expect(data.models).toEqual([
+      { id: 'chat-a', name: 'Chat A', providerId: 'provider-a', isDefault: true },
+    ]);
     expect(data.quickCreatePolicy).toEqual({
       autoModelRouting: true,
-      globalDefault: '',
-      quickCreateDefault: '',
+      globalDefault: 'provider-a::chat-a',
+      quickCreateDefault: 'provider-a::chat-a',
     });
   });
 

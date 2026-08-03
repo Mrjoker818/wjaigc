@@ -125,9 +125,9 @@ describe('quick create model resolution', () => {
 });
 
 describe('user model assignment', () => {
-  it('requires an explicit assignment', () => {
-    expect(isModelAssignedToUser(undefined, 'provider-a', 'model-a')).toBe(false);
-    expect(isModelAssignedToUser([], 'provider-a', 'model-a')).toBe(false);
+  it('inherits the enabled system catalog when no per-user allowlist is configured', () => {
+    expect(isModelAssignedToUser(undefined, 'provider-a', 'model-a')).toBe(true);
+    expect(isModelAssignedToUser([], 'provider-a', 'model-a')).toBe(true);
   });
 
   it('accepts legacy bare model identifiers', () => {

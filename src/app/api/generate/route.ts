@@ -32,6 +32,7 @@ import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, getProviderAspectRatios, normalizeImageGenerationSelection, ModelParamType } from '@/lib/canvas-generation-group';
 import { buildGenerationRouteAudit } from '@/lib/generation-route-audit';
 import { buildGenerationBatch } from '@/lib/generation-batch';
+import { isModelAssignedToUser } from '@/lib/model-defaults';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -225,7 +226,7 @@ export async function POST(request: NextRequest) {
     // 图像模型权限校验：非管理员用户需检查 imageModels 授权列表
     if (sessionUser && sessionUser.role !== 'admin') {
       const allowed = sessionUser.imageModels;
-      if (allowed && allowed.length > 0 && !allowed.includes(model)) {
+      if (!isModelAssignedToUser(allowed, effectiveProviderId, model)) {
         return NextResponse.json({ success: false, error: '您没有权限使用此图像模型，请联系管理员' }, { status: 403 });
       }
     }

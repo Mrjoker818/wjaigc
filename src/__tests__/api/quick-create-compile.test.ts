@@ -215,18 +215,21 @@ describe('POST /api/quick-create/compile', () => {
     expect(mocks.stream).not.toHaveBeenCalled();
   });
 
-  it('rejects users without an explicitly assigned chat model', async () => {
+  it('uses the enabled system chat catalog when a user has no explicit chat allowlist', async () => {
     mocks.getSessionUser.mockResolvedValue({ ...activeUser, chatModels: [] });
 
-    const response = await POST(request());
-    const events = await readSse(response);
+    const events = await readSse(await POST(request()));
+    const resultEvent = events.find((event: Record<string, unknown>) => event.type === 'result');
 
-    expect(response.status).toBe(200);
-    expect(events).toContainEqual(expect.objectContaining({
-      type: 'error',
-      code: 'NO_AVAILABLE_MODEL',
+    expect(resultEvent).toEqual(expect.objectContaining({
+      type: 'result',
+      result: expect.objectContaining({
+        model: 'chat-a',
+        providerId: 'provider-a',
+        modelSource: 'quick-create-default',
+      }),
     }));
-    expect(mocks.stream).not.toHaveBeenCalled();
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
   });
 
   it('supports legacy bare model assignments', async () => {

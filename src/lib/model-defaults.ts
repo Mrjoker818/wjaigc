@@ -38,7 +38,9 @@ export function isModelAssignedToUser(
   providerId: string,
   modelId: string,
 ): boolean {
-  if (!allowedModels?.length) return false;
+  // An empty assignment is the default "inherit the enabled system catalog"
+  // state. Only a non-empty list acts as a per-user restriction.
+  if (!allowedModels?.length) return true;
   return allowedModels.includes(modelId) || allowedModels.includes(`${providerId}::${modelId}`);
 }
 
