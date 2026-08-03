@@ -816,3 +816,20 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | Regression | RED/GREEN tests cover description alignment, per-image category ownership, Chinese/English/bilingual instruction compilation, and async payload persistence. |
 | Local verification | 23 generation-chain assertions passed; full Vitest: 307 files / 1,380 tests passed, 3 PostgreSQL files / 4 tests skipped without `TEST_POSTGRES_URL`; TypeScript and production build passed; ESLint exited 0 with 949 historical warnings. |
 | Status | Fixed locally; pending exact-commit cloud verification with one Chinese-native and one English-native image model. |
+
+### BUG-044: Reference/fusion group hid the actionable task failure reason
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite canvas reference group / fusion group generation |
+| Environment | Reported after cloud deployment, 2026-08-03 |
+| Reproduction | Create a reference group, select a model, and submit generation. When polling returns a terminal failure, the canvas reports only `生成失败，请检查模型和API配置`. |
+| Expected | A group without a provider route is blocked before submission. A provider, task, or capability failure preserves its first actionable server-side error for the user. |
+| Actual | The polling loop retained only failed task IDs in a `Set`, then replaced every failure with one generic message. A group with a selected model but no `providerId` could still submit an ambiguous request. |
+| Root cause | Group polling discarded `error`, `message`, and nested result details. The group preflight checked `model` but not `providerId`. |
+| Fix | Added `getGroupGenerationFailureMessage()` to safely select a bounded, actionable failure message; terminal failures now retain their task detail in a `Map`; group submission fails fast when no provider is bound. |
+| Files | `src/lib/group-generation-error.ts`, `src/components/infinite-canvas.tsx`, `src/__tests__/lib/group-generation-error.test.ts`, `src/__tests__/components/canvas-group-generation-error-contract.test.ts` |
+| Regression | RED then GREEN: five assertions cover top-level and nested task errors, detailed-error fallback, explicit provider preflight, and the polling error-retention contract. |
+| Local verification | Focused error suite: 2 files / 5 tests passed. Group/reference chain: 4 files / 18 tests passed. `pnpm ts-check` passed. |
+| Cloud status | Pending deployment. The next reference-group run must record the exact returned message. If it reports a model reference-image capability limitation, that is a provider/model capability result rather than a generic application configuration error. |

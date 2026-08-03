@@ -360,3 +360,11 @@
 | Chinese-native reference constraints | Pending exact-build deployment | With an enabled Chinese-native image model, the same two-reference scenario produces a successful task while retaining the Chinese constraint strategy. |
 | Blank description alignment | Pending cloud observation | Reference #1 without a prior description must not inherit reference #2's description after automatic subject identification. |
 | Async recovery retention | Pending cloud observation | Refresh or reopen while a multi-reference generation is pending; the recovered task retains `referenceCategoryStrengths` and finishes with the same source-image relationship. |
+
+## 2026-08-03 Reference/Fusion Group Failure Diagnosis
+
+| Item | Current status | Acceptance evidence |
+|---|---|---|
+| Missing group provider preflight | Verified locally, pending deployment | A group that has no provider binding does not call `/api/generate` and explains that the user must reselect a model. |
+| Provider capability vs. application failure | Pending real browser verification | Submit a reference group through an enabled provider, retain the exact task error if it fails, and classify it as model capability, provider configuration, or application defect from the returned evidence. |
+| Reference group success path | Pending real browser verification | A supported image-to-image model receives the selected group references and returns an editable canvas image without a generic configuration message. |

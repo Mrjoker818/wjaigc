@@ -54,6 +54,7 @@ import { getHexCubeInitialPosition } from '@/lib/hex-cube-position';
 import { buildHexCubeGenerationInput } from '@/lib/hex-cube-generation';
 import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
 import { translateApiError } from '@/lib/api-error-translator';
+import { getGroupGenerationFailureMessage } from '@/lib/group-generation-error';
 import { } from '@/config/app-meta';
 import { getCanvasViewportMarginFactor, PAN_VIEWPORT_SYNC_INTERVAL_MS, resolveCanvasCullingBounds, resolveCanvasRenderOffset } from '@/lib/canvas-pan-virtualization';
 import { CanvasSpatialIndex } from '@/lib/canvas-spatial-index';
@@ -4872,6 +4873,21 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }));
         return;
       }
+      if (!providerId) {
+        setGenGroups(prev => prev.map(g => {
+          if (g.id !== group.id) return g;
+          return {
+            ...g,
+            resultPlaceholder: {
+              ...g.resultPlaceholder,
+              isProcessing: false,
+              progress: 0,
+              errorMsg: '当前参考图组未绑定提供商，请重新选择模型后重试',
+            },
+          };
+        }));
+        return;
+      }
 
       // 将 data: URL 参考图先上传到服务器，避免请求体过大 (base64 图片会触发 413 Request Entity Too Large)
       const rawRefUrls = group.refImages.map(r => r.url);
@@ -5065,7 +5081,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         const pollWithBackoff = async () => {
           // 收集所有已完成任务的结果
           const completedResults = new Map<string, string[]>();
-          const failedTasks = new Set<string>();
+          const failedTasks = new Map<string, string>();
           
           // ★ 渐进式显示：跟踪已添加URL和位置偏移
           const addedUrls = new Set<string>();
@@ -5235,7 +5251,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   await addProgressiveImages(resultUrls);
                 } else {
                   // 完成但没有图片 → 失败
-                  failedTasks.add(tid);
+                  failedTasks.set(tid, getGroupGenerationFailureMessage([pollData]));
                 }
               } else if (pollData.status === 'partiallyCompleted') {
                 // ★ 部分完成（submitOnly恢复模式）：立即显示已完成图片，继续轮询剩余
@@ -5245,7 +5261,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 }
                 // 不标记为完成或失败，继续轮询
               } else if (pollData.status === 'failed' || (pollData.status === 'error' && !pollData.retryable)) {
-                failedTasks.add(tid);
+                failedTasks.set(tid, getGroupGenerationFailureMessage([pollData]));
               }
               // 可重试错误/processing → 继续轮询
             }
@@ -5265,7 +5281,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             }));
           } else {
             // 超时或全部失败
-            const errMsg = failedTasks.size > 0 ? '生成失败，请检查模型和API配置' : '生成超时，请重试';
+            const errMsg = failedTasks.size > 0
+              ? getGroupGenerationFailureMessage(failedTasks.values())
+              : '生成超时，请重试';
             setGenGroups(prev => prev.map(g => {
               if (g.id !== group.id) return g;
               return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };

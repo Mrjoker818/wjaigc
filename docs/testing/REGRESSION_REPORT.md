@@ -594,3 +594,14 @@ This gate does not claim provider generation or billing acceptance. The next rea
 | Focused generation suite | PASS | 6 files / 23 tests passed. |
 | Full local quality gate | PASS WITH ENVIRONMENT SKIPS | `pnpm ts-check`, `pnpm test` (307 files / 1,380 tests passed; 3 PostgreSQL files / 4 tests skipped), and `pnpm build` passed. `pnpm lint` exited 0 with 949 historical warnings. |
 | Cloud acceptance | PENDING DEPLOYMENT | Use an enabled Chinese-native image model and an enabled English-native image model with two reference images, different selected categories, and a successful generated result for each. |
+
+## 2026-08-03 Reference/Fusion Error Transparency Gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Missing provider route preflight | PASS (local) | A generation group with a selected model but no `providerId` is stopped before `/api/generate`, with a visible model-selection recovery message. |
+| Provider/task failure visibility | PASS (local) | The group polling loop retains terminal task detail instead of replacing it with `生成失败，请检查模型和API配置`. |
+| Nested polling payload compatibility | PASS (local) | `result.message` is recognized when top-level `error` is absent. |
+| Focused regression | PASS | 2 files / 5 tests for failure-message behavior; 4 group/reference-chain files / 18 tests passed. |
+| TypeScript | PASS | `pnpm ts-check` completed successfully. |
+| Cloud acceptance | PENDING DEPLOYMENT | Submit one real reference-group request with an enabled provider and save the returned status/error, request ID, provider ID, and model ID. |

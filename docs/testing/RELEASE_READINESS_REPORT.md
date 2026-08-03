@@ -535,3 +535,9 @@ The image-generator panel deliberately remains different from canvas reference/f
 - Local checks passed: focused generation suite 23 assertions; full suite 1,380 passing tests; TypeScript and production build passed; lint has 0 errors and 949 historical warnings.
 
 **Release decision remains: Not approved.** The deployed build still needs paid real-provider acceptance for two-reference generation on enabled Chinese-native and English-native models, together with the existing cancellation, refund, PostgreSQL concurrency, and cross-browser blockers.
+
+## 2026-08-03 Reference/Fusion Group Failure-Visibility Update
+
+BUG-044 is fixed locally and covered by focused regression tests, but it is not cloud-accepted yet. This change intentionally does not treat a real provider rejection as an application success: it makes the rejection visible so the provider capability, request shape, or configuration can be diagnosed from evidence.
+
+The overall release decision remains **Not approved** until the deployed reference-group workflow proves that a bound enabled provider can complete a real image-to-image request, or returns an actionable and correctly attributed failure without leaving the group stuck.
