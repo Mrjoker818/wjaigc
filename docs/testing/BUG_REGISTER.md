@@ -759,3 +759,19 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | Regression | New RED/GREEN canvas-group contract covers modifier grouping, long press panning, pointer capture, empty-prompt generation, persisted reference analysis, and per-request metadata isolation. |
 | Local verification | Focused canvas contracts: 8/8 passed. Full Vitest: 303 files / 1367 tests passed, 3 PostgreSQL-specific files / 4 tests skipped without `TEST_POSTGRES_URL`. TypeScript, ESLint error gate, and production build passed. |
 | Cloud status | Pending deployment and real browser validation with an enabled vision model and an enabled image model. |
+
+### BUG-040: Canvas group controls were intercepted before their click actions ran
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite canvas image groups, reference groups, and fusion groups |
+| Environment | Deployed cloud canvas, Chrome, 2026-08-03 |
+| Reproduction | Open any image, reference, or fusion group. Click Collapse, Close, or a generation-group model option. |
+| Expected | Collapse changes the group visibility, Close removes the group, and choosing a model updates the group toolbar so Generate can be used. |
+| Actual | All three group types remained visible. Reference/fusion model menus closed without applying a model, leaving Generate unavailable. |
+| Root cause | The root canvas `pointerdown` handler processed events from group buttons before the subsequent `click` handler. It closed the dropdown and entered canvas selection/drag behavior because group containers were not declared as toolbar interaction boundaries. |
+| Fix | Added `data-toolbar="image-group"` and `data-toolbar="generation-group"` to the two group containers. The root handler already ignores events originating inside `[data-toolbar]`; title drag pointer capture remains unchanged. |
+| Files | `src/components/infinite-canvas.tsx`, `src/__tests__/components/canvas-group-gesture-contract.test.ts` |
+| Regression | RED then GREEN: the group-gesture contract now requires both group boundaries and the root pointer-handler exclusion selector. Focused canvas/generation suite: 6 files, 24 tests passed. |
+| Status | Fixed locally. Pending exact-commit cloud deployment and Chrome acceptance for collapse, close, model selection, drag, reference generation, and fusion generation. |

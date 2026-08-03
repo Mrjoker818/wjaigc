@@ -29,6 +29,12 @@ describe('canvas group gesture contract', () => {
     expect(source).toContain('e.currentTarget.setPointerCapture(e.pointerId);');
   });
 
+  it('isolates image and generation group controls from the root canvas pointer handler', () => {
+    expect(source).toContain('data-toolbar="image-group"');
+    expect(source).toContain('data-toolbar="generation-group"');
+    expect(source).toContain("[data-floating-panel], [data-popup], [data-modal], [data-toolbar], [data-compare-dialog]");
+  });
+
   it('keeps reference and fusion groups usable when the user has not typed a prompt yet', () => {
     expect(source).toContain("const effectivePrompt = toolbar.prompt.trim() || 'Generate a creative variation of the reference image(s).';");
     expect(source).toContain('disabled={group.resultPlaceholder.isProcessing || !group.toolbar.model}');

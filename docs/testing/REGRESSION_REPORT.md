@@ -558,3 +558,16 @@ The cancellation failure is an application release blocker, not a provider failu
 | Full regression | PASS WITH ENVIRONMENT SKIPS | `pnpm test`: 303 files / 1367 tests passed; 3 PostgreSQL-specific files / 4 tests skipped because no isolated `TEST_POSTGRES_URL` is configured. |
 | TypeScript / lint / build | PASS WITH HISTORICAL WARNINGS | `pnpm ts-check` and `pnpm build` passed; `pnpm lint` reported 0 errors and 949 existing warnings. |
 | Cloud browser evidence | PENDING DEPLOYMENT | Validate Alt and Ctrl/Cmd grouping, title dragging, reference recognition, reference generation, fusion generation, and a persisted project reload. |
+
+## 2026-08-03 Group Control Regression Gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Image-group interaction boundary | PASS (local) | `data-toolbar="image-group"` prevents the root canvas `pointerdown` handler from consuming Collapse and Close actions. |
+| Reference/fusion interaction boundary | PASS (local) | `data-toolbar="generation-group"` preserves model-menu clicks until their own click handler commits the selected model. |
+| Pointer-drag compatibility | PASS (local contract) | Existing title drag handles still use pointer capture; the fix only short-circuits the root pointer-down start handler for control-originated events. |
+| Focused regression | PASS | 6 test files / 24 tests: group gestures, image dragging, progressive generation, generation reconciliation, batch construction, and progressive polling contract. |
+| Full local gate after BUG-040 | PASS WITH ENVIRONMENT SKIPS | `pnpm ts-check`, `pnpm lint` (0 errors / 949 historical warnings), `pnpm test` (303 files / 1368 tests passed; 3 PostgreSQL files / 4 tests skipped without `TEST_POSTGRES_URL`), and `pnpm build` all passed. |
+| Cloud browser acceptance | PENDING DEPLOYMENT | Validate image/reference/fusion Collapse and Close, select a group model, generate, drag the title, save, and refresh. |
+
+This gate does not claim provider generation or billing acceptance. The next real `n=2` browser run must use an enabled provider and prove separate task slots and progressive result arrival after group controls are confirmed.

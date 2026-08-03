@@ -10340,6 +10340,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             return (
               <div
                 key={group.id}
+                data-toolbar="image-group"
                 className={`absolute rounded-xl border-2 ${isMonochrome ? 'border-blue-400/60 bg-blue-50/10' : 'border-gold/40 bg-gold/5'} pointer-events-auto`}
                 style={{
                   left: groupX,
@@ -11478,6 +11479,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               <div key={`gen-group-${group.id}`}>
                 {/* Container frame — visible border around the entire group */}
                 <div
+                  data-toolbar="generation-group"
                   className="absolute pointer-events-none rounded-2xl"
                   style={{
                     left: containerMinX,

@@ -510,3 +510,11 @@ The reference/fusion-group repair has passed local regression, TypeScript, lint 
 - Required cloud acceptance: create both group types from real images, use a real vision-model recognition request, run reference and fusion generation with a configured provider, drag a group, save, and refresh.
 
 **Release decision remains: Not approved.** Existing P1 cancellation and billing-ledger acceptance items, PostgreSQL concurrency evidence, cross-browser verification, and the new group workflow acceptance must be completed before an overall release approval.
+
+## 2026-08-03 Group Control Regression Update
+
+BUG-040 was reproduced in the deployed canvas: image-group, reference-group, and fusion-group controls were intercepted by the root canvas pointer-down handler before their click action could run. The local fix introduces explicit interaction boundaries for both group container types and is covered by a RED/GREEN regression test.
+
+Local evidence: focused canvas and progressive-generation suite passed 24 assertions. The complete local gate also passed: TypeScript, ESLint error gate (`0` errors / `949` historical warnings), `303` test files / `1368` tests, and the production build. Three PostgreSQL-specific test files remain skipped because no isolated `TEST_POSTGRES_URL` is configured. This is not release acceptance evidence. The deployment must be checked against the pushed commit before using it for the paid `n > 1` acceptance flow.
+
+**Release decision: Not approved.** P1 provider cancellation/refund evidence, PostgreSQL concurrency, cross-browser coverage, group-control cloud acceptance, and the next exact-build `n=2` progressive-return verification remain open.

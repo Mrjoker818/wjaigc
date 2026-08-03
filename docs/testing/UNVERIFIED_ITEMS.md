@@ -332,3 +332,13 @@
 | Reference recognition | Pending deployment | `识别参考图` returns visible success feedback and the next generation request includes the recognized descriptions. |
 | Group generation | Pending deployment | With a valid selected image model, both reference and fusion groups submit successfully even before custom prompt text is entered; generated output reaches the canvas. |
 | Project recovery | Pending deployment | Save and refresh after group creation; group descriptions and generated output retain the correct source-image relationship. |
+
+## 2026-08-03 Newly Opened Group-Control Acceptance
+
+| Item | Current status | Acceptance evidence |
+|---|---|---|
+| Image-group collapse and close | Pending exact-build deployment | Collapse changes the visible group state; Close removes the group and its saved group record without deleting unrelated images. |
+| Reference-group collapse, close, and model selection | Pending exact-build deployment | A selected model remains visible after the menu closes and Generate becomes available when the model supports the action. |
+| Fusion-group collapse, close, and model selection | Pending exact-build deployment | Same as reference group, with no unwanted image drag or canvas selection. |
+| Group title drag after control isolation | Pending exact-build deployment | Header drag still moves the group as before; pressing a title button does not start a drag. |
+| Paid `n=2` progressive return after group-control acceptance | Pending | The enabled provider creates two durable task slots and each result appears as soon as its own provider task completes. |
