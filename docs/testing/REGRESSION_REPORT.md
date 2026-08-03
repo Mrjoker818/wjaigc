@@ -605,3 +605,13 @@ This gate does not claim provider generation or billing acceptance. The next rea
 | Focused regression | PASS | 2 files / 5 tests for failure-message behavior; 4 group/reference-chain files / 18 tests passed. |
 | TypeScript | PASS | `pnpm ts-check` completed successfully. |
 | Cloud acceptance | PENDING DEPLOYMENT | Submit one real reference-group request with an enabled provider and save the returned status/error, request ID, provider ID, and model ID. |
+
+## 2026-08-03 Shared Reference-Image Transport Gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Reference payload ordering | PASS | RED/GREEN route contract requires `requestBody.image` to be assigned before `filterRequestForModel()` creates the submitted body. |
+| Bottom generator forwarding | PASS (code-path trace) | `GenerationPanel` forwards `referenceImages` through `GenerationParams`; `CanvasWorkspace` submits `{ ...params }` to `/api/generate`, so it uses the same repaired server path as reference/fusion groups. |
+| Provider endpoint compatibility | PASS (local) | The capability layer now receives `image` and `image_urls` after reference normalization, allowing `/images/edits` to receive its required image input and preserving fallback reference inputs. |
+| Full local quality gate | PASS WITH ENVIRONMENT SKIPS | `pnpm test`: 309 files / 1,386 tests passed; 3 PostgreSQL files / 4 tests skipped without `TEST_POSTGRES_URL`. `pnpm ts-check`, `pnpm lint` (0 errors / 949 historical warnings), `pnpm build`, and protected-file self-check (8/8) passed. |
+| Cloud acceptance | PENDING DEPLOYMENT | Submit one bottom-generator reference request and one canvas reference-group request using enabled configured models. Each must reach a provider task without `Missing required parameter: image`; retain any subsequent exact provider response. |

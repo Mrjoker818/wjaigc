@@ -368,3 +368,11 @@
 | Missing group provider preflight | Verified locally, pending deployment | A group that has no provider binding does not call `/api/generate` and explains that the user must reselect a model. |
 | Provider capability vs. application failure | Pending real browser verification | Submit a reference group through an enabled provider, retain the exact task error if it fails, and classify it as model capability, provider configuration, or application defect from the returned evidence. |
 | Reference group success path | Pending real browser verification | A supported image-to-image model receives the selected group references and returns an editable canvas image without a generic configuration message. |
+
+## 2026-08-03 Shared Reference-Image Transport Acceptance
+
+| Item | Current status | Acceptance evidence |
+|---|---|---|
+| Bottom image-generator reference submission | Pending exact-build deployment | Upload one valid reference image in the bottom generator, submit through an enabled model, and verify the provider receives an image-bearing request rather than returning `Missing required parameter: image`. |
+| Canvas reference-group submission | Pending exact-build deployment | Create a reference group from a loaded canvas image, submit through an enabled model, and verify the request reaches a provider task with its image input retained. |
+| Provider error classification after transport repair | Pending cloud observation | If a model still rejects the request, record the exact provider/model response and classify it as capability, configuration, moderation, or provider outage rather than re-labeling it as a missing-image application defect. |

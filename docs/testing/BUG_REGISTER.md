@@ -833,3 +833,20 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | Regression | RED then GREEN: five assertions cover top-level and nested task errors, detailed-error fallback, explicit provider preflight, and the polling error-retention contract. |
 | Local verification | Focused error suite: 2 files / 5 tests passed. Group/reference chain: 4 files / 18 tests passed. `pnpm ts-check` passed. |
 | Cloud status | Pending deployment. The next reference-group run must record the exact returned message. If it reports a model reference-image capability limitation, that is a provider/model capability result rather than a generic application configuration error. |
+
+### BUG-045: Reference-image requests lost the required provider image payload
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Bottom image generator, infinite-canvas reference/fusion groups, `/api/generate` provider compatibility path |
+| Environment | Cloud report, 2026-08-03 |
+| Reproduction | Add a reference image in the bottom image generator or create a reference/fusion group, select an enabled image model, and submit generation. |
+| Expected | The selected reference images remain in the provider-ready request. Models routed to `/images/edits` receive the required `image` payload, and fallback generation requests retain their reference inputs. |
+| Actual | Providers returned `Missing required parameter: image`. The same result appeared across models, proving this was a shared application transport defect rather than a single-model availability issue. |
+| Root cause | `/api/generate` created its capability-filtered request snapshot before it populated `requestBody.image` and `requestBody.image_urls` from `referenceImages`. Endpoint selection later detected the image on the unfiltered body and chose `/images/edits`, but submitted the stale filtered body without `image`. |
+| Fix | Move `filterRequestForModel()` until after reference image normalization, base64 conversion, and size compression. The filtered request now contains the exact image fields used by provider compatibility and endpoint selection. The bottom generator already forwards `GenerationParams.referenceImages` unchanged through `CanvasWorkspace` to this same route, so the shared fix covers both UI entries without duplicating transport logic. |
+| Files | `src/app/api/generate/route.ts`, `src/__tests__/api/generate-reference-category-strength-contract.test.ts` |
+| Regression | RED then GREEN: the route contract initially proved that filtering happened before `requestBody.image` assignment; it now requires reference payload creation before filtering and compatibility adjustment. |
+| Local verification | Focused generation chain: 6 assertions passed. Full Vitest: 309 files / 1,386 tests passed; 3 PostgreSQL-specific files / 4 tests skipped because no isolated `TEST_POSTGRES_URL` is configured. `pnpm ts-check`, `pnpm lint` (0 errors / 949 historical warnings), production build, and protected-file self-check (8/8) passed. |
+| Cloud status | Pending exact-commit deployment and real browser acceptance with the bottom generator and a canvas reference group. A subsequent provider capability rejection must be retained verbatim and must not be misclassified as this fixed transport defect. |

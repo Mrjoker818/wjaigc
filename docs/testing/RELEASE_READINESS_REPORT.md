@@ -541,3 +541,11 @@ The image-generator panel deliberately remains different from canvas reference/f
 BUG-044 is fixed locally and covered by focused regression tests, but it is not cloud-accepted yet. This change intentionally does not treat a real provider rejection as an application success: it makes the rejection visible so the provider capability, request shape, or configuration can be diagnosed from evidence.
 
 The overall release decision remains **Not approved** until the deployed reference-group workflow proves that a bound enabled provider can complete a real image-to-image request, or returns an actionable and correctly attributed failure without leaving the group stuck.
+
+## 2026-08-03 Shared Reference-Image Transport Update
+
+The cloud error `Missing required parameter: image` was traced to a shared application request-construction defect, not to `gpt-image-2-4k` or any individual model. The bottom image generator and canvas reference/fusion groups all converge on `/api/generate`; capability filtering previously captured a request body before reference images were attached.
+
+The repair now attaches and normalizes `image` plus `image_urls` first, then filters and adapts the exact provider request. Local RED/GREEN regression, full Vitest (309 files / 1,386 tests), TypeScript, lint error gating, production build, and protected-file checks passed.
+
+**Release decision remains: Not approved.** This fixes the common transport blocker locally, but paid cloud acceptance must prove successful submission from both the bottom generator and a canvas reference group. PostgreSQL concurrency, cancellation/refund, and cross-browser gates remain open.

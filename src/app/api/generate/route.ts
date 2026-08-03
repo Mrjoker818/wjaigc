@@ -1593,10 +1593,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // ★ 基于模型能力的参数过滤：只发送模型实际支持的字段，避免 API 报错
-      const filteredBody = filterRequestForModel(currentModelConfig.modelId, requestBody);
-
-      // ★ 诊断日志：记录发送给 API 的关键分辨率参数，便于排查"用户设置4K但实际生成1K"问题
+      // ★ 诊断日志：记录发送给 API 的关键分辨率参数，便于排查“用户设置4K但实际生成1K”问题
       console.log(`[generate] Resolution params → model: ${currentModelConfig.modelId}, paramType: ${currentModelConfig.paramType}, quality: ${quality}, effectiveSize: ${effectiveSize}, pixelSize: ${pixelSize || 'null'}, finalSize: ${finalSize}, profile.sizeFormat: ${profile.sizeFormat}, requestBody.size: ${requestBody.size}, requestBody.resolution: ${requestBody.resolution || 'N/A'}, requestBody.width: ${requestBody.width || 'N/A'}, requestBody.height: ${requestBody.height || 'N/A'}`);
 
       // 添加参考图片
@@ -1810,6 +1807,10 @@ export async function POST(request: NextRequest) {
           }
         }
       }
+
+      // Filter only after reference inputs are present. The filtered object is the
+      // exact payload passed to the provider compatibility layer.
+      const filteredBody = filterRequestForModel(currentModelConfig.modelId, requestBody);
 
       // ★ Gemini 图像模型专用路由：通过 /chat/completions 生图
       // 某些中转站（如4SAPI）的 Gemini 图像模型仅支持 /chat/completions 端点，
