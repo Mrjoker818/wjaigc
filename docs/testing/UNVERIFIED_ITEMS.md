@@ -342,3 +342,12 @@
 | Fusion-group collapse, close, and model selection | Pending exact-build deployment | Same as reference group, with no unwanted image drag or canvas selection. |
 | Group title drag after control isolation | Pending exact-build deployment | Header drag still moves the group as before; pressing a title button does not start a drag. |
 | Paid `n=2` progressive return after group-control acceptance | Pending | The enabled provider creates two durable task slots and each result appears as soon as its own provider task completes. |
+
+## 2026-08-03 Group Zoom and Fidelity Acceptance
+
+| Item | Current status | Acceptance evidence |
+|---|---|---|
+| Reference/fusion configuration menu scaling | Pending exact-build deployment | At 50% and 100% canvas zoom, aspect ratio, resolution, quality, and output-count menus visually match their trigger scale and remain selectable. |
+| Reference category fidelity | Pending provider verification | Changing one of the six category controls affects only that semantic preservation instruction in the request. |
+| Fusion full-content fidelity | Pending provider verification | Each fusion source is sent as an image input with all six preservation categories at 100%; the result retains salient information from every source. |
+| Image-to-image `n=2` after fidelity change | Pending | Two independent provider tasks and progressive canvas results remain correct with reference or fusion inputs. |

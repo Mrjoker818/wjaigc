@@ -129,6 +129,7 @@ export async function POST(request: NextRequest) {
       referenceMode,
       referenceCategories,
       referenceStrengths,
+      referenceCategoryStrengths,
       referenceDescriptions,
       imageCategory, 
       productCategory, 
@@ -1369,13 +1370,23 @@ export async function POST(request: NextRequest) {
       // 收集所有激活的规范分类及其最大强度
       const activeCatStrengths: Record<string, number> = {};
       const strengths = referenceStrengths as number[] | undefined;
+      const categoryStrengthsByImage = referenceCategoryStrengths
+        && typeof referenceCategoryStrengths === 'object'
+        && !Array.isArray(referenceCategoryStrengths)
+        ? referenceCategoryStrengths as Record<string, Record<string, unknown>>
+        : undefined;
 
       for (const [imgIdx, cats] of Object.entries(referenceCategories as Record<string, string[]>)) {
         if (Array.isArray(cats)) {
-          const imgStrength = strengths?.[Number(imgIdx)] ?? 0;
           for (const cat of cats) {
-            if (imgStrength <= 0) continue; // 0% strength = not active, skip
             const normKey = normalizeCategory(cat);
+            const perCategoryStrength = categoryStrengthsByImage?.[imgIdx]?.[cat]
+              ?? categoryStrengthsByImage?.[imgIdx]?.[normKey];
+            const rawStrength = typeof perCategoryStrength === 'number'
+              ? perCategoryStrength
+              : strengths?.[Number(imgIdx)] ?? 0;
+            const imgStrength = Math.max(0, Math.min(100, rawStrength));
+            if (imgStrength <= 0) continue; // 0% strength = not active, skip
             activeCatStrengths[normKey] = Math.max(activeCatStrengths[normKey] || 0, imgStrength);
           }
         }

@@ -571,3 +571,14 @@ The cancellation failure is an application release blocker, not a provider failu
 | Cloud browser acceptance | PENDING DEPLOYMENT | Validate image/reference/fusion Collapse and Close, select a group model, generate, drag the title, save, and refresh. |
 
 This gate does not claim provider generation or billing acceptance. The next real `n=2` browser run must use an enabled provider and prove separate task slots and progressive result arrival after group controls are confirmed.
+
+## 2026-08-03 Group Zoom and Fidelity Gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Scaled group configuration menus | PASS (local) | Aspect ratio, resolution, quality, and output-count use `CanvasScaledMenuSelect` within the canvas transform tree. |
+| Independent reference categories | PASS (local) | `buildGroupReferenceRequestControls` preserves `style: 85` and `subject: 20` independently instead of collapsing both to `85`. |
+| Full fusion preservation contract | PASS (local) | Every fusion source receives all six categories at `100` and strict request strength `0.05`. |
+| Reference-description alignment | PASS (local) | Blank descriptions are retained as placeholders so source image indexes do not shift. |
+| Verification | PASS WITH ENVIRONMENT SKIPS | TypeScript, ESLint error gate, full Vitest (305 files / 1374 tests passed; 3 PostgreSQL files / 4 tests skipped), and production build passed. |
+| Cloud acceptance | PENDING DEPLOYMENT | Verify menu scaling at two zoom levels, per-category reference behavior, fusion preservation, and a real `n=2` request. |

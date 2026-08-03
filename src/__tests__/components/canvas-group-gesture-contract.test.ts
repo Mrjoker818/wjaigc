@@ -40,14 +40,30 @@ describe('canvas group gesture contract', () => {
     expect(source).toContain('disabled={group.resultPlaceholder.isProcessing || !group.toolbar.model}');
   });
 
-  it('offers an explicit reference-analysis action and persists its descriptions for grouped generation', () => {
-    expect(source).toContain('const handleAnalyzeGroupReferences = useCallback');
-    expect(source).toContain('referenceDescriptions: Record<string, string>');
-    expect(source).toContain('onClick={() => handleAnalyzeGroupReferences(group.id)}');
+  it('uses reference category controls as the grouped image-to-image fidelity input', () => {
+    expect(source).toContain('buildGroupReferenceRequestControls(');
+    expect(source).toContain('referenceCategoryStrengths');
+    expect(source).toContain('REFERENCE_CATEGORIES.map(category => [category, 70])');
   });
 
   it('keeps reference metadata scoped to the generation request so parallel groups cannot overwrite each other', () => {
     expect(source).toContain('const referenceMeta: {');
     expect(source).not.toContain('groupRefMetaRef');
+  });
+
+  it('keeps reference descriptions index-aligned with their source images', () => {
+    expect(source).toContain("referenceDescriptions: succeededIndices.map(index => referenceMeta.referenceDescriptions?.[index] || '')");
+    expect(source).not.toContain("referenceDescriptions: succeededIndices.map(index => referenceMeta.referenceDescriptions?.[index] || '').filter(");
+  });
+
+  it('uses a canvas-transformed menu for group settings instead of native selects', () => {
+    expect(source).toContain('function CanvasScaledMenuSelect');
+    expect(source).toContain('<CanvasScaledMenuSelect');
+    expect(source).toContain('openGroupConfigDropdown');
+  });
+
+  it('does not expose a separate vision-to-text action as the reference fidelity control', () => {
+    expect(source).not.toContain("handleAnalyzeGroupReferences(group.id)");
+    expect(source).not.toContain("'识别参考图'");
   });
 });

@@ -42,7 +42,7 @@ import {
   useAnnotationController,
 } from '@/features/annotations/use-annotation-controller';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
-import { calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, QUALITY_DISPLAY_NAMES, getProviderAspectRatios, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
+import { buildGroupReferenceRequestControls, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, QUALITY_DISPLAY_NAMES, getProviderAspectRatios, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
@@ -480,6 +480,81 @@ function ElapsedTime({ startTime, className }: { startTime: number; className?: 
   const formatted = minutes > 0 ? `${minutes}:${seconds.toString().padStart(2, '0')}` : `${seconds}s`;
 
   return <span className={className}>{formatted}</span>;
+}
+
+interface CanvasScaledMenuSelectProps {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  open: boolean;
+  isMonochrome: boolean;
+  onOpenChange: (open: boolean) => void;
+  onValueChange: (value: string) => void;
+}
+
+/**
+ * Native select popovers are drawn outside the transformed canvas, so they
+ * ignore canvas zoom. This menu stays inside the canvas transform tree.
+ */
+function CanvasScaledMenuSelect({
+  label,
+  value,
+  options,
+  open,
+  isMonochrome,
+  onOpenChange,
+  onValueChange,
+}: CanvasScaledMenuSelectProps) {
+  const selectedLabel = options.find(option => option.value === value)?.label || value;
+
+  return (
+    <div className="relative min-w-0" data-popup="canvas-scaled-menu">
+      <button
+        type="button"
+        className={`flex min-w-[68px] items-center justify-between gap-1 rounded-lg border px-2.5 py-1.5 text-[13px] ${isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-800' : 'border-white/[0.14] bg-white/5 text-text-bright'}`}
+        aria-label={label}
+        aria-expanded={open}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpenChange(!open);
+        }}
+      >
+        <span className="truncate">{selectedLabel}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 top-full z-50 mt-1 min-w-full overflow-hidden rounded-lg shadow-xl"
+          style={{
+            background: isMonochrome ? '#fff' : 'rgba(20,20,20,0.98)',
+            border: isMonochrome ? '1px solid #ddd' : '1px solid #333',
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
+        >
+          {options.map(option => {
+            const selected = option.value === value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={`block w-full whitespace-nowrap px-3 py-2 text-left text-[13px] transition-colors ${selected ? (isMonochrome ? 'bg-blue-50 text-blue-800' : 'bg-gold/15 text-gold') : (isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-text-bright hover:bg-[#2a2a2a]')}`}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onValueChange(option.value);
+                  onOpenChange(false);
+                }}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange }: InfiniteCanvasProps) {
@@ -1942,8 +2017,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [genGroups, setGenGroups] = useState<CanvasGenGroup[]>([]);
   const genGroupsRef = useRef<CanvasGenGroup[]>(genGroups);
   const [optimizingGroupId, setOptimizingGroupId] = useState<string | null>(null);
-  const [analyzingGroupId, setAnalyzingGroupId] = useState<string | null>(null);
   const [openModelDropdownGroupId, setOpenModelDropdownGroupId] = useState<string | null>(null);
+  const [openGroupConfigDropdown, setOpenGroupConfigDropdown] = useState<{
+    groupId: string;
+    field: 'aspectRatio' | 'resolution' | 'quality' | 'outputCount';
+  } | null>(null);
   const [genGroupTick, setGenGroupTick] = useState(0);
   // Tick timer for gen group elapsed time display
   useEffect(() => {
@@ -3142,6 +3220,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     // Close any open model dropdown
     setOpenModelDropdownGroupId(null);
+    setOpenGroupConfigDropdown(null);
 
     // Click on blank canvas area: close done annotation bubbles
     if (!annotationMode && editMode === 'none' && e.button === 0) {
@@ -4368,12 +4447,18 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const createGenGroupLocal = useCallback((firstImage: CanvasImage, groupType: GenGroupType): CanvasGenGroup => {
     const groupId = `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const placeholderId = `ph-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const initialCategories: ReferenceCategory[] = groupType === 'reference'
+      ? [...REFERENCE_CATEGORIES]
+      : [];
+    const initialStrengths: Record<string, number> = groupType === 'reference'
+      ? Object.fromEntries(REFERENCE_CATEGORIES.map(category => [category, 70]))
+      : {};
     const refImg: GroupRefImage = {
       imageId: firstImage.id,
       url: firstImage.url,
       number: 1,
-      categories: [],
-      strengths: {},
+      categories: initialCategories,
+      strengths: initialStrengths,
     };
     // 计算结果框位置：先尝试第一张图右侧，然后自动避让
     const defaultResultX = firstImage.x + firstImage.width + 80;
@@ -4423,8 +4508,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         resultX: resultPos.x,
         resultY: resultPos.y,
       },
-      sourceCategories: { [firstImage.id]: [] },
-      sourceStrengths: { [firstImage.id]: {} },
+      sourceCategories: { [firstImage.id]: initialCategories },
+      sourceStrengths: { [firstImage.id]: initialStrengths },
       referenceDescriptions: {},
       resultImageIds: [],
       createdAt: Date.now(),
@@ -4449,8 +4534,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           imageId: image.id,
           url: image.url,
           number: latestGroup.refImages.length + 1,
-          categories: [],
-          strengths: {},
+          categories: [...REFERENCE_CATEGORIES],
+          strengths: Object.fromEntries(REFERENCE_CATEGORIES.map(category => [category, 70])),
         };
         const allRefs = [...latestGroup.refImages, newRef];
         const refImageObjs = allRefs
@@ -4464,8 +4549,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             ...g,
             refImages: allRefs,
             sourceImageIds: [...g.sourceImageIds, image.id],
-            sourceCategories: { ...g.sourceCategories, [image.id]: [] },
-            sourceStrengths: { ...g.sourceStrengths, [image.id]: {} },
+            sourceCategories: { ...g.sourceCategories, [image.id]: [...REFERENCE_CATEGORIES] },
+            sourceStrengths: { ...g.sourceStrengths, [image.id]: Object.fromEntries(REFERENCE_CATEGORIES.map(category => [category, 70])) },
             position: { ...g.position, sourceCenterX: avgX, sourceCenterY: avgY },
           };
         });
@@ -4652,84 +4737,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
   }, []);
 
-  const handleAnalyzeGroupReferences = useCallback(async (groupId: string) => {
-    const group = genGroupsRef.current.find(candidate => candidate.id === groupId);
-    if (!group || group.refImages.length === 0 || analyzingGroupId === groupId) return;
-
-    setAnalyzingGroupId(groupId);
-    const referenceDescriptions: Record<string, string> = {};
-    const failedReferences: string[] = [];
-
-    try {
-      for (const reference of group.refImages) {
-        try {
-          const response = await fetch('/api/vision-prompt', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageUrl: reference.url }),
-          });
-          const payload = await response.json().catch(() => null) as {
-            success?: boolean;
-            error?: string;
-            data?: unknown;
-          } | null;
-
-          if (!response.ok || !payload?.success) {
-            throw new Error(payload?.error || `识别失败（HTTP ${response.status}）`);
-          }
-
-          const data = payload.data && typeof payload.data === 'object'
-            ? payload.data as Record<string, unknown>
-            : {};
-          const en = data.en && typeof data.en === 'object'
-            ? data.en as Record<string, unknown>
-            : {};
-          const zh = data.zh && typeof data.zh === 'object'
-            ? data.zh as Record<string, unknown>
-            : {};
-          const description = [
-            typeof en.prompt === 'string' ? en.prompt : '',
-            typeof zh.prompt === 'string' ? zh.prompt : '',
-            typeof data.raw === 'string' ? data.raw : '',
-          ].find(value => value.trim())?.trim();
-
-          if (!description) {
-            throw new Error('识别结果为空');
-          }
-
-          referenceDescriptions[reference.imageId] = description.slice(0, 2000);
-        } catch (error) {
-          failedReferences.push(error instanceof Error ? error.message : '识别失败');
-        }
-      }
-
-      const completedCount = Object.keys(referenceDescriptions).length;
-      if (completedCount > 0) {
-        setGenGroups(prev => prev.map(candidate => (
-          candidate.id === groupId
-            ? {
-                ...candidate,
-                referenceDescriptions: {
-                  ...candidate.referenceDescriptions,
-                  ...referenceDescriptions,
-                },
-              }
-            : candidate
-        )));
-      }
-
-      if (completedCount === group.refImages.length) {
-        toast.success(`已识别 ${completedCount} 张参考图`);
-      } else if (completedCount > 0) {
-        toast.warning(`已识别 ${completedCount} 张参考图，${failedReferences.length} 张未完成`);
-      } else {
-        toast.error(failedReferences[0] || '参考图识别失败');
-      }
-    } finally {
-      setAnalyzingGroupId(current => current === groupId ? null : current);
-    }
-  }, [analyzingGroupId]);
-
   /** 处理生成组的生成请求 */
   const handleGroupGenerate = useCallback(async (group: CanvasGenGroup) => {
     const toolbar = group.toolbar;
@@ -4804,6 +4811,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const referenceMeta: {
       referenceDescriptions?: string[];
       referenceCategories?: Record<string, string[]>;
+      referenceCategoryStrengths?: Record<string, Record<string, number>>;
       referenceStrengths?: number[];
     } = {};
     const groupReferenceDescriptions = group.refImages.map(reference => (
@@ -4813,87 +4821,43 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     ));
 
     if (group.type === 'reference' && group.refImages.length > 0) {
-      // 参考图组：收集类别/强度/描述，传给后端处理
-      // 前端不再构建复杂提示词，避免与后端逻辑冲突导致重复指令和变形
-
-      // 收集参考图的原始描述（用于增强主体识别精度）
-      // 收集所有激活的类别及其最大强度（跨多张参考图取最大值）
-      const catStrengthMap: Record<string, number> = {};
-      for (const r of group.refImages) {
-        const cats = group.sourceCategories[r.imageId] || [];
-        const strengths = group.sourceStrengths[r.imageId] || {};
-        for (const c of cats) {
-          const s = strengths[c] || 0;
-          if (s > 0) {
-            catStrengthMap[c] = Math.max(catStrengthMap[c] || 0, s);
-          }
-        }
-      }
-
-      const activeKeys = Object.keys(catStrengthMap);
+      const controls = buildGroupReferenceRequestControls(
+        group.type,
+        group.refImages,
+        group.sourceCategories,
+        group.sourceStrengths,
+      );
       const keyword = fullPrompt.trim();
-
-      // 构建后端需要的 referenceCategories 和 referenceStrengths 格式
-      // referenceCategories: { "0": ["style", "subject"], "1": ["composition"] }
-      const referenceCategories: Record<string, string[]> = {};
-      const referenceStrengthsArr: number[] = [];
-      for (let i = 0; i < group.refImages.length; i++) {
-        const r = group.refImages[i];
-        const cats = group.sourceCategories[r.imageId] || [];
-        const strengths = group.sourceStrengths[r.imageId] || {};
-        if (cats.length > 0) {
-          referenceCategories[String(i)] = cats;
-          // 取该参考图激活类别中的最大强度
-          const maxStr = cats.reduce((max, c) => Math.max(max, strengths[c] || 0), 0);
-          referenceStrengthsArr.push(maxStr);
-        } else {
-          referenceStrengthsArr.push(0);
-        }
-      }
-
-      // strength 计算：保留方面多/强 → strength 低（更接近原图）
-      // preserveRatio=0 (无保留) → strength=0.80 (允许较大变化)
-      // preserveRatio=1 (全部最高保留) → strength=0.15 (几乎不变)
-      if (activeKeys.length > 0) {
-        const totalPreserveScore = activeKeys.reduce((sum, cat) => sum + catStrengthMap[cat], 0);
-        const maxScore = activeKeys.length * 100;
-        const preserveRatio = totalPreserveScore / maxScore;
-        calculatedStrength = Math.round((0.80 - preserveRatio * 0.65) * 100) / 100;
-        // 当保留主体时，额外降低 strength
-        if (catStrengthMap['subject'] > 0) {
-          const subjectStr = catStrengthMap['subject'] || 0;
-          const subjectReduction = (subjectStr / 100) * 0.25;
-          calculatedStrength = Math.max(0.15, calculatedStrength - subjectReduction);
-        }
-      }
-
-      // 保存这些信息供 fetch 请求使用
+      calculatedStrength = controls.generationStrength;
       referenceMeta.referenceDescriptions = groupReferenceDescriptions;
-      referenceMeta.referenceCategories = Object.keys(referenceCategories).length > 0
-        ? referenceCategories
-        : undefined;
-      referenceMeta.referenceStrengths = referenceStrengthsArr.some(s => s > 0)
-        ? referenceStrengthsArr
-        : undefined;
+      referenceMeta.referenceCategories = controls.referenceCategories;
+      referenceMeta.referenceCategoryStrengths = controls.referenceCategoryStrengths as Record<string, Record<string, number>> | undefined;
+      referenceMeta.referenceStrengths = controls.referenceStrengths;
 
-      // fullPrompt 只保留用户的原始关键词，后端根据 categories/descriptions 构建完整提示词
       if (!keyword) {
         fullPrompt = 'Generate a creative variation of the reference image(s).';
       }
     } else if (group.type === 'fusion' && group.refImages.length > 0) {
-      // 融图组：融合多张参考图
-      calculatedStrength = 0.65;
+      const controls = buildGroupReferenceRequestControls(
+        group.type,
+        group.refImages,
+        group.sourceCategories,
+        group.sourceStrengths,
+      );
+      calculatedStrength = controls.generationStrength;
       const keyword = fullPrompt.trim();
-      // 收集融合参考图的原始描述
       const fusionRefDescs = groupReferenceDescriptions.filter((description): description is string => !!description);
       referenceMeta.referenceDescriptions = groupReferenceDescriptions;
+      referenceMeta.referenceCategories = controls.referenceCategories;
+      referenceMeta.referenceCategoryStrengths = controls.referenceCategoryStrengths as Record<string, Record<string, number>> | undefined;
+      referenceMeta.referenceStrengths = controls.referenceStrengths;
       const fusionDescHint = fusionRefDescs.length > 0
         ? ` The reference images depict: "${fusionRefDescs.join('; ')}".`
         : '';
       if (keyword) {
-        fullPrompt = `[fusion] Seamlessly blend and fuse elements from the reference images, then create: ${keyword}.${fusionDescHint}`;
+        fullPrompt = `[fusion] Treat every reference image as mandatory source material. Preserve all visible subjects, composition, scene, color, style, and fine details from every source while integrating them into one coherent image. Then create: ${keyword}.${fusionDescHint}`;
       } else {
-        fullPrompt = `[fusion] Seamlessly blend and fuse elements from the reference images into a cohesive new image.${fusionDescHint}`;
+        fullPrompt = `[fusion] Treat every reference image as mandatory source material. Preserve all visible subjects, composition, scene, color, style, and fine details from every source while integrating them into one coherent image.${fusionDescHint}`;
       }
     }
 
@@ -4971,9 +4935,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
           submitOnly: true,
           ...(calculatedStrength != null && calculatedStrength > 0 ? { strength: calculatedStrength } : {}),
-          ...(referenceMeta.referenceDescriptions?.some(description => description.trim()) ? { referenceDescriptions: succeededIndices.map(index => referenceMeta.referenceDescriptions?.[index] || '').filter(description => description.trim()) } : {}),
+          ...(referenceMeta.referenceDescriptions?.some(description => description.trim()) ? { referenceDescriptions: succeededIndices.map(index => referenceMeta.referenceDescriptions?.[index] || '') } : {}),
           ...(referenceMeta.referenceCategories ? { referenceCategories: Object.fromEntries(succeededIndices.map((originalIndex, newIndex) => [String(newIndex), referenceMeta.referenceCategories?.[String(originalIndex)] || []]).filter(([, value]) => value.length > 0)) } : {}),
-          ...(referenceMeta.referenceStrengths?.length ? { referenceStrengths: referenceMeta.referenceStrengths } : {}),
+          ...(referenceMeta.referenceCategoryStrengths ? { referenceCategoryStrengths: Object.fromEntries(succeededIndices.map((originalIndex, newIndex) => [String(newIndex), referenceMeta.referenceCategoryStrengths?.[String(originalIndex)] || {}])) } : {}),
+          ...(referenceMeta.referenceStrengths?.length ? { referenceStrengths: succeededIndices.map(index => referenceMeta.referenceStrengths?.[index] || 0) } : {}),
         }),
         signal: genController.signal,
       });
@@ -11424,6 +11389,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             const isHoveredForDrop = hoveredGenGroupId === group.id;
             const dragDx = isThisGroupDragging ? genGroupDragOffset.x : 0;
             const dragDy = isThisGroupDragging ? genGroupDragOffset.y : 0;
+            const isGroupConfigMenuOpen = openGroupConfigDropdown?.groupId === group.id;
+            const isAnyGroupMenuOpen = openModelDropdownGroupId === group.id || isGroupConfigMenuOpen;
 
             // Dynamically calculate result size from toolbar aspect ratio and actual pixel size
             const arParts = group.toolbar.aspectRatio.split(':').map(Number);
@@ -11489,7 +11456,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     background: isHoveredForDrop ? (isRef ? 'rgba(212,175,55,0.12)' : 'rgba(78,205,196,0.12)') : accentBg,
                     border: `2px solid ${isThisGroupDragging ? accentColor : isHoveredForDrop ? accentColor : accentBorder}`,
                     zIndex: 12,
-                    overflow: (group.isCollapsed || openModelDropdownGroupId !== group.id) ? 'hidden' : 'visible',
+                    overflow: (group.isCollapsed || !isAnyGroupMenuOpen) ? 'hidden' : 'visible',
                     transition: isThisGroupDragging ? 'none' : 'height 0.3s ease, border-color 0.2s, background 0.2s',
                     boxShadow: isHoveredForDrop ? `0 0 20px ${accentColor}40` : 'none',
                   }}
@@ -11672,7 +11639,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                       if (ci >= 0) cats.splice(ci, 1);
                                     } else {
                                       if (!cats.includes(cat)) cats.push(cat);
-                                      if (!str[cat]) str[cat] = 0;
+                                      if (!str[cat]) str[cat] = 70;
                                     }
                                     newCats[img.id] = cats;
                                     newStr[img.id] = str;
@@ -11840,6 +11807,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         onMouseDown={(e) => { e.stopPropagation(); }}
                         onClick={(e) => {
                           e.stopPropagation();
+                          setOpenGroupConfigDropdown(null);
                           setOpenModelDropdownGroupId(prev => prev === group.id ? null : group.id);
                         }}
                       >
@@ -11903,71 +11871,86 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       return (
                     <div className="flex items-center gap-2 flex-wrap">
                       {/* 图像比例 */}
-                      <select
-                        className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
+                      <CanvasScaledMenuSelect
+                        label="图像比例"
                         value={group.toolbar.aspectRatio}
-                        onChange={(e) => {
-                          const newAr = e.target.value;
+                        options={supportedRatios.map(value => ({ value, label: value }))}
+                        open={openGroupConfigDropdown?.groupId === group.id && openGroupConfigDropdown.field === 'aspectRatio'}
+                        isMonochrome={isMonochrome}
+                        onOpenChange={(open) => {
+                          setOpenModelDropdownGroupId(null);
+                          setOpenGroupConfigDropdown(open ? { groupId: group.id, field: 'aspectRatio' } : null);
+                        }}
+                        onValueChange={(newAr) => {
                           const newSize = calculateActualPixels(newAr, currentResolution, group.toolbar.model);
                           setGenGroups(prev => prev.map(g =>
                             g.id === group.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g
                           ));
                         }}
-                      >
-                        {supportedRatios.map(r => (
-                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r}</option>
-                        ))}
-                      </select>
+                      />
                       {/* 分辨率档位 */}
                       {showResolution && (
-                      <select
-                        className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
+                      <CanvasScaledMenuSelect
+                        label="图片分辨率"
                         value={currentResolution}
-                        onChange={(e) => {
-                          const newRes = e.target.value;
+                        options={supportedResolutions.map(value => ({
+                          value,
+                          label: RESOLUTION_TIER_DISPLAY_NAMES[value] || value,
+                        }))}
+                        open={openGroupConfigDropdown?.groupId === group.id && openGroupConfigDropdown.field === 'resolution'}
+                        isMonochrome={isMonochrome}
+                        onOpenChange={(open) => {
+                          setOpenModelDropdownGroupId(null);
+                          setOpenGroupConfigDropdown(open ? { groupId: group.id, field: 'resolution' } : null);
+                        }}
+                        onValueChange={(newRes) => {
                           const newSize = calculateActualPixels(group.toolbar.aspectRatio, newRes, group.toolbar.model);
                           setGenGroups(prev => prev.map(g =>
                             g.id === group.id ? { ...g, toolbar: { ...g.toolbar, resolution: newRes, size: newSize } } : g
                           ));
                         }}
-                      >
-                        {supportedResolutions.map(r => (
-                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{RESOLUTION_TIER_DISPLAY_NAMES[r] || r}</option>
-                        ))}
-                      </select>
+                      />
                       )}
                       {/* 图片质量 */}
                       {showQuality && (
-                      <select
-                        className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
+                      <CanvasScaledMenuSelect
+                        label="图片质量"
                         value={currentQuality}
-                        onChange={(e) => {
-                          const newQ = e.target.value;
+                        options={supportedQualityLevels.map(value => ({
+                          value,
+                          label: QUALITY_LEVEL_DISPLAY_NAMES[value] || value,
+                        }))}
+                        open={openGroupConfigDropdown?.groupId === group.id && openGroupConfigDropdown.field === 'quality'}
+                        isMonochrome={isMonochrome}
+                        onOpenChange={(open) => {
+                          setOpenModelDropdownGroupId(null);
+                          setOpenGroupConfigDropdown(open ? { groupId: group.id, field: 'quality' } : null);
+                        }}
+                        onValueChange={(newQ) => {
                           setGenGroups(prev => prev.map(g =>
                             g.id === group.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ } } : g
                           ));
                         }}
-                      >
-                        {supportedQualityLevels.map(q => (
-                          <option key={q} value={q} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{QUALITY_LEVEL_DISPLAY_NAMES[q] || q}</option>
-                        ))}
-                      </select>
+                      />
                       )}
                       {/* 出图数量 */}
-                      <select
-                        className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
-                        value={group.toolbar.outputCount || group.toolbar.n || 1}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
+                      <CanvasScaledMenuSelect
+                        label="出图数量"
+                        value={String(group.toolbar.outputCount || group.toolbar.n || 1)}
+                        options={[1, 2, 3, 4].map(value => ({ value: String(value), label: `${value}张` }))}
+                        open={openGroupConfigDropdown?.groupId === group.id && openGroupConfigDropdown.field === 'outputCount'}
+                        isMonochrome={isMonochrome}
+                        onOpenChange={(open) => {
+                          setOpenModelDropdownGroupId(null);
+                          setOpenGroupConfigDropdown(open ? { groupId: group.id, field: 'outputCount' } : null);
+                        }}
+                        onValueChange={(value) => {
+                          const val = Number(value);
                           setGenGroups(prev => prev.map(g =>
                             g.id === group.id ? { ...g, toolbar: { ...g.toolbar, outputCount: val, n: val } } : g
                           ));
                         }}
-                      >
-                        {[1,2,3,4].map(n => (
-                          <option key={n} value={n} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{n}张</option>
-                        ))}
-                      </select>
+                      />
                     </div>
                     );
                     })()}
@@ -12000,21 +11983,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       </div>
                     </div>
 
-                    {/* Row 4: Analyze + Optimize + Generate + Cancel */}
+                    {/* Row 4: Optimize + Generate + Cancel */}
                     <div className="flex items-center gap-2">
-                      <button
-                        className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-blue-50 hover:bg-blue-100 text-blue-600' : 'bg-[#252525] hover:bg-[#282828]/85 text-muted-foreground'}`}
-                        onClick={() => handleAnalyzeGroupReferences(group.id)}
-                        disabled={analyzingGroupId === group.id || group.refImages.length === 0}
-                        title="识别全部参考图内容，并在生成时作为参考说明"
-                      >
-                        {analyzingGroupId === group.id ? (
-                          <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: accentColor, borderTopColor: 'transparent' }} />
-                        ) : (
-                          <Sparkles className="w-4 h-4" />
-                        )}
-                        <span>{analyzingGroupId === group.id ? '识别中...' : '识别参考图'}</span>
-                      </button>
                       <button
                         className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-blue-50 hover:bg-blue-100 text-blue-600' : 'bg-[#252525] hover:bg-[#282828]/85 text-muted-foreground'}`}
                         onClick={() => handleOptimizeGroupPrompt(group.id)}

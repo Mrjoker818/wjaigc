@@ -518,3 +518,9 @@ BUG-040 was reproduced in the deployed canvas: image-group, reference-group, and
 Local evidence: focused canvas and progressive-generation suite passed 24 assertions. The complete local gate also passed: TypeScript, ESLint error gate (`0` errors / `949` historical warnings), `303` test files / `1368` tests, and the production build. Three PostgreSQL-specific test files remain skipped because no isolated `TEST_POSTGRES_URL` is configured. This is not release acceptance evidence. The deployment must be checked against the pushed commit before using it for the paid `n > 1` acceptance flow.
 
 **Release decision: Not approved.** P1 provider cancellation/refund evidence, PostgreSQL concurrency, cross-browser coverage, group-control cloud acceptance, and the next exact-build `n=2` progressive-return verification remain open.
+
+## 2026-08-03 Group Fidelity Update
+
+The deployed `072cd6f` build exposed two additional group issues: native setting menus ignored canvas zoom, and the six reference controls were not retained as independent generation constraints. The next local patch renders configuration menus inside the scaled canvas and preserves per-category strengths through the generation API. Fusion mode now requires every source image's style, composition, scene, color, subject, and detail at full strength.
+
+Local quality gates passed, but the release decision remains **Not approved** until the exact deployed commit is visually verified and completes a real image-to-image `n=2` run.

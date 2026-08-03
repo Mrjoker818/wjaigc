@@ -23,6 +23,104 @@ export const REFERENCE_CATEGORY_LABELS: Record<string, string> = {
 };
 export type ReferenceCategory = typeof REFERENCE_CATEGORIES[number];
 
+export interface GroupReferenceRequestControls {
+  referenceCategories?: Record<string, ReferenceCategory[]>;
+  referenceCategoryStrengths?: Record<string, Partial<Record<ReferenceCategory, number>>>;
+  referenceStrengths?: number[];
+  generationStrength?: number;
+}
+
+function clampReferenceStrength(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value ?? 0)));
+}
+
+/**
+ * Converts canvas reference controls into a provider-neutral request shape.
+ * Reference groups preserve only the categories the user selected; fusion
+ * groups deliberately preserve every semantic category from every source.
+ */
+export function buildGroupReferenceRequestControls(
+  type: GenGroupType,
+  refImages: Array<Pick<GroupRefImage, 'imageId'>>,
+  sourceCategories: Record<string, ReferenceCategory[]>,
+  sourceStrengths: Record<string, Record<string, number>>,
+): GroupReferenceRequestControls {
+  if (refImages.length === 0) return {};
+
+  if (type === 'fusion') {
+    const referenceCategories: Record<string, ReferenceCategory[]> = {};
+    const referenceCategoryStrengths: Record<string, Partial<Record<ReferenceCategory, number>>> = {};
+
+    refImages.forEach((reference, index) => {
+      referenceCategories[String(index)] = [...REFERENCE_CATEGORIES];
+      referenceCategoryStrengths[String(index)] = Object.fromEntries(
+        REFERENCE_CATEGORIES.map(category => [category, 100]),
+      ) as Partial<Record<ReferenceCategory, number>>;
+    });
+
+    return {
+      referenceCategories,
+      referenceCategoryStrengths,
+      referenceStrengths: refImages.map(() => 100),
+      generationStrength: 0.05,
+    };
+  }
+
+  const referenceCategories: Record<string, ReferenceCategory[]> = {};
+  const referenceCategoryStrengths: Record<string, Partial<Record<ReferenceCategory, number>>> = {};
+  const referenceStrengths: number[] = [];
+  const activeStrengths: Array<{ category: ReferenceCategory; strength: number }> = [];
+
+  refImages.forEach((reference, index) => {
+    const selectedCategories = (sourceCategories[reference.imageId] || [])
+      .filter((category): category is ReferenceCategory => REFERENCE_CATEGORIES.includes(category));
+    const selectedStrengths: Partial<Record<ReferenceCategory, number>> = {};
+
+    for (const category of selectedCategories) {
+      const strength = clampReferenceStrength(sourceStrengths[reference.imageId]?.[category]);
+      selectedStrengths[category] = strength;
+      if (strength > 0) {
+        activeStrengths.push({ category, strength });
+      }
+    }
+
+    if (selectedCategories.length > 0) {
+      referenceCategories[String(index)] = selectedCategories;
+      referenceCategoryStrengths[String(index)] = selectedStrengths;
+    }
+    referenceStrengths.push(Math.max(0, ...Object.values(selectedStrengths)));
+  });
+
+  if (activeStrengths.length === 0) {
+    return {
+      referenceCategories: Object.keys(referenceCategories).length > 0 ? referenceCategories : undefined,
+      referenceCategoryStrengths: Object.keys(referenceCategoryStrengths).length > 0 ? referenceCategoryStrengths : undefined,
+      referenceStrengths: referenceStrengths.some(strength => strength > 0) ? referenceStrengths : undefined,
+    };
+  }
+
+  const preserveRatio = activeStrengths.reduce((sum, item) => sum + item.strength, 0)
+    / (activeStrengths.length * 100);
+  let generationStrength = Math.round((0.8 - preserveRatio * 0.65) * 100) / 100;
+  const subjectStrength = Math.max(
+    0,
+    ...activeStrengths
+      .filter(item => item.category === 'subject')
+      .map(item => item.strength),
+  );
+  if (subjectStrength > 0) {
+    generationStrength = Math.max(0.15, generationStrength - (subjectStrength / 100) * 0.25);
+  }
+
+  return {
+    referenceCategories,
+    referenceCategoryStrengths,
+    referenceStrengths,
+    generationStrength,
+  };
+}
+
 // 单张参考图在组中的配置
 export interface GroupRefImage {
   imageId: string;           // 画布图片ID

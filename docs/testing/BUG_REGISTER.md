@@ -775,3 +775,29 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | Files | `src/components/infinite-canvas.tsx`, `src/__tests__/components/canvas-group-gesture-contract.test.ts` |
 | Regression | RED then GREEN: the group-gesture contract now requires both group boundaries and the root pointer-handler exclusion selector. Focused canvas/generation suite: 6 files, 24 tests passed. |
 | Status | Fixed locally. Pending exact-commit cloud deployment and Chrome acceptance for collapse, close, model selection, drag, reference generation, and fusion generation. |
+
+### BUG-041: Native group-setting menus ignored canvas zoom
+
+| Field | Detail |
+|---|---|
+| Severity | P2 |
+| Module | Infinite canvas reference and fusion group toolbar |
+| Environment | Deployed cloud canvas, Chrome, commit `072cd6f`, 2026-08-03 |
+| Reproduction | Zoom the canvas out, then open aspect ratio, resolution, quality, or output-count on a reference or fusion group. |
+| Actual | The toolbar shrank with the canvas while the browser-native dropdown menu remained screen-sized. |
+| Root cause | Native `<select>` popovers are rendered outside the transformed canvas DOM tree and cannot inherit its scale transform. |
+| Fix | Replaced the four group-toolbar native selects with `CanvasScaledMenuSelect`, a menu rendered inside the transformed group container. |
+| Regression | Group gesture contract requires the canvas-scaled menu and its controlled open state. |
+| Status | Fixed locally; pending deployed visual acceptance at zoom out and zoom in. |
+
+### BUG-042: Group reference fidelity controls did not preserve per-category intent
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite canvas reference and fusion image-to-image generation |
+| Actual | The six reference controls were flattened to one maximum strength per source image. The separate `识别参考图` control called vision-to-text instead of controlling image-to-image fidelity. Fusion used ordinary reference strength rather than full-content preservation. |
+| Root cause | The request schema had no per-category strength map, and fusion did not generate a complete semantic preservation contract. |
+| Fix | Added `referenceCategoryStrengths` from canvas to `/api/generate`; each category keeps its own strength. New reference groups start with the six semantic controls at 70%. Fusion sends all six categories at 100% for every source and uses strict generation strength `0.05`. The vision-to-text button was removed. |
+| Regression | Pure request-control tests cover independent category strengths and full fusion controls. API contract verifies per-category values are preferred over legacy image-wide strength. |
+| Status | Fixed locally; pending deployed provider verification with a supported image-to-image model. |
