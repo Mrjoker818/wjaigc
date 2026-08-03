@@ -5437,6 +5437,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     cancellingTaskIdsRef.current.add(taskId);
+    console.info('[Canvas] cancellation requested from processing frame', {
+      taskId,
+      frameId: image.id,
+    });
     updateProcessingFrame(image.id, {
       label: '取消中…',
       status: 'cancelling',
@@ -5444,6 +5448,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     });
     try {
       const cancellation = await taskEventsClient.cancelTask(taskId);
+      console.info('[Canvas] cancellation response handled', {
+        taskId,
+        frameId: image.id,
+        success: cancellation.success,
+      });
       if (!cancellation.success) {
         toast.error(cancellation.message || '取消任务失败，请稍后重试');
         updateProcessingFrame(image.id, {
@@ -5456,6 +5465,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
       canvasGenerationAbortControllersRef.current.get(taskId)?.abort();
       removeProcessingFrame(image.id);
+      console.info('[Canvas] cancelled processing frame removed', {
+        taskId,
+        frameId: image.id,
+      });
     } finally {
       cancellingTaskIdsRef.current.delete(taskId);
     }

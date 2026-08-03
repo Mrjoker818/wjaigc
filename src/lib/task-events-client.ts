@@ -62,12 +62,18 @@ export class TaskEventsClient {
 
   async cancelTask(taskId: string): Promise<{ success: boolean; message?: string }> {
     try {
+      console.info('[TaskEventsClient] cancel request started', { taskId });
       const response = await fetch(`${this.getBaseUrl()}/api/cancel-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId }),
       });
       const payload = await response.json() as CancellationResponse;
+      console.info('[TaskEventsClient] cancel response received', {
+        taskId,
+        status: response.status,
+        success: payload.success === true,
+      });
       if (payload.success !== true) {
         return {
           success: false,
