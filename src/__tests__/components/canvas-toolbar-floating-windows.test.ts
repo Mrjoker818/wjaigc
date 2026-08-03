@@ -85,4 +85,11 @@ describe('canvas toolbar floating windows', () => {
     expect(imageEditorSource).toContain("if (event.key === 'Escape' && !event.defaultPrevented)");
     expect(videoPanelSource).toContain('fixed z-[210]');
   });
+
+  it('treats reverse engineering as an isolated floating canvas tool', () => {
+    expect(canvasSource).toContain('showEffectReverse');
+    expect(canvasSource).toContain('setShowEffectReverse(false)');
+    expect(canvasSource).toContain('<EffectReverseEngineeringPanel');
+    expect(canvasSource).toContain('data-popup="effect-reverse-engineering"');
+  });
 });

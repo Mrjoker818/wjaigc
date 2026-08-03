@@ -101,6 +101,7 @@ import {
 } from '@/lib/element-decomposition/client';
 import type { ElementDecomposeOutputMode } from '@/lib/element-decomposition/types';
 import type { LayerDecompositionResult } from '@/lib/layer-decomposition/types';
+import type { EffectReverseTaskResult } from '@/lib/effect-reverse-engineering/types';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 const HumanRepairPanel = lazy(() => import('@/components/human-repair-panel'));
@@ -114,6 +115,7 @@ const SceneStudioPanel = lazy(() => import('@/components/scene-studio-panel'));
 const StickerAssistantPanel = lazy(() => import('@/components/sticker-assistant-panel'));
 const BrandPackagingPanel = lazy(() => import('@/components/brand-packaging-panel'));
 const Display3DPanel = lazy(() => import('@/components/display3d-panel'));
+const EffectReverseEngineeringPanel = lazy(() => import('@/components/effect-reverse-engineering-panel').then(m => ({ default: m.EffectReverseEngineeringPanel })));
 
 // P1: 图层面板 + 版本历史面板
 const LayerPanel = lazy(() => import('@/components/layer-panel').then(m => ({ default: m.LayerPanel })));
@@ -135,6 +137,21 @@ interface ConfiguredUpscaleModel {
   modelId: string;
   label: string;
   unavailableReason?: string;
+}
+
+interface EffectReverseCanvasSource {
+  projectId: string;
+  imageId: string;
+  versionId: string;
+  imageUrl: string;
+  label?: string;
+  sourceVersionId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  originalWidth?: number;
+  originalHeight?: number;
 }
 
 interface UpscaleModelsResponse {
@@ -627,6 +644,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [showBrandPackaging, setShowBrandPackaging] = useState(false);
   const [showDisplay3D, setShowDisplay3D] = useState(false);
   const [display3DSource, setDisplay3DSource] = useState<{ id: string; url: string; prompt?: string } | null>(null);
+  const [showEffectReverse, setShowEffectReverse] = useState(false);
+  const [effectReverseSource, setEffectReverseSource] = useState<EffectReverseCanvasSource | null>(null);
   // 美陈拆解（独立功能：识别展陈/物料/道具，生成浅灰背景平面元素拆解板）
   const [showDisplayDecomposePanel, setShowDisplayDecomposePanel] = useState(false);
   const [displayDecomposeRatio, setDisplayDecomposeRatio] = useState<DisplayDecomposeRatio>('16:9');
@@ -1744,7 +1763,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // Whether any floating panel is open (used to auto-hide connections & image toolbar)
   const localMediaToolWindowOpen = showRemoveBgPicker || showDisplayDecomposePanel || show3DModal || showVideoExtractPanel || showPsdEditor;
-  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showBrandIp || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
+  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showBrandIp || showSceneStudio || showBrandPackaging || showDisplay3D || showEffectReverse || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
 
   // Video tools handler
   const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress' | 'extract-frame', image: CanvasImage, timestamp?: number) => {
@@ -1955,6 +1974,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setShowSceneStudio(false);
     setShowBrandPackaging(false);
     setShowDisplay3D(false);
+    setShowEffectReverse(false);
+    setEffectReverseSource(null);
     setShowCanvasGenerator(false);
     setShowVideoExtractPanel(false);
     setShowPsdEditor(false);
@@ -5610,6 +5631,71 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const getActiveImageData = useCallback((): CanvasImage | null => {
     return resolveActiveCanvasImage(images, selectedImageData, editImageId);
   }, [editImageId, images, selectedImageData]);
+
+  const openEffectReverseEngineering = useCallback(() => {
+    const source = getActiveImageData();
+    const effectiveProjectId = projectId || brandProject?.id;
+    if (!effectiveProjectId) {
+      toast.error('请先保存或选择一个项目');
+      return;
+    }
+    if (!source || !source.url) {
+      toast.error('请先选择一张已加载的图片');
+      return;
+    }
+    if (source.mediaType === 'video' || source.videoUrl || source.threeDModelUrl || source.isProcessingPlaceholder) {
+      toast.error('效果图反向拆图仅支持已完成的普通图片');
+      return;
+    }
+
+    const sourceVersionId = source.annotationVersionId || buildAnnotationSourceVersionId(
+      source.id,
+      source.createdAt,
+      source.url,
+    );
+    setEffectReverseSource({
+      projectId: effectiveProjectId,
+      imageId: source.id,
+      versionId: sourceVersionId,
+      imageUrl: source.url,
+      label: source.name || source.prompt || '效果图',
+      sourceVersionId,
+      x: source.x,
+      y: source.y,
+      width: source.width,
+      height: source.height,
+      originalWidth: source.originalWidth,
+      originalHeight: source.originalHeight,
+    });
+    setShowEffectReverse(true);
+  }, [brandProject?.id, getActiveImageData, projectId]);
+
+  const handleEffectReverseResult = useCallback((result: EffectReverseTaskResult) => {
+    const source = effectReverseSource;
+    if (!source || !result.correctedImageUrl) return;
+    const createdAt = Date.now();
+    const imageId = `effect-reverse-${createdAt}`;
+    const newImage: CanvasImage = {
+      id: imageId,
+      url: result.correctedImageUrl,
+      x: source.x + source.width + 48,
+      y: source.y,
+      width: source.width,
+      height: source.height,
+      originalWidth: source.originalWidth,
+      originalHeight: source.originalHeight,
+      createdAt,
+      name: `${source.label || '效果图'}-反向拆图`,
+      generatedFromImageId: source.imageId,
+      annotationSourceImageId: source.imageId,
+      annotationSourceVersionId: source.sourceVersionId,
+      annotationVersionId: buildAnnotationSourceVersionId(imageId, createdAt, result.correctedImageUrl),
+    };
+    onImagesChange([...imagesRef.current, newImage]);
+    setSelectedIds(new Set([newImage.id]));
+    onSelectImage(newImage);
+    toast.success('透视校正结果已添加到源图右侧');
+  }, [effectReverseSource, onImagesChange, onSelectImage]);
 
   // 3D model name to friendly Chinese label mapping
   const get3DModelLabel = useCallback((modelId: string): string => {
@@ -15912,6 +15998,22 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           </Suspense>
         )}
 
+        {showEffectReverse && effectReverseSource && (
+          <div className="contents" data-popup="effect-reverse-engineering">
+            <Suspense fallback={null}>
+              <EffectReverseEngineeringPanel
+                initialSource={effectReverseSource}
+                isMonochrome={isMonochrome}
+                onClose={() => {
+                  setShowEffectReverse(false);
+                  setEffectReverseSource(null);
+                }}
+                onCanvasResult={handleEffectReverseResult}
+              />
+            </Suspense>
+          </div>
+        )}
+
         {/* ====== PSD LAYER EDITOR MODAL ====== */}
         {showPsdEditor && psdEditorImageUrl && (
           <div
@@ -17630,6 +17732,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           >
             <Store className="h-4 w-4" />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">展陈Pro</span>
+          </button>
+
+          {/* Effect Reverse Engineering Pro */}
+          <button
+            onClick={openEffectReverseEngineering}
+            className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            title="效果图反向拆图 Pro"
+          >
+            <Scan className="h-4 w-4" />
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">反向拆图 Pro</span>
           </button>
 
           {/* AI PSD Generator */}
