@@ -351,3 +351,12 @@
 | Reference category fidelity | Pending provider verification | Changing one of the six category controls affects only that semantic preservation instruction in the request. |
 | Fusion full-content fidelity | Pending provider verification | Each fusion source is sent as an image input with all six preservation categories at 100%; the result retains salient information from every source. |
 | Image-to-image `n=2` after fidelity change | Pending | Two independent provider tasks and progressive canvas results remain correct with reference or fusion inputs. |
+
+## 2026-08-03 Image Generator Reference-Constraint Acceptance
+
+| Item | Current status | Acceptance evidence |
+|---|---|---|
+| English-native reference constraints | Pending exact-build deployment | With an enabled English-native image model, two references with different selected categories produce a successful task whose request preserves numbered category ownership. |
+| Chinese-native reference constraints | Pending exact-build deployment | With an enabled Chinese-native image model, the same two-reference scenario produces a successful task while retaining the Chinese constraint strategy. |
+| Blank description alignment | Pending cloud observation | Reference #1 without a prior description must not inherit reference #2's description after automatic subject identification. |
+| Async recovery retention | Pending cloud observation | Refresh or reopen while a multi-reference generation is pending; the recovered task retains `referenceCategoryStrengths` and finishes with the same source-image relationship. |

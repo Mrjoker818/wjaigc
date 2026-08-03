@@ -524,3 +524,14 @@ Local evidence: focused canvas and progressive-generation suite passed 24 assert
 The deployed `072cd6f` build exposed two additional group issues: native setting menus ignored canvas zoom, and the six reference controls were not retained as independent generation constraints. The next local patch renders configuration menus inside the scaled canvas and preserves per-category strengths through the generation API. Fusion mode now requires every source image's style, composition, scene, color, subject, and detail at full strength.
 
 Local quality gates passed, but the release decision remains **Not approved** until the exact deployed commit is visually verified and completes a real image-to-image `n=2` run.
+
+## 2026-08-03 Image Generator Reference-Constraint Update
+
+The image-generator panel deliberately remains different from canvas reference/fusion groups: each reference image may select up to two semantic categories and retains one image-wide strength. This update repairs the server-side interpretation without changing that approved UI.
+
+- The server now binds descriptions, categories, and strengths to their exact numbered source image.
+- Constraint language is chosen internally from the selected provider/model: Chinese-native models receive Chinese instructions, English-native models receive English instructions, and unknown providers receive a compact bilingual fallback.
+- Durable asynchronous tasks retain `referenceCategoryStrengths`, preventing recovery from silently degrading a request.
+- Local checks passed: focused generation suite 23 assertions; full suite 1,380 passing tests; TypeScript and production build passed; lint has 0 errors and 949 historical warnings.
+
+**Release decision remains: Not approved.** The deployed build still needs paid real-provider acceptance for two-reference generation on enabled Chinese-native and English-native models, together with the existing cancellation, refund, PostgreSQL concurrency, and cross-browser blockers.

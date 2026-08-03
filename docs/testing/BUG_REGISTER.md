@@ -801,3 +801,18 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | Fix | Added `referenceCategoryStrengths` from canvas to `/api/generate`; each category keeps its own strength. New reference groups start with the six semantic controls at 70%. Fusion sends all six categories at 100% for every source and uses strict generation strength `0.05`. The vision-to-text button was removed. |
 | Regression | Pure request-control tests cover independent category strengths and full fusion controls. API contract verifies per-category values are preferred over legacy image-wide strength. |
 | Status | Fixed locally; pending deployed provider verification with a supported image-to-image model. |
+
+### BUG-043: Image-generator reference descriptions and categories could cross-bind
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Bottom image generator / `/api/generate` reference-image prompt compilation |
+| Reproduction | Submit two reference images where the first has no saved description and the second has one, then choose different categories or strengths for each image. Resume the request through the durable async task path. |
+| Expected | Each numbered reference keeps its own description and selected categories; the same request semantics survive durable task persistence. |
+| Actual | Empty descriptions were filtered before indexing, allowing later descriptions to shift onto earlier images. Selected categories from different images were flattened into one global instruction, and `referenceCategoryStrengths` was absent from asynchronous recovery payloads. |
+| Root cause | The server treated reference descriptions as a compact list rather than a positional list; legacy prompt composition merged category controls across all sources; recovery payloads did not preserve per-category data. |
+| Fix | Added `reference-constraint-compiler`: positional description alignment, per-image numbered constraints, category-specific strength bands, and model/provider language selection (`zh`, `en`, compact bilingual fallback). Persisted `referenceCategoryStrengths` in both durable submission payload variants. The panel remains Chinese-only and retains its intentional two-category-per-reference plus one image-wide strength UX. |
+| Regression | RED/GREEN tests cover description alignment, per-image category ownership, Chinese/English/bilingual instruction compilation, and async payload persistence. |
+| Local verification | 23 generation-chain assertions passed; full Vitest: 307 files / 1,380 tests passed, 3 PostgreSQL files / 4 tests skipped without `TEST_POSTGRES_URL`; TypeScript and production build passed; ESLint exited 0 with 949 historical warnings. |
+| Status | Fixed locally; pending exact-commit cloud verification with one Chinese-native and one English-native image model. |

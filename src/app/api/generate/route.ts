@@ -33,6 +33,10 @@ import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, getPro
 import { buildGenerationRouteAudit } from '@/lib/generation-route-audit';
 import { buildGenerationBatch } from '@/lib/generation-batch';
 import { isModelAssignedToUser } from '@/lib/model-defaults';
+import {
+  alignReferenceDescriptions,
+  compileReferenceConstraints,
+} from '@/lib/reference-constraint-compiler';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -345,6 +349,7 @@ export async function POST(request: NextRequest) {
         referenceMode,
         referenceCategories,
         referenceStrengths,
+        referenceCategoryStrengths,
         referenceDescriptions,
         imageCategory,
         productCategory,
@@ -951,6 +956,7 @@ export async function POST(request: NextRequest) {
         referenceMode,
         referenceCategories,
         referenceStrengths,
+        referenceCategoryStrengths,
         referenceDescriptions,
         imageCategory,
         productCategory,
@@ -991,6 +997,7 @@ export async function POST(request: NextRequest) {
         referenceMode,
         referenceCategories,
         referenceStrengths,
+        referenceCategoryStrengths,
         referenceDescriptions,
         imageCategory,
         productCategory,
@@ -1284,38 +1291,35 @@ export async function POST(request: NextRequest) {
     // ── Auto-identify reference image subjects via AI vision ──
     // When referenceImages exist but lack descriptions, use AI vision to identify
     // what's in the image, preventing subject misidentification (e.g. medicine→cosmetics)
-    const refDescArr: string[] = Array.isArray(referenceDescriptions)
-      ? referenceDescriptions.filter((d: string) => d && typeof d === 'string' && d.trim())
-      : [];
+    const refDescArr = alignReferenceDescriptions(
+      Array.isArray(referenceImages) ? referenceImages : [],
+      referenceDescriptions,
+    );
 
     if (referenceImages && referenceImages.length > 0) {
-      // Identify any reference images that don't have descriptions
-      const imagesNeedingId = referenceImages.filter((_: string, i: number) => !refDescArr[i] || !refDescArr[i].trim());
-      if (imagesNeedingId.length > 0) {
-        console.info(`[generate] Auto-identifying ${imagesNeedingId.length} reference image(s) via AI vision`);
+      const missingDescriptionIndexes = referenceImages.flatMap((_: string, index: number) => (
+        refDescArr[index] ? [] : [index]
+      ));
+      if (missingDescriptionIndexes.length > 0) {
+        console.info(`[generate] Auto-identifying ${missingDescriptionIndexes.length} reference image(s) via AI vision`);
         try {
-          // Identify images in parallel (with concurrency limit of 2)
-          const identifyPromises = imagesNeedingId.map(async (imgUrl: string, idx: number) => {
+          const identifyPromises = missingDescriptionIndexes.map(async (index: number) => {
             try {
-              const result = await identifyImageSubject(imgUrl, 8000);
+              const result = await identifyImageSubject(referenceImages[index], 8000);
               return result ? result.en : null;
             } catch (err) {
-              console.warn(`[generate] Vision identification failed for image ${idx}:`, err);
+              console.warn(`[generate] Vision identification failed for image ${index}:`, err);
               return null;
             }
           });
           const identifiedResults = await Promise.all(identifyPromises);
 
-          // Fill in identified descriptions for images that lacked them
-          let identifiedIdx = 0;
-          for (let i = 0; i < referenceImages.length; i++) {
-            if (!refDescArr[i] || !refDescArr[i].trim()) {
-              const identified = identifiedResults[identifiedIdx++];
-              if (identified) {
-                refDescArr[i] = identified;
-              }
+          missingDescriptionIndexes.forEach((referenceIndex: number, resultIndex: number) => {
+            const identified = identifiedResults[resultIndex];
+            if (identified) {
+              refDescArr[referenceIndex] = identified;
             }
-          }
+          });
           console.info(`[generate] Identified subjects: ${refDescArr.filter(Boolean).join('; ')}`);
         } catch (err) {
           console.warn('[generate] Batch vision identification failed (non-critical):', err);
@@ -1335,8 +1339,24 @@ export async function POST(request: NextRequest) {
       (Array.isArray(referenceCategories) && referenceCategories.length > 0) ||
       (!Array.isArray(referenceCategories) && Object.keys(referenceCategories as Record<string, unknown>).length > 0)
     );
+    const compiledReferenceConstraints = referenceImages && referenceImages.length > 0 && hasCategories
+      ? compileReferenceConstraints({
+          providerId: effectiveProviderId,
+          providerName: provider?.displayName || provider?.name,
+          modelId: modelConfig.modelId,
+          referenceImages,
+          referenceDescriptions: refDescArr,
+          referenceCategories: referenceCategories as Record<string, string[]> | string[][],
+          referenceStrengths,
+          referenceCategoryStrengths,
+        })
+      : null;
 
-    if (referenceImages && referenceImages.length > 0 && !hasCategories) {
+    if (compiledReferenceConstraints?.hasActiveConstraints) {
+      enhancedPrompt = `[REFERENCE MODE] ${compiledReferenceConstraints.prompt} ${enhancedPrompt}`;
+    }
+
+    if (referenceImages && referenceImages.length > 0 && !hasCategories && !compiledReferenceConstraints?.hasActiveConstraints) {
       // 无分类模式：使用参考图描述增强提示词
       if (refDescText) {
         enhancedPrompt = `[REFERENCE MODE] The reference image depicts: "${refDescText}". You MUST preserve the main subject identity — do NOT replace it with a different object. ${enhancedPrompt}`;
@@ -1347,7 +1367,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 参考图分类增强 - 基于前端传递的分类和强度，增强提示词让AI正确理解参考意图
-    if (referenceImages && referenceImages.length > 0 && hasCategories) {
+    if (referenceImages && referenceImages.length > 0 && hasCategories && !compiledReferenceConstraints?.hasActiveConstraints) {
       // 规范化分类键：中文→英文
       const normalizeCategory = (key: string): string => {
         const cnToEn: Record<string, string> = {

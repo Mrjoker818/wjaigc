@@ -582,3 +582,15 @@ This gate does not claim provider generation or billing acceptance. The next rea
 | Reference-description alignment | PASS (local) | Blank descriptions are retained as placeholders so source image indexes do not shift. |
 | Verification | PASS WITH ENVIRONMENT SKIPS | TypeScript, ESLint error gate, full Vitest (305 files / 1374 tests passed; 3 PostgreSQL files / 4 tests skipped), and production build passed. |
 | Cloud acceptance | PENDING DEPLOYMENT | Verify menu scaling at two zoom levels, per-category reference behavior, fusion preservation, and a real `n=2` request. |
+
+## 2026-08-03 Image Generator Reference-Constraint Gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Reference description positional alignment | PASS (local) | Empty descriptions remain placeholders, so reference #2 can never be attached to reference #1. |
+| Per-reference category ownership | PASS (local) | The compiler emits numbered reference blocks; style/composition on reference #1 and subject/detail on reference #2 are not merged. |
+| Model-language adaptation | PASS (local) | Chinese-native provider/model IDs produce Chinese constraints; English-native IDs produce English constraints; unknown IDs receive compact bilingual constraints internally. |
+| Durable async task recovery | PASS (local) | Both generation submission payload forms persist `referenceCategoryStrengths`. |
+| Focused generation suite | PASS | 6 files / 23 tests passed. |
+| Full local quality gate | PASS WITH ENVIRONMENT SKIPS | `pnpm ts-check`, `pnpm test` (307 files / 1,380 tests passed; 3 PostgreSQL files / 4 tests skipped), and `pnpm build` passed. `pnpm lint` exited 0 with 949 historical warnings. |
+| Cloud acceptance | PENDING DEPLOYMENT | Use an enabled Chinese-native image model and an enabled English-native image model with two reference images, different selected categories, and a successful generated result for each. |
