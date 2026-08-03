@@ -9,7 +9,7 @@ const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json
 };
 
 describe('Coze preview runtime contract', () => {
-  it('fails the preview startup before exposing a production server with missing required secrets', () => {
+  it('uses the preview build entry and recovers missing production prerequisites before starting', () => {
     expect(devSection).toContain('build = [ "bash", "./scripts/coze-preview-build.sh" ]');
     expect(devSection).toContain('run = [ "bash", "./scripts/coze-start.sh" ]');
     expect(devSection).not.toContain('pnpm", "run", "dev');
@@ -20,9 +20,12 @@ describe('Coze preview runtime contract', () => {
 
     const startScript = readFileSync(resolve(process.cwd(), 'scripts/coze-start.sh'), 'utf8');
     expect(packageJson.scripts?.doctor).toBe('node scripts/doctor.mjs');
-    expect(startScript).toContain('exec ./node_modules/.bin/next start -p "${PORT:-5000}" -H 0.0.0.0');
-    expect(startScript).not.toContain('pnpm install');
-    expect(startScript).not.toContain('pnpm run build');
-    expect(startScript).not.toContain('pnpm run doctor');
+    expect(packageJson.scripts?.start).toBe('next start -p 5000 -H 0.0.0.0');
+    expect(startScript).toContain('exec pnpm run start');
+    expect(startScript).toContain('if [ ! -s ".next/BUILD_ID" ]; then');
+    expect(startScript).toContain('pnpm install --frozen-lockfile');
+    expect(startScript).toContain('pnpm run build');
+    expect(startScript).toContain('pnpm run doctor -- --startup');
+    expect(startScript).not.toContain('pnpm run dev');
   });
 });

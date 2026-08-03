@@ -8,23 +8,28 @@ describe('Coze startup production contract', () => {
       resolve(process.cwd(), 'scripts/coze-start.sh'),
       'utf8',
     );
+    const packageJson = JSON.parse(
+      readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'),
+    ) as { scripts?: Record<string, string> };
 
-    expect(source).toContain('exec ./node_modules/.bin/next start');
+    expect(packageJson.scripts?.start).toBe('next start -p 5000 -H 0.0.0.0');
+    expect(source).toContain('exec pnpm run start');
     expect(source).not.toContain('exec pnpm run dev');
     expect(source).not.toContain('${COZE_PROJECT_ENV:-DEV}');
   });
 
-  it('starts only an already-built production server without install, build, or doctor work', () => {
+  it('recovers missing build prerequisites without switching to a development server', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'scripts/coze-start.sh'),
       'utf8',
     );
 
     expect(source).toContain('.next/BUILD_ID');
-    expect(source).toContain('node_modules/.bin/next');
-    expect(source).toContain('exec ./node_modules/.bin/next start -p "${PORT:-5000}" -H 0.0.0.0');
-    expect(source).not.toContain('pnpm install');
-    expect(source).not.toContain('pnpm run build');
-    expect(source).not.toContain('pnpm run doctor');
+    expect(source).toContain('robust_install');
+    expect(source).toContain('exec pnpm run start');
+    expect(source).toContain('pnpm install --frozen-lockfile');
+    expect(source).toContain('pnpm run build');
+    expect(source).toContain('pnpm run doctor -- --startup');
+    expect(source).not.toContain('exec pnpm run dev');
   });
 });
