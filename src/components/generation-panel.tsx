@@ -404,6 +404,45 @@ export function GenerationPanel(
     const [promptHeight, setPromptHeight] = useState(72); // default ~3 rows
     const promptDragRef = useRef<{ startY: number; startH: number } | null>(null);
 
+    const persistSelectedModel = useCallback((compositeKey: string) => {
+        if (typeof window === 'undefined' || !compositeKey.includes('::')) return;
+
+        const pureId = compositeKey.split('::').pop()!;
+        const providerId = compositeKey.split('::')[0] || '';
+        const modelEntry = discoveredModels.find(
+            entry => entry.id === pureId && entry.providerId === providerId,
+        );
+
+        // Never re-save a model that no longer exists in the server catalog.
+        if (!modelEntry) return;
+
+        try {
+            const currentUserId = localStorage.getItem('unbounded_ai_current_user');
+            if (currentUserId) {
+                const stored = localStorage.getItem('unbounded_ai_user_data');
+                const data = stored ? JSON.parse(stored) : { userData: {} };
+                if (!data.userData) data.userData = {};
+                if (!data.userData[currentUserId]) data.userData[currentUserId] = {};
+                data.userData[currentUserId].selectedModel = compositeKey;
+                localStorage.setItem('unbounded_ai_user_data', JSON.stringify(data));
+            }
+        } catch (error) {
+            console.error('Failed to save selected model:', error);
+        }
+
+        try {
+            localStorage.setItem('wujie_selected_model', JSON.stringify({
+                model: pureId,
+                providerId,
+                compositeKey,
+                apiDisplayName: modelEntry.apiDisplayName || modelEntry.displayLabel || '',
+                providerName: modelEntry.providerName || '',
+                quality,
+                aspectRatio,
+            }));
+        } catch {}
+    }, [aspectRatio, discoveredModels, quality]);
+
     // 初始化万能API管理器（仅客户端）
     useEffect(() => {
         if (typeof window !== 'undefined') {
@@ -497,6 +536,13 @@ export function GenerationPanel(
         const pureModelId = model ? (model.includes('::') ? model.split('::').pop()! : model) : '';
         onModelChange?.(pureModelId);
     }, [model, onModelChange]);
+
+    // Persist any valid reconciled selection after the server catalog has replaced
+    // an old model key. This keeps the visible select, generation request and
+    // canvas-tool cache on the same provider/model pair after a page refresh.
+    useEffect(() => {
+        persistSelectedModel(model);
+    }, [model, discoveredModels, persistSelectedModel]);
 
     // 获取当前模型支持的比例
     const pureModelId = model ? (model.includes('::') ? model.split('::').pop()! : model) : '';
@@ -883,17 +929,13 @@ export function GenerationPanel(
                 if (serverModels.length > 0) {
                     // 完整替换模型列表，确保管理员更新后自动同步
                     setDiscoveredModels(serverModels);
-                    // 仅在未选中模型时自动选择第一个；刷新列表时不改变当前选择
+                    // 保留有效选择；管理员删除/迁移模型后，过期的本地复合键必须回退。
+                    // 否则原生 select 会视觉上显示第一项，实际请求仍携带已失效的旧模型。
                     setModel(prev => {
-                        if (!prev && serverModels.length > 0) {
-                            return selectInitialModel('', serverModels.map(entry => ({
-                                id: `${entry.providerId}::${entry.id}`,
-                                isDefault: entry.isDefault,
-                            })));
-                        }
-                        // 刷新时保持当前选择不变，即使模型已不存在于列表中
-                        // 用户可手动切换到其他模型
-                        return prev;
+                        return selectInitialModel(prev, serverModels.map(entry => ({
+                            id: `${entry.providerId}::${entry.id}`,
+                            isDefault: entry.isDefault,
+                        })));
                     });
                 }
             }

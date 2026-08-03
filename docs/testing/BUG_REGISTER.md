@@ -850,3 +850,20 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | Regression | RED then GREEN: the route contract initially proved that filtering happened before `requestBody.image` assignment; it now requires reference payload creation before filtering and compatibility adjustment. |
 | Local verification | Focused generation chain: 6 assertions passed. Full Vitest: 309 files / 1,386 tests passed; 3 PostgreSQL-specific files / 4 tests skipped because no isolated `TEST_POSTGRES_URL` is configured. `pnpm ts-check`, `pnpm lint` (0 errors / 949 historical warnings), production build, and protected-file self-check (8/8) passed. |
 | Cloud status | Pending exact-commit deployment and real browser acceptance with the bottom generator and a canvas reference group. A subsequent provider capability rejection must be retained verbatim and must not be misclassified as this fixed transport defect. |
+
+### BUG-046: Displayed image model and submitted provider/model could diverge
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Bottom image generator, `/api/generate`, persisted model selection |
+| Environment | Coze preview, Chrome, 2026-08-03 |
+| Reproduction | Keep a stale `providerId::modelId` composite key in local storage after the administrator removes or moves that model. Reload the page and submit using the visually displayed first native-select option. |
+| Expected | The visible option, local persisted selection, request `providerId`, and request `model` must be the same configured pair. An invalid explicit pair must be rejected before any durable task or credit operation. |
+| Actual | Chrome displayed `Gpt Image 2`, while the captured request contained provider `api_1780636172228_0mhitfd` with model `gemini-2.5-flash-image`. That model was not configured on the selected provider. The later provider fetch failed, which looked like a provider outage even though the request routing was invalid. |
+| Root cause | Native `<select>` renders its first available option when its controlled value no longer matches an option. React state and two local-storage caches retained the stale composite key. The server accepted the explicit provider ID even when that provider did not own the requested model. |
+| Fix | Reconcile the controlled selection against the refreshed server catalog and persist only a valid composite key to both existing caches. `/api/generate` now validates an explicit provider/model pair against that provider's configured image-model list before batch/task creation, persistence, or charging; mismatches return `MODEL_PROVIDER_MISMATCH` with `retryable: false`. |
+| Files | `src/components/generation-panel.tsx`, `src/app/api/generate/route.ts`, `src/__tests__/components/generation-panel-model-reconciliation-contract.test.ts`, `src/__tests__/api/generate-provider-model-mismatch-contract.test.ts` |
+| Regression | RED then GREEN: the UI contract requires stale-key reconciliation and cache persistence; the API contract requires the mismatch gate before `buildGenerationBatch`. Focused generation/recovery suite: 55 assertions passed. |
+| Local verification | `pnpm ts-check` passed; `pnpm lint` exited 0 with 949 pre-existing warnings; `pnpm test` passed 311 files / 1,389 tests, with 3 PostgreSQL-specific files / 4 tests skipped because no isolated `TEST_POSTGRES_URL` is configured; `pnpm build` passed. |
+| Cloud status | Pending exact-commit deployment and real Chrome acceptance. Capture the selected option plus `/api/generate` body, then run one valid configured model and one deliberately stale selection. |

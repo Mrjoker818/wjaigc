@@ -376,3 +376,13 @@
 | Bottom image-generator reference submission | Pending exact-build deployment | Upload one valid reference image in the bottom generator, submit through an enabled model, and verify the provider receives an image-bearing request rather than returning `Missing required parameter: image`. |
 | Canvas reference-group submission | Pending exact-build deployment | Create a reference group from a loaded canvas image, submit through an enabled model, and verify the request reaches a provider task with its image input retained. |
 | Provider error classification after transport repair | Pending cloud observation | If a model still rejects the request, record the exact provider/model response and classify it as capability, configuration, moderation, or provider outage rather than re-labeling it as a missing-image application defect. |
+
+## 2026-08-03 Provider/Model Routing Acceptance
+
+| Item | Current status | Acceptance evidence |
+|---|---|---|
+| Stale local model recovery | Pending exact-build deployment | After a hard refresh, the model visible in the selector and the `/api/generate` `providerId/model` fields are the same configured pair. |
+| Invalid provider/model preflight | Pending exact-build deployment | A deliberately stale explicit pair returns `MODEL_PROVIDER_MISMATCH` before a task ID is created and without a credit ledger entry. |
+| Valid configured provider task | Pending exact-build deployment | A real configured model returns an application task ID quickly, records the selected provider/model, and progresses through terminal completion or an actionable provider failure. |
+| Submission-uncertain recovery | Pending cloud observation | Simulate or observe a browser/proxy fetch interruption after task submission. The UI must not call the task failed solely from its own network error; it must recover using the durable app task and provider status. |
+| Provider terminal propagation | Pending cloud observation | When the provider marks an identified remote task failed, the next app poll transitions the matching app task to failed with the provider reason and does not remain generating beyond the defined polling/recovery interval. |

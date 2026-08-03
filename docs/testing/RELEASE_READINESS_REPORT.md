@@ -549,3 +549,14 @@ The cloud error `Missing required parameter: image` was traced to a shared appli
 The repair now attaches and normalizes `image` plus `image_urls` first, then filters and adapts the exact provider request. Local RED/GREEN regression, full Vitest (309 files / 1,386 tests), TypeScript, lint error gating, production build, and protected-file checks passed.
 
 **Release decision remains: Not approved.** This fixes the common transport blocker locally, but paid cloud acceptance must prove successful submission from both the bottom generator and a canvas reference group. PostgreSQL concurrency, cancellation/refund, and cross-browser gates remain open.
+
+## 2026-08-03 Routing Consistency Update
+
+The Coze browser capture exposed a P1 Wujie routing error: the model selector visibly displayed one configured option while the submitted request paired the selected provider with an unconfigured stale model. This could surface as `fetch failed` and be mistaken for a provider outage.
+
+The local repair is verified by new RED/GREEN regression contracts, the focused generation/recovery suite, TypeScript, lint error gating, full Vitest, and production build. It is **not cloud accepted yet**. Release remains **Not approved** until the exact deployed commit proves:
+
+1. UI selection, persisted selection, and `/api/generate` provider/model fields always agree.
+2. An invalid explicit pair is rejected before task creation and charging.
+3. A valid configured provider task reaches a terminal state with retained provider evidence.
+4. Browser/proxy interruption after submission is reconciled through the durable task rather than misreported as an immediate provider failure.

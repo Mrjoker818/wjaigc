@@ -615,3 +615,15 @@ This gate does not claim provider generation or billing acceptance. The next rea
 | Provider endpoint compatibility | PASS (local) | The capability layer now receives `image` and `image_urls` after reference normalization, allowing `/images/edits` to receive its required image input and preserving fallback reference inputs. |
 | Full local quality gate | PASS WITH ENVIRONMENT SKIPS | `pnpm test`: 309 files / 1,386 tests passed; 3 PostgreSQL files / 4 tests skipped without `TEST_POSTGRES_URL`. `pnpm ts-check`, `pnpm lint` (0 errors / 949 historical warnings), `pnpm build`, and protected-file self-check (8/8) passed. |
 | Cloud acceptance | PENDING DEPLOYMENT | Submit one bottom-generator reference request and one canvas reference-group request using enabled configured models. Each must reach a provider task without `Missing required parameter: image`; retain any subsequent exact provider response. |
+
+## 2026-08-03 Provider/Model Routing Consistency Gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Stale model selection recovery | PASS (local) | The generator reconciles a stale persisted `providerId::modelId` against `/api/models?type=image` and writes the valid replacement into both existing local-storage caches. |
+| Explicit provider/model validation | PASS (local) | `/api/generate` rejects a provider/model combination not configured on the requested provider with `MODEL_PROVIDER_MISMATCH` before generation-batch creation and credit/task persistence. |
+| Generation recovery and idempotency regression | PASS (local) | Focused suite: 9 files / 55 tests passed, including progressive polling, recovery lease, idempotency, and resumed-task polling. |
+| Full local quality gate | PASS WITH ENVIRONMENT SKIPS | `pnpm ts-check`, `pnpm lint` (0 errors / 949 historical warnings), `pnpm test` (311 files / 1,389 tests passed; 3 PostgreSQL files / 4 tests skipped without `TEST_POSTGRES_URL`), and `pnpm build` passed. |
+| Coze browser acceptance | PENDING DEPLOYMENT | Verify that the visible selected model exactly matches the `providerId` and `model` in `/api/generate`; then verify a valid configured request reaches a provider task and a deliberately stale pair is rejected before task creation or charge. |
+
+This gate closes one confirmed application-routing defect. It does not yet classify all future provider failures: a real deployment test must retain the provider response, app task ID, remote task ID, and terminal transition timing before attributing a failure to the provider or to Wujie.

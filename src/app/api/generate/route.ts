@@ -228,6 +228,43 @@ export async function POST(request: NextRequest) {
     sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
+    // An explicit provider/model pair is a user selection, not a fallback hint.
+    // Validate it before task persistence and billing so stale browser state cannot
+    // submit an unrelated model to the provider shown in the UI.
+    let requestedProvider = null;
+    if (effectiveProviderId) {
+      requestedProvider = await findProviderById(effectiveProviderId);
+      const selectedProviderModels = Array.isArray(requestedProvider?.selectedModels)
+        ? requestedProvider.selectedModels
+        : [];
+      const requestedProviderModels = selectedProviderModels.length > 0
+        ? selectedProviderModels
+        : (requestedProvider?.discoveredModels || []).map(item => item.id);
+      const normalizedRequestedModel = normalizeModelForApi(rawModelId, { providerModels: requestedProviderModels });
+      const configuredModel = requestedProviderModels.find((configuredId) => {
+        const configured = String(configuredId).toLowerCase();
+        return configured === rawModelId.toLowerCase()
+          || configured === normalizedRequestedModel.apiModelName.toLowerCase();
+      });
+      const providerKind = requestedProvider?.modelType || requestedProvider?.type || '';
+      const supportsImageGeneration = ['image', 'universal', 'general', 'imageEdit'].includes(providerKind);
+
+      if (!requestedProvider || !supportsImageGeneration || !configuredModel) {
+        return NextResponse.json({
+          success: false,
+          code: 'MODEL_PROVIDER_MISMATCH',
+          error: '所选模型已不在当前供应商的可用列表中，请刷新模型列表后重新选择',
+          retryable: false,
+          providerId: effectiveProviderId,
+          model: rawModelId,
+        }, { status: 400 });
+      }
+
+      // Preserve the configured identifier's casing and accepted alias form.
+      model = configuredModel;
+      normalized = normalizedRequestedModel;
+    }
+
     // 图像模型权限校验：非管理员用户需检查 imageModels 授权列表
     if (sessionUser && sessionUser.role !== 'admin') {
       const allowed = sessionUser.imageModels;
@@ -1148,7 +1185,7 @@ export async function POST(request: NextRequest) {
     const allImageProviders = await findAllProvidersForType('image');
     
     // 尝试找到用户指定模型对应的 provider（优先使用 providerId 精确匹配）
-    let provider = await findProviderForModel(model, 'image', effectiveProviderId || undefined);
+    let provider = requestedProvider || await findProviderForModel(model, 'image', effectiveProviderId || undefined);
     let serverApiKey = provider?.apiKey;
     let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
     
