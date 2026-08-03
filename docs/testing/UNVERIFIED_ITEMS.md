@@ -321,3 +321,14 @@
 
 | BUG-037 cloud provider-label verification | Pending deployment | Deploy the non-empty provider metadata guard, submit Pear `gpt-image-2`, and verify completed canvas cards remain labeled Pear when the provider poll response is blank. |
 | BUG-038 precise cancellation rejection | Pending deployment | Submit a live Pear `n=2` task, cancel the first active slot, and record the exact server rejection message, sibling task outcome, refresh recovery, and billing ledger state. |
+
+## 2026-08-03 Canvas Group Deployment Checks
+
+| Item | Current status | Acceptance evidence |
+|---|---|---|
+| Reference group creation | Pending deployment | `Alt + click` on a real canvas image produces one visible reference group without moving the source image. |
+| Fusion group creation | Pending deployment | `Ctrl/Cmd + click` on a real canvas image produces one visible fusion group without moving the source image. |
+| Group movement | Pending deployment | Dragging the group header moves its source and result layout together; a blank-canvas long press pans instead of box-selecting. |
+| Reference recognition | Pending deployment | `识别参考图` returns visible success feedback and the next generation request includes the recognized descriptions. |
+| Group generation | Pending deployment | With a valid selected image model, both reference and fusion groups submit successfully even before custom prompt text is entered; generated output reaches the canvas. |
+| Project recovery | Pending deployment | Save and refresh after group creation; group descriptions and generated output retain the correct source-image relationship. |

@@ -544,3 +544,17 @@ The follow-up patch preserves the configured provider when the completion respon
 | Server error visibility | PASS (local), pending deployment | The cancellation client now preserves an API `error` field as the UI-facing message. Focused suite: 14 tests passed. |
 
 The cancellation failure is an application release blocker, not a provider failure: the Pear provider completed both tasks normally.
+
+## 2026-08-03 Canvas Reference/Fusion Group Regression
+
+| Check | Result | Evidence |
+|---|---|---|
+| Modifier gesture enters group creation before image drag | PASS (local) | `canvas-group-gesture-contract.test.ts` verifies the root pointer-down path dispatches Alt to reference groups and Ctrl/Cmd to fusion groups. |
+| Blank-canvas long press restores panning | PASS (local) | The same contract verifies timer setup, movement cancellation, and pan activation. |
+| Group titles remain draggable | PASS (local) | Ordinary and generation-group headers now use pointer capture. |
+| Empty prompt group generation | PASS (local) | A selected model is sufficient; reference/fusion fallback prompts are used when the user has not typed an instruction. |
+| Reference content recognition | PASS (local wiring) | The group action calls `/api/vision-prompt`, persists descriptions by image ID, and reuses them in the corresponding generation request. |
+| Parallel group isolation | PASS (local) | Generation metadata is invocation-local rather than stored in a shared ref. |
+| Full regression | PASS WITH ENVIRONMENT SKIPS | `pnpm test`: 303 files / 1367 tests passed; 3 PostgreSQL-specific files / 4 tests skipped because no isolated `TEST_POSTGRES_URL` is configured. |
+| TypeScript / lint / build | PASS WITH HISTORICAL WARNINGS | `pnpm ts-check` and `pnpm build` passed; `pnpm lint` reported 0 errors and 949 existing warnings. |
+| Cloud browser evidence | PENDING DEPLOYMENT | Validate Alt and Ctrl/Cmd grouping, title dragging, reference recognition, reference generation, fusion generation, and a persisted project reload. |

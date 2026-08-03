@@ -500,3 +500,13 @@ The BUG-037 patch has passed the local regression, full Vitest suite, TypeScript
 BUG-037 is verified in the deployed direct-canvas generator: fresh Pear `n=2` output cards retained the Pear label.
 
 The same live test reproduced a P1 cancellation failure. A first-slot cancellation click at `processing 0%` did not cancel either slot. The next deployment carries an observability-only repair that surfaces the server's exact rejection reason; it does not claim cancellation success. The release decision remains **Not approved**.
+
+## 2026-08-03 Canvas Group Fix Gate
+
+The reference/fusion-group repair has passed local regression, TypeScript, lint error gating, and production build. It is deployable for cloud acceptance, but it does not close the release gate by itself.
+
+- Added P1 BUG-039 coverage for grouping gestures, group dragging, default generation, reference analysis, and concurrent-group metadata isolation.
+- Local verification: `pnpm test` passed with 303 files / 1367 tests; `pnpm ts-check` and `pnpm build` passed; ESLint has 0 errors and 949 historical warnings.
+- Required cloud acceptance: create both group types from real images, use a real vision-model recognition request, run reference and fusion generation with a configured provider, drag a group, save, and refresh.
+
+**Release decision remains: Not approved.** Existing P1 cancellation and billing-ledger acceptance items, PostgreSQL concurrency evidence, cross-browser verification, and the new group workflow acceptance must be completed before an overall release approval.

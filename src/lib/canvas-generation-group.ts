@@ -99,6 +99,8 @@ export interface CanvasGenGroup {
   // 每张源图的参考类别和强度
   sourceCategories: Record<string, ReferenceCategory[]>;    // imageId → 选中类别
   sourceStrengths: Record<string, Record<string, number>>;  // imageId → { category: strength }
+  // 已识别的参考图描述，供参考图组和融图组生成时复用
+  referenceDescriptions?: Record<string, string>;
 
   // 生成结果（完成后）
   resultImageIds?: string[];
@@ -1325,6 +1327,7 @@ export function createGenGroup(
     },
     sourceCategories: sourceCategories || defaultCategories,
     sourceStrengths: sourceStrengths || defaultStrengths,
+    referenceDescriptions: {},
     createdAt: Date.now(),
   };
 }

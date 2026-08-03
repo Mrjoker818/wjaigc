@@ -1054,6 +1054,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const groupDragReadyRef = useRef(false);
   const groupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const removeRefFromGroupRef = useRef<(groupId: string, imageId: string) => void>(() => {});
+  const addReferenceImageToGenGroupRef = useRef<(image: CanvasImage) => void>(() => {});
+  const addFusionImageToGenGroupRef = useRef<(image: CanvasImage) => void>(() => {});
   const exitEditModeRef = useRef<() => void>(() => {});
 
   // 同步groups到父组件
@@ -1092,6 +1094,39 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const mouseDownPosRef = useRef({ x: 0, y: 0 });
   const mouseDownOnImageRef = useRef(false);
   const imageDragReadyRef = useRef(false);
+  const canvasLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const blankCanvasPointerRef = useRef<number | null>(null);
+
+  const clearBlankCanvasLongPress = useCallback((pointerId?: number) => {
+    if (pointerId !== undefined && blankCanvasPointerRef.current !== pointerId) {
+      return;
+    }
+    if (canvasLongPressTimerRef.current) {
+      clearTimeout(canvasLongPressTimerRef.current);
+      canvasLongPressTimerRef.current = null;
+    }
+    blankCanvasPointerRef.current = null;
+  }, []);
+
+  const startBlankCanvasLongPress = useCallback((
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+  ) => {
+    clearBlankCanvasLongPress();
+    blankCanvasPointerRef.current = pointerId;
+    canvasLongPressTimerRef.current = setTimeout(() => {
+      if (blankCanvasPointerRef.current !== pointerId) return;
+      canvasLongPressTimerRef.current = null;
+      setBoxSelectStart(null);
+      setBoxSelectEnd(null);
+      updatePanPreview(viewOffset);
+      panViewportSyncAtRef.current = 0;
+      setIsPanning(true);
+      setPanStart({ x: clientX - viewOffset.x, y: clientY - viewOffset.y });
+      setIsLongPressing(true);
+    }, 250);
+  }, [clearBlankCanvasLongPress, updatePanPreview, viewOffset]);
 
   // Ctrl key tracking for reference selection hint
   const [ctrlKeyHeld, setCtrlKeyHeld] = useState(false);
@@ -1906,9 +1941,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // 【调整2&3】生成组状态 — Alt+左键参考图组 / Ctrl+左键融图组
   const [genGroups, setGenGroups] = useState<CanvasGenGroup[]>([]);
   const genGroupsRef = useRef<CanvasGenGroup[]>(genGroups);
-  // 临时存储参考图组的元数据（descriptions/categories/strengths），供 fetch 请求使用
-  const groupRefMetaRef = useRef<{ referenceDescriptions?: string[]; referenceCategories?: Record<string, string[]>; referenceStrengths?: number[] }>({});
   const [optimizingGroupId, setOptimizingGroupId] = useState<string | null>(null);
+  const [analyzingGroupId, setAnalyzingGroupId] = useState<string | null>(null);
   const [openModelDropdownGroupId, setOpenModelDropdownGroupId] = useState<string | null>(null);
   const [genGroupTick, setGenGroupTick] = useState(0);
   // Tick timer for gen group elapsed time display
@@ -3375,9 +3409,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
       mouseDownOnImageRef.current = true;
       imageDragReadyRef.current = true;
-      if (e.ctrlKey || e.metaKey) {
-        // Ctrl+Click is handled entirely by onClick on the image div to avoid double-toggle
-        mouseDownOnImageRef.current = true;
+      const modifierImage = images.find((image) => image.id === hitId);
+      if (modifierImage && (e.altKey || e.ctrlKey || e.metaKey)) {
+        imageDragReadyRef.current = false;
+        if (e.altKey) {
+          addReferenceImageToGenGroupRef.current(modifierImage);
+        } else {
+          addFusionImageToGenGroupRef.current(modifierImage);
+        }
         return;
       } else if (!selectedIds.has(hitId)) {
         setSelectedIds(new Set([hitId]));
@@ -3396,8 +3435,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       // Box select: left-click drag on blank area immediately starts box selection
       setBoxSelectStart({ x: e.clientX, y: e.clientY });
       setBoxSelectEnd({ x: e.clientX, y: e.clientY });
+      e.currentTarget.setPointerCapture(e.pointerId);
+      startBlankCanvasLongPress(e.pointerId, e.clientX, e.clientY);
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, updatePanPreview, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, updatePanPreview, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, startBlankCanvasLongPress]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (
@@ -3488,6 +3529,15 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       return;
     }
     const canvasPos = screenToCanvas(e.clientX, e.clientY);
+    if (blankCanvasPointerRef.current === e.pointerId) {
+      const movedDistance = Math.hypot(
+        e.clientX - mouseDownPosRef.current.x,
+        e.clientY - mouseDownPosRef.current.y,
+      );
+      if (movedDistance > 6) {
+        clearBlankCanvasLongPress(e.pointerId);
+      }
+    }
 
     // Middle button panning
     if (isMiddlePanning) {
@@ -3653,9 +3703,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         });
       }
     }
-  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, boxSelectStart, resizingImage, resizeCorner, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, panStart.x, panStart.y, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, dragStart.x, dragStart.y, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, updatePanPreview, annotationV2State.annotations, annotationV2State.gesture.kind, updateAnnotationV2Gesture, moveAnnotationV2Text]);
+  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, boxSelectStart, resizingImage, resizeCorner, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, panStart.x, panStart.y, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, dragStart.x, dragStart.y, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, updatePanPreview, annotationV2State.annotations, annotationV2State.gesture.kind, updateAnnotationV2Gesture, moveAnnotationV2Text, clearBlankCanvasLongPress]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    clearBlankCanvasLongPress(e.pointerId);
     const releaseAnnotationPointer = () => {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
@@ -4042,22 +4093,25 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, zoom, viewOffset.x, viewOffset.y, commitPanPreview, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture]);
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, zoom, viewOffset.x, viewOffset.y, commitPanPreview, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, clearBlankCanvasLongPress]);
 
   const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (annotationPointerIdRef.current !== e.pointerId) return;
-    movingTextAnnotationIdRef.current = null;
-    annotationPointerIdRef.current = null;
-    if (annotationV2State.gesture.kind !== 'idle') {
-      escapeAnnotationV2();
+    clearBlankCanvasLongPress(e.pointerId);
+    if (annotationPointerIdRef.current === e.pointerId) {
+      movingTextAnnotationIdRef.current = null;
+      annotationPointerIdRef.current = null;
+      if (annotationV2State.gesture.kind !== 'idle') {
+        escapeAnnotationV2();
+      }
     }
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-  }, [annotationV2State.gesture.kind, escapeAnnotationV2]);
+  }, [annotationV2State.gesture.kind, clearBlankCanvasLongPress, escapeAnnotationV2]);
 
   const handlePointerLeave = useCallback(() => {
     if (annotationPointerIdRef.current !== null) return;
+    clearBlankCanvasLongPress();
     if (editMode !== 'none') {
       handleEditMouseUp();
       return;
@@ -4090,7 +4144,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       clearTimeout(groupDragTimerRef.current);
       groupDragTimerRef.current = null;
     }
-  }, [dragTarget, editMode, groupDragTarget, handleEditMouseUp, isMiddlePanning, isPanning, commitPanPreview]);
+  }, [dragTarget, editMode, groupDragTarget, handleEditMouseUp, isMiddlePanning, isPanning, commitPanPreview, clearBlankCanvasLongPress]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     // Prevent scroll from affecting canvas when cursor is over a modal/overlay/popup
@@ -4371,6 +4425,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       },
       sourceCategories: { [firstImage.id]: [] },
       sourceStrengths: { [firstImage.id]: {} },
+      referenceDescriptions: {},
       resultImageIds: [],
       createdAt: Date.now(),
     };
@@ -4457,6 +4512,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       return [...prev, newGroup];
     });
   }, [createGenGroupLocal, images]);
+
+  useEffect(() => {
+    addReferenceImageToGenGroupRef.current = handleAltClickAddToGroup;
+  }, [handleAltClickAddToGroup]);
+
+  useEffect(() => {
+    addFusionImageToGenGroupRef.current = handleCtrlClickAddToGroup;
+  }, [handleCtrlClickAddToGroup]);
 
   /** 从生成组中移除参考图 */
   const removeRefFromGroup = useCallback((groupId: string, imageId: string) => {
@@ -4589,10 +4652,88 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
   }, []);
 
+  const handleAnalyzeGroupReferences = useCallback(async (groupId: string) => {
+    const group = genGroupsRef.current.find(candidate => candidate.id === groupId);
+    if (!group || group.refImages.length === 0 || analyzingGroupId === groupId) return;
+
+    setAnalyzingGroupId(groupId);
+    const referenceDescriptions: Record<string, string> = {};
+    const failedReferences: string[] = [];
+
+    try {
+      for (const reference of group.refImages) {
+        try {
+          const response = await fetch('/api/vision-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: reference.url }),
+          });
+          const payload = await response.json().catch(() => null) as {
+            success?: boolean;
+            error?: string;
+            data?: unknown;
+          } | null;
+
+          if (!response.ok || !payload?.success) {
+            throw new Error(payload?.error || `识别失败（HTTP ${response.status}）`);
+          }
+
+          const data = payload.data && typeof payload.data === 'object'
+            ? payload.data as Record<string, unknown>
+            : {};
+          const en = data.en && typeof data.en === 'object'
+            ? data.en as Record<string, unknown>
+            : {};
+          const zh = data.zh && typeof data.zh === 'object'
+            ? data.zh as Record<string, unknown>
+            : {};
+          const description = [
+            typeof en.prompt === 'string' ? en.prompt : '',
+            typeof zh.prompt === 'string' ? zh.prompt : '',
+            typeof data.raw === 'string' ? data.raw : '',
+          ].find(value => value.trim())?.trim();
+
+          if (!description) {
+            throw new Error('识别结果为空');
+          }
+
+          referenceDescriptions[reference.imageId] = description.slice(0, 2000);
+        } catch (error) {
+          failedReferences.push(error instanceof Error ? error.message : '识别失败');
+        }
+      }
+
+      const completedCount = Object.keys(referenceDescriptions).length;
+      if (completedCount > 0) {
+        setGenGroups(prev => prev.map(candidate => (
+          candidate.id === groupId
+            ? {
+                ...candidate,
+                referenceDescriptions: {
+                  ...candidate.referenceDescriptions,
+                  ...referenceDescriptions,
+                },
+              }
+            : candidate
+        )));
+      }
+
+      if (completedCount === group.refImages.length) {
+        toast.success(`已识别 ${completedCount} 张参考图`);
+      } else if (completedCount > 0) {
+        toast.warning(`已识别 ${completedCount} 张参考图，${failedReferences.length} 张未完成`);
+      } else {
+        toast.error(failedReferences[0] || '参考图识别失败');
+      }
+    } finally {
+      setAnalyzingGroupId(current => current === groupId ? null : current);
+    }
+  }, [analyzingGroupId]);
+
   /** 处理生成组的生成请求 */
   const handleGroupGenerate = useCallback(async (group: CanvasGenGroup) => {
     const toolbar = group.toolbar;
-    if (!toolbar.prompt.trim()) return;
+    const effectivePrompt = toolbar.prompt.trim() || 'Generate a creative variation of the reference image(s).';
 
     // 计算结果框尺寸（根据用户选择的比例和模型尺寸）
     const [arW, arH] = toolbar.aspectRatio.split(':').map(Number);
@@ -4658,20 +4799,24 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     // 构建提示词
-    let fullPrompt = toolbar.prompt;
+    let fullPrompt = effectivePrompt;
     let calculatedStrength: number | undefined;
+    const referenceMeta: {
+      referenceDescriptions?: string[];
+      referenceCategories?: Record<string, string[]>;
+      referenceStrengths?: number[];
+    } = {};
+    const groupReferenceDescriptions = group.refImages.map(reference => (
+      group.referenceDescriptions?.[reference.imageId]?.trim()
+      || images.find(image => image.id === reference.imageId)?.prompt?.trim()
+      || ''
+    ));
 
     if (group.type === 'reference' && group.refImages.length > 0) {
       // 参考图组：收集类别/强度/描述，传给后端处理
       // 前端不再构建复杂提示词，避免与后端逻辑冲突导致重复指令和变形
 
       // 收集参考图的原始描述（用于增强主体识别精度）
-      const refDescriptions = group.refImages
-        .map(r => {
-          const canvasImg = images.find(img => img.id === r.imageId);
-          return canvasImg?.prompt?.trim() || '';
-        });
-
       // 收集所有激活的类别及其最大强度（跨多张参考图取最大值）
       const catStrengthMap: Record<string, number> = {};
       for (const r of group.refImages) {
@@ -4723,11 +4868,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
 
       // 保存这些信息供 fetch 请求使用
-      groupRefMetaRef.current = {
-        referenceDescriptions: refDescriptions,
-        referenceCategories: Object.keys(referenceCategories).length > 0 ? referenceCategories : undefined,
-        referenceStrengths: referenceStrengthsArr.some(s => s > 0) ? referenceStrengthsArr : undefined,
-      };
+      referenceMeta.referenceDescriptions = groupReferenceDescriptions;
+      referenceMeta.referenceCategories = Object.keys(referenceCategories).length > 0
+        ? referenceCategories
+        : undefined;
+      referenceMeta.referenceStrengths = referenceStrengthsArr.some(s => s > 0)
+        ? referenceStrengthsArr
+        : undefined;
 
       // fullPrompt 只保留用户的原始关键词，后端根据 categories/descriptions 构建完整提示词
       if (!keyword) {
@@ -4738,12 +4885,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       calculatedStrength = 0.65;
       const keyword = fullPrompt.trim();
       // 收集融合参考图的原始描述
-      const fusionRefDescs = group.refImages
-        .map(r => {
-          const canvasImg = images.find(img => img.id === r.imageId);
-          return canvasImg?.prompt?.trim();
-        })
-        .filter((d): d is string => !!d);
+      const fusionRefDescs = groupReferenceDescriptions.filter((description): description is string => !!description);
+      referenceMeta.referenceDescriptions = groupReferenceDescriptions;
       const fusionDescHint = fusionRefDescs.length > 0
         ? ` The reference images depict: "${fusionRefDescs.join('; ')}".`
         : '';
@@ -4828,16 +4971,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
           submitOnly: true,
           ...(calculatedStrength != null && calculatedStrength > 0 ? { strength: calculatedStrength } : {}),
-          ...(groupRefMetaRef.current.referenceDescriptions?.some(d => d.trim()) ? { referenceDescriptions: succeededIndices.map(i => groupRefMetaRef.current.referenceDescriptions?.[i] || '').filter(d => d.trim()) } : {}),
-          ...(groupRefMetaRef.current.referenceCategories ? { referenceCategories: Object.fromEntries(succeededIndices.map((origIdx, newIdx) => [String(newIdx), groupRefMetaRef.current.referenceCategories?.[String(origIdx)] || []]).filter(([,v]) => v.length > 0)) } : {}),
-          ...(groupRefMetaRef.current.referenceStrengths?.length ? { referenceStrengths: groupRefMetaRef.current.referenceStrengths } : {}),
+          ...(referenceMeta.referenceDescriptions?.some(description => description.trim()) ? { referenceDescriptions: succeededIndices.map(index => referenceMeta.referenceDescriptions?.[index] || '').filter(description => description.trim()) } : {}),
+          ...(referenceMeta.referenceCategories ? { referenceCategories: Object.fromEntries(succeededIndices.map((originalIndex, newIndex) => [String(newIndex), referenceMeta.referenceCategories?.[String(originalIndex)] || []]).filter(([, value]) => value.length > 0)) } : {}),
+          ...(referenceMeta.referenceStrengths?.length ? { referenceStrengths: referenceMeta.referenceStrengths } : {}),
         }),
         signal: genController.signal,
       });
       } finally {
         clearTimeout(genTimeout);
-        // 清理参考图元数据，避免污染下一次生成
-        groupRefMetaRef.current = {};
       }
 
       // 安全解析响应：优先尝试 JSON，回退到纯文本
@@ -10212,6 +10353,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               >
                 {/* Title bar */}
                 <div
+                  data-canvas-group-drag-handle
                   className={`flex items-center gap-2 px-3 ${isMonochrome ? 'bg-blue-50/80' : 'bg-[#222]'} rounded-t-lg h-[36px] select-none ${groupDragTarget === group.id && groupDragReadyRef.current ? 'cursor-grabbing' : 'cursor-grab'}`}
                   onClick={(e) => { e.stopPropagation(); }}
                   onDoubleClick={() => {
@@ -10220,13 +10362,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     setGroupEditName(group.name);
                     setGroupEditNote(group.note);
                   }}
-                  onMouseDown={(e) => {
+                  onPointerDown={(e) => {
                     if (e.button !== 0) return; // only left button
                     // Don't start drag if clicking on buttons or input
                     const target = e.target as HTMLElement;
                     if (target.closest('button') || target.closest('input')) return;
                     e.stopPropagation();
                     if (editingGroupId === group.id) return; // don't drag while editing name
+                    e.currentTarget.setPointerCapture(e.pointerId);
                     // Start long press timer for group drag (hold 200ms before dragging)
                     groupDragReadyRef.current = false;
                     setGroupDragTarget(group.id);
@@ -10340,19 +10483,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   if (image.isProcessingPlaceholder) return;
                   if (editMode !== 'none') return;
                   if (annotationMode) return; // annotation mode handles its own clicks via mousedown
-                  if (e.altKey) {
-                    // 【调整2】Alt+Click: 创建/追加参考图组
-                    handleAltClickAddToGroup(image);
-                    return;
-                  }
-                  if (e.ctrlKey || e.metaKey) {
-                    // 【调整3】Ctrl+Click: 创建/追加融图组
-                    handleCtrlClickAddToGroup(image);
-                    return;
-                  } else {
-                    setSelectedIds(new Set([image.id]));
-                    selectImage(image.id);
-                  }
+                  if (e.altKey || e.ctrlKey || e.metaKey) return;
+                  setSelectedIds(new Set([image.id]));
+                  selectImage(image.id);
                 }}
               >
                 {image.isProcessingPlaceholder && image.processing ? (
@@ -11361,13 +11494,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 >
                   {/* Title bar — draggable + collapse/close */}
                   <div
+                    data-canvas-group-drag-handle
                     className="flex items-center justify-between px-4 py-1.5 rounded-t-2xl pointer-events-auto select-none"
                     style={{ background: accentBgStrong, borderBottom: group.isCollapsed ? 'none' : `1px solid ${accentBorder}` }}
-                    onMouseDown={(e) => {
+                    onPointerDown={(e) => {
                       if (e.button !== 0) return;
                       if ((e.target as HTMLElement).closest('button')) return;
                       e.stopPropagation();
-                      e.preventDefault();
+                      e.currentTarget.setPointerCapture(e.pointerId);
                       setGenGroupDragTarget(group.id);
                       const canvasPos = screenToCanvas(e.clientX, e.clientY);
                       setGenGroupDragStart(canvasPos);
@@ -11864,8 +11998,21 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       </div>
                     </div>
 
-                    {/* Row 4: Optimize + Generate + Cancel */}
+                    {/* Row 4: Analyze + Optimize + Generate + Cancel */}
                     <div className="flex items-center gap-2">
+                      <button
+                        className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-blue-50 hover:bg-blue-100 text-blue-600' : 'bg-[#252525] hover:bg-[#282828]/85 text-muted-foreground'}`}
+                        onClick={() => handleAnalyzeGroupReferences(group.id)}
+                        disabled={analyzingGroupId === group.id || group.refImages.length === 0}
+                        title="识别全部参考图内容，并在生成时作为参考说明"
+                      >
+                        {analyzingGroupId === group.id ? (
+                          <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: accentColor, borderTopColor: 'transparent' }} />
+                        ) : (
+                          <Sparkles className="w-4 h-4" />
+                        )}
+                        <span>{analyzingGroupId === group.id ? '识别中...' : '识别参考图'}</span>
+                      </button>
                       <button
                         className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-blue-50 hover:bg-blue-100 text-blue-600' : 'bg-[#252525] hover:bg-[#282828]/85 text-muted-foreground'}`}
                         onClick={() => handleOptimizeGroupPrompt(group.id)}
@@ -11883,7 +12030,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         className="flex-1 py-2.5 rounded-lg text-sm font-bold text-black transition-all hover:brightness-110 active:scale-[0.98]"
                         style={{ background: isRef ? 'linear-gradient(135deg, #d4af37, #f0d060)' : 'linear-gradient(135deg, #4ecdc4, #45b7d1)' }}
                         onClick={() => handleGenGroupGenerate(group.id)}
-                        disabled={group.resultPlaceholder.isProcessing || !group.toolbar.prompt.trim()}
+                        disabled={group.resultPlaceholder.isProcessing || !group.toolbar.model}
                       >
                         {group.resultPlaceholder.isProcessing ? '生成中...' : '生成'}
                       </button>

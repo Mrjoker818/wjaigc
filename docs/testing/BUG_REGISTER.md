@@ -742,3 +742,20 @@ await page.evaluate(() => {
 ### BUG-037 Cloud Closure
 
 A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cobalt-blue cup outputs. Both completed image cards displayed `PearAPI 图像`, with no FHL mislabel. BUG-037 is closed for the direct-canvas route. Historical cards were not used as evidence.
+
+## 2026-08-03 Canvas Reference and Fusion Group Recovery
+
+### BUG-039: Reference/fusion groups could not reliably be created, moved, analyzed, or generated
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite canvas reference group / fusion group |
+| Reproduction | On a deployed canvas image, use `Alt + click` to create a reference group or `Ctrl/Cmd + click` to create a fusion group; try to drag the group title, generate without a manually typed prompt, and inspect reference content. |
+| Observed result | The root pointer handler entered image-drag behavior before the image `click` handler could create a group. Group titles used mouse events without pointer capture, blank-canvas long press did not enter pan mode, and the Generate button was disabled whenever the prompt was empty despite documented fallback prompts. No group-level reference analysis action existed. |
+| Root cause | Modifier grouping was split across pointer and click phases; group dragging mixed mouse and pointer event paths; generation metadata was stored in a shared mutable ref that could be overwritten by concurrent groups. |
+| Fix | Route modifier grouping through the root pointer-down path; restore blank-canvas long-press panning; use captured pointer events for group title dragging; allow model-selected groups to use the built-in reference/fusion prompt fallback; add a sequential `识别参考图` action that persists per-image descriptions and forwards them with the generation request; scope metadata to each generation invocation. |
+| Files | `src/components/infinite-canvas.tsx`, `src/lib/canvas-generation-group.ts`, `src/__tests__/components/canvas-group-gesture-contract.test.ts` |
+| Regression | New RED/GREEN canvas-group contract covers modifier grouping, long press panning, pointer capture, empty-prompt generation, persisted reference analysis, and per-request metadata isolation. |
+| Local verification | Focused canvas contracts: 8/8 passed. Full Vitest: 303 files / 1367 tests passed, 3 PostgreSQL-specific files / 4 tests skipped without `TEST_POSTGRES_URL`. TypeScript, ESLint error gate, and production build passed. |
+| Cloud status | Pending deployment and real browser validation with an enabled vision model and an enabled image model. |
