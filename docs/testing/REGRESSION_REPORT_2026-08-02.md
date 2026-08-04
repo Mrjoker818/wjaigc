@@ -83,3 +83,19 @@ Scope: Effect Reverse Engineering Pro Chinese three-column workbench, collision-
 - No deployed-browser evidence exists for this addendum. The Chinese window, three-column layout, drawer collision behavior, overflow callbacks, narrow viewport behavior, console/network state, and real provider task flow remain **unverified until Coze deploys this commit**.
 
 Release decision for this addendum: **not approved for release until deployed-browser verification is attached**.
+
+## 方案 B Deployed Browser Check - 2026-08-04
+
+Deployment inspected in the authenticated Chrome session:
+`https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9-5000.dev.coze.site/`
+
+- Login and project loading completed without an authentication loop.
+- The selected-image toolbar kept five primary actions visible and exposed all 14 remaining actions through the bounded `+14` menu.
+- The `+14` callback path was exercised by opening the real `参数调色` panel.
+- Effect Reverse Engineering Pro opened as a Chinese `1180 × 760` three-column workbench fully inside the `1920 × 863` viewport.
+- Source, workspace and layer regions were present. Original, perspective and flat tabs switched successfully.
+- Manual layer add, rename, lock, unlock and visibility changes worked.
+- No application console errors or warnings were captured during these interactions.
+- A real browser regression was reproduced in the bottom toolbar drawer: its rendered top was `1069px` while the viewport height was `863px`. The expected viewport-relative top was approximately `272px`.
+- Root cause: the fixed drawer was nested below the toolbar's Tailwind `-translate-x-1/2` containing block, so viewport coordinates were applied relative to the translated toolbar.
+- Local remediation portals the unchanged drawer to `document.body`. This remediation requires a new deployed-browser check before closure.

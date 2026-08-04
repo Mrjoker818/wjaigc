@@ -35,3 +35,10 @@ Do not close or execute `UV-20260802-03` against that stale build. Re-deploy the
 | UV-20260804-02 | P2 | Open the bottom feature drawer with the right panel open, verify it is fully visible, bounded, internally scrollable, and does not capture canvas events | Unverified; pure layout and source-contract checks passed |
 | UV-20260804-03 | P2 | Verify the selected-image toolbar keeps the first five actions visible and exposes every remaining action through `+N`; invoke an overflow action and verify custom order/hidden preferences | Unverified; layout, preference, and wiring checks passed |
 | UV-20260804-04 | P2 | Verify narrow viewport clamping and absence of horizontal overflow, then inspect console errors, browser dialogs, and network failures | Unverified; requires deployed browser evidence |
+
+### 2026-08-04 Status Update
+
+- `UV-20260804-01`: Partially verified on deployed commit `51d8016`; Chinese three-column UI and manual interactions passed. Real analyzer/provider task execution remains unverified.
+- `UV-20260804-02`: Failed on deployed commit `51d8016`; the drawer rendered below the viewport because it was nested inside a translated containing block. A local Portal fix is awaiting deployment.
+- `UV-20260804-03`: Verified on deployed commit `51d8016`; five primary actions, 14 overflow actions and the `参数调色` callback path worked.
+- `UV-20260804-04`: Desktop console inspection passed with no application warnings/errors. Narrow viewport behavior remains unverified.

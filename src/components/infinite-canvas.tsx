@@ -17623,6 +17623,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         <div className={`w-px h-5 mx-1.5 ${separatorCls}`} />
 
         {/* ── Right: Feature buttons (collapsible) ── */}
+        {typeof document !== 'undefined' && createPortal(
+          (
         <div
           data-bottom-toolbar-drawer
           onClickCapture={closeCanvasToolPanels}
@@ -17857,6 +17859,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           </button>
 
         </div>
+          ),
+          document.body,
+        )}
 
         {/* ── Far-right: Auxiliary controls (always visible) ── */}
         <div className={`w-px h-5 ml-1.5 ${separatorCls}`} />

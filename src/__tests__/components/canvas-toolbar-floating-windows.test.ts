@@ -46,6 +46,13 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain("bottomBarHovered && bottomToolbarDrawerPlacement ? 'grid grid-cols-6 gap-1 opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'");
   });
 
+  it('portals the fixed bottom-toolbar drawer outside the translated toolbar containing block', () => {
+    expect(canvasSource).toContain("import { createPortal } from 'react-dom';");
+    expect(canvasSource).toContain('createPortal(');
+    expect(canvasSource).toContain('document.body');
+    expect(canvasSource).toMatch(/createPortal\(\s*\(\s*<div[\s\S]*?data-bottom-toolbar-drawer/);
+  });
+
   it('isolates bottom-toolbar pointer input from canvas interactions', () => {
     expect(canvasSource).toContain('data-toolbar="bottom-toolbar"');
     expect(canvasSource).toContain('onMouseDown={(event) => event.stopPropagation()}');
