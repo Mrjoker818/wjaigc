@@ -2581,6 +2581,108 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     }
   }, [images, currentUser?.id, setImages, autoLayoutImages, stabilizeCanvasImages]);
 
+  const handleUploadEffectReverseSource = useCallback(async (file: File): Promise<CanvasImage> => {
+    if (!currentProject?.id) {
+      throw new Error('请先保存或选择一个项目');
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch('/api/save-image', {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    });
+    const payload = await response.json().catch(() => null) as {
+      success?: boolean;
+      url?: string;
+      error?: string;
+    } | null;
+    if (!response.ok || !payload?.success || !payload.url) {
+      throw new Error(payload?.error || `源图保存失败 (${response.status})`);
+    }
+
+    const { width: naturalWidth, height: naturalHeight } = await loadCanvasImageSize(payload.url);
+    const displaySize = getCanvasImageDisplaySize(naturalWidth, naturalHeight);
+    const createdAt = Date.now();
+    const imageId = `effect-reverse-source-${createdAt}-${Math.random().toString(36).slice(2, 9)}`;
+    const baseImage: CanvasImage = {
+      id: imageId,
+      url: payload.url,
+      prompt: '',
+      name: file.name,
+      x: 0,
+      y: 0,
+      width: displaySize.width,
+      height: displaySize.height,
+      originalWidth: naturalWidth,
+      originalHeight: naturalHeight,
+      createdAt,
+      annotationVersionId: buildAnnotationSourceVersionId(imageId, createdAt, payload.url),
+    };
+    const previousImages = latestImagesRef.current;
+    const uploaded = autoLayoutImages(previousImages, [baseImage])[0] || baseImage;
+    const nextImages = [...previousImages, uploaded];
+    const persistableCanvasImages = nextImages.map((image) => ({
+      id: image.id,
+      url: image.url,
+      x: image.x,
+      y: image.y,
+      width: image.width,
+      height: image.height,
+      originalWidth: image.originalWidth || image.width,
+      originalHeight: image.originalHeight || image.height,
+      rotation: 0,
+      zIndex: image.zIndex || 0,
+      createdAt: image.createdAt || Date.now(),
+      prompt: image.prompt || '',
+      ...(image.annotationVersionId ? { annotationVersionId: image.annotationVersionId } : {}),
+    }));
+
+    latestImagesRef.current = nextImages;
+    setImages(nextImages);
+    const manager = UserManagerCore.getInstance();
+    manager.updateProject(currentProject.id, {
+      canvasImages: persistableCanvasImages,
+      metadata: {
+        ...(currentProject.metadata || {}),
+        groups: groupsRef.current,
+        viewState: viewStateRef.current,
+        annotationsV2: annotationRecordsRef.current,
+      },
+    });
+
+    try {
+      await UserManagerCore.getInstance().flushProjectsToServer();
+    } catch (error) {
+      latestImagesRef.current = previousImages;
+      setImages(previousImages);
+      manager.updateProject(currentProject.id, {
+        canvasImages: previousImages.map((image) => ({
+          id: image.id,
+          url: image.url,
+          x: image.x,
+          y: image.y,
+          width: image.width,
+          height: image.height,
+          originalWidth: image.originalWidth || image.width,
+          originalHeight: image.originalHeight || image.height,
+          rotation: 0,
+          zIndex: image.zIndex || 0,
+          createdAt: image.createdAt || Date.now(),
+          prompt: image.prompt || '',
+          ...(image.annotationVersionId ? { annotationVersionId: image.annotationVersionId } : {}),
+        })),
+      });
+      throw new Error(error instanceof Error ? error.message : '项目同步失败，源图未加入反拆任务');
+    }
+
+    stabilizeCanvasImages([{ id: uploaded.id, url: uploaded.url }]);
+    setSelectedImage(uploaded);
+    toast.success('源图已保存到项目并载入反向拆图');
+    return uploaded;
+  }, [autoLayoutImages, currentProject, getCanvasImageDisplaySize, loadCanvasImageSize, setImages, stabilizeCanvasImages]);
+
   const handleAddVectorAsset = useCallback(async (asset: VectorDesignAsset, sourceImageId?: string) => {
     const sourceImage = sourceImageId ? latestImagesRef.current.find(img => img.id === sourceImageId) : undefined;
     const baseSize = sourceImage
@@ -4824,6 +4926,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onExtractKeywords={handleCanvasExtractKeywords}
           onFusion={handleCanvasFusion}
           onAddImages={handleAddImages}
+          onUploadEffectReverseSource={handleUploadEffectReverseSource}
           onReferenceSelect={handleCanvasReferenceSelect}
           referenceIds={ctrlRefSelections.map(r => r.id)}
           altRefMarkerIds={altRefMarkers.map(r => r.id)}

@@ -21,7 +21,7 @@ export function EffectReverseLayerPanel({ regions, analyzerAvailable, onChange, 
     <aside
       data-testid="effect-reverse-layer-panel"
       data-panel="layer-panel"
-      className="flex min-h-0 w-[280px] shrink-0 flex-col gap-3 border-l border-white/10 p-3 max-[1100px]:w-[240px] max-[960px]:w-full max-[960px]:border-l-0 max-[960px]:border-t"
+      className="flex min-h-0 flex-col gap-3"
     >
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium">{REVERSE_COPY.layers}</h2>
@@ -39,7 +39,7 @@ export function EffectReverseLayerPanel({ regions, analyzerAvailable, onChange, 
         {analyzerAvailable ? REVERSE_COPY.analysis : REVERSE_COPY.manualMode}
         <span className="mt-1 block text-[11px] text-amber-300">{REVERSE_COPY.notAnalyzed}</span>
       </button>
-      <div className="min-h-0 space-y-2 overflow-y-auto">
+      <div className="max-h-52 space-y-2 overflow-y-auto pr-1 [scrollbar-width:thin]">
         {regions.map((region, index) => (
           <div key={region.id} className="border border-white/10 p-2 text-xs">
             <div className="flex items-center gap-1">

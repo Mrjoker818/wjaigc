@@ -38,12 +38,15 @@ describe('canvas toolbar floating windows', () => {
 
   it('keeps core canvas controls visible while the extended bottom-toolbar tools can collapse', () => {
     expect(canvasSource).toContain('max-w-[calc(100%-2rem)]');
-    expect(canvasSource).toContain('overflow-x-auto');
-    expect(canvasSource).toContain('[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden');
+    const bottomToolbarStart = canvasSource.indexOf('<div\n        ref={bottomToolbarRef}\n        data-toolbar="bottom-toolbar"');
+    const bottomToolbarSource = canvasSource.slice(bottomToolbarStart, canvasSource.indexOf('data-bottom-toolbar-drawer', bottomToolbarStart));
+    expect(bottomToolbarSource).toContain('overflow-visible');
+    expect(bottomToolbarSource).not.toContain('overflow-x-auto');
+    expect(bottomToolbarSource).not.toContain('[scrollbar-width:none]');
     expect(canvasSource).toContain('data-bottom-toolbar-drawer');
     expect(canvasSource).toContain('getBottomToolbarDrawerPlacement');
     expect(canvasSource).toContain('max-h-[min(60vh,520px)]');
-    expect(canvasSource).toContain("bottomBarHovered && bottomToolbarDrawerPlacement ? 'grid grid-cols-6 gap-1 opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'");
+    expect(canvasSource).toContain("grid-cols-[repeat(auto-fit,minmax(44px,1fr))]");
   });
 
   it('portals the fixed bottom-toolbar drawer outside the translated toolbar containing block', () => {
@@ -51,6 +54,17 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('createPortal(');
     expect(canvasSource).toContain('document.body');
     expect(canvasSource).toMatch(/createPortal\(\s*\(\s*<div[\s\S]*?data-bottom-toolbar-drawer/);
+    expect(canvasSource).toContain('bottomToolbarDrawerOpen');
+    expect(canvasSource).toContain('aria-label="全部工具"');
+    expect(canvasSource).toContain('aria-expanded={bottomToolbarDrawerOpen}');
+    expect(canvasSource).toContain('aria-controls="canvas-bottom-toolbar-drawer"');
+    expect(canvasSource).toMatch(/aria-controls="canvas-bottom-toolbar-drawer"[\s\S]*?onClick=\{\(\) => \{[\s\S]*?setBottomToolbarDrawerOpen\(\(open\) => !open\);[\s\S]*?\}\}/);
+    expect(canvasSource).not.toContain('onMouseEnter={() => setBottomToolbarDrawerOpen(true)}');
+    expect(canvasSource).toContain('id="canvas-bottom-toolbar-drawer"');
+    expect(canvasSource).toContain("grid-cols-[repeat(auto-fit,minmax(44px,1fr))]");
+    expect(canvasSource).not.toContain("bottomToolbarDrawerOpen && bottomToolbarDrawerPlacement ? 'grid grid-cols-6");
+    expect(canvasSource).toContain("event.key === 'Escape'");
+    expect(canvasSource).toContain("closest('[data-toolbar=\"bottom-toolbar\"], [data-bottom-toolbar-drawer]')");
   });
 
   it('isolates bottom-toolbar pointer input from canvas interactions', () => {
@@ -64,6 +78,15 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('visibleImageActions.slice(5)');
     expect(canvasSource).toContain("toolbarExpanded ? 'block' : 'hidden'");
     expect(canvasSource).toContain('onWheel={(e) => e.stopPropagation()}');
+  });
+
+  it('keeps bottom and selected-image tool menus mutually exclusive', () => {
+    expect(canvasSource).toContain('setToolbarExpanded(false);');
+    expect(canvasSource).toContain('setShowToolbarCustomize(false);');
+    expect(canvasSource).toContain('setBottomToolbarDrawerOpen(false);');
+    expect(canvasSource).toMatch(/aria-controls="canvas-bottom-toolbar-drawer"[\s\S]*?setToolbarExpanded\(false\);[\s\S]*?setShowToolbarCustomize\(false\);[\s\S]*?setBottomToolbarDrawerOpen\(\(open\) => !open\)/);
+    expect(canvasSource).toMatch(/aria-controls="selected-image-toolbar-overflow"[\s\S]*?setBottomToolbarDrawerOpen\(false\);[\s\S]*?setShowToolbarCustomize\(false\);[\s\S]*?setToolbarExpanded\(\(open\) => !open\)/);
+    expect(canvasSource).toMatch(/event\.key === 'Escape'[\s\S]*?setBottomToolbarDrawerOpen\(false\);[\s\S]*?setToolbarExpanded\(false\);[\s\S]*?setShowToolbarCustomize\(false\);/);
   });
 
   it('keeps the selected-image delete action reachable without colliding with hover actions', () => {
@@ -95,7 +118,10 @@ describe('canvas toolbar floating windows', () => {
 
   it('opens one bottom-toolbar tool at a time and allows Escape to close external editors', () => {
     expect(canvasSource).toContain('const closeCanvasToolPanels = useCallback');
-    expect(canvasSource).toContain('onClickCapture={closeCanvasToolPanels}');
+    expect(canvasSource).not.toContain('onClickCapture={closeCanvasToolPanels}');
+    expect(canvasSource).not.toContain('onPointerDownCapture={closeCanvasToolPanels}');
+    expect(canvasSource).toContain('closeBottomToolbarDrawerAfterAction');
+    expect(canvasSource).toContain("target.closest('button')");
     expect(canvasSource).toContain("new Event('wujie:canvas-tool-opened')");
     expect(canvasSource).toContain("window.addEventListener('wujie:close-canvas-tool-panels'");
     expect(canvasWorkspaceSource).toContain("window.addEventListener('wujie:canvas-tool-opened'");

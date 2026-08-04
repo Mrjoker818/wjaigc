@@ -8,6 +8,7 @@ const readSource = (path: string) => readFileSync(
 ).replace(/\r\n/g, '\n');
 
 const source = readSource('src/components/effect-reverse-engineering-panel.tsx');
+const sourcePanelSource = readSource('src/components/effect-reverse-engineering/source-panel.tsx');
 const workspaceSource = readSource('src/components/effect-reverse-engineering/workspace.tsx');
 const layerSource = readSource('src/components/effect-reverse-engineering/layer-panel.tsx');
 const layerOperationsSource = readSource('src/lib/effect-reverse-engineering/layer-operations.ts');
@@ -19,7 +20,8 @@ describe('EffectReverseEngineeringPanel contract', () => {
     expect(source).toContain('fixed z-[220]');
     expect(source).toContain('EffectReverseSourcePanel');
     expect(source).toContain('EffectReverseWorkspace');
-    expect(source).toContain('EffectReverseLayerPanel');
+    expect(source).not.toContain('grid-cols-[380px_minmax(0,1fr)_300px]');
+    expect(sourcePanelSource).toContain('EffectReverseLayerPanel');
     expect(layerSource).toContain('REVERSE_COPY.manualMode');
     expect(source).toContain('onPointerDown={(event) => event.stopPropagation()}');
     expect(source).toContain('onWheel={(event) => event.stopPropagation()}');
@@ -58,6 +60,14 @@ describe('EffectReverseEngineeringPanel contract', () => {
     expect(source).toContain('sanitizeGeometry');
     expect(source).toContain('setMinimized');
     expect(source).toContain('setMaximized');
+  });
+
+  it('re-clamps the floating window when the viewport changes', () => {
+    expect(source).toContain("window.addEventListener('resize', handleViewportResize)");
+    expect(source).toContain('desktopGeometryRef.current');
+    expect(source).toContain('sanitizeGeometry(geometryBasis, nextViewport)');
+    expect(source).toContain('width: viewport.width - 32');
+    expect(source).toContain('height: viewport.height - 32');
   });
 
   it('uses Chinese window controls and task feedback', () => {

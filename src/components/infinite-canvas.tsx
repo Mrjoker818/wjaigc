@@ -372,6 +372,8 @@ interface InfiniteCanvasProps {
   altRefMarkerIds?: string[];
   /** Force save canvas data to localStorage + server */
   onForceSave?: (images: CanvasImage[]) => void;
+  /** Persist a file as an owned project image before using it as reverse-engineering source. */
+  onUploadEffectReverseSource?: (file: File) => Promise<CanvasImage>;
   /** 用户绘制的连线 */
   connections?: CanvasConnection[];
   /** 连线变更回调 */
@@ -576,7 +578,7 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
   // Stable refs for callbacks used in effects (avoid stale closures)
@@ -1326,6 +1328,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const [leftToolbarExpanded, setLeftToolbarExpanded] = useState(false);
   const [bottomBarHovered, setBottomBarHovered] = useState(false);
+  const [bottomToolbarDrawerOpen, setBottomToolbarDrawerOpen] = useState(false);
   const bottomToolbarRef = useRef<HTMLDivElement | null>(null);
   const [bottomToolbarDrawerPlacement, setBottomToolbarDrawerPlacement] = useState<BottomToolbarDrawerPlacement | null>(null);
 
@@ -1341,11 +1344,39 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [isPanelCollapsed]);
 
   useEffect(() => {
-    if (!bottomBarHovered) return;
+    if (!bottomToolbarDrawerOpen) return;
     updateBottomToolbarDrawerPlacement();
     window.addEventListener('resize', updateBottomToolbarDrawerPlacement);
     return () => window.removeEventListener('resize', updateBottomToolbarDrawerPlacement);
-  }, [bottomBarHovered, updateBottomToolbarDrawerPlacement]);
+  }, [bottomToolbarDrawerOpen, updateBottomToolbarDrawerPlacement]);
+
+  useEffect(() => {
+    if (!bottomToolbarDrawerOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-toolbar="bottom-toolbar"], [data-bottom-toolbar-drawer]')) return;
+      setBottomToolbarDrawerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setBottomToolbarDrawerOpen(false);
+        setToolbarExpanded(false);
+        setShowToolbarCustomize(false);
+      }
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [bottomToolbarDrawerOpen]);
+
+  const closeBottomToolbarDrawerAfterAction = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (!target?.closest('button')) return;
+    setBottomToolbarDrawerOpen(false);
+  }, []);
 
   // P2-1: 轻量连线状态
   const canvasConnections = connections ?? [];
@@ -5690,6 +5721,40 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     });
     setShowEffectReverse(true);
   }, [brandProject?.id, getActiveImageData, projectId]);
+
+  const handleUploadEffectReverseSource = useCallback(async (file: File) => {
+    if (!onUploadEffectReverseSource) {
+      throw new Error('当前项目暂时无法保存上传的源图');
+    }
+    const uploaded = await onUploadEffectReverseSource(file);
+    const effectiveProjectId = projectId || brandProject?.id;
+    if (!effectiveProjectId) {
+      throw new Error('请先保存或选择一个项目');
+    }
+    const sourceVersionId = uploaded.annotationVersionId || buildAnnotationSourceVersionId(
+      uploaded.id,
+      uploaded.createdAt,
+      uploaded.url,
+    );
+    const nextSource: EffectReverseCanvasSource = {
+      projectId: effectiveProjectId,
+      imageId: uploaded.id,
+      versionId: sourceVersionId,
+      imageUrl: uploaded.url,
+      label: uploaded.name || file.name,
+      sourceVersionId,
+      x: uploaded.x,
+      y: uploaded.y,
+      width: uploaded.width,
+      height: uploaded.height,
+      originalWidth: uploaded.originalWidth,
+      originalHeight: uploaded.originalHeight,
+    };
+    setEffectReverseSource(nextSource);
+    setSelectedIds(new Set([uploaded.id]));
+    onSelectImage(uploaded);
+    return nextSource;
+  }, [brandProject?.id, onSelectImage, onUploadEffectReverseSource, projectId]);
 
   const handleEffectReverseResult = useCallback((result: EffectReverseTaskResult) => {
     const source = effectReverseSource;
@@ -16027,6 +16092,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               <EffectReverseEngineeringPanel
                 initialSource={effectReverseSource}
                 isMonochrome={isMonochrome}
+                onUploadSource={handleUploadEffectReverseSource}
                 onClose={() => {
                   setShowEffectReverse(false);
                   setEffectReverseSource(null);
@@ -16723,7 +16789,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     type="button"
                     aria-expanded={toolbarExpanded}
                     aria-controls="selected-image-toolbar-overflow"
-                    onClick={(e) => { e.stopPropagation(); setToolbarExpanded(!toolbarExpanded); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setBottomToolbarDrawerOpen(false);
+                      setShowToolbarCustomize(false);
+                      setToolbarExpanded((open) => !open);
+                    }}
                     className={`flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-medium transition-all ${
                       isMonochrome
                         ? 'text-blue-500 hover:text-blue-700 hover:bg-blue-50'
@@ -16737,7 +16808,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 )}
                 {/* 自定义按钮 */}
                 <button
-                  onClick={(e) => { e.stopPropagation(); setShowToolbarCustomize(true); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setBottomToolbarDrawerOpen(false);
+                    setToolbarExpanded(false);
+                    setShowToolbarCustomize(true);
+                  }}
                   className={`flex items-center px-1.5 py-1.5 rounded-full text-xs font-medium transition-all ${
                     isMonochrome
                       ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
@@ -17549,9 +17625,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         ref={bottomToolbarRef}
         data-toolbar="bottom-toolbar"
         onMouseDown={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
         onMouseEnter={() => setBottomBarHovered(true)}
         onMouseLeave={() => setBottomBarHovered(false)}
-        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex max-w-[calc(100%-2rem)] items-center overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
+        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex max-w-[calc(100%-2rem)] items-center overflow-visible rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
       >
         {/* ── Center: Main function buttons (always visible) ── */}
         <button
@@ -17623,22 +17702,44 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         <div className={`w-px h-5 mx-1.5 ${separatorCls}`} />
 
         {/* ── Right: Feature buttons (collapsible) ── */}
+        <button
+          type="button"
+          aria-label="全部工具"
+          aria-expanded={bottomToolbarDrawerOpen}
+          aria-controls="canvas-bottom-toolbar-drawer"
+          onClick={() => {
+            setToolbarExpanded(false);
+            setShowToolbarCustomize(false);
+            setBottomToolbarDrawerOpen((open) => !open);
+          }}
+          className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${bottomToolbarDrawerOpen ? (isMonochrome ? 'bg-gray-900 text-white' : 'bg-white/15 text-text-bright ring-1 ring-gold/30') : (isMonochrome ? 'text-gray-500 hover:bg-gray-100 hover:text-gray-800' : 'text-gold-muted hover:bg-white/10 hover:text-text-bright')}`}
+          title="全部工具"
+        >
+          <LayoutGrid className="h-4 w-4" />
+        </button>
         {typeof document !== 'undefined' && createPortal(
           (
         <div
+          id="canvas-bottom-toolbar-drawer"
           data-bottom-toolbar-drawer
-          onClickCapture={closeCanvasToolPanels}
-          style={bottomBarHovered && bottomToolbarDrawerPlacement ? {
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            closeBottomToolbarDrawerAfterAction(event);
+          }}
+          style={bottomToolbarDrawerOpen && bottomToolbarDrawerPlacement ? {
             left: bottomToolbarDrawerPlacement.left,
             top: bottomToolbarDrawerPlacement.top,
             width: bottomToolbarDrawerPlacement.width,
             maxHeight: bottomToolbarDrawerPlacement.height,
           } : undefined}
           className={`fixed z-[70] max-h-[min(60vh,520px)] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-xl border p-2 shadow-2xl backdrop-blur-md transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'border-gray-200 bg-white/95' : 'border-white/[0.10] bg-[#1a1a1a]/95'} ${
-            bottomBarHovered && bottomToolbarDrawerPlacement ? 'grid grid-cols-6 gap-1 opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'
+            bottomToolbarDrawerOpen && bottomToolbarDrawerPlacement ? 'grid grid-cols-[repeat(auto-fit,minmax(44px,1fr))] gap-1 opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'
           }`}
         >
-          <div className={`col-span-6 h-px mb-1 ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
+          <div className={`col-span-full mb-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
 
           {/* 图转3D工厂 - moved inside collapsible area */}
           <button
