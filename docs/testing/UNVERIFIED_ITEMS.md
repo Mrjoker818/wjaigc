@@ -386,3 +386,15 @@
 | Valid configured provider task | Pending exact-build deployment | A real configured model returns an application task ID quickly, records the selected provider/model, and progresses through terminal completion or an actionable provider failure. |
 | Submission-uncertain recovery | Pending cloud observation | Simulate or observe a browser/proxy fetch interruption after task submission. The UI must not call the task failed solely from its own network error; it must recover using the durable app task and provider status. |
 | Provider terminal propagation | Pending cloud observation | When the provider marks an identified remote task failed, the next app poll transitions the matching app task to failed with the provider reason and does not remain generating beyond the defined polling/recovery interval. |
+
+## 2026-08-04 RemoveBG and Pear Deployment Acceptance
+
+| Item | Current status | Acceptance evidence |
+|---|---|---|
+| Dedicated RemoveBG protocol | Verified locally, pending deployment | Capture the selected `providerId` and `model`, provider request path, application response, and final canvas artifact. The dedicated call must not use generic `/images/generations`. |
+| RemoveBG alpha quality | Pending real output | PNG, WebP, and ZIP paths each produce a readable RGBA PNG with both transparent and non-transparent pixels; no checkerboard pixels are baked into the image. |
+| RemoveBG billing settlement | Pending PostgreSQL evidence | Exactly one `image_remove_bg` charge for either action alias; failure or cancellation creates at most one compensating refund. |
+| Pear asynchronous submission | Pending real provider run | Initial `/api/layered-decompose` returns an application task ID before the provider finishes and exposes `submitting-pear`, `waiting-for-pear`, and `downloading-psd` phases. |
+| Pear ZIP to PSD editor | Pending real artifact run | The safe downloader accepts the real ZIP, extracts the primary non-`_depth.psd` file, validates `8BPS`, and opens at least two editable layers. |
+| PostgreSQL concurrency suites | Skipped locally | Run annotation, element decomposition, and layered decomposition concurrency suites against an isolated PostgreSQL database and retain transaction/ledger evidence. |
+| Exact-build smoke regression | Pending deployment | Verify authentication, configured model visibility, reference/fusion groups, `n > 1` progressive generation, canvas/node/ChatCanvas, image toolbar, and bottom toolbar after deploying the exact commit. |

@@ -12,7 +12,9 @@ describe('video poll terminal durability contract', () => {
   it('commits a completed video before publishing the in-memory completion state', () => {
     const videoStart = source.indexOf("if (registryTask.type === 'video')");
     const completion = source.indexOf('const completed = await completeCloudTask(taskId,', videoStart);
-    const memoryUpdate = source.indexOf("updateTaskProgress(taskId, {\n                status: 'completed'", completion);
+    const completionTail = source.slice(completion);
+    const memoryMatch = /updateTaskProgress\(taskId,\s*\{\s*status:\s*'completed'/.exec(completionTail);
+    const memoryUpdate = memoryMatch ? completion + memoryMatch.index : -1;
 
     expect(videoStart).toBeGreaterThan(-1);
     expect(completion).toBeGreaterThan(videoStart);

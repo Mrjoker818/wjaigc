@@ -48,7 +48,9 @@ describe('video task durability contract', () => {
     it(`${routePath} durably records the provider task ID before exposing it to the in-memory poller`, () => {
       const source = readSource(routePath);
       const providerTaskPersistence = source.indexOf('await recordVideoTaskRemotePolling(taskId,');
-      const inMemoryPollState = source.indexOf('updateTaskProgress(taskId, {\n          progress: 10,', providerTaskPersistence);
+      const persistenceTail = source.slice(providerTaskPersistence);
+      const memoryMatch = /updateTaskProgress\(taskId,\s*\{\s*progress:\s*10,/.exec(persistenceTail);
+      const inMemoryPollState = memoryMatch ? providerTaskPersistence + memoryMatch.index : -1;
 
       expect(providerTaskPersistence).toBeGreaterThan(-1);
       expect(inMemoryPollState).toBeGreaterThan(providerTaskPersistence);

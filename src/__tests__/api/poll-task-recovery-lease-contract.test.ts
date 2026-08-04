@@ -57,7 +57,9 @@ describe('poll-task recovery lease contract', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
     const directResult = source.indexOf('if (directImageUrls.length > 0)');
     const completed = source.indexOf('const committed = await completeCloudTask(', directResult);
-    const memoryUpdate = source.indexOf("updateTaskProgress(recovered.taskId, {\n                status: 'completed'", completed);
+    const completionTail = source.slice(completed);
+    const memoryMatch = /updateTaskProgress\(recovered\.taskId,\s*\{\s*status:\s*'completed'/.exec(completionTail);
+    const memoryUpdate = memoryMatch ? completed + memoryMatch.index : -1;
 
     expect(completed).toBeGreaterThan(directResult);
     expect(memoryUpdate).toBeGreaterThan(completed);

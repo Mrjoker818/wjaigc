@@ -8,6 +8,14 @@ const source = readFileSync(
   'utf8',
 );
 
+function indexOfCompletedProgress(start: number, taskExpression: string): number {
+  const tail = source.slice(start);
+  const match = new RegExp(
+    `updateTaskProgress\\(${taskExpression},\\s*\\{\\s*status:\\s*'completed'`,
+  ).exec(tail);
+  return match ? start + match.index : -1;
+}
+
 describe('progressive generation recovery contract', () => {
   it('schedules provider submission after returning the recovery acknowledgement', () => {
     const recoveryStart = source.indexOf('if (requiresSubmissionRecovery)');
@@ -24,7 +32,7 @@ describe('progressive generation recovery contract', () => {
   it('commits recovered direct results with a conditional database completion before memory state', () => {
     const directResult = source.indexOf('if (directImageUrls.length > 0)');
     const persistedCompletion = source.indexOf('const committed = await completeCloudTask(', directResult);
-    const memoryCompletion = source.indexOf("updateTaskProgress(recovered.taskId, {\n                status: 'completed'", directResult);
+    const memoryCompletion = indexOfCompletedProgress(directResult, 'recovered\\.taskId');
 
     expect(directResult).toBeGreaterThan(-1);
     expect(persistedCompletion).toBeGreaterThan(directResult);

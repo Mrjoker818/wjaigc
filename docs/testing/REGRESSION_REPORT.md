@@ -627,3 +627,18 @@ This gate does not claim provider generation or billing acceptance. The next rea
 | Coze browser acceptance | PENDING DEPLOYMENT | Verify that the visible selected model exactly matches the `providerId` and `model` in `/api/generate`; then verify a valid configured request reaches a provider task and a deliberately stale pair is rejected before task creation or charge. |
 
 This gate closes one confirmed application-routing defect. It does not yet classify all future provider failures: a real deployment test must retain the provider response, app task ID, remote task ID, and terminal transition timing before attributing a failure to the provider or to Wujie.
+
+## 2026-08-04 RemoveBG and Layer Artifact Gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Dedicated RemoveBG routing | PASS (local) | Dedicated `removebg` providers are kept out of generic image-generation candidates and are invoked through the dedicated adapter. Explicit provider selection has priority and user model authorization is checked. |
+| RemoveBG output and billing contract | PASS (local) | Both action aliases use `image_remove_bg`; successful dedicated results return provider/model/engine metadata and persist RGBA plus alpha mask. `ai` and `ai-only` do not silently fall back to CPU. |
+| Pear layered artifact handling | PASS (local) | Pear submission requests asynchronous URL results; PSD and ZIP artifacts are accepted; ZIP entry count, path, MIME, decompressed size, PSD signature, primary/depth selection, and legacy persisted URL compatibility are covered. |
+| Focused RemoveBG suites | PASS | 3 files / 17 assertions passed. |
+| Focused Pear/layer suites | PASS | 5 files / 50 assertions passed. |
+| Full regression | PASS WITH ENVIRONMENT SKIPS | `pnpm test`: 320 files / 1,435 tests passed; 3 PostgreSQL-specific files / 4 tests skipped because no isolated PostgreSQL URL is configured. |
+| Production build | PASS | `pnpm build`: Next.js 16.2.10 compiled, type checked, generated 112 static pages, and collected all dynamic routes. |
+| Cloud browser acceptance | PENDING DEPLOYMENT | Real provider output, alpha quality, Pear ZIP download/extraction/editor opening, PostgreSQL terminal transitions, and billing/refund records require the deployed environment. |
+
+The four task-durability source-order contracts now use branch-scoped whitespace-tolerant matching rather than fixed indentation. They still assert that durable database writes occur before in-memory completion or polling publication; no production task-state logic was relaxed.

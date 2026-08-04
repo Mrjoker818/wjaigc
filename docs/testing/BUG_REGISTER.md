@@ -867,3 +867,18 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | Regression | RED then GREEN: the UI contract requires stale-key reconciliation and cache persistence; the API contract requires the mismatch gate before `buildGenerationBatch`. Focused generation/recovery suite: 55 assertions passed. |
 | Local verification | `pnpm ts-check` passed; `pnpm lint` exited 0 with 949 pre-existing warnings; `pnpm test` passed 311 files / 1,389 tests, with 3 PostgreSQL-specific files / 4 tests skipped because no isolated `TEST_POSTGRES_URL` is configured; `pnpm build` passed. |
 | Cloud status | Pending exact-commit deployment and real Chrome acceptance. Capture the selected option plus `/api/generate` body, then run one valid configured model and one deliberately stale selection. |
+
+### BUG-047: Dedicated RemoveBG providers were routed through generic image generation
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Image toolbar remove background / `/api/image-edit` |
+| Reproduction | Configure a provider with model type `removebg`, select AI remove background, and submit a raster image. |
+| Expected | The selected dedicated provider/model uses its documented remove-background protocol, preserves a real alpha channel, returns provider traceability, and uses the same billing operation for both supported action aliases. |
+| Actual | Dedicated providers could be mixed into generic image candidates and sent through an image-generation protocol. `removebg` and `remove_background` also did not share one explicit action classification at every decision point. |
+| Root cause | Provider discovery did not separate dedicated `removebg` adapters from generic image-generation fallbacks. The route used repeated string comparisons rather than one normalized action boundary. |
+| Fix | Separate authorized dedicated RemoveBG providers from generic candidates; prefer an explicitly selected provider; call `submitDedicatedRemoveBg`; safely persist RGBA and alpha-mask outputs; return `providerId`, `usedModel`, and `engine: dedicated-removebg`; unify both action aliases under `image_remove_bg`; prohibit silent CPU fallback for `ai` and `ai-only`. |
+| Files | `src/app/api/image-edit/route.ts`, `src/__tests__/api/remove-bg-provider-wiring.test.ts` |
+| Regression | Dedicated wiring suite: 7/7 assertions. Combined RemoveBG provider/profile suite: 17/17 assertions. Full Vitest: 320 files / 1,435 tests passed; 3 PostgreSQL files / 4 tests skipped without an isolated database. Production build passed. |
+| Cloud status | Pending exact-build Chrome verification with a real dedicated provider. PNG/WebP/ZIP output, alpha quality, provider/model traceability, one charge, and at-most-one refund remain unverified. |

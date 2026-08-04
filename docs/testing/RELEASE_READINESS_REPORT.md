@@ -560,3 +560,16 @@ The local repair is verified by new RED/GREEN regression contracts, the focused 
 2. An invalid explicit pair is rejected before task creation and charging.
 3. A valid configured provider task reaches a terminal state with retained provider evidence.
 4. Browser/proxy interruption after submission is reconciled through the durable task rather than misreported as an immediate provider failure.
+
+## 2026-08-04 Local Gate Update
+
+Dedicated RemoveBG production wiring and Pear PSD/ZIP artifact handling have passed their focused suites and the complete local test/build gate. The complete Vitest run passed 320 files and 1,435 tests. Four PostgreSQL concurrency tests remain skipped because this workstation has no isolated PostgreSQL test URL. The Next.js production build completed successfully and generated 112 static pages.
+
+**Release decision remains: Not approved.** Local evidence cannot close the following production boundaries:
+
+1. A real dedicated RemoveBG provider must return a non-constant alpha result through each supported response format and preserve the selected provider/model metadata.
+2. A real Pear `Image-Layered` request must return quickly with an application task ID, progress through asynchronous phases, download the ZIP, select the non-depth PSD, and open editable layers.
+3. PostgreSQL must prove concurrent idempotency, conditional terminal transitions, one charge, and at-most-one refund under completion/cancel/failure races.
+4. Login, model catalog, reference/fusion groups, `n > 1` progressive return, canvas, node mode, ChatCanvas, and both toolbars require an exact-build Chrome smoke regression after deployment.
+
+No local test result is being used as a substitute for those deployed acceptance checks.

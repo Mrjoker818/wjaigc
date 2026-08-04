@@ -44,6 +44,12 @@ import { buildDisplayDecomposePrompt, buildDisplayDecomposeRequestBody, normaliz
 import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';
 import { evaluateRemoveBgOutput } from '@/lib/image-tools/remove-bg-quality';
 import { resolveLayerSourceImage } from '@/lib/layer-decomposition/source-image';
+import { isModelAssignedToUser } from '@/lib/model-defaults';
+import {
+  submitDedicatedRemoveBg,
+  RemoveBgProviderError,
+} from '@/lib/remove-bg-provider';
+import type { ApiProvider } from '@/lib/universal-api-types';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -1522,6 +1528,7 @@ export async function POST(request: NextRequest) {
     deductedCredits = 0; // 跟踪已扣积分，用于失败退款
     const { action: rawAction, imageUrl, maskImage, prompt, editMode, expandRatio, expandScale = 1, expandPadding, targetWidth, targetHeight, aspectRatio, angleMode = 'image', rotation = 0, tilt = 0, zoom = 1, model: rawModel = 'gemini-2.5-flash-image-preview', providerId, engine: enginePref = 'auto' } = body;
     const action = rawAction === 'extend' ? 'outpaint' : rawAction;
+    const isRemoveBackgroundAction = action === 'removebg' || action === 'remove_background';
 
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
     let modelStr = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel);
@@ -1611,7 +1618,7 @@ export async function POST(request: NextRequest) {
     // 积分检查与扣除
     if (sessionUser) {
       const creditOp = action === 'upscale' ? 'image_upscale'
-        : action === 'remove_background' ? 'image_remove_bg'
+        : isRemoveBackgroundAction ? 'image_remove_bg'
         : action === 'outpaint' ? 'image_edit'
         : 'image_edit';
       const creditResult = await consumeCredits(sessionUser.id, creditOp, undefined, undefined, modelStr, { providerId: effectiveProviderId || undefined });
@@ -1628,7 +1635,17 @@ export async function POST(request: NextRequest) {
     // 2. 再尝试管理员配置的其他 image 类型 provider 的模型
     // 3. 最后使用环境变量兜底
     // 构建候选模型列表：前端指定的模型优先，然后是其他所有可用模型
-    const candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string; advancedParams?: Record<string, string> }> = [];
+    type ImageCandidate = {
+      model: string;
+      apiKey: string;
+      apiBaseUrl: string;
+      source: string;
+      providerId?: string;
+      providerType?: ApiProvider['modelType'];
+      advancedParams?: Record<string, string>;
+    };
+    const candidateModels: ImageCandidate[] = [];
+    const dedicatedRemoveBgProviders: ApiProvider[] = [];
     const triedModels = new Set<string>();
 
     const allImageProviders = await findAllProvidersForType('image');
@@ -1642,6 +1659,8 @@ export async function POST(request: NextRequest) {
           apiKey: specifiedProvider.apiKey,
           apiBaseUrl: normalizeApiBaseUrl(specifiedProvider.baseUrl),
           source: 'specified-provider',
+          providerId: specifiedProvider.id,
+          providerType: specifiedProvider.modelType,
           advancedParams: specifiedProvider.advancedParams,
         });
         triedModels.add(lookupModel);
@@ -1658,6 +1677,8 @@ export async function POST(request: NextRequest) {
         apiKey: preferredProvider.apiKey,
         apiBaseUrl: normalizeApiBaseUrl(preferredProvider.baseUrl),
         source: 'preferred',
+        providerId: preferredProvider.id,
+        providerType: preferredProvider.modelType,
         advancedParams: preferredProvider.advancedParams,
       });
       triedModels.add(lookupModel);
@@ -1672,6 +1693,8 @@ export async function POST(request: NextRequest) {
             apiKey: entry.provider.apiKey,
             apiBaseUrl: normalizeApiBaseUrl(entry.provider.baseUrl),
             source: 'admin-auto',
+            providerId: entry.provider.id,
+            providerType: entry.provider.modelType,
             advancedParams: entry.provider.advancedParams,
           });
           triedModels.add(m);
@@ -1682,19 +1705,33 @@ export async function POST(request: NextRequest) {
     // 2.5 功能专用模型优先插入到候选列表首位（按action类型）:
     //   removebg: 优先使用管理员配置的 removebg 类型专用模型
     //   upscale: 优先使用管理员配置的 upscaler 类型专用模型
-    if (action === 'removebg' || action === 'upscale') {
-      const specialType = action === 'removebg' ? 'removebg' : 'upscaler';
+    if (isRemoveBackgroundAction || action === 'upscale') {
+      const specialType = isRemoveBackgroundAction ? 'removebg' : 'upscaler';
       const { isRemoveBgModel, isUpscalerModel } = await import('@/lib/model-capabilities');
       const specialProviders = await findAllProvidersForType(specialType);
       const specialModels: typeof candidateModels = [];
       for (const entry of specialProviders) {
+        const isDedicatedRemoveBgProvider = isRemoveBackgroundAction
+          && (entry.provider.modelType || entry.provider.type) === 'removebg';
         for (const m of entry.models) {
+          const isAuthorized = !sessionUser
+            || sessionUser.role === 'admin'
+            || isModelAssignedToUser(sessionUser.imageModels, entry.provider.id, m);
+          if (!isAuthorized) continue;
+          if (isDedicatedRemoveBgProvider) {
+            if (!dedicatedRemoveBgProviders.some(provider => provider.id === entry.provider.id)) {
+              dedicatedRemoveBgProviders.push(entry.provider);
+            }
+            continue;
+          }
           if (!triedModels.has(m)) {
             specialModels.push({
               model: m,
               apiKey: entry.provider.apiKey,
               apiBaseUrl: normalizeApiBaseUrl(entry.provider.baseUrl),
               source: `admin-special-${specialType}`,
+              providerId: entry.provider.id,
+              providerType: entry.provider.modelType,
               advancedParams: entry.provider.advancedParams,
             });
             triedModels.add(m);
@@ -1703,7 +1740,7 @@ export async function POST(request: NextRequest) {
       }
       // 对于 removebg/upscale 操作，在通用 image 模型中也检查是否为专用模型（关键词匹配）
       // 将通用image模型里匹配的专用模型也移到前面
-      const isSpecialModel = (action as string) === 'removebg' ? isRemoveBgModel : isUpscalerModel;
+      const isSpecialModel = isRemoveBackgroundAction ? isRemoveBgModel : isUpscalerModel;
       const matchedFromImage: typeof candidateModels = [];
       const restGeneral: typeof candidateModels = [];
       for (const c of candidateModels) {
@@ -1718,6 +1755,12 @@ export async function POST(request: NextRequest) {
       candidateModels.push(...specialModels, ...matchedFromImage, ...restGeneral);
     }
 
+    if (effectiveProviderId) {
+      dedicatedRemoveBgProviders.sort((provider) => (
+        provider.id === effectiveProviderId ? -1 : 1
+      ));
+    }
+
     // 3. 环境变量兜底
     const envApiKey = process.env.APIMART_API_KEY || '';
     const envApiBaseUrl = normalizeApiBaseUrl(process.env.APIMART_BASE_URL || '');
@@ -1727,10 +1770,15 @@ export async function POST(request: NextRequest) {
         apiKey: envApiKey,
         apiBaseUrl: envApiBaseUrl,
         source: 'env-fallback',
+        providerType: 'image',
       });
     }
 
-    if (candidateModels.length === 0) {
+    const genericRemoveBgCandidates = candidateModels.filter(
+      candidate => candidate.providerType !== 'removebg',
+    );
+
+    if (candidateModels.length === 0 && dedicatedRemoveBgProviders.length === 0) {
       return NextResponse.json({
         success: false,
         error: '请先在管理员系统配置可用的图像模型（image类型）',
@@ -3141,8 +3189,8 @@ export async function POST(request: NextRequest) {
     }, { status: 500 });
     }
 
-    if (action === 'removebg' || action === 'remove_background') {
-      if (engineMode !== 'ai') {
+    if (isRemoveBackgroundAction) {
+      if (engineMode === 'local' || engineMode === 'cpu') {
         const rembgModel = isRembgCpuModel(body.removeBgModel || '')
           ? body.removeBgModel!
           : DEFAULT_REMBG_MODEL;
@@ -3169,12 +3217,12 @@ export async function POST(request: NextRequest) {
             }
             console.warn('[remove_background] rembg CPU output failed quality validation; trying configured fallback');
           }
-          if (engineMode === 'cpu') {
+          if (engineMode === 'cpu' || engineMode === 'local') {
             return NextResponse.json({ success: false, error: rembgResult.error || 'rembg CPU 去背景失败' }, { status: 502 });
           }
           console.warn('[remove_background] rembg CPU failed, trying explicitly configured AI fallback:', rembgResult.error);
         } catch (error) {
-          if (engineMode === 'cpu') {
+          if (engineMode === 'cpu' || engineMode === 'local') {
             return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'rembg CPU 去背景失败' }, { status: 502 });
           }
           console.warn('[remove_background] rembg CPU error, trying explicitly configured AI fallback:', error);
@@ -3203,10 +3251,69 @@ export async function POST(request: NextRequest) {
       ].join(', ');
 
       let aiSuccess = false;
-      if (engineMode !== 'local') {
+      let dedicatedError: RemoveBgProviderError | null = null;
       try {
-        console.log(`[remove_background] Trying AI path first (${candidateModels.length} models available: ${candidateModels.slice(0,3).map(c=>c.model).join(', ')}...)`);
-        const submitResult = await autoTrySubmitImageTask(candidateModels, (m) => ({
+        for (const dedicatedProvider of dedicatedRemoveBgProviders) {
+          const configuredDedicatedModels = [
+            dedicatedProvider.selectedModel,
+            ...(dedicatedProvider.selectedModels || []),
+            ...(dedicatedProvider.discoveredModels || []).map(model => model.id),
+          ].filter((model): model is string => Boolean(model));
+          const dedicatedModel = configuredDedicatedModels.includes(modelStr)
+            ? modelStr
+            : configuredDedicatedModels[0] || modelStr;
+          try {
+            const dedicatedResult = await submitDedicatedRemoveBg(
+              { ...dedicatedProvider, selectedModel: dedicatedModel },
+              imageUrl,
+              { signal: request.signal },
+            );
+            const alphaMaskBuffer = await sharp(dedicatedResult.buffer)
+              .ensureAlpha()
+              .extractChannel(3)
+              .png()
+              .toBuffer();
+            const persisted = await postProcessLocalRemoveBG(
+              dedicatedResult.buffer.toString('base64'),
+              alphaMaskBuffer.toString('base64'),
+              await fetchImageBuffer(imageUrl),
+            );
+            if (!persisted) {
+              throw new RemoveBgProviderError(
+                'REMOVE_BG_OUTPUT_INVALID',
+                'RemoveBG output could not be persisted safely',
+              );
+            }
+            aiSuccess = true;
+            return NextResponse.json({
+              success: true,
+              imageUrl: persisted.imageUrl,
+              maskUrl: persisted.maskUrl,
+              quality: persisted.quality,
+              action,
+              providerId: dedicatedProvider.id,
+              usedModel: dedicatedModel,
+              engine: 'dedicated-removebg',
+            });
+          } catch (error) {
+            dedicatedError = error instanceof RemoveBgProviderError
+              ? error
+              : new RemoveBgProviderError(
+                  'REMOVE_BG_PROVIDER_FAILED',
+                  'RemoveBG provider request failed',
+                  true,
+                  { cause: error },
+                );
+            console.warn(
+              `[remove_background] Dedicated provider ${dedicatedProvider.id} failed:`,
+              dedicatedError.code,
+            );
+            if (!dedicatedError.retryable) break;
+          }
+        }
+
+        console.log(`[remove_background] Trying generic AI fallback (${genericRemoveBgCandidates.length} models available: ${genericRemoveBgCandidates.slice(0,3).map(c=>c.model).join(', ')}...)`);
+        const submitResult = await autoTrySubmitImageTask(genericRemoveBgCandidates, (m) => ({
           model: m,
           prompt: removeBgPrompt,
           negative_prompt: removeBgNegativePrompt,
@@ -3245,7 +3352,7 @@ export async function POST(request: NextRequest) {
         if (submitResult.taskId) {
           // 异步模式：返回 taskId 给前端轮询，poll-task 会做后处理
           console.log(`[remove_background] AI returned taskId=${submitResult.taskId}, returning to frontend for polling`);
-          const rbUsedCandidate = candidateModels.find(c => c.model === aiUsedModel) || candidateModels[0];
+          const rbUsedCandidate = genericRemoveBgCandidates.find(c => c.model === aiUsedModel) || genericRemoveBgCandidates[0];
           aiSuccess = true;
           registerTask(submitResult.taskId, 'generate', 'AI 移除背景', sessionUser?.id);
           void recordImageTaskSubmitted({ taskId: submitResult.taskId, userId: sessionUser?.id, type: 'removebg', providerId: effectiveProviderId, model: aiUsedModel, label: 'AI 移除背景' })
@@ -3268,15 +3375,19 @@ export async function POST(request: NextRequest) {
       } catch (bgErr) {
         console.warn('[remove_background] AI remove background fallback failed:', bgErr instanceof Error ? bgErr.message : bgErr);
       }
-      } // end if (engineMode !== 'local')
 
       // engineMode==='ai' 且 AI路径失败：直接返回错误，不降级
-      if (engineMode === 'ai' && !aiSuccess) {
+      if ((engineMode === 'ai' || engineMode === 'ai-only') && !aiSuccess) {
         logError(OP_ACTIONS.IMAGE_EDIT, new Error(`action:${action} engine:ai 所有AI模型失败`), {
           userId: sessionUser?.id,
           model: '',
         });
-        return NextResponse.json({ error: 'AI 移除背景失败，已配置的模型均不可用。请检查API密钥或切换到本地/自动模式。' }, { status: 502 });
+        return NextResponse.json({
+          success: false,
+          code: dedicatedError?.code || 'REMOVE_BG_AI_FAILED',
+          error: dedicatedError?.message || 'AI 移除背景失败，已配置的模型均不可用。',
+          retryable: dedicatedError?.retryable ?? true,
+        }, { status: 502 });
       }
 
       // ─── 所有路径均失败 → 本地透明化兜底（秒级完成） ───
