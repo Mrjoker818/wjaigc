@@ -20,3 +20,18 @@ An item is listed here when source-level or local automated evidence exists but 
 ## Execution Rule
 
 For every item above, retain a screenshot, console log, network response, task/request ID, and (when the flow is billable) the administrator billing record. A provider outage can be classified as provider-blocked only after the platform displays a durable terminal state with the correct retry/refund outcome.
+
+## Deployment Blocker Observed On 2026-08-02
+
+The authenticated deployed page at `https://wjaigc.coze.site/` did not expose the code in GitHub `main` commit `05f809652e35fbb1032042af747c7a46b0c9d7b6`. Its upscale dialog showed four hard-coded 302 options and omitted both configured Pear upscalers, while the administrator page reported one enabled 302 upscaler and two enabled Pear upscalers.
+
+Do not close or execute `UV-20260802-03` against that stale build. Re-deploy the exact GitHub commit first, reload the page, and record the dynamic catalog before starting any billable job.
+
+## 方案 B Deployment Verification Items - 2026-08-04
+
+| ID | Priority | Required deployed verification | Current status |
+| --- | --- | --- | --- |
+| UV-20260804-01 | P1 | Open Effect Reverse Engineering Pro from the selected-image toolbar and verify Chinese title, source column, workspace tabs, layer column, calibration notice, and real task status | Unverified; local component and build checks passed |
+| UV-20260804-02 | P2 | Open the bottom feature drawer with the right panel open, verify it is fully visible, bounded, internally scrollable, and does not capture canvas events | Unverified; pure layout and source-contract checks passed |
+| UV-20260804-03 | P2 | Verify the selected-image toolbar keeps the first five actions visible and exposes every remaining action through `+N`; invoke an overflow action and verify custom order/hidden preferences | Unverified; layout, preference, and wiring checks passed |
+| UV-20260804-04 | P2 | Verify narrow viewport clamping and absence of horizontal overflow, then inspect console errors, browser dialogs, and network failures | Unverified; requires deployed browser evidence |

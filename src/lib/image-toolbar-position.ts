@@ -9,6 +9,7 @@ export interface ImageToolbarPositionInput {
   offset: { x: number; y: number };
   toolbar: { width: number; height: number };
   viewport: { width: number; height: number };
+  occupiedRight?: number;
   margin?: number;
   gap?: number;
 }
@@ -27,6 +28,7 @@ export function getConstrainedImageToolbarPosition({
   viewport,
   margin = 16,
   gap = 8,
+  occupiedRight = 0,
 }: ImageToolbarPositionInput): ImageToolbarPosition {
   const safeMargin = Math.max(0, margin);
   const screenX = image.x * zoom + offset.x;
@@ -34,9 +36,10 @@ export function getConstrainedImageToolbarPosition({
   const screenWidth = image.width * zoom;
   const screenHeight = image.height * zoom;
   const preferredLeft = screenX + screenWidth / 2;
+  const availableRight = Math.max(safeMargin, viewport.width - Math.max(0, occupiedRight) - safeMargin);
   const effectiveToolbarWidth = Math.min(
     Math.max(0, toolbar.width),
-    Math.max(0, viewport.width - safeMargin * 2),
+    Math.max(0, availableRight - safeMargin),
   );
   const halfWidth = effectiveToolbarWidth / 2;
 
@@ -45,8 +48,8 @@ export function getConstrainedImageToolbarPosition({
   if (preferredLeft - halfWidth < safeMargin) {
     left = safeMargin;
     horizontalTransform = 'translate(0';
-  } else if (preferredLeft + halfWidth > viewport.width - safeMargin) {
-    left = viewport.width - safeMargin;
+  } else if (preferredLeft + halfWidth > availableRight) {
+    left = availableRight;
     horizontalTransform = 'translate(-100%';
   } else {
     horizontalTransform = 'translate(-50%';

@@ -52,3 +52,34 @@ This report records the post-remediation local regression state. It does not cla
 ## Current Release Decision
 
 **Not approved for release yet.** The local code gates are necessary evidence, but the deployment gates above are mandatory before the P1/P0 findings can be closed.
+
+## Deployed Preflight Addendum - 2026-08-02
+
+- Deployed URL inspected in authenticated Chrome: `https://wjaigc.coze.site/`
+- GitHub `main` and the local verified worktree both resolve to `05f809652e35fbb1032042af747c7a46b0c9d7b6`.
+- The deployed image-toolbar upscale dialog still exposed four hard-coded 302 choices:
+  - `Super-Upscale V2 (AI超分)`
+  - `Upscale V6 (标准放大)`
+  - `Image Upscale (基础放大)`
+  - `ESRGAN (高清增强)`
+- The same deployed administrator API page reported a different effective configuration:
+  - `302放大`: enabled, upscale type, **1 enabled model**
+  - `Pear放大接口`: enabled, upscale type, **2 enabled models**
+- Therefore the inspected deployment does not contain the dynamic configured-upscaler catalog from commit `05f8096`. That code must show configured 302/Pear choices rather than the old four-item hard-coded 302 list.
+- No billable upscale request was submitted from this stale deployment. Testing a known stale request-routing surface would not be valid evidence for the repaired code.
+- The no-charge 302 protocol preflight returned `2 passed, 1 warning, 0 failed`: `/models` was reachable (961 models), while generic `/images/generations` returned 404 with an `/images/edits` fallback hint. This is a provider endpoint/capability signal, not proof that a configured 302 special-upscale model is either usable or broken.
+- Current release decision remains **not approved** until Coze deploys GitHub `main` at `05f8096` and the browser re-check proves the corrected catalog and provider-model routing.
+
+## 方案 B Local Verification Addendum - 2026-08-04
+
+Scope: Effect Reverse Engineering Pro Chinese three-column workbench, collision-safe bottom toolbar drawer, and selected-image `+N` overflow menu.
+
+- Focused Vitest: **47 passed / 47**, across 7 files.
+- TypeScript: `pnpm ts-check` **passed**.
+- Production build: `pnpm build` **passed**, Next.js 16.2.10, 112 static pages generated and application routes collected.
+- `git diff --check`: **passed**.
+- Existing action descriptors and callbacks remain the source of truth; the new overflow menu reuses the same action objects and the bottom drawer retains existing feature buttons and annotation entry.
+- The reverse-engineering result tab is gated on a real completed task result. Manual regions remain explicitly manual and are not represented as AI analysis.
+- No deployed-browser evidence exists for this addendum. The Chinese window, three-column layout, drawer collision behavior, overflow callbacks, narrow viewport behavior, console/network state, and real provider task flow remain **unverified until Coze deploys this commit**.
+
+Release decision for this addendum: **not approved for release until deployed-browser verification is attached**.

@@ -10,6 +10,7 @@ import {
   type VideoRetryPayload,
 } from '@/lib/video-processing-state';
 import { getConstrainedImageToolbarPosition } from '@/lib/image-toolbar-position';
+import { getBottomToolbarDrawerPlacement, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from 'react';
@@ -1325,6 +1326,26 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const [leftToolbarExpanded, setLeftToolbarExpanded] = useState(false);
   const [bottomBarHovered, setBottomBarHovered] = useState(false);
+  const bottomToolbarRef = useRef<HTMLDivElement | null>(null);
+  const [bottomToolbarDrawerPlacement, setBottomToolbarDrawerPlacement] = useState<BottomToolbarDrawerPlacement | null>(null);
+
+  const updateBottomToolbarDrawerPlacement = useCallback(() => {
+    const trigger = bottomToolbarRef.current?.getBoundingClientRect();
+    if (!trigger || typeof window === 'undefined') return;
+    setBottomToolbarDrawerPlacement(getBottomToolbarDrawerPlacement({
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      trigger: { left: trigger.left, top: trigger.top, width: trigger.width, height: trigger.height },
+      drawer: { width: 420, height: Math.min(window.innerHeight * 0.6, 520) },
+      occupiedRight: isPanelCollapsed ? 20 : 480,
+    }));
+  }, [isPanelCollapsed]);
+
+  useEffect(() => {
+    if (!bottomBarHovered) return;
+    updateBottomToolbarDrawerPlacement();
+    window.addEventListener('resize', updateBottomToolbarDrawerPlacement);
+    return () => window.removeEventListener('resize', updateBottomToolbarDrawerPlacement);
+  }, [bottomBarHovered, updateBottomToolbarDrawerPlacement]);
 
   // P2-1: 轻量连线状态
   const canvasConnections = connections ?? [];
@@ -9699,7 +9720,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     .filter((a): a is typeof imageActions[number] => a !== undefined);
 
   // 折叠时仅显示前5个
-  const displayedActions = toolbarExpanded ? visibleImageActions : visibleImageActions.slice(0, 5);
+  const displayedActions = visibleImageActions.slice(0, 5);
+  const overflowImageActions = visibleImageActions.slice(5);
   const hasMoreActions = visibleImageActions.length > 5;
 
   // Canvas right-click menu items
@@ -9993,6 +10015,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         width: canvasSize.width || window.innerWidth,
         height: canvasSize.height || window.innerHeight,
       },
+      occupiedRight: isPanelCollapsed ? 20 : 480,
     });
   };
 
@@ -16697,6 +16720,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 </button>
                 {hasMoreActions && (
                   <button
+                    type="button"
+                    aria-expanded={toolbarExpanded}
+                    aria-controls="selected-image-toolbar-overflow"
                     onClick={(e) => { e.stopPropagation(); setToolbarExpanded(!toolbarExpanded); }}
                     className={`flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-medium transition-all ${
                       isMonochrome
@@ -16706,7 +16732,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     title={toolbarExpanded ? '收起工具栏' : '展开更多工具'}
                   >
                     {toolbarExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    <span className="text-[10px]">{toolbarExpanded ? '收起' : `+${visibleImageActions.length - 5}`}</span>
+                    <span className="text-[10px]">{toolbarExpanded ? '收起' : `+${overflowImageActions.length}`}</span>
                   </button>
                 )}
                 {/* 自定义按钮 */}
@@ -16723,6 +16749,30 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 </button>
               </div>
               </div>
+
+              {hasMoreActions && (
+                <div
+                  id="selected-image-toolbar-overflow"
+                  data-image-toolbar-overflow
+                  className={`absolute left-1/2 top-full z-50 mt-2 w-56 -translate-x-1/2 overflow-y-auto rounded-lg border p-1 shadow-2xl max-h-[min(50vh,420px)] ${toolbarExpanded ? 'block' : 'hidden'} ${isMonochrome ? 'border-gray-200 bg-white' : 'border-white/[0.12] bg-[#141418]'}`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onWheel={(e) => e.stopPropagation()}
+                >
+                  {visibleImageActions.slice(5).map((action) => (
+                    <button
+                      key={action.label}
+                      type="button"
+                      data-testid={action.testId}
+                      onClick={(e) => { e.stopPropagation(); setToolbarExpanded(false); action.action(); }}
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs ${isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+                      title={action.desc || action.label}
+                    >
+                      {action.icon}<span>{action.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* 工具栏自定义弹窗 */}
               {showToolbarCustomize && (
@@ -17496,6 +17546,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* Floating pill toolbar - semi-collapsed, expand on hover */}
       <div
+        ref={bottomToolbarRef}
         data-toolbar="bottom-toolbar"
         onMouseDown={(event) => event.stopPropagation()}
         onMouseEnter={() => setBottomBarHovered(true)}
@@ -17573,12 +17624,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* ── Right: Feature buttons (collapsible) ── */}
         <div
+          data-bottom-toolbar-drawer
           onClickCapture={closeCanvasToolPanels}
-          className={`flex items-center transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-            bottomBarHovered ? 'max-w-[900px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
+          style={bottomBarHovered && bottomToolbarDrawerPlacement ? {
+            left: bottomToolbarDrawerPlacement.left,
+            top: bottomToolbarDrawerPlacement.top,
+            width: bottomToolbarDrawerPlacement.width,
+            maxHeight: bottomToolbarDrawerPlacement.height,
+          } : undefined}
+          className={`fixed z-[70] max-h-[min(60vh,520px)] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-xl border p-2 shadow-2xl backdrop-blur-md transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'border-gray-200 bg-white/95' : 'border-white/[0.10] bg-[#1a1a1a]/95'} ${
+            bottomBarHovered && bottomToolbarDrawerPlacement ? 'grid grid-cols-6 gap-1 opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'
           }`}
         >
-          <div className={`w-px h-5 mr-1.5 ${separatorCls}`} />
+          <div className={`col-span-6 h-px mb-1 ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
 
           {/* 图转3D工厂 - moved inside collapsible area */}
           <button

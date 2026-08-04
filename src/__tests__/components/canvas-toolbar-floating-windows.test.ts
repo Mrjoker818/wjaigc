@@ -40,12 +40,23 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('max-w-[calc(100%-2rem)]');
     expect(canvasSource).toContain('overflow-x-auto');
     expect(canvasSource).toContain('[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden');
-    expect(canvasSource).toContain("bottomBarHovered ? 'max-w-[900px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'");
+    expect(canvasSource).toContain('data-bottom-toolbar-drawer');
+    expect(canvasSource).toContain('getBottomToolbarDrawerPlacement');
+    expect(canvasSource).toContain('max-h-[min(60vh,520px)]');
+    expect(canvasSource).toContain("bottomBarHovered && bottomToolbarDrawerPlacement ? 'grid grid-cols-6 gap-1 opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'");
   });
 
   it('isolates bottom-toolbar pointer input from canvas interactions', () => {
     expect(canvasSource).toContain('data-toolbar="bottom-toolbar"');
     expect(canvasSource).toContain('onMouseDown={(event) => event.stopPropagation()}');
+  });
+
+  it('uses a bounded +N popover instead of expanding the selected-image toolbar', () => {
+    expect(canvasSource).toContain('data-image-toolbar-overflow');
+    expect(canvasSource).toContain('max-h-[min(50vh,420px)]');
+    expect(canvasSource).toContain('visibleImageActions.slice(5)');
+    expect(canvasSource).toContain("toolbarExpanded ? 'block' : 'hidden'");
+    expect(canvasSource).toContain('onWheel={(e) => e.stopPropagation()}');
   });
 
   it('keeps the selected-image delete action reachable without colliding with hover actions', () => {

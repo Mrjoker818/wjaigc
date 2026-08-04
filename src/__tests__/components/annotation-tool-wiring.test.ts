@@ -273,7 +273,7 @@ describe('InfiniteCanvas annotation gesture integration', () => {
       'data-toolbar="bottom-annotation-entry"',
     );
     const expandedGroupIndex = canvasSource.indexOf(
-      "bottomBarHovered ? 'max-w-[900px]",
+      'data-bottom-toolbar-drawer',
     );
 
     expect(entryIndex).toBeGreaterThan(-1);
