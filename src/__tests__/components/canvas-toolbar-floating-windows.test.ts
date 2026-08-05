@@ -11,6 +11,7 @@ const layerPanelSource = readSource('src/components/layer-panel.tsx');
 const versionHistorySource = readSource('src/components/version-history-panel.tsx');
 const imageEditorSource = readSource('src/components/image-editor.tsx');
 const videoPanelSource = readSource('src/components/video-generation-panel.tsx');
+const globalsSource = readSource('src/app/globals.css');
 
 describe('canvas toolbar floating windows', () => {
   it('centers the canvas generator and video utility panels when opened', () => {
@@ -75,6 +76,13 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('>全部工具</span>');
     expect(canvasSource).toContain('aria-label="关闭工具抽屉"');
     expect(canvasSource).not.toContain('grid-cols-[repeat(auto-fit,minmax(44px,1fr))]');
+  });
+
+  it('centers drawer tile icons and labels without inherited tooltip offsets', () => {
+    expect(globalsSource).toContain('#canvas-bottom-toolbar-drawer section button');
+    expect(globalsSource).toContain('justify-items: center');
+    expect(globalsSource).toContain('all: initial');
+    expect(globalsSource).toContain('width: max-content');
   });
 
   it('isolates bottom-toolbar pointer input from canvas interactions', () => {
