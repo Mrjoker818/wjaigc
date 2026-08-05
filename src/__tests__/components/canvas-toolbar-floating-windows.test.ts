@@ -46,7 +46,7 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('data-bottom-toolbar-drawer');
     expect(canvasSource).toContain('getBottomToolbarDrawerPlacement');
     expect(canvasSource).toContain('max-h-[min(60vh,520px)]');
-    expect(canvasSource).toContain("grid-cols-[repeat(auto-fit,minmax(44px,1fr))]");
+    expect(canvasSource).toContain("'flex flex-col gap-2 opacity-100 pointer-events-auto'");
   });
 
   it('portals the fixed bottom-toolbar drawer outside the translated toolbar containing block', () => {
@@ -61,10 +61,20 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toMatch(/aria-controls="canvas-bottom-toolbar-drawer"[\s\S]*?onClick=\{\(\) => \{[\s\S]*?setBottomToolbarDrawerOpen\(\(open\) => !open\);[\s\S]*?\}\}/);
     expect(canvasSource).not.toContain('onMouseEnter={() => setBottomToolbarDrawerOpen(true)}');
     expect(canvasSource).toContain('id="canvas-bottom-toolbar-drawer"');
-    expect(canvasSource).toContain("grid-cols-[repeat(auto-fit,minmax(44px,1fr))]");
+    expect(canvasSource).toContain('data-toolbar-drawer-section="ai-creation"');
     expect(canvasSource).not.toContain("bottomToolbarDrawerOpen && bottomToolbarDrawerPlacement ? 'grid grid-cols-6");
     expect(canvasSource).toContain("event.key === 'Escape'");
     expect(canvasSource).toContain("closest('[data-toolbar=\"bottom-toolbar\"], [data-bottom-toolbar-drawer]')");
+  });
+
+  it('groups the bottom-toolbar drawer into labeled sections with a close action', () => {
+    expect(canvasSource).toContain('data-toolbar-drawer-section="ai-creation"');
+    expect(canvasSource).toContain('data-toolbar-drawer-section="brand-design"');
+    expect(canvasSource).toContain('data-toolbar-drawer-section="pro-tools"');
+    expect(canvasSource).toContain('data-toolbar-drawer-section="canvas-tools"');
+    expect(canvasSource).toContain('>全部工具</span>');
+    expect(canvasSource).toContain('aria-label="关闭工具抽屉"');
+    expect(canvasSource).not.toContain('grid-cols-[repeat(auto-fit,minmax(44px,1fr))]');
   });
 
   it('isolates bottom-toolbar pointer input from canvas interactions', () => {

@@ -1340,6 +1340,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       trigger: { left: trigger.left, top: trigger.top, width: trigger.width, height: trigger.height },
       drawer: { width: 420, height: Math.min(window.innerHeight * 0.6, 520) },
       occupiedRight: isPanelCollapsed ? 20 : 480,
+      minWidth: Math.min(360, window.innerWidth - 16),
     }));
   }, [isPanelCollapsed]);
 
@@ -17731,15 +17732,35 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           }}
           style={bottomToolbarDrawerOpen && bottomToolbarDrawerPlacement ? {
             left: bottomToolbarDrawerPlacement.left,
-            top: bottomToolbarDrawerPlacement.top,
             width: bottomToolbarDrawerPlacement.width,
             maxHeight: bottomToolbarDrawerPlacement.height,
+            ...(bottomToolbarDrawerPlacement.side.startsWith('above') && bottomToolbarDrawerPlacement.bottom !== undefined
+              ? { bottom: bottomToolbarDrawerPlacement.bottom }
+              : { top: bottomToolbarDrawerPlacement.top }),
           } : undefined}
           className={`fixed z-[70] max-h-[min(60vh,520px)] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-xl border p-2 shadow-2xl backdrop-blur-md transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'border-gray-200 bg-white/95' : 'border-white/[0.10] bg-[#1a1a1a]/95'} ${
-            bottomToolbarDrawerOpen && bottomToolbarDrawerPlacement ? 'grid grid-cols-[repeat(auto-fit,minmax(44px,1fr))] gap-1 opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'
+            bottomToolbarDrawerOpen && bottomToolbarDrawerPlacement ? 'flex flex-col gap-2 opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'
           }`}
         >
-          <div className={`col-span-full mb-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
+          <div className="flex items-center justify-between gap-2 px-1 pt-1 pb-1">
+            <div className="flex items-center gap-2">
+              <LayoutGrid className={`h-4 w-4 ${isMonochrome ? 'text-gray-500' : 'text-gold'}`} />
+              <span className={`text-xs font-semibold tracking-wide ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>全部工具</span>
+            </div>
+            <button
+              type="button"
+              aria-label="关闭工具抽屉"
+              onClick={() => setBottomToolbarDrawerOpen(false)}
+              className={`h-7 w-7 flex items-center justify-center rounded-full transition-colors ${isMonochrome ? 'text-gray-500 hover:bg-gray-100 hover:text-gray-800' : 'text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <section data-toolbar-drawer-section="ai-creation" className="grid grid-cols-4 gap-1">
+            <div className={`col-span-full flex items-center gap-1.5 px-1 pt-1 ${isMonochrome ? 'text-gray-400' : 'text-gold-muted'}`}>
+              <span className="text-[10px] font-semibold tracking-[0.12em] uppercase">AI 创作</span>
+            </div>
 
           {/* 图转3D工厂 - moved inside collapsible area */}
           <button
@@ -17790,7 +17811,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">视频生成</span>
           </button>
 
-          <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />
+          </section>
+
+          <section data-toolbar-drawer-section="brand-design" className="grid grid-cols-4 gap-1">
+            <div className={`col-span-full flex items-center gap-1.5 px-1 pt-1 ${isMonochrome ? 'text-gray-400' : 'text-gold-muted'}`}>
+              <span className="text-[10px] font-semibold tracking-[0.12em] uppercase">品牌设计</span>
+            </div>
 
           {/* Brand E-commerce */}
           <button
@@ -17864,6 +17890,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             <PenTool className="h-4 w-4" />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">Logo Pro</span>
           </button>
+          </section>
+
+          <section data-toolbar-drawer-section="pro-tools" className="grid grid-cols-4 gap-1">
+            <div className={`col-span-full flex items-center gap-1.5 px-1 pt-1 ${isMonochrome ? 'text-gray-400' : 'text-gold-muted'}`}>
+              <span className="text-[10px] font-semibold tracking-[0.12em] uppercase">专业工具</span>
+            </div>
 
           {/* 3D构图画布 Pro */}
           <button
@@ -17930,7 +17962,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">表情助手</span>
           </button>
 
-          <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />
+          </section>
+
+          <section data-toolbar-drawer-section="canvas-tools" className="grid grid-cols-4 gap-1">
+            <div className={`col-span-full flex items-center gap-1.5 px-1 pt-1 ${isMonochrome ? 'text-gray-400' : 'text-gold-muted'}`}>
+              <span className="text-[10px] font-semibold tracking-[0.12em] uppercase">画布工具</span>
+            </div>
 
           {/* HexCube */}
           <button
@@ -17946,8 +17983,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">六面体</span>
           </button>
 
-          <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />
-
           {/* ChatCanvas 批注 — 折叠区末尾 */}
           <button
             data-toolbar="bottom-annotation-entry"
@@ -17958,6 +17993,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             <MessageCircle className="h-4 w-4" />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">ChatCanvas (C)</span>
           </button>
+          </section>
 
         </div>
           ),

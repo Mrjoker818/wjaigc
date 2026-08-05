@@ -5,6 +5,7 @@ export interface BottomToolbarDrawerPlacementInput {
   trigger: ToolbarRect;
   drawer: { width: number; height: number };
   occupiedRight?: number;
+  minWidth?: number;
   margin?: number;
   gap?: number;
 }
@@ -12,29 +13,42 @@ export interface BottomToolbarDrawerPlacementInput {
 export interface BottomToolbarDrawerPlacement {
   left: number;
   top: number;
+  bottom?: number;
   width: number;
   height: number;
-  side: 'above-left' | 'above-right' | 'below-left' | 'below-right';
+  side: 'above-center' | 'above-left' | 'above-right' | 'below-center' | 'below-left' | 'below-right';
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max));
 
-export function getBottomToolbarDrawerPlacement({ viewport, trigger, drawer, occupiedRight = 0, margin = 8, gap = 8 }: BottomToolbarDrawerPlacementInput): BottomToolbarDrawerPlacement {
-  const availableRight = Math.max(margin, viewport.width - Math.max(0, occupiedRight) - margin);
+function horizontalAnchor(left: number, width: number, triggerCenter: number): 'left' | 'center' | 'right' {
+  const drawerCenter = left + width / 2;
+  if (Math.abs(drawerCenter - triggerCenter) <= 8) return 'center';
+  return drawerCenter < triggerCenter ? 'left' : 'right';
+}
+
+export function getBottomToolbarDrawerPlacement({ viewport, trigger, drawer, occupiedRight = 0, minWidth = 0, margin = 8, gap = 8 }: BottomToolbarDrawerPlacementInput): BottomToolbarDrawerPlacement {
+  const safeMinWidth = Math.max(0, Math.min(minWidth, viewport.width - margin * 2));
+  const maxReservedRight = Math.max(0, viewport.width - margin * 2 - safeMinWidth);
+  const effectiveOccupiedRight = Math.min(Math.max(0, occupiedRight), maxReservedRight);
+  const availableRight = Math.max(margin + safeMinWidth, viewport.width - effectiveOccupiedRight - margin);
   const availableWidth = Math.max(0, availableRight - margin);
   const availableHeight = Math.max(0, viewport.height - margin * 2);
-  const width = Math.min(drawer.width, availableWidth);
+  const width = Math.min(drawer.width, Math.max(safeMinWidth, availableWidth));
   const height = Math.min(drawer.height, availableHeight);
-  const preferLeft = trigger.left + trigger.width > availableRight / 2;
-  const leftCandidate = preferLeft ? trigger.left + trigger.width - width : trigger.left;
+  const triggerCenter = trigger.left + trigger.width / 2;
+  const preferredLeft = triggerCenter - width / 2;
+  const maxLeft = Math.max(margin, availableRight - width);
+  const left = Math.round(clamp(preferredLeft, margin, maxLeft));
   const aboveTop = trigger.top - gap - height;
   const useAbove = aboveTop >= margin || trigger.top > viewport.height / 2;
   const topCandidate = useAbove ? aboveTop : trigger.top + trigger.height + gap;
   return {
-    left: Math.round(clamp(leftCandidate, margin, availableRight - width)),
+    left,
     top: Math.round(clamp(topCandidate, margin, viewport.height - margin - height)),
+    bottom: useAbove ? viewport.height - trigger.top + gap : undefined,
     width: Math.round(width),
     height: Math.round(height),
-    side: `${useAbove ? 'above' : 'below'}-${preferLeft ? 'left' : 'right'}` as BottomToolbarDrawerPlacement['side'],
+    side: `${useAbove ? 'above' : 'below'}-${horizontalAnchor(left, width, triggerCenter)}` as BottomToolbarDrawerPlacement['side'],
   };
 }
