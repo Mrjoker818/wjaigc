@@ -49,7 +49,12 @@ _session_cache = {}
 def get_session(model_name):
     if model_name in _session_cache:
         return _session_cache[model_name]
-    requested = model_name if model_name in _MODEL_FILES else "realesrgan-x4plus-fp16"
+    requested = model_name if model_name in _MODEL_FILES else "realesrgan-x4plus"
+    # CPU 推理优先 fp32（精度与速度均优于 fp16，后者仅适配部分加速硬件）
+    if requested == "realesrgan-x4plus-fp16":
+        fp32_path = os.path.join(_ONNX_MODELS_DIR, _MODEL_FILES["realesrgan-x4plus"])
+        if os.path.exists(fp32_path):
+            requested = "realesrgan-x4plus"
     model_file = _MODEL_FILES[requested]
     model_path = os.path.join(_ONNX_MODELS_DIR, model_file)
     if not os.path.exists(model_path):
@@ -66,7 +71,7 @@ def get_session(model_name):
             raise FileNotFoundError(f"ONNX 模型文件不存在: {model_path}")
     print(f"[upscale_onnx] Loading model: {model_path}", file=sys.stderr)
     sess_options = ort.SessionOptions()
-    sess_options.intra_op_num_threads = 2
+    sess_options.intra_op_num_threads = int(os.environ.get("UPSAMPLE_NUM_THREADS", "4"))
     sess_options.inter_op_num_threads = 1
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     session = ort.InferenceSession(model_path, sess_options=sess_options, providers=['CPUExecutionProvider'])
@@ -94,7 +99,7 @@ def process_tile(session, tile_img, model_name):
     return result
 
 
-def upscale_image_tiled(img, scale=4, tile_size=256, model_name="realesrgan-x4plus-fp16", output_file=None):
+def upscale_image_tiled(img, scale=4, tile_size=256, model_name="realesrgan-x4plus", output_file=None):
     """
     分块放大 — 逐行拼接，内存优化版 (v2 坐标修复)
 
@@ -310,7 +315,7 @@ def main():
     output_file = params.get("outputFile", "")
     scale = int(params.get("scale", 4))
     tile_size = params.get("tileSize", 256)
-    model_name = params.get("model", "realesrgan-x4plus-fp16")
+    model_name = params.get("model", "realesrgan-x4plus")
 
     if not image_b64 and not input_file:
         sys.stdout.write(json.dumps({"success": False, "error": "缺少 image 或 inputFile 参数"}))

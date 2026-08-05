@@ -337,7 +337,7 @@ export async function performOnnxUpscale(
     }
 
     const result = await callOnnxUpscale(
-      imageBase64, scale, tileSize, onnxAvailable.model || 'realesrgan-x4plus-fp16',
+      imageBase64, scale, tileSize, onnxAvailable.model || 'realesrgan-x4plus',
       inputFile, outputFile, timeoutMs,
     );
 
