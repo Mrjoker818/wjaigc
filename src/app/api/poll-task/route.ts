@@ -670,6 +670,29 @@ export async function POST(request: NextRequest) {
           } else {
             const errorText = await pollResp.text().catch(() => '');
             console.warn(`[poll-task] edit remote poll HTTP error: status=${pollResp.status}, body=${errorText.substring(0, 200)}`);
+            // 4xx 客户端错误（API Key 无效/无权限/任务不存在）为永久性错误，标记失败避免无限轮询
+            if (pollResp.status >= 400 && pollResp.status < 500) {
+              const isAuthError = pollResp.status === 401 || pollResp.status === 403;
+              const isGoneError = pollResp.status === 404 || pollResp.status === 410;
+              const errorMsg = isAuthError
+                ? '远程编辑任务鉴权失败：API Key 无效或已过期，请检查该模型对应的 API 凭证'
+                : isGoneError
+                  ? '远程编辑任务不存在或已过期'
+                  : `远程编辑任务返回错误: ${errorText.substring(0, 200)}`;
+              console.warn(`[poll-task] edit remote poll ${pollResp.status} -> marking failed: ${errorMsg}`);
+              if (isAnnotationEdit) {
+                await terminateCloudTaskAndRefund(taskId, 'failed', errorMsg);
+              }
+              failEditTask(taskId, errorMsg);
+              failedTaskCache.set(taskId, { error: errorMsg, timestamp: Date.now() });
+              return NextResponse.json({
+                success: false,
+                status: 'failed',
+                error: errorMsg,
+                retryable: false,
+              }, { status: 200 });
+            }
+            // 429/5xx/网络层临时故障 → 保持 processing 让前端继续轮询
           }
         } catch (remoteErr) {
           console.warn('[poll-task] edit remote poll error:', remoteErr instanceof Error ? remoteErr.message : remoteErr);

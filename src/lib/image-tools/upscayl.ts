@@ -167,8 +167,11 @@ interface OnnxUpscaleResult {
 /** 动态计算 tileSize：根据图片尺寸和可用内存自适应 */
 export function calcOptimalTileSize(width: number, height: number, scale: number): number {
   const pixels = width * height;
-  if (pixels > 1024 * 1024) return 128;
-  if (pixels >= 512 * 512) return 192;
+  // 模型为 4x 固定倍率；tile 过小会导致 tile 数量爆炸
+  // （如 2160x3840 用 128 => 510 个 tile 串行推理 50min+，占满 CPU 使服务无响应）。
+  // 统一提升到 512 上限，将 tile 数量控制在几十个以内，配合 scale-aware 预缩小进一步降负载。
+  if (pixels > 1024 * 1024) return 512;
+  if (pixels >= 512 * 512) return 512;
   if (pixels >= 256 * 256) return 256;
   return Math.min(width, 256);
 }
@@ -178,7 +181,7 @@ export function calcTimeoutMs(width: number, height: number, tileSize: number): 
   const cols = Math.ceil(width / tileSize);
   const rows = Math.ceil(height / tileSize);
   const totalTiles = cols * rows;
-  const secondsPerTile = tileSize <= 128 ? 5 : tileSize <= 256 ? 8 : 12;
+  const secondsPerTile = tileSize <= 128 ? 5 : tileSize <= 256 ? 8 : 15;
   const estimatedSeconds = totalTiles * secondsPerTile;
   return Math.min(30 * 60 * 1000, Math.max(5 * 60 * 1000, (estimatedSeconds * 2 + 30) * 1000));
 }
@@ -307,13 +310,28 @@ export async function performOnnxUpscale(
     let processBuffer = inputBuffer;
     let procW = origW;
     let procH = origH;
-    if (origW > MAX_ONNX_EDGE || origH > MAX_ONNX_EDGE) {
+
+    // 模型固定 4x：当目标倍率 < 4 时，预缩小输入使 4x 输出正好等于目标尺寸，
+    // 避免每个 tile 先 4x 推理再缩回（推理像素浪费 (4/scale)² 倍）。
+    // 例：scale=2 时输入缩小一半，4x 输出 = 原图 x2，推理像素降为 1/4。
+    const onnxModelScale = 4;
+    const effectiveScale = Math.max(1, Math.min(onnxModelScale, scale));
+    const useScaleAwarePreResize = effectiveScale < onnxModelScale;
+    const shrinkW = Math.max(64, Math.round(origW * effectiveScale / onnxModelScale));
+    const shrinkH = Math.max(64, Math.round(origH * effectiveScale / onnxModelScale));
+    const targetProcW = Math.min(origW, MAX_ONNX_EDGE, useScaleAwarePreResize ? shrinkW : MAX_ONNX_EDGE);
+    const targetProcH = Math.min(origH, MAX_ONNX_EDGE, useScaleAwarePreResize ? shrinkH : MAX_ONNX_EDGE);
+
+    if (targetProcW < origW || targetProcH < origH) {
       const { resizeIfTooLarge } = await import('./file');
-      const resized = await resizeIfTooLarge(inputBuffer, MAX_ONNX_EDGE);
+      const resized = await resizeIfTooLarge(inputBuffer, Math.max(targetProcW, targetProcH));
       processBuffer = resized.buffer;
       procW = resized.width;
       procH = resized.height;
-      console.log(`[upscayl] Resized超大图: ${origW}x${origH} -> ${procW}x${procH}`);
+      console.log(
+        `[upscayl] ONNX pre-resize: ${origW}x${origH} -> ${procW}x${procH} ` +
+        `(scale=${scale}, model=${onnxModelScale}x${useScaleAwarePreResize ? ', scale-aware' : ', edge-limit'})`
+      );
     }
 
     const tileSize = params.tileSize || calcOptimalTileSize(procW, procH, scale);
@@ -336,8 +354,9 @@ export async function performOnnxUpscale(
       console.log(`[upscayl] ONNX CPU upscale (base64 mode): ${procW}x${procH} -> ${scale}x, tileSize=${tileSize}`);
     }
 
+    const onnxScale = useScaleAwarePreResize ? onnxModelScale : scale;
     const result = await callOnnxUpscale(
-      imageBase64, scale, tileSize, onnxAvailable.model || 'realesrgan-x4plus',
+      imageBase64, onnxScale, tileSize, onnxAvailable.model || 'realesrgan-x4plus',
       inputFile, outputFile, timeoutMs,
     );
 
@@ -348,8 +367,8 @@ export async function performOnnxUpscale(
     // 文件模式：Python 已直接写入输出文件
     if (result.outputFile && fs.existsSync(result.outputFile)) {
       let finalBuffer: Buffer = await fs.promises.readFile(result.outputFile);
-      const outW = result.outputSize?.[0] ?? procW * scale;
-      const outH = result.outputSize?.[1] ?? procH * scale;
+      const outW = result.outputSize?.[0] ?? procW * onnxScale;
+      const outH = result.outputSize?.[1] ?? procH * onnxScale;
 
       // 两步锐化恢复纹理
       finalBuffer = Buffer.from(await sharp(finalBuffer)

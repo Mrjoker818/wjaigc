@@ -110,7 +110,13 @@ export async function recraftVectorize(
 
   const { baseUrl, apiKey } = provider;
 
-  // 尝试多个端点路径
+  // 归一化 baseUrl：管理员可能配置了带 /v1 或 /recraft/v1 的地址，
+  // 统一去掉尾部版本前缀后在根域名上拼接标准端点，避免 /v1/v1 或 /v1/recraft/v1 重复导致 404
+  let recraftBase = (baseUrl || '').trim();
+  while (recraftBase.endsWith('/')) recraftBase = recraftBase.slice(0, -1);
+  recraftBase = recraftBase.replace(/\/recraft\/v1$/, '').replace(/\/v1$/, '');
+
+  // 尝试多个端点路径（recraftBase 为根域名）
   const endpoints = [
     '/recraft/v1/images/vectorize',
     '/v1/images/vectorize',
@@ -148,8 +154,8 @@ export async function recraftVectorize(
       formData.append('image', imageBlob, 'image.png');
       formData.append('output_format', outputFormat);
 
-      const url = `${baseUrl}${endpoint}`;
-      const response = await fetchWithV1Retry(baseUrl, endpoint, {
+      const url = `${recraftBase}${endpoint}`;
+      const response = await fetchWithV1Retry(recraftBase, endpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
