@@ -170,8 +170,29 @@ def _save_result(result_bgr, mask_bin, input_img, output_path):
         cv2.imwrite(output_path, result_bgr)
 
 
+def ensure_torch_site():
+    """确保 torch 运行时可用：优先 /opt/torch-site，缺失时从 /space/torch-site.tar 自动解压。
+
+    torch 代码量 ~660MB / 1.1 万个小文件，virtiofs 逐文件写入极慢（~21 分钟），
+    因此持久化用单文件 tar（/space/torch-site.tar），启动时解压到 overlay 盘（~5s）。
+    """
+    site = "/opt/torch-site"
+    if not os.path.isdir(os.path.join(site, "torch")):
+        try:
+            os.makedirs("/opt", exist_ok=True)
+            if os.path.exists("/space/torch-site.tar"):
+                os.system("tar xf /space/torch-site.tar -C /opt >/dev/null 2>&1")
+        except Exception:
+            pass
+    if site not in sys.path:
+        sys.path.insert(0, site)
+    return os.path.isdir(os.path.join(site, "torch"))
+
+
 def run_lama_inpaint(input_path, mask_path, output_path, model, model_path):
     """直接用 torch 加载 big-lama / anime-manga-big-lama JIT 模型推理。"""
+    if not ensure_torch_site():
+        raise RuntimeError("torch 运行时不可用（/opt/torch-site 与 /space/torch-site.tar 均缺失）")
     import cv2
     import io
     import numpy as np
@@ -250,6 +271,7 @@ def run_lama_inpaint(input_path, mask_path, output_path, model, model_path):
 
 def run_zits_inpaint(input_path, mask_path, output_path):
     """ZITS 结构感知修复（可选，依赖 iopaint 包）。"""
+    ensure_torch_site()
     import torch
 
     torch.set_num_threads(max(1, int(os.environ.get("IOPAINT_NUM_THREADS", "4"))))
