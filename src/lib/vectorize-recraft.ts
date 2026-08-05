@@ -123,9 +123,9 @@ export async function recraftVectorize(
   if (options.imageBuffer) {
     imageBlob = new Blob([new Uint8Array(options.imageBuffer)], { type: 'image/png' });
   } else {
-    // 下载图片
+    // 下载图片（大图下载放宽到 30s）
     try {
-      const imageResponse = await fetchWithV1Retry(options.imageUrl, '', {}, true, 15000);
+      const imageResponse = await fetchWithV1Retry(options.imageUrl, '', {}, true, 30000);
       if (!imageResponse.ok) {
         return { success: false, engine: 'recraft', error: `下载图片失败: HTTP ${imageResponse.status}` };
       }
@@ -139,6 +139,8 @@ export async function recraftVectorize(
   const outputFormat = options.outputFormat || 'svg';
 
   // 逐个尝试端点
+  // 单端点超时放宽到 180s：Recraft 矢量化大图（2048px+）通常需要 60~180s，
+  // 原 60s 超时会把正常处理误判为失败并盲目切换到下一个端点，造成总耗时成倍增长。
   let lastError = '';
   for (const endpoint of endpoints) {
     try {
@@ -153,12 +155,21 @@ export async function recraftVectorize(
           'Authorization': `Bearer ${apiKey}`,
         },
         body: formData,
-      }, true, 60000);
+      }, true, 180000);
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
         lastError = `端点 ${endpoint} 返回 HTTP ${response.status}: ${errorText.slice(0, 200)}`;
-        continue; // 尝试下一个端点
+        // 鉴权失败（401/403/407）：换端点也必然失败，直接中止，避免无谓等待
+        if (response.status === 401 || response.status === 403 || response.status === 407) {
+          return {
+            success: false,
+            engine: 'recraft',
+            error: `Recraft API 鉴权失败 (HTTP ${response.status})，请检查矢量模型 API Key`,
+          };
+        }
+        // 404/405 路径不存在 → 快速尝试下一个端点
+        continue;
       }
 
       const contentType = response.headers.get('content-type') || '';
@@ -215,7 +226,7 @@ export async function recraftVectorize(
       // 格式4: { url: "..." } 返回 SVG URL
       if (data.url || data.data?.[0]?.url) {
         const svgUrl = data.url || data.data[0].url;
-        const svgResponse = await fetchWithV1Retry(svgUrl, '', {}, true, 15000);
+        const svgResponse = await fetchWithV1Retry(svgUrl, '', {}, true, 30000);
         if (svgResponse.ok) {
           const svg = await svgResponse.text();
           return {

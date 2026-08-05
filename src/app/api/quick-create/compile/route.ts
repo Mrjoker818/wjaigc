@@ -33,7 +33,8 @@ interface AuthorizedChatModel extends QuickCreateModelCandidate {
 
 function providerSupportsChat(provider: ApiProvider): boolean {
   const type = provider.modelType ?? provider.type;
-  return type === 'chat' || type === 'vlm' || type === 'universal' || type === 'general';
+  // 快速创作编译只使用 LLM 聊天模型；VLM（视觉语言模型）仅用于智能图像临摹等视觉工具
+  return type === 'chat' || type === 'universal' || type === 'general';
 }
 
 function providerOwnsModel(provider: ApiProvider, modelId: string): boolean {

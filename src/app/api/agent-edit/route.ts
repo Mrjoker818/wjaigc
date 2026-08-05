@@ -187,22 +187,80 @@ export async function POST(request: NextRequest) {
       };
 
       try {
-        // 查找 LLM 提供商
-        const chatProvider = await findProviderForFeature('chat');
-        if (!chatProvider || isCancelled()) {
-          if (!chatProvider) {
-            localTaskStore.set(taskId, {
-              userId: authResult.userId,
-              status: 'failed', error: '未配置聊天模型，请在管理员面板添加 LLM 模型', progress: 100, label: '失败', createdAt: Date.now(),
-            });
-            void recordAgentTaskTerminal(taskId, {
-              status: 'failed', error: 'No chat model is configured for Agent execution',
-            }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
+        // 解析 LLM 提供商：优先使用前端传入的 providerId 精确定位，避免静默降级
+        const isChatType = (p: ApiProvider): boolean => {
+          const t = p.modelType ?? p.type;
+          return t === 'chat' || t === 'universal' || t === 'general';
+        };
+
+        let chatProvider: ApiProvider | null = null;
+        let chatModel = '';
+
+        if (typeof providerId === 'string' && providerId.trim()) {
+          chatProvider = await findProviderById(providerId.trim());
+          if (chatProvider && !isChatType(chatProvider)) {
+            console.warn(`[agent-edit] Provider ${providerId} is not a chat-type provider, rejecting`);
+            chatProvider = null;
           }
-          return;
         }
 
-        const chatModel = chatProvider.selectedModels?.[0] || pureModel || 'gpt-4o';
+        if (chatProvider) {
+          if (pureModel) {
+            // 前端指定模型时，必须精确匹配该提供商的授权模型，禁止静默降级
+            const authorized = new Set<string>([
+              ...(chatProvider.selectedModels || []),
+              ...(chatProvider.selectedModel ? [chatProvider.selectedModel] : []),
+            ]);
+            if (authorized.has(pureModel)) {
+              chatModel = pureModel;
+            } else {
+              localTaskStore.set(taskId, {
+                userId: authResult.userId,
+                status: 'failed',
+                error: `模型 ${pureModel} 不在提供商 ${chatProvider.name} 的授权列表中，请切换其他模型`,
+                progress: 100, label: '失败', createdAt: Date.now(),
+              });
+              void recordAgentTaskTerminal(taskId, {
+                status: 'failed', error: `Model ${pureModel} is not authorized on provider ${chatProvider.name}`,
+              }).catch(e => console.warn('[agent-edit] terminal persistence failed:', e));
+              return;
+            }
+          } else {
+            chatModel = chatProvider.selectedModels?.[0] || '';
+          }
+        }
+
+        // 未指定 providerId 或指定提供商不可用 → 兼容旧调用，回退到功能查找
+        if (!chatProvider) {
+          chatProvider = await findProviderForFeature('chat');
+          if (!chatProvider || isCancelled()) {
+            if (!chatProvider) {
+              localTaskStore.set(taskId, {
+                userId: authResult.userId,
+                status: 'failed', error: '未配置聊天模型，请在管理员面板添加 LLM 模型', progress: 100, label: '失败', createdAt: Date.now(),
+              });
+              void recordAgentTaskTerminal(taskId, {
+                status: 'failed', error: 'No chat model is configured for Agent execution',
+              }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
+            }
+            return;
+          }
+          if (!chatModel) {
+            chatModel = chatProvider.selectedModels?.[0] || pureModel || 'gpt-4o';
+          }
+        }
+
+        // 最终兜底：仍无可用模型时给出明确错误，而非带空模型继续执行
+        if (!chatModel) {
+          localTaskStore.set(taskId, {
+            userId: authResult.userId,
+            status: 'failed', error: '聊天模型未授权，请在管理员面板配置可用的 LLM 模型', progress: 100, label: '失败', createdAt: Date.now(),
+          });
+          void recordAgentTaskTerminal(taskId, {
+            status: 'failed', error: 'No authorized chat model is available for Agent execution',
+          }).catch(e => console.warn('[agent-edit] terminal persistence failed:', e));
+          return;
+        }
 
         // 构建 Agent 上下文
         const requestedRounds = typeof maxRounds === 'number' ? Math.trunc(maxRounds) : 5;

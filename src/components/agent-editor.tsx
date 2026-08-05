@@ -99,6 +99,29 @@ export function AgentEditor({
   const [error, setError] = useState('');
   const [resultImageUrl, setResultImageUrl] = useState('');
 
+  // 决策模型（LLM）选择：Agent 编排的思考模型，从 /api/models?type=chat 加载
+  const [chatModelOptions, setChatModelOptions] = useState<{ providerId: string; providerName: string; id: string; name: string; isDefault?: boolean }[]>([]);
+  const [selectedChatModel, setSelectedChatModel] = useState('');
+  const chatModelLoaded = useRef(false);
+  useEffect(() => {
+    if (chatModelLoaded.current) return;
+    chatModelLoaded.current = true;
+    fetch('/api/models?type=chat')
+      .then((r) => r.json())
+      .then((data: { models?: { providerId: string; providerName: string; id: string; name: string; isDefault?: boolean }[] }) => {
+        const models = Array.isArray(data?.models) ? data.models : [];
+        setChatModelOptions(models);
+        const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('wujie_agent_llm_model') || '' : '';
+        if (saved && models.some((m) => `${m.providerId}::${m.id}` === saved)) {
+          setSelectedChatModel(saved);
+        } else if (models.length > 0) {
+          const dflt = models.find((m) => m.isDefault) || models[0];
+          setSelectedChatModel(`${dflt.providerId}::${dflt.id}`);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // 提示词模板触发状态
   const [showTemplatePopup, setShowTemplatePopup] = useState(false);
   const [templateSearch, setTemplateSearch] = useState('');
@@ -268,6 +291,8 @@ export function AgentEditor({
           imagePrompt: imagePrompt || '',
           maskDataUrl: '',
           maxRounds,
+          model: selectedChatModel.split('::')[1] || '',
+          providerId: selectedChatModel.split('::')[0] || '',
           ...getCurrentImageModelInfo(),
         }),
       });
@@ -594,8 +619,31 @@ export function AgentEditor({
         )}
       </div>
 
-      {/* 固定底部区域：轮次 + 输入框 + 按钮 + 拖拽手柄 */}
+      {/* 固定底部区域：模型 + 轮次 + 输入框 + 按钮 + 拖拽手柄 */}
       <div className="shrink-0 flex flex-col" style={{ borderTop: `1px solid ${borderColor}` }}>
+        {/* 决策模型选择（LLM） */}
+        {chatModelOptions.length > 0 && (
+          <div className="flex items-center gap-1.5 px-3 pt-2 pb-1">
+            <span className="text-xs shrink-0" style={{ color: mutedColor }}>模型:</span>
+            <select
+              value={selectedChatModel}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSelectedChatModel(v);
+                try { localStorage.setItem('wujie_agent_llm_model', v); } catch { /* ignore */ }
+              }}
+              className="flex-1 min-w-0 text-xs rounded px-1.5 py-1 border outline-none cursor-pointer"
+              style={{ color: textColor, borderColor, background: bgInput }}
+              title="Agent 编排的思考模型（LLM）"
+            >
+              {chatModelOptions.map((m) => (
+                <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`}>
+                  {m.name || m.id}{m.providerName ? ` (${m.providerName})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {/* 轮次选择 */}
         <div className="flex items-center gap-1.5 px-3 pt-2 pb-1">
           <span className="text-xs" style={{ color: mutedColor }}>轮次:</span>

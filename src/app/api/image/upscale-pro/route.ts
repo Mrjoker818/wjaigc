@@ -755,9 +755,9 @@ async function upscaleViaOnnx(
       // 后续会精确resize到目标尺寸 origW*scale × origH*scale
     }
 
-    let tileSize = 256;
-    if (maxDim > 512) tileSize = 128;
-    else if (maxDim > 256) tileSize = 192;
+    // 计算tile大小：输入已缩放到 ≤1024px，固定 512 tile 使分块数从 64(128px) 降至 4(512px)，
+    // 推理总像素不变但每块固定开销（session.run/numpy/文件IO）减少约 16 倍，CPU 放大显著提速
+    let tileSize = 512;
 
     console.log(`[upscale-pro] ONNX upscale: input=${maxDim}px, model=${modelName}, tile=${tileSize}, target=${scale}x (model=4x then resize)`);
 
@@ -773,7 +773,7 @@ async function upscaleViaOnnx(
       const proc = execFile(
         'python3',
         [scriptPath],
-        { timeout: 300000, maxBuffer: 50 * 1024 * 1024 },
+        { timeout: 600000, maxBuffer: 50 * 1024 * 1024 },
         (error, stdout, stderr) => {
           if (error) {
             reject(error);
