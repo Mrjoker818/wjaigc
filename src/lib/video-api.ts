@@ -303,6 +303,26 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
     profile: 'apimart-video', name: 'Wan2.5 Video (APImart)', short: 'Wan2.5V', provider: 'Wan/APImart',
     features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [5,8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
+  'doubao-seedance-2.0-face': {
+    profile: 'apimart-video', name: 'Seedance 2.0 Face (APImart)', short: 'SD2.0F', provider: 'ByteDance/APImart',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 15, durations: [5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p','4K'], region: 'global' },
+  },
+  'doubao-seedance-2.0-fast-face': {
+    profile: 'apimart-video', name: 'Seedance 2.0 Fast Face (APImart)', short: 'SD2.0FF', provider: 'ByteDance/APImart',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 15, durations: [5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+  },
+  'doubao-seedance-2.0-mini': {
+    profile: 'apimart-video', name: 'Seedance 2.0 Mini (APImart)', short: 'SD2.0M', provider: 'ByteDance/APImart',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+  },
+  'kling-v3-omni': {
+    profile: 'apimart-video', name: 'Kling V3 Omni (APImart)', short: 'KlingV3O', provider: 'Kuaishou/APImart',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['1K','2K','4K'], region: 'global' },
+  },
+  'grok-imagine-1.5-video-apimart': {
+    profile: 'apimart-video', name: 'Grok Imagine 1.5 Video (APImart)', short: 'GrokI1.5', provider: 'xAI/APImart',
+    features: { firstLastFrame: false, multiReference: true, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [3, 5, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
   // ==== AI Link 视频模型 ====
   'kling-v3': {
     profile: 'ai-link', name: 'Kling V3 (AI Link)', short: 'KlingV3', provider: 'Kuaishou/AI-Link',
@@ -323,6 +343,10 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   'doubao-seedance-2-0-fast-260128': {
     profile: 'ai-link', name: 'Seedance 2.0 Fast (AI Link)', short: 'SD2.0F', provider: 'ByteDance/AI-Link',
     features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+  },
+  'doubao-seedance-2-0-mini-260615': {
+    profile: 'pearapi-video', name: 'Seedance 2.0 Mini (PearAPI)', short: 'SD2.0M', provider: 'ByteDance/PearAPI',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
   },
   'happyhorse-1.0': {
     profile: 'ai-link', name: 'HappyHorse 1.0 (AI Link)', short: 'HH1.0', provider: 'HappyHorse/AI-Link',

@@ -382,6 +382,7 @@ const URL_PROFILE_RULES: Array<{ pattern: RegExp; profile: ApiCompatProfile }> =
   { pattern: /302\.ai|302ai/i,            profile: PROFILE_OPENAI },   // 302.AI: 标准OpenAI兼容中转，替换api.openai.com为api.302.ai即可
   { pattern: /rust\.cat/i,                profile: PROFILE_RUSTCAT },  // 虚宝图像: 使用宽高比格式，直接返回图片
   { pattern: /fhl\.mom/i,                 profile: PROFILE_FHL },  // FHL: 像素尺寸+扁平参考图(不转嵌套)
+  { pattern: /ai-link\.shop|ai_link/i,    profile: PROFILE_OPENAI },  // AI Link: 统一LLM网关, OpenAI兼容 /v1/images/generations + /v1/images/edits
 ];
 
 // ---------------------------------------------------------------------------
