@@ -233,14 +233,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const response = await fetchWithV1Retry(apiBase, '/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.apiKey}` },
-          body: JSON.stringify({ model: selectedModel, messages, max_tokens: 4096 }),
+          body: JSON.stringify({ model: selectedModel, messages, max_tokens: 4096, stream: false }),
         });
         if (!response.ok) {
-          updateTaskProgress(taskId, { status: 'failed', error: `API错误: ${response.status} ${await response.text()}` });
+          const errText = await response.text();
+          console.error(`[display-3d/decompose] API error: ${response.status}`, errText.substring(0, 500));
+          updateTaskProgress(taskId, { status: 'failed', error: `API错误: ${response.status} ${errText.substring(0, 200)}` });
           return;
         }
 
-        const apiResponse = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+        const responseText = await response.text();
+        let apiResponse: { choices?: Array<{ message?: { content?: unknown } }> };
+        try {
+          apiResponse = JSON.parse(responseText);
+        } catch {
+          console.error(`[display-3d/decompose] Non-JSON response (first 200 chars):`, responseText.substring(0, 200));
+          updateTaskProgress(taskId, { status: 'failed', error: `API 返回非 JSON 格式: ${responseText.substring(0, 100)}` });
+          return;
+        }
         const content = readString(apiResponse.choices?.[0]?.message?.content);
         const jsonText = extractBalancedJson(content);
         if (!jsonText) {

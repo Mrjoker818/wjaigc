@@ -223,6 +223,73 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
   return null;
 }
 
+/**
+ * Find ALL available vision-capable providers, ordered by priority.
+ * Used by identifyImageSubject for multi-provider fallback.
+ */
+async function findAllVisionProviders(): Promise<Array<{ baseUrl: string; apiKey: string; model: string; providerId: string }>> {
+  const providers = await getApiProviders();
+  const result: Array<{ baseUrl: string; apiKey: string; model: string; providerId: string }> = [];
+  const seen = new Set<string>();
+
+  const PREFERRED_KEYWORDS = ['gpt-4o', 'gemini', 'claude-3', 'claude-4', 'gpt-5'];
+
+  // Helper: add a provider+model to results if not already seen
+  const tryAdd = (p: { baseUrl: string; apiKey: string; id?: string }, model: string, providerId: string) => {
+    const key = `${providerId}::${model}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push({ baseUrl: p.baseUrl, apiKey: p.apiKey, model, providerId });
+  };
+
+  // Phase 1: VLM and Chat providers — preferred models from selectedModels
+  for (const featureType of ['vlm', 'chat'] as const) {
+    const featureProvider = await findProviderForFeature(featureType);
+    if (!featureProvider?.apiKey) continue;
+
+    const selectedModels = getSelectedModelIds(featureProvider);
+    const visionModelsSelected = selectedModels.filter(isVisionModel);
+
+    // Preferred models first (gpt-4o / gemini / claude / gpt-5)
+    const preferred = visionModelsSelected.filter(m =>
+      PREFERRED_KEYWORDS.some(kw => m.toLowerCase().includes(kw))
+    );
+    for (const m of preferred) {
+      tryAdd(featureProvider, m, featureProvider.id || featureType);
+    }
+
+    // Then other vision models from selectedModels
+    const others = visionModelsSelected.filter(m =>
+      !PREFERRED_KEYWORDS.some(kw => m.toLowerCase().includes(kw))
+    );
+    for (const m of others) {
+      tryAdd(featureProvider, m, featureProvider.id || featureType);
+    }
+  }
+
+  // Phase 2: Scan ALL providers for vision models in selectedModels
+  for (const p of providers) {
+    if (!p.apiKey || !p.isEnabled) continue;
+    const selectedModels = getSelectedModelIds(p);
+    const visionModelsSelected = selectedModels.filter(isVisionModel);
+    for (const m of visionModelsSelected) {
+      tryAdd(p, m, p.id || 'unknown');
+    }
+  }
+
+  // Phase 3: Fall back to discoveredModels (less reliable)
+  for (const p of providers) {
+    if (!p.apiKey || !p.isEnabled) continue;
+    const allModels = getModelIds(p);
+    const visionModels = allModels.filter(isVisionModel);
+    for (const m of visionModels) {
+      tryAdd(p, m, p.id || 'unknown');
+    }
+  }
+
+  return result;
+}
+
 async function findStrictVisionProvider(identity?: {
   userId: string;
   userRole: string;
@@ -442,25 +509,30 @@ export async function identifyImageSubject(
   imageUrl: string,
   timeoutMs: number = 8000,
 ): Promise<IdentifyResult | null> {
-  // Single attempt — identification is best-effort, don't waste time on retries
-  const maxRetries = 1;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
+  // Collect ALL available vision providers for multi-provider fallback
+  const allProviders = await findAllVisionProviders();
+  if (allProviders.length === 0) {
+    console.warn('[identify-subject] No vision-capable model provider available for identification');
+    return null;
+  }
+
+  console.info(`[identify-subject] Found ${allProviders.length} vision provider(s): ${allProviders.map(p => p.model).join(', ')}`);
+
+  // Pre-convert image to base64 once (reuse across all provider attempts)
+  const base64 = await imageToBase64(imageUrl);
+  if (!base64) {
+    console.warn('[identify-subject] Failed to convert image to base64');
+    return null;
+  }
+
+  // Try each provider in priority order until one succeeds
+  // Limit to first 8 providers to avoid excessive API calls when all fail
+  const maxAttempts = Math.min(allProviders.length, 8);
+  for (let i = 0; i < maxAttempts; i++) {
+    const provider = allProviders[i];
     try {
-      const provider = await findVisionProvider();
-      if (!provider) {
-        console.warn('[identify-subject] No vision-capable model provider available for identification');
-        return null;
-      }
+      console.info(`[identify-subject] Trying provider ${i + 1}/${maxAttempts}: model=${provider.model}`);
 
-      console.info(`[identify-subject] Using model: ${provider.model} (attempt ${attempt + 1}/${maxRetries})`);
-
-      const base64 = await imageToBase64(imageUrl);
-      if (!base64) {
-        console.warn('[identify-subject] Failed to convert image to base64');
-        return null;
-      }
-
-      // ★ 简洁的识别回复不需要太多 token
       const requestBody = {
         model: provider.model,
         messages: [
@@ -480,6 +552,7 @@ export async function identifyImageSubject(
         ],
         max_tokens: 300,
         temperature: 0.1,
+        stream: false,
       };
 
       const controller = new AbortController();
@@ -506,12 +579,8 @@ export async function identifyImageSubject(
 
         if (!response.ok) {
           const errorText = await response.text().catch(() => '');
-          console.warn(`[identify-subject] Vision API error: ${response.status} ${errorText.slice(0, 200)}`);
-          if (attempt < maxRetries - 1) {
-            await new Promise(r => setTimeout(r, 1000));
-            continue;
-          }
-          return null;
+          console.warn(`[identify-subject] Provider ${i + 1} (${provider.model}) API error: ${response.status} ${errorText.slice(0, 200)}`);
+          continue; // Try next provider
         }
 
         // Handle both streaming and non-streaming responses
@@ -537,12 +606,8 @@ export async function identifyImageSubject(
         }
 
         if (!content) {
-          console.warn('[identify-subject] Vision API returned empty content');
-          if (attempt < maxRetries - 1) {
-            await new Promise(r => setTimeout(r, 1000));
-            continue;
-          }
-          return null;
+          console.warn(`[identify-subject] Provider ${i + 1} (${provider.model}) returned empty content`);
+          continue; // Try next provider
         }
 
         // Clean up the content - remove quotes, extra whitespace
@@ -557,7 +622,7 @@ export async function identifyImageSubject(
         if (enMatch) enDesc = enMatch[1].trim();
         if (zhMatch) zhDesc = zhMatch[1].trim();
 
-        console.info(`[identify-subject] Identified: en="${enDesc}", zh="${zhDesc}"`);
+        console.info(`[identify-subject] Identified (provider ${i + 1}, model=${provider.model}): en="${enDesc}", zh="${zhDesc}"`);
         return {
           en: enDesc,
           zh: zhDesc || enDesc,
@@ -566,14 +631,11 @@ export async function identifyImageSubject(
         clearTimeout(timeoutId);
       }
     } catch (err) {
-      console.warn(`[identify-subject] Attempt ${attempt + 1}/${maxRetries} failed:`, err instanceof Error ? err.message : String(err));
-      if (attempt < maxRetries - 1) {
-        // Wait briefly before retry
-        await new Promise(r => setTimeout(r, 1000));
-        continue;
-      }
-      return null;
+      console.warn(`[identify-subject] Provider ${i + 1} (${provider.model}) failed:`, err instanceof Error ? err.message : String(err));
+      // Continue to next provider
     }
   }
+
+  console.warn(`[identify-subject] All ${maxAttempts} vision provider attempts exhausted, identification failed`);
   return null;
 }

@@ -711,6 +711,78 @@ export async function POST(request: NextRequest) {
       }, { status: 200 });
     }
 
+    // ★ Layer decomposition tasks (segment-elements) use independent cloud_tasks table,
+    // not registered in task-registry. Must check BEFORE the cloud task recovery logic
+    // to avoid the recovery code from mis-registering layer tasks into task-registry.
+    if (taskId.startsWith('layer_') && sessionUser) {
+      try {
+        const layerTask = await getLayerTaskStatus({
+          taskId,
+          userId: sessionUser.id,
+          userRole: sessionUser.role || 'user',
+        });
+        console.log(`[poll-task] layer task found: taskId=${taskId}, status=${layerTask.status}, progress=${layerTask.progress}`);
+        if (layerTask.status === 'completed' && layerTask.result) {
+          return NextResponse.json({
+            success: true,
+            status: 'completed',
+            progress: 100,
+            result: { decomposition: layerTask.result, type: 'layer-decomposition' },
+          }, { status: 200 });
+        }
+        if (layerTask.status === 'failed' || layerTask.status === 'cancelled' || layerTask.status === 'timeout') {
+          return NextResponse.json({
+            success: false,
+            status: layerTask.status,
+            progress: layerTask.progress,
+            error: layerTask.error?.message || '图片分层任务失败',
+            retryable: layerTask.error?.retryable || false,
+          }, { status: 200 });
+        }
+        // pending / processing
+        return NextResponse.json({
+          success: true,
+          status: 'processing',
+          progress: layerTask.progress,
+          label: layerTask.phase || '正在处理图片分层...',
+        }, { status: 200 });
+      } catch (layerErr) {
+        // Fallback: directly query cloud_tasks table for layer task status
+        // (avoids lease/heartbeat complexity of getLayerTaskStatus)
+        try {
+          const cloudTask = await getCloudTaskForUser(taskId, sessionUser.id);
+          if (cloudTask) {
+            console.log(`[poll-task] layer task (fallback): taskId=${taskId}, status=${cloudTask.status}, progress=${cloudTask.progress}`);
+            if (cloudTask.status === 'completed') {
+              return NextResponse.json({
+                success: true,
+                status: 'completed',
+                progress: 100,
+                result: { decomposition: cloudTask.result, type: 'layer-decomposition' },
+              }, { status: 200 });
+            }
+            if (['failed', 'cancelled', 'timeout'].includes(cloudTask.status)) {
+              return NextResponse.json({
+                success: false,
+                status: cloudTask.status,
+                progress: cloudTask.progress,
+                error: cloudTask.error || '图片分层任务失败',
+                retryable: false,
+              }, { status: 200 });
+            }
+            return NextResponse.json({
+              success: true,
+              status: 'processing',
+              progress: cloudTask.progress,
+              label: cloudTask.label || '正在处理图片分层...',
+            }, { status: 200 });
+          }
+        } catch {
+          // Both methods failed — fall through to normal flow
+        }
+      }
+    }
+
     // ★ 优先检查本地完成缓存（避免重复查远端API和重复持久化）
     const cachedCompleted = completedTaskCache.get(taskId);
     if (cachedCompleted) {
