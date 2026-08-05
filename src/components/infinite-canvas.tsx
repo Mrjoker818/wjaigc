@@ -1736,6 +1736,46 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     };
   }, []);
 
+  // remove.bg 专用去背景提供商状态（管理员配置 removebg 类型提供商后前端体现）
+  const [removeBgDedicatedName, setRemoveBgDedicatedName] = useState('');
+  const [removeBgDedicatedLoaded, setRemoveBgDedicatedLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const loadRemoveBgDedicated = async () => {
+      try {
+        const response = await fetch('/api/models?type=removebg');
+        if (!response.ok) {
+          if (!cancelled) setRemoveBgDedicatedLoaded(true);
+          return;
+        }
+        const payload = (await response.json()) as {
+          providers?: Array<{
+            id?: string;
+            modelType?: string;
+            type?: string;
+            name?: string;
+            displayName?: string;
+          }>;
+        };
+        const dedicated = (payload.providers || []).find(
+          provider => (provider.modelType || provider.type) === 'removebg' && provider.id,
+        );
+        if (!cancelled) {
+          setRemoveBgDedicatedName(
+            dedicated ? (dedicated.displayName || dedicated.name || 'remove.bg') : '',
+          );
+          setRemoveBgDedicatedLoaded(true);
+        }
+      } catch {
+        if (!cancelled) setRemoveBgDedicatedLoaded(true);
+      }
+    };
+    void loadRemoveBgDedicated();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Multi-angle state
   const [multiAngleMode, setMultiAngleMode] = useState<MultiAngleMode>('image');
   const [multiAngleRotation, setMultiAngleRotation] = useState(0);
@@ -13334,6 +13374,40 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   <button onClick={() => setShowRemoveBgPicker(false)} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-500 hover:text-blue-700 hover:bg-blue-50' : 'text-gold-muted/70 hover:text-white hover:bg-[#282828]/85'}`}>
                     <X size={16} />
                   </button>
+                </div>
+                {/* 引擎状态区（含 remove.bg 专用引擎体现） */}
+                <div className={`px-3 py-2.5 border-b ${isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-[#444] bg-[#1f1f1f]'}`}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className={`text-[11px] font-medium ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>处理引擎</span>
+                    <button
+                      onClick={() => setEngineDialog('removebg')}
+                      className={`flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md transition-colors ${
+                        isMonochrome
+                          ? 'bg-white border border-gray-300 text-blue-600 hover:bg-blue-50'
+                          : 'bg-[#282828] border border-[#555] text-gold hover:bg-[#333]'
+                      }`}
+                    >
+                      <span>引擎:</span>
+                      <span className="font-semibold">
+                        {removeBgEngine === 'auto' ? '智能自动' : removeBgEngine === 'ai' ? '云端 AI' : '本地算法'}
+                      </span>
+                    </button>
+                  </div>
+                  <div className={`flex items-start gap-1.5 text-[11px] leading-snug ${isMonochrome ? 'text-gray-600' : 'text-gray-300'}`}>
+                    {removeBgDedicatedName ? (
+                      <>
+                        <span className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${isMonochrome ? 'bg-green-600' : 'bg-green-400'}`} />
+                        <span>专用 <span className={isMonochrome ? 'text-green-700 font-medium' : 'text-green-400 font-medium'}>{removeBgDedicatedName}</span> 已启用，将优先调用云端抠图 API</span>
+                      </>
+                    ) : removeBgDedicatedLoaded ? (
+                      <>
+                        <span className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${isMonochrome ? 'bg-amber-500' : 'bg-amber-400/80'}`} />
+                        <span>remove.bg 专用引擎未配置，可在管理员面板添加「抠图」类型提供商启用（当前走本地模型 / 通用 AI）</span>
+                      </>
+                    ) : (
+                      <span>正在检测专用引擎…</span>
+                    )}
+                  </div>
                 </div>
                 {/* Model list */}
                 <div className="p-3 space-y-2">
