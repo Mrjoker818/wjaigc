@@ -53,6 +53,14 @@ function getModelIds(provider: { selectedModels?: string[]; discoveredModels?: M
 }
 
 /**
+ * Check if a provider is a VLM-type provider.
+ * VLM providers should only be used for SVG intelligent tracing, not for subject identification.
+ */
+function isVlmProvider(provider: { type?: string; modelType?: string }): boolean {
+  return provider.type === 'vlm' || provider.modelType === 'vlm';
+}
+
+/**
  * Extract only admin-selected model IDs (excludes discoveredModels).
  * ★ selectedModels are explicitly enabled by the admin and are guaranteed to work,
  *   whereas discoveredModels may include models that exist on the API but aren't
@@ -113,9 +121,9 @@ function isChatModel(modelId: string): boolean {
 async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; model: string } | null> {
   const providers = await getApiProviders();
 
-  // Strategy 1: Find provider with explicitly vision-capable models
-  // 优先级：vlm类型 > chat类型中的视觉模型 > 任意提供商中的视觉模型
-  for (const featureType of ['vlm', 'chat'] as const) {
+  // Strategy 1: Find chat provider with vision-capable models
+  // ★ VLM 类型仅用于 SVG 智能描摹，主体识别只使用 chat 类型
+  for (const featureType of ['chat'] as const) {
     const featureProvider = await findProviderForFeature(featureType);
     if (featureProvider?.apiKey) {
       // ★ 优先使用 selectedModels（管理员明确启用的模型），避免使用 discoveredModels 中未授权的模型
@@ -167,8 +175,10 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
   }
 
   // Strategy 2: Scan all providers for vision models (prefer selectedModels)
+  // ★ Skip VLM-type providers — VLM is reserved for SVG tracing only
   for (const p of providers) {
     if (!p.apiKey || !p.isEnabled) continue;
+    if (isVlmProvider(p)) continue;
     const selectedModels = getSelectedModelIds(p);
     const visionModelsSelected = selectedModels.filter(isVisionModel);
     if (visionModelsSelected.length > 0) {
@@ -182,6 +192,7 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
   // Strategy 2b: Fall back to discoveredModels if no selectedModels matched
   for (const p of providers) {
     if (!p.apiKey || !p.isEnabled) continue;
+    if (isVlmProvider(p)) continue;
     const models = getModelIds(p);
     const visionModels = models.filter(isVisionModel);
     if (visionModels.length > 0) {
@@ -196,6 +207,7 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
   // Strategy 3: Fallback — use any chat model from selectedModels (may not support vision)
   for (const p of providers) {
     if (!p.apiKey || !p.isEnabled) continue;
+    if (isVlmProvider(p)) continue;
     const selectedModels = getSelectedModelIds(p).filter(isChatModel);
     if (selectedModels.length > 0) {
       console.warn(`[identify-subject] No vision model found, falling back to chat model: ${selectedModels[0]}`);
@@ -209,6 +221,7 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
   // Strategy 3b: Fall back to any chat model from all models
   for (const p of providers) {
     if (!p.apiKey || !p.isEnabled) continue;
+    if (isVlmProvider(p)) continue;
     const models = getModelIds(p).filter(isChatModel);
     if (models.length > 0) {
       console.warn(`[identify-subject] No vision model found, falling back to chat model: ${models[0]}`);
@@ -242,8 +255,9 @@ async function findAllVisionProviders(): Promise<Array<{ baseUrl: string; apiKey
     result.push({ baseUrl: p.baseUrl, apiKey: p.apiKey, model, providerId });
   };
 
-  // Phase 1: VLM and Chat providers — preferred models from selectedModels
-  for (const featureType of ['vlm', 'chat'] as const) {
+  // Phase 1: Chat providers — preferred models from selectedModels
+  // ★ VLM 类型仅用于 SVG 智能描摹，主体识别只使用 chat 类型
+  for (const featureType of ['chat'] as const) {
     const featureProvider = await findProviderForFeature(featureType);
     if (!featureProvider?.apiKey) continue;
 
@@ -267,9 +281,10 @@ async function findAllVisionProviders(): Promise<Array<{ baseUrl: string; apiKey
     }
   }
 
-  // Phase 2: Scan ALL providers for vision models in selectedModels
+  // Phase 2: Scan ALL non-VLM providers for vision models in selectedModels
   for (const p of providers) {
     if (!p.apiKey || !p.isEnabled) continue;
+    if (isVlmProvider(p)) continue;
     const selectedModels = getSelectedModelIds(p);
     const visionModelsSelected = selectedModels.filter(isVisionModel);
     for (const m of visionModelsSelected) {
@@ -277,9 +292,10 @@ async function findAllVisionProviders(): Promise<Array<{ baseUrl: string; apiKey
     }
   }
 
-  // Phase 3: Fall back to discoveredModels (less reliable)
+  // Phase 3: Fall back to discoveredModels (less reliable) — skip VLM
   for (const p of providers) {
     if (!p.apiKey || !p.isEnabled) continue;
+    if (isVlmProvider(p)) continue;
     const allModels = getModelIds(p);
     const visionModels = allModels.filter(isVisionModel);
     for (const m of visionModels) {
@@ -300,7 +316,8 @@ async function findStrictVisionProvider(identity?: {
   model: string;
 } | null> {
   const providers = await getApiProviders();
-  const enabled = providers.filter((provider) => provider.isEnabled && provider.apiKey);
+  // ★ Skip VLM-type providers — VLM is reserved for SVG tracing only
+  const enabled = providers.filter((provider) => provider.isEnabled && provider.apiKey && !isVlmProvider(provider));
   const user = identity && identity.userRole !== 'admin'
     ? await dbGetUserById(identity.userId)
     : null;

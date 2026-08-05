@@ -296,7 +296,8 @@ export async function POST(request: NextRequest) {
     }
     const candidates: VisionCandidate[] = [];
 
-    const allProviders = (await getApiProviders()).filter(p => p.isEnabled && p.baseUrl && p.apiKey);
+    // ★ VLM 类型仅用于 SVG 智能描摹，图片识词只使用非 VLM 类型
+    const allProviders = (await getApiProviders()).filter(p => p.isEnabled && p.baseUrl && p.apiKey && p.type !== 'vlm' && p.modelType !== 'vlm');
 
     if (resolvedProviderId) {
       // User specified a provider — use it directly
@@ -330,9 +331,9 @@ export async function POST(request: NextRequest) {
         }
       }
       // If no provider has the exact model, fall back to findProviderForModel
+      // ★ VLM 类型仅用于 SVG 智能描摹，图片识词只使用 chat/image 类型
       if (candidates.length === 0) {
         const provider = await findProviderForModel(resolvedModel, 'chat')
-          || await findProviderForModel(resolvedModel, 'vlm')
           || await findProviderForModel(resolvedModel, 'image');
         if (provider?.apiKey) {
           candidates.push({
