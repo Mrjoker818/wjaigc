@@ -408,7 +408,7 @@ async function createLocalEraseInpaint(
 export const maxDuration = 1800; // 30分钟 - token link等慢速API生图可达260s+
 export const dynamic = 'force-dynamic';
 
-type EditAction = 'inpaint' | 'outpaint' | 'extend' | 'remove_background' | 'removebg' | 'upscale' | 'multi_angle' | 'display_decompose';
+type EditAction = 'inpaint' | 'outpaint' | 'extend' | 'remove_background' | 'removebg' | 'upscale' | 'multi_angle' | 'display_decompose' | 'erase' | 'mask';
 
 interface EditRequest {
   action: EditAction;
@@ -1527,7 +1527,7 @@ export async function POST(request: NextRequest) {
     sessionUser = await getSessionUser(request);
     deductedCredits = 0; // 跟踪已扣积分，用于失败退款
     const { action: rawAction, imageUrl, maskImage, prompt, editMode, expandRatio, expandScale = 1, expandPadding, targetWidth, targetHeight, aspectRatio, angleMode = 'image', rotation = 0, tilt = 0, zoom = 1, model: rawModel = 'gemini-2.5-flash-image-preview', providerId, engine: enginePref = 'auto' } = body;
-    const action = rawAction === 'extend' ? 'outpaint' : rawAction;
+    const action = rawAction === 'extend' ? 'outpaint' : (rawAction === 'erase' || rawAction === 'mask') ? 'inpaint' : rawAction;
     const isRemoveBackgroundAction = action === 'removebg' || action === 'remove_background';
 
     // 防御性处理：确保 model 是字符串（前端可能误传对象）

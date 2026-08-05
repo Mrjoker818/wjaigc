@@ -3,7 +3,7 @@ import sharp from 'sharp';
 
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { findProviderForModel } from '@/lib/server-api-config';
-import { getRequestUser } from '@/lib/api-auth';
+import { getRequestUser, getInternalRequestHeaders } from '@/lib/api-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import {
@@ -34,10 +34,10 @@ function asAnalysis(value: unknown): AspectRecomposeAnalysis {
   };
 }
 
-async function analyzeImage(baseUrl: string, imageUrl: string, model?: string, providerId?: string): Promise<AspectRecomposeAnalysis> {
+async function analyzeImage(baseUrl: string, imageUrl: string, model?: string, providerId?: string, authHeaders?: Record<string, string>): Promise<AspectRecomposeAnalysis> {
   const response = await fetch(`${baseUrl}/api/vision-prompt`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
     body: JSON.stringify({ imageUrl, model, providerId }),
     signal: AbortSignal.timeout(100_000),
   }).catch(() => null);
@@ -55,12 +55,12 @@ async function analyzeImage(baseUrl: string, imageUrl: string, model?: string, p
   });
 }
 
-async function pollGeneratedImage(baseUrl: string, generatedTaskId: string, model: string, providerId?: string): Promise<string> {
+async function pollGeneratedImage(baseUrl: string, generatedTaskId: string, model: string, providerId?: string, authHeaders?: Record<string, string>): Promise<string> {
   const deadline = Date.now() + 9 * 60_000;
   while (Date.now() < deadline) {
     const response = await fetch(`${baseUrl}/api/poll-task`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ taskId: generatedTaskId, model, providerId }),
       signal: AbortSignal.timeout(45_000),
     });
@@ -79,14 +79,14 @@ async function pollGeneratedImage(baseUrl: string, generatedTaskId: string, mode
   throw new Error('图像重组超时，请稍后重试');
 }
 
-async function generateRecomposedImage(baseUrl: string, sourceUrl: string, targetRatio: AspectRecomposeRatio, prompt: string, model?: string, providerId?: string): Promise<{ imageUrl: string; validation: ReturnType<typeof validateAspectRatioDimensions> }> {
+async function generateRecomposedImage(baseUrl: string, sourceUrl: string, targetRatio: AspectRecomposeRatio, prompt: string, model?: string, providerId?: string, authHeaders?: Record<string, string>): Promise<{ imageUrl: string; validation: ReturnType<typeof validateAspectRatioDimensions> }> {
   const provider = model ? await findProviderForModel(model, 'image') : null;
   const resolvedModel = model || provider?.selectedModels?.[0];
   if (!resolvedModel) throw new Error('未找到可用的图像模型，请先在管理员面板配置');
 
   const response = await fetchWithV1Retry(baseUrl, '/api/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
     body: JSON.stringify({
       prompt,
       aspectRatio: targetRatio,
@@ -106,7 +106,7 @@ async function generateRecomposedImage(baseUrl: string, sourceUrl: string, targe
   if (!imageUrl) {
     const generatedTaskId = Array.isArray(data.taskIds) && typeof data.taskIds[0] === 'string' ? data.taskIds[0] as string : typeof data.taskId === 'string' ? data.taskId : '';
     if (!generatedTaskId) throw new Error('图像模型不支持可识别的图生图返回协议');
-    imageUrl = await pollGeneratedImage(baseUrl, generatedTaskId, resolvedModel, providerId || provider?.id);
+    imageUrl = await pollGeneratedImage(baseUrl, generatedTaskId, resolvedModel, providerId || provider?.id, authHeaders);
   }
   const buffer = await fetchImageBuffer(imageUrl);
   const metadata = await sharp(buffer).metadata();
@@ -132,10 +132,14 @@ export async function POST(request: NextRequest) {
     try {
       const model = typeof body.model === 'string' ? body.model : undefined;
       const providerId = typeof body.providerId === 'string' ? body.providerId : undefined;
-      const analysis = await analyzeImage(baseUrl, imageUrl, model, providerId);
+      // ★ 生成内部 API 认证头，避免内部 fetch 调用被认证中间件拦截
+      const authHeaders = user?.user?.id
+        ? await getInternalRequestHeaders(user.user.id, user.user.role || 'user')
+        : {};
+      const analysis = await analyzeImage(baseUrl, imageUrl, model, providerId, authHeaders);
       updateTaskProgress(taskId, { progress: 25, label: '正在重组元素与版式...' });
       const firstPrompt = buildAspectRecomposePrompt({ targetRatio, analysis });
-      let generated = await generateRecomposedImage(baseUrl, imageUrl, targetRatio, firstPrompt, model, providerId);
+      let generated = await generateRecomposedImage(baseUrl, imageUrl, targetRatio, firstPrompt, model, providerId, authHeaders);
       let retryCount = 0;
       if (!generated.validation.valid) {
         retryCount = maxRetries;
@@ -145,7 +149,7 @@ export async function POST(request: NextRequest) {
           analysis,
           retryFeedback: `上次输出比例误差为 ${(generated.validation.error * 100).toFixed(2)}%，必须严格输出 ${targetRatio}`,
         });
-        generated = await generateRecomposedImage(baseUrl, imageUrl, targetRatio, retryPrompt, model, providerId);
+        generated = await generateRecomposedImage(baseUrl, imageUrl, targetRatio, retryPrompt, model, providerId, authHeaders);
       }
       if (!generated.validation.valid) throw new Error(`重组结果未达到 ${targetRatio} 比例要求`);
       updateTaskProgress(taskId, {

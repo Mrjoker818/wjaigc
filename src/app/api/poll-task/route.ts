@@ -43,6 +43,7 @@ import {
 import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
 import { resolveVideoCompatProfile } from '@/lib/video-api';
 import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';
+import { getLayerTaskStatus } from '@/lib/layer-decomposition/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -1647,6 +1648,46 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
       }
       // 既不在 registry 也不在缓存，任务不存在或已过期
+      // ★ 检查是否为 layer-decomposition 任务（segment-elements/layered-decompose 提交的任务）
+      // layer 任务使用独立的 cloud_tasks 表，不注册到 task-registry
+      if (sessionUser) {
+        try {
+          const layerTask = await getLayerTaskStatus({
+            taskId,
+            userId: sessionUser.id,
+            userRole: sessionUser.role || 'user',
+          });
+          if (layerTask) {
+            console.log(`[poll-task] layer task found: taskId=${taskId}, status=${layerTask.status}, progress=${layerTask.progress}`);
+            if (layerTask.status === 'completed' && layerTask.result) {
+              return NextResponse.json({
+                success: true,
+                status: 'completed',
+                progress: 100,
+                result: { decomposition: layerTask.result, type: 'layer-decomposition' },
+              }, { status: 200 });
+            }
+            if (layerTask.status === 'failed' || layerTask.status === 'cancelled' || layerTask.status === 'timeout') {
+              return NextResponse.json({
+                success: false,
+                status: layerTask.status,
+                progress: layerTask.progress,
+                error: layerTask.error?.message || '图片分层任务失败',
+                retryable: layerTask.error?.retryable || false,
+              }, { status: 200 });
+            }
+            // pending / processing
+            return NextResponse.json({
+              success: true,
+              status: 'processing',
+              progress: layerTask.progress,
+              label: layerTask.phase || '正在处理图片分层...',
+            }, { status: 200 });
+          }
+        } catch {
+          // Not a layer task or layer service unavailable — fall through to "not found"
+        }
+      }
       // ★ 返回 status:'failed' 而非 'not_found'，确保所有前端轮询代码（检查 status==='failed'）都能正确停止
       console.log(`[poll-task] 任务不存在或已过期: ${taskId}`);
       return NextResponse.json({

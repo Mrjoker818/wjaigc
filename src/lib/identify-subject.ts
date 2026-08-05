@@ -53,6 +53,16 @@ function getModelIds(provider: { selectedModels?: string[]; discoveredModels?: M
 }
 
 /**
+ * Extract only admin-selected model IDs (excludes discoveredModels).
+ * ★ selectedModels are explicitly enabled by the admin and are guaranteed to work,
+ *   whereas discoveredModels may include models that exist on the API but aren't
+ *   authorized or may fail when called.
+ */
+function getSelectedModelIds(provider: { selectedModels?: string[] }): string[] {
+  return (provider.selectedModels || []) as string[];
+}
+
+/**
  * Check if a model ID is likely to support vision/image input
  * ★ 关键改进：优先选择支持视觉的模型，避免发送图片到纯文本模型导致静默失败
  */
@@ -108,15 +118,34 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
   for (const featureType of ['vlm', 'chat'] as const) {
     const featureProvider = await findProviderForFeature(featureType);
     if (featureProvider?.apiKey) {
-      const models = getModelIds(featureProvider);
-      // ★ 先找支持视觉的模型
-      const visionModels = models.filter(isVisionModel);
+      // ★ 优先使用 selectedModels（管理员明确启用的模型），避免使用 discoveredModels 中未授权的模型
+      const selectedModels = getSelectedModelIds(featureProvider);
+      const visionModelsSelected = selectedModels.filter(isVisionModel);
+      if (visionModelsSelected.length > 0) {
+        const preferred = visionModelsSelected.find(m =>
+          m.toLowerCase().includes('gpt-4o') ||
+          m.toLowerCase().includes('gemini') ||
+          m.toLowerCase().includes('claude-3') ||
+          m.toLowerCase().includes('claude-4') ||
+          m.toLowerCase().includes('gpt-5')
+        );
+        return {
+          baseUrl: featureProvider.baseUrl,
+          apiKey: featureProvider.apiKey,
+          model: preferred || visionModelsSelected[0],
+        };
+      }
+      // 如果 selectedModels 中没有视觉模型，尝试使用所有模型（含 discoveredModels）
+      const allModels = getModelIds(featureProvider);
+      const visionModels = allModels.filter(isVisionModel);
       if (visionModels.length > 0) {
         // 优先选 gpt-4o / gemini 系列
         const preferred = visionModels.find(m =>
           m.toLowerCase().includes('gpt-4o') ||
           m.toLowerCase().includes('gemini') ||
           m.toLowerCase().includes('claude-3') ||
+          m.toLowerCase().includes('claude-4') ||
+          m.toLowerCase().includes('gpt-5') ||
           m.toLowerCase().includes('qwen-vl')
         );
         return {
@@ -126,7 +155,7 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
         };
       }
       // 如果没有已知视觉模型，尝试使用 chat 模型（可能是未知但支持视觉的模型）
-      const chatModels = models.filter(isChatModel);
+      const chatModels = allModels.filter(isChatModel);
       if (chatModels.length > 0 && featureType === 'chat') {
         return {
           baseUrl: featureProvider.baseUrl,
@@ -137,7 +166,20 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
     }
   }
 
-  // Strategy 2: Scan all providers for vision models
+  // Strategy 2: Scan all providers for vision models (prefer selectedModels)
+  for (const p of providers) {
+    if (!p.apiKey || !p.isEnabled) continue;
+    const selectedModels = getSelectedModelIds(p);
+    const visionModelsSelected = selectedModels.filter(isVisionModel);
+    if (visionModelsSelected.length > 0) {
+      return {
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey,
+        model: visionModelsSelected[0],
+      };
+    }
+  }
+  // Strategy 2b: Fall back to discoveredModels if no selectedModels matched
   for (const p of providers) {
     if (!p.apiKey || !p.isEnabled) continue;
     const models = getModelIds(p);
@@ -151,7 +193,20 @@ async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; 
     }
   }
 
-  // Strategy 3: Fallback — use any chat model (may not support vision)
+  // Strategy 3: Fallback — use any chat model from selectedModels (may not support vision)
+  for (const p of providers) {
+    if (!p.apiKey || !p.isEnabled) continue;
+    const selectedModels = getSelectedModelIds(p).filter(isChatModel);
+    if (selectedModels.length > 0) {
+      console.warn(`[identify-subject] No vision model found, falling back to chat model: ${selectedModels[0]}`);
+      return {
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey,
+        model: selectedModels[0],
+      };
+    }
+  }
+  // Strategy 3b: Fall back to any chat model from all models
   for (const p of providers) {
     if (!p.apiKey || !p.isEnabled) continue;
     const models = getModelIds(p).filter(isChatModel);
@@ -184,6 +239,32 @@ async function findStrictVisionProvider(identity?: {
     : null;
   const chatModels = (user as (typeof user & { chat_models?: string[] }) | null)
     ?.chat_models;
+
+  // Pass 1: Prefer selectedModels only (admin-authorized models)
+  for (const provider of enabled) {
+    const selectedModels = getSelectedModelIds(provider);
+    const model = selectedModels.find((modelId) =>
+      isVisionModel(modelId)
+      && (
+        !identity
+        || identity.userRole === 'admin'
+        || isModelAssignedToUser(
+          chatModels,
+          provider.id,
+          modelId,
+        )
+      )
+    );
+    if (model) {
+      return {
+        providerId: provider.id,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model,
+      };
+    }
+  }
+  // Pass 2: Fall back to all models (including discoveredModels)
   for (const provider of enabled) {
     const model = getModelIds(provider).find((modelId) =>
       isVisionModel(modelId)

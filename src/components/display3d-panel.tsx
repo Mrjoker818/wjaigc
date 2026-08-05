@@ -388,12 +388,21 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
           if (saved) {
             const pureModel = saved.includes('::') ? saved.split('::')[1] : saved;
             const savedProvId = saved.includes('::') ? saved.split('::')[0] : '';
-            if (mapped.some(m => m.id === pureModel)) {
+            // ★ 优先同时匹配 modelId + providerId，避免跨提供商误匹配
+            const exactMatch = mapped.find(m => m.id === pureModel && m.providerId === savedProvId);
+            if (exactMatch) {
               setSelectedChatModel(pureModel);
               setSelectedChatProviderId(savedProvId);
             } else {
-              setSelectedChatModel(mapped[0].id);
-              setSelectedChatProviderId(mapped[0].providerId);
+              // 退而求其次：仅匹配 modelId，但使用 mapped 中的 providerId
+              const modelMatch = mapped.find(m => m.id === pureModel);
+              if (modelMatch) {
+                setSelectedChatModel(modelMatch.id);
+                setSelectedChatProviderId(modelMatch.providerId);
+              } else {
+                setSelectedChatModel(mapped[0].id);
+                setSelectedChatProviderId(mapped[0].providerId);
+              }
             }
           } else {
             setSelectedChatModel(mapped[0].id);

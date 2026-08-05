@@ -328,6 +328,7 @@ async function realCandidate(
     headers: { 'Content-Type': 'application/json', ...internalHeaders },
     body: JSON.stringify({
       action: 'inpaint',
+      editMode: 'mask',
       imageUrl: input.sourceImageUrl,
       maskImage,
       prompt: buildHumanRepairPrompt(target, input.options),
