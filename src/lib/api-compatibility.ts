@@ -224,8 +224,8 @@ export const PROFILE_PEARAPI: ApiCompatProfile = {
   editEndpoint: '/images/edits',
   editEncoding: 'json-first',
   supportsInputFidelity: false,
-  pollMode: 'none',
-  pollPathTemplate: '',
+  pollMode: 'pearapi-task',
+  pollPathTemplate: '/images/tasks/{taskId}',
   pollMethod: 'GET',
   extraBodyParams: { task_type: 'sync', response_format: 'url' },
 };
@@ -996,11 +996,24 @@ export function extractImageUrl(pollData: Record<string, unknown>): string | nul
       return `data:image/png;base64,${result.b64_json}`;
     }
   }
-  // Path 3: data.output[0].url / .image_url
-  const output = pollData?.output as Array<Record<string, unknown>> | undefined;
-  if (output?.length) {
+  // Path 3: data.output[0].url / .image_url (array format)
+  //       3b: data.output.data[].url / data.output.image_urls[] (PearAPI object format)
+  const output = pollData?.output as Array<Record<string, unknown>> | Record<string, unknown> | undefined;
+  if (Array.isArray(output) && output.length) {
     const url = unwrapUrl(output[0]?.url) || unwrapUrl(output[0]?.image_url);
     if (url) return url;
+  } else if (output && typeof output === 'object') {
+    // PearAPI format: output.data[{url}] / output.image_urls[]
+    const outData = (output as Record<string, unknown>).data as Array<Record<string, unknown>> | undefined;
+    if (outData?.length) {
+      const url = unwrapUrl(outData[0]?.url) || unwrapUrl(outData[0]?.image_url);
+      if (url) return url;
+    }
+    const outImageUrls = (output as Record<string, unknown>).image_urls;
+    const url = unwrapUrl(outImageUrls);
+    if (url) return url;
+    const outUrl = unwrapUrl((output as Record<string, unknown>).url) || unwrapUrl((output as Record<string, unknown>).image_url);
+    if (outUrl) return outUrl;
   }
   // Path 4: data.data[0].url / .image_url / .b64_json
   const nestedData = pollData?.data;

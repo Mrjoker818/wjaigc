@@ -292,8 +292,8 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
     features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p'], region: 'global' },
   },
   'sora-2': {
-    profile: 'apimart-video', name: 'Sora 2 (APImart)', short: 'Sora2', provider: 'OpenAI/APImart',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 20, durations: [5,10,15,20], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    profile: 'apimart-video', name: 'Sora 2', short: 'Sora2', provider: 'OpenAI',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 20, durations: [4, 5, 8, 10, 12, 15, 20], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
   'minimax-hailuo-02': {
     profile: 'apimart-video', name: 'MiniMax Hailuo 02 (APImart)', short: 'Hailuo02', provider: 'MiniMax/APImart',
@@ -346,7 +346,7 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   },
   'doubao-seedance-2-0-mini-260615': {
     profile: 'pearapi-video', name: 'Seedance 2.0 Mini (PearAPI)', short: 'SD2.0M', provider: 'ByteDance/PearAPI',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
   },
   'happyhorse-1.0': {
     profile: 'ai-link', name: 'HappyHorse 1.0 (AI Link)', short: 'HH1.0', provider: 'HappyHorse/AI-Link',
@@ -609,10 +609,18 @@ export function parseVideoSubmitResponse(
       };
     }
     case 'pearapi-video': {
-      // PearAPI 与 APImart 格式相同：{code:200, data:[{status:"submitted", task_id:"xxx"}]}
+      // PearAPI 提交响应: { task_id: "vid_xxx", status: "queued" }
+      const taskId = data?.task_id || data?.id || '';
+      if (taskId) {
+        return {
+          taskId,
+          status: 'submitted',
+          estimatedTime: 240,
+        };
+      }
+      // Fallback: try APImart-wrapped format {code:200, data:[{task_id:"xxx"}]}
       const items = data?.data;
       const item = Array.isArray(items) ? items[0] : items;
-      // 同步完成：data[0].url 直接有视频
       if (item?.url || item?.video_url) {
         return {
           taskId: item?.task_id || item?.id || '',
@@ -621,7 +629,7 @@ export function parseVideoSubmitResponse(
         };
       }
       return {
-        taskId: item?.task_id || item?.id || data?.task_id || '',
+        taskId: item?.task_id || item?.id || '',
         status: 'submitted',
         estimatedTime: 240,
       };
@@ -729,7 +737,7 @@ export function buildVideoPollRequest(
       };
     case 'pearapi-video':
       return {
-        url: `${cleanBaseUrl}/v1/tasks/${taskId}`,
+        url: `${cleanBaseUrl}/v1/video/generations/${taskId}`,
         headers: { 'Authorization': `Bearer ${apiKey}` },
         method: 'GET',
       };
@@ -1242,33 +1250,33 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   if (params.lastFrameImageUrl) refImages.push(params.lastFrameImageUrl);
   if (params.referenceImages?.length) refImages.push(...params.referenceImages);
 
-  // Compute size from aspect ratio or default
-  const size = params.aspectRatio && params.aspectRatio.includes(':')
-    ? params.aspectRatio
-    : '16:9';
+  // Determine mode based on inputs
+  let mode = 'text2video';
+  if (refImages.length > 0) {
+    mode = params.lastFrameImageUrl ? 'image2video' : 'image2video';
+  }
 
   const body: Record<string, unknown> = {
     model: params.model,
     prompt: params.prompt,
-    n: 1,
-    size,
-    response_format: 'url',
-    task_type: 'async',
-    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
+    mode,
+    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : { aspect_ratio: '16:9' }),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...(params.seed !== undefined ? { seed: params.seed } : {}),
   };
 
-  // Single image vs multiple (PearAPI style: same as images)
-  if (refImages.length === 1) {
-    body.image = refImages[0];
-  } else if (refImages.length > 1) {
-    body.images = refImages;
+  // PearAPI recommends reference_contents array: [{type, media_url, name}]
+  if (refImages.length > 0) {
+    body.reference_contents = refImages.map((url, idx) => ({
+      type: 'image',
+      media_url: url,
+      name: idx === 0 ? 'first_frame' : `ref_${idx + 1}`,
+    }));
   }
 
   return {
-    url: `${cleanBase}/v1/videos/generations`,
+    url: `${cleanBase}/v1/video/generations`,
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
@@ -1279,50 +1287,61 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
 }
 
 /** Parse PearAPI video poll response.
- * GET /v1/videos/tasks/{id}
- * Completed response: {status:'completed', output:{created, data:[{url}], video_urls:[...]}, progress, error:{message}}
+ * GET /v1/video/generations/{task_id}
+ * Completed response: {task_id, status:'completed', url:'https://...', format:'mp4', progress:100, metadata:{}, error:null}
+ * In-progress: {task_id, status:'in_progress', progress:45}
  */
 function parsePearApiVideoPoll(data: unknown): VideoTaskPollResult {
-  // PearAPI 轮询响应有两种格式：
-  // 1. 包裹格式：{code:200, data:{id, status, progress, result/output:{videos:[{url}]}}}
-  // 2. 扁平格式（实测 GET /v1/videos/tasks/{id}）：{id, status, progress, output:{video_url}}
+  // PearAPI 轮询响应格式（官方文档）：
+  // 扁平格式：{task_id, status, url, format, progress, metadata, error}
+  // 也兼容旧版包裹格式：{code:200, data:{...}}
   const inner = getApiValue(data, 'data');
-  // 无 data 包裹时回退到顶层对象，确保 status/progress/output 均能取到
   const item = (inner && (Array.isArray(inner) ? inner[0] : inner)) || data;
   const status = (getApiString(item, 'status') || getApiString(data, 'status') || '').toLowerCase();
 
   if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
-    const result = getApiValue(item, 'result') || getApiValue(item, 'results') || getApiValue(item, 'output')
-      || getApiValue(data, 'output') || getApiValue(data, 'result');
-    const videos = getApiValue(result, 'videos') || getApiValue(result, 'video_results');
-    let videoUrl: string | undefined;
-    if (Array.isArray(videos) && videos.length > 0) {
-      const video = videos[0];
-      const url = getApiValue(video, 'url');
-      videoUrl = Array.isArray(url) ? getApiString(url[0]) : getApiString(url) || getApiString(video, 'video_url');
-    }
+    // PearAPI 文档：completed 时 url 在顶层
+    let videoUrl = getApiString(item, 'url') || getApiString(data, 'url');
+
+    // Fallback: 尝试嵌套格式（兼容旧版/其他代理）
     if (!videoUrl) {
-      const resultData = getApiValue(result, 'data');
-      if (Array.isArray(resultData) && resultData.length > 0) {
-        const firstResult = resultData[0];
-        videoUrl = typeof firstResult === 'string'
-          ? firstResult
-          : getApiString(firstResult, 'url') || getApiString(firstResult, 'video_url');
+      const result = getApiValue(item, 'result') || getApiValue(item, 'results') || getApiValue(item, 'output')
+        || getApiValue(data, 'output') || getApiValue(data, 'result');
+      const videos = getApiValue(result, 'videos') || getApiValue(result, 'video_results');
+      if (Array.isArray(videos) && videos.length > 0) {
+        const video = videos[0];
+        const url = getApiValue(video, 'url');
+        videoUrl = Array.isArray(url) ? getApiString(url[0]) : getApiString(url) || getApiString(video, 'video_url');
       }
+      if (!videoUrl) {
+        const resultData = getApiValue(result, 'data');
+        if (Array.isArray(resultData) && resultData.length > 0) {
+          const firstResult = resultData[0];
+          videoUrl = typeof firstResult === 'string'
+            ? firstResult
+            : getApiString(firstResult, 'url') || getApiString(firstResult, 'video_url');
+        }
+      }
+      if (!videoUrl) videoUrl = getApiString(result, 'video_url') || getApiString(result, 'url') || getApiString(item, 'video_url');
     }
-    if (!videoUrl) videoUrl = getApiString(result, 'video_url') || getApiString(result, 'url') || getApiString(item, 'video_url');
+
+    const metadata = getApiValue(item, 'metadata') || getApiValue(data, 'metadata');
     return {
       status: 'succeeded',
       progress: 100,
       videoUrl,
-      duration: getApiNumber(result, 'duration'),
-      thumbnailUrl: getApiString(result, 'thumbnail_url') || getApiString(result, 'cover_url'),
+      duration: getApiNumber(metadata, 'duration') || getApiNumber(item, 'duration'),
+      thumbnailUrl: getApiString(item, 'thumbnail_url') || getApiString(data, 'thumbnail_url'),
     };
   }
   if (status === 'failed' || status === 'error' || status === 'cancelled') {
+    const errorObj = getApiValue(item, 'error') || getApiValue(data, 'error');
+    const errorMsg = typeof errorObj === 'object' && errorObj !== null
+      ? (getApiString(errorObj, 'message') || getApiString(errorObj, 'code') || JSON.stringify(errorObj))
+      : (typeof errorObj === 'string' ? errorObj : '');
     return {
       status: 'failed',
-      error: getApiString(item, 'error', 'message') || getApiString(item, 'fail_reason') || getApiString(data, 'error', 'message') || getApiString(data, 'message') || 'Video generation failed',
+      error: errorMsg || getApiString(item, 'error', 'message') || getApiString(data, 'error', 'message') || getApiString(data, 'message') || 'Video generation failed',
     };
   }
   if (status === 'running' || status === 'processing' || status === 'in_progress') {
