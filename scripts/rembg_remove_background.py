@@ -50,13 +50,31 @@ def main():
             os.makedirs(models_dir, exist_ok=True)
             os.environ['U2NET_HOME'] = models_dir
 
+        import glob
         from PIL import Image
         from rembg import new_session, remove
+
+        # 优先精确文件名（大小写不敏感），其次兼容 epoch 后缀（如 BiRefNet-general-epoch_244.onnx）
+        model_path = None
+        if models_dir:
+            exact = os.path.join(models_dir, f'{model_name}.onnx')
+            if os.path.isfile(exact):
+                model_path = exact
+            else:
+                matches = []
+                try:
+                    for f in os.listdir(models_dir):
+                        if f.lower().startswith(f'{model_name.lower()}-') and f.lower().endswith('.onnx'):
+                            matches.append(os.path.join(models_dir, f))
+                except Exception:
+                    matches = []
+                if matches:
+                    model_path = sorted(matches)[0]
 
         source = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert('RGBA')
         original_size = source.size
         processing_source = resize_for_processing(source)
-        session = new_session(model_name)
+        session = new_session(model_name, model_path) if model_path else new_session(model_name)
         result = remove(
             processing_source,
             session=session,

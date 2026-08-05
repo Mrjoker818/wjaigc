@@ -8,9 +8,9 @@
 | 功能 | 当前模型 | 实际状态 | 质量评级 |
 |------|---------|---------|---------|
 | 擦除（涂抹消除） | OpenCV Telea（iopaint_erase.py 实际路径） | 可用，0.25-0.67s | ⭐ 一般（纹理平滑失真） |
-| 擦除（LaMa/ZITS） | big-lama.pt / zits 已下载（/space/iopaint-models，962M） | **torch 缺失未启用** → 现为升级重点 | ⭐⭐⭐ 好 |
+| 擦除（LaMa/ZITS） | big-lama.pt / zits 已下载（/space/iopaint-models，962M） | **已启用**（torch 2.5.1+cpu） | ⭐⭐⭐ 好 |
 | 去背景 | BiRefNet-lite（/space/removebg-models，600M） | 可用，推理 5.6-6.6s（4线程） | ⭐⭐⭐ 好 |
-| 无损放大 | 无模型 | 不可用（AI API 兜底） | - |
+| 无损放大 | realesrgan-x4plus.onnx（/space/upscayl-models，67M） | **已补齐并实测** | ⭐⭐⭐ 好 |
 
 **关键发现**：torch CPU 版已安装（torch 2.5.1+cpu，/opt/torch-site 661M），LaMa 真实链路已打通并自愈恢复。
 
@@ -23,9 +23,11 @@
 | 擦除 | LaMa | 2048² | 41.4s | 51s | **大图建议限尺寸** |
 | 擦除 | OpenCV Telea（兜底） | 1024² | 0.25s | <1s | 极快但质量一般 |
 | 去背景 | BiRefNet-lite | 1024² | 5.6-6.6s | ~8s | 比上版预估 2-4s 慢，已修正 |
-| 放大 | Real-ESRGAN | - | 未测 | - | 模型未下载（可选） |
+| 放大 | Real-ESRGAN x4 | 1024²→4096² | 214s（16 tile） | ~220s | **真实可用**；大图建议限 2x |
 
 **性能规律**：像素面积 ×4 → LaMa 耗时 ×5.7（1024→2048），CNN 超线性（内存带宽限制）。
+
+**⚠️ 实测重要结论**：BiRefNet-general（927M）在 CPU 不可实用——rembg 命名规则不匹配（文件为 `BiRefNet-general-epoch_244.onnx` 大写，rembg 按小写 `birefnet-general.onnx` 查找）会触发 GitHub 973M 下载卡死；即使就绪，927M 模型 CPU 推理预计分钟级。**维持 BiRefNet-lite（5.6-6.6s）作为生产方案**。
 
 **线程建议**：`IOPAINT_NUM_THREADS=4`（默认已生效，留 2 核给 Web/并发）。并发闸门：同一时刻仅 1 个本地推理任务（Node 端 spawn 天然串行）。
 
@@ -38,13 +40,15 @@
 - **验证**：真实擦除成功，非蒙版区域像素级保留（外围均值 8.5=8.5），纯色修复偏差 <1%（126.8 vs 128）
 - **健康检测**：/api/image/health 现在报告 `model: "lama"`（torch+模型存在时）
 
-### ⬜ 2. BiRefNet-general 去背景（可选，~1G）
-- lite 已实测可用（5.6-6.6s），general 精度更高但更慢（预估 10-15s）
-- 下载：`scripts/download-iopaint-models.sh`（支持 birefnet-general）
-- **建议**：非必装，lite 满足日常；如需高精度再补
+### ✅ 2. Real-ESRGAN 无损放大（已补齐）
+- 模型 realesrgan-x4plus.onnx（67M，/space/upscayl-models）已就位
+- 真实测试：1024²→4096² 成功（4 线程，16 tile，**214s**）
+- Node 端链路已配置（ONNX_MODELS_DIR=/space/upscayl-models），多策略降级：云端 API → ONNX → AI 兜底
+- **建议**：大图（>1024）建议 2x；4x 需 ~3.5 分钟 CPU
 
-### ⬜ 3. Real-ESRGAN 无损放大（补齐，~64M）
-- 当前放大模型缺失（health 显示 upscale 不可用），AI API 兜底
+### ⬜ 3. BiRefNet-general（实测不推荐）
+- **命名 bug 已修**：rembg_remove_background.py glob 改大小写不敏感 + 支持 model_path 直传；ensure-models.sh 增加 general 小写迁移（软链 `birefnet-general.onnx`）
+- **实测结论**：927M 模型 CPU 推理不可实用（分钟级 + 触发 GitHub 973M 下载卡死）→ **维持 BiRefNet-lite 生产方案**，general 仅供未来 GPU 环境
 - 下载后本地放大离线可用（4x，4 线程约 10-20s/1024²）
 
 ### ✅ 4. 资源约束

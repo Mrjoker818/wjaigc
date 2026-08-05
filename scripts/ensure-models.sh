@@ -221,6 +221,14 @@ download_with_fallback \
     "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx" \
     "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx"
 
+# BiRefNet-general (~927MB) - 高精度通用（CPU 推理约 5-10 分钟/张，生产建议维持 lite；仅 GPU/批处理场景启用）
+download_with_fallback \
+    "BiRefNet 高精度通用 (birefnet-general.onnx, CPU 不推荐)" \
+    "$REMOVEBG_DIR/birefnet-general.onnx" \
+    500000000 \
+    "https://github.com/danielgatis/rembg/releases/download/v0.0.0/birefnet-general.onnx" \
+    "${GH_PROXY}https://github.com/danielgatis/rembg/releases/download/v0.0.0/birefnet-general.onnx"
+
 
 # ============================================================
 # 迁移旧路径模型文件（如果存在）
@@ -261,6 +269,14 @@ LITE_FILE="$REMOVEBG_DIR/birefnet-general-lite.onnx"
 if [ -f "$OLD_LITE_FILE" ] && [ ! -f "$LITE_FILE" ]; then
     echo "[迁移] BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx -> birefnet-general-lite.onnx"
     cp "$OLD_LITE_FILE" "$LITE_FILE"
+fi
+
+# 兼容大写下栽文件名（BiRefNet-general-epoch_244.onnx → rembg 期望的小写名）
+OLD_GENERAL_FILE=$(ls "$REMOVEBG_DIR"/BiRefNet-general-*.onnx 2>/dev/null | head -1)
+GENERAL_FILE="$REMOVEBG_DIR/birefnet-general.onnx"
+if [ -n "$OLD_GENERAL_FILE" ] && [ "$(basename "$OLD_GENERAL_FILE")" != "birefnet-general.onnx" ] && [ ! -e "$GENERAL_FILE" ]; then
+    echo "[迁移] $(basename "$OLD_GENERAL_FILE") -> birefnet-general.onnx (rembg 兼容)"
+    ln -sf "$OLD_GENERAL_FILE" "$GENERAL_FILE"
 fi
 
 # ============================================================

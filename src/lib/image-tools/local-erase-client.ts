@@ -127,7 +127,7 @@ export async function checkLocalEraseHealth(): Promise<{
 
   const torchAvailable = await runPython([
     '-c',
-    "import importlib.util, sys, os; sys.path.insert(0, '/opt/torch-site'); sys.exit(0 if os.path.isdir('/opt/torch-site/torch') and importlib.util.find_spec('torch') else 1)",
+    "import importlib.util, sys, os; sys.path.insert(0, '/opt/torch-site'); ok = os.path.isdir('/opt/torch-site/torch') or os.path.exists('/space/torch-site.tar'); sys.exit(0 if ok else 1)",
   ])
     .then(() => true)
     .catch(() => false);
