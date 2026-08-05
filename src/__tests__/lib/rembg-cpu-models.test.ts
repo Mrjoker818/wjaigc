@@ -14,16 +14,18 @@ describe('CPU rembg model catalog', () => {
     expect(configSource).toContain("process.platform === 'win32' ? 'python' : 'python3'");
   });
 
-  it('defaults to the full BiRefNet general model', () => {
-    expect(DEFAULT_REMBG_MODEL).toBe('birefnet-general');
+  it('defaults to the fast lite BiRefNet model', () => {
+    expect(DEFAULT_REMBG_MODEL).toBe('birefnet-general-lite');
     expect(REMBG_CPU_MODELS.map(model => model.id)).toEqual([
+      'birefnet-general-lite',
       'birefnet-general',
       'birefnet-portrait',
       'birefnet-massive',
     ]);
   });
 
-  it('does not keep legacy IOPaint remove-background model ids', () => {
+  it('keeps lite and full BiRefNet choices and drops legacy IOPaint ids', () => {
+    expect(isRembgCpuModel('birefnet-general-lite')).toBe(true);
     expect(isRembgCpuModel('birefnet-portrait')).toBe(true);
     expect(isRembgCpuModel('u2net')).toBe(false);
     expect(isRembgCpuModel('isnet-general-use')).toBe(false);

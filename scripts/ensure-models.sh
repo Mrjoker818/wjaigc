@@ -33,6 +33,15 @@ else
   REMOVEBG_DIR="${REMOVEBG_MODELS_DIR:-$PROJECT_ROOT/models/removebg}"
 fi
 
+# Real-ESRGAN ONNX 模型目录（放大）
+if [ -n "$UPSCAYL_MODELS_DIR" ]; then
+  UPSCALE_DIR="$UPSCAYL_MODELS_DIR"
+elif [ -d "/space/upscayl-models" ]; then
+  UPSCALE_DIR="/space/upscayl-models"
+else
+  UPSCALE_DIR="${ONNX_MODELS_DIR:-$PROJECT_ROOT/onnx-models}"
+fi
+
 ACTION="${1:---check}"
 
 # GitHub 下载加速镜像 (ghproxy.cc SSL 过期，使用 ghfast.top)
@@ -42,10 +51,11 @@ echo "============================================"
 echo " IOPaint + RemoveBG 模型检查工具"
 echo " IOPaint 目录: $IOPAINT_DIR"
 echo " RemoveBG 目录: $REMOVEBG_DIR"
+echo " UPSCALE 目录: $UPSCALE_DIR"
 echo " 操作: $ACTION"
 echo "============================================"
 
-mkdir -p "$IOPAINT_DIR" "$REMOVEBG_DIR"
+mkdir -p "$IOPAINT_DIR" "$REMOVEBG_DIR" "$UPSCALE_DIR"
 
 # --- 下载函数 ---
 # 返回 0=就绪/下载成功, 1=缺失/下载失败 (不触发 set -e)
@@ -158,6 +168,22 @@ download_with_fallback \
     "${GH_PROXY}https://github.com/Sanster/models/releases/download/add_zits/zits-inpaint-0717.pt"
 
 # ============================================================
+# Real-ESRGAN 无损放大模型
+# ============================================================
+echo ""
+echo "--- Real-ESRGAN 无损放大模型 ---"
+
+if [ "$ACTION" = "--check" ]; then
+  if [ -f "$UPSCALE_DIR/realesrgan-x4plus.onnx" ] && [ "$(stat -c%s "$UPSCALE_DIR/realesrgan-x4plus.onnx" 2>/dev/null || echo 0)" -gt 10000000 ]; then
+    echo "[就绪] Real-ESRGAN (realesrgan-x4plus.onnx)"
+  else
+    echo "[缺失] Real-ESRGAN (realesrgan-x4plus.onnx) - 使用 sharp/AI API 兜底"
+  fi
+elif [ "$ACTION" = "--download" ] || [ "$ACTION" = "--force" ]; then
+  UPSCAYL_MODELS_DIR="$UPSCALE_DIR" bash "$(dirname "$0")/download-upscale-models.sh" || true
+fi
+
+# ============================================================
 # RemoveBG 去背景模型
 # ============================================================
 echo ""
@@ -229,6 +255,14 @@ if [ -d "$OLD_U2NET_HOME" ]; then
     done
 fi
 
+# 兼容旧下载文件名（BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx → rembg 期望名）
+OLD_LITE_FILE="$REMOVEBG_DIR/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx"
+LITE_FILE="$REMOVEBG_DIR/birefnet-general-lite.onnx"
+if [ -f "$OLD_LITE_FILE" ] && [ ! -f "$LITE_FILE" ]; then
+    echo "[迁移] BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx -> birefnet-general-lite.onnx"
+    cp "$OLD_LITE_FILE" "$LITE_FILE"
+fi
+
 # ============================================================
 # 创建 torch hub 兼容符号链接
 # iopaint 的 get_cache_path_by_url 查找 TORCH_HOME/hub/checkpoints/<filename>
@@ -282,9 +316,11 @@ check_status() {
 check_status "LaMa 擦除" "$IOPAINT_DIR/big-lama.pt" 1000000
 check_status "Anime-Lama 动漫擦除" "$IOPAINT_DIR/anime-manga-big-lama.pt" 1000000
 check_status "ZITS 结构修复" "$IOPAINT_DIR/zits-inpaint-0717.pt" 100000
+check_status "BiRefNet Lite 去背景" "$REMOVEBG_DIR/birefnet-general-lite.onnx" 100000000
 check_status "U2NetP 去背景" "$REMOVEBG_DIR/u2netp.onnx" 1000000
 check_status "U2Net 去背景" "$REMOVEBG_DIR/u2net.onnx" 100000000
 check_status "Silueta 去背景" "$REMOVEBG_DIR/silueta.onnx" 10000000
+check_status "Real-ESRGAN 放大" "$UPSCALE_DIR/realesrgan-x4plus.onnx" 10000000
 
 echo ""
 echo "模型目录:"

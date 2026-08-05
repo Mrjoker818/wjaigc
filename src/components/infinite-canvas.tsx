@@ -2058,7 +2058,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Erase model selection (LaMa / ZITS / Anime-Lama)
   const [eraseModelId, setEraseModelId] = useState<string>('lama');
   // RemoveBG model selection
-  const [removeBgModelId, setRemoveBgModelId] = useState<string>('birefnet-general');
+  const [removeBgModelId, setRemoveBgModelId] = useState<string>('birefnet-general-lite');
   const [addRemoveBgMaskToCanvas, setAddRemoveBgMaskToCanvas] = useState(false);
   // Cache the target image when opening the remove-bg picker so the correct image is used even if selection changes
   const [removeBgTargetImage, setRemoveBgTargetImage] = useState<CanvasImage | null>(null);
@@ -13316,7 +13316,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         {/* ====== REMOVE BACKGROUND MODEL PICKER ====== */}
         {showRemoveBgPicker && (() => {
           const removeBgModels: Array<{ id: string; label: string; description: string; size: string; recommended?: boolean }> = [
-            { id: 'birefnet-general', label: 'BiRefNet 通用', description: '完整通用模型，优先保留主体和细节', size: '约 1GB', recommended: true },
+            { id: 'birefnet-general-lite', label: 'BiRefNet 通用 Lite', description: '轻量快速版，默认首选', size: '约 224MB', recommended: true },
+            { id: 'birefnet-general', label: 'BiRefNet 通用', description: '完整通用模型，优先保留主体和细节', size: '约 1GB' },
             { id: 'birefnet-portrait', label: 'BiRefNet 人像', description: '针对头发和人物边缘优化', size: '约 1GB' },
             { id: 'birefnet-massive', label: 'BiRefNet Massive', description: '复杂主体优先，CPU 处理时间更长', size: '约 1GB+' },
           ];

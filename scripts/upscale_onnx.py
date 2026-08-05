@@ -49,15 +49,19 @@ _session_cache = {}
 def get_session(model_name):
     if model_name in _session_cache:
         return _session_cache[model_name]
-    if model_name not in ("realesrgan-x4plus-fp16",):
-        model_name = "realesrgan-x4plus-fp16"
-    model_file = _MODEL_FILES.get(model_name, "realesrgan-x4plus-fp16.onnx")
+    requested = model_name if model_name in _MODEL_FILES else "realesrgan-x4plus-fp16"
+    model_file = _MODEL_FILES[requested]
     model_path = os.path.join(_ONNX_MODELS_DIR, model_file)
     if not os.path.exists(model_path):
-        fp16_path = os.path.join(_ONNX_MODELS_DIR, "realesrgan-x4plus-fp16.onnx")
-        if os.path.exists(fp16_path):
-            model_path = fp16_path
-            model_name = "realesrgan-x4plus-fp16"
+        alt_file = (
+            "realesrgan-x4plus.onnx"
+            if requested == "realesrgan-x4plus-fp16"
+            else "realesrgan-x4plus-fp16.onnx"
+        )
+        alt_path = os.path.join(_ONNX_MODELS_DIR, alt_file)
+        if os.path.exists(alt_path):
+            model_path = alt_path
+            requested = "realesrgan-x4plus" if alt_file.startswith("realesrgan-x4plus.") else "realesrgan-x4plus-fp16"
         else:
             raise FileNotFoundError(f"ONNX 模型文件不存在: {model_path}")
     print(f"[upscale_onnx] Loading model: {model_path}", file=sys.stderr)
@@ -66,13 +70,14 @@ def get_session(model_name):
     sess_options.inter_op_num_threads = 1
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     session = ort.InferenceSession(model_path, sess_options=sess_options, providers=['CPUExecutionProvider'])
-    _session_cache[model_name] = session
-    return session
+    _session_cache[requested] = (session, requested)
+    return session, requested
 
 
-def process_tile(session, tile_img):
+def process_tile(session, tile_img, model_name):
     """处理单个 tile，返回 PIL Image（强制释放中间内存）"""
-    img_array = np.array(tile_img).astype(np.float16) / 255.0
+    dtype = np.float16 if "fp16" in model_name else np.float32
+    img_array = np.array(tile_img).astype(dtype) / 255.0
     img_chw = np.transpose(img_array, (2, 0, 1))
     input_tensor = np.expand_dims(img_chw, axis=0)
     del img_array, img_chw
@@ -99,7 +104,7 @@ def upscale_image_tiled(img, scale=4, tile_size=256, model_name="realesrgan-x4pl
     3. 模型推理后，按实际添加的 overlap 精确裁剪
     4. 粘贴位置 = 核心区域起点 × target_scale
     """
-    session = get_session(model_name)
+    session, resolved_model_name = get_session(model_name)
     w, h = img.size
     cols = max(1, math.ceil(w / tile_size))
     rows = max(1, math.ceil(h / tile_size))
@@ -146,7 +151,7 @@ def upscale_image_tiled(img, scale=4, tile_size=256, model_name="realesrgan-x4pl
                 tile_w, tile_h = tile.size
 
                 t0 = time.time()
-                result = process_tile(session, tile)
+                result = process_tile(session, tile, resolved_model_name)
                 elapsed = time.time() - t0
                 print(f"[upscale_onnx] Tile {tile_idx+1}/{total_tiles}: "
                       f"core=[{core_x1},{core_y1}]-[{core_x2},{core_y2}] "

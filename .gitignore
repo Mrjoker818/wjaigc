@@ -83,6 +83,7 @@ Desktop.ini
 # AI Models (large binary files)
 /models/
 /upscayl-models/
+/onnx-models/
 
 # Python virtual environment
 .venv/

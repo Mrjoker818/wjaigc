@@ -20,10 +20,14 @@ describe('CPU rembg remove-background wiring', () => {
     expect(scriptSource).toContain("new_session(model_name)");
     expect(scriptSource).toContain("'rgbaBase64'");
     expect(scriptSource).toContain("'maskBase64'");
+    expect(scriptSource).toContain("'birefnet-general-lite'");
+    expect(scriptSource).toContain('OMP_NUM_THREADS');
   });
 
-  it('offers only full CPU BiRefNet choices in the image toolbar', () => {
-    expect(canvasSource).toContain("useState<string>('birefnet-general')");
+  it('offers the lite default and full CPU BiRefNet choices in the image toolbar', () => {
+    expect(canvasSource).toContain("useState<string>('birefnet-general-lite')");
+    expect(canvasSource).toContain("id: 'birefnet-general-lite'");
+    expect(canvasSource).toContain("id: 'birefnet-general'");
     expect(canvasSource).toContain("id: 'birefnet-portrait'");
     expect(canvasSource).not.toContain("id: 'u2net'");
   });

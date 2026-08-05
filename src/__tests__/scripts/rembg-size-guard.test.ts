@@ -10,4 +10,9 @@ describe('rembg CPU size guard', () => {
     expect(source).toContain('processing_source = resize_for_processing(source)');
     expect(source).toContain("if result.size != original_size:");
   });
+
+  it('defaults to the lite model and bounds onnxruntime threads', () => {
+    expect(source).toContain("DEFAULT_MODEL = 'birefnet-general-lite'");
+    expect(source).toContain('OMP_NUM_THREADS');
+  });
 });

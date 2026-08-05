@@ -2,15 +2,17 @@ import { spawn } from 'child_process';
 import path from 'path';
 
 import { LOCAL_AI_ENABLED, PYTHON_BIN, REMOVEBG_MODELS_DIR } from './config';
+import { withLocalInferenceLock } from './concurrency-gate';
 
 export const REMBG_CPU_MODELS = [
+  { id: 'birefnet-general-lite', label: 'BiRefNet 通用 Lite', description: '轻量快速版，默认首选，CPU 2-4 秒完成', size: '约 224MB', recommended: true },
   { id: 'birefnet-general', label: 'BiRefNet 通用', description: '完整通用模型，优先保留主体和细节', size: '约 1GB', recommended: true },
   { id: 'birefnet-portrait', label: 'BiRefNet 人像', description: '针对头发和人物边缘优化', size: '约 1GB' },
   { id: 'birefnet-massive', label: 'BiRefNet Massive', description: '复杂主体优先，CPU 处理时间更长', size: '约 1GB+' },
 ] as const;
 
 export type RembgCpuModelId = (typeof REMBG_CPU_MODELS)[number]['id'];
-export const DEFAULT_REMBG_MODEL: RembgCpuModelId = 'birefnet-general';
+export const DEFAULT_REMBG_MODEL: RembgCpuModelId = 'birefnet-general-lite';
 
 const REMBG_REMOVE_BACKGROUND_SCRIPT = path.join(process.cwd(), 'scripts', 'rembg_remove_background.py');
 const REMBG_TIMEOUT_MS = 180_000;
@@ -58,7 +60,7 @@ export async function generateRembgMask(
   const modelId = isRembgCpuModel(model) ? model : DEFAULT_REMBG_MODEL;
   const input = JSON.stringify({ image: imageBuffer.toString('base64'), model: modelId });
 
-  return new Promise(resolve => {
+  return withLocalInferenceLock(() => new Promise<RembgScriptResult>(resolve => {
     const child = spawn(PYTHON_BIN, [REMBG_REMOVE_BACKGROUND_SCRIPT], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -95,5 +97,5 @@ export async function generateRembgMask(
       }
     });
     child.stdin.end(input);
-  });
+  }));
 }

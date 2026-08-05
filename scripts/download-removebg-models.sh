@@ -16,7 +16,7 @@ fi
 
 # Model definitions: name | filename | url | md5 | size
 MODELS=(
-  "birefnet-general-lite|BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx|https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx|4fab47adc4ff364be1713e97b7e66334|224MB"
+  "birefnet-general-lite|birefnet-general-lite.onnx|https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx|4fab47adc4ff364be1713e97b7e66334|224MB"
   "u2netp|u2netp.onnx|https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx|8e83ca70e441ab06c318d82300c84806|4.5MB"
   "silueta|silueta.onnx|https://github.com/danielgatis/rembg/releases/download/v0.0.0/silueta.onnx|55e59e0d8062d2f5d013f4725ee84782|45MB"
 )

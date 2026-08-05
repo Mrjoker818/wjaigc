@@ -5,13 +5,16 @@ import json
 import os
 import sys
 
+# 6 vCPU 部署下限制 onnxruntime 推理线程，避免抢占 Web 服务算力。
+os.environ.setdefault("OMP_NUM_THREADS", "4")
 
 ALLOWED_MODELS = {
+    'birefnet-general-lite',
     'birefnet-general',
     'birefnet-portrait',
     'birefnet-massive',
 }
-DEFAULT_MODEL = 'birefnet-general'
+DEFAULT_MODEL = 'birefnet-general-lite'
 MAX_PROCESSING_EDGE = 2048
 
 

@@ -10,17 +10,25 @@ import os from 'os';
 import { spawn } from 'child_process';
 import sharp from 'sharp';
 import { UPSCALE_DEFAULT_SCALE, UPSCALE_TIMEOUT_MS, UPSCALE_OUTPUT_DIR, UPSCALE_OUTPUT_URL_PREFIX, PYTHON_BIN } from './config';
+import { withLocalInferenceLock } from './concurrency-gate';
 
 // ---- 目录配置 ----
 
 function getOnnxModelsDir(): string {
   const envDir = process.env.ONNX_MODELS_DIR;
   if (envDir && fs.existsSync(envDir)) return envDir;
-  // 优先 /space/onnx-models（持久化目录），再 fallback 到项目内
-  if (fs.existsSync('/space/onnx-models') && fs.readdirSync('/space/onnx-models').length > 0) {
-    return '/space/onnx-models';
-  }
-  return path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'onnx-models');
+  // 优先使用持久化目录，再 fallback 到项目内
+  const persistentCandidates = [
+    process.env.UPSCAYL_MODELS_DIR,
+    '/space/upscayl-models',
+    '/space/onnx-models',
+    path.join(process.cwd(), 'onnx-models'),
+  ].filter(Boolean) as string[];
+  const existing = persistentCandidates.find(dir =>
+    fs.existsSync(dir) && fs.readdirSync(dir).some(file => file.includes('realesrgan'))
+  );
+  if (existing) return existing;
+  return path.join(process.cwd(), 'onnx-models');
 }
 
 function getUpscaleOutputDir(): string {
@@ -76,14 +84,15 @@ export async function isOnnxUpscaleAvailable(): Promise<{
     return { available: false, error: 'ONNX 模型目录不存在' };
   }
 
-  // 检查模型文件
+  // 检查模型文件（fp16 或完整精度均可）
   const modelFile = 'realesrgan-x4plus-fp16.onnx';
+  const altModel = 'realesrgan-x4plus.onnx';
+  let foundModel = modelFile;
   if (!fs.existsSync(path.join(modelsDir, modelFile))) {
-    // 也尝试不带 fp16 后缀
-    const altModel = 'realesrgan-x4plus.onnx';
     if (!fs.existsSync(path.join(modelsDir, altModel))) {
-      return { available: false, error: `ONNX 模型文件不存在 (${modelFile})` };
+      return { available: false, error: `ONNX 模型文件不存在 (${modelFile} / ${altModel})` };
     }
+    foundModel = altModel;
   }
 
   // 检查 Python + onnxruntime 依赖
@@ -131,7 +140,7 @@ export async function isOnnxUpscaleAvailable(): Promise<{
     return { available: false, error: 'Python 环境不可用' };
   }
 
-  return { available: true, model: 'realesrgan-x4plus-fp16' };
+  return { available: true, model: foundModel };
 }
 
 /** 获取 upscale_onnx.py 脚本路径 */
@@ -280,15 +289,16 @@ export async function performOnnxUpscale(
     return { success: false, error: `不支持的放大倍率: ${scale}，最小 2 倍` };
   }
 
-  const onnxAvailable = await isOnnxUpscaleAvailable();
-  if (!onnxAvailable.available) {
-    return { success: false, error: onnxAvailable.error || 'ONNX 放大不可用' };
-  }
+  return withLocalInferenceLock(async () => {
+    const onnxAvailable = await isOnnxUpscaleAvailable();
+    if (!onnxAvailable.available) {
+      return { success: false, error: onnxAvailable.error || 'ONNX 放大不可用' };
+    }
 
-  ensureOutputDirs();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onnx-upscale-'));
+    ensureOutputDirs();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onnx-upscale-'));
 
-  try {
+    try {
     const { readImageToBuffer } = await import('./file');
     const { buffer: inputBuffer, width: origW, height: origH } =
       await readImageToBuffer(inputImageUrl);
@@ -327,7 +337,7 @@ export async function performOnnxUpscale(
     }
 
     const result = await callOnnxUpscale(
-      imageBase64, scale, tileSize, 'realesrgan-x4plus-fp16',
+      imageBase64, scale, tileSize, onnxAvailable.model || 'realesrgan-x4plus-fp16',
       inputFile, outputFile, timeoutMs,
     );
 
@@ -406,12 +416,13 @@ export async function performOnnxUpscale(
       model: result.model || 'realesrgan-x4plus-fp16',
       scale,
     };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return { success: false, error: `ONNX 放大失败: ${msg}` };
-  } finally {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-  }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { success: false, error: `ONNX 放大失败: ${msg}` };
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+  });
 }
 
 // ============================================================
