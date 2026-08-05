@@ -1948,6 +1948,8 @@ export function isEditsEndpointRejected(status: number, errorBody: string): bool
     lower.includes('unsupported endpoint') ||
     (lower.includes('invalid') && lower.includes('image_url')) ||  // images[] format rejected by API proxy
     (lower.includes('image_url') && lower.includes('required')) ||  // "images[].image_url is required" — API proxy rejects edits endpoint format
+    lower.includes('请上传参考图') ||  // Chinese: "please upload reference image" — AI Link edits endpoint can't handle JSON image_urls
+    lower.includes('reference #') ||  // English: "reference #1 required" — generic reference image required error
     (status === 404) || // endpoint doesn't exist
     (status === 405) || // method not allowed on this endpoint
     (status === 422)    // unprocessable entity — endpoint doesn't accept this payload
