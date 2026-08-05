@@ -853,7 +853,7 @@ export function resolveProfileForModel(
   // These providers have their own format requirements (e.g., APImart uses image_urls, not images[]).
   // Only force the openai profile for 'auto' or undefined baseProfiles.
   // For 'auto' profile, also preserve sizeFormat and use correct editEndpoint for GPT-Image models.
-  const providerSpecificProfiles = ['apimart', 'pearapi', '4sapi'];
+  const providerSpecificProfiles = ['apimart', 'pearapi'];
   if (isOpenAIImageModel(modelId) && !providerSpecificProfiles.includes(baseProfile.id)) {
     const openaiProfile = COMPAT_PROFILES['openai'];
     // GPT-Image models use /images/generations for reference images (images[]),

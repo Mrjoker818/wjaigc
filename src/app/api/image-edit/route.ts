@@ -1116,16 +1116,18 @@ async function submit302aiUpscaleTask(
   console.debug(`[image-edit] 302.AI upscale response keys:`, Object.keys(result));
 
   // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
-  if (result.image && result.image.url) {
+  // Fallback: some 302.AI endpoints return { output: "url" } instead
+  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+  if (directUrl) {
     return {
-      directUrl: result.image.url,
-      width: result.image.width,
-      height: result.image.height,
+      directUrl,
+      width: result.image?.width,
+      height: result.image?.height,
       usedModel: '302-super-upscale-v2',
     };
   }
 
-  throw new Error('302.AI upscale response missing image.url');
+  throw new Error('302.AI upscale response missing image.url or output');
 }
 
 /**
@@ -1171,16 +1173,18 @@ async function submit302aiUpscaleV6Task(
   console.debug(`[image-edit] 302.AI upscale-v6 response keys:`, Object.keys(result));
 
   // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
-  if (result.image && result.image.url) {
+  // Fallback: some 302.AI endpoints return { output: "url" } instead
+  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+  if (directUrl) {
     return {
-      directUrl: result.image.url,
-      width: result.image.width,
-      height: result.image.height,
+      directUrl,
+      width: result.image?.width,
+      height: result.image?.height,
       usedModel: '302-upscale-v6',
     };
   }
 
-  throw new Error('302.AI upscale-v6 response missing image.url');
+  throw new Error('302.AI upscale-v6 response missing image.url or output');
 }
 
 /**
@@ -1222,16 +1226,18 @@ async function submit302aiImageUpscaleTask(
   const result = await response.json();
   console.debug(`[image-edit] 302.AI image-upscale response keys:`, Object.keys(result));
 
-  if (result.image && result.image.url) {
+  // 响应格式: { image: { url, ... } } or { output: "url" }
+  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+  if (directUrl) {
     return {
-      directUrl: result.image.url,
-      width: result.image.width,
-      height: result.image.height,
+      directUrl,
+      width: result.image?.width,
+      height: result.image?.height,
       usedModel: '302-image-upscale',
     };
   }
 
-  throw new Error('302.AI image-upscale response missing image.url');
+  throw new Error('302.AI image-upscale response missing image.url or output');
 }
 
 /**
@@ -1273,16 +1279,18 @@ async function submit302aiEsrganTask(
   const result = await response.json();
   console.debug(`[image-edit] 302.AI esrgan response keys:`, Object.keys(result));
 
-  if (result.image && result.image.url) {
+  // 响应格式: { image: { url, ... } } or { output: "url" }
+  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+  if (directUrl) {
     return {
-      directUrl: result.image.url,
-      width: result.image.width,
-      height: result.image.height,
+      directUrl,
+      width: result.image?.width,
+      height: result.image?.height,
       usedModel: '302-esrgan',
     };
   }
 
-  throw new Error('302.AI esrgan response missing image.url');
+  throw new Error('302.AI esrgan response missing image.url or output');
 }
 
 /**

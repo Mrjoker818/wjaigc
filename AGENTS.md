@@ -815,7 +815,18 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v4.1.0 (当前版本)
+### v4.2.0 (当前版本)
+
+**API 供应商协议对齐修复 — P0-P2 共 6 项**
+
+- **P0: APImart 视频字段名 `size` → `aspect_ratio`**: APImart 视频 API 文档使用 `aspect_ratio` 字段，代码误用 `size`。同时移除未文档化的默认 `resolution: '1080p'`，改为仅在用户通过 advancedParams 显式设置时才发送（涉及 `src/lib/video-api.ts` `buildApiMartVideoSubmit`）
+- **P0: 4S API GPT-Image-2 编辑端点修复**: `providerSpecificProfiles` 数组包含 `'4sapi'`，阻止了 GPT-Image 模型覆盖逻辑。移除 `'4sapi'` 后，GPT-Image-2 模型的 editEndpoint 从 `/images/edits`（multipart）自动切换为 `/images/generations`（JSON + images[] 数组），与 4S API 实际协议一致（涉及 `src/lib/api-compatibility.ts`）
+- **P1: PearAPI Image-Layered 补充 `prompt` 字段**: PearAPI Schema 要求 `prompt` (minLength: 1)，但代码未发送。添加 `prompt: '.'` 占位符满足校验，不影响模型行为（涉及 `src/lib/layer-decomposition/pear-adapter.ts`）
+- **P2: AI Link 视频内容下载容错性增强**: 内容下载端点可能返回 JSON 错误体（HTTP 200 + Content-Type: application/json）而非二进制视频。新增 Content-Type 检测：若返回 JSON，尝试从中提取 `video_url`/`url` 作为 fallback URL 并重新下载；非 200 响应读取错误体用于诊断（涉及 `src/app/api/poll-task/route.ts`）
+- **P2: 302.AI 放大响应解析 fallback**: 4 个 302.AI 放大适配器（super-upscale-v2/upscale-v6/image-upscale/esrgan）的响应解析仅检查 `result.image.url`。新增 `result.output` 字符串字段作为 fallback，兼容部分端点返回 `{ output: "url" }` 格式的响应（涉及 `src/app/api/image-edit/route.ts`）
+- **P2: APImart 视频 i2v 格式确认**: `generation_type` + `image_with_roles` 为 APImart i2v 功能的专用格式，经审查确认为正确设计，保留不变
+
+### v4.1.0
 
 **P0: 核心功能修复 — 8 项稳定性与正确性修复**
 

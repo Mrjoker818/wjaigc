@@ -1393,18 +1393,54 @@ export async function POST(request: NextRequest) {
                   signal: AbortSignal.timeout(120000),
                 });
                 if (videoResp.ok) {
-                  const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
-                  // 从原始URL或Content-Type推断视频扩展名
-                  const origPath = new URL(videoResult.videoUrl).pathname;
-                  const ext = path.extname(origPath).toLowerCase() || '.mp4';
-                  const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
-                  const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
-                  await fs.mkdir(dirPath, { recursive: true });
-                  await fs.writeFile(path.join(dirPath, filename), videoBuffer);
-                  persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
-                  console.log(`[poll-task/video] Persisted video: ${persistedVideoUrl} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
+                  // Guard against error JSON being returned with a 200 status
+                  // (some AI Link gateways return errors as JSON with 200)
+                  const contentType = videoResp.headers.get('content-type') || '';
+                  if (contentType.includes('application/json') && videoProfile === 'ai-link') {
+                    const errorBody = await videoResp.text();
+                    console.warn(`[poll-task/video] AI Link content endpoint returned JSON instead of binary: ${errorBody.slice(0, 500)}`);
+                    // Try to extract a video URL from the JSON error/response
+                    try {
+                      const parsed = JSON.parse(errorBody);
+                      const fallbackUrl = parsed?.data?.video_url || parsed?.data?.url || parsed?.video_url || parsed?.url;
+                      if (typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http')) {
+                        console.log(`[poll-task/video] AI Link: extracted fallback URL from JSON: ${fallbackUrl.slice(0, 100)}`);
+                        const retryResp = await fetch(fallbackUrl, {
+                          headers: videoFetchHeaders,
+                          signal: AbortSignal.timeout(120000),
+                        });
+                        if (retryResp.ok && !retryResp.headers.get('content-type')?.includes('application/json')) {
+                          const videoBuffer = Buffer.from(await retryResp.arrayBuffer());
+                          const origPath = new URL(fallbackUrl).pathname;
+                          const ext = path.extname(origPath).toLowerCase() || '.mp4';
+                          const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+                          const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
+                          await fs.mkdir(dirPath, { recursive: true });
+                          await fs.writeFile(path.join(dirPath, filename), videoBuffer);
+                          persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
+                          console.log(`[poll-task/video] Persisted video from fallback URL: ${persistedVideoUrl} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
+                        }
+                      }
+                    } catch {
+                      // JSON parse failed — nothing more we can do
+                    }
+                  } else {
+                    const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+                    // 从原始URL或Content-Type推断视频扩展名
+                    const origPath = new URL(videoResult.videoUrl).pathname;
+                    const ext = path.extname(origPath).toLowerCase() || '.mp4';
+                    const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+                    const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
+                    await fs.mkdir(dirPath, { recursive: true });
+                    await fs.writeFile(path.join(dirPath, filename), videoBuffer);
+                    persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
+                    console.log(`[poll-task/video] Persisted video: ${persistedVideoUrl} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
+                  }
                 } else {
-                  console.warn(`[poll-task/video] Failed to download video: ${videoResp.status}`);
+                  // Read error body for diagnostics
+                  let errorDetail = '';
+                  try { errorDetail = await videoResp.text(); } catch { /* ignore */ }
+                  console.warn(`[poll-task/video] Failed to download video: ${videoResp.status} ${videoResp.statusText}`, errorDetail.slice(0, 300));
                 }
               } catch (persistErr) {
                 console.warn('[poll-task] Video persist failed, using source URL:', persistErr);

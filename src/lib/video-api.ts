@@ -1160,11 +1160,10 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     imageWithRoles.push(...referenceImages.map(url => ({ url, role: 'reference_image' as const })));
   }
 
-  // Map resolution: duration/quality → 720p/1080p/4k (default 1080p)
-  let resolution = '1080p';
-  if (params.mode === 'pro') resolution = '4k';
-  const advRes = getApiString(params.advancedParams, 'resolution');
-  if (advRes) resolution = advRes;
+  // APImart video API uses `aspect_ratio` (not `size`).
+  // `resolution` is not a documented field — only forward it when the user
+  // explicitly sets it via advancedParams.
+  const advResolution = getApiString(params.advancedParams, 'resolution');
 
   const body: Record<string, unknown> = {
     model: params.model,
@@ -1174,9 +1173,9 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     ...(imageWithRoles.length > 0
       ? { image_with_roles: imageWithRoles }
       : referenceImages.length > 0 ? { image_urls: referenceImages } : {}),
-    ...(params.aspectRatio ? { size: params.aspectRatio } : {}),
+    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
-    resolution,
+    ...(advResolution ? { resolution: advResolution } : {}),
     ...(params.generateAudio !== undefined ? { generate_audio: params.generateAudio } : {}),
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...(params.seed !== undefined ? { seed: params.seed } : {}),
