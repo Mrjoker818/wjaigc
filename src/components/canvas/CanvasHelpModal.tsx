@@ -100,7 +100,7 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
           <ToolCard icon={Eraser} title="擦除" desc="画笔涂抹消除，自动修复" imageFile="erase-tool.jpeg" detail="涂抹要消除的区域，本地 LaMa/ZITS/Anime-Lama 优先修复，AI 智能修复兜底，所有工具统一使用图像生成面板当前模型，支持任务取消" isMonochrome={isMonochrome} />
           <ToolCard icon={Brush} title="蒙版" desc="精准遮罩，AI 重新生成" imageFile="mask-tool.jpeg" detail="画白色区域标记要重新生成的部分，输入提示词描述，AI 仅在蒙版区域生成新内容" isMonochrome={isMonochrome} />
           <ToolCard icon={Scissors} title="移除背景" desc="一键去背景，输出主体图+蒙版" imageFile="remove-bg.jpeg" detail="自动分离主体与背景，同时生成透明底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先，AI 原生透明输出+边缘颜色混合修复，消除抠图锯齿" isMonochrome={isMonochrome} />
-          <ToolCard icon={ZoomIn} title="放大" desc="无损放大，智能补细节" imageFile="upscale.jpeg" detail="选择放大模型和倍率（2x/4x），支持 PNG/JPG/WEBP 输出" isMonochrome={isMonochrome} />
+          <ToolCard icon={ZoomIn} title="放大" desc="无损放大，智能补细节" imageFile="upscale.jpeg" detail="AI 放大支持 4 种模型（302 超级放大 V2 / 放大 V6 / 基础放大 / ESRGAN 高清增强），倍率 2x/4x，支持 PNG/JPG/WEBP 输出" isMonochrome={isMonochrome} />
           <ToolCard icon={Pencil} title="语言修图" desc="自然语言描述修改图片" imageFile="lang-edit.jpeg" detail="用自然语言描述修改意图，支持 OpenAI（可区域涂抹）+ Gemini（智能理解），自动裁切适配比例" isMonochrome={isMonochrome} />
           <ToolCard icon={Bot} title="Agent 编排" desc="智能编排多工具" detail="AI 自动选择和组合工具（修图/生图/分析/调色），多轮决策直至完成" isMonochrome={isMonochrome} />
           <ToolCard icon={Type} title="字境大师 Pro" desc="AI 字体设计与生成" detail="9 大字体风格库 + 12 种使用场景 + AI 设计方案生成，支持即梦提示词增强和黑底白字/透明Logo模式" isMonochrome={isMonochrome} />
@@ -182,6 +182,14 @@ function ChangelogContent({ isMonochrome }: { isMonochrome: boolean }) {
       <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>{APP_VERSION_LABEL}</div>
       <div className="space-y-2.5">
         {[
+          'v4.1.0 修复：生图数量>1时多图完整返回，不再丢失图片',
+          'v4.1.0 修复：祛除背景操作正确作用于右键选中的图片',
+          'v4.1.0 修复：快速创作高级模式不再卡在编译过程（超时保护）',
+          'v4.1.0 修复：人物精修大师视觉检测真实生效，不再返回固定扫描结果',
+          'v4.1.0 修复：元素拆解忠于原图元素，不再整体重绘',
+          'v4.1.0 放大升级：AI放大新增 302 基础放大 + ESRGAN 高清增强，共 4 个模型',
+          'v4.1.0 修复：标注修改大图自动缩小，不再报 size exceeds',
+          'v4.1.0 修复：SVG 元素编辑选中图形有金色高亮反馈',
           '视频生成：文生视频/图生视频/首尾帧/多参考图，6种API协议适配，20+视频模型',
           '视频编辑：语言描述修改视频内容，视频延长，黑金主题播放器',
           'Logo Pro：AI Logo设计与生成，5种风格方向+10种行业类型+3种视觉风格',

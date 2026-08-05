@@ -6,14 +6,15 @@ import {
   BookOpen, X, Info, Wand2, ImagePlus, GitMerge,
   Shapes, Settings,
   FileBox, ChevronRight, Check, PenTool, Pencil, Box, Type,
-  Bot, Palette, FolderOpen, FileImage, Building2, ShoppingBag, Store
+  Bot, Palette, FolderOpen, FileImage, Building2, ShoppingBag, Store,
+  ScanFace
 } from 'lucide-react';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 
 // ─── Types ──────────────────────────────────────────────────────
 
 type SectionId = 'canvas' | 'generate' | 'img2img' | 'video' | 'tools'
-  | 'svg-trace' | 'lang-edit' | 'agent-edit' | 'refine-engine' | 'sticker'
+  | 'svg-trace' | 'lang-edit' | 'agent-edit' | 'refine-engine' | 'human-repair' | 'sticker'
   | 'font-design' | 'logo-pro' | 'brand-factory' | 'brand-ecommerce'
   | 'node-editor' | 'scene-studio' | 'display3d' | 'ai-psd' | 'chat' | 'project' | 'admin'
   | 'shortcuts' | 'tips' | 'changelog';
@@ -35,6 +36,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'lang-edit', label: '语言修图', icon: <Wand2 size={14} />, group: '使用说明' },
   { id: 'agent-edit', label: 'Agent 编排', icon: <Bot size={14} />, group: '使用说明' },
   { id: 'refine-engine', label: '精修引擎', icon: <Palette size={14} />, group: '使用说明' },
+  { id: 'human-repair', label: '人物精修大师', icon: <ScanFace size={14} />, group: '使用说明' },
   { id: 'sticker', label: '表情助手', icon: <Shapes size={14} />, group: '使用说明' },
   { id: 'font-design', label: '字境大师', icon: <Type size={14} />, group: '使用说明' },
   { id: 'logo-pro', label: 'Logo 生成器 Pro', icon: <PenTool size={14} />, group: '使用说明' },
@@ -117,6 +119,7 @@ function GenerateSection() {
       </p>
       <SubTitle>基础功能</SubTitle>
       <FeatureItem>模型选择：从管理员配置的模型列表中选择图像模型</FeatureItem>
+      <FeatureItem>生图数量：单次可生成多张图（1 张起），供应商侧全部生成并扣费，前端会完整返回同等数量的图片</FeatureItem>
       <FeatureItem>画面比例：带比例图形预览，直观展示比例样式</FeatureItem>
       <FeatureItem>生图质量：根据所选模型支持的质量设置</FeatureItem>
       <FeatureItem>产品品类：通用、人物、风景、建筑等预设场景</FeatureItem>
@@ -158,11 +161,16 @@ function ToolsSection() {
       </p>
       <SubTitle>放大</SubTitle>
       <FeatureItem>智能补细节把图片变大变高清，不改画面内容、不换背景</FeatureItem>
-      <FeatureItem>支持多种放大模型和倍率（2x / 4x），输出格式 PNG / JPG / WEBP</FeatureItem>
+      <FeatureItem>AI 放大支持 4 种模型：302 超级放大 V2 / 302 放大 V6 / 302 基础放大 / ESRGAN 高清增强</FeatureItem>
+      <FeatureItem>支持倍率（2x / 4x），输出格式 PNG / JPG / WEBP</FeatureItem>
       <SubTitle>移除背景</SubTitle>
       <FeatureItem>自动把主体和背景分开，一键删掉杂乱背景</FeatureItem>
       <FeatureItem>同时输出透明背景图 + 黑白蒙版图（白色 = 主体，黑色 = 背景）</FeatureItem>
       <FeatureItem>多模型可选：BiRefNet 通用推荐 / U2Net 轻量快速 / Silueta 轻量人像</FeatureItem>
+      <SubTitle>编辑元素（元素拆解）</SubTitle>
+      <FeatureItem>选中图片 → 顶部工具栏“编辑元素”，AI 拆解图中元素并生成拆解方案</FeatureItem>
+      <FeatureItem>拆解严格忠于原图元素，不新增画面外的内容，结果逐项还原原图中的真实元素</FeatureItem>
+      <FeatureItem>支持拆解构件 / 材质 / BOM 清单 / 平面分区，输出复核提示供设计师、制作方、结构工程师确认</FeatureItem>
       <SubTitle>擦除</SubTitle>
       <FeatureItem>画笔涂抹消除并自动无缝补上新的画面</FeatureItem>
       <FeatureItem>IOPaint 多模型优先（LaMa 通用 / ZITS 结构保持 / Anime-Lama 动漫），AI 模型兜底</FeatureItem>
@@ -255,6 +263,29 @@ function RefineEngineSection() {
       <SubTitle>入口</SubTitle>
       <FeatureItem>选中图片 → 工具栏“精修”按钮</FeatureItem>
       <FeatureItem>右键菜单“精修引擎”</FeatureItem>
+    </div>
+  );
+}
+
+function HumanRepairSection() {
+  return (
+    <div>
+      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">人物精修大师</h3>
+      <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
+        专门针对人像的 AI 精修工具，先通过视觉模型智能扫描人物身体各区域质量，再按需修复，适合面部、手部、四肢等部位的细节优化。
+      </p>
+      <SubTitle>扫描与推荐</SubTitle>
+      <FeatureItem>上传图片后 AI 视觉模型自动扫描头发、面部、身体、手部、腿部等区域并打分</FeatureItem>
+      <FeatureItem>根据扫描结果智能推荐精修方案（轻度 / 标准 / 深度），无问题区域不推荐修复</FeatureItem>
+      <FeatureItem>支持多区域批量选择，一键应用推荐方案</FeatureItem>
+      <SubTitle>精修模式</SubTitle>
+      <FeatureItem>轻度：细节微调，保持原图质感</FeatureItem>
+      <FeatureItem>标准：均衡修复画质与细节</FeatureItem>
+      <FeatureItem>深度：较大幅度的修复，改善明显瑕疵</FeatureItem>
+      <FeatureItem>每张图可独立生成，修复结果自动添加到画布</FeatureItem>
+      <SubTitle>入口</SubTitle>
+      <FeatureItem>底部工具栏“人物精修大师”按钮</FeatureItem>
+      <FeatureItem>选中图片右键菜单“人物精修”</FeatureItem>
     </div>
   );
 }
@@ -599,6 +630,16 @@ function ChangelogSection() {
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">更新内容</h3>
 
+      <SubTitle>v4.1.0</SubTitle>
+      <FeatureItem>修复：生图数量 &gt;1 时前端只能收到 1 张图（多图完整返回）</FeatureItem>
+      <FeatureItem>修复：祛除背景操作错误图片（右键选择后目标被切换）</FeatureItem>
+      <FeatureItem>修复：快速创作面板高级模式卡在"正在编辑专业方案"（前端超时 + 后端流级看门狗）</FeatureItem>
+      <FeatureItem>修复：人物精修大师无法正常使用（内部认证替代 cookie，视觉检测真实生效）</FeatureItem>
+      <FeatureItem>修复：元素拆解完全改变原图（提示词忠于原图元素 + 降低 strength）</FeatureItem>
+      <FeatureItem>放大功能升级：AI 放大新增 302 基础放大 + ESRGAN 高清增强，共 4 个放大模型可选</FeatureItem>
+      <FeatureItem>修复：标注修改功能 size exceeds 错误（大图自动等比缩小到支持范围）</FeatureItem>
+      <FeatureItem>修复：SVG 元素编辑窗口选中图形无反馈（金色高亮 + hover 效果）</FeatureItem>
+
       <SubTitle>v4.0.0</SubTitle>
       <FeatureItem>元素拆解全面升级：通用化 prompt 适配任意画面 + 两阶段流程 + 透明PNG输出</FeatureItem>
       <FeatureItem>ChatCanvas 批注融合升级：r3/r4 批注升级包 + Shift+数字快捷键</FeatureItem>
@@ -701,6 +742,7 @@ const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   'lang-edit': <LangEditSection />,
   'agent-edit': <AgentEditSection />,
   'refine-engine': <RefineEngineSection />,
+  'human-repair': <HumanRepairSection />,
   'sticker': <StickerSection />,
   'font-design': <FontDesignSection />,
   'logo-pro': <LogoProSection />,

@@ -815,7 +815,20 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v3.8.0 (当前版本)
+### v4.1.0 (当前版本)
+
+**P0: 核心功能修复 — 8 项稳定性与正确性修复**
+
+- **生图数量多图返回**: 修复设置生图数量>1 时前端只能收到 1 张图的问题。非 submitOnly 路径响应 JSON 新增 `directImageUrls` 字段；submitOnly 后台处理器重写 `directImageUrls` 分支，支持纯直接模式、混合模式（直接+异步）、纯异步模式三种情况，确保供应商已生成的全部图片正确返回前端（涉及 `src/app/api/generate/route.ts`）
+- **祛除背景目标图片错位**: 修复用户选择图片1但祛除背景作用于图片2的问题。新增 `removeBgTargetImage` 状态，右键打开 RemoveBg 选择器时缓存目标图片，确认时优先使用缓存的图片而非再次读取当前选中（涉及 `src/components/infinite-canvas.tsx`）
+- **快速创作编译卡死**: 修复高级模式默认设置下卡在"正在编辑专业方案"的问题。前端添加 120s 超时 AbortController；后端路由新增 `maxDuration = 120`；SSE 流内添加 90s 超时看门狗（Promise.race），确保 LLM 流挂起时能中断并返回错误（涉及 `src/components/canvas-workspace.tsx`、`src/app/api/quick-create/compile/route.ts`）
+- **人物精修大师认证失败**: 修复人物检测/修复功能无法正常使用的问题。`detectHumanWithVision` 及 `realCandidate` 的 cookie 头部认证改为 `getInternalRequestHeaders(userId, 'user')` 内部密钥认证，杜绝 localhost fetch 下 cookie 无法传播导致降级到 mock 检测器的问题；补充错误日志便于排查（涉及 `src/lib/human-repair-service.ts`、`src/app/api/human/analyze/route.ts`、`src/app/api/human/repair/route.ts`）
+- **元素拆解忠实度**: 修复拆解结果完全改变原图的问题。提示词重写为严格忠于原图元素（保留主体/构图/色彩/材质），明确禁止创造原图中不存在的元素；`strength` 从 0.72 降至 0.45（涉及 `src/lib/display-decompose.ts`）
+- **AI 放大模型扩充**: 放大功能新增 2 个 AI 模型，从 2 个扩充到 4 个：`302-image-upscale`（基础放大）与 `302-esrgan`（ESRGAN 高清增强），补充对应 API 适配器与分发逻辑（涉及 `src/lib/302-upscale-models.ts`、`src/app/api/image-edit/route.ts`）
+- **标注修改尺寸超限**: 修复"size exceeds the maximum supported resolution"错误。`compileAnnotationAssets` 对超过最长边 2048px 的图片等比缩小后再构建蒙版与参考图；`/api/edit` 路由增加 size 安全限制，超过 2048px 自动按比例缩小（涉及 `src/lib/annotation-mask.ts`、`src/app/api/edit/route.ts`）
+- **SVG 选中反馈**: 修复 SVG 元素编辑窗口选中图形无反馈的问题。添加 `useEffect` + `stageRef` 在选中元素上切换 `.vector-selected` class，新增金色 drop-shadow 高亮与 hover 效果（涉及 `src/components/vector-design/vector-editor-dialog.tsx`）
+
+### v3.8.0
 
 **P0: 视频导演系统 (Video Director) — 导演级提示词编排 + AI分镜 + 失败诊断**
 
