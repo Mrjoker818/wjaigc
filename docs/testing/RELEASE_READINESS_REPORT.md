@@ -573,3 +573,11 @@ Dedicated RemoveBG production wiring and Pear PSD/ZIP artifact handling have pas
 4. Login, model catalog, reference/fusion groups, `n > 1` progressive return, canvas, node mode, ChatCanvas, and both toolbars require an exact-build Chrome smoke regression after deployment.
 
 No local test result is being used as a substitute for those deployed acceptance checks.
+
+---
+
+## 2026-08-05 Local Acceptance Status (`7d88625`)
+
+All local gates pass: unit/API/regression suites, TypeScript, ESLint (0 errors), and production build. Deployed acceptance remains blocked: the exact-build cloud smoke needs a running Coze sandbox, and the credit-consuming P0 generation E2E needs explicit environment credentials plus paid-generation approval.
+
+**Verdict: 有条件通过 (conditional)** - pending deployed acceptance checks for auth, model catalog, canvas/node/ChatCanvas, both toolbars, `n > 1` progressive generation, and PostgreSQL billing consistency.

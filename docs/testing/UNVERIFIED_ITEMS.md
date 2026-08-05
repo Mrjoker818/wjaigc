@@ -398,3 +398,13 @@
 | Pear ZIP to PSD editor | Pending real artifact run | The safe downloader accepts the real ZIP, extracts the primary non-`_depth.psd` file, validates `8BPS`, and opens at least two editable layers. |
 | PostgreSQL concurrency suites | Skipped locally | Run annotation, element decomposition, and layered decomposition concurrency suites against an isolated PostgreSQL database and retain transaction/ledger evidence. |
 | Exact-build smoke regression | Pending deployment | Verify authentication, configured model visibility, reference/fusion groups, `n > 1` progressive generation, canvas/node/ChatCanvas, image toolbar, and bottom toolbar after deploying the exact commit. |
+
+---
+
+## 2026-08-05 acceptance-chain additions (`7d88625`)
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Paid P0 generation E2E on exact build | Unverified | Missing `E2E_TEST_USERNAME` / `E2E_TEST_PASSWORD` / `E2E_GENERATION_MODEL` and `E2E_ENABLE_PAID_GENERATION=true` |
+| Cloud exact-build smoke | Unverified | Preview URL returns 404 `instance_not_found`; restart Coze sandbox first |
+| PostgreSQL concurrency/refund suites | Skipped | No isolated PostgreSQL URL configured |

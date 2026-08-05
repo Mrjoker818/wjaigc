@@ -642,3 +642,21 @@ This gate closes one confirmed application-routing defect. It does not yet class
 | Cloud browser acceptance | PENDING DEPLOYMENT | Real provider output, alpha quality, Pear ZIP download/extraction/editor opening, PostgreSQL terminal transitions, and billing/refund records require the deployed environment. |
 
 The four task-durability source-order contracts now use branch-scoped whitespace-tolerant matching rather than fixed indentation. They still assert that durable database writes occur before in-memory completion or polling publication; no production task-state logic was relaxed.
+
+---
+
+## 2026-08-05 Acceptance Chain (`7d88625`)
+
+| Check | Result |
+|-------|--------|
+| `pnpm install --frozen-lockfile` | PASS (restored pruned nested `safe-buffer`; local page returns 200) |
+| `pnpm doctor` | 23 passed / 10 environment warnings / 0 failed |
+| `pnpm lint` | 0 errors / 951 legacy warnings |
+| `pnpm ts-check` | PASS |
+| `pnpm test` | 1,479 passed / 4 skipped / 0 failed |
+| `pnpm test:api` | 335 passed / 3 skipped / 0 failed |
+| `pnpm test:regression` | 1,104 passed / 1 skipped / 0 failed |
+| `pnpm build` | PASS |
+| Playwright login-entry contract | 8 cases; 6/8 on first run, isolated reruns pass (Chromium flake) |
+| Paid P0 E2E | BLOCKED (credentials, paid-generation env, and local DB not configured) |
+| Cloud smoke | BLOCKED (preview returns 404 `instance_not_found`) |

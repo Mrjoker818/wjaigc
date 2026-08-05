@@ -882,3 +882,14 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | Files | `src/app/api/image-edit/route.ts`, `src/__tests__/api/remove-bg-provider-wiring.test.ts` |
 | Regression | Dedicated wiring suite: 7/7 assertions. Combined RemoveBG provider/profile suite: 17/17 assertions. Full Vitest: 320 files / 1,435 tests passed; 3 PostgreSQL files / 4 tests skipped without an isolated database. Production build passed. |
 | Cloud status | Pending exact-build Chrome verification with a real dedicated provider. PNG/WebP/ZIP output, alpha quality, provider/model traceability, one charge, and at-most-one refund remain unverified. |
+
+---
+
+## 2026-08-05 Acceptance Chain (`7d88625`)
+
+| ID | Finding | Severity | Status |
+|----|---------|----------|--------|
+| ACC-001 | `pnpm install --frozen-lockfile` pruned the nested `node_modules/jszip/node_modules/safe-buffer` package, breaking the local dev page compile with a 500. Restored the nested package from the root copy; page and `/api/session` return 200 again. | P2 (environment) | Fixed locally; deploy images must not rely on manually nested packages |
+| ACC-002 | Playwright login-entry contract: 6/8 passed on the first run; the 2 Chromium chat-entry failures were flaky (isolated rerun passes). | P3 | No functional regression found |
+| ACC-003 | Real paid P0 generation E2E was not run: `E2E_TEST_USERNAME/PASSWORD/GENERATION_MODEL` and `E2E_ENABLE_PAID_GENERATION=true` are not configured and the local database is absent. | Unverified | Blocked by environment |
+| ACC-004 | Cloud preview URL returns 404 `instance_not_found`; the Coze sandbox must be restarted before exact-build cloud smoke. | Unverified | Blocked by environment |
