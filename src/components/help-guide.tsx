@@ -485,15 +485,59 @@ function ShortcutsSection() {
   return (
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">快捷键</h3>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2">
-        <FeatureItem><KeyBadge>Ctrl+Z</KeyBadge> 撤回操作</FeatureItem>
-        <FeatureItem><KeyBadge>Ctrl+Shift+Z</KeyBadge> 重做（节点模式）</FeatureItem>
-        <FeatureItem><KeyBadge>Delete</KeyBadge> 删除选中图片</FeatureItem>
-        <FeatureItem><KeyBadge>ESC</KeyBadge> 退出编辑 / 取消选择</FeatureItem>
-        <FeatureItem><KeyBadge>空格+拖动</KeyBadge> 抓手工具平移画布</FeatureItem>
-        <FeatureItem><KeyBadge>Ctrl+点击</KeyBadge> 多选图片</FeatureItem>
-        <FeatureItem><KeyBadge>Ctrl+C/V</KeyBadge> 复制粘贴节点（节点模式）</FeatureItem>
-        <FeatureItem><KeyBadge>滚轮</KeyBadge> 缩放画布</FeatureItem>
+      <div className="space-y-3 mt-2">
+        <div>
+          <div className="text-[11px] font-semibold text-[var(--color-primary)] mb-1">画布操作</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <FeatureItem><KeyBadge>Ctrl+Z</KeyBadge> 撤回操作</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+Shift+Z</KeyBadge> 重做操作</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+A</KeyBadge> 全选画布图片</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+D</KeyBadge> 复制选中图片</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+Plus</KeyBadge> 放大画布</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+Minus</KeyBadge> 缩小画布</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+G</KeyBadge> 创建组</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+Q</KeyBadge> 瀑布流布局</FeatureItem>
+            <FeatureItem><KeyBadge>Delete</KeyBadge> 删除选中图片</FeatureItem>
+            <FeatureItem><KeyBadge>ESC</KeyBadge> 退出编辑 / 取消选择</FeatureItem>
+            <FeatureItem><KeyBadge>空格+拖动</KeyBadge> 抓手工具平移画布</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+点击</KeyBadge> 多选图片</FeatureItem>
+            <FeatureItem><KeyBadge>滚轮</KeyBadge> 缩放画布</FeatureItem>
+            <FeatureItem><KeyBadge>粘贴</KeyBadge> 粘贴剪贴板图片</FeatureItem>
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold text-[var(--color-primary)] mb-1">批注模式</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <FeatureItem><KeyBadge>C</KeyBadge> 切换批注模式</FeatureItem>
+            <FeatureItem><KeyBadge>B</KeyBadge> 画笔工具（批注）</FeatureItem>
+            <FeatureItem><KeyBadge>R</KeyBadge> 区域工具（批注）</FeatureItem>
+            <FeatureItem><KeyBadge>[ / ]</KeyBadge> 减小 / 增大画笔</FeatureItem>
+            <FeatureItem><KeyBadge>Alt</KeyBadge> 反向擦除（擦除/蒙版）</FeatureItem>
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold text-[var(--color-primary)] mb-1">工具面板</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <FeatureItem><KeyBadge>Shift+1</KeyBadge> 3D 模型</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+2</KeyBadge> 图片编辑</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+3</KeyBadge> Agent 编排</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+4</KeyBadge> 视频面板</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+5</KeyBadge> 品牌电商</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+6</KeyBadge> 精修引擎</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+7</KeyBadge> 人物精修大师</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+8</KeyBadge> 字境大师</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+9</KeyBadge> 品牌工厂</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+0</KeyBadge> 品牌 IP</FeatureItem>
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold text-[var(--color-primary)] mb-1">节点模式</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <FeatureItem><KeyBadge>Ctrl+C/V</KeyBadge> 复制粘贴节点</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+Z</KeyBadge> 撤销（节点）</FeatureItem>
+            <FeatureItem><KeyBadge>Ctrl+Shift+Z</KeyBadge> 重做（节点）</FeatureItem>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -776,7 +820,7 @@ export function HelpGuide({ isOpen, onClose, initialSection = 'canvas', themeSty
   const groups = ['使用说明', '更新内容'] as const;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-[680px] max-h-[80vh] bg-[var(--color-surface)] rounded-xl border border-[var(--color-outline-variant)] shadow-2xl flex flex-col overflow-hidden"
         data-modal>

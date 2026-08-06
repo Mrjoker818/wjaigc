@@ -2725,6 +2725,20 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         setZoom(newZoom);
         return;
       }
+      // Ctrl + A: Select all images on canvas
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
+        if (inputFocused) return;
+        e.preventDefault();
+        const selectableImages = images.filter(img => !img.isProcessingPlaceholder);
+        if (selectableImages.length > 0) {
+          setSelectedIds(new Set(selectableImages.map(img => img.id)));
+          selectImage(selectableImages[0].id);
+        } else {
+          setSelectedIds(new Set());
+          selectImage(null);
+        }
+        return;
+      }
       // Ctrl + D: Duplicate selected images (prevent browser bookmark shortcut)
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD') {
         if (inputFocused) return;
