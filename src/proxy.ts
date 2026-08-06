@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 const MAX_BODY_SIZE = 50 * 1024 * 1024;
 const PATH_TRAVERSAL_PATTERN = /\.\.[/\\]|%2e%2e[%/\\]/i;
 const UNSAFE_PROTOCOL_PATTERN = /^(file|javascript|vbscript|data):/i;
-const XSS_PATTERN = /<\s*script|on\w+\s*=|javascript\s*:/i;
+const XSS_PATTERN = /<\s*script|javascript\s*:|\bon(?:click|error|load|mouseover|mouseout|mousedown|mouseup|change|submit|focus|blur|keydown|keyup|keypress|input|scroll|wheel|touchstart|touchmove|touchend|toggle|animationend|transitionend)\s*=/i;
 const SKIP_PATHS = ['/_next', '/favicon', '/uploads/', '/api/serve-upload/'];
 
 function getRequestId(request: NextRequest): string {

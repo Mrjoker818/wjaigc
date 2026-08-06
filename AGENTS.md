@@ -815,7 +815,18 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v4.2.0 (当前版本)
+### v4.2.1 (当前版本)
+
+**智能对话数据跨设备持久化 — 聊天历史/Skills/自定义智能体服务器同步**
+
+- **聊天数据持久化修复（P0）**: 聊天会话（`chat-sessions`）、自定义 Skills（`chat-skills`）、自定义智能体（`custom-agents`）此前仅存 localStorage，用户在其他电脑登录后数据全部丢失。现新增服务端同步：
+  - `/api/user-data/sync` 的 `ALLOWED_KEY_PREFIXES` 新增 `chat_` 前缀（涉及 `src/app/api/user-data/sync/route.ts`）
+  - `chat-panel.tsx` 新增 `loadChatKeyFromServer`（加载优先服务器，fallback localStorage）与 `scheduleChatSync`（800ms 防抖写入服务器）辅助函数
+  - 聊天会话/自定义 Skills/自定义智能体初始化时优先从服务器拉取（合并本地），保存时双写 localStorage + 服务器，删除会话同步删除
+  - 数据按用户隔离（`wujie_user_data` 表 user_id 维度），换设备登录后自动恢复（涉及 `src/components/chat-panel.tsx`）
+- **XSS 中间件误伤修复（P1）**: `src/proxy.ts` 的 `XSS_PATTERN` 使用宽泛的 `on\w+\s*=` 正则，误拦截 `sessionId=`/`projectId=` 等正常 query 参数（chat-tasks API 400）。改为显式 `on` 事件名白名单（onclick/onerror/onload 等 24 个），`sessionId`/`projectId`/`optionId` 等不再误伤，真实 XSS（`onclick=`、`<script>`、`javascript:`）仍拦截
+
+### v4.2.0
 
 **API 供应商协议对齐修复 — P0-P2 共 6 项**
 

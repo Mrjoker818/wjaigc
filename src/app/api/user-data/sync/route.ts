@@ -6,7 +6,7 @@ import { execSql } from '@/lib/db-client';
 export const dynamic = 'force-dynamic';
 
 // Allowed key prefixes for user data sync (prevent overwriting system data)
-const ALLOWED_KEY_PREFIXES = ['projects', 'favorites', 'brand_', 'font_', 'canvas_', 'workflow_', 'settings_', 'theme_', 'custom_'];
+const ALLOWED_KEY_PREFIXES = ['projects', 'favorites', 'brand_', 'font_', 'canvas_', 'workflow_', 'settings_', 'theme_', 'custom_', 'chat_'];
 
 function isKeyAllowed(key: string): boolean {
   return ALLOWED_KEY_PREFIXES.some(prefix => key.startsWith(prefix));

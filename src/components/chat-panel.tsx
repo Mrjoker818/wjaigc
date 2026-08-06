@@ -1302,6 +1302,58 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   const [activeSkill, setActiveSkill] = useState<ChatSkill | null>(null);
   const [skillParamValues, setSkillParamValues] = useState<Record<string, string>>({});
 
+  // ===== 聊天数据跨设备持久化（服务器同步，避免换电脑/换浏览器后数据丢失） =====
+  const isChatUserLoggedIn = useCallback(() => {
+    if (typeof window === 'undefined') return false;
+    return !!localStorage.getItem('unbounded_ai_current_user');
+  }, []);
+  const saveChatKeyToServer = useCallback(async (key: string, value: unknown): Promise<void> => {
+    if (!isChatUserLoggedIn()) return;
+    try {
+      const res = await fetch('/api/user-data/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      });
+      if (!res.ok) {
+        console.warn('[chat-persist] sync failed', key, res.status);
+      }
+    } catch (e) {
+      console.warn('[chat-persist] sync error', key, e);
+    }
+  }, [isChatUserLoggedIn]);
+  const loadChatKeyFromServer = useCallback(async (key: string): Promise<unknown | null> => {
+    if (!isChatUserLoggedIn()) return null;
+    try {
+      const res = await fetch(`/api/user-data/sync?key=${encodeURIComponent(key)}`);
+      const data = await res.json();
+      if (data?.success && data.value != null) return data.value;
+      return null;
+    } catch {
+      return null;
+    }
+  }, [isChatUserLoggedIn]);
+  // 防抖调度器：聊天数据变更后延迟写入服务器，避免高频写库
+  const chatSyncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const scheduleChatSync = useCallback((key: string, value: unknown) => {
+    if (!isChatUserLoggedIn()) return;
+    if (chatSyncTimers.current[key]) clearTimeout(chatSyncTimers.current[key]);
+    chatSyncTimers.current[key] = setTimeout(() => {
+      void saveChatKeyToServer(key, value);
+      delete chatSyncTimers.current[key];
+    }, 800);
+  }, [isChatUserLoggedIn, saveChatKeyToServer]);
+  // 会话列表与本地合并（按 id 去重，updatedAt 较新者优先）
+  const mergeChatSessionLists = useCallback((server: ChatSession[], local: ChatSession[]): ChatSession[] => {
+    const map = new Map<string, ChatSession>();
+    for (const s of local) map.set(s.id, s);
+    for (const s of server) {
+      const existing = map.get(s.id);
+      if (!existing || (s.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) map.set(s.id, s);
+    }
+    return Array.from(map.values()).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).slice(0, 50);
+  }, []);
+
   // ===== 思考计时器 =====
   useEffect(() => {
     if (isLoading) {
@@ -1602,13 +1654,27 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   // 合并内置+自定义智能体
   const allAgents = [...AGENTS, ...customAgents];
 
-  // 加载自定义智能体
+  // 加载自定义智能体（登录用户优先从服务器恢复）
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('custom-agents');
-      if (stored) setCustomAgents(JSON.parse(stored));
-    } catch {}
-  }, []);
+    let cancelled = false;
+    const init = async () => {
+      try {
+        const stored = localStorage.getItem('custom-agents');
+        if (stored) setCustomAgents(JSON.parse(stored));
+      } catch {}
+      try {
+        const serverAgents = await loadChatKeyFromServer('chat_agents');
+        if (!cancelled && Array.isArray(serverAgents) && serverAgents.length > 0) {
+          setCustomAgents(serverAgents as typeof AGENTS);
+          try { localStorage.setItem('custom-agents', JSON.stringify(serverAgents)); } catch {}
+        }
+      } catch {
+        // 服务器不可用时保留本地智能体
+      }
+    };
+    void init();
+    return () => { cancelled = true; };
+  }, [loadChatKeyFromServer]);
 
   // ===== Lovart 风格预设 Skills =====
   const LOVART_PRESET_SKILLS: ChatSkill[] = useMemo(() => [
@@ -2779,19 +2845,34 @@ IP角色设计规范：
     },
   ], []);
 
-  // 加载 Skills（合并预置+用户自定义）
+  // 加载 Skills（合并预置+用户自定义，登录用户优先从服务器恢复自定义技能）
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('chat-skills');
-      const userSkills: ChatSkill[] = stored ? JSON.parse(stored) : [];
-      // 预置Skills不重复添加（按id去重）
+    let cancelled = false;
+    const init = async () => {
+      let userSkills: ChatSkill[] = [];
+      try {
+        const stored = localStorage.getItem('chat-skills');
+        if (stored) userSkills = JSON.parse(stored);
+      } catch {
+        // ignore
+      }
+      try {
+        const serverSkills = await loadChatKeyFromServer('chat_skills');
+        if (!cancelled && Array.isArray(serverSkills) && serverSkills.length > 0) {
+          userSkills = serverSkills as ChatSkill[];
+          try { localStorage.setItem('chat-skills', JSON.stringify(userSkills)); } catch {}
+        }
+      } catch {
+        // 服务器不可用时保留本地技能
+      }
+      if (cancelled) return;
       const userSkillIds = new Set(userSkills.map(s => s.id));
       const merged = [...LOVART_PRESET_SKILLS.filter(s => !userSkillIds.has(s.id)), ...userSkills];
       setChatSkills(merged);
-    } catch {
-      setChatSkills(LOVART_PRESET_SKILLS);
-    }
-  }, [LOVART_PRESET_SKILLS]);
+    };
+    void init();
+    return () => { cancelled = true; };
+  }, [LOVART_PRESET_SKILLS, loadChatKeyFromServer]);
 
   // 保存 Skills
   const saveSkills = useCallback((skills: ChatSkill[]) => {
@@ -2799,7 +2880,8 @@ IP角色设计规范：
     try {
       localStorage.setItem('chat-skills', JSON.stringify(skills));
     } catch {}
-  }, []);
+    scheduleChatSync('chat_skills', skills);
+  }, [scheduleChatSync]);
 
   // 保存当前对话为 Skill
   const handleSaveAsSkill = useCallback(() => {
@@ -2990,26 +3072,48 @@ IP角色设计规范：
     }
   }, [loadImageModels]);
 
-  // 初始化对话列表
+  // 初始化对话列表（已登录用户优先从服务器拉取，与本地合并后回写）
   useEffect(() => {
-    const saved = localStorage.getItem('chat-sessions');
-    if (saved) {
+    let cancelled = false;
+    const init = async () => {
+      let localSessions: ChatSession[] = [];
+      const saved = localStorage.getItem('chat-sessions');
+      if (saved) {
+        try {
+          localSessions = JSON.parse(saved);
+          if (localSessions.length > 0) {
+            setChatSessions(localSessions);
+            const latest = localSessions.reduce((a, b) => a.updatedAt > b.updatedAt ? a : b);
+            setCurrentSessionId(latest.id);
+            setMessages(latest.messages);
+            setModel(latest.model);
+            setSystemPrompt(latest.systemPrompt);
+          }
+        } catch {
+          // ignore
+        }
+      }
+      // 服务器为权威源：登录用户跨设备恢复聊天历史
       try {
-        const sessions: ChatSession[] = JSON.parse(saved);
-        setChatSessions(sessions);
-        if (sessions.length > 0) {
-          const latest = sessions.reduce((a, b) => a.updatedAt > b.updatedAt ? a : b);
+        const serverSessions = await loadChatKeyFromServer('chat_sessions');
+        if (!cancelled && Array.isArray(serverSessions) && serverSessions.length > 0) {
+          const merged = mergeChatSessionLists(serverSessions as ChatSession[], localSessions);
+          setChatSessions(merged);
+          const latest = merged.reduce((a, b) => a.updatedAt > b.updatedAt ? a : b);
           setCurrentSessionId(latest.id);
           setMessages(latest.messages);
           setModel(latest.model);
           setSystemPrompt(latest.systemPrompt);
+          localStorage.setItem('chat-sessions', JSON.stringify(merged));
         }
       } catch {
-        // ignore
+        // 服务器不可用时保留本地会话
       }
-    }
-    setChatSessionsLoaded(true);
-  }, []);
+      if (!cancelled) setChatSessionsLoaded(true);
+    };
+    void init();
+    return () => { cancelled = true; };
+  }, [loadChatKeyFromServer, mergeChatSessionLists]);
 
   // 保存对话到localStorage
   const saveSession = useCallback((sessionMessages: Message[], sessionModel: string, sessionSystemPrompt: string, sessionId?: string) => {
@@ -3035,10 +3139,11 @@ IP角色设计规范：
       const filtered = prev.filter(s => s.id !== id);
       const updated = [session, ...filtered].slice(0, 50);
       localStorage.setItem('chat-sessions', JSON.stringify(updated));
+      scheduleChatSync('chat_sessions', updated);
       return updated;
     });
     if (!currentSessionId) setCurrentSessionId(id);
-  }, [currentSessionId]);
+  }, [currentSessionId, scheduleChatSync]);
 
   const persistMessageUpdate = useCallback((messageId: string, update: (message: Message) => Message) => {
     const nextMessages = updateChatSessionMessage(messagesRef.current, messageId, update);
@@ -3176,13 +3281,14 @@ IP角色设计规范：
     setChatSessions(prev => {
       const updated = prev.filter(s => s.id !== sessionId);
       localStorage.setItem('chat-sessions', JSON.stringify(updated));
+      scheduleChatSync('chat_sessions', updated);
       return updated;
     });
     if (currentSessionId === sessionId) {
       setMessages([]);
       setCurrentSessionId(`session-${Date.now()}`);
     }
-  }, [currentSessionId]);
+  }, [currentSessionId, scheduleChatSync]);
 
   // 加载第三方聊天模型
   useEffect(() => {
@@ -5199,6 +5305,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         const updated = customAgents.filter(a => a.id !== selectedAgent.id);
                         setCustomAgents(updated);
                         localStorage.setItem('custom-agents', JSON.stringify(updated));
+                        scheduleChatSync('chat_agents', updated);
                         setSystemPrompt('');
                       }}
                       className={`p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-gold-muted' : 'hover:bg-gray-200 text-gray-500'}`}
@@ -6978,6 +7085,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 updated = updated.slice(updated.length - 30);
               }
               localStorage.setItem('custom-agents', JSON.stringify(updated));
+              scheduleChatSync('chat_agents', updated);
               return updated;
             });
           }}
