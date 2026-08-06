@@ -11671,7 +11671,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             // Container bounds: include all source images + result placeholder + toolbar (apply drag offset)
             const resultFrameW = Math.max(resultW, 420);
             const hasResult = !!group.resultPlaceholder.resultUrl;
-            const toolbarH = hasResult ? 0 : 220; // toolbar hidden when result exists
+            const toolbarH = hasResult ? 0 : (isRef ? 220 : 260); // toolbar hidden when result exists
             const allBounds = [
               ...srcBounds,
               { x: resultX, y: resultY, w: resultFrameW, h: resultH + toolbarH }
