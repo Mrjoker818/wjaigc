@@ -90,16 +90,12 @@ function LayerItem({
 
   return (
     <div
-      className={`group relative flex items-center gap-2 px-2 py-1.5 cursor-pointer transition-all ${bgClass} ${isVisible ? '' : 'opacity-50'}`}
+      className={`group relative flex flex-col w-[108px] flex-shrink-0 rounded-lg overflow-visible cursor-pointer transition-all ${bgClass} ${isVisible ? '' : 'opacity-50'}`}
       onClick={onSelect}
+      title={displayName}
     >
-      {/* 拖拽手柄 */}
-      <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 cursor-grab">
-        <GripVertical className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-gold-muted'}`} />
-      </div>
-
-      {/* 缩略图 */}
-      <div className="flex-shrink-0 w-8 h-8 rounded overflow-hidden relative">
+      {/* 缩略图区 */}
+      <div className="relative w-full h-16 rounded-t-lg overflow-hidden">
         <img
           src={image.url}
           alt={displayName}
@@ -109,13 +105,38 @@ function LayerItem({
         {/* 锁定覆盖层 */}
         {isLocked && (
           <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-            <Lock className="w-3 h-3 text-white" />
+            <Lock className="w-3.5 h-3.5 text-white" />
           </div>
+        )}
+        {/* 拖拽手柄 - 左上角 */}
+        <div className="absolute top-0.5 left-0.5 opacity-0 group-hover:opacity-100 cursor-grab p-0.5 rounded bg-black/40">
+          <GripVertical className={`w-3 h-3 ${isMonochrome ? 'text-gray-300' : 'text-gold'}`} />
+        </div>
+        {/* 操作按钮 - 右上角（hover 显示） */}
+        <div className="absolute top-0.5 right-0.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+          <button
+            onClick={(e) => { e.stopPropagation(); onVisibilityToggle(); }}
+            className="p-0.5 rounded bg-black/40 hover:bg-black/70 transition-colors"
+            title={isVisible ? '隐藏图层' : '显示图层'}
+          >
+            {isVisible ? <Eye className="w-3 h-3 text-white" /> : <EyeOff className="w-3 h-3 text-white/70" />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onLockToggle(); }}
+            className="p-0.5 rounded bg-black/40 hover:bg-black/70 transition-colors"
+            title={isLocked ? '解锁图层' : '锁定图层'}
+          >
+            {isLocked ? <Lock className="w-3 h-3 text-gold" /> : <Unlock className="w-3 h-3 text-white" />}
+          </button>
+        </div>
+        {/* 选中边框 */}
+        {isSelected && (
+          <div className={`absolute inset-0 rounded-t-lg ring-2 pointer-events-none ${isMonochrome ? 'ring-gray-400' : 'ring-gold'}`} />
         )}
       </div>
 
-      {/* 图层名称 */}
-      <div className="flex-1 min-w-0">
+      {/* 信息区 */}
+      <div className={`px-1 py-1 rounded-b-lg flex flex-col gap-0.5 ${isSelected ? (isMonochrome ? 'bg-gray-200' : 'bg-gold/10') : ''}`}>
         {isEditing ? (
           <input
             type="text"
@@ -126,64 +147,36 @@ function LayerItem({
               if (e.key === 'Enter') handleRenameSubmit();
               if (e.key === 'Escape') setIsEditing(false);
             }}
-            className="w-full px-1 py-0.5 text-xs bg-transparent border border-gold/30 rounded focus:outline-none focus:border-gold"
+            className="w-full px-1 py-0.5 text-[11px] bg-transparent border border-gold/30 rounded focus:outline-none focus:border-gold"
             autoFocus
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <div className={`text-xs truncate ${isMonochrome ? 'text-gray-700' : 'text-foreground'}`}>
+          <div className={`text-[11px] leading-tight truncate text-center ${isMonochrome ? 'text-gray-700' : 'text-foreground'}`}>
             {displayName}
           </div>
         )}
         {/* 模型信息 */}
         {image.modelName && (
-          <div className={`text-xs truncate ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground opacity-60'}`}>
+          <div className={`text-[9px] truncate text-center ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground opacity-60'}`}>
             {image.modelName}
           </div>
         )}
-      </div>
-
-      {/* 操作按钮 */}
-      <div className="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100">
-        {/* 可见性 */}
-        <button
-          onClick={(e) => { e.stopPropagation(); onVisibilityToggle(); }}
-          className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
-          title={isVisible ? '隐藏图层' : '显示图层'}
-        >
-          {isVisible ? (
-            <Eye className={`w-3.5 h-3.5 ${isMonochrome ? 'text-gray-500' : 'text-muted-foreground'}`} />
-          ) : (
-            <EyeOff className={`w-3.5 h-3.5 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/50'}`} />
-          )}
-        </button>
-
-        {/* 锁定 */}
-        <button
-          onClick={(e) => { e.stopPropagation(); onLockToggle(); }}
-          className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
-          title={isLocked ? '解锁图层' : '锁定图层'}
-        >
-          {isLocked ? (
-            <Lock className={`w-3.5 h-3.5 ${isMonochrome ? 'text-gray-500' : 'text-gold'}`} />
-          ) : (
-            <Unlock className={`w-3.5 h-3.5 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
-          )}
-        </button>
-
-        {/* 更多菜单 */}
-        <button
-          onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-          className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
-        >
-          <MoreHorizontal className={`w-3.5 h-3.5 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
-        </button>
+        {/* 更多菜单按钮 */}
+        <div className="flex justify-center">
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+            className={`p-0.5 rounded transition-colors opacity-0 group-hover:opacity-100 ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
+          >
+            <MoreHorizontal className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
+          </button>
+        </div>
       </div>
 
       {/* 更多菜单弹窗 */}
       {showMenu && (
         <div
-          className={`absolute right-2 top-full mt-1 z-50 py-1 rounded-lg shadow-lg ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/20'}`}
+          className={`absolute right-0 top-full mt-1 z-50 py-1 rounded-lg shadow-lg min-w-[120px] ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/20'}`}
           onClick={(e) => e.stopPropagation()}
         >
           <button
@@ -411,37 +404,40 @@ export function LayerPanel({
         </div>
       </div>
 
-      {/* 图层列表 */}
-      <div className="flex-1 overflow-y-auto">
+      {/* 图层列表 - 横向排列 */}
+      <div className="flex-1 overflow-x-auto overflow-y-hidden min-h-0">
         {images.length === 0 ? (
           <div className={`flex flex-col items-center justify-center h-full gap-2 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`}>
             <FileImage className="w-6 h-6 opacity-50" />
             <span className="text-xs">暂无图层</span>
           </div>
         ) : (
-          sortedImages.map((image, index) => (
-            <div
-              key={image.id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, image.id)}
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, index)}
-            >
-              <LayerItem
-                image={image}
-                index={images.findIndex(img => img.id === image.id)}
-                isSelected={selectedIds.includes(image.id)}
-                isMonochrome={isMonochrome}
-                onSelect={() => onSelect?.([image.id])}
-                onVisibilityToggle={() => handleVisibilityToggle(image.id)}
-                onLockToggle={() => handleLockToggle(image.id)}
-                onRename={(name) => handleRename(image.id, name)}
-                onDelete={() => onDelete?.(image.id)}
-                onMoveUp={() => handleMoveUp(image.id)}
-                onMoveDown={() => handleMoveDown(image.id)}
-              />
-            </div>
-          ))
+          <div className="flex flex-row gap-2 p-2 items-start h-full w-max">
+            {sortedImages.map((image, index) => (
+              <div
+                key={image.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, image.id)}
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, index)}
+                className="flex-shrink-0"
+              >
+                <LayerItem
+                  image={image}
+                  index={images.findIndex(img => img.id === image.id)}
+                  isSelected={selectedIds.includes(image.id)}
+                  isMonochrome={isMonochrome}
+                  onSelect={() => onSelect?.([image.id])}
+                  onVisibilityToggle={() => handleVisibilityToggle(image.id)}
+                  onLockToggle={() => handleLockToggle(image.id)}
+                  onRename={(name) => handleRename(image.id, name)}
+                  onDelete={() => onDelete?.(image.id)}
+                  onMoveUp={() => handleMoveUp(image.id)}
+                  onMoveDown={() => handleMoveDown(image.id)}
+                />
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

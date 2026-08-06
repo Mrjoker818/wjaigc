@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   GitBranch, History, ChevronRight, ChevronDown, Circle, CircleDot,
   Undo2, Redo2, RotateCcw, BookmarkPlus, Trash2, X, Clock,
@@ -56,7 +56,6 @@ export function VersionHistoryPanel({
   floating = false,
   rightInset = 0,
 }: VersionHistoryPanelProps) {
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [showBranchDialog, setShowBranchDialog] = useState(false);
   const [branchFromNode, setBranchFromNode] = useState<string | null>(null);
   const [branchName, setBranchName] = useState('');
@@ -70,123 +69,72 @@ export function VersionHistoryPanel({
     return nodes.find(n => n.isHead)?.id;
   }, [manager, nodes]);
 
-  // 获取根节点
-  const rootNode = useMemo(() => nodes.find(n => n.parentId === null), [nodes]);
+  // 主路径节点（从根到当前 head 的线性路径，适配底部抽屉横向时间线）
+  const pathNodes = useMemo(
+    () => currentPath.map(id => nodes.find(n => n.id === id)).filter(Boolean) as VersionNode[],
+    [currentPath, nodes],
+  );
 
-  // 展开当前路径上的所有节点
-  useEffect(() => {
-    const pathNodes = new Set(currentPath);
-    setExpandedNodes(pathNodes);
-  }, [currentPath]);
+  // 分支节点（不在主路径上的其他版本，按时间倒序）
+  const branchNodes = useMemo(() => {
+    const pathSet = new Set(currentPath);
+    return nodes.filter(n => !pathSet.has(n.id)).sort((a, b) => b.timestamp - a.timestamp);
+  }, [nodes, currentPath]);
 
-  // 切换节点展开状态
-  const toggleExpand = useCallback((nodeId: string) => {
-    setExpandedNodes(prev => {
-      const next = new Set(prev);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
-      return next;
-    });
-  }, []);
-
-  // 渲染单个节点行
-  const renderNodeRow = useCallback(function renderNodeRow(node: VersionNode, depth: number, isExpanded: boolean, isCurrent: boolean, isInPath: boolean, hasChildren: boolean, children: VersionNode[]) {
-    const nodeBgClass = isCurrent
-      ? isMonochrome ? 'bg-blue-100 border-blue-300' : 'bg-gold/10 border-gold/30'
-      : isInPath
-        ? isMonochrome ? 'bg-gray-50' : 'bg-white/[0.02]'
-        : isMonochrome ? 'bg-transparent hover:bg-gray-50' : 'bg-transparent hover:bg-white/[0.02]';
-
+  // 渲染横向时间线卡片（适配底部抽屉）
+  const renderTimelineCard = useCallback((node: VersionNode, isPath: boolean) => {
+    const isCurrent = node.isHead;
+    const thumbUrl = node.snapshot?.[node.snapshot.length - 1]?.url;
+    const cardBg = isCurrent
+      ? (isMonochrome ? 'bg-blue-50 border-blue-300' : 'bg-gold/10 border-gold/40')
+      : isPath
+        ? (isMonochrome ? 'bg-gray-50 border-gray-200' : 'bg-white/[0.03] border-gold/10')
+        : (isMonochrome ? 'bg-gray-50/60 border-gray-200' : 'bg-white/[0.02] border-gold/5');
     return (
-      <div key={node.id} className="select-none">
-        {/* 节点行 */}
-        <div
-          className={`group flex items-center gap-1 px-2 py-1.5 cursor-pointer border-l-2 transition-all ${nodeBgClass}`}
-          style={{ marginLeft: depth * 12 }}
-          onClick={() => onRestore(node.id)}
-        >
-          {/* 展开/折叠按钮 */}
-          {hasChildren ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); toggleExpand(node.id); }}
-              className={`p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
-            >
-              {isExpanded ? (
-                <ChevronDown className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
-              ) : (
-                <ChevronRight className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
-              )}
-            </button>
+      <div
+        key={node.id}
+        className={`group relative flex flex-col w-[110px] flex-shrink-0 rounded-lg border cursor-pointer transition-all ${cardBg}`}
+        onClick={() => onRestore(node.id)}
+        title={`${node.userMark || node.label} — ${formatTime(node.timestamp)}`}
+      >
+        {/* 缩略图 */}
+        <div className="relative w-full h-14 rounded-t-lg overflow-hidden bg-black/20">
+          {thumbUrl ? (
+            <img src={thumbUrl} alt={node.userMark || node.label} className="w-full h-full object-cover" />
           ) : (
-            <div className="w-4" />
-          )}
-
-          {/* 当前状态指示器 */}
-          {isCurrent ? (
-            <CircleDot className={`w-3.5 h-3.5 ${isMonochrome ? 'text-blue-600' : 'text-gold'}`} />
-          ) : (
-            <Circle className={`w-3.5 h-3.5 ${isMonochrome ? 'text-gray-300' : 'text-muted-foreground/30'}`} />
-          )}
-
-          {/* 节点标签 */}
-          <div className="flex-1 min-w-0">
-            <div className={`text-xs truncate ${isCurrent ? (isMonochrome ? 'text-blue-700 font-medium' : 'text-gold font-medium') : (isMonochrome ? 'text-gray-600' : 'text-foreground')}`}>
-              {node.userMark || node.label}
+            <div className="w-full h-full flex items-center justify-center">
+              <History className={`w-4 h-4 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/40'}`} />
             </div>
-          </div>
-
-          {/* 时间戳 */}
-          <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`}>
-            {formatTime(node.timestamp)}
-          </div>
-
-          {/* 操作按钮 */}
-          <div className="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100">
-            {/* 创建分支 */}
+          )}
+          {/* 当前标记 */}
+          {isCurrent && (
+            <div className="absolute top-1 right-1 px-1 py-0.5 rounded bg-black/50">
+              <CircleDot className={`w-3 h-3 ${isMonochrome ? 'text-blue-500' : 'text-gold'}`} />
+            </div>
+          )}
+          {/* hover 分支按钮 */}
+          <div className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={(e) => { e.stopPropagation(); setBranchFromNode(node.id); setBranchName(''); setShowBranchDialog(true); }}
-              className={`p-1 rounded ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
+              className={`p-1 rounded ${isMonochrome ? 'bg-gray-700/70 hover:bg-gray-600' : 'bg-black/50 hover:bg-black/70'}`}
               title="从此节点创建分支"
             >
-              <GitBranch className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
+              <GitBranch className="w-3 h-3 text-white" />
             </button>
           </div>
         </div>
-
-        {/* 子节点 */}
-        {isExpanded && hasChildren && (
-          <div className="relative">
-            {/* 分支连线（如果有多个子节点） */}
-            {children.length > 1 && (
-              <div className={`absolute left-[${depth * 12 + 12}px] top-0 bottom-0 w-px ${isMonochrome ? 'bg-gray-200' : 'bg-gold/10'}`} />
-            )}
-            {children.map(child => {
-              const childIsExpanded = expandedNodes.has(child.id);
-              const childIsCurrent = child.isHead;
-              const childIsInPath = currentPath.includes(child.id);
-              const childHasChildren = child.children.length > 0;
-              const childChildren = child.children.map(id => nodes.find(n => n.id === id)).filter(Boolean) as VersionNode[];
-              return renderNodeRow(child, depth + 1, childIsExpanded, childIsCurrent, childIsInPath, childHasChildren, childChildren);
-            })}
+        {/* 信息区 */}
+        <div className={`px-1.5 py-1 rounded-b-lg ${isCurrent ? (isMonochrome ? 'bg-blue-50' : 'bg-gold/10') : ''}`}>
+          <div className={`text-[11px] leading-tight truncate ${isCurrent ? (isMonochrome ? 'text-blue-700 font-medium' : 'text-gold font-medium') : (isMonochrome ? 'text-gray-600' : 'text-foreground')}`}>
+            {node.userMark || node.label}
           </div>
-        )}
+          <div className={`text-[10px] mt-0.5 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/70'}`}>
+            {formatTime(node.timestamp)}
+          </div>
+        </div>
       </div>
     );
-  }, [expandedNodes, currentPath, nodes, isMonochrome, onRestore, toggleExpand]);
-
-  // 渲染整个节点树
-  const renderedTree = useMemo(() => {
-    if (!rootNode) return null;
-    const isExpanded = expandedNodes.has(rootNode.id);
-    const isCurrent = rootNode.isHead;
-    const isInPath = currentPath.includes(rootNode.id);
-    const hasChildren = rootNode.children.length > 0;
-    const children = rootNode.children.map(id => nodes.find(n => n.id === id)).filter(Boolean) as VersionNode[];
-    return renderNodeRow(rootNode, 0, isExpanded, isCurrent, isInPath, hasChildren, children);
-  }, [rootNode, expandedNodes, currentPath, nodes, renderNodeRow]);
+  }, [isMonochrome, onRestore, setShowBranchDialog, setBranchFromNode, setBranchName, setShowBranchDialog]);
 
   const isBottom = position === 'bottom';
   const placementClass = isBottom
@@ -233,17 +181,38 @@ export function VersionHistoryPanel({
         </div>
       )}
 
-      {/* 版本树 */}
-      <div className="flex-1 overflow-y-auto">
-        {nodes.length === 0 ? (
-          <div className={`flex flex-col items-center justify-center h-full gap-2 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`}>
-            <History className="w-6 h-6 opacity-50" />
-            <span className="text-xs">暂无历史记录</span>
+      {/* 版本时间线（横向卡片，适配底部抽屉） */}
+      {nodes.length === 0 ? (
+        <div className={`flex-1 flex flex-col items-center justify-center gap-2 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`}>
+          <History className="w-6 h-6 opacity-50" />
+          <span className="text-xs">暂无历史记录</span>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* 主路径时间线 */}
+          <div className={`px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/60'}`}>
+            当前分支
           </div>
-        ) : (
-          renderedTree
-        )}
-      </div>
+          <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden scrollbar-thin">
+            <div className="flex flex-row gap-2 px-3 py-2 items-stretch w-max min-w-full">
+              {pathNodes.map(node => renderTimelineCard(node, true))}
+            </div>
+          </div>
+          {/* 分支轨道 */}
+          {branchNodes.length > 0 && (
+            <>
+              <div className={`px-3 pt-1 pb-1 text-[10px] uppercase tracking-wide ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/60'}`}>
+                其他分支
+              </div>
+              <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden scrollbar-thin">
+                <div className="flex flex-row gap-2 px-3 py-2 items-stretch w-max min-w-full">
+                  {branchNodes.map(node => renderTimelineCard(node, false))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* 底部状态栏 */}
       <div className={`flex items-center justify-between px-3 py-2 border-t ${isMonochrome ? 'border-gray-200' : 'border-gold/10'}`}>
