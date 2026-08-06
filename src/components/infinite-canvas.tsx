@@ -17722,7 +17722,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         onWheel={(event) => event.stopPropagation()}
         onMouseEnter={() => setBottomBarHovered(true)}
         onMouseLeave={() => setBottomBarHovered(false)}
-        style={{ bottom: (showLayerPanel || showVersionHistory) ? 'calc(min(42dvh, 340px) + 28px)' : undefined }}
+        style={{ bottom: (showLayerPanel || showVersionHistory) ? 'calc(min(30dvh, 260px) + 28px)' : undefined }}
         className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex max-w-[calc(100%-2rem)] items-center overflow-visible rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
       >
         {/* ── Center: Main function buttons (always visible) ── */}

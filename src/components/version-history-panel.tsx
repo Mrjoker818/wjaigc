@@ -93,12 +93,12 @@ export function VersionHistoryPanel({
     return (
       <div
         key={node.id}
-        className={`group relative flex flex-col w-[110px] flex-shrink-0 rounded-lg border cursor-pointer transition-all ${cardBg}`}
+        className={`group relative flex flex-col w-[96px] flex-shrink-0 rounded-lg border cursor-pointer transition-all ${cardBg}`}
         onClick={() => onRestore(node.id)}
         title={`${node.userMark || node.label} — ${formatTime(node.timestamp)}`}
       >
         {/* 缩略图 */}
-        <div className="relative w-full h-14 rounded-t-lg overflow-hidden bg-black/20">
+        <div className="relative w-full h-10 rounded-t-lg overflow-hidden bg-black/20">
           {thumbUrl ? (
             <img src={thumbUrl} alt={node.userMark || node.label} className="w-full h-full object-cover" />
           ) : (
@@ -125,10 +125,10 @@ export function VersionHistoryPanel({
         </div>
         {/* 信息区 */}
         <div className={`px-1.5 py-1 rounded-b-lg ${isCurrent ? (isMonochrome ? 'bg-blue-50' : 'bg-gold/10') : ''}`}>
-          <div className={`text-[11px] leading-tight truncate ${isCurrent ? (isMonochrome ? 'text-blue-700 font-medium' : 'text-gold font-medium') : (isMonochrome ? 'text-gray-600' : 'text-foreground')}`}>
+          <div className={`text-[10px] leading-tight truncate ${isCurrent ? (isMonochrome ? 'text-blue-700 font-medium' : 'text-gold font-medium') : (isMonochrome ? 'text-gray-600' : 'text-foreground')}`}>
             {node.userMark || node.label}
           </div>
-          <div className={`text-[10px] mt-0.5 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/70'}`}>
+          <div className={`text-[9px] mt-0.5 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/70'}`}>
             {formatTime(node.timestamp)}
           </div>
         </div>
@@ -138,7 +138,7 @@ export function VersionHistoryPanel({
 
   const isBottom = position === 'bottom';
   const placementClass = isBottom
-    ? 'fixed bottom-0 left-0 h-[min(42dvh,340px)] rounded-t-xl shadow-2xl'
+    ? 'fixed bottom-0 left-0 h-[min(30dvh,260px)] rounded-t-xl shadow-2xl'
     : floating
       ? 'fixed left-1/2 top-1/2 h-[min(70dvh,620px)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg shadow-2xl'
       : `absolute ${position === 'left' ? 'left-0' : 'right-0'} top-12 bottom-14`;
@@ -193,7 +193,7 @@ export function VersionHistoryPanel({
           <div className={`px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/60'}`}>
             当前分支
           </div>
-          <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden scrollbar-thin">
+          <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gold/40 [&::-webkit-scrollbar-track]:bg-transparent">
             <div className="flex flex-row gap-2 px-3 py-2 items-stretch w-max min-w-full">
               {pathNodes.map(node => renderTimelineCard(node, true))}
             </div>
@@ -204,7 +204,7 @@ export function VersionHistoryPanel({
               <div className={`px-3 pt-1 pb-1 text-[10px] uppercase tracking-wide ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/60'}`}>
                 其他分支
               </div>
-              <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden scrollbar-thin">
+              <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gold/40 [&::-webkit-scrollbar-track]:bg-transparent">
                 <div className="flex flex-row gap-2 px-3 py-2 items-stretch w-max min-w-full">
                   {branchNodes.map(node => renderTimelineCard(node, false))}
                 </div>

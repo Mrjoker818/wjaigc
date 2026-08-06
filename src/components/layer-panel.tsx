@@ -354,7 +354,7 @@ export function LayerPanel({
       style={{
         width: isBottomDock ? (rightInset ? `calc(100% - ${rightInset}px)` : '100%') : width,
         maxWidth: isBottomDock ? undefined : (floating ? 'calc(100dvw - 2rem)' : 'min(100%, calc(100dvw - 1rem))'),
-        height: isBottomDock ? 'min(42dvh, 340px)' : undefined,
+        height: isBottomDock ? 'min(30dvh, 260px)' : undefined,
       }}
       data-popup={floating || isBottomDock ? 'layer-panel' : undefined}
     >
@@ -405,7 +405,7 @@ export function LayerPanel({
       </div>
 
       {/* 图层列表 - 横向排列 */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden min-h-0">
+      <div className={`flex-1 overflow-x-auto overflow-y-hidden min-h-0 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full ${isMonochrome ? '[&::-webkit-scrollbar-thumb]:bg-gray-300' : '[&::-webkit-scrollbar-thumb]:bg-gold/30 hover:[&::-webkit-scrollbar-thumb]:bg-gold/50'}`}>
         {images.length === 0 ? (
           <div className={`flex flex-col items-center justify-center h-full gap-2 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`}>
             <FileImage className="w-6 h-6 opacity-50" />
