@@ -826,6 +826,14 @@ UPSCALE_TIMEOUT_MS=300000
   - 数据按用户隔离（`wujie_user_data` 表 user_id 维度），换设备登录后自动恢复（涉及 `src/components/chat-panel.tsx`）
 - **XSS 中间件误伤修复（P1）**: `src/proxy.ts` 的 `XSS_PATTERN` 使用宽泛的 `on\w+\s*=` 正则，误拦截 `sessionId=`/`projectId=` 等正常 query 参数（chat-tasks API 400）。改为显式 `on` 事件名白名单（onclick/onerror/onload 等 24 个），`sessionId`/`projectId`/`optionId` 等不再误伤，真实 XSS（`onclick=`、`<script>`、`javascript:`）仍拦截
 
+**独立智能对话页（simple-chat）项目数据跨设备持久化 — 项目/任务/消息服务器同步**
+
+- **项目数据持久化修复（P0）**: simple-chat 的 `wujie_chat_projects` 此前仅存 localStorage（`simple-chat-types.ts`），用户在其他电脑登录后项目/任务/消息全部丢失。现新增服务端同步（涉及 `src/app/simple-chat/page.tsx`）：
+  - 新增 `loadChatProjectsFromServer`（登录用户初始化时优先从服务器 `chat_simple_projects` 拉取，服务器权威 + localStorage 兜底合并）
+  - 新增 `scheduleChatProjectsSync`（1200ms 防抖写入服务器，仅登录用户生效，未登录跳过）
+  - 已确认记忆（`wujie_chat_memories` 表）与分享（`wujie_shared_conversations` 表）本就数据库持久化，无需改动
+- **simple-chat 全链路测试（14/14 通过）**: 登录鉴权 / Mock 模型注册 / 聊天模型列表 / SSE 流式对话 / 未登录 memory 401 / memory 读写（数据库）/ 分享创建 + 公开读取 / 文件上传解析（txt）/ 项目数据跨设备读写 / 测试数据清理
+
 ### v4.2.0
 
 **API 供应商协议对齐修复 — P0-P2 共 6 项**

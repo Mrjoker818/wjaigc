@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/simple-chat/sidebar";
 import ChatArea from "@/components/simple-chat/chat-area";
@@ -42,6 +42,40 @@ export default function SimpleChatPage() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  // ===== 项目数据跨设备持久化（服务器同步，避免换电脑/换浏览器后数据丢失） =====
+  const PROJECTS_SYNC_KEY = 'chat_simple_projects';
+  const chatProjectsSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadChatProjectsFromServer = useCallback(async (): Promise<Project[] | null> => {
+    try {
+      const res = await fetch(`/api/user-data/sync?key=${PROJECTS_SYNC_KEY}`);
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.value) && data.value.length > 0) {
+        return data.value as Project[];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const scheduleChatProjectsSync = useCallback((value: Project[]) => {
+    if (chatProjectsSyncTimer.current) clearTimeout(chatProjectsSyncTimer.current);
+    chatProjectsSyncTimer.current = setTimeout(() => {
+      void (async () => {
+        try {
+          await fetch('/api/user-data/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: PROJECTS_SYNC_KEY, value }),
+          });
+        } catch {
+          // localStorage 仍是兜底，静默失败
+        }
+      })();
+    }, 800);
+  }, []);
+
   // Auth
   useEffect(() => {
     fetchSessionPayload().then(data => {
@@ -52,20 +86,34 @@ export default function SimpleChatPage() {
     }).catch(() => setShowLogin(true)).finally(() => setAuthLoading(false));
   }, []);
 
-  // Load projects
+  // Load projects（优先服务器，localStorage 兜底）
   useEffect(() => {
     if (!user) return;
-    let loaded = loadProjects();
-    if (loaded.length === 0) loaded = [createDefaultProject()];
-    setProjects(loaded);
-    setActiveProjectId(loaded[0].id);
-    setActiveTaskId(loaded[0].tasks[0]?.id ?? null);
-  }, [user]);
+    let cancelled = false;
+    const init = async () => {
+      let loaded = loadProjects();
+      // 已登录用户从服务器拉取最新项目（服务器为权威），本地无数据或服务器有更新时覆盖
+      const serverProjects = await loadChatProjectsFromServer();
+      if (cancelled) return;
+      if (serverProjects && serverProjects.length > 0) {
+        loaded = serverProjects;
+      }
+      if (loaded.length === 0) loaded = [createDefaultProject()];
+      setProjects(loaded);
+      setActiveProjectId(loaded[0].id);
+      setActiveTaskId(loaded[0].tasks[0]?.id ?? null);
+    };
+    init();
+    return () => { cancelled = true; };
+  }, [user, loadChatProjectsFromServer]);
 
-  // Persist
+  // Persist（双写：localStorage + 服务器防抖同步）
   useEffect(() => {
-    if (projects.length > 0) saveProjects(projects);
-  }, [projects]);
+    if (projects.length > 0) {
+      saveProjects(projects);
+      scheduleChatProjectsSync(projects);
+    }
+  }, [projects, scheduleChatProjectsSync]);
 
   const activeProject = projects.find(p => p.id === activeProjectId) ?? null;
   const activeTask = activeProject?.tasks.find(t => t.id === activeTaskId) ?? null;
