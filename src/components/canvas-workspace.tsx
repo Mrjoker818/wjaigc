@@ -3441,10 +3441,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       // 渐进式轮询视频任务（与图片生成一致，SSE加速 + 渐进间隔）
       const videoPollStartTime = Date.now();
       const pollVideoResult = async (attempt = 0): Promise<void> => {
+        // ★ 组件卸载后立即终止递归轮询
+        if (!isMountedRef.current) return;
         if (hasDirectVideoPollingTimedOut(attempt, Date.now() - videoPollStartTime)) {
           markVideoPlaceholderFailed(phId, '已超过最大等待时间', '视频生成超时');
           toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-          setActiveGenerationCount(prev => Math.max(0, prev - 1));
+          if (isMountedRef.current) setActiveGenerationCount(prev => Math.max(0, prev - 1));
           return;
         }
         // 渐进式间隔：1s → 1.5s → 2s → 3s（视频生成通常较慢，间隔不宜过短）
@@ -3534,11 +3536,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               markVideoPlaceholderFailed(phId, '未获取到视频地址');
               toast.error('视频生成失败', { description: '未获取到视频地址', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
             }
-            setActiveGenerationCount(prev => Math.max(0, prev - 1));
+            if (isMountedRef.current) setActiveGenerationCount(prev => Math.max(0, prev - 1));
           } else if (pollData.status === 'failed') {
             markVideoPlaceholderFailed(phId, pollData.error || '未知错误');
             toast.error('视频生成失败', { description: pollData.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-            setActiveGenerationCount(prev => Math.max(0, prev - 1));
+            if (isMountedRef.current) setActiveGenerationCount(prev => Math.max(0, prev - 1));
             // 通知视频面板：shot 失败（解开 waitForShotTask 的等待）
             try {
                 const shotId = params.shotId;
@@ -3548,6 +3550,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             } catch {}
           } else {
             // 更新进度，继续轮询
+            if (!isMountedRef.current) return;
             const progress = pollData.progress || 0;
             setImages(prev => prev.map(img =>
               img.id === phId ? {
@@ -3576,7 +3579,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           ? 'bg-white border border-gray-200 text-gray-900'
           : 'bg-[#141414] border-[#2a2a2a] text-white',
       });
-      setActiveGenerationCount(prev => Math.max(0, prev - 1));
+      if (isMountedRef.current) setActiveGenerationCount(prev => Math.max(0, prev - 1));
     }
   }, [setImages, themeStyle]);
 
@@ -3698,6 +3701,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         const maxAttempts = 180;
 
         while (pollAttempts < maxAttempts) {
+          // ★ 检查组件是否已卸载，避免僵尸轮询
+          if (!isMountedRef.current) break;
           await new Promise(resolve => setTimeout(resolve, 2000));
           pollAttempts++;
 

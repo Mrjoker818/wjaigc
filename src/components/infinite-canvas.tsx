@@ -2121,11 +2121,22 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const canvasRef = useRef<HTMLDivElement>(null);
   const uploadFileInputRef = useRef<HTMLInputElement>(null);
   const imagesRef = useRef<CanvasImage[]>(images);
+  // ★ 组件挂载状态 ref：用于轮询循环检测组件是否已卸载，避免僵尸轮询
+  const isMountedRef = useRef(true);
   // P2-4: 追踪所有活跃的setInterval，确保组件卸载时清理
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
   useEffect(() => {
+    isMountedRef.current = true;
     const set = activeIntervalsRef.current;
-    return () => { set.forEach((id) => clearInterval(id)); set.clear(); };
+    return () => {
+      isMountedRef.current = false;
+      // ★ 组件卸载时中止所有正在进行的轮询
+      pollingAbortRef.current?.abort();
+      canvasGenerationAbortControllersRef.current.forEach(c => c.abort());
+      canvasGenerationAbortControllersRef.current.clear();
+      set.forEach((id) => clearInterval(id));
+      set.clear();
+    };
   }, []);
 
   // 【调整2&3】生成组状态 — Alt+左键参考图组 / Ctrl+左键融图组
@@ -5287,6 +5298,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           };
 
           while (Date.now() - startTime < maxPollTime) {
+            // ★ 检查组件是否已卸载，避免僵尸轮询
+            if (!isMountedRef.current) break;
             // 检查是否所有任务都已完成或失败
             const pendingTaskIds = allTaskIds.filter(tid => !completedResults.has(tid) && !failedTasks.has(tid));
             if (pendingTaskIds.length === 0) break;
@@ -6507,6 +6520,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         lastPollErrorRef.current = '任务已被取消';
         return null;
       }
+      // ★ 检查组件是否已卸载，避免僵尸轮询
+      if (!isMountedRef.current) {
+        return null;
+      }
 
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed/60)}m${elapsed%60}s`;
@@ -6828,6 +6845,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         canvasGenerationAbortControllersRef.current.set(slot.taskId, abortController);
         try {
           for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          // ★ 检查组件是否已卸载，避免僵尸轮询
+          if (!isMountedRef.current) return null;
           const delay = attempt <= 5 ? 200 : attempt <= 15 ? 500 : attempt <= 30 ? 1000 : 2000;
           await new Promise(resolve => setTimeout(resolve, delay));
           if (abortController.signal.aborted) return null;
@@ -7127,6 +7146,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       let completed = false;
 
       while (!completed && Date.now() - pollStart < maxPollTime) {
+        // ★ 检查组件是否已卸载，避免僵尸轮询
+        if (!isMountedRef.current) break;
         await new Promise(r => setTimeout(r, 2000));
         try {
           const pollResp = await fetch('/api/poll-task', {
@@ -7365,6 +7386,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         let pollAttempts = 0;
         const maxPollAttempts = 750; // ~25 minutes
         while (!completed && pollAttempts < maxPollAttempts) {
+          // ★ 检查组件是否已卸载，避免僵尸轮询
+          if (!isMountedRef.current) break;
           pollAttempts++;
           await new Promise(r => setTimeout(r, 2000));
           const pollRes = await fetch('/api/poll-task', {
@@ -8771,6 +8794,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         const taskStartedAt = Date.now();
         let pollAttempt = 0;
         while (Date.now() - taskStartedAt < THREE_D_TASK_TIMEOUT_MS) {
+          // ★ 检查组件是否已卸载，避免僵尸轮询
+          if (!isMountedRef.current) {
+            streamSource?.close();
+            setThreeDProgress(null);
+            return;
+          }
           const elapsed = Math.floor((Date.now() - taskStartedAt) / 1000);
           const progressVal = Math.min(90, 25 + Math.round((elapsed / (THREE_D_TASK_TIMEOUT_MS / 1000)) * 65));
           updateProcessingFrame(placeholderId, {
