@@ -560,7 +560,7 @@ function CanvasScaledMenuSelect({
               <button
                 key={option.value}
                 type="button"
-                className={`block w-full whitespace-nowrap px-3 py-2 text-left text-[13px] transition-colors ${selected ? (isMonochrome ? 'bg-blue-50 text-blue-800' : 'bg-gold/15 text-gold') : (isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-text-bright hover:bg-[#2a2a2a]')}`}
+                className={`block w-full whitespace-nowrap px-3 py-1 text-left text-[13px] transition-colors ${selected ? (isMonochrome ? 'bg-blue-50 text-blue-800' : 'bg-gold/15 text-gold') : (isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-text-bright hover:bg-[#2a2a2a]')}`}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
