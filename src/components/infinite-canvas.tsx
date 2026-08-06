@@ -21,7 +21,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, Upload, Sparkles,
   RotateCcw, Minus, GitMerge, GitBranch,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck, Menu, Grip
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationExecutionResult } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, computeAnnotationRegion, BRUSH_COLOR_PALETTE, applyMergedAnnotationExecutionResult } from '@/lib/canvas-annotation';
@@ -10372,7 +10372,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="工作流中心"
             >
-              <LayoutGrid className={`h-3.5 w-3.5 ${mIcon.layoutGrid}`} />
+              <Boxes className={`h-3.5 w-3.5 ${mIcon.layoutGrid}`} />
               <span>工作流中心</span>
             </button>
             {/* Divider */}
@@ -10446,7 +10446,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.layoutGrid} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
               title="工作流中心"
             >
-              <LayoutGrid className="w-4 h-4" />
+              <Boxes className="w-4 h-4" />
             </button>
             <div className={`w-5 my-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
             <button
@@ -17805,7 +17805,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${bottomToolbarDrawerOpen ? (isMonochrome ? 'bg-gray-900 text-white' : 'bg-white/15 text-text-bright ring-1 ring-gold/30') : (isMonochrome ? 'text-gray-500 hover:bg-gray-100 hover:text-gray-800' : 'text-gold-muted hover:bg-white/10 hover:text-text-bright')}`}
           title="全部工具"
         >
-          <LayoutGrid className="h-4 w-4" />
+          <Menu className="h-4 w-4" />
         </button>
         {typeof document !== 'undefined' && createPortal(
           (
@@ -17833,7 +17833,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         >
           <div className="flex items-center justify-between gap-2 px-1 pt-1 pb-1">
             <div className="flex items-center gap-2">
-              <LayoutGrid className={`h-4 w-4 ${isMonochrome ? 'text-gray-500' : 'text-gold'}`} />
+              <Menu className={`h-4 w-4 ${isMonochrome ? 'text-gray-500' : 'text-gold'}`} />
               <span className={`text-xs font-semibold tracking-wide ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>全部工具</span>
             </div>
             <button
@@ -18133,7 +18133,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title={`网格: ${gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}`}
         >
-          <LayoutGrid className="h-4 w-4" />
+          <Grip className="h-4 w-4" />
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}</span>
         </button>
 
