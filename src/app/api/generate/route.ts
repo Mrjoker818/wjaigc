@@ -2681,6 +2681,42 @@ export async function POST(request: NextRequest) {
           }
         );
 
+        // ★ Fallback: if /images/generations with images[] nested format fails with
+        // "请上传参考图" or "reference #" error, retry with image_urls (flat string array) format.
+        // Some providers (e.g. AI Link) don't support the nested images[] format on
+        // /images/generations and require the flat image_urls field instead.
+        if (!submitResponse.ok && Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0) {
+          const refErrorText = await submitResponse.text();
+          if (isEditsEndpointRejected(submitResponse.status, refErrorText)) {
+            console.info('[generate] /images/generations with images[] format rejected, retrying with image_urls flat format...');
+            const flatUrls = (adjustedBody.images as Array<{ image_url: { url: string } }>)
+              .map((img) => img.image_url?.url || '')
+              .filter(Boolean);
+            delete adjustedBody.images;
+            adjustedBody.image_urls = flatUrls;
+
+            submitResponse = await fetchWithV1Retry(
+              currentApiBaseUrl,
+              endpoint,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${currentApiKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(adjustedBody),
+                signal: controller.signal,
+              }
+            );
+          } else {
+            // Reconstruct response for parseSubmitResponse (body was consumed by .text())
+            submitResponse = new Response(refErrorText, {
+              status: submitResponse.status,
+              headers: submitResponse.headers,
+            });
+          }
+        }
+
         clearTimeoutSafely();
       }
 

@@ -319,9 +319,13 @@ function normalizeStoredUser(user: StoredUser): StoredUser {
 
 async function writeStore(file: StoredUsersFile): Promise<void> {
   const data = { ...file, updatedAt: Date.now() };
-  // Write to file (backward compatible)
-  await mkdir(SYSTEM_DIR, { recursive: true });
-  await writeFile(USERS_PATH, JSON.stringify(data, null, 2), 'utf8');
+  // Write to file (backward compatible) — file system failures should not block DB writes
+  try {
+    await mkdir(SYSTEM_DIR, { recursive: true });
+    await writeFile(USERS_PATH, JSON.stringify(data, null, 2), 'utf8');
+  } catch (fsErr) {
+    console.warn('[auth] File system write failed (non-critical if DB is configured):', fsErr instanceof Error ? fsErr.message : fsErr);
+  }
   if (isDatabaseConfigured()) {
     // Safety: ensure we don't lose DB users that aren't in the current write list
     try {
@@ -500,7 +504,11 @@ async function readStore(): Promise<StoredUsersFile> {
       createdAt: now,
       updatedAt: now,
     });
-    await writeStore(file);
+    try {
+      await writeStore(file);
+    } catch (writeErr) {
+      console.warn('[auth] writeStore failed during admin bootstrap (non-critical, proceeding with in-memory data):', writeErr instanceof Error ? writeErr.message : writeErr);
+    }
   } else {
     const admin = file.users[adminIndex];
     file.users[adminIndex] = {
