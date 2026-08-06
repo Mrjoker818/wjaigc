@@ -758,6 +758,19 @@ async function submitImageTask(
     if (effectiveEndpoint === '/images/edits' && isEditsEndpointRejected(submitResponse.status, errorText)) {
       console.log('[submitImageTask] /images/edits rejected, auto-falling back to /images/generations');
       const fallbackBody = stripEditsOnlyFields(adjustedBody);
+
+      // ★ If images[] nested format exists (from adjustRequestForProfile conversion),
+      // convert back to image_urls flat format for maximum provider compatibility
+      if (Array.isArray(fallbackBody.images) && fallbackBody.images.length > 0) {
+        const flatUrls = (fallbackBody.images as Array<{ image_url: { url: string } }>)
+          .map((img) => img.image_url?.url || '')
+          .filter(Boolean);
+        delete fallbackBody.images;
+        if (flatUrls.length > 0) {
+          fallbackBody.image_urls = flatUrls;
+        }
+      }
+
       const fallbackEndpoint: ImageEndpoint = '/images/generations';
 
       // 增强 prompt：/images/generations 仅将 image_urls 视为可选参考，
@@ -846,6 +859,51 @@ async function submitImageTask(
           }
         }
         console.error('[submitImageTask] fallback request error:', fallbackErr);
+      }
+    }
+
+    // ★ Fallback: if /images/generations with images[] nested format fails with
+    // "请上传参考图" or "reference #" error, retry with image_urls (flat string array) format.
+    // Some providers (e.g. AI Link) don't support the nested images[] format on
+    // /images/generations and require the flat image_urls field instead.
+    if (effectiveEndpoint === '/images/generations' && Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0
+        && isEditsEndpointRejected(submitResponse.status, errorText)) {
+      console.info('[submitImageTask] /images/generations with images[] format rejected, retrying with image_urls flat format...');
+      const flatUrls = (adjustedBody.images as Array<{ image_url: { url: string } }>)
+        .map((img) => img.image_url?.url || '')
+        .filter(Boolean);
+      delete adjustedBody.images;
+      adjustedBody.image_urls = flatUrls;
+
+      try {
+        const flatResponse = await fetchWithV1Retry(
+          apiBaseUrl,
+          effectiveEndpoint,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(adjustedBody),
+            signal: AbortSignal.timeout(60000),
+          }
+        );
+        if (flatResponse.ok) {
+          console.log('[submitImageTask] retry with image_urls flat format succeeded');
+          const flatText = await flatResponse.text();
+          const flatJson = JSON.parse(flatText);
+          const parsed = parseResponseForProfile(flatJson, profile);
+          return {
+            taskId: parsed.taskIds?.[0],
+            directUrl: parsed.directImageUrls?.[0],
+          };
+        } else {
+          const flatErrorText = await flatResponse.text();
+          console.error('[submitImageTask] retry with image_urls also failed:', flatResponse.status, flatErrorText);
+        }
+      } catch (retryErr) {
+        console.error('[submitImageTask] retry with image_urls error:', retryErr);
       }
     }
 

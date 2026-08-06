@@ -1290,9 +1290,74 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           // 响应中既没有图片也没有 task_id
           console.warn('[edit] images/generations response has no images or task_ids, falling back to chat/completions');
         } else {
-          // images/generations 失败，记录日志后回退到 chat/completions
+          // images/generations 失败
           const errText = await genResponse.text().catch(() => '');
-          console.warn(`[edit] images/generations failed (${genResponse.status}): ${errText.substring(0, 200)}, falling back to chat/completions`);
+          console.warn(`[edit] images/generations failed (${genResponse.status}): ${errText.substring(0, 200)}`);
+
+          // ★ Fallback: if images[] nested format was rejected, retry with image_urls flat format
+          // Some providers (e.g. AI Link) don't support nested images[] on /images/generations
+          if (Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0
+              && isEditsEndpointRejected(genResponse.status, errText)) {
+            console.info('[edit] /images/generations with images[] format rejected, retrying with image_urls flat format...');
+            const flatUrls = (adjustedBody.images as Array<{ image_url: { url: string } }>)
+              .map((img) => img.image_url?.url || '')
+              .filter(Boolean);
+            const flatBody = { ...adjustedBody };
+            delete flatBody.images;
+            flatBody.image_urls = flatUrls;
+
+            try {
+              const flatResponse = await fetchWithV1Retry(
+                effectiveBaseUrl,
+                resolvedEndpoint,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${effectiveApiKey}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(flatBody),
+                  signal: AbortSignal.any([taskSignal, AbortSignal.timeout(120000)]),
+                },
+              );
+              if (flatResponse.ok) {
+                const flatResponseText = await flatResponse.text();
+                let flatData: Record<string, unknown>;
+                if (flatResponseText.trimStart().startsWith('data:')) {
+                  flatData = parseSSEToJSON(flatResponseText);
+                } else {
+                  try { flatData = JSON.parse(flatResponseText); } catch {
+                    throw new Error('API 响应解析失败');
+                  }
+                }
+                const flatParsed = parseResponseForProfile(flatData, compatProfile);
+                if (flatParsed.mode === 'direct' && flatParsed.directImageUrls.length > 0) {
+                  const flatImages: Array<{ url: string; revisedPrompt: string }> = flatParsed.directImageUrls.map(url => ({
+                    url,
+                    revisedPrompt: effectivePrompt,
+                  }));
+                  await finishTask({
+                    success: true,
+                    image: flatImages[0],
+                    images: flatImages,
+                    model: pureModel,
+                    provider: effectiveBaseUrl || 'unknown',
+                    llmInstruction,
+                    editRegions: llmEditRegions,
+                    autoMaskGenerated: llmEditRegions.length > 0,
+                  });
+                  return;
+                }
+              } else {
+                const flatErrText = await flatResponse.text().catch(() => '');
+                console.warn(`[edit] retry with image_urls also failed (${flatResponse.status}): ${flatErrText.substring(0, 200)}, falling back to chat/completions`);
+              }
+            } catch (flatRetryErr) {
+              console.warn('[edit] retry with image_urls error, falling back to chat/completions:', flatRetryErr instanceof Error ? flatRetryErr.message : flatRetryErr);
+            }
+          } else {
+            console.warn('[edit] falling back to chat/completions');
+          }
         }
       } catch (genErr) {
         console.warn('[edit] images/generations error, falling back to chat/completions:', genErr instanceof Error ? genErr.message : genErr);

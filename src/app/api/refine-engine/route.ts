@@ -726,8 +726,21 @@ async function submitRefineToApi(
 
     // Check if /images/edits is rejected → fallback to /images/generations
     if (isEditsEndpointRejected(response.status, errText)) {
-      console.info('[refine-engine] /images/edits rejected, falling back to /images/generations...');
+      console.info('[refine-engine] endpoint rejected, falling back to /images/generations...');
       const fallbackBody = stripEditsOnlyFields(apiBody);
+
+      // ★ If images[] nested format exists (from adjustRequestForProfile conversion),
+      // convert back to image_urls flat format for maximum provider compatibility
+      if (Array.isArray(fallbackBody.images) && fallbackBody.images.length > 0) {
+        const flatUrls = (fallbackBody.images as Array<{ image_url: { url: string } }>)
+          .map((img) => img.image_url?.url || '')
+          .filter(Boolean);
+        delete fallbackBody.images;
+        if (flatUrls.length > 0) {
+          fallbackBody.image_urls = flatUrls;
+        }
+      }
+
       if (fallbackBody.image_urls && Array.isArray(fallbackBody.image_urls) && (fallbackBody.image_urls as string[]).length > 0) {
         fallbackBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for generation. Do NOT generate from scratch. ${String(fallbackBody.prompt || '')}`;
       }
