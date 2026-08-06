@@ -30,8 +30,10 @@ export interface LayerPanelProps {
   onDelete?: (id: string) => void;
   /** 关闭面板回调 */
   onClose?: () => void;
-  /** 面板位置（左或右） */
-  position?: 'left' | 'right';
+  /** 面板位置（左、右或底部抽屉） */
+  position?: 'left' | 'right' | 'bottom';
+  /** 面板宽度（position='bottom' 时右侧留白宽度，用于避开右侧功能面板） */
+  rightInset?: number;
   /** 面板宽度 */
   width?: number;
   /** 是否以画布中央浮窗显示 */
@@ -234,6 +236,7 @@ export function LayerPanel({
   position = 'right',
   width = 220,
   floating = false,
+  rightInset = 0,
 }: LayerPanelProps) {
   // 按zIndex排序（高zIndex在上面）
   const sortedImages = useMemo(() => {
@@ -338,20 +341,29 @@ export function LayerPanel({
     }));
   }, [images, sortedImages, onReorder]);
 
-  const positionClass = position === 'left' ? 'left-0' : 'right-0';
-  const placementClass = floating
-    ? 'fixed left-1/2 top-1/2 h-[min(70dvh,620px)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg shadow-2xl'
-    : `absolute ${positionClass} top-12 bottom-14`;
-  const edgeBorderClass = position === 'left' ? 'border-r' : 'border-l';
+  const isBottomDock = position === 'bottom';
+  const positionClass = !isBottomDock && position === 'left' ? 'left-0' : 'right-0';
+  const placementClass = isBottomDock
+    ? 'fixed bottom-0 left-0 rounded-t-xl shadow-2xl'
+    : floating
+      ? 'fixed left-1/2 top-1/2 h-[min(70dvh,620px)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg shadow-2xl'
+      : `absolute ${positionClass} top-12 bottom-14`;
+  const edgeBorderClass = isBottomDock
+    ? 'border-t'
+    : position === 'left' ? 'border-r' : 'border-l';
   const themeClass = isMonochrome
-    ? floating ? 'bg-gray-50 border border-gray-200' : `bg-gray-50 ${edgeBorderClass} border-gray-200`
-    : floating ? 'bg-[#0a0a0a] border border-gold/10' : `bg-[#0a0a0a] ${edgeBorderClass} border-gold/10`;
+    ? isBottomDock ? 'bg-gray-50 border-t border-gray-200' : (floating ? 'bg-gray-50 border border-gray-200' : `bg-gray-50 ${edgeBorderClass} border-gray-200`)
+    : isBottomDock ? 'bg-[#0a0a0a] border-t border-gold/10' : (floating ? 'bg-[#0a0a0a] border border-gold/10' : `bg-[#0a0a0a] ${edgeBorderClass} border-gold/10`);
 
   return (
     <div
       className={`${placementClass} z-[80] flex flex-col ${themeClass}`}
-      style={{ width, maxWidth: floating ? 'calc(100dvw - 2rem)' : 'min(100%, calc(100dvw - 1rem))' }}
-      data-popup={floating ? 'layer-panel' : undefined}
+      style={{
+        width: isBottomDock ? (rightInset ? `calc(100% - ${rightInset}px)` : '100%') : width,
+        maxWidth: isBottomDock ? undefined : (floating ? 'calc(100dvw - 2rem)' : 'min(100%, calc(100dvw - 1rem))'),
+        height: isBottomDock ? 'min(42dvh, 340px)' : undefined,
+      }}
+      data-popup={floating || isBottomDock ? 'layer-panel' : undefined}
     >
       {/* 标题栏 */}
       <div className={`flex items-center justify-between px-3 py-2 border-b ${isMonochrome ? 'border-gray-200' : 'border-gold/10'}`}>
