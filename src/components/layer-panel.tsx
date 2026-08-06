@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Eye, EyeOff, Lock, Unlock, Trash2, ChevronUp, ChevronDown,
   GripVertical, MoreHorizontal, Pencil, X, Check, Image as ImageIcon,
@@ -53,6 +53,10 @@ interface LayerItemProps {
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  /** 打开菜单：传入按钮的 DOMRect 用于 fixed 定位 */
+  onMenuOpen?: (imageId: string, rect: DOMRect) => void;
+  /** 外部触发的重命名ID */
+  forceRenameId?: string | null;
   dragHandleProps?: Record<string, unknown>;
 }
 
@@ -68,28 +72,19 @@ function LayerItem({
   onDelete,
   onMoveUp,
   onMoveDown,
+  onMenuOpen,
+  forceRenameId,
 }: LayerItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(image.name || `图层 ${index + 1}`);
-  const [showMenu, setShowMenu] = useState(false);
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const [menuStyle, setMenuStyle] = useState<React.CSSProperties | null>(null);
 
-  // 计算菜单定位：fixed 避开容器 overflow 裁剪
+  // 外部触发重命名
   useEffect(() => {
-    if (showMenu && menuButtonRef.current) {
-      const rect = menuButtonRef.current.getBoundingClientRect();
-      // 菜单向上弹出（菜单在按钮上方）
-      setMenuStyle({
-        position: 'fixed',
-        right: window.innerWidth - rect.right + 8,
-        bottom: window.innerHeight - rect.top + 4,
-        zIndex: 100,
-      });
-    } else {
-      setMenuStyle(null);
+    if (forceRenameId === image.id) {
+      setIsEditing(true);
+      setEditName(image.name || `图层 ${index + 1}`);
     }
-  }, [showMenu]);
+  }, [forceRenameId, image.id, image.name, index]);
 
   const displayName = image.name || `图层 ${index + 1}`;
   const isVisible = image.visible !== false;
@@ -183,53 +178,13 @@ function LayerItem({
         {/* 更多菜单按钮 */}
         <div className="flex justify-center">
           <button
-            ref={menuButtonRef}
-            onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+            onClick={(e) => { e.stopPropagation(); onMenuOpen?.(image.id, e.currentTarget.getBoundingClientRect()); }}
             className={`p-0.5 rounded transition-colors opacity-0 group-hover:opacity-100 ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
           >
             <MoreHorizontal className={`w-3 h-3 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
           </button>
         </div>
       </div>
-
-      {/* 更多菜单弹窗 — fixed 定位避开容器溢出裁剪 */}
-      {showMenu && menuStyle && (
-        <div
-          style={menuStyle}
-          className={`py-1 rounded-lg shadow-lg min-w-[120px] ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/20'}`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            onClick={() => { setIsEditing(true); setShowMenu(false); }}
-            className={`w-full px-3 py-1.5 text-xs flex items-center gap-2 ${isMonochrome ? 'hover:bg-gray-50 text-gray-700' : 'hover:bg-white/5 text-foreground'}`}
-          >
-            <Pencil className="w-3 h-3" />
-            重命名
-          </button>
-          <button
-            onClick={() => { onMoveUp(); setShowMenu(false); }}
-            className={`w-full px-3 py-1.5 text-xs flex items-center gap-2 ${isMonochrome ? 'hover:bg-gray-50 text-gray-700' : 'hover:bg-white/5 text-foreground'}`}
-          >
-            <ChevronUp className="w-3 h-3" />
-            上移一层
-          </button>
-          <button
-            onClick={() => { onMoveDown(); setShowMenu(false); }}
-            className={`w-full px-3 py-1.5 text-xs flex items-center gap-2 ${isMonochrome ? 'hover:bg-gray-50 text-gray-700' : 'hover:bg-white/5 text-foreground'}`}
-          >
-            <ChevronDown className="w-3 h-3" />
-            下移一层
-          </button>
-          <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-gold/10'}`} />
-          <button
-            onClick={() => { onDelete(); setShowMenu(false); }}
-            className={`w-full px-3 py-1.5 text-xs flex items-center gap-2 ${isMonochrome ? 'hover:bg-red-50 text-red-600' : 'hover:bg-red-500/10 text-red-400'}`}
-          >
-            <Trash2 className="w-3 h-3" />
-            删除图层
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -275,6 +230,7 @@ export function LayerPanel({
   // 重命名
   const handleRename = useCallback((imageId: string, name: string) => {
     onRename?.(imageId, name);
+    setForceRenameId(null);
   }, [onRename]);
 
   // 上移一层（增加zIndex）
@@ -302,6 +258,21 @@ export function LayerPanel({
   // 批量操作状态
   const visibleCount = images.filter(img => img.visible !== false).length;
   const lockedCount = images.filter(img => img.locked === true).length;
+
+  // 菜单状态（面板级渲染，避开滚动容器裁剪）
+  const [menuState, setMenuState] = useState<{ rect: DOMRect; imageId: string } | null>(null);
+  const handleMenuOpen = useCallback((imageId: string, rect: DOMRect) => {
+    setMenuState({ rect, imageId });
+  }, []);
+  const handleMenuClose = useCallback(() => {
+    setMenuState(null);
+  }, []);
+
+  // 重命名触发状态
+  const [forceRenameId, setForceRenameId] = useState<string | null>(null);
+  const handleRenameState = useCallback((id: string) => {
+    setForceRenameId(id);
+  }, []);
 
   // 全部显示/隐藏
   const handleToggleAllVisibility = useCallback(() => {
@@ -454,6 +425,8 @@ export function LayerPanel({
                   onDelete={() => onDelete?.(image.id)}
                   onMoveUp={() => handleMoveUp(image.id)}
                   onMoveDown={() => handleMoveDown(image.id)}
+                  onMenuOpen={handleMenuOpen}
+                  forceRenameId={forceRenameId}
                 />
               </div>
             ))}
@@ -470,6 +443,67 @@ export function LayerPanel({
           锁定: {lockedCount}/{images.length}
         </div>
       </div>
+
+      {/* 面板级菜单渲染 — 避开滚动容器裁剪 */}
+      {menuState && (
+        <div
+          className="fixed inset-0 z-[90]"
+          onClick={handleMenuClose}
+        >
+          <div
+            className={`py-1 rounded-lg shadow-lg min-w-[120px] ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/20'}`}
+            style={{
+              position: 'fixed',
+              right: window.innerWidth - menuState.rect.right + 8,
+              bottom: window.innerHeight - menuState.rect.top + 4,
+              zIndex: 100,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                setForceRenameId(menuState.imageId);
+                setMenuState(null);
+              }}
+              className={`w-full px-3 py-1.5 text-xs flex items-center gap-2 ${isMonochrome ? 'hover:bg-gray-50 text-gray-700' : 'hover:bg-white/5 text-foreground'}`}
+            >
+              <Pencil className="w-3 h-3" />
+              重命名
+            </button>
+            <button
+              onClick={() => {
+                handleMoveUp(menuState.imageId);
+                setMenuState(null);
+              }}
+              className={`w-full px-3 py-1.5 text-xs flex items-center gap-2 ${isMonochrome ? 'hover:bg-gray-50 text-gray-700' : 'hover:bg-white/5 text-foreground'}`}
+            >
+              <ChevronUp className="w-3 h-3" />
+              上移一层
+            </button>
+            <button
+              onClick={() => {
+                handleMoveDown(menuState.imageId);
+                setMenuState(null);
+              }}
+              className={`w-full px-3 py-1.5 text-xs flex items-center gap-2 ${isMonochrome ? 'hover:bg-gray-50 text-gray-700' : 'hover:bg-white/5 text-foreground'}`}
+            >
+              <ChevronDown className="w-3 h-3" />
+              下移一层
+            </button>
+            <div className={`h-px ${isMonochrome ? 'bg-gray-100' : 'bg-gold/10'}`} />
+            <button
+              onClick={() => {
+                onDelete?.(menuState.imageId);
+                setMenuState(null);
+              }}
+              className={`w-full px-3 py-1.5 text-xs flex items-center gap-2 ${isMonochrome ? 'hover:bg-red-50 text-red-600' : 'hover:bg-red-500/10 text-red-400'}`}
+            >
+              <Trash2 className="w-3 h-3" />
+              删除图层
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
