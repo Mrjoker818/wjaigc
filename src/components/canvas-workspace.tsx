@@ -307,12 +307,18 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }
       }
 
-      // Record diff: if prevImagesRef is stale, squash from stale→prev and prev→next into one step
+      // Record diff: always use the actual React state `prev` as the base.
+      // ★ 修复：之前当 prevImagesRef 过期时（如 setImagesRaw 直接调用未更新 ref），
+      // 会使用过期的 prevImagesRef.current（可能为 []）作为基准，
+      // 导致 recordChange([], allImages) 被记录，Ctrl+Z 时所有图片被移除。
+      // 现在始终使用 prev（真实 React 状态）作为基准，确保 diff 计算正确。
       // ★ 跳过非用户操作（项目加载/服务器同步）的 diff 记录，防止 Ctrl+Z 撤销到空画布
       if (!skipHistoryRef.current) {
-        const baseState = prevImagesRef.current === prev ? prev : prevImagesRef.current;
-        if (baseState.length > 0 || next.length > 0) {
-          incrementalHistoryRef.current.recordChange(baseState, next);
+        // 安全防护：如果 prev 为空但 next 包含多张图片，可能是项目加载未被 skipHistory 拦截
+        // 这种情况下跳过 diff 记录，避免记录"从空到全部图片"的错误 diff
+        const isBulkLoad = prev.length === 0 && next.length > 1;
+        if (!isBulkLoad && (prev.length > 0 || next.length > 0)) {
+          incrementalHistoryRef.current.recordChange(prev, next);
         }
       }
 
@@ -326,6 +332,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     setImagesRaw(prev => {
       const result = incrementalHistoryRef.current.undo(prev);
       if (result === prev) return prev;
+      // ★ 安全防护：如果 undo 会导致所有图片被清空（result 为空但 prev 有图片），
+      // 说明 undo 栈中存在错误的"从空到全部图片"diff，跳过此 undo 操作
+      if (result.length === 0 && prev.length > 0) {
+        console.warn('[Undo] 阻止了清空所有图片的撤销操作, prev count:', prev.length);
+        return prev;
+      }
       prevImagesRef.current = result;
       return result;
     });
@@ -858,7 +870,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         originalHeight: 1024,
         isAiGenerated: true,
       }));
-      setImagesRaw(prev => [...prev, ...newImages]);
+      // ★ 修复：使用 setImages 包装器而非直接 setImagesRaw，确保 prevImagesRef 同步更新
+      // 之前直接调用 setImagesRaw 导致 prevImagesRef 过期，后续 setImages 调用会使用过期的基准计算 diff
+      setImages(prev => [...prev, ...newImages]);
     } catch {
       // ignore parse errors
     }
