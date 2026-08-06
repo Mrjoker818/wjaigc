@@ -323,17 +323,22 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   const handleUndo = useCallback(() => {
     if (!incrementalHistoryRef.current.canUndo()) return;
-    // Flush pending diff and apply reverse
-    const result = incrementalHistoryRef.current.undo(prevImagesRef.current);
-    prevImagesRef.current = result;
-    setImagesRaw(result);
+    setImagesRaw(prev => {
+      const result = incrementalHistoryRef.current.undo(prev);
+      if (result === prev) return prev;
+      prevImagesRef.current = result;
+      return result;
+    });
   }, []);
 
   const handleRedo = useCallback(() => {
     if (!incrementalHistoryRef.current.canRedo()) return;
-    const result = incrementalHistoryRef.current.redo(prevImagesRef.current);
-    prevImagesRef.current = result;
-    setImagesRaw(result);
+    setImagesRaw(prev => {
+      const result = incrementalHistoryRef.current.redo(prev);
+      if (result === prev) return prev;
+      prevImagesRef.current = result;
+      return result;
+    });
   }, []);
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
