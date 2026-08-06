@@ -271,6 +271,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // ★ 跳过历史记录标记：项目加载/服务器同步等非用户操作不记录 undo diff
   // 防止 Ctrl+Z 撤销到项目加载前的空画布状态
   const skipHistoryRef = useRef(false);
+  // ★ 自动 mark 定时器：图片变更后经过一段空闲期自动创建撤销检查点
+  // 解决 mark() 从未被调用导致所有变更累积在同一个 pendingDiff 中、
+  // Ctrl+Z 只能撤回 1 步的问题。拖拽等连续操作期间定时器不断重置，
+  // 操作结束后 500ms 自动 flush 为一个独立撤销步骤。
+  const markTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ====== Tree History (Version History Panel) ======
   // 树状版本历史，支持分支和任意节点回溯
@@ -286,8 +291,30 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       isMountedRef.current = false;
       quickCreateCompileControllerRef.current?.abort();
       quickCreateCompileControllerRef.current = null;
+      if (markTimerRef.current) {
+        clearTimeout(markTimerRef.current);
+        markTimerRef.current = null;
+      }
     };
   }, []);
+
+  // ★ 自动创建撤销检查点：每次 images 变化后启动 500ms 定时器，
+  // 若期间无新变更则调用 mark() 将累积的 pendingDiff flush 为一个独立撤销步骤。
+  // 拖拽等高频操作期间定时器不断重置，操作结束后才创建检查点 → 一个拖拽 = 一步撤销。
+  // 离散操作（生成/删除/编辑）之间自然有 >500ms 间隔 → 各自成为独立撤销步骤。
+  useEffect(() => {
+    if (markTimerRef.current) clearTimeout(markTimerRef.current);
+    markTimerRef.current = setTimeout(() => {
+      incrementalHistoryRef.current.mark();
+      markTimerRef.current = null;
+    }, 500);
+    return () => {
+      if (markTimerRef.current) {
+        clearTimeout(markTimerRef.current);
+        markTimerRef.current = null;
+      }
+    };
+  }, [images]);
 
   // Wrap setImages to record incremental diff before each change
   const setImages = useCallback((action: React.SetStateAction<CanvasImage[]>) => {
@@ -328,13 +355,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, []);
 
   const handleUndo = useCallback(() => {
+    // ★ 清除待处理的 mark 定时器，避免 undo 后 stale mark 干扰
+    if (markTimerRef.current) {
+      clearTimeout(markTimerRef.current);
+      markTimerRef.current = null;
+    }
     if (!incrementalHistoryRef.current.canUndo()) return;
     setImagesRaw(prev => {
       const result = incrementalHistoryRef.current.undo(prev);
       if (result === prev) return prev;
-      // ★ 安全防护：如果 undo 会导致所有图片被清空（result 为空但 prev 有图片），
-      // 说明 undo 栈中存在错误的"从空到全部图片"diff，跳过此 undo 操作
-      if (result.length === 0 && prev.length > 0) {
+      // ★ 安全防护：如果 undo 会导致多张图片被清空（result 为空但 prev 有多张图片），
+      // 说明 undo 栈中可能存在错误的"从空到全部图片"bulk-load diff，跳过此 undo 操作。
+      // 注意：prev.length > 1 而非 > 0，允许用户撤销在空画布上添加的第一张图片。
+      if (result.length === 0 && prev.length > 1) {
         console.warn('[Undo] 阻止了清空所有图片的撤销操作, prev count:', prev.length);
         return prev;
       }
@@ -344,6 +377,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, []);
 
   const handleRedo = useCallback(() => {
+    // ★ 清除待处理的 mark 定时器，避免 redo 后 stale mark 干扰
+    if (markTimerRef.current) {
+      clearTimeout(markTimerRef.current);
+      markTimerRef.current = null;
+    }
     if (!incrementalHistoryRef.current.canRedo()) return;
     setImagesRaw(prev => {
       const result = incrementalHistoryRef.current.redo(prev);
