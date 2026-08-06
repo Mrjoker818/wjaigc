@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   Eye, EyeOff, Lock, Unlock, Trash2, ChevronUp, ChevronDown,
   GripVertical, MoreHorizontal, Pencil, X, Check, Image as ImageIcon,
@@ -72,6 +72,24 @@ function LayerItem({
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(image.name || `图层 ${index + 1}`);
   const [showMenu, setShowMenu] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties | null>(null);
+
+  // 计算菜单定位：fixed 避开容器 overflow 裁剪
+  useEffect(() => {
+    if (showMenu && menuButtonRef.current) {
+      const rect = menuButtonRef.current.getBoundingClientRect();
+      // 菜单向上弹出（菜单在按钮上方）
+      setMenuStyle({
+        position: 'fixed',
+        right: window.innerWidth - rect.right + 8,
+        bottom: window.innerHeight - rect.top + 4,
+        zIndex: 100,
+      });
+    } else {
+      setMenuStyle(null);
+    }
+  }, [showMenu]);
 
   const displayName = image.name || `图层 ${index + 1}`;
   const isVisible = image.visible !== false;
@@ -165,6 +183,7 @@ function LayerItem({
         {/* 更多菜单按钮 */}
         <div className="flex justify-center">
           <button
+            ref={menuButtonRef}
             onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
             className={`p-0.5 rounded transition-colors opacity-0 group-hover:opacity-100 ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
           >
@@ -173,10 +192,11 @@ function LayerItem({
         </div>
       </div>
 
-      {/* 更多菜单弹窗 */}
-      {showMenu && (
+      {/* 更多菜单弹窗 — fixed 定位避开容器溢出裁剪 */}
+      {showMenu && menuStyle && (
         <div
-          className={`absolute right-0 top-full mt-1 z-50 py-1 rounded-lg shadow-lg min-w-[120px] ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/20'}`}
+          style={menuStyle}
+          className={`py-1 rounded-lg shadow-lg min-w-[120px] ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/20'}`}
           onClick={(e) => e.stopPropagation()}
         >
           <button
