@@ -1154,7 +1154,7 @@ export default function ChatArea({
   return (
     <div className="flex-1 flex flex-col h-screen bg-background">
       {/* Top Bar */}
-      <header className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
+      <header className="relative z-50 flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
         <button onClick={onToggleSidebar} className="p-2 rounded-lg hover:bg-muted transition-colors" title="切换侧边栏">
           <Menu className="w-5 h-5 text-muted-foreground" />
         </button>
