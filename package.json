@@ -22,7 +22,6 @@
     "test:inventory": "node scripts/generate-function-inventory.mjs",
     "doctor": "node scripts/doctor.mjs",
     "perf:check": "node scripts/benchmark-ui-interactions.mjs",
-    "human:virtual-test": "tsx scripts/human-ai-engine-virtual-test.ts",
     "human:smoke-test": "tsx scripts/human-ai-engine-smoke-test.ts"
   },
   "dependencies": {
