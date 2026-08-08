@@ -35,6 +35,10 @@ function requireRealEnvironment(): void {
 test.describe('P0 real user journey', () => {
   test('login, upload, canvas operations, real generation, save/reload, download, and logout', async ({ page }, testInfo) => {
     test.setTimeout(300_000); // 5 min — real generation can take 60-120s
+    testInfo.annotations.push(
+      { type: 'featureId', description: 'workspace.canvas.generate' },
+      { type: 'verification', description: 'real-provider-paid-e2e' },
+    );
     requireRealEnvironment();
     const evidence = collectBrowserEvidence(page);
     try {

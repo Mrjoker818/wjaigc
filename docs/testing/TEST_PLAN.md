@@ -2,6 +2,33 @@
 
 > 版本: v1.0 | 生成时间: 2026-07-20 | 基于测试计划 Word 文档
 
+## WJ-STABLE-001 Stage 0 补充
+
+Stage 0 只建立版本基线、受保护功能目录、兼容样本、证据格式和发布门禁，不修改供应商、任务、积分、认证、画布、节点或聊天业务行为。
+
+浏览器冒烟 `tests/e2e/stage-0-evidence.spec.ts` 仅验证：
+
+1. 部署地址可以返回页面文档。
+2. 最终页面与目标部署地址同源。
+3. 页面主体存在。
+4. 首屏没有未捕获 `pageerror`。
+
+该冒烟不验证登录、生成、扣费、保存、支付、PostgreSQL 并发、对象存储或供应商结果。云端运行 SHA 无法由 `E2E_DEPLOYMENT_COMMIT` 确认时，即使页面可打开也必须记录为 `blocked`。
+
+证据目录：
+
+```text
+test-results/evidence/<commit>/<featureId>/<browser>/<timestamp>/
+```
+
+执行示例：
+
+```powershell
+$env:E2E_BASE_URL = "https://www.wjaigc.top/"
+$env:E2E_ALLOW_BLOCKED = "true"
+pnpm exec playwright test tests/e2e/stage-0-evidence.spec.ts --project=chromium
+```
+
 ---
 
 ## 测试范围
