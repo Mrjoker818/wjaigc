@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPublicApiProviders, getPublicModels } from '@/lib/server-api-config';
-import type { ApiKind, ModelInfo } from '@/lib/server-api-config';
-import { isModelAssignedToUser } from '@/lib/model-defaults';
+import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
-import { resolveTaskModelCatalog } from '@/lib/task-core/model-catalog';
+import {
+  resolveTaskModelCatalogResult,
+  taskModelKey,
+} from '@/lib/task-core/model-catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,25 +13,6 @@ const WORKFLOW_MODEL_TYPES = new Set<ApiKind>([
   'image', 'chat', 'universal', 'general', '3d', 'vectorize', 'layer',
   'video', 'vlm', 'imageEdit', 'upscaler', 'removebg', 'audio',
 ]);
-
-function filterModelsForUser(models: ModelInfo[], user: Awaited<ReturnType<typeof getSessionUser>>): ModelInfo[] {
-  if (user?.role === 'admin' || !user) return models;
-
-  return models.filter(model => {
-    if (model.type === 'image' && user.imageModels?.length) {
-      return isModelAssignedToUser(user.imageModels, model.providerId, model.id);
-    }
-    if (model.type === 'chat' && user.chatModels?.length) {
-      return isModelAssignedToUser(user.chatModels, model.providerId, model.id);
-    }
-    if (model.type === 'layer') {
-      const apiPermissions = user.apiPermissions;
-      if (apiPermissions?.layer !== true) return false;
-      return isModelAssignedToUser(user.imageModels, model.providerId, model.id);
-    }
-    return true;
-  });
-}
 
 export async function GET(request: NextRequest) {
   const requestedType = request.nextUrl.searchParams.get('type');
@@ -42,15 +25,25 @@ export async function GET(request: NextRequest) {
     getSessionUser(request),
   ]);
   const providerNames = new Map(providers.map(provider => [provider.id, provider.displayName || provider.name || provider.id]));
-  const filteredModels = filterModelsForUser(models, user);
-  const taskModelCatalog = await resolveTaskModelCatalog(filteredModels, user);
+  const catalogResult = await resolveTaskModelCatalogResult(models, user);
+  const filteredModels = models.filter(model => (
+    catalogResult.authorizedModelKeys.has(taskModelKey(model.providerId, model.id))
+  ));
 
   return NextResponse.json({
     success: true,
-    models: filteredModels.map(model => ({
-      ...model,
-      provider: providerNames.get(model.providerId) || model.providerId,
-    })),
-    taskModelCatalog,
+    models: filteredModels.map(model => {
+      const key = taskModelKey(model.providerId, model.id);
+      const effectiveType = catalogResult.effectiveModelTypes.get(key);
+      return {
+        ...model,
+        ...(model.type && effectiveType && model.type !== effectiveType
+          ? { type: effectiveType }
+          : {}),
+        provider: providerNames.get(model.providerId) || model.providerId,
+      };
+    }),
+    taskModelCatalog: catalogResult.taskModelCatalog,
+    modelAuthorizationMigration: catalogResult.modelAuthorizationMigration,
   });
 }

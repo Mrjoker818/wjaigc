@@ -100,7 +100,32 @@ function connectorTemplates(value: unknown): Record<string, unknown>[] {
   return Array.isArray(data?.templates) ? data.templates.filter((item): item is Record<string, unknown> => objectValue(item) !== null) : [];
 }
 function providerModelOptions(models: string[] | undefined, providerId: string): Array<{ id: string; name: string; providerId: string }> {
-  return (models ?? []).map((model) => ({ id: model, name: model, providerId }));
+  return (models ?? []).map((model) => ({
+    id: `${providerId}::${model}`,
+    name: model,
+    providerId,
+  }));
+}
+
+function resolveVisibleModelAssignments(
+  assignments: string[] | undefined,
+  options: Array<{ id: string; name: string }>,
+): string[] | undefined {
+  if (!assignments) return undefined;
+  const optionsByModelId = new Map<string, string[]>();
+  for (const option of options) {
+    const candidates = optionsByModelId.get(option.name) || [];
+    candidates.push(option.id);
+    optionsByModelId.set(option.name, candidates);
+  }
+
+  return assignments.flatMap(assignment => {
+    if (assignment.includes('::')) {
+      return [assignment];
+    }
+    const candidates = optionsByModelId.get(assignment) || [];
+    return candidates.length === 1 ? candidates : [assignment];
+  });
 }
 
 const apiKindLabels: Record<ApiKind, string> = {
@@ -996,6 +1021,18 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     }
     return list;
   }, [providers, apiFilterType, apiFilterStatus, apiSearchQuery]);
+  const adminChatModelOptions = useMemo(
+    () => providers
+      .filter(p => p.modelType === 'chat' || p.modelType === 'universal' || p.modelType === 'general')
+      .flatMap(p => providerModelOptions(p.selectedModels, p.id)),
+    [providers],
+  );
+  const adminImageModelOptions = useMemo(
+    () => providers
+      .filter(p => p.modelType === 'image')
+      .flatMap(p => providerModelOptions(p.selectedModels, p.id)),
+    [providers],
+  );
 
   const toggleSelectAllProviders = useCallback(() => {
     if (selectedProviderIds.size === filteredProviders.length && filteredProviders.length > 0) {
@@ -2612,8 +2649,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               createdAt: u.createdAt,
               apiPermissions: u.apiPermissions,
               productType: u.productType,
-              chatModels: u.chatModels,
-              imageModels: u.imageModels,
+              chatModels: resolveVisibleModelAssignments(u.chatModels, adminChatModelOptions),
+              imageModels: resolveVisibleModelAssignments(u.imageModels, adminImageModelOptions),
               dailyTokenLimit: u.dailyTokenLimit,
               monthlyTokenLimit: u.monthlyTokenLimit,
               dailyImageLimit: u.dailyImageLimit,
@@ -2750,8 +2787,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { chatModels, imageModels } }) });
               await refreshAdmin();
             }}
-            adminChatModels={providers.filter(p => p.modelType === 'chat' || p.modelType === 'universal' || p.modelType === 'general').flatMap(p => providerModelOptions(p.selectedModels, p.id))}
-            adminImageModels={providers.filter(p => p.modelType === 'image').flatMap(p => providerModelOptions(p.selectedModels, p.id))}
+            adminChatModels={adminChatModelOptions}
+            adminImageModels={adminImageModelOptions}
           />
         )}
 
