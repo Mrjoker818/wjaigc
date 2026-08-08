@@ -35,7 +35,15 @@ export interface PublishDurableDirectTaskInput {
   completeTask: (
     prepared: Record<string, unknown>,
   ) => Promise<TransitionTaskResult | undefined>;
-  publishCompleted: (task: DurableTask) => void;
+}
+
+export interface ExposeDurableDirectTaskInput {
+  taskId: string;
+  task: DurableTask;
+  taskIds: string[];
+  directImageUrls: string[];
+  publishRegistry: (task: DurableTask) => void;
+  onPublishError?: (error: unknown) => void;
 }
 
 export type PublishDurableDirectTaskResult =
@@ -79,6 +87,26 @@ export function getTaskResultImageUrls(
   return Array.from(new Set(urls));
 }
 
+export function exposeDurableDirectTask(
+  input: ExposeDurableDirectTaskInput,
+): void {
+  input.taskIds.push(input.taskId);
+  const firstImageUrl = getTaskResultImageUrls(input.task)[0];
+  if (firstImageUrl) {
+    input.directImageUrls.push(firstImageUrl);
+  }
+
+  try {
+    input.publishRegistry(input.task);
+  } catch (error) {
+    try {
+      input.onPublishError?.(error);
+    } catch {
+      // The durable task is already reachable by taskId.
+    }
+  }
+}
+
 export async function publishDurableDirectTask(
   input: PublishDurableDirectTaskInput,
 ): Promise<PublishDurableDirectTaskResult> {
@@ -109,7 +137,6 @@ export async function publishDurableDirectTask(
     };
   }
 
-  input.publishCompleted(terminal.task);
   return {
     published: true,
     taskId: input.taskId,

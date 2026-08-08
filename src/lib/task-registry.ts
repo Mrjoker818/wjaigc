@@ -54,7 +54,8 @@ interface GlobalTaskStore {
   userQueues: Map<string, string[]>;
   userActiveCount: Map<string, number>;
   taskUserMap: Map<string, string>;
-  durableTaskIds: Set<string>;
+  pendingDurableTaskMarkers: Map<string, number>;
+  durableTaskIds?: Set<string>;
 }
 
 function getGlobalTaskStore(): GlobalTaskStore {
@@ -68,13 +69,22 @@ function getGlobalTaskStore(): GlobalTaskStore {
       userQueues: new Map<string, string[]>(),
       userActiveCount: new Map<string, number>(),
       taskUserMap: new Map<string, string>(),
-      durableTaskIds: new Set<string>(),
+      pendingDurableTaskMarkers: new Map<string, number>(),
     };
     ((globalThis as Record<string, unknown>)[key] as GlobalTaskStore).eventBus.setMaxListeners(200);
   }
   const store = (globalThis as Record<string, unknown>)[key] as GlobalTaskStore;
   store.abortControllers ||= new Map<string, AbortController>();
-  store.durableTaskIds ||= new Set<string>();
+  store.pendingDurableTaskMarkers ||= new Map<string, number>();
+  if (store.durableTaskIds) {
+    const markedAt = Date.now();
+    for (const taskId of store.durableTaskIds) {
+      const task = store.registry.get(taskId);
+      if (task) task.persistence = 'durable';
+      else store.pendingDurableTaskMarkers.set(taskId, markedAt);
+    }
+    delete store.durableTaskIds;
+  }
   return store;
 }
 
@@ -85,7 +95,6 @@ const taskEventBus = getGlobalTaskStore().eventBus;
 const userQueues = getGlobalTaskStore().userQueues;
 const userActiveCount = getGlobalTaskStore().userActiveCount;
 const taskUserMap = getGlobalTaskStore().taskUserMap;
-const durableTaskIds = getGlobalTaskStore().durableTaskIds;
 
 // ─── 任务操作 ─────────────────────────────────────────────────────────
 
@@ -103,9 +112,15 @@ export function registerTask(
   userId?: string,
   persistence?: TaskPersistence,
 ): TaskInfo {
+  const now = Date.now();
   const effectiveUserId = userId || 'anonymous';
+  const durableMarkers = getGlobalTaskStore().pendingDurableTaskMarkers;
+  const durableMarkedAt = durableMarkers.get(taskId);
+  const hasLiveDurableMarker = durableMarkedAt !== undefined
+    && now - durableMarkedAt <= PENDING_DURABLE_MARKER_TTL_MS;
+  durableMarkers.delete(taskId);
   const resolvedPersistence = persistence
-    ?? (durableTaskIds.has(taskId) ? 'durable' : 'memory');
+    ?? (hasLiveDurableMarker ? 'durable' : 'memory');
   cancelledTasks.delete(taskId);
 
   const task: TaskInfo = {
@@ -116,8 +131,8 @@ export function registerTask(
     progress: 0,
     label: label || type,
     userId: effectiveUserId,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
   };
   taskRegistry.set(taskId, task);
   evictOldestTerminalTasks();
@@ -132,12 +147,15 @@ export function registerTask(
   return task;
 }
 
-export function markTaskDurable(taskId: string): void {
-  durableTaskIds.add(taskId);
+export function markTaskDurable(taskId: string, markedAt: number = Date.now()): void {
+  const durableMarkers = getGlobalTaskStore().pendingDurableTaskMarkers;
   const task = taskRegistry.get(taskId);
   if (task) {
     task.persistence = 'durable';
+    durableMarkers.delete(taskId);
+    return;
   }
+  durableMarkers.set(taskId, markedAt);
 }
 
 /**
@@ -312,6 +330,7 @@ export const MAX_CONCURRENT_PER_USER = parseInt(process.env.TASK_MAX_CONCURRENT 
 export const MAX_TASKS = 500;
 /** 任务过期时间（毫秒） */
 export const TASK_TTL_MS = 30 * 60 * 1000;
+export const PENDING_DURABLE_MARKER_TTL_MS = TASK_TTL_MS;
 
 const defaultQueueConfig: QueueConfig = { maxConcurrent: MAX_CONCURRENT_PER_USER, perUser: true };
 
@@ -425,6 +444,7 @@ export function getActiveTaskCount(userId: string): number {
 /** 淘汰最老的终态任务，确保 registry 不超过上限 */
 function evictOldestTerminalTasks(): void {
   if (taskRegistry.size <= MAX_TASKS) return;
+  const durableMarkers = getGlobalTaskStore().pendingDurableTaskMarkers;
   const ACTIVE_STATUSES: TaskStatus[] = ['pending', 'processing', 'queued'];
   // 按 updatedAt 升序排列终态任务，优先淘汰最老的
   const terminalEntries: [string, TaskInfo][] = [];
@@ -441,11 +461,26 @@ function evictOldestTerminalTasks(): void {
     taskRegistry.delete(id);
     cancelledTasks.delete(id);
     taskAbortControllers.delete(id);
+    durableMarkers.delete(id);
   }
+}
+
+export function cleanupPendingDurableTaskMarkers(now: number = Date.now()): void {
+  const durableMarkers = getGlobalTaskStore().pendingDurableTaskMarkers;
+  for (const [taskId, markedAt] of durableMarkers) {
+    if (now - markedAt > PENDING_DURABLE_MARKER_TTL_MS) {
+      durableMarkers.delete(taskId);
+    }
+  }
+}
+
+export function getPendingDurableTaskMarkerCount(): number {
+  return getGlobalTaskStore().pendingDurableTaskMarkers.size;
 }
 
 /** Remove expired tasks without leaving queue waiters or capacity behind. */
 export function cleanupExpiredTasks(now: number = Date.now()): void {
+  const durableMarkers = getGlobalTaskStore().pendingDurableTaskMarkers;
   const activeStatuses: TaskStatus[] = ['pending', 'processing', 'queued'];
   const expiredTasks: Array<[string, TaskInfo]> = [];
   for (const entry of taskRegistry) {
@@ -470,12 +505,14 @@ export function cleanupExpiredTasks(now: number = Date.now()): void {
     taskRegistry.delete(id);
     cancelledTasks.delete(id);
     taskAbortControllers.delete(id);
+    durableMarkers.delete(id);
   }
 
   // Unknown IDs may be cancelled after a restart. Bound their recovery marker.
   for (const [id, cancelledAt] of cancelledTasks) {
     if (now - cancelledAt > TASK_TTL_MS) cancelledTasks.delete(id);
   }
+  cleanupPendingDurableTaskMarkers(now);
   evictOldestTerminalTasks();
 }
 

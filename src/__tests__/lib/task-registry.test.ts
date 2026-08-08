@@ -15,7 +15,10 @@ import {
   getActiveTaskCount,
   waitForQueueSlot,
   cleanupExpiredTasks,
+  cleanupPendingDurableTaskMarkers,
+  getPendingDurableTaskMarkerCount,
   markTaskDurable,
+  PENDING_DURABLE_MARKER_TTL_MS,
   MAX_CONCURRENT_PER_USER,
   MAX_TASKS,
 } from '@/lib/task-registry';
@@ -26,6 +29,9 @@ describe('task-registry 模块', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    cleanupPendingDurableTaskMarkers(
+      Date.now() + PENDING_DURABLE_MARKER_TTL_MS + 1,
+    );
   });
 
   describe('registerTask', () => {
@@ -64,16 +70,75 @@ describe('task-registry 模块', () => {
         status: 'processing',
         progress: 45,
       });
+      expect(getPendingDurableTaskMarkerCount()).toBe(0);
     });
 
     it('registers a task as durable when persistence was marked first', () => {
       const id = uniqueId();
 
       markTaskDurable(id);
+      expect(getPendingDurableTaskMarkerCount()).toBe(1);
       const task = registerTask(id, 'generate', '图像生成', 'user1');
 
       expect(task.persistence).toBe('durable');
       expect(getTaskInfo(id)?.persistence).toBe('durable');
+      expect(getPendingDurableTaskMarkerCount()).toBe(0);
+    });
+
+    it('expires an unconsumed durable marker before a later registration', () => {
+      const id = uniqueId();
+      const markedAt = Date.now();
+
+      markTaskDurable(id, markedAt);
+      cleanupPendingDurableTaskMarkers(
+        markedAt + PENDING_DURABLE_MARKER_TTL_MS + 1,
+      );
+
+      expect(getPendingDurableTaskMarkerCount()).toBe(0);
+      expect(registerTask(id, 'generate', '图像生成', 'user1').persistence)
+        .toBe('memory');
+    });
+
+    it('does not let an evicted durable task make a reused id durable', () => {
+      const id = uniqueId();
+      registerTask(id, 'generate', '图像生成', 'user1');
+      markTaskDurable(id);
+      updateTaskProgress(id, { status: 'completed', progress: 100 });
+
+      cleanupExpiredTasks(Date.now() + PENDING_DURABLE_MARKER_TTL_MS + 1);
+      expect(getTaskInfo(id)).toBeUndefined();
+
+      expect(registerTask(id, 'generate', '图像生成', 'user1').persistence)
+        .toBe('memory');
+    });
+
+    it('does not retain durable identity after capacity eviction', () => {
+      cleanupExpiredTasks(Date.now() + 2 * 60 * 60 * 1000 + 1);
+      const id = uniqueId();
+      registerTask(id, 'generate', '图像生成', 'user1');
+      markTaskDurable(id);
+      updateTaskProgress(id, { status: 'completed', progress: 100 });
+
+      for (let index = 0; index < MAX_TASKS; index++) {
+        const fillerId = uniqueId();
+        registerTask(fillerId, 'generate', '图像生成', 'user1');
+        updateTaskProgress(fillerId, { status: 'completed', progress: 100 });
+      }
+
+      expect(getTaskInfo(id)).toBeUndefined();
+      expect(registerTask(id, 'generate', '图像生成', 'user1').persistence)
+        .toBe('memory');
+    });
+
+    it('reinitializes pending markers for a legacy HMR global store', () => {
+      const store = (
+        globalThis as unknown as Record<string, Record<string, unknown>>
+      ).__wujie_task_store__;
+      delete store.pendingDurableTaskMarkers;
+
+      expect(getPendingDurableTaskMarkerCount()).toBe(0);
+      markTaskDurable(uniqueId());
+      expect(getPendingDurableTaskMarkerCount()).toBe(1);
     });
 
     it('注册的任务可以通过getTaskInfo查询到', () => {

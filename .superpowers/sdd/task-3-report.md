@@ -251,6 +251,214 @@ Concerns:
 
 No GitHub push was performed.
 
+## Fifth Independent Review Fix
+
+### Scope
+
+This follow-up remains limited to Task 3 task authority and projection
+correctness. It does not implement Task 4 billing/refunds, Task 5 multi-image
+semantics, Task 6 Abort, or Task 7 entry migration.
+
+Changed production paths:
+
+- `src/lib/task-registry.ts`
+- `src/lib/task-core/task-service.ts`
+- `src/app/api/generate/route.ts`
+
+Changed tests:
+
+- `src/__tests__/lib/task-registry.test.ts`
+- `src/__tests__/lib/task-state.test.ts`
+- `src/__tests__/api/generate-terminal-persistence-contract.test.ts`
+
+The generate route remains the minimum approved Task 3 direct-result path. No
+provider request, response schema, credit behavior, or multi-image fan-out was
+changed.
+
+### TDD RED: Durable Marker Lifecycle
+
+The first RED added marker consumption, expiry, eviction/reuse, and HMR store
+coverage:
+
+```text
+pnpm exec vitest run \
+  src/__tests__/lib/task-registry.test.ts \
+  src/__tests__/lib/cloud-task-storage.test.ts \
+  src/__tests__/api/cancel-task.test.ts
+
+Exit code: 1
+Test Files: 1 failed, 2 passed
+Tests: 24 failed, 56 passed
+```
+
+All registry tests failed at setup because
+`cleanupPendingDurableTaskMarkers` did not exist. This established the missing
+bounded-marker contract before implementation while cloud storage and cancel
+behavior remained GREEN.
+
+### Durable Marker GREEN
+
+- Replaced the permanent `durableTaskIds` Set with timestamped
+  `pendingDurableTaskMarkers`.
+- `markTaskDurable` upgrades an existing registry task in place and removes any
+  pending marker. Only create-before-register stores a temporary marker.
+- `registerTask` consumes and deletes a live marker. Unmarked and expired IDs
+  still default to `memory`.
+- Pending markers use `TASK_TTL_MS` as a bounded TTL and are removed by
+  `cleanupExpiredTasks` and the dedicated cleanup helper.
+- Registry TTL deletion and capacity eviction defensively remove a same-ID
+  marker, so a reused ID cannot inherit stale durable classification.
+- HMR initialization upgrades existing tasks from the legacy Set and converts
+  only unmatched legacy IDs into timestamped temporary markers.
+- The shared `createCloudTask` success hook remains the automatic marker source
+  for ordinary generate, video, and extend tasks. Poll recovery remains
+  explicitly durable because it restores an existing database row.
+
+Final marker-focused GREEN:
+
+```text
+Exit code: 0
+Test Files: 3 passed
+Tests: 81 passed
+```
+
+This includes explicit register-before-create, create-before-register, create
+false, marker expiry, TTL eviction/reuse, capacity eviction/reuse, HMR
+initialization, video registration, and memory-cancel compatibility coverage.
+
+### TDD RED: Durable Direct Reachability
+
+The second RED removed the callback from the test harness and required a safe
+publication step:
+
+```text
+pnpm exec vitest run src/__tests__/lib/task-state.test.ts
+
+Exit code: 1
+Test Files: 1 failed
+Tests: 7 failed, 93 passed
+```
+
+The failures proved that the old helper still invoked `publishCompleted` and
+that no safe exposure function existed for no-URL, projection-error, or
+multi-URL snapshots.
+
+The existing route source contract then failed as expected because it still
+asserted the removed callback shape:
+
+```text
+Exit code: 1
+Test Files: 1 failed
+Tests: 1 failed, 1 passed
+```
+
+### Durable Direct GREEN
+
+- `publishDurableDirectTask` now performs only
+  `createTask -> prepareCompletion -> completeTask` and returns the
+  authoritative terminal snapshot.
+- Added `exposeDurableDirectTask`. It first appends the authoritative `taskId`
+  to the response collection, then appends at most the first authoritative
+  image URL, and only afterward attempts registry/SSE projection.
+- A completed snapshot with no image URL remains reachable by `taskId`.
+- Registry publication exceptions are contained and reported through a warning
+  callback after the task has already become reachable.
+- CAS losers use only the winner snapshot returned by terminal persistence.
+  CAS winners still persist the prepared final URL before terminal completion.
+- The durable route no longer has a publisher callback capable of turning a
+  committed PostgreSQL completion into an omitted response task.
+- The `_skipCloudTaskPersistence` memory-only path retains its previous
+  behavior.
+
+Direct-focused GREEN:
+
+```text
+Exit code: 0
+Test Files: 2 passed
+Tests: 102 passed
+```
+
+Behavioral coverage includes completed-without-URL, registry publication
+failure, winner snapshot selection, persisted winner URL, and one direct URL
+maximum per returned task ID.
+
+### Fifth Review Verification
+
+Task 3 focused suite:
+
+```text
+Exit code: 0
+Test Files: 9 passed, 1 skipped
+Tests: 224 passed, 1 skipped
+```
+
+Expanded cloud task, generate, poll recovery, video, cancel, admin, registry,
+and async-generation regression suite:
+
+```text
+Exit code: 0
+Test Files: 20 passed, 1 skipped
+Tests: 259 passed, 1 skipped
+```
+
+PostgreSQL remains explicit:
+
+```text
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+authoritative task-state PostgreSQL tests skipped.
+```
+
+Static verification:
+
+```text
+pnpm ts-check
+Exit code: 0
+
+pnpm exec eslint <changed TypeScript/test files>
+Exit code: 0
+Errors: 0
+Warnings: 19 existing warnings in src/app/api/generate/route.ts
+
+git diff --check
+Exit code: 0
+```
+
+Protected baseline against temporary candidate
+`0915b890944034a195649755d7e023fb524ff4c8`, containing the complete fifth
+review working tree and the exact cumulative approved Task 1-3 paths:
+
+```text
+Exit code: 0
+PASS All 38 baseline feature IDs remain present.
+PASS No unapproved source drift was detected.
+PASS All literal protected component paths are present.
+PASS All required evidence contracts are present.
+PASS Base and candidate Git refs are confirmed.
+PASS Release gate completed with 0 warning(s).
+```
+
+### Fifth Review Risks And Blockers
+
+BLOCKED:
+
+- `POSTGRES_TEST_DATABASE_URL` remains absent. Real PostgreSQL CAS concurrency
+  and transaction behavior were skipped and are not reported as passed.
+- `E2E_DEPLOYMENT_COMMIT` remains unavailable, so cloud runtime provenance is
+  still unconfirmed.
+
+Concerns:
+
+- Pending durable markers remain process-local by design, but are now bounded
+  by TTL and consumed on registration. Cross-process/restart recovery continues
+  to rely on the database and the explicit poll recovery projection.
+- A completed durable direct task may have no image URL. It is intentionally
+  returned by task ID so polling can expose the authoritative empty-result
+  problem instead of hiding a committed task.
+- Provider behavior, billing/refunds, multi-image semantics, Abort handling,
+  and broad entry migration remain unchanged and deferred to Tasks 4-7.
+
+No GitHub push was performed.
+
 ## 2026-08-08 Second Independent Review Fix
 
 Status before this fix: `CHANGES_REQUIRED`.
