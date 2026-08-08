@@ -163,6 +163,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       // 记录失败次数
       recordFailedAttempt(clientIp, username);
+      console.warn(`[auth/login] Authentication failed for user "${username}" (IP: ${clientIp}, productType: ${body.productType || 'none'})`);
       if (isFormSubmission) {
         return redirectToPublicPath(request, `/login/${body.productType === 'chat' ? 'chat' : 'canvas'}?error=invalid_credentials`);
       }
@@ -192,6 +193,7 @@ export async function POST(request: NextRequest) {
     });
     return response;
   } catch (error) {
+    console.error(`[auth/login] Error during login for user "${formProductType}":`, error instanceof Error ? error.message : error, error instanceof Error ? error.stack?.split('\n').slice(0, 3).join(' | ') : '');
     if (isFormSubmission) {
       const errorCode = error instanceof AuthConfigurationError ? 'configuration' : 'login_failed';
       return redirectToPublicPath(request, `/login/${formProductType}?error=${errorCode}`);

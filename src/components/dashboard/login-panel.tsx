@@ -69,7 +69,22 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
       });
 
       if (!response.ok) {
-        setLoginError('登录失败，请检查用户名、密码或授权');
+        let errorMsg = '登录失败，请检查用户名、密码或授权';
+        try {
+          const errorData = await response.json() as { error?: string };
+          if (response.status === 429) {
+            errorMsg = errorData.error || '尝试次数过多，请稍后再试';
+          } else if (response.status === 503) {
+            errorMsg = '服务器认证配置异常，请联系管理员';
+          } else if (response.status === 500) {
+            errorMsg = '服务器内部错误，请稍后重试';
+          } else if (response.status === 401) {
+            errorMsg = '用户名或密码错误';
+          }
+        } catch {
+          // response body not JSON, use default error
+        }
+        setLoginError(errorMsg);
         return;
       }
 
