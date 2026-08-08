@@ -8,6 +8,7 @@ import {
   chargeCloudTaskCredits,
   claimCloudTaskLease,
   createCloudTask,
+  getCloudTaskById,
   getCloudTaskForUser,
   getCloudTaskForUserByIdempotencyKey,
   listCloudTasks,
@@ -16,6 +17,8 @@ import {
   releaseCloudTaskLease,
   renewCloudTaskLease,
   terminateCloudTaskAndRefund,
+  transitionCloudTaskStatus,
+  type CloudTaskStatus,
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
 import * as cloudTaskStorage from '@/lib/cloud-task-storage';
@@ -73,19 +76,119 @@ describe('cloud-task-storage', () => {
     expect(created).toBe(false);
   });
 
-  it('updates a task terminal status with result and credit state', async () => {
-    await updateCloudTask('task-finish', {
+  it('updates status only through an allowed edge with status and revision CAS', async () => {
+    execSql.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT * FROM cloud_tasks WHERE id = $1')) {
+        return {
+          rows: [{
+            id: 'task-finish',
+            user_id: 'user-a',
+            type: 'generate',
+            status: 'processing',
+            progress: 50,
+            credit_status: 'pending',
+            revision: 4,
+            created_at: 100,
+            updated_at: 100,
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [{ id: 'task-finish' }], rowCount: 1 };
+    });
+
+    await expect(updateCloudTask('task-finish', {
       status: 'completed',
       progress: 100,
       result: { imageUrl: '/result.png' },
       creditStatus: 'charged',
-    });
+    })).resolves.toBe(true);
 
     const update = execSql.mock.calls.find(([sql]) => String(sql).startsWith('UPDATE cloud_tasks SET'));
     expect(update).toBeDefined();
     expect(update?.[0]).toContain('status = $');
     expect(update?.[0]).toContain('result = $');
     expect(update?.[0]).toContain('credit_status = $');
+    expect(update?.[0]).toContain('status = ANY');
+    expect(update?.[0]).toContain('revision = $');
+    expect(update?.[1]).toEqual(expect.arrayContaining([
+      ['processing'],
+      4,
+    ]));
+  });
+
+  it.each([
+    ['processing', 'created'],
+    ['uploading', 'queued'],
+    ['created', 'processing'],
+  ] as const)('rejects generic status bypass %s -> %s', async (from, to) => {
+    execSql.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT * FROM cloud_tasks WHERE id = $1')) {
+        return {
+          rows: [{
+            id: 'task-invalid-edge',
+            user_id: 'user-a',
+            type: 'generate',
+            status: from,
+            progress: 30,
+            credit_status: 'pending',
+            revision: 2,
+            created_at: 100,
+            updated_at: 100,
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [{ id: 'task-invalid-edge' }], rowCount: 1 };
+    });
+
+    await expect(updateCloudTask('task-invalid-edge', {
+      status: to as CloudTaskStatus,
+    })).resolves.toBe(false);
+    expect(execSql.mock.calls.some(([sql]) =>
+      String(sql).startsWith('UPDATE cloud_tasks SET')
+    )).toBe(false);
+  });
+
+  it.each([
+    ['progress', { progress: 5 }],
+    ['result', { result: { imageUrl: '/overwrite.png' } }],
+    ['error', { error: 'overwrite' }],
+    ['remoteTaskId', { remoteTaskId: 'remote-overwrite' }],
+    ['creditStatus', { creditStatus: 'refunded' as const }],
+    ['creditCost', { creditCost: 99 }],
+  ])('blocks terminal statusless %s business-field updates', async (_field, input) => {
+    execSql.mockImplementation(async (sql: string) => ({
+      rows: [],
+      rowCount: sql.includes(
+        "status NOT IN ('completed', 'failed', 'cancelled', 'timeout')",
+      ) ? 0 : 1,
+    }));
+
+    await expect(updateCloudTask('terminal-task', input)).resolves.toBe(false);
+    const update = execSql.mock.calls.find(([sql]) =>
+      String(sql).startsWith('UPDATE cloud_tasks SET')
+    );
+    expect(update?.[0]).toContain(
+      "status NOT IN ('completed', 'failed', 'cancelled', 'timeout')",
+    );
+  });
+
+  it('allows a terminal audit label without opening business fields', async () => {
+    execSql.mockResolvedValueOnce({
+      rows: [{ id: 'terminal-task' }],
+      rowCount: 1,
+    });
+
+    await expect(updateCloudTask('terminal-task', {
+      label: 'late audit note',
+    })).resolves.toBe(true);
+
+    const update = execSql.mock.calls.find(([sql]) =>
+      String(sql).startsWith('UPDATE cloud_tasks SET')
+    );
+    expect(update?.[0]).toContain('label = $');
+    expect(update?.[0]).not.toContain("status NOT IN ('completed'");
   });
 
   it('queries a task with both task id and owner id', async () => {
@@ -112,6 +215,32 @@ describe('cloud-task-storage', () => {
     });
   });
 
+  it('keeps durable raw status while projecting legacy readers centrally', async () => {
+    const row = {
+      id: 'task-uploading',
+      user_id: 'user-a',
+      type: 'generate',
+      status: 'uploading',
+      progress: 90,
+      credit_status: 'pending',
+      revision: 3,
+      created_at: 100,
+      updated_at: 200,
+    };
+    execSql.mockResolvedValue({ rows: [row], rowCount: 1 });
+
+    await expect(getCloudTaskById('task-uploading')).resolves.toMatchObject({
+      status: 'uploading',
+      revision: 3,
+    });
+    await expect(
+      getCloudTaskForUser('task-uploading', 'user-a'),
+    ).resolves.toMatchObject({
+      status: 'processing',
+      revision: 3,
+    });
+  });
+
   it('lists cloud tasks with provider and status filters', async () => {
     execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
@@ -123,12 +252,34 @@ describe('cloud-task-storage', () => {
     expect(select?.[1]).toEqual(['provider-a', 'failed', 25]);
   });
 
+  it.each([
+    ['queued', ['created', 'queued']],
+    ['pending', ['submitting', 'pending']],
+    ['processing', ['processing', 'uploading']],
+  ] as const)('expands the legacy %s filter to durable persisted states', async (
+    status,
+    persistedStatuses,
+  ) => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    await listCloudTasks({ status });
+
+    const select = execSql.mock.calls.find(([sql]) =>
+      String(sql).includes('ORDER BY updated_at DESC')
+    );
+    expect(select?.[0]).toContain('status = ANY');
+    expect(select?.[1]).toEqual(expect.arrayContaining([persistedStatuses]));
+  });
+
   it('summarizes task states by provider without reading task payloads', async () => {
     execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
     await getCloudTaskProviderSummary();
 
     const select = execSql.mock.calls.find(([sql]) => String(sql).includes('GROUP BY provider_id'));
+    expect(select?.[0]).toContain(
+      "status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')",
+    );
     expect(select?.[0]).toContain("status IN ('failed', 'timeout', 'cancelled')");
     expect(select?.[0]).not.toContain('result');
   });
@@ -142,7 +293,9 @@ describe('cloud-task-storage', () => {
     const lease = await claimCloudTaskLease('task-lease', 'worker-a', 4000, 1000);
 
     const update = execSql.mock.calls.find(([sql]) => String(sql).includes('lease_expires_at'));
-    expect(update?.[0]).toContain("status IN ('queued', 'pending', 'processing')");
+    expect(update?.[0]).toContain(
+      "status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')",
+    );
     expect(update?.[0]).toContain('lease_expires_at < $');
     expect(update?.[1]).toEqual(expect.arrayContaining(['task-lease', 'worker-a', 5000, 1000]));
     expect(lease).toEqual({ taskId: 'task-lease', owner: 'worker-a', expiresAt: 5000, attemptCount: 2 });
@@ -192,7 +345,9 @@ describe('cloud-task-storage', () => {
 
     const update = execSql.mock.calls.find(([sql]) => String(sql).includes('lease_expires_at = $3'));
     expect(update?.[0]).toContain('lease_owner = $2');
-    expect(update?.[0]).toContain("status IN ('queued', 'pending', 'processing')");
+    expect(update?.[0]).toContain(
+      "status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')",
+    );
     expect(update?.[1]).toEqual(['task-lease', 'worker-a', 5000, 1000]);
   });
 
@@ -332,7 +487,22 @@ describe('cloud-task-storage', () => {
   });
 
   it('does not report a zero-cost charge when the guarded task update loses its lease', async () => {
-    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    execSql
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'task-zero-cost',
+          user_id: 'user-a',
+          type: 'annotation-edit',
+          status: 'pending',
+          progress: 0,
+          credit_status: 'not-applicable',
+          revision: 3,
+          created_at: 100,
+          updated_at: 100,
+        }],
+        rowCount: 1,
+      })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
     const charge = await chargeCloudTaskCredits(
       'task-zero-cost',
@@ -346,5 +516,44 @@ describe('cloud-task-storage', () => {
     const update = execSql.mock.calls.find(([sql]) => String(sql).startsWith('UPDATE cloud_tasks SET'));
     expect(update?.[0]).toContain('lease_owner = $');
     expect(update?.[1]).toEqual(expect.arrayContaining(['worker-a']));
+  });
+
+  it('writes terminal credit compatibility metadata in the same CAS statement', async () => {
+    execSql.mockResolvedValueOnce({
+      rows: [{
+        id: 'task-terminal-credit',
+        user_id: 'user-a',
+        type: 'generate',
+        status: 'completed',
+        progress: 100,
+        credit_status: 'charged',
+        revision: 8,
+        created_at: 100,
+        updated_at: 200,
+      }],
+      rowCount: 1,
+    });
+
+    await expect(transitionCloudTaskStatus({
+      taskId: 'task-terminal-credit',
+      from: ['processing'],
+      to: 'completed',
+      revision: 7,
+      result: { imageUrl: '/result.png' },
+      creditStatus: 'charged',
+    })).resolves.toMatchObject({
+      transitioned: true,
+      task: {
+        status: 'completed',
+        creditStatus: 'charged',
+        revision: 8,
+      },
+    });
+
+    const update = execSql.mock.calls.find(([sql]) =>
+      String(sql).includes('AND revision = $3')
+    );
+    expect(update?.[0]).toContain('credit_status = $');
+    expect(update?.[1]).toEqual(expect.arrayContaining(['charged']));
   });
 });

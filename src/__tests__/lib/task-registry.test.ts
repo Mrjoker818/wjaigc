@@ -114,12 +114,14 @@ describe('task-registry 模块', () => {
       expect(isTaskCancelled(id)).toBe(false);
     });
 
-    it('keeps the cancellation signal available to an in-flight worker', () => {
+    it('keeps the cancellation signal without announcing a terminal state', () => {
       const id = uniqueId();
       registerTask(id, 'generate', '图像生成');
+      updateTaskProgress(id, { status: 'processing', progress: 35 });
       cancelTask(id);
       const task = getTaskInfo(id);
-      expect(task?.status).toBe('cancelled');
+      expect(task?.status).toBe('processing');
+      expect(task?.progress).toBe(35);
       expect(isTaskCancelled(id)).toBe(true);
     });
 
@@ -129,13 +131,17 @@ describe('task-registry 模块', () => {
   });
 
   describe('cancelTask', () => {
-    it('取消任务成功', () => {
+    it('records a cancellation request but waits for the database projection', () => {
       const id = uniqueId();
       registerTask(id, 'generate', '图像生成');
+      updateTaskProgress(id, { status: 'processing' });
       const result = cancelTask(id);
       expect(result).toBe(true);
       const task = getTaskInfo(id);
-      expect(task?.status).toBe('cancelled');
+      expect(task?.status).toBe('processing');
+
+      updateTaskProgress(id, { status: 'cancelled', progress: 0 });
+      expect(getTaskInfo(id)?.status).toBe('cancelled');
     });
 
     it('不存在的任务也返回true（幂等设计）', () => {

@@ -56,6 +56,20 @@ export interface DurableTask {
 const durableStatusSet = new Set<string>(DURABLE_TASK_STATUSES);
 const terminalStatusSet = new Set<DurableTaskStatus>(TERMINAL_TASK_STATUSES);
 
+export const TASK_STATUS_TRANSITIONS: Readonly<
+  Record<DurableTaskStatus, readonly DurableTaskStatus[]>
+> = {
+  created: ['queued', 'failed', 'cancelled', 'timeout'],
+  queued: ['submitting', 'processing', 'failed', 'cancelled', 'timeout'],
+  submitting: ['processing', 'failed', 'cancelled', 'timeout'],
+  processing: ['uploading', 'completed', 'failed', 'cancelled', 'timeout'],
+  uploading: ['processing', 'failed', 'cancelled', 'timeout'],
+  completed: [],
+  failed: [],
+  cancelled: [],
+  timeout: [],
+};
+
 export function isDurableTaskStatus(status: string): status is DurableTaskStatus {
   return durableStatusSet.has(status);
 }
@@ -76,7 +90,5 @@ export function canTransitionTaskStatus(
   from: DurableTaskStatus,
   to: DurableTaskStatus,
 ): boolean {
-  if (from === to || isTerminalTaskStatus(from)) return false;
-  if (to === 'completed') return from === 'processing';
-  return true;
+  return TASK_STATUS_TRANSITIONS[from].includes(to);
 }

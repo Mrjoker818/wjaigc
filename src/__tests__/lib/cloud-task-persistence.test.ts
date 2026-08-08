@@ -1,11 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createCloudTask, updateCloudTask } = vi.hoisted(() => ({
+const {
+  createCloudTask,
+  getCloudTaskById,
+  transitionCloudTaskStatus,
+  transitionTask,
+  updateCloudTask,
+} = vi.hoisted(() => ({
   createCloudTask: vi.fn(),
+  getCloudTaskById: vi.fn(),
+  transitionCloudTaskStatus: vi.fn(),
+  transitionTask: vi.fn(),
   updateCloudTask: vi.fn(),
 }));
 
-vi.mock('@/lib/cloud-task-storage', () => ({ createCloudTask, updateCloudTask }));
+vi.mock('@/lib/cloud-task-storage', () => ({
+  createCloudTask,
+  getCloudTaskById,
+  transitionCloudTaskStatus,
+  updateCloudTask,
+}));
+vi.mock('@/lib/task-core/task-service', () => ({ transitionTask }));
 
 import {
   recordImageTaskSubmitted,
@@ -22,6 +37,16 @@ import {
 describe('cloud-task-persistence', () => {
   beforeEach(() => {
     createCloudTask.mockReset().mockResolvedValue(true);
+    getCloudTaskById.mockReset();
+    transitionCloudTaskStatus.mockReset();
+    transitionTask.mockReset().mockResolvedValue({
+      transitioned: true,
+      task: {
+        id: 'terminal-task',
+        status: 'completed',
+        revision: 1,
+      },
+    });
     updateCloudTask.mockReset().mockResolvedValue(undefined);
   });
 
@@ -122,9 +147,10 @@ describe('cloud-task-persistence', () => {
       creditStatus: 'charged',
     });
 
-    expect(updateCloudTask).toHaveBeenCalledWith('remote-task-1', expect.objectContaining({
-      status: 'completed',
-      progress: 100,
+    expect(transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'remote-task-1',
+      from: ['processing'],
+      to: 'completed',
       creditStatus: 'charged',
       result: {
         imageUrl: '/uploads/result.png',
@@ -133,6 +159,7 @@ describe('cloud-task-persistence', () => {
         maskUrls: ['/uploads/mask.png'],
       },
     }));
+    expect(updateCloudTask).not.toHaveBeenCalled();
   });
 
   it('persists all batch image and mask URLs while keeping the first item compatible', async () => {
@@ -150,9 +177,9 @@ describe('cloud-task-persistence', () => {
       creditStatus: 'charged',
     });
 
-    expect(updateCloudTask).toHaveBeenCalledWith('remote-task-batch', expect.objectContaining({
-      status: 'completed',
-      progress: 100,
+    expect(transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'remote-task-batch',
+      to: 'completed',
       creditStatus: 'charged',
       result: {
         imageUrl: '/uploads/result-1.png',
@@ -165,6 +192,7 @@ describe('cloud-task-persistence', () => {
         maskUrls: ['/uploads/mask-1.png', '/uploads/mask-2.png'],
       },
     }));
+    expect(updateCloudTask).not.toHaveBeenCalled();
   });
 
   it('records a failed image task with a readable error', async () => {
@@ -174,12 +202,16 @@ describe('cloud-task-persistence', () => {
       creditStatus: 'refunded',
     });
 
-    expect(updateCloudTask).toHaveBeenCalledWith('remote-task-1', expect.objectContaining({
-      status: 'failed',
-      progress: 0,
-      error: '上游服务超时',
+    expect(transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'remote-task-1',
+      to: 'failed',
+      error: {
+        code: 'LEGACY_TASK_ERROR',
+        message: '上游服务超时',
+      },
       creditStatus: 'refunded',
     }));
+    expect(updateCloudTask).not.toHaveBeenCalled();
   });
 
   it('does not persist an internal image task when its outer task owns monitoring', async () => {
@@ -197,17 +229,19 @@ describe('cloud-task-persistence', () => {
     });
 
     expect(createCloudTask).not.toHaveBeenCalled();
+    expect(transitionTask).not.toHaveBeenCalled();
     expect(updateCloudTask).not.toHaveBeenCalled();
   });
 
   it('records a cancelled task as refunded when cancellation refunds credits', async () => {
     await recordCloudTaskCancelled('remote-task-1', true);
 
-    expect(updateCloudTask).toHaveBeenCalledWith('remote-task-1', expect.objectContaining({
-      status: 'cancelled',
-      progress: 0,
+    expect(transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'remote-task-1',
+      to: 'cancelled',
       creditStatus: 'refunded',
     }));
+    expect(updateCloudTask).not.toHaveBeenCalled();
   });
 
   it('builds recovery context without credentials or request payloads', () => {
@@ -248,14 +282,15 @@ describe('cloud-task-persistence', () => {
       imageUrl: '/api/serve-upload/video/video-task-1/cover.png',
     });
 
-    expect(updateCloudTask).toHaveBeenCalledWith('video-task-1', expect.objectContaining({
-      status: 'completed',
-      progress: 100,
+    expect(transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'video-task-1',
+      to: 'completed',
       result: {
         videoUrl: '/api/serve-upload/video/video-task-1/result.mp4',
         imageUrl: '/api/serve-upload/video/video-task-1/cover.png',
       },
     }));
+    expect(updateCloudTask).not.toHaveBeenCalled();
   });
 
   it('creates a video task as pending until its atomic credit charge succeeds', async () => {
@@ -316,12 +351,50 @@ describe('cloud-task-persistence', () => {
       previewImageUrl: 'https://assets.example/cover.png',
     });
 
-    expect(updateCloudTask).toHaveBeenCalledWith('three-d-task-1', expect.objectContaining({
-      status: 'completed',
+    expect(transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'three-d-task-1',
+      to: 'completed',
       result: {
         assetUrl: 'https://assets.example/model.glb',
         previewImageUrl: 'https://assets.example/cover.png',
       },
     }));
+    expect(updateCloudTask).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['image', () => recordImageTaskTerminal('lost-image', {
+      status: 'completed',
+      imageUrl: '/lost.png',
+      creditStatus: 'charged',
+    })],
+    ['video', () => recordVideoTaskTerminal('lost-video', {
+      status: 'completed',
+      videoUrl: '/lost.mp4',
+      creditStatus: 'charged',
+    })],
+    ['3d', () => recordThreeDTaskTerminal('lost-3d', {
+      status: 'completed',
+      assetUrl: '/lost.glb',
+      creditStatus: 'charged',
+    })],
+    ['cancel', () => recordCloudTaskCancelled('lost-cancel', true)],
+  ])('does not overwrite compatibility metadata when the %s terminal CAS loses', async (
+    _type,
+    recordTerminal,
+  ) => {
+    transitionTask.mockResolvedValueOnce({
+      transitioned: false,
+      task: {
+        id: 'winner',
+        status: 'failed',
+        revision: 2,
+      },
+    });
+
+    await recordTerminal();
+
+    expect(transitionTask).toHaveBeenCalledTimes(1);
+    expect(updateCloudTask).not.toHaveBeenCalled();
   });
 });
