@@ -13,7 +13,7 @@ export async function POST(_request: NextRequest) {
   });
 }
 
-export function projectTaskEventPayload(
+function projectTaskEventPayload(
   event: TaskEvent,
 ): ReturnType<typeof attachCanonicalGenerationSlotToEvent<TaskEvent>> {
   return attachCanonicalGenerationSlotToEvent(event);

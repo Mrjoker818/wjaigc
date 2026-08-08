@@ -80,7 +80,7 @@ test.describe('durable progressive generation slots', () => {
     const pollCounts = new Map<string, number>();
     const completionOrder: number[] = [];
     const completedTasks = new Set<string>();
-    let syncedProjects: unknown[] = [];
+    const syncedUserData = new Map<string, unknown>();
     let allowInitialCompletion = false;
     let allowPostReloadCompletion = false;
     let observeGenerateRequest: () => void = () => {};
@@ -108,26 +108,27 @@ test.describe('durable progressive generation slots', () => {
     });
     await page.route('**/api/user-data/sync*', async (route) => {
       if (route.request().method() === 'GET') {
+        const key = new URL(route.request().url()).searchParams.get('key') || '';
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
             success: true,
-            key: 'projects',
-            value: syncedProjects.length > 0 ? syncedProjects : null,
+            key,
+            value: syncedUserData.get(key) ?? null,
           }),
         });
         return;
       }
 
-      const body = route.request().postDataJSON() as { key?: string; value?: unknown };
-      if (body.key === 'projects' && Array.isArray(body.value)) {
-        syncedProjects = body.value;
+      const body = route.request().postDataJSON() as { key?: string; value?: unknown } | null;
+      if (body?.key) {
+        syncedUserData.set(body.key, body.value);
       }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, key: body.key, projectIdMap: {} }),
+        body: JSON.stringify({ success: true, key: body?.key || '', projectIdMap: {} }),
       });
     });
     await page.route('**/api/tasks/recover*', async (route) => {
@@ -232,9 +233,12 @@ test.describe('durable progressive generation slots', () => {
       pollCounts.set(taskId, nextCount);
 
       const completesBeforeReload = allowInitialCompletion && slotIndex === 2;
-      const postReloadThreshold = slotIndex === 0 ? 1 : slotIndex === 3 ? 2 : 3;
-      const shouldComplete = completesBeforeReload
-        || (allowPostReloadCompletion && nextCount >= postReloadThreshold);
+      const completesAfterReload = allowPostReloadCompletion && (
+        slotIndex === 0
+        || (slotIndex === 3 && completedTasks.has(TASK_IDS[0]))
+        || (slotIndex === 1 && completedTasks.has(TASK_IDS[3]))
+      );
+      const shouldComplete = completesBeforeReload || completesAfterReload;
 
       if (shouldComplete && !completedTasks.has(taskId)) {
         completedTasks.add(taskId);
@@ -289,13 +293,18 @@ test.describe('durable progressive generation slots', () => {
     await expect(processingSlots).toHaveCount(3);
 
     await expect.poll(
-      () => syncedProjects.some((project) => {
+      () => {
+        const syncedProjects = syncedUserData.get('projects');
+        if (!Array.isArray(syncedProjects)) return false;
+        return syncedProjects.some((project) => {
         if (!project || typeof project !== 'object') return false;
         const canvasImages = (project as { canvasImages?: unknown[] }).canvasImages;
         return Array.isArray(canvasImages) && canvasImages.length === 4;
-      }),
+        });
+      },
       { timeout: 15_000, intervals: [500, 1_000] },
     ).toBe(true);
+    const syncedProjects = syncedUserData.get('projects') as unknown[];
     const projectId = String((syncedProjects[0] as { id?: string } | undefined)?.id || '');
     expect(projectId).not.toBe('');
 

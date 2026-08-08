@@ -134,7 +134,28 @@ describe('canvas-task-placeholders', () => {
       slotId: 'batch-a:0',
       slotIndex: 0,
       taskId: 'completed-task',
-      status: 'processing',
+      status: 'completed',
+      progress: 100,
     });
+  });
+  it('binds a normalized fallback slot sequence without duplicate-index overwrite', () => {
+    const images = [
+      { id: 'frame-a', isProcessingPlaceholder: true, processing: { status: 'submitting', progress: 5 } },
+      { id: 'frame-b', isProcessingPlaceholder: true, processing: { status: 'submitting', progress: 5 } },
+    ];
+    const normalized = [
+      { taskId: 'task-a', batchId: 'batch-a', slotId: 'batch-a:0', slotIndex: 0, status: 'submitting' as const },
+      { taskId: 'task-b', batchId: 'batch-a', slotId: 'batch-a:1', slotIndex: 1, status: 'submitting' as const },
+    ];
+
+    const result = applyGenerationSlotsToProcessingPlaceholders(
+      images,
+      normalized,
+      ['frame-a', 'frame-b'],
+    );
+
+    expect(result.map(image => (
+      image.processing as { taskId?: string } | undefined
+    )?.taskId)).toEqual(['task-a', 'task-b']);
   });
 });

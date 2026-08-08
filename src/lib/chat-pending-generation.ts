@@ -3,6 +3,87 @@ export interface ChatPendingGenerationTask {
   model: string;
   providerId: string;
   type: 'image' | 'video';
+  batchId?: string;
+  slotId?: string;
+  slotIndex?: number;
+}
+
+export interface ChatGenerationSlot {
+  taskId: string;
+  slotIndex: number;
+  batchId?: string;
+  slotId?: string;
+}
+
+export interface ChatGenerationSlotResult<T> {
+  slot: ChatGenerationSlot;
+  result: T;
+}
+
+export interface ChatGenerationSlotSettlement<T> {
+  slot: ChatGenerationSlot;
+  result?: T;
+  error?: string;
+}
+
+export interface ChatGenerationSlotImage {
+  slotIndex: number;
+  url: string;
+}
+
+export function upsertChatGenerationSlotImage(
+  images: ChatGenerationSlotImage[],
+  slotIndex: number,
+  url: string,
+): ChatGenerationSlotImage[] {
+  const bySlot = new Map(images.map(image => [image.slotIndex, image]));
+  bySlot.set(slotIndex, { slotIndex, url });
+  return [...bySlot.values()].sort((left, right) => left.slotIndex - right.slotIndex);
+}
+
+export function mergeRecoveredImages(
+  existing: string[] | undefined,
+  recovered: string[],
+): string[] {
+  return [...new Set([...(existing || []), ...recovered])];
+}
+
+export async function collectChatGenerationSlotResults<T>(
+  slots: ChatGenerationSlot[],
+  resolveSlot: (slot: ChatGenerationSlot) => Promise<T | undefined>,
+  onSlotResult?: (slot: ChatGenerationSlot, result: T) => void,
+): Promise<Array<ChatGenerationSlotResult<T>>> {
+  const completed: Array<ChatGenerationSlotResult<T>> = [];
+  await Promise.all(slots.map(async (slot) => {
+    const result = await resolveSlot(slot);
+    if (result === undefined) return;
+    onSlotResult?.(slot, result);
+    completed.push({ slot, result });
+  }));
+
+  return completed.sort((left, right) => left.slot.slotIndex - right.slot.slotIndex);
+}
+
+export async function settleChatGenerationSlots<T>(
+  slots: ChatGenerationSlot[],
+  resolveSlot: (slot: ChatGenerationSlot) => Promise<T>,
+  onSlotSettled?: (settlement: ChatGenerationSlotSettlement<T>) => void,
+): Promise<Array<ChatGenerationSlotSettlement<T>>> {
+  const settlements = await Promise.all(slots.map(async (slot) => {
+    let settlement: ChatGenerationSlotSettlement<T>;
+    try {
+      settlement = { slot, result: await resolveSlot(slot) };
+    } catch (error) {
+      settlement = {
+        slot,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    onSlotSettled?.(settlement);
+    return settlement;
+  }));
+
+  return settlements.sort((left, right) => left.slot.slotIndex - right.slot.slotIndex);
 }
 
 export interface RecoverableChatCloudTask {

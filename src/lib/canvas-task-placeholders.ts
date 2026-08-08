@@ -1,5 +1,5 @@
 import { isTerminalGenerationStatus } from '@/lib/generation-batch';
-import type { CanonicalGenerationSlot } from '@/lib/task-core/generation-batch';
+import type { GenerationSubmitSlot } from '@/lib/task-core/generation-batch';
 
 interface ProcessingPlaceholder {
   id?: string;
@@ -61,10 +61,12 @@ export function applyTaskIdsToProcessingPlaceholders<T extends ProcessingPlaceho
  */
 export function applyGenerationSlotsToProcessingPlaceholders<T extends ProcessingPlaceholder>(
   images: readonly T[],
-  slots: readonly CanonicalGenerationSlot[],
+  slots: readonly GenerationSubmitSlot[],
   placeholderIds: readonly string[] = [],
 ): T[] {
-  const slotsById = new Map(slots.map((slot) => [slot.slotId, slot]));
+  const slotsById = new Map(
+    slots.flatMap((slot) => slot.slotId ? [[slot.slotId, slot] as const] : []),
+  );
   const slotsByIndex = new Map(slots.map((slot) => [slot.slotIndex, slot]));
   const placeholderIndex = new Map(
     placeholderIds.map((placeholderId, index) => [placeholderId, index] as const),
@@ -85,6 +87,9 @@ export function applyGenerationSlotsToProcessingPlaceholders<T extends Processin
 
     if (!slot) return image;
 
+    const isCompleted = slot.status === 'completed';
+    const isTerminal = isTerminalGenerationStatus(slot.status);
+
     return {
       ...image,
       processing: {
@@ -93,8 +98,10 @@ export function applyGenerationSlotsToProcessingPlaceholders<T extends Processin
         slotId: slot.slotId,
         slotIndex: slot.slotIndex,
         taskId: slot.taskId,
-        status: 'processing',
-        progress: Math.max(image.processing.progress || 0, 10),
+        status: slot.status,
+        progress: isCompleted
+          ? 100
+          : (isTerminal ? image.processing.progress || 0 : Math.max(image.processing.progress || 0, 10)),
         label: '已提交，等待生成',
       },
     };

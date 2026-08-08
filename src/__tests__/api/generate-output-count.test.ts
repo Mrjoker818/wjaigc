@@ -15,10 +15,12 @@ describe('image generation output-count contract', () => {
   it('returns one durable submitOnly child task for each requested output slot', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
 
-    expect(source).toContain('const generationBatch = buildGenerationBatch');
+    expect(source).toContain('const generationBatch = createDurableGenerationBatch');
+    expect(source).toContain('createTaskId: (slotIndex)');
     expect(source).toContain('for (const slot of generationBatch.slots)');
+    expect(source).toContain('const asyncTaskId = slot.taskId');
     expect(source).toContain('slotId: slot.slotId');
-    expect(source).toContain('slotIndex: slot.index');
+    expect(source).toContain('slotIndex: slot.slotIndex');
     expect(source).toContain('slots: submittedSlots');
   });
 });

@@ -13,6 +13,10 @@ import {
   applyTaskIdsToProcessingPlaceholders,
   shouldPersistProcessingPlaceholder,
 } from '@/lib/canvas-task-placeholders';
+import {
+  normalizeGenerationSubmitSlots,
+  resolveGenerationSlotIndex,
+} from '@/lib/task-core/generation-batch';
 import { reconcileCompletedGenerationSlot } from '@/lib/canvas-generation-reconciliation';
 import { findUniqueLegacyTaskMatch, type RecoverableLegacyTask } from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
@@ -1895,12 +1899,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
       // === 轮询模式：API返回任务ID，前端轮询结果 ===
       if (data.mode === 'polling') {
-        const { taskIds, estimatedTime, prompt: enhancedPrompt, modelName: pollingModelName, providerName: pollingProviderName, apiBaseUrl: pollingApiBaseUrl } = data;
+        const { estimatedTime, prompt: enhancedPrompt, modelName: pollingModelName, providerName: pollingProviderName, apiBaseUrl: pollingApiBaseUrl } = data;
+        const submittedSlots = normalizeGenerationSubmitSlots(data);
+        const taskIds = submittedSlots.map(slot => slot.taskId);
 
         // Persist task IDs before the first poll so an autosave/reload can resume them.
         setImages((previous) => (
-          Array.isArray(data.slots) && data.slots.length > 0
-            ? applyGenerationSlotsToProcessingPlaceholders(previous, data.slots, placeholderIds)
+          submittedSlots.length > 0
+            ? applyGenerationSlotsToProcessingPlaceholders(previous, submittedSlots, placeholderIds)
             : applyTaskIdsToProcessingPlaceholders(previous, placeholderIds, taskIds)
         ));
 
@@ -1940,7 +1946,68 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           apiProvider?: string;
           generationRouteAudit?: CanvasImage['generationRouteAudit'];
         }> = [];
-        let terminalTaskCount = 0;
+        const terminalStatuses = new Set(['completed', 'failed', 'cancelled', 'timeout']);
+        const activeSubmittedSlots = submittedSlots.filter(slot => !terminalStatuses.has(slot.status));
+        let terminalTaskCount = submittedSlots.length - activeSubmittedSlots.length;
+        const replaceCompletedSubmitSlotPlaceholder = (
+          completedImage: (typeof completedImages)[number],
+        ): void => {
+          const phId = placeholderIds[completedImage.slotIndex];
+          if (!phId) return;
+          setImages(prev => prev.map(img => (
+            img.id === phId && img.isProcessingPlaceholder
+              ? {
+                ...img,
+                id: completedImage.id,
+                url: completedImage.url,
+                prompt: completedImage.prompt,
+                model: completedImage.model,
+                quality: completedImage.quality,
+                aspectRatio: completedImage.aspectRatio,
+                stylePreset: completedImage.stylePreset,
+                category: completedImage.category,
+                size: completedImage.size,
+                sourceUrl: completedImage.sourceUrl,
+                modelName: completedImage.modelName || pollingModelName || completedImage.model,
+                apiProvider: completedImage.apiProvider || pollingProviderName || params.providerId || '',
+                apiBaseUrl: pollingApiBaseUrl || '',
+                generationRouteAudit: completedImage.generationRouteAudit,
+                isProcessingPlaceholder: false,
+                processing: undefined,
+              }
+              : img
+          )));
+        };
+
+        submittedSlots.forEach((submittedSlot) => {
+          if (submittedSlot.status !== 'completed') return;
+          const completedImageUrls = extractGeneratedImageUrls(submittedSlot.result || {});
+          let firstCompletedImage: (typeof completedImages)[number] | undefined;
+          completedImageUrls.forEach((rawImageUrl, imageIdx) => {
+            const completedImage = {
+              id: `${Date.now()}-${submittedSlot.slotIndex}-${imageIdx}`,
+              slotIndex: submittedSlot.slotIndex,
+              url: rawImageUrl,
+              prompt: enhancedPrompt || params.prompt,
+              model: params.model,
+              quality: params.quality,
+              aspectRatio: params.aspectRatio,
+              stylePreset: params.stylePreset,
+              category: (params.imageCategory && params.imageCategory !== 'none')
+                ? params.imageCategory
+                : ((params.productCategory && params.productCategory !== 'none')
+                  ? params.productCategory
+                  : undefined),
+              size: params.size,
+              sourceUrl: rawImageUrl,
+              modelName: pollingModelName || undefined,
+              apiProvider: pollingProviderName || params.providerId || undefined,
+            };
+            completedImages.push(completedImage);
+            firstCompletedImage ||= completedImage;
+          });
+          if (firstCompletedImage) replaceCompletedSubmitSlotPlaceholder(firstCompletedImage);
+        });
 
         const updateBatchProgress = (): void => {
           const completedSlots = Math.min(completedImages.length, placeholderIds.length);
@@ -1966,7 +2033,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           }));
         };
 
-        await Promise.all(taskIds.map(async (currentTaskId: string, taskIdx: number) => {
+        await Promise.all(activeSubmittedSlots.map(async (submittedSlot) => {
+          const currentTaskId = submittedSlot.taskId;
           let pollCount = 0;
           let taskCompleted = false;
           let consecutiveErrors = 0;
@@ -2041,10 +2109,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
               const completedImageUrls = extractGeneratedImageUrls(pollData as Record<string, unknown>);
               if (pollData.status === 'completed' && completedImageUrls.length > 0) {
+                const completedSlotIndex = resolveGenerationSlotIndex(
+                  submittedSlot,
+                  pollData as Record<string, unknown>,
+                );
                 completedImageUrls.forEach((rawImageUrl, imageIdx) => {
                   completedImages.push({
-                    id: `${Date.now()}-${taskIdx}-${imageIdx}`,
-                    slotIndex: taskIdx,
+                    id: `${Date.now()}-${completedSlotIndex}-${imageIdx}`,
+                    slotIndex: completedSlotIndex,
                     url: rawImageUrl,
                     prompt: enhancedPrompt || params.prompt,
                     model: params.model,
@@ -2059,8 +2131,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     generationRouteAudit: pollData.generationRouteAudit,
                   });
                 });
-                const completedSlotImage = completedImages.find(image => image.slotIndex === taskIdx);
-                const phId = placeholderIds[taskIdx];
+                const completedSlotImage = completedImages.find(image => image.slotIndex === completedSlotIndex);
+                const phId = placeholderIds[completedSlotIndex];
                 if (completedSlotImage && phId) {
                   setImages(prev => prev.map(img => (
                     img.id === phId && img.isProcessingPlaceholder

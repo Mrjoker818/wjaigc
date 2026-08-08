@@ -17,12 +17,12 @@ describe('generate submitOnly idempotency contract', () => {
   it('binds child idempotency keys to a stable batch and slot index', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
     const branch = source.indexOf('if (submitOnly)');
-    const batch = source.indexOf('const generationBatch = buildGenerationBatch', branch);
+    const batch = source.indexOf('const generationBatch = createDurableGenerationBatch', branch);
     const slotLoop = source.indexOf('for (const slot of generationBatch.slots)', batch);
 
     expect(batch).toBeGreaterThan(branch);
     expect(slotLoop).toBeGreaterThan(batch);
-    expect(source).toContain('`${idempotencyKey}:${slot.index}`');
+    expect(source).toContain('`${idempotencyKey}:${slot.slotIndex}`');
     expect(source).toContain('batchId: generationBatch.batchId');
   });
 
