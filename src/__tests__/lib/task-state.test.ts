@@ -29,6 +29,7 @@ import {
   type DurableTaskStatus,
 } from '@/lib/task-core/task-state';
 import {
+  publishDurableDirectTask,
   TaskNotFoundError,
   transitionTask,
 } from '@/lib/task-core/task-service';
@@ -244,5 +245,113 @@ describe('durable task state', () => {
       taskId: current.id,
     }));
     expect(updateTaskProgress).not.toHaveBeenCalled();
+  });
+
+  describe('durable direct task publication', () => {
+    const completedTask = {
+      ...cloudTask('completed', 2),
+      id: 'direct-task',
+      result: { imageUrl: '/direct.png' },
+      progress: 100,
+    };
+
+    function publicationHarness(
+      createTask: () => Promise<boolean>,
+      completeTask: () => Promise<{
+        transitioned: boolean;
+        task: ReturnType<typeof cloudTask> & {
+          result?: Record<string, unknown>;
+        };
+      } | undefined>,
+    ) {
+      const taskIds: string[] = [];
+      const registry: string[] = [];
+      return {
+        taskIds,
+        registry,
+        run: () => publishDurableDirectTask({
+          taskId: 'direct-task',
+          createTask,
+          completeTask,
+          publishCompleted: (task) => {
+            taskIds.push(task.id);
+            registry.push(`${task.id}:${task.status}`);
+          },
+        }),
+      };
+    }
+
+    it('does not publish when durable creation returns false', async () => {
+      const completeTask = vi.fn();
+      const harness = publicationHarness(
+        vi.fn().mockResolvedValue(false),
+        completeTask,
+      );
+
+      await expect(harness.run()).resolves.toMatchObject({
+        published: false,
+        reason: 'create-rejected',
+      });
+      expect(completeTask).not.toHaveBeenCalled();
+      expect(harness.taskIds).toEqual([]);
+      expect(harness.registry).toEqual([]);
+    });
+
+    it('propagates creation errors without publishing', async () => {
+      const harness = publicationHarness(
+        vi.fn().mockRejectedValue(new Error('postgres unavailable')),
+        vi.fn(),
+      );
+
+      await expect(harness.run()).rejects.toThrow('postgres unavailable');
+      expect(harness.taskIds).toEqual([]);
+      expect(harness.registry).toEqual([]);
+    });
+
+    it('does not publish when a CAS loser observes a failed winner', async () => {
+      const harness = publicationHarness(
+        vi.fn().mockResolvedValue(true),
+        vi.fn().mockResolvedValue({
+          transitioned: false,
+          task: cloudTask('failed', 2),
+        }),
+      );
+
+      await expect(harness.run()).resolves.toMatchObject({
+        published: false,
+        reason: 'terminal-not-completed',
+        task: { status: 'failed' },
+      });
+      expect(harness.taskIds).toEqual([]);
+      expect(harness.registry).toEqual([]);
+    });
+
+    it.each([
+      ['CAS winner', true],
+      ['CAS loser with authoritative completed snapshot', false],
+    ] as const)('publishes a completed direct task for %s', async (
+      _scenario,
+      transitioned,
+    ) => {
+      const harness = publicationHarness(
+        vi.fn().mockResolvedValue(true),
+        vi.fn().mockResolvedValue({
+          transitioned,
+          task: completedTask,
+        }),
+      );
+
+      await expect(harness.run()).resolves.toMatchObject({
+        published: true,
+        transitioned,
+        task: {
+          id: 'direct-task',
+          status: 'completed',
+          result: { imageUrl: '/direct.png' },
+        },
+      });
+      expect(harness.taskIds).toEqual(['direct-task']);
+      expect(harness.registry).toEqual(['direct-task:completed']);
+    });
   });
 });

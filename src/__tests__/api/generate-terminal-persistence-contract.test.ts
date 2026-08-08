@@ -21,6 +21,9 @@ describe('generate authoritative terminal persistence contract', () => {
     expect(submitOnlyWorker).toContain(
       'const recordSubmitOnlyTerminal = async',
     );
+    expect(source).toContain(
+      "registerTask(asyncTaskId, 'generate-async', '生成图片', userId, 'durable');",
+    );
     expect(submitOnlyWorker).not.toContain('void recordImageTaskTerminal');
     expect(submitOnlyWorker).not.toMatch(
       /updateTaskProgress\(asyncTaskId,\s*\{[\s\S]{0,120}?status:\s*'(completed|failed|cancelled)'/,
@@ -49,16 +52,22 @@ describe('generate authoritative terminal persistence contract', () => {
       /if \(_skipCloudTaskPersistence\)[\s\S]*?updateTaskProgress\(directTid,\s*\{[\s\S]*?status:\s*'completed'/,
     );
     expect(directBranch).toContain(
-      'const taskCreated = await recordImageTaskSubmitted',
+      'await publishDurableDirectTask',
     );
     expect(directBranch).toMatch(
-      /if \(taskCreated\)[\s\S]*?await recordImageTaskTerminal\(directTid,/,
+      /createTask:\s*\(\) => recordImageTaskSubmitted\(/,
     );
-    expect(directBranch).toContain(
-      'terminalTransitioned = terminal?.transitioned === true',
+    expect(directBranch).toMatch(
+      /completeTask:\s*\(\) => recordImageTaskTerminal\(directTid,/,
     );
-    expect(directBranch).toContain(
-      'if (terminalTransitioned && persistedUrl && persistedUrl !== rawUrl)',
+    expect(directBranch).toMatch(
+      /publishCompleted:[\s\S]*?taskIds\.push\(directTid\)[\s\S]*?registerTask\([\s\S]*?'durable'/,
+    );
+    const durablePublication = directBranch.slice(
+      directBranch.indexOf('publishCompleted:'),
+    );
+    expect(durablePublication.indexOf('taskIds.push(directTid)')).toBeGreaterThan(
+      -1,
     );
     expect(directBranch).not.toContain('void recordImageTaskTerminal');
   });

@@ -28,6 +28,27 @@ export interface TransitionTaskResult {
   task: DurableTask;
 }
 
+export interface PublishDurableDirectTaskInput {
+  taskId: string;
+  createTask: () => Promise<boolean>;
+  completeTask: () => Promise<TransitionTaskResult | undefined>;
+  publishCompleted: (task: DurableTask) => void;
+}
+
+export type PublishDurableDirectTaskResult =
+  | {
+      published: true;
+      taskId: string;
+      transitioned: boolean;
+      task: DurableTask;
+    }
+  | {
+      published: false;
+      taskId: string;
+      reason: 'create-rejected' | 'terminal-missing' | 'terminal-not-completed';
+      task?: DurableTask;
+    };
+
 export class TaskNotFoundError extends Error {
   readonly code = 'TASK_NOT_FOUND';
 
@@ -35,6 +56,44 @@ export class TaskNotFoundError extends Error {
     super(`Task not found: ${taskId}`);
     this.name = 'TaskNotFoundError';
   }
+}
+
+export async function publishDurableDirectTask(
+  input: PublishDurableDirectTaskInput,
+): Promise<PublishDurableDirectTaskResult> {
+  const created = await input.createTask();
+  if (!created) {
+    return {
+      published: false,
+      taskId: input.taskId,
+      reason: 'create-rejected',
+    };
+  }
+
+  const terminal = await input.completeTask();
+  if (!terminal) {
+    return {
+      published: false,
+      taskId: input.taskId,
+      reason: 'terminal-missing',
+    };
+  }
+  if (terminal.task.status !== 'completed') {
+    return {
+      published: false,
+      taskId: input.taskId,
+      reason: 'terminal-not-completed',
+      task: terminal.task,
+    };
+  }
+
+  input.publishCompleted(terminal.task);
+  return {
+    published: true,
+    taskId: input.taskId,
+    transitioned: terminal.transitioned,
+    task: terminal.task,
+  };
 }
 
 export async function transitionTask(

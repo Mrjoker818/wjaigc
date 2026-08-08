@@ -34,6 +34,21 @@ describe('task-registry 模块', () => {
       expect(task.taskId).toBe(id);
       expect(task.type).toBe('generate');
       expect(task.label).toBe('图像生成');
+      expect(task.persistence).toBe('memory');
+    });
+
+    it('records durable persistence only when explicitly requested', () => {
+      const id = uniqueId();
+      const task = registerTask(
+        id,
+        'generate',
+        '图像生成',
+        'user1',
+        'durable',
+      );
+
+      expect(task.persistence).toBe('durable');
+      expect(getTaskInfo(id)?.persistence).toBe('durable');
     });
 
     it('注册的任务可以通过getTaskInfo查询到', () => {

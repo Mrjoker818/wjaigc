@@ -21,6 +21,7 @@ import { calculateConfiguredCreditCost, checkCredits, consumeCredits } from '@/l
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
+import { publishDurableDirectTask } from '@/lib/task-core/task-service';
 import {
   chargeCloudTaskCredits,
   getCloudTaskForUserByIdempotencyKey,
@@ -448,7 +449,7 @@ export async function POST(request: NextRequest) {
           retryable: true,
         }, { status: 503 });
       }
-      registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
+      registerTask(asyncTaskId, 'generate-async', '生成图片', userId, 'durable');
       updateTaskProgress(asyncTaskId, { result: { submissionPayload } });
       const recordSubmitOnlyTerminal = async (
         input: Parameters<typeof recordImageTaskTerminal>[1],
@@ -1093,6 +1094,7 @@ export async function POST(request: NextRequest) {
           'generate-async',
           `生成图片 ${pendingCharge.slotIndex + 1}/${generationBatch.slots.length}`,
           userId,
+          'durable',
         );
         updateTaskProgress(pendingCharge.taskId, {
           status: 'processing',
@@ -2864,14 +2866,16 @@ export async function POST(request: NextRequest) {
     // 即使是直接返回的图片 URL，也注册到 task-registry 并返回 taskIds，
     // 让前端通过 poll-task 获取结果，确保请求快速响应
     // ★ 关键优化：persistRemoteImage 不阻塞响应，在后台异步执行
+    const publishedDirectImageUrls: string[] = [];
     if (directImageUrls.length > 0) {
       for (let i = 0; i < directImageUrls.length; i++) {
         const rawUrl = directImageUrls[i];
         const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
-        taskIds.push(directTid);
-        registerTask(directTid, 'generate', '生成图片', userId);
-        let terminalTransitioned = false;
+        let terminalPublished = false;
         if (_skipCloudTaskPersistence) {
+          taskIds.push(directTid);
+          publishedDirectImageUrls.push(rawUrl);
+          registerTask(directTid, 'generate', '生成图片', userId);
           updateTaskProgress(directTid, {
             status: 'completed',
             progress: 100,
@@ -2887,26 +2891,52 @@ export async function POST(request: NextRequest) {
               advancedParams: provider?.advancedParams,
             }
           });
-          terminalTransitioned = true;
+          terminalPublished = true;
         } else {
           try {
-            const taskCreated = await recordImageTaskSubmitted({
+            const publication = await publishDurableDirectTask({
               taskId: directTid,
-              userId,
-              projectId: typeof projectId === 'string' ? projectId : undefined,
-              sessionId: typeof sessionId === 'string' ? sessionId : undefined,
-              messageId: typeof messageId === 'string' ? messageId : undefined,
-              providerId: usedProviderId,
-              model: usedModelId,
-            });
-            if (taskCreated) {
-              const terminal = await recordImageTaskTerminal(directTid, {
+              createTask: () => recordImageTaskSubmitted({
+                taskId: directTid,
+                userId,
+                projectId: typeof projectId === 'string' ? projectId : undefined,
+                sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+                messageId: typeof messageId === 'string' ? messageId : undefined,
+                providerId: usedProviderId,
+                model: usedModelId,
+              }),
+              completeTask: () => recordImageTaskTerminal(directTid, {
                 status: 'completed',
                 imageUrl: rawUrl,
                 creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
                 generationRouteAudit,
-              });
-              terminalTransitioned = terminal?.transitioned === true;
+              }),
+              publishCompleted: (task) => {
+                taskIds.push(directTid);
+                publishedDirectImageUrls.push(rawUrl);
+                registerTask(
+                  directTid,
+                  'generate',
+                  '生成图片',
+                  userId,
+                  'durable',
+                );
+                updateTaskProgress(directTid, {
+                  status: 'completed',
+                  progress: task.progress,
+                  result: task.result,
+                  error: task.error,
+                });
+              },
+            });
+            terminalPublished = publication.published;
+            if (!publication.published) {
+              console.warn(
+                '[generate] Durable direct task was not publishable:',
+                directTid,
+                publication.reason,
+                publication.task?.status,
+              );
             }
           } catch (error) {
             console.warn('[generate] 云端任务完成记录失败:', error);
@@ -2921,7 +2951,7 @@ export async function POST(request: NextRequest) {
           providerId: usedProviderId, advancedParams: provider?.advancedParams,
         };
         persistRemoteImage(rawUrl).then(persistedUrl => {
-          if (terminalTransitioned && persistedUrl && persistedUrl !== rawUrl) {
+          if (terminalPublished && persistedUrl && persistedUrl !== rawUrl) {
             updateTaskProgress(tid, {
               status: 'completed', progress: 100,
               result: { imageUrl: persistedUrl, ...providerInfo }
@@ -2982,7 +3012,9 @@ export async function POST(request: NextRequest) {
       taskIds,
       // ★ 关键修复：同时返回 directImageUrls，确保 submitOnly 后台处理器能直接获取所有图片 URL
       // 而不依赖从 task-registry 查找 direct- 任务（可能在 dev 模式或 registry 不共享时失败）
-      directImageUrls: directImageUrls.length > 0 ? directImageUrls : undefined,
+      directImageUrls: publishedDirectImageUrls.length > 0
+        ? publishedDirectImageUrls
+        : undefined,
       model: usedModelId,
       modelName: usedModelName,
       providerName: usedProviderName,

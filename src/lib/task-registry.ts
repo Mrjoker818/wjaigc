@@ -18,11 +18,13 @@ import { EventEmitter } from 'events';
 
 export type TaskType = 'generate' | 'generate-async' | 'image-edit' | 'edit' | 'svg-trace' | 'upscale' | 'removebg' | 'extend' | 'mask' | 'erase' | 'vectorize' | 'segment' | 'batch' | 'outpaint' | 'multi-angle' | 'display-decompose' | 'brand-generate' | 'brand-ecommerce' | 'refine-engine' | 'font-design' | 'ai-psd' | 'video' | 'packaging' | 'display3d' | 'display3d-decompose' | '3d' | '3d-auto-multi-view' | '3d-retexture' | '3d-remesh' | 'venue-analyze' | 'venue-proposals' | 'venue-lock-design' | 'venue-render' | 'venue-qc' | 'human-repair' | 'aspect-recompose';
 export type TaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+export type TaskPersistence = 'memory' | 'durable';
 
 export interface TaskInfo {
   taskId: string;
   type: TaskType;
   status: TaskStatus;
+  persistence?: TaskPersistence;
   progress: number;       // 0-100
   label?: string;         // 人类可读标签，如 "生成图片"、"移除背景"
   result?: unknown;
@@ -90,7 +92,13 @@ const taskUserMap = getGlobalTaskStore().taskUserMap;
  *  - 需要等待的路由可调用 await waitForQueueSlot(taskId) 阻塞直到获得槽位
  *  ★ 未传入 userId 时，使用 'anonymous' 分组（所有匿名用户共享并发限制）
  */
-export function registerTask(taskId: string, type: TaskType, label?: string, userId?: string): TaskInfo {
+export function registerTask(
+  taskId: string,
+  type: TaskType,
+  label?: string,
+  userId?: string,
+  persistence: TaskPersistence = 'memory',
+): TaskInfo {
   const effectiveUserId = userId || 'anonymous';
   cancelledTasks.delete(taskId);
 
@@ -98,6 +106,7 @@ export function registerTask(taskId: string, type: TaskType, label?: string, use
     taskId,
     type,
     status: 'pending',
+    persistence,
     progress: 0,
     label: label || type,
     userId: effectiveUserId,

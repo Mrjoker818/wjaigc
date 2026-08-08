@@ -674,4 +674,170 @@ Concerns:
   `e5867f08729312dc4164987e09394e46565be769`; the environment's `origin/main`
   mismatch recorded earlier in this report remains unresolved.
 
+## Third Independent Review Fix
+
+### Scope
+
+This follow-up remains limited to Task 3. It does not implement Task 4 billing
+or refunds, Task 5 multi-image changes, Task 6 Abort support, or Task 7 entry
+migration.
+
+The review required two additional authoritative-persistence contracts:
+
+- Registry tasks now carry an optional persistence classification. Existing
+  callers default to `memory`; only generation paths that successfully create a
+  `cloud_tasks` row opt into `durable`.
+- Durable direct image results are not exposed in the response or registry
+  until cloud-task creation and the terminal CAS establish an authoritative
+  completed task.
+
+The route changes remain the minimum approved Task 3 ordering work:
+
+- `src/app/api/cancel-task/route.ts`
+- `src/app/api/generate/route.ts`
+
+No other business route or UI was changed.
+
+### TDD RED
+
+Tests were written before the implementation changes:
+
+```text
+pnpm exec vitest run \
+  src/__tests__/lib/task-registry.test.ts \
+  src/__tests__/api/cancel-task.test.ts \
+  src/__tests__/lib/task-state.test.ts \
+  src/__tests__/api/generate-terminal-persistence-contract.test.ts \
+  tests/integration/task-state-postgres.test.ts
+
+Exit code: 1
+Test Files: 4 failed, 1 skipped
+Tests: 9 failed, 117 passed, 1 skipped
+```
+
+The RED failures demonstrated:
+
+- `registerTask` did not preserve an explicit durable/memory classification.
+- Registry-only cancellation still queried PostgreSQL and returned 500 when
+  that lookup failed.
+- Direct durable generation published task IDs and registry state before
+  authoritative creation/terminal persistence.
+- The injectable direct-publication behavior did not yet exist.
+
+The PostgreSQL integration test remained explicit:
+
+```text
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+authoritative task-state PostgreSQL tests skipped.
+```
+
+### Minimal GREEN Implementation
+
+- Added `TaskPersistence = 'memory' | 'durable'` and optional
+  `TaskInfo.persistence`; `registerTask` defaults to `memory`, preserving every
+  existing unmodified caller.
+- Marked only successfully persisted submit-only, pending multi-slot, and
+  durable direct generation registrations as `durable`.
+- Split cancellation by the registry persistence property:
+  - memory/legacy registry tasks use the existing registry, edit-store, and
+    refund behavior without calling `getCloudTaskForUser`;
+  - durable registry tasks and registry-missing recovery requests remain
+    database-first, and lookup/transition failure cannot publish cancelled.
+- Added `publishDurableDirectTask`, a dependency-injected Task 3 helper that
+  requires successful create plus an authoritative completed terminal snapshot
+  before invoking the registry/response publisher.
+- Durable direct create rejection, create exception, missing terminal snapshot,
+  and non-completed CAS winner do not add a success task ID. A CAS loser may
+  publish only when its authoritative snapshot is already completed.
+- `_skipCloudTaskPersistence` direct tasks retain the legacy memory-only path.
+
+### GREEN And Regression Evidence
+
+Focused Task 3 suite:
+
+```text
+Exit code: 0
+Test Files: 4 passed, 1 skipped
+Tests: 127 passed, 1 skipped
+```
+
+The focused tests cover:
+
+- default memory and explicit durable registry registration;
+- memory cancellation with a rejecting database mock, including an assertion
+  that `getCloudTaskForUser` was not called;
+- durable lookup failure with no registry terminal projection;
+- durable direct create false, create throw, CAS loser with failed winner,
+  CAS winner completed, and CAS loser with authoritative completed;
+- returned task IDs and registry publication only after authoritative
+  completion.
+
+Generate/cancel/cloud-task/admin/async regression suite:
+
+```text
+Exit code: 0
+Test Files: 16 passed, 1 skipped
+Tests: 219 passed, 1 skipped
+```
+
+PostgreSQL status:
+
+```text
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+the real PostgreSQL integration test was skipped and is not reported as passed.
+```
+
+Static verification:
+
+```text
+pnpm ts-check
+Exit code: 0
+
+pnpm exec eslint <changed TypeScript/test files>
+Exit code: 0
+Errors: 0
+Warnings: 19 pre-existing warnings in src/app/api/generate/route.ts
+
+git diff --check
+Exit code: 0
+```
+
+Protected baseline against a temporary Git candidate containing the complete
+working-tree fix, with the exact cumulative Task 1-3 approved paths:
+
+```text
+pnpm check:protected-baseline -- \
+  --base e5867f0 \
+  --candidate <temporary candidate commit> \
+  <repeated exact --allow-path values for approved Task 1-3 paths>
+
+Exit code: 0
+PASS All 38 baseline feature IDs remain present.
+PASS No unapproved source drift was detected.
+PASS All literal protected component paths are present.
+PASS All required evidence contracts are present.
+PASS Base and candidate Git refs are confirmed.
+PASS Release gate completed with 0 warning(s).
+```
+
+### Third Review Risks And Blockers
+
+BLOCKED:
+
+- `POSTGRES_TEST_DATABASE_URL` is still missing. Real PostgreSQL CAS and
+  transaction behavior were not executed and must not be described as passed.
+- `E2E_DEPLOYMENT_COMMIT` remains unavailable, so cloud runtime provenance is
+  still unconfirmed.
+
+Concerns:
+
+- Existing `registerTask` callers intentionally remain memory tasks unless they
+  are part of the generation persistence paths changed here. Full entry
+  migration remains Task 7.
+- Existing refund implementations and ordering outside the minimum cancellation
+  split are unchanged; Task 4 remains deferred.
+- The formal protected baseline remains
+  `e5867f08729312dc4164987e09394e46565be769`; the previously recorded
+  `origin/main` mismatch remains unresolved.
+
 No GitHub push was performed.

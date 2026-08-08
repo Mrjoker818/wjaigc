@@ -58,6 +58,58 @@ export async function POST(request: NextRequest) {
 
     // 检查任务是否存在于注册中心
     const taskInfo = getTaskInfo(taskId);
+    if (taskInfo && taskInfo.persistence !== 'durable') {
+      if (
+        taskInfo.userId
+        && taskInfo.userId !== 'anonymous'
+        && taskInfo.userId !== user.id
+        && user.role !== 'admin'
+      ) {
+        return NextResponse.json(
+          { success: false, error: '无权取消此任务' },
+          { status: 403 },
+        );
+      }
+
+      const safeTaskInfo = (() => {
+        const { result, ...rest } = taskInfo;
+        if (result && typeof result === 'object') {
+          const safeResult = { ...result } as Record<string, unknown>;
+          delete safeResult.apiKey;
+          delete safeResult.apiBaseUrl;
+          return { ...rest, result: safeResult };
+        }
+        return rest;
+      })();
+
+      cancelTask(taskId);
+      cancelEditTask(taskId);
+
+      if (
+        (taskInfo.creditCost || 0) > 0
+        && taskInfo.userId
+        && taskInfo.userId !== 'anonymous'
+      ) {
+        try {
+          await refundCredits(
+            taskInfo.userId,
+            taskInfo.creditCost || 0,
+            `任务取消退款 (taskId: ${taskId}, type: ${taskInfo.type})`,
+            taskId,
+          );
+        } catch (refundErr) {
+          console.error('[cancel-task] Refund failed:', refundErr);
+        }
+      }
+
+      updateTaskProgress(taskId, { status: 'cancelled', progress: 0 });
+      return NextResponse.json({
+        success: true,
+        message: '任务取消请求已发送',
+        task: safeTaskInfo,
+      });
+    }
+
     const persistedTask = await getCloudTaskForUser(taskId, user.id);
     const atomicTerminalTask = requiresAtomicTerminalSettlement(persistedTask);
     const atomicCancellationReason = persistedTask?.type === 'video' || persistedTask?.type === 'video-extend'
@@ -136,7 +188,7 @@ export async function POST(request: NextRequest) {
 
     // ★ 退款：取消任务时退还已扣除的积分
     let refunded = false;
-    let terminalSettled = Boolean(taskInfo && !persistedTask);
+    let terminalSettled = false;
     const creditCost = taskInfo?.creditCost ?? persistedTask?.creditCost ?? 0;
     const creditOwnerId = taskInfo?.userId ?? persistedTask?.userId;
     if (persistedTask?.type === 'annotation-edit') {
