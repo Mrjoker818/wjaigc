@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
 }));
 
-vi.mock('@/lib/server-api-config', () => ({
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/server-api-config', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/server-api-config')>(),
   getApiProviders: mocks.getApiProviders,
   getPublicApiProviders: mocks.getPublicApiProviders,
   getPublicModels: mocks.getPublicModels,
@@ -52,6 +54,26 @@ describe('model defaults', () => {
           { id: 'image-b', name: 'Image B', providerId: 'provider-b', type: 'image' },
           { id: 'chat-b', name: 'Chat B', providerId: 'provider-b', type: 'chat' },
           { id: 'shared-chat', name: 'Provider B Chat', providerId: 'provider-b', type: 'chat' },
+        ],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'layer-provider',
+        name: 'Layer Provider',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        isEnabled: true,
+        type: 'layer',
+        modelType: 'layer',
+        selectedModels: ['stale-layer'],
+        discoveredModels: [
+          {
+            id: 'stale-layer',
+            name: 'Stale Layer Type',
+            providerId: 'layer-provider',
+            type: 'image',
+          },
         ],
         createdAt: 1,
         updatedAt: 1,
@@ -157,10 +179,55 @@ describe('model defaults', () => {
     const data = await response.json();
 
     expect(data.models.map((model: { id: string }) => model.id)).toEqual(['chat-a']);
+    expect(data.taskModelCatalog).toEqual([
+      expect.objectContaining({
+        providerId: 'provider-a',
+        modelId: 'chat-a',
+        kind: 'chat',
+      }),
+    ]);
+    expect(data.modelAuthorizationMigration).toEqual({
+      resolved: [{
+        legacyModelId: 'chat-a',
+        exactModelId: 'provider-a::chat-a',
+      }],
+      required: [],
+    });
     expect(data.quickCreatePolicy).toEqual({
       autoModelRouting: false,
       globalDefault: 'provider-a::chat-a',
       quickCreateDefault: '',
+    });
+  });
+
+  it('rejects ambiguous legacy bare assignments consistently in models and task catalog', async () => {
+    mocks.getPublicModels.mockResolvedValue([
+      { id: 'shared-chat', name: 'Provider A Chat', providerId: 'provider-a', type: 'chat' },
+      { id: 'shared-chat', name: 'Provider B Chat', providerId: 'provider-b', type: 'chat' },
+    ]);
+    mocks.getRuntimeSettings.mockResolvedValue({
+      defaultChatModel: 'provider-a::shared-chat',
+      quickCreateChatModel: 'provider-b::shared-chat',
+      quickCreateAutoModelRouting: true,
+    });
+    mocks.getSessionUser.mockResolvedValue({
+      id: 'user-1',
+      role: 'user',
+      chatModels: ['shared-chat'],
+    });
+
+    const response = await GET(new NextRequest('http://localhost/api/models?type=chat'));
+    const data = await response.json();
+
+    expect(data.models).toEqual([]);
+    expect(data.taskModelCatalog).toEqual([]);
+    expect(data.modelAuthorizationMigration).toEqual({
+      resolved: [],
+      required: [{
+        legacyModelId: 'shared-chat',
+        reason: 'ambiguous',
+        candidates: ['provider-a::shared-chat', 'provider-b::shared-chat'],
+      }],
     });
   });
 
@@ -198,5 +265,31 @@ describe('model defaults', () => {
         kind: 'chat',
       }),
     ]);
+  });
+
+  it('uses the dedicated layer type for both permission checks and catalog kind', async () => {
+    mocks.getPublicModels.mockResolvedValue([
+      {
+        id: 'stale-layer',
+        name: 'Stale Layer Type',
+        providerId: 'layer-provider',
+        type: 'image',
+      },
+    ]);
+    mocks.getSessionUser.mockResolvedValue({
+      id: 'user-1',
+      role: 'user',
+      imageModels: ['layer-provider::stale-layer'],
+      apiPermissions: {
+        image: true,
+        layer: false,
+      },
+    });
+
+    const response = await GET(new NextRequest('http://localhost/api/models?type=layer'));
+    const data = await response.json();
+
+    expect(data.models).toEqual([]);
+    expect(data.taskModelCatalog).toEqual([]);
   });
 });

@@ -30,18 +30,31 @@ export interface TaskModelDescriptor {
   outputKinds: string[];
 }
 
-type TaskModelKind = TaskModelDescriptor['kind'];
-type TaskModelOverride = Partial<Omit<TaskModelDescriptor, 'providerId' | 'modelId'>>;
+export interface ModelAuthorizationMigration {
+  resolved: Array<{
+    legacyModelId: string;
+    exactModelId: string;
+  }>;
+  required: Array<{
+    legacyModelId: string;
+    reason: 'ambiguous' | 'not-visible';
+    candidates: string[];
+  }>;
+}
 
-const TASK_MODEL_KINDS = new Set<TaskModelKind>([
-  'image',
-  'video',
-  'chat',
-  'edit',
-  'upscale',
-  'layer',
-  '3d',
-]);
+export interface TaskModelCatalogResult {
+  taskModelCatalog: TaskModelDescriptor[];
+  authorizedModelKeys: Set<string>;
+  effectiveModelTypes: Map<string, ApiKind>;
+  modelAuthorizationMigration: ModelAuthorizationMigration;
+}
+
+type TaskModelKind = TaskModelDescriptor['kind'];
+type TaskModelOverride = Partial<Omit<
+  TaskModelDescriptor,
+  'providerId' | 'modelId' | 'kind'
+>>;
+
 const EXECUTION_MODES = new Set<TaskModelDescriptor['executionMode']>(['sync', 'async']);
 const IMAGE_AUTH_TYPES = new Set<ApiKind>([
   'image',
@@ -52,9 +65,31 @@ const IMAGE_AUTH_TYPES = new Set<ApiKind>([
   'removebg',
 ]);
 const CHAT_AUTH_TYPES = new Set<ApiKind>(['chat', 'vlm']);
+const MAX_OVERRIDE_ARRAY_ITEMS = 32;
+const MAX_OVERRIDE_ARRAY_ITEM_LENGTH = 128;
+const MAX_OVERRIDE_PROTOCOL_LENGTH = 128;
+const MAX_OVERRIDE_OUTPUTS = 4;
+const MAX_OVERRIDE_DURATION_SECONDS = 3600;
+
+interface CatalogEntry {
+  provider: ApiProvider;
+  model: ModelInfo;
+  sourceType: ApiKind;
+  descriptor: TaskModelDescriptor | null;
+}
+
+interface AssignmentResolution {
+  unrestricted: boolean;
+  exactModelIds: Set<string>;
+  migration: ModelAuthorizationMigration;
+}
 
 export function taskModelKey(providerId: string, modelId: string): string {
   return `${providerId}::${modelId}`;
+}
+
+function hasOwn(value: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function isConfiguredModel(provider: ApiProvider, modelId: string): boolean {
@@ -81,17 +116,23 @@ function findConfiguredModel(provider: ApiProvider, modelId: string): ModelInfo 
   };
 }
 
-function inferGeneralModelType(modelId: string): ApiKind {
+function inferGeneralModelType(modelId: string): ReturnType<typeof inferModelType> {
   const family = classifyModelFamily(modelId);
-  if (family !== 'other') return 'image';
-  return inferModelType(modelId, 'chat');
+  return inferModelType(modelId, family === 'other' ? 'chat' : 'image');
 }
 
 function resolveSourceType(provider: ApiProvider, model: ModelInfo): ApiKind {
-  const sourceType = model.type || provider.modelType || provider.type;
-  return sourceType === 'general' || sourceType === 'universal'
-    ? inferGeneralModelType(model.id)
-    : sourceType;
+  const providerType = provider.modelType || provider.type;
+  if (providerType !== 'general' && providerType !== 'universal') {
+    return providerType;
+  }
+
+  const discoveredFallback: Parameters<typeof inferModelType>[1] = model.type
+    && model.type !== 'general'
+    && model.type !== 'universal'
+    ? (model.type === 'imageEdit' ? 'image' : model.type)
+    : inferGeneralModelType(model.id);
+  return inferModelType(model.id, discoveredFallback);
 }
 
 function resolveTaskKind(sourceType: ApiKind): TaskModelKind | null {
@@ -116,15 +157,6 @@ function resolveTaskKind(sourceType: ApiKind): TaskModelKind | null {
     default:
       return null;
   }
-}
-
-function hasExactAssignment(
-  allowedModels: string[] | undefined,
-  providerId: string,
-  modelId: string,
-): boolean {
-  if (!allowedModels?.length) return true;
-  return allowedModels.includes(taskModelKey(providerId, modelId));
 }
 
 function hasRequiredPermission(user: User, sourceType: ApiKind): boolean {
@@ -158,24 +190,6 @@ function hasRequiredPermission(user: User, sourceType: ApiKind): boolean {
     case 'universal':
       return true;
   }
-}
-
-function isAuthorizedForModel(
-  user: User | null,
-  provider: ApiProvider,
-  model: ModelInfo,
-): boolean {
-  if (!user || user.role === 'admin') return true;
-
-  const sourceType = resolveSourceType(provider, model);
-  if (!hasRequiredPermission(user, sourceType)) return false;
-  if (IMAGE_AUTH_TYPES.has(sourceType)) {
-    return hasExactAssignment(user.imageModels, provider.id, model.id);
-  }
-  if (CHAT_AUTH_TYPES.has(sourceType)) {
-    return hasExactAssignment(user.chatModels, provider.id, model.id);
-  }
-  return true;
 }
 
 function providerHint(provider: ApiProvider): string {
@@ -313,53 +327,105 @@ function createBaseDescriptor(
 }
 
 function readStringArray(value: unknown): string[] | undefined {
-  return Array.isArray(value) && value.every(item => typeof item === 'string')
-    ? [...value]
-    : undefined;
+  if (!Array.isArray(value)) return undefined;
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const normalized = item.trim();
+    if (
+      !normalized
+      || normalized.length > MAX_OVERRIDE_ARRAY_ITEM_LENGTH
+      || seen.has(normalized)
+    ) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+    if (result.length >= MAX_OVERRIDE_ARRAY_ITEMS) break;
+  }
+  return result;
 }
 
 function readTaskModelOverride(provider: ApiProvider, modelId: string): TaskModelOverride {
-  const raw = provider.advancedParams?.taskModelCapabilities;
-  if (!raw) return {};
+  const advancedParams = provider.advancedParams;
+  if (
+    !advancedParams
+    || !hasOwn(advancedParams, 'taskModelCapabilities')
+  ) {
+    return {};
+  }
+  const raw = advancedParams.taskModelCapabilities;
+  if (typeof raw !== 'string' || !raw) return {};
 
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    if (!hasOwn(parsed, modelId)) return {};
     const candidate = (parsed as Record<string, unknown>)[modelId];
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return {};
     const value = candidate as Record<string, unknown>;
     const override: TaskModelOverride = {};
 
-    if (typeof value.kind === 'string' && TASK_MODEL_KINDS.has(value.kind as TaskModelKind)) {
-      override.kind = value.kind as TaskModelKind;
+    if (hasOwn(value, 'protocol') && typeof value.protocol === 'string') {
+      const protocol = value.protocol.trim();
+      if (protocol && protocol.length <= MAX_OVERRIDE_PROTOCOL_LENGTH) {
+        override.protocol = protocol;
+      }
     }
-    if (typeof value.protocol === 'string' && value.protocol) override.protocol = value.protocol;
     if (
-      typeof value.executionMode === 'string'
+      hasOwn(value, 'executionMode')
+      && typeof value.executionMode === 'string'
       && EXECUTION_MODES.has(value.executionMode as TaskModelDescriptor['executionMode'])
     ) {
       override.executionMode = value.executionMode as TaskModelDescriptor['executionMode'];
     }
 
-    const allowedRatios = readStringArray(value.allowedRatios);
+    const allowedRatios = hasOwn(value, 'allowedRatios')
+      ? readStringArray(value.allowedRatios)
+      : undefined;
     if (allowedRatios !== undefined) override.allowedRatios = allowedRatios;
-    const allowedSizes = readStringArray(value.allowedSizes);
+    const allowedSizes = hasOwn(value, 'allowedSizes')
+      ? readStringArray(value.allowedSizes)
+      : undefined;
     if (allowedSizes !== undefined) override.allowedSizes = allowedSizes;
-    const qualityOptions = readStringArray(value.qualityOptions);
+    const qualityOptions = hasOwn(value, 'qualityOptions')
+      ? readStringArray(value.qualityOptions)
+      : undefined;
     if (qualityOptions !== undefined) override.qualityOptions = qualityOptions;
-    const outputKinds = readStringArray(value.outputKinds);
+    const outputKinds = hasOwn(value, 'outputKinds')
+      ? readStringArray(value.outputKinds)
+      : undefined;
     if (outputKinds !== undefined) override.outputKinds = outputKinds;
 
-    if (typeof value.maxOutputs === 'number' && value.maxOutputs > 0) {
+    if (
+      hasOwn(value, 'maxOutputs')
+      && typeof value.maxOutputs === 'number'
+      && Number.isFinite(value.maxOutputs)
+      && value.maxOutputs >= 1
+      && value.maxOutputs <= MAX_OVERRIDE_OUTPUTS
+    ) {
       override.maxOutputs = Math.floor(value.maxOutputs);
     }
-    if (typeof value.maxDurationSeconds === 'number' && value.maxDurationSeconds > 0) {
-      override.maxDurationSeconds = value.maxDurationSeconds;
+    if (
+      hasOwn(value, 'maxDurationSeconds')
+      && typeof value.maxDurationSeconds === 'number'
+      && Number.isFinite(value.maxDurationSeconds)
+      && value.maxDurationSeconds >= 1
+      && value.maxDurationSeconds <= MAX_OVERRIDE_DURATION_SECONDS
+    ) {
+      override.maxDurationSeconds = Math.floor(value.maxDurationSeconds);
     }
-    if (typeof value.supportsReferenceImages === 'boolean') {
+    if (
+      hasOwn(value, 'supportsReferenceImages')
+      && typeof value.supportsReferenceImages === 'boolean'
+    ) {
       override.supportsReferenceImages = value.supportsReferenceImages;
     }
-    if (typeof value.supportsMask === 'boolean') override.supportsMask = value.supportsMask;
+    if (hasOwn(value, 'supportsMask') && typeof value.supportsMask === 'boolean') {
+      override.supportsMask = value.supportsMask;
+    }
 
     return override;
   } catch {
@@ -382,6 +448,186 @@ function describeConfiguredModel(
   };
 }
 
+function emptyMigration(): ModelAuthorizationMigration {
+  return { resolved: [], required: [] };
+}
+
+function mergeMigration(
+  target: ModelAuthorizationMigration,
+  source: ModelAuthorizationMigration,
+): void {
+  target.resolved.push(...source.resolved);
+  target.required.push(...source.required);
+}
+
+function resolveAssignments(
+  allowedModels: string[] | undefined,
+  entries: CatalogEntry[],
+): AssignmentResolution {
+  if (!allowedModels?.length) {
+    return {
+      unrestricted: true,
+      exactModelIds: new Set(),
+      migration: emptyMigration(),
+    };
+  }
+
+  const visibleKeys = new Set(entries.map(entry => (
+    taskModelKey(entry.provider.id, entry.model.id)
+  )));
+  const candidatesByModelId = new Map<string, string[]>();
+  for (const entry of entries) {
+    const exactModelId = taskModelKey(entry.provider.id, entry.model.id);
+    const candidates = candidatesByModelId.get(entry.model.id) || [];
+    if (!candidates.includes(exactModelId)) candidates.push(exactModelId);
+    candidatesByModelId.set(entry.model.id, candidates);
+  }
+
+  const exactModelIds = new Set<string>();
+  const migration = emptyMigration();
+  const seenAssignments = new Set<string>();
+  for (const assignment of allowedModels) {
+    if (typeof assignment !== 'string' || seenAssignments.has(assignment)) continue;
+    seenAssignments.add(assignment);
+
+    if (assignment.includes('::')) {
+      if (visibleKeys.has(assignment)) exactModelIds.add(assignment);
+      continue;
+    }
+
+    const candidates = candidatesByModelId.get(assignment) || [];
+    if (candidates.length === 1) {
+      exactModelIds.add(candidates[0]);
+      migration.resolved.push({
+        legacyModelId: assignment,
+        exactModelId: candidates[0],
+      });
+      continue;
+    }
+
+    migration.required.push({
+      legacyModelId: assignment,
+      reason: candidates.length > 1 ? 'ambiguous' : 'not-visible',
+      candidates,
+    });
+  }
+
+  return { unrestricted: false, exactModelIds, migration };
+}
+
+function configuredModelsForProviders(providers: ApiProvider[]): ModelInfo[] {
+  return providers.flatMap(provider => {
+    if (!provider.isEnabled || !provider.baseUrl || !provider.apiKey) return [];
+    const modelIds = provider.selectedModels?.length
+      ? provider.selectedModels
+      : (provider.discoveredModels || []).map(model => model.id);
+    return modelIds.map(modelId => {
+      const discovered = provider.discoveredModels?.find(model => model.id === modelId);
+      return discovered ? {
+        ...discovered,
+        providerId: provider.id,
+      } : {
+        id: modelId,
+        name: modelId,
+        providerId: provider.id,
+        type: provider.modelType || provider.type,
+      };
+    });
+  });
+}
+
+function buildTaskModelCatalogResult(
+  models: ModelInfo[],
+  user: User | null,
+  providers: ApiProvider[],
+): TaskModelCatalogResult {
+  const providersById = new Map(providers.map(provider => [provider.id, provider]));
+  const entries = models.flatMap((model): CatalogEntry[] => {
+    const provider = providersById.get(model.providerId);
+    if (!provider) return [];
+    const configuredModel = findConfiguredModel(provider, model.id);
+    if (!configuredModel) return [];
+    const mergedModel = { ...configuredModel, ...model };
+    const sourceType = resolveSourceType(provider, mergedModel);
+    return [{
+      provider,
+      model: mergedModel,
+      sourceType,
+      descriptor: describeConfiguredModel(provider, mergedModel),
+    }];
+  });
+
+  const effectiveModelTypes = new Map(entries.map(entry => [
+    taskModelKey(entry.provider.id, entry.model.id),
+    entry.sourceType,
+  ]));
+  if (!user || user.role === 'admin') {
+    return {
+      taskModelCatalog: entries.flatMap(entry => entry.descriptor ? [entry.descriptor] : []),
+      authorizedModelKeys: new Set(models.map(model => taskModelKey(model.providerId, model.id))),
+      effectiveModelTypes,
+      modelAuthorizationMigration: emptyMigration(),
+    };
+  }
+  if (user.status === 'disabled') {
+    return {
+      taskModelCatalog: [],
+      authorizedModelKeys: new Set(),
+      effectiveModelTypes,
+      modelAuthorizationMigration: emptyMigration(),
+    };
+  }
+
+  const permissionEligibleEntries = entries.filter(entry => (
+    !entry.descriptor || hasRequiredPermission(user, entry.sourceType)
+  ));
+  const imageEntries = permissionEligibleEntries.filter(entry => (
+    entry.descriptor && IMAGE_AUTH_TYPES.has(entry.sourceType)
+  ));
+  const chatEntries = permissionEligibleEntries.filter(entry => (
+    entry.descriptor && CHAT_AUTH_TYPES.has(entry.sourceType)
+  ));
+  const imageAssignments = resolveAssignments(user.imageModels, imageEntries);
+  const chatAssignments = resolveAssignments(user.chatModels, chatEntries);
+  const modelAuthorizationMigration = emptyMigration();
+  mergeMigration(modelAuthorizationMigration, imageAssignments.migration);
+  mergeMigration(modelAuthorizationMigration, chatAssignments.migration);
+
+  const authorizedModelKeys = new Set<string>();
+  const taskModelCatalog: TaskModelDescriptor[] = [];
+  for (const entry of entries) {
+    const key = taskModelKey(entry.provider.id, entry.model.id);
+    if (!entry.descriptor) {
+      authorizedModelKeys.add(key);
+      continue;
+    }
+    if (!hasRequiredPermission(user, entry.sourceType)) continue;
+
+    const assignments = IMAGE_AUTH_TYPES.has(entry.sourceType)
+      ? imageAssignments
+      : CHAT_AUTH_TYPES.has(entry.sourceType)
+        ? chatAssignments
+        : null;
+    if (
+      assignments
+      && !assignments.unrestricted
+      && !assignments.exactModelIds.has(key)
+    ) {
+      continue;
+    }
+
+    authorizedModelKeys.add(key);
+    taskModelCatalog.push(entry.descriptor);
+  }
+
+  return {
+    taskModelCatalog,
+    authorizedModelKeys,
+    effectiveModelTypes,
+    modelAuthorizationMigration,
+  };
+}
+
 export async function resolveTaskModel(
   providerId: string,
   modelId: string,
@@ -395,11 +641,31 @@ export async function resolveTaskModel(
   }
 
   const user = users.find(candidate => candidate.id === userId) || null;
-  if (!user || user.status === 'disabled' || !isAuthorizedForModel(user, provider, model)) {
+  if (!user || user.status === 'disabled') {
     throw new Error(`User ${userId} is not authorized for ${taskModelKey(providerId, modelId)}`);
   }
 
-  const descriptor = describeConfiguredModel(provider, model);
+  const result = buildTaskModelCatalogResult(
+    configuredModelsForProviders(providers),
+    user,
+    providers,
+  );
+  const key = taskModelKey(providerId, modelId);
+  const migrationRequired = result.modelAuthorizationMigration.required.find(item => (
+    item.legacyModelId === modelId && item.candidates.includes(key)
+  ));
+  if (!result.authorizedModelKeys.has(key)) {
+    if (migrationRequired) {
+      throw new Error(
+        `Model authorization migration required for ${modelId}: ${migrationRequired.reason}`,
+      );
+    }
+    throw new Error(`User ${userId} is not authorized for ${key}`);
+  }
+
+  const descriptor = result.taskModelCatalog.find(candidate => (
+    candidate.providerId === providerId && candidate.modelId === modelId
+  ));
   if (!descriptor) {
     throw new Error(`Task model ${taskModelKey(providerId, modelId)} is not supported`);
   }
@@ -410,15 +676,13 @@ export async function resolveTaskModelCatalog(
   models: ModelInfo[],
   user: User | null,
 ): Promise<TaskModelDescriptor[]> {
-  const providers = await getApiProviders();
-  const providersById = new Map(providers.map(provider => [provider.id, provider]));
+  return (await resolveTaskModelCatalogResult(models, user)).taskModelCatalog;
+}
 
-  return models.flatMap(model => {
-    const provider = providersById.get(model.providerId);
-    if (!provider) return [];
-    const configuredModel = findConfiguredModel(provider, model.id);
-    if (!configuredModel || !isAuthorizedForModel(user, provider, configuredModel)) return [];
-    const descriptor = describeConfiguredModel(provider, { ...configuredModel, ...model });
-    return descriptor ? [descriptor] : [];
-  });
+export async function resolveTaskModelCatalogResult(
+  models: ModelInfo[],
+  user: User | null,
+): Promise<TaskModelCatalogResult> {
+  const providers = await getApiProviders();
+  return buildTaskModelCatalogResult(models, user, providers);
 }

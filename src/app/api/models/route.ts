@@ -3,8 +3,10 @@ import { getPublicApiProviders, getPublicModels } from '@/lib/server-api-config'
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
-import { isModelAssignedToUser } from '@/lib/model-defaults';
-import { resolveTaskModelCatalog } from '@/lib/task-core/model-catalog';
+import {
+  resolveTaskModelCatalogResult,
+  taskModelKey,
+} from '@/lib/task-core/model-catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,22 +19,11 @@ export async function GET(request: NextRequest) {
     getRuntimeSettings(),
   ]);
 
-  // 模型权限过滤：管理员看全部，普通用户只看显式授权的模型。
-  // 同时兼容历史裸 modelId 和 providerId::modelId 两种授权格式。
-  const isAdmin = user?.role === 'admin';
-  let filteredModels = models;
-
-  if (!isAdmin && user) {
-    if (type === 'chat') {
-      filteredModels = models.filter(model => (
-        isModelAssignedToUser(user.chatModels, model.providerId, model.id)
-      ));
-    } else if (type === 'image' || type === 'vectorize') {
-      filteredModels = models.filter(model => (
-        isModelAssignedToUser(user.imageModels, model.providerId, model.id)
-      ));
-    }
-  }
+  // Legacy bare IDs are accepted only when they resolve to one visible provider.
+  const catalogResult = await resolveTaskModelCatalogResult(models, user);
+  const filteredModels = models.filter(model => (
+    catalogResult.authorizedModelKeys.has(taskModelKey(model.providerId, model.id))
+  ));
 
   const configuredDefault = type === 'image'
     ? runtimeSettings.defaultImageModel
@@ -46,18 +37,25 @@ export async function GET(request: NextRequest) {
     : type === 'chat'
       ? runtimeSettings.quickCreateChatModel
       : '';
-  const responseModels = filteredModels.map(model => ({
-    ...model,
-    isDefault: Boolean(configuredDefault && `${model.providerId}::${model.id}` === configuredDefault),
-  }));
-  const taskModelCatalog = await resolveTaskModelCatalog(filteredModels, user);
+  const responseModels = filteredModels.map(model => {
+    const key = taskModelKey(model.providerId, model.id);
+    const effectiveType = catalogResult.effectiveModelTypes.get(key);
+    return {
+      ...model,
+      ...(model.type && effectiveType && model.type !== effectiveType
+        ? { type: effectiveType }
+        : {}),
+      isDefault: Boolean(configuredDefault && key === configuredDefault),
+    };
+  });
   const availableModelIds = new Set(responseModels.map(model => `${model.providerId}::${model.id}`));
 
   return NextResponse.json({
     success: true,
     providers,
     models: responseModels,
-    taskModelCatalog,
+    taskModelCatalog: catalogResult.taskModelCatalog,
+    modelAuthorizationMigration: catalogResult.modelAuthorizationMigration,
     quickCreatePolicy: {
       autoModelRouting: runtimeSettings.quickCreateAutoModelRouting,
       globalDefault: availableModelIds.has(configuredDefault) ? configuredDefault : '',

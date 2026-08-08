@@ -7,9 +7,10 @@ const mocks = vi.hoisted(() => ({
   listManagedUsers: vi.fn(),
 }));
 
-vi.mock('@/lib/server-api-config', () => ({
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/server-api-config', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/server-api-config')>(),
   getApiProviders: mocks.getApiProviders,
-  inferModelType: (_modelId: string, fallback: string) => fallback,
 }));
 vi.mock('@/lib/server-auth', () => ({
   listManagedUsers: mocks.listManagedUsers,
@@ -62,9 +63,14 @@ describe('task model catalog', () => {
             'gpt-image-1': {
               providerId: 'wrong-provider',
               modelId: 'wrong-model',
-              allowedRatios: ['1:1', '16:9'],
+              kind: 'chat',
+              allowedRatios: [' 1:1 ', '', '16:9', '1:1'],
               maxOutputs: 2,
               supportsMask: false,
+            },
+            'shared-image': {
+              maxOutputs: 999,
+              maxDurationSeconds: -1,
             },
           }),
         },
@@ -79,16 +85,62 @@ describe('task model catalog', () => {
         ],
       }),
       createProvider({
-        id: 'video-provider',
-        type: 'video',
+        id: 'general-provider',
+        type: 'universal',
+        modelType: 'universal',
         baseUrl: 'https://dashscope.aliyuncs.com',
         selectedModels: ['kling-v3-omni-video-generation'],
         discoveredModels: [
           {
             id: 'kling-v3-omni-video-generation',
             name: 'Kling V3 Omni',
-            providerId: 'video-provider',
-            type: 'video',
+            providerId: 'general-provider',
+            type: 'image',
+          },
+        ],
+      }),
+      createProvider({
+        id: 'layer-provider',
+        type: 'layer',
+        modelType: 'layer',
+        selectedModels: ['stale-layer'],
+        discoveredModels: [
+          {
+            id: 'stale-layer',
+            name: 'Stale Layer Type',
+            providerId: 'layer-provider',
+            type: 'image',
+          },
+        ],
+      }),
+      createProvider({
+        id: 'inherited-override-provider',
+        type: 'image',
+        selectedModels: ['gpt-image-1'],
+        discoveredModels: [
+          {
+            id: 'gpt-image-1',
+            name: 'Inherited Override',
+            providerId: 'inherited-override-provider',
+            type: 'image',
+          },
+        ],
+        advancedParams: Object.create({
+          taskModelCapabilities: JSON.stringify({
+            'gpt-image-1': { supportsMask: false },
+          }),
+        }) as ApiProvider['advancedParams'],
+      }),
+      createProvider({
+        id: 'unique-provider',
+        type: 'image',
+        selectedModels: ['unique-image'],
+        discoveredModels: [
+          {
+            id: 'unique-image',
+            name: 'Unique Image',
+            providerId: 'unique-provider',
+            type: 'image',
           },
         ],
       }),
@@ -111,7 +163,25 @@ describe('task model catalog', () => {
           audio: true,
         },
       }),
-      createUser({ id: 'legacy-user', imageModels: ['shared-image'] }),
+      createUser({ id: 'unique-legacy-user', imageModels: ['unique-image'] }),
+      createUser({ id: 'ambiguous-legacy-user', imageModels: ['shared-image'] }),
+      createUser({
+        id: 'layer-denied-user',
+        imageModels: ['layer-provider::stale-layer'],
+        apiPermissions: {
+          image: true,
+          chat: true,
+          threeD: true,
+          imageEdit: true,
+          vectorize: true,
+          vlm: true,
+          layer: false,
+          video: true,
+          upscaler: true,
+          removebg: true,
+          audio: true,
+        },
+      }),
       createUser({ id: 'admin-a', role: 'admin' }),
     ]);
   });
@@ -156,13 +226,13 @@ describe('task model catalog', () => {
 
   it('reuses video capabilities for duration, ratios, sizes, references, and async execution', async () => {
     const descriptor = await resolveTaskModel(
-      'video-provider',
+      'general-provider',
       'kling-v3-omni-video-generation',
       'admin-a',
     );
 
     expect(descriptor).toEqual({
-      providerId: 'video-provider',
+      providerId: 'general-provider',
       modelId: 'kling-v3-omni-video-generation',
       kind: 'video',
       protocol: 'dashscope',
@@ -178,7 +248,31 @@ describe('task model catalog', () => {
     });
   });
 
-  it('requires an exact provider and model pair before applying user authorization', async () => {
+  it('migrates a legacy bare assignment only when the visible provider pair is unique', async () => {
+    await expect(resolveTaskModel(
+      'unique-provider',
+      'unique-image',
+      'unique-legacy-user',
+    )).resolves.toMatchObject({
+      providerId: 'unique-provider',
+      modelId: 'unique-image',
+    });
+  });
+
+  it('rejects ambiguous legacy bare assignments instead of guessing a provider', async () => {
+    await expect(resolveTaskModel(
+      'provider-a',
+      'shared-image',
+      'ambiguous-legacy-user',
+    )).rejects.toThrow('migration required');
+    await expect(resolveTaskModel(
+      'provider-b',
+      'shared-image',
+      'ambiguous-legacy-user',
+    )).rejects.toThrow('migration required');
+  });
+
+  it('requires an exact provider and model pair before applying current authorization', async () => {
     await expect(resolveTaskModel('provider-a', 'shared-image', 'user-a')).resolves.toMatchObject({
       providerId: 'provider-a',
       modelId: 'shared-image',
@@ -186,11 +280,44 @@ describe('task model catalog', () => {
     await expect(resolveTaskModel('provider-b', 'shared-image', 'user-a')).rejects.toThrow(
       'not authorized',
     );
-    await expect(resolveTaskModel('provider-a', 'shared-image', 'legacy-user')).rejects.toThrow(
-      'not authorized',
-    );
     await expect(resolveTaskModel('provider-a', 'dall-e-3', 'admin-a')).rejects.toThrow(
       'not configured',
     );
+  });
+
+  it('uses the dedicated provider type for permissions even when discovery is stale', async () => {
+    await expect(resolveTaskModel(
+      'layer-provider',
+      'stale-layer',
+      'layer-denied-user',
+    )).rejects.toThrow('not authorized');
+
+    await expect(resolveTaskModel(
+      'layer-provider',
+      'stale-layer',
+      'admin-a',
+    )).resolves.toMatchObject({ kind: 'layer' });
+  });
+
+  it('ignores identity overrides and bounds capability override values', async () => {
+    const descriptor = await resolveTaskModel('provider-a', 'shared-image', 'admin-a');
+
+    expect(descriptor).toMatchObject({
+      providerId: 'provider-a',
+      modelId: 'shared-image',
+      kind: 'image',
+      maxOutputs: 1,
+    });
+    expect(descriptor.maxDurationSeconds).toBeUndefined();
+  });
+
+  it('only reads own override properties from provider configuration', async () => {
+    const descriptor = await resolveTaskModel(
+      'inherited-override-provider',
+      'gpt-image-1',
+      'admin-a',
+    );
+
+    expect(descriptor.supportsMask).toBe(true);
   });
 });

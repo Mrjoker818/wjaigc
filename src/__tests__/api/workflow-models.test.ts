@@ -8,7 +8,9 @@ const mocks = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
 }));
 
-vi.mock('@/lib/server-api-config', () => ({
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/server-api-config', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/server-api-config')>(),
   getApiProviders: mocks.getApiProviders,
   getPublicApiProviders: mocks.getPublicApiProviders,
   getPublicModels: mocks.getPublicModels,
@@ -47,7 +49,7 @@ describe('GET /api/workflow/models', () => {
         modelType: 'layer',
         selectedModels: ['layer-model'],
         discoveredModels: [
-          { id: 'layer-model', name: 'Layer Model', providerId: 'layer-provider', type: 'layer' },
+          { id: 'layer-model', name: 'Layer Model', providerId: 'layer-provider', type: 'image' },
         ],
         createdAt: 1,
         updatedAt: 1,
@@ -115,7 +117,52 @@ describe('GET /api/workflow/models', () => {
     expect(data.models.map((model: { id: string }) => model.id)).toEqual(['image-model', 'layer-model']);
   });
 
+  it('rejects an exact layer assignment when layer permission is false even if discovery says image', async () => {
+    mocks.getSessionUser.mockResolvedValue({
+      id: 'user-1',
+      role: 'user',
+      apiPermissions: { image: true, layer: false },
+      imageModels: ['layer-provider::layer-model'],
+    });
+    mocks.getPublicModels.mockResolvedValue([
+      {
+        id: 'layer-model',
+        name: 'Layer Model',
+        providerId: 'layer-provider',
+        type: 'image',
+      },
+    ]);
+
+    const response = await GET(new NextRequest('http://localhost/api/workflow/models?type=layer'));
+    const data = await response.json();
+
+    expect(data.models).toEqual([]);
+    expect(data.taskModelCatalog).toEqual([]);
+  });
+
   it('only exposes assigned layer models to a permitted non-admin user', async () => {
+    mocks.getApiProviders.mockResolvedValue([
+      {
+        id: 'layer-provider',
+        name: 'Layer Provider',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        isEnabled: true,
+        type: 'layer',
+        modelType: 'layer',
+        selectedModels: ['Image-Layered'],
+        discoveredModels: [
+          {
+            id: 'Image-Layered',
+            name: 'Pear Layered',
+            providerId: 'layer-provider',
+            type: 'layer',
+          },
+        ],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
     mocks.getSessionUser.mockResolvedValue({
       id: 'user-1',
       role: 'user',
