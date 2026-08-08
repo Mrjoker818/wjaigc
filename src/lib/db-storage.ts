@@ -44,7 +44,19 @@ interface DbApiProvider {
 
 // ─── Core Tables Initialization (for new deployments) ─────────────────────────
 
-export async function ensureCoreTables(): Promise<void> {
+let coreTablesInitialization: Promise<void> | null = null;
+
+export function ensureCoreTables(): Promise<void> {
+  if (!coreTablesInitialization) {
+    coreTablesInitialization = initializeCoreTables().catch((error) => {
+      coreTablesInitialization = null;
+      throw error;
+    });
+  }
+  return coreTablesInitialization;
+}
+
+async function initializeCoreTables(): Promise<void> {
   try {
     // 用户表
     await execSql(`

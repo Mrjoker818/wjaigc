@@ -239,3 +239,160 @@ describe('task billing service', () => {
     );
   });
 });
+
+describe('task billing initialization and legacy safety', () => {
+  it('serializes concurrent core table initialization and retries after failure', async () => {
+    vi.resetModules();
+    vi.doUnmock('@/lib/db-storage');
+
+    let rejectInitialization: ((error: Error) => void) | undefined;
+    const failedInitialization = new Promise<never>((_, reject) => {
+      rejectInitialization = reject;
+    });
+    let coreCreateCalls = 0;
+    const execSql = vi.fn((sql: string) => {
+      if (sql.includes('CREATE TABLE IF NOT EXISTS wujie_users')) {
+        coreCreateCalls += 1;
+        if (coreCreateCalls === 1) return failedInitialization;
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+    vi.doMock('@/lib/db-client', () => ({
+      execSql,
+      getPool: vi.fn(),
+    }));
+
+    const { ensureCoreTables } = await import('@/lib/db-storage');
+    const attempts = Array.from({ length: 20 }, () => ensureCoreTables());
+
+    await vi.waitFor(() => {
+      expect(coreCreateCalls).toBe(1);
+    });
+    rejectInitialization?.(new Error('core ddl failed'));
+    const failures = await Promise.allSettled(attempts);
+
+    expect(failures.every(({ status }) => status === 'rejected')).toBe(true);
+    await expect(ensureCoreTables()).resolves.toBeUndefined();
+    expect(coreCreateCalls).toBe(2);
+  });
+
+  it('serializes concurrent cloud task initialization and retries after failure', async () => {
+    vi.resetModules();
+    vi.doUnmock('@/lib/cloud-task-storage');
+
+    let rejectInitialization: ((error: Error) => void) | undefined;
+    const failedInitialization = new Promise<never>((_, reject) => {
+      rejectInitialization = reject;
+    });
+    let cloudCreateCalls = 0;
+    const execSql = vi.fn((sql: string) => {
+      if (sql.includes('CREATE TABLE IF NOT EXISTS cloud_tasks')) {
+        cloudCreateCalls += 1;
+        if (cloudCreateCalls === 1) return failedInitialization;
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+    vi.doMock('@/lib/db-client', () => ({
+      execSql,
+      getPool: vi.fn(),
+    }));
+
+    const { ensureCloudTaskTables } = await import(
+      '@/lib/cloud-task-storage'
+    );
+    const attempts = Array.from(
+      { length: 20 },
+      () => ensureCloudTaskTables(),
+    );
+
+    await vi.waitFor(() => {
+      expect(cloudCreateCalls).toBe(1);
+    });
+    rejectInitialization?.(new Error('cloud ddl failed'));
+    const failures = await Promise.allSettled(attempts);
+
+    expect(failures.every(({ status }) => status === 'rejected')).toBe(true);
+    await expect(ensureCloudTaskTables()).resolves.toBeUndefined();
+    expect(cloudCreateCalls).toBe(2);
+  });
+
+  it('rejects reuse when a legacy task has no verifiable request digest', async () => {
+    vi.resetModules();
+    vi.doUnmock('@/lib/cloud-task-storage');
+
+    const execSql = vi.fn().mockResolvedValue({ rows: [], rowCount: 0 });
+    const query = vi.fn(async (sql: string) => {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes('pg_advisory_xact_lock')) {
+        return { rows: [{}], rowCount: 1 };
+      }
+      if (
+        sql.includes('SELECT * FROM cloud_tasks')
+        && sql.includes('idempotency_key')
+      ) {
+        return {
+          rows: [{
+            id: 'legacy-task',
+            user_id: 'user-a',
+            type: 'generate',
+            status: 'processing',
+            progress: 0,
+            result: {},
+            credit_status: 'pending',
+            credit_cost: 7,
+            idempotency_key: 'legacy-key',
+            request_digest: '',
+            revision: 0,
+            created_at: 100,
+            updated_at: 100,
+          }],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`Unexpected transaction query: ${sql}`);
+    });
+    const release = vi.fn();
+    vi.doMock('@/lib/db-client', () => ({
+      execSql,
+      getPool: () => ({
+        connect: async () => ({ query, release }),
+      }),
+    }));
+
+    const { createBillableCloudTask } = await import(
+      '@/lib/cloud-task-storage'
+    );
+    await expect(createBillableCloudTask({
+      userId: 'user-a',
+      idempotencyKey: 'legacy-key',
+      requestDigest: 'new-digest',
+      creditCost: 7,
+      task: {
+        id: 'new-task',
+        userId: 'user-a',
+        type: 'generate',
+        status: 'processing',
+        progress: 0,
+        createdAt: 200,
+        updatedAt: 200,
+      },
+    })).rejects.toMatchObject({
+      name: 'IdempotencyConflictError',
+      code: 'IDEMPOTENCY_CONFLICT',
+      status: 409,
+      details: {
+        existingDigest: 'legacy-unknown',
+        requestDigest: 'new-digest',
+      },
+    });
+
+    expect(
+      query.mock.calls.some(([sql]) =>
+        String(sql).includes('SET request_digest')
+      ),
+    ).toBe(false);
+    expect(release).toHaveBeenCalledOnce();
+  });
+});
