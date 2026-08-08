@@ -16,7 +16,11 @@ vi.mock('@/lib/server-auth', () => ({
   listManagedUsers: mocks.listManagedUsers,
 }));
 
-import { resolveTaskModel } from '@/lib/task-core/model-catalog';
+import {
+  resolveTaskModel,
+  resolveTaskModelCatalogResult,
+  taskModelKey,
+} from '@/lib/task-core/model-catalog';
 
 function createProvider(overrides: Partial<ApiProvider> & Pick<ApiProvider, 'id' | 'type'>): ApiProvider {
   const { id, type, ...rest } = overrides;
@@ -83,6 +87,15 @@ describe('task model catalog', () => {
           { id: 'dall-e-3', name: 'DALL-E 3', providerId: 'provider-b', type: 'image' },
           { id: 'shared-image', name: 'Shared Image B', providerId: 'provider-b', type: 'image' },
         ],
+        advancedParams: {
+          taskModelCapabilities: JSON.stringify({
+            'dall-e-3': {
+              allowedRatios: ['1:1', 42],
+              allowedSizes: Array.from({ length: 33 }, (_, index) => `size-${index}`),
+              maxOutputs: 2.5,
+            },
+          }),
+        },
       }),
       createProvider({
         id: 'general-provider',
@@ -141,6 +154,19 @@ describe('task model catalog', () => {
             name: 'Unique Image',
             providerId: 'unique-provider',
             type: 'image',
+          },
+        ],
+      }),
+      createProvider({
+        id: 'audio-provider',
+        type: 'audio',
+        selectedModels: ['speech-1'],
+        discoveredModels: [
+          {
+            id: 'speech-1',
+            name: 'Speech 1',
+            providerId: 'audio-provider',
+            type: 'audio',
           },
         ],
       }),
@@ -224,6 +250,20 @@ describe('task model catalog', () => {
     });
   });
 
+  it('rejects an invalid override array or fractional number instead of partially replacing defaults', async () => {
+    const descriptor = await resolveTaskModel('provider-b', 'dall-e-3', 'admin-a');
+
+    expect(descriptor.allowedRatios).toEqual(
+      expect.arrayContaining(['1:1', '16:9', '9:16']),
+    );
+    expect(descriptor.allowedSizes).toEqual([
+      '1024x1024',
+      '1792x1024',
+      '1024x1792',
+    ]);
+    expect(descriptor.maxOutputs).toBe(1);
+  });
+
   it('reuses video capabilities for duration, ratios, sizes, references, and async execution', async () => {
     const descriptor = await resolveTaskModel(
       'general-provider',
@@ -270,6 +310,43 @@ describe('task model catalog', () => {
       'shared-image',
       'ambiguous-legacy-user',
     )).rejects.toThrow('migration required');
+  });
+
+  it('resolves legacy uniqueness from the complete configured catalog, not a requested subset', async () => {
+    const result = await resolveTaskModelCatalogResult(
+      [{
+        id: 'shared-image',
+        name: 'Shared Image A',
+        providerId: 'provider-a',
+        type: 'image',
+      }],
+      createUser({
+        id: 'ambiguous-subset-user',
+        imageModels: ['shared-image'],
+        apiPermissions: {
+          image: true,
+          chat: true,
+          threeD: true,
+          imageEdit: true,
+          vectorize: true,
+          vlm: true,
+          layer: true,
+          video: true,
+          upscaler: true,
+          removebg: true,
+          audio: true,
+        },
+      }),
+    );
+
+    expect(result.authorizedModelKeys.has(taskModelKey('provider-a', 'shared-image'))).toBe(false);
+    expect(result.modelAuthorizationMigration.required).toEqual([
+      expect.objectContaining({
+        legacyModelId: 'shared-image',
+        reason: 'ambiguous',
+        candidates: ['provider-a::shared-image', 'provider-b::shared-image'],
+      }),
+    ]);
   });
 
   it('requires an exact provider and model pair before applying current authorization', async () => {
@@ -319,5 +396,48 @@ describe('task model catalog', () => {
     );
 
     expect(descriptor.supportsMask).toBe(true);
+  });
+
+  it('checks final kind permission before authorizing descriptor-null audio models', async () => {
+    const audioModel = [{
+      id: 'speech-1',
+      name: 'Speech 1',
+      providerId: 'audio-provider',
+      type: 'audio' as const,
+    }];
+    const permissions = {
+      image: true,
+      chat: true,
+      threeD: true,
+      imageEdit: true,
+      vectorize: true,
+      vlm: true,
+      layer: true,
+      video: true,
+      upscaler: true,
+      removebg: true,
+      audio: false,
+    };
+
+    const denied = await resolveTaskModelCatalogResult(
+      audioModel,
+      createUser({ id: 'audio-denied', apiPermissions: permissions }),
+    );
+    const permitted = await resolveTaskModelCatalogResult(
+      audioModel,
+      createUser({
+        id: 'audio-permitted',
+        apiPermissions: { ...permissions, audio: true },
+      }),
+    );
+
+    expect(denied.authorizedModelKeys.has('audio-provider::speech-1')).toBe(false);
+    expect(permitted.authorizedModelKeys.has('audio-provider::speech-1')).toBe(true);
+    expect(permitted.taskModelCatalog).not.toContainEqual(
+      expect.objectContaining({
+        providerId: 'audio-provider',
+        modelId: 'speech-1',
+      }),
+    );
   });
 });

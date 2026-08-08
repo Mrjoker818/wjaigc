@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
   getApiProviders: vi.fn(),
   getPublicApiProviders: vi.fn(),
+  getPublicModelCatalogSnapshot: vi.fn(),
   getPublicModels: vi.fn(),
   getRuntimeSettings: vi.fn(),
   getSessionUser: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock('@/lib/server-api-config', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/server-api-config')>(),
   getApiProviders: mocks.getApiProviders,
   getPublicApiProviders: mocks.getPublicApiProviders,
+  getPublicModelCatalogSnapshot: mocks.getPublicModelCatalogSnapshot,
   getPublicModels: mocks.getPublicModels,
 }));
 vi.mock('@/lib/runtime-settings', () => ({ getRuntimeSettings: mocks.getRuntimeSettings }));
@@ -90,6 +92,11 @@ describe('model defaults', () => {
       quickCreateAutoModelRouting: true,
     });
     mocks.getSessionUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    mocks.getPublicModelCatalogSnapshot.mockImplementation(async () => ({
+      configuredProviders: await mocks.getApiProviders(),
+      providers: await mocks.getPublicApiProviders(),
+      models: await mocks.getPublicModels(undefined),
+    }));
   });
 
   it('marks the configured default image model without changing the available model list', async () => {
@@ -189,7 +196,8 @@ describe('model defaults', () => {
     expect(data.modelAuthorizationMigration).toEqual({
       resolved: [{
         legacyModelId: 'chat-a',
-        exactModelId: 'provider-a::chat-a',
+        reason: 'unique',
+        count: 1,
       }],
       required: [],
     });
@@ -226,7 +234,7 @@ describe('model defaults', () => {
       required: [{
         legacyModelId: 'shared-chat',
         reason: 'ambiguous',
-        candidates: ['provider-a::shared-chat', 'provider-b::shared-chat'],
+        count: 2,
       }],
     });
   });

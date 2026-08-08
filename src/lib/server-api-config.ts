@@ -174,7 +174,6 @@ export function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d
     return 'audio';
   }
   // 视频模型关键词匹配 — 必须在所有其他类型之前检查
-  // 例外：如果同时包含 image 关键词，归类为图像模型
   if (
     id.includes('video') ||
     id.includes('seedance') ||
@@ -199,8 +198,6 @@ export function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d
     id.includes('image2video') || id.includes('i2v') ||
     id.includes('pyramid-flow')
   ) {
-    // 例外：如果同时包含 image 关键词，则不是视频模型
-    if (id.includes('image')) return 'image';
     return 'video';
   }
   // Embedding/rerank 模型 — 既不是 chat 也不是 image，归类为 chat（对话面板不显示）
@@ -1030,67 +1027,105 @@ export async function findAllProvidersForType(modelType: ApiKind): Promise<Array
   }).filter(entry => entry.models.length > 0);
 }
 
-export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]> {
-  const providers = await getApiProviders();
-  // Determine which provider types should be included for the requested modelType
-  // - Exact type match: provider.modelType === modelType
-  // - General/universal providers: include their models, but filter by model-level type
+export function resolveEffectiveModelType(
+  provider: ApiProvider,
+  model: ModelInfo,
+): ModelInfo['type'] {
+  const providerType = provider.modelType || provider.type;
+  if (providerType !== 'general' && providerType !== 'universal') {
+    return providerType;
+  }
+
+  const discoveredType = model.type;
+  const fallback = discoveredType === 'general' || discoveredType === 'universal'
+    ? modelTypeForProvider(provider)
+    : discoveredType === 'imageEdit'
+      ? 'image'
+      : discoveredType;
+  return inferModelType(model.id, fallback);
+}
+
+function decoratePublicModel(provider: ApiProvider, model: ModelInfo): ModelInfo {
+  const effectiveModel = {
+    ...model,
+    providerId: provider.id,
+    type: resolveEffectiveModelType(provider, model),
+  };
+  const adminDisplayName = effectiveModel.displayName || '';
+  const providerName = effectiveModel.name && effectiveModel.name !== effectiveModel.id
+    ? effectiveModel.name
+    : '';
+  const mappedName = getModelDisplayName(effectiveModel.id);
+  const name = adminDisplayName || providerName || mappedName;
+  const apiDisplayName = providerName || mappedName;
+  return {
+    ...effectiveModel,
+    name,
+    apiDisplayName,
+    displayName: adminDisplayName || undefined,
+  } as ModelInfo;
+}
+
+export function getPublicModelsFromProviders(
+  providers: ApiProvider[],
+  modelType?: ApiKind,
+): ModelInfo[] {
   const isGeneralQuery = !modelType || modelType === 'universal' || modelType === 'general';
 
   return providers
-    .filter(provider => provider.isEnabled && provider.baseUrl && provider.apiKey && (isGeneralQuery || provider.modelType === modelType || provider.modelType === 'universal' || provider.modelType === 'general' || (modelType === 'image' && provider.modelType === 'imageEdit')))
+    .filter(provider => provider.isEnabled && provider.baseUrl && provider.apiKey)
     .flatMap(provider => {
       const selected = new Set(provider.selectedModels || []);
       const discovered = provider.discoveredModels || [];
-      const resolved302Models = modelType === 'upscaler'
+      const resolved302Models = (
+        modelType === 'upscaler'
+        || (!modelType && provider.modelType === 'upscaler')
+      )
         ? resolve302UpscaleModelSelection(provider.baseUrl, Array.from(selected))
         : null;
       if (resolved302Models) {
         const catalog = get302UpscaleModelsForProvider(provider.baseUrl, 'upscaler');
         return catalog
           .filter(model => resolved302Models.some(modelId => modelId === model.id))
-          .map(model => ({ ...model, providerId: provider.id }));
+          .map(model => decoratePublicModel(provider, {
+            ...model,
+            providerId: provider.id,
+          }));
       }
-      // If admin has explicitly selected models, show only those
+
       if (selected.size > 0) {
-        const visible = discovered.filter(model => selected.has(model.id));
-        const selectedModels = visible.length ? visible : Array.from(selected).map(id => ({
-          id,
-          name: '', // will be resolved below
-          providerId: provider.id,
-          type: inferModelType(id, modelTypeForProvider(provider)),
-          displayName: undefined,
-        } satisfies ModelInfo));
-        return selectedModels.map(model => {
-          // Older provider rows may retain `image` on discovered models even after
-          // the administrator reclassifies the dedicated provider as `layer`.
-          const effectiveModel = provider.modelType === 'layer'
-            ? { ...model, type: 'layer' as const }
-            : model;
-          // 优先级：管理员手动设置的 displayName > 第三方 API 供应商名称 > 本地映射
-          const adminDisplayName = effectiveModel.displayName || '';
-          const providerName = effectiveModel.name && effectiveModel.name !== effectiveModel.id ? effectiveModel.name : '';
-          const mappedName = getModelDisplayName(effectiveModel.id);
-          const name = adminDisplayName || providerName || mappedName;
-          const apiDisplayName = providerName || mappedName; // 原始API名称（用于回退）
-          return { ...effectiveModel, providerId: provider.id, name, apiDisplayName, displayName: adminDisplayName || undefined };
-        });
+        const selectedModels = Array.from(selected).map(id => (
+          discovered.find(model => model.id === id) || {
+              id,
+              name: '',
+              providerId: provider.id,
+              type: inferModelType(id, modelTypeForProvider(provider)),
+              displayName: undefined,
+            } satisfies ModelInfo
+        ));
+        return selectedModels.map(model => decoratePublicModel(provider, model));
       }
-      // If no models explicitly selected, show all discovered models
-      // (admin hasn't filtered yet, so all are available)
-      return discovered.map(model => {
-          const adminDisplayName = model.displayName || '';
-          const providerName = model.name && model.name !== model.id ? model.name : '';
-          const mappedName = getModelDisplayName(model.id);
-          const name = adminDisplayName || providerName || mappedName;
-          const apiDisplayName = providerName || mappedName;
-          return { ...model, providerId: provider.id, name, apiDisplayName, displayName: adminDisplayName || undefined };
-        });
+
+      return discovered.map(model => decoratePublicModel(provider, model));
     })
-    // Filter by model-level type for non-general queries
-    // This prevents image models from appearing in chat panel and vice versa
-    .filter(model => {
-      if (isGeneralQuery) return true;
-      return model.type === modelType;
-    });
+    .filter(model => isGeneralQuery || model.type === modelType);
+}
+
+export interface PublicModelCatalogSnapshot {
+  configuredProviders: ApiProvider[];
+  providers: PublicApiProvider[];
+  models: ModelInfo[];
+}
+
+export async function getPublicModelCatalogSnapshot(): Promise<PublicModelCatalogSnapshot> {
+  const configuredProviders = await getApiProviders();
+  return {
+    configuredProviders,
+    providers: sanitizeProviders(configuredProviders),
+    models: getPublicModelsFromProviders(configuredProviders),
+  };
+}
+
+export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]> {
+  return getPublicModelsFromProviders(await getApiProviders(), modelType);
 }
