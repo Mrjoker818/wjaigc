@@ -78,6 +78,7 @@ function buildMaskSvg(
   const shapes: string[] = [];
   for (const annotation of annotations) {
     const geometry = annotation.geometry;
+    if (!geometry || typeof geometry.kind !== 'string') continue; // 防御：缺失 geometry 的批注跳过
     if (geometry.kind === 'region' || geometry.kind === 'semantic-object') {
       shapes.push(
         `<rect x="${geometry.region.x * width}" y="${geometry.region.y * height}" `
@@ -108,6 +109,7 @@ function buildReferenceSvg(
   const shapes = annotations.map((annotation, index) => {
     const number = index + 1;
     const geometry = annotation.geometry;
+    if (!geometry || typeof geometry.kind !== 'string') return ''; // 防御：缺失 geometry 的批注跳过
     if (geometry.kind === 'region' || geometry.kind === 'semantic-object') {
       const x = geometry.region.x * width;
       const y = geometry.region.y * height;

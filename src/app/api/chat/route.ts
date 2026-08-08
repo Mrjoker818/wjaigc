@@ -818,9 +818,14 @@ async function handleAgentStream(
         await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: fixedMessages.length, stream: true, agentIterations: iteration });
       } catch (err) {
         console.error('[chat-agent] Stream error:', err);
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: `Agent 执行出错: ${err instanceof Error ? err.message : String(err)}` })}\n\n`));
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-        controller.close();
+        // 防止 controller 已关闭时 enqueue 再次抛错（ERR_INVALID_STATE）
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: `Agent 执行出错: ${err instanceof Error ? err.message : String(err)}` })}\n\n`));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        } catch (closeErr) {
+          console.error('[chat-agent] Stream already closed, skipping error enqueue:', closeErr);
+        }
         // 异常时也按已捕获的部分 usage 结算（比保留整笔预估更公平）
         tokenBilling?.finalize();
       }

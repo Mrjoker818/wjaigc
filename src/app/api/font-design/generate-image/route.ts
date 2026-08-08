@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
-import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { normalizeModelForApi, filterRequestForModel } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { persistResultImage } from '@/lib/persist-result-image';
@@ -284,7 +284,11 @@ export async function POST(request: NextRequest) {
             quality: '2K',
           };
 
-          const adjustedRequest = adjustRequestForProfile(requestBody, pCompatProfile);
+          // 按模型能力过滤请求参数（如 gpt-image-2 不支持 2K，自动移除 quality）
+          const filteredRequest = filterRequestForModel(pModel, requestBody);
+          const requestBodyFinal = filteredRequest as Record<string, unknown>;
+
+          const adjustedRequest = adjustRequestForProfile(requestBodyFinal, pCompatProfile);
           const endpoint = adjustedRequest.endpoint || '/images/generations';
 
           const response = await fetchWithV1Retry(pBaseUrl, endpoint, {

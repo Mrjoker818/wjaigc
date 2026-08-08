@@ -87,7 +87,7 @@ function isGeometryValid(geometry: NormalizedAnnotationGeometry): boolean {
 export function validateEditIntentBundle(
   bundle: EditIntentBundle,
 ): BundleValidationResult {
-  if (bundle.annotations.length < 1 || bundle.annotations.length > 10) {
+  if (!bundle.annotations || bundle.annotations.length < 1 || bundle.annotations.length > 10) {
     return {
       success: false,
       code: 'ANNOTATION_COUNT_INVALID',
@@ -114,25 +114,26 @@ export function validateEditIntentBundle(
   ];
   const totalGeometryPoints = bundle.annotations.reduce((total, annotation) => {
     const geometry = annotation.geometry;
+    if (!geometry) return total;
     if (geometry.kind === 'brush') return total + geometry.points.length;
     if (geometry.kind === 'semantic-object') return total + (geometry.polygon?.length || 0);
     if (geometry.kind === 'arrow') return total + 2;
     return total + 1;
   }, 0);
   const complexityInvalid = (
-    bundle.prompt.length > MAX_PROMPT_LENGTH
-    || bundle.idempotencyKey.length === 0
-    || bundle.idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH
-    || identifierValues.some((value) => value.length > MAX_ID_LENGTH)
+    (bundle.prompt?.length || 0) > MAX_PROMPT_LENGTH
+    || (bundle.idempotencyKey?.length || 0) === 0
+    || (bundle.idempotencyKey?.length || 0) > MAX_IDEMPOTENCY_KEY_LENGTH
+    || identifierValues.some((value) => (value || '').length > MAX_ID_LENGTH)
     || bundle.annotations.some((annotation) =>
       (annotation.instruction?.length || 0) > MAX_INSTRUCTION_LENGTH
       || (annotation.label?.length || 0) > MAX_LABEL_LENGTH
       || (
-        annotation.geometry.kind === 'brush'
-        && annotation.geometry.points.length > MAX_BRUSH_POINTS
+        annotation.geometry?.kind === 'brush'
+        && (annotation.geometry.points?.length || 0) > MAX_BRUSH_POINTS
       )
       || (
-        annotation.geometry.kind === 'semantic-object'
+        annotation.geometry?.kind === 'semantic-object'
         && (annotation.geometry.polygon?.length || 0) > MAX_POLYGON_POINTS
       )
     )
@@ -203,7 +204,8 @@ export function validateEditIntentBundle(
   }
 
   if (bundle.annotations.some((annotation) =>
-    annotation.type !== annotation.geometry.kind
+    !annotation.geometry
+    || annotation.type !== annotation.geometry.kind
     || !isGeometryValid(annotation.geometry)
   )) {
     return {
