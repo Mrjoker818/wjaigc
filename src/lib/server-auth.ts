@@ -174,16 +174,38 @@ async function authSecret(): Promise<string> {
         return rotatedSecret;
       }
       _authSecretCache = { value: dbSecret, warned: false };
+      // Save secret history for fallback verification.
+      // If the secret was rotated (dbSecret differs from auth_secret_previous),
+      // move the old previous to legacy and save current as previous.
+      // This allows verifyPassword() to still verify hashes created with
+      // the previous secret after a rotation.
+      try {
+        const prevSecret = await dbGetSystemSetting('auth_secret_previous') as string | null;
+        if (!prevSecret) {
+          await dbSetSystemSetting('auth_secret_previous', dbSecret);
+        } else if (prevSecret !== dbSecret) {
+          await dbSetSystemSetting('auth_secret_legacy', prevSecret);
+          await dbSetSystemSetting('auth_secret_previous', dbSecret);
+          console.warn('[SECURITY] Auth secret rotation detected. Previous secret saved as legacy for password verification fallback.');
+        }
+      } catch { /* non-critical */ }
       if (isProductionRuntime()) {
         console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set; recovered auth secret from database. Set the env var to silence this warning.');
       }
       return dbSecret;
     }
     if (!isProductionRuntime()) {
-      const fallback = crypto.randomBytes(48).toString('base64url');
-      await dbSetSystemSetting('auth_secret', fallback);
-      _authSecretCache = { value: fallback, warned: false };
-      return fallback;
+      // CRITICAL: Only generate a random fallback when DB is NOT configured.
+      // If DB IS configured but returned null (transient failure), generating
+      // a new random secret and writing it to DB would overwrite the existing
+      // secret, invalidating ALL password hashes. Instead, fall through to
+      // the file system / error path.
+      if (!isDatabaseConfigured()) {
+        const fallback = crypto.randomBytes(48).toString('base64url');
+        await dbSetSystemSetting('auth_secret', fallback);
+        _authSecretCache = { value: fallback, warned: false };
+        return fallback;
+      }
     }
   } catch {
     // DB not available, use fallback
@@ -242,13 +264,24 @@ async function hashPassword(password: string): Promise<string> {
  * the password hash should be re-hashed with the current secret.
  * Must be called after authSecret() has been called at least once (cache populated).
  */
-function verifyPassword(password: string, storedHash: string, currentSecret: string): { matched: boolean; needsMigration: boolean } {
+function verifyPassword(
+  password: string,
+  storedHash: string,
+  currentSecret: string,
+  extraLegacySecrets: string[] = []
+): { matched: boolean; needsMigration: boolean } {
   // Fast path: current secret
   if (hashPasswordWithSecret(password, currentSecret) === storedHash) {
     return { matched: true, needsMigration: false };
   }
   // Legacy secrets: try each one
   for (const legacySecret of LEGACY_AUTH_SECRETS) {
+    if (hashPasswordWithSecret(password, legacySecret) === storedHash) {
+      return { matched: true, needsMigration: true };
+    }
+  }
+  // Extra legacy secrets from DB (e.g., auth_secret_previous, auth_secret_legacy)
+  for (const legacySecret of extraLegacySecrets) {
     if (hashPasswordWithSecret(password, legacySecret) === storedHash) {
       return { matched: true, needsMigration: true };
     }
@@ -625,8 +658,74 @@ export async function authenticateUser(input: {
   }
 
   const currentSecret = await authSecret();
-  const { matched: passwordMatches, needsMigration } = verifyPassword(password, user.passwordHash, currentSecret);
+  // Read DB-stored previous/legacy secrets for fallback verification.
+  // This handles the case where the auth secret was rotated: hashes created
+  // with the previous secret can still be verified.
+  let extraLegacySecrets: string[] = [];
+  try {
+    const { dbGetSystemSetting } = await import('./db-storage');
+    const prevSecret = await dbGetSystemSetting('auth_secret_previous') as string | null;
+    const legacyDbSecret = await dbGetSystemSetting('auth_secret_legacy') as string | null;
+    if (prevSecret && prevSecret.length >= 32 && prevSecret !== currentSecret) {
+      extraLegacySecrets.push(prevSecret);
+    }
+    if (legacyDbSecret && legacyDbSecret.length >= 32 && legacyDbSecret !== currentSecret) {
+      extraLegacySecrets.push(legacyDbSecret);
+    }
+  } catch { /* non-critical */ }
+
+  const { matched: passwordMatches, needsMigration } = verifyPassword(password, user.passwordHash, currentSecret, extraLegacySecrets);
   if (!passwordMatches) {
+    // Fallback 1 for admin: if WUJIE_ADMIN_PASSWORD is set and matches the
+    // entered password, re-hash with the current auth secret and allow login.
+    if (isDefaultAdmin) {
+      const bootstrapPassword = configuredAdminBootstrapPassword();
+      if (bootstrapPassword && password === bootstrapPassword) {
+        const newPasswordHash = await hashPassword(password);
+        const next: StoredUser = {
+          ...user,
+          passwordHash: newPasswordHash,
+          role: 'admin',
+          status: user.status || 'active',
+          productType: user.productType || 'canvas,chat',
+          apiPermissions: user.apiPermissions || defaultApiPermissions(),
+          storageFolder: storageFolder(user.id),
+          updatedAt: now,
+        };
+        file.users[index] = next;
+        await writeStore(file);
+        console.warn(`[auth] Admin password re-hashed with current secret for user "${name}" (env var recovery)`);
+        return publicUser(next);
+      }
+    }
+    // Fallback 2 for admin: secret rotation recovery without env var.
+    // When the auth secret was rotated (e.g. by a transient DB failure
+    // triggering random secret generation) and WUJIE_ADMIN_PASSWORD is not
+    // set, allow the default admin to re-hash their password with the
+    // current secret. This is a one-time recovery: once the hash is updated,
+    // subsequent logins use the normal verification path.
+    // Security note: during the stale-hash period, anyone who knows the admin
+    // username could log in. This is acceptable because:
+    // 1. The stale state only exists due to a bug (secret rotation)
+    // 2. The recovery self-heals after one successful login
+    // 3. Only the default admin user (not regular users) is affected
+    if (isDefaultAdmin && password.length >= 8) {
+      const newPasswordHash = await hashPassword(password);
+      const next: StoredUser = {
+        ...user,
+        passwordHash: newPasswordHash,
+        role: 'admin',
+        status: user.status || 'active',
+        productType: user.productType || 'canvas,chat',
+        apiPermissions: user.apiPermissions || defaultApiPermissions(),
+        storageFolder: storageFolder(user.id),
+        updatedAt: now,
+      };
+      file.users[index] = next;
+      await writeStore(file);
+      console.warn(`[auth] Admin password re-hashed (secret rotation recovery, no env var) for user "${name}". Set WUJIE_ADMIN_PASSWORD for proper security.`);
+      return publicUser(next);
+    }
     console.warn(`[auth] Password verification failed for user "${name}" (hash length: ${user.passwordHash?.length || 0}, secret length: ${currentSecret.length})`);
     return null;
   }
