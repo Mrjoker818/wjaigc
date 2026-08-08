@@ -99,24 +99,40 @@ function connectorTemplates(value: unknown): Record<string, unknown>[] {
   const data = objectValue(value);
   return Array.isArray(data?.templates) ? data.templates.filter((item): item is Record<string, unknown> => objectValue(item) !== null) : [];
 }
-function providerModelOptions(models: string[] | undefined, providerId: string): Array<{ id: string; name: string; providerId: string }> {
+export interface DashboardModelOption {
+  id: string;
+  name: string;
+  providerId: string;
+}
+
+function modelIdFromExactAssignment(assignment: string): string {
+  const separatorIndex = assignment.indexOf('::');
+  return separatorIndex >= 0 ? assignment.slice(separatorIndex + 2) : assignment;
+}
+
+export function providerModelOptions(
+  models: string[] | undefined,
+  providerId: string,
+  providerName: string,
+): DashboardModelOption[] {
   return (models ?? []).map((model) => ({
     id: `${providerId}::${model}`,
-    name: model,
+    name: `${model} · ${providerName}`,
     providerId,
   }));
 }
 
 function resolveVisibleModelAssignments(
   assignments: string[] | undefined,
-  options: Array<{ id: string; name: string }>,
+  options: DashboardModelOption[],
 ): string[] | undefined {
   if (!assignments) return undefined;
   const optionsByModelId = new Map<string, string[]>();
   for (const option of options) {
-    const candidates = optionsByModelId.get(option.name) || [];
+    const modelId = modelIdFromExactAssignment(option.id);
+    const candidates = optionsByModelId.get(modelId) || [];
     candidates.push(option.id);
-    optionsByModelId.set(option.name, candidates);
+    optionsByModelId.set(modelId, candidates);
   }
 
   return assignments.flatMap(assignment => {
@@ -126,6 +142,27 @@ function resolveVisibleModelAssignments(
     const candidates = optionsByModelId.get(assignment) || [];
     return candidates.length === 1 ? candidates : [assignment];
   });
+}
+
+export function normalizeModelAssignmentsForSave(
+  assignments: string[],
+  options: DashboardModelOption[],
+): string[] {
+  const visibleExactIds = new Set(options.map(option => option.id));
+  const replacedBareIds = new Set(
+    assignments
+      .filter(assignment => assignment.includes('::') && visibleExactIds.has(assignment))
+      .map(modelIdFromExactAssignment),
+  );
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const assignment of assignments) {
+    if (!assignment.includes('::') && replacedBareIds.has(assignment)) continue;
+    if (seen.has(assignment)) continue;
+    seen.add(assignment);
+    result.push(assignment);
+  }
+  return result;
 }
 
 const apiKindLabels: Record<ApiKind, string> = {
@@ -1024,13 +1061,21 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const adminChatModelOptions = useMemo(
     () => providers
       .filter(p => p.modelType === 'chat' || p.modelType === 'universal' || p.modelType === 'general')
-      .flatMap(p => providerModelOptions(p.selectedModels, p.id)),
+      .flatMap(p => providerModelOptions(
+        p.selectedModels,
+        p.id,
+        p.displayName || p.name || p.id,
+      )),
     [providers],
   );
   const adminImageModelOptions = useMemo(
     () => providers
       .filter(p => p.modelType === 'image')
-      .flatMap(p => providerModelOptions(p.selectedModels, p.id)),
+      .flatMap(p => providerModelOptions(
+        p.selectedModels,
+        p.id,
+        p.displayName || p.name || p.id,
+      )),
     [providers],
   );
 
@@ -2782,7 +2827,15 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               await refreshAdmin();
             }}
             onUpdateUserModels={async (userId: string, chatModels: string[], imageModels: string[]) => {
-              await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { chatModels, imageModels } }) });
+              const normalizedChatModels = normalizeModelAssignmentsForSave(
+                chatModels,
+                adminChatModelOptions,
+              );
+              const normalizedImageModels = normalizeModelAssignmentsForSave(
+                imageModels,
+                adminImageModelOptions,
+              );
+              await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { chatModels: normalizedChatModels, imageModels: normalizedImageModels } }) });
               await refreshAdmin();
             }}
             adminChatModels={adminChatModelOptions}

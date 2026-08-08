@@ -5,10 +5,12 @@ import {
   getResolutionTierOptions,
 } from '@/lib/canvas-generation-group';
 import {
-  classifyModelFamily,
   getImageTaskCapabilityDefaults,
 } from '@/lib/model-capabilities';
-import { getApiProviders, inferModelType } from '@/lib/server-api-config';
+import {
+  getApiProviders,
+  resolveEffectiveModelType,
+} from '@/lib/server-api-config';
 import { listManagedUsers } from '@/lib/server-auth';
 import type { ApiKind, ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import type { User } from '@/lib/user-types';
@@ -39,6 +41,21 @@ export interface ModelAuthorizationMigration {
     legacyModelId: string;
     reason: 'ambiguous' | 'not-visible';
     candidates: string[];
+  }>;
+}
+
+export interface PublicModelAuthorizationMigration {
+  resolved: Array<{
+    legacyModelId: string;
+    reason: 'unique';
+    count: number;
+    exactModelId?: string;
+  }>;
+  required: Array<{
+    legacyModelId: string;
+    reason: 'ambiguous' | 'not-visible';
+    count: number;
+    candidates?: string[];
   }>;
 }
 
@@ -88,6 +105,41 @@ export function taskModelKey(providerId: string, modelId: string): string {
   return `${providerId}::${modelId}`;
 }
 
+export function matchesRequestedModelType(
+  effectiveType: ApiKind | undefined,
+  requestedType: string | null | undefined,
+): boolean {
+  if (
+    !requestedType
+    || requestedType === 'all'
+    || requestedType === 'general'
+    || requestedType === 'universal'
+  ) {
+    return true;
+  }
+  return effectiveType === requestedType;
+}
+
+export function serializeModelAuthorizationMigration(
+  migration: ModelAuthorizationMigration,
+  user: User | null,
+): PublicModelAuthorizationMigration | ModelAuthorizationMigration {
+  if (!user || user.role === 'admin') return migration;
+
+  return {
+    resolved: migration.resolved.map(item => ({
+      legacyModelId: item.legacyModelId,
+      reason: 'unique' as const,
+      count: 1,
+    })),
+    required: migration.required.map(item => ({
+      legacyModelId: item.legacyModelId,
+      reason: item.reason,
+      count: item.candidates.length,
+    })),
+  };
+}
+
 function hasOwn(value: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -116,23 +168,8 @@ function findConfiguredModel(provider: ApiProvider, modelId: string): ModelInfo 
   };
 }
 
-function inferGeneralModelType(modelId: string): ReturnType<typeof inferModelType> {
-  const family = classifyModelFamily(modelId);
-  return inferModelType(modelId, family === 'other' ? 'chat' : 'image');
-}
-
 function resolveSourceType(provider: ApiProvider, model: ModelInfo): ApiKind {
-  const providerType = provider.modelType || provider.type;
-  if (providerType !== 'general' && providerType !== 'universal') {
-    return providerType;
-  }
-
-  const discoveredFallback: Parameters<typeof inferModelType>[1] = model.type
-    && model.type !== 'general'
-    && model.type !== 'universal'
-    ? (model.type === 'imageEdit' ? 'image' : model.type)
-    : inferGeneralModelType(model.id);
-  return inferModelType(model.id, discoveredFallback);
+  return resolveEffectiveModelType(provider, model);
 }
 
 function resolveTaskKind(sourceType: ApiKind): TaskModelKind | null {
@@ -332,18 +369,13 @@ function readStringArray(value: unknown): string[] | undefined {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const item of value) {
-    if (typeof item !== 'string') continue;
+    if (typeof item !== 'string') return undefined;
     const normalized = item.trim();
-    if (
-      !normalized
-      || normalized.length > MAX_OVERRIDE_ARRAY_ITEM_LENGTH
-      || seen.has(normalized)
-    ) {
-      continue;
-    }
+    if (!normalized || seen.has(normalized)) continue;
+    if (normalized.length > MAX_OVERRIDE_ARRAY_ITEM_LENGTH) return undefined;
     seen.add(normalized);
     result.push(normalized);
-    if (result.length >= MAX_OVERRIDE_ARRAY_ITEMS) break;
+    if (result.length > MAX_OVERRIDE_ARRAY_ITEMS) return undefined;
   }
   return result;
 }
@@ -403,19 +435,21 @@ function readTaskModelOverride(provider: ApiProvider, modelId: string): TaskMode
       hasOwn(value, 'maxOutputs')
       && typeof value.maxOutputs === 'number'
       && Number.isFinite(value.maxOutputs)
+      && Number.isInteger(value.maxOutputs)
       && value.maxOutputs >= 1
       && value.maxOutputs <= MAX_OVERRIDE_OUTPUTS
     ) {
-      override.maxOutputs = Math.floor(value.maxOutputs);
+      override.maxOutputs = value.maxOutputs;
     }
     if (
       hasOwn(value, 'maxDurationSeconds')
       && typeof value.maxDurationSeconds === 'number'
       && Number.isFinite(value.maxDurationSeconds)
+      && Number.isInteger(value.maxDurationSeconds)
       && value.maxDurationSeconds >= 1
       && value.maxDurationSeconds <= MAX_OVERRIDE_DURATION_SECONDS
     ) {
-      override.maxDurationSeconds = Math.floor(value.maxDurationSeconds);
+      override.maxDurationSeconds = value.maxDurationSeconds;
     }
     if (
       hasOwn(value, 'supportsReferenceImages')
@@ -564,7 +598,9 @@ function buildTaskModelCatalogResult(
   if (!user || user.role === 'admin') {
     return {
       taskModelCatalog: entries.flatMap(entry => entry.descriptor ? [entry.descriptor] : []),
-      authorizedModelKeys: new Set(models.map(model => taskModelKey(model.providerId, model.id))),
+      authorizedModelKeys: new Set(entries.map(entry => (
+        taskModelKey(entry.provider.id, entry.model.id)
+      ))),
       effectiveModelTypes,
       modelAuthorizationMigration: emptyMigration(),
     };
@@ -579,7 +615,7 @@ function buildTaskModelCatalogResult(
   }
 
   const permissionEligibleEntries = entries.filter(entry => (
-    !entry.descriptor || hasRequiredPermission(user, entry.sourceType)
+    hasRequiredPermission(user, entry.sourceType)
   ));
   const imageEntries = permissionEligibleEntries.filter(entry => (
     entry.descriptor && IMAGE_AUTH_TYPES.has(entry.sourceType)
@@ -597,10 +633,6 @@ function buildTaskModelCatalogResult(
   const taskModelCatalog: TaskModelDescriptor[] = [];
   for (const entry of entries) {
     const key = taskModelKey(entry.provider.id, entry.model.id);
-    if (!entry.descriptor) {
-      authorizedModelKeys.add(key);
-      continue;
-    }
     if (!hasRequiredPermission(user, entry.sourceType)) continue;
 
     const assignments = IMAGE_AUTH_TYPES.has(entry.sourceType)
@@ -617,7 +649,7 @@ function buildTaskModelCatalogResult(
     }
 
     authorizedModelKeys.add(key);
-    taskModelCatalog.push(entry.descriptor);
+    if (entry.descriptor) taskModelCatalog.push(entry.descriptor);
   }
 
   return {
@@ -679,10 +711,22 @@ export async function resolveTaskModelCatalog(
   return (await resolveTaskModelCatalogResult(models, user)).taskModelCatalog;
 }
 
-export async function resolveTaskModelCatalogResult(
+export function resolveTaskModelCatalogResultFromSnapshot(
   models: ModelInfo[],
+  user: User | null,
+  providers: ApiProvider[],
+): TaskModelCatalogResult {
+  return buildTaskModelCatalogResult(models, user, providers);
+}
+
+export async function resolveTaskModelCatalogResult(
+  _models: ModelInfo[],
   user: User | null,
 ): Promise<TaskModelCatalogResult> {
   const providers = await getApiProviders();
-  return buildTaskModelCatalogResult(models, user, providers);
+  return buildTaskModelCatalogResult(
+    configuredModelsForProviders(providers),
+    user,
+    providers,
+  );
 }

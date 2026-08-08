@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
   getApiProviders: vi.fn(),
   getPublicApiProviders: vi.fn(),
+  getPublicModelCatalogSnapshot: vi.fn(),
   getPublicModels: vi.fn(),
   getSessionUser: vi.fn(),
 }));
@@ -13,6 +14,7 @@ vi.mock('@/lib/server-api-config', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/server-api-config')>(),
   getApiProviders: mocks.getApiProviders,
   getPublicApiProviders: mocks.getPublicApiProviders,
+  getPublicModelCatalogSnapshot: mocks.getPublicModelCatalogSnapshot,
   getPublicModels: mocks.getPublicModels,
 }));
 
@@ -63,6 +65,11 @@ describe('GET /api/workflow/models', () => {
       { id: 'image-model', name: 'Image Model', providerId: 'image-provider', type: 'image' },
       { id: 'layer-model', name: 'Layer Model', providerId: 'layer-provider', type: 'layer' },
     ]);
+    mocks.getPublicModelCatalogSnapshot.mockImplementation(async () => ({
+      configuredProviders: await mocks.getApiProviders(),
+      providers: await mocks.getPublicApiProviders(),
+      models: await mocks.getPublicModels(undefined),
+    }));
   });
 
   it('returns all selectable workflow models when type is all', async () => {

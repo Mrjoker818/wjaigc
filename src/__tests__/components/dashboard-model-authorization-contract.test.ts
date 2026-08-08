@@ -1,15 +1,58 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import * as dashboardModule from '@/components/dashboard/dashboard-view';
+
+interface ModelOption {
+  id: string;
+  name: string;
+  providerId: string;
+}
+
+const dashboardHelpers = dashboardModule as unknown as {
+  providerModelOptions?: (
+    models: string[] | undefined,
+    providerId: string,
+    providerName: string,
+  ) => ModelOption[];
+  normalizeModelAssignmentsForSave?: (
+    assignments: string[],
+    options: ModelOption[],
+  ) => string[];
+};
 
 describe('dashboard model authorization contract', () => {
-  it('writes provider-bound model assignments while preserving the visible model label', () => {
-    const source = fs.readFileSync(
-      path.resolve(process.cwd(), 'src/components/dashboard/dashboard-view.tsx'),
-      'utf8',
+  it('labels duplicate model ids with their provider while keeping exact assignment ids', () => {
+    const options = dashboardHelpers.providerModelOptions?.(
+      ['shared-model'],
+      'provider-a',
+      'Provider A',
     );
 
-    expect(source).toContain('id: `${providerId}::${model}`');
-    expect(source).toContain('name: model');
+    expect(options).toEqual([{
+      id: 'provider-a::shared-model',
+      name: 'shared-model · Provider A',
+      providerId: 'provider-a',
+    }]);
+  });
+
+  it('removes a same-model legacy bare assignment when an exact provider pair is selected', () => {
+    const options: ModelOption[] = [
+      {
+        id: 'provider-a::shared-model',
+        name: 'shared-model · Provider A',
+        providerId: 'provider-a',
+      },
+      {
+        id: 'provider-b::shared-model',
+        name: 'shared-model · Provider B',
+        providerId: 'provider-b',
+      },
+    ];
+
+    const payload = dashboardHelpers.normalizeModelAssignmentsForSave?.(
+      ['shared-model', 'provider-a::shared-model', 'legacy-other', 'provider-a::shared-model'],
+      options,
+    );
+
+    expect(payload).toEqual(['provider-a::shared-model', 'legacy-other']);
   });
 });

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getPublicApiProviders, getPublicModels } from '@/lib/server-api-config';
+import { getPublicModelCatalogSnapshot } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import {
-  resolveTaskModelCatalogResult,
+  matchesRequestedModelType,
+  resolveTaskModelCatalogResultFromSnapshot,
+  serializeModelAuthorizationMigration,
   taskModelKey,
 } from '@/lib/task-core/model-catalog';
 
@@ -19,16 +21,29 @@ export async function GET(request: NextRequest) {
   const modelType = requestedType && requestedType !== 'all' && WORKFLOW_MODEL_TYPES.has(requestedType as ApiKind)
     ? requestedType as ApiKind
     : undefined;
-  const [providers, models, user] = await Promise.all([
-    getPublicApiProviders(),
-    getPublicModels(modelType),
+  const [snapshot, user] = await Promise.all([
+    getPublicModelCatalogSnapshot(),
     getSessionUser(request),
   ]);
-  const providerNames = new Map(providers.map(provider => [provider.id, provider.displayName || provider.name || provider.id]));
-  const catalogResult = await resolveTaskModelCatalogResult(models, user);
-  const filteredModels = models.filter(model => (
-    catalogResult.authorizedModelKeys.has(taskModelKey(model.providerId, model.id))
-  ));
+  const providerNames = new Map(snapshot.providers.map(provider => [
+    provider.id,
+    provider.displayName || provider.name || provider.id,
+  ]));
+  const catalogResult = resolveTaskModelCatalogResultFromSnapshot(
+    snapshot.models,
+    user,
+    snapshot.configuredProviders,
+  );
+  const filteredModels = snapshot.models.filter(model => {
+    const key = taskModelKey(model.providerId, model.id);
+    return (
+      catalogResult.authorizedModelKeys.has(key)
+      && matchesRequestedModelType(
+        catalogResult.effectiveModelTypes.get(key),
+        modelType,
+      )
+    );
+  });
 
   return NextResponse.json({
     success: true,
@@ -43,7 +58,16 @@ export async function GET(request: NextRequest) {
         provider: providerNames.get(model.providerId) || model.providerId,
       };
     }),
-    taskModelCatalog: catalogResult.taskModelCatalog,
-    modelAuthorizationMigration: catalogResult.modelAuthorizationMigration,
+    taskModelCatalog: catalogResult.taskModelCatalog.filter(model => {
+      const key = taskModelKey(model.providerId, model.modelId);
+      return matchesRequestedModelType(
+        catalogResult.effectiveModelTypes.get(key),
+        modelType,
+      );
+    }),
+    modelAuthorizationMigration: serializeModelAuthorizationMigration(
+      catalogResult.modelAuthorizationMigration,
+      user,
+    ),
   });
 }
