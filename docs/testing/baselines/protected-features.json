@@ -314,7 +314,7 @@
     "name": "精修引擎与人物精修大师",
     "entrances": ["图片浮动工具栏", "右键菜单", "底部工具栏"],
     "routes": ["/api/refine-engine", "/api/human/*"],
-    "components": ["src/components/human-ai-engine-panel.tsx", "src/components/infinite-canvas.tsx"],
+    "components": ["src/components/human-repair-panel.tsx", "src/components/refine-engine-panel.tsx", "src/components/infinite-canvas.tsx"],
     "actions": ["产品精修", "人物精修", "人脸修复", "手部修复", "三维视角"],
     "resultKinds": ["refine-task", "canvas-image"],
     "preservesOriginal": true,

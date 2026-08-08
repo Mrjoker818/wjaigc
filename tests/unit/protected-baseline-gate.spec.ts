@@ -1,0 +1,121 @@
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+interface Feature {
+  featureId: string;
+  components?: string[];
+}
+
+async function loadGateModule() {
+  const scriptPath = resolve(
+    process.cwd(),
+    'scripts/check-protected-baseline.mjs',
+  );
+  return import(pathToFileURL(scriptPath).href) as Promise<{
+    evaluateProtectedBaseline: (input: {
+      baselineFeatures: Feature[];
+      candidateFeatures: Feature[];
+      changedPaths?: string[];
+      untrackedPaths?: string[];
+      protectedSourcePaths?: string[];
+      missingEvidenceContracts?: string[];
+      baseResolved?: boolean;
+      candidateResolved?: boolean;
+    }) => {
+      pass: string[];
+      warn: string[];
+      block: string[];
+    };
+  }>;
+}
+
+const baselineFeatures: Feature[] = [
+  {
+    featureId: 'workspace.canvas.core',
+    components: ['src/components/infinite-canvas.tsx'],
+  },
+  {
+    featureId: 'workspace.workflow.graph',
+    components: ['src/components/node-editor.tsx'],
+  },
+];
+
+describe('protected baseline release gate', () => {
+  it('passes an identical candidate and allows documentation-only changes', async () => {
+    const { evaluateProtectedBaseline } = await loadGateModule();
+    const result = evaluateProtectedBaseline({
+      baselineFeatures,
+      candidateFeatures: structuredClone(baselineFeatures),
+      changedPaths: ['docs/testing/TEST_PLAN.md'],
+    });
+
+    expect(result.block).toEqual([]);
+    expect(result.pass.length).toBeGreaterThan(0);
+  });
+
+  it('warns but passes when a feature is added', async () => {
+    const { evaluateProtectedBaseline } = await loadGateModule();
+    const result = evaluateProtectedBaseline({
+      baselineFeatures,
+      candidateFeatures: [
+        ...baselineFeatures,
+        { featureId: 'workspace.chat.new-tool', components: [] },
+      ],
+    });
+
+    expect(result.block).toEqual([]);
+    expect(result.warn.join('\n')).toMatch(/workspace\.chat\.new-tool/);
+  });
+
+  it('blocks removed and duplicate feature ids', async () => {
+    const { evaluateProtectedBaseline } = await loadGateModule();
+    const removed = evaluateProtectedBaseline({
+      baselineFeatures,
+      candidateFeatures: baselineFeatures.slice(1),
+    });
+    const duplicate = evaluateProtectedBaseline({
+      baselineFeatures,
+      candidateFeatures: [...baselineFeatures, baselineFeatures[0]],
+    });
+
+    expect(removed.block.join('\n')).toMatch(/workspace\.canvas\.core/);
+    expect(duplicate.block.join('\n')).toMatch(/Duplicate/);
+  });
+
+  it('blocks untracked protected source but allows test infrastructure', async () => {
+    const { evaluateProtectedBaseline } = await loadGateModule();
+    const blocked = evaluateProtectedBaseline({
+      baselineFeatures,
+      candidateFeatures: baselineFeatures,
+      untrackedPaths: ['src/components/new-runtime-panel.tsx'],
+    });
+    const allowed = evaluateProtectedBaseline({
+      baselineFeatures,
+      candidateFeatures: baselineFeatures,
+      changedPaths: [
+        'src/__tests__/scripts/function-inventory.test.ts',
+        'tests/unit/protected-baseline-gate.spec.ts',
+        'scripts/check-protected-baseline.mjs',
+      ],
+    });
+
+    expect(blocked.block.join('\n')).toMatch(/new-runtime-panel/);
+    expect(allowed.block).toEqual([]);
+  });
+
+  it('blocks missing evidence contracts and unresolved git refs', async () => {
+    const { evaluateProtectedBaseline } = await loadGateModule();
+    const result = evaluateProtectedBaseline({
+      baselineFeatures,
+      candidateFeatures: baselineFeatures,
+      missingEvidenceContracts: ['tests/helpers/evidence-manifest.ts'],
+      baseResolved: false,
+      candidateResolved: false,
+    });
+
+    expect(result.block.join('\n')).toMatch(/evidence-manifest/);
+    expect(result.block.join('\n')).toMatch(/base Git ref/);
+    expect(result.block.join('\n')).toMatch(/candidate Git ref/);
+  });
+});

@@ -1,0 +1,71 @@
+name: Stage 0 Protected Baseline
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  protected-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate protected inventory
+        run: pnpm test:inventory
+
+      - name: Run Stage 0 contract tests
+        run: >-
+          pnpm exec vitest run
+          src/__tests__/scripts/function-inventory.test.ts
+          tests/unit/evidence-manifest.spec.ts
+          tests/unit/protected-baseline-gate.spec.ts
+
+      - name: Check protected baseline
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            pnpm check:protected-baseline -- --base "${{ github.event.pull_request.base.sha }}" --candidate HEAD
+          else
+            pnpm check:protected-baseline -- --base origin/main --candidate HEAD
+          fi
+
+      - name: Upload Stage 0 inventory contracts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-0-protected-baseline-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            docs/testing/FUNCTION_INVENTORY.md
+            docs/testing/PROTECTED_FEATURES.md
+            docs/testing/baselines/
+            docs/testing/evidence/README.md
+
+      - name: Declare external verification limits
+        run: |
+          echo "This workflow does not claim that real providers, PostgreSQL concurrency,"
+          echo "payment callbacks, cloud storage, or authenticated cloud E2E passed."

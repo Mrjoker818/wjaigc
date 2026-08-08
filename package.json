@@ -20,6 +20,7 @@
     "test:e2e:p0": "playwright test tests/e2e/p0-core.spec.ts",
     "test:artifacts": "node scripts/collect-playwright-artifacts.mjs",
     "test:inventory": "node scripts/generate-function-inventory.mjs",
+    "check:protected-baseline": "node scripts/check-protected-baseline.mjs",
     "doctor": "node scripts/doctor.mjs",
     "perf:check": "node scripts/benchmark-ui-interactions.mjs",
     "human:virtual-test": "tsx scripts/human-ai-engine-virtual-test.ts",
