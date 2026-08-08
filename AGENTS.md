@@ -826,6 +826,13 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
+### v4.2.3
+
+**参考图组/融图组参考图识别一致性修复 — 消除 referenceImages/accessibleReferenceImages 索引错位**
+
+- **P1: 参考图索引一致性修复**: `generate/route.ts` 中提示词增强、AI视觉识别、`compileReferenceConstraints` 调用此前使用原始 `referenceImages`（前端输入），而实际发送给 API 的是 `accessibleReferenceImages`（后端解析后）。当部分图片解析失败时，两者长度不一致导致索引错位：约束提示词引用的图片编号与实际发送的图片不匹配。统一改为使用 `accessibleReferenceImages`，确保提示词约束、视觉识别、约束编译器与实际发送的图片完全对齐（涉及 `src/app/api/generate/route.ts`，6 处引用修正）
+- **P2: 诊断日志清理**: 移除 `infinite-canvas.tsx` 中 `handleGroupGenerate` 残留的诊断 `console.log`（涉及 `src/components/infinite-canvas.tsx`）
+
 ### v4.2.2
 
 **跨模式图像生成稳定性修复 — Simple-chat 认证 / 工作流 submitOnly / API 错误回退**
