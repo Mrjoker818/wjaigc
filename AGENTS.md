@@ -793,6 +793,17 @@ UPSCALE_TIMEOUT_MS=300000
 - 检查 `infinite-canvas.tsx` 中的 `onAddImages` 参数类型，应为 `(imageUrls: string[]) => void`
 - 确保所有组件 Props 接口定义正确
 
+### 工作流 I2I 超时 / HeadersTimeoutError
+- `workflow-engine.ts` 的 `ai-generate` 节点必须设置 `submitOnly: true`，否则 `/api/generate` 会阻塞整个生成过程导致 `UND_ERR_HEADERS_TIMEOUT`
+- submitOnly 模式下 generate API 立即返回 `taskIds`，恢复工作进程（recovery worker）在 `poll-task/route.ts` 中异步执行实际生成
+- 恢复工作进程从 `submissionPayload` 读取 `referenceImages`，如果缺少参考图，检查 `submissionPayload` 是否包含 `referenceImages` 字段
+- API 返回 "请上传参考图" 类错误时，`isEditsEndpointRejected` 应匹配并触发 `/images/edits` → `/images/generations` 回退
+
+### Simple-chat 图像生成 401 认证失败
+- `simple-chat/chat/route.ts` 中内部 fetch 调用必须通过 `getInternalRequestHeaders(userId, userRole)` 传递认证头
+- 轮询 `poll-task` 时必须传递 `model` 和 `providerId` 参数，否则后端无法找到正确的 API 提供商
+- 生成请求体应包含 `submitOnly: true`，避免阻塞 SSE 流
+
 ### 热更新不生效
 - 检查是否在正确的目录修改文件
 - 确认 `.coze` 配置文件正确
@@ -814,6 +825,15 @@ UPSCALE_TIMEOUT_MS=300000
 - IOPaint 不可用时会自动降级到 AI API → 本地算法兜底
 
 ## 更新日志
+
+### v4.2.2
+
+**跨模式图像生成稳定性修复 — Simple-chat 认证 / 工作流 submitOnly / API 错误回退**
+
+- **P0: Simple-chat 图像生成认证失败修复**: `src/app/api/simple-chat/chat/route.ts` 中内部 `fetch('/api/generate')` 缺少认证头导致 401 拒绝。现通过 `getInternalRequestHeaders(user.id, user.role)` 传递内部认证头；生成请求体添加 `submitOnly: true` 避免阻塞 SSE 流；响应处理新增 `directImageUrls` 字段支持；`poll-task` 轮询请求体修正为 `model: imageModel, providerId: imageProviderId`（涉及 `src/app/api/simple-chat/chat/route.ts`）
+- **P0: Simple-chat 轮询超时窗口扩大**: 轮询上限从 60 次（3分钟）提升至 100 次（5分钟），适配慢速图像模型（涉及 `src/app/api/simple-chat/chat/route.ts`）
+- **P1: 工作流 I2I 超时修复**: `workflow-engine.ts` 的 `buildNodeExecutionRequest` 为 `ai-generate` 节点添加 `submitOnly: true`，使 `/api/generate` 立即返回 `taskIds` 而非阻塞整个生成过程（此前导致 300s `UND_ERR_HEADERS_TIMEOUT`）；同时在参考图块中添加 `body.imageUrl = refImageUrl` 确保 generate API 检测到 img2img 模式（涉及 `src/lib/workflow-engine.ts`）
+- **P1: API 错误模式匹配修复**: `api-compatibility.ts` 的 `isEditsEndpointRejected` 函数中，`请上传参考图` 精确匹配无法覆盖 `请上传你要作为参考的原图` 等变体。改为 `(lower.includes('请上传') && lower.includes('参考'))` 模糊匹配，确保所有"请上传参考图"类错误均触发 `/images/edits` → `/images/generations` 自动回退（涉及 `src/lib/api-compatibility.ts`）
 
 ### v4.2.1 (当前版本)
 

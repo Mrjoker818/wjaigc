@@ -5,6 +5,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { fetchWithTimeout } from '@/lib/api-helpers';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
+import { getInternalRequestHeaders } from '@/lib/api-auth';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -335,32 +336,38 @@ export async function POST(request: NextRequest) {
             const referenceImage = userImages.length > 0 && i2iIntent ? userImages[0] : undefined;
 
             try {
+              const internalHeaders = await getInternalRequestHeaders(user.id, user.role === 'admin' ? 'admin' : 'user');
               const imgRes = await fetch(`${request.nextUrl.origin}/api/generate`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...internalHeaders },
                 body: JSON.stringify({
                   prompt: imgPrompt,
                   model: imageModel,
                   providerId: imageProviderId,
                   size: imgSize,
                   count: 1,
+                  submitOnly: true,
                   ...(referenceImage ? { imageUrl: referenceImage, strength: i2iStrength } : {}),
                 }),
               });
-              const imgData = await imgRes.json() as { success?: boolean; taskIds?: string[]; imageUrls?: string[] };
+              const imgData = await imgRes.json() as { success?: boolean; taskIds?: string[]; imageUrls?: string[]; directImageUrls?: string[] };
 
-              if (imgData.success && imgData.taskIds?.length) {
+              // 直接返回图片的情况（同步提供商）
+              const directUrls = imgData.directImageUrls || imgData.imageUrls;
+              if (imgData.success && directUrls?.length && !imgData.taskIds?.length) {
+                send({ type: 'image', imageUrl: directUrls[0], prompt: imgPrompt });
+              } else if (imgData.success && imgData.taskIds?.length) {
                 const taskId = imgData.taskIds[0];
                 send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: '图片生成中...', taskId });
 
                 // 轮询直到完成
                 let attempts = 0;
-                while (attempts < 60) {
+                while (attempts < 100) {
                   await new Promise(r => setTimeout(r, 3000));
                   const pollRes = await fetch(`${request.nextUrl.origin}/api/poll-task`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ taskId, model }),
+                    headers: { 'Content-Type': 'application/json', ...internalHeaders },
+                    body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),
                   });
                   const pollData = await pollRes.json() as { status?: string; imageUrl?: string; progress?: number };
 

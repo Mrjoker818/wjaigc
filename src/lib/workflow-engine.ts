@@ -1608,6 +1608,7 @@ export function buildNodeExecutionRequest(
         size: actualSize || '1024x1024',
         outputCount: config.n || 1,
         seed: config.seed || -1,
+        submitOnly: true, // 工作流使用提交+轮询模式，避免generate内部长时间轮询导致超时
       };
       
       // 根据参数类型传递正确的参数
@@ -1628,6 +1629,7 @@ export function buildNodeExecutionRequest(
       if (refImageUrl) {
         const refStrength = (config.referenceStrength as number) ?? 70;
         const refMode = (config.referenceMode as string) || 'reference';
+        body.imageUrl = refImageUrl; // 单图参考（generate API 标准参数）
         body.referenceImages = [refImageUrl];
         body.referenceMode = refMode;
         body.strength = refStrength / 100; // 转换为0-1范围
