@@ -175,6 +175,11 @@ describe('dashboard model authorization contract', () => {
         providerId: 'general-provider',
       },
       {
+        id: 'general-provider::qwen3-vl',
+        name: 'qwen3-vl · general-provider label',
+        providerId: 'general-provider',
+      },
+      {
         id: 'chat-provider::chat-model',
         name: 'chat-model · chat-provider label',
         providerId: 'chat-provider',

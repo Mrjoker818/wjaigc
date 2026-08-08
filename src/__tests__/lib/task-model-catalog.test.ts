@@ -113,6 +113,33 @@ describe('task model catalog', () => {
         ],
       }),
       createProvider({
+        id: 'vlm-provider',
+        type: 'universal',
+        modelType: 'universal',
+        selectedModels: ['qwen3-vl'],
+        discoveredModels: [
+          {
+            id: 'qwen3-vl',
+            name: 'Qwen VLM',
+            providerId: 'vlm-provider',
+            type: 'chat',
+          },
+        ],
+      }),
+      createProvider({
+        id: 'chat-provider',
+        type: 'chat',
+        selectedModels: ['chat-model'],
+        discoveredModels: [
+          {
+            id: 'chat-model',
+            name: 'Chat Model',
+            providerId: 'chat-provider',
+            type: 'chat',
+          },
+        ],
+      }),
+      createProvider({
         id: 'layer-provider',
         type: 'layer',
         modelType: 'layer',
@@ -209,6 +236,40 @@ describe('task model catalog', () => {
       }),
       createUser({ id: 'unique-legacy-user', imageModels: ['unique-image'] }),
       createUser({ id: 'ambiguous-legacy-user', imageModels: ['shared-image'] }),
+      createUser({
+        id: 'vlm-selected-user',
+        chatModels: ['vlm-provider::qwen3-vl'],
+        apiPermissions: {
+          image: true,
+          chat: true,
+          threeD: true,
+          imageEdit: true,
+          vectorize: true,
+          vlm: true,
+          layer: true,
+          video: true,
+          upscaler: true,
+          removebg: true,
+          audio: true,
+        },
+      }),
+      createUser({
+        id: 'vlm-unselected-user',
+        chatModels: ['chat-provider::chat-model'],
+        apiPermissions: {
+          image: true,
+          chat: true,
+          threeD: true,
+          imageEdit: true,
+          vectorize: true,
+          vlm: true,
+          layer: true,
+          video: true,
+          upscaler: true,
+          removebg: true,
+          audio: true,
+        },
+      }),
       createUser({
         id: '302-exact-alias-user',
         imageModels: ['302-alias-provider::upscale-v6'],
@@ -433,6 +494,25 @@ describe('task model catalog', () => {
     await expect(resolveTaskModel('provider-a', 'dall-e-3', 'admin-a')).rejects.toThrow(
       'not configured',
     );
+  });
+
+  it('uses chat model exact assignments to authorize VLM models consistently', async () => {
+    await expect(resolveTaskModel(
+      'vlm-provider',
+      'qwen3-vl',
+      'vlm-selected-user',
+    )).resolves.toMatchObject({
+      providerId: 'vlm-provider',
+      modelId: 'qwen3-vl',
+      kind: 'chat',
+      supportsReferenceImages: true,
+    });
+
+    await expect(resolveTaskModel(
+      'vlm-provider',
+      'qwen3-vl',
+      'vlm-unselected-user',
+    )).rejects.toThrow('not authorized');
   });
 
   it('uses the dedicated provider type for permissions even when discovery is stale', async () => {
