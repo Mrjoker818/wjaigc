@@ -98,12 +98,16 @@ describe('POST /api/cancel-task', () => {
       type: 'edit',
       status: 'processing',
       creditCost: 4,
+      persistence: 'memory',
     });
-    mocks.getCloudTaskForUser.mockResolvedValue(null);
+    mocks.getCloudTaskForUser.mockRejectedValue(
+      new Error('postgres unavailable'),
+    );
 
     const response = await POST(request('memory-only-task'));
 
     expect(response.status).toBe(200);
+    expect(mocks.getCloudTaskForUser).not.toHaveBeenCalled();
     expect(mocks.cancelTask).toHaveBeenCalledWith('memory-only-task');
     expect(mocks.cancelEditTask).toHaveBeenCalledWith('memory-only-task');
     expect(mocks.refundCredits).toHaveBeenCalledWith(
@@ -126,6 +130,7 @@ describe('POST /api/cancel-task', () => {
       userId: 'user-a',
       type: 'generate',
       status: 'processing',
+      persistence: 'durable',
     });
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'task-db-failure',
@@ -148,6 +153,28 @@ describe('POST /api/cancel-task', () => {
     );
   });
 
+  it('does not touch the registry when durable task lookup fails', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'task-db-lookup-failure',
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+      persistence: 'durable',
+    });
+    mocks.getCloudTaskForUser.mockRejectedValue(
+      new Error('postgres unavailable'),
+    );
+
+    const response = await POST(request('task-db-lookup-failure'));
+
+    expect(response.status).toBe(500);
+    expect(mocks.cancelTask).not.toHaveBeenCalled();
+    expect(mocks.cancelEditTask).not.toHaveBeenCalled();
+    expect(mocks.updateTaskProgress).not.toHaveBeenCalled();
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+  });
+
   it('retries authoritative persistence when a cancellation signal already exists', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
     mocks.getTaskInfo.mockReturnValue({
@@ -155,6 +182,7 @@ describe('POST /api/cancel-task', () => {
       userId: 'user-a',
       type: 'generate',
       status: 'processing',
+      persistence: 'durable',
     });
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'task-cancel-retry',
@@ -181,6 +209,7 @@ describe('POST /api/cancel-task', () => {
       userId: 'user-a',
       type: 'edit',
       creditCost: 8,
+      persistence: 'durable',
     });
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'annotation-task',
@@ -213,6 +242,7 @@ describe('POST /api/cancel-task', () => {
       userId: 'user-a',
       type: 'generate-async',
       creditCost: 6,
+      persistence: 'durable',
       result: {
         submissionPayload: {
           batchId: 'batch-1',
@@ -259,6 +289,7 @@ describe('POST /api/cancel-task', () => {
       userId: 'user-a',
       type: 'generate-async',
       creditCost: 6,
+      persistence: 'durable',
     });
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'generation-slot-race',
@@ -300,6 +331,7 @@ describe('POST /api/cancel-task', () => {
       userId: 'user-a',
       type: 'video',
       creditCost: 50,
+      persistence: 'durable',
     });
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'video-task',
