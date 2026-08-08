@@ -44,6 +44,7 @@ import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
 import { resolveVideoCompatProfile } from '@/lib/video-api';
 import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';
 import { getLayerTaskStatus } from '@/lib/layer-decomposition/service';
+import { projectCanonicalGenerationSlot } from '@/lib/task-core/generation-batch';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,23 +91,24 @@ async function refundTaskCredits(
 function withGenerationSlotMetadata<T extends Record<string, unknown>>(
   payload: T,
   taskResult: Record<string, unknown> | undefined,
+  taskId: string,
 ): T {
-  const submissionPayload = taskResult?.submissionPayload as Record<string, unknown> | undefined;
-  if (!submissionPayload || typeof submissionPayload !== 'object') return payload;
-
-  if (
-    typeof submissionPayload.batchId !== 'string'
-    || typeof submissionPayload.slotId !== 'string'
-    || typeof submissionPayload.slotIndex !== 'number'
-  ) {
-    return payload;
-  }
+  const canonical = projectCanonicalGenerationSlot({
+    taskId,
+    status: typeof payload.status === 'string' ? payload.status : 'processing',
+    result: taskResult,
+    ...(typeof payload.error === 'string'
+      ? { error: { code: 'TASK_FAILED', message: payload.error } }
+      : {}),
+  });
+  if (!canonical) return payload;
 
   return {
     ...payload,
-    batchId: submissionPayload.batchId,
-    slotId: submissionPayload.slotId,
-    slotIndex: submissionPayload.slotIndex,
+    batchId: canonical.batchId,
+    slotId: canonical.slotId,
+    slotIndex: canonical.slotIndex,
+    taskId: canonical.taskId,
   };
 }
 
@@ -163,7 +165,7 @@ async function getDurableGenerationSlotResponse(
       modelName: typeof result.modelName === 'string' ? result.modelName : '',
       providerName,
       generationRouteAudit: result.generationRouteAudit,
-    }, result));
+    }, result, taskId));
   }
 
   if (['failed', 'cancelled', 'timeout'].includes(persistedTask.status)) {
@@ -173,7 +175,7 @@ async function getDurableGenerationSlotResponse(
       progress: persistedTask.progress,
       error: persistedTask.error || '任务未完成',
       retryable: persistedTask.status === 'failed',
-    }, result));
+    }, result, taskId));
   }
 
   return NextResponse.json(withGenerationSlotMetadata({
@@ -181,7 +183,7 @@ async function getDurableGenerationSlotResponse(
     status: 'processing',
     progress: persistedTask.progress,
     label: persistedTask.label || '正在生成图片',
-  }, result));
+  }, result, taskId));
 }
 
 const MAX_CACHE_SIZE = 1000;
@@ -858,7 +860,7 @@ export async function POST(request: NextRequest) {
               ? persistedTask.result.maskUrls
               : (persistedTask.result.maskUrl ? [persistedTask.result.maskUrl] : []),
             providerName,
-          }, persistedTask.result), { status: 200 });
+          }, persistedTask.result, taskId), { status: 200 });
         }
         if (persistedTask.status === 'completed' && persistedTask.result?.videoUrl) {
           return NextResponse.json({
@@ -876,7 +878,7 @@ export async function POST(request: NextRequest) {
             status: persistedTask.status,
             error: persistedTask.error || '任务未完成',
             retryable: persistedTask.status === 'failed',
-          }, persistedTask.result), { status: 200 });
+          }, persistedTask.result, taskId), { status: 200 });
         }
 
         const recovery = buildRecoveredTaskContext(persistedTask);
@@ -1074,7 +1076,7 @@ export async function POST(request: NextRequest) {
             progress: Math.max(recovery.progress, 1),
             label: '正在提交生成任务...',
             recoveryPending: true,
-          }, persistedResult), { status: 200 });
+          }, persistedResult, taskId), { status: 200 });
         }
         registryTask = getTaskInfo(taskId);
       }

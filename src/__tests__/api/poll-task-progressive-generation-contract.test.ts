@@ -40,10 +40,10 @@ describe('progressive generation recovery contract', () => {
   });
 
   it('returns durable generation slot metadata when a persisted child reaches a terminal state', () => {
-    expect(source).toContain('withGenerationSlotMetadata(');
-    expect(source).toContain('batchId: submissionPayload.batchId');
-    expect(source).toContain('slotId: submissionPayload.slotId');
-    expect(source).toContain('slotIndex: submissionPayload.slotIndex');
+    expect(source).toContain("projectCanonicalGenerationSlot");
+    expect(source).toContain('const canonical = projectCanonicalGenerationSlot({');
+    expect(source).toContain('taskId,');
+    expect(source).toContain('taskId: canonical.taskId');
   });
 
   it('uses the durable provider id to correct stale provider display names before completing a slot', () => {

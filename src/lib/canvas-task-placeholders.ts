@@ -1,4 +1,5 @@
 import { isTerminalGenerationStatus } from '@/lib/generation-batch';
+import type { CanonicalGenerationSlot } from '@/lib/task-core/generation-batch';
 
 interface ProcessingPlaceholder {
   id?: string;
@@ -8,6 +9,9 @@ interface ProcessingPlaceholder {
     progress?: number;
     label?: string;
     taskId?: string;
+    batchId?: string;
+    slotId?: string;
+    slotIndex?: number;
   };
 }
 
@@ -41,6 +45,54 @@ export function applyTaskIdsToProcessingPlaceholders<T extends ProcessingPlaceho
       processing: {
         ...image.processing,
         taskId,
+        status: 'processing',
+        progress: Math.max(image.processing.progress || 0, 10),
+        label: '已提交，等待生成',
+      },
+    };
+  });
+}
+
+/**
+ * Bind submitOnly child tasks by their durable slot identity. Response order is
+ * deliberately ignored because providers can acknowledge or complete slots in
+ * any order. placeholderIds is only used to seed metadata onto newly-created
+ * legacy placeholders that do not have a slot identity yet.
+ */
+export function applyGenerationSlotsToProcessingPlaceholders<T extends ProcessingPlaceholder>(
+  images: readonly T[],
+  slots: readonly CanonicalGenerationSlot[],
+  placeholderIds: readonly string[] = [],
+): T[] {
+  const slotsById = new Map(slots.map((slot) => [slot.slotId, slot]));
+  const slotsByIndex = new Map(slots.map((slot) => [slot.slotIndex, slot]));
+  const placeholderIndex = new Map(
+    placeholderIds.map((placeholderId, index) => [placeholderId, index] as const),
+  );
+
+  return images.map((image) => {
+    if (!image.isProcessingPlaceholder || !image.processing) return image;
+    if (isTerminalGenerationStatus(image.processing.status)) return image;
+
+    const persistedSlot = image.processing.slotId
+      ? slotsById.get(image.processing.slotId)
+      : undefined;
+    const persistedIndex = typeof image.processing.slotIndex === 'number'
+      ? image.processing.slotIndex
+      : (image.id ? placeholderIndex.get(image.id) : undefined);
+    const slot = persistedSlot
+      ?? (typeof persistedIndex === 'number' ? slotsByIndex.get(persistedIndex) : undefined);
+
+    if (!slot) return image;
+
+    return {
+      ...image,
+      processing: {
+        ...image.processing,
+        batchId: slot.batchId,
+        slotId: slot.slotId,
+        slotIndex: slot.slotIndex,
+        taskId: slot.taskId,
         status: 'processing',
         progress: Math.max(image.processing.progress || 0, 10),
         label: '已提交，等待生成',

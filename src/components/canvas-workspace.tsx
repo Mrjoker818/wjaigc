@@ -8,7 +8,11 @@ import {
   buildVideoFailureProcessing,
   createVideoRetryPayload,
 } from '@/lib/video-processing-state';
-import { applyTaskIdsToProcessingPlaceholders, shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
+import {
+  applyGenerationSlotsToProcessingPlaceholders,
+  applyTaskIdsToProcessingPlaceholders,
+  shouldPersistProcessingPlaceholder,
+} from '@/lib/canvas-task-placeholders';
 import { reconcileCompletedGenerationSlot } from '@/lib/canvas-generation-reconciliation';
 import { findUniqueLegacyTaskMatch, type RecoverableLegacyTask } from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
@@ -1894,7 +1898,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         const { taskIds, estimatedTime, prompt: enhancedPrompt, modelName: pollingModelName, providerName: pollingProviderName, apiBaseUrl: pollingApiBaseUrl } = data;
 
         // Persist task IDs before the first poll so an autosave/reload can resume them.
-        setImages((previous) => applyTaskIdsToProcessingPlaceholders(previous, placeholderIds, taskIds));
+        setImages((previous) => (
+          Array.isArray(data.slots) && data.slots.length > 0
+            ? applyGenerationSlotsToProcessingPlaceholders(previous, data.slots, placeholderIds)
+            : applyTaskIdsToProcessingPlaceholders(previous, placeholderIds, taskIds)
+        ));
 
         // 自适应轮询间隔策略（优化版）
         // 前期更快探测，后期适度延长避免浪费请求
