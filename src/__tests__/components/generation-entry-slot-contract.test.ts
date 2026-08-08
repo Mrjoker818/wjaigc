@@ -51,9 +51,13 @@ describe('shared generation slot contract across entry points', () => {
 
   it('keeps workflow image nodes routed through submitOnly /api/generate', () => {
     const workflow = readSource('src/lib/workflow-engine.ts');
+    const generateStart = workflow.indexOf("case 'ai-generate':");
+    const generateEnd = workflow.indexOf("case 'ai-edit':", generateStart);
+    const generateBranch = workflow.slice(generateStart, generateEnd);
 
     expect(workflow).toContain("endpoint: '/api/generate'");
-    expect(workflow).toContain('submitOnly: true');
-    expect(workflow).toContain('outputCount: config.n || 1');
+    expect(generateBranch).toContain('submitOnly: true');
+    expect(generateBranch).toContain('outputCount: config.n || 1');
+    expect(generateBranch.match(/submitOnly:\s*true/g)).toHaveLength(1);
   });
 });

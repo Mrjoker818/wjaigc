@@ -1607,7 +1607,6 @@ export function buildNodeExecutionRequest(
         aspectRatio,
         size: actualSize || '1024x1024',
         outputCount: config.n || 1,
-        submitOnly: true,
         seed: config.seed || -1,
         submitOnly: true, // 工作流使用提交+轮询模式，避免generate内部长时间轮询导致超时
       };
