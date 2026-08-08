@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyGenerationSlotsToProcessingPlaceholders,
   applyTaskIdsToProcessingPlaceholders,
   shouldPersistProcessingPlaceholder,
 } from '@/lib/canvas-task-placeholders';
@@ -37,5 +38,103 @@ describe('canvas-task-placeholders', () => {
       ['frame-a'],
       ['task-a'],
     )).toEqual(images);
+  });
+
+  it('binds submitted tasks to placeholders by durable slot identity instead of response order', () => {
+    const images = [
+      {
+        id: 'frame-slot-0',
+        isProcessingPlaceholder: true,
+        processing: {
+          status: 'submitting',
+          progress: 5,
+          batchId: 'batch-a',
+          slotId: 'batch-a:0',
+          slotIndex: 0,
+        },
+      },
+      {
+        id: 'frame-slot-1',
+        isProcessingPlaceholder: true,
+        processing: {
+          status: 'submitting',
+          progress: 5,
+          batchId: 'batch-a',
+          slotId: 'batch-a:1',
+          slotIndex: 1,
+        },
+      },
+    ];
+
+    const result = applyGenerationSlotsToProcessingPlaceholders(images, [
+      { batchId: 'batch-a', slotId: 'batch-a:1', slotIndex: 1, taskId: 'task-b', status: 'submitting' },
+      { batchId: 'batch-a', slotId: 'batch-a:0', slotIndex: 0, taskId: 'task-a', status: 'submitting' },
+    ]);
+
+    expect(result[0].processing).toMatchObject({
+      batchId: 'batch-a',
+      slotId: 'batch-a:0',
+      slotIndex: 0,
+      taskId: 'task-a',
+    });
+    expect(result[1].processing).toMatchObject({
+      batchId: 'batch-a',
+      slotId: 'batch-a:1',
+      slotIndex: 1,
+      taskId: 'task-b',
+    });
+  });
+
+  it('keeps legacy taskIds array compatibility for placeholders without slot metadata', () => {
+    const images: Array<{
+      id: string;
+      isProcessingPlaceholder: boolean;
+      processing: {
+        status: string;
+        progress: number;
+        taskId?: string;
+      };
+    }> = [
+      { id: 'legacy-a', isProcessingPlaceholder: true, processing: { status: 'submitting', progress: 5 } },
+      { id: 'legacy-b', isProcessingPlaceholder: true, processing: { status: 'submitting', progress: 5 } },
+    ];
+
+    expect(applyTaskIdsToProcessingPlaceholders(
+      images,
+      ['legacy-a', 'legacy-b'],
+      ['task-a', 'task-b'],
+    ).map((image) => image.processing?.taskId))
+      .toEqual(['task-a', 'task-b']);
+  });
+
+  it('persists a reused terminal slot task id so reload can fetch its durable result', () => {
+    const images = [{
+      id: 'frame-slot-0',
+      isProcessingPlaceholder: true,
+      processing: {
+        status: 'submitting',
+        progress: 5,
+        batchId: 'batch-a',
+        slotId: 'batch-a:0',
+        slotIndex: 0,
+      },
+    }];
+
+    const result = applyGenerationSlotsToProcessingPlaceholders(images, [{
+      batchId: 'batch-a',
+      slotId: 'batch-a:0',
+      slotIndex: 0,
+      taskId: 'completed-task',
+      status: 'completed',
+      result: { imageUrl: 'https://cdn.example.com/completed.png' },
+    }]);
+
+    expect(result[0].processing).toMatchObject({
+      batchId: 'batch-a',
+      slotId: 'batch-a:0',
+      slotIndex: 0,
+      taskId: 'completed-task',
+      status: 'processing',
+    });
   });
 });

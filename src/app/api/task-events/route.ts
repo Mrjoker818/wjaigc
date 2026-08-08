@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { subscribeToTaskEvents, type TaskEvent } from '@/lib/task-registry';
 import { getTaskEventTransport } from '@/lib/task-event-transport';
+import { attachCanonicalGenerationSlotToEvent } from '@/lib/task-core/generation-batch';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,12 @@ export async function POST(_request: NextRequest) {
     success: false,
     error: 'SSE endpoint requires GET. Use EventSource to connect.',
   });
+}
+
+export function projectTaskEventPayload(
+  event: TaskEvent,
+): ReturnType<typeof attachCanonicalGenerationSlotToEvent<TaskEvent>> {
+  return attachCanonicalGenerationSlotToEvent(event);
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
@@ -39,7 +46,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       const unsubscribe = subscribeToTaskEvents((event: TaskEvent) => {
         try {
           if (event.task?.userId !== currentUserId) return;
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          const payload = projectTaskEventPayload(event);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         } catch {
           if (heartbeat) clearInterval(heartbeat);
           unsubscribe();
