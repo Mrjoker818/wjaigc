@@ -150,6 +150,191 @@ describe('cloud-task-storage', () => {
     )).toBe(false);
   });
 
+  it('allows edit progress to remain processing with revision CAS', async () => {
+    execSql.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT * FROM cloud_tasks WHERE id = $1')) {
+        return {
+          rows: [{
+            id: 'edit-processing',
+            user_id: 'user-a',
+            type: 'annotation-edit',
+            status: 'processing',
+            progress: 20,
+            credit_status: 'charged',
+            revision: 6,
+            created_at: 100,
+            updated_at: 100,
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [{ id: 'edit-processing' }], rowCount: 1 };
+    });
+
+    await expect(updateCloudTask('edit-processing', {
+      status: 'processing',
+      progress: 45,
+      label: 'Applying edit',
+      result: { stage: 'inpaint' },
+      expectedStatuses: ['processing'],
+    })).resolves.toBe(true);
+
+    const update = execSql.mock.calls.find(([sql]) =>
+      String(sql).startsWith('UPDATE cloud_tasks SET')
+    );
+    expect(update?.[0]).toContain('status = ANY');
+    expect(update?.[0]).toContain('revision = $');
+    expect(update?.[1]).toEqual(expect.arrayContaining([
+      ['processing'],
+      6,
+    ]));
+  });
+
+  it('keeps legal pending and processing sources for a processing patch', async () => {
+    execSql.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT * FROM cloud_tasks WHERE id = $1')) {
+        return {
+          rows: [{
+            id: 'pending-or-processing',
+            user_id: 'user-a',
+            type: 'generate',
+            status: 'processing',
+            progress: 10,
+            credit_status: 'charged',
+            revision: 3,
+            created_at: 100,
+            updated_at: 100,
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [{ id: 'pending-or-processing' }], rowCount: 1 };
+    });
+
+    await expect(updateCloudTask('pending-or-processing', {
+      status: 'processing',
+      progress: 25,
+      expectedStatuses: ['pending', 'processing'],
+    })).resolves.toBe(true);
+
+    const update = execSql.mock.calls.find(([sql]) =>
+      String(sql).startsWith('UPDATE cloud_tasks SET')
+    );
+    expect(update?.[1]).toEqual(expect.arrayContaining([
+      ['submitting', 'pending', 'processing'],
+      3,
+    ]));
+  });
+
+  it.each([
+    ['queued', 'queued', ['queued']],
+    ['pending', 'pending', ['submitting', 'pending']],
+  ] as const)(
+    'allows nonterminal legacy %s to remain %s with revision CAS',
+    async (persistedStatus, patchStatus, persistedExpectedStatuses) => {
+      execSql.mockImplementation(async (sql: string) => {
+        if (sql.includes('SELECT * FROM cloud_tasks WHERE id = $1')) {
+          return {
+            rows: [{
+              id: `same-${persistedStatus}`,
+              user_id: 'user-a',
+              type: 'generate',
+              status: persistedStatus,
+              progress: 10,
+              credit_status: 'pending',
+              revision: 5,
+              created_at: 100,
+              updated_at: 100,
+            }],
+            rowCount: 1,
+          };
+        }
+        return { rows: [{ id: `same-${persistedStatus}` }], rowCount: 1 };
+      });
+
+      await expect(updateCloudTask(`same-${persistedStatus}`, {
+        status: patchStatus,
+        progress: 15,
+        label: 'Still active',
+        expectedStatuses: [patchStatus],
+      })).resolves.toBe(true);
+
+      const update = execSql.mock.calls.find(([sql]) =>
+        String(sql).startsWith('UPDATE cloud_tasks SET')
+      );
+      expect(update?.[1]).toEqual(expect.arrayContaining([
+        persistedExpectedStatuses,
+        5,
+      ]));
+    },
+  );
+
+  it('allows workflow to repeat processing without weakening terminal guards', async () => {
+    execSql.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT * FROM cloud_tasks WHERE id = $1')) {
+        return {
+          rows: [{
+            id: 'workflow-processing',
+            user_id: 'user-a',
+            type: 'workflow',
+            status: 'processing',
+            progress: 60,
+            credit_status: 'not-applicable',
+            revision: 8,
+            created_at: 100,
+            updated_at: 100,
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [{ id: 'workflow-processing' }], rowCount: 1 };
+    });
+
+    await expect(updateCloudTask('workflow-processing', {
+      status: 'processing',
+      progress: 70,
+      label: 'Running node 4',
+    })).resolves.toBe(true);
+    expect(execSql.mock.calls.some(([sql]) =>
+      String(sql).includes('revision = $')
+    )).toBe(true);
+  });
+
+  it.each(['completed', 'failed', 'cancelled', 'timeout'] as const)(
+    'rejects terminal %s same-status business patches',
+    async (status) => {
+      execSql.mockImplementation(async (sql: string) => {
+        if (sql.includes('SELECT * FROM cloud_tasks WHERE id = $1')) {
+          return {
+            rows: [{
+              id: `terminal-same-${status}`,
+              user_id: 'user-a',
+              type: 'generate',
+              status,
+              progress: status === 'completed' ? 100 : 0,
+              credit_status: 'charged',
+              revision: 9,
+              created_at: 100,
+              updated_at: 100,
+            }],
+            rowCount: 1,
+          };
+        }
+        return { rows: [{ id: `terminal-same-${status}` }], rowCount: 1 };
+      });
+
+      await expect(updateCloudTask(`terminal-same-${status}`, {
+        status,
+        progress: 50,
+        result: { overwrite: true },
+        expectedStatuses: [status],
+      })).resolves.toBe(false);
+      expect(execSql.mock.calls.some(([sql]) =>
+        String(sql).startsWith('UPDATE cloud_tasks SET')
+      )).toBe(false);
+    },
+  );
+
   it.each([
     ['progress', { progress: 5 }],
     ['result', { result: { imageUrl: '/overwrite.png' } }],

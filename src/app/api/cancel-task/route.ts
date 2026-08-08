@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
 
     // ★ 退款：取消任务时退还已扣除的积分
     let refunded = false;
-    let terminalSettled = false;
+    let terminalSettled = Boolean(taskInfo && !persistedTask);
     const creditCost = taskInfo?.creditCost ?? persistedTask?.creditCost ?? 0;
     const creditOwnerId = taskInfo?.userId ?? persistedTask?.userId;
     if (persistedTask?.type === 'annotation-edit') {

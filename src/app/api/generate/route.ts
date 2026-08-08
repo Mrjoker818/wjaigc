@@ -450,9 +450,15 @@ export async function POST(request: NextRequest) {
       }
       registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
       updateTaskProgress(asyncTaskId, { result: { submissionPayload } });
-      const recordSubmitOnlyTerminal = (input: Parameters<typeof recordImageTaskTerminal>[1]) => {
-        void recordImageTaskTerminal(asyncTaskId, input)
-          .catch(error => console.warn('[generate] submitOnly cloud task terminal update failed:', error));
+      const recordSubmitOnlyTerminal = async (
+        input: Parameters<typeof recordImageTaskTerminal>[1],
+      ) => {
+        try {
+          return await recordImageTaskTerminal(asyncTaskId, input);
+        } catch (error) {
+          console.warn('[generate] submitOnly cloud task terminal update failed:', error);
+          return undefined;
+        }
       };
       // 记录积分成本到任务信息中，用于取消时退款
       if (deductedCredits > 0) {
@@ -490,8 +496,7 @@ export async function POST(request: NextRequest) {
           console.log(`[generate] submitOnly bgData keys: ${Object.keys(bgData).join(',')}, success: ${bgData.success}, taskIds: ${bgData.taskIds?.length || 0}`);
 
           if (!bgRes.ok || !bgData.success) {
-            updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: bgData.error || '生成失败', label: '生成失败' });
-            recordSubmitOnlyTerminal({
+            await recordSubmitOnlyTerminal({
               status: 'failed',
               error: typeof bgData.error === 'string' ? bgData.error : '生成失败',
               creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
@@ -519,22 +524,7 @@ export async function POST(request: NextRequest) {
 
             if (asyncOnlyTaskIds.length === 0) {
               // 纯直接模式：所有图片都已返回
-              updateTaskProgress(asyncTaskId, {
-                status: 'completed',
-                progress: 100,
-                label: `生成完成 (${directUrls.length}张)`,
-                result: {
-                  imageUrl: directUrls[0],
-                  imageUrls: directUrls,
-                  usedModel: bgData.model,
-                  modelName: bgData.modelName,
-                  providerName: bgData.providerName,
-                  generationRouteAudit: bgGenerationRouteAudit,
-                  apiBaseUrl: bgData.apiBaseUrl,
-                  providerId: bgData.providerId,
-                }
-              });
-              recordSubmitOnlyTerminal({
+              await recordSubmitOnlyTerminal({
                 status: 'completed',
                 imageUrl: directUrls[0],
                 imageUrls: directUrls,
@@ -617,22 +607,7 @@ export async function POST(request: NextRequest) {
             // 合并所有结果
             const allUrls = Array.from(new Set(mixedCollectedUrls.filter(u => typeof u === 'string' && u.length > 0)));
             if (allUrls.length > 0) {
-              updateTaskProgress(asyncTaskId, {
-                status: 'completed',
-                progress: 100,
-                label: `生成完成 (${allUrls.length}张)`,
-                result: {
-                  imageUrl: allUrls[0],
-                  imageUrls: allUrls,
-                  usedModel: bgData.model,
-                  modelName: bgData.modelName,
-                  providerName: bgData.providerName,
-                  generationRouteAudit: bgGenerationRouteAudit,
-                  apiBaseUrl: bgData.apiBaseUrl,
-                  providerId: bgData.providerId,
-                }
-              });
-              recordSubmitOnlyTerminal({
+              await recordSubmitOnlyTerminal({
                 status: 'completed',
                 imageUrl: allUrls[0],
                 imageUrls: allUrls,
@@ -641,8 +616,7 @@ export async function POST(request: NextRequest) {
               });
               console.log(`[generate] submitOnly mixed mode completed: ${allUrls.length} images for ${asyncTaskId}`);
             } else {
-              updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成失败', label: '生成失败' });
-              recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
+              await recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
             }
             return;
           }
@@ -672,26 +646,15 @@ export async function POST(request: NextRequest) {
               }
               return { imageUrls: Array.from(new Set(imageUrls)), result, failed };
             };
-            const completeDirectTasks = (imageUrls: string[], directResult?: Record<string, unknown>): void => {
-              updateTaskProgress(asyncTaskId, {
-                status: 'completed',
-                progress: 100,
-                label: `生成完成 (${imageUrls.length}张)`,
-                result: {
-                  imageUrl: imageUrls[0], imageUrls,
-                  usedModel: bgData.model || directResult?.usedModel,
-                  modelName: bgData.modelName || directResult?.modelName,
-                  providerName: bgData.providerName || directResult?.providerName,
-                  generationRouteAudit: bgGenerationRouteAudit || directResult?.generationRouteAudit,
-                  apiBaseUrl: bgData.apiBaseUrl || directResult?.apiBaseUrl,
-                  providerId: bgData.providerId || directResult?.providerId,
-                }
-              });
-              recordSubmitOnlyTerminal({ status: 'completed', imageUrl: imageUrls[0], imageUrls, creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable', generationRouteAudit: bgGenerationRouteAudit || directResult?.generationRouteAudit });
+            const completeDirectTasks = async (
+              imageUrls: string[],
+              directResult?: Record<string, unknown>,
+            ): Promise<void> => {
+              await recordSubmitOnlyTerminal({ status: 'completed', imageUrl: imageUrls[0], imageUrls, creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable', generationRouteAudit: bgGenerationRouteAudit || directResult?.generationRouteAudit });
             };
             const immediateDirect = collectDirectResults();
             if (immediateDirect.imageUrls.length > 0) {
-              completeDirectTasks(immediateDirect.imageUrls, immediateDirect.result);
+              await completeDirectTasks(immediateDirect.imageUrls, immediateDirect.result);
               return;
             }
             console.log('[generate] submitOnly direct tasks not yet completed, waiting...');
@@ -699,12 +662,11 @@ export async function POST(request: NextRequest) {
               await new Promise(r => setTimeout(r, 1000));
               const waitedDirect = collectDirectResults();
               if (waitedDirect.imageUrls.length > 0) {
-                completeDirectTasks(waitedDirect.imageUrls, waitedDirect.result);
+                await completeDirectTasks(waitedDirect.imageUrls, waitedDirect.result);
                 return;
               }
               if (waitedDirect.failed) {
-                updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成失败', label: '生成失败' });
-                recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
+                await recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
                 return;
               }
             }
@@ -878,23 +840,7 @@ export async function POST(request: NextRequest) {
             allCompleted = pendingSet.size === 0 && collectedResults.size === bgTaskIds.length;
 
             if (allCompleted && collectedImageUrls.length > 0) {
-              updateTaskProgress(asyncTaskId, {
-                status: 'completed',
-                progress: 100,
-                label: `生成完成 (${collectedImageUrls.length}张)`,
-                result: {
-                  imageUrl: collectedImageUrls[0],
-                  imageUrls: collectedImageUrls,
-                  maskUrl: collectedMaskUrls[0] || '',
-                  maskUrls: collectedMaskUrls,
-                  modelName: bgData.modelName || '',
-                  providerName: bgData.providerName || '',
-                  usedModel: bgData.model,
-                  apiBaseUrl: bgData.apiBaseUrl,
-                  providerId: bgData.providerId,
-                }
-              });
-              recordSubmitOnlyTerminal({
+              await recordSubmitOnlyTerminal({
                 status: 'completed',
                 imageUrl: collectedImageUrls[0],
                 imageUrls: collectedImageUrls,
@@ -907,8 +853,7 @@ export async function POST(request: NextRequest) {
             }
 
             if (anyFailed) {
-              updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: failedError, label: '生成失败' });
-              recordSubmitOnlyTerminal({ status: 'failed', error: failedError, creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
+              await recordSubmitOnlyTerminal({ status: 'failed', error: failedError, creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
               if (deductedCredits > 0 && sessionUser) {
                 try {
                   const { refundCredits } = await import('@/lib/credits');
@@ -918,8 +863,7 @@ export async function POST(request: NextRequest) {
               return;
             }
 
-            updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成超时', label: '生成超时' });
-            recordSubmitOnlyTerminal({ status: 'timeout', error: '生成超时', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
+            await recordSubmitOnlyTerminal({ status: 'timeout', error: '生成超时', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
             if (deductedCredits > 0 && sessionUser) {
               try {
                 const { refundCredits } = await import('@/lib/credits');
@@ -930,8 +874,7 @@ export async function POST(request: NextRequest) {
           }
 
           // 无图片也无 taskIds — 失败
-          updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '未获得生成结果', label: '生成失败' });
-          recordSubmitOnlyTerminal({
+          await recordSubmitOnlyTerminal({
             status: 'failed',
             error: '未获得生成结果',
             creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
@@ -946,8 +889,7 @@ export async function POST(request: NextRequest) {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`[generate] submitOnly background error for ${asyncTaskId}:`, msg);
-          updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: msg, label: '生成失败' });
-          recordSubmitOnlyTerminal({
+          await recordSubmitOnlyTerminal({
             status: 'failed',
             error: msg,
             creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
@@ -2928,39 +2870,48 @@ export async function POST(request: NextRequest) {
         const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
         taskIds.push(directTid);
         registerTask(directTid, 'generate', '生成图片', userId);
-        void recordImageTaskSubmitted({
-          taskId: directTid,
-          userId,
-          projectId: typeof projectId === 'string' ? projectId : undefined,
-          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
-          messageId: typeof messageId === 'string' ? messageId : undefined,
-          providerId: usedProviderId,
-          model: usedModelId,
-          persist: !_skipCloudTaskPersistence,
-        }).catch(error => console.warn('[generate] 云端任务记录创建失败:', error));
-        // 先用原始 URL 标记为已完成，确保前端能立即获取到结果
-        updateTaskProgress(directTid, {
-          status: 'completed',
-          progress: 100,
-          result: {
-            imageUrl: rawUrl,
-            usedModel: usedModelId,
-            modelName: usedModelName,
-            providerName: usedProviderName,
-            generationRouteAudit,
-            apiBaseUrl: usedApiBaseUrl,
-            apiKey: provider?.apiKey || serverApiKey,
-            providerId: usedProviderId,
-            advancedParams: provider?.advancedParams,
+        let terminalTransitioned = false;
+        if (_skipCloudTaskPersistence) {
+          updateTaskProgress(directTid, {
+            status: 'completed',
+            progress: 100,
+            result: {
+              imageUrl: rawUrl,
+              usedModel: usedModelId,
+              modelName: usedModelName,
+              providerName: usedProviderName,
+              generationRouteAudit,
+              apiBaseUrl: usedApiBaseUrl,
+              apiKey: provider?.apiKey || serverApiKey,
+              providerId: usedProviderId,
+              advancedParams: provider?.advancedParams,
+            }
+          });
+          terminalTransitioned = true;
+        } else {
+          try {
+            const taskCreated = await recordImageTaskSubmitted({
+              taskId: directTid,
+              userId,
+              projectId: typeof projectId === 'string' ? projectId : undefined,
+              sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+              messageId: typeof messageId === 'string' ? messageId : undefined,
+              providerId: usedProviderId,
+              model: usedModelId,
+            });
+            if (taskCreated) {
+              const terminal = await recordImageTaskTerminal(directTid, {
+                status: 'completed',
+                imageUrl: rawUrl,
+                creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+                generationRouteAudit,
+              });
+              terminalTransitioned = terminal?.transitioned === true;
+            }
+          } catch (error) {
+            console.warn('[generate] 云端任务完成记录失败:', error);
           }
-        });
-        void recordImageTaskTerminal(directTid, {
-          status: 'completed',
-          imageUrl: rawUrl,
-          creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
-          generationRouteAudit,
-          persist: !_skipCloudTaskPersistence,
-        }).catch(error => console.warn('[generate] 云端任务完成记录失败:', error));
+        }
         // 后台异步持久化：不阻塞响应，完成后更新 task 结果为持久化 URL
         const tid = directTid;
         const providerInfo = {
@@ -2970,7 +2921,7 @@ export async function POST(request: NextRequest) {
           providerId: usedProviderId, advancedParams: provider?.advancedParams,
         };
         persistRemoteImage(rawUrl).then(persistedUrl => {
-          if (persistedUrl && persistedUrl !== rawUrl) {
+          if (terminalTransitioned && persistedUrl && persistedUrl !== rawUrl) {
             updateTaskProgress(tid, {
               status: 'completed', progress: 100,
               result: { imageUrl: persistedUrl, ...providerInfo }
