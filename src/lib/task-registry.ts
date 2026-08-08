@@ -139,7 +139,11 @@ export function waitForQueueSlot(taskId: string, timeoutMs: number = 5 * 60 * 10
     // 监听任务状态变化
     const subscription = subscribeToTaskEvents((event) => {
       if (event.taskId !== taskId) return;
-      if (event.task.status === 'pending' || event.task.status === 'processing') {
+      if (isTaskCancelled(taskId)) {
+        clearTimeout(timer);
+        subscription();
+        resolve(false);
+      } else if (event.task.status === 'pending' || event.task.status === 'processing') {
         clearTimeout(timer);
         subscription();
         resolve(true); // 获得槽位
@@ -207,7 +211,8 @@ export function cancelTask(taskId: string): boolean {
   if (cancelledTasks.has(taskId)) return true;
   cancelledTasks.set(taskId, Date.now());
   abortTaskExecution(taskId, new Error(`Task ${taskId} was cancelled`));
-  updateTaskProgress(taskId, { status: 'cancelled' });
+  const task = taskRegistry.get(taskId);
+  if (task) emitEvent('updated', task);
   return true;
 }
 

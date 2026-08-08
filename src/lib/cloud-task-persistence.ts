@@ -1,16 +1,19 @@
-import * as cloudTaskStorage from '@/lib/cloud-task-storage';
+import {
+  createCloudTask,
+  updateCloudTask,
+  type CloudTask,
+  type CloudTaskCreditStatus,
+  type CloudTaskStatus,
+} from '@/lib/cloud-task-storage';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
+import {
+  transitionTask,
+  type TransitionTaskResult,
+} from '@/lib/task-core/task-service';
 import type {
   DurableTaskStatus,
   UnifiedTaskError,
 } from '@/lib/task-core/task-state';
-
-type CloudTask = import('@/lib/cloud-task-storage').CloudTask;
-type CloudTaskCreditStatus =
-  import('@/lib/cloud-task-storage').CloudTaskCreditStatus;
-type CloudTaskStatus = import('@/lib/cloud-task-storage').CloudTaskStatus;
-
-const { createCloudTask, updateCloudTask } = cloudTaskStorage;
 
 interface ImageTaskSubmission {
   taskId: string;
@@ -102,37 +105,15 @@ const FAILURE_TERMINAL_FROM: DurableTaskStatus[] = [
   'uploading',
 ];
 
-function supportsAuthoritativeTaskState(): boolean {
-  return Object.prototype.hasOwnProperty.call(
-    cloudTaskStorage,
-    'transitionCloudTaskStatus',
-  ) && Object.prototype.hasOwnProperty.call(
-    cloudTaskStorage,
-    'getCloudTaskById',
-  );
-}
-
 async function persistTerminalTask(
   taskId: string,
   input: PersistTerminalTaskInput,
-): Promise<void> {
+): Promise<TransitionTaskResult> {
   const creditStatus = input.creditStatus || 'pending';
-  if (!supportsAuthoritativeTaskState()) {
-    await updateCloudTask(taskId, {
-      status: input.status,
-      progress: input.status === 'completed' ? 100 : 0,
-      result: input.result,
-      error: input.error,
-      creditStatus,
-    });
-    return;
-  }
-
-  const { transitionTask } = await import('@/lib/task-core/task-service');
   const error: UnifiedTaskError | undefined = input.error
     ? { code: 'LEGACY_TASK_ERROR', message: input.error }
     : undefined;
-  const outcome = await transitionTask({
+  return transitionTask({
     taskId,
     from: input.status === 'completed'
       ? ['processing']
@@ -140,11 +121,8 @@ async function persistTerminalTask(
     to: input.status,
     result: input.result,
     error,
+    creditStatus,
   });
-
-  if (outcome.transitioned) {
-    await updateCloudTask(taskId, { creditStatus });
-  }
 }
 
 export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Promise<boolean> {
@@ -182,7 +160,10 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
   });
 }
 
-export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTerminal): Promise<void> {
+export async function recordImageTaskTerminal(
+  taskId: string,
+  input: ImageTaskTerminal,
+): Promise<TransitionTaskResult | undefined> {
   if (input.persist === false) return;
 
   const imageUrls = Array.from(new Set([
@@ -206,7 +187,7 @@ export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTe
       }
     : undefined;
 
-  await persistTerminalTask(taskId, {
+  return persistTerminalTask(taskId, {
     status: input.status,
     result,
     error: input.error,
@@ -249,12 +230,15 @@ export async function recordVideoTaskRemotePolling(
   });
 }
 
-export async function recordVideoTaskTerminal(taskId: string, input: VideoTaskTerminal): Promise<void> {
+export async function recordVideoTaskTerminal(
+  taskId: string,
+  input: VideoTaskTerminal,
+): Promise<TransitionTaskResult> {
   const result = input.videoUrl
     ? { videoUrl: input.videoUrl, imageUrl: input.imageUrl || '' }
     : undefined;
 
-  await persistTerminalTask(taskId, {
+  return persistTerminalTask(taskId, {
     status: input.status,
     result,
     error: input.error,
@@ -279,12 +263,15 @@ export async function recordThreeDTaskSubmitted(input: ThreeDTaskSubmission): Pr
   });
 }
 
-export async function recordThreeDTaskTerminal(taskId: string, input: ThreeDTaskTerminal): Promise<void> {
+export async function recordThreeDTaskTerminal(
+  taskId: string,
+  input: ThreeDTaskTerminal,
+): Promise<TransitionTaskResult> {
   const result = input.assetUrl
     ? { assetUrl: input.assetUrl, previewImageUrl: input.previewImageUrl || '' }
     : undefined;
 
-  await persistTerminalTask(taskId, {
+  return persistTerminalTask(taskId, {
     status: input.status,
     result,
     error: input.error,
@@ -292,8 +279,11 @@ export async function recordThreeDTaskTerminal(taskId: string, input: ThreeDTask
   });
 }
 
-export async function recordCloudTaskCancelled(taskId: string, refunded: boolean): Promise<void> {
-  await persistTerminalTask(taskId, {
+export async function recordCloudTaskCancelled(
+  taskId: string,
+  refunded: boolean,
+): Promise<TransitionTaskResult> {
+  return persistTerminalTask(taskId, {
     status: 'cancelled',
     creditStatus: refunded ? 'refunded' : 'pending',
   });

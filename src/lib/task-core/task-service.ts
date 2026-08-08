@@ -1,6 +1,7 @@
 import {
   getCloudTaskById,
   transitionCloudTaskStatus,
+  type CloudTaskCreditStatus,
   type PersistedCloudTask,
 } from '@/lib/cloud-task-storage';
 import { updateTaskProgress } from '@/lib/task-registry';
@@ -19,11 +20,21 @@ export interface TransitionTaskInput {
   revision?: number;
   result?: Record<string, unknown>;
   error?: UnifiedTaskError;
+  creditStatus?: CloudTaskCreditStatus;
 }
 
 export interface TransitionTaskResult {
   transitioned: boolean;
   task: DurableTask;
+}
+
+export class TaskNotFoundError extends Error {
+  readonly code = 'TASK_NOT_FOUND';
+
+  constructor(readonly taskId: string) {
+    super(`Task not found: ${taskId}`);
+    this.name = 'TaskNotFoundError';
+  }
 }
 
 export async function transitionTask(
@@ -35,7 +46,7 @@ export async function transitionTask(
 
   const current = await getCloudTaskById(input.taskId);
   if (!current) {
-    throw new Error(`Task not found: ${input.taskId}`);
+    throw new TaskNotFoundError(input.taskId);
   }
 
   const durableCurrent = toDurableTask(current);
@@ -57,9 +68,10 @@ export async function transitionTask(
     revision: input.revision ?? durableCurrent.revision,
     result: input.result,
     error: input.error,
+    creditStatus: input.creditStatus,
   });
   if (!outcome.task) {
-    throw new Error(`Task disappeared during transition: ${input.taskId}`);
+    throw new TaskNotFoundError(input.taskId);
   }
 
   const task = toDurableTask(outcome.task);

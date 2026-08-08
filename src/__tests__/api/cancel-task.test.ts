@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getTaskInfo: vi.fn(),
   isTaskCancelled: vi.fn(),
   cancelTask: vi.fn(),
+  updateTaskProgress: vi.fn(),
   cancelEditTask: vi.fn(),
   refundCredits: vi.fn(),
   getCloudTaskForUser: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('@/lib/task-registry', () => ({
   getTaskInfo: mocks.getTaskInfo,
   isTaskCancelled: mocks.isTaskCancelled,
   cancelTask: mocks.cancelTask,
+  updateTaskProgress: mocks.updateTaskProgress,
 }));
 vi.mock('@/lib/edit-task-store', () => ({ cancelEditTask: mocks.cancelEditTask }));
 vi.mock('@/lib/credits', () => ({ refundCredits: mocks.refundCredits }));
@@ -43,7 +45,10 @@ describe('POST /api/cancel-task', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
     mocks.isTaskCancelled.mockReturnValue(false);
-    mocks.recordCloudTaskCancelled.mockResolvedValue(undefined);
+    mocks.recordCloudTaskCancelled.mockResolvedValue({
+      transitioned: true,
+      task: { id: 'cancelled-task', status: 'cancelled', revision: 1 },
+    });
     mocks.terminateCloudTaskAndRefund.mockResolvedValue({
       status: 'cancelled',
       transitioned: true,
@@ -85,6 +90,61 @@ describe('POST /api/cancel-task', () => {
     expect(mocks.recordCloudTaskCancelled).toHaveBeenCalledWith('task-owned', false);
   });
 
+  it('does not project cancelled when authoritative persistence fails', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'task-db-failure',
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'task-db-failure',
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+      creditCost: 0,
+    });
+    mocks.recordCloudTaskCancelled.mockRejectedValue(
+      new Error('postgres unavailable'),
+    );
+
+    const response = await POST(request('task-db-failure'));
+
+    expect(response.status).toBe(500);
+    expect(mocks.cancelTask).toHaveBeenCalledWith('task-db-failure');
+    expect(mocks.updateTaskProgress).not.toHaveBeenCalledWith(
+      'task-db-failure',
+      expect.objectContaining({ status: 'cancelled' }),
+    );
+  });
+
+  it('retries authoritative persistence when a cancellation signal already exists', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'task-cancel-retry',
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'task-cancel-retry',
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+      creditCost: 0,
+    });
+    mocks.isTaskCancelled.mockReturnValue(true);
+
+    const response = await POST(request('task-cancel-retry'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordCloudTaskCancelled).toHaveBeenCalledWith(
+      'task-cancel-retry',
+      false,
+    );
+  });
+
   it('settles annotation cancellation and refund from the database terminal state', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
     mocks.getTaskInfo.mockReturnValue({
@@ -111,6 +171,10 @@ describe('POST /api/cancel-task', () => {
     );
     expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
     expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+    expect(mocks.updateTaskProgress).toHaveBeenCalledWith(
+      'annotation-task',
+      { status: 'cancelled', progress: 0 },
+    );
   });
 
   it('settles a durable generation slot atomically so a late provider completion cannot win', async () => {
@@ -153,6 +217,10 @@ describe('POST /api/cancel-task', () => {
     );
     expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
     expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+    expect(mocks.updateTaskProgress).toHaveBeenCalledWith(
+      'generation-slot-task',
+      { status: 'cancelled', progress: 0 },
+    );
   });
 
   it('does not report a durable generation slot as cancelled when its database terminal transition loses', async () => {
@@ -222,5 +290,9 @@ describe('POST /api/cancel-task', () => {
     );
     expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
     expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+    expect(mocks.updateTaskProgress).toHaveBeenCalledWith(
+      'video-task',
+      { status: 'cancelled', progress: 0 },
+    );
   });
 });

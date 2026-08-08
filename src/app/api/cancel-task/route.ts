@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cancelTask, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
+import {
+  cancelTask,
+  getTaskInfo,
+  updateTaskProgress,
+} from '@/lib/task-registry';
 import { cancelEditTask } from '@/lib/edit-task-store';
 import { getSessionUser as getAuthUser } from '@/lib/server-auth';
 import { refundCredits } from '@/lib/credits';
@@ -87,7 +91,9 @@ export async function POST(request: NextRequest) {
     const safeTaskInfo = taskInfo ? (() => {
       const { result, ...rest } = taskInfo;
       if (result && typeof result === 'object') {
-        const { apiKey: _ak, apiBaseUrl: _abu, ...safeResult } = result as Record<string, unknown>;
+        const safeResult = { ...result } as Record<string, unknown>;
+        delete safeResult.apiKey;
+        delete safeResult.apiBaseUrl;
         return { ...rest, result: safeResult };
       }
       return rest;
@@ -115,17 +121,7 @@ export async function POST(request: NextRequest) {
 
       cancelTask(taskId);
       cancelEditTask(taskId);
-      return NextResponse.json({
-        success: true,
-        message: '任务已取消',
-        task: safeTaskInfo,
-      });
-    }
-
-    if (isTaskCancelled(taskId)) {
-      if (persistedTask?.type === 'annotation-edit') {
-        await terminateCloudTaskAndRefund(taskId, 'cancelled', 'Annotation edit cancelled');
-      }
+      updateTaskProgress(taskId, { status: 'cancelled', progress: 0 });
       return NextResponse.json({
         success: true,
         message: '任务已取消',
@@ -151,9 +147,21 @@ export async function POST(request: NextRequest) {
           `Annotation edit cancelled (taskId: ${taskId})`,
         );
         refunded = settlement.refunded || persistedTask.creditStatus === 'refunded';
-        terminalSettled = true;
+        terminalSettled = settlement.transitioned
+          || settlement.status === 'cancelled';
+        if (!terminalSettled) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: '任务状态已变化，无法取消',
+              status: settlement.status,
+            },
+            { status: 409 },
+          );
+        }
       } catch (refundErr) {
         console.error('[cancel-task] Annotation cancellation settlement failed:', refundErr);
+        throw refundErr;
       }
     } else if (persistedTask && creditCost > 0) {
       try {
@@ -180,9 +188,19 @@ export async function POST(request: NextRequest) {
       }
     }
     if (!terminalSettled) {
-      void recordCloudTaskCancelled(taskId, refunded)
-        .catch((error) => console.warn('[cancel-task] Cloud task cancellation persistence failed:', error));
+      const cancellation = await recordCloudTaskCancelled(taskId, refunded);
+      if (!cancellation.transitioned && cancellation.task.status !== 'cancelled') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: '任务状态已变化，无法取消',
+            status: cancellation.task.status,
+          },
+          { status: 409 },
+        );
+      }
     }
+    updateTaskProgress(taskId, { status: 'cancelled', progress: 0 });
 
     return NextResponse.json({
       success: true,

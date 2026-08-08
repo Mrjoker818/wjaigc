@@ -28,7 +28,10 @@ import {
   normalizeDurableTaskStatus,
   type DurableTaskStatus,
 } from '@/lib/task-core/task-state';
-import { transitionTask } from '@/lib/task-core/task-service';
+import {
+  TaskNotFoundError,
+  transitionTask,
+} from '@/lib/task-core/task-service';
 
 function cloudTask(status: DurableTaskStatus, revision = 0) {
   return {
@@ -66,19 +69,46 @@ describe('durable task state', () => {
     ]);
   });
 
-  it.each<DurableTaskStatus>(['failed', 'cancelled', 'timeout'])(
-    'rejects %s -> completed',
-    (status) => {
-      expect(canTransitionTaskStatus(status, 'completed')).toBe(false);
-    },
+  const allowedEdges: Array<[DurableTaskStatus, DurableTaskStatus]> = [
+    ['created', 'queued'],
+    ['created', 'failed'],
+    ['created', 'cancelled'],
+    ['created', 'timeout'],
+    ['queued', 'submitting'],
+    ['queued', 'processing'],
+    ['queued', 'failed'],
+    ['queued', 'cancelled'],
+    ['queued', 'timeout'],
+    ['submitting', 'processing'],
+    ['submitting', 'failed'],
+    ['submitting', 'cancelled'],
+    ['submitting', 'timeout'],
+    ['processing', 'uploading'],
+    ['processing', 'completed'],
+    ['processing', 'failed'],
+    ['processing', 'cancelled'],
+    ['processing', 'timeout'],
+    ['uploading', 'processing'],
+    ['uploading', 'failed'],
+    ['uploading', 'cancelled'],
+    ['uploading', 'timeout'],
+  ];
+  const allowedEdgeKeys = new Set(
+    allowedEdges.map(([from, to]) => `${from}->${to}`),
   );
 
-  it('allows completed only from processing', () => {
-    for (const status of DURABLE_TASK_STATUSES) {
-      expect(canTransitionTaskStatus(status, 'completed')).toBe(
-        status === 'processing',
-      );
-    }
+  it.each(allowedEdges)('allows the explicit edge %s -> %s', (from, to) => {
+    expect(canTransitionTaskStatus(from, to)).toBe(true);
+  });
+
+  it.each(
+    DURABLE_TASK_STATUSES.flatMap((from) =>
+      DURABLE_TASK_STATUSES
+        .filter((to) => !allowedEdgeKeys.has(`${from}->${to}`))
+        .map((to) => [from, to] as const)
+    ),
+  )('rejects the undeclared edge %s -> %s', (from, to) => {
+    expect(canTransitionTaskStatus(from, to)).toBe(false);
   });
 
   it('normalizes the legacy pending status without removing compatibility', () => {
@@ -173,6 +203,46 @@ describe('durable task state', () => {
     });
 
     expect(outcome).toEqual({ transitioned: false, task: winner });
+    expect(updateTaskProgress).not.toHaveBeenCalled();
+  });
+
+  it('throws a dedicated not-found error when the task does not exist', async () => {
+    getCloudTaskById.mockResolvedValue(null);
+
+    await expect(transitionTask({
+      taskId: 'missing-task',
+      from: ['processing'],
+      to: 'completed',
+    })).rejects.toEqual(expect.objectContaining({
+      name: 'TaskNotFoundError',
+      code: 'TASK_NOT_FOUND',
+      taskId: 'missing-task',
+    }));
+    await expect(transitionTask({
+      taskId: 'missing-task',
+      from: ['processing'],
+      to: 'completed',
+    })).rejects.toBeInstanceOf(TaskNotFoundError);
+  });
+
+  it('uses the same dedicated error when the task disappears after CAS loss', async () => {
+    const current = cloudTask('processing', 13);
+    getCloudTaskById.mockResolvedValue(current);
+    transitionCloudTaskStatus.mockResolvedValue({
+      transitioned: false,
+      task: null,
+    });
+
+    await expect(transitionTask({
+      taskId: current.id,
+      from: ['processing'],
+      to: 'completed',
+      revision: 13,
+    })).rejects.toEqual(expect.objectContaining({
+      name: 'TaskNotFoundError',
+      code: 'TASK_NOT_FOUND',
+      taskId: current.id,
+    }));
     expect(updateTaskProgress).not.toHaveBeenCalled();
   });
 });

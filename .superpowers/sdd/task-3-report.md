@@ -250,3 +250,240 @@ Concerns:
   state transition.
 
 No GitHub push was performed.
+
+---
+
+## Independent Review Fix: CHANGES_REQUIRED
+
+The Task 3 independent review found that the first implementation still
+allowed overly broad non-terminal transitions, retained a generic terminal
+metadata bypass, and let the cancellation route announce an in-memory terminal
+state before PostgreSQL confirmed it. This section supersedes the affected
+claims in the original report above.
+
+### Additional Scope And Minimal Necessity
+
+Changed for the review fix:
+
+- `src/lib/task-core/task-state.ts`
+- `src/lib/task-core/task-service.ts`
+- `src/lib/cloud-task-storage.ts`
+- `src/lib/cloud-task-persistence.ts`
+- `src/lib/task-registry.ts`
+- `src/app/api/cancel-task/route.ts`
+- `src/__tests__/lib/task-state.test.ts`
+- `src/__tests__/lib/cloud-task-storage.test.ts`
+- `src/__tests__/lib/cloud-task-persistence.test.ts`
+- `src/__tests__/lib/task-registry.test.ts`
+- `src/__tests__/api/cancel-task.test.ts`
+
+`src/lib/task-registry.ts` was minimally necessary because `cancelTask()`
+previously mutated the registry to `cancelled` and emitted SSE before the
+database transition. It now records the cancellation signal and aborts the
+current execution without publishing a terminal state.
+
+`src/app/api/cancel-task/route.ts` was minimally necessary because the route
+previously called `cancelTask()` first and persisted cancellation
+fire-and-forget. It now awaits the authoritative transition or atomic
+settlement and projects `cancelled` only after PostgreSQL confirms the terminal
+state. No other route or UI file was changed.
+
+The fix did not implement Task 4 billing/refund redesign, Task 5 multi-image
+behavior, Task 6 Abort contracts, or Task 7 entry migration.
+
+### Review TDD RED
+
+Tests were changed before the production fix.
+
+Command:
+
+```text
+pnpm exec vitest run \
+  src/__tests__/lib/task-state.test.ts \
+  src/__tests__/lib/cloud-task-storage.test.ts \
+  src/__tests__/lib/cloud-task-persistence.test.ts \
+  src/__tests__/lib/task-registry.test.ts \
+  src/__tests__/api/cancel-task.test.ts \
+  tests/integration/task-state-postgres.test.ts
+```
+
+Stable RED result:
+
+```text
+Exit code: 1
+Test Files: 5 failed | 1 skipped
+Tests: 46 failed | 122 passed | 1 skipped
+
+Expected failures covered:
+- undeclared non-terminal state edges were still accepted;
+- generic status updates did not consistently use status plus revision CAS;
+- terminal result/error/remoteTaskId/creditStatus/creditCost/progress writes
+  were not all blocked;
+- durable created/submitting/uploading rows were not centrally projected for
+  legacy readers, filters, provider summary, and leases;
+- terminal persistence still used the mock-dependent fallback and a second
+  credit-status update;
+- cancelTask() still announced cancelled before database success;
+- cancel route persistence was fire-and-forget;
+- TaskNotFoundError did not exist.
+
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+authoritative task-state PostgreSQL tests skipped.
+```
+
+### Minimal Review Fix GREEN
+
+Implemented:
+
+1. Replaced the permissive state predicate with a table-driven directed graph:
+   - `created -> queued|failed|cancelled|timeout`
+   - `queued -> submitting|processing|failed|cancelled|timeout`
+   - `submitting -> processing|failed|cancelled|timeout`
+   - `processing -> uploading|completed|failed|cancelled|timeout`
+   - `uploading -> processing|failed|cancelled|timeout`
+   - terminal states have no outgoing edges.
+2. Kept `completed` exclusive to `processing -> completed`; uploading can
+   return to processing before completion.
+3. Made every generic status update read the raw durable row, validate the
+   explicit edge, and issue a status plus revision CAS.
+4. Restricted statusless terminal updates to the audit `label` field.
+   `result`, `error`, `remoteTaskId`, `creditStatus`, `creditCost`, and
+   `progress` all carry a terminal-row SQL guard.
+5. Added `creditStatus` to the same conditional terminal transition statement.
+   Image, video, 3D, and cancellation persistence no longer perform a second
+   generic metadata update.
+6. Removed the `hasOwnProperty`-dependent persistence fallback. Unit tests now
+   execute the authoritative `transitionTask()` branch directly and prove a
+   losing terminal writer does not issue a compatibility overwrite.
+7. Kept raw durable reads in `getCloudTaskById()` and centralized legacy
+   projection for existing readers:
+   - `created|queued -> queued`
+   - `submitting|pending -> pending`
+   - `processing|uploading -> processing`.
+8. Expanded legacy filters, provider active summaries, lease claims, and lease
+   renewals to cover every durable active state plus legacy `pending`.
+9. Added dedicated `TaskNotFoundError` for both initial absence and the
+   explicit CAS-loss reread-null contract.
+10. Changed cancellation projection ordering so registry/SSE remains
+    non-terminal until the database transition succeeds.
+
+First implementation run after the production edits:
+
+```text
+Exit code: 1
+Test Files: 2 failed | 3 passed | 1 skipped
+Tests: 2 failed | 166 passed | 1 skipped
+
+The two remaining failures were test-contract adjustments:
+- zero-cost lease loss needed to simulate a successful raw read followed by a
+  failed CAS;
+- stale queue cleanup needed a non-terminal cancellation notification so its
+  waiter could resolve without making cancelTask() terminal.
+```
+
+Final focused GREEN:
+
+```text
+Exit code: 0
+Test Files: 5 passed | 1 skipped
+Tests: 168 passed | 1 skipped
+
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+authoritative task-state PostgreSQL tests skipped.
+```
+
+### Review Regression And Gates
+
+Cloud task, cancellation, admin projection, and PostgreSQL-gated regression:
+
+```text
+pnpm exec vitest run \
+  src/__tests__/lib/task-state.test.ts \
+  src/__tests__/lib/cloud-task-storage.test.ts \
+  src/__tests__/lib/cloud-task-persistence.test.ts \
+  src/__tests__/lib/task-registry.test.ts \
+  src/__tests__/api/cancel-task.test.ts \
+  src/__tests__/api/admin-cloud-tasks.test.ts \
+  tests/integration/task-state-postgres.test.ts \
+  tests/integration/task-core-postgres.test.ts
+
+Exit code: 0
+Test Files: 7 passed | 1 skipped
+Tests: 175 passed | 2 skipped
+
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+both real PostgreSQL suites explicitly skipped.
+```
+
+TypeScript:
+
+```text
+pnpm ts-check
+Exit code: 0
+next typegen: success
+tsc -p tsconfig.json: success
+```
+
+Changed-file ESLint:
+
+```text
+pnpm exec eslint <all 12 changed TypeScript/test files>
+Exit code: 0
+Warnings: 0
+Errors: 0
+```
+
+Whitespace:
+
+```text
+git diff --check
+Exit code: 0
+```
+
+Protected baseline first correctly blocked three previously approved paths that
+were not included in the initial allow list:
+
+```text
+BLOCK Unapproved source drift: .superpowers/sdd/task-3-report.md
+BLOCK Unapproved source drift: scripts/doctor-status.mjs
+BLOCK Unapproved source drift: scripts/doctor.mjs
+```
+
+Protected baseline with the explicit Task 1-3 approved paths:
+
+```text
+pnpm check:protected-baseline -- \
+  --base e5867f0 \
+  --candidate HEAD \
+  <repeated exact --allow-path values for approved Task 1-3 source paths>
+
+Exit code: 0
+PASS All 38 baseline feature IDs remain present.
+PASS No unapproved source drift was detected.
+PASS All literal protected component paths are present.
+PASS All required evidence contracts are present.
+PASS Base and candidate Git refs are confirmed.
+PASS Release gate completed with 0 warning(s).
+```
+
+### Review Risks And Blockers
+
+BLOCKED:
+
+- `POSTGRES_TEST_DATABASE_URL` is still missing. Real PostgreSQL concurrency,
+  lease, projection, and terminal-field behavior were not executed and are not
+  reported as passed.
+- `E2E_DEPLOYMENT_COMMIT` remains unavailable, so cloud runtime provenance is
+  still unconfirmed.
+
+Concerns:
+
+- The cancellation route change is intentionally limited to ordering and
+  projection. Existing refund mechanisms remain unchanged until Task 4.
+- Existing legacy callers remain in place. Storage guards and centralized
+  projections protect them, but Task 7 migration is intentionally deferred.
+- The formal baseline remains
+  `e5867f08729312dc4164987e09394e46565be769`; the environment's `origin/main`
+  mismatch recorded earlier in this report remains unresolved.
+
+No GitHub push was performed.

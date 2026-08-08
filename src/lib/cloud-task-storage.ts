@@ -1,6 +1,7 @@
 import { execSql } from '@/lib/db-client';
 import {
   canTransitionTaskStatus,
+  normalizeDurableTaskStatus,
   type DurableTaskStatus,
   type UnifiedTaskError,
 } from '@/lib/task-core/task-state';
@@ -36,8 +37,9 @@ export interface CloudTask {
 
 export type PersistedCloudTaskStatus = DurableTaskStatus | 'pending';
 
-export interface PersistedCloudTask extends Omit<CloudTask, 'status'> {
+export interface PersistedCloudTask extends Omit<CloudTask, 'status' | 'revision'> {
   status: PersistedCloudTaskStatus;
+  revision: number;
 }
 
 export interface CloudTaskLease {
@@ -64,7 +66,7 @@ export interface UpdateCloudTaskInput {
   creditStatus?: CloudTaskCreditStatus;
   creditCost?: number;
   remoteTaskId?: string;
-  expectedStatuses?: CloudTaskStatus[];
+  expectedStatuses?: PersistedCloudTaskStatus[];
   leaseOwner?: string;
   expectedRevision?: number;
 }
@@ -76,6 +78,7 @@ export interface TransitionCloudTaskStatusInput {
   revision: number;
   result?: Record<string, unknown>;
   error?: UnifiedTaskError;
+  creditStatus?: CloudTaskCreditStatus;
 }
 
 export interface TransitionCloudTaskStatusResult {
@@ -129,6 +132,9 @@ export interface CloudTaskFallbackTransitionResult extends CloudTaskCreditRefund
 }
 
 let tablesEnsured = false;
+
+const TERMINAL_STATUS_GUARD =
+  "status NOT IN ('completed', 'failed', 'cancelled', 'timeout')";
 
 export async function ensureCloudTaskTables(): Promise<void> {
   if (tablesEnsured) return;
@@ -219,6 +225,42 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
 export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInput): Promise<boolean> {
   await ensureCloudTaskTables();
 
+  let expectedStatuses = input.expectedStatuses;
+  let expectedRevision = input.expectedRevision;
+  if (input.status !== undefined) {
+    const current = await getCloudTaskById(taskId);
+    if (!current) return false;
+
+    const currentStatus = normalizeDurableTaskStatus(current.status);
+    const targetStatus = normalizeDurableTaskStatus(input.status);
+    const sourceStatuses = expectedStatuses?.length
+      ? expectedStatuses
+      : [current.status];
+    if (
+      expectedRevision !== undefined
+      && expectedRevision !== current.revision
+    ) {
+      return false;
+    }
+    if (
+      !sourceStatuses.some((status) =>
+        normalizeDurableTaskStatus(status) === currentStatus
+      )
+      || sourceStatuses.some((status) =>
+        !canTransitionTaskStatus(
+          normalizeDurableTaskStatus(status),
+          targetStatus,
+        )
+      )
+      || !canTransitionTaskStatus(currentStatus, targetStatus)
+    ) {
+      return false;
+    }
+
+    expectedStatuses = expandPersistedStatuses(sourceStatuses);
+    expectedRevision = current.revision;
+  }
+
   const sets: string[] = ['updated_at = $2', 'revision = revision + 1'];
   const params: unknown[] = [taskId, Date.now()];
   let index = 3;
@@ -233,24 +275,26 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.remoteTaskId !== undefined) { sets.push(`remote_task_id = $${index++}`); params.push(input.remoteTaskId); }
 
   const conditions = ['id = $1'];
-  if (input.status === 'completed') {
-    conditions.push("status = 'processing'");
-  } else if (input.status !== undefined) {
-    conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'timeout')");
-  } else if (input.progress !== undefined) {
-    conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'timeout')");
+  const hasBusinessFieldUpdate = input.progress !== undefined
+    || input.result !== undefined
+    || input.error !== undefined
+    || input.creditStatus !== undefined
+    || input.creditCost !== undefined
+    || input.remoteTaskId !== undefined;
+  if (input.status === undefined && hasBusinessFieldUpdate) {
+    conditions.push(TERMINAL_STATUS_GUARD);
   }
-  if (input.expectedStatuses?.length) {
+  if (expectedStatuses?.length) {
     conditions.push(`status = ANY($${index++}::text[])`);
-    params.push(input.expectedStatuses);
+    params.push(expectedStatuses);
   }
   if (input.leaseOwner) {
     conditions.push(`lease_owner = $${index++}`);
     params.push(input.leaseOwner);
   }
-  if (input.expectedRevision !== undefined) {
+  if (expectedRevision !== undefined) {
     conditions.push(`revision = $${index++}`);
-    params.push(input.expectedRevision);
+    params.push(expectedRevision);
   }
   const result = await execSql(`UPDATE cloud_tasks SET ${sets.join(', ')}
     WHERE ${conditions.join(' AND ')}
@@ -305,6 +349,10 @@ export async function transitionCloudTaskStatus(
     params.push(input.error.message);
   } else if (input.to === 'completed') {
     sets.push("error = ''");
+  }
+  if (input.creditStatus !== undefined) {
+    sets.push(`credit_status = $${index++}`);
+    params.push(input.creditStatus);
   }
 
   const result = await execSql(`
@@ -747,7 +795,7 @@ export async function claimCloudTaskLease(
         attempt_count = attempt_count + 1,
         updated_at = $4
     WHERE id = $1
-      AND status IN ('queued', 'pending', 'processing')
+      AND status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')
       -- No same-owner bypass: an unexpired lease blocks everyone, including the
       -- current owner. Otherwise every poll re-claims and re-submits the task,
       -- billing the provider once per poll tick.
@@ -778,7 +826,7 @@ export async function renewCloudTaskLease(
         updated_at = $4
     WHERE id = $1
       AND lease_owner = $2
-      AND status IN ('queued', 'pending', 'processing')
+      AND status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')
     RETURNING id
   `, [taskId, owner, now + Math.max(1_000, ttlMs), now]);
   return (result.rowCount ?? result.rows.length) > 0;
@@ -838,7 +886,15 @@ export async function listCloudTasks(filters: CloudTaskListFilters = {}): Promis
   addFilter('message_id', filters.messageId);
   addFilter('provider_id', filters.providerId);
   addFilter('model', filters.model);
-  addFilter('status', filters.status);
+  if (filters.status) {
+    const persistedStatuses = legacyFilterStatuses(filters.status);
+    if (persistedStatuses.length === 1) {
+      addFilter('status', persistedStatuses[0]);
+    } else {
+      params.push(persistedStatuses);
+      clauses.push(`status = ANY($${params.length}::text[])`);
+    }
+  }
   params.push(Math.min(Math.max(filters.limit || 100, 1), 500));
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const result = await execSql(`SELECT * FROM cloud_tasks ${where} ORDER BY updated_at DESC LIMIT $${params.length}`, params);
@@ -851,7 +907,9 @@ export async function getCloudTaskProviderSummary(): Promise<CloudTaskProviderSu
     SELECT
       provider_id,
       COUNT(*)::int AS total,
-      COUNT(*) FILTER (WHERE status IN ('queued', 'pending', 'processing'))::int AS processing,
+      COUNT(*) FILTER (
+        WHERE status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')
+      )::int AS processing,
       COUNT(*) FILTER (WHERE status IN ('failed', 'timeout', 'cancelled'))::int AS failed,
       COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
       MAX(updated_at) AS last_updated_at
@@ -878,7 +936,9 @@ function rowToCloudTask(row: Record<string, unknown>): CloudTask {
     sessionId: String(row.session_id || '') || undefined,
     messageId: String(row.message_id || '') || undefined,
     type: String(row.type),
-    status: row.status as CloudTaskStatus,
+    status: projectPersistedStatusToLegacy(
+      row.status as PersistedCloudTaskStatus,
+    ),
     providerId: String(row.provider_id || '') || undefined,
     model: String(row.model || '') || undefined,
     remoteTaskId: String(row.remote_task_id || '') || undefined,
@@ -904,7 +964,56 @@ function rowToPersistedCloudTask(
   return {
     ...rowToCloudTask(row),
     status: row.status as PersistedCloudTaskStatus,
+    revision: Number(row.revision || 0),
   };
+}
+
+function projectPersistedStatusToLegacy(
+  status: PersistedCloudTaskStatus,
+): CloudTaskStatus {
+  switch (status) {
+    case 'created':
+    case 'queued':
+      return 'queued';
+    case 'submitting':
+    case 'pending':
+      return 'pending';
+    case 'processing':
+    case 'uploading':
+      return 'processing';
+    case 'completed':
+    case 'failed':
+    case 'cancelled':
+    case 'timeout':
+      return status;
+  }
+}
+
+function legacyFilterStatuses(
+  status: CloudTaskStatus,
+): PersistedCloudTaskStatus[] {
+  switch (status) {
+    case 'queued':
+      return ['created', 'queued'];
+    case 'pending':
+      return ['submitting', 'pending'];
+    case 'processing':
+      return ['processing', 'uploading'];
+    default:
+      return [status];
+  }
+}
+
+function expandPersistedStatuses(
+  statuses: PersistedCloudTaskStatus[],
+): PersistedCloudTaskStatus[] {
+  const expanded = statuses.flatMap((status) => {
+    if (status === 'submitting' || status === 'pending') {
+      return ['submitting', 'pending'] as const;
+    }
+    return [status];
+  });
+  return Array.from(new Set(expanded));
 }
 
 function parseJsonObject(value: unknown): Record<string, unknown> | undefined {
