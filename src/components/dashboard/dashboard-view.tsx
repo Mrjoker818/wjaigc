@@ -139,7 +139,7 @@ export function buildDashboardModelAuthorizationOptions(
     for (const model of getConfiguredModelsForProvider(provider)) {
       const option = providerModelOptions([model.id], provider.id, providerName)[0];
       const authorizationNamespace = resolveModelAuthorizationNamespace(model.type);
-      if (model.type === 'chat') chatModels.push(option);
+      if (authorizationNamespace === 'chat') chatModels.push(option);
       if (authorizationNamespace === 'image') imageModels.push(option);
     }
   }
