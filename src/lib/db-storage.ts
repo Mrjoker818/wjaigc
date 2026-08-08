@@ -1907,7 +1907,8 @@ export async function dbGetDashboardStats(periodDays = 7) {
   try {
     const now = Date.now();
     const todayStart = now - (now % 86400000);
-    const periodStart = now - periodDays * 86400000;
+    const safePeriod = Number.isFinite(periodDays) && periodDays > 0 ? periodDays : 7;
+    const periodStart = now - safePeriod * 86400000;
     const weekStart = now - 7 * 86400000;
     const monthStart = now - 30 * 86400000;
 
@@ -1980,10 +1981,10 @@ export async function dbGetDashboardStats(periodDays = 7) {
     const recentUsersRes = await execSql(
       `SELECT name, email, created_at FROM wujie_users ORDER BY created_at DESC LIMIT 5`
     );
-    const recentUsers = (recentUsersRes.rows as { name: string; email: string; created_at: number }[]).map(r => ({
+    const recentUsers = (recentUsersRes.rows as { name: string; email: string; created_at: number | string }[]).map(r => ({
       name: r.name,
       email: r.email || '-',
-      date: new Date(r.created_at).toISOString().slice(0, 10),
+      date: (() => { const t = new Date(Number(r.created_at)); return Number.isNaN(t.getTime()) ? '-' : t.toISOString().slice(0, 10); })(),
     }));
 
     // Provider status from admin API providers
