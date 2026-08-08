@@ -53,6 +53,10 @@ function normalizePostgresConnectionString(connectionString) {
   return connectionString;
 }
 
+function quoteIdentifier(identifier) {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
 async function checkDataDir() {
   const dataDir = path.resolve(process.env.WUJIE_DATA_DIR || './data');
   try {
@@ -80,6 +84,131 @@ async function checkDatabase() {
   } finally {
     await client.end().catch(() => undefined);
   }
+}
+
+async function checkPostgresTestDatabase() {
+  const connectionString = process.env.POSTGRES_TEST_DATABASE_URL?.trim();
+  if (!connectionString) {
+    add(
+      'BLOCKED',
+      'postgres-test-database',
+      'POSTGRES_TEST_DATABASE_URL is not configured; Stage 1 release verification is blocked',
+    );
+    return;
+  }
+
+  const client = new Client({
+    connectionString: normalizePostgresConnectionString(connectionString),
+    connectionTimeoutMillis: 5_000,
+  });
+  const schemaName = `doctor_stage1_${process.pid}_${Date.now().toString(36)}`;
+  const quotedSchemaName = quoteIdentifier(schemaName);
+  const advisoryLockName = `${schemaName}_advisory_lock`;
+  let connected = false;
+  let schemaCreated = false;
+  let transactionOpen = false;
+  let advisoryLockHeld = false;
+  let checkError;
+
+  try {
+    await client.connect();
+    connected = true;
+    await client.query(`CREATE SCHEMA ${quotedSchemaName}`);
+    schemaCreated = true;
+    await client.query(`SET search_path TO ${quotedSchemaName}, public`);
+    await client.query(
+      'CREATE TABLE doctor_stage1_probe(id bigint generated always as identity primary key, marker text not null)',
+    );
+
+    await client.query('BEGIN');
+    transactionOpen = true;
+    await client.query(
+      "INSERT INTO doctor_stage1_probe(marker) VALUES ('rolled-back')",
+    );
+    await client.query('ROLLBACK');
+    transactionOpen = false;
+    const rollbackResult = await client.query(
+      'SELECT COUNT(*)::int AS count FROM doctor_stage1_probe',
+    );
+    if (Number(rollbackResult.rows[0]?.count) !== 0) {
+      throw new Error('transaction rollback verification failed');
+    }
+
+    await client.query(
+      'CREATE UNIQUE INDEX doctor_stage1_probe_marker_uq ON doctor_stage1_probe(marker)',
+    );
+    await client.query(
+      "INSERT INTO doctor_stage1_probe(marker) VALUES ('unique-marker')",
+    );
+    let uniqueIndexVerified = false;
+    try {
+      await client.query(
+        "INSERT INTO doctor_stage1_probe(marker) VALUES ('unique-marker')",
+      );
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === '23505') {
+        uniqueIndexVerified = true;
+      } else {
+        throw error;
+      }
+    }
+    if (!uniqueIndexVerified) {
+      throw new Error('unique index verification failed');
+    }
+
+    const lockResult = await client.query(
+      'SELECT pg_try_advisory_lock(hashtext($1)) AS acquired',
+      [advisoryLockName],
+    );
+    advisoryLockHeld = lockResult.rows[0]?.acquired === true;
+    if (!advisoryLockHeld) {
+      throw new Error('advisory lock acquisition failed');
+    }
+    const unlockResult = await client.query(
+      'SELECT pg_advisory_unlock(hashtext($1)) AS released',
+      [advisoryLockName],
+    );
+    advisoryLockHeld = false;
+    if (unlockResult.rows[0]?.released !== true) {
+      throw new Error('advisory lock release failed');
+    }
+  } catch (error) {
+    checkError = error;
+  } finally {
+    if (transactionOpen) {
+      await client.query('ROLLBACK').catch(() => undefined);
+    }
+    if (advisoryLockHeld) {
+      await client
+        .query('SELECT pg_advisory_unlock(hashtext($1))', [advisoryLockName])
+        .catch(() => undefined);
+    }
+    if (schemaCreated) {
+      await client.query('RESET search_path').catch(() => undefined);
+      try {
+        await client.query(`DROP SCHEMA IF EXISTS ${quotedSchemaName} CASCADE`);
+      } catch (error) {
+        checkError ||= error;
+      }
+    }
+    if (connected) {
+      await client.end().catch(() => undefined);
+    }
+  }
+
+  if (checkError) {
+    add(
+      'FAIL',
+      'postgres-test-database',
+      `capability probe failed: ${checkError instanceof Error ? checkError.message : String(checkError)}`,
+    );
+    return;
+  }
+  add(
+    'PASS',
+    'postgres-test-database',
+    'connection, CREATE TABLE, transactions, unique indexes, and advisory locks verified',
+  );
 }
 
 async function checkObjectStorage() {
@@ -242,6 +371,7 @@ async function main() {
   await checkDataDir();
   await checkDatabase();
   await checkDatabaseTables();
+  await checkPostgresTestDatabase();
   await checkObjectStorage();
   await checkBuildArtifacts();
   await checkDirectoryStructure();
@@ -252,8 +382,9 @@ async function main() {
 
   for (const result of results) console.log(`[${result.status}] ${result.area}: ${result.detail}`);
   const failed = results.filter((result) => result.status === 'FAIL');
-  console.log(`\nSummary: ${results.filter((result) => result.status === 'PASS').length} passed, ${results.filter((result) => result.status === 'WARN').length} warnings, ${failed.length} failed`);
-  if (failed.length > 0) process.exitCode = 1;
+  const blocked = results.filter((result) => result.status === 'BLOCKED');
+  console.log(`\nSummary: ${results.filter((result) => result.status === 'PASS').length} passed, ${results.filter((result) => result.status === 'WARN').length} warnings, ${failed.length} failed, ${blocked.length} blocked`);
+  if (failed.length > 0 || (production && blocked.length > 0)) process.exitCode = 1;
 }
 
 await main();
