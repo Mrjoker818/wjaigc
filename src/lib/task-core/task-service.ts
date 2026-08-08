@@ -31,7 +31,10 @@ export interface TransitionTaskResult {
 export interface PublishDurableDirectTaskInput {
   taskId: string;
   createTask: () => Promise<boolean>;
-  completeTask: () => Promise<TransitionTaskResult | undefined>;
+  prepareCompletion: () => Promise<Record<string, unknown>>;
+  completeTask: (
+    prepared: Record<string, unknown>,
+  ) => Promise<TransitionTaskResult | undefined>;
   publishCompleted: (task: DurableTask) => void;
 }
 
@@ -58,6 +61,24 @@ export class TaskNotFoundError extends Error {
   }
 }
 
+export function getTaskResultImageUrls(
+  task: Pick<DurableTask, 'result'>,
+): string[] {
+  const result = task.result;
+  if (!result || typeof result !== 'object') return [];
+
+  const urls: string[] = [];
+  if (Array.isArray(result.imageUrls)) {
+    urls.push(...result.imageUrls.filter(
+      (url): url is string => typeof url === 'string' && url.length > 0,
+    ));
+  }
+  if (typeof result.imageUrl === 'string' && result.imageUrl.length > 0) {
+    urls.push(result.imageUrl);
+  }
+  return Array.from(new Set(urls));
+}
+
 export async function publishDurableDirectTask(
   input: PublishDurableDirectTaskInput,
 ): Promise<PublishDurableDirectTaskResult> {
@@ -70,7 +91,8 @@ export async function publishDurableDirectTask(
     };
   }
 
-  const terminal = await input.completeTask();
+  const prepared = await input.prepareCompletion();
+  const terminal = await input.completeTask(prepared);
   if (!terminal) {
     return {
       published: false,
