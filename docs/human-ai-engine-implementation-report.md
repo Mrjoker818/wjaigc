@@ -21,6 +21,7 @@
 
 ## 已验证
 
+- `pnpm human:virtual-test`：通过，验证 8 类目标、自动蒙版、保护提示、候选排序与失败候选过滤。
 - `pnpm lint`：通过。
 - `pnpm ts-check`：通过。
 - `pnpm test`：58 个测试文件、312 项测试通过。
