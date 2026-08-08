@@ -1,5 +1,10 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+> [!IMPORTANT]
+> **2026-08-08 最新状态覆盖：当前整体发布结论为“不通过”。**
+> 本文件下方 2026-07-20 的“100% 通过、可投入生产”仅是历史快照，不能覆盖后续已登记的未闭环缺陷、5 个基线测试失败、4 个 ESLint 错误、PostgreSQL 并发/账务阻塞和云端运行 SHA 未确认。
+> 最新 Stage 0 证据见 `docs/testing/STAGE_0_COMPLETION_REPORT.md` 与 `docs/testing/UNVERIFIED_ITEMS_STAGE_0.md`。
+
 > 生成时间：2026-07-20
 > 版本：v3.8.0
 > 测试周期：全平台真实用户测试、缺陷扫描与统一修复

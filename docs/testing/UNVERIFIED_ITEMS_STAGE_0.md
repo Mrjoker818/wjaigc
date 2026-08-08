@@ -1,5 +1,13 @@
 # Stage 0 未验证与阻塞项
 
+## 2026-08-08 质量门禁补充
+
+- 全量 Vitest：1489 通过、5 失败、4 跳过；失败项与 Stage 0 开始前基线一致，没有新增失败。
+- ESLint：4 errors、962 warnings；4 个 error 均位于 Stage 0 未修改的现有业务文件。
+- TypeScript、doctor、生产构建、S0 专项 15 项测试和保护基线门禁通过。
+- PostgreSQL 并发测试仍因缺少隔离数据库而跳过。
+- Chromium 云端可达性证据仍为 `BLOCKED`，原因是云端运行 Commit 无法确认。
+
 > 计划：`WJ-STABLE-001`
 > 阶段：Stage 0 版本与功能冻结
 > 结论边界：测试基础设施通过不等于平台业务通过
