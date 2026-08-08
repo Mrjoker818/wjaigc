@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -19,9 +20,10 @@ describe('task core PostgreSQL baseline', () => {
 
     expect(helpers.withIsolatedPostgres).toBeTypeOf('function');
     expect(helpers.schemaExists).toBeTypeOf('function');
+    expect(helpers.createIsolatedPostgresConnectionString).toBeTypeOf('function');
   });
 
-  it('reports a release blocker when the PostgreSQL test database is unavailable', () => {
+  it('fails production doctor when the PostgreSQL test database is unavailable', () => {
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
       DOCTOR_SKIP_ENV_FILE: '1',
@@ -30,7 +32,7 @@ describe('task core PostgreSQL baseline', () => {
 
     const result = spawnSync(
       process.execPath,
-      [resolve(process.cwd(), 'scripts/doctor.mjs')],
+      [resolve(process.cwd(), 'scripts/doctor.mjs'), '--production'],
       {
         cwd: process.cwd(),
         env: environment,
@@ -41,6 +43,22 @@ describe('task core PostgreSQL baseline', () => {
     expect(result.stdout).toContain(
       '[BLOCKED] postgres-test-database: POSTGRES_TEST_DATABASE_URL is not configured; Stage 1 release verification is blocked',
     );
+    expect(result.status).not.toBe(0);
+  });
+
+  it('creates a Pool connection string with no public schema fallback', async () => {
+    const { createIsolatedPostgresConnectionString } = await import(
+      '../helpers/postgres-test-database'
+    );
+    const connectionString = createIsolatedPostgresConnectionString(
+      'postgresql://postgres:postgres@localhost:5432/wujie_test?options=-cstatement_timeout%3D5000',
+      'test_task_core',
+    );
+    const options = new URL(connectionString).searchParams.get('options');
+
+    expect(options).toContain('-cstatement_timeout=5000');
+    expect(options).toContain('-csearch_path=test_task_core');
+    expect(options).not.toContain('public');
   });
 
   it('requires doctor to probe the Stage 1 PostgreSQL capabilities', () => {
@@ -56,15 +74,62 @@ describe('task core PostgreSQL baseline', () => {
     expect(source).toContain('pg_try_advisory_lock');
   });
 
-  postgresIt('creates an isolated schema and removes it after the test', async () => {
+  postgresIt('binds business execSql to the isolated schema and removes it after the test', async () => {
     const { schemaExists, withIsolatedPostgres } = await import(
       '../helpers/postgres-test-database'
     );
+    const tableName = `task_core_marker_${randomUUID()
+      .replaceAll('-', '')
+      .slice(0, 12)}`;
     const schema = await withIsolatedPostgres(
       'task-core-schema',
-      async ({ schemaName, query }) => {
-        await query('CREATE TABLE marker(id text primary key)');
-        return schemaName;
+      async ({ databaseUrl, schemaName, query }) => {
+        expect(process.env.DATABASE_URL).toBe(databaseUrl);
+        expect(process.env.PGDATABASE_URL).toBe(databaseUrl);
+
+        await query(
+          `CREATE TABLE public.${tableName}(id text primary key, source text not null)`,
+        );
+        try {
+          await query(
+            `INSERT INTO public.${tableName}(id, source) VALUES ('shared', 'public')`,
+          );
+
+          const { execSql } = await import('@/lib/db-client');
+          const beforeCreate = await execSql(
+            `SELECT to_regclass('${tableName}')::text AS relation`,
+          );
+          expect(beforeCreate.rows[0]?.relation).toBeNull();
+
+          await execSql(
+            `CREATE TABLE ${tableName}(id text primary key, source text not null)`,
+          );
+          await execSql(
+            `INSERT INTO ${tableName}(id, source) VALUES ($1, $2)`,
+            ['isolated', 'business-exec-sql'],
+          );
+
+          const activeSchema = await execSql(
+            'SELECT current_schema() AS schema_name',
+          );
+          const isolatedRows = await execSql(
+            `SELECT id, source FROM ${tableName}`,
+          );
+          const publicRows = await query(
+            `SELECT id, source FROM public.${tableName}`,
+          );
+
+          expect(activeSchema.rows[0]?.schema_name).toBe(schemaName);
+          expect(isolatedRows.rows).toEqual([
+            { id: 'isolated', source: 'business-exec-sql' },
+          ]);
+          expect(publicRows.rows).toEqual([
+            { id: 'shared', source: 'public' },
+          ]);
+          return schemaName;
+        } finally {
+          await query(`DROP TABLE IF EXISTS public.${tableName}`);
+        }
       },
     );
 
