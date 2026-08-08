@@ -161,7 +161,7 @@ export function saveProjects(projects: SimpleChatProject[]): void {
   }
 }
 
-// ========== 预设 Skills（办公12 + 设计3 = 15个） ==========
+// ========== 预设 Skills（办公13 + 设计3 = 16个） ==========
 
 export interface PresetSkill {
   id: string;
@@ -174,7 +174,7 @@ export interface PresetSkill {
 }
 
 export const PRESET_SKILLS: PresetSkill[] = [
-  // 办公类 (12)
+  // 办公类 (13)
   { id: 'ppt-master', name: 'PPT大师', category: '办公', icon: '📊', tags: ['PPT', '演示', '办公'], description: 'PPT演示文稿大师，从叙事大纲到视觉设计一站式搞定，支持图表/图片/表格，6种主题配色，自动信息密度控制', systemPrompt: `你是专业PPT演示文稿设计师，拥有10年商业演示设计经验。你的核心能力是将任何主题转化为结构清晰、视觉统一的演示文稿。
 
 ## 叙事方法论（参考 AST 观众状态转移理论）
