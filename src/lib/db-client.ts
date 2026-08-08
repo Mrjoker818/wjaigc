@@ -102,8 +102,7 @@ export async function testConnection(): Promise<boolean> {
 }
 
 export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
-  }
+  const currentPool = pool;
+  pool = null;
+  if (currentPool) await currentPool.end();
 }
