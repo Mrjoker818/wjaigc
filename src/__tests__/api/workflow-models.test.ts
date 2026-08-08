@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
+  getApiProviders: vi.fn(),
   getPublicApiProviders: vi.fn(),
   getPublicModels: vi.fn(),
   getSessionUser: vi.fn(),
 }));
 
 vi.mock('@/lib/server-api-config', () => ({
+  getApiProviders: mocks.getApiProviders,
   getPublicApiProviders: mocks.getPublicApiProviders,
   getPublicModels: mocks.getPublicModels,
 }));
@@ -19,6 +21,38 @@ import { GET } from '@/app/api/workflow/models/route';
 describe('GET /api/workflow/models', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
+    mocks.getApiProviders.mockResolvedValue([
+      {
+        id: 'image-provider',
+        name: 'Image Provider',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        isEnabled: true,
+        type: 'image',
+        modelType: 'image',
+        selectedModels: ['image-model'],
+        discoveredModels: [
+          { id: 'image-model', name: 'Image Model', providerId: 'image-provider', type: 'image' },
+        ],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'layer-provider',
+        name: 'Layer Provider',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        isEnabled: true,
+        type: 'layer',
+        modelType: 'layer',
+        selectedModels: ['layer-model'],
+        discoveredModels: [
+          { id: 'layer-model', name: 'Layer Model', providerId: 'layer-provider', type: 'layer' },
+        ],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
     mocks.getPublicApiProviders.mockResolvedValue([
       { id: 'image-provider', displayName: 'Image Provider' },
       { id: 'layer-provider', name: 'Layer Provider' },
@@ -34,7 +68,7 @@ describe('GET /api/workflow/models', () => {
       id: 'user-1',
       role: 'user',
       apiPermissions: { layer: true },
-      imageModels: ['image-model', 'layer-provider::layer-model'],
+      imageModels: ['image-provider::image-model', 'layer-provider::layer-model'],
     });
 
     const response = await GET(new NextRequest('http://localhost/api/workflow/models?type=all'));
@@ -45,6 +79,18 @@ describe('GET /api/workflow/models', () => {
     expect(data.models).toEqual([
       { id: 'image-model', name: 'Image Model', providerId: 'image-provider', provider: 'Image Provider', type: 'image' },
       { id: 'layer-model', name: 'Layer Model', providerId: 'layer-provider', provider: 'Layer Provider', type: 'layer' },
+    ]);
+    expect(data.taskModelCatalog).toEqual([
+      expect.objectContaining({
+        providerId: 'image-provider',
+        modelId: 'image-model',
+        kind: 'image',
+      }),
+      expect.objectContaining({
+        providerId: 'layer-provider',
+        modelId: 'layer-model',
+        kind: 'layer',
+      }),
     ]);
   });
 

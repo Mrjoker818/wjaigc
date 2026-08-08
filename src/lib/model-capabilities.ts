@@ -579,6 +579,48 @@ export function getModelCapabilities(modelId: string): ModelCapabilities {
   return caps;
 }
 
+export interface ImageTaskCapabilityDefaults {
+  allowedSizes: string[];
+  qualityOptions: string[];
+  maxOutputs: number;
+  supportsReferenceImages: boolean;
+  supportsMask: boolean;
+  outputKinds: string[];
+}
+
+const REFERENCE_IMAGE_FAMILIES = new Set<ModelFamily>([
+  'gpt-image',
+  'dalle2',
+  'gemini-image',
+  'flux',
+  'stable-diffusion',
+  'midjourney',
+  'kling',
+  'seedream',
+  'ideogram',
+  'hidream',
+  'recraft',
+  'playground',
+  'leonardo',
+]);
+
+/**
+ * Provider-neutral image defaults for task scheduling and validation.
+ * Provider/model-specific catalog overrides are applied by task-core.
+ */
+export function getImageTaskCapabilityDefaults(modelId: string): ImageTaskCapabilityDefaults {
+  const capabilities = getModelCapabilities(modelId);
+
+  return {
+    allowedSizes: [...capabilities.allowedSizes],
+    qualityOptions: [...capabilities.qualityOptions],
+    maxOutputs: capabilities.supportsMultipleImages ? 4 : 1,
+    supportsReferenceImages: REFERENCE_IMAGE_FAMILIES.has(capabilities.family),
+    supportsMask: capabilities.supportsMask,
+    outputKinds: [...capabilities.outputFormats],
+  };
+}
+
 /**
  * 判断模型是否支持某个能力
  */
