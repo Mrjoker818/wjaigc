@@ -46,6 +46,28 @@ export interface ExposeDurableDirectTaskInput {
   onPublishError?: (error: unknown) => void;
 }
 
+export interface PublishGenerateTaskCandidatesInput {
+  candidateTaskIds: readonly string[];
+  authoritativeDirectTaskIds: ReadonlySet<string>;
+  prepublishedTaskIds?: ReadonlySet<string>;
+  skipCloudTaskPersistence: boolean;
+  createDurableTask: (taskId: string) => Promise<boolean>;
+  publishProcessing: (taskId: string) => void;
+  onPersistenceError?: (taskId: string, error: unknown) => void;
+  onProjectionError?: (taskId: string, error: unknown) => void;
+}
+
+export interface GenerateTaskPublicationFailure {
+  taskId: string;
+  reason: 'create-rejected' | 'create-error';
+  error?: unknown;
+}
+
+export interface PublishGenerateTaskCandidatesResult {
+  publishedTaskIds: string[];
+  failures: GenerateTaskPublicationFailure[];
+}
+
 export type PublishDurableDirectTaskResult =
   | {
       published: true;
@@ -105,6 +127,65 @@ export function exposeDurableDirectTask(
       // The durable task is already reachable by taskId.
     }
   }
+}
+
+export async function publishGenerateTaskCandidates(
+  input: PublishGenerateTaskCandidatesInput,
+): Promise<PublishGenerateTaskCandidatesResult> {
+  const publishedTaskIds: string[] = [];
+  const failures: GenerateTaskPublicationFailure[] = [];
+  const seen = new Set<string>();
+
+  for (const taskId of input.candidateTaskIds) {
+    if (seen.has(taskId)) continue;
+    seen.add(taskId);
+
+    if (
+      input.authoritativeDirectTaskIds.has(taskId)
+      || input.prepublishedTaskIds?.has(taskId)
+    ) {
+      publishedTaskIds.push(taskId);
+      continue;
+    }
+
+    if (!input.skipCloudTaskPersistence) {
+      let created: boolean;
+      try {
+        created = await input.createDurableTask(taskId);
+      } catch (error) {
+        failures.push({ taskId, reason: 'create-error', error });
+        try {
+          input.onPersistenceError?.(taskId, error);
+        } catch {
+          // The failed candidate remains excluded from the response.
+        }
+        continue;
+      }
+      if (!created) {
+        const error = new Error(`Durable task creation rejected: ${taskId}`);
+        failures.push({ taskId, reason: 'create-rejected' });
+        try {
+          input.onPersistenceError?.(taskId, error);
+        } catch {
+          // The failed candidate remains excluded from the response.
+        }
+        continue;
+      }
+    }
+
+    try {
+      input.publishProcessing(taskId);
+    } catch (error) {
+      try {
+        input.onProjectionError?.(taskId, error);
+      } catch {
+        // PostgreSQL is authoritative once durable creation succeeds.
+      }
+    }
+    publishedTaskIds.push(taskId);
+  }
+
+  return { publishedTaskIds, failures };
 }
 
 export async function publishDurableDirectTask(

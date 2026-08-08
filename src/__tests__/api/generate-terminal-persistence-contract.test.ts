@@ -88,4 +88,43 @@ describe('generate authoritative terminal persistence contract', () => {
       .toBe(-1);
     expect(directBranch).not.toContain('void recordImageTaskTerminal');
   });
+
+  it('awaits provider task durability and filters the final polling response', () => {
+    const publicationStart = source.indexOf(
+      'const taskPublication = await publishGenerateTaskCandidates',
+    );
+    const publicationBranch = source.slice(publicationStart);
+
+    expect(publicationStart).toBeGreaterThan(-1);
+    expect(publicationBranch).toMatch(
+      /createDurableTask:\s*\(tid\) => recordImageTaskSubmitted\(/,
+    );
+    expect(publicationBranch).toMatch(
+      /publishProcessing:[\s\S]*?registerTask\([\s\S]*?updateTaskProgress\(/,
+    );
+    expect(publicationBranch).toContain(
+      'const publishedTaskIds = taskPublication.publishedTaskIds',
+    );
+    expect(publicationBranch).toContain('status: _skipCloudTaskPersistence ? 500 : 503');
+    expect(publicationBranch).toContain('taskIds: publishedTaskIds');
+    expect(publicationBranch).toContain('count: publishedTaskIds.length');
+    expect(publicationBranch).not.toContain('void recordImageTaskSubmitted');
+  });
+
+  it('marks completed direct ids before registry publication and skips them in the provider loop', () => {
+    const directStart = source.indexOf('if (directImageUrls.length > 0)');
+    const publicationStart = source.indexOf(
+      'const taskPublication = await publishGenerateTaskCandidates',
+      directStart,
+    );
+    const branch = source.slice(directStart, publicationStart + 500);
+    const authoritativeMark = branch.indexOf(
+      'authoritativeDirectTaskIds.add(publication.taskId)',
+    );
+    const expose = branch.indexOf('exposeDurableDirectTask({');
+
+    expect(authoritativeMark).toBeGreaterThan(-1);
+    expect(expose).toBeGreaterThan(authoritativeMark);
+    expect(branch).toContain('authoritativeDirectTaskIds,');
+  });
 });

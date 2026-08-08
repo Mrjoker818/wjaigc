@@ -23,6 +23,7 @@ import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 import {
   exposeDurableDirectTask,
+  publishGenerateTaskCandidates,
   publishDurableDirectTask,
 } from '@/lib/task-core/task-service';
 import {
@@ -2869,12 +2870,15 @@ export async function POST(request: NextRequest) {
     // 让前端通过 poll-task 获取结果，确保请求快速响应
     // ★ 关键优化：persistRemoteImage 不阻塞响应，在后台异步执行
     const publishedDirectImageUrls: string[] = [];
+    const authoritativeDirectTaskIds = new Set<string>();
+    const prepublishedTaskIds = new Set<string>();
     if (directImageUrls.length > 0) {
       for (let i = 0; i < directImageUrls.length; i++) {
         const rawUrl = directImageUrls[i];
         const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
         if (_skipCloudTaskPersistence) {
           taskIds.push(directTid);
+          prepublishedTaskIds.add(directTid);
           publishedDirectImageUrls.push(rawUrl);
           registerTask(directTid, 'generate', '生成图片', userId);
           updateTaskProgress(directTid, {
@@ -2955,6 +2959,7 @@ export async function POST(request: NextRequest) {
               ),
             });
             if (publication.published) {
+              authoritativeDirectTaskIds.add(publication.taskId);
               exposeDurableDirectTask({
                 taskId: publication.taskId,
                 task: publication.task,
@@ -2997,22 +3002,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (taskIds.length === 0) {
-      return NextResponse.json({
-        success: false,
-        error: `所有可用模型均提交失败，请稍后重试或联系管理员配置`,
-        modelName: usedModelName,
-      }, { status: 500 });
-    }
-
     // 返回task_ids给前端，由前端负责轮询
     // ★ 注册异步任务到统一注册中心（SSE推送 + 取消支持 + 存储提供商信息供 poll-task 使用）
-    for (const tid of taskIds) {
-      // 跳过已经注册的直接模式任务（上面已注册并标记完成）
-      const existingTask = getTaskInfo(tid);
-      if (existingTask) continue;
-      registerTask(tid, 'generate', '生成图片', userId);
-      void recordImageTaskSubmitted({
+    const taskPublication = await publishGenerateTaskCandidates({
+      candidateTaskIds: taskIds,
+      authoritativeDirectTaskIds,
+      prepublishedTaskIds,
+      skipCloudTaskPersistence: Boolean(_skipCloudTaskPersistence),
+      createDurableTask: (tid) => recordImageTaskSubmitted({
         taskId: tid,
         userId,
         projectId: typeof projectId === 'string' ? projectId : undefined,
@@ -3021,29 +3018,58 @@ export async function POST(request: NextRequest) {
         providerId: usedProviderId,
         model: usedModelId,
         submissionPayload: generationRouteAudit ? { generationRouteAudit } : undefined,
-        persist: !_skipCloudTaskPersistence,
-      }).catch(error => console.warn('[generate] 云端任务记录创建失败:', error));
-      // ★ 关键修复：存储提供商信息到 task-registry，确保 poll-task 能直接使用正确的提供商
-      // 而不需要通过 findProviderForModel 重新查找（可能找不到或找到错误的提供商）
-      updateTaskProgress(tid, {
-        status: 'processing',
-        progress: 5,
-        result: {
-          usedModel: usedModelId,
-          modelName: usedModelName,
-          providerName: usedProviderName,
-          generationRouteAudit,
-          apiBaseUrl: usedApiBaseUrl,
-          apiKey: provider?.apiKey || serverApiKey,
-          providerId: usedProviderId,
-          advancedParams: provider?.advancedParams,
+      }),
+      publishProcessing: (tid) => {
+        if (!getTaskInfo(tid)) {
+          registerTask(tid, 'generate', '生成图片', userId);
         }
-      });
+        // ★ 存储提供商信息到 task-registry，确保 poll-task 使用提交时的提供商。
+        updateTaskProgress(tid, {
+          status: 'processing',
+          progress: 5,
+          result: {
+            usedModel: usedModelId,
+            modelName: usedModelName,
+            providerName: usedProviderName,
+            generationRouteAudit,
+            apiBaseUrl: usedApiBaseUrl,
+            apiKey: provider?.apiKey || serverApiKey,
+            providerId: usedProviderId,
+            advancedParams: provider?.advancedParams,
+          }
+        });
+      },
+      onPersistenceError: (tid, error) => {
+        console.error(
+          '[generate] Provider task excluded because durable creation failed:',
+          tid,
+          error,
+        );
+      },
+      onProjectionError: (tid, error) => {
+        console.warn(
+          '[generate] Durable provider task registry projection failed:',
+          tid,
+          error,
+        );
+      },
+    });
+    const publishedTaskIds = taskPublication.publishedTaskIds;
+
+    if (publishedTaskIds.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: _skipCloudTaskPersistence
+          ? '所有可用模型均提交失败，请稍后重试或联系管理员配置'
+          : '生成任务已提交，但未能建立可轮询的持久化记录，请稍后重试',
+        modelName: usedModelName,
+      }, { status: _skipCloudTaskPersistence ? 500 : 503 });
     }
+
     return NextResponse.json({
       success: true,
       mode: 'polling',
-      taskIds,
+      taskIds: publishedTaskIds,
       // ★ 关键修复：同时返回 directImageUrls，确保 submitOnly 后台处理器能直接获取所有图片 URL
       // 而不依赖从 task-registry 查找 direct- 任务（可能在 dev 模式或 registry 不共享时失败）
       directImageUrls: publishedDirectImageUrls.length > 0
@@ -3061,7 +3087,7 @@ export async function POST(request: NextRequest) {
       originalPrompt: prompt,
       category: imageCategory,
       style: stylePreset,
-      count: taskIds.length,
+      count: publishedTaskIds.length,
     });
 
   } catch (apiError: unknown) {

@@ -30,6 +30,7 @@ import {
 } from '@/lib/task-core/task-state';
 import {
   exposeDurableDirectTask,
+  publishGenerateTaskCandidates,
   publishDurableDirectTask,
   TaskNotFoundError,
   transitionTask,
@@ -495,6 +496,185 @@ describe('durable task state', () => {
       expect(taskIds).toEqual(['direct-task']);
       expect(imageUrls).toEqual(['/winner-1.png']);
       expect(imageUrls.length).toBeLessThanOrEqual(taskIds.length);
+    });
+  });
+
+  describe('generate task candidate publication', () => {
+    it('does not resolve or register a provider task before durable creation finishes', async () => {
+      let resolveCreate: ((created: boolean) => void) | undefined;
+      const createDurableTask = vi.fn(() => new Promise<boolean>((resolve) => {
+        resolveCreate = resolve;
+      }));
+      const publishProcessing = vi.fn();
+      let settled = false;
+
+      const publication = publishGenerateTaskCandidates({
+        candidateTaskIds: ['provider-task'],
+        authoritativeDirectTaskIds: new Set(),
+        skipCloudTaskPersistence: false,
+        createDurableTask,
+        publishProcessing,
+      }).finally(() => {
+        settled = true;
+      });
+
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(publishProcessing).not.toHaveBeenCalled();
+
+      resolveCreate?.(true);
+      await expect(publication).resolves.toEqual({
+        publishedTaskIds: ['provider-task'],
+        failures: [],
+      });
+      expect(publishProcessing).toHaveBeenCalledWith('provider-task');
+    });
+
+    it('never exposes a provider task as memory while its INSERT is pending', async () => {
+      let persistence: 'memory' | 'durable' = 'memory';
+      let resolveCreate: ((created: boolean) => void) | undefined;
+      const publishProcessing = vi.fn(() => {
+        expect(persistence).toBe('durable');
+      });
+
+      const publication = publishGenerateTaskCandidates({
+        candidateTaskIds: ['provider-task'],
+        authoritativeDirectTaskIds: new Set(),
+        skipCloudTaskPersistence: false,
+        createDurableTask: () => new Promise<boolean>((resolve) => {
+          resolveCreate = (created) => {
+            if (created) persistence = 'durable';
+            resolve(created);
+          };
+        }),
+        publishProcessing,
+      });
+
+      await Promise.resolve();
+      expect(persistence).toBe('memory');
+      expect(publishProcessing).not.toHaveBeenCalled();
+
+      resolveCreate?.(true);
+      await publication;
+      expect(publishProcessing).toHaveBeenCalledTimes(1);
+    });
+
+    it('filters create false and create errors from returned task ids', async () => {
+      const onPersistenceError = vi.fn();
+      const result = await publishGenerateTaskCandidates({
+        candidateTaskIds: ['rejected-task', 'throwing-task'],
+        authoritativeDirectTaskIds: new Set(),
+        skipCloudTaskPersistence: false,
+        createDurableTask: vi.fn()
+          .mockResolvedValueOnce(false)
+          .mockRejectedValueOnce(new Error('postgres unavailable')),
+        publishProcessing: vi.fn(),
+        onPersistenceError,
+      });
+
+      expect(result.publishedTaskIds).toEqual([]);
+      expect(result.failures).toEqual([
+        { taskId: 'rejected-task', reason: 'create-rejected' },
+        {
+          taskId: 'throwing-task',
+          reason: 'create-error',
+          error: expect.objectContaining({ message: 'postgres unavailable' }),
+        },
+      ]);
+      expect(onPersistenceError).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns only provider task ids whose durable creation succeeded', async () => {
+      const publishProcessing = vi.fn();
+      const result = await publishGenerateTaskCandidates({
+        candidateTaskIds: ['provider-a', 'provider-b', 'provider-c'],
+        authoritativeDirectTaskIds: new Set(),
+        skipCloudTaskPersistence: false,
+        createDurableTask: vi.fn()
+          .mockResolvedValueOnce(true)
+          .mockResolvedValueOnce(false)
+          .mockResolvedValueOnce(true),
+        publishProcessing,
+      });
+
+      expect(result.publishedTaskIds).toEqual(['provider-a', 'provider-c']);
+      expect(publishProcessing.mock.calls).toEqual([
+        ['provider-a'],
+        ['provider-c'],
+      ]);
+    });
+
+    it('preserves authoritative direct ids without processing projection or remote persistence', async () => {
+      const createDurableTask = vi.fn();
+      const publishProcessing = vi.fn(() => {
+        throw new Error('direct task must not be projected as processing');
+      });
+      const result = await publishGenerateTaskCandidates({
+        candidateTaskIds: ['direct-task'],
+        authoritativeDirectTaskIds: new Set(['direct-task']),
+        skipCloudTaskPersistence: false,
+        createDurableTask,
+        publishProcessing,
+      });
+
+      expect(result).toEqual({
+        publishedTaskIds: ['direct-task'],
+        failures: [],
+      });
+      expect(createDurableTask).not.toHaveBeenCalled();
+      expect(publishProcessing).not.toHaveBeenCalled();
+    });
+
+    it('skips processing fallback after direct registry publication throws', async () => {
+      const completedDirectTask: DurableTask = {
+        ...cloudTask('completed', 2),
+        id: 'direct-task',
+        result: { imageUrl: '/direct.png' },
+        progress: 100,
+      };
+      const candidateTaskIds: string[] = [];
+      const authoritativeDirectTaskIds = new Set<string>();
+      authoritativeDirectTaskIds.add(completedDirectTask.id);
+
+      exposeDurableDirectTask({
+        taskId: completedDirectTask.id,
+        task: completedDirectTask,
+        taskIds: candidateTaskIds,
+        directImageUrls: [],
+        publishRegistry: () => {
+          throw new Error('registry unavailable');
+        },
+      });
+
+      const createDurableTask = vi.fn();
+      const publishProcessing = vi.fn();
+      const result = await publishGenerateTaskCandidates({
+        candidateTaskIds,
+        authoritativeDirectTaskIds,
+        skipCloudTaskPersistence: false,
+        createDurableTask,
+        publishProcessing,
+      });
+
+      expect(result.publishedTaskIds).toEqual(['direct-task']);
+      expect(createDurableTask).not.toHaveBeenCalled();
+      expect(publishProcessing).not.toHaveBeenCalled();
+    });
+
+    it('keeps memory-only internal tasks independent from durable creation', async () => {
+      const createDurableTask = vi.fn();
+      const publishProcessing = vi.fn();
+      const result = await publishGenerateTaskCandidates({
+        candidateTaskIds: ['memory-task'],
+        authoritativeDirectTaskIds: new Set(),
+        skipCloudTaskPersistence: true,
+        createDurableTask,
+        publishProcessing,
+      });
+
+      expect(result.publishedTaskIds).toEqual(['memory-task']);
+      expect(createDurableTask).not.toHaveBeenCalled();
+      expect(publishProcessing).toHaveBeenCalledWith('memory-task');
     });
   });
 });
