@@ -251,6 +251,174 @@ Concerns:
 
 No GitHub push was performed.
 
+## Sixth Independent Review Fix
+
+### Scope
+
+This follow-up remains limited to Task 3 route-level authoritative task
+publication. It does not re-submit provider work and does not implement Task 4
+billing/refunds, Task 5 multi-image semantics, Task 6 Abort, or Task 7 entry
+migration.
+
+Changed production paths:
+
+- `src/lib/task-core/task-service.ts`
+- `src/app/api/generate/route.ts`
+
+Changed tests:
+
+- `src/__tests__/lib/task-state.test.ts`
+- `src/__tests__/api/generate-terminal-persistence-contract.test.ts`
+- `src/__tests__/api/poll-task-authoritative-direct.test.ts`
+
+The new poll-task test is behavior-only coverage of the already-approved DB
+recovery path; `src/app/api/poll-task/route.ts` itself was not changed.
+
+### TDD RED: Provider Task Publication Barrier
+
+The RED introduced an injected, delayed durable-create promise and tested the
+candidate publication contract before implementation:
+
+```text
+pnpm exec vitest run src/__tests__/lib/task-state.test.ts
+
+Exit code: 1
+Test Files: 1 failed
+Tests: 6 failed, 100 passed
+```
+
+The six failures all reported that `publishGenerateTaskCandidates` did not
+exist. The RED locked these requirements:
+
+- the publication promise and registry projection remain pending until INSERT
+  resolves;
+- no provider task can be registered as memory while durable creation is
+  pending;
+- create `false` and create exceptions exclude the candidate task ID;
+- partial success returns only successfully persisted provider IDs;
+- authoritative direct IDs bypass provider persistence and processing
+  projection;
+- `_skipCloudTaskPersistence` tasks retain the memory-only path.
+
+### Provider Publication GREEN
+
+- Added `publishGenerateTaskCandidates`, a small injected coordinator that
+  deduplicates candidate IDs and returns an explicit `publishedTaskIds` result.
+- Durable provider candidates await `recordImageTaskSubmitted` before registry
+  publication. `createCloudTask` therefore marks the task durable before
+  `registerTask` can expose it.
+- A create rejection or exception is recorded as an explicit failure and the
+  task ID is omitted from the final polling response.
+- Partial persistence failure keeps only successful IDs.
+- If every durable candidate fails persistence, the route returns HTTP `503`
+  with an explicit “no pollable durable record” error.
+- `_skipCloudTaskPersistence` candidates do not call the database and retain
+  legacy memory registration.
+- The final response, `count`, and polling IDs now use
+  `publishedTaskIds`, not the unverified provider candidate array.
+- Provider tasks are not re-submitted; only the local cloud-task row creation
+  and registry projection order changed.
+
+### TDD Coverage: Authoritative Direct Skip
+
+- The route now maintains `authoritativeDirectTaskIds`.
+- A direct ID is added to this Set immediately after the terminal helper
+  returns an authoritative completed snapshot and before registry publication.
+- `exposeDurableDirectTask` still puts the ID into the candidate response before
+  attempting registry/SSE projection.
+- The common publication coordinator unconditionally preserves and skips
+  authoritative direct IDs, independent of registry presence.
+- A combined behavior test makes the direct registry publisher throw, then
+  runs the common coordinator and proves that the ID remains returned while
+  provider creation and processing projection are never invoked.
+
+An executable poll route test additionally simulates:
+
+- no registry task;
+- a completed PostgreSQL direct snapshot;
+- no local completed cache.
+
+It proves that poll-task returns the authoritative completed image response
+without rebuilding a processing registry task, claiming a recovery lease,
+resolving a provider, or issuing a remote `fetch`.
+
+Focused GREEN:
+
+```text
+Exit code: 0
+Test Files: 7 passed
+Tests: 212 passed
+```
+
+### Sixth Review Verification
+
+Expanded Task 3 state, storage, persistence, marker, cancel, generate, poll,
+video, admin, and async-generation regression suite:
+
+```text
+Exit code: 0
+Test Files: 21 passed, 1 skipped
+Tests: 269 passed, 1 skipped
+```
+
+PostgreSQL remains explicit:
+
+```text
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+authoritative task-state PostgreSQL tests skipped.
+```
+
+Static verification:
+
+```text
+pnpm ts-check
+Exit code: 0
+
+pnpm exec eslint <changed TypeScript/test files>
+Exit code: 0
+Errors: 0
+Warnings: 19 existing warnings in src/app/api/generate/route.ts
+
+git diff --check
+Exit code: 0
+```
+
+Protected baseline against temporary candidate
+`489e7552d75c66501cd11011ba8a8f4e194f367e`, containing the complete sixth
+review working tree and the exact cumulative approved Task 1-3 paths:
+
+```text
+Exit code: 0
+PASS All 38 baseline feature IDs remain present.
+PASS No unapproved source drift was detected.
+PASS All literal protected component paths are present.
+PASS All required evidence contracts are present.
+PASS Base and candidate Git refs are confirmed.
+PASS Release gate completed with 0 warning(s).
+```
+
+### Sixth Review Risks And Blockers
+
+BLOCKED:
+
+- `POSTGRES_TEST_DATABASE_URL` remains absent. Real PostgreSQL CAS concurrency
+  and transaction behavior were skipped and are not reported as passed.
+- `E2E_DEPLOYMENT_COMMIT` remains unavailable, so cloud runtime provenance is
+  still unconfirmed.
+
+Concerns:
+
+- Provider submission can succeed remotely while local durable-row creation
+  fails. The route now correctly returns failure/partial success rather than an
+  unpollable task ID, but provider-side orphan reconciliation remains outside
+  Task 3.
+- Registry projection failure after successful provider-row creation does not
+  invalidate the durable task. Poll recovery remains the fallback authority.
+- Provider behavior, billing/refunds, multi-image semantics, Abort handling,
+  and broad entry migration remain unchanged and deferred to Tasks 4-7.
+
+No GitHub push was performed.
+
 ## Fifth Independent Review Fix
 
 ### Scope
