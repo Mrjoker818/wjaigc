@@ -22,7 +22,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile,
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 import {
-  getTaskResultImageUrls,
+  exposeDurableDirectTask,
   publishDurableDirectTask,
 } from '@/lib/task-core/task-service';
 import {
@@ -2953,30 +2953,36 @@ export async function POST(request: NextRequest) {
                   generationRouteAudit,
                 },
               ),
-              publishCompleted: (task) => {
-                const authoritativeImageUrls = getTaskResultImageUrls(task);
-                if (authoritativeImageUrls.length === 0) {
-                  throw new Error(
-                    `Completed durable task ${directTid} has no authoritative image result`,
-                  );
-                }
-                taskIds.push(directTid);
-                publishedDirectImageUrls.push(...authoritativeImageUrls);
-                registerTask(
-                  directTid,
-                  'generate',
-                  '生成图片',
-                  userId,
-                );
-                updateTaskProgress(directTid, {
-                  status: 'completed',
-                  progress: task.progress,
-                  result: task.result,
-                  error: task.error,
-                });
-              },
             });
-            if (!publication.published) {
+            if (publication.published) {
+              exposeDurableDirectTask({
+                taskId: publication.taskId,
+                task: publication.task,
+                taskIds,
+                directImageUrls: publishedDirectImageUrls,
+                publishRegistry: (task) => {
+                  registerTask(
+                    directTid,
+                    'generate',
+                    '生成图片',
+                    userId,
+                  );
+                  updateTaskProgress(directTid, {
+                    status: 'completed',
+                    progress: task.progress,
+                    result: task.result,
+                    error: task.error,
+                  });
+                },
+                onPublishError: (error) => {
+                  console.warn(
+                    '[generate] Durable direct registry publication failed:',
+                    directTid,
+                    error,
+                  );
+                },
+              });
+            } else {
               console.warn(
                 '[generate] Durable direct task was not publishable:',
                 directTid,

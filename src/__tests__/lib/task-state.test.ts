@@ -29,11 +29,12 @@ import {
   type DurableTaskStatus,
 } from '@/lib/task-core/task-state';
 import {
-  getTaskResultImageUrls,
+  exposeDurableDirectTask,
   publishDurableDirectTask,
   TaskNotFoundError,
   transitionTask,
 } from '@/lib/task-core/task-service';
+import type { DurableTask } from '@/lib/task-core/task-state';
 
 function cloudTask(status: DurableTaskStatus, revision = 0) {
   return {
@@ -267,6 +268,7 @@ describe('durable task state', () => {
       prepareCompletion = vi.fn().mockResolvedValue({
         imageUrl: '/prepared.png',
       }),
+      publishRegistry?: (task: DurableTask) => void,
     ) {
       const taskIds: string[] = [];
       const registry: string[] = [];
@@ -276,17 +278,26 @@ describe('durable task state', () => {
         registry,
         imageUrls,
         prepareCompletion,
-        run: () => publishDurableDirectTask({
-          taskId: 'direct-task',
-          createTask,
-          prepareCompletion,
-          completeTask,
-          publishCompleted: (task) => {
-            taskIds.push(task.id);
-            registry.push(`${task.id}:${task.status}`);
-            imageUrls.push(...getTaskResultImageUrls(task));
-          },
-        }),
+        run: async () => {
+          const publication = await publishDurableDirectTask({
+            taskId: 'direct-task',
+            createTask,
+            prepareCompletion,
+            completeTask,
+          });
+          if (publication.published) {
+            exposeDurableDirectTask({
+              taskId: publication.taskId,
+              task: publication.task,
+              taskIds,
+              directImageUrls: imageUrls,
+              publishRegistry: publishRegistry ?? ((task) => {
+                registry.push(`${task.id}:${task.status}`);
+              }),
+            });
+          }
+          return publication;
+        },
       };
     }
 
@@ -417,6 +428,73 @@ describe('durable task state', () => {
         transitioned: false,
       });
       expect(harness.imageUrls).toEqual(['/winner.png']);
+    });
+
+    it('keeps a completed task reachable when its snapshot has no image URL', async () => {
+      const harness = publicationHarness(
+        vi.fn().mockResolvedValue(true),
+        vi.fn().mockResolvedValue({
+          transitioned: true,
+          task: {
+            ...completedTask,
+            result: {},
+          },
+        }),
+      );
+
+      await expect(harness.run()).resolves.toMatchObject({
+        published: true,
+        task: { status: 'completed' },
+      });
+      expect(harness.taskIds).toEqual(['direct-task']);
+      expect(harness.imageUrls).toEqual([]);
+      expect(harness.registry).toEqual(['direct-task:completed']);
+    });
+
+    it('keeps the taskId reachable when registry publication throws', async () => {
+      const onPublishError = vi.fn();
+      const taskIds: string[] = [];
+      const imageUrls: string[] = [];
+
+      expect(() => exposeDurableDirectTask({
+        taskId: completedTask.id,
+        task: completedTask,
+        taskIds,
+        directImageUrls: imageUrls,
+        publishRegistry: () => {
+          throw new Error('registry unavailable');
+        },
+        onPublishError,
+      })).not.toThrow();
+
+      expect(taskIds).toEqual(['direct-task']);
+      expect(imageUrls).toEqual(['/direct.png']);
+      expect(onPublishError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'registry unavailable' }),
+      );
+    });
+
+    it('publishes at most the first authoritative image URL for one taskId', () => {
+      const taskIds: string[] = [];
+      const imageUrls: string[] = [];
+
+      exposeDurableDirectTask({
+        taskId: completedTask.id,
+        task: {
+          ...completedTask,
+          result: {
+            imageUrls: ['/winner-1.png', '/winner-2.png'],
+            imageUrl: '/winner-3.png',
+          },
+        },
+        taskIds,
+        directImageUrls: imageUrls,
+        publishRegistry: vi.fn(),
+      });
+
+      expect(taskIds).toEqual(['direct-task']);
+      expect(imageUrls).toEqual(['/winner-1.png']);
+      expect(imageUrls.length).toBeLessThanOrEqual(taskIds.length);
     });
   });
 });

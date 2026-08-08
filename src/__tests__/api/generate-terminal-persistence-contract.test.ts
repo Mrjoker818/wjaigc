@@ -71,14 +71,13 @@ describe('generate authoritative terminal persistence contract', () => {
       /completeTask:\s*\(prepared\) => recordImageTaskTerminal\([\s\S]*?imageUrl:[\s\S]*?prepared\.imageUrl/,
     );
     expect(directBranch).toMatch(
-      /publishCompleted:[\s\S]*?getTaskResultImageUrls\(task\)[\s\S]*?taskIds\.push\(directTid\)[\s\S]*?registerTask\(/,
+      /if \(publication\.published\)[\s\S]*?exposeDurableDirectTask\(\{[\s\S]*?taskIds,[\s\S]*?directImageUrls:\s*publishedDirectImageUrls,[\s\S]*?publishRegistry:[\s\S]*?registerTask\(/,
     );
     const durablePublication = directBranch.slice(
-      directBranch.indexOf('publishCompleted:'),
+      directBranch.indexOf('if (publication.published)'),
     );
-    expect(durablePublication.indexOf('taskIds.push(directTid)')).toBeGreaterThan(
-      -1,
-    );
+    expect(durablePublication).not.toContain('publishCompleted:');
+    expect(durablePublication).not.toContain('getTaskResultImageUrls');
     expect(durablePublication).not.toContain(
       'publishedDirectImageUrls.push(rawUrl)',
     );
