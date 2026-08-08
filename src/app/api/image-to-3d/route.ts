@@ -385,9 +385,9 @@ async function buildHunyuan3DBody(request: ImageTo3DRequest): Promise<Record<str
     }
   }
 
-  // 302.ai 代理层要求显式声明图片格式
-  body.ImageFormat = 'png';
-
+  // 混元3D API 要求 ResultFormat 字段（已在上面按 format 映射设置），
+  // 不发送 ImageFormat —— 腾讯云 SubmitHunyuanTo3DRapidJob 无此参数，
+  // 302.ai 代理会原样透传导致 UnknownParameter 错误（2026-08 实测）
   return body;
 }
 
