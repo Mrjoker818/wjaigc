@@ -90,6 +90,35 @@ describe('POST /api/cancel-task', () => {
     expect(mocks.recordCloudTaskCancelled).toHaveBeenCalledWith('task-owned', false);
   });
 
+  it('keeps a registry-only task cancellable without authoritative persistence', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'memory-only-task',
+      userId: 'user-a',
+      type: 'edit',
+      status: 'processing',
+      creditCost: 4,
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue(null);
+
+    const response = await POST(request('memory-only-task'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.cancelTask).toHaveBeenCalledWith('memory-only-task');
+    expect(mocks.cancelEditTask).toHaveBeenCalledWith('memory-only-task');
+    expect(mocks.refundCredits).toHaveBeenCalledWith(
+      'user-a',
+      4,
+      expect.stringContaining('taskId: memory-only-task'),
+      'memory-only-task',
+    );
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+    expect(mocks.updateTaskProgress).toHaveBeenCalledWith(
+      'memory-only-task',
+      { status: 'cancelled', progress: 0 },
+    );
+  });
+
   it('does not project cancelled when authoritative persistence fails', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
     mocks.getTaskInfo.mockReturnValue({

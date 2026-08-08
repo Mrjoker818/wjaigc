@@ -1,6 +1,7 @@
 import { execSql } from '@/lib/db-client';
 import {
   canTransitionTaskStatus,
+  isTerminalTaskStatus,
   normalizeDurableTaskStatus,
   type DurableTaskStatus,
   type UnifiedTaskError,
@@ -236,6 +237,14 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
     const sourceStatuses = expectedStatuses?.length
       ? expectedStatuses
       : [current.status];
+    const allowedSourceStatuses = sourceStatuses.filter((status) => {
+      const normalizedStatus = normalizeDurableTaskStatus(status);
+      return canTransitionTaskStatus(normalizedStatus, targetStatus)
+        || (
+          normalizedStatus === targetStatus
+          && !isTerminalTaskStatus(targetStatus)
+        );
+    });
     if (
       expectedRevision !== undefined
       && expectedRevision !== current.revision
@@ -243,21 +252,14 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
       return false;
     }
     if (
-      !sourceStatuses.some((status) =>
+      !allowedSourceStatuses.some((status) =>
         normalizeDurableTaskStatus(status) === currentStatus
       )
-      || sourceStatuses.some((status) =>
-        !canTransitionTaskStatus(
-          normalizeDurableTaskStatus(status),
-          targetStatus,
-        )
-      )
-      || !canTransitionTaskStatus(currentStatus, targetStatus)
     ) {
       return false;
     }
 
-    expectedStatuses = expandPersistedStatuses(sourceStatuses);
+    expectedStatuses = expandPersistedStatuses(allowedSourceStatuses);
     expectedRevision = current.revision;
   }
 

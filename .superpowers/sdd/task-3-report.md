@@ -251,6 +251,194 @@ Concerns:
 
 No GitHub push was performed.
 
+## 2026-08-08 Second Independent Review Fix
+
+Status before this fix: `CHANGES_REQUIRED`.
+
+This pass remained inside Task 3. It did not implement Task 4 billing/refund
+redesign, Task 5 multi-image behavior, Task 6 Abort behavior, or Task 7 entry
+migration.
+
+### Minimal Scope Necessity
+
+The review explicitly approved two route-level compatibility repairs:
+
+- `src/app/api/generate/route.ts` was minimally necessary because durable image
+  generation branches still published terminal registry/SSE state before the
+  PostgreSQL terminal CAS completed.
+- `src/app/api/cancel-task/route.ts` was minimally necessary because the first
+  review's database-first path incorrectly treated legacy registry-only tasks
+  as durable tasks and could return `TaskNotFoundError`/500.
+
+No other business route or UI file was changed.
+
+### Second Review TDD RED
+
+Tests were added before the production changes:
+
+- real `updateCloudTask()` SQL/mock coverage for processing, queued, pending,
+  and workflow same-status non-terminal patches;
+- mixed `pending|processing -> processing` source filtering;
+- terminal same-status business patch rejection;
+- systematic generate-route terminal ordering contracts;
+- registry-only cancellation compatibility and durable cancellation failure
+  projection protection.
+
+Initial RED:
+
+```text
+pnpm exec vitest run \
+  src/__tests__/lib/cloud-task-storage.test.ts \
+  src/__tests__/api/generate-terminal-persistence-contract.test.ts \
+  src/__tests__/api/cancel-task.test.ts \
+  tests/integration/task-state-postgres.test.ts
+
+Exit code: 1
+Test Files: 3 failed | 1 skipped
+Tests: 6 failed | 45 passed | 1 skipped
+
+Expected failures:
+- updateCloudTask rejected processing/queued/pending same-status active patches;
+- expectedStatuses containing the active target status discarded valid sources;
+- durable generate terminal branches did not await authoritative persistence;
+- registry-only cancellation attempted the durable persistence path.
+
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+authoritative task-state PostgreSQL tests skipped.
+```
+
+After the minimal production changes, one contract test still selected the
+wrong `submitOnly` branch in the large generate route:
+
+```text
+Exit code: 1
+Test Files: 1 failed | 2 passed | 1 skipped
+Tests: 1 failed | 52 passed | 1 skipped
+```
+
+The test was corrected to anchor on the actual
+`recordSubmitOnlyTerminal` helper. No production behavior was relaxed.
+
+### Second Review Minimal GREEN
+
+Implemented:
+
+1. `updateCloudTask()` now filters `expectedStatuses` to sources that are
+   either an explicit directed predecessor or the same normalized
+   non-terminal status.
+2. An empty filtered source set or a current row outside that filtered set
+   returns `false`.
+3. Same-status active patches still use the current persisted revision and
+   `status = ANY(...)` CAS.
+4. Terminal same-status business patches remain rejected for completed,
+   failed, cancelled, and timeout rows.
+5. Every durable terminal branch in the legacy submit-only image worker now
+   awaits `recordImageTaskTerminal()` and relies on its successful CAS to
+   project terminal registry/SSE state.
+6. Direct image results retain the old in-memory terminal behavior only when
+   `_skipCloudTaskPersistence` marks the task as non-persistent. Durable direct
+   tasks await creation and terminal persistence; CAS loss or persistence
+   failure leaves `terminalTransitioned=false` and cannot publish terminal
+   registry updates.
+7. Registry-only cancellation now remains legacy-compatible: it cancels the
+   registry/edit store, runs the existing refund behavior, and projects
+   cancelled without invoking authoritative persistence.
+8. Persisted cancellation remains database-first and does not project
+   cancelled when the transition/settlement throws or loses.
+
+Focused GREEN:
+
+```text
+Exit code: 0
+Test Files: 3 passed | 1 skipped
+Tests: 53 passed | 1 skipped
+
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+authoritative task-state PostgreSQL tests skipped.
+```
+
+### Second Review Regression And Gates
+
+Unified Task 3, storage/persistence, cancellation, admin projection, async
+generation, and all generate contract regressions:
+
+```text
+Unified regression files: 16
+Exit code: 0
+Test Files: 15 passed | 1 skipped
+Tests: 208 passed | 1 skipped
+
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+authoritative task-state PostgreSQL tests skipped.
+```
+
+TypeScript:
+
+```text
+pnpm ts-check
+Exit code: 0
+next typegen: success
+tsc -p tsconfig.json: success
+```
+
+Changed-file ESLint:
+
+```text
+pnpm exec eslint \
+  src/lib/cloud-task-storage.ts \
+  src/app/api/cancel-task/route.ts \
+  src/app/api/generate/route.ts \
+  src/__tests__/lib/cloud-task-storage.test.ts \
+  src/__tests__/api/cancel-task.test.ts \
+  src/__tests__/api/generate-terminal-persistence-contract.test.ts
+
+Exit code: 0
+Errors: 0
+Warnings: 19 historical warnings in src/app/api/generate/route.ts
+```
+
+Whitespace:
+
+```text
+git diff --check
+Exit code: 0
+```
+
+Protected baseline with explicit approved Task 1-3 paths plus the review-
+approved generate/cancel route paths:
+
+```text
+pnpm check:protected-baseline -- --base e5867f0 --candidate HEAD \
+  <exact repeated --allow-path values>
+
+Exit code: 0
+PASS All 38 baseline feature IDs remain present.
+PASS No unapproved source drift was detected.
+PASS All literal protected component paths are present.
+PASS All required evidence contracts are present.
+PASS Base and candidate Git refs are confirmed.
+PASS Release gate completed with 0 warning(s).
+```
+
+### Second Review Risks And Blockers
+
+BLOCKED:
+
+- `POSTGRES_TEST_DATABASE_URL` remains absent. Real PostgreSQL CAS concurrency
+  and terminal transition tests were skipped and are not reported as passed.
+- Cloud runtime commit/provider evidence remains outside this local Task 3 fix.
+
+Concerns:
+
+- The legacy submit-only wrapper remains guarded by its existing environment
+  flag; this fix changes only terminal ordering inside that path.
+- Existing refund calls were preserved for compatibility. Atomic billing and
+  refund redesign remains Task 4.
+- Internal non-persistent generation tasks intentionally keep registry
+  authority because no `cloud_tasks` row exists.
+
+No GitHub push was performed.
+
 ---
 
 ## Independent Review Fix: CHANGES_REQUIRED
