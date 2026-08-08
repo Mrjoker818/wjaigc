@@ -9,6 +9,8 @@
  * 此文件仅包含服务端函数（依赖 db-storage）
  */
 
+import { createHash } from 'node:crypto';
+
 import { dbGetCredits, dbAdjustCredits, dbInitCredits, dbRecordCreditTransaction } from './db-storage';
 export {
   CREDITS_TO_CNY, CNY_TO_CREDITS,
@@ -21,6 +23,41 @@ import {
 } from './credits-constants';
 import { loadCreditPricingConfig, resolveConfiguredCreditCost, resolveTokenPricingFromConfig } from './credit-pricing';
 import type { TokenCreditPricing } from './credit-pricing';
+
+export type TaskBillingTransactionKind = 'charge' | 'refund';
+
+export class InsufficientCreditsError extends Error {
+  readonly code = 'INSUFFICIENT_CREDITS';
+  readonly status = 402;
+  readonly statusCode = 402;
+
+  constructor(
+    readonly userId: string,
+    readonly required: number,
+    readonly balance: number,
+  ) {
+    super(`Insufficient credits: required ${required}, available ${balance}`);
+    this.name = 'InsufficientCreditsError';
+  }
+}
+
+export function normalizeBillableCreditCost(creditCost: number): number {
+  if (!Number.isFinite(creditCost) || creditCost < 0) {
+    throw new RangeError('creditCost must be a finite non-negative number');
+  }
+  return Math.ceil(creditCost);
+}
+
+export function createTaskBillingTransactionId(
+  kind: TaskBillingTransactionKind,
+  taskId: string,
+): string {
+  const digest = createHash('sha256')
+    .update(`${kind}\0${taskId}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `ctx_${kind}_${digest}`;
+}
 
 // ========== 查找模型积分消耗 ==========
 

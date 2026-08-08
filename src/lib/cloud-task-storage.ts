@@ -1,5 +1,12 @@
-import { execSql } from '@/lib/db-client';
+import { execSql, getPool } from '@/lib/db-client';
+import {
+  createTaskBillingTransactionId,
+  InsufficientCreditsError,
+  normalizeBillableCreditCost,
+} from '@/lib/credits';
+import { ensureCoreTables } from '@/lib/db-storage';
 import { markTaskDurable } from '@/lib/task-registry';
+import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import {
   canTransitionTaskStatus,
   isTerminalTaskStatus,
@@ -34,6 +41,9 @@ export interface CloudTask {
   leaseExpiresAt?: number;
   attemptCount?: number;
   idempotencyKey?: string;
+  requestDigest?: string;
+  chargedTransactionId?: string;
+  refundedTransactionId?: string;
   revision?: number;
 }
 
@@ -133,6 +143,34 @@ export interface CloudTaskFallbackTransitionResult extends CloudTaskCreditRefund
   transitioned: boolean;
 }
 
+export interface CreateBillableCloudTaskInput {
+  userId: string;
+  idempotencyKey: string;
+  requestDigest: string;
+  creditCost: number;
+  task: Omit<CreateCloudTaskInput, 'status'> & {
+    status: PersistedCloudTaskStatus;
+  };
+}
+
+export interface CreateBillableCloudTaskResult {
+  task: PersistedCloudTask;
+  reused: boolean;
+  charged: boolean;
+}
+
+export interface SettleFailedCloudTaskInput {
+  taskId: string;
+  status: CloudTaskFailureStatus;
+  error: UnifiedTaskError;
+}
+
+export interface SettleFailedCloudTaskResult {
+  task: PersistedCloudTask;
+  transitioned: boolean;
+  refunded: boolean;
+}
+
 let tablesEnsured = false;
 
 const TERMINAL_STATUS_GUARD =
@@ -163,6 +201,9 @@ export async function ensureCloudTaskTables(): Promise<void> {
       lease_expires_at BIGINT DEFAULT 0,
       attempt_count INTEGER NOT NULL DEFAULT 0,
       idempotency_key TEXT DEFAULT '',
+      request_digest TEXT DEFAULT '',
+      charged_transaction_id TEXT DEFAULT '',
+      refunded_transaction_id TEXT DEFAULT '',
       revision INTEGER NOT NULL DEFAULT 0,
       created_at BIGINT NOT NULL,
       updated_at BIGINT NOT NULL
@@ -176,9 +217,14 @@ export async function ensureCloudTaskTables(): Promise<void> {
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS lease_expires_at BIGINT DEFAULT 0');
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0');
   await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS idempotency_key TEXT DEFAULT ''");
+  await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS request_digest TEXT DEFAULT ''");
+  await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS charged_transaction_id TEXT DEFAULT ''");
+  await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS refunded_transaction_id TEXT DEFAULT ''");
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS credit_cost NUMERIC NOT NULL DEFAULT 0');
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 0');
   await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_user_idempotency ON cloud_tasks(user_id, idempotency_key) WHERE idempotency_key <> ''");
+  await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_charged_transaction ON cloud_tasks(charged_transaction_id) WHERE charged_transaction_id <> ''");
+  await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_refunded_transaction ON cloud_tasks(refunded_transaction_id) WHERE refunded_transaction_id <> ''");
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_user_created ON cloud_tasks(user_id, created_at DESC)');
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_status_updated ON cloud_tasks(status, updated_at DESC)');
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_chat_recovery ON cloud_tasks(user_id, project_id, session_id, updated_at DESC)');
@@ -191,10 +237,12 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
     INSERT INTO cloud_tasks (
       id, user_id, project_id, session_id, message_id, type, status, provider_id, model, remote_task_id,
       progress, label, result, error, credit_status, credit_cost, lease_owner, lease_expires_at,
-      attempt_count, idempotency_key, revision, created_at, updated_at
+      attempt_count, idempotency_key, request_digest, charged_transaction_id,
+      refunded_transaction_id, revision, created_at, updated_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+      $21, $22, $23, $24, $25, $26
     ) ON CONFLICT DO NOTHING
   `, [
     input.id,
@@ -217,6 +265,9 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
     input.leaseExpiresAt || 0,
     input.attemptCount || 0,
     input.idempotencyKey || '',
+    input.requestDigest || '',
+    input.chargedTransactionId || '',
+    input.refundedTransactionId || '',
     input.revision || 0,
     input.createdAt,
     input.updatedAt,
@@ -226,6 +277,300 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
     markTaskDurable(input.id);
   }
   return created;
+}
+
+export async function createBillableCloudTask(
+  input: CreateBillableCloudTaskInput,
+): Promise<CreateBillableCloudTaskResult> {
+  await ensureCoreTables();
+  await ensureCloudTaskTables();
+
+  const creditCost = normalizeBillableCreditCost(input.creditCost);
+  const pool = getPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [`${input.userId}\0${input.idempotencyKey}`],
+    );
+
+    const existingResult = await client.query(
+      `SELECT * FROM cloud_tasks
+       WHERE user_id = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [input.userId, input.idempotencyKey],
+    );
+    const existingRow = existingResult.rows[0] as
+      | Record<string, unknown>
+      | undefined;
+    if (existingRow) {
+      const existingDigest = getPersistedRequestDigest(existingRow);
+      if (existingDigest && existingDigest !== input.requestDigest) {
+        throw new IdempotencyConflictError({
+          userId: input.userId,
+          idempotencyKey: input.idempotencyKey,
+          existingDigest,
+          requestDigest: input.requestDigest,
+        });
+      }
+
+      let reusableRow = existingRow;
+      if (!existingDigest) {
+        const bound = await client.query(
+          `UPDATE cloud_tasks
+           SET request_digest = $3, updated_at = $4
+           WHERE user_id = $1 AND idempotency_key = $2
+           RETURNING *`,
+          [
+            input.userId,
+            input.idempotencyKey,
+            input.requestDigest,
+            Date.now(),
+          ],
+        );
+        reusableRow = bound.rows[0] as Record<string, unknown>;
+      }
+
+      await client.query('COMMIT');
+      return {
+        task: rowToPersistedCloudTask(reusableRow),
+        reused: true,
+        charged: false,
+      };
+    }
+
+    const now = Date.now();
+    const chargedTransactionId = creditCost > 0
+      ? createTaskBillingTransactionId('charge', input.task.id)
+      : '';
+    let balanceAfter = 0;
+
+    if (creditCost > 0) {
+      await client.query(
+        `INSERT INTO wujie_credits (
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 0, 0, 0, $3, $3)
+        ON CONFLICT (user_id) DO NOTHING`,
+        [`credits_${input.userId}`, input.userId, now],
+      );
+      const lockedCredits = await client.query(
+        'SELECT balance FROM wujie_credits WHERE user_id = $1 FOR UPDATE',
+        [input.userId],
+      );
+      const currentBalance = Number(lockedCredits.rows[0]?.balance ?? 0);
+      if (currentBalance < creditCost) {
+        throw new InsufficientCreditsError(
+          input.userId,
+          creditCost,
+          currentBalance,
+        );
+      }
+
+      const deducted = await client.query(
+        `UPDATE wujie_credits
+         SET balance = balance - $1,
+             total_used = total_used + $1,
+             updated_at = $2
+         WHERE user_id = $3
+         RETURNING balance`,
+        [creditCost, now, input.userId],
+      );
+      balanceAfter = Number(deducted.rows[0]?.balance ?? 0);
+    }
+
+    const task = input.task;
+    const insertedTask = await client.query(
+      `INSERT INTO cloud_tasks (
+        id, user_id, project_id, session_id, message_id, type, status,
+        provider_id, model, remote_task_id, progress, label, result, error,
+        credit_status, credit_cost, lease_owner, lease_expires_at,
+        attempt_count, idempotency_key, request_digest,
+        charged_transaction_id, refunded_transaction_id, revision,
+        created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+        $21, $22, '', $23, $24, $25
+      )
+      RETURNING *`,
+      [
+        task.id,
+        input.userId,
+        task.projectId || '',
+        task.sessionId || '',
+        task.messageId || '',
+        task.type,
+        task.status,
+        task.providerId || '',
+        task.model || '',
+        task.remoteTaskId || '',
+        task.progress,
+        task.label || '',
+        JSON.stringify(task.result || {}),
+        task.error || '',
+        creditCost > 0 ? 'pending' : 'not-applicable',
+        creditCost,
+        task.leaseOwner || '',
+        task.leaseExpiresAt || 0,
+        task.attemptCount || 0,
+        input.idempotencyKey,
+        input.requestDigest,
+        chargedTransactionId,
+        task.revision || 0,
+        task.createdAt,
+        task.updatedAt,
+      ],
+    );
+
+    if (creditCost > 0) {
+      await client.query(
+        `INSERT INTO wujie_credit_transactions (
+          id, user_id, type, amount, balance_after, description, model,
+          task_id, reference_id, created_at
+        ) VALUES ($1, $2, 'consume', $3, $4, $5, $6, $7, $7, $8)`,
+        [
+          chargedTransactionId,
+          input.userId,
+          -creditCost,
+          balanceAfter,
+          task.label || task.type,
+          task.model || '',
+          task.id,
+          now,
+        ],
+      );
+    }
+
+    await client.query('COMMIT');
+    return {
+      task: rowToPersistedCloudTask(
+        insertedTask.rows[0] as Record<string, unknown>,
+      ),
+      reused: false,
+      charged: creditCost > 0,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function settleFailedCloudTask(
+  input: SettleFailedCloudTaskInput,
+): Promise<SettleFailedCloudTaskResult> {
+  await ensureCoreTables();
+  await ensureCloudTaskTables();
+
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const selected = await client.query(
+      'SELECT * FROM cloud_tasks WHERE id = $1 FOR UPDATE',
+      [input.taskId],
+    );
+    const row = selected.rows[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      throw new Error(`Task not found: ${input.taskId}`);
+    }
+
+    const currentStatus = normalizeDurableTaskStatus(String(row.status));
+    if (!canTransitionTaskStatus(currentStatus, input.status)) {
+      await client.query('COMMIT');
+      return {
+        task: rowToPersistedCloudTask(row),
+        transitioned: false,
+        refunded: false,
+      };
+    }
+
+    const creditCost = Number(row.credit_cost || 0);
+    const shouldRefund = row.credit_status === 'pending' && creditCost > 0;
+    const refundedTransactionId = shouldRefund
+      ? createTaskBillingTransactionId('refund', input.taskId)
+      : '';
+
+    if (shouldRefund) {
+      const lockedCredits = await client.query(
+        'SELECT balance FROM wujie_credits WHERE user_id = $1 FOR UPDATE',
+        [row.user_id],
+      );
+      if (lockedCredits.rows.length === 0) {
+        throw new Error(`Credit account not found for task: ${input.taskId}`);
+      }
+      const refunded = await client.query(
+        `UPDATE wujie_credits
+         SET balance = balance + $1,
+             total_used = GREATEST(total_used - $1, 0),
+             updated_at = $2
+         WHERE user_id = $3
+         RETURNING balance`,
+        [creditCost, Date.now(), row.user_id],
+      );
+      const balanceAfter = Number(refunded.rows[0]?.balance ?? 0);
+      await client.query(
+        `INSERT INTO wujie_credit_transactions (
+          id, user_id, type, amount, balance_after, description, model,
+          task_id, reference_id, created_at
+        ) VALUES ($1, $2, 'refund', $3, $4, $5, $6, $7, $7, $8)`,
+        [
+          refundedTransactionId,
+          row.user_id,
+          creditCost,
+          balanceAfter,
+          input.error.message,
+          row.model || '',
+          input.taskId,
+          Date.now(),
+        ],
+      );
+    }
+
+    const updated = await client.query(
+      `UPDATE cloud_tasks
+       SET status = $2,
+           progress = 0,
+           error = $3,
+           credit_status = CASE
+             WHEN $4::boolean THEN 'refunded'
+             WHEN credit_cost <= 0 THEN 'not-applicable'
+             ELSE credit_status
+           END,
+           refunded_transaction_id = CASE
+             WHEN $4::boolean THEN $5
+             ELSE refunded_transaction_id
+           END,
+           revision = revision + 1,
+           updated_at = $6
+       WHERE id = $1
+       RETURNING *`,
+      [
+        input.taskId,
+        input.status,
+        input.error.message,
+        shouldRefund,
+        refundedTransactionId,
+        Date.now(),
+      ],
+    );
+    await client.query('COMMIT');
+    return {
+      task: rowToPersistedCloudTask(
+        updated.rows[0] as Record<string, unknown>,
+      ),
+      transitioned: true,
+      refunded: shouldRefund,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInput): Promise<boolean> {
@@ -961,6 +1306,11 @@ function rowToCloudTask(row: Record<string, unknown>): CloudTask {
     leaseExpiresAt: Number(row.lease_expires_at || 0) || undefined,
     attemptCount: Number(row.attempt_count || 0) || undefined,
     idempotencyKey: String(row.idempotency_key || '') || undefined,
+    requestDigest: String(row.request_digest || '') || undefined,
+    chargedTransactionId:
+      String(row.charged_transaction_id || '') || undefined,
+    refundedTransactionId:
+      String(row.refunded_transaction_id || '') || undefined,
     revision: Number(row.revision || 0),
   };
 }
@@ -1033,4 +1383,13 @@ function parseJsonObject(value: unknown): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+function getPersistedRequestDigest(row: Record<string, unknown>): string {
+  const explicitDigest = String(row.request_digest || '').trim();
+  if (explicitDigest) return explicitDigest;
+  const legacyResult = parseJsonObject(row.result);
+  return typeof legacyResult?.requestHash === 'string'
+    ? legacyResult.requestHash.trim()
+    : '';
 }
