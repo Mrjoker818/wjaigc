@@ -221,6 +221,7 @@ export async function ensureCoreTables(): Promise<void> {
       ['wujie_recharge_orders', 'paid_at', 'BIGINT'],
       ['wujie_api_providers', 'balance_username', 'TEXT DEFAULT \'\''],
       ['wujie_api_providers', 'balance_password', 'TEXT DEFAULT \'\''],
+      ['wujie_credit_transactions', 'task_id', 'TEXT DEFAULT \'\''],
       ['wujie_credit_transactions', 'reference_id', 'TEXT DEFAULT \'\''],
       // 操作日志扩展列
       ['wujie_audit_log', 'level', 'TEXT DEFAULT \'info\''],
@@ -250,6 +251,15 @@ export async function ensureCoreTables(): Promise<void> {
     try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_created ON wujie_audit_log(created_at)`); } catch {}
     try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_user_id ON wujie_audit_log(user_id)`); } catch {}
     try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_resolution ON wujie_audit_log(resolution_status)`); } catch {}
+    await execSql(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_tx_task_type_once
+       ON wujie_credit_transactions(task_id, type)
+       WHERE task_id <> ''
+         AND (
+           (type = 'consume' AND id LIKE 'ctx_charge_%')
+           OR (type = 'refund' AND id LIKE 'ctx_refund_%')
+         )`,
+    );
 
     console.log('[db-storage] Core tables ensured');
   } catch (e) {
