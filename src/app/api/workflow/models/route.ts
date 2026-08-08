@@ -3,6 +3,7 @@ import { getPublicApiProviders, getPublicModels } from '@/lib/server-api-config'
 import type { ApiKind, ModelInfo } from '@/lib/server-api-config';
 import { isModelAssignedToUser } from '@/lib/model-defaults';
 import { getSessionUser } from '@/lib/server-auth';
+import { resolveTaskModelCatalog } from '@/lib/task-core/model-catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,10 +17,10 @@ function filterModelsForUser(models: ModelInfo[], user: Awaited<ReturnType<typeo
 
   return models.filter(model => {
     if (model.type === 'image' && user.imageModels?.length) {
-      return user.imageModels.includes(model.id);
+      return isModelAssignedToUser(user.imageModels, model.providerId, model.id);
     }
     if (model.type === 'chat' && user.chatModels?.length) {
-      return user.chatModels.includes(model.id);
+      return isModelAssignedToUser(user.chatModels, model.providerId, model.id);
     }
     if (model.type === 'layer') {
       const apiPermissions = user.apiPermissions;
@@ -41,12 +42,15 @@ export async function GET(request: NextRequest) {
     getSessionUser(request),
   ]);
   const providerNames = new Map(providers.map(provider => [provider.id, provider.displayName || provider.name || provider.id]));
+  const filteredModels = filterModelsForUser(models, user);
+  const taskModelCatalog = await resolveTaskModelCatalog(filteredModels, user);
 
   return NextResponse.json({
     success: true,
-    models: filterModelsForUser(models, user).map(model => ({
+    models: filteredModels.map(model => ({
       ...model,
       provider: providerNames.get(model.providerId) || model.providerId,
     })),
+    taskModelCatalog,
   });
 }

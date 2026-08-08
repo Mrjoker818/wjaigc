@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
+  getApiProviders: vi.fn(),
   getPublicApiProviders: vi.fn(),
   getPublicModels: vi.fn(),
   getRuntimeSettings: vi.fn(),
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/server-api-config', () => ({
+  getApiProviders: mocks.getApiProviders,
   getPublicApiProviders: mocks.getPublicApiProviders,
   getPublicModels: mocks.getPublicModels,
 }));
@@ -19,6 +21,42 @@ import { GET } from '@/app/api/models/route';
 
 describe('model defaults', () => {
   beforeEach(() => {
+    mocks.getApiProviders.mockResolvedValue([
+      {
+        id: 'provider-a',
+        name: 'Provider A',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        isEnabled: true,
+        type: 'universal',
+        modelType: 'universal',
+        selectedModels: ['image-a', 'chat-a', 'shared-chat'],
+        discoveredModels: [
+          { id: 'image-a', name: 'Image A', providerId: 'provider-a', type: 'image' },
+          { id: 'chat-a', name: 'Chat A', providerId: 'provider-a', type: 'chat' },
+          { id: 'shared-chat', name: 'Provider A Chat', providerId: 'provider-a', type: 'chat' },
+        ],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'provider-b',
+        name: 'Provider B',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        isEnabled: true,
+        type: 'universal',
+        modelType: 'universal',
+        selectedModels: ['image-b', 'chat-b', 'shared-chat'],
+        discoveredModels: [
+          { id: 'image-b', name: 'Image B', providerId: 'provider-b', type: 'image' },
+          { id: 'chat-b', name: 'Chat B', providerId: 'provider-b', type: 'chat' },
+          { id: 'shared-chat', name: 'Provider B Chat', providerId: 'provider-b', type: 'chat' },
+        ],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
     mocks.getPublicApiProviders.mockResolvedValue([]);
     mocks.getPublicModels.mockResolvedValue([
       { id: 'image-a', name: 'Image A', providerId: 'provider-a' },
@@ -45,6 +83,20 @@ describe('model defaults', () => {
       globalDefault: 'provider-a::image-a',
       quickCreateDefault: 'provider-b::image-b',
     });
+    expect(data.taskModelCatalog).toEqual([
+      expect.objectContaining({
+        providerId: 'provider-a',
+        modelId: 'image-a',
+        kind: 'image',
+        executionMode: 'sync',
+      }),
+      expect.objectContaining({
+        providerId: 'provider-b',
+        modelId: 'image-b',
+        kind: 'image',
+        executionMode: 'sync',
+      }),
+    ]);
   });
 
   it('does not expose configured defaults that are unavailable to the current user', async () => {
@@ -139,5 +191,12 @@ describe('model defaults', () => {
       globalDefault: '',
       quickCreateDefault: 'provider-a::shared-chat',
     });
+    expect(data.taskModelCatalog).toEqual([
+      expect.objectContaining({
+        providerId: 'provider-a',
+        modelId: 'shared-chat',
+        kind: 'chat',
+      }),
+    ]);
   });
 });

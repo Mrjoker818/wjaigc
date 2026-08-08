@@ -4,6 +4,7 @@ import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
 import { isModelAssignedToUser } from '@/lib/model-defaults';
+import { resolveTaskModelCatalog } from '@/lib/task-core/model-catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,12 +50,14 @@ export async function GET(request: NextRequest) {
     ...model,
     isDefault: Boolean(configuredDefault && `${model.providerId}::${model.id}` === configuredDefault),
   }));
+  const taskModelCatalog = await resolveTaskModelCatalog(filteredModels, user);
   const availableModelIds = new Set(responseModels.map(model => `${model.providerId}::${model.id}`));
 
   return NextResponse.json({
     success: true,
     providers,
     models: responseModels,
+    taskModelCatalog,
     quickCreatePolicy: {
       autoModelRouting: runtimeSettings.quickCreateAutoModelRouting,
       globalDefault: availableModelIds.has(configuredDefault) ? configuredDefault : '',
