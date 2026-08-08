@@ -9,8 +9,14 @@ import {
 } from '@/lib/model-capabilities';
 import {
   getApiProviders,
-  resolveEffectiveModelType,
 } from '@/lib/server-api-config';
+import {
+  canonicalizeConfiguredModelId,
+  getConfiguredModelsForProvider,
+  getConfiguredModelsForProviders,
+  resolveEffectiveModelType,
+  resolveModelAuthorizationNamespace,
+} from '@/lib/model-type-classification';
 import { listManagedUsers } from '@/lib/server-auth';
 import type { ApiKind, ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import type { User } from '@/lib/user-types';
@@ -44,20 +50,22 @@ export interface ModelAuthorizationMigration {
   }>;
 }
 
-export interface PublicModelAuthorizationMigration {
+export interface RedactedModelAuthorizationMigration {
   resolved: Array<{
     legacyModelId: string;
     reason: 'unique';
     count: number;
-    exactModelId?: string;
   }>;
   required: Array<{
     legacyModelId: string;
     reason: 'ambiguous' | 'not-visible';
     count: number;
-    candidates?: string[];
   }>;
 }
+
+export type PublicModelAuthorizationMigration =
+  | ModelAuthorizationMigration
+  | RedactedModelAuthorizationMigration;
 
 export interface TaskModelCatalogResult {
   taskModelCatalog: TaskModelDescriptor[];
@@ -73,15 +81,6 @@ type TaskModelOverride = Partial<Omit<
 >>;
 
 const EXECUTION_MODES = new Set<TaskModelDescriptor['executionMode']>(['sync', 'async']);
-const IMAGE_AUTH_TYPES = new Set<ApiKind>([
-  'image',
-  'vectorize',
-  'layer',
-  'imageEdit',
-  'upscaler',
-  'removebg',
-]);
-const CHAT_AUTH_TYPES = new Set<ApiKind>(['chat', 'vlm']);
 const MAX_OVERRIDE_ARRAY_ITEMS = 32;
 const MAX_OVERRIDE_ARRAY_ITEM_LENGTH = 128;
 const MAX_OVERRIDE_PROTOCOL_LENGTH = 128;
@@ -144,28 +143,19 @@ function hasOwn(value: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
-function isConfiguredModel(provider: ApiProvider, modelId: string): boolean {
-  const selectedModels = provider.selectedModels || [];
-  if (selectedModels.length > 0) return selectedModels.includes(modelId);
-  return Boolean(provider.discoveredModels?.some(model => model.id === modelId));
-}
-
 function findConfiguredModel(provider: ApiProvider, modelId: string): ModelInfo | null {
   if (
     !provider.isEnabled
     || !provider.baseUrl
     || !provider.apiKey
-    || !isConfiguredModel(provider, modelId)
   ) {
     return null;
   }
 
-  return provider.discoveredModels?.find(model => model.id === modelId) || {
-    id: modelId,
-    name: modelId,
-    providerId: provider.id,
-    type: provider.modelType || provider.type,
-  };
+  const canonicalModelId = canonicalizeConfiguredModelId(provider, modelId);
+  return getConfiguredModelsForProvider(provider).find(model => (
+    model.id === canonicalModelId
+  )) || null;
 }
 
 function resolveSourceType(provider: ApiProvider, model: ModelInfo): ApiKind {
@@ -377,6 +367,7 @@ function readStringArray(value: unknown): string[] | undefined {
     result.push(normalized);
     if (result.length > MAX_OVERRIDE_ARRAY_ITEMS) return undefined;
   }
+  if (value.length > 0 && result.length === 0) return undefined;
   return result;
 }
 
@@ -509,14 +500,6 @@ function resolveAssignments(
   const visibleKeys = new Set(entries.map(entry => (
     taskModelKey(entry.provider.id, entry.model.id)
   )));
-  const candidatesByModelId = new Map<string, string[]>();
-  for (const entry of entries) {
-    const exactModelId = taskModelKey(entry.provider.id, entry.model.id);
-    const candidates = candidatesByModelId.get(entry.model.id) || [];
-    if (!candidates.includes(exactModelId)) candidates.push(exactModelId);
-    candidatesByModelId.set(entry.model.id, candidates);
-  }
-
   const exactModelIds = new Set<string>();
   const migration = emptyMigration();
   const seenAssignments = new Set<string>();
@@ -525,11 +508,29 @@ function resolveAssignments(
     seenAssignments.add(assignment);
 
     if (assignment.includes('::')) {
-      if (visibleKeys.has(assignment)) exactModelIds.add(assignment);
+      const separatorIndex = assignment.indexOf('::');
+      const providerId = assignment.slice(0, separatorIndex);
+      const assignedModelId = assignment.slice(separatorIndex + 2);
+      const provider = entries.find(entry => entry.provider.id === providerId)?.provider;
+      const canonicalAssignment = provider
+        ? taskModelKey(
+            providerId,
+            canonicalizeConfiguredModelId(provider, assignedModelId),
+          )
+        : assignment;
+      if (visibleKeys.has(canonicalAssignment)) exactModelIds.add(canonicalAssignment);
       continue;
     }
 
-    const candidates = candidatesByModelId.get(assignment) || [];
+    const candidates = entries.flatMap(entry => {
+      const canonicalAssignment = canonicalizeConfiguredModelId(
+        entry.provider,
+        assignment,
+      );
+      return canonicalAssignment === entry.model.id
+        ? [taskModelKey(entry.provider.id, entry.model.id)]
+        : [];
+    });
     if (candidates.length === 1) {
       exactModelIds.add(candidates[0]);
       migration.resolved.push({
@@ -547,27 +548,6 @@ function resolveAssignments(
   }
 
   return { unrestricted: false, exactModelIds, migration };
-}
-
-function configuredModelsForProviders(providers: ApiProvider[]): ModelInfo[] {
-  return providers.flatMap(provider => {
-    if (!provider.isEnabled || !provider.baseUrl || !provider.apiKey) return [];
-    const modelIds = provider.selectedModels?.length
-      ? provider.selectedModels
-      : (provider.discoveredModels || []).map(model => model.id);
-    return modelIds.map(modelId => {
-      const discovered = provider.discoveredModels?.find(model => model.id === modelId);
-      return discovered ? {
-        ...discovered,
-        providerId: provider.id,
-      } : {
-        id: modelId,
-        name: modelId,
-        providerId: provider.id,
-        type: provider.modelType || provider.type,
-      };
-    });
-  });
 }
 
 function buildTaskModelCatalogResult(
@@ -618,10 +598,12 @@ function buildTaskModelCatalogResult(
     hasRequiredPermission(user, entry.sourceType)
   ));
   const imageEntries = permissionEligibleEntries.filter(entry => (
-    entry.descriptor && IMAGE_AUTH_TYPES.has(entry.sourceType)
+    entry.descriptor
+    && resolveModelAuthorizationNamespace(entry.sourceType) === 'image'
   ));
   const chatEntries = permissionEligibleEntries.filter(entry => (
-    entry.descriptor && CHAT_AUTH_TYPES.has(entry.sourceType)
+    entry.descriptor
+    && resolveModelAuthorizationNamespace(entry.sourceType) === 'chat'
   ));
   const imageAssignments = resolveAssignments(user.imageModels, imageEntries);
   const chatAssignments = resolveAssignments(user.chatModels, chatEntries);
@@ -635,9 +617,10 @@ function buildTaskModelCatalogResult(
     const key = taskModelKey(entry.provider.id, entry.model.id);
     if (!hasRequiredPermission(user, entry.sourceType)) continue;
 
-    const assignments = IMAGE_AUTH_TYPES.has(entry.sourceType)
+    const authorizationNamespace = resolveModelAuthorizationNamespace(entry.sourceType);
+    const assignments = authorizationNamespace === 'image'
       ? imageAssignments
-      : CHAT_AUTH_TYPES.has(entry.sourceType)
+      : authorizationNamespace === 'chat'
         ? chatAssignments
         : null;
     if (
@@ -667,7 +650,10 @@ export async function resolveTaskModel(
 ): Promise<TaskModelDescriptor> {
   const [providers, users] = await Promise.all([getApiProviders(), listManagedUsers()]);
   const provider = providers.find(candidate => candidate.id === providerId);
-  const model = provider ? findConfiguredModel(provider, modelId) : null;
+  const canonicalModelId = provider
+    ? canonicalizeConfiguredModelId(provider, modelId)
+    : modelId;
+  const model = provider ? findConfiguredModel(provider, canonicalModelId) : null;
   if (!provider || !model) {
     throw new Error(`Task model ${taskModelKey(providerId, modelId)} is not configured`);
   }
@@ -678,25 +664,25 @@ export async function resolveTaskModel(
   }
 
   const result = buildTaskModelCatalogResult(
-    configuredModelsForProviders(providers),
+    getConfiguredModelsForProviders(providers),
     user,
     providers,
   );
-  const key = taskModelKey(providerId, modelId);
+  const key = taskModelKey(providerId, canonicalModelId);
   const migrationRequired = result.modelAuthorizationMigration.required.find(item => (
-    item.legacyModelId === modelId && item.candidates.includes(key)
+    item.legacyModelId === canonicalModelId && item.candidates.includes(key)
   ));
   if (!result.authorizedModelKeys.has(key)) {
     if (migrationRequired) {
       throw new Error(
-        `Model authorization migration required for ${modelId}: ${migrationRequired.reason}`,
+        `Model authorization migration required for ${canonicalModelId}: ${migrationRequired.reason}`,
       );
     }
     throw new Error(`User ${userId} is not authorized for ${key}`);
   }
 
   const descriptor = result.taskModelCatalog.find(candidate => (
-    candidate.providerId === providerId && candidate.modelId === modelId
+    candidate.providerId === providerId && candidate.modelId === canonicalModelId
   ));
   if (!descriptor) {
     throw new Error(`Task model ${taskModelKey(providerId, modelId)} is not supported`);
@@ -725,7 +711,7 @@ export async function resolveTaskModelCatalogResult(
 ): Promise<TaskModelCatalogResult> {
   const providers = await getApiProviders();
   return buildTaskModelCatalogResult(
-    configuredModelsForProviders(providers),
+    getConfiguredModelsForProviders(providers),
     user,
     providers,
   );

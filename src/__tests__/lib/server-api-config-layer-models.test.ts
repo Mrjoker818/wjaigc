@@ -169,4 +169,89 @@ describe('server API config layer models', () => {
       }),
     ]);
   });
+
+  it('normalizes 302 legacy and alias selections while preserving an explicit unknown model', async () => {
+    mocks.dbGetApiProviders.mockResolvedValue([
+      {
+        id: '302-legacy',
+        name: '302 Legacy',
+        display_name: '302 Legacy',
+        base_url: 'https://api.302.ai',
+        api_key: 'server-secret',
+        is_enabled: true,
+        type: 'upscaler',
+        model_type: 'upscaler',
+        request_style: 'auto',
+        selected_models: ['302'],
+        discovered_models: [],
+        advanced_params: {},
+        is_default: false,
+        created_at: 1,
+        updated_at: 1,
+        connection_status: 'success',
+        sort_order: 0,
+      },
+      {
+        id: '302-alias',
+        name: '302 Alias',
+        display_name: '302 Alias',
+        base_url: 'https://api.302.ai',
+        api_key: 'server-secret',
+        is_enabled: true,
+        type: 'upscaler',
+        model_type: 'upscaler',
+        request_style: 'auto',
+        selected_models: ['upscale-v6'],
+        discovered_models: [],
+        advanced_params: {},
+        is_default: false,
+        created_at: 1,
+        updated_at: 1,
+        connection_status: 'success',
+        sort_order: 0,
+      },
+      {
+        id: '302-unknown',
+        name: '302 Unknown',
+        display_name: '302 Unknown',
+        base_url: 'https://api.302.ai',
+        api_key: 'server-secret',
+        is_enabled: true,
+        type: 'upscaler',
+        model_type: 'upscaler',
+        request_style: 'auto',
+        selected_models: ['custom-upscale'],
+        discovered_models: [],
+        advanced_params: {},
+        is_default: false,
+        created_at: 1,
+        updated_at: 1,
+        connection_status: 'success',
+        sort_order: 0,
+      },
+    ]);
+
+    await expect(getPublicModels('upscaler')).resolves.toEqual([
+      expect.objectContaining({
+        id: '302-super-upscale-v2',
+        providerId: '302-legacy',
+        type: 'upscaler',
+      }),
+      expect.objectContaining({
+        id: '302-upscale-v6',
+        providerId: '302-legacy',
+        type: 'upscaler',
+      }),
+      expect.objectContaining({
+        id: '302-upscale-v6',
+        providerId: '302-alias',
+        type: 'upscaler',
+      }),
+      expect.objectContaining({
+        id: 'custom-upscale',
+        providerId: '302-unknown',
+        type: 'upscaler',
+      }),
+    ]);
+  });
 });

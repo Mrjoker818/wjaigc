@@ -170,6 +170,24 @@ describe('task model catalog', () => {
           },
         ],
       }),
+      createProvider({
+        id: '302-legacy-provider',
+        type: 'upscaler',
+        baseUrl: 'https://api.302.ai',
+        selectedModels: ['302'],
+      }),
+      createProvider({
+        id: '302-alias-provider',
+        type: 'upscaler',
+        baseUrl: 'https://api.302.ai',
+        selectedModels: ['upscale-v6'],
+      }),
+      createProvider({
+        id: '302-unknown-provider',
+        type: 'upscaler',
+        baseUrl: 'https://api.302.ai',
+        selectedModels: ['custom-upscale'],
+      }),
     ]);
     mocks.listManagedUsers.mockResolvedValue([
       createUser({
@@ -191,6 +209,40 @@ describe('task model catalog', () => {
       }),
       createUser({ id: 'unique-legacy-user', imageModels: ['unique-image'] }),
       createUser({ id: 'ambiguous-legacy-user', imageModels: ['shared-image'] }),
+      createUser({
+        id: '302-exact-alias-user',
+        imageModels: ['302-alias-provider::upscale-v6'],
+        apiPermissions: {
+          image: true,
+          chat: true,
+          threeD: true,
+          imageEdit: true,
+          vectorize: true,
+          vlm: true,
+          layer: true,
+          video: true,
+          upscaler: true,
+          removebg: true,
+          audio: true,
+        },
+      }),
+      createUser({
+        id: '302-bare-alias-user',
+        imageModels: ['upscale-v6'],
+        apiPermissions: {
+          image: true,
+          chat: true,
+          threeD: true,
+          imageEdit: true,
+          vectorize: true,
+          vlm: true,
+          layer: true,
+          video: true,
+          upscaler: true,
+          removebg: true,
+          audio: true,
+        },
+      }),
       createUser({
         id: 'layer-denied-user',
         imageModels: ['layer-provider::stale-layer'],
@@ -262,6 +314,27 @@ describe('task model catalog', () => {
       '1024x1792',
     ]);
     expect(descriptor.maxOutputs).toBe(1);
+  });
+
+  it('treats an all-whitespace override array as invalid and keeps inferred defaults', async () => {
+    const providers = await mocks.getApiProviders();
+    const providerB = providers.find((provider: ApiProvider) => provider.id === 'provider-b');
+    if (!providerB) throw new Error('provider-b fixture missing');
+    providerB.advancedParams = {
+      taskModelCapabilities: JSON.stringify({
+        'dall-e-3': {
+          allowedSizes: [' ', '\t'],
+        },
+      }),
+    };
+
+    const descriptor = await resolveTaskModel('provider-b', 'dall-e-3', 'admin-a');
+
+    expect(descriptor.allowedSizes).toEqual([
+      '1024x1024',
+      '1792x1024',
+      '1024x1792',
+    ]);
   });
 
   it('reuses video capabilities for duration, ratios, sizes, references, and async execution', async () => {
@@ -439,5 +512,68 @@ describe('task model catalog', () => {
         modelId: 'speech-1',
       }),
     );
+  });
+
+  it('uses canonical configured keys for 302 legacy, alias, and explicit unknown selections', async () => {
+    await expect(resolveTaskModel(
+      '302-legacy-provider',
+      '302-super-upscale-v2',
+      'admin-a',
+    )).resolves.toMatchObject({
+      providerId: '302-legacy-provider',
+      modelId: '302-super-upscale-v2',
+      kind: 'upscale',
+    });
+    await expect(resolveTaskModel(
+      '302-alias-provider',
+      '302-upscale-v6',
+      'admin-a',
+    )).resolves.toMatchObject({
+      providerId: '302-alias-provider',
+      modelId: '302-upscale-v6',
+      kind: 'upscale',
+    });
+    await expect(resolveTaskModel(
+      '302-alias-provider',
+      'upscale-v6',
+      'admin-a',
+    )).resolves.toMatchObject({
+      providerId: '302-alias-provider',
+      modelId: '302-upscale-v6',
+      kind: 'upscale',
+    });
+    await expect(resolveTaskModel(
+      '302-unknown-provider',
+      'custom-upscale',
+      'admin-a',
+    )).resolves.toMatchObject({
+      providerId: '302-unknown-provider',
+      modelId: 'custom-upscale',
+      kind: 'upscale',
+    });
+  });
+
+  it('canonicalizes existing exact and bare 302 alias assignments during authorization', async () => {
+    await expect(resolveTaskModel(
+      '302-alias-provider',
+      '302-upscale-v6',
+      '302-exact-alias-user',
+    )).resolves.toMatchObject({
+      modelId: '302-upscale-v6',
+      kind: 'upscale',
+    });
+
+    const providers = await mocks.getApiProviders();
+    mocks.getApiProviders.mockResolvedValue(
+      providers.filter((provider: ApiProvider) => provider.id !== '302-legacy-provider'),
+    );
+    await expect(resolveTaskModel(
+      '302-alias-provider',
+      '302-upscale-v6',
+      '302-bare-alias-user',
+    )).resolves.toMatchObject({
+      modelId: '302-upscale-v6',
+      kind: 'upscale',
+    });
   });
 });

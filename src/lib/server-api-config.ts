@@ -13,6 +13,13 @@ import {
   resolve302UpscaleModelId,
   resolve302UpscaleModelSelection,
 } from './302-upscale-models';
+import {
+  getConfiguredModelsForProvider,
+  inferModelType,
+  modelTypeForProvider,
+  resolveEffectiveModelType,
+} from './model-type-classification';
+export { inferModelType, resolveEffectiveModelType } from './model-type-classification';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
@@ -134,184 +141,6 @@ const AI_LINK_VIDEO_MODELS = [
 function isAiLinkBaseUrl(baseUrl: string): boolean {
   const lower = (baseUrl || '').toLowerCase();
   return lower.includes('ai-link.shop') || lower.includes('ailink.shop');
-}
-
-function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio' {
-  if (provider.modelType === 'chat') return 'chat';
-  if (provider.modelType === '3d') return '3d';
-  if (provider.modelType === 'vectorize') return 'vectorize';
-  if (provider.modelType === 'layer') return 'layer';
-  if (provider.modelType === 'video') return 'video';
-  if (provider.modelType === 'audio') return 'audio';
-  if (provider.modelType === 'upscaler') return 'upscaler';
-  if (provider.modelType === 'removebg') return 'removebg';
-  // VLM type stays as 'vlm' for SVG vectorization pipeline
-  if (provider.modelType === 'vlm') return 'vlm';
-  // General/universal: default to 'chat' since most models are chat
-  // Individual model types from inferModelType override this in getPublicModels
-  if (provider.modelType === 'universal' || provider.modelType === 'general') return 'chat';
-  // Legacy imageEdit type maps to 'image'
-  if ((provider.modelType as string) === 'imageEdit') return 'image';
-  return 'image';
-}
-
-export function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio' {
-  const id = modelId.toLowerCase();
-  // 音频/TTS模型关键词匹配 — 必须靠前检查，避免被其他类型误判
-  if (
-    id.includes('tts') ||
-    id.includes('speech') ||
-    (id.includes('audio') && !id.includes('audio-output')) ||
-    id.includes('voice-generation') ||
-    id.includes('voice-gen') ||
-    id.includes('text-to-speech') ||
-    id.includes('fish-speech') ||
-    id.includes('cosyvoice') ||
-    id.includes('chat-tts') ||
-    id.includes('bark-') ||
-    id.includes('elevenlabs')
-  ) {
-    return 'audio';
-  }
-  // 视频模型关键词匹配 — 必须在所有其他类型之前检查
-  if (
-    id.includes('video') ||
-    id.includes('seedance') ||
-    id.includes('kling') ||
-    id.includes('hailuo') ||
-    id.includes('vidu') ||
-    (id.includes('sora') && !id.includes('sorafenib')) ||
-    id.includes('veo') ||
-    id.includes('pika') ||
-    id.includes('ray2') || id.includes('ray3') ||
-    id.includes('gen-3') || id.includes('gen-4') || id.includes('gen-2') ||
-    id.includes('cogvideo') || id.includes('cog-video') ||
-    id.includes('wan-') || id.includes('wan2.') || id.includes('wan2-') ||
-    id.includes('runway') ||
-    id.includes('luma') ||
-    id.includes('mochi') ||
-    id.includes('ltx') ||
-    id.includes('doubao-video') || id.includes('bytedance-video') ||
-    id.includes('minimax-video') ||
-    id.includes('deforum') ||
-    id.includes('text2video') || id.includes('t2v') ||
-    id.includes('image2video') || id.includes('i2v') ||
-    id.includes('pyramid-flow')
-  ) {
-    return 'video';
-  }
-  // Embedding/rerank 模型 — 既不是 chat 也不是 image，归类为 chat（对话面板不显示）
-  // 但这些模型不应该出现在图像面板，所以先匹配它们并归入 chat
-  if (
-    id.includes('embed') ||
-    id.includes('rerank') ||
-    id.includes('retrieval') ||
-    id.includes('moderation') ||
-    id.includes('stt') ||
-    id.includes('whisper') ||
-    id.includes('transcrib')
-  ) return 'chat';
-  // 矢量化模型关键词匹配
-  if (id.includes('vectorize') || id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-convert') || id.includes('svgconvert') || id.includes('recraft')) return 'vectorize';
-  // VLM视觉语言模型关键词匹配
-  if (
-    id.includes('qwen-vl') || id.includes('qwen2.5-vl') || id.includes('qwen2-vl') ||
-    id.includes('qwen3-vl') || id.includes('qwen2.7-vl') || id.includes('qvq') ||
-    id.includes('glm-4v') || id.includes('glm-5v') || id.includes('glm-4.1v') || id.includes('glm-4v-plus') ||
-    id.includes('gemini-vision') || id.includes('internvl') || id.includes('intern-vl') ||
-    id.includes('moondream') || id.includes('llava') || id.includes('cogvlm') ||
-    id.includes('idefics') || id.includes('kosmos') || id.includes('florence') ||
-    id.includes('qwen2.5-vl') || id.includes('qwen3.6-vl') ||
-    (id.includes('qwen') && id.includes('vl'))
-  ) return 'vlm';
-  // 放大模型关键词匹配 — 必须在图像之前检查，因为 SeedVR2 等包含 seed 关键词会被误判为图像
-  if (
-    id.includes('seedvr') || id.includes('seed-vr') ||
-    id.includes('upscaler') || id.includes('upscale') ||
-    id.includes('real-esrgan') || id.includes('realesrgan') ||
-    id.includes('swinir') || id.includes('scunet') ||
-    id.includes('hat') && id.includes('super') ||
-    id.includes('gfpgan') || id.includes('codeformer') ||
-    id.includes('remacri') || id.includes('ultramix') ||
-    id.includes('4x-anime') || id.includes('4x-ultrasharp')
-  ) return 'upscaler';
-  // 去背景模型关键词匹配
-  if (
-    id.includes('removebg') || id.includes('remove-bg') || id.includes('rmbg') ||
-    id.includes('birefnet') || id.includes('u2net') || id.includes('isnet') ||
-    id.includes('background-remover') || id.includes('cutout') ||
-    id.includes('matting') || id.includes('background-remove') ||
-    id.includes('remove-background') || id.includes('transparent-bg')
-  ) return 'removebg';
-  // 分层模型关键词匹配
-  if (id.includes('qwen-image-layered') || id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
-  // 3D模型关键词匹配 — 移除 hunyuan（hunyuan-video 已在上面被正确归类为视频）
-  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan-3d') || id.includes('hunyuan3d')) return '3d';
-  // 图像模型关键词匹配 — 必须在 chat 之前检查，因为有些模型名同时包含 gpt+image
-  if (
-    id.includes('image') ||
-    id.includes('dall-e') ||
-    id.includes('dalle') ||
-    id.includes('flux') ||
-    id.includes('stable') ||
-    id.includes('sdxl') ||
-    id.includes('midjourney') ||
-    id.includes('imagen') ||
-    id.includes('seedream') ||
-    id.includes('ideogram') ||
-    id.includes('recraft') ||
-    id.includes('playground') ||
-    id.includes('kandinsky') ||
-    id.includes('pixart') ||
-    id.includes('deepfloyd') ||
-    id.includes('wuerstchen') ||
-    id.includes('openjourney') ||
-    id.includes('dreamshaper') ||
-    id.includes('realistic-vision') ||
-    id.includes('deliberate') ||
-    id.includes('anything-v') ||
-    id.includes('counterfeit') ||
-    id.includes('meinamix') ||
-    id.includes('novelai') ||
-    id.includes('nai-diffusion') ||
-    id.includes('cogview') ||
-    id.includes('minimax-image')
-  ) return 'image';
-  // Embedding/rerank 模型 — 既不是 chat 也不是 image，归类为 chat（对话面板不显示）
-  // 但这些模型不应该出现在图像面板，所以先匹配它们并归入 chat
-  if (
-    id.includes('embed') ||
-    id.includes('rerank') ||
-    id.includes('retrieval') ||
-    id.includes('moderation') ||
-    id.includes('tts') ||
-    id.includes('stt') ||
-    id.includes('whisper') ||
-    id.includes('speech') ||
-    id.includes('audio') ||
-    id.includes('transcrib')
-  ) return 'chat';
-  // LLM模型关键词匹配
-  if (
-    id.includes('gpt') ||
-    id.includes('claude') ||
-    id.includes('gemini') ||
-    id.includes('qwen') ||
-    id.includes('deepseek') ||
-    id.includes('llama') ||
-    id.includes('glm') ||
-    id.includes('mistral') ||
-    id.includes('codestral') ||
-    id.includes('yi-') ||
-    id.includes('chatglm') ||
-    id.includes('command') ||
-    id.includes('phi') ||
-    id.includes('grok') ||
-    id.includes('o1') ||
-    id.includes('o3') ||
-    id.includes('o4')
-  ) return 'chat';
-  return fallback;
 }
 
 function formatModel(model: Record<string, unknown>, provider: ApiProvider): ModelInfo {
@@ -1027,24 +856,6 @@ export async function findAllProvidersForType(modelType: ApiKind): Promise<Array
   }).filter(entry => entry.models.length > 0);
 }
 
-export function resolveEffectiveModelType(
-  provider: ApiProvider,
-  model: ModelInfo,
-): ModelInfo['type'] {
-  const providerType = provider.modelType || provider.type;
-  if (providerType !== 'general' && providerType !== 'universal') {
-    return providerType;
-  }
-
-  const discoveredType = model.type;
-  const fallback = discoveredType === 'general' || discoveredType === 'universal'
-    ? modelTypeForProvider(provider)
-    : discoveredType === 'imageEdit'
-      ? 'image'
-      : discoveredType;
-  return inferModelType(model.id, fallback);
-}
-
 function decoratePublicModel(provider: ApiProvider, model: ModelInfo): ModelInfo {
   const effectiveModel = {
     ...model,
@@ -1075,38 +886,8 @@ export function getPublicModelsFromProviders(
   return providers
     .filter(provider => provider.isEnabled && provider.baseUrl && provider.apiKey)
     .flatMap(provider => {
-      const selected = new Set(provider.selectedModels || []);
-      const discovered = provider.discoveredModels || [];
-      const resolved302Models = (
-        modelType === 'upscaler'
-        || (!modelType && provider.modelType === 'upscaler')
-      )
-        ? resolve302UpscaleModelSelection(provider.baseUrl, Array.from(selected))
-        : null;
-      if (resolved302Models) {
-        const catalog = get302UpscaleModelsForProvider(provider.baseUrl, 'upscaler');
-        return catalog
-          .filter(model => resolved302Models.some(modelId => modelId === model.id))
-          .map(model => decoratePublicModel(provider, {
-            ...model,
-            providerId: provider.id,
-          }));
-      }
-
-      if (selected.size > 0) {
-        const selectedModels = Array.from(selected).map(id => (
-          discovered.find(model => model.id === id) || {
-              id,
-              name: '',
-              providerId: provider.id,
-              type: inferModelType(id, modelTypeForProvider(provider)),
-              displayName: undefined,
-            } satisfies ModelInfo
-        ));
-        return selectedModels.map(model => decoratePublicModel(provider, model));
-      }
-
-      return discovered.map(model => decoratePublicModel(provider, model));
+      return getConfiguredModelsForProvider(provider)
+        .map(model => decoratePublicModel(provider, model));
     })
     .filter(model => isGeneralQuery || model.type === modelType);
 }
