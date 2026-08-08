@@ -31,6 +31,10 @@ import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
 import type { Project, CanvasImage, User, UsageStats } from '@/lib/user-types';
 import { ConfirmDialog } from '@/components/custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
+import {
+  getConfiguredModelsForProvider,
+  resolveModelAuthorizationNamespace,
+} from '@/lib/model-type-classification';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { loadProjects as loadSimpleChatProjects } from '@/components/simple-chat/simple-chat-types';
 import JSZip from 'jszip';
@@ -120,6 +124,26 @@ export function providerModelOptions(
     name: `${model} · ${providerName}`,
     providerId,
   }));
+}
+
+export function buildDashboardModelAuthorizationOptions(
+  providers: ApiProvider[],
+): {
+  chatModels: DashboardModelOption[];
+  imageModels: DashboardModelOption[];
+} {
+  const chatModels: DashboardModelOption[] = [];
+  const imageModels: DashboardModelOption[] = [];
+  for (const provider of providers) {
+    const providerName = provider.displayName || provider.name || provider.id;
+    for (const model of getConfiguredModelsForProvider(provider)) {
+      const option = providerModelOptions([model.id], provider.id, providerName)[0];
+      const authorizationNamespace = resolveModelAuthorizationNamespace(model.type);
+      if (model.type === 'chat') chatModels.push(option);
+      if (authorizationNamespace === 'image') imageModels.push(option);
+    }
+  }
+  return { chatModels, imageModels };
 }
 
 function resolveVisibleModelAssignments(
@@ -1058,26 +1082,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     }
     return list;
   }, [providers, apiFilterType, apiFilterStatus, apiSearchQuery]);
-  const adminChatModelOptions = useMemo(
-    () => providers
-      .filter(p => p.modelType === 'chat' || p.modelType === 'universal' || p.modelType === 'general')
-      .flatMap(p => providerModelOptions(
-        p.selectedModels,
-        p.id,
-        p.displayName || p.name || p.id,
-      )),
+  const adminModelAuthorizationOptions = useMemo(
+    () => buildDashboardModelAuthorizationOptions(providers),
     [providers],
   );
-  const adminImageModelOptions = useMemo(
-    () => providers
-      .filter(p => p.modelType === 'image')
-      .flatMap(p => providerModelOptions(
-        p.selectedModels,
-        p.id,
-        p.displayName || p.name || p.id,
-      )),
-    [providers],
-  );
+  const adminChatModelOptions = adminModelAuthorizationOptions.chatModels;
+  const adminImageModelOptions = adminModelAuthorizationOptions.imageModels;
 
   const toggleSelectAllProviders = useCallback(() => {
     if (selectedProviderIds.size === filteredProviders.length && filteredProviders.length > 0) {

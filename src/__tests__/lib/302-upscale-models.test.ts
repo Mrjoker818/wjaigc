@@ -49,6 +49,12 @@ describe('302.AI upscale model catalog', () => {
     expect(resolve302UpscaleModelSelection('https://api.302ai.cn', ['302-upscale-v6'])).toEqual([
       '302-upscale-v6',
     ]);
+    expect(resolve302UpscaleModelSelection('https://api.302ai.cn', ['upscale-v6'])).toEqual([
+      '302-upscale-v6',
+    ]);
+    expect(resolve302UpscaleModelSelection('https://api.302ai.cn', ['custom-upscale'])).toEqual([
+      'custom-upscale',
+    ]);
     expect(resolve302UpscaleModelSelection('https://api.example.com', ['302'])).toBeNull();
   });
 });
