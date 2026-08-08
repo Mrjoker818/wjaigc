@@ -52,6 +52,7 @@ export const dynamic = 'force-dynamic';
 // （Next.js dev模式下不同路由可能使用不同的 task-registry 实例，
 //   所以在 poll-task 内部维护自己的缓存更可靠）
 const completedTaskCache = new Map<string, {
+  userId: string;
   imageUrl: string;
   imageUrls?: string[];
   maskUrl?: string;
@@ -60,10 +61,16 @@ const completedTaskCache = new Map<string, {
   buttons?: unknown[];
   modelName?: string;
   providerName?: string;
+  taskResult?: Record<string, unknown>;
   timestamp: number;
 }>();
 const FAILED_CACHE = Symbol('failed');
-const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
+const failedTaskCache = new Map<string, {
+  userId: string;
+  error: string;
+  taskResult?: Record<string, unknown>;
+  timestamp: number;
+}>();
 const TASK_RECOVERY_LEASE_MS = 10 * 60_000;
 const TASK_RECOVERY_WORKER_ID = process.env.WUJIE_WORKER_ID || `poll-task-${process.pid}`;
 // A pending submitOnly wrapper whose background worker keeps updating progress is
@@ -687,7 +694,7 @@ export async function POST(request: NextRequest) {
                 await terminateCloudTaskAndRefund(taskId, 'failed', errorMsg);
               }
               failEditTask(taskId, errorMsg);
-              failedTaskCache.set(taskId, { error: errorMsg, timestamp: Date.now() });
+              failedTaskCache.set(taskId, { userId, error: errorMsg, timestamp: Date.now() });
               return NextResponse.json({
                 success: false,
                 status: 'failed',
@@ -788,7 +795,10 @@ export async function POST(request: NextRequest) {
     // ★ 优先检查本地完成缓存（避免重复查远端API和重复持久化）
     const cachedCompleted = completedTaskCache.get(taskId);
     if (cachedCompleted) {
-      return NextResponse.json({
+      if (sessionUser?.role !== 'admin' && cachedCompleted.userId !== userId) {
+        return NextResponse.json({ success: false, status: 'error', error: '任务不存在' }, { status: 404 });
+      }
+      return NextResponse.json(withGenerationSlotMetadata({
         success: true,
         status: 'completed',
         progress: 100,
@@ -800,20 +810,34 @@ export async function POST(request: NextRequest) {
         buttons: cachedCompleted.buttons || [],
         modelName: cachedCompleted.modelName || '',
         providerName: cachedCompleted.providerName || '',
-      }, { status: 200 });
+      }, cachedCompleted.taskResult, taskId), { status: 200 });
     }
     const cachedFailed = failedTaskCache.get(taskId);
     if (cachedFailed) {
-      return NextResponse.json({
+      if (sessionUser?.role !== 'admin' && cachedFailed.userId !== userId) {
+        return NextResponse.json({ success: false, status: 'error', error: '任务不存在' }, { status: 404 });
+      }
+      return NextResponse.json(withGenerationSlotMetadata({
         success: false,
         status: 'failed',
         error: translateApiError(cachedFailed.error),
         retryable: true,
-      }, { status: 200 });
+      }, cachedFailed.taskResult, taskId), { status: 200 });
     }
 
     // ★ 检查 task-registry 中的任务
     let registryTask = getTaskInfo(taskId);
+    if (
+      registryTask
+      && sessionUser
+      && sessionUser.role !== 'admin'
+      && registryTask.userId !== sessionUser.id
+    ) {
+      return NextResponse.json({ success: false, status: 'error', error: '任务不存在' }, { status: 404 });
+    }
+    if (registryTask && !sessionUser && registryTask.userId !== 'anonymous') {
+      return NextResponse.json({ success: false, status: 'error', error: '任务不存在' }, { status: 404 });
+    }
     // ★ 防重复扣费：按 submissionPayload.workerMode 判断任务是否已有活着的提交者。
     // - 'recovery'（默认）：本进程没有后台提交者，poll-task 就是唯一提交方，立即恢复提交；
     //   租约（不允许 owner 自匹配重复 claim）保证租约期内只提交一次。
@@ -904,7 +928,7 @@ export async function POST(request: NextRequest) {
               retryable: true,
             }, { status: 200 });
           }
-          failedTaskCache.set(recovery.taskId, { error, timestamp: Date.now() });
+          failedTaskCache.set(recovery.taskId, { userId: recovery.userId, error, timestamp: Date.now() });
           return NextResponse.json({
             success: false,
             status: 'failed',
@@ -952,7 +976,7 @@ export async function POST(request: NextRequest) {
           progress: recovery.progress,
           creditCost: persistedTask.creditCost,
           result: {
-            submissionPayload: requiresSubmissionRecovery ? submissionPayload : undefined,
+            submissionPayload,
             remoteTaskId: recovery.remoteTaskId,
             ...(recovery.type.startsWith('video') ? {
               thirdPartyTaskId: recovery.remoteTaskId,
@@ -1019,8 +1043,10 @@ export async function POST(request: NextRequest) {
                 result: completedResult,
               });
               completedTaskCache.set(recovered.taskId, {
+                userId: recovery.userId,
                 imageUrl: directImageUrls[0],
                 imageUrls: directImageUrls,
+                taskResult: completedResult,
                 timestamp: Date.now(),
               });
               releaseQueueSlot(recovered.taskId);
@@ -1064,7 +1090,12 @@ export async function POST(request: NextRequest) {
             if (!termination.transitioned) return;
 
             updateTaskProgress(recovered.taskId, { status: 'failed', progress: 0, error: message });
-            failedTaskCache.set(recovered.taskId, { error: message, timestamp: Date.now() });
+            failedTaskCache.set(recovered.taskId, {
+              userId: recovery.userId,
+              error: message,
+              taskResult: persistedResult,
+              timestamp: Date.now(),
+            });
             releaseQueueSlot(recovered.taskId);
           } finally {
             unregisterTaskAbortController(recovered.taskId, recoveryController);
@@ -1116,7 +1147,7 @@ export async function POST(request: NextRequest) {
         const completedVideo = registryTask.type === 'video'
           ? getCompletedVideoTaskResult(safeResult)
           : undefined;
-        return NextResponse.json({
+        return NextResponse.json(withGenerationSlotMetadata({
           success: true,
           status: 'completed',
           progress: registryTask.progress,
@@ -1133,37 +1164,37 @@ export async function POST(request: NextRequest) {
           modelName: (safeResult?.usedModel as string) || (safeResult?.modelName as string) || '',
           providerName,
           generationRouteAudit: safeResult?.generationRouteAudit,
-        }, { status: 200 });
+        }, taskResult as Record<string, unknown> | undefined, taskId), { status: 200 });
       }
       if (registryTask.status === 'failed') {
         // ★ 释放队列槽位
         releaseQueueSlot(taskId);
-        return NextResponse.json({
+        return NextResponse.json(withGenerationSlotMetadata({
           success: false,
           status: 'failed',
           progress: registryTask.progress,
           error: translateApiError(registryTask.error || '处理失败'),
           retryable: false,
-        }, { status: 200 });
+        }, registryTask.result as Record<string, unknown> | undefined, taskId), { status: 200 });
       }
       if (registryTask.status === 'cancelled') {
-        return NextResponse.json({
+        return NextResponse.json(withGenerationSlotMetadata({
           success: false,
           status: 'cancelled',
           error: '任务已被取消',
           retryable: false,
-        }, { status: 200 });
+        }, registryTask.result as Record<string, unknown> | undefined, taskId), { status: 200 });
       }
       // submitOnly uses this task as a local progress wrapper. Its background
       // worker owns the provider task ID, so polling it remotely would send an
       // async-* ID to the provider and can falsely terminally fail the task.
       if (isPendingLocalAsyncGenerateTask(registryTask)) {
-        return NextResponse.json({
+        return NextResponse.json(withGenerationSlotMetadata({
           success: true,
           status: 'processing',
           progress: registryTask.progress,
           label: registryTask.label || '生成中...',
-        }, { status: 200 });
+        }, registryTask.result as Record<string, unknown> | undefined, taskId), { status: 200 });
       }
       // ★ 视频任务轮询：使用 video-api 协议适配器
       if (registryTask.type === 'video') {
@@ -1321,7 +1352,7 @@ export async function POST(request: NextRequest) {
               }
               updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
               releaseQueueSlot(taskId);
-              failedTaskCache.set(taskId, { error: errorMsg, timestamp: Date.now() });
+              failedTaskCache.set(taskId, { userId, error: errorMsg, timestamp: Date.now() });
               return NextResponse.json({
                 success: false, status: 'failed',
                 error: translateApiError(errorMsg),
@@ -1469,7 +1500,7 @@ export async function POST(request: NextRequest) {
                 result: completedResult,
               });
               releaseQueueSlot(taskId);
-              completedTaskCache.set(taskId, { imageUrl: persistedVideoUrl, modelName: '', providerName: '', timestamp: Date.now() });
+              completedTaskCache.set(taskId, { userId, imageUrl: persistedVideoUrl, modelName: '', providerName: '', timestamp: Date.now() });
 
               return NextResponse.json({
                 success: true,
@@ -1500,7 +1531,7 @@ export async function POST(request: NextRequest) {
             }
             updateTaskProgress(taskId, { status: 'failed', error: noUrlError, progress: 0 });
             releaseQueueSlot(taskId);
-            failedTaskCache.set(taskId, { error: noUrlError, timestamp: Date.now() });
+            failedTaskCache.set(taskId, { userId, error: noUrlError, timestamp: Date.now() });
           }
 
           if (videoResult.status === 'failed') {
@@ -1522,7 +1553,7 @@ export async function POST(request: NextRequest) {
             }
             updateTaskProgress(taskId, { status: 'failed', error: videoFailedError, progress: 0 });
             releaseQueueSlot(taskId);
-            failedTaskCache.set(taskId, { error: videoFailedError, timestamp: Date.now() });
+            failedTaskCache.set(taskId, { userId, error: videoFailedError, timestamp: Date.now() });
             return NextResponse.json({
               success: false, status: 'failed',
               error: videoFailedError,
@@ -2441,7 +2472,12 @@ export async function POST(request: NextRequest) {
         if (!durableGenerationSlot) {
           await recordImageTaskTerminal(taskId, { status: 'failed', error: terminalError, creditStatus });
         }
-        failedTaskCache.set(taskId, { error: terminalError, timestamp: Date.now() });
+        failedTaskCache.set(taskId, {
+          userId,
+          error: terminalError,
+          taskResult: existingResult,
+          timestamp: Date.now(),
+        });
         releaseQueueSlot(taskId);
         pollResult.status = 'failed';
         pollResult.progress = 100;
@@ -2551,6 +2587,7 @@ export async function POST(request: NextRequest) {
       const cachedImageUrl = imageUrls[0];
       if (cachedImageUrl) {
         completedTaskCache.set(taskId, {
+          userId,
           imageUrl: cachedImageUrl,
           imageUrls,
           maskUrl: maskUrls[0] || '',
@@ -2559,6 +2596,11 @@ export async function POST(request: NextRequest) {
           buttons,
           modelName: finalModelName,
           providerName: finalProviderName,
+          taskResult: {
+            ...existingResult,
+            imageUrl: cachedImageUrl,
+            imageUrls,
+          },
           timestamp: Date.now(),
         });
       }
@@ -2603,7 +2645,12 @@ export async function POST(request: NextRequest) {
           creditStatus,
         }).catch(error => console.warn('[poll-task] 云端任务失败记录失败:', error));
       }
-      failedTaskCache.set(taskId, { error: translatedError, timestamp: Date.now() });
+      failedTaskCache.set(taskId, {
+        userId,
+        error: translatedError,
+        taskResult: durableFailureResult,
+        timestamp: Date.now(),
+      });
       releaseQueueSlot(taskId);
       pollResult.error = translatedError;
       pollResult.success = false;
@@ -2650,7 +2697,14 @@ export async function POST(request: NextRequest) {
     // ★ 日志：返回给前端的最终结果
     console.log(`[poll-task] taskId=${taskId} returning: status=${pollResult.status}, imageUrl=${pollResult.imageUrl ? 'YES' : 'NO'}, progress=${pollResult.progress}`);
 
-    return NextResponse.json(pollResult);
+    const currentTaskResult = getTaskInfo(taskId)?.result;
+    return NextResponse.json(withGenerationSlotMetadata(
+      pollResult as Record<string, unknown>,
+      currentTaskResult && typeof currentTaskResult === 'object'
+        ? currentTaskResult as Record<string, unknown>
+        : undefined,
+      taskId,
+    ));
 
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);

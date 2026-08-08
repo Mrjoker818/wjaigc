@@ -1607,6 +1607,7 @@ export function buildNodeExecutionRequest(
         aspectRatio,
         size: actualSize || '1024x1024',
         outputCount: config.n || 1,
+        submitOnly: true,
         seed: config.seed || -1,
         submitOnly: true, // 工作流使用提交+轮询模式，避免generate内部长时间轮询导致超时
       };
@@ -1752,6 +1753,8 @@ export function buildNodeExecutionRequest(
           model: config.model || '',
           providerId: config.providerId || '',
           strength: config.strength || 50,
+          outputCount: config.n || 1,
+          submitOnly: true,
         }
       };
 
@@ -1875,6 +1878,8 @@ export function buildNodeExecutionRequest(
         model: brandModel,
         quality: brandQuality,
         size: brandSize || '1024x1024',
+        outputCount: config.n || 1,
+        submitOnly: true,
       };
       if (config.providerId) brandBody.providerId = config.providerId;
       return {
@@ -1916,6 +1921,8 @@ export function buildNodeExecutionRequest(
         imageUrl: config.imageUrl || '',
         quality: maQuality,
         size: maSize || '1024x1024',
+        outputCount: config.n || 1,
+        submitOnly: true,
       };
       if (config.providerId) maBody.providerId = config.providerId;
       return {
@@ -2034,6 +2041,8 @@ export function buildNodeExecutionRequest(
         },
         imageUrl: config.imageUrl || '',
         strength: config.continueMode === 'img2img' ? (config.strength || 50) : undefined,
+        outputCount: config.n || 1,
+        submitOnly: true,
       };
       if (config.providerId) sbBody.providerId = config.providerId;
       return {
@@ -2273,6 +2282,8 @@ export function buildNodeExecutionRequest(
           model: getConfigString(config, 'model'),
           aspectRatio: '2:1',
           n: 1,
+          outputCount: 1,
+          submitOnly: true,
           imageUrl: refImage || undefined,
         }
       };

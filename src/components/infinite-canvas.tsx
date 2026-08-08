@@ -49,6 +49,7 @@ import type { PsdLayerItem } from '@/types/psdLayer';
 import { awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
+import { normalizeGenerationSubmitSlots } from '@/lib/task-core/generation-batch';
 import { } from '@/lib/canvas-annotation-visibility';
 import { closestSupportedImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { getHexCubeInitialPosition } from '@/lib/hex-cube-position';
@@ -260,6 +261,7 @@ interface GroupGenerationResponse {
   mode?: string;
   imageUrls: string[];
   taskIds: string[];
+  slots?: unknown[];
   estimatedTime?: number;
   modelName?: string;
   providerName?: string;
@@ -304,6 +306,7 @@ function parseGroupGenerationResponse(value: unknown): GroupGenerationResponse {
     taskIds: Array.isArray(record?.taskIds)
       ? record.taskIds.filter((taskId): taskId is string => typeof taskId === 'string')
       : [],
+    slots: Array.isArray(record?.slots) ? record.slots : undefined,
     estimatedTime: getJsonNumber(record, 'estimatedTime'),
     modelName: getJsonString(record, 'modelName'),
     providerName: getJsonString(record, 'providerName'),
@@ -5205,10 +5208,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           if (g.id !== group.id) return g;
           return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: data.error } };
         }));
-      } else if (data.taskIds) {
+      } else if (data.taskIds || data.slots) {
         // 轮询模式 — 与生成面板一致的动态轮询策略
         // ★ 支持多 taskId 并行轮询（outputCount>1 时 API 可能返回多个 taskIds）
-        const allTaskIds = data.taskIds;
+        const submittedSlots = normalizeGenerationSubmitSlots(data);
+        const allTaskIds = submittedSlots.map(slot => slot.taskId);
         const estimatedTime = data.estimatedTime || 30;
         // 单任务最大25分钟（1500秒），兼容慢速API如apimart(可能需要10-20分钟)、gpt-image-2 4K(7-10分钟)
         const maxPollTime = Math.min(1500, Math.max(600, estimatedTime * 8 + 600)) * 1000;

@@ -10,19 +10,40 @@ const source = readFileSync(
 
 describe('canvas progressive generation contract', () => {
   it('polls every durable image slot concurrently instead of waiting for the previous slot', () => {
-    expect(source).toContain('await Promise.all(taskIds.map(async (');
-    expect(source).toContain('taskIdx: number');
+    expect(source).toContain(
+      'const activeSubmittedSlots = submittedSlots.filter(slot => !terminalStatuses.has(slot.status));',
+    );
+    expect(source).toContain('await Promise.all(activeSubmittedSlots.map(async (');
+    expect(source).toContain('submittedSlot');
   });
 
-  it('replaces the completed slot immediately using its own task index', () => {
+  it('replaces the completed slot immediately using canonical server slot metadata', () => {
     const completion = source.indexOf("if (pollData.status === 'completed' && completedImageUrls.length > 0)");
-    const slotPlaceholder = source.indexOf('const phId = placeholderIds[taskIdx];', completion);
+    const canonicalSlot = source.indexOf('resolveGenerationSlotIndex(', completion);
+    const slotPlaceholder = source.indexOf('const phId = placeholderIds[completedSlotIndex];', completion);
     const immediateCanvasUpdate = source.indexOf('setImages(prev => prev.map(img =>', slotPlaceholder);
 
     expect(completion).toBeGreaterThan(-1);
-    expect(slotPlaceholder).toBeGreaterThan(completion);
+    expect(canonicalSlot).toBeGreaterThan(completion);
+    expect(slotPlaceholder).toBeGreaterThan(canonicalSlot);
     expect(immediateCanvasUpdate).toBeGreaterThan(slotPlaceholder);
-    expect(source).toContain('slotIndex: taskIdx');
+    expect(source).toContain('slotIndex: completedSlotIndex');
+  });
+
+  it('replaces slots already completed in the submit response before polling siblings', () => {
+    const submitCompletedStart = source.indexOf('submittedSlots.forEach((submittedSlot) => {');
+    const immediateSubmitReplacement = source.indexOf(
+      'replaceCompletedSubmitSlotPlaceholder(',
+      submitCompletedStart,
+    );
+    const activePollingStart = source.indexOf(
+      'await Promise.all(activeSubmittedSlots.map(async (submittedSlot) => {',
+      submitCompletedStart,
+    );
+
+    expect(submitCompletedStart).toBeGreaterThan(-1);
+    expect(immediateSubmitReplacement).toBeGreaterThan(submitCompletedStart);
+    expect(activePollingStart).toBeGreaterThan(immediateSubmitReplacement);
   });
 
   it('does not append a second image after the matching slot was already replaced', () => {

@@ -6,8 +6,10 @@ import { Bot, Send, Square, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff,
 import { AgentBuilderDialog, type AgentDefinition, type AgentRecipe } from '@/components/chat/AgentBuilderDialog';
 import { toast } from 'sonner';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
+import { normalizeGenerationSubmitSlots } from '@/lib/task-core/generation-batch';
 import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
-import { getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, updateChatSessionMessage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
+import { collectChatGenerationSlotResults, getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, mergeRecoveredImages, settleChatGenerationSlots, updateChatSessionMessage, upsertChatGenerationSlotImage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
+import { normalizePersistedChatSessions } from '@/lib/chat-session-persistence';
 import { UserManager } from '@/lib/user-manager';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -3152,7 +3154,7 @@ IP角色设计规范：
       const saved = localStorage.getItem('chat-sessions');
       if (saved) {
         try {
-          localSessions = JSON.parse(saved);
+          localSessions = normalizePersistedChatSessions<ChatSession>(JSON.parse(saved));
           if (localSessions.length > 0) {
             setChatSessions(localSessions);
             const latest = localSessions.reduce((a, b) => a.updatedAt > b.updatedAt ? a : b);
@@ -3168,8 +3170,9 @@ IP角色设计规范：
       // 服务器为权威源：登录用户跨设备恢复聊天历史
       try {
         const serverSessions = await loadChatKeyFromServer('chat_sessions');
-        if (!cancelled && Array.isArray(serverSessions) && serverSessions.length > 0) {
-          const merged = mergeChatSessionLists(serverSessions as ChatSession[], localSessions);
+        const validServerSessions = normalizePersistedChatSessions<ChatSession>(serverSessions);
+        if (!cancelled && validServerSessions.length > 0) {
+          const merged = mergeChatSessionLists(validServerSessions, localSessions);
           setChatSessions(merged);
           const latest = merged.reduce((a, b) => a.updatedAt > b.updatedAt ? a : b);
           setCurrentSessionId(latest.id);
@@ -3264,57 +3267,93 @@ IP角色设计规范：
         if (resumedChatTaskKeysRef.current.has(resumeKey)) continue;
         resumedChatTaskKeysRef.current.add(resumeKey);
 
-        const recoveredUrls: string[] = [];
-        let terminalError = '';
+        const taskById = new Map(tasks.map(task => [task.taskId, task]));
+        const resumeSlots = tasks.map((task, index) => ({
+          taskId: task.taskId,
+          slotIndex: typeof task.slotIndex === 'number' ? task.slotIndex : index,
+          ...(task.batchId ? { batchId: task.batchId } : {}),
+          ...(task.slotId ? { slotId: task.slotId } : {}),
+        }));
+        let recoveredSlotImages: Array<{ slotIndex: number; url: string }> = [];
+        const settlements = await settleChatGenerationSlots(
+          resumeSlots,
+          async (slot) => {
+            const task = taskById.get(slot.taskId);
+            if (!task) throw new Error('恢复任务信息不完整');
+            const createTerminalTaskError = (message: string): Error => {
+              const error = new Error(message);
+              error.name = 'TerminalTaskError';
+              return error;
+            };
+            for (let attempt = 0; attempt < CHAT_TASK_MAX_ATTEMPTS && !cancelled; attempt += 1) {
+              try {
+                const response = await fetch('/api/poll-task', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ taskId: task.taskId, model: task.model, providerId: task.providerId }),
+                });
+                const data = await response.json();
+                const videoUrl = data.videoUrl || data.result?.videoUrl;
+                const resultUrl = task.type === 'video' || videoUrl
+                  ? videoUrl
+                  : extractTaskResultImageUrl(data);
 
-        for (const task of tasks) {
-          for (let attempt = 0; attempt < CHAT_TASK_MAX_ATTEMPTS && !cancelled; attempt += 1) {
-            try {
-              const response = await fetch('/api/poll-task', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId: task.taskId, model: task.model, providerId: task.providerId }),
-              });
-              const data = await response.json();
-              const videoUrl = data.videoUrl || data.result?.videoUrl;
-              const resultUrl = task.type === 'video' || videoUrl
-                ? videoUrl
-                : extractTaskResultImageUrl(data);
+                if (data.status === 'completed') {
+                  if (typeof resultUrl === 'string' && resultUrl) return resultUrl;
+                  throw createTerminalTaskError('生成完成但未获取到结果');
+                }
+                if (data.status === 'failed' || data.status === 'cancelled' || data.retryable === false) {
+                  throw createTerminalTaskError(data.error || '生成失败');
+                }
 
-              if (data.status === 'completed') {
-                if (typeof resultUrl === 'string' && resultUrl) recoveredUrls.push(resultUrl);
-                else terminalError = '生成完成但未获取到结果';
-                break;
+                const progress = Math.min(90, Math.max(5, data.progress || Math.round(((attempt + 1) / CHAT_TASK_MAX_ATTEMPTS) * 85)));
+                setMessages(current => current.map(item => item.id === message.id
+                  ? { ...item, generateProgress: progress }
+                  : item));
+              } catch (error) {
+                if (error instanceof Error && error.name === 'TerminalTaskError') {
+                  throw error;
+                }
+                // Transient provider or network failures are retried within the same window.
               }
-              if (data.status === 'failed' || data.status === 'cancelled' || data.retryable === false) {
-                terminalError = data.error || '生成失败';
-                break;
-              }
-
-              const progress = Math.min(90, Math.max(5, data.progress || Math.round(((attempt + 1) / CHAT_TASK_MAX_ATTEMPTS) * 85)));
-              setMessages(current => current.map(item => item.id === message.id
-                ? { ...item, generateProgress: progress }
-                : item));
-            } catch {
-              // Transient provider or network failures are retried within the same window.
+              await new Promise(resolve => setTimeout(resolve, getChatTaskPollIntervalMs(attempt)));
             }
-            await new Promise(resolve => setTimeout(resolve, getChatTaskPollIntervalMs(attempt)));
-          }
-          if (terminalError) break;
-        }
+            if (cancelled) throw new Error('任务恢复已取消');
+            throw new Error('任务恢复超时，请在任务中心确认供应商结果后重试');
+          },
+          (settlement) => {
+            if (!settlement.result) return;
+            recoveredSlotImages = upsertChatGenerationSlotImage(
+              recoveredSlotImages,
+              settlement.slot.slotIndex,
+              settlement.result,
+            );
+            const visibleRecoveredUrls = recoveredSlotImages.map(image => image.url);
+            setMessages(current => current.map(item => item.id === message.id
+              ? {
+                ...item,
+                generatedImages: mergeRecoveredImages(
+                  item.generatedImages,
+                  visibleRecoveredUrls,
+                ),
+              }
+              : item));
+            onAddImages?.([settlement.result]);
+          },
+        );
 
         if (cancelled) return;
-        const uniqueUrls = [...new Set(recoveredUrls)];
-        if (uniqueUrls.length > 0 && onAddImages) onAddImages(uniqueUrls);
+        const uniqueUrls = recoveredSlotImages.map(image => image.url);
+        const terminalError = settlements
+          .flatMap(settlement => settlement.error ? [settlement.error] : [])
+          .join('；');
         setMessages(current => current.map(item => item.id === message.id
           ? {
             ...item,
-            generatedImages: uniqueUrls.length > 0
-              ? [...new Set([...(item.generatedImages || []), ...uniqueUrls])]
-              : item.generatedImages,
+            generatedImages: mergeRecoveredImages(item.generatedImages, uniqueUrls),
             isGeneratingImage: false,
             generateProgress: uniqueUrls.length > 0 ? 100 : item.generateProgress,
-            generateError: uniqueUrls.length > 0 ? undefined : (terminalError || '任务恢复超时，请在任务中心确认供应商结果后重试'),
+            generateError: terminalError || undefined,
             pendingGenerationTasks: undefined,
           }
           : item));
@@ -4448,10 +4487,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 if (generateData.imageUrls?.length > 0) { promptResultUrls.push(...generateData.imageUrls); }
                 else if (generateData.imageUrl) { promptResultUrls.push(generateData.imageUrl); }
 
-                const taskIds: string[] = generateData.taskIds || [];
-                if (taskIds.length > 0 && promptResultUrls.length === 0) {
-                  const pendingGenerationTasks: ChatPendingGenerationTask[] = taskIds.map(taskId => ({
-                    taskId,
+                const submittedSlots = normalizeGenerationSubmitSlots(generateData);
+                if (submittedSlots.length > 0 && promptResultUrls.length === 0) {
+                  const pendingGenerationTasks: ChatPendingGenerationTask[] = submittedSlots.map(slot => ({
+                    ...slot,
                     model: genModel,
                     providerId: imageModelInfo.providerId || '',
                     type: 'image',
@@ -4460,7 +4499,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     ...msg,
                     pendingGenerationTasks: [...(msg.pendingGenerationTasks || []), ...pendingGenerationTasks],
                   }));
-                  for (const taskId of taskIds) {
+                  const progressiveResults = new Map<number, string>();
+                  const settledResults = await collectChatGenerationSlotResults(
+                    submittedSlots,
+                    async (slot) => {
                     for (let i = 0; i < CHAT_TASK_MAX_ATTEMPTS; i++) {
                       const interval = getChatTaskPollIntervalMs(i);
                       await new Promise(r => setTimeout(r, interval));
@@ -4474,17 +4516,37 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         const pollRes = await fetch('/api/poll-task', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ taskId, model: genModel, providerId: imageModelInfo.providerId }),
+                          body: JSON.stringify({ taskId: slot.taskId, model: genModel, providerId: imageModelInfo.providerId }),
                         });
                         const pollData = await pollRes.json();
                         if (pollData.status === 'completed') {
                           const extractedUrl = extractTaskResultImageUrl(pollData);
-                          if (extractedUrl && typeof extractedUrl === 'string') { promptResultUrls.push(extractedUrl); }
-                          break;
-                        } else if (pollData.status === 'failed' || pollData.retryable === false) { break; }
+                          return extractedUrl && typeof extractedUrl === 'string'
+                            ? extractedUrl
+                            : undefined;
+                        } else if (pollData.status === 'failed' || pollData.retryable === false) {
+                          return undefined;
+                        }
                       } catch { /* retry */ }
                     }
-                  }
+                    return undefined;
+                    },
+                    (slot, resultUrl) => {
+                      progressiveResults.set(slot.slotIndex, resultUrl);
+                      const progressiveUrls = [...new Set([
+                        ...allResultUrls,
+                        ...[...progressiveResults.entries()]
+                          .sort(([left], [right]) => left - right)
+                          .map(([, url]) => url),
+                      ])];
+                      setMessages(prev => prev.map(msg =>
+                        msg.id === assistantMessageId
+                          ? { ...msg, generatedImages: progressiveUrls }
+                          : msg
+                      ));
+                    },
+                  );
+                  promptResultUrls.push(...settledResults.map(entry => entry.result));
                 }
                 allResultUrls.push(...promptResultUrls);
                 if (allResultUrls.length > 0) {
@@ -4583,22 +4645,26 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   return;
                 }
 
-                const taskIds: string[] = generateData.taskIds || [];
+                const submittedSlots = normalizeGenerationSubmitSlots(generateData);
                 const genModel = generateData.model || imageModelInfo.model;
                 const resultUrls: string[] = [];
 
                 if (generateData.imageUrls?.length > 0) { resultUrls.push(...generateData.imageUrls); }
                 else if (generateData.imageUrl) { resultUrls.push(generateData.imageUrl); }
 
-                if (taskIds.length > 0 && resultUrls.length === 0) {
-                  const pendingGenerationTasks: ChatPendingGenerationTask[] = taskIds.map(taskId => ({
-                    taskId,
+                const slotErrors: string[] = [];
+                if (submittedSlots.length > 0 && resultUrls.length === 0) {
+                  const pendingGenerationTasks: ChatPendingGenerationTask[] = submittedSlots.map(slot => ({
+                    ...slot,
                     model: genModel,
                     providerId: imageModelInfo.providerId || '',
                     type: 'image',
                   }));
                   persistMessageUpdate(assistantMessageId, msg => ({ ...msg, pendingGenerationTasks }));
-                  for (const taskId of taskIds) {
+                  const progressiveResults = new Map<number, string>();
+                  const settledResults = await collectChatGenerationSlotResults(
+                    submittedSlots,
+                    async (slot) => {
                     for (let i = 0; i < CHAT_TASK_MAX_ATTEMPTS; i++) {
                       const interval = getChatTaskPollIntervalMs(i);
                       await new Promise(r => setTimeout(r, interval));
@@ -4610,24 +4676,41 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         const pollRes = await fetch('/api/poll-task', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ taskId, model: genModel, providerId: imageModelInfo.providerId }),
+                          body: JSON.stringify({ taskId: slot.taskId, model: genModel, providerId: imageModelInfo.providerId }),
                         });
                         const pollData = await pollRes.json();
                         if (pollData.status === 'completed') {
                           const extractedUrl = extractTaskResultImageUrl(pollData);
-                          if (extractedUrl && typeof extractedUrl === 'string') { resultUrls.push(extractedUrl); }
-                          break;
+                          return extractedUrl && typeof extractedUrl === 'string'
+                            ? extractedUrl
+                            : undefined;
                         } else if (pollData.status === 'failed' || pollData.retryable === false) {
+                          const slotError = pollData.error || '生成失败';
+                          slotErrors.push(slotError);
                           setMessages(prev => prev.map(msg => 
                             msg.id === assistantMessageId 
-                              ? { ...msg, isGeneratingImage: false, generateError: pollData.error || '生成失败' }
+                              ? { ...msg, isGeneratingImage: true, generateError: slotError }
                               : msg
                           ));
-                          return;
+                          return undefined;
                         }
                       } catch { /* retry */ }
                     }
-                  }
+                    return undefined;
+                    },
+                    (slot, resultUrl) => {
+                      progressiveResults.set(slot.slotIndex, resultUrl);
+                      const progressiveUrls = [...progressiveResults.entries()]
+                        .sort(([left], [right]) => left - right)
+                        .map(([, url]) => url);
+                      setMessages(prev => prev.map(msg =>
+                        msg.id === assistantMessageId
+                          ? { ...msg, generatedImages: progressiveUrls }
+                          : msg
+                      ));
+                    },
+                  );
+                  resultUrls.push(...settledResults.map(entry => entry.result));
                 }
 
                 if (resultUrls.length > 0) {
@@ -4636,7 +4719,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   const suggestions = generateSuggestions({ contentCategory: 'image_generated', modelName: imageModelInfo.model });
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
-                      ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100, suggestions }
+                      ? {
+                        ...msg,
+                        generatedImages: uniqueResultUrls,
+                        isGeneratingImage: false,
+                        generateProgress: 100,
+                        generateError: slotErrors.length > 0
+                          ? `部分图片生成失败：${[...new Set(slotErrors)].join('；')}`
+                          : undefined,
+                        suggestions,
+                      }
                       : msg
                   ));
                   if (onAddImages) {
@@ -4645,7 +4737,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 } else {
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
-                      ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果' }
+                      ? {
+                        ...msg,
+                        isGeneratingImage: false,
+                        generateError: slotErrors.length > 0
+                          ? [...new Set(slotErrors)].join('；')
+                          : '图像生成未返回结果',
+                      }
                       : msg
                   ));
                 }

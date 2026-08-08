@@ -33,6 +33,9 @@ describe('task-events generation slot contract', () => {
             slotIndex: 1,
           },
           imageUrl: 'https://cdn.example.com/slot-2.png',
+          apiKey: 'secret-key',
+          apiBaseUrl: 'https://private-provider.example.com',
+          advancedParams: { internal: true },
         },
         createdAt: 1,
         updatedAt: 2,
@@ -41,6 +44,12 @@ describe('task-events generation slot contract', () => {
 
     expect(attachCanonicalGenerationSlotToEvent(event)).toEqual({
       ...event,
+      task: {
+        ...event.task,
+        result: {
+          imageUrl: 'https://cdn.example.com/slot-2.png',
+        },
+      },
       batchId: 'batch-sse',
       slotId: 'batch-sse:1',
       slotIndex: 1,
@@ -49,5 +58,41 @@ describe('task-events generation slot contract', () => {
         imageUrl: 'https://cdn.example.com/slot-2.png',
       },
     });
+  });
+
+  it('never serializes internal generation credentials in either SSE result location', () => {
+    const event: TaskEvent = {
+      taskId: 'task-sensitive',
+      type: 'progress',
+      task: {
+        taskId: 'task-sensitive',
+        type: 'generate-async',
+        status: 'processing',
+        progress: 25,
+        result: {
+          submissionPayload: {
+            batchId: 'batch-sensitive',
+            slotId: 'batch-sensitive:0',
+            slotIndex: 0,
+            apiKey: 'nested-secret',
+          },
+          apiKey: 'secret-key',
+          apiBaseUrl: 'https://private-provider.example.com',
+          advancedParams: { internal: true },
+          imageUrl: 'https://cdn.example.com/preview.png',
+        },
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    };
+
+    const serialized = JSON.stringify(attachCanonicalGenerationSlotToEvent(event));
+
+    expect(serialized).not.toContain('secret-key');
+    expect(serialized).not.toContain('nested-secret');
+    expect(serialized).not.toContain('apiBaseUrl');
+    expect(serialized).not.toContain('advancedParams');
+    expect(serialized).not.toContain('submissionPayload');
+    expect(serialized).toContain('https://cdn.example.com/preview.png');
   });
 });

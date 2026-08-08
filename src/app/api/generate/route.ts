@@ -36,7 +36,12 @@ import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, getProviderAspectRatios, normalizeImageGenerationSelection, ModelParamType } from '@/lib/canvas-generation-group';
 import { buildGenerationRouteAudit } from '@/lib/generation-route-audit';
-import { buildGenerationBatch } from '@/lib/generation-batch';
+import {
+  createDurableGenerationBatch,
+  projectCanonicalGenerationSlot,
+  type CanonicalGenerationSlot,
+} from '@/lib/task-core/generation-batch';
+import { normalizeDurableTaskStatus } from '@/lib/task-core/task-state';
 import { isModelAssignedToUser } from '@/lib/model-defaults';
 import {
   alignReferenceDescriptions,
@@ -931,7 +936,14 @@ export async function POST(request: NextRequest) {
       const batchSeed = idempotencyKey
         ? createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 24)
         : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const generationBatch = buildGenerationBatch(`batch-${batchSeed}`, requestedSlotCount);
+      const taskSeed = Date.now();
+      const generationBatch = createDurableGenerationBatch({
+        batchId: `batch-${batchSeed}`,
+        requestedCount: requestedSlotCount,
+        createTaskId: (slotIndex) => (
+          `async-${taskSeed}-${slotIndex}-${Math.random().toString(36).slice(2, 8)}`
+        ),
+      });
       const requestDigest = createHash('sha256').update(JSON.stringify({
         prompt,
         aspectRatio,
@@ -999,22 +1011,17 @@ export async function POST(request: NextRequest) {
         requestDigest,
         workerMode: 'recovery',
       };
-      const submittedSlots: Array<{
-        slotId: string;
-        slotIndex: number;
-        taskId: string;
-        status: 'submitting' | 'queued' | 'processing';
-      }> = [];
+      const submittedSlots: CanonicalGenerationSlot[] = [];
       const pendingCharges: Array<{ taskId: string; slotId: string; slotIndex: number }> = [];
 
       for (const slot of generationBatch.slots) {
-        const asyncTaskId = `async-${Date.now()}-${slot.index}-${Math.random().toString(36).slice(2, 8)}`;
-        const childIdempotencyKey = idempotencyKey ? `${idempotencyKey}:${slot.index}` : undefined;
+        const asyncTaskId = slot.taskId;
+        const childIdempotencyKey = idempotencyKey ? `${idempotencyKey}:${slot.slotIndex}` : undefined;
         const childPayload = {
           ...submissionPayload,
           batchId: generationBatch.batchId,
           slotId: slot.slotId,
-          slotIndex: slot.index,
+          slotIndex: slot.slotIndex,
         };
         const taskCreated = await recordImageTaskSubmitted({
           taskId: asyncTaskId,
@@ -1025,23 +1032,25 @@ export async function POST(request: NextRequest) {
           providerId: effectiveProviderId,
           model,
           type: 'generate-async',
-          label: `生成图片 ${slot.index + 1}/${generationBatch.slots.length}`,
+          label: `生成图片 ${slot.slotIndex + 1}/${generationBatch.slots.length}`,
           idempotencyKey: childIdempotencyKey,
           submissionPayload: childPayload,
           batchId: generationBatch.batchId,
           slotId: slot.slotId,
-          slotIndex: slot.index,
+          slotIndex: slot.slotIndex,
           deferCreditCharge: true,
         });
 
         if (taskCreated) {
           submittedSlots.push({
-            slotId: slot.slotId,
-            slotIndex: slot.index,
-            taskId: asyncTaskId,
+            ...slot,
             status: 'submitting',
           });
-          pendingCharges.push({ taskId: asyncTaskId, slotId: slot.slotId, slotIndex: slot.index });
+          pendingCharges.push({
+            taskId: asyncTaskId,
+            slotId: slot.slotId,
+            slotIndex: slot.slotIndex,
+          });
           continue;
         }
 
@@ -1060,17 +1069,27 @@ export async function POST(request: NextRequest) {
           }, { status: 409 });
         }
 
-        submittedSlots.push({
-          slotId: String(existingPayload.slotId || slot.slotId),
-          slotIndex: typeof existingPayload.slotIndex === 'number' ? existingPayload.slotIndex : slot.index,
+        const canonicalExisting = projectCanonicalGenerationSlot({
           taskId: existing.id,
-          status: existing.status === 'pending' || existing.status === 'queued' ? 'submitting' : 'processing',
+          status: existing.status,
+          result: existing.result,
+        });
+        submittedSlots.push(canonicalExisting ?? {
+          batchId: generationBatch.batchId,
+          slotId: String(existingPayload.slotId || slot.slotId),
+          slotIndex: typeof existingPayload.slotIndex === 'number'
+            ? existingPayload.slotIndex
+            : slot.slotIndex,
+          taskId: existing.id,
+          status: normalizeDurableTaskStatus(existing.status),
         });
         if (existing.status === 'pending' && existing.creditStatus === 'not-applicable') {
           pendingCharges.push({
             taskId: existing.id,
             slotId: String(existingPayload.slotId || slot.slotId),
-            slotIndex: typeof existingPayload.slotIndex === 'number' ? existingPayload.slotIndex : slot.index,
+            slotIndex: typeof existingPayload.slotIndex === 'number'
+              ? existingPayload.slotIndex
+              : slot.slotIndex,
           });
         }
       }

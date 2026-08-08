@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  collectChatGenerationSlotResults,
+  settleChatGenerationSlots,
+  upsertChatGenerationSlotImage,
   getResumableChatGenerationTasks,
   mergeChatSessionMessages,
   mergeRecoveredChatTasks,
@@ -7,6 +10,145 @@ import {
   type ChatSessionMessageSnapshot,
   type RecoverableChatCloudTask,
 } from '@/lib/chat-pending-generation';
+
+describe('chat progressive generation slots', () => {
+  it('starts every slot concurrently, emits each completion immediately, and returns stable slot order', async () => {
+    const resolvers = new Map<number, (value: string) => void>();
+    const started: number[] = [];
+    const completed: number[] = [];
+    const slots = [2, 0, 1].map(slotIndex => ({
+      taskId: `task-${slotIndex}`,
+      slotIndex,
+    }));
+
+    const pending = collectChatGenerationSlotResults(
+      slots,
+      slot => new Promise<string>((resolve) => {
+        started.push(slot.slotIndex);
+        resolvers.set(slot.slotIndex, resolve);
+      }),
+      slot => completed.push(slot.slotIndex),
+    );
+
+    await Promise.resolve();
+    expect(started).toEqual([2, 0, 1]);
+
+    resolvers.get(2)?.('url-2');
+    await Promise.resolve();
+    expect(completed).toEqual([2]);
+
+    resolvers.get(0)?.('url-0');
+    await Promise.resolve();
+    expect(completed).toEqual([2, 0]);
+
+    resolvers.get(1)?.('url-1');
+    await expect(pending).resolves.toEqual([
+      { slot: { taskId: 'task-0', slotIndex: 0 }, result: 'url-0' },
+      { slot: { taskId: 'task-1', slotIndex: 1 }, result: 'url-1' },
+      { slot: { taskId: 'task-2', slotIndex: 2 }, result: 'url-2' },
+    ]);
+  });
+  it('does not resolve the batch until slower siblings settle after an early failure', async () => {
+    let resolveSlow: ((value: string) => void) | undefined;
+    let settled = false;
+    const pending = collectChatGenerationSlotResults(
+      [
+        { taskId: 'failed-fast', slotIndex: 0 },
+        { taskId: 'slow-success', slotIndex: 1 },
+      ],
+      slot => (
+        slot.slotIndex === 0
+          ? Promise.resolve(undefined)
+          : new Promise<string>(resolve => { resolveSlow = resolve; })
+      ),
+    ).then(result => {
+      settled = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveSlow?.('url-1');
+    await expect(pending).resolves.toEqual([
+      { slot: { taskId: 'slow-success', slotIndex: 1 }, result: 'url-1' },
+    ]);
+  });
+
+  it('records an early failure without preventing slower sibling recovery', async () => {
+    let resolveSlow: ((value: string) => void) | undefined;
+    let settled = false;
+    const pending = settleChatGenerationSlots(
+      [
+        { taskId: 'failed-fast', slotIndex: 0 },
+        { taskId: 'slow-success', slotIndex: 1 },
+      ],
+      slot => (
+        slot.slotIndex === 0
+          ? Promise.reject(new Error('provider rejected slot 0'))
+          : new Promise<string>(resolve => { resolveSlow = resolve; })
+      ),
+    ).then(result => {
+      settled = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveSlow?.('url-1');
+    await expect(pending).resolves.toEqual([
+      {
+        slot: { taskId: 'failed-fast', slotIndex: 0 },
+        error: 'provider rejected slot 0',
+      },
+      {
+        slot: { taskId: 'slow-success', slotIndex: 1 },
+        result: 'url-1',
+      },
+    ]);
+  });
+
+  it('publishes recovered images immediately while keeping stable slot order', async () => {
+    const resolvers = new Map<number, {
+      resolve: (value: string) => void;
+      reject: (error: Error) => void;
+    }>();
+    let visibleImages: Array<{ slotIndex: number; url: string }> = [];
+    const snapshots: string[][] = [];
+    const pending = settleChatGenerationSlots(
+      [0, 1, 2].map(slotIndex => ({ taskId: `task-${slotIndex}`, slotIndex })),
+      slot => new Promise<string>((resolve, reject) => {
+        resolvers.set(slot.slotIndex, { resolve, reject });
+      }),
+      settlement => {
+        if (!settlement.result) return;
+        visibleImages = upsertChatGenerationSlotImage(
+          visibleImages,
+          settlement.slot.slotIndex,
+          settlement.result,
+        );
+        snapshots.push(visibleImages.map(image => image.url));
+      },
+    );
+
+    await Promise.resolve();
+    resolvers.get(2)?.resolve('url-2');
+    await Promise.resolve();
+    expect(snapshots).toEqual([['url-2']]);
+
+    resolvers.get(0)?.resolve('url-0');
+    await Promise.resolve();
+    expect(snapshots).toEqual([['url-2'], ['url-0', 'url-2']]);
+
+    resolvers.get(1)?.reject(new Error('slot 1 failed'));
+    const settlements = await pending;
+    expect(settlements.map(item => item.slot.slotIndex)).toEqual([0, 1, 2]);
+    expect(visibleImages.map(image => image.url)).toEqual(['url-0', 'url-2']);
+  });
+});
 
 describe('getResumableChatGenerationTasks', () => {
   it('returns tasks from a message with isGeneratingImage=true and pendingGenerationTasks', () => {
