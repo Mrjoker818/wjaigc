@@ -61,6 +61,73 @@ describe('task core PostgreSQL baseline', () => {
     expect(options).not.toContain('public');
   });
 
+  it('runs every cleanup step and aggregates every cleanup failure', async () => {
+    const { cleanupIsolatedPostgres } = await import(
+      '../helpers/postgres-test-database'
+    );
+    const stepNames = [
+      'close-isolated-business-pool',
+      'restore-database-environment',
+      'rollback-helper-client',
+      'reset-helper-search-path',
+      'drop-isolated-schema',
+      'end-helper-client',
+    ];
+    const calls: string[] = [];
+
+    let cleanupError: unknown;
+    try {
+      const failingStep = (name: string) => async () => {
+        calls.push(name);
+        throw new Error(`${name} failed`);
+      };
+      await cleanupIsolatedPostgres({
+        closeBusinessPool: failingStep('close-isolated-business-pool'),
+        dropIsolatedSchema: failingStep('drop-isolated-schema'),
+        endHelperClient: failingStep('end-helper-client'),
+        environmentBound: true,
+        resetHelperSearchPath: failingStep('reset-helper-search-path'),
+        restoreDatabaseEnvironment: failingStep(
+          'restore-database-environment',
+        ),
+        rollbackHelperClient: failingStep('rollback-helper-client'),
+        schemaCreated: true,
+      });
+    } catch (error) {
+      cleanupError = error;
+    }
+
+    expect(calls).toEqual(stepNames);
+    expect(cleanupError).toBeInstanceOf(AggregateError);
+    expect(
+      (cleanupError as AggregateError).errors.map(
+        (error) => (error as Error).message,
+      ),
+    ).toEqual(stepNames.map((name) => `${name}: ${name} failed`));
+    expect((cleanupError as Error).message).toContain(
+      'PostgreSQL isolation cleanup failed',
+    );
+  });
+
+  it('lets the postgres-test blocker alone determine production exit status', async () => {
+    const { getDoctorExitCode } = await import('../../scripts/doctor-status.mjs');
+
+    expect(
+      getDoctorExitCode({
+        blockedCount: 0,
+        failedCount: 0,
+        production: true,
+      }),
+    ).toBe(0);
+    expect(
+      getDoctorExitCode({
+        blockedCount: 1,
+        failedCount: 0,
+        production: true,
+      }),
+    ).not.toBe(0);
+  });
+
   it('requires doctor to probe the Stage 1 PostgreSQL capabilities', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'scripts/doctor.mjs'),

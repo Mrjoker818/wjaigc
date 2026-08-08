@@ -5,6 +5,7 @@ import process from 'node:process';
 import dotenv from 'dotenv';
 import { Client } from 'pg';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
+import { getDoctorExitCode } from './doctor-status.mjs';
 
 // Test isolation: DOCTOR_SKIP_ENV_FILE=1 skips loading .env/.env.local so
 // production-credential checks run against a clean environment.
@@ -384,7 +385,11 @@ async function main() {
   const failed = results.filter((result) => result.status === 'FAIL');
   const blocked = results.filter((result) => result.status === 'BLOCKED');
   console.log(`\nSummary: ${results.filter((result) => result.status === 'PASS').length} passed, ${results.filter((result) => result.status === 'WARN').length} warnings, ${failed.length} failed, ${blocked.length} blocked`);
-  if (failed.length > 0 || (production && blocked.length > 0)) process.exitCode = 1;
+  process.exitCode = getDoctorExitCode({
+    blockedCount: blocked.length,
+    failedCount: failed.length,
+    production,
+  });
 }
 
 await main();

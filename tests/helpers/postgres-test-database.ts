@@ -19,6 +19,22 @@ interface IsolatedPostgresContext {
   query: QueryFn;
 }
 
+interface PostgresCleanupStep {
+  name: string;
+  run: () => Promise<void> | void;
+}
+
+interface IsolatedPostgresCleanupOptions {
+  closeBusinessPool: () => Promise<void> | void;
+  dropIsolatedSchema: () => Promise<void> | void;
+  endHelperClient: () => Promise<void> | void;
+  environmentBound: boolean;
+  resetHelperSearchPath: () => Promise<void> | void;
+  restoreDatabaseEnvironment: () => Promise<void> | void;
+  rollbackHelperClient: () => Promise<void> | void;
+  schemaCreated: boolean;
+}
+
 function getConnectionString(): string {
   const connectionString = process.env.POSTGRES_TEST_DATABASE_URL?.trim();
   if (!connectionString) {
@@ -69,6 +85,78 @@ function restoreEnvironmentVariable(
   process.env[name] = value;
 }
 
+function createStepError(stepName: string, error: unknown): Error {
+  const detail = error instanceof Error ? error.message : String(error);
+  return new Error(`${stepName}: ${detail}`, { cause: error });
+}
+
+export async function runPostgresCleanup(
+  steps: PostgresCleanupStep[],
+): Promise<void> {
+  const errors: Error[] = [];
+
+  for (const step of steps) {
+    try {
+      await step.run();
+    } catch (error) {
+      errors.push(createStepError(step.name, error));
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new AggregateError(
+      errors,
+      `PostgreSQL isolation cleanup failed (${errors.length} step${errors.length === 1 ? '' : 's'})`,
+    );
+  }
+}
+
+export async function cleanupIsolatedPostgres({
+  closeBusinessPool,
+  dropIsolatedSchema,
+  endHelperClient,
+  environmentBound,
+  resetHelperSearchPath,
+  restoreDatabaseEnvironment,
+  rollbackHelperClient,
+  schemaCreated,
+}: IsolatedPostgresCleanupOptions): Promise<void> {
+  const steps: PostgresCleanupStep[] = [];
+  if (environmentBound) {
+    steps.push(
+      {
+        name: 'close-isolated-business-pool',
+        run: closeBusinessPool,
+      },
+      {
+        name: 'restore-database-environment',
+        run: restoreDatabaseEnvironment,
+      },
+    );
+  }
+  if (schemaCreated) {
+    steps.push(
+      {
+        name: 'rollback-helper-client',
+        run: rollbackHelperClient,
+      },
+      {
+        name: 'reset-helper-search-path',
+        run: resetHelperSearchPath,
+      },
+      {
+        name: 'drop-isolated-schema',
+        run: dropIsolatedSchema,
+      },
+    );
+  }
+  steps.push({
+    name: 'end-helper-client',
+    run: endHelperClient,
+  });
+  await runPostgresCleanup(steps);
+}
+
 export function createIsolatedPostgresConnectionString(
   connectionString: string,
   schemaName: string,
@@ -112,6 +200,9 @@ export async function withIsolatedPostgres<T>(
   const previousPgDatabaseUrl = process.env.PGDATABASE_URL;
   let schemaCreated = false;
   let environmentBound = false;
+  let operationError: unknown;
+  let operationFailed = false;
+  let result: T | undefined;
 
   try {
     await client.connect();
@@ -125,23 +216,52 @@ export async function withIsolatedPostgres<T>(
     environmentBound = true;
 
     const query: QueryFn = (text, values) => client.query(text, values);
-    return await callback({ databaseUrl, schemaName, query });
-  } finally {
-    if (environmentBound) {
-      try {
-        await closePool();
-      } finally {
+    result = await callback({ databaseUrl, schemaName, query });
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+  }
+
+  let cleanupError: unknown;
+  try {
+    await cleanupIsolatedPostgres({
+      closeBusinessPool: () => closePool(),
+      dropIsolatedSchema: () =>
+        client
+          .query(`DROP SCHEMA IF EXISTS ${quotedSchemaName} CASCADE`)
+          .then(() => undefined),
+      endHelperClient: () => client.end(),
+      environmentBound,
+      resetHelperSearchPath: () =>
+        client.query('RESET search_path').then(() => undefined),
+      restoreDatabaseEnvironment: () => {
         restoreEnvironmentVariable('DATABASE_URL', previousDatabaseUrl);
         restoreEnvironmentVariable('PGDATABASE_URL', previousPgDatabaseUrl);
-      }
-    }
-    if (schemaCreated) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      await client.query('RESET search_path').catch(() => undefined);
-      await client.query(`DROP SCHEMA IF EXISTS ${quotedSchemaName} CASCADE`);
-    }
-    await client.end().catch(() => undefined);
+      },
+      rollbackHelperClient: () =>
+        client.query('ROLLBACK').then(() => undefined),
+      schemaCreated,
+    });
+  } catch (error) {
+    cleanupError = error;
   }
+
+  if (operationFailed && cleanupError) {
+    const cleanupErrors =
+      cleanupError instanceof AggregateError
+        ? cleanupError.errors
+        : [cleanupError];
+    throw new AggregateError(
+      [
+        createStepError('postgres-operation', operationError),
+        ...cleanupErrors,
+      ],
+      'PostgreSQL isolation operation and cleanup failed',
+    );
+  }
+  if (operationFailed) throw operationError;
+  if (cleanupError) throw cleanupError;
+  return result as T;
 }
 
 export async function schemaExists(schemaName: string): Promise<boolean> {
