@@ -1333,8 +1333,8 @@ export async function POST(request: NextRequest) {
       referenceDescriptions,
     );
 
-    if (referenceImages && referenceImages.length > 0) {
-      const missingDescriptionIndexes = referenceImages.flatMap((_: string, index: number) => (
+    if (accessibleReferenceImages.length > 0) {
+      const missingDescriptionIndexes = accessibleReferenceImages.flatMap((_: string, index: number) => (
         refDescArr[index] ? [] : [index]
       ));
       if (missingDescriptionIndexes.length > 0) {
@@ -1342,7 +1342,7 @@ export async function POST(request: NextRequest) {
         try {
           const identifyPromises = missingDescriptionIndexes.map(async (index: number) => {
             try {
-              const result = await identifyImageSubject(referenceImages[index], 8000);
+              const result = await identifyImageSubject(accessibleReferenceImages[index], 8000);
               return result ? result.en : null;
             } catch (err) {
               console.warn(`[generate] Vision identification failed for image ${index}:`, err);
@@ -1366,9 +1366,9 @@ export async function POST(request: NextRequest) {
     const refDescText = refDescArr.filter(Boolean).join('; ');
 
     // 融合模式增强提示词 - 明确指导模型如何融合参考图
-    if (referenceMode === 'fusion' && referenceImages && referenceImages.length > 1) {
+    if (referenceMode === 'fusion' && accessibleReferenceImages.length > 1) {
       const fusionDescHint = refDescText ? ` The reference images depict: "${refDescText}".` : '';
-      enhancedPrompt = `[FUSION MODE] Combine and merge ${referenceImages.length} reference images into a single cohesive composition.${fusionDescHint} ${enhancedPrompt}. Seamlessly blend all visual elements together, maintaining the key characteristics of each reference while creating a unified, natural result.`;
+      enhancedPrompt = `[FUSION MODE] Combine and merge ${accessibleReferenceImages.length} reference images into a single cohesive composition.${fusionDescHint} ${enhancedPrompt}. Seamlessly blend all visual elements together, maintaining the key characteristics of each reference while creating a unified, natural result.`;
     }
 
     // 参考图增强：无分类或空分类时，使用描述文本增强；有分类时使用分类增强
@@ -1376,12 +1376,12 @@ export async function POST(request: NextRequest) {
       (Array.isArray(referenceCategories) && referenceCategories.length > 0) ||
       (!Array.isArray(referenceCategories) && Object.keys(referenceCategories as Record<string, unknown>).length > 0)
     );
-    const compiledReferenceConstraints = referenceImages && referenceImages.length > 0 && hasCategories
+    const compiledReferenceConstraints = accessibleReferenceImages.length > 0 && hasCategories
       ? compileReferenceConstraints({
           providerId: effectiveProviderId,
           providerName: provider?.displayName || provider?.name,
           modelId: modelConfig.modelId,
-          referenceImages,
+          referenceImages: accessibleReferenceImages,
           referenceDescriptions: refDescArr,
           referenceCategories: referenceCategories as Record<string, string[]> | string[][],
           referenceStrengths,
@@ -1393,7 +1393,7 @@ export async function POST(request: NextRequest) {
       enhancedPrompt = `[REFERENCE MODE] ${compiledReferenceConstraints.prompt} ${enhancedPrompt}`;
     }
 
-    if (referenceImages && referenceImages.length > 0 && !hasCategories && !compiledReferenceConstraints?.hasActiveConstraints) {
+    if (accessibleReferenceImages.length > 0 && !hasCategories && !compiledReferenceConstraints?.hasActiveConstraints) {
       // 无分类模式：使用参考图描述增强提示词
       if (refDescText) {
         enhancedPrompt = `[REFERENCE MODE] The reference image depicts: "${refDescText}". You MUST preserve the main subject identity — do NOT replace it with a different object. ${enhancedPrompt}`;
@@ -1404,7 +1404,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 参考图分类增强 - 基于前端传递的分类和强度，增强提示词让AI正确理解参考意图
-    if (referenceImages && referenceImages.length > 0 && hasCategories && !compiledReferenceConstraints?.hasActiveConstraints) {
+    if (accessibleReferenceImages.length > 0 && hasCategories && !compiledReferenceConstraints?.hasActiveConstraints) {
       // 规范化分类键：中文→英文
       const normalizeCategory = (key: string): string => {
         const cnToEn: Record<string, string> = {
