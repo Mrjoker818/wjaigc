@@ -408,3 +408,10 @@
 | Paid P0 generation E2E on exact build | Unverified | Missing `E2E_TEST_USERNAME` / `E2E_TEST_PASSWORD` / `E2E_GENERATION_MODEL` and `E2E_ENABLE_PAID_GENERATION=true` |
 | Cloud exact-build smoke | Unverified | Preview URL returns 404 `instance_not_found`; restart Coze sandbox first |
 | PostgreSQL concurrency/refund suites | Skipped | No isolated PostgreSQL URL configured |
+
+## 2026-08-08 Stage 1 PostgreSQL task baseline
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Isolated PostgreSQL schema lifecycle | BLOCKED | `POSTGRES_TEST_DATABASE_URL` is not configured in the current environment. The real integration test is explicitly skipped and must not be counted as passed. |
+| Stage 1 PostgreSQL capability probe | BLOCKED | `pnpm doctor` reports the missing test database as a release blocker. When configured, it verifies connection, `CREATE TABLE`, transactions, unique indexes, and advisory locks. |
