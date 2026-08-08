@@ -22,6 +22,7 @@ import {
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
 import * as cloudTaskStorage from '@/lib/cloud-task-storage';
+import { getTaskInfo, registerTask } from '@/lib/task-registry';
 
 describe('cloud-task-storage', () => {
   beforeEach(() => {
@@ -74,6 +75,79 @@ describe('cloud-task-storage', () => {
     const insert = execSql.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO cloud_tasks'));
     expect(insert?.[0]).toContain('ON CONFLICT DO NOTHING');
     expect(created).toBe(false);
+  });
+
+  it('upgrades a registered task only after its cloud row is inserted', async () => {
+    const taskId = 'task-register-before-create';
+    registerTask(taskId, 'generate', 'Generate', 'user-a');
+    expect(getTaskInfo(taskId)?.persistence).toBe('memory');
+
+    await expect(createCloudTask({
+      id: taskId,
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+      progress: 5,
+      createdAt: 100,
+      updatedAt: 100,
+    })).resolves.toBe(true);
+
+    expect(getTaskInfo(taskId)?.persistence).toBe('durable');
+  });
+
+  it('remembers a cloud insert for a task registered later', async () => {
+    const taskId = 'task-create-before-register';
+
+    await expect(createCloudTask({
+      id: taskId,
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+      progress: 5,
+      createdAt: 100,
+      updatedAt: 100,
+    })).resolves.toBe(true);
+
+    expect(registerTask(taskId, 'generate', 'Generate', 'user-a'))
+      .toMatchObject({ persistence: 'durable' });
+  });
+
+  it('does not mark a task durable when the cloud insert is rejected', async () => {
+    const taskId = 'task-create-rejected-marker';
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    await expect(createCloudTask({
+      id: taskId,
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+      progress: 5,
+      createdAt: 100,
+      updatedAt: 100,
+    })).resolves.toBe(false);
+
+    expect(registerTask(taskId, 'generate', 'Generate', 'user-a'))
+      .toMatchObject({ persistence: 'memory' });
+  });
+
+  it('automatically upgrades a registered video task after persistence succeeds', async () => {
+    const taskId = 'video-register-before-create';
+    registerTask(taskId, 'video', 'Video', 'user-a');
+
+    await expect(createCloudTask({
+      id: taskId,
+      userId: 'user-a',
+      type: 'video',
+      status: 'processing',
+      progress: 0,
+      createdAt: 100,
+      updatedAt: 100,
+    })).resolves.toBe(true);
+
+    expect(getTaskInfo(taskId)).toMatchObject({
+      type: 'video',
+      persistence: 'durable',
+    });
   });
 
   it('updates status only through an allowed edge with status and revision CAS', async () => {

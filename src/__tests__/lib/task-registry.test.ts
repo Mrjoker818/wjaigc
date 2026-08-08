@@ -15,6 +15,7 @@ import {
   getActiveTaskCount,
   waitForQueueSlot,
   cleanupExpiredTasks,
+  markTaskDurable,
   MAX_CONCURRENT_PER_USER,
   MAX_TASKS,
 } from '@/lib/task-registry';
@@ -46,6 +47,30 @@ describe('task-registry 模块', () => {
         'user1',
         'durable',
       );
+
+      expect(task.persistence).toBe('durable');
+      expect(getTaskInfo(id)?.persistence).toBe('durable');
+    });
+
+    it('upgrades an existing registry task to durable without changing its status', () => {
+      const id = uniqueId();
+      registerTask(id, 'generate', '图像生成', 'user1');
+      updateTaskProgress(id, { status: 'processing', progress: 45 });
+
+      markTaskDurable(id);
+
+      expect(getTaskInfo(id)).toMatchObject({
+        persistence: 'durable',
+        status: 'processing',
+        progress: 45,
+      });
+    });
+
+    it('registers a task as durable when persistence was marked first', () => {
+      const id = uniqueId();
+
+      markTaskDurable(id);
+      const task = registerTask(id, 'generate', '图像生成', 'user1');
 
       expect(task.persistence).toBe('durable');
       expect(getTaskInfo(id)?.persistence).toBe('durable');

@@ -21,7 +21,10 @@ import { calculateConfiguredCreditCost, checkCredits, consumeCredits } from '@/l
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
-import { publishDurableDirectTask } from '@/lib/task-core/task-service';
+import {
+  getTaskResultImageUrls,
+  publishDurableDirectTask,
+} from '@/lib/task-core/task-service';
 import {
   chargeCloudTaskCredits,
   getCloudTaskForUserByIdempotencyKey,
@@ -449,7 +452,7 @@ export async function POST(request: NextRequest) {
           retryable: true,
         }, { status: 503 });
       }
-      registerTask(asyncTaskId, 'generate-async', '生成图片', userId, 'durable');
+      registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
       updateTaskProgress(asyncTaskId, { result: { submissionPayload } });
       const recordSubmitOnlyTerminal = async (
         input: Parameters<typeof recordImageTaskTerminal>[1],
@@ -1094,7 +1097,6 @@ export async function POST(request: NextRequest) {
           'generate-async',
           `生成图片 ${pendingCharge.slotIndex + 1}/${generationBatch.slots.length}`,
           userId,
-          'durable',
         );
         updateTaskProgress(pendingCharge.taskId, {
           status: 'processing',
@@ -2871,7 +2873,6 @@ export async function POST(request: NextRequest) {
       for (let i = 0; i < directImageUrls.length; i++) {
         const rawUrl = directImageUrls[i];
         const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
-        let terminalPublished = false;
         if (_skipCloudTaskPersistence) {
           taskIds.push(directTid);
           publishedDirectImageUrls.push(rawUrl);
@@ -2891,7 +2892,30 @@ export async function POST(request: NextRequest) {
               advancedParams: provider?.advancedParams,
             }
           });
-          terminalPublished = true;
+          const providerInfo = {
+            usedModel: usedModelId,
+            modelName: usedModelName,
+            providerName: usedProviderName,
+            generationRouteAudit,
+            apiBaseUrl: usedApiBaseUrl,
+            apiKey: provider?.apiKey || serverApiKey,
+            providerId: usedProviderId,
+            advancedParams: provider?.advancedParams,
+          };
+          persistRemoteImage(rawUrl).then(persistedUrl => {
+            if (persistedUrl && persistedUrl !== rawUrl) {
+              updateTaskProgress(directTid, {
+                status: 'completed',
+                progress: 100,
+                result: { imageUrl: persistedUrl, ...providerInfo },
+              });
+            }
+          }).catch(error => {
+            console.warn(
+              '[generate] 后台持久化失败（使用原始URL）:',
+              error instanceof Error ? error.message : error,
+            );
+          });
         } else {
           try {
             const publication = await publishDurableDirectTask({
@@ -2905,21 +2929,44 @@ export async function POST(request: NextRequest) {
                 providerId: usedProviderId,
                 model: usedModelId,
               }),
-              completeTask: () => recordImageTaskTerminal(directTid, {
-                status: 'completed',
-                imageUrl: rawUrl,
-                creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
-                generationRouteAudit,
-              }),
+              prepareCompletion: async () => {
+                try {
+                  return {
+                    imageUrl: await persistRemoteImage(rawUrl) || rawUrl,
+                  };
+                } catch (error) {
+                  console.warn(
+                    '[generate] 云端图片持久化失败（使用原始URL）:',
+                    error instanceof Error ? error.message : error,
+                  );
+                  return { imageUrl: rawUrl };
+                }
+              },
+              completeTask: (prepared) => recordImageTaskTerminal(
+                directTid,
+                {
+                  status: 'completed',
+                  imageUrl: typeof prepared.imageUrl === 'string'
+                    ? prepared.imageUrl
+                    : rawUrl,
+                  creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+                  generationRouteAudit,
+                },
+              ),
               publishCompleted: (task) => {
+                const authoritativeImageUrls = getTaskResultImageUrls(task);
+                if (authoritativeImageUrls.length === 0) {
+                  throw new Error(
+                    `Completed durable task ${directTid} has no authoritative image result`,
+                  );
+                }
                 taskIds.push(directTid);
-                publishedDirectImageUrls.push(rawUrl);
+                publishedDirectImageUrls.push(...authoritativeImageUrls);
                 registerTask(
                   directTid,
                   'generate',
                   '生成图片',
                   userId,
-                  'durable',
                 );
                 updateTaskProgress(directTid, {
                   status: 'completed',
@@ -2929,7 +2976,6 @@ export async function POST(request: NextRequest) {
                 });
               },
             });
-            terminalPublished = publication.published;
             if (!publication.published) {
               console.warn(
                 '[generate] Durable direct task was not publishable:',
@@ -2942,24 +2988,6 @@ export async function POST(request: NextRequest) {
             console.warn('[generate] 云端任务完成记录失败:', error);
           }
         }
-        // 后台异步持久化：不阻塞响应，完成后更新 task 结果为持久化 URL
-        const tid = directTid;
-        const providerInfo = {
-          usedModel: usedModelId, modelName: usedModelName, providerName: usedProviderName,
-          generationRouteAudit,
-          apiBaseUrl: usedApiBaseUrl, apiKey: provider?.apiKey || serverApiKey,
-          providerId: usedProviderId, advancedParams: provider?.advancedParams,
-        };
-        persistRemoteImage(rawUrl).then(persistedUrl => {
-          if (terminalPublished && persistedUrl && persistedUrl !== rawUrl) {
-            updateTaskProgress(tid, {
-              status: 'completed', progress: 100,
-              result: { imageUrl: persistedUrl, ...providerInfo }
-            });
-          }
-        }).catch(e => {
-          console.warn('[generate] 后台持久化失败（使用原始URL）:', e?.message || e);
-        });
       }
     }
 

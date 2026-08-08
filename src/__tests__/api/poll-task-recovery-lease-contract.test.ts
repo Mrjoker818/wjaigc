@@ -12,6 +12,7 @@ describe('poll-task recovery lease contract', () => {
     expect(recoveryStart).toBeGreaterThan(-1);
     expect(leaseClaim).toBeGreaterThan(recoveryStart);
     expect(register).toBeGreaterThan(leaseClaim);
+    expect(source.slice(register, register + 420)).toContain("'durable'");
   });
 
   it('restores a persisted credit cost and atomically settles it when resumed submission fails', () => {

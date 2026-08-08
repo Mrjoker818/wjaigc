@@ -933,6 +933,7 @@ export async function POST(request: NextRequest) {
               : recovery.type) as TaskType,
           recovery.label,
           recovery.userId,
+          'durable',
         );
         const recoveredProvider = recovery.providerId
           ? await findProviderById(recovery.providerId)

@@ -54,6 +54,7 @@ interface GlobalTaskStore {
   userQueues: Map<string, string[]>;
   userActiveCount: Map<string, number>;
   taskUserMap: Map<string, string>;
+  durableTaskIds: Set<string>;
 }
 
 function getGlobalTaskStore(): GlobalTaskStore {
@@ -67,11 +68,13 @@ function getGlobalTaskStore(): GlobalTaskStore {
       userQueues: new Map<string, string[]>(),
       userActiveCount: new Map<string, number>(),
       taskUserMap: new Map<string, string>(),
+      durableTaskIds: new Set<string>(),
     };
     ((globalThis as Record<string, unknown>)[key] as GlobalTaskStore).eventBus.setMaxListeners(200);
   }
   const store = (globalThis as Record<string, unknown>)[key] as GlobalTaskStore;
   store.abortControllers ||= new Map<string, AbortController>();
+  store.durableTaskIds ||= new Set<string>();
   return store;
 }
 
@@ -82,6 +85,7 @@ const taskEventBus = getGlobalTaskStore().eventBus;
 const userQueues = getGlobalTaskStore().userQueues;
 const userActiveCount = getGlobalTaskStore().userActiveCount;
 const taskUserMap = getGlobalTaskStore().taskUserMap;
+const durableTaskIds = getGlobalTaskStore().durableTaskIds;
 
 // ─── 任务操作 ─────────────────────────────────────────────────────────
 
@@ -97,16 +101,18 @@ export function registerTask(
   type: TaskType,
   label?: string,
   userId?: string,
-  persistence: TaskPersistence = 'memory',
+  persistence?: TaskPersistence,
 ): TaskInfo {
   const effectiveUserId = userId || 'anonymous';
+  const resolvedPersistence = persistence
+    ?? (durableTaskIds.has(taskId) ? 'durable' : 'memory');
   cancelledTasks.delete(taskId);
 
   const task: TaskInfo = {
     taskId,
     type,
     status: 'pending',
-    persistence,
+    persistence: resolvedPersistence,
     progress: 0,
     label: label || type,
     userId: effectiveUserId,
@@ -124,6 +130,14 @@ export function registerTask(
   if (updated) Object.assign(task, updated);
 
   return task;
+}
+
+export function markTaskDurable(taskId: string): void {
+  durableTaskIds.add(taskId);
+  const task = taskRegistry.get(taskId);
+  if (task) {
+    task.persistence = 'durable';
+  }
 }
 
 /**

@@ -1,4 +1,5 @@
 import { execSql } from '@/lib/db-client';
+import { markTaskDurable } from '@/lib/task-registry';
 import {
   canTransitionTaskStatus,
   isTerminalTaskStatus,
@@ -220,7 +221,11 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<bool
     input.createdAt,
     input.updatedAt,
   ]);
-  return (result.rowCount ?? 0) > 0;
+  const created = (result.rowCount ?? 0) > 0;
+  if (created) {
+    markTaskDurable(input.id);
+  }
+  return created;
 }
 
 export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInput): Promise<boolean> {

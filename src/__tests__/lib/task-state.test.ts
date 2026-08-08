@@ -29,6 +29,7 @@ import {
   type DurableTaskStatus,
 } from '@/lib/task-core/task-state';
 import {
+  getTaskResultImageUrls,
   publishDurableDirectTask,
   TaskNotFoundError,
   transitionTask,
@@ -257,25 +258,33 @@ describe('durable task state', () => {
 
     function publicationHarness(
       createTask: () => Promise<boolean>,
-      completeTask: () => Promise<{
+      completeTask: (prepared: Record<string, unknown>) => Promise<{
         transitioned: boolean;
         task: ReturnType<typeof cloudTask> & {
           result?: Record<string, unknown>;
         };
       } | undefined>,
+      prepareCompletion = vi.fn().mockResolvedValue({
+        imageUrl: '/prepared.png',
+      }),
     ) {
       const taskIds: string[] = [];
       const registry: string[] = [];
+      const imageUrls: string[] = [];
       return {
         taskIds,
         registry,
+        imageUrls,
+        prepareCompletion,
         run: () => publishDurableDirectTask({
           taskId: 'direct-task',
           createTask,
+          prepareCompletion,
           completeTask,
           publishCompleted: (task) => {
             taskIds.push(task.id);
             registry.push(`${task.id}:${task.status}`);
+            imageUrls.push(...getTaskResultImageUrls(task));
           },
         }),
       };
@@ -293,8 +302,10 @@ describe('durable task state', () => {
         reason: 'create-rejected',
       });
       expect(completeTask).not.toHaveBeenCalled();
+      expect(harness.prepareCompletion).not.toHaveBeenCalled();
       expect(harness.taskIds).toEqual([]);
       expect(harness.registry).toEqual([]);
+      expect(harness.imageUrls).toEqual([]);
     });
 
     it('propagates creation errors without publishing', async () => {
@@ -304,8 +315,10 @@ describe('durable task state', () => {
       );
 
       await expect(harness.run()).rejects.toThrow('postgres unavailable');
+      expect(harness.prepareCompletion).not.toHaveBeenCalled();
       expect(harness.taskIds).toEqual([]);
       expect(harness.registry).toEqual([]);
+      expect(harness.imageUrls).toEqual([]);
     });
 
     it('does not publish when a CAS loser observes a failed winner', async () => {
@@ -324,6 +337,7 @@ describe('durable task state', () => {
       });
       expect(harness.taskIds).toEqual([]);
       expect(harness.registry).toEqual([]);
+      expect(harness.imageUrls).toEqual([]);
     });
 
     it.each([
@@ -352,6 +366,57 @@ describe('durable task state', () => {
       });
       expect(harness.taskIds).toEqual(['direct-task']);
       expect(harness.registry).toEqual(['direct-task:completed']);
+      expect(harness.imageUrls).toEqual(['/direct.png']);
+    });
+
+    it('passes the persisted final URL into the winning terminal CAS', async () => {
+      const prepareCompletion = vi.fn().mockResolvedValue({
+        imageUrl: '/persisted-final.png',
+      });
+      const completeTask = vi.fn().mockImplementation(
+        async (prepared: Record<string, unknown>) => ({
+          transitioned: true,
+          task: {
+            ...completedTask,
+            result: prepared,
+          },
+        }),
+      );
+      const harness = publicationHarness(
+        vi.fn().mockResolvedValue(true),
+        completeTask,
+        prepareCompletion,
+      );
+
+      await expect(harness.run()).resolves.toMatchObject({
+        published: true,
+        transitioned: true,
+      });
+      expect(prepareCompletion).toHaveBeenCalledTimes(1);
+      expect(completeTask).toHaveBeenCalledWith({
+        imageUrl: '/persisted-final.png',
+      });
+      expect(harness.imageUrls).toEqual(['/persisted-final.png']);
+    });
+
+    it('publishes a CAS winner snapshot instead of the loser prepared URL', async () => {
+      const harness = publicationHarness(
+        vi.fn().mockResolvedValue(true),
+        vi.fn().mockResolvedValue({
+          transitioned: false,
+          task: {
+            ...completedTask,
+            result: { imageUrl: '/winner.png' },
+          },
+        }),
+        vi.fn().mockResolvedValue({ imageUrl: '/loser.png' }),
+      );
+
+      await expect(harness.run()).resolves.toMatchObject({
+        published: true,
+        transitioned: false,
+      });
+      expect(harness.imageUrls).toEqual(['/winner.png']);
     });
   });
 });

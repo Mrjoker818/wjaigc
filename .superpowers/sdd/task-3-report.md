@@ -840,4 +840,202 @@ Concerns:
   `e5867f08729312dc4164987e09394e46565be769`; the previously recorded
   `origin/main` mismatch remains unresolved.
 
+## Fourth Independent Review Fix
+
+### Scope
+
+This follow-up remains strictly within Task 3 authoritative task persistence.
+It does not implement Task 4 billing/refunds, Task 5 multi-image behavior,
+Task 6 Abort, or Task 7 entry migration.
+
+The minimum additional production paths are:
+
+- `src/lib/task-registry.ts`
+- `src/lib/cloud-task-storage.ts`
+- `src/lib/task-core/task-service.ts`
+- `src/app/api/generate/route.ts`
+- `src/app/api/poll-task/route.ts`
+
+The `poll-task` change is necessary because it rebuilds an in-memory task from
+an already-existing durable row without calling `createCloudTask` in the
+current process. It is limited to passing the explicit durable classification
+to `registerTask`; no polling, provider, billing, or terminal behavior changed.
+
+### TDD RED: Durable Marker
+
+The first RED added behavioral coverage for register-before-create,
+create-before-register, rejected inserts, video registration, and poll recovery:
+
+```text
+pnpm exec vitest run \
+  src/__tests__/lib/task-registry.test.ts \
+  src/__tests__/lib/cloud-task-storage.test.ts \
+  src/__tests__/api/poll-task-recovery-lease-contract.test.ts \
+  src/__tests__/api/cancel-task.test.ts
+
+Exit code: 1
+Test Files: 3 failed, 1 passed
+Tests: 6 failed, 80 passed
+```
+
+The failures showed:
+
+- `markTaskDurable` did not exist.
+- A successful `createCloudTask` did not upgrade an existing registry task.
+- A successful insert was forgotten when registration happened later.
+- A registered video task remained memory-only after persistence.
+- poll recovery rebuilt a durable row without a durable registry marker.
+
+The rejected-insert test was already GREEN in the RED run, proving that the
+new expectation was specifically “mark only on INSERT success,” not “mark every
+attempt.”
+
+### Durable Marker GREEN
+
+- Added `durableTaskIds` to the existing `globalThis` registry store, including
+  compatibility initialization for a store created by an older module instance.
+- Added `markTaskDurable(taskId)`. It records the marker and upgrades an
+  existing `TaskInfo.persistence` in place without emitting an SSE event or
+  changing task status/progress.
+- `registerTask` still defaults unmarked tasks to `memory`; when persistence is
+  omitted it consults the durable marker, covering create-before-register.
+- `createCloudTask` calls `markTaskDurable` only when the INSERT reports
+  `rowCount > 0`. Conflict/false and thrown inserts do not mark.
+- Removed the reviewed generate-specific durable arguments so submit-only,
+  batch slot, direct, ordinary remote generate, video, and extend paths rely on
+  the shared storage contract after successful creation.
+- poll recovery explicitly registers durable because it starts from an existing
+  database row rather than creating one in this process.
+
+Marker-focused GREEN:
+
+```text
+Exit code: 0
+Test Files: 4 passed
+Tests: 86 passed
+```
+
+### TDD RED: Durable Direct Final URL
+
+The second RED added real helper behavior tests plus route ordering contracts:
+
+```text
+pnpm exec vitest run \
+  src/__tests__/lib/task-state.test.ts \
+  src/__tests__/api/generate-terminal-persistence-contract.test.ts
+
+Exit code: 1
+Test Files: 2 failed
+Tests: 5 failed, 94 passed
+```
+
+The failures demonstrated:
+
+- durable completion had no prepare-before-CAS phase;
+- no shared helper extracted image URLs from the authoritative task snapshot;
+- a CAS winner could not prove that its persisted final URL was passed into the
+  terminal write;
+- a CAS loser could still publish its own URL instead of the winner snapshot;
+- the route still contained terminal-after background result replacement.
+
+### Durable Direct GREEN
+
+- `publishDurableDirectTask` now performs:
+  `createTask -> prepareCompletion -> completeTask -> publishCompleted`.
+- The generate route awaits `persistRemoteImage(rawUrl)` inside
+  `prepareCompletion`; a persistence exception explicitly falls back to the raw
+  URL before the terminal CAS.
+- `recordImageTaskTerminal` receives that final URL, so PostgreSQL stores the
+  same result later projected to registry/SSE and returned as
+  `directImageUrls`.
+- Added the pure `getTaskResultImageUrls` helper. The publisher reads only the
+  authoritative `task.result.imageUrls/imageUrl`; it never unconditionally
+  publishes the local raw URL.
+- A CAS loser with an authoritative completed winner publishes the winner URL.
+  A failed/cancelled/timeout winner remains non-publishable.
+- Removed durable terminal-after `persistRemoteImage().then(...)` result
+  replacement. The legacy `_skipCloudTaskPersistence` memory path retains its
+  background persistence update because no database row exists.
+
+Direct-focused GREEN:
+
+```text
+Exit code: 0
+Test Files: 2 passed
+Tests: 99 passed
+```
+
+### Final Verification
+
+Task 3 focused marker/direct/cancel/poll/video suite:
+
+```text
+Exit code: 0
+Test Files: 8 passed, 1 skipped
+Tests: 197 passed, 1 skipped
+```
+
+Expanded generate, poll-task, video/extend, cloud-task, cancel, registry,
+admin, and async recovery regression suite:
+
+```text
+Exit code: 0
+Test Files: 24 passed, 1 skipped
+Tests: 259 passed, 1 skipped
+```
+
+PostgreSQL remains explicit:
+
+```text
+BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured;
+authoritative task-state PostgreSQL tests skipped.
+```
+
+Static verification:
+
+```text
+pnpm ts-check
+Exit code: 0
+
+pnpm exec eslint <changed TypeScript/test files>
+Exit code: 0
+Errors: 0
+Warnings: 34 existing warnings in generate and poll-task routes
+
+git diff --check
+Exit code: 0
+```
+
+Protected baseline against a temporary candidate containing the complete
+working tree, with exact cumulative approved Task 1-3 paths:
+
+```text
+Exit code: 0
+PASS All 38 baseline feature IDs remain present.
+PASS No unapproved source drift was detected.
+PASS All literal protected component paths are present.
+PASS All required evidence contracts are present.
+PASS Base and candidate Git refs are confirmed.
+PASS Release gate completed with 0 warning(s).
+```
+
+### Fourth Review Risks And Blockers
+
+BLOCKED:
+
+- `POSTGRES_TEST_DATABASE_URL` is still missing. Real PostgreSQL concurrency
+  and transaction behavior were skipped and are not reported as passed.
+- `E2E_DEPLOYMENT_COMMIT` remains unavailable, so cloud runtime provenance is
+  still unconfirmed.
+
+Concerns:
+
+- `durableTaskIds` is process-local by design. Cross-process/restart recovery
+  therefore continues to depend on database reads; the poll recovery path now
+  explicitly restores the durable registry classification.
+- Pure memory tasks remain `memory` by default and continue to avoid database
+  dependency.
+- Provider calls, credit behavior, multi-image behavior, Abort handling, and
+  broad entry migration remain unchanged and deferred to Tasks 4-7.
+
 No GitHub push was performed.

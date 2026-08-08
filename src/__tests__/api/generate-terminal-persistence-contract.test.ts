@@ -21,9 +21,16 @@ describe('generate authoritative terminal persistence contract', () => {
     expect(submitOnlyWorker).toContain(
       'const recordSubmitOnlyTerminal = async',
     );
-    expect(source).toContain(
-      "registerTask(asyncTaskId, 'generate-async', '生成图片', userId, 'durable');",
+    const submitCreate = source.lastIndexOf(
+      'const taskCreated = await recordImageTaskSubmitted',
+      helperStart,
     );
+    const submitRegister = source.lastIndexOf(
+      "registerTask(asyncTaskId, 'generate-async', '生成图片', userId);",
+      helperStart,
+    );
+    expect(submitCreate).toBeGreaterThan(-1);
+    expect(submitRegister).toBeGreaterThan(submitCreate);
     expect(submitOnlyWorker).not.toContain('void recordImageTaskTerminal');
     expect(submitOnlyWorker).not.toMatch(
       /updateTaskProgress\(asyncTaskId,\s*\{[\s\S]{0,120}?status:\s*'(completed|failed|cancelled)'/,
@@ -58,10 +65,13 @@ describe('generate authoritative terminal persistence contract', () => {
       /createTask:\s*\(\) => recordImageTaskSubmitted\(/,
     );
     expect(directBranch).toMatch(
-      /completeTask:\s*\(\) => recordImageTaskTerminal\(directTid,/,
+      /prepareCompletion:\s*async\s*\(\)[\s\S]*?await persistRemoteImage\(rawUrl\)/,
     );
     expect(directBranch).toMatch(
-      /publishCompleted:[\s\S]*?taskIds\.push\(directTid\)[\s\S]*?registerTask\([\s\S]*?'durable'/,
+      /completeTask:\s*\(prepared\) => recordImageTaskTerminal\([\s\S]*?imageUrl:[\s\S]*?prepared\.imageUrl/,
+    );
+    expect(directBranch).toMatch(
+      /publishCompleted:[\s\S]*?getTaskResultImageUrls\(task\)[\s\S]*?taskIds\.push\(directTid\)[\s\S]*?registerTask\(/,
     );
     const durablePublication = directBranch.slice(
       directBranch.indexOf('publishCompleted:'),
@@ -69,6 +79,14 @@ describe('generate authoritative terminal persistence contract', () => {
     expect(durablePublication.indexOf('taskIds.push(directTid)')).toBeGreaterThan(
       -1,
     );
+    expect(durablePublication).not.toContain(
+      'publishedDirectImageUrls.push(rawUrl)',
+    );
+    const durableStart = directBranch.indexOf('} else {');
+    expect(directBranch.indexOf('persistRemoteImage(rawUrl).then'))
+      .toBeLessThan(durableStart);
+    expect(directBranch.indexOf('persistRemoteImage(rawUrl).then', durableStart))
+      .toBe(-1);
     expect(directBranch).not.toContain('void recordImageTaskTerminal');
   });
 });
