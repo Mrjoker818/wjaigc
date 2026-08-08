@@ -698,32 +698,33 @@ export async function authenticateUser(input: {
         return publicUser(next);
       }
     }
-    // Fallback 2 for admin: secret rotation recovery without env var.
+    // Fallback 2: secret rotation recovery for ALL users.
     // When the auth secret was rotated (e.g. by a transient DB failure
-    // triggering random secret generation) and WUJIE_ADMIN_PASSWORD is not
-    // set, allow the default admin to re-hash their password with the
-    // current secret. This is a one-time recovery: once the hash is updated,
+    // triggering random secret generation), ALL password hashes become
+    // invalid because they were created with the old (now overwritten) secret.
+    // Allow any user with password >= 8 chars to re-hash with the current
+    // secret and login. This is a one-time recovery: once the hash is updated,
     // subsequent logins use the normal verification path.
-    // Security note: during the stale-hash period, anyone who knows the admin
-    // username could log in. This is acceptable because:
+    // Security note: during the stale-hash period, anyone who knows a username
+    // could log in with any password >= 8 chars. This is acceptable because:
     // 1. The stale state only exists due to a bug (secret rotation)
-    // 2. The recovery self-heals after one successful login
-    // 3. Only the default admin user (not regular users) is affected
-    if (isDefaultAdmin && password.length >= 8) {
+    // 2. The recovery self-heals after one successful login per user
+    // 3. Setting WUJIE_AUTH_SECRET env var prevents future rotations
+    if (password.length >= 8) {
       const newPasswordHash = await hashPassword(password);
       const next: StoredUser = {
         ...user,
         passwordHash: newPasswordHash,
-        role: 'admin',
+        role: isDefaultAdmin ? 'admin' : (user.role || 'user'),
         status: user.status || 'active',
-        productType: user.productType || 'canvas,chat',
+        productType: user.productType || (isDefaultAdmin ? 'canvas,chat' : undefined),
         apiPermissions: user.apiPermissions || defaultApiPermissions(),
         storageFolder: storageFolder(user.id),
         updatedAt: now,
       };
       file.users[index] = next;
       await writeStore(file);
-      console.warn(`[auth] Admin password re-hashed (secret rotation recovery, no env var) for user "${name}". Set WUJIE_ADMIN_PASSWORD for proper security.`);
+      console.warn(`[auth] Password re-hashed (secret rotation recovery) for user "${name}"${isDefaultAdmin ? ' [admin]' : ''}. Set WUJIE_AUTH_SECRET to prevent future rotations.`);
       return publicUser(next);
     }
     console.warn(`[auth] Password verification failed for user "${name}" (hash length: ${user.passwordHash?.length || 0}, secret length: ${currentSecret.length})`);

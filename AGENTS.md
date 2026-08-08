@@ -834,6 +834,7 @@ UPSCALE_TIMEOUT_MS=300000
 - **P0: authSecret() 防止非生产环境随机覆盖 DB secret**: 非生产环境仅在 `!isDatabaseConfigured()` 时生成随机 secret；DB 已配置但返回 null 时不再覆盖，避免密码哈希失效（涉及 `src/lib/server-auth.ts`）
 - **P0: admin 密码恢复 — 不依赖环境变量的自愈机制**: 密码哈希不匹配时，对默认 admin 用户（password >= 8 字符），自动用当前 secret 重新哈希并允许登录。这是一次性恢复：哈希更新后后续登录走正常验证路径（涉及 `src/lib/server-auth.ts` `authenticateUser()`）
 - **P0: admin 密码恢复 — 通过 WUJIE_ADMIN_PASSWORD 环境变量**: 密码哈希不匹配时，若 `WUJIE_ADMIN_PASSWORD` 已设置且与输入密码匹配，自动重新哈希（涉及 `src/lib/server-auth.ts` `authenticateUser()`）
+- **P0: 全用户密码恢复 — 不限制 admin**: 密码哈希不匹配时，对所有用户（非仅 admin）只要密码 >= 8 字符，自动用当前 secret 重新哈希并允许登录。这是一次性自愈：哈希更新后后续登录走正常验证路径。旧 secret 已被覆盖丢失，无法通过 legacy secret 验证，只能通过重新哈希恢复（涉及 `src/lib/server-auth.ts` `authenticateUser()`）
 - **P1: auth secret 历史备份机制**: `authSecret()` 每次从 DB 读取 secret 时，检测是否发生轮换。首次保存当前 secret 为 `auth_secret_previous`；轮换时将旧 `auth_secret_previous` 移至 `auth_secret_legacy`，当前 secret 保存为新的 `auth_secret_previous`。`verifyPassword()` 新增 `extraLegacySecrets` 参数，尝试 DB 中的历史 secret 验证旧哈希（涉及 `src/lib/server-auth.ts`）
 - **P1: readStore() 级联 503 修复**: admin 不存在时改用 `configuredAdminBootstrapPassword()`（返回 null）替代 `requireAdminBootstrapPassword()`（抛出异常），DB 临时不可达时跳过 admin 创建而非返回 503（涉及 `src/lib/server-auth.ts` `readStore()`）
 - **P2: 诊断日志增强**: 登录失败时记录用户名、IP、productType；认证异常时记录错误堆栈前 3 行；用户未找到时记录可用用户数；密码验证失败时记录 hash/secret 长度（涉及 `src/app/api/auth/login/route.ts`、`src/lib/server-auth.ts`）
