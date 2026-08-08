@@ -6,7 +6,10 @@ import {
 } from '@/lib/credits';
 import { ensureCoreTables } from '@/lib/db-storage';
 import { markTaskDurable } from '@/lib/task-registry';
-import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
+import {
+  IdempotencyConflictError,
+  LEGACY_UNKNOWN_REQUEST_DIGEST,
+} from '@/lib/task-core/idempotency';
 import {
   canTransitionTaskStatus,
   isTerminalTaskStatus,
@@ -171,14 +174,24 @@ export interface SettleFailedCloudTaskResult {
   refunded: boolean;
 }
 
-let tablesEnsured = false;
+let cloudTaskTablesInitialization: Promise<void> | null = null;
 
 const TERMINAL_STATUS_GUARD =
   "status NOT IN ('completed', 'failed', 'cancelled', 'timeout')";
 
-export async function ensureCloudTaskTables(): Promise<void> {
-  if (tablesEnsured) return;
+export function ensureCloudTaskTables(): Promise<void> {
+  if (!cloudTaskTablesInitialization) {
+    cloudTaskTablesInitialization = initializeCloudTaskTables().catch(
+      (error) => {
+        cloudTaskTablesInitialization = null;
+        throw error;
+      },
+    );
+  }
+  return cloudTaskTablesInitialization;
+}
 
+async function initializeCloudTaskTables(): Promise<void> {
   await execSql(`
     CREATE TABLE IF NOT EXISTS cloud_tasks (
       id TEXT PRIMARY KEY,
@@ -228,7 +241,6 @@ export async function ensureCloudTaskTables(): Promise<void> {
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_user_created ON cloud_tasks(user_id, created_at DESC)');
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_status_updated ON cloud_tasks(status, updated_at DESC)');
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_chat_recovery ON cloud_tasks(user_id, project_id, session_id, updated_at DESC)');
-  tablesEnsured = true;
 }
 
 export async function createCloudTask(input: CreateCloudTaskInput): Promise<boolean> {
@@ -307,7 +319,15 @@ export async function createBillableCloudTask(
       | undefined;
     if (existingRow) {
       const existingDigest = getPersistedRequestDigest(existingRow);
-      if (existingDigest && existingDigest !== input.requestDigest) {
+      if (!existingDigest) {
+        throw new IdempotencyConflictError({
+          userId: input.userId,
+          idempotencyKey: input.idempotencyKey,
+          existingDigest: LEGACY_UNKNOWN_REQUEST_DIGEST,
+          requestDigest: input.requestDigest,
+        });
+      }
+      if (existingDigest !== input.requestDigest) {
         throw new IdempotencyConflictError({
           userId: input.userId,
           idempotencyKey: input.idempotencyKey,
@@ -316,26 +336,9 @@ export async function createBillableCloudTask(
         });
       }
 
-      let reusableRow = existingRow;
-      if (!existingDigest) {
-        const bound = await client.query(
-          `UPDATE cloud_tasks
-           SET request_digest = $3, updated_at = $4
-           WHERE user_id = $1 AND idempotency_key = $2
-           RETURNING *`,
-          [
-            input.userId,
-            input.idempotencyKey,
-            input.requestDigest,
-            Date.now(),
-          ],
-        );
-        reusableRow = bound.rows[0] as Record<string, unknown>;
-      }
-
       await client.query('COMMIT');
       return {
-        task: rowToPersistedCloudTask(reusableRow),
+        task: rowToPersistedCloudTask(existingRow),
         reused: true,
         charged: false,
       };

@@ -12,6 +12,8 @@ const MAX_USER_ID_LENGTH = 256;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 256;
 const MAX_REQUEST_DIGEST_LENGTH = 256;
 
+export const LEGACY_UNKNOWN_REQUEST_DIGEST = 'legacy-unknown';
+
 export class IdempotencyConflictError extends Error {
   readonly code = 'IDEMPOTENCY_CONFLICT';
   readonly status = 409;

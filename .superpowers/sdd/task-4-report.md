@@ -5,10 +5,11 @@
 - Worktree: `J:\无界本地版\projects\_upstream-wjaigc-restore\.worktrees\wj-stable-s1`
 - Branch: `codex/wj-stable-s1`
 - Required starting commit: `00ec56f6ce84f2c3c515e79d5132e169cb5b1b55`
+- Review-fix base commit: `f54b7ec62a1d4d61053999d76d32f27b0080f5bb`
 - Date: 2026-08-08
 - Task boundary: Task 4 only. Tasks 5-7 were not entered.
 
-## RED Evidence
+## Original RED Evidence
 
 Initial command:
 
@@ -33,10 +34,35 @@ A second focused RED was captured for terminal projection:
 pnpm exec vitest run src/__tests__/lib/task-billing.test.ts
 ```
 
-The new cancellation test failed because the database `cancelled` winner was
+The cancellation test failed because the database `cancelled` winner was
 projected to the legacy registry as `failed`. The minimal implementation now
 preserves `cancelled`; `timeout` remains projected as `failed` because the
 legacy registry has no `timeout` status.
+
+## Independent Review RED
+
+After the first Task 4 commit, the review identified two unsafe boundaries:
+
+1. `ensureCoreTables()` and `ensureCloudTaskTables()` could execute their DDL
+   concurrently during a 20-request cold start.
+2. A legacy task with neither `request_digest` nor `result.requestHash` could
+   be silently bound to a new request and reused without a verifiable charge
+   relationship.
+
+The review tests were added before the fix and run with:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/task-billing.test.ts tests/integration/task-billing-concurrency.test.ts
+```
+
+Observed RED:
+
+- Core table initialization executed 20 times instead of once.
+- Cloud task table initialization executed 20 times instead of once.
+- Legacy empty-digest reuse attempted `UPDATE request_digest` instead of
+  raising an idempotency conflict.
+- Result: `3 failed`, `7 passed`, `1 skipped`.
+- The skipped real PostgreSQL test explicitly reported `BLOCKED`.
 
 ## Implementation
 
@@ -47,10 +73,24 @@ legacy registry has no `timeout` status.
   `code=IDEMPOTENCY_CONFLICT` and HTTP-mappable status `409`.
 - Serialized same-user, same-key creation through a PostgreSQL transaction
   advisory lock.
-- Reuses the existing task for the same digest.
+- Reuses the existing task only for the same verifiable digest.
 - Rejects the same key with a different digest.
-- Preserves compatibility with legacy tasks whose digest was stored as
-  `result.requestHash`, and binds previously empty digests on first reuse.
+- Preserves compatibility with legacy tasks whose verifiable digest was stored
+  as `result.requestHash`.
+- Fails closed when both legacy digest locations are empty. The request raises
+  `IdempotencyConflictError` with `existingDigest=legacy-unknown`; it does not
+  mutate or silently reuse the old task.
+
+### Concurrent Initialization
+
+- `ensureCoreTables()` and `ensureCloudTaskTables()` each use a module-level
+  shared initialization `Promise`.
+- Concurrent callers await the same initialization operation instead of
+  running duplicate DDL.
+- A rejected initialization clears the shared promise, allowing the next call
+  to retry.
+- Unit tests cover 20 concurrent callers, shared rejection, and successful
+  retry for both initialization paths.
 
 ### Atomic Task Creation and Charge
 
@@ -95,9 +135,24 @@ pnpm exec vitest run src/__tests__/lib/task-billing.test.ts tests/integration/ta
 
 Result:
 
-- `160 passed`
+- `163 passed`
 - `2 skipped`
 - Both skips explicitly report missing `POSTGRES_TEST_DATABASE_URL`.
+
+The Task 4 PostgreSQL test now covers these scenarios when
+`POSTGRES_TEST_DATABASE_URL` is available:
+
+- Empty-schema cold start with 20 concurrent submissions.
+- Same-key and same-digest 20-request reuse with one task and one charge.
+- Same-key and different-digest conflict.
+- Insufficient balance transaction rollback.
+- Task primary-key conflict transaction rollback.
+- Zero-credit task creation without a ledger entry.
+- Completed task rejecting a later failure/refund.
+- Legacy empty-digest task rejecting reuse.
+- Forced ledger insertion failure rolling back task and balance changes.
+- Concurrent `failed` / `cancelled` / `timeout` allowing one terminal winner
+  and one refund.
 
 ### TypeScript
 
@@ -120,41 +175,31 @@ Result:
 - The warnings are pre-existing unused-variable warnings in `credits.ts` and
   `db-storage.ts`; Task 4 did not expand into unrelated cleanup.
 
-### Full Test Suite
+### Diff Check
 
 ```powershell
-pnpm test
+git diff --check
 ```
 
-Result:
-
-- `1685 passed`
-- `7 failed`
-- `7 skipped`
-
-The seven failures are outside Task 4's permitted files and their source files
-are unchanged from the required starting commit. They cover:
-
-1. API compatibility provider profile expectation.
-2. Effect reverse cancellation expectation.
-3. Pear layer adapter request-body expectation.
-4. Vector design source contract expectation.
-5. Image tool request integrity source contract.
-6. Upscale ONNX thread-count expectation.
-7. Pear video duration parsing expectation.
-
-They remain release blockers for their owning tasks and were not hidden,
-deleted, skipped, or modified here.
+Result: passed. Git emitted only working-copy line-ending notices.
 
 ### Protected Baseline
 
-Run after creating the Task 4 commit:
+Command:
 
 ```powershell
-pnpm check:protected-baseline -- --base e5867f0 --candidate HEAD
+pnpm check:protected-baseline -- --base e5867f0 --candidate HEAD <exact S1 Task 1-4 allow-path arguments>
 ```
 
-Final result is recorded below after commit verification.
+The gate evaluates committed changes plus the current staged/working-tree
+changes. Result:
+
+- All 38 baseline feature IDs remain present.
+- No unapproved source drift was detected.
+- All literal protected component paths are present.
+- All required evidence contracts are present.
+- Base and candidate Git refs are confirmed.
+- Release gate completed with `0 warning(s)`.
 
 ## Blockers
 
@@ -163,20 +208,24 @@ Final result is recorded below after commit verification.
 `POSTGRES_TEST_DATABASE_URL` is not configured. Therefore this task cannot
 claim real PostgreSQL proof for:
 
+- Empty-schema 20-request initialization.
 - 20 concurrent same-key submissions reusing one task.
 - Exactly one balance deduction and one charge ledger row.
 - Same-key, different-digest conflict under real concurrency.
 - Concurrent `failed` / `cancelled` / `timeout` producing one terminal and one
   refund.
+- Insufficient-balance, task-key-conflict, and ledger-insertion rollback.
+- Zero-credit behavior, completed-task refund rejection, and legacy
+  empty-digest conflict.
 
 The integration test exists and explicitly skips with a `BLOCKED` message
 instead of using a mock as evidence.
 
 ## Remaining Risk
 
-- The implementation is covered by unit/source-contract tests and related
-  regressions, but the decisive database concurrency test remains blocked.
-- The full repository suite has seven unrelated failures, so the repository as
-  a whole is not release-ready based on this Task 4 run.
+- Unit and mocked transaction tests prove the review fixes, but authoritative
+  PostgreSQL concurrency and rollback evidence remains blocked.
+- The previous full repository run had seven unrelated failures outside Task
+  4's permitted files. They were not hidden, deleted, skipped, or modified.
 - No Task 5-7 route migration has been performed; callers must opt into the new
   service in later tasks.
