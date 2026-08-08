@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "remote": "https://github.com/Mrjoker818/wjaigc.git",
+  "branch": "origin/main",
+  "commit": "69ba94ef6bde041293ad9609ec76285d3e287a7f",
+  "packageVersion": "4.0.0",
+  "generatedAt": "2026-08-08T13:31:28+08:00",
+  "worktreePolicy": {
+    "implementationBranch": "codex/wj-stable-s0",
+    "isolatedWorktree": true,
+    "businessSourceMustMatchBaselineAtStageStart": true,
+    "businessSourcePaths": [
+      "src",
+      "package.json",
+      "pnpm-lock.yaml"
+    ],
+    "stageScope": "testing infrastructure and release protection only"
+  },
+  "excludedPaths": [
+    ".playwright-cli/",
+    ".worktrees/",
+    "_refs-*/",
+    "output/",
+    "playwright-report/",
+    "test-results/"
+  ],
+  "baselineVerification": {
+    "businessSourceMatchesRemote": true,
+    "command": "git diff --exit-code origin/main -- src package.json pnpm-lock.yaml",
+    "testCommand": "pnpm test",
+    "testFilesPassed": 322,
+    "testFilesFailed": 5,
+    "testFilesSkipped": 3,
+    "testsPassed": 1474,
+    "testsFailed": 5,
+    "testsSkipped": 4,
+    "status": "known-failures",
+    "postgresqlConcurrencyStatus": "blocked-no-isolated-database"
+  },
+  "knownBaselineFailures": [
+    {
+      "testFile": "src/__tests__/lib/api-compatibility.test.ts",
+      "summary": "4SAPI compatibility profile expectation differs from current openai profile resolution."
+    },
+    {
+      "testFile": "src/__tests__/lib/pear-layer-adapter.test.ts",
+      "summary": "Pear layer request now includes the prompt fallback value '.'."
+    },
+    {
+      "testFile": "src/__tests__/components/image-tool-request-integrity.test.ts",
+      "summary": "String-based assertion does not match the current erase and mask action normalization."
+    },
+    {
+      "testFile": "src/__tests__/lib/upscale-onnx-model.test.ts",
+      "summary": "Thread-count assertion expects 2 while the current environment-driven default is 4."
+    },
+    {
+      "testFile": "src/__tests__/lib/video-api-parsing.test.ts",
+      "summary": "Pear string-result parsing does not preserve the expected duration value."
+    }
+  ]
+}
