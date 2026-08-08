@@ -1,4 +1,9 @@
 import { execSql } from '@/lib/db-client';
+import {
+  canTransitionTaskStatus,
+  type DurableTaskStatus,
+  type UnifiedTaskError,
+} from '@/lib/task-core/task-state';
 
 export type CloudTaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
 export type CloudTaskCreditStatus = 'pending' | 'charged' | 'refunded' | 'not-applicable';
@@ -29,6 +34,12 @@ export interface CloudTask {
   revision?: number;
 }
 
+export type PersistedCloudTaskStatus = DurableTaskStatus | 'pending';
+
+export interface PersistedCloudTask extends Omit<CloudTask, 'status'> {
+  status: PersistedCloudTaskStatus;
+}
+
 export interface CloudTaskLease {
   taskId: string;
   owner: string;
@@ -56,6 +67,20 @@ export interface UpdateCloudTaskInput {
   expectedStatuses?: CloudTaskStatus[];
   leaseOwner?: string;
   expectedRevision?: number;
+}
+
+export interface TransitionCloudTaskStatusInput {
+  taskId: string;
+  from: DurableTaskStatus[];
+  to: DurableTaskStatus;
+  revision: number;
+  result?: Record<string, unknown>;
+  error?: UnifiedTaskError;
+}
+
+export interface TransitionCloudTaskStatusResult {
+  transitioned: boolean;
+  task: PersistedCloudTask | null;
 }
 
 export interface CloudTaskListFilters {
@@ -208,6 +233,13 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.remoteTaskId !== undefined) { sets.push(`remote_task_id = $${index++}`); params.push(input.remoteTaskId); }
 
   const conditions = ['id = $1'];
+  if (input.status === 'completed') {
+    conditions.push("status = 'processing'");
+  } else if (input.status !== undefined) {
+    conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'timeout')");
+  } else if (input.progress !== undefined) {
+    conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'timeout')");
+  }
   if (input.expectedStatuses?.length) {
     conditions.push(`status = ANY($${index++}::text[])`);
     params.push(input.expectedStatuses);
@@ -225,6 +257,75 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
     RETURNING id
   `, params);
   return (result.rowCount ?? result.rows.length) > 0;
+}
+
+export async function transitionCloudTaskStatus(
+  input: TransitionCloudTaskStatusInput,
+): Promise<TransitionCloudTaskStatusResult> {
+  await ensureCloudTaskTables();
+
+  const allowedFrom = input.from.filter((status) =>
+    canTransitionTaskStatus(status, input.to)
+  );
+  const from = Array.from(new Set([
+    ...allowedFrom,
+    ...(allowedFrom.includes('submitting') ? ['pending' as const] : []),
+  ]));
+  if (from.length === 0) {
+    return {
+      transitioned: false,
+      task: await getCloudTaskById(input.taskId),
+    };
+  }
+  const sets = [
+    'status = $4',
+    `progress = CASE
+      WHEN $4 = 'completed' THEN 100
+      WHEN $4 IN ('failed', 'cancelled', 'timeout') THEN 0
+      ELSE progress
+    END`,
+    'updated_at = $5',
+    'revision = revision + 1',
+  ];
+  const params: unknown[] = [
+    input.taskId,
+    from,
+    input.revision,
+    input.to,
+    Date.now(),
+  ];
+  let index = 6;
+
+  if (input.result !== undefined) {
+    sets.push(`result = $${index++}`);
+    params.push(JSON.stringify(input.result));
+  }
+  if (input.error !== undefined) {
+    sets.push(`error = $${index++}`);
+    params.push(input.error.message);
+  } else if (input.to === 'completed') {
+    sets.push("error = ''");
+  }
+
+  const result = await execSql(`
+    UPDATE cloud_tasks
+    SET ${sets.join(', ')}
+    WHERE id = $1
+      AND status = ANY($2::text[])
+      AND revision = $3
+    RETURNING *
+  `, params);
+  if (result.rows.length > 0) {
+    return {
+      transitioned: true,
+      task: rowToPersistedCloudTask(result.rows[0]),
+    };
+  }
+
+  return {
+    transitioned: false,
+    task: await getCloudTaskById(input.taskId),
+  };
 }
 
 /**
@@ -708,6 +809,12 @@ export async function getCloudTaskForUser(taskId: string, userId: string): Promi
   return rowToCloudTask(result.rows[0]);
 }
 
+export async function getCloudTaskById(taskId: string): Promise<PersistedCloudTask | null> {
+  await ensureCloudTaskTables();
+  const result = await execSql('SELECT * FROM cloud_tasks WHERE id = $1', [taskId]);
+  return result.rows.length > 0 ? rowToPersistedCloudTask(result.rows[0]) : null;
+}
+
 export async function getCloudTaskForUserByIdempotencyKey(userId: string, idempotencyKey: string): Promise<CloudTask | null> {
   if (!idempotencyKey) return null;
   await ensureCloudTaskTables();
@@ -788,6 +895,15 @@ function rowToCloudTask(row: Record<string, unknown>): CloudTask {
     attemptCount: Number(row.attempt_count || 0) || undefined,
     idempotencyKey: String(row.idempotency_key || '') || undefined,
     revision: Number(row.revision || 0),
+  };
+}
+
+function rowToPersistedCloudTask(
+  row: Record<string, unknown>,
+): PersistedCloudTask {
+  return {
+    ...rowToCloudTask(row),
+    status: row.status as PersistedCloudTaskStatus,
   };
 }
 

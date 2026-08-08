@@ -1,11 +1,16 @@
-import {
-  createCloudTask,
-  updateCloudTask,
-  type CloudTaskCreditStatus,
-  type CloudTaskStatus,
-  type CloudTask,
-} from '@/lib/cloud-task-storage';
+import * as cloudTaskStorage from '@/lib/cloud-task-storage';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
+import type {
+  DurableTaskStatus,
+  UnifiedTaskError,
+} from '@/lib/task-core/task-state';
+
+type CloudTask = import('@/lib/cloud-task-storage').CloudTask;
+type CloudTaskCreditStatus =
+  import('@/lib/cloud-task-storage').CloudTaskCreditStatus;
+type CloudTaskStatus = import('@/lib/cloud-task-storage').CloudTaskStatus;
+
+const { createCloudTask, updateCloudTask } = cloudTaskStorage;
 
 interface ImageTaskSubmission {
   taskId: string;
@@ -82,6 +87,66 @@ interface ThreeDTaskTerminal {
   creditStatus?: CloudTaskCreditStatus;
 }
 
+interface PersistTerminalTaskInput {
+  status: Extract<CloudTaskStatus, 'completed' | 'failed' | 'cancelled' | 'timeout'>;
+  result?: Record<string, unknown>;
+  error?: string;
+  creditStatus?: CloudTaskCreditStatus;
+}
+
+const FAILURE_TERMINAL_FROM: DurableTaskStatus[] = [
+  'created',
+  'queued',
+  'submitting',
+  'processing',
+  'uploading',
+];
+
+function supportsAuthoritativeTaskState(): boolean {
+  return Object.prototype.hasOwnProperty.call(
+    cloudTaskStorage,
+    'transitionCloudTaskStatus',
+  ) && Object.prototype.hasOwnProperty.call(
+    cloudTaskStorage,
+    'getCloudTaskById',
+  );
+}
+
+async function persistTerminalTask(
+  taskId: string,
+  input: PersistTerminalTaskInput,
+): Promise<void> {
+  const creditStatus = input.creditStatus || 'pending';
+  if (!supportsAuthoritativeTaskState()) {
+    await updateCloudTask(taskId, {
+      status: input.status,
+      progress: input.status === 'completed' ? 100 : 0,
+      result: input.result,
+      error: input.error,
+      creditStatus,
+    });
+    return;
+  }
+
+  const { transitionTask } = await import('@/lib/task-core/task-service');
+  const error: UnifiedTaskError | undefined = input.error
+    ? { code: 'LEGACY_TASK_ERROR', message: input.error }
+    : undefined;
+  const outcome = await transitionTask({
+    taskId,
+    from: input.status === 'completed'
+      ? ['processing']
+      : FAILURE_TERMINAL_FROM,
+    to: input.status,
+    result: input.result,
+    error,
+  });
+
+  if (outcome.transitioned) {
+    await updateCloudTask(taskId, { creditStatus });
+  }
+}
+
 export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Promise<boolean> {
   if (input.persist === false) return true;
 
@@ -141,12 +206,11 @@ export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTe
       }
     : undefined;
 
-  await updateCloudTask(taskId, {
+  await persistTerminalTask(taskId, {
     status: input.status,
-    progress: input.status === 'completed' ? 100 : 0,
     result,
     error: input.error,
-    creditStatus: input.creditStatus || 'pending',
+    creditStatus: input.creditStatus,
   });
 }
 
@@ -190,12 +254,11 @@ export async function recordVideoTaskTerminal(taskId: string, input: VideoTaskTe
     ? { videoUrl: input.videoUrl, imageUrl: input.imageUrl || '' }
     : undefined;
 
-  await updateCloudTask(taskId, {
+  await persistTerminalTask(taskId, {
     status: input.status,
-    progress: input.status === 'completed' ? 100 : 0,
     result,
     error: input.error,
-    creditStatus: input.creditStatus || 'pending',
+    creditStatus: input.creditStatus,
   });
 }
 
@@ -221,19 +284,17 @@ export async function recordThreeDTaskTerminal(taskId: string, input: ThreeDTask
     ? { assetUrl: input.assetUrl, previewImageUrl: input.previewImageUrl || '' }
     : undefined;
 
-  await updateCloudTask(taskId, {
+  await persistTerminalTask(taskId, {
     status: input.status,
-    progress: input.status === 'completed' ? 100 : 0,
     result,
     error: input.error,
-    creditStatus: input.creditStatus || 'pending',
+    creditStatus: input.creditStatus,
   });
 }
 
 export async function recordCloudTaskCancelled(taskId: string, refunded: boolean): Promise<void> {
-  await updateCloudTask(taskId, {
+  await persistTerminalTask(taskId, {
     status: 'cancelled',
-    progress: 0,
     creditStatus: refunded ? 'refunded' : 'pending',
   });
 }
