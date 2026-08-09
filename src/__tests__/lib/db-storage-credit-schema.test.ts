@@ -27,5 +27,15 @@ describe('credit schema initialization', () => {
     expect(statements).toContain(
       "ALTER TABLE wujie_credit_transactions ADD COLUMN IF NOT EXISTS reference_id TEXT DEFAULT ''",
     );
+
+    const createAuditLogIndex = statements.findIndex((sql) => (
+      sql.includes('CREATE TABLE IF NOT EXISTS wujie_audit_log')
+    ));
+    const migrateAuditLogIndex = statements.findIndex((sql) => (
+      sql.includes('ALTER TABLE wujie_audit_log')
+    ));
+
+    expect(createAuditLogIndex).toBeGreaterThanOrEqual(0);
+    expect(migrateAuditLogIndex).toBeGreaterThan(createAuditLogIndex);
   });
 });

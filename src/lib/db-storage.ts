@@ -212,6 +212,34 @@ async function initializeCoreTables(): Promise<void> {
     await execSql(`CREATE INDEX IF NOT EXISTS idx_credit_tx_type ON wujie_credit_transactions(type)`);
     await execSql(`CREATE INDEX IF NOT EXISTS idx_credit_tx_created ON wujie_credit_transactions(created_at)`);
 
+    // Existing deployments may have an older audit schema, so the migrations
+    // below still add any columns that are missing.
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_audit_log (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL DEFAULT '',
+        user_name TEXT,
+        action TEXT NOT NULL DEFAULT '',
+        target_type TEXT,
+        target_id TEXT,
+        detail TEXT,
+        ip_address TEXT,
+        created_at BIGINT NOT NULL,
+        level TEXT DEFAULT 'info',
+        error_message TEXT DEFAULT '',
+        stack_trace TEXT DEFAULT '',
+        request_data JSONB DEFAULT '{}',
+        response_status INTEGER DEFAULT 0,
+        duration_ms INTEGER DEFAULT 0,
+        model TEXT DEFAULT '',
+        provider_id TEXT DEFAULT '',
+        resolution_status TEXT DEFAULT 'none',
+        resolution_detail TEXT DEFAULT '',
+        resolved_at BIGINT,
+        resolved_by TEXT DEFAULT ''
+      )
+    `);
+
     // ─── 安全迁移：给已有表补充缺失列 ────────────────────────────────
     // CREATE TABLE IF NOT EXISTS 不会添加新列，需要单独 ALTER TABLE
     const migrations: [string, string, string][] = [

@@ -43,6 +43,13 @@ export function validateIdempotencyIdentity(
   };
 }
 
+export function createIdempotencyLockKey(
+  userId: string,
+  idempotencyKey: string,
+): string {
+  return `${userId.length}:${userId}${idempotencyKey.length}:${idempotencyKey}`;
+}
+
 function validatePart(name: string, value: string, maxLength: number): string {
   const normalized = value.trim();
   if (!normalized) {

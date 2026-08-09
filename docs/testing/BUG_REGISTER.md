@@ -902,3 +902,37 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | S1-GATE-002 | P1 release blocker | The full latest-main lint/test baseline is not green: 4 ESLint errors and 10 inherited test failures remain visible from the Task 7 checkpoint. | Open; no test or rule was deleted to conceal it |
 | S1-GATE-003 | P1 release blocker | Exact-build paid `n=1/2/3/4` evidence has not run in Chromium, Firefox, and WebKit with real request/task/ledger IDs. | Open; non-mocked suite and manual CI gate now exist |
 | S1-GATE-004 | P1 release blocker | Real cancellation, timeout, late completion, one-time refund, and rollback rehearsal lack deployed evidence. | Open |
+
+## 2026-08-09 Stage 1 PostgreSQL findings
+
+### BUG-048: Fresh core schema omitted the audit-log table
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | PostgreSQL core schema initialization |
+| Reproduction | Run the Stage 1 billing-concurrency suite against an empty isolated PostgreSQL schema. |
+| Expected | `ensureCoreTables()` creates every table before applying additive migrations and indexes. |
+| Actual | `wujie_audit_log` was never created; its migrations and indexes failed with PostgreSQL `42P01` and were swallowed. |
+| Root cause | The audit-log base DDL was absent from `initializeCoreTables()`. |
+| Fix | Added the complete additive table definition before its migrations and indexes. |
+| Regression | The schema test now requires audit-table creation to precede audit migrations. |
+| Status | Fixed and verified locally against PostgreSQL 18. |
+
+### BUG-049: PostgreSQL advisory lock key contained an illegal NUL byte
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Atomic task admission and billing |
+| Reproduction | Call `createBillableTask()` against real PostgreSQL. |
+| Expected | The transaction acquires a user/request-scoped advisory lock and proceeds to idempotent task creation. |
+| Actual | PostgreSQL rejected the text parameter with `invalid byte sequence for encoding UTF8: 0x00`. |
+| Root cause | The lock identity joined the user and request key with a NUL byte, which PostgreSQL text cannot contain. |
+| Fix | Replaced it with a collision-safe length-prefixed identity. |
+| Regression | Unit coverage rejects NUL and tuple collisions; the real 20-way concurrency suite passes. |
+| Status | Fixed and verified locally against PostgreSQL 18. |
+
+### S1-GATE-001 update
+
+The isolated PostgreSQL blocker is closed locally: doctor verified the required capabilities and the three authoritative suites passed `9/9`. Deployed provider billing evidence remains open under S1-GATE-003 and S1-GATE-004.

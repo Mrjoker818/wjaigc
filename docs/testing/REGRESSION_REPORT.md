@@ -676,3 +676,17 @@ The four task-durability source-order contracts now use branch-scoped whitespace
 | Real provider and accounting | NOT EXECUTED | Requires exact deployment SHA, real account, exact provider/model, paid approval, and database ledger access. |
 
 No Stage 1 completion claim is made. The next evidence run must retain the uploaded `playwright-report/` and `test-results/` artifacts.
+
+## 2026-08-09 Stage 1 real PostgreSQL gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Doctor PostgreSQL capability probe | PASS | PostgreSQL 18 on loopback port `55432`; connection, DDL, transactions, unique indexes, and advisory locks verified. |
+| Core schema completeness | PASS | RED/GREEN test proves `wujie_audit_log` is created before additive migrations. |
+| Advisory lock encoding | PASS | Lock identity contains no NUL and distinguishes ambiguous string tuples. |
+| Authoritative PostgreSQL suites | PASS | 3 files / 9 tests, including 20-way cold-start idempotency, 20-way paid idempotency, terminal races, one charge, and at-most-one refund. |
+| Focused task/billing regression | PASS | 4 files / 77 tests. |
+| TypeScript | PASS | `pnpm ts-check`. |
+| Changed-file ESLint | PASS WITH HISTORICAL WARNINGS | 0 errors; 5 pre-existing warnings in untouched regions of `db-storage.ts`. |
+
+This closes the local PostgreSQL evidence gap. It does not replace exact-deployment browser, provider, ledger, cancellation, timeout, or rollback evidence.

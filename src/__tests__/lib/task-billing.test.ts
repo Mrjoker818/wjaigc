@@ -20,6 +20,7 @@ import {
   settleFailedTask,
 } from '@/lib/task-core/billing-service';
 import {
+  createIdempotencyLockKey,
   IdempotencyConflictError,
   validateIdempotencyIdentity,
 } from '@/lib/task-core/idempotency';
@@ -118,6 +119,15 @@ describe('task billing service', () => {
       idempotencyKey: 'request-key',
       requestDigest: '',
     })).toThrow('requestDigest');
+  });
+
+  it('encodes advisory lock identities without PostgreSQL NUL bytes or tuple collisions', () => {
+    const lockKey = createIdempotencyLockKey('user-a', 'request-key');
+
+    expect(lockKey).not.toContain('\0');
+    expect(createIdempotencyLockKey('ab', 'c')).not.toBe(
+      createIdempotencyLockKey('a', 'bc'),
+    );
   });
 
   it('publishes only the terminal transition that won the database race', async () => {

@@ -437,3 +437,14 @@
 | PostgreSQL races | BLOCKED | Isolated database proves concurrent same-key admission, terminal races, and at-most-one refund. |
 | Cancellation and timeout | BLOCKED | Provider request is aborted, late completion is rejected, terminal state is stable, and refund occurs once. |
 | Rollback rehearsal | BLOCKED | `core-v2 -> legacy` rollback preserves existing data and lets old tasks continue under `handlerVersion`. |
+
+## 2026-08-09 Stage 1 PostgreSQL evidence update
+
+| Item | Status | Evidence still required |
+|---|---|---|
+| Isolated PostgreSQL schema lifecycle | VERIFIED LOCALLY | None for the local gate; schema creation, binding, cleanup, and removal passed. |
+| Concurrent idempotency and billing settlement | VERIFIED LOCALLY | 20-way duplicate admission, one charge, terminal race, and at-most-one refund passed on PostgreSQL 18. |
+| Deployed provider ledger | UNVERIFIED | Exact deployed SHA must tie real request IDs, application task IDs, provider task IDs, balance changes, charges, and refunds together. |
+| Chromium / Firefox / WebKit paid E2E | BLOCKED | Deploy the candidate commit and supply the exact runtime SHA plus real account/model configuration. |
+| Cancellation, timeout, late completion | BLOCKED | Run against the deployed provider and retain abort, stable terminal state, and one-time refund evidence. |
+| Rollback rehearsal | BLOCKED | Demonstrate `core-v2 -> legacy` rollback without data loss or task duplication. |

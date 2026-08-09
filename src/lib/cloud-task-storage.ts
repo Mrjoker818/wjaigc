@@ -7,6 +7,7 @@ import {
 import { ensureCoreTables } from '@/lib/db-storage';
 import { markTaskDurable } from '@/lib/task-registry';
 import {
+  createIdempotencyLockKey,
   IdempotencyConflictError,
   LEGACY_UNKNOWN_REQUEST_DIGEST,
 } from '@/lib/task-core/idempotency';
@@ -305,7 +306,7 @@ export async function createBillableCloudTask(
     await client.query('BEGIN');
     await client.query(
       'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-      [`${input.userId}\0${input.idempotencyKey}`],
+      [createIdempotencyLockKey(input.userId, input.idempotencyKey)],
     );
 
     const existingResult = await client.query(

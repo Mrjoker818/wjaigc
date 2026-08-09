@@ -594,3 +594,14 @@ All local gates pass: unit/API/regression suites, TypeScript, ESLint (0 errors),
 The release infrastructure can now collect non-mocked, exact-build evidence, but the evidence itself is incomplete. Local TypeScript, the Stage 1 contract, E2E discovery, and the 38-feature protection gate pass. Release remains blocked by inherited full lint/test failures, missing isolated PostgreSQL, missing paid three-browser provider evidence, and missing cancellation/refund/rollback proof.
 
 The authoritative detail is `docs/testing/STAGE_1_COMPLETION_REPORT.md`. CI must not treat the external evidence job as optional for a Stage 1 release decision.
+
+## 2026-08-09 Stage 1 PostgreSQL update
+
+The local isolated-database blocker is now closed. A loopback-only PostgreSQL 18 instance exposed two real defects before passing the gate: the missing `wujie_audit_log` base table and an illegal NUL byte in the advisory-lock identity. Both were reproduced, covered by failing tests, fixed minimally, and reverified.
+
+- Doctor: 22 passed / 12 warnings / 0 failed / 0 blocked for the supplied test database.
+- PostgreSQL suites: 3 files / 9 tests passed, 0 skipped.
+- Focused task and billing regression: 4 files / 77 tests passed.
+- TypeScript passed; changed-file ESLint has 0 errors.
+
+**Release decision remains Not passed.** Exact-deployment paid generation in Chromium, Firefox, and WebKit; deployed cancellation/timeout/late-result ledger evidence; rollback rehearsal; and inherited full-repository lint/test blockers remain open.
