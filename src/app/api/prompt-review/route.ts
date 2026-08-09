@@ -69,7 +69,7 @@ function parsePromptReviewResponse(content: string): PromptReviewResult | null {
     // Not pure JSON, try to extract from markdown code block
   }
 
-  // Extract from ```json ... ``` block
+  // Extract from ```json ... ``` block (with closing ```)
   const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) {
     try {
@@ -82,7 +82,36 @@ function parsePromptReviewResponse(content: string): PromptReviewResult | null {
     }
   }
 
-  // Try to find JSON object in text
+  // Extract from ```json ... (without closing ``` — LLM may have been cut off)
+  const openBlockMatch = content.match(/```(?:json)?\s*([\s\S]+)/);
+  if (openBlockMatch) {
+    const blockContent = openBlockMatch[1].trim();
+    // Try to find the JSON object within the block
+    const objInBlock = blockContent.match(/\{[\s\S]*\}/);
+    if (objInBlock) {
+      try {
+        const parsed = JSON.parse(objInBlock[0]);
+        if (parsed.enhancedPrompt && parsed.suggestedRatio) {
+          return parsed;
+        }
+      } catch {
+        // Try to fix common JSON issues: trailing comma, unescaped newlines
+        try {
+          const fixed = objInBlock[0]
+            .replace(/,\s*}/g, '}')
+            .replace(/,\s*]/g, ']');
+          const parsed = JSON.parse(fixed);
+          if (parsed.enhancedPrompt && parsed.suggestedRatio) {
+            return parsed;
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  // Try to find JSON object in raw text
   const objectMatch = content.match(/\{[\s\S]*\}/);
   if (objectMatch) {
     try {
@@ -91,7 +120,18 @@ function parsePromptReviewResponse(content: string): PromptReviewResult | null {
         return parsed;
       }
     } catch {
-      // ignore
+      // Try to fix common JSON issues
+      try {
+        const fixed = objectMatch[0]
+          .replace(/,\s*}/g, '}')
+          .replace(/,\s*]/g, ']');
+        const parsed = JSON.parse(fixed);
+        if (parsed.enhancedPrompt && parsed.suggestedRatio) {
+          return parsed;
+        }
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -203,7 +243,7 @@ export async function POST(request: NextRequest) {
             { role: 'user', content: userMessage },
           ],
           temperature: 0.6,
-          max_tokens: 800,
+          max_tokens: 1200,
           stream: false,
         }),
         signal: AbortSignal.timeout(45000),
@@ -234,7 +274,7 @@ export async function POST(request: NextRequest) {
     const reviewResult = parsePromptReviewResponse(content);
 
     if (!reviewResult) {
-      console.warn('[prompt-review] Failed to parse LLM response:', content.slice(0, 300));
+      console.warn('[prompt-review] Failed to parse LLM response (length=' + content.length + '):', content.slice(0, 500));
       // Refund on parse failure
       if (deductedCredits > 0 && sessionUser) {
         await refundCredits(sessionUser.id, deductedCredits, '提示词确认解析失败退款', undefined);
