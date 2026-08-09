@@ -5628,9 +5628,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                             exec.status === 'completed' ? (isGold ? 'bg-emerald-900/10' : 'bg-green-50') :
                             (isGold ? 'bg-red-900/10' : 'bg-red-50')
                           }`}>
-                            {exec.status === 'running' && <Loader2 size={12} className={`animate-spin ${isGold ? 'text-gold' : 'text-blue-500'}`} />}
-                            {exec.status === 'completed' && <Check size={12} className={isGold ? 'text-emerald-400' : 'text-green-500'} />}
-                            {exec.status === 'failed' && <X size={12} className={isGold ? 'text-red-400' : 'text-red-500'} />}
+                            {exec.status === 'running' && <Loader2 size={16} className={`animate-spin ${isGold ? 'text-gold' : 'text-blue-500'}`} />}
+                            {exec.status === 'completed' && <Check size={14} className={isGold ? 'text-emerald-400' : 'text-green-500'} />}
+                            {exec.status === 'failed' && <X size={14} className={isGold ? 'text-red-400' : 'text-red-500'} />}
                             <span className={`text-xs flex-1 ${
                               exec.status === 'running' ? (isGold ? 'text-gold/80' : 'text-blue-700') :
                               exec.status === 'completed' ? (isGold ? 'text-emerald-300/80' : 'text-green-700') :
@@ -5734,7 +5734,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                           <div className="p-4">
                             <div className="flex items-center justify-between mb-2">
                               <div className="flex items-center gap-2">
-                                <Loader2 size={14} className={`animate-spin ${isGold ? 'text-gold' : 'text-blue-500'}`} />
+                                <Loader2 size={18} className={`animate-spin ${isGold ? 'text-gold' : 'text-blue-500'}`} />
                                 <span className={`text-xs ${isGold ? 'text-gold/80' : 'text-gray-600'}`}>
                                   生成中...
                                 </span>
@@ -5907,8 +5907,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             ))}
             </>
           )}
-          {/* 思考中加载指示器 — 当有工具执行步骤时隐藏，避免与工具步骤重叠 */}
-          {isLoading && !(messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].toolExecutions && messages[messages.length - 1].toolExecutions!.length > 0) && (
+          {/* 思考中加载指示器 — 仅当 AI 已输出文本内容时隐藏；工具执行期间保持显示 */}
+          {isLoading && !(messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].content && messages[messages.length - 1].content.trim().length > 0) && (
             <div className="flex gap-2.5 justify-start">
               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
                 isGold ? 'bg-gold/15 text-gold' : 'bg-gray-100 text-gray-600'
