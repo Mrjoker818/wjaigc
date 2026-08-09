@@ -371,5 +371,11 @@ export async function cancelEffectReverseTask(input: {
 }): Promise<EffectReverseTaskRecord> {
   assertTaskAccess(input);
   cancelTask(input.taskId);
+  const task = getTaskInfo(input.taskId);
+  updateTaskProgress(input.taskId, {
+    status: 'cancelled',
+    progress: task?.progress ?? 0,
+    label: 'Cancelled',
+  });
   return mapRecord(input.taskId);
 }

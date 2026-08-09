@@ -115,4 +115,29 @@ describe('poll-task recovery lease contract', () => {
     // and re-submit the provider task. It must not exist.
     expect(source.slice(claimStart, claimEnd)).not.toContain('lease_owner = $2 OR');
   });
+
+  it('defers retryable submission failures before any terminal refund', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const recoveryStart = source.indexOf('if (requiresSubmissionRecovery)');
+    const catchStart = source.indexOf('} catch (error) {', recoveryStart);
+    const decision = source.indexOf('classifyRecoverySubmissionFailure(', catchStart);
+    const deferBranch = source.indexOf('if (recoveryFailure?.defer)', decision);
+    const deferCall = source.indexOf('deferCloudTaskRecovery(', deferBranch);
+    const terminalSettlement = source.indexOf('terminateCloudTaskAndRefund(', deferCall);
+
+    expect(decision).toBeGreaterThan(catchStart);
+    expect(deferBranch).toBeGreaterThan(decision);
+    expect(deferCall).toBeGreaterThan(deferBranch);
+    expect(terminalSettlement).toBeGreaterThan(deferCall);
+  });
+
+  it('honours persisted recovery backoff before claiming another lease', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const recoveryStart = source.indexOf('const recovery = buildRecoveredTaskContext');
+    const backoff = source.indexOf('getTaskRecoveryBackoff(persistedTask)', recoveryStart);
+    const leaseClaim = source.indexOf('claimCloudTaskLease(', recoveryStart);
+
+    expect(backoff).toBeGreaterThan(recoveryStart);
+    expect(leaseClaim).toBeGreaterThan(backoff);
+  });
 });

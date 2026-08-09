@@ -71,7 +71,7 @@ def get_session(model_name):
             raise FileNotFoundError(f"ONNX 模型文件不存在: {model_path}")
     print(f"[upscale_onnx] Loading model: {model_path}", file=sys.stderr)
     sess_options = ort.SessionOptions()
-    sess_options.intra_op_num_threads = int(os.environ.get("UPSAMPLE_NUM_THREADS", "4"))
+    sess_options.intra_op_num_threads = max(1, min(4, int(os.environ.get("UPSAMPLE_NUM_THREADS", "4"))))
     sess_options.inter_op_num_threads = 1
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     session = ort.InferenceSession(model_path, sess_options=sess_options, providers=['CPUExecutionProvider'])

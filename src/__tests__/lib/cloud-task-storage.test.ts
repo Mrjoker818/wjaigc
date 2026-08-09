@@ -8,6 +8,7 @@ import {
   chargeCloudTaskCredits,
   claimCloudTaskLease,
   createCloudTask,
+  deferCloudTaskRecovery,
   getCloudTaskById,
   getCloudTaskForUser,
   getCloudTaskForUserByIdempotencyKey,
@@ -594,6 +595,30 @@ describe('cloud-task-storage', () => {
     const update = execSql.mock.calls.find(([sql]) => String(sql).includes("lease_owner = ''"));
     expect(update?.[0]).toContain('lease_owner = $2');
     expect(update?.[1]).toEqual(['task-lease', 'worker-a', expect.any(Number)]);
+  });
+
+  it('defers a retryable recovery without releasing it into a hot loop', async () => {
+    execSql.mockResolvedValueOnce({ rows: [{ id: 'task-deferred' }], rowCount: 1 });
+
+    await expect(deferCloudTaskRecovery(
+      'task-deferred',
+      'worker-a',
+      30_000,
+      '上游限速，等待自动重试',
+      1_000,
+    )).resolves.toBe(true);
+
+    const update = execSql.mock.calls.find(([sql]) => String(sql).includes("lease_owner = ''"));
+    expect(update?.[0]).toContain('lease_expires_at = $3');
+    expect(update?.[0]).toContain('lease_owner = $2');
+    expect(update?.[0]).toContain("status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')");
+    expect(update?.[1]).toEqual([
+      'task-deferred',
+      'worker-a',
+      31_000,
+      1_000,
+      '上游限速，等待自动重试',
+    ]);
   });
 
   it('renews a live task lease only for its current owner', async () => {

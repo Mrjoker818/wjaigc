@@ -757,7 +757,7 @@ async function upscaleViaOnnx(
 
     // 计算tile大小：输入已缩放到 ≤1024px，固定 512 tile 使分块数从 64(128px) 降至 4(512px)，
     // 推理总像素不变但每块固定开销（session.run/numpy/文件IO）减少约 16 倍，CPU 放大显著提速
-    let tileSize = 512;
+    const tileSize = 512;
 
     console.log(`[upscale-pro] ONNX upscale: input=${maxDim}px, model=${modelName}, tile=${tileSize}, target=${scale}x (model=4x then resize)`);
 

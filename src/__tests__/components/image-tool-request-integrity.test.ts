@@ -43,6 +43,7 @@ describe('image tool request integrity', () => {
   });
 
   it('normalizes the legacy extend action to the implemented outpaint handler', () => {
-    expect(imageEditSource).toContain("const action = rawAction === 'extend' ? 'outpaint' : rawAction;");
+    expect(imageEditSource).toContain("rawAction === 'extend' ? 'outpaint'");
+    expect(imageEditSource).toContain("(rawAction === 'erase' || rawAction === 'mask') ? 'inpaint'");
   });
 });

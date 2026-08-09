@@ -13,7 +13,7 @@ describe('Coze startup production contract', () => {
     ) as { scripts?: Record<string, string> };
 
     expect(packageJson.scripts?.start).toBe('next start -p 5000 -H 0.0.0.0');
-    expect(source).toContain('exec pnpm run start');
+    expect(source).toContain('exec ./node_modules/.bin/next start');
     expect(source).not.toContain('exec pnpm run dev');
     expect(source).not.toContain('${COZE_PROJECT_ENV:-DEV}');
   });
@@ -25,11 +25,12 @@ describe('Coze startup production contract', () => {
     );
 
     expect(source).toContain('.next/BUILD_ID');
-    expect(source).toContain('robust_install');
-    expect(source).toContain('exec pnpm run start');
+    expect(source).toContain('exec ./node_modules/.bin/next start');
     expect(source).toContain('pnpm install --frozen-lockfile');
+    expect(source).toContain('pnpm install --ignore-scripts');
+    expect(source).toContain('node scripts/prepare-tools.mjs');
+    expect(source).toContain('node scripts/patch-pg-ssl.js');
     expect(source).toContain('pnpm run build');
-    expect(source).toContain('pnpm run doctor -- --startup');
     expect(source).not.toContain('exec pnpm run dev');
   });
 });

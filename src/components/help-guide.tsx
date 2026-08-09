@@ -677,7 +677,7 @@ function ChangelogSection() {
       <SubTitle>v4.1.0</SubTitle>
       <FeatureItem>修复：生图数量 &gt;1 时前端只能收到 1 张图（多图完整返回）</FeatureItem>
       <FeatureItem>修复：祛除背景操作错误图片（右键选择后目标被切换）</FeatureItem>
-      <FeatureItem>修复：快速创作面板高级模式卡在"正在编辑专业方案"（前端超时 + 后端流级看门狗）</FeatureItem>
+      <FeatureItem>修复：快速创作面板高级模式卡在&quot;正在编辑专业方案&quot;（前端超时 + 后端流级看门狗）</FeatureItem>
       <FeatureItem>修复：人物精修大师无法正常使用（内部认证替代 cookie，视觉检测真实生效）</FeatureItem>
       <FeatureItem>修复：元素拆解完全改变原图（提示词忠于原图元素 + 降低 strength）</FeatureItem>
       <FeatureItem>放大功能升级：AI 放大新增 302 基础放大 + ESRGAN 高清增强，共 4 个放大模型可选</FeatureItem>

@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
 }));
 
+vi.mock('server-only', () => ({}));
+
 vi.mock('@/lib/server-api-config', () => ({
   findProviderForModel: mocks.findProviderForModel,
 }));

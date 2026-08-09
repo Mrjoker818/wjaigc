@@ -62,9 +62,9 @@ describe('vector design API contract', () => {
   });
 
   it('filters vector models through the normal user image-model allowlist', () => {
-    expect(modelsSource).toContain("type === 'vectorize'");
+    expect(modelsSource).toContain('catalogResult.authorizedModelKeys.has(key)');
     expect(modelsSource).toContain(
-      'isModelAssignedToUser(user.imageModels, model.providerId, model.id)',
+      'matchesRequestedModelType(catalogResult.effectiveModelTypes.get(key), requestedType)',
     );
   });
 });

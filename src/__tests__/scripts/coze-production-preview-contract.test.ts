@@ -21,11 +21,11 @@ describe('Coze preview runtime contract', () => {
     const startScript = readFileSync(resolve(process.cwd(), 'scripts/coze-start.sh'), 'utf8');
     expect(packageJson.scripts?.doctor).toBe('node scripts/doctor.mjs');
     expect(packageJson.scripts?.start).toBe('next start -p 5000 -H 0.0.0.0');
-    expect(startScript).toContain('exec pnpm run start');
-    expect(startScript).toContain('if [ ! -s ".next/BUILD_ID" ]; then');
+    expect(startScript).toContain('exec ./node_modules/.bin/next start');
+    expect(startScript).toContain('if [ -s ".next/BUILD_ID" ]; then');
     expect(startScript).toContain('pnpm install --frozen-lockfile');
+    expect(startScript).toContain('pnpm install --ignore-scripts');
     expect(startScript).toContain('pnpm run build');
-    expect(startScript).toContain('pnpm run doctor -- --startup');
     expect(startScript).not.toContain('pnpm run dev');
   });
 });

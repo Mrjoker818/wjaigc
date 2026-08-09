@@ -1,12 +1,14 @@
 {
   "stage": "WJ-STABLE-001/S1",
-  "baseCommit": "9ff09fb08f0e97134f0112617794cde9cde3f545",
+  "baseCommit": "275202a9e523955fe1b8ae6f36866ff192fd5334",
   "reviewRule": "Only the exact source files migrated by Tasks 1-7 are allowed. Directory-wide src drift is forbidden.",
   "infrastructurePaths": [
     ".superpowers/sdd/task-3-report.md",
     ".superpowers/sdd/task-4-report.md",
+    "pnpm-lock.yaml",
     "scripts/doctor-status.mjs",
-    "scripts/doctor.mjs"
+    "scripts/doctor.mjs",
+    "scripts/upscale_onnx.py"
   ],
   "paths": [
     "src/app/api/admin/cloud-tasks/route.ts",
@@ -16,6 +18,7 @@
     "src/app/api/edit/route.ts",
     "src/app/api/generate/route.ts",
     "src/app/api/image-edit/route.ts",
+    "src/app/api/image/upscale-pro/route.ts",
     "src/app/api/image-to-3d/route.ts",
     "src/app/api/layered-decompose/route.ts",
     "src/app/api/models/route.ts",
@@ -29,8 +32,11 @@
     "src/components/chat-panel.tsx",
     "src/components/dashboard/dashboard-view.tsx",
     "src/components/infinite-canvas.tsx",
+    "src/components/help-guide.tsx",
+    "src/components/layer-panel.tsx",
     "src/lib/302-upscale-models.ts",
     "src/lib/agent-task-persistence.ts",
+    "src/lib/api-compatibility.ts",
     "src/lib/canvas-task-placeholders.ts",
     "src/lib/chat-pending-generation.ts",
     "src/lib/chat-session-persistence.ts",
@@ -39,6 +45,7 @@
     "src/lib/credits.ts",
     "src/lib/db-client.ts",
     "src/lib/db-storage.ts",
+    "src/lib/effect-reverse-engineering/service.ts",
     "src/lib/layer-decomposition/service.ts",
     "src/lib/legacy-task-recovery.ts",
     "src/lib/model-capabilities.ts",
@@ -49,11 +56,13 @@
     "src/lib/task-core/generation-batch.ts",
     "src/lib/task-core/idempotency.ts",
     "src/lib/task-core/model-catalog.ts",
+    "src/lib/task-core/recovery-submission.ts",
     "src/lib/task-core/task-abort.ts",
     "src/lib/task-core/task-error.ts",
     "src/lib/task-core/task-service.ts",
     "src/lib/task-core/task-state.ts",
     "src/lib/task-registry.ts",
+    "src/lib/video-api.ts",
     "src/lib/workflow-engine.ts"
   ]
 }

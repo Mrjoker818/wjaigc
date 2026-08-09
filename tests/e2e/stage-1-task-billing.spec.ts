@@ -67,22 +67,26 @@ async function loginAndOpenCanvas(page: Page): Promise<void> {
   await page.context().clearCookies();
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => localStorage.clear());
+  const sessionReady = page.waitForResponse((response) => (
+    response.url().includes('/api/session') && response.request().method() === 'GET'
+  ));
   await page.reload({ waitUntil: 'domcontentloaded' });
+  expect((await sessionReady).ok(), 'The entry page session check failed.').toBeTruthy();
 
   const entry = page.getByRole('button', { name: /无限画布/ }).first();
-  if (await entry.isVisible({ timeout: 5_000 }).catch(() => false)) await entry.click();
+  await expect(entry).toBeVisible({ timeout: 10_000 });
+  await entry.click();
 
   const usernameInput = page.getByPlaceholder('请输入用户名');
-  if (await usernameInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await usernameInput.fill(username!);
-    await page.getByPlaceholder('请输入密码').fill(password!);
-    const loginResponse = page.waitForResponse((response) => (
-      response.url().includes('/api/auth/login')
-      && response.request().method() === 'POST'
-    ));
-    await page.getByRole('button', { name: '登录', exact: true }).click();
-    expect((await loginResponse).ok(), 'The real account could not log in.').toBeTruthy();
-  }
+  await expect(usernameInput).toBeVisible({ timeout: 10_000 });
+  await usernameInput.fill(username!);
+  await page.getByPlaceholder('请输入密码').fill(password!);
+  const loginResponse = page.waitForResponse((response) => (
+    response.url().includes('/api/auth/login')
+    && response.request().method() === 'POST'
+  ));
+  await page.getByRole('button', { name: '登录', exact: true }).click();
+  expect((await loginResponse).ok(), 'The real account could not log in.').toBeTruthy();
 
   await expect(page.getByRole('heading', { name: '我的项目', exact: true })).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: '新建项目', exact: true }).click();

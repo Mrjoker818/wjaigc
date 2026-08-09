@@ -1301,11 +1301,11 @@ function parsePearApiVideoPoll(data: unknown): VideoTaskPollResult {
   if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
     // PearAPI 文档：completed 时 url 在顶层
     let videoUrl = getApiString(item, 'url') || getApiString(data, 'url');
+    const result = getApiValue(item, 'result') || getApiValue(item, 'results') || getApiValue(item, 'output')
+      || getApiValue(data, 'output') || getApiValue(data, 'result');
 
     // Fallback: 尝试嵌套格式（兼容旧版/其他代理）
     if (!videoUrl) {
-      const result = getApiValue(item, 'result') || getApiValue(item, 'results') || getApiValue(item, 'output')
-        || getApiValue(data, 'output') || getApiValue(data, 'result');
       const videos = getApiValue(result, 'videos') || getApiValue(result, 'video_results');
       if (Array.isArray(videos) && videos.length > 0) {
         const video = videos[0];
@@ -1329,7 +1329,10 @@ function parsePearApiVideoPoll(data: unknown): VideoTaskPollResult {
       status: 'succeeded',
       progress: 100,
       videoUrl,
-      duration: getApiNumber(metadata, 'duration') || getApiNumber(item, 'duration'),
+      duration: getApiNumber(metadata, 'duration')
+        ?? getApiNumber(result, 'duration')
+        ?? getApiNumber(item, 'duration')
+        ?? getApiNumber(data, 'duration'),
       thumbnailUrl: getApiString(item, 'thumbnail_url') || getApiString(data, 'thumbnail_url'),
     };
   }

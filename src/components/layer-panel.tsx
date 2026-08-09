@@ -227,6 +227,9 @@ export function LayerPanel({
     onToggleLock?.(imageId);
   }, [onToggleLock]);
 
+  // 重命名触发状态
+  const [forceRenameId, setForceRenameId] = useState<string | null>(null);
+
   // 重命名
   const handleRename = useCallback((imageId: string, name: string) => {
     onRename?.(imageId, name);
@@ -268,8 +271,6 @@ export function LayerPanel({
     setMenuState(null);
   }, []);
 
-  // 重命名触发状态
-  const [forceRenameId, setForceRenameId] = useState<string | null>(null);
   const handleRenameState = useCallback((id: string) => {
     setForceRenameId(id);
   }, []);

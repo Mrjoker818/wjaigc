@@ -1206,6 +1206,34 @@ export async function releaseCloudTaskLease(
   return (result.rowCount ?? result.rows.length) > 0;
 }
 
+/**
+ * Releases the current worker while keeping a short database-backed retry
+ * barrier. This prevents every browser poll from immediately re-submitting a
+ * provider request after a transient 429/5xx/transport failure.
+ */
+export async function deferCloudTaskRecovery(
+  taskId: string,
+  owner: string,
+  delayMs: number,
+  label: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  await ensureCloudTaskTables();
+  const retryAt = now + Math.max(1_000, delayMs);
+  const result = await execSql(`
+    UPDATE cloud_tasks
+    SET lease_owner = '',
+        lease_expires_at = $3,
+        updated_at = $4,
+        label = $5
+    WHERE id = $1
+      AND lease_owner = $2
+      AND status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')
+    RETURNING id
+  `, [taskId, owner, retryAt, now, label]);
+  return (result.rowCount ?? result.rows.length) > 0;
+}
+
 export async function getCloudTaskForUser(taskId: string, userId: string): Promise<CloudTask | null> {
   await ensureCloudTaskTables();
   const result = await execSql('SELECT * FROM cloud_tasks WHERE id = $1 AND user_id = $2', [taskId, userId]);

@@ -35,6 +35,7 @@ import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerm
 import {
   claimCloudTaskLease,
   completeCloudTask,
+  deferCloudTaskRecovery,
   getCloudTaskForUser,
   refundCloudTaskCredits,
   terminateCloudTaskAndRefund,
@@ -45,9 +46,9 @@ import { resolveVideoCompatProfile } from '@/lib/video-api';
 import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';
 import { getLayerTaskStatus } from '@/lib/layer-decomposition/service';
 import { projectCanonicalGenerationSlot } from '@/lib/task-core/generation-batch';
-import { createTaskAbortScope } from '@/lib/task-core/task-abort';
+import { createTaskAbortScope, getTaskRecoveryBackoff } from '@/lib/task-core/task-abort';
+import { classifyRecoverySubmissionFailure } from '@/lib/task-core/recovery-submission';
 import {
-  inferTaskErrorSource,
   normalizeTaskError,
 } from '@/lib/task-core/task-error';
 import { getRequestId } from '@/lib/request-id';
@@ -943,6 +944,17 @@ export async function POST(request: NextRequest) {
             retryable: true,
           }, { status: 200 });
         }
+        const recoveryBackoff = getTaskRecoveryBackoff(persistedTask);
+        if (!recoveryBackoff.recoveryAllowed) {
+          return NextResponse.json(withGenerationSlotMetadata({
+            success: true,
+            status: persistedTask.status,
+            progress: Math.max(persistedTask.progress, 1),
+            label: persistedTask.label || '任务正在等待恢复',
+            recoveryPending: true,
+            retryAfterMs: recoveryBackoff.retryAfterMs,
+          }, persistedTask.result, taskId), { status: 200 });
+        }
         const lease = await claimCloudTaskLease(
           recovery.taskId,
           TASK_RECOVERY_WORKER_ID,
@@ -1007,6 +1019,8 @@ export async function POST(request: NextRequest) {
               timeoutMs: 600_000,
               requestId,
             });
+            let recoveryResponseStatus: number | undefined;
+            let recoveryResponseData: Record<string, unknown> | null = null;
             try {
             if (isTaskCancelled(recovered.taskId)) return;
             const resumed = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
@@ -1023,10 +1037,16 @@ export async function POST(request: NextRequest) {
               }),
               signal: recoveryAbort.signal,
             });
-            const resumedData = await resumed.json().catch(() => null) as Record<string, unknown> | null;
-            if (!resumed.ok || !resumedData?.success) {
-              throw new Error(typeof resumedData?.error === 'string' ? resumedData.error : `任务恢复提交失败 (${resumed.status})`);
+            recoveryResponseStatus = resumed.status;
+            recoveryResponseData = await resumed.json().catch(() => null) as Record<string, unknown> | null;
+            if (!resumed.ok || !recoveryResponseData?.success) {
+              throw new Error(
+                typeof recoveryResponseData?.error === 'string'
+                  ? recoveryResponseData.error
+                  : `任务恢复提交失败 (${resumed.status})`,
+              );
             }
+            const resumedData = recoveryResponseData;
 
             const directImageUrls = [
               ...(Array.isArray(resumedData.imageUrls) ? resumedData.imageUrls : []),
@@ -1103,14 +1123,44 @@ export async function POST(request: NextRequest) {
             }
             updateTaskProgress(recovered.taskId, { status: 'processing', progress: 10, result: recoveredResult });
           } catch (error) {
-            const taskError = normalizeTaskError(
-              recoveryAbort.signal.aborted
-                ? recoveryAbort.signal.reason
-                : error,
+            const recoveryFailure = recoveryAbort.signal.aborted
+              ? null
+              : classifyRecoverySubmissionFailure({
+                  status: recoveryResponseStatus,
+                  responseData: recoveryResponseData,
+                  error,
+                  attemptCount: lease.attemptCount,
+                  requestId,
+                });
+            if (recoveryFailure?.defer) {
+              const deferred = await deferCloudTaskRecovery(
+                recovered.taskId,
+                TASK_RECOVERY_WORKER_ID,
+                recoveryFailure.retryDelayMs,
+                recoveryFailure.taskError.message,
+              );
+              if (deferred) {
+                updateTaskProgress(recovered.taskId, {
+                  status: 'processing',
+                  progress: Math.max(recovery.progress, 1),
+                  label: recoveryFailure.taskError.message,
+                });
+                console.warn('[poll-task] Recovery submission deferred', {
+                  requestId: recoveryFailure.taskError.requestId,
+                  taskId: recovered.taskId,
+                  code: recoveryFailure.taskError.code,
+                  attemptCount: lease.attemptCount,
+                  retryDelayMs: recoveryFailure.retryDelayMs,
+                });
+              }
+              return;
+            }
+            const taskError = recoveryFailure?.taskError || normalizeTaskError(
+              recoveryAbort.signal.reason,
               {
                 code: 'TASK_RECOVERY_FAILED',
                 message: '任务恢复失败，请稍后重试',
-                source: inferTaskErrorSource(error),
+                source: 'wujie',
                 retryable: true,
                 requestId,
               },
