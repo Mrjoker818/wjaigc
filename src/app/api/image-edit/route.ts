@@ -1174,8 +1174,8 @@ async function submit302aiUpscaleTask(
   console.debug(`[image-edit] 302.AI upscale response keys:`, Object.keys(result));
 
   // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
-  // Fallback: some 302.AI endpoints return { output: "url" } instead
-  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+  // Fallback: some 302.AI endpoints return { output: "url" } or { images: [{ url }] } instead
+  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined) || (Array.isArray(result.images) ? result.images[0]?.url : undefined);
   if (directUrl) {
     return {
       directUrl,
@@ -1231,8 +1231,8 @@ async function submit302aiUpscaleV6Task(
   console.debug(`[image-edit] 302.AI upscale-v6 response keys:`, Object.keys(result));
 
   // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
-  // Fallback: some 302.AI endpoints return { output: "url" } instead
-  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+  // Fallback: some 302.AI endpoints return { output: "url" } or { images: [{ url }] } instead
+  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined) || (Array.isArray(result.images) ? result.images[0]?.url : undefined);
   if (directUrl) {
     return {
       directUrl,
@@ -1285,7 +1285,7 @@ async function submit302aiImageUpscaleTask(
   console.debug(`[image-edit] 302.AI image-upscale response keys:`, Object.keys(result));
 
   // 响应格式: { image: { url, ... } } or { output: "url" }
-  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined) || (Array.isArray(result.images) ? result.images[0]?.url : undefined);
   if (directUrl) {
     return {
       directUrl,
@@ -1338,7 +1338,7 @@ async function submit302aiEsrganTask(
   console.debug(`[image-edit] 302.AI esrgan response keys:`, Object.keys(result));
 
   // 响应格式: { image: { url, ... } } or { output: "url" }
-  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined) || (Array.isArray(result.images) ? result.images[0]?.url : undefined);
   if (directUrl) {
     return {
       directUrl,
