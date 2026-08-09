@@ -611,3 +611,11 @@ The local isolated-database blocker is now closed. A loopback-only PostgreSQL 18
 BUG-050 is fixed locally: charged durable image slots now receive a server-owned kickoff through the existing lease-protected recovery route, without waiting for a browser poll. Focused concurrency/billing tests, TypeScript, ESLint error gating, the full Vitest suite, and the production build pass.
 
 **Release decision remains Not passed.** The exact cloud commit must still prove that `n=1/2/3/4` starts without browser polling, returns each image progressively, records one charge per slot, creates no duplicate provider task under concurrent browser/server wakeup, and refunds each cancelled legacy zombie task at most once.
+
+### 2026-08-10 cloud probe correction
+
+The first deployed server-kickoff candidate (`9392b50`) did not pass its no-browser-poll probe. Its signed internal request reached `/api/poll-task`, but that route only recognized a browser session cookie and therefore looked for the paid task as `anonymous`. The probe task was cancelled and refunded once; the three historical zombie tasks were also cancelled and refunded exactly once each.
+
+Unified request authentication is now covered locally by a RED/GREEN regression test, the focused suite passes 47 tests, the full Vitest suite exits 0 with the PostgreSQL environment skips declared, and the production build passes.
+
+**Release decision remains Not passed.** The internal-auth follow-up is not yet deployed. Server-owned first submission, concurrent wakeup idempotency, progressive paid `n=1/2/3/4`, and exact deployed ledger evidence remain release blockers.

@@ -453,7 +453,7 @@
 
 | Item | Status | Required proof |
 |---|---|---|
-| Server-owned first submission | PENDING DEPLOYMENT | Submit a paid task, stop browser polling immediately, and verify the application task receives a remote provider task ID and reaches a terminal state. |
+| Server-owned first submission | FAILED ON `9392b50`; FIX PENDING REDEPLOYMENT | The first cloud probe exposed missing signed-internal authentication in `/api/poll-task`. Deploy the follow-up, submit a paid task, stop browser polling immediately, and verify a real provider task ID plus terminal state. |
 | Concurrent server/browser wakeup | PENDING DEPLOYMENT | Capture the database lease and provider ledger proving one provider task and one charge per slot. |
-| Legacy zombie cleanup | PENDING DEPLOYMENT | Cancel the three known synthetic tasks, verify terminal `cancelled`, one refund each, and no second refund on repeated cancellation. |
+| Legacy zombie cleanup | VERIFIED IN CLOUD | Three synthetic tasks reached `cancelled/refunded`, each returned 60 credits, and repeated cancellation produced no second refund. |
 | Progressive `n=1/2/3/4` | PENDING DEPLOYMENT | Each slot appears as soon as its provider result completes and does not wait for the slowest sibling. |

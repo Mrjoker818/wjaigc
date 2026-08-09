@@ -4,8 +4,7 @@ export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（
 
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
-import { getSessionUser } from '@/lib/server-auth';
-import { getInternalRequestHeaders } from '@/lib/api-auth';
+import { getInternalRequestHeaders, getRequestUser } from '@/lib/api-auth';
 import { resolveCompatProfile, buildPollUrl, extractImageUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
@@ -255,7 +254,7 @@ export async function POST(request: NextRequest) {
     // ★ engine 参数：前端传递的任务引擎类型（用于 AI RemoveBG 后处理等场景）
     // 优先使用请求参数，因为 Next.js dev 模式下 task-registry 可能不共享
     const requestEngineStr = typeof requestEngine === 'string' ? requestEngine : '';
-    const sessionUser = await getSessionUser(request);
+    const sessionUser = (await getRequestUser(request))?.user || null;
     // ★ 安全：已登录用户必须使用 session 中的 userId，忽略客户端传入值（防止伪造）
     const userId = sessionUser?.id || "anonymous";
 

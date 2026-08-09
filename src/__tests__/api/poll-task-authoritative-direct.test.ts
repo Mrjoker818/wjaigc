@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
-  getSessionUser: vi.fn(),
   getTaskInfo: vi.fn(),
   isTaskCancelled: vi.fn(),
   getCloudTaskForUser: vi.fn(),
@@ -11,10 +10,7 @@ const mocks = vi.hoisted(() => ({
   updateTaskProgress: vi.fn(),
   findProviderForModel: vi.fn(),
   findProviderById: vi.fn(),
-}));
-
-vi.mock('@/lib/server-auth', () => ({
-  getSessionUser: mocks.getSessionUser,
+  getRequestUser: vi.fn(),
 }));
 
 vi.mock('@/lib/task-registry', () => ({
@@ -56,7 +52,10 @@ vi.mock('@/lib/model-capabilities', () => ({
 }));
 
 vi.mock('@/lib/server-user-storage', () => ({ appendUserJsonl: vi.fn() }));
-vi.mock('@/lib/api-auth', () => ({ getInternalRequestHeaders: vi.fn() }));
+vi.mock('@/lib/api-auth', () => ({
+  getInternalRequestHeaders: vi.fn(),
+  getRequestUser: mocks.getRequestUser,
+}));
 vi.mock('@/lib/remove-bg-postprocess', () => ({ postProcessAIRemoveBG: vi.fn() }));
 vi.mock('@/lib/fetch-image-buffer', () => ({ fetchImageBuffer: vi.fn() }));
 vi.mock('@/lib/image-tools/masked-edit-composite', () => ({ compositeMaskedEdit: vi.fn() }));
@@ -77,7 +76,10 @@ import { POST } from '@/app/api/poll-task/route';
 describe('poll-task authoritative direct recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getRequestUser.mockResolvedValue({
+      user: { id: 'user-a', role: 'user' },
+      source: 'cookie',
+    });
     mocks.getTaskInfo.mockReturnValue(undefined);
     mocks.isTaskCancelled.mockReturnValue(false);
   });
@@ -123,5 +125,42 @@ describe('poll-task authoritative direct recovery', () => {
     expect(mocks.claimCloudTaskLease).not.toHaveBeenCalled();
     expect(mocks.findProviderForModel).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('accepts a signed internal user when no browser cookie exists', async () => {
+    mocks.getRequestUser.mockResolvedValue({
+      user: { id: 'user-a', role: 'admin' },
+      source: 'internal',
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'internal-task',
+      userId: 'user-a',
+      type: 'generate-async',
+      status: 'completed',
+      progress: 100,
+      result: {
+        imageUrl: '/internal.png',
+        imageUrls: ['/internal.png'],
+      },
+      createdAt: 1,
+      updatedAt: 2,
+      revision: 2,
+    });
+    const request = new Request('http://localhost/api/poll-task', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ taskId: 'internal-task' }),
+    });
+
+    const response = await POST(request as NextRequest);
+    const payload = await response.json();
+
+    expect(payload).toMatchObject({
+      success: true,
+      status: 'completed',
+      imageUrl: '/internal.png',
+    });
+    expect(mocks.getRequestUser).toHaveBeenCalledWith(request);
+    expect(mocks.getCloudTaskForUser).toHaveBeenCalledWith('internal-task', 'user-a');
   });
 });

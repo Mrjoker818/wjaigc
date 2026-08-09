@@ -704,3 +704,18 @@ This closes the local PostgreSQL evidence gap. It does not replace exact-deploym
 | Full Vitest | PASS WITH EXPLICIT SKIPS | Full suite exited 0. PostgreSQL suites requiring `POSTGRES_TEST_DATABASE_URL` remained explicitly skipped in this workstation run. |
 
 The browser remains a progress observer and compatibility fallback. It is no longer the required trigger for the first provider submission.
+
+## 2026-08-10 Cloud probe and internal-auth follow-up
+
+| Check | Result | Evidence |
+|---|---|---|
+| No-browser-poll probe on `9392b50` | FAIL | Paid task `async-1786318164491-0-etn2wk` remained `processing` at progress 0; `updatedAt` did not move and `remoteTaskId` never became a provider task ID. |
+| Probe cleanup | PASS | The failed probe was cancelled and its 60 credits were refunded once, restoring the pre-probe balance. |
+| Legacy zombie cleanup | PASS | The three known synthetic tasks reached `cancelled/refunded`; balances changed `220 -> 280 -> 340 -> 400`, and a repeated cancel produced no duplicate refund. |
+| Root-cause regression | PASS LOCALLY | RED/GREEN test proves `/api/poll-task` accepts a signed internal user without a browser cookie and looks up the durable task under that user. |
+| Focused authentication/lease suite | PASS | 6 files / 47 tests. |
+| Full Vitest | PASS WITH EXPLICIT SKIPS | Exit 0; authoritative suites requiring `POSTGRES_TEST_DATABASE_URL` were explicitly skipped on this workstation. |
+| TypeScript / ESLint | PASS WITH HISTORICAL WARNINGS | TypeScript passed; ESLint reported 0 errors and 960 historical warnings. |
+| Production build | PASS | Next.js 16.2.10 production build generated 112 static pages and completed successfully. |
+
+This follow-up is not a cloud pass. The new exact commit must be deployed before repeating the no-browser-poll probe and the progressive paid `n=1/2/3/4` run.
