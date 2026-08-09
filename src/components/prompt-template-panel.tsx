@@ -8,7 +8,8 @@ import {
   addPromptTemplate, 
   updatePromptTemplate, 
   deletePromptTemplate,
-  getTemplateCategories
+  getTemplateCategories,
+  initPromptTemplates
 } from '@/lib/prompt-templates';
 
 interface PromptTemplatePanelProps {
@@ -51,6 +52,11 @@ export default function PromptTemplatePanel({
     setTemplates(all);
     setCategories(getTemplateCategories());
   }, []);
+
+  // 首次挂载时初始化远程模板数据
+  useEffect(() => {
+    initPromptTemplates().then(loadTemplates);
+  }, [loadTemplates]);
 
   useEffect(() => {
     if (isOpen) {
