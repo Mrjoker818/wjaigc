@@ -88,7 +88,7 @@ export default function PromptTemplatePanel({
     setFormContent(template.content);
     setFormCategory(template.category);
     setFormTags(template.tags.join(', '));
-    setFormIsGlobal(template.isGlobal);
+    setFormIsGlobal(template.isGlobal ?? false);
     setFormThumbnail(template.thumbnail || '');
     setIsEditing(true);
     setShowAddForm(true);

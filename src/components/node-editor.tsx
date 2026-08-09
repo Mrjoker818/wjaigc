@@ -19,7 +19,7 @@ import {
   getResolutionTierOptions,
 } from '@/lib/canvas-generation-group';
 import { modelSupports } from '@/lib/model-capabilities';
-import { getPromptTemplates, searchTemplates, addPromptTemplate } from '@/lib/prompt-templates';
+import { getPromptTemplates, searchTemplates, addPromptTemplate, initPromptTemplates } from '@/lib/prompt-templates';
 import {
   getVisibleWorkflowNodeIds,
   resolveWorkflowCullingBounds,
@@ -852,6 +852,8 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
     };
     return () => { bc.close(); bcRef.current = null; };
   }, []);
+  // 初始化提示词模板（从服务端加载默认模板）
+  useEffect(() => { initPromptTemplates(); }, []);
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   // 兼容：获取单个选中节点ID
   const selectedNodeId = useMemo(() => selectedNodeIds.size > 0 ? [...selectedNodeIds][0] : null, [selectedNodeIds]);
@@ -962,7 +964,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
         text: t.content,
         tags: t.tags,
         category: t.category,
-        createdAt: t.createdAt,
+        createdAt: t.createdAt ?? Date.now(),
       }));
       const fromOld = oldSnippets.filter(s => !fromTemplates.some(t => t.id === s.id));
       return [...fromTemplates, ...fromOld];
