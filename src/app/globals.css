@@ -493,6 +493,11 @@ input[type="range"]::-moz-range-thumb {
     animation: shimmer 1.5s ease-in-out infinite;
   }
 
+  /* 处理帧进度条光泽动画（infinite-canvas processing frame） */
+  .progress-shimmer {
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
   /* 脉冲呼吸效果 */
   .pulse-glow {
     animation: pulseGlow 2s ease-in-out infinite;

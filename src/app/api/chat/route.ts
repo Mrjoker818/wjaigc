@@ -628,11 +628,165 @@ async function handleAgentStream(
                 signal: AbortSignal.timeout(agentModeEnabled ? 300000 : 120000), // Agent模式5分钟超时
               });
               if (fallbackResponse.ok && fallbackResponse.body) {
-                const reader = fallbackResponse.body.getReader();
+                const fbReader = fallbackResponse.body.getReader();
+                const fbDecoder = new TextDecoder();
+                let fbBuffer = '';
+                let fbContent = '';
                 while (true) {
-                  const { done, value } = await reader.read();
+                  const { done, value } = await fbReader.read();
                   if (done) break;
+                  // Forward raw bytes to client
                   controller.enqueue(value);
+                  // Accumulate content for fallback tool detection
+                  fbBuffer += fbDecoder.decode(value, { stream: true });
+                  const fbLines = fbBuffer.split('\n');
+                  fbBuffer = fbLines.pop() || '';
+                  for (const fbLine of fbLines) {
+                    const fbTrimmed = fbLine.trim();
+                    if (!fbTrimmed || !fbTrimmed.startsWith('data: ')) continue;
+                    const fbData = fbTrimmed.slice(6);
+                    if (fbData === '[DONE]') continue;
+                    try {
+                      const fbParsed = JSON.parse(fbData);
+                      const fbDelta = fbParsed.choices?.[0]?.delta;
+                      if (fbDelta?.content) {
+                        fbContent += fbDelta.content;
+                      }
+                    } catch { /* skip */ }
+                  }
+                }
+
+                // ====== Fallback: 模型不支持函数调用时，自动提取设计思路并手动触发生图 ======
+                if (iteration === 1 && fbContent.trim()) {
+                  const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user');
+                  const userText = typeof lastUserMsg?.content === 'string'
+                    ? lastUserMsg.content
+                    : Array.isArray(lastUserMsg?.content)
+                      ? (lastUserMsg.content as Array<{ type?: string; text?: string }>)
+                          .filter(p => p.type === 'text').map(p => p.text || '').join(' ')
+                      : '';
+                  const imageIntentRegex = /生成|画|出图|设计|创作|画一张|帮我画|给我画|做一张|制作|海报|插画|头像|壁纸|logo|商标|吉祥物|角色设计|场景|封面|banner/i;
+                  const videoIntentRegex = /视频|动画|动态|运镜|短片|宣传片/i;
+                  const wantsImage = imageIntentRegex.test(userText);
+                  const wantsVideo = videoIntentRegex.test(userText) && !wantsImage;
+
+                  if (wantsImage && imageModel) {
+                    const cleanPrompt = fbContent
+                      .replace(/^(好的|好的！|好的,|没问题|没问题！|当然|当然！|我来帮你|让我来|我来为你|我来为您)[^。\n]*[。.\n]*/i, '')
+                      .trim();
+                    const fallbackPrompt = cleanPrompt || fbContent;
+                    const fallbackToolCallId = `fallback_img_${Date.now()}`;
+                    const fallbackArgs: Record<string, unknown> = {
+                      prompt: fallbackPrompt,
+                      aspect_ratio: '1:1',
+                      quality: '1K',
+                    };
+
+                    console.log(`[chat-agent] Fallback (no-tools): manually triggering generate_image with prompt="${fallbackPrompt.substring(0, 100)}..."`);
+
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_execution_start',
+                      toolName: 'generate_image',
+                      toolCallId: fallbackToolCallId,
+                      toolArgs: fallbackArgs,
+                      label: '正在生成图片...',
+                      iteration,
+                    })}\n\n`));
+
+                    let fallbackResult: ToolCallResult;
+                    try {
+                      fallbackResult = await Promise.race([
+                        executeToolCall('generate_image', fallbackArgs, {
+                          chatApiKey, chatBaseUrl, origin, userId,
+                          imageModel: imageModel || '',
+                          imageProviderId: imageProviderId || '',
+                          allowedTools: availableTools.map(tool => tool.function.name),
+                          ...taskContext,
+                        }),
+                        new Promise<ToolCallResult>((_, reject) =>
+                          setTimeout(() => reject(new Error('Tool execution timeout')), TOOL_EXECUTION_TIMEOUT)
+                        ),
+                      ]);
+                    } catch (err) {
+                      const msg = err instanceof Error ? err.message : String(err);
+                      fallbackResult = { success: false, error: msg, resultText: `工具执行超时或出错: ${msg}` };
+                    }
+
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_execution_result',
+                      toolName: 'generate_image',
+                      toolCallId: fallbackToolCallId,
+                      success: fallbackResult.success,
+                      error: fallbackResult.error,
+                      imageUrls: fallbackResult.imageUrls || [],
+                      videoUrls: fallbackResult.videoUrls || [],
+                      taskIds: fallbackResult.taskIds || [],
+                      iteration,
+                    })}\n\n`));
+
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_execution_complete',
+                      iteration,
+                      toolsExecuted: 1,
+                    })}\n\n`));
+                  } else if (wantsVideo && imageModel) {
+                    const fallbackPrompt = fbContent
+                      .replace(/^(好的|好的！|好的,|没问题|没问题！|当然|当然！|我来帮你|让我来|我来为你|我来为您)[^。\n]*[。.\n]*/i, '')
+                      .trim() || fbContent;
+                    const fallbackToolCallId = `fallback_vid_${Date.now()}`;
+                    const fallbackArgs: Record<string, unknown> = {
+                      prompt: fallbackPrompt,
+                      aspect_ratio: '16:9',
+                    };
+
+                    console.log(`[chat-agent] Fallback (no-tools): manually triggering generate_video with prompt="${fallbackPrompt.substring(0, 100)}..."`);
+
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_execution_start',
+                      toolName: 'generate_video',
+                      toolCallId: fallbackToolCallId,
+                      toolArgs: fallbackArgs,
+                      label: '正在生成视频...',
+                      iteration,
+                    })}\n\n`));
+
+                    let fallbackResult: ToolCallResult;
+                    try {
+                      fallbackResult = await Promise.race([
+                        executeToolCall('generate_video', fallbackArgs, {
+                          chatApiKey, chatBaseUrl, origin, userId,
+                          imageModel: imageModel || '',
+                          imageProviderId: imageProviderId || '',
+                          allowedTools: availableTools.map(tool => tool.function.name),
+                          ...taskContext,
+                        }),
+                        new Promise<ToolCallResult>((_, reject) =>
+                          setTimeout(() => reject(new Error('Tool execution timeout')), TOOL_EXECUTION_TIMEOUT)
+                        ),
+                      ]);
+                    } catch (err) {
+                      const msg = err instanceof Error ? err.message : String(err);
+                      fallbackResult = { success: false, error: msg, resultText: `工具执行超时或出错: ${msg}` };
+                    }
+
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_execution_result',
+                      toolName: 'generate_video',
+                      toolCallId: fallbackToolCallId,
+                      success: fallbackResult.success,
+                      error: fallbackResult.error,
+                      imageUrls: fallbackResult.imageUrls || [],
+                      videoUrls: fallbackResult.videoUrls || [],
+                      taskIds: fallbackResult.taskIds || [],
+                      iteration,
+                    })}\n\n`));
+
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_execution_complete',
+                      iteration,
+                      toolsExecuted: 1,
+                    })}\n\n`));
+                  }
                 }
               }
               break; // Exit loop — no tools support
@@ -717,6 +871,147 @@ async function handleAgentStream(
 
           // If no tool_calls, we're done — the text content has already been forwarded
           if (!hasToolCalls || finishReason !== 'tool_calls') {
+            // ====== Fallback: 模型不支持函数调用时，自动提取设计思路并手动触发生图 ======
+            // 当 API 提供商（如 APImart）不转发 tool_calls 时，模型会返回文本而非调用工具。
+            // 此时如果用户请求了生图/视频等操作，后端自动提取模型输出的设计思路作为提示词，
+            // 手动调用对应工具，确保"对话即出图"体验不中断。
+            if (iteration === 1 && assistantContent.trim()) {
+              // 检查用户最后一条消息是否包含生图/创作意图
+              const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user');
+              const userText = typeof lastUserMsg?.content === 'string'
+                ? lastUserMsg.content
+                : Array.isArray(lastUserMsg?.content)
+                  ? (lastUserMsg.content as Array<{ type?: string; text?: string }>)
+                      .filter(p => p.type === 'text').map(p => p.text || '').join(' ')
+                  : '';
+              const imageIntentRegex = /生成|画|出图|设计|创作|画一张|帮我画|给我画|做一张|制作|海报|插画|头像|壁纸|logo|商标|吉祥物|角色设计|场景|封面|banner/i;
+              const videoIntentRegex = /视频|动画|动态|运镜|短片|宣传片/i;
+              const wantsImage = imageIntentRegex.test(userText);
+              const wantsVideo = videoIntentRegex.test(userText) && !wantsImage;
+
+              if (wantsImage && imageModel) {
+                // 提取设计思路作为提示词——移除"好的""我来帮你"等对话性前缀
+                const cleanPrompt = assistantContent
+                  .replace(/^(好的|好的！|好的,|没问题|没问题！|当然|当然！|我来帮你|让我来|我来为你|我来为您)[^。\n]*[。.\n]*/i, '')
+                  .trim();
+                const fallbackPrompt = cleanPrompt || assistantContent;
+                const fallbackToolCallId = `fallback_img_${Date.now()}`;
+                const fallbackArgs: Record<string, unknown> = {
+                  prompt: fallbackPrompt,
+                  aspect_ratio: '1:1',
+                  quality: '1K',
+                };
+
+                console.log(`[chat-agent] Fallback: model did not call generate_image, manually triggering with prompt="${fallbackPrompt.substring(0, 100)}..."`);
+
+                // 发送 tool_execution_start 事件——前端据此显示"正在生成图片..."动效
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_execution_start',
+                  toolName: 'generate_image',
+                  toolCallId: fallbackToolCallId,
+                  toolArgs: fallbackArgs,
+                  label: '正在生成图片...',
+                  iteration,
+                })}\n\n`));
+
+                let fallbackResult: ToolCallResult;
+                try {
+                  fallbackResult = await Promise.race([
+                    executeToolCall('generate_image', fallbackArgs, {
+                      chatApiKey, chatBaseUrl, origin, userId,
+                      imageModel: imageModel || '',
+                      imageProviderId: imageProviderId || '',
+                      allowedTools: availableTools.map(tool => tool.function.name),
+                      ...taskContext,
+                    }),
+                    new Promise<ToolCallResult>((_, reject) =>
+                      setTimeout(() => reject(new Error('Tool execution timeout')), TOOL_EXECUTION_TIMEOUT)
+                    ),
+                  ]);
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  fallbackResult = { success: false, error: msg, resultText: `工具执行超时或出错: ${msg}` };
+                }
+
+                // 发送 tool_execution_result 事件——前端据此收集 taskIds 并开始轮询
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_execution_result',
+                  toolName: 'generate_image',
+                  toolCallId: fallbackToolCallId,
+                  success: fallbackResult.success,
+                  error: fallbackResult.error,
+                  imageUrls: fallbackResult.imageUrls || [],
+                  videoUrls: fallbackResult.videoUrls || [],
+                  taskIds: fallbackResult.taskIds || [],
+                  iteration,
+                })}\n\n`));
+
+                // 发送 tool_execution_complete 事件
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_execution_complete',
+                  iteration,
+                  toolsExecuted: 1,
+                })}\n\n`));
+              } else if (wantsVideo && imageModel) {
+                // 视频生成 fallback（简化版：使用模型输出作为 prompt）
+                const fallbackPrompt = assistantContent
+                  .replace(/^(好的|好的！|好的,|没问题|没问题！|当然|当然！|我来帮你|让我来|我来为你|我来为您)[^。\n]*[。.\n]*/i, '')
+                  .trim() || assistantContent;
+                const fallbackToolCallId = `fallback_vid_${Date.now()}`;
+                const fallbackArgs: Record<string, unknown> = {
+                  prompt: fallbackPrompt,
+                  aspect_ratio: '16:9',
+                };
+
+                console.log(`[chat-agent] Fallback: model did not call generate_video, manually triggering with prompt="${fallbackPrompt.substring(0, 100)}..."`);
+
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_execution_start',
+                  toolName: 'generate_video',
+                  toolCallId: fallbackToolCallId,
+                  toolArgs: fallbackArgs,
+                  label: '正在生成视频...',
+                  iteration,
+                })}\n\n`));
+
+                let fallbackResult: ToolCallResult;
+                try {
+                  fallbackResult = await Promise.race([
+                    executeToolCall('generate_video', fallbackArgs, {
+                      chatApiKey, chatBaseUrl, origin, userId,
+                      imageModel: imageModel || '',
+                      imageProviderId: imageProviderId || '',
+                      allowedTools: availableTools.map(tool => tool.function.name),
+                      ...taskContext,
+                    }),
+                    new Promise<ToolCallResult>((_, reject) =>
+                      setTimeout(() => reject(new Error('Tool execution timeout')), TOOL_EXECUTION_TIMEOUT)
+                    ),
+                  ]);
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  fallbackResult = { success: false, error: msg, resultText: `工具执行超时或出错: ${msg}` };
+                }
+
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_execution_result',
+                  toolName: 'generate_video',
+                  toolCallId: fallbackToolCallId,
+                  success: fallbackResult.success,
+                  error: fallbackResult.error,
+                  imageUrls: fallbackResult.imageUrls || [],
+                  videoUrls: fallbackResult.videoUrls || [],
+                  taskIds: fallbackResult.taskIds || [],
+                  iteration,
+                })}\n\n`));
+
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_execution_complete',
+                  iteration,
+                  toolsExecuted: 1,
+                })}\n\n`));
+              }
+            }
             break;
           }
 
