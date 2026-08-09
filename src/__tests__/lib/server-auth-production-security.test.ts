@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import os from 'os';
 import path from 'path';
@@ -85,7 +85,8 @@ describe.sequential('server authentication production security', () => {
 
     await mkdir(systemDir, { recursive: true });
     await writeFile(path.join(systemDir, 'auth-secret'), persistedSecret, 'utf8');
-    await writeFile(path.join(systemDir, 'users.json'), JSON.stringify({
+    const usersFile = path.join(systemDir, 'users.json');
+    await writeFile(usersFile, JSON.stringify({
       users: [{
         id: 'admin_mr_joker',
         name: 'Mr.joker',
@@ -94,7 +95,7 @@ describe.sequential('server authentication production security', () => {
         status: 'active',
         productType: 'canvas,chat',
         apiPermissions: { image: true, chat: true },
-        storageFolder: 'admin_mr_joker',
+        storageFolder: 'data/users/admin_mr_joker',
         createdAt: 1,
         updatedAt: 1,
       }],
@@ -109,6 +110,7 @@ describe.sequential('server authentication production security', () => {
     delete process.env.WUJIE_ADMIN_PASSWORD;
 
     const { authenticateUser } = await import('@/lib/server-auth');
+    const usersBeforeLogin = await readFile(usersFile, 'utf8');
 
     await expect(authenticateUser({
       name: 'Mr.joker',
@@ -119,6 +121,7 @@ describe.sequential('server authentication production security', () => {
       name: 'Mr.joker',
       role: 'admin',
     });
+    await expect(readFile(usersFile, 'utf8')).resolves.toBe(usersBeforeLogin);
   });
 
   it('authorizes a newly bootstrapped administrator for the canvas product', async () => {

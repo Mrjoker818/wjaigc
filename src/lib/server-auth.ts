@@ -581,14 +581,28 @@ export async function authenticateUser(input: {
   // If password matched via a legacy secret, re-hash with current secret (auto-migration)
   const newPasswordHash = needsMigration ? await hashPassword(password) : (passwordMatches ? user.passwordHash : await hashPassword(password));
 
+  const nextRole = isDefaultAdmin ? 'admin' : user.role || 'user';
+  const nextStatus = input.profile?.status || user.status || 'active';
+  const nextApiPermissions = input.profile?.apiPermissions || user.apiPermissions || defaultApiPermissions();
+  const nextStorageFolder = storageFolder(user.id);
+  const nextEmail = input.profile?.email ?? user.email;
+  const shouldPersist = needsMigration
+    || nextRole !== user.role
+    || nextStatus !== user.status
+    || nextApiPermissions !== user.apiPermissions
+    || nextStorageFolder !== user.storageFolder
+    || nextEmail !== user.email;
+
+  if (!shouldPersist) return publicUser(user);
+
   const next: StoredUser = {
     ...user,
     name,
-    role: isDefaultAdmin ? 'admin' : user.role || 'user',
-    status: input.profile?.status || user.status || 'active',
-    apiPermissions: input.profile?.apiPermissions || user.apiPermissions || defaultApiPermissions(),
-    storageFolder: storageFolder(user.id),
-    email: input.profile?.email ?? user.email,
+    role: nextRole,
+    status: nextStatus,
+    apiPermissions: nextApiPermissions,
+    storageFolder: nextStorageFolder,
+    email: nextEmail,
     passwordHash: newPasswordHash,
     updatedAt: now,
   };

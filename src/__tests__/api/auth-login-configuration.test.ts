@@ -73,4 +73,16 @@ describe('POST /api/auth/login configuration failures', () => {
     });
     expect(mocks.createSessionToken).not.toHaveBeenCalled();
   });
+
+  it('does not block a successful login on user directory initialization', async () => {
+    mocks.authenticateUser.mockResolvedValue({ id: 'user-1', name: 'admin' });
+    mocks.createSessionToken.mockResolvedValue('session-token');
+    mocks.ensureUserDataDirs.mockResolvedValue(undefined);
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(response.cookies.get('wujie_session')?.value).toBe('session-token');
+    expect(mocks.ensureUserDataDirs).not.toHaveBeenCalled();
+  });
 });

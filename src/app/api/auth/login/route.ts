@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureUserDataDirs } from '@/lib/server-user-storage';
 import { AuthConfigurationError, authenticateUser, createSessionToken, WUJIE_SESSION_COOKIE, WUJIE_SESSION_TTL_SECONDS } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
 import { validateApiInputs } from '@/lib/api-validator';
@@ -171,8 +170,6 @@ export async function POST(request: NextRequest) {
 
     // 登录成功，清除限流记录
     clearRateLimitOnSuccess(clientIp, username);
-
-    await ensureUserDataDirs(user.id);
 
     const successPath = formProductType === 'chat'
       ? '/simple-chat'
