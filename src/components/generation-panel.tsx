@@ -709,30 +709,60 @@ export function GenerationPanel(
             const resp = await fetch('/api/prompt-review', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: fullPrompt, model, providerId: model.includes('::') ? model.split('::')[0] : undefined }),
+                body: JSON.stringify({ prompt: fullPrompt }),
             });
             const data = await resp.json();
             if (!resp.ok || !data.success) {
                 toast.error(data.error || '提示词分析失败，请重试');
                 return;
             }
+            // Map AI-suggested ratio/quality to model-supported options
+            const supportedRatios = getProviderAspectRatios(pureModelId, selectedProviderHint);
+            const supportedQualities = (() => {
+                const paramType = getModelParamType(pureModelId, selectedProviderHint);
+                if (paramType === 'quality') return getQualityLevelOptions(pureModelId, selectedProviderHint);
+                return getResolutionTierOptions(pureModelId, selectedProviderHint);
+            })();
+
+            // Validate/normalize suggested ratio
+            let finalRatio = data.suggestedRatio;
+            if (!supportedRatios.includes(finalRatio)) {
+                // Try to find a close match by normalizing format
+                const normalized = finalRatio?.replace(/\s/g, '');
+                finalRatio = supportedRatios.find(r => r === normalized) || supportedRatios[0] || '1:1';
+            }
+
+            // Validate/normalize suggested quality
+            let finalQuality = data.suggestedQuality;
+            if (!supportedQualities.includes(finalQuality)) {
+                // Fallback mapping: hd -> high/2K/4K, standard -> auto/low/1K
+                const qualityFallbackMap: Record<string, string[]> = {
+                    'hd': ['high', '4K', '3K', '2K', 'hd', 'quality'],
+                    'standard': ['standard', 'auto', 'low', '1K', 'default', 'medium'],
+                    'high': ['high', '4K', '3K', '2K', 'hd', 'quality'],
+                    'low': ['low', '1K', 'auto', 'standard'],
+                };
+                const fallbacks = qualityFallbackMap[finalQuality] || qualityFallbackMap['standard'];
+                finalQuality = fallbacks.find(q => supportedQualities.includes(q)) || supportedQualities[0] || 'standard';
+            }
+
             setPromptReviewData({
                 summary: data.summary,
                 enhancedPrompt: data.enhancedPrompt,
-                suggestedRatio: data.suggestedRatio,
-                suggestedQuality: data.suggestedQuality,
+                suggestedRatio: finalRatio,
+                suggestedQuality: finalQuality,
                 analysis: data.analysis,
                 originalPrompt: data.originalPrompt,
             });
             setReviewedPrompt(data.enhancedPrompt);
-            setReviewedRatio(data.suggestedRatio);
-            setReviewedQuality(data.suggestedQuality);
+            setReviewedRatio(finalRatio);
+            setReviewedQuality(finalQuality);
         } catch (err) {
             toast.error('网络错误，请重试');
         } finally {
             setPromptReviewLoading(false);
         }
-    }, [prompt, selectedTags, model]);
+    }, [prompt, selectedTags, model, pureModelId, selectedProviderHint]);
 
     // Listen for trigger-prompt-review event
     const handlePromptReviewRef = useRef(handlePromptReview);
@@ -1596,29 +1626,69 @@ export function GenerationPanel(
                             />
                         </div>
                         {/* Suggested Ratio & Quality */}
-                        <div className="flex gap-3">
-                            <div className="flex-1">
+                        <div className="flex flex-col gap-3">
+                            {/* Ratio */}
+                            <div>
                                 <label className={`text-xs font-medium mb-1 block ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>推荐比例</label>
-                                <select
-                                    value={reviewedRatio}
-                                    onChange={(e) => setReviewedRatio(e.target.value)}
-                                    className={`w-full px-2 py-1.5 rounded-md text-xs border ${mc ? 'bg-white border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.06] text-text-bright'} focus:outline-none`}
-                                >
-                                    {['1:1', '3:4', '4:3', '9:16', '16:9', '3:2', '2:3'].map(r => (
-                                        <option key={r} value={r}>{r}</option>
+                                <div className="grid grid-cols-5 gap-1.5">
+                                    {getSupportedAspectRatios().map(ratio => (
+                                        <button
+                                            key={ratio}
+                                            onClick={() => setReviewedRatio(ratio)}
+                                            className={`${gridBtnBase} ${reviewedRatio === ratio ? gridBtnOn : gridBtnOff}`}
+                                        >
+                                            <div className="flex flex-col items-center leading-none gap-0.5">
+                                                <div
+                                                    className="border currentColor rounded-[1px]"
+                                                    style={{
+                                                        width: (() => {
+                                                            if (ratio === 'auto') return 12;
+                                                            const [w] = ratio.split(':').map(Number);
+                                                            const h = ratio.split(':').map(Number)[1];
+                                                            const maxDim = 16;
+                                                            return Math.max(6, (w / Math.max(w, h)) * maxDim);
+                                                        })(),
+                                                        height: (() => {
+                                                            if (ratio === 'auto') return 12;
+                                                            const [w, h] = ratio.split(':').map(Number);
+                                                            const maxDim = 16;
+                                                            return Math.max(6, (h / Math.max(w, h)) * maxDim);
+                                                        })(),
+                                                        borderWidth: 1.5,
+                                                        opacity: reviewedRatio === ratio ? 1 : 0.5,
+                                                    }}
+                                                />
+                                                <span className="text-xs">{ratio === 'auto' ? '智能' : ratio}</span>
+                                            </div>
+                                        </button>
                                     ))}
-                                </select>
+                                </div>
                             </div>
-                            <div className="flex-1">
+                            {/* Quality */}
+                            <div>
                                 <label className={`text-xs font-medium mb-1 block ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>推荐质量</label>
-                                <select
-                                    value={reviewedQuality}
-                                    onChange={(e) => setReviewedQuality(e.target.value)}
-                                    className={`w-full px-2 py-1.5 rounded-md text-xs border ${mc ? 'bg-white border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.06] text-text-bright'} focus:outline-none`}
-                                >
-                                    <option value="standard">标准</option>
-                                    <option value="hd">高清</option>
-                                </select>
+                                <div className="grid grid-cols-4 gap-1.5">
+                                    {getSupportedQualities().map(q => (
+                                        <button
+                                            key={q}
+                                            onClick={() => setReviewedQuality(q)}
+                                            className={`${gridBtnBase} ${reviewedQuality === q ? gridBtnOn : gridBtnOff}`}
+                                        >
+                                            <div className="flex flex-col items-center leading-none">
+                                                <span className="text-xs">
+                                                    {q === 'auto' ? '自动' :
+                                                     q === 'low' ? '快速' :
+                                                     q === 'medium' ? '中等' :
+                                                     q === 'standard' ? '标准' :
+                                                     q === 'high' ? '高清' :
+                                                     q === 'hd' ? '高清' :
+                                                     q === 'ultra' ? '超清' :
+                                                     (RESOLUTION_TIER_DISPLAY_NAMES[q] || QUALITY_LEVEL_DISPLAY_NAMES[q] || q)}
+                                                </span>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                         {/* Actions */}

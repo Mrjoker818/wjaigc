@@ -789,7 +789,7 @@ export function QuickCreatePanel({
         >
           <div className="flex items-start gap-2.5">
             {compileState.isCompiling ? (
-              <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
+              <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden="true" />
             ) : compileState.error ? (
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
             ) : (

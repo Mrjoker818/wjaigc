@@ -182,30 +182,46 @@ export async function POST(request: NextRequest) {
       deductedCredits = creditResult.cost;
     }
 
-    // Resolve provider
+    // Resolve provider — always use a chat/LLM provider, never an image provider
     const resolved = splitProviderModel(model, providerId);
     let selectedModel = resolved.model;
     let apiKey = '';
     let baseUrl = '';
     let resolvedProviderId = resolved.providerId;
 
+    // If a providerId was given, verify it's a chat provider — skip image/video/3d providers
     if (resolvedProviderId) {
       const provider = (await getApiProviders()).find(item => item.id === resolvedProviderId && item.isEnabled);
-      if (!provider) {
-        return NextResponse.json({ error: '未找到可用的后台模型提供商配置' }, { status: 400 });
-      }
-      apiKey = provider.apiKey;
-      baseUrl = normalizeChatBaseUrl(provider.baseUrl);
-      selectedModel = selectedModel || provider.selectedModels?.[0] || DEFAULT_MODEL;
-    } else if (selectedModel && selectedModel !== DEFAULT_MODEL) {
-      const provider = await findProviderForModel(selectedModel, 'chat');
-      if (provider?.apiKey) {
-        resolvedProviderId = provider.id;
-        apiKey = provider.apiKey;
-        baseUrl = normalizeChatBaseUrl(provider.baseUrl);
+      if (provider) {
+        const pType = (provider as any).type || provider.modelType;
+        const isChat = pType === 'chat' || (Array.isArray(pType) && pType.includes('chat'));
+        if (isChat) {
+          apiKey = provider.apiKey;
+          baseUrl = normalizeChatBaseUrl(provider.baseUrl);
+          selectedModel = selectedModel || provider.selectedModels?.[0] || DEFAULT_MODEL;
+        } else {
+          // Not a chat provider — reset and fall through to auto-discovery
+          resolvedProviderId = undefined;
+          selectedModel = DEFAULT_MODEL;
+        }
       }
     }
 
+    // Try to find by model name (only if it looks like a chat model, not an image model)
+    if (!apiKey && selectedModel && selectedModel !== DEFAULT_MODEL) {
+      const provider = await findProviderForModel(selectedModel, 'chat');
+      if (provider?.apiKey) {
+        const pType = (provider as any).type || provider.modelType;
+        const isChat = pType === 'chat' || (Array.isArray(pType) && pType.includes('chat'));
+        if (isChat) {
+          resolvedProviderId = provider.id;
+          apiKey = provider.apiKey;
+          baseUrl = normalizeChatBaseUrl(provider.baseUrl);
+        }
+      }
+    }
+
+    // Auto-discovery: find the first enabled chat provider
     if (!apiKey) {
       const allProviders = await getApiProviders();
       const chatProvider = allProviders.find(p =>
@@ -223,91 +239,119 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '请先在管理员后台配置可用的 LLM 模型 API' }, { status: 400 });
     }
 
-    const { apiModelName: normalizedModel } = normalizeModelForApi(selectedModel);
+    // Build candidate model list for fallback, collect all models from the current provider
+    const candidateModels: string[] = [];
+    const currentProvider = (await getApiProviders()).find(p => p.id === resolvedProviderId);
+    if (currentProvider) {
+      const models = (currentProvider as any).selected_models || currentProvider.selectedModels || [];
+      if (Array.isArray(models)) {
+        candidateModels.push(...models.filter(Boolean));
+      } else if (typeof models === 'string') {
+        candidateModels.push(...models.split(/[\s,]+/).filter(Boolean));
+      }
+    }
+    // Ensure selectedModel is first in the list
+    if (selectedModel && !candidateModels.includes(selectedModel)) {
+      candidateModels.unshift(selectedModel);
+    }
+    // If no candidates, use the already resolved model
+    if (candidateModels.length === 0) {
+      candidateModels.push(selectedModel);
+    }
 
     const userMessage = `请分析以下图像生成请求，并生成提示词确认方案：\n\n${prompt}`;
+    let lastCallError: string | null = null;
+    let lastParseError = false;
 
-    const response = await fetchWithV1Retry(
-      baseUrl,
-      '/chat/completions',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+    for (const candidateModel of candidateModels) {
+      const { apiModelName: normalizedModel } = normalizeModelForApi(candidateModel);
+      try {
+        const response = await fetchWithV1Retry(
+          baseUrl,
+          '/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: normalizedModel,
+              messages: [
+                { role: 'system', content: PROMPT_REVIEW_SYSTEM },
+                { role: 'user', content: userMessage },
+              ],
+              temperature: 0.6,
+              max_tokens: 1200,
+              stream: false,
+            }),
+            signal: AbortSignal.timeout(45000),
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.warn(`[prompt-review] model ${candidateModel} failed:`, response.status, errorText.slice(0, 200));
+          lastCallError = `AI模型请求失败 (${response.status})`;
+          continue; // Try next model
+        }
+
+        let data = await response.json();
+        // Unwrap APImart style response
+        if (data.code === 200 && data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
+          data = data.data;
+        }
+
+        const content = data.choices?.[0]?.message?.content || '';
+
+        const reviewResult = parsePromptReviewResponse(content);
+
+        if (!reviewResult) {
+          console.warn(`[prompt-review] model ${candidateModel} parse failed (length=${content.length}):`, content.slice(0, 200));
+          lastParseError = true;
+          continue; // Try next model
+        }
+
+        // Validate ratio
+        const validRatios = ['1:1', '3:4', '4:3', '9:16', '16:9', '3:2', '2:3'];
+        if (!validRatios.includes(reviewResult.suggestedRatio)) {
+          reviewResult.suggestedRatio = '1:1';
+        }
+        if (!['standard', 'hd'].includes(reviewResult.suggestedQuality)) {
+          reviewResult.suggestedQuality = 'standard';
+        }
+
+        void logOperation({
+          action: OP_ACTIONS.PROMPT_REVIEW,
+          userId,
+          level: 'info',
+          durationMs: Date.now() - startTime,
           model: normalizedModel,
-          messages: [
-            { role: 'system', content: PROMPT_REVIEW_SYSTEM },
-            { role: 'user', content: userMessage },
-          ],
-          temperature: 0.6,
-          max_tokens: 1200,
-          stream: false,
-        }),
-        signal: AbortSignal.timeout(45000),
+          providerId: resolvedProviderId,
+        });
+
+        return NextResponse.json({
+          success: true,
+          ...reviewResult,
+          originalPrompt: prompt,
+        });
+
+      } catch (callError: any) {
+        console.warn(`[prompt-review] model ${candidateModel} exception:`, callError.message);
+        lastCallError = callError.message || 'AI模型请求失败';
+        continue; // Try next model
       }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[prompt-review] API error:', response.status, errorText);
-      // Refund on failure
-      if (deductedCredits > 0 && sessionUser) {
-        await refundCredits(sessionUser.id, deductedCredits, '提示词确认失败退款', undefined);
-      }
-      return NextResponse.json(
-        { error: `AI模型请求失败 (${response.status})` },
-        { status: response.status },
-      );
     }
 
-    let data = await response.json();
-    // Unwrap APImart style response
-    if (data.code === 200 && data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
-      data = data.data;
+    // All models failed
+    console.error('[prompt-review] All candidate models failed, last error:', lastCallError);
+    if (deductedCredits > 0 && sessionUser) {
+      await refundCredits(sessionUser.id, deductedCredits, '提示词确认失败退款', undefined);
     }
-
-    const content = data.choices?.[0]?.message?.content || '';
-
-    const reviewResult = parsePromptReviewResponse(content);
-
-    if (!reviewResult) {
-      console.warn('[prompt-review] Failed to parse LLM response (length=' + content.length + '):', content.slice(0, 500));
-      // Refund on parse failure
-      if (deductedCredits > 0 && sessionUser) {
-        await refundCredits(sessionUser.id, deductedCredits, '提示词确认解析失败退款', undefined);
-      }
-      return NextResponse.json({
-        success: false,
-        error: 'AI模型返回格式异常，请重试',
-      }, { status: 502 });
-    }
-
-    // Validate ratio
-    const validRatios = ['1:1', '3:4', '4:3', '9:16', '16:9', '3:2', '2:3'];
-    if (!validRatios.includes(reviewResult.suggestedRatio)) {
-      reviewResult.suggestedRatio = '1:1';
-    }
-    if (!['standard', 'hd'].includes(reviewResult.suggestedQuality)) {
-      reviewResult.suggestedQuality = 'standard';
-    }
-
-    void logOperation({
-      action: OP_ACTIONS.PROMPT_REVIEW,
-      userId,
-      level: 'info',
-      durationMs: Date.now() - startTime,
-      model: normalizedModel,
-      providerId: resolvedProviderId,
-    });
-
     return NextResponse.json({
-      success: true,
-      ...reviewResult,
-      originalPrompt: prompt,
-    });
+      success: false,
+      error: lastParseError ? 'AI模型返回格式异常，请重试' : (lastCallError || 'AI模型请求失败，请重试'),
+    }, { status: 502 });
 
   } catch (error) {
     console.error('[prompt-review] Error:', error);

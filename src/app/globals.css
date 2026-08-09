@@ -1287,11 +1287,20 @@ input[type="range"]::-moz-range-thumb {
 
 /* 减少动画偏好 — 无障碍 */
 @media (prefers-reduced-motion: reduce) {
+  /*
+   * 仅减弱装饰性过渡动画，保留功能性动画（animate-spin / animate-pulse /
+   * animate-bounce / animate-ping / shimmer / progress-shimmer 等）。
+   * 功能性动画是 UX 反馈的必要组成部分（加载旋转器、进度条、骨架屏），
+   * 禁用它们会让用户误以为应用卡死。
+   */
   *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  /* 装饰性入场/过渡动画 — 减弱为单次瞬时播放 */
+  .panel-slide-in,
+  .fade-in,
+  .scale-in,
+  .slide-up,
   .ne-node-enter,
   .ne-menu-pop,
   .ne-overlay-fade,
@@ -1301,8 +1310,11 @@ input[type="range"]::-moz-range-thumb {
   .ne-port-animated,
   .ne-conn-flowing,
   .node-card,
-  .status-badge.running .status-dot {
-    animation: none !important;
+  .status-badge.running .status-dot,
+  .context-menu,
+  .pulse-glow {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 

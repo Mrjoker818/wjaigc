@@ -311,7 +311,7 @@ export function AnnotationComposer({
               className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-3 text-sm text-destructive hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
               onClick={onCancel}
             >
-              <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              <Loader2 size={15} className="animate-spin" aria-hidden="true" />
               取消
             </button>
           </>
