@@ -43,6 +43,7 @@ import type {
   LayerTaskResponse,
 } from '@/lib/layer-decomposition/types';
 import { deleteImageFile, saveImageFile } from '@/lib/server-data-root';
+import type { TaskEntryAudit } from '@/lib/task-core/entry-migration';
 
 const TASK_LEASE_MS = 5 * 60_000;
 const activeControllers = new Map<string, AbortController>();
@@ -119,6 +120,7 @@ export interface SubmitLayerInput {
   userRole: string;
   idempotencyKey: string;
   request: LayerDecompositionRequest;
+  taskEntryAudit?: TaskEntryAudit;
 }
 
 export interface LayerTaskIdentity {
@@ -324,6 +326,12 @@ export async function submitLayerDecomposition(
   if (!claim.owner) return toTaskResponse(await freshTask(claim.taskId, input.userId));
 
   let task = await freshTask(claim.taskId, input.userId);
+  if (input.taskEntryAudit) {
+    await updateTaskState(task, {
+      patch: { taskEntryAudit: input.taskEntryAudit },
+    });
+    task = await freshTask(task.id, input.userId);
+  }
   if (!cloudRequested) {
     await updateTaskState(task, {
       status: 'processing',

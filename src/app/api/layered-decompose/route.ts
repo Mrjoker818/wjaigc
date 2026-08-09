@@ -13,6 +13,8 @@ import {
   readLayerRequest,
   validateLayerIdempotencyKey,
 } from '@/lib/layer-decomposition/validation';
+import { createTaskEntryAudit, resolveTaskCoreMode } from '@/lib/task-core/entry-migration';
+import { getRequestId } from '@/lib/request-id';
 
 function trustedRequestHosts(request: NextRequest): string[] {
   let configuredPublicHost = '';
@@ -65,6 +67,9 @@ function errorResponse(error: unknown): NextResponse {
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
+  const requestId = getRequestId(request);
+  const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
   try {
@@ -84,6 +89,16 @@ export async function POST(request: NextRequest) {
       userRole: auth.userRole,
       idempotencyKey,
       request: layerRequest,
+      taskEntryAudit: createTaskEntryAudit({
+        entry: 'layer',
+        mode: taskCoreMode,
+        requestId,
+        requestedProviderId: parsedRequest.providerId,
+        requestedModelId: parsedRequest.modelId,
+        actualProviderId: layerRequest.providerId,
+        actualModelId: layerRequest.modelId,
+        startedAt,
+      }),
     });
     return NextResponse.json(result, { status: 202 });
   } catch (error) {

@@ -3,15 +3,20 @@ import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   requireAdminUser: vi.fn(),
-  getApiProviders: vi.fn(),
-  inferModelType: vi.fn(),
+  getPublicModelCatalogSnapshot: vi.fn(),
+  resolveTaskModelCatalogResultFromSnapshot: vi.fn(),
   loadCreditPricingConfig: vi.fn(),
 }));
 
 vi.mock('@/lib/server-auth', () => ({ requireAdminUser: mocks.requireAdminUser }));
 vi.mock('@/lib/server-api-config', () => ({
-  getApiProviders: mocks.getApiProviders,
-  inferModelType: mocks.inferModelType,
+  getApiProviders: vi.fn(() => { throw new Error('legacy provider scan must not be used'); }),
+  inferModelType: vi.fn(() => { throw new Error('legacy model inference must not be used'); }),
+  getPublicModelCatalogSnapshot: mocks.getPublicModelCatalogSnapshot,
+}));
+vi.mock('@/lib/task-core/model-catalog', () => ({
+  resolveTaskModelCatalogResultFromSnapshot: mocks.resolveTaskModelCatalogResultFromSnapshot,
+  taskModelKey: (providerId: string, modelId: string) => `${providerId}::${modelId}`,
 }));
 vi.mock('@/lib/credit-pricing', () => ({
   loadCreditPricingConfig: mocks.loadCreditPricingConfig,
@@ -29,14 +34,30 @@ import { GET } from '@/app/api/admin/credits/pricing/route';
 describe('admin credit pricing model classification', () => {
   beforeEach(() => {
     mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
-    mocks.getApiProviders.mockResolvedValue([{
+    const provider = {
       id: 'provider-general',
       displayName: 'General provider',
       modelType: 'general',
       selectedModels: ['custom-prose-model'],
       isEnabled: true,
-    }]);
-    mocks.inferModelType.mockImplementation((_model: string, fallback: string) => fallback);
+    };
+    const model = {
+      id: 'custom-prose-model',
+      name: 'Custom prose model',
+      providerId: 'provider-general',
+      type: 'general',
+    };
+    mocks.getPublicModelCatalogSnapshot.mockResolvedValue({
+      configuredProviders: [provider],
+      providers: [{ id: provider.id, name: provider.displayName }],
+      models: [model],
+    });
+    mocks.resolveTaskModelCatalogResultFromSnapshot.mockReturnValue({
+      taskModelCatalog: [],
+      authorizedModelKeys: new Set(['provider-general::custom-prose-model']),
+      effectiveModelTypes: new Map([['provider-general::custom-prose-model', 'chat']]),
+      modelAuthorizationMigration: { resolved: [], required: [] },
+    });
     mocks.loadCreditPricingConfig.mockResolvedValue({ modelCredits: {}, updatedAt: null });
   });
 
@@ -47,7 +68,11 @@ describe('admin credit pricing model classification', () => {
     };
 
     expect(response.status).toBe(200);
-    expect(mocks.inferModelType).toHaveBeenCalledWith('custom-prose-model', 'chat');
+    expect(mocks.resolveTaskModelCatalogResultFromSnapshot).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ id: 'admin-1' }),
+      expect.any(Array),
+    );
     expect(body.models[0]).toMatchObject({
       modelType: 'chat',
       billingCategory: 'llm',

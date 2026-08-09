@@ -3,6 +3,8 @@ import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/li
 import { getSessionUser } from '@/lib/server-auth';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { recordThreeDTaskTerminal } from '@/lib/cloud-task-persistence';
+import { getCloudTaskById } from '@/lib/cloud-task-storage';
+import { settleFailedTask } from '@/lib/task-core/billing-service';
 import { THREE_D_POLL_REQUEST_TIMEOUT_MS } from '@/lib/three-d-task-performance';
 
 // Filter sensitive fields (apiKey, secret, token, password) from response data before sending to client
@@ -195,9 +197,9 @@ async function resolvePollRequest(body: PollRequest & { providerId?: string }): 
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await resolvePollRequest(await request.json() as PollRequest & { providerId?: string });
+    let body = await resolvePollRequest(await request.json() as PollRequest & { providerId?: string });
     // Verify session (getSessionUser throws on unauthenticated)
-    await getSessionUser(request);
+    const sessionUser = await getSessionUser(request);
     if (!body) {
       return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
     }
@@ -207,6 +209,78 @@ export async function POST(request: NextRequest) {
     if (!body.provider.apiKey) {
       return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
     }
+
+    const persistedTask = await getCloudTaskById(body.taskId);
+    if (persistedTask && sessionUser && persistedTask.userId !== sessionUser.id) {
+      return NextResponse.json({ success: false, error: '无权访问该 3D 任务' }, { status: 403 });
+    }
+    const persistenceTaskId = persistedTask?.id || body.taskId;
+    const persistedResult = persistedTask?.result || {};
+    if (persistedTask?.status === 'completed') {
+      return NextResponse.json({
+        success: true,
+        taskId: persistenceTaskId,
+        status: 'succeeded',
+        assetUrl: persistedResult.assetUrl,
+        previewImageUrl: persistedResult.previewImageUrl,
+        modelUrls: persistedResult.modelUrls,
+        replayed: true,
+      });
+    }
+    if (
+      persistedTask
+      && (
+        persistedTask.status === 'failed'
+        || persistedTask.status === 'cancelled'
+        || persistedTask.status === 'timeout'
+      )
+    ) {
+      return NextResponse.json({
+        success: true,
+        taskId: persistenceTaskId,
+        status: persistedTask.status,
+        error: persistedTask.error || `3D task is ${persistedTask.status}`,
+        replayed: true,
+      });
+    }
+    if (persistedTask?.remoteTaskId) {
+      body = { ...body, taskId: persistedTask.remoteTaskId };
+    }
+
+    const persistCompletedTask = async (
+      completedAssetUrl?: string,
+      completedPreviewImageUrl?: string,
+    ): Promise<void> => {
+      if (!persistedTask) return;
+      const terminal = await recordThreeDTaskTerminal(persistenceTaskId, {
+        status: 'completed',
+        assetUrl: completedAssetUrl,
+        previewImageUrl: completedPreviewImageUrl,
+        creditStatus: persistedTask.creditCost && persistedTask.creditCost > 0
+          ? 'charged'
+          : 'not-applicable',
+      });
+      if (!terminal.transitioned && terminal.task.status !== 'completed') {
+        throw new Error(`3D task terminal conflict: ${terminal.task.status}`);
+      }
+    };
+
+    const persistFailedTask = async (message: string): Promise<void> => {
+      if (!persistedTask) return;
+      const terminal = await settleFailedTask({
+        taskId: persistenceTaskId,
+        status: 'failed',
+        error: {
+          code: 'THREE_D_GENERATION_FAILED',
+          message,
+          source: 'provider',
+          retryable: true,
+        },
+      });
+      if (!terminal.transitioned) {
+        throw new Error('3D task terminal conflict');
+      }
+    };
 
     const config = buildPollConfig(body);
     if (!config) {
@@ -237,10 +311,7 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
       console.error('[poll-3d-task] Error:', response.status, errorText.slice(0, 500));
-      void recordThreeDTaskTerminal(body.taskId, {
-        status: 'failed',
-        error: `Poll failed: ${response.status}`,
-      }).catch((persistError) => console.warn('[poll-3d-task] Cloud task failure persistence failed:', persistError));
+      await persistFailedTask(`Poll failed: ${response.status}`);
       return NextResponse.json({
         success: false,
         status: 'error',
@@ -333,14 +404,10 @@ export async function POST(request: NextRequest) {
         }
         const tripoProgress = inner.progress as number | undefined;
 
-        void recordThreeDTaskTerminal(body.taskId, {
-          status: 'completed',
-          assetUrl,
-          previewImageUrl,
-        }).catch((persistError) => console.warn('[poll-3d-task] Cloud task completion persistence failed:', persistError));
+        await persistCompletedTask(assetUrl, previewImageUrl);
         return NextResponse.json({
           success: true,
-          taskId: body.taskId,
+          taskId: persistenceTaskId,
           status,
           assetUrl,
           previewImageUrl,
@@ -378,14 +445,10 @@ export async function POST(request: NextRequest) {
         if (meshyProgress !== undefined) extraData.progress = meshyProgress;
         if (data.consumed_credits !== undefined) extraData.consumed_credits = data.consumed_credits;
 
-        void recordThreeDTaskTerminal(body.taskId, {
-          status: 'completed',
-          assetUrl,
-          previewImageUrl,
-        }).catch((persistError) => console.warn('[poll-3d-task] Cloud task completion persistence failed:', persistError));
+        await persistCompletedTask(assetUrl, previewImageUrl);
         return NextResponse.json({
           success: true,
-          taskId: body.taskId,
+          taskId: persistenceTaskId,
           status,
           assetUrl,
           previewImageUrl,
@@ -397,13 +460,10 @@ export async function POST(request: NextRequest) {
         status = 'failed';
         const taskError = data.task_error as Record<string, unknown> | undefined;
         const errorMsg = (taskError?.message || data.error_message || data.message) as string | undefined;
-        void recordThreeDTaskTerminal(body.taskId, {
-          status: 'failed',
-          error: errorMsg || '3D generation failed',
-        }).catch((persistError) => console.warn('[poll-3d-task] Cloud task failure persistence failed:', persistError));
+        await persistFailedTask(errorMsg || '3D generation failed');
         return NextResponse.json({
           success: true,
-          taskId: body.taskId,
+          taskId: persistenceTaskId,
           status,
           error: errorMsg || '3D generation failed',
           rawData: filterSensitiveFields(data),
@@ -415,7 +475,7 @@ export async function POST(request: NextRequest) {
         const precedingTasks = data.preceding_tasks as number | undefined;
         return NextResponse.json({
           success: true,
-          taskId: body.taskId,
+          taskId: persistenceTaskId,
           status,
           progress: progress || 0,
           precedingTasks,
@@ -425,21 +485,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (status === 'succeeded') {
-      void recordThreeDTaskTerminal(body.taskId, {
-        status: 'completed',
-        assetUrl,
-        previewImageUrl,
-      }).catch((persistError) => console.warn('[poll-3d-task] Cloud task completion persistence failed:', persistError));
+      await persistCompletedTask(assetUrl, previewImageUrl);
     } else if (status === 'failed') {
-      void recordThreeDTaskTerminal(body.taskId, {
-        status: 'failed',
-        error: '3D generation failed',
-      }).catch((persistError) => console.warn('[poll-3d-task] Cloud task failure persistence failed:', persistError));
+      await persistFailedTask('3D generation failed');
     }
 
     return NextResponse.json({
       success: true,
-      taskId: body.taskId,
+      taskId: persistenceTaskId,
       status,
       assetUrl,
       previewImageUrl,

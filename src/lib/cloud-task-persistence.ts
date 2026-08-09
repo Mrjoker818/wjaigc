@@ -14,6 +14,7 @@ import type {
   DurableTaskStatus,
 } from '@/lib/task-core/task-state';
 import { normalizeTaskError } from '@/lib/task-core/task-error';
+import type { TaskEntryAudit } from '@/lib/task-core/entry-migration';
 
 interface ImageTaskSubmission {
   taskId: string;
@@ -29,10 +30,12 @@ interface ImageTaskSubmission {
   idempotencyKey?: string;
   submissionPayload?: Record<string, unknown>;
   creditCost?: number;
+  creditStatus?: CloudTaskCreditStatus;
   batchId?: string;
   slotId?: string;
   slotIndex?: number;
   deferCreditCharge?: boolean;
+  taskEntryAudit?: TaskEntryAudit;
 }
 
 interface ImageTaskTerminal {
@@ -59,6 +62,7 @@ interface VideoTaskSubmission {
   label?: string;
   creditCost?: number;
   deferCreditCharge?: boolean;
+  taskEntryAudit?: TaskEntryAudit;
 }
 
 interface VideoTaskTerminal {
@@ -80,6 +84,9 @@ interface ThreeDTaskSubmission {
   providerId?: string;
   model?: string;
   label?: string;
+  creditCost?: number;
+  creditStatus?: CloudTaskCreditStatus;
+  taskEntryAudit?: TaskEntryAudit;
 }
 
 interface ThreeDTaskTerminal {
@@ -145,6 +152,12 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
   const submissionPayload = input.submissionPayload || input.slotId
     ? { ...input.submissionPayload, ...slotPayload }
     : undefined;
+  const result = submissionPayload || input.taskEntryAudit
+    ? {
+        ...(submissionPayload ? { submissionPayload } : {}),
+        ...(input.taskEntryAudit ? { taskEntryAudit: input.taskEntryAudit } : {}),
+      }
+    : undefined;
 
   return createCloudTask({
     id: input.taskId,
@@ -159,8 +172,8 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
     remoteTaskId: input.taskId,
     progress: input.deferCreditCharge ? 0 : 5,
     label: input.label || '生成图片',
-    result: submissionPayload ? { submissionPayload } : undefined,
-    creditStatus: input.deferCreditCharge ? 'not-applicable' : undefined,
+    result,
+    creditStatus: input.deferCreditCharge ? 'not-applicable' : input.creditStatus,
     creditCost: input.deferCreditCharge ? 0 : input.creditCost,
     idempotencyKey: input.idempotencyKey,
     createdAt: now,
@@ -216,6 +229,7 @@ export async function recordVideoTaskSubmitted(input: VideoTaskSubmission): Prom
     remoteTaskId: input.taskId,
     progress: input.deferCreditCharge ? 0 : 5,
     label: input.label || 'Video generation',
+    result: input.taskEntryAudit ? { taskEntryAudit: input.taskEntryAudit } : undefined,
     creditStatus: input.deferCreditCharge ? 'not-applicable' : undefined,
     creditCost: input.deferCreditCharge ? 0 : input.creditCost,
     createdAt: now,
@@ -266,6 +280,9 @@ export async function recordThreeDTaskSubmitted(input: ThreeDTaskSubmission): Pr
     remoteTaskId: input.taskId,
     progress: 5,
     label: input.label || '3D model generation',
+    result: input.taskEntryAudit ? { taskEntryAudit: input.taskEntryAudit } : undefined,
+    creditCost: input.creditCost,
+    creditStatus: input.creditStatus,
     createdAt: now,
     updatedAt: now,
   });

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminUser } from '@/lib/server-auth';
-import { getApiProviders, inferModelType } from '@/lib/server-api-config';
+import { getPublicModelCatalogSnapshot } from '@/lib/server-api-config';
 import { getChatModelCredits, getImageModelCredits, getVideoModelCreditsPerSecond } from '@/lib/credits';
 import { loadCreditPricingConfig, saveCreditPricingConfig, buildPricingKey, type ModelCreditEntry } from '@/lib/credit-pricing';
 import { getBillingModelCategory } from '@/lib/billing-model-category';
 import { IMAGE_MODEL_CREDITS } from '@/lib/credits-constants';
+import { resolveTaskModelCatalogResultFromSnapshot, taskModelKey } from '@/lib/task-core/model-catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,24 +37,28 @@ export async function GET(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
 
-  const [providers, config] = await Promise.all([getApiProviders(), loadCreditPricingConfig()]);
-  const models = providers
-    .filter(provider => provider.isEnabled !== false)
-    .flatMap(provider => (provider.selectedModels || []).map(model => {
-      const providerType = provider.modelType || provider.type || 'image';
-      const supportedFallbacks = new Set<Parameters<typeof inferModelType>[1]>([
-        'image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm', 'upscaler', 'removebg', 'audio',
-      ]);
-      const normalizedProviderType = providerType.trim().toLowerCase();
-      const fallbackType = normalizedProviderType === 'general' || normalizedProviderType === 'universal'
-        ? 'chat'
-        : supportedFallbacks.has(normalizedProviderType as Parameters<typeof inferModelType>[1])
-          ? normalizedProviderType as Parameters<typeof inferModelType>[1]
-          : 'image';
-      const modelType = inferModelType(model, fallbackType);
+  const [snapshot, config] = await Promise.all([
+    getPublicModelCatalogSnapshot(),
+    loadCreditPricingConfig(),
+  ]);
+  const catalog = resolveTaskModelCatalogResultFromSnapshot(
+    snapshot.models,
+    admin,
+    snapshot.configuredProviders,
+  );
+  const providerNames = new Map(snapshot.configuredProviders.map(provider => [
+    provider.id,
+    provider.displayName || provider.name || provider.id,
+  ]));
+  const models = snapshot.models
+    .filter(model => catalog.authorizedModelKeys.has(taskModelKey(model.providerId, model.id)))
+    .map(modelInfo => {
+      const model = modelInfo.id;
+      const providerId = modelInfo.providerId;
+      const modelType = catalog.effectiveModelTypes.get(taskModelKey(providerId, model)) || modelInfo.type;
       const billingCategory = getBillingModelCategory(modelType);
       const fallback = defaultCredits(modelType, model);
-      const compoundKey = buildPricingKey(provider.id, model);
+      const compoundKey = buildPricingKey(providerId, model);
       // Try provider-specific key first, then model-only key (backward compat)
       const configured = config.modelCredits[compoundKey] ?? config.modelCredits[model];
       const refQuality = defaultQualityTiers(modelType, model);
@@ -79,8 +84,8 @@ export async function GET(request: NextRequest) {
       }
 
       return {
-        providerId: provider.id,
-        providerName: provider.displayName || provider.name || provider.id,
+        providerId,
+        providerName: providerNames.get(providerId) || providerId,
         model,
         modelType,
         billingCategory,
@@ -92,7 +97,7 @@ export async function GET(request: NextRequest) {
         // LLM Token 计费（积分/1M tokens）；配置后按实际 usage 结算，credits 作为预估预扣
         tokenPricing,
       };
-    }));
+    });
 
   return NextResponse.json({ success: true, models, updatedAt: config.updatedAt || null });
 }

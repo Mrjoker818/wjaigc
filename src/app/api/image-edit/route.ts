@@ -22,7 +22,7 @@ import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg
 import { DEFAULT_REMBG_MODEL, generateRembgMask, isRembgCpuModel } from '@/lib/image-tools/rembg-client';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
-import { consumeCredits, refundCredits } from '@/lib/credits';
+import { calculateConfiguredCreditCost, consumeCredits, refundCredits } from '@/lib/credits';
 import { validateImageUrl } from '@/lib/input-validation';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
@@ -50,8 +50,26 @@ import {
   RemoveBgProviderError,
 } from '@/lib/remove-bg-provider';
 import type { ApiProvider } from '@/lib/universal-api-types';
+import {
+  createTaskEntryAudit,
+  executeTaskEntryMigration,
+  resolveTaskCoreMode,
+  type TaskCoreMode,
+} from '@/lib/task-core/entry-migration';
+import { createBillableTask, settleFailedTask } from '@/lib/task-core/billing-service';
+import type { DurableTaskStatus } from '@/lib/task-core/task-state';
+import { getRequestId } from '@/lib/request-id';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+
+function resolveImageEditTaskCoreMode(
+  requestedMode: TaskCoreMode,
+  coreV2Eligible: boolean,
+): TaskCoreMode {
+  return requestedMode === 'core-v2' && !coreV2Eligible
+    ? 'shadow'
+    : requestedMode;
+}
 
 function findClosestAspectRatio(aspectRatio: string): string {
   if (SUPPORTED_RATIOS.includes(aspectRatio)) return aspectRatio;
@@ -1584,7 +1602,12 @@ async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<str
 
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
+  const taskStartedAt = Date.now();
+  const requestId = getRequestId(request);
+  const requestedTaskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   let deductedCredits = 0;
+  let usesAtomicBilling = false;
+  let atomicBillingTaskId: string | null = null;
   let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   try {
     const authResult = await requireApiAuthOrReject(request);
@@ -1609,6 +1632,11 @@ export async function POST(request: NextRequest) {
     const requested302UpscaleModel = requestedUpscaleModel
       ? resolve302UpscaleModelId(requestedUpscaleModel)
       : null;
+    const taskCoreMode = resolveImageEditTaskCoreMode(
+      requestedTaskCoreMode,
+      action === 'upscale' && Boolean(requested302UpscaleModel),
+    );
+    usesAtomicBilling = taskCoreMode === 'core-v2';
     const engineMode = (
       enginePref === 'ai'
       || enginePref === 'local'
@@ -1682,17 +1710,49 @@ export async function POST(request: NextRequest) {
     }
 
     // 积分检查与扣除
+    const creditOp = action === 'upscale' ? 'image_upscale'
+      : isRemoveBackgroundAction ? 'image_remove_bg'
+      : 'image_edit';
     if (sessionUser) {
-      const creditOp = action === 'upscale' ? 'image_upscale'
-        : isRemoveBackgroundAction ? 'image_remove_bg'
-        : action === 'outpaint' ? 'image_edit'
-        : 'image_edit';
-      const creditResult = await consumeCredits(sessionUser.id, creditOp, undefined, undefined, modelStr, { providerId: effectiveProviderId || undefined });
+      if (usesAtomicBilling) {
+        deductedCredits = await calculateConfiguredCreditCost(
+          creditOp,
+          modelStr,
+          { providerId: effectiveProviderId || undefined },
+        );
+      } else {
+        const creditResult = await consumeCredits(sessionUser.id, creditOp, undefined, undefined, modelStr, { providerId: effectiveProviderId || undefined });
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
-      deductedCredits = creditResult.cost;
+        deductedCredits = creditResult.cost;
+      }
     }
+
+    const buildTaskEntryAudit = (
+      actualProviderId = effectiveProviderId,
+      actualModelId = modelStr,
+    ) => createTaskEntryAudit({
+      entry: 'edit',
+      mode: taskCoreMode,
+      requestId,
+      requestedProviderId: effectiveProviderId || undefined,
+      requestedModelId: lookupModel || undefined,
+      actualProviderId: actualProviderId || undefined,
+      actualModelId: actualModelId || undefined,
+      startedAt: taskStartedAt,
+      creditCost: deductedCredits,
+      creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+    });
+
+    const persistSubmittedImageTask = async (
+      input: Parameters<typeof recordImageTaskSubmitted>[0],
+    ): Promise<void> => {
+      const recorded = await recordImageTaskSubmitted(input);
+      if (!recorded) {
+        throw new Error(`图片编辑任务 ${input.taskId} 持久化失败，已停止返回不可恢复的任务`);
+      }
+    };
 
     // 放大/擦除/蒙版 均使用管理员系统的 image 类型模型
     // 策略：自动识别管理员配置的所有可用 image 模型，按优先级逐一尝试
@@ -1987,14 +2047,18 @@ export async function POST(request: NextRequest) {
       if (result.taskId) {
         const decomposeCandidate = candidateModels.find(candidate => candidate.model === result.usedModel) || candidateModels[0];
         registerTask(result.taskId, 'display-decompose', '元素拆解', sessionUser?.id);
-        void recordImageTaskSubmitted({
+        await persistSubmittedImageTask({
           taskId: result.taskId,
           userId: sessionUser?.id,
           type: 'display-decompose',
           providerId: effectiveProviderId,
           model: result.usedModel || decomposeCandidate?.model,
           label: '元素拆解',
-        }).catch(error => console.warn('[image-edit] 美陈拆解云端任务记录创建失败:', error));
+          taskEntryAudit: buildTaskEntryAudit(
+            effectiveProviderId,
+            result.usedModel || decomposeCandidate?.model,
+          ),
+        });
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
@@ -2226,8 +2290,15 @@ export async function POST(request: NextRequest) {
       if (result?.taskId) {
         const maCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
         registerTask(result.taskId, 'multi-angle', '多角度旋转', sessionUser?.id);
-        void recordImageTaskSubmitted({ taskId: result.taskId, userId: sessionUser?.id, type: 'multi-angle', providerId: effectiveProviderId, model: result.usedModel || maCandidate?.model, label: '多角度旋转' })
-          .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
+        await persistSubmittedImageTask({
+          taskId: result.taskId,
+          userId: sessionUser?.id,
+          type: 'multi-angle',
+          providerId: effectiveProviderId,
+          model: result.usedModel || maCandidate?.model,
+          label: '多角度旋转',
+          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, result.usedModel || maCandidate?.model),
+        });
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
@@ -2432,11 +2503,50 @@ export async function POST(request: NextRequest) {
       // Explicit 302 selections are charged before the provider call. Persist a
       // task before dispatch so a provider rejection can be refunded exactly once.
       let upscaleCreditTaskId: string | null = null;
-      const beginRequested302CreditTask = async (): Promise<void> => {
-        if (!requested302UpscaleModel || !sessionUser || deductedCredits <= 0 || upscaleCreditTaskId) return;
+      type Requested302Admission = {
+        taskId: string | null;
+        creditCost: number;
+        reused: boolean;
+        status: DurableTaskStatus;
+        result?: Record<string, unknown>;
+        error?: string;
+      };
+      const beginRequested302CreditTask = async (): Promise<NextResponse | null> => {
+        if (!requested302UpscaleModel || upscaleCreditTaskId) return null;
 
+        const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
+        const requestDigest = createHash('sha256').update(JSON.stringify({
+          action,
+          imageUrl,
+          providerId: effectiveProviderId,
+          model: requested302UpscaleModel,
+          sourceWidth: origW,
+          sourceHeight: origH,
+          targetWidth: targetW,
+          targetHeight: targetH,
+        })).digest('hex');
+        const submissionPayload = {
+          sourceWidth: origW,
+          sourceHeight: origH,
+          targetWidth: targetW,
+          targetHeight: targetH,
+          requestedModel: requested302UpscaleModel,
+        };
         const taskId = `upscale-302-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        const recorded = await recordImageTaskSubmitted({
+        const admission = await executeTaskEntryMigration<Requested302Admission>({
+          mode: taskCoreMode,
+          legacy: async () => {
+            if (!sessionUser || deductedCredits <= 0) {
+              return {
+                taskId: null,
+                creditCost: 0,
+                reused: false,
+                status: 'processing' as const,
+                result: undefined,
+                error: undefined,
+              };
+            }
+            const recorded = await recordImageTaskSubmitted({
           taskId,
           userId: sessionUser.id,
           type: 'upscale',
@@ -2444,18 +2554,99 @@ export async function POST(request: NextRequest) {
           model: requested302UpscaleModel,
           label: '302.AI 超分',
           creditCost: deductedCredits,
-          submissionPayload: {
-            sourceWidth: origW,
-            sourceHeight: origH,
-            targetWidth: targetW,
-            targetHeight: targetH,
-            requestedModel: requested302UpscaleModel,
-          },
+          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, requested302UpscaleModel),
+          submissionPayload,
         });
         if (!recorded) {
           throw new Error('无法记录 302.AI 超分任务，已中止请求以防止扣费状态不一致');
         }
-        upscaleCreditTaskId = taskId;
+            return {
+              taskId,
+              creditCost: deductedCredits,
+              reused: false,
+              status: 'processing' as const,
+              result: undefined,
+              error: undefined,
+            };
+          },
+          coreV2: async () => {
+            const now = Date.now();
+            const result = await createBillableTask({
+              userId: sessionUser?.id || 'anonymous',
+              idempotencyKey,
+              requestDigest,
+              creditCost: deductedCredits,
+              task: {
+                id: taskId,
+                type: 'upscale',
+                status: 'processing',
+                providerId: effectiveProviderId,
+                model: requested302UpscaleModel,
+                progress: 0,
+                label: '302.AI upscale',
+                result: {
+                  taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, requested302UpscaleModel),
+                  submissionPayload,
+                },
+                createdAt: now,
+                updatedAt: now,
+              },
+            });
+            return {
+              taskId: result.task.id,
+              creditCost: result.task.creditCost || 0,
+              reused: result.reused,
+              status: result.task.status,
+              result: result.task.result,
+              error: result.task.error,
+            };
+          },
+          factsFromResult: value => ({
+            providerId: effectiveProviderId,
+            modelId: requested302UpscaleModel,
+            creditCost: value.creditCost,
+            status: value.status === 'completed'
+              || value.status === 'failed'
+              || value.status === 'cancelled'
+              || value.status === 'timeout'
+              ? value.status
+              : 'processing',
+          }),
+          previewCoreFacts: async () => ({
+            providerId: effectiveProviderId,
+            modelId: requested302UpscaleModel,
+            creditCost: deductedCredits,
+            status: 'processing',
+          }),
+        });
+
+        upscaleCreditTaskId = admission.value.taskId;
+        atomicBillingTaskId = admission.value.taskId;
+        if (!admission.value.reused || !admission.value.taskId) return null;
+
+        const reusedImageUrl = typeof admission.value.result?.imageUrl === 'string'
+          ? admission.value.result.imageUrl
+          : null;
+        if (admission.value.status === 'completed' && reusedImageUrl) {
+          return NextResponse.json({
+            success: true,
+            imageUrl: reusedImageUrl,
+            taskId: admission.value.taskId,
+            action,
+            reused: true,
+          });
+        }
+        const terminalFailure = admission.value.status === 'failed'
+          || admission.value.status === 'cancelled'
+          || admission.value.status === 'timeout';
+        return NextResponse.json({
+          success: !terminalFailure,
+          taskId: admission.value.taskId,
+          action,
+          status: admission.value.status,
+          error: admission.value.error,
+          reused: true,
+        }, { status: terminalFailure ? 409 : 200 });
       };
 
       const completeRequested302CreditTask = async (imageUrlResult: string): Promise<void> => {
@@ -2500,7 +2691,8 @@ export async function POST(request: NextRequest) {
         };
       };
 
-      await beginRequested302CreditTask();
+      const reusedAdmissionResponse = await beginRequested302CreditTask();
+      if (reusedAdmissionResponse) return reusedAdmissionResponse;
 
       // 单次倍率可覆盖目标时，直接调用编排器选中的专用 AI 超分模型。
       // AI 输出必须真实达到目标尺寸；Sharp 只允许下采样或格式归一，禁止补足缺失像素。
@@ -3200,8 +3392,15 @@ export async function POST(request: NextRequest) {
       // 通过在 task result 中标记 _needsResize + targetW/targetH，让 poll-task 完成后触发 resize
       if (aiResult?.taskId) {
         const regTaskId = registerTask(aiResult.taskId, 'upscale', 'AI放大', sessionUser?.id);
-        void recordImageTaskSubmitted({ taskId: regTaskId.taskId, userId: sessionUser?.id, type: 'upscale', providerId: effectiveProviderId, model: aiResult.usedModel, label: 'AI放大' })
-          .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
+        await persistSubmittedImageTask({
+          taskId: regTaskId.taskId,
+          userId: sessionUser?.id,
+          type: 'upscale',
+          providerId: effectiveProviderId,
+          model: aiResult.usedModel,
+          label: 'AI放大',
+          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, aiResult.usedModel),
+        });
         updateTaskProgress(regTaskId.taskId, {
           status: 'processing',
           progress: 12,
@@ -3421,8 +3620,15 @@ export async function POST(request: NextRequest) {
           const rbUsedCandidate = genericRemoveBgCandidates.find(c => c.model === aiUsedModel) || genericRemoveBgCandidates[0];
           aiSuccess = true;
           registerTask(submitResult.taskId, 'generate', 'AI 移除背景', sessionUser?.id);
-          void recordImageTaskSubmitted({ taskId: submitResult.taskId, userId: sessionUser?.id, type: 'removebg', providerId: effectiveProviderId, model: aiUsedModel, label: 'AI 移除背景' })
-            .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
+          await persistSubmittedImageTask({
+            taskId: submitResult.taskId,
+            userId: sessionUser?.id,
+            type: 'removebg',
+            providerId: effectiveProviderId,
+            model: aiUsedModel,
+            label: 'AI 移除背景',
+            taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, aiUsedModel),
+          });
           updateTaskProgress(submitResult.taskId, {
             status: 'processing',
             progress: 10,
@@ -3751,8 +3957,15 @@ export async function POST(request: NextRequest) {
               // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
               const eraseUsedCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
               registerTask(eraseResult.taskId, 'erase', '擦除', sessionUser?.id);
-              void recordImageTaskSubmitted({ taskId: eraseResult.taskId, userId: sessionUser?.id, type: 'erase', providerId: effectiveProviderId, model: eraseResult.usedModel || eraseUsedCandidate?.model, label: '擦除' })
-                .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
+              await persistSubmittedImageTask({
+                taskId: eraseResult.taskId,
+                userId: sessionUser?.id,
+                type: 'erase',
+                providerId: effectiveProviderId,
+                model: eraseResult.usedModel || eraseUsedCandidate?.model,
+                label: '擦除',
+                taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, eraseResult.usedModel || eraseUsedCandidate?.model),
+              });
               updateTaskProgress(eraseResult.taskId, {
                 status: 'processing',
                 progress: 10,
@@ -3886,8 +4099,6 @@ export async function POST(request: NextRequest) {
                 // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
                 const eraseCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
                 registerTask(eraseResult.taskId, 'erase', 'AI擦除', sessionUser?.id);
-                void recordImageTaskSubmitted({ taskId: eraseResult.taskId, userId: sessionUser?.id, type: 'erase', providerId: effectiveProviderId, model: eraseResult.usedModel || eraseCandidate?.model, label: 'AI擦除' })
-                  .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
                 updateTaskProgress(eraseResult.taskId, {
                   status: 'processing',
                   progress: 30,
@@ -4072,8 +4283,15 @@ export async function POST(request: NextRequest) {
       if (result.taskId) {
         const usedCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
         registerTask(result.taskId, 'mask', '蒙版修图', sessionUser?.id);
-        void recordImageTaskSubmitted({ taskId: result.taskId, userId: sessionUser?.id, type: 'mask', providerId: effectiveProviderId, model: result.usedModel || usedCandidate?.model, label: '蒙版修图' })
-          .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
+        await persistSubmittedImageTask({
+          taskId: result.taskId,
+          userId: sessionUser?.id,
+          type: 'mask',
+          providerId: effectiveProviderId,
+          model: result.usedModel || usedCandidate?.model,
+          label: '蒙版修图',
+          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, result.usedModel || usedCandidate?.model),
+        });
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
@@ -4330,8 +4548,15 @@ export async function POST(request: NextRequest) {
       // 异步结果 - 返回 taskId，前端轮询后直接使用 AI 结果
       if (result.taskId) {
         registerTask(result.taskId, 'outpaint', '扩展画面', sessionUser?.id);
-        void recordImageTaskSubmitted({ taskId: result.taskId, userId: sessionUser?.id, type: 'outpaint', providerId: effectiveProviderId, model: result.usedModel || apiModelStr, label: '扩展画面' })
-          .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
+        await persistSubmittedImageTask({
+          taskId: result.taskId,
+          userId: sessionUser?.id,
+          type: 'outpaint',
+          providerId: effectiveProviderId,
+          model: result.usedModel || apiModelStr,
+          label: '扩展画面',
+          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, result.usedModel || apiModelStr),
+        });
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
@@ -4366,7 +4591,23 @@ export async function POST(request: NextRequest) {
       durationMs: opTimer.end(),
     });
     // 退款：异常失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
+    if (usesAtomicBilling && atomicBillingTaskId) {
+      try {
+        await settleFailedTask({
+          taskId: atomicBillingTaskId,
+          status: 'failed',
+          error: {
+            code: 'IMAGE_EDIT_FAILED',
+            message: errMsg,
+            source: 'wujie',
+            retryable: true,
+            requestId,
+          },
+        });
+      } catch (settleError) {
+        console.error('[image-edit] Atomic task settlement failed:', settleError);
+      }
+    } else if (!usesAtomicBilling && deductedCredits > 0 && sessionUser) {
       try {
         await refundCredits(sessionUser.id, deductedCredits, `图像编辑异常退款: ${errMsg.substring(0, 100)}`);
       } catch (refundErr) { console.error('[image-edit] Refund failed:', refundErr); }

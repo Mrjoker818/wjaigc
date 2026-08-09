@@ -305,6 +305,36 @@ describe('layer decomposition service concurrency', () => {
     expect(mocks.submitPearLayerTask).toHaveBeenCalledTimes(1);
   });
 
+  it('persists the entry audit on the owned task without changing submission semantics', async () => {
+    const taskEntryAudit = {
+      entry: 'layer' as const,
+      mode: 'shadow' as const,
+      handlerVersion: 'task-core-v2-shadow' as const,
+      requestId: 'req-layer-entry-1',
+      requestedProviderId: 'pear-provider',
+      requestedModelId: 'pear-layer-model',
+      actualProviderId: 'pear-provider',
+      actualModelId: 'pear-layer-model',
+      startedAt: 1_000,
+      updatedAt: 1_000,
+      durationMs: 0,
+      creditCost: 0,
+      creditStatus: 'not-applicable' as const,
+    };
+
+    await submitLayerDecomposition({
+      userId: 'user-1',
+      userRole: 'user',
+      idempotencyKey: 'layer-audit-1',
+      request,
+      taskEntryAudit,
+    });
+
+    expect(mocks.task?.result).toEqual(expect.objectContaining({ taskEntryAudit }));
+    expect(mocks.chargeCloudTaskCredits).toHaveBeenCalledTimes(1);
+    expect(mocks.submitPearLayerTask).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the initial Pear submission leased while duplicate clients poll', async () => {
     let finishSubmission: ((value: {
       kind: 'async';

@@ -6,6 +6,7 @@
  * 异步提交 + 轮询模式，复用 task-registry
  */
 
+import { createHash } from 'node:crypto';
 import { after, NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import {
@@ -27,7 +28,7 @@ import {
 import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
 import { getSessionUser } from '@/lib/server-auth';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
-import { calculateConfiguredCreditCost } from '@/lib/credits';
+import { calculateConfiguredCreditCost, InsufficientCreditsError } from '@/lib/credits';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { validateApiInputs } from '@/lib/api-validator';
 import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted } from '@/lib/cloud-task-persistence';
@@ -35,10 +36,19 @@ import {
   chargeCloudTaskCredits,
   completeCloudTask,
   terminateCloudTaskAndRefund,
+  updateCloudTask,
 } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
 import type { VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
+import {
+  createTaskEntryAudit,
+  executeTaskEntryMigration,
+  resolveTaskCoreMode,
+} from '@/lib/task-core/entry-migration';
+import { createBillableTask } from '@/lib/task-core/billing-service';
+import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
+import { getRequestId } from '@/lib/request-id';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -48,6 +58,9 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
+  const taskStartedAt = Date.now();
+  const requestId = getRequestId(request);
+  const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   let plannedCreditCost = 0;
   let sessionUser: User | null = null;
   try {
@@ -322,22 +335,154 @@ export async function POST(request: NextRequest) {
           providerId: provider.id,
         })
       : 0;
+    let taskEntryAudit = createTaskEntryAudit({
+      entry: 'video',
+      mode: taskCoreMode,
+      requestId,
+      requestedProviderId: effectiveProviderId || undefined,
+      requestedModelId: pureModel,
+      actualProviderId: provider.id,
+      actualModelId: pureModel,
+      startedAt: taskStartedAt,
+      creditCost: plannedCreditCost,
+      creditStatus: plannedCreditCost > 0 ? 'pending' : 'not-applicable',
+    });
 
     // 5. 注册任务
-    const taskId = `video_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    let taskId = `video_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const modeLabel = imageUrl ? '图生视频' : '文生视频';
     const modelName = modelInfo?.name || model;
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || taskId;
+    const requestDigest = createHash('sha256').update(JSON.stringify({
+      providerId: provider.id,
+      model: pureModel,
+      prompt,
+      imageUrl,
+      lastFrameImageUrl,
+      referenceImages,
+      aspectRatio,
+      duration,
+      mode,
+      generateAudio,
+      negativePrompt,
+      seed,
+      projectId,
+    })).digest('hex');
+    const migration = await executeTaskEntryMigration({
+      mode: taskCoreMode,
+      legacy: async () => {
+        await recordVideoTaskSubmitted({
+          taskId,
+          userId: sessionUser?.id,
+          projectId: typeof projectId === 'string' ? projectId : undefined,
+          providerId: provider.id,
+          model: pureModel,
+          label: `${modeLabel} - ${modelName}`,
+          creditCost: plannedCreditCost,
+          deferCreditCharge: true,
+          taskEntryAudit,
+        });
+        const charge = await chargeCloudTaskCredits(
+          taskId,
+          sessionUser?.id || 'anonymous',
+          plannedCreditCost,
+          `视频生成 - ${modelName}`,
+        );
+        return {
+          taskId,
+          creditCost: charge.creditCost,
+          accepted: charge.charged,
+          reused: false,
+          status: 'processing' as const,
+        };
+      },
+      coreV2: async () => {
+        const now = Date.now();
+        const admission = await createBillableTask({
+          userId: sessionUser?.id || 'anonymous',
+          idempotencyKey,
+          requestDigest,
+          creditCost: plannedCreditCost,
+          task: {
+            id: taskId,
+            projectId: typeof projectId === 'string' ? projectId : undefined,
+            type: 'video',
+            status: 'processing',
+            providerId: provider.id,
+            model: pureModel,
+            remoteTaskId: taskId,
+            progress: 0,
+            label: `${modeLabel} - ${modelName}`,
+            result: { taskEntryAudit },
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        return {
+          taskId: admission.task.id,
+          creditCost: admission.task.creditCost || 0,
+          accepted: admission.reused || admission.charged || plannedCreditCost === 0,
+          reused: admission.reused,
+          status: admission.task.status,
+        };
+      },
+      factsFromResult: value => ({
+        providerId: provider.id,
+        modelId: pureModel,
+        creditCost: value.creditCost,
+        status: value.status === 'submitting'
+          ? 'pending'
+          : value.status === 'created' || value.status === 'uploading'
+            ? 'processing'
+            : value.status,
+      }),
+      previewCoreFacts: async () => ({
+        providerId: provider.id,
+        modelId: pureModel,
+        creditCost: plannedCreditCost,
+        status: 'processing',
+      }),
+    });
+    taskId = migration.value.taskId;
+    taskEntryAudit = createTaskEntryAudit({
+      entry: 'video',
+      mode: taskCoreMode,
+      requestId,
+      requestedProviderId: effectiveProviderId || undefined,
+      requestedModelId: pureModel,
+      actualProviderId: provider.id,
+      actualModelId: pureModel,
+      startedAt: taskStartedAt,
+      creditCost: migration.value.creditCost,
+      creditStatus: plannedCreditCost > 0 ? 'pending' : 'not-applicable',
+      comparison: migration.comparison,
+    });
+    if (migration.comparison) {
+      await updateCloudTask(taskId, { result: { taskEntryAudit } });
+    }
+    if (!migration.value.accepted) {
+      await terminateCloudTaskAndRefund(taskId, 'cancelled', '视频生成积分扣费未完成，未向供应商提交任务');
+      return NextResponse.json({
+        error: '积分不足或积分服务暂不可用，未向视频供应商提交请求',
+        retryable: true,
+      }, { status: 402 });
+    }
+    if (migration.value.reused) {
+      return NextResponse.json({
+        taskId,
+        shotId: shotId || null,
+        status: migration.value.status,
+        message: '已返回相同请求的现有视频任务',
+        requestId,
+        handlerVersion: taskEntryAudit.handlerVersion,
+      });
+    }
     registerTask(taskId, 'video', `${modeLabel} · ${modelName}`, sessionUser?.id);
     try {
-      await recordVideoTaskSubmitted({
-        taskId,
-        userId: sessionUser?.id,
-        projectId: typeof projectId === 'string' ? projectId : undefined,
-        providerId: provider.id,
-        model: pureModel,
-        label: `${modeLabel} - ${modelName}`,
-        creditCost: plannedCreditCost,
-        deferCreditCharge: true,
+      updateTaskProgress(taskId, {
+        status: 'processing',
+        progress: 0,
+        creditCost: migration.value.creditCost,
       });
     } catch (error) {
       console.error('[video/generate] Cloud task submit persistence failed:', error);
@@ -346,21 +491,6 @@ export async function POST(request: NextRequest) {
         retryable: true,
       }, { status: 503 });
     }
-    const charge = await chargeCloudTaskCredits(
-      taskId,
-      sessionUser?.id || 'anonymous',
-      plannedCreditCost,
-      `视频生成 - ${modelName}`,
-    );
-    if (!charge.charged) {
-      await terminateCloudTaskAndRefund(taskId, 'cancelled', '视频生成积分扣费未完成，未向供应商提交任务');
-      return NextResponse.json({
-        error: '积分不足或积分服务暂不可用，未向视频供应商提交请求',
-        retryable: true,
-      }, { status: 402 });
-    }
-    updateTaskProgress(taskId, { status: 'processing', progress: 0, creditCost: charge.creditCost });
-
     // 6. 异步提交到第三方 API
     after(async () => {
       const submitController = new AbortController();
@@ -508,6 +638,8 @@ export async function POST(request: NextRequest) {
         name: modelInfo.name,
         features: modelInfo.features,
       } : null,
+      requestId,
+      handlerVersion: taskEntryAudit.handlerVersion,
     });
   } catch (err: unknown) {
     console.error('[video/generate] Error:', err);
@@ -518,9 +650,14 @@ export async function POST(request: NextRequest) {
       targetType: 'video',
       durationMs: opTimer.end(),
     });
+    const status = err instanceof InsufficientCreditsError
+      ? 402
+      : err instanceof IdempotencyConflictError
+        ? 409
+        : 500;
     return NextResponse.json(
-      { error: errorMessage(err, '视频生成请求失败') },
-      { status: 500 },
+      { error: errorMessage(err, '视频生成请求失败'), requestId },
+      { status },
     );
   }
 }

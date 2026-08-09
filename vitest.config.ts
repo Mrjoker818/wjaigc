@@ -9,6 +9,7 @@ export default defineConfig({
       'src/__tests__/**/*.test.ts',
       'tests/unit/**/*.spec.ts',
       'tests/integration/**/*.test.ts',
+      'tests/regression/**/*.test.ts',
     ],
     // Sharp/fontconfig integration tests share native process resources and are
     // timing-flaky under file-level parallelism. Keep the full suite deterministic.

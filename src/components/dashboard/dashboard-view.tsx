@@ -69,6 +69,33 @@ interface ConnectorStatus {
   loading: boolean;
   error?: string;
 }
+interface CloudTaskMonitorRow {
+  id: string;
+  userId: string;
+  type: string;
+  status: string;
+  providerId?: string;
+  providerName?: string;
+  model?: string;
+  progress: number;
+  label?: string;
+  error?: string;
+  updatedAt: number;
+  requestId?: string;
+  handlerVersion?: string;
+  requestedProviderId?: string;
+  requestedModelId?: string;
+  actualProviderId?: string;
+  actualModelId?: string;
+  durationMs?: number;
+  errorSource?: string;
+  billing?: {
+    status?: string;
+    cost?: number;
+    chargedTransactionId?: string | null;
+    refundedTransactionId?: string | null;
+  };
+}
 function errorMessage(error: unknown, fallback: string): string { return error instanceof Error ? error.message : fallback; }
 function objectValue(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function connectorHealth(value: unknown): ConnectorHealth | null {
@@ -363,7 +390,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     totalUsage: number; dailyUsage: number;
     lastUpdated: string; error?: string; endpoint?: string;
   }>>([]);
-  const [cloudTasks, setCloudTasks] = useState<Array<{ id: string; userId: string; type: string; status: string; providerId?: string; providerName?: string; model?: string; progress: number; label?: string; error?: string; updatedAt: number }>>([]);
+  const [cloudTasks, setCloudTasks] = useState<CloudTaskMonitorRow[]>([]);
   const [cloudTasksLoading, setCloudTasksLoading] = useState(false);
   const [cloudTasksError, setCloudTasksError] = useState<string | null>(null);
   const [providerTaskSummary, setProviderTaskSummary] = useState<Record<string, { total: number; processing: number; failed: number }>>({});
@@ -3074,8 +3101,32 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   {cloudTasks.slice(0, 8).map(task => {
                     const isFailed = ['failed', 'timeout', 'cancelled'].includes(task.status);
                     const isCompleted = task.status === 'completed';
+                    const durationLabel = typeof task.durationMs === 'number'
+                      ? task.durationMs >= 60_000
+                        ? `${(task.durationMs / 60_000).toFixed(1)} 分钟`
+                        : `${(task.durationMs / 1_000).toFixed(1)} 秒`
+                      : '未记录';
                     return <div key={task.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-2.5 hover:bg-muted/40">
-                      <div className="min-w-0"><div className="flex items-center gap-2"><span className="text-xs font-medium text-foreground truncate">{task.label || task.type}</span><span className={`text-[10px] px-1.5 py-0.5 rounded ${isFailed ? 'bg-destructive/15 text-destructive' : isCompleted ? 'bg-emerald-500/15 text-emerald-500' : 'bg-primary/10 text-primary'}`}>{task.status}</span></div><div className="mt-1 text-[10px] text-muted-foreground truncate">{task.providerName || task.providerId || '未标记供应商'} · {task.model || '未标记模型'}{task.error ? ` · ${task.error}` : ''}</div></div>
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-medium text-foreground truncate">{task.label || task.type}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${isFailed ? 'bg-destructive/15 text-destructive' : isCompleted ? 'bg-emerald-500/15 text-emerald-500' : 'bg-primary/10 text-primary'}`}>{task.status}</span>
+                          <span className="text-[10px] text-muted-foreground">{task.handlerVersion || 'legacy'}</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground break-all">
+                          请求：{task.requestedProviderId || '自动'} · {task.requestedModelId || '自动'}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground break-all">
+                          实际：{task.providerName || task.actualProviderId || task.providerId || '未标记供应商'} · {task.actualModelId || task.model || '未标记模型'}
+                        </div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                          <span>耗时 {durationLabel}</span>
+                          <span>积分 {task.billing?.status || '未记录'} / {task.billing?.cost ?? 0}</span>
+                          <span>错误来源 {task.errorSource || '未标记'}</span>
+                          <span className="break-all">requestId {task.requestId || '未记录'}</span>
+                        </div>
+                        {task.error && <div className="text-[10px] text-destructive break-words">{task.error}</div>}
+                      </div>
                       <div className="text-right text-[10px] text-muted-foreground"><div>{task.progress}%</div><div className="mt-1">{new Date(task.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div></div>
                     </div>;
                   })}

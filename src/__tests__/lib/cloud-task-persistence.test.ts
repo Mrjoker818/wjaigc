@@ -72,6 +72,38 @@ describe('cloud-task-persistence', () => {
     expect(created).toBe(true);
   });
 
+  it('persists image entry audit facts for the administrator task projection', async () => {
+    const taskEntryAudit = {
+      entry: 'edit' as const,
+      mode: 'shadow' as const,
+      handlerVersion: 'task-core-v2-shadow' as const,
+      requestId: 'req-image-edit-1',
+      requestedProviderId: 'provider-requested',
+      requestedModelId: 'model-requested',
+      actualProviderId: 'provider-actual',
+      actualModelId: 'model-actual',
+      startedAt: 1_000,
+      updatedAt: 1_200,
+      durationMs: 200,
+      creditCost: 4,
+      creditStatus: 'charged' as const,
+    };
+
+    await recordImageTaskSubmitted({
+      taskId: 'remote-task-audited',
+      userId: 'user-a',
+      creditCost: 4,
+      creditStatus: 'charged',
+      taskEntryAudit,
+    });
+
+    expect(createCloudTask).toHaveBeenCalledWith(expect.objectContaining({
+      result: { taskEntryAudit },
+      creditCost: 4,
+      creditStatus: 'charged',
+    }));
+  });
+
   it('propagates an idempotency collision to the submitter', async () => {
     createCloudTask.mockResolvedValue(false);
 

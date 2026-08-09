@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForFeature, findProviderById, findProviderForModel } from '@/lib/server-api-config';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
@@ -14,9 +15,23 @@ import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
 import { isTaskCancelled as isRegistryCancelled } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits, refundCredits } from '@/lib/credits';
+import {
+  calculateConfiguredCreditCost,
+  consumeCredits,
+  refundCredits,
+  InsufficientCreditsError,
+} from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logError, OP_ACTIONS } from '@/lib/op-log';
+import {
+  createTaskEntryAudit,
+  executeTaskEntryMigration,
+  resolveTaskCoreMode,
+} from '@/lib/task-core/entry-migration';
+import { createBillableTask } from '@/lib/task-core/billing-service';
+import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
+import type { DurableTaskStatus } from '@/lib/task-core/task-state';
+import { getRequestId } from '@/lib/request-id';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -71,8 +86,11 @@ if (typeof setInterval !== 'undefined') {
  */
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+  const requestId = getRequestId(request);
+  const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   let deductedCredits = 0;
   let sessionUser: import('@/lib/user-types').User | null = null;
+  let localTaskId: string | null = null;
   const selectedModel = '';
   const providerId = '';
   try {
@@ -118,17 +136,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '缺少图片或描述' }, { status: 400 });
     }
 
-    // 积分检查与扣除
-    sessionUser = await getSessionUser(request).catch(() => null);
-    deductedCredits = 0;
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model);
-      if (!creditResult.success) {
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-      deductedCredits = creditResult.cost;
-    }
-
     // Content safety check
     const safetyResult = checkPromptSafety(prompt);
     if (safetyResult.level === 'block') {
@@ -138,8 +145,168 @@ export async function POST(request: NextRequest) {
       logSafetyWarning(prompt, safetyResult);
     }
 
-    // 生成任务 ID
-    const taskId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    sessionUser = await getSessionUser(request).catch(() => null);
+    const plannedCreditCost = sessionUser
+      ? await calculateConfiguredCreditCost(
+          'image_retouch',
+          typeof pureModel === 'string' ? pureModel : undefined,
+          { providerId: typeof providerId === 'string' ? providerId : undefined },
+        )
+      : 0;
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
+    const requestDigest = createHash('sha256').update(JSON.stringify({
+      image,
+      prompt,
+      maskDataUrl,
+      providerId,
+      model: pureModel,
+      imageProviderId,
+      imageModel: pureImageModel,
+      imagePrompt,
+      quality,
+      aspectRatio,
+      maxRounds,
+    })).digest('hex');
+    type AgentAdmission = {
+      taskId: string;
+      creditCost: number;
+      reused: boolean;
+      status: DurableTaskStatus;
+      result?: Record<string, unknown>;
+    };
+    const admission = await executeTaskEntryMigration<AgentAdmission>({
+      mode: taskCoreMode,
+      legacy: async () => {
+        let creditCost = 0;
+        if (sessionUser) {
+          const creditResult = await consumeCredits(
+            sessionUser.id,
+            'image_retouch',
+            undefined,
+            undefined,
+            model,
+          );
+          if (!creditResult.success) {
+            throw new InsufficientCreditsError(
+              sessionUser.id,
+              plannedCreditCost,
+              creditResult.balance || 0,
+            );
+          }
+          creditCost = creditResult.cost;
+          deductedCredits = creditCost;
+        }
+        const taskId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const created = await recordAgentTaskSubmitted({
+          taskId,
+          userId: authResult.userId,
+          providerId: typeof providerId === 'string' ? providerId : undefined,
+          model: typeof pureModel === 'string' ? pureModel : undefined,
+          label: 'Agent processing',
+          creditCost,
+          creditStatus: creditCost > 0 ? 'pending' : 'not-applicable',
+          taskEntryAudit: createTaskEntryAudit({
+            entry: 'agent',
+            mode: taskCoreMode,
+            requestId,
+            requestedProviderId: typeof providerId === 'string' ? providerId : undefined,
+            requestedModelId: typeof model === 'string' ? model : undefined,
+            actualProviderId: typeof providerId === 'string' ? providerId : undefined,
+            actualModelId: typeof pureModel === 'string' ? pureModel : undefined,
+            startedAt: startTime,
+            creditCost,
+            creditStatus: creditCost > 0 ? 'pending' : 'not-applicable',
+          }),
+        });
+        if (!created) throw new Error('Agent task could not be created');
+        return { taskId, creditCost, reused: false, status: 'processing' };
+      },
+      coreV2: async () => {
+        const now = Date.now();
+        const result = await createBillableTask({
+          userId: authResult.userId,
+          idempotencyKey,
+          requestDigest,
+          creditCost: plannedCreditCost,
+          task: {
+            id: `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'agent-edit',
+            status: 'processing',
+            providerId: typeof providerId === 'string' ? providerId : undefined,
+            model: typeof pureModel === 'string' ? pureModel : undefined,
+            progress: 5,
+            label: 'Agent processing',
+            result: {
+              taskEntryAudit: createTaskEntryAudit({
+                entry: 'agent',
+                mode: 'core-v2',
+                requestId,
+                requestedProviderId: typeof providerId === 'string' ? providerId : undefined,
+                requestedModelId: typeof model === 'string' ? model : undefined,
+                actualProviderId: typeof providerId === 'string' ? providerId : undefined,
+                actualModelId: typeof pureModel === 'string' ? pureModel : undefined,
+                startedAt: startTime,
+                creditCost: plannedCreditCost,
+                creditStatus: plannedCreditCost > 0 ? 'pending' : 'not-applicable',
+              }),
+            },
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        return {
+          taskId: result.task.id,
+          creditCost: result.task.creditCost || 0,
+          reused: result.reused,
+          status: result.task.status,
+          result: result.task.result,
+        };
+      },
+      factsFromResult: value => ({
+        providerId: typeof providerId === 'string' ? providerId : undefined,
+        modelId: typeof pureModel === 'string' ? pureModel : undefined,
+        creditCost: value.creditCost,
+        status: value.status === 'completed'
+          || value.status === 'failed'
+          || value.status === 'cancelled'
+          || value.status === 'timeout'
+          ? value.status
+          : 'processing',
+      }),
+      previewCoreFacts: async () => ({
+        providerId: typeof providerId === 'string' ? providerId : undefined,
+        modelId: typeof pureModel === 'string' ? pureModel : undefined,
+        creditCost: plannedCreditCost,
+        status: 'processing',
+      }),
+    });
+    const taskId = admission.value.taskId;
+    localTaskId = taskId;
+    deductedCredits = admission.value.creditCost;
+    if (admission.value.reused) {
+      if (
+        admission.value.status === 'failed'
+        || admission.value.status === 'cancelled'
+        || admission.value.status === 'timeout'
+      ) {
+        return NextResponse.json({
+          success: false,
+          code: 'AGENT_TASK_TERMINAL',
+          error: `Agent task is already ${admission.value.status}`,
+          taskId,
+          status: admission.value.status,
+          replayed: true,
+        }, { status: 409 });
+      }
+      return NextResponse.json({
+        success: true,
+        taskId,
+        status: admission.value.status,
+        result: admission.value.result,
+        mode: 'agent',
+        replayed: true,
+      });
+    }
 
     // 注册任务到本地存储
     localTaskStore.set(taskId, {
@@ -150,34 +317,20 @@ export async function POST(request: NextRequest) {
       createdAt: Date.now(),
     });
 
-    // 异步执行（后台处理）— 使用 after() 确保响应返回后 IIFE 仍可运行
-    try {
-      const created = await recordAgentTaskSubmitted({
-        taskId,
-        userId: authResult.userId,
-        providerId: typeof providerId === 'string' ? providerId : undefined,
-        model: typeof pureModel === 'string' ? pureModel : undefined,
-        label: 'Agent processing',
-      });
-      if (!created) {
-        return NextResponse.json({ success: false, error: 'Agent task could not be created. Please retry.' }, { status: 503 });
-      }
-      void recordAgentTaskProgress(taskId, 5, 'Agent processing');
-    } catch (error) {
-      console.warn('[agent-edit] persistent task creation failed:', error);
-      return NextResponse.json({ success: false, error: 'Agent task storage is temporarily unavailable. Please retry.' }, { status: 503 });
-    }
+    await recordAgentTaskProgress(taskId, 5, 'Agent processing');
 
     after(async () => {
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
-        const task = localTaskStore.get(taskId);
-        if (task && task.status === 'processing') {
-          localTaskStore.set(taskId, { ...task, status: 'timeout', error: 'Agent task timed out', progress: 0 });
-          void recordAgentTaskTerminal(taskId, {
-            status: 'timeout', error: 'Agent task timed out',
-          }).catch(error => console.warn('[agent-edit] timeout persistence failed:', error));
-        }
+        void (async () => {
+          const task = localTaskStore.get(taskId);
+          if (task && task.status === 'processing') {
+            await recordAgentTaskTerminal(taskId, {
+              status: 'timeout', error: 'Agent task timed out',
+            });
+            localTaskStore.set(taskId, { ...task, status: 'timeout', error: 'Agent task timed out', progress: 0 });
+          }
+        })().catch(error => console.error('[agent-edit] timeout persistence failed:', error));
       }, EDIT_GLOBAL_TIMEOUT_MS);
 
       // 辅助函数：检查任务是否已被取消（同时检查本地 store 和全局 task-registry）
@@ -214,15 +367,15 @@ export async function POST(request: NextRequest) {
             if (authorized.has(pureModel)) {
               chatModel = pureModel;
             } else {
+              await recordAgentTaskTerminal(taskId, {
+                status: 'failed', error: `Model ${pureModel} is not authorized on provider ${chatProvider.name}`,
+              });
               localTaskStore.set(taskId, {
                 userId: authResult.userId,
                 status: 'failed',
                 error: `模型 ${pureModel} 不在提供商 ${chatProvider.name} 的授权列表中，请切换其他模型`,
                 progress: 100, label: '失败', createdAt: Date.now(),
               });
-              void recordAgentTaskTerminal(taskId, {
-                status: 'failed', error: `Model ${pureModel} is not authorized on provider ${chatProvider.name}`,
-              }).catch(e => console.warn('[agent-edit] terminal persistence failed:', e));
               return;
             }
           } else {
@@ -235,13 +388,13 @@ export async function POST(request: NextRequest) {
           chatProvider = await findProviderForFeature('chat');
           if (!chatProvider || isCancelled()) {
             if (!chatProvider) {
+              await recordAgentTaskTerminal(taskId, {
+                status: 'failed', error: 'No chat model is configured for Agent execution',
+              });
               localTaskStore.set(taskId, {
                 userId: authResult.userId,
                 status: 'failed', error: '未配置聊天模型，请在管理员面板添加 LLM 模型', progress: 100, label: '失败', createdAt: Date.now(),
               });
-              void recordAgentTaskTerminal(taskId, {
-                status: 'failed', error: 'No chat model is configured for Agent execution',
-              }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
             }
             return;
           }
@@ -252,13 +405,13 @@ export async function POST(request: NextRequest) {
 
         // 最终兜底：仍无可用模型时给出明确错误，而非带空模型继续执行
         if (!chatModel) {
+          await recordAgentTaskTerminal(taskId, {
+            status: 'failed', error: 'No authorized chat model is available for Agent execution',
+          });
           localTaskStore.set(taskId, {
             userId: authResult.userId,
             status: 'failed', error: '聊天模型未授权，请在管理员面板配置可用的 LLM 模型', progress: 100, label: '失败', createdAt: Date.now(),
           });
-          void recordAgentTaskTerminal(taskId, {
-            status: 'failed', error: 'No authorized chat model is available for Agent execution',
-          }).catch(e => console.warn('[agent-edit] terminal persistence failed:', e));
           return;
         }
 
@@ -647,9 +800,9 @@ export async function POST(request: NextRequest) {
         }
 
         if (result.success) {
-          void recordAgentTaskTerminal(taskId, {
+          await recordAgentTaskTerminal(taskId, {
             status: 'completed', imageUrl: persistedImageUrl, steps: result.steps, finalResponse: result.finalResponse,
-          }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
+          });
           localTaskStore.set(taskId, {
             userId: authResult.userId,
             status: 'completed',
@@ -663,10 +816,10 @@ export async function POST(request: NextRequest) {
             createdAt: localTaskStore.get(taskId)?.createdAt || Date.now(),
           });
         } else {
-          void recordAgentTaskTerminal(taskId, {
+          await recordAgentTaskTerminal(taskId, {
             status: 'failed', imageUrl: persistedImageUrl, steps: result.steps, finalResponse: result.finalResponse,
             error: translateApiError(result.error || result.finalResponse || 'Agent execution failed'),
-          }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
+          });
           // Agent 执行失败（LLM 调用失败、工具执行失败等）
           localTaskStore.set(taskId, {
             userId: authResult.userId,
@@ -687,10 +840,10 @@ export async function POST(request: NextRequest) {
         console.error('[agent-edit] Error:', errMsg);
         const task = localTaskStore.get(taskId);
         if (task && task.status === 'processing') {
-          localTaskStore.set(taskId, { ...task, status: 'failed', error: translateApiError(errMsg), progress: 100 });
-          void recordAgentTaskTerminal(taskId, {
+          await recordAgentTaskTerminal(taskId, {
             status: 'failed', error: translateApiError(errMsg),
-          }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
+          });
+          localTaskStore.set(taskId, { ...task, status: 'failed', error: translateApiError(errMsg), progress: 100 });
         }
       } finally {
         clearTimeout(timeout);
@@ -714,11 +867,26 @@ export async function POST(request: NextRequest) {
       durationMs,
       detail: `Agent编排编辑请求失败`,
     });
-    // 退款：Agent编排失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
+    if (localTaskId) {
+      try {
+        await recordAgentTaskTerminal(localTaskId, {
+          status: 'failed',
+          error: err instanceof Error ? err.message : 'Agent request failed',
+        });
+      } catch (settleError) {
+        console.error('[agent-edit] Task settlement failed:', settleError);
+      }
+    } else if (deductedCredits > 0 && sessionUser) {
       try {
         await refundCredits(sessionUser.id, deductedCredits, `Agent编排失败退款`);
       } catch (refundErr) { console.error('[agent-edit] Refund failed:', refundErr); }
+    }
+    if (err instanceof InsufficientCreditsError || err instanceof IdempotencyConflictError) {
+      return NextResponse.json({
+        success: false,
+        code: err.code,
+        error: err.message,
+      }, { status: err.statusCode });
     }
     return NextResponse.json(
       { success: false, error: '请求处理失败' },
@@ -762,9 +930,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Task not found or access denied' }, { status: 404 });
     }
     if (task && task.status === 'processing') {
+      await recordAgentTaskTerminal(taskId, { status: 'cancelled', error: 'Task cancelled by user' });
       localTaskStore.set(taskId, { ...task, status: 'cancelled', error: '任务已取消' });
-      void recordAgentTaskTerminal(taskId, { status: 'cancelled', error: 'Task cancelled by user' })
-        .catch(error => console.warn('[agent-edit] cancellation persistence failed:', error));
       return NextResponse.json({ success: true, status: 'cancelled' });
     }
     return NextResponse.json({ success: false, error: '任务不存在或无法取消' });

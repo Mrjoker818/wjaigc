@@ -8,6 +8,17 @@ function readSource(path: string): string {
 }
 
 describe('video task durability contract', () => {
+  it('guards the generate entry with a single-path task-core migration', () => {
+    const source = readSource('src/app/api/video/generate/route.ts');
+
+    expect(source).toContain('executeTaskEntryMigration({');
+    expect(source).toContain('createBillableTask({');
+    expect(source).toContain("request.headers.get('idempotency-key')");
+    expect(source.indexOf('executeTaskEntryMigration({')).toBeLessThan(
+      source.indexOf('after(async () => {'),
+    );
+  });
+
   for (const routePath of [
     'src/app/api/video/generate/route.ts',
     'src/app/api/video/extend/route.ts',

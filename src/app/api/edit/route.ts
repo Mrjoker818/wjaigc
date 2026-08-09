@@ -5,7 +5,12 @@ import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getSessionUser } from '@/lib/server-auth';
-import { calculateConfiguredCreditCost, consumeCredits, refundCredits } from '@/lib/credits';
+import {
+  calculateConfiguredCreditCost,
+  consumeCredits,
+  refundCredits,
+  InsufficientCreditsError,
+} from '@/lib/credits';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { validateImageUrl, validatePrompt } from '@/lib/input-validation';
 import type { ApiProvider } from '@/lib/universal-api-types';
@@ -34,6 +39,15 @@ import {
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
 import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
+import {
+  createTaskEntryAudit,
+  executeTaskEntryMigration,
+  resolveTaskCoreMode,
+} from '@/lib/task-core/entry-migration';
+import { createBillableTask } from '@/lib/task-core/billing-service';
+import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
+import type { DurableTaskStatus } from '@/lib/task-core/task-state';
+import { getRequestId } from '@/lib/request-id';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
@@ -303,6 +317,9 @@ function extractAllImagesFromResponse(responseData: Record<string, unknown>, fal
 // ============================================================
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
+  const taskStartedAt = Date.now();
+  const requestId = getRequestId(request);
+  const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
   const annotationIdempotencyKey = request.headers.get('x-idempotency-key')?.trim() || '';
@@ -314,6 +331,7 @@ export async function POST(request: NextRequest) {
     }, { status: 400 });
   }
   let deductedCredits = 0;
+  let usesAtomicBilling = false;
   let sessionUser: import('@/lib/user-types').User | null = null;
   let annotationTaskId = '';
   try {
@@ -452,60 +470,145 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    if (annotationIdempotencyKey) {
-      const claim = await claimAnnotationEditTask({
-        userId: authResult.userId,
-        idempotencyKey: annotationIdempotencyKey,
-        requestHash: createAnnotationRequestHash(parsedRequestBody),
-        providerId: extractedProviderId || providerId || imageProvider?.id || '',
-        model: pureModel,
-      });
-      annotationTaskId = claim.taskId;
-      if (!claim.owner) {
-        return NextResponse.json({
-          success: true,
-          mode: 'polling',
-          taskId: claim.taskId,
-          replayed: true,
+    type EditAdmission = {
+      taskId: string | null;
+      creditCost: number;
+      reused: boolean;
+      status: DurableTaskStatus;
+    };
+    const requestHash = createAnnotationRequestHash(parsedRequestBody);
+    const actualProviderId = extractedProviderId || providerId || imageProvider?.id || '';
+    const plannedCreditCost = sessionUser
+      ? await calculateConfiguredCreditCost(
+          'image_retouch',
+          model,
+          { quality, providerId: providerId || undefined },
+        )
+      : 0;
+    const admission = await executeTaskEntryMigration<EditAdmission>({
+      mode: taskCoreMode,
+      legacy: async () => {
+        let claimedTaskId: string | null = null;
+        let reused = false;
+        if (annotationIdempotencyKey) {
+          const claim = await claimAnnotationEditTask({
+            userId: authResult.userId,
+            idempotencyKey: annotationIdempotencyKey,
+            requestHash,
+            providerId: actualProviderId,
+            model: pureModel,
+          });
+          claimedTaskId = claim.taskId;
+          reused = !claim.owner;
+        }
+        if (reused) {
+          return { taskId: claimedTaskId, creditCost: 0, reused, status: 'processing' };
+        }
+        if (!sessionUser) {
+          return { taskId: claimedTaskId, creditCost: 0, reused: false, status: 'processing' };
+        }
+        const creditResult = claimedTaskId
+          ? await chargeCloudTaskCredits(
+              claimedTaskId,
+              sessionUser.id,
+              plannedCreditCost,
+              `Annotation edit [${pureModel}]`,
+            )
+          : await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { quality, providerId: providerId || undefined });
+        const creditAccepted = 'success' in creditResult
+          ? creditResult.success
+          : creditResult.charged;
+        if (!creditAccepted) {
+          if (claimedTaskId) {
+            await updateCloudTask(claimedTaskId, {
+              status: 'failed',
+              error: 'Insufficient credits',
+              creditStatus: 'not-applicable',
+            });
+          }
+          const balance = 'balance' in creditResult ? creditResult.balance || 0 : 0;
+          throw new InsufficientCreditsError(
+            sessionUser.id,
+            plannedCreditCost,
+            balance,
+          );
+        }
+        return {
+          taskId: claimedTaskId,
+          creditCost: 'cost' in creditResult ? creditResult.cost : creditResult.creditCost,
+          reused: false,
+          status: 'processing',
+        };
+      },
+      coreV2: async () => {
+        const now = Date.now();
+        const result = await createBillableTask({
+          userId: authResult.userId,
+          idempotencyKey: annotationIdempotencyKey || requestId,
+          requestDigest: requestHash,
+          creditCost: plannedCreditCost,
+          task: {
+            id: `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            type: 'edit',
+            status: 'processing',
+            providerId: actualProviderId || undefined,
+            model: pureModel,
+            progress: 0,
+            label: '语言修图',
+            result: { requestHash },
+            createdAt: now,
+            updatedAt: now,
+          },
         });
-      }
+        return {
+          taskId: result.task.id,
+          creditCost: result.task.creditCost || 0,
+          reused: result.reused,
+          status: result.task.status,
+        };
+      },
+      factsFromResult: value => ({
+        providerId: actualProviderId || undefined,
+        modelId: pureModel,
+        creditCost: value.creditCost,
+        status: value.status === 'completed'
+          || value.status === 'failed'
+          || value.status === 'cancelled'
+          || value.status === 'timeout'
+          ? value.status
+          : 'processing',
+      }),
+      previewCoreFacts: async () => ({
+        providerId: actualProviderId || undefined,
+        modelId: pureModel,
+        creditCost: plannedCreditCost,
+        status: 'processing',
+      }),
+    });
+    usesAtomicBilling = admission.mode === 'core-v2';
+    annotationTaskId = admission.value.taskId || '';
+    deductedCredits = admission.value.creditCost;
+    if (admission.value.reused && admission.value.taskId) {
+      return NextResponse.json({
+        success: true,
+        mode: 'polling',
+        taskId: admission.value.taskId,
+        replayed: true,
+      });
     }
 
-    // 积分扣除（在凭证验证通过后）
-    if (sessionUser) {
-      const creditResult = annotationTaskId
-        ? await (async () => {
-            const cost = await calculateConfiguredCreditCost(
-              'image_retouch',
-              model,
-              { quality, providerId: providerId || undefined },
-            );
-            const result = await chargeCloudTaskCredits(
-              annotationTaskId,
-              sessionUser.id,
-              cost,
-              `Annotation edit [${pureModel}]`,
-            );
-            return {
-              success: result.charged,
-              balance: result.balance || 0,
-              cost: result.creditCost,
-              message: result.charged ? undefined : '积分不足或批注任务已结算',
-            };
-          })()
-        : await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { quality, providerId: providerId || undefined });
-      if (!creditResult.success) {
-        if (annotationTaskId) {
-          await updateCloudTask(annotationTaskId, {
-            status: 'failed',
-            error: creditResult.message || 'Insufficient credits',
-            creditStatus: 'not-applicable',
-          });
-        }
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-      deductedCredits = creditResult.cost;
-    }
+    const taskEntryAudit = createTaskEntryAudit({
+      entry: 'edit',
+      mode: taskCoreMode,
+      requestId,
+      requestedProviderId: extractedProviderId || providerId || undefined,
+      requestedModelId: model,
+      actualProviderId: imageProvider?.id || extractedProviderId || providerId || undefined,
+      actualModelId: pureModel,
+      startedAt: taskStartedAt,
+      creditCost: deductedCredits,
+      creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+    });
 
     // ========== 1.5 创建异步任务（提交+轮询模式，避免CDN/FaaS代理超时） ==========
     const taskId = annotationTaskId || `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -513,6 +616,10 @@ export async function POST(request: NextRequest) {
       await updateCloudTask(taskId, {
         status: 'processing',
         progress: 0,
+        result: {
+          requestHash: createAnnotationRequestHash(parsedRequestBody),
+          taskEntryAudit,
+        },
       });
     }
     setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
@@ -546,6 +653,11 @@ export async function POST(request: NextRequest) {
         if (annotationTaskId) {
           const committed = await completeCloudTask(taskId, {
             requestHash: createAnnotationRequestHash(parsedRequestBody),
+            taskEntryAudit: createTaskEntryAudit({
+              ...taskEntryAudit,
+              updatedAt: Date.now(),
+              creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+            }),
             ...result,
           });
           if (!committed) return false;
@@ -1690,12 +1802,14 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
   });
 
   // ========== 立即返回 taskId（提交+轮询模式） ==========
-  return NextResponse.json({
-    success: true,
-    mode: 'polling',
-    taskId,
-    estimatedTime: 30,
-  });
+   return NextResponse.json({
+     success: true,
+     mode: 'polling',
+     taskId,
+     estimatedTime: 30,
+     requestId,
+     handlerVersion: taskEntryAudit.handlerVersion,
+   });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[edit] Task creation error: ${message}`);
@@ -1707,7 +1821,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       durationMs: opTimer.end(),
     });
     // 退款：任务创建失败时退还积分
-    if (annotationTaskId) {
+    if (usesAtomicBilling && annotationTaskId) {
       try {
         await terminateCloudTaskAndRefund(
           annotationTaskId,
@@ -1717,7 +1831,17 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       } catch (refundErr) {
         console.error('[edit] Atomic annotation refund failed:', refundErr);
       }
-    } else if (deductedCredits > 0 && sessionUser) {
+    } else if (!usesAtomicBilling && annotationTaskId) {
+      try {
+        await terminateCloudTaskAndRefund(
+          annotationTaskId,
+          'failed',
+          message.substring(0, 100),
+        );
+      } catch (refundErr) {
+        console.error('[edit] Atomic annotation refund failed:', refundErr);
+      }
+    } else if (!usesAtomicBilling && deductedCredits > 0 && sessionUser) {
       try {
         await refundCredits(sessionUser.id, deductedCredits, `语言修图任务创建失败退款: ${message.substring(0, 100)}`);
       } catch (refundErr) { console.error('[edit] Refund failed:', refundErr); }
@@ -1728,6 +1852,13 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         code: error.code,
         error: error.message,
       }, { status: 409 });
+    }
+    if (error instanceof InsufficientCreditsError || error instanceof IdempotencyConflictError) {
+      return NextResponse.json({
+        success: false,
+        code: error.code,
+        error: error.message,
+      }, { status: error.statusCode });
     }
     return NextResponse.json({ success: false, error: `任务创建失败: ${message}` }, { status: 500 });
   }

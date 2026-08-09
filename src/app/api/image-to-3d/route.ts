@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits, refundCredits } from '@/lib/credits';
+import {
+  calculateConfiguredCreditCost,
+  consumeCredits,
+  refundCredits,
+  InsufficientCreditsError,
+} from '@/lib/credits';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import fsSync from 'fs';
@@ -9,6 +15,16 @@ import path from 'path';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS } from '@/lib/op-log';
 import { recordThreeDTaskSubmitted } from '@/lib/cloud-task-persistence';
+import {
+  createTaskEntryAudit,
+  executeTaskEntryMigration,
+  resolveTaskCoreMode,
+} from '@/lib/task-core/entry-migration';
+import { createBillableTask, settleFailedTask } from '@/lib/task-core/billing-service';
+import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
+import type { DurableTaskStatus } from '@/lib/task-core/task-state';
+import { completeCloudTask, updateCloudTask } from '@/lib/cloud-task-storage';
+import { getRequestId } from '@/lib/request-id';
 import {
   THREE_D_SUBMISSION_TIMEOUT_MS,
   TRIPO_UPLOAD_CONCURRENCY,
@@ -1067,7 +1083,11 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+  const requestId = getRequestId(request);
+  const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   let deductedCredits = 0;
+  let localTaskId: string | null = null;
+  let usesAtomicBilling = false;
   let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   const finalModel = '';
   const finalProviderId = '';
@@ -1076,7 +1096,10 @@ export async function POST(request: NextRequest) {
     if (!runtimeSettings.threeDModelEnabled) {
       return NextResponse.json({ success: false, error: '3D generation is currently disabled by the administrator' }, { status: 403 });
     }
-    const body = await resolveServerProvider(await request.json() as ImageTo3DRequest);
+    const requestedBody = await request.json() as ImageTo3DRequest;
+    const requestedProviderId = requestedBody.providerId || requestedBody.provider?.id;
+    const requestedModelId = requestedBody.provider?.model;
+    const body = await resolveServerProvider(requestedBody);
     // 输入校验
     const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {
         imageUrl: 'optionalImageUrl'
@@ -1087,16 +1110,6 @@ export async function POST(request: NextRequest) {
 
     // Verify session (getSessionUser throws on unauthenticated)
     sessionUser = await getSessionUser(request);
-
-    // 积分检查与扣除
-    deductedCredits = 0;
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, '3d_model');
-      if (!creditResult.success) {
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-      deductedCredits = creditResult.cost;
-    }
 
     // Validate: text-to-3d needs prompt; single-image/multi-image needs imageUrl
     const mode = body.mode || 'single-image';
@@ -1115,6 +1128,138 @@ export async function POST(request: NextRequest) {
     }
     if (body.backend === 'api' && !body.provider?.apiKey) {
       return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
+    }
+
+    type ThreeDAdmission = {
+      taskId: string | null;
+      creditCost: number;
+      reused: boolean;
+      status: DurableTaskStatus;
+      result?: Record<string, unknown>;
+    };
+    const plannedCreditCost = sessionUser
+      ? await calculateConfiguredCreditCost('3d_model')
+      : 0;
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
+    const requestDigest = createHash('sha256').update(JSON.stringify({
+      providerId: body.provider?.id,
+      model: body.provider?.model,
+      mode: body.mode,
+      imageUrl: body.imageUrl,
+      images: body.images,
+      prompt: body.prompt,
+      quality: body.quality,
+      texture: body.texture,
+      format: body.format,
+      version: body.version,
+      enablePBR: body.enablePBR,
+      faceCount: body.faceCount,
+      pose: body.pose,
+    })).digest('hex');
+    const admission = await executeTaskEntryMigration<ThreeDAdmission>({
+      mode: taskCoreMode,
+      legacy: async () => {
+        if (!sessionUser) {
+          return { taskId: null, creditCost: 0, reused: false, status: 'processing' };
+        }
+        const creditResult = await consumeCredits(sessionUser.id, '3d_model');
+        if (!creditResult.success) {
+          throw new InsufficientCreditsError(
+            sessionUser.id,
+            plannedCreditCost,
+            creditResult.balance || 0,
+          );
+        }
+        return {
+          taskId: null,
+          creditCost: creditResult.cost,
+          reused: false,
+          status: 'processing',
+        };
+      },
+      coreV2: async () => {
+        const now = Date.now();
+        const result = await createBillableTask({
+          userId: sessionUser?.id || 'anonymous',
+          idempotencyKey,
+          requestDigest,
+          creditCost: plannedCreditCost,
+          task: {
+            id: `3d_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+            type: '3d-model',
+            status: 'processing',
+            providerId: body.provider?.id,
+            model: body.provider?.model,
+            progress: 0,
+            label: '3D model generation',
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        return {
+          taskId: result.task.id,
+          creditCost: result.task.creditCost || 0,
+          reused: result.reused,
+          status: result.task.status,
+          result: result.task.result,
+        };
+      },
+      factsFromResult: value => ({
+        providerId: body.provider?.id,
+        modelId: body.provider?.model,
+        creditCost: value.creditCost,
+        status: value.status === 'completed'
+          || value.status === 'failed'
+          || value.status === 'cancelled'
+          || value.status === 'timeout'
+          ? value.status
+          : 'processing',
+      }),
+      previewCoreFacts: async () => ({
+        providerId: body.provider?.id,
+        modelId: body.provider?.model,
+        creditCost: plannedCreditCost,
+        status: 'processing',
+      }),
+    });
+    usesAtomicBilling = admission.mode === 'core-v2';
+    localTaskId = admission.value.taskId;
+    deductedCredits = admission.value.creditCost;
+    if (admission.value.reused && localTaskId) {
+      const replayResult = admission.value.result || {};
+      if (admission.value.status === 'completed') {
+        return NextResponse.json({
+          success: true,
+          backend: body.backend,
+          taskId: localTaskId,
+          status: admission.value.status,
+          assetUrl: replayResult.assetUrl,
+          previewImageUrl: replayResult.previewImageUrl,
+          modelUrls: replayResult.modelUrls,
+          replayed: true,
+        });
+      }
+      if (
+        admission.value.status === 'failed'
+        || admission.value.status === 'cancelled'
+        || admission.value.status === 'timeout'
+      ) {
+        return NextResponse.json({
+          success: false,
+          code: 'THREE_D_TASK_TERMINAL',
+          error: `3D task is already ${admission.value.status}`,
+          taskId: localTaskId,
+          status: admission.value.status,
+          replayed: true,
+        }, { status: 409 });
+      }
+      return NextResponse.json({
+        success: true,
+        backend: body.backend,
+        taskId: localTaskId,
+        status: admission.value.status,
+        replayed: true,
+      });
     }
 
     // Resolve local image URLs to accessible format for external APIs
@@ -1148,16 +1293,53 @@ export async function POST(request: NextRequest) {
       local: body.local,
     }));
 
+    const taskEntryAudit = createTaskEntryAudit({
+      entry: '3d',
+      mode: taskCoreMode,
+      requestId,
+      requestedProviderId,
+      requestedModelId,
+      actualProviderId: body.provider?.id,
+      actualModelId: body.provider?.model,
+      startedAt: startTime,
+      creditCost: deductedCredits,
+      creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+    });
     const external = await tryExternalRequest(body);
     if (external?.assetUrl || external?.taskId) {
-      if (external.taskId) {
-        void recordThreeDTaskSubmitted({
+      if (usesAtomicBilling && localTaskId) {
+        if (external.taskId) {
+          const remoteIdentityPersisted = await updateCloudTask(localTaskId, {
+            status: 'processing',
+            progress: 5,
+            remoteTaskId: external.taskId,
+            result: { taskEntryAudit },
+          });
+          if (!remoteIdentityPersisted) {
+            throw new Error('Unable to persist the 3D supplier task identity');
+          }
+        } else if (external.assetUrl) {
+          const completionPersisted = await completeCloudTask(localTaskId, {
+            assetUrl: external.assetUrl,
+            previewImageUrl: external.previewImageUrl,
+            modelUrls: external.modelUrls,
+            taskEntryAudit,
+          });
+          if (!completionPersisted) {
+            throw new Error('Unable to persist the completed 3D task');
+          }
+        }
+      } else if (external.taskId) {
+        await recordThreeDTaskSubmitted({
           taskId: external.taskId,
           userId: sessionUser?.id,
           providerId: body.provider?.id,
           model: body.provider?.model,
           label: '3D model generation',
-        }).catch((persistError) => console.warn('[image-to-3d] Cloud task submit persistence failed:', persistError));
+          creditCost: deductedCredits,
+          creditStatus: deductedCredits > 0 ? 'pending' : 'not-applicable',
+          taskEntryAudit,
+        });
       }
       // 记录成功日志
       logOperation({
@@ -1175,7 +1357,7 @@ export async function POST(request: NextRequest) {
         success: true,
         backend: body.backend,
         assetUrl: external.assetUrl,
-        taskId: external.taskId,
+        taskId: usesAtomicBilling && localTaskId ? localTaskId : external.taskId,
         // For async tasks (taskId exists but no assetUrl yet), don't return a placeholder SVG
         // The frontend will show a processing progress frame instead
         previewImageUrl: external.assetUrl ? (external.previewImageUrl || buildPreviewSvg(body, external.note)) : external.previewImageUrl,
@@ -1201,10 +1383,33 @@ export async function POST(request: NextRequest) {
       detail: `3D转换失败: provider=${finalProviderId}, model=${finalModel}`,
     });
     // 退款：3D生成失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
+    if (usesAtomicBilling && localTaskId) {
+      try {
+        await settleFailedTask({
+          taskId: localTaskId,
+          status: 'failed',
+          error: {
+            code: 'THREE_D_GENERATION_FAILED',
+            message: error instanceof Error ? error.message : 'Image to 3D failed',
+            source: 'wujie',
+            retryable: true,
+            requestId,
+          },
+        });
+      } catch (settleError) {
+        console.error('[image-to-3d] Atomic task settlement failed:', settleError);
+      }
+    } else if (!usesAtomicBilling && deductedCredits > 0 && sessionUser) {
       try {
         await refundCredits(sessionUser.id, deductedCredits, `3D模型生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
       } catch (refundErr) { console.error('[image-to-3d] Refund failed:', refundErr); }
+    }
+    if (error instanceof InsufficientCreditsError || error instanceof IdempotencyConflictError) {
+      return NextResponse.json({
+        success: false,
+        code: error.code,
+        error: error.message,
+      }, { status: error.statusCode });
     }
     return NextResponse.json({
       success: false,
