@@ -18,4 +18,10 @@ fi
 echo "[coze-deploy-build] Building Next.js project..."
 pnpm run build
 
+# Step 3: Backup build artifacts to dist/ (not in .dockerignore)
+# This ensures FaaS runtime can access the build output even if .next is excluded
+echo "[coze-deploy-build] Backing up build artifacts to dist/..."
+rm -rf dist
+cp -r .next dist
+
 echo "[coze-deploy-build] Build completed successfully."

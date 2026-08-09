@@ -3,22 +3,24 @@ set -euo pipefail
 
 PORT="${PORT:-${DEPLOY_RUN_PORT:-5000}}"
 
-# --- Production fast path: start immediately if next binary exists ---
-if [ -x "node_modules/.bin/next" ]; then
-  # If BUILD_ID exists, just start the server (fastest path)
-  if [ -s ".next/BUILD_ID" ]; then
-    echo "[coze-start] Starting production server on port ${PORT}..."
-    exec ./node_modules/.bin/next start -p "${PORT}" -H 0.0.0.0
-  fi
-
-  # BUILD_ID missing but next binary exists — try starting anyway
-  # (build artifacts may be packaged at a different path in FaaS)
-  echo "[coze-start] BUILD_ID not found, but next binary exists. Attempting direct start..."
+# --- Fast path: BUILD_ID exists, start immediately ---
+if [ -s ".next/BUILD_ID" ]; then
+  echo "[coze-start] Starting production server on port ${PORT}..."
   exec ./node_modules/.bin/next start -p "${PORT}" -H 0.0.0.0
 fi
 
-# --- Fallback: dev environment, install + build needed ---
-echo "[coze-start] next binary not found. Running install + build..."
+# --- Restore from dist/ backup if .next is missing ---
+# (FaaS packaging may exclude .next via .dockerignore; dist/ is not ignored)
+if [ -s "dist/BUILD_ID" ]; then
+  echo "[coze-start] Restoring build artifacts from dist/..."
+  rm -rf .next
+  cp -r dist .next
+  echo "[coze-start] Restore complete. Starting production server on port ${PORT}..."
+  exec ./node_modules/.bin/next start -p "${PORT}" -H 0.0.0.0
+fi
+
+# --- Fallback: build from scratch (dev environment or cold start) ---
+echo "[coze-start] No build artifacts found. Building..."
 
 # Wait for any existing build process to finish
 if [ -f ".next/lock" ]; then
@@ -30,16 +32,19 @@ if [ -f ".next/lock" ]; then
   done
 fi
 
-robust_install() {
+# Install dependencies if needed
+if [ ! -x "node_modules/.bin/next" ]; then
+  echo "[coze-start] Installing dependencies..."
   if ! pnpm install --frozen-lockfile 2>&1; then
     echo "[coze-start] frozen-lockfile failed, trying --ignore-scripts..."
     pnpm install --ignore-scripts
     node scripts/prepare-tools.mjs 2>/dev/null || true
     node scripts/patch-pg-ssl.js 2>/dev/null || true
   fi
-}
+fi
 
-robust_install
+# Build
+echo "[coze-start] Running next build..."
 pnpm run build
 
 echo "[coze-start] Build complete. Starting server on port ${PORT}..."
