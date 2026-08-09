@@ -664,3 +664,15 @@ The four task-durability source-order contracts now use branch-scoped whitespace
 | Playwright login-entry contract | 8 cases; 6/8 on first run, isolated reruns pass (Chromium flake) |
 | Paid P0 E2E | BLOCKED (credentials, paid-generation env, and local DB not configured) |
 | Cloud smoke | BLOCKED (preview returns 404 `instance_not_found`) |
+
+## 2026-08-09 Stage 1 Task 8 gate update
+
+| Check | Result | Evidence |
+|---|---|---|
+| Release-gate contract | PASS | 3/3 tests validate real E2E inputs, manual external CI, and exact source allowlisting. |
+| Protected functionality | PASS WITH WARNING | 38/38 protected feature IDs remain; no missing literal component or evidence path. Baseline metadata SHA requires later refresh. |
+| Stage 1 E2E discovery | PASS | Chromium, Chromium 1080p, Firefox, and WebKit each discover the non-mocked task/billing journey. |
+| PostgreSQL focused suite | BLOCKED | 6 local contract tests pass; 3 authoritative database tests skip explicitly without `POSTGRES_TEST_DATABASE_URL`. |
+| Real provider and accounting | NOT EXECUTED | Requires exact deployment SHA, real account, exact provider/model, paid approval, and database ledger access. |
+
+No Stage 1 completion claim is made. The next evidence run must retain the uploaded `playwright-report/` and `test-results/` artifacts.

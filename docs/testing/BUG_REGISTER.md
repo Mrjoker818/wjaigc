@@ -893,3 +893,12 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 | ACC-002 | Playwright login-entry contract: 6/8 passed on the first run; the 2 Chromium chat-entry failures were flaky (isolated rerun passes). | P3 | No functional regression found |
 | ACC-003 | Real paid P0 generation E2E was not run: `E2E_TEST_USERNAME/PASSWORD/GENERATION_MODEL` and `E2E_ENABLE_PAID_GENERATION=true` are not configured and the local database is absent. | Unverified | Blocked by environment |
 | ACC-004 | Cloud preview URL returns 404 `instance_not_found`; the Coze sandbox must be restarted before exact-build cloud smoke. | Unverified | Blocked by environment |
+
+## 2026-08-09 Stage 1 release-gate blockers
+
+| ID | Severity | Finding | Status |
+|---|---|---|---|
+| S1-GATE-001 | P0 release blocker | No isolated `POSTGRES_TEST_DATABASE_URL`; authoritative idempotency, terminal-race, charge, and refund behavior cannot be proven. | Open; 3 real PostgreSQL tests explicitly skipped |
+| S1-GATE-002 | P1 release blocker | The full latest-main lint/test baseline is not green: 4 ESLint errors and 10 inherited test failures remain visible from the Task 7 checkpoint. | Open; no test or rule was deleted to conceal it |
+| S1-GATE-003 | P1 release blocker | Exact-build paid `n=1/2/3/4` evidence has not run in Chromium, Firefox, and WebKit with real request/task/ledger IDs. | Open; non-mocked suite and manual CI gate now exist |
+| S1-GATE-004 | P1 release blocker | Real cancellation, timeout, late completion, one-time refund, and rollback rehearsal lack deployed evidence. | Open |

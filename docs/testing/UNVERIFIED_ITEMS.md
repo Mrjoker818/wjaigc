@@ -425,3 +425,15 @@
 | Real PostgreSQL terminal/refund races | BLOCKED | `POSTGRES_TEST_DATABASE_URL` is not configured; the authoritative PostgreSQL task-state and billing-concurrency suites were explicitly skipped. |
 | Real provider cancellation and late result | BLOCKED | Requires a deployed exact commit, a long-running paid provider task, request/task IDs, provider status evidence, and the PostgreSQL ledger proving at most one refund. |
 | Cloud recovery backoff | Pending deployment | After deploying the exact candidate commit, verify that an active lease or recent update does not trigger a hot `/api/tasks/recover` loop and that recovery resumes after the advertised retry time. |
+
+## 2026-08-09 Stage 1 Task 8 external evidence
+
+| Item | Status | Required proof |
+|---|---|---|
+| Exact deployment identity | BLOCKED | `E2E_DEPLOYMENT_COMMIT` must equal the runtime commit at `E2E_BASE_URL`. |
+| Paid three-browser generation | BLOCKED | Real account and exact provider/model must complete `n=1/2/3/4` in Chromium, Firefox, and WebKit. |
+| Progressive provider results | BLOCKED | Each child task records its own completion time and appears on canvas without waiting for unrelated slots. |
+| Billing ledger | BLOCKED | Balance and transaction evidence ties every charge/refund to request ID and task ID. |
+| PostgreSQL races | BLOCKED | Isolated database proves concurrent same-key admission, terminal races, and at-most-one refund. |
+| Cancellation and timeout | BLOCKED | Provider request is aborted, late completion is rejected, terminal state is stable, and refund occurs once. |
+| Rollback rehearsal | BLOCKED | `core-v2 -> legacy` rollback preserves existing data and lets old tasks continue under `handlerVersion`. |

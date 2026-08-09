@@ -1,4 +1,4 @@
-name: Stage 0 Protected Baseline
+name: Stage 0 and Stage 1 Quality Gate
 
 on:
   push:
@@ -6,6 +6,20 @@ on:
       - main
       - "codex/**"
   pull_request:
+  workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: Exact deployed URL used for real browser evidence
+        required: true
+        type: string
+      deployment_commit:
+        description: Exact Git commit running at deployment_url
+        required: true
+        type: string
+      generation_model:
+        description: Exact providerId::modelId authorized for paid verification
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -47,10 +61,15 @@ jobs:
       - name: Check protected baseline
         shell: bash
         run: |
+          mapfile -t paths < <(jq -r '.paths[], .infrastructurePaths[]' docs/testing/baselines/stage-1-source-allowlist.json)
+          args=()
+          for path in "${paths[@]}"; do
+            args+=(--allow-path "$path")
+          done
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            pnpm check:protected-baseline -- --base "${{ github.event.pull_request.base.sha }}" --candidate HEAD
+            pnpm check:protected-baseline -- --base "${{ github.event.pull_request.base.sha }}" --candidate HEAD "${args[@]}"
           else
-            pnpm check:protected-baseline -- --base origin/main --candidate HEAD
+            pnpm check:protected-baseline -- --base origin/main --candidate HEAD "${args[@]}"
           fi
 
       - name: Upload Stage 0 inventory contracts
@@ -69,3 +88,110 @@ jobs:
         run: |
           echo "This workflow does not claim that real providers, PostgreSQL concurrency,"
           echo "payment callbacks, cloud storage, or authenticated cloud E2E passed."
+
+  stage-1-local-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Stage 1 release contracts
+        run: pnpm exec vitest run src/__tests__/scripts/stage-1-release-gate-contract.test.ts
+
+      - name: Check reviewed Stage 1 source drift
+        shell: bash
+        run: |
+          mapfile -t paths < <(jq -r '.paths[], .infrastructurePaths[]' docs/testing/baselines/stage-1-source-allowlist.json)
+          args=()
+          for path in "${paths[@]}"; do
+            args+=(--allow-path "$path")
+          done
+          pnpm check:protected-baseline -- --base origin/main --candidate HEAD "${args[@]}"
+
+      - name: TypeScript
+        run: pnpm ts-check
+
+      - name: ESLint
+        run: pnpm lint
+
+      - name: Full automated test suite
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm build
+
+  stage-1-external-evidence:
+    if: github.event_name == 'workflow_dispatch'
+    needs:
+      - protected-baseline
+      - stage-1-local-gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      E2E_BASE_URL: ${{ inputs.deployment_url }}
+      E2E_DEPLOYMENT_COMMIT: ${{ inputs.deployment_commit }}
+      E2E_STAGE1_GENERATION_MODEL: ${{ inputs.generation_model }}
+      E2E_TEST_USERNAME: ${{ secrets.E2E_TEST_USERNAME }}
+      E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+      E2E_ENABLE_PAID_GENERATION: "true"
+      POSTGRES_TEST_DATABASE_URL: ${{ secrets.POSTGRES_TEST_DATABASE_URL }}
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.deployment_commit }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+
+      - name: Verify PostgreSQL concurrency and billing finality
+        run: >-
+          pnpm exec vitest run
+          tests/integration/task-*-postgres.test.ts
+          tests/integration/task-*-concurrency.test.ts
+
+      - name: Capture Chromium Firefox and WebKit real evidence
+        run: >-
+          pnpm exec playwright test tests/e2e/stage-1-task-billing.spec.ts
+          --project=chromium --project=firefox --project=webkit
+
+      - name: Upload Stage 1 release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-1-release-evidence-${{ inputs.deployment_commit }}
+          if-no-files-found: error
+          path: |
+            playwright-report/
+            test-results/

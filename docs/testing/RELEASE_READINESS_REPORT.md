@@ -586,3 +586,11 @@ No local test result is being used as a substitute for those deployed acceptance
 All local gates pass: unit/API/regression suites, TypeScript, ESLint (0 errors), and production build. Deployed acceptance remains blocked: the exact-build cloud smoke needs a running Coze sandbox, and the credit-consuming P0 generation E2E needs explicit environment credentials plus paid-generation approval.
 
 **Verdict: 有条件通过 (conditional)** - pending deployed acceptance checks for auth, model catalog, canvas/node/ChatCanvas, both toolbars, `n > 1` progressive generation, and PostgreSQL billing consistency.
+
+## 2026-08-09 Stage 1 decision
+
+**Decision: Not passed. Do not merge or release Stage 1 as complete.**
+
+The release infrastructure can now collect non-mocked, exact-build evidence, but the evidence itself is incomplete. Local TypeScript, the Stage 1 contract, E2E discovery, and the 38-feature protection gate pass. Release remains blocked by inherited full lint/test failures, missing isolated PostgreSQL, missing paid three-browser provider evidence, and missing cancellation/refund/rollback proof.
+
+The authoritative detail is `docs/testing/STAGE_1_COMPLETION_REPORT.md`. CI must not treat the external evidence job as optional for a Stage 1 release decision.
