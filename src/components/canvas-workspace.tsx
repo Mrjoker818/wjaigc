@@ -44,7 +44,7 @@ import {
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell } from 'lucide-react';
+import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell, FileText } from 'lucide-react';
 import { type Workflow } from '@/lib/workflow-engine';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
@@ -5318,13 +5318,23 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             {activePanel === 'generate' && createMode === 'professional' && (
               <div className="px-4 py-3 flex-shrink-0">
                 <div className={`h-px mb-3 ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
-                <button
-                  onClick={() => document.dispatchEvent(new CustomEvent('trigger-generate'))}
-                  className={`btn-press w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg active:shadow-sm' : 'bg-gradient-to-r from-gold to-gold-dark text-black hover:from-gold-light hover:to-gold shadow-md hover:shadow-lg active:shadow-sm'}`}
-                >
-                  <Sparkles className="h-4 w-4" />
-                  <span>开始生成</span>
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => document.dispatchEvent(new CustomEvent('trigger-prompt-review'))}
+                    className={`btn-press px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all border ${themeStyle === 'monochrome' ? 'border-gray-300 text-gray-600 hover:bg-gray-50' : 'border-gold/30 text-gold hover:bg-gold/5'}`}
+                    title="AI 分析提示词并给出优化建议"
+                  >
+                    <FileText className="h-4 w-4" />
+                    <span>提示词确认</span>
+                  </button>
+                  <button
+                    onClick={() => document.dispatchEvent(new CustomEvent('trigger-generate'))}
+                    className={`btn-press flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${themeStyle === 'monochrome' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg active:shadow-sm' : 'bg-gradient-to-r from-gold to-gold-dark text-black hover:from-gold-light hover:to-gold shadow-md hover:shadow-lg active:shadow-sm'}`}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    <span>开始生成</span>
+                  </button>
+                </div>
               </div>
             )}
             </div>

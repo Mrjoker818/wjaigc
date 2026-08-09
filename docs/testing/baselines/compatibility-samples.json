@@ -1,0 +1,107 @@
+[
+  {
+    "sampleId": "sample.single-image",
+    "sampleType": "single-image",
+    "requiredArtifacts": ["source-image", "project-snapshot"],
+    "expectedPersistence": "Image URL, dimensions, position, scale and layer order survive save and refresh.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.transparent-png",
+    "sampleType": "transparent-png",
+    "requiredArtifacts": ["rgba-png", "alpha-inspection", "project-snapshot"],
+    "expectedPersistence": "Alpha remains transparent after upload, canvas rendering, save, refresh and download.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.canvas-100-nodes",
+    "sampleType": "100-node-canvas",
+    "requiredArtifacts": ["project-snapshot", "interaction-metrics", "browser-trace"],
+    "expectedPersistence": "All node positions, sizes and layer relationships survive save and refresh.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.image-group",
+    "sampleType": "image-group",
+    "requiredArtifacts": ["source-images", "group-state", "project-snapshot"],
+    "expectedPersistence": "Membership, group position, collapse state and primary image survive refresh.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.reference-group",
+    "sampleType": "reference-image-group",
+    "requiredArtifacts": ["reference-images", "semantic-controls", "generation-task"],
+    "expectedPersistence": "Reference categories, strengths, model selection and generated outputs survive refresh.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.fusion-group",
+    "sampleType": "fusion-group",
+    "requiredArtifacts": ["source-images", "fusion-controls", "generation-task"],
+    "expectedPersistence": "All sources remain associated and the fusion result is restored without replacing originals.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.annotation",
+    "sampleType": "annotation",
+    "requiredArtifacts": ["source-image", "annotation-geometry", "edit-task"],
+    "expectedPersistence": "Pin, region and brush annotations retain geometry, instruction and result linkage.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.video-task",
+    "sampleType": "video-task",
+    "requiredArtifacts": ["task-record", "provider-record", "video-result"],
+    "expectedPersistence": "Duration, model, provider, progress, terminal state and playable URL survive refresh.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.three-d-task",
+    "sampleType": "3d-task",
+    "requiredArtifacts": ["task-record", "provider-record", "model-files"],
+    "expectedPersistence": "Preview image, model URLs, formats and terminal state survive refresh.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.psd-layered",
+    "sampleType": "psd-layered-task",
+    "requiredArtifacts": ["source-image", "task-record", "zip-or-psd", "layer-manifest"],
+    "expectedPersistence": "Remote artifact, extracted primary PSD, layer order and editable state survive refresh.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.node-workflow",
+    "sampleType": "node-workflow",
+    "requiredArtifacts": ["workflow-json", "execution-log", "node-results"],
+    "expectedPersistence": "Nodes, edges, ports, configuration, execution state and outputs survive refresh.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.chat-history",
+    "sampleType": "chat-history",
+    "requiredArtifacts": ["chat-project", "messages", "dashboard-count"],
+    "expectedPersistence": "Conversation history, attachments and dashboard statistics remain consistent.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.failed-task",
+    "sampleType": "failed-task",
+    "requiredArtifacts": ["task-record", "provider-error", "credit-settlement"],
+    "expectedPersistence": "Failure reason and terminal state survive refresh without duplicate charge or result.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.cancelled-task",
+    "sampleType": "cancelled-task",
+    "requiredArtifacts": ["task-record", "provider-cancel", "credit-settlement"],
+    "expectedPersistence": "Cancelled remains terminal, rejects late results and refunds at most once.",
+    "verificationStatus": "unverified"
+  },
+  {
+    "sampleId": "sample.invalid-media-project",
+    "sampleType": "project-with-invalid-media",
+    "requiredArtifacts": ["project-snapshot", "invalid-media-record", "recovery-log"],
+    "expectedPersistence": "Invalid media is reported and isolated without blanking valid project content.",
+    "verificationStatus": "unverified"
+  }
+]

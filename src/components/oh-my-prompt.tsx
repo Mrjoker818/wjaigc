@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Lightbulb, X, Upload, Wand2, Eye, Sparkles, Loader2, Copy, Check, Send, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp, Zap } from 'lucide-react';
+import { Lightbulb, X, Upload, Wand2, Eye, Sparkles, Loader2, Copy, Check, Send, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp, Zap, GripHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -572,9 +572,54 @@ export default function OhMyPrompt({
   const [activeTab, setActiveTab] = useState<OmpActiveTab>(defaultActiveTab || initialTab);
   const settings = loadSettings();
 
+  // Drag state
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef({ startX: 0, startY: 0, offsetX: 0, offsetY: 0, dragging: false });
+  const panelRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (defaultActiveTab) setActiveTab(defaultActiveTab);
   }, [defaultActiveTab, isOpen]);
+
+  // Center the panel on mount
+  useEffect(() => {
+    if (!isOpen || floating) return;
+    // Delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      if (panelRef.current) {
+        const rect = panelRef.current.getBoundingClientRect();
+        setPosition({
+          x: Math.max(0, (window.innerWidth - rect.width) / 2),
+          y: Math.max(0, (window.innerHeight - rect.height) / 2),
+        });
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [isOpen, floating]);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if (floating) return;
+    e.preventDefault();
+    const startX = e.clientX - position.x;
+    const startY = e.clientY - position.y;
+    dragRef.current = { startX, startY, offsetX: position.x, offsetY: position.y, dragging: true };
+    setIsDragging(true);
+  }, [floating, position]);
+
+  const handleDragMove = useCallback((e: React.MouseEvent) => {
+    if (!dragRef.current.dragging || floating) return;
+    e.preventDefault();
+    setPosition({
+      x: Math.max(0, e.clientX - dragRef.current.startX),
+      y: Math.max(0, e.clientY - dragRef.current.startY),
+    });
+  }, [floating]);
+
+  const handleDragEnd = useCallback(() => {
+    dragRef.current.dragging = false;
+    setIsDragging(false);
+  }, []);
 
   useEffect(() => {
     saveSettings({ visionDefaultFormat: settings.visionDefaultFormat });
@@ -600,21 +645,25 @@ export default function OhMyPrompt({
   const isGold = themeStyle === 'gold';
   const panelClass = floating 
     ? 'fixed right-2 bottom-16 w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[200]'
-    : 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm';
+    : 'fixed inset-0 z-50 bg-black/40 backdrop-blur-sm';
   const innerClass = floating
     ? 'w-full flex flex-col bg-[#1a1a1a]'
     : 'w-full max-w-xl bg-background rounded-2xl shadow-2xl border border-border overflow-hidden flex flex-col';
 
   return (
-    <div className={panelClass}>
-      <div className={innerClass} style={floating ? { height: '520px' } : { height: '720px', maxHeight: '90vh' }}>
+    <div className={panelClass} onMouseMove={handleDragMove} onMouseUp={handleDragEnd} onMouseLeave={handleDragEnd}>
+      <div ref={floating ? undefined : panelRef} className={`${floating ? '' : 'fixed'} ${innerClass}`} 
+        style={floating 
+          ? { height: '520px' } 
+          : { height: '720px', maxHeight: '90vh', left: position.x, top: position.y, cursor: isDragging ? 'grabbing' : 'default' }
+        }>
         {/* Header */}
-        <div className={`flex items-center justify-between px-4 py-3 border-b ${floating ? 'border-[#333]' : 'border-border bg-gradient-to-r from-primary/5 to-transparent'}`}>
+        <div onMouseDown={handleDragStart} className={`flex items-center justify-between px-4 py-3 border-b cursor-grab active:cursor-grabbing select-none ${floating ? 'border-[#333]' : 'border-border bg-gradient-to-r from-primary/5 to-transparent'}`}>
           <div className="flex items-center gap-2">
             <Lightbulb className={`w-5 h-5 ${floating ? 'text-[#d4af37]' : 'text-primary'}`} />
             <h2 className={`text-base font-semibold ${floating ? 'text-white' : 'text-foreground'}`}>灵感工坊</h2>
           </div>
-          <button onClick={onClose} className={floating ? 'text-gray-400 hover:text-white' : 'text-muted-foreground hover:text-foreground'}>
+          <button onClick={onClose} className={floating ? 'text-muted-foreground hover:text-white' : 'text-muted-foreground hover:text-foreground'}>
             <X className="w-5 h-5" />
           </button>
         </div>

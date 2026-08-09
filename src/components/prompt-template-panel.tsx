@@ -8,7 +8,8 @@ import {
   addPromptTemplate, 
   updatePromptTemplate, 
   deletePromptTemplate,
-  getTemplateCategories
+  getTemplateCategories,
+  initPromptTemplates
 } from '@/lib/prompt-templates';
 
 interface PromptTemplatePanelProps {
@@ -52,6 +53,11 @@ export default function PromptTemplatePanel({
     setCategories(getTemplateCategories());
   }, []);
 
+  // 首次挂载时初始化远程模板数据
+  useEffect(() => {
+    initPromptTemplates().then(loadTemplates);
+  }, [loadTemplates]);
+
   useEffect(() => {
     if (isOpen) {
       loadTemplates();
@@ -88,7 +94,7 @@ export default function PromptTemplatePanel({
     setFormContent(template.content);
     setFormCategory(template.category);
     setFormTags(template.tags.join(', '));
-    setFormIsGlobal(template.isGlobal);
+    setFormIsGlobal(template.isGlobal ?? false);
     setFormThumbnail(template.thumbnail || '');
     setIsEditing(true);
     setShowAddForm(true);

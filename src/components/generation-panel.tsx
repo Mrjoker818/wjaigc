@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap, FileText } from 'lucide-react';
+import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap, FileText, Sparkles, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import { ApiProvider } from '@/lib/universal-api-types';
@@ -404,6 +404,20 @@ export function GenerationPanel(
     const [promptHeight, setPromptHeight] = useState(72); // default ~3 rows
     const promptDragRef = useRef<{ startY: number; startH: number } | null>(null);
 
+    // P1: Prompt Review — AI 分析提示词并给出优化建议，用户确认后再生成
+    const [promptReviewLoading, setPromptReviewLoading] = useState(false);
+    const [promptReviewData, setPromptReviewData] = useState<{
+        summary: string;
+        enhancedPrompt: string;
+        suggestedRatio: string;
+        suggestedQuality: string;
+        analysis: string;
+        originalPrompt: string;
+    } | null>(null);
+    const [reviewedPrompt, setReviewedPrompt] = useState('');
+    const [reviewedRatio, setReviewedRatio] = useState('1:1');
+    const [reviewedQuality, setReviewedQuality] = useState('standard');
+
     const persistSelectedModel = useCallback((compositeKey: string) => {
         if (typeof window === 'undefined' || !compositeKey.includes('::')) return;
 
@@ -681,6 +695,70 @@ export function GenerationPanel(
         document.addEventListener('trigger-generate', handleTriggerGenerate);
         return () => document.removeEventListener('trigger-generate', handleTriggerGenerate);
     }, []);
+
+    // P1: Prompt Review — AI 分析当前提示词，给出优化建议
+    const handlePromptReview = useCallback(async () => {
+        const fullPrompt = [prompt.trim(), ...selectedTags].filter(Boolean).join(', ');
+        if (!fullPrompt.trim()) {
+            toast.warning('请先输入提示词');
+            return;
+        }
+        setPromptReviewLoading(true);
+        setPromptReviewData(null);
+        try {
+            const resp = await fetch('/api/prompt-review', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: fullPrompt, model, providerId: model.includes('::') ? model.split('::')[0] : undefined }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                toast.error(data.error || '提示词分析失败，请重试');
+                return;
+            }
+            setPromptReviewData({
+                summary: data.summary,
+                enhancedPrompt: data.enhancedPrompt,
+                suggestedRatio: data.suggestedRatio,
+                suggestedQuality: data.suggestedQuality,
+                analysis: data.analysis,
+                originalPrompt: data.originalPrompt,
+            });
+            setReviewedPrompt(data.enhancedPrompt);
+            setReviewedRatio(data.suggestedRatio);
+            setReviewedQuality(data.suggestedQuality);
+        } catch (err) {
+            toast.error('网络错误，请重试');
+        } finally {
+            setPromptReviewLoading(false);
+        }
+    }, [prompt, selectedTags, model]);
+
+    // Listen for trigger-prompt-review event
+    const handlePromptReviewRef = useRef(handlePromptReview);
+    handlePromptReviewRef.current = handlePromptReview;
+    useEffect(() => {
+        const handleTrigger = () => handlePromptReviewRef.current();
+        document.addEventListener('trigger-prompt-review', handleTrigger);
+        return () => document.removeEventListener('trigger-prompt-review', handleTrigger);
+    }, []);
+
+    // P1: 确认提示词审核结果，应用到生成面板并生成
+    const applyPromptReviewAndGenerate = useCallback(() => {
+        if (!promptReviewData) return;
+        // Apply enhanced prompt
+        setPrompt(reviewedPrompt);
+        // Apply suggested ratio
+        if (reviewedRatio !== aspectRatio) setAspectRatio(reviewedRatio);
+        // Apply suggested quality
+        if (reviewedQuality !== quality) setQuality(reviewedQuality);
+        // Close review card
+        setPromptReviewData(null);
+        // Trigger generation after state update
+        setTimeout(() => {
+            handleGenerateRef.current();
+        }, 100);
+    }, [promptReviewData, reviewedPrompt, reviewedRatio, reviewedQuality, aspectRatio, quality]);
 
     // 初始化万能API管理器
     useEffect(() => {
@@ -1480,6 +1558,87 @@ export function GenerationPanel(
                         提示词方程式
                     </button>
                 </div>
+
+                {/* P1: Prompt Review 卡片 — AI 分析提示词后的确认面板 */}
+                {promptReviewLoading && (
+                    <div className={`rounded-lg border p-4 flex items-center gap-3 ${mc ? 'border-gray-200 bg-gray-50' : 'border-gold/20 bg-gold/5'}`}>
+                        <Loader2 className={`h-4 w-4 animate-spin ${mc ? 'text-gray-500' : 'text-gold'}`} />
+                        <span className={`text-xs ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>AI 正在分析提示词...</span>
+                    </div>
+                )}
+                {promptReviewData && !promptReviewLoading && (
+                    <div className={`rounded-lg border p-3 space-y-3 ${mc ? 'border-gray-200 bg-gray-50' : 'border-gold/20 bg-gold/5'}`}>
+                        {/* Header */}
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className={`h-4 w-4 ${mc ? 'text-blue-500' : 'text-gold'}`} />
+                                <span className={`text-sm font-semibold ${mc ? 'text-gray-800' : 'text-gold'}`}>{promptReviewData.summary}</span>
+                            </div>
+                            <button
+                                onClick={() => setPromptReviewData(null)}
+                                className={`rounded-md p-1 transition-colors ${mc ? 'hover:bg-gray-200 text-gray-400' : 'hover:bg-white/10 text-gold-muted/50'}`}
+                            >
+                                <X className="h-3.5 w-3.5" />
+                            </button>
+                        </div>
+                        {/* Analysis */}
+                        {promptReviewData.analysis && (
+                            <p className={`text-xs leading-relaxed ${mc ? 'text-gray-500' : 'text-gold-muted/70'}`}>{promptReviewData.analysis}</p>
+                        )}
+                        {/* Enhanced Prompt — editable */}
+                        <div>
+                            <label className={`text-xs font-medium mb-1 block ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>优化后的提示词（可编辑）</label>
+                            <textarea
+                                value={reviewedPrompt}
+                                onChange={(e) => setReviewedPrompt(e.target.value)}
+                                rows={4}
+                                className={`w-full px-3 py-2 rounded-md text-xs resize-none border ${mc ? 'bg-white border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.06] text-text-bright'} focus:outline-none focus:ring-1 ${mc ? 'focus:ring-gray-300' : 'focus:ring-gold/30'} leading-relaxed`}
+                            />
+                        </div>
+                        {/* Suggested Ratio & Quality */}
+                        <div className="flex gap-3">
+                            <div className="flex-1">
+                                <label className={`text-xs font-medium mb-1 block ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>推荐比例</label>
+                                <select
+                                    value={reviewedRatio}
+                                    onChange={(e) => setReviewedRatio(e.target.value)}
+                                    className={`w-full px-2 py-1.5 rounded-md text-xs border ${mc ? 'bg-white border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.06] text-text-bright'} focus:outline-none`}
+                                >
+                                    {['1:1', '3:4', '4:3', '9:16', '16:9', '3:2', '2:3'].map(r => (
+                                        <option key={r} value={r}>{r}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex-1">
+                                <label className={`text-xs font-medium mb-1 block ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>推荐质量</label>
+                                <select
+                                    value={reviewedQuality}
+                                    onChange={(e) => setReviewedQuality(e.target.value)}
+                                    className={`w-full px-2 py-1.5 rounded-md text-xs border ${mc ? 'bg-white border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.06] text-text-bright'} focus:outline-none`}
+                                >
+                                    <option value="standard">标准</option>
+                                    <option value="hd">高清</option>
+                                </select>
+                            </div>
+                        </div>
+                        {/* Actions */}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setPromptReviewData(null)}
+                                className={`flex-1 py-2 rounded-md text-xs font-medium transition-all ${mc ? 'border border-gray-300 text-gray-500 hover:bg-gray-100' : 'border border-white/10 text-gold-muted/70 hover:bg-white/5'}`}
+                            >
+                                取消
+                            </button>
+                            <button
+                                onClick={applyPromptReviewAndGenerate}
+                                className={`flex-1 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${mc ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gradient-to-r from-gold to-gold-dark text-black hover:from-gold-light'}`}
+                            >
+                                <Check className="h-3.5 w-3.5" />
+                                确认并生成
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {/* 快速风格 */}
                 <div className="space-y-1">

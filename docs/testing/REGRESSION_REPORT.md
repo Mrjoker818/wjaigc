@@ -1,5 +1,9 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+> [!IMPORTANT]
+> **2026-08-08 最新回归状态：全量测试仍有 5 个历史失败，不能视为全量通过。**
+> Stage 0 新增专项测试 15/15 通过，没有新增全量测试失败；详细证据见 `docs/testing/STAGE_0_COMPLETION_REPORT.md`。
+
 > 生成时间：2026-07-20
 > 测试范围：全平台功能回归 + 跨浏览器兼容性
 > 测试方法：E2E 自动化测试 (Playwright) + API 自动化测试 (Vitest)

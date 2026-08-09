@@ -48,6 +48,7 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
+import { inferStageLabel } from '@/lib/task-stage-labels';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { } from '@/lib/canvas-annotation-visibility';
 import { closestSupportedImageAspectRatio } from '@/lib/image-aspect-ratio';
@@ -6533,7 +6534,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           : Math.min(92, 75 + Math.round(((elapsed - 120) / 600) * 17));
       onProgress?.(
         Math.min(92, baseProgress),
-        `AI 正在生成中... (已等待 ${elapsedStr})`
+        inferStageLabel('generate', baseProgress, Date.now() - startTime) + ` (已等待 ${elapsedStr})`
       );
       // ★ SSE加速：同时等待定时器和SSE完成事件
       const pollDelay = getEditPollInterval(i);
@@ -6569,7 +6570,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             ? (estRemaining > 0 ? ` · 预计还需 ${estRemaining}s` : ' · 即将完成')
             : '';
           const serverProgress = Math.min(92, Math.round(data.progress * 0.9) + 10);
-          onProgress?.(serverProgress, (data.label as string) || `AI 正在生成中... (已等待 ${elapsedStr})${estSuffix}`);
+          onProgress?.(serverProgress, (data.label as string) || (inferStageLabel('generate', serverProgress, Date.now() - startTime) + ` (已等待 ${elapsedStr})${estSuffix}`));
         }
 
         // ★ 检查服务端取消状态

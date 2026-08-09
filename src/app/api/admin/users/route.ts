@@ -11,6 +11,7 @@ import {
 } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
 import { dbListUserData, dbGetUserData, dbDeleteUserData, dbAddAuditLog } from '@/lib/db-storage';
+import { execSql } from '@/lib/db-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,11 +32,9 @@ export async function GET(request: NextRequest) {
       let credits = 0;
       let projectCount = 0;
       try {
-        const ud = await dbGetUserData(u.id, 'credits') as Record<string, unknown> | null;
-        if (ud && typeof ud === 'object' && 'data_value' in ud) {
-          const dv = (ud as Record<string, unknown>).data_value;
-          const parsed = typeof dv === 'string' ? JSON.parse(dv) : dv;
-          credits = Number((parsed as Record<string, unknown>)?.balance ?? (parsed as Record<string, unknown>)?.credits ?? 0) || 0;
+        const creditRows = await execSql('SELECT balance FROM wujie_credits WHERE user_id = $1', [u.id]);
+        if (creditRows.rows.length > 0) {
+          credits = Number(creditRows.rows[0]?.balance ?? 0) || 0;
         }
       } catch {}
       try {

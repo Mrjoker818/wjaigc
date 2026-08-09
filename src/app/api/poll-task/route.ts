@@ -22,6 +22,7 @@ import {
   updateTaskProgress,
   type TaskType,
 } from '@/lib/task-registry';
+import { inferStageLabel, GENERATE_STAGES, VIDEO_STAGES } from '@/lib/task-stage-labels';
 import { translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -1071,7 +1072,7 @@ export async function POST(request: NextRequest) {
             success: true,
             status: 'processing',
             progress: Math.max(recovery.progress, 1),
-            label: '正在提交生成任务...',
+            label: GENERATE_STAGES.SUBMITTING,
             recoveryPending: true,
           }, persistedResult), { status: 200 });
         }
@@ -1159,7 +1160,7 @@ export async function POST(request: NextRequest) {
           success: true,
           status: 'processing',
           progress: registryTask.progress,
-          label: registryTask.label || '生成中...',
+          label: registryTask.label || GENERATE_STAGES.GENERATING,
         }, { status: 200 });
       }
       // ★ 视频任务轮询：使用 video-api 协议适配器
@@ -1658,7 +1659,7 @@ export async function POST(request: NextRequest) {
               success: true,
               status: 'partiallyCompleted',
               progress: progressPct,
-              label: `生成中 (${completedCount}/${allDirectTaskIds.length})...`,
+              label: `${GENERATE_STAGES.GENERATING} (${completedCount}/${allDirectTaskIds.length})`,
               imageUrls: dedupedPartialUrls,
               imageUrl: dedupedPartialUrls[0],
               completedCount,
@@ -1680,7 +1681,7 @@ export async function POST(request: NextRequest) {
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
-            label: `生成完成 (${dedupedImageUrls.length}张)`,
+            label: GENERATE_STAGES.COMPLETED(dedupedImageUrls.length),
             result: {
               imageUrl,
               imageUrls: dedupedImageUrls,
@@ -1695,7 +1696,7 @@ export async function POST(request: NextRequest) {
             success: true,
             status: 'completed',
             progress: 100,
-            label: `生成完成 (${dedupedImageUrls.length}张)`,
+            label: GENERATE_STAGES.COMPLETED(dedupedImageUrls.length),
             imageUrl,
             imageUrls: dedupedImageUrls,
             task: getTaskInfo(taskId),
@@ -1717,7 +1718,7 @@ export async function POST(request: NextRequest) {
           success: true,
           status: 'processing',
           progress: registryTask.progress || 10,
-          label: registryTask.label || '正在提交生成任务...',
+          label: registryTask.label || GENERATE_STAGES.SUBMITTING,
         }, { status: 200 });
       }
       // ★ 将推导出的 remoteTaskId 注入 regResult，供后续远端轮询使用

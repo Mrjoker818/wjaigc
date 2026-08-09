@@ -1041,7 +1041,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       try {
         const p = providers.find(x => x.id === pid);
         if (!p) continue;
-        const res = await fetch('/api/admin/test-connection', {
+        const res = await fetch('/api/test-provider-connection', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ providerId: pid })
         });
@@ -1327,10 +1327,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setUserDetailId(userId);
     setShowUserDrawer(true);
     try {
-      // Load credits for this user
-      const creditsRes = await fetch('/api/credits', { credentials: 'include' });
-      // Use the credits admin endpoint
-      const allCreditsRes = await fetch('/api/credits/admin?action=list', { credentials: 'include' });
+      // Load all users' credits via admin overview
+      const allCreditsRes = await fetch('/api/credits?action=admin-overview', { credentials: 'include' });
       if (allCreditsRes.ok) {
         const data = await allCreditsRes.json();
         if (data.success && data.users) {
@@ -1339,12 +1337,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         }
       }
       // Load user transactions
-      const txRes = await fetch(`/api/credits/admin?action=transactions&userId=${userId}`, { credentials: 'include' });
+      const txRes = await fetch(`/api/credits?action=transactions&userId=${userId}`, { credentials: 'include' });
       if (txRes.ok) {
         const txData = await txRes.json();
         if (txData.success && txData.transactions) {
-          setUserDetailTransactions(txData.transactions.map((t: { id: string; type: string; amount: number; balance_after: number; description: string; created_at: number }) => ({
-            id: t.id, type: t.type, amount: t.amount, balanceAfter: t.balance_after, description: t.description, createdAt: t.created_at,
+          setUserDetailTransactions(txData.transactions.map((t: { id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }) => ({
+            id: t.id, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter, description: t.description, createdAt: t.createdAt,
           })));
         }
       }

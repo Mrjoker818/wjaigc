@@ -22,9 +22,9 @@ export default defineConfig({
   ],
   use: {
     baseURL,
-    trace: 'on',
-    video: 'on',
-    screenshot: 'on',
+    trace: 'retain-on-failure',
+    video: 'retain-on-failure',
+    screenshot: 'only-on-failure',
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
   },
