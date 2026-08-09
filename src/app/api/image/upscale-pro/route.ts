@@ -950,6 +950,9 @@ export async function POST(request: NextRequest) {
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
 
+  let deductedCredits = 0;
+  const userId = authResult.userId;
+
   try {
     const body = await request.json() as UpscaleProRequest;
     // 输入校验
@@ -984,6 +987,13 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    // 积分扣除（输入校验通过后扣费，避免无效请求被扣分）
+    const creditResult = await consumeCredits(userId, 'image_upscale');
+    if (!creditResult.success) {
+      return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+    }
+    deductedCredits = creditResult.cost;
 
     // ★ 8× 链式放大：先 4× 再 2×（因为 Real-ESRGAN/ONNX 单次最大 4×）
     // targetScale > 4 时执行两步放大，最终尺寸 = 原图 × targetScale
@@ -1099,6 +1109,11 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[upscale-pro] Error:', msg);
+    if (deductedCredits > 0) {
+      try {
+        await refundCredits(userId, deductedCredits, `无损放大Pro失败退款: ${msg.substring(0, 100)}`);
+      } catch (refundErr) { console.error('[upscale-pro] Refund failed:', refundErr); }
+    }
     return NextResponse.json(
       { success: false, error: `无损放大失败: ${msg}` },
       { status: 500 },

@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       let credits = 0;
       let projectCount = 0;
       try {
-        const creditRows = await execSql(`SELECT balance FROM wujie_credits WHERE user_id = '${u.id.replace(/'/g, "''")}' ORDER BY created_at DESC LIMIT 1`);
+        const creditRows = await execSql('SELECT balance FROM wujie_credits WHERE user_id = $1', [u.id]);
         if (creditRows.rows.length > 0) {
           credits = Number(creditRows.rows[0]?.balance ?? 0) || 0;
         }
