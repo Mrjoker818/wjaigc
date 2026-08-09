@@ -6313,15 +6313,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 onClick={() => {
                   abortControllerRef.current?.abort();
                 }}
-                className={`shrink-0 h-7 px-2 rounded-md flex items-center justify-center gap-1 text-[11px] font-medium transition-all ${
+                className={`shrink-0 w-7 h-7 rounded-md flex items-center justify-center transition-all ${
                   isGold
                     ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
                     : 'bg-red-50 text-red-500 hover:bg-red-100 border border-red-200'
                 }`}
                 title="停止生成"
               >
-                <Square size={11} className="fill-current" />
-                <span>停止</span>
+                <Square size={13} className="fill-current" />
               </button>
             ) : (
               <button
