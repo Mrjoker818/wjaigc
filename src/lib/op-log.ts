@@ -61,6 +61,7 @@ export const OP_ACTIONS = {
   // 聊天/LLM
   CHAT: 'chat',
   PROMPT_OPTIMIZE: 'prompt_optimize',
+  PROMPT_REVIEW: 'prompt_review',
   VISION_ANALYZE: 'vision_analyze',
 
   // 编辑/修复

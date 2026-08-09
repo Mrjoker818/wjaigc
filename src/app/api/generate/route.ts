@@ -20,6 +20,7 @@ import { calculateConfiguredCreditCost, checkCredits, consumeCredits } from '@/l
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
+import { GENERATE_STAGES } from '@/lib/task-stage-labels';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 import {
   chargeCloudTaskCredits,
@@ -448,7 +449,7 @@ export async function POST(request: NextRequest) {
           retryable: true,
         }, { status: 503 });
       }
-      registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
+      registerTask(asyncTaskId, 'generate-async', GENERATE_STAGES.INIT, userId);
       updateTaskProgress(asyncTaskId, { result: { submissionPayload } });
       const recordSubmitOnlyTerminal = (input: Parameters<typeof recordImageTaskTerminal>[1]) => {
         void recordImageTaskTerminal(asyncTaskId, input)
@@ -458,7 +459,7 @@ export async function POST(request: NextRequest) {
       if (deductedCredits > 0) {
         updateTaskProgress(asyncTaskId, { creditCost: deductedCredits });
       }
-      updateTaskProgress(asyncTaskId, { status: 'processing', progress: 0, label: '准备中...' });
+      updateTaskProgress(asyncTaskId, { status: 'processing', progress: 0, label: GENERATE_STAGES.INIT });
       console.log(`[generate] submitOnly mode: taskId=${asyncTaskId}, returning immediately`);
 
       // ★ 后台执行生成逻辑（fire-and-forget）
@@ -490,7 +491,7 @@ export async function POST(request: NextRequest) {
           console.log(`[generate] submitOnly bgData keys: ${Object.keys(bgData).join(',')}, success: ${bgData.success}, taskIds: ${bgData.taskIds?.length || 0}`);
 
           if (!bgRes.ok || !bgData.success) {
-            updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: bgData.error || '生成失败', label: '生成失败' });
+            updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: bgData.error || '生成失败', label: GENERATE_STAGES.FAILED });
             recordSubmitOnlyTerminal({
               status: 'failed',
               error: typeof bgData.error === 'string' ? bgData.error : '生成失败',
@@ -522,7 +523,7 @@ export async function POST(request: NextRequest) {
               updateTaskProgress(asyncTaskId, {
                 status: 'completed',
                 progress: 100,
-                label: `生成完成 (${directUrls.length}张)`,
+                label: GENERATE_STAGES.COMPLETED(directUrls.length),
                 result: {
                   imageUrl: directUrls[0],
                   imageUrls: directUrls,
@@ -620,7 +621,7 @@ export async function POST(request: NextRequest) {
               updateTaskProgress(asyncTaskId, {
                 status: 'completed',
                 progress: 100,
-                label: `生成完成 (${allUrls.length}张)`,
+                label: GENERATE_STAGES.COMPLETED(allUrls.length),
                 result: {
                   imageUrl: allUrls[0],
                   imageUrls: allUrls,
@@ -641,7 +642,7 @@ export async function POST(request: NextRequest) {
               });
               console.log(`[generate] submitOnly mixed mode completed: ${allUrls.length} images for ${asyncTaskId}`);
             } else {
-              updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成失败', label: '生成失败' });
+              updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成失败', label: GENERATE_STAGES.FAILED });
               recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
             }
             return;
@@ -703,7 +704,7 @@ export async function POST(request: NextRequest) {
                 return;
               }
               if (waitedDirect.failed) {
-                updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成失败', label: '生成失败' });
+                updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成失败', label: GENERATE_STAGES.FAILED });
                 recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
                 return;
               }
@@ -716,7 +717,7 @@ export async function POST(request: NextRequest) {
             updateTaskProgress(asyncTaskId, {
               status: 'processing',
               progress: 10,
-              label: '生成中...',
+              label: GENERATE_STAGES.GENERATING,
               result: {
                 submissionPayload,
                 remoteTaskId: bgTaskIds[0],
@@ -856,7 +857,7 @@ export async function POST(request: NextRequest) {
               const progressValue = 10 + Math.round((completedCount / bgTaskIds.length) * 80);
               updateTaskProgress(asyncTaskId, {
                 progress: progressValue,
-                label: `生成中 (${completedCount}/${bgTaskIds.length})`,
+                label: `${GENERATE_STAGES.GENERATING} (${completedCount}/${bgTaskIds.length})`,
               });
 
               if (isTaskCancelled(asyncTaskId)) return;
@@ -881,7 +882,7 @@ export async function POST(request: NextRequest) {
               updateTaskProgress(asyncTaskId, {
                 status: 'completed',
                 progress: 100,
-                label: `生成完成 (${collectedImageUrls.length}张)`,
+                label: GENERATE_STAGES.COMPLETED(collectedImageUrls.length),
                 result: {
                   imageUrl: collectedImageUrls[0],
                   imageUrls: collectedImageUrls,
@@ -907,7 +908,7 @@ export async function POST(request: NextRequest) {
             }
 
             if (anyFailed) {
-              updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: failedError, label: '生成失败' });
+              updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: failedError, label: GENERATE_STAGES.FAILED });
               recordSubmitOnlyTerminal({ status: 'failed', error: failedError, creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
               if (deductedCredits > 0 && sessionUser) {
                 try {
@@ -918,7 +919,7 @@ export async function POST(request: NextRequest) {
               return;
             }
 
-            updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成超时', label: '生成超时' });
+            updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成超时', label: GENERATE_STAGES.TIMEOUT });
             recordSubmitOnlyTerminal({ status: 'timeout', error: '生成超时', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
             if (deductedCredits > 0 && sessionUser) {
               try {
@@ -930,7 +931,7 @@ export async function POST(request: NextRequest) {
           }
 
           // 无图片也无 taskIds — 失败
-          updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '未获得生成结果', label: '生成失败' });
+          updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '未获得生成结果', label: GENERATE_STAGES.FAILED });
           recordSubmitOnlyTerminal({
             status: 'failed',
             error: '未获得生成结果',
@@ -946,7 +947,7 @@ export async function POST(request: NextRequest) {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`[generate] submitOnly background error for ${asyncTaskId}:`, msg);
-          updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: msg, label: '生成失败' });
+          updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: msg, label: GENERATE_STAGES.FAILED });
           recordSubmitOnlyTerminal({
             status: 'failed',
             error: msg,
@@ -2927,7 +2928,7 @@ export async function POST(request: NextRequest) {
         const rawUrl = directImageUrls[i];
         const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
         taskIds.push(directTid);
-        registerTask(directTid, 'generate', '生成图片', userId);
+        registerTask(directTid, 'generate', GENERATE_STAGES.INIT, userId);
         void recordImageTaskSubmitted({
           taskId: directTid,
           userId,
@@ -2996,7 +2997,7 @@ export async function POST(request: NextRequest) {
       // 跳过已经注册的直接模式任务（上面已注册并标记完成）
       const existingTask = getTaskInfo(tid);
       if (existingTask) continue;
-      registerTask(tid, 'generate', '生成图片', userId);
+      registerTask(tid, 'generate', GENERATE_STAGES.SUBMITTING, userId);
       void recordImageTaskSubmitted({
         taskId: tid,
         userId,
