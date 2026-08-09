@@ -605,3 +605,9 @@ The local isolated-database blocker is now closed. A loopback-only PostgreSQL 18
 - TypeScript passed; changed-file ESLint has 0 errors.
 
 **Release decision remains Not passed.** Exact-deployment paid generation in Chromium, Firefox, and WebKit; deployed cancellation/timeout/late-result ledger evidence; rollback rehearsal; and inherited full-repository lint/test blockers remain open.
+
+## 2026-08-10 P0 durable-generation update
+
+BUG-050 is fixed locally: charged durable image slots now receive a server-owned kickoff through the existing lease-protected recovery route, without waiting for a browser poll. Focused concurrency/billing tests, TypeScript, ESLint error gating, the full Vitest suite, and the production build pass.
+
+**Release decision remains Not passed.** The exact cloud commit must still prove that `n=1/2/3/4` starts without browser polling, returns each image progressively, records one charge per slot, creates no duplicate provider task under concurrent browser/server wakeup, and refunds each cancelled legacy zombie task at most once.

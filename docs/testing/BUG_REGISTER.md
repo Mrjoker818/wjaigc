@@ -936,3 +936,17 @@ A fresh direct-canvas Pear `gpt-image-2` run at `1:1 / 1K / n=2` created two cob
 ### S1-GATE-001 update
 
 The isolated PostgreSQL blocker is closed locally: doctor verified the required capabilities and the three authoritative suites passed `9/9`. Deployed provider billing evidence remains open under S1-GATE-003 and S1-GATE-004.
+
+### BUG-050: Durable image slots depended on browser polling to start provider submission
+
+| Field | Detail |
+|---|---|
+| Severity | P0 |
+| Module | Durable image generation, task recovery, billing |
+| Reproduction | Submit a durable `n > 1` batch, retain the returned application task IDs, then stop browser polling before `/api/poll-task` is called. |
+| Expected | Every charged slot starts from a server-owned worker; the browser only observes progress. |
+| Actual | Three paid test slots remained `processing` for hours with no remote provider task ID, `creditStatus=pending`, and no automatic refund. |
+| Root cause | `/api/generate` persisted and charged each slot but delegated the first provider submission to the browser's first `/api/poll-task` request. |
+| Fix | Schedule a server-owned kickoff after all slot charges succeed. Each kickoff enters the existing `/api/poll-task` recovery path, whose PostgreSQL lease remains the sole provider-submission fence. |
+| Regression | Added a RED/GREEN kickoff unit suite and a generate-route ordering contract; the focused lease/billing suite passed 108 assertions and the full Vitest suite exited successfully. |
+| Status | Fixed and verified locally; exact-deployment provider and refund acceptance remains open. |

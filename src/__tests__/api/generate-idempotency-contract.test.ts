@@ -50,6 +50,20 @@ describe('generate submitOnly idempotency contract', () => {
     expect(register).toBeGreaterThan(atomicCharge);
   });
 
+  it('schedules server-owned slot kickoff only after every atomic charge succeeds', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    const branch = source.indexOf('if (submitOnly)');
+    const chargeLoop = source.indexOf('for (const pendingCharge of pendingCharges)', branch);
+    const kickoffSchedule = source.indexOf('kickoffDurableGenerationTasks({', chargeLoop);
+    const response = source.indexOf('return NextResponse.json({', kickoffSchedule);
+
+    expect(chargeLoop).toBeGreaterThan(branch);
+    expect(kickoffSchedule).toBeGreaterThan(chargeLoop);
+    expect(response).toBeGreaterThan(kickoffSchedule);
+    expect(source.slice(chargeLoop, kickoffSchedule)).toContain("if (!charge.charged)");
+    expect(source.slice(chargeLoop, kickoffSchedule)).toContain('return NextResponse.json({');
+  });
+
   it('persists a sanitized submission payload so cloud polling can resume a worker that was interrupted after the response', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
     const branch = source.indexOf('if (submitOnly)');

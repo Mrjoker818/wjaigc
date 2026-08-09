@@ -448,3 +448,12 @@
 | Chromium / Firefox / WebKit paid E2E | BLOCKED | Deploy the candidate commit and supply the exact runtime SHA plus real account/model configuration. |
 | Cancellation, timeout, late completion | BLOCKED | Run against the deployed provider and retain abort, stable terminal state, and one-time refund evidence. |
 | Rollback rehearsal | BLOCKED | Demonstrate `core-v2 -> legacy` rollback without data loss or task duplication. |
+
+## 2026-08-10 durable generation deployment acceptance
+
+| Item | Status | Required proof |
+|---|---|---|
+| Server-owned first submission | PENDING DEPLOYMENT | Submit a paid task, stop browser polling immediately, and verify the application task receives a remote provider task ID and reaches a terminal state. |
+| Concurrent server/browser wakeup | PENDING DEPLOYMENT | Capture the database lease and provider ledger proving one provider task and one charge per slot. |
+| Legacy zombie cleanup | PENDING DEPLOYMENT | Cancel the three known synthetic tasks, verify terminal `cancelled`, one refund each, and no second refund on repeated cancellation. |
+| Progressive `n=1/2/3/4` | PENDING DEPLOYMENT | Each slot appears as soon as its provider result completes and does not wait for the slowest sibling. |

@@ -47,6 +47,7 @@ import {
   alignReferenceDescriptions,
   compileReferenceConstraints,
 } from '@/lib/reference-constraint-compiler';
+import { kickoffDurableGenerationTasks } from '@/lib/task-core/durable-generation-kickoff';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -1132,6 +1133,25 @@ export async function POST(request: NextRequest) {
           },
         });
       }
+
+      const kickoffTaskIds = submittedSlots
+        .filter((slot) => !['completed', 'failed', 'cancelled', 'timeout'].includes(slot.status))
+        .map((slot) => slot.taskId);
+      after(async () => {
+        const kickoff = await kickoffDurableGenerationTasks({
+          taskIds: kickoffTaskIds,
+          userId: authResult.userId,
+          userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+        });
+        if (kickoff.failed.length > 0) {
+          console.warn('[generate] Durable generation kickoff was not accepted for every slot', {
+            batchId: generationBatch.batchId,
+            attempted: kickoff.attempted,
+            accepted: kickoff.accepted,
+            failed: kickoff.failed,
+          });
+        }
+      });
 
       return NextResponse.json({
         success: true,

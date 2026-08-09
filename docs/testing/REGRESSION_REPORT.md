@@ -690,3 +690,17 @@ No Stage 1 completion claim is made. The next evidence run must retain the uploa
 | Changed-file ESLint | PASS WITH HISTORICAL WARNINGS | 0 errors; 5 pre-existing warnings in untouched regions of `db-storage.ts`. |
 
 This closes the local PostgreSQL evidence gap. It does not replace exact-deployment browser, provider, ledger, cancellation, timeout, or rollback evidence.
+
+## 2026-08-10 Durable generation server-kickoff regression
+
+| Check | Result | Evidence |
+|---|---|---|
+| RED reproduction | PASS | The new suite failed before implementation because no server-owned kickoff existed. |
+| Per-slot kickoff | PASS | Unique task IDs are posted independently to the authenticated internal `/api/poll-task` route. |
+| Partial kickoff failure isolation | PASS | One failed internal request does not prevent later slots from being awakened. |
+| Charge-before-start ordering | PASS | Source contract proves kickoff is scheduled only after every atomic slot charge succeeds; charge failure returns before scheduling. |
+| Lease and billing regression | PASS | 11 focused files / 108 tests passed, including recovery lease, terminal persistence, cancellation billing, and batch identity. |
+| TypeScript / ESLint / build | PASS | TypeScript passed; ESLint reported 0 errors and 960 historical warnings; Next.js production build passed. |
+| Full Vitest | PASS WITH EXPLICIT SKIPS | Full suite exited 0. PostgreSQL suites requiring `POSTGRES_TEST_DATABASE_URL` remained explicitly skipped in this workstation run. |
+
+The browser remains a progress observer and compatibility fallback. It is no longer the required trigger for the first provider submission.
