@@ -33,11 +33,14 @@ vi.mock('@/lib/cloud-task-persistence', () => ({ recordCloudTaskCancelled: mocks
 
 import { POST } from '@/app/api/cancel-task/route';
 
-function request(taskId: string): NextRequest {
+function request(taskId: string, requestId?: string): NextRequest {
   return new NextRequest('http://localhost/api/cancel-task', {
     method: 'POST',
     body: JSON.stringify({ taskId }),
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(requestId ? { 'x-request-id': requestId } : {}),
+    },
   });
 }
 
@@ -173,6 +176,35 @@ describe('POST /api/cancel-task', () => {
     expect(mocks.cancelEditTask).not.toHaveBeenCalled();
     expect(mocks.updateTaskProgress).not.toHaveBeenCalled();
     expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+  });
+
+  it('returns a safe unified database error with the caller requestId', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'task-db-error-contract',
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+      persistence: 'durable',
+    });
+    mocks.getCloudTaskForUser.mockRejectedValue(
+      new Error('postgres password=secret connection refused'),
+    );
+
+    const response = await POST(
+      request('task-db-error-contract', 'req_cancel_contract_01'),
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get('x-request-id')).toBe('req_cancel_contract_01');
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      success: false,
+      code: 'TASK_CANCEL_FAILED',
+      message: '取消任务失败，请稍后重试',
+      source: 'database',
+      retryable: true,
+      requestId: 'req_cancel_contract_01',
+    }));
   });
 
   it('retries authoritative persistence when a cancellation signal already exists', async () => {

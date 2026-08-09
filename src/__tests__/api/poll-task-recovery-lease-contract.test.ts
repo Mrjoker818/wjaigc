@@ -66,6 +66,20 @@ describe('poll-task recovery lease contract', () => {
     expect(memoryUpdate).toBeGreaterThan(completed);
   });
 
+  it('classifies recovery aborts before settling the database terminal state', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const recoveryStart = source.indexOf('if (requiresSubmissionRecovery)');
+    const catchStart = source.indexOf('} catch (error) {', recoveryStart);
+    const normalized = source.indexOf('normalizeTaskError(', catchStart);
+    const timeoutStatus = source.indexOf("'TASK_TIMEOUT'", normalized);
+    const terminalSettlement = source.indexOf('terminateCloudTaskAndRefund(', timeoutStatus);
+
+    expect(catchStart).toBeGreaterThan(recoveryStart);
+    expect(normalized).toBeGreaterThan(catchStart);
+    expect(timeoutStatus).toBeGreaterThan(normalized);
+    expect(terminalSettlement).toBeGreaterThan(timeoutStatus);
+  });
+
   it('does not treat a recovered generate-async task with a remote task id as local-only work', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
     const localTaskGate = source.indexOf('if (LOCAL_TASK_TYPES.includes(registryTask.type)');

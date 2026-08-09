@@ -123,7 +123,8 @@ describe('progressive generation recovery contract', () => {
     const recoveryCacheWrite = source.slice(recoveryCatch, recoveryCatch + 260);
 
     expect(recoveryCatch).toBeGreaterThan(-1);
-    expect(recoveryCacheWrite).toContain('taskResult: persistedResult');
+    expect(recoveryCacheWrite).toContain('...persistedResult');
+    expect(recoveryCacheWrite).toContain('taskError');
   });
 
   it('projects canonical slot metadata on the first remote provider response', () => {
@@ -156,18 +157,16 @@ describe('progressive generation recovery contract', () => {
 
   it('binds recovery submission to task cancellation instead of letting a detached request continue', () => {
     const recoveryStart = source.indexOf('if (requiresSubmissionRecovery)');
-    const controller = source.indexOf('const recoveryController = new AbortController()', recoveryStart);
-    const registration = source.indexOf('registerTaskAbortController(recovered.taskId, recoveryController)', controller);
-    const combinedSignal = source.indexOf(
-      'AbortSignal.any([recoveryController.signal, AbortSignal.timeout(600000)])',
-      registration,
-    );
-    const cleanup = source.indexOf('unregisterTaskAbortController(recovered.taskId, recoveryController)', combinedSignal);
+    const scope = source.indexOf('const recoveryAbort = createTaskAbortScope(', recoveryStart);
+    const timeout = source.indexOf('timeoutMs: 600_000', scope);
+    const fetchSignal = source.indexOf('signal: recoveryAbort.signal', timeout);
+    const cleanup = source.indexOf('recoveryAbort.dispose()', fetchSignal);
 
-    expect(controller).toBeGreaterThan(recoveryStart);
-    expect(registration).toBeGreaterThan(controller);
-    expect(combinedSignal).toBeGreaterThan(registration);
-    expect(cleanup).toBeGreaterThan(combinedSignal);
+    expect(scope).toBeGreaterThan(recoveryStart);
+    expect(timeout).toBeGreaterThan(scope);
+    expect(fetchSignal).toBeGreaterThan(timeout);
+    expect(cleanup).toBeGreaterThan(fetchSignal);
+    expect(source.slice(scope, fetchSignal)).not.toContain('request.signal');
   });
 
   it('settles durable generation slots atomically before exposing remote terminal results', () => {

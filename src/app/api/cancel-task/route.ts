@@ -13,6 +13,8 @@ import {
   refundCloudTaskCredits,
   terminateCloudTaskAndRefund,
 } from '@/lib/cloud-task-storage';
+import { errorResponse, getRequestId } from '@/lib/request-id';
+import { inferTaskErrorSource } from '@/lib/task-core/task-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +38,7 @@ function requiresAtomicTerminalSettlement(task: Awaited<ReturnType<typeof getClo
  * Response: { success: boolean, message?: string }
  */
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request);
   try {
     // 认证检查：只有登录用户才能取消任务
     const user = await getAuthUser(request);
@@ -260,10 +263,22 @@ export async function POST(request: NextRequest) {
       task: safeTaskInfo,
     });
   } catch (err) {
-    console.error('[cancel-task] Error:', err);
-    return NextResponse.json(
-      { success: false, error: '取消任务失败' },
-      { status: 500 }
+    const source = inferTaskErrorSource(err);
+    console.error('[cancel-task] Error:', {
+      requestId,
+      source,
+      errorName: err instanceof Error ? err.name : typeof err,
+    });
+    return errorResponse(
+      500,
+      'TASK_CANCEL_FAILED',
+      '取消任务失败，请稍后重试',
+      requestId,
+      true,
+      {
+        source,
+        error: '取消任务失败，请稍后重试',
+      },
     );
   }
 }

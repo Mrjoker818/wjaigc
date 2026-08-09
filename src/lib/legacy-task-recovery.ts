@@ -16,6 +16,17 @@ export interface RecoverableLegacyTask {
   label?: string;
 }
 
+export function getLegacyRecoveryRetryAt(input: {
+  now?: number;
+  retryAfterMs?: number;
+  requestFailed?: boolean;
+}): number {
+  const now = input.now ?? Date.now();
+  const serverDelay = Math.max(0, input.retryAfterMs || 0);
+  const transientFailureFloor = input.requestFailed ? 3_000 : 0;
+  return now + Math.max(serverDelay, transientFailureFloor);
+}
+
 function normalizedModel(model: string | undefined): string {
   const value = (model || '').trim();
   const suffix = value.includes('::') ? value.split('::').at(-1) : value;

@@ -4,8 +4,10 @@ import {
   isTerminalTaskStatus,
   normalizeDurableTaskStatus,
   type DurableTaskStatus,
+  type TaskErrorInput,
   type UnifiedTaskError,
 } from '@/lib/task-core/task-state';
+import { normalizeTaskError } from '@/lib/task-core/task-error';
 
 export interface CanonicalGenerationSlot {
   batchId: string;
@@ -30,7 +32,7 @@ export interface GenerationSubmitSlot {
   batchId?: string;
   status: DurableTaskStatus;
   result?: Record<string, unknown>;
-  error?: UnifiedTaskError;
+  error?: TaskErrorInput;
 }
 
 interface CreateDurableGenerationBatchInput {
@@ -43,7 +45,7 @@ interface ProjectCanonicalGenerationSlotInput {
   taskId: string;
   status: string;
   result?: Record<string, unknown>;
-  error?: UnifiedTaskError;
+  error?: TaskErrorInput;
 }
 
 interface LegacyGenerationTaskEventEnvelope {
@@ -125,7 +127,7 @@ export function normalizeGenerationSubmitSlots(
         ? sanitizeSlotResult(slot.result as Record<string, unknown>)
         : undefined;
       const error = slot.error && typeof slot.error === 'object'
-        ? slot.error as UnifiedTaskError
+        ? slot.error as TaskErrorInput
         : undefined;
       const normalizedStatus = !status || status === 'pending'
         ? 'submitting'
@@ -275,7 +277,16 @@ export function projectCanonicalGenerationSlot(
     taskId: requireIdentity(input.taskId, 'taskId'),
     status: normalizeDurableTaskStatus(input.status),
     ...(safeResult ? { result: safeResult } : {}),
-    ...(input.error ? { error: input.error } : {}),
+    ...(input.error
+      ? {
+          error: normalizeTaskError(input.error, {
+            code: input.error.code,
+            message: input.error.message,
+            source: 'wujie',
+            retryable: false,
+          }),
+        }
+      : {}),
   };
 }
 
@@ -310,7 +321,7 @@ export function attachCanonicalGenerationSlotToEvent<
 
 export function reconcileGenerationBatch(
   batch: DurableGenerationBatch,
-  event: CanonicalGenerationSlot,
+  event: Omit<CanonicalGenerationSlot, 'error'> & { error?: TaskErrorInput },
 ): DurableGenerationBatch {
   if (event.batchId !== batch.batchId) return batch;
 
@@ -331,7 +342,16 @@ export function reconcileGenerationBatch(
     ...current,
     status: event.status,
     ...(event.result ? { result: event.result } : {}),
-    ...(event.error ? { error: event.error } : {}),
+    ...(event.error
+      ? {
+          error: normalizeTaskError(event.error, {
+            code: event.error.code,
+            message: event.error.message,
+            source: 'wujie',
+            retryable: false,
+          }),
+        }
+      : {}),
   };
 
   return {

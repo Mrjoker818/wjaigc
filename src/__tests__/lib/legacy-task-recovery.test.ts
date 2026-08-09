@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { findUniqueLegacyTaskMatch } from '@/lib/legacy-task-recovery';
+import {
+  findUniqueLegacyTaskMatch,
+  getLegacyRecoveryRetryAt,
+} from '@/lib/legacy-task-recovery';
 
 describe('findUniqueLegacyTaskMatch', () => {
   const placeholder = {
@@ -30,5 +33,19 @@ describe('findUniqueLegacyTaskMatch', () => {
     expect(findUniqueLegacyTaskMatch({ ...placeholder, processing: { status: 'processing', taskId: 'saved-task' } }, [
       { id: 'async-1', status: 'processing', prompt: placeholder.prompt, model: 'seedream-lite' },
     ])).toBeUndefined();
+  });
+});
+
+describe('getLegacyRecoveryRetryAt', () => {
+  it('honors the server retry window and applies a floor after transient failures', () => {
+    expect(getLegacyRecoveryRetryAt({
+      now: 10_000,
+      retryAfterMs: 8_000,
+    })).toBe(18_000);
+    expect(getLegacyRecoveryRetryAt({
+      now: 10_000,
+      retryAfterMs: 0,
+      requestFailed: true,
+    })).toBe(13_000);
   });
 });

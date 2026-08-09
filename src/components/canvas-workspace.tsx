@@ -18,7 +18,11 @@ import {
   resolveGenerationSlotIndex,
 } from '@/lib/task-core/generation-batch';
 import { reconcileCompletedGenerationSlot } from '@/lib/canvas-generation-reconciliation';
-import { findUniqueLegacyTaskMatch, type RecoverableLegacyTask } from '@/lib/legacy-task-recovery';
+import {
+  findUniqueLegacyTaskMatch,
+  getLegacyRecoveryRetryAt,
+  type RecoverableLegacyTask,
+} from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import {
   restoreAnnotations,
@@ -1011,6 +1015,16 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const resumedTaskPollingGenerationRef = useRef(0);
   const legacyRecoveryAttemptedRef = useRef<Set<string>>(new Set());
   const legacyRecoveryInFlightRef = useRef<Set<string>>(new Set());
+  const legacyRecoveryRetryAtRef = useRef<Map<string, number>>(new Map());
+  const legacyRecoveryRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const [legacyRecoveryRevision, setLegacyRecoveryRevision] = useState(0);
+  useEffect(() => () => {
+    for (const timer of legacyRecoveryRetryTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    legacyRecoveryRetryTimersRef.current.clear();
+    legacyRecoveryRetryAtRef.current.clear();
+  }, [currentProject?.id]);
   useEffect(() => {
     if (!currentProject?.id) return;
 
@@ -1022,15 +1036,38 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     ));
     const keys = placeholders
       .map((image) => `${currentProject.id}:${image.id}`)
-      .filter((key) => !legacyRecoveryAttemptedRef.current.has(key) && !legacyRecoveryInFlightRef.current.has(key));
+      .filter((key) => (
+        !legacyRecoveryAttemptedRef.current.has(key)
+        && !legacyRecoveryInFlightRef.current.has(key)
+        && (legacyRecoveryRetryAtRef.current.get(key) || 0) <= Date.now()
+      ));
     if (keys.length === 0) return;
+
+    const scheduleRetry = (key: string, retryAt: number) => {
+      legacyRecoveryRetryAtRef.current.set(key, retryAt);
+      const existing = legacyRecoveryRetryTimersRef.current.get(key);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        legacyRecoveryRetryTimersRef.current.delete(key);
+        setLegacyRecoveryRevision((revision) => revision + 1);
+      }, Math.max(0, retryAt - Date.now()));
+      legacyRecoveryRetryTimersRef.current.set(key, timer);
+    };
 
     keys.forEach((key) => legacyRecoveryInFlightRef.current.add(key));
     let cancelled = false;
     void (async () => {
       try {
         const response = await fetch(`/api/tasks/recover?projectId=${encodeURIComponent(currentProject.id)}&includeLegacyUnassigned=1`);
-        const data = await response.json() as { success?: boolean; tasks?: RecoverableLegacyTask[] };
+        const data = await response.json() as {
+          success?: boolean;
+          tasks?: RecoverableLegacyTask[];
+          retryAfterMs?: number;
+        };
+        const retryAt = getLegacyRecoveryRetryAt({
+          retryAfterMs: data.retryAfterMs,
+        });
+        keys.forEach((key) => scheduleRetry(key, retryAt));
         if (!response.ok || !data.success || !Array.isArray(data.tasks) || cancelled) return;
 
         const keyByImageId = new Map(placeholders.map((image) => [image.id, `${currentProject.id}:${image.id}`]));
@@ -1054,14 +1091,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           };
         }));
       } catch {
-        // The next render retries a failed recovery fetch; do not guess a task ID.
+        const retryAt = getLegacyRecoveryRetryAt({ requestFailed: true });
+        keys.forEach((key) => scheduleRetry(key, retryAt));
       } finally {
         keys.forEach((key) => legacyRecoveryInFlightRef.current.delete(key));
       }
     })();
 
     return () => { cancelled = true; };
-  }, [currentProject?.id, images, setImages]);
+  }, [currentProject?.id, images, legacyRecoveryRevision, setImages]);
 
   useEffect(() => {
     resumedTaskPollingGenerationRef.current += 1;

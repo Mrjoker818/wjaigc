@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listCloudTasks } from '@/lib/cloud-task-storage';
 import { getSessionUser } from '@/lib/server-auth';
+import { getTaskRecoveryBackoff } from '@/lib/task-core/task-abort';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,7 @@ function toRecoveryTask(task: Awaited<ReturnType<typeof listCloudTasks>>[number]
     ? (payload as Record<string, unknown>).prompt
     : undefined;
 
+  const recovery = getTaskRecoveryBackoff(task);
   return {
     id: task.id,
     type: task.type,
@@ -21,6 +23,10 @@ function toRecoveryTask(task: Awaited<ReturnType<typeof listCloudTasks>>[number]
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     prompt: typeof prompt === 'string' ? prompt : undefined,
+    recoveryAllowed: recovery.recoveryAllowed,
+    retryAfterMs: recovery.retryAfterMs,
+    nextRecoveryAt: recovery.nextRecoveryAt,
+    recoveryReason: recovery.reason,
   };
 }
 
@@ -46,5 +52,15 @@ export async function GET(request: NextRequest) {
     .filter((task, index, entries) => entries.findIndex((candidate) => candidate.id === task.id) === index)
     .map(toRecoveryTask);
 
-  return NextResponse.json({ success: true, tasks });
+  const activeRetryDelays = tasks
+    .filter((task) => ['queued', 'pending', 'processing'].includes(task.status))
+    .map((task) => task.retryAfterMs)
+    .filter((delay) => delay > 0);
+  const retryAfterMs = activeRetryDelays.length > 0
+    ? Math.min(...activeRetryDelays)
+    : 3_000;
+  const response = NextResponse.json({ success: true, tasks, retryAfterMs });
+  response.headers.set('Cache-Control', 'no-store');
+  response.headers.set('Retry-After', String(Math.max(1, Math.ceil(retryAfterMs / 1_000))));
+  return response;
 }

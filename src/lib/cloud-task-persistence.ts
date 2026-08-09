@@ -12,8 +12,8 @@ import {
 } from '@/lib/task-core/task-service';
 import type {
   DurableTaskStatus,
-  UnifiedTaskError,
 } from '@/lib/task-core/task-state';
+import { normalizeTaskError } from '@/lib/task-core/task-error';
 
 interface ImageTaskSubmission {
   taskId: string;
@@ -110,8 +110,16 @@ async function persistTerminalTask(
   input: PersistTerminalTaskInput,
 ): Promise<TransitionTaskResult> {
   const creditStatus = input.creditStatus || 'pending';
-  const error: UnifiedTaskError | undefined = input.error
-    ? { code: 'LEGACY_TASK_ERROR', message: input.error }
+  const error = input.error
+    ? normalizeTaskError(
+        { code: 'LEGACY_TASK_ERROR', message: input.error },
+        {
+          code: 'LEGACY_TASK_ERROR',
+          message: input.error,
+          source: 'wujie',
+          retryable: false,
+        },
+      )
     : undefined;
   return transitionTask({
     taskId,

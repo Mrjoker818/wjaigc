@@ -415,3 +415,13 @@
 |------|--------|-------|
 | Isolated PostgreSQL schema lifecycle | BLOCKED | `POSTGRES_TEST_DATABASE_URL` is not configured in the current environment. The real integration test is explicitly skipped and must not be counted as passed. |
 | Stage 1 PostgreSQL capability probe | BLOCKED | `pnpm doctor` reports the missing test database as a release blocker. When configured, it verifies connection, `CREATE TABLE`, transactions, unique indexes, and advisory locks. |
+
+## 2026-08-09 Stage 1 Task 6 cancellation and recovery acceptance
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Deterministic cancellation/timeout terminal races | Verified locally | Focused Vitest coverage proves terminal states cannot be overwritten by late completion, task abort reaches the owned network signal, and recovery retries honor lease/backoff metadata. |
+| Progressive generation browser regression | Verified locally | Chromium, Chromium 1080p, Firefox, and WebKit passed the four-slot out-of-order completion and refresh-resume scenario. |
+| Real PostgreSQL terminal/refund races | BLOCKED | `POSTGRES_TEST_DATABASE_URL` is not configured; the authoritative PostgreSQL task-state and billing-concurrency suites were explicitly skipped. |
+| Real provider cancellation and late result | BLOCKED | Requires a deployed exact commit, a long-running paid provider task, request/task IDs, provider status evidence, and the PostgreSQL ledger proving at most one refund. |
+| Cloud recovery backoff | Pending deployment | After deploying the exact candidate commit, verify that an active lease or recent update does not trigger a hot `/api/tasks/recover` loop and that recovery resumes after the advertised retry time. |

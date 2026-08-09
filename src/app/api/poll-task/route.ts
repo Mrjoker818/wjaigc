@@ -45,6 +45,12 @@ import { resolveVideoCompatProfile } from '@/lib/video-api';
 import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';
 import { getLayerTaskStatus } from '@/lib/layer-decomposition/service';
 import { projectCanonicalGenerationSlot } from '@/lib/task-core/generation-batch';
+import { createTaskAbortScope } from '@/lib/task-core/task-abort';
+import {
+  inferTaskErrorSource,
+  normalizeTaskError,
+} from '@/lib/task-core/task-error';
+import { getRequestId } from '@/lib/request-id';
 
 export const dynamic = 'force-dynamic';
 
@@ -221,6 +227,7 @@ if (typeof setInterval !== 'undefined') {
 // 轮询异步任务状态 - 由前端调用
 // 通用化设计：支持不同提供商的任务状态查询格式
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request);
   try {
     const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl } = await request.json();
     if (!taskId || typeof taskId !== 'string') {
@@ -996,8 +1003,10 @@ export async function POST(request: NextRequest) {
         });
         if (requiresSubmissionRecovery) {
           after(async () => {
-            const recoveryController = new AbortController();
-            registerTaskAbortController(recovered.taskId, recoveryController);
+            const recoveryAbort = createTaskAbortScope(recovered.taskId, {
+              timeoutMs: 600_000,
+              requestId,
+            });
             try {
             if (isTaskCancelled(recovered.taskId)) return;
             const resumed = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
@@ -1012,7 +1021,7 @@ export async function POST(request: NextRequest) {
                 _skipCredits: true,
                 _skipCloudTaskPersistence: true,
               }),
-              signal: AbortSignal.any([recoveryController.signal, AbortSignal.timeout(600000)]),
+              signal: recoveryAbort.signal,
             });
             const resumedData = await resumed.json().catch(() => null) as Record<string, unknown> | null;
             if (!resumed.ok || !resumedData?.success) {
@@ -1035,7 +1044,14 @@ export async function POST(request: NextRequest) {
                 completedResult,
                 TASK_RECOVERY_WORKER_ID,
               );
-              if (!committed) return;
+              if (!committed) {
+                console.info('[poll-task] Late recovery result ignored', {
+                  requestId,
+                  taskId: recovered.taskId,
+                  attemptedStatus: 'completed',
+                });
+                return;
+              }
 
               updateTaskProgress(recovered.taskId, {
                 status: 'completed',
@@ -1077,28 +1093,73 @@ export async function POST(request: NextRequest) {
               expectedStatuses: ['processing'],
               leaseOwner: TASK_RECOVERY_WORKER_ID,
             });
-            if (!updated) return;
+            if (!updated) {
+              console.info('[poll-task] Late recovery provider id ignored', {
+                requestId,
+                taskId: recovered.taskId,
+                remoteTaskId: remoteTaskIds[0],
+              });
+              return;
+            }
             updateTaskProgress(recovered.taskId, { status: 'processing', progress: 10, result: recoveredResult });
           } catch (error) {
-            const message = error instanceof Error ? error.message : '任务恢复提交失败';
+            const taskError = normalizeTaskError(
+              recoveryAbort.signal.aborted
+                ? recoveryAbort.signal.reason
+                : error,
+              {
+                code: 'TASK_RECOVERY_FAILED',
+                message: '任务恢复失败，请稍后重试',
+                source: inferTaskErrorSource(error),
+                retryable: true,
+                requestId,
+              },
+            );
+            if (taskError.code === 'TASK_EXECUTION_REPLACED') {
+              console.info('[poll-task] Superseded recovery worker stopped', {
+                requestId: taskError.requestId,
+                taskId: recovered.taskId,
+              });
+              return;
+            }
+            const terminalStatus = taskError.code === 'TASK_TIMEOUT'
+              ? 'timeout'
+              : taskError.code === 'TASK_CANCELLED'
+                ? 'cancelled'
+                : 'failed';
             const termination = await terminateCloudTaskAndRefund(
               recovered.taskId,
-              'failed',
-              message,
+              terminalStatus,
+              taskError.message,
               TASK_RECOVERY_WORKER_ID,
             );
-            if (!termination.transitioned) return;
+            if (!termination.transitioned) {
+              console.info('[poll-task] Recovery terminal race lost', {
+                requestId: taskError.requestId,
+                taskId: recovered.taskId,
+                attemptedStatus: terminalStatus,
+                currentStatus: termination.status,
+              });
+              return;
+            }
 
-            updateTaskProgress(recovered.taskId, { status: 'failed', progress: 0, error: message });
+            updateTaskProgress(recovered.taskId, {
+              status: terminalStatus,
+              progress: 0,
+              error: taskError.message,
+            });
             failedTaskCache.set(recovered.taskId, {
               userId: recovery.userId,
-              error: message,
-              taskResult: persistedResult,
+              error: taskError.message,
+              taskResult: {
+                ...persistedResult,
+                taskError,
+              },
               timestamp: Date.now(),
             });
             releaseQueueSlot(recovered.taskId);
           } finally {
-            unregisterTaskAbortController(recovered.taskId, recoveryController);
+            recoveryAbort.dispose();
           }
           });
           return NextResponse.json(withGenerationSlotMetadata({

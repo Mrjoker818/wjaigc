@@ -15,7 +15,7 @@ import {
   isTerminalTaskStatus,
   normalizeDurableTaskStatus,
   type DurableTaskStatus,
-  type UnifiedTaskError,
+  type TaskErrorInput,
 } from '@/lib/task-core/task-state';
 
 export type CloudTaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
@@ -92,7 +92,7 @@ export interface TransitionCloudTaskStatusInput {
   to: DurableTaskStatus;
   revision: number;
   result?: Record<string, unknown>;
-  error?: UnifiedTaskError;
+  error?: TaskErrorInput;
   creditStatus?: CloudTaskCreditStatus;
 }
 
@@ -165,7 +165,7 @@ export interface CreateBillableCloudTaskResult {
 export interface SettleFailedCloudTaskInput {
   taskId: string;
   status: CloudTaskFailureStatus;
-  error: UnifiedTaskError;
+  error: TaskErrorInput;
 }
 
 export interface SettleFailedCloudTaskResult {

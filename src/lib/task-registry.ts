@@ -13,11 +13,16 @@
  */
 
 import { EventEmitter } from 'events';
+import {
+  abortTaskExecution as abortCoreTaskExecution,
+  registerTaskAbortController as registerCoreTaskAbortController,
+  unregisterTaskAbortController as unregisterCoreTaskAbortController,
+} from '@/lib/task-core/task-abort';
 
 // ─── 类型 ────────────────────────────────────────────────────────────
 
 export type TaskType = 'generate' | 'generate-async' | 'image-edit' | 'edit' | 'svg-trace' | 'upscale' | 'removebg' | 'extend' | 'mask' | 'erase' | 'vectorize' | 'segment' | 'batch' | 'outpaint' | 'multi-angle' | 'display-decompose' | 'brand-generate' | 'brand-ecommerce' | 'refine-engine' | 'font-design' | 'ai-psd' | 'video' | 'packaging' | 'display3d' | 'display3d-decompose' | '3d' | '3d-auto-multi-view' | '3d-retexture' | '3d-remesh' | 'venue-analyze' | 'venue-proposals' | 'venue-lock-design' | 'venue-render' | 'venue-qc' | 'human-repair' | 'aspect-recompose';
-export type TaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+export type TaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
 export type TaskPersistence = 'memory' | 'durable';
 
 export interface TaskInfo {
@@ -39,7 +44,7 @@ export interface TaskInfo {
 
 export interface TaskEvent {
   taskId: string;
-  type: 'created' | 'updated' | 'completed' | 'failed' | 'cancelled' | 'progress' | 'queued';
+  type: 'created' | 'updated' | 'completed' | 'failed' | 'cancelled' | 'timeout' | 'progress' | 'queued';
   task: TaskInfo;
 }
 
@@ -49,7 +54,6 @@ export interface TaskEvent {
 interface GlobalTaskStore {
   registry: Map<string, TaskInfo>;
   cancelled: Map<string, number>;
-  abortControllers: Map<string, AbortController>;
   eventBus: EventEmitter;
   userQueues: Map<string, string[]>;
   userActiveCount: Map<string, number>;
@@ -64,7 +68,6 @@ function getGlobalTaskStore(): GlobalTaskStore {
     (globalThis as Record<string, unknown>)[key] = {
       registry: new Map<string, TaskInfo>(),
       cancelled: new Map<string, number>(),
-      abortControllers: new Map<string, AbortController>(),
       eventBus: new EventEmitter(),
       userQueues: new Map<string, string[]>(),
       userActiveCount: new Map<string, number>(),
@@ -74,7 +77,6 @@ function getGlobalTaskStore(): GlobalTaskStore {
     ((globalThis as Record<string, unknown>)[key] as GlobalTaskStore).eventBus.setMaxListeners(200);
   }
   const store = (globalThis as Record<string, unknown>)[key] as GlobalTaskStore;
-  store.abortControllers ||= new Map<string, AbortController>();
   store.pendingDurableTaskMarkers ||= new Map<string, number>();
   if (store.durableTaskIds) {
     const markedAt = Date.now();
@@ -90,7 +92,6 @@ function getGlobalTaskStore(): GlobalTaskStore {
 
 const taskRegistry = getGlobalTaskStore().registry;
 const cancelledTasks = getGlobalTaskStore().cancelled;
-const taskAbortControllers = getGlobalTaskStore().abortControllers;
 const taskEventBus = getGlobalTaskStore().eventBus;
 const userQueues = getGlobalTaskStore().userQueues;
 const userActiveCount = getGlobalTaskStore().userActiveCount;
@@ -188,7 +189,11 @@ export function waitForQueueSlot(taskId: string, timeoutMs: number = 5 * 60 * 10
         clearTimeout(timer);
         subscription();
         resolve(true); // 获得槽位
-      } else if (event.task.status === 'cancelled' || event.task.status === 'failed') {
+      } else if (
+        event.task.status === 'cancelled'
+        || event.task.status === 'failed'
+        || event.task.status === 'timeout'
+      ) {
         clearTimeout(timer);
         subscription();
         resolve(false); // 被取消或失败
@@ -205,7 +210,7 @@ export function updateTaskProgress(
   const task = taskRegistry.get(taskId);
   if (!task) return;
 
-  const terminalStatuses: TaskStatus[] = ['completed', 'failed', 'cancelled'];
+  const terminalStatuses: TaskStatus[] = ['completed', 'failed', 'cancelled', 'timeout'];
   if (
     terminalStatuses.includes(task.status)
     && update.status
@@ -229,6 +234,8 @@ export function updateTaskProgress(
     emitEvent('completed', task);
   } else if (update.status === 'failed') {
     emitEvent('failed', task);
+  } else if (update.status === 'timeout') {
+    emitEvent('timeout', task);
   } else if (update.progress !== undefined && update.progress !== oldProgress) {
     emitEvent('progress', task);
   } else if (oldStatus === 'queued' && task.status !== 'queued') {
@@ -238,6 +245,7 @@ export function updateTaskProgress(
   }
 
   if (reachedTerminalState) {
+    unregisterTaskAbortController(taskId);
     releaseQueueSlot(taskId);
   }
 }
@@ -251,7 +259,7 @@ export function getTaskInfo(taskId: string): TaskInfo | undefined {
 export function cancelTask(taskId: string): boolean {
   if (cancelledTasks.has(taskId)) return true;
   cancelledTasks.set(taskId, Date.now());
-  abortTaskExecution(taskId, new Error(`Task ${taskId} was cancelled`));
+  abortCoreTaskExecution(taskId, 'cancelled');
   const task = taskRegistry.get(taskId);
   if (task) emitEvent('updated', task);
   return true;
@@ -259,11 +267,7 @@ export function cancelTask(taskId: string): boolean {
 
 /** Register the controller that owns the live backend work for a task. */
 export function registerTaskAbortController(taskId: string, controller: AbortController): void {
-  const existing = taskAbortControllers.get(taskId);
-  if (existing && existing !== controller && !existing.signal.aborted) {
-    existing.abort(new Error(`Task ${taskId} execution was replaced`));
-  }
-  taskAbortControllers.set(taskId, controller);
+  registerCoreTaskAbortController(taskId, controller);
 }
 
 /** Remove a controller only if the caller still owns the registration. */
@@ -271,19 +275,12 @@ export function unregisterTaskAbortController(
   taskId: string,
   controller?: AbortController,
 ): void {
-  if (!controller || taskAbortControllers.get(taskId) === controller) {
-    taskAbortControllers.delete(taskId);
-  }
+  unregisterCoreTaskAbortController(taskId, controller);
 }
 
 /** Actively stop the network and image work associated with a task. */
 export function abortTaskExecution(taskId: string, reason?: unknown): boolean {
-  const controller = taskAbortControllers.get(taskId);
-  if (!controller) return false;
-  if (!controller.signal.aborted) {
-    controller.abort(reason);
-  }
-  return true;
+  return abortCoreTaskExecution(taskId, reason);
 }
 
 /** 检查任务是否已取消（现有路由在处理循环中检查） */
@@ -460,7 +457,7 @@ function evictOldestTerminalTasks(): void {
     releaseQueueSlot(id);
     taskRegistry.delete(id);
     cancelledTasks.delete(id);
-    taskAbortControllers.delete(id);
+    unregisterTaskAbortController(id);
     durableMarkers.delete(id);
   }
 }
@@ -504,7 +501,7 @@ export function cleanupExpiredTasks(now: number = Date.now()): void {
 
     taskRegistry.delete(id);
     cancelledTasks.delete(id);
-    taskAbortControllers.delete(id);
+    unregisterTaskAbortController(id);
     durableMarkers.delete(id);
   }
 

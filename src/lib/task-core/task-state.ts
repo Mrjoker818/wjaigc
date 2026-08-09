@@ -1,3 +1,8 @@
+export type {
+  TaskErrorInput,
+  UnifiedTaskError,
+} from '@/lib/task-core/task-error';
+
 export const DURABLE_TASK_STATUSES = [
   'created',
   'queued',
@@ -20,11 +25,6 @@ export const TERMINAL_TASK_STATUSES = [
 ] as const satisfies readonly DurableTaskStatus[];
 
 export type TerminalTaskStatus = (typeof TERMINAL_TASK_STATUSES)[number];
-
-export interface UnifiedTaskError {
-  code: string;
-  message: string;
-}
 
 export interface DurableTask {
   id: string;

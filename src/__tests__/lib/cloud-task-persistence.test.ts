@@ -205,10 +205,13 @@ describe('cloud-task-persistence', () => {
     expect(transitionTask).toHaveBeenCalledWith(expect.objectContaining({
       taskId: 'remote-task-1',
       to: 'failed',
-      error: {
+      error: expect.objectContaining({
         code: 'LEGACY_TASK_ERROR',
         message: '上游服务超时',
-      },
+        source: 'wujie',
+        retryable: false,
+        requestId: expect.stringMatching(/^req_/),
+      }),
       creditStatus: 'refunded',
     }));
     expect(updateCloudTask).not.toHaveBeenCalled();

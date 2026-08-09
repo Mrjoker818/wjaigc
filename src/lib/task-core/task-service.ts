@@ -10,7 +10,7 @@ import {
   normalizeDurableTaskStatus,
   type DurableTask,
   type DurableTaskStatus,
-  type UnifiedTaskError,
+  type TaskErrorInput,
 } from '@/lib/task-core/task-state';
 
 export interface TransitionTaskInput {
@@ -19,7 +19,7 @@ export interface TransitionTaskInput {
   to: DurableTaskStatus;
   revision?: number;
   result?: Record<string, unknown>;
-  error?: UnifiedTaskError;
+  error?: TaskErrorInput;
   creditStatus?: CloudTaskCreditStatus;
 }
 
@@ -287,7 +287,7 @@ function toDurableTask(task: PersistedCloudTask): DurableTask {
 
 function toProjectionStatus(
   status: DurableTaskStatus,
-): 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' {
+): 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout' {
   switch (status) {
     case 'created':
     case 'queued':
@@ -302,7 +302,8 @@ function toProjectionStatus(
     case 'cancelled':
       return 'cancelled';
     case 'failed':
-    case 'timeout':
       return 'failed';
+    case 'timeout':
+      return 'timeout';
   }
 }

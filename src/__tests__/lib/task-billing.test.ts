@@ -162,7 +162,7 @@ describe('task billing service', () => {
 
     expect(registry.updateTaskProgress).toHaveBeenCalledTimes(1);
     expect(registry.updateTaskProgress).toHaveBeenCalledWith('task-owner', {
-      status: 'failed',
+      status: 'timeout',
       progress: 0,
       error: 'Provider timed out',
     });

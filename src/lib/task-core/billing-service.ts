@@ -8,7 +8,7 @@ import { markTaskDurable, updateTaskProgress } from '@/lib/task-registry';
 import {
   normalizeDurableTaskStatus,
   type DurableTask,
-  type UnifiedTaskError,
+  type TaskErrorInput,
 } from '@/lib/task-core/task-state';
 import { validateIdempotencyIdentity } from '@/lib/task-core/idempotency';
 
@@ -40,7 +40,7 @@ export interface CreateBillableTaskResult {
 export interface SettleFailedTaskInput {
   taskId: string;
   status: CloudTaskFailureStatus;
-  error: UnifiedTaskError;
+  error: TaskErrorInput;
 }
 
 export interface SettleFailedTaskResult {
@@ -76,8 +76,13 @@ export async function settleFailedTask(
 ): Promise<SettleFailedTaskResult> {
   const outcome = await settleFailedCloudTask(input);
   if (outcome.transitioned) {
+    const projectionStatus = outcome.task.status === 'cancelled'
+      ? 'cancelled'
+      : outcome.task.status === 'timeout'
+        ? 'timeout'
+        : 'failed';
     updateTaskProgress(outcome.task.id, {
-      status: outcome.task.status === 'cancelled' ? 'cancelled' : 'failed',
+      status: projectionStatus,
       progress: 0,
       error: outcome.task.error,
     });
