@@ -18,6 +18,7 @@ export interface RecoverableChatCloudTask {
 interface PendingGenerationMessage {
   isGeneratingImage?: boolean;
   pendingGenerationTasks?: ChatPendingGenerationTask[];
+  generatedImages?: string[];
 }
 
 export interface ChatSessionMessageSnapshot extends PendingGenerationMessage {
@@ -52,7 +53,12 @@ export function mergeChatSessionMessages<T extends ChatSessionMessageSnapshot>(
     const persistedTasks = persisted ? getResumableChatGenerationTasks(persisted) : [];
     const incomingTasks = getResumableChatGenerationTasks(incoming);
 
-    if (persistedTasks.length > 0 && incomingTasks.length === 0) {
+    // If the incoming message already has generatedImages, the task has completed.
+    // Do NOT restore pending tasks from the persisted snapshot — that would
+    // re-trigger isGeneratingImage and cause duplicate image cards.
+    const incomingHasResults = (incoming.generatedImages?.length ?? 0) > 0;
+
+    if (persistedTasks.length > 0 && incomingTasks.length === 0 && !incomingHasResults) {
       return {
         ...persisted,
         ...incoming,

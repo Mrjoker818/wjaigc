@@ -3305,7 +3305,11 @@ IP角色设计规范：
 
         if (cancelled) return;
         const uniqueUrls = [...new Set(recoveredUrls)];
-        if (uniqueUrls.length > 0 && onAddImages) onAddImages(uniqueUrls);
+        // If the message already has generatedImages, the images were already
+        // added to the canvas during the original session. Skip re-adding.
+        const existingImages = message.generatedImages || [];
+        const newUrlsToAdd = uniqueUrls.filter(u => !existingImages.includes(u));
+        if (newUrlsToAdd.length > 0 && onAddImages) onAddImages(newUrlsToAdd);
         setMessages(current => current.map(item => item.id === message.id
           ? {
             ...item,
@@ -4350,7 +4354,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 }
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
-                    ? { ...msg, generatedImages: [...new Set([...(msg.generatedImages || []), ...newUrls])], isGeneratingImage: false, generateProgress: 100 }
+                    ? { ...msg, generatedImages: [...new Set([...(msg.generatedImages || []), ...newUrls])], isGeneratingImage: false, generateProgress: 100, pendingGenerationTasks: undefined }
                     : msg
                 ));
               } else if (allPolledVideoUrls.length > 0) {
@@ -4359,13 +4363,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 if (onAddImages && newVideoUrls.length > 0) onAddImages(newVideoUrls);
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
-                    ? { ...msg, generatedImages: [...new Set([...(msg.generatedImages || []), ...newVideoUrls])], isGeneratingImage: false, generateProgress: 100 }
+                    ? { ...msg, generatedImages: [...new Set([...(msg.generatedImages || []), ...newVideoUrls])], isGeneratingImage: false, generateProgress: 100, pendingGenerationTasks: undefined }
                     : msg
                 ));
               } else {
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
-                    ? { ...msg, isGeneratingImage: false, generateError: '图像生成完成但未获取到结果' }
+                    ? { ...msg, isGeneratingImage: false, generateError: '图像生成完成但未获取到结果', pendingGenerationTasks: undefined }
                     : msg
                 ));
               }
@@ -4373,7 +4377,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               console.error('[ChatImage] Task polling error:', err);
               setMessages(prev => prev.map(msg =>
                 msg.id === assistantMessageId
-                  ? { ...msg, isGeneratingImage: false, generateError: '图像生成轮询失败' }
+                  ? { ...msg, isGeneratingImage: false, generateError: '图像生成轮询失败', pendingGenerationTasks: undefined }
                   : msg
               ));
             }
@@ -4499,7 +4503,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 const uniqueResultUrls = [...new Set(allResultUrls)];
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantMessageId 
-                    ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100 }
+                    ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100, pendingGenerationTasks: undefined }
                     : msg
                 ));
                 if (onAddImages) {
@@ -4508,7 +4512,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               } else {
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantMessageId 
-                    ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果，请检查图像模型配置' }
+                    ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果，请检查图像模型配置', pendingGenerationTasks: undefined }
                     : msg
                 ));
               }
@@ -4516,7 +4520,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               console.error('[ChatImage] Image generation error:', imgError);
               setMessages(prev => prev.map(msg => 
                 msg.id === assistantMessageId 
-                  ? { ...msg, isGeneratingImage: false, generateError: `图像生成出错: ${imgError instanceof Error ? imgError.message : '未知错误'}` }
+                  ? { ...msg, isGeneratingImage: false, generateError: `图像生成出错: ${imgError instanceof Error ? imgError.message : '未知错误'}`, pendingGenerationTasks: undefined }
                   : msg
               ));
             }
@@ -4636,7 +4640,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   const suggestions = generateSuggestions({ contentCategory: 'image_generated', modelName: imageModelInfo.model });
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
-                      ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100, suggestions }
+                      ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100, suggestions, pendingGenerationTasks: undefined }
                       : msg
                   ));
                   if (onAddImages) {
@@ -4645,7 +4649,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 } else {
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
-                      ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果' }
+                      ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果', pendingGenerationTasks: undefined }
                       : msg
                   ));
                 }
@@ -4653,7 +4657,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 console.error('[ChatImage] Fallback generation error:', imgError);
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantMessageId 
-                    ? { ...msg, isGeneratingImage: false, generateError: `图像生成出错: ${imgError instanceof Error ? imgError.message : '未知错误'}` }
+                    ? { ...msg, isGeneratingImage: false, generateError: `图像生成出错: ${imgError instanceof Error ? imgError.message : '未知错误'}`, pendingGenerationTasks: undefined }
                     : msg
                 ));
               }
