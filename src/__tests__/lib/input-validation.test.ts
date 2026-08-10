@@ -57,6 +57,20 @@ describe('input-validation', () => {
       expect(validateImageUrl('data:text/html,<h1>test</h1>')).not.toBeNull();
     });
 
+    it('should accept data:application/octet-stream URLs (blob conversion fallback)', () => {
+      expect(validateImageUrl('data:application/octet-stream;base64,abc123')).toBeNull();
+    });
+
+    it('should accept HTTP URLs longer than 10000 characters (presigned URLs)', () => {
+      const longUrl = 'https://example.com/image.png?' + 'x'.repeat(15000);
+      expect(validateImageUrl(longUrl)).toBeNull();
+    });
+
+    it('should reject HTTP URLs longer than 100000 characters', () => {
+      const longUrl = 'https://example.com/image.png?' + 'x'.repeat(100001);
+      expect(validateImageUrl(longUrl)).not.toBeNull();
+    });
+
     it('should reject FTP URLs', () => {
       expect(validateImageUrl('ftp://example.com/image.png')).not.toBeNull();
     });

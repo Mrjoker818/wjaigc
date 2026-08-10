@@ -177,7 +177,12 @@ export async function POST(request: NextRequest) {
     if (referenceImages && Array.isArray(referenceImages)) {
       const validRefs = referenceImages.filter(r => r && (typeof r === 'string' ? r.trim() !== '' : r?.url?.trim() !== ''));
       for (const ref of validRefs) {
-        const urlErr = validateImageUrl(typeof ref === 'string' ? ref : ref?.url);
+        const refUrl = typeof ref === 'string' ? ref : ref?.url;
+        // 诊断日志：记录超长参考图URL（超过旧阈值10000字符），便于排查来源
+        if (typeof refUrl === 'string' && refUrl.length > 10000) {
+          console.warn(`[generate] 超长参考图URL: length=${refUrl.length}, prefix=${refUrl.slice(0, 120)}..., isDataUrl=${refUrl.startsWith('data:')}`);
+        }
+        const urlErr = validateImageUrl(refUrl);
         if (urlErr) {
           return NextResponse.json({ success: false, error: `参考图URL无效: ${urlErr}` }, { status: 400 });
         }

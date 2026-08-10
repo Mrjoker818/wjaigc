@@ -826,6 +826,15 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
+### v4.2.7
+
+**P0: 参考图URL长度限制修复 — 部分用户参考图URL超过10000字符被拒绝**
+
+- **根因**: `validateImageUrl`（`input-validation.ts` + `api-validator.ts`）对非 `data:image/` URL 强制 10000 字符限制。部分 AI API 提供商或 CDN 返回的 presigned URL / 签名 URL 含嵌入 token、签名、base64 编码参数等，可能超过 10000 字符。校验在 `generate/route.ts` 第 176-184 行对每个参考图 URL 执行，超长 URL 直接返回 `参考图URL无效:imageUrl 长度超出限制`（400 错误），导致用户无法使用带参考图的生成功能
+- **修复 1**: 将非 data URL 的长度限制从 10000 提高到 100000 字符（仍保留防滥用上限，但兼容超长签名 URL）。涉及 `src/lib/input-validation.ts` 和 `src/lib/api-validator.ts` 的 `validateImageUrl` 函数
+- **修复 2**: 放宽 data URL 格式检测：从仅接受 `data:image/` 扩展到同时接受 `data:application/octet-stream`（某些 `FileReader.readAsDataURL` 或 blob 转换在浏览器无法确定 MIME 类型时产生此类型）。仍然拒绝 `data:text/html` 等危险类型（XSS 防护不变）
+- **增强**: 在 `generate/route.ts` 参考图校验处添加诊断日志，当 URL 超过 10000 字符时记录长度和前 120 字符前缀，便于后续排查具体来源
+
 ### v4.2.6
 
 **P0: 放大功能内容审核降级修复 — 302.AI 内容审核拒绝后自动降级到其他放大方法**

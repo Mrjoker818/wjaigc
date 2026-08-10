@@ -23,12 +23,13 @@ import { NextRequest, NextResponse } from 'next/server';
 type ValidateResult = string | null;
 type ValidateFn = (value: unknown, fieldName?: string) => ValidateResult;
 
-// URL 校验：允许 http/https、/uploads/ /api/ 相对路径、data:image/ base64
+// URL 校验：允许 http/https、/uploads/ /api/ 相对路径、data:image/ 和 data:application/octet-stream base64
 export function validateImageUrl(url: unknown, fieldName = 'imageUrl'): ValidateResult {
   if (!url || typeof url !== 'string') return `${fieldName} 不能为空`;
   const t = url.trim();
   if (t.length === 0) return `${fieldName} 不能为空白`;
-  const isDataUrl = t.startsWith('data:image/');
+  // 接受 data:image/ 和 data:application/octet-stream（某些 FileReader/blob 转换产生此 MIME 类型）
+  const isDataUrl = t.startsWith('data:image/') || t.startsWith('data:application/octet-stream');
   const ok = t.startsWith('http://') || t.startsWith('https://') ||
              t.startsWith('/uploads/') || t.startsWith('/api/') ||
              isDataUrl;
@@ -36,8 +37,8 @@ export function validateImageUrl(url: unknown, fieldName = 'imageUrl'): Validate
   if (t.startsWith('file://') || t.startsWith('javascript:')) return `${fieldName} 包含不安全的协议`;
   // base64 data URL 跳过长度限制（可达数百万字符），单独限制 20MB
   if (isDataUrl && t.length > 27_000_000) return `${fieldName} 数据过大，请压缩后重试`;
-  // HTTP/相对路径URL保留长度限制
-  if (!isDataUrl && t.length > 10000) return `${fieldName} 长度超出限制`;
+  // HTTP/相对路径URL保留长度限制防止滥用，但提高到 100000 以兼容超长的签名URL
+  if (!isDataUrl && t.length > 100000) return `${fieldName} 长度超出限制`;
   return null;
 }
 
