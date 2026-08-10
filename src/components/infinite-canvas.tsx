@@ -2744,10 +2744,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         const selectableImages = images.filter(img => !img.isProcessingPlaceholder);
         if (selectableImages.length > 0) {
           setSelectedIds(new Set(selectableImages.map(img => img.id)));
-          selectImage(selectableImages[0].id);
         } else {
           setSelectedIds(new Set());
-          selectImage(null);
         }
         return;
       }
