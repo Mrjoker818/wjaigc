@@ -357,3 +357,71 @@ migration was mutated for this proof.
 - Review files/packages remain untracked and excluded. Stable, main, Obsidian,
   `.superpowers/sdd/progress.md`, product UI, and Task 3+ were not touched; no push
   was performed.
+
+## Review R4 Timing-Independence Repair - 2026-08-11
+
+### R4 Test Evidence
+
+R4-I1 was an independent-review finding about test orchestration, not a production
+service, storage, or migration defect. Replacing the fixed delay with the database
+barrier passed on its first real PostgreSQL run, so no RED result is claimed or
+fabricated. The historical fixed-delay evidence above records the earlier test
+state; this R4 section supersedes that orchestration.
+
+Targeted command:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/wujie_stage2_test?sslmode=disable'
+pnpm exec vitest run tests/integration/stage-2-asset-storage-postgres.test.ts -t "serializes createAssetVersion idempotency"
+```
+
+Actual result: 1/1 selected real PostgreSQL test passed in 4.57 seconds. The test
+contains no `pg_sleep` or fixed wall-clock delay for race amplification.
+
+Focused command:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/wujie_stage2_test?sslmode=disable'
+pnpm exec vitest run src/__tests__/lib/asset-service.test.ts tests/integration/stage-2-asset-storage-postgres.test.ts
+```
+
+Actual result: 2/2 files and 15/15 tests passed in 11.12 seconds: 7 unit tests and
+8 real PostgreSQL integration tests. All R3 assertions remain GREEN.
+
+### R4-I1 Closed
+
+- The version-insert trigger now waits on a schema-specific advisory transaction
+  lock instead of calling `pg_sleep(0.15)`. An independent helper connection holds
+  the matching session lock before all 20 service operations start.
+- The service uses a dedicated 20-connection pool with a unique
+  `application_name`. A bounded catalog poll requires all 20 sessions to expose an
+  ungranted advisory lock in `pg_locks` and `wait_event_type = 'Lock'` in
+  `pg_stat_activity`. It additionally requires at least one
+  `INSERT INTO wujie_asset_versions` waiter whose `pg_blocking_pids` contains the
+  helper PID. Only then does the test release the barrier.
+- This condition deterministically places the target insert behind the barrier and
+  proves every concurrent call has reached a database lock. With the reviewed
+  advisory idempotency serialization, one call reaches the trigger and the others
+  wait on that call's idempotency lock; after release all 20 reuse one version row.
+  A check-then-insert implementation would instead let multiple calls pass the
+  lookup and wait in the trigger, then expose raw `23505` conflicts after release.
+- The barrier helper uses `try/finally`, bounded connection/query/observation and
+  settlement waits, unconditional advisory unlock, service-backend termination if
+  settlement stalls, and bounded helper/observer release. The dedicated service
+  pool is closed only after the barrier has settled or aborted every started
+  promise, preventing failure paths from hanging `Pool.end()`.
+
+### R4 Scope And Verification
+
+- Modified `tests/integration/stage-2-asset-storage-postgres.test.ts`.
+- Appended `.superpowers/sdd/task-2-report.md`.
+- Production service, storage, migrations, prior tests, and all R3 evidence are
+  unchanged. The focused total remains 15 tests.
+- `pnpm ts-check` and target ESLint passed. Task 2 path `git diff --check` is part
+  of the final pre-commit gate.
+- Final pre-commit verification passed all four gates. The repeated focused run
+  completed in 10.51 seconds with 2/2 files and 15/15 tests passing; `pnpm
+  ts-check`, target ESLint, and the Task 2 path `git diff --check` also exited 0.
+- Review files/packages remain untracked and excluded. Stable, main, Obsidian,
+  `.superpowers/sdd/progress.md`, product UI, and Task 3+ were not touched; no push
+  was performed.

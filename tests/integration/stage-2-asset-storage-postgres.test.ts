@@ -310,6 +310,212 @@ async function exerciseAssetLockBarrier(input: {
   return blockedPid;
 }
 
+async function waitForVersionInsertBarrier(
+  query: QueryFn,
+  applicationName: string,
+  blockerPid: number,
+  expectedWaiters: number,
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const observed = await query<{ direct_insert_waiters: number; lock_waiters: number }>(
+      `SELECT
+         count(*) FILTER (
+           WHERE activity.wait_event_type = 'Lock'
+             AND EXISTS (
+               SELECT 1 FROM pg_locks pending_lock
+               WHERE pending_lock.pid = activity.pid
+                 AND pending_lock.locktype = 'advisory'
+                 AND pending_lock.granted = false
+             )
+         )::int AS lock_waiters,
+         count(*) FILTER (
+           WHERE activity.wait_event_type = 'Lock'
+             AND activity.query LIKE '%INSERT INTO wujie_asset_versions%'
+             AND $2 = ANY(pg_blocking_pids(activity.pid))
+             AND EXISTS (
+               SELECT 1 FROM pg_locks pending_lock
+               WHERE pending_lock.pid = activity.pid
+                 AND pending_lock.locktype = 'advisory'
+                 AND pending_lock.granted = false
+             )
+         )::int AS direct_insert_waiters
+       FROM pg_stat_activity activity
+       WHERE activity.datname = current_database()
+         AND activity.application_name = $1`,
+      [applicationName, blockerPid],
+    );
+    if (
+      observed.rows[0]?.lock_waiters === expectedWaiters
+      && (observed.rows[0]?.direct_insert_waiters ?? 0) > 0
+    ) {
+      return;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+
+  const diagnostics = await query<{
+    blockers: number[];
+    has_pending_advisory_lock: boolean;
+    pid: number;
+    query: string;
+    wait_event: string | null;
+    wait_event_type: string | null;
+  }>(
+    `SELECT activity.pid, activity.wait_event_type, activity.wait_event, activity.query,
+            pg_blocking_pids(activity.pid) AS blockers,
+            EXISTS (
+              SELECT 1 FROM pg_locks pending_lock
+              WHERE pending_lock.pid = activity.pid
+                AND pending_lock.locktype = 'advisory'
+                AND pending_lock.granted = false
+            ) AS has_pending_advisory_lock
+     FROM pg_stat_activity activity
+     WHERE activity.datname = current_database()
+       AND activity.application_name = $1
+     ORDER BY activity.pid`,
+    [applicationName],
+  );
+  throw new Error(
+    `Version insert barrier did not observe ${expectedWaiters} lock waiters for blocker PID ${blockerPid}: ${JSON.stringify(diagnostics.rows)}`,
+  );
+}
+
+async function exerciseVersionInsertBarrier(input: {
+  applicationName: string;
+  isolatedDatabaseUrl: string;
+  operationCount: number;
+  startOperation: () => Promise<CreatedGraph>;
+}): Promise<CreatedGraph[]> {
+  const clientConfig = {
+    connectionString: input.isolatedDatabaseUrl,
+    connectionTimeoutMillis: 5_000,
+    query_timeout: 5_000,
+  };
+  const helper = new Client(clientConfig);
+  const observer = new Client(clientConfig);
+  const operations: Promise<CreatedGraph>[] = [];
+  const cleanupErrors: unknown[] = [];
+  let barrierHeld = false;
+  let blockerPid = 0;
+  let helperConnected = false;
+  let observerConnected = false;
+  let operationError: unknown;
+  let results: CreatedGraph[] | undefined;
+
+  try {
+    await bounded(helper.connect(), 'version barrier helper connection');
+    helperConnected = true;
+    await bounded(observer.connect(), 'version barrier observer connection');
+    observerConnected = true;
+    const blocker = await helper.query<{ pid: number }>(
+      `SELECT pg_backend_pid() AS pid,
+              pg_advisory_lock(hashtextextended('asset-test-version-insert:' || current_schema(), 0))`,
+    );
+    blockerPid = blocker.rows[0]?.pid ?? 0;
+    barrierHeld = true;
+
+    for (let index = 0; index < input.operationCount; index += 1) {
+      operations.push(input.startOperation());
+    }
+    const observerQuery: QueryFn = (text, values) => observer.query(text, values);
+    await waitForVersionInsertBarrier(
+      observerQuery,
+      input.applicationName,
+      blockerPid,
+      input.operationCount,
+    );
+
+    const unlocked = await bounded(
+      helper.query<{ unlocked: boolean }>(
+        `SELECT pg_advisory_unlock(
+           hashtextextended('asset-test-version-insert:' || current_schema(), 0)
+         ) AS unlocked`,
+      ),
+      'version insert barrier release',
+    );
+    expect(unlocked.rows[0]?.unlocked).toBe(true);
+    barrierHeld = false;
+    results = await bounded(Promise.all(operations), 'version barrier service operations', 10_000);
+  } catch (error) {
+    operationError = error;
+  } finally {
+    if (barrierHeld) {
+      try {
+        const unlocked = await bounded(
+          helper.query<{ unlocked: boolean }>(
+            `SELECT pg_advisory_unlock(
+               hashtextextended('asset-test-version-insert:' || current_schema(), 0)
+             ) AS unlocked`,
+          ),
+          'version insert barrier cleanup release',
+        );
+        if (unlocked.rows[0]?.unlocked !== true) {
+          throw new Error('Version insert barrier cleanup did not release the advisory lock');
+        }
+        barrierHeld = false;
+      } catch (error) {
+        cleanupErrors.push(error);
+        if (observerConnected && blockerPid > 0) {
+          await bounded(
+            observer.query('SELECT pg_terminate_backend($1)', [blockerPid]),
+            'version barrier blocker termination',
+          ).catch((terminateError) => cleanupErrors.push(terminateError));
+        }
+      }
+    }
+
+    if (operations.length > 0) {
+      try {
+        await bounded(Promise.allSettled(operations), 'version barrier operation settlement', 10_000);
+      } catch (error) {
+        cleanupErrors.push(error);
+        if (observerConnected) {
+          await bounded(
+            observer.query(
+              `SELECT pg_terminate_backend(pid)
+               FROM pg_stat_activity
+               WHERE datname = current_database()
+                 AND application_name = $1
+                 AND pid <> pg_backend_pid()`,
+              [input.applicationName],
+            ),
+            'version barrier service backend termination',
+          ).catch((terminateError) => cleanupErrors.push(terminateError));
+          await bounded(
+            Promise.allSettled(operations),
+            'aborted version barrier operation settlement',
+            10_000,
+          ).catch((settleError) => cleanupErrors.push(settleError));
+        }
+      }
+    }
+
+    if (helperConnected) {
+      await bounded(helper.end(), 'version barrier helper release')
+        .catch((error) => cleanupErrors.push(error));
+    }
+    if (observerConnected) {
+      await bounded(observer.end(), 'version barrier observer release')
+        .catch((error) => cleanupErrors.push(error));
+    }
+  }
+
+  if (operationError) {
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [operationError, ...cleanupErrors],
+        'Version insert barrier and cleanup failed',
+      );
+    }
+    throw operationError;
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, 'Version insert barrier cleanup failed');
+  }
+  return results ?? [];
+}
+
 describe('Stage 2 asset storage on real PostgreSQL', () => {
   postgresIt('stores source identity and defines the exact transfer idempotency index scope', async () => {
     await withIsolatedPostgres('stage-2-transfer-index', async ({ databaseUrl: isolatedDatabaseUrl, query }) => {
@@ -592,22 +798,31 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
       await seedProject(query, actorUserId, projectId);
       await seedProject(query, actorUserId, otherProjectId);
       const { createAssetService } = await loadService();
-      const service = createAssetService();
+      const applicationName = `stage2-version-barrier-${randomUUID()}`;
+      const servicePool = new Pool({
+        connectionString: withApplicationName(isolatedDatabaseUrl, applicationName),
+        connectionTimeoutMillis: 5_000,
+        max: 20,
+      });
+      const storageModule = await import('@/lib/asset-core/storage') as unknown as AssetStorageModule;
+      const service = createAssetService(storageModule.createPostgresAssetStorage(servicePool));
       await query(`
-        CREATE FUNCTION delay_concurrent_version_insert() RETURNS trigger
+        CREATE FUNCTION wait_for_concurrent_version_insert() RETURNS trigger
         LANGUAGE plpgsql AS $$
         BEGIN
           IF NEW.idempotency_key = 'concurrent-version-key' THEN
-            PERFORM pg_sleep(0.15);
+            PERFORM pg_advisory_xact_lock(
+              hashtextextended('asset-test-version-insert:' || current_schema(), 0)
+            );
           END IF;
           RETURN NEW;
         END;
         $$
       `);
       await query(`
-        CREATE TRIGGER delay_concurrent_version_insert
+        CREATE TRIGGER wait_for_concurrent_version_insert
         BEFORE INSERT ON wujie_asset_versions
-        FOR EACH ROW EXECUTE FUNCTION delay_concurrent_version_insert()
+        FOR EACH ROW EXECUTE FUNCTION wait_for_concurrent_version_insert()
       `);
       const input = {
         actorUserId,
@@ -619,44 +834,51 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
         metadata: { requestDigest: 'caller-spoof', provenance: 'postgres-test' },
       };
 
-      const sameDigest = await Promise.all(
-        Array.from({ length: 20 }, () => service.createAssetVersion(input)),
-      );
-      expect(new Set(sameDigest.map((result) => result.version.id)).size).toBe(1);
-      expect(sameDigest.filter((result) => !result.reused)).toHaveLength(1);
-      const storedVersion = await query<{ metadata: Record<string, unknown> }>(
-        'SELECT metadata FROM wujie_asset_versions WHERE owner_id = $1 AND project_id = $2 AND idempotency_key = $3',
-        [actorUserId, projectId, input.idempotencyKey],
-      );
-      expect(storedVersion.rows).toEqual([{ metadata: {
-        provenance: 'postgres-test',
-        requestDigest: 'concurrent-version-digest',
-      } }]);
+      try {
+        const sameDigest = await exerciseVersionInsertBarrier({
+          applicationName,
+          isolatedDatabaseUrl,
+          operationCount: 20,
+          startOperation: () => service.createAssetVersion(input),
+        });
+        expect(new Set(sameDigest.map((result) => result.version.id)).size).toBe(1);
+        expect(sameDigest.filter((result) => !result.reused)).toHaveLength(1);
+        const storedVersion = await query<{ metadata: Record<string, unknown> }>(
+          'SELECT metadata FROM wujie_asset_versions WHERE owner_id = $1 AND project_id = $2 AND idempotency_key = $3',
+          [actorUserId, projectId, input.idempotencyKey],
+        );
+        expect(storedVersion.rows).toEqual([{ metadata: {
+          provenance: 'postgres-test',
+          requestDigest: 'concurrent-version-digest',
+        } }]);
 
-      const differentDigest = await Promise.allSettled([
-        service.createAssetVersion({ ...input, idempotencyKey: 'different-digest-key', requestDigest: 'digest-a' }),
-        service.createAssetVersion({ ...input, idempotencyKey: 'different-digest-key', requestDigest: 'digest-b' }),
-      ]);
-      expect(differentDigest.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-      expect(differentDigest.filter((result) => errorCode(result) === 'ASSET_IDEMPOTENCY_CONFLICT')).toHaveLength(1);
-      const physicalVersions = await query<{ count: string }>(
-        'SELECT count(*)::text AS count FROM wujie_asset_versions WHERE owner_id = $1 AND project_id = $2 AND idempotency_key = $3',
-        [actorUserId, projectId, 'different-digest-key'],
-      );
-      expect(physicalVersions.rows).toEqual([{ count: '1' }]);
+        const differentDigest = await Promise.allSettled([
+          service.createAssetVersion({ ...input, idempotencyKey: 'different-digest-key', requestDigest: 'digest-a' }),
+          service.createAssetVersion({ ...input, idempotencyKey: 'different-digest-key', requestDigest: 'digest-b' }),
+        ]);
+        expect(differentDigest.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+        expect(differentDigest.filter((result) => errorCode(result) === 'ASSET_IDEMPOTENCY_CONFLICT')).toHaveLength(1);
+        const physicalVersions = await query<{ count: string }>(
+          'SELECT count(*)::text AS count FROM wujie_asset_versions WHERE owner_id = $1 AND project_id = $2 AND idempotency_key = $3',
+          [actorUserId, projectId, 'different-digest-key'],
+        );
+        expect(physicalVersions.rows).toEqual([{ count: '1' }]);
 
-      const foreignProjectVersion = await createVersion(service, actorUserId, otherProjectId, 'other-project');
-      await expect(service.createWorkspacePlacement({
-        actorUserId,
-        projectId,
-        assetVersionId: foreignProjectVersion.version.id,
-        workspace: 'canvas',
-        workspaceId: 'canvas-scoped-lookup',
-        entityType: 'canvas-image',
-        entityId: 'image-scoped-lookup',
-      })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+        const foreignProjectVersion = await createVersion(service, actorUserId, otherProjectId, 'other-project');
+        await expect(service.createWorkspacePlacement({
+          actorUserId,
+          projectId,
+          assetVersionId: foreignProjectVersion.version.id,
+          workspace: 'canvas',
+          workspaceId: 'canvas-scoped-lookup',
+          entityType: 'canvas-image',
+          entityId: 'image-scoped-lookup',
+        })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+      } finally {
+        await bounded(servicePool.end(), 'version barrier service pool cleanup', 10_000);
+      }
     });
-  });
+  }, 30_000);
 
   postgresIt('copies one source version into one target graph for twenty concurrent cross-project sends', async () => {
     await withIsolatedPostgres('stage-2-cross-project-send', async ({ databaseUrl: isolatedDatabaseUrl, query }) => {
