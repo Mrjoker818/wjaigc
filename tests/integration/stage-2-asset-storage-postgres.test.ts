@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import { Client } from 'pg';
+import { Client, Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -67,7 +67,11 @@ interface AssetService {
 }
 
 interface AssetServiceModule {
-  createAssetService(): AssetService;
+  createAssetService(storage?: unknown): AssetService;
+}
+
+interface AssetStorageModule {
+  createPostgresAssetStorage(pool: Pool): unknown;
 }
 
 const databaseUrl = process.env.POSTGRES_TEST_DATABASE_URL?.trim();
@@ -129,7 +133,35 @@ function errorCode(result: PromiseSettledResult<unknown>): unknown {
     : undefined;
 }
 
-async function waitForBlockedAssetLock(query: QueryFn, blockerPid: number): Promise<number> {
+function normalizeCatalogExpression(expression: string): string {
+  return expression.replace(/[()]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function withApplicationName(connectionString: string, applicationName: string): string {
+  const parsed = new URL(connectionString);
+  parsed.searchParams.set('application_name', applicationName);
+  return parsed.toString();
+}
+
+async function bounded<T>(promise: Promise<T>, label: string, timeoutMs = 5_000): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function waitForBlockedAssetLock(
+  query: QueryFn,
+  blockerPid: number,
+  applicationName: string,
+): Promise<number> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const blocked = await query<{ pid: number }>(
@@ -137,12 +169,13 @@ async function waitForBlockedAssetLock(query: QueryFn, blockerPid: number): Prom
        FROM pg_stat_activity activity
        WHERE activity.datname = current_database()
          AND activity.pid <> pg_backend_pid()
+         AND activity.application_name = $2
          AND activity.wait_event_type = 'Lock'
          AND activity.query LIKE '%FROM wujie_assets%'
          AND activity.query LIKE '%FOR UPDATE%'
          AND $1 = ANY(pg_blocking_pids(activity.pid))
        LIMIT 1`,
-      [blockerPid],
+      [blockerPid, applicationName],
     );
     const blockedPid = blocked.rows[0]?.pid;
     if (blockedPid) return blockedPid;
@@ -160,25 +193,121 @@ async function waitForBlockedAssetLock(query: QueryFn, blockerPid: number): Prom
      FROM pg_stat_activity activity
      WHERE activity.datname = current_database()
        AND activity.pid <> pg_backend_pid()
+       AND activity.application_name = $1
      ORDER BY activity.pid`,
+    [applicationName],
   );
   throw new Error(
     `No asset-lock waiter observed for blocker PID ${blockerPid}: ${JSON.stringify(diagnostics.rows)}`,
   );
 }
 
-async function observeBlockedAssetLock(
-  isolatedDatabaseUrl: string,
-  blockerPid: number,
-): Promise<number> {
-  const observer = new Client({ connectionString: isolatedDatabaseUrl });
-  await observer.connect();
+async function exerciseAssetLockBarrier(input: {
+  applicationName: string;
+  assetId: string;
+  isolatedDatabaseUrl: string;
+  startBlockedOperation: () => Promise<unknown>;
+  startConcurrentOperation: () => Promise<unknown>;
+}): Promise<number> {
+  const clientConfig = {
+    connectionString: input.isolatedDatabaseUrl,
+    connectionTimeoutMillis: 5_000,
+    query_timeout: 5_000,
+  };
+  const helper = new Client(clientConfig);
+  const observer = new Client(clientConfig);
+  const operations: Promise<unknown>[] = [];
+  const cleanupErrors: unknown[] = [];
+  let blockerPid = 0;
+  let blockedPid = 0;
+  let helperConnected = false;
+  let observerConnected = false;
+  let transactionOpen = false;
+  let operationError: unknown;
+
   try {
+    await bounded(helper.connect(), 'asset-lock helper connection');
+    helperConnected = true;
+    await bounded(observer.connect(), 'asset-lock observer connection');
+    observerConnected = true;
+    await helper.query('BEGIN');
+    transactionOpen = true;
+    await helper.query('SELECT id FROM wujie_assets WHERE id = $1 FOR UPDATE', [input.assetId]);
+    const blocker = await helper.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+    blockerPid = blocker.rows[0]?.pid ?? 0;
+
+    operations.push(input.startBlockedOperation());
     const observerQuery: QueryFn = (text, values) => observer.query(text, values);
-    return await waitForBlockedAssetLock(observerQuery, blockerPid);
+    blockedPid = await waitForBlockedAssetLock(observerQuery, blockerPid, input.applicationName);
+    expect(blockedPid).toBeGreaterThan(0);
+
+    operations.push(input.startConcurrentOperation());
+    await bounded(helper.query('COMMIT'), 'asset-lock helper commit');
+    transactionOpen = false;
+    await bounded(Promise.all(operations), 'asset-lock service operations');
+  } catch (error) {
+    operationError = error;
   } finally {
-    await observer.end();
+    if (transactionOpen) {
+      try {
+        await bounded(helper.query('ROLLBACK'), 'asset-lock helper rollback');
+        transactionOpen = false;
+      } catch (error) {
+        cleanupErrors.push(error);
+        if (observerConnected && blockerPid > 0) {
+          await bounded(
+            observer.query('SELECT pg_terminate_backend($1)', [blockerPid]),
+            'asset-lock blocker termination',
+          ).catch((terminateError) => cleanupErrors.push(terminateError));
+        }
+      }
+    }
+
+    if (operations.length > 0) {
+      try {
+        await bounded(Promise.allSettled(operations), 'asset-lock operation settlement');
+      } catch (error) {
+        cleanupErrors.push(error);
+        if (observerConnected) {
+          await bounded(
+            observer.query(
+              `SELECT pg_terminate_backend(pid)
+               FROM pg_stat_activity
+               WHERE datname = current_database()
+                 AND application_name = $1
+                 AND pid <> pg_backend_pid()`,
+              [input.applicationName],
+            ),
+            'asset-lock service backend termination',
+          ).catch((terminateError) => cleanupErrors.push(terminateError));
+          await bounded(
+            Promise.allSettled(operations),
+            'aborted asset-lock operation settlement',
+          ).catch((settleError) => {
+            cleanupErrors.push(settleError);
+          });
+        }
+      }
+    }
+
+    if (helperConnected) {
+      await bounded(helper.end(), 'asset-lock helper release').catch((error) => cleanupErrors.push(error));
+    }
+    if (observerConnected) {
+      await bounded(observer.end(), 'asset-lock observer release').catch((error) => cleanupErrors.push(error));
+    }
   }
+
+  if (operationError) {
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError([operationError, ...cleanupErrors], 'Asset-lock barrier and cleanup failed');
+    }
+    throw operationError;
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, 'Asset-lock barrier cleanup failed');
+  }
+  return blockedPid;
 }
 
 describe('Stage 2 asset storage on real PostgreSQL', () => {
@@ -226,8 +355,9 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
         'entity_id',
         'idempotency_key',
       ]);
-      expect(index.rows[0]?.predicate).toContain('idempotency_key IS NOT NULL');
-      expect(index.rows[0]?.predicate).not.toContain('source_version_id IS NOT NULL');
+      expect(normalizeCatalogExpression(index.rows[0]?.predicate ?? '')).toBe(
+        'idempotency_key IS NOT NULL',
+      );
 
       const supersededIndex = await query<{ count: string }>(
         `SELECT count(*)::text AS count
@@ -294,8 +424,9 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
       expect(backfilled.rows[0]?.source_version_id).toBe(versionId);
       expect(backfilled.rows[0]?.request_digest).toBe(`legacy-transfer:${oldPlacementId}`);
 
-      const lineageCheck = await query<{ definition: string }>(
-        `SELECT pg_get_constraintdef(constraint_row.oid) AS definition
+      const lineageCheck = await query<{ convalidated: boolean; definition: string }>(
+        `SELECT constraint_row.convalidated,
+                pg_get_constraintdef(constraint_row.oid) AS definition
          FROM pg_constraint constraint_row
          JOIN pg_class relation ON relation.oid = constraint_row.conrelid
          JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
@@ -303,15 +434,18 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
            AND constraint_row.conname = 'wujie_workspace_placements_transfer_lineage_check'`,
       );
       expect(lineageCheck.rows).toHaveLength(1);
+      expect(lineageCheck.rows[0]?.convalidated).toBe(true);
       expect(lineageCheck.rows[0]?.definition).toContain('idempotency_key IS NULL');
       expect(lineageCheck.rows[0]?.definition).toContain('source_version_id IS NOT NULL');
       expect(lineageCheck.rows[0]?.definition).toContain('request_digest IS NOT NULL');
 
       const lineageForeignKey = await query<{
+        convalidated: boolean;
         local_columns: string[];
         referenced_columns: string[];
       }>(
         `SELECT
+           constraint_row.convalidated,
            ARRAY(
              SELECT attribute.attname::text
              FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key(attnum, ordinality)
@@ -334,6 +468,7 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
            AND constraint_row.contype = 'f'`,
       );
       expect(lineageForeignKey.rows).toEqual([{
+        convalidated: true,
         local_columns: ['source_version_id', 'owner_id'],
         referenced_columns: ['id', 'owner_id'],
       }]);
@@ -384,6 +519,67 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
           'foreign-source-owner', 'foreign-source-owner', 'key-c', 'digest-c',
         ],
       )).rejects.toMatchObject({ code: '23503' });
+    });
+  });
+
+  postgresIt('fails the lineage migration closed for a pre-existing cross-owner source', async () => {
+    await withIsolatedPostgres('stage-2-cross-owner-lineage-upgrade', async ({ query }) => {
+      await applyMigration(query, '20260810_wj_stable_s2_assets.sql');
+      await applyMigration(query, '20260810_wj_stable_s2_workspace_entity_pairs.sql');
+      await applyMigration(query, '20260811_wj_stable_s2_asset_transfer_idempotency.sql');
+      await applyMigration(query, '20260811_wj_stable_s2_cross_project_transfer.sql');
+
+      const targetOwnerId = randomUUID();
+      const targetProjectId = randomUUID();
+      const targetAssetId = randomUUID();
+      const targetVersionId = randomUUID();
+      const sourceOwnerId = randomUUID();
+      const sourceProjectId = randomUUID();
+      const sourceAssetId = randomUUID();
+      const sourceVersionId = randomUUID();
+      await seedProject(query, targetOwnerId, targetProjectId);
+      await seedProject(query, sourceOwnerId, sourceProjectId);
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind)
+         VALUES ($1, $2, $3, 'image'), ($4, $5, $6, 'image')`,
+        [targetAssetId, targetOwnerId, targetProjectId, sourceAssetId, sourceOwnerId, sourceProjectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(id, asset_id, owner_id, project_id, file_url)
+         VALUES ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)`,
+        [
+          targetVersionId,
+          targetAssetId,
+          targetOwnerId,
+          targetProjectId,
+          'https://example.test/target.png',
+          sourceVersionId,
+          sourceAssetId,
+          sourceOwnerId,
+          sourceProjectId,
+          'https://example.test/cross-owner-source.png',
+        ],
+      );
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, source_version_id,
+           workspace_kind, workspace_id, entity_type, entity_id, idempotency_key, request_digest
+         ) VALUES ($1, $2, $3, $4, $5, $6, 'canvas', $7, 'canvas-image', $8, $9, $10)`,
+        [
+          randomUUID(),
+          targetOwnerId,
+          targetProjectId,
+          targetAssetId,
+          targetVersionId,
+          sourceVersionId,
+          'pre-existing-cross-owner',
+          'pre-existing-cross-owner',
+          'pre-existing-cross-owner-key',
+          'pre-existing-cross-owner-digest',
+        ],
+      );
+
+      await expect(applyMigration(query, lineageMigration)).rejects.toMatchObject({ code: '23503' });
     });
   });
 
@@ -564,7 +760,19 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
       );
       expect(sourceGraph.rows).toEqual([{ asset_count: '1', version_count: '1' }]);
 
-      await expect(service.sendVersionToWorkspace({ ...transfer, actorUserId: foreignUserId }))
+      await expect(service.sendVersionToWorkspace({
+        ...transfer,
+        actorUserId: foreignUserId,
+        targetProjectId: foreignProjectId,
+      }))
+        .rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+      const forgedOwnerTransfer = {
+        ...transfer,
+        actorUserId: foreignUserId,
+        targetProjectId: foreignProjectId,
+        ownerId: actorUserId,
+      };
+      await expect(service.sendVersionToWorkspace(forgedOwnerTransfer))
         .rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
       await expect(service.sendVersionToWorkspace({ ...transfer, targetProjectId: foreignProjectId }))
         .rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
@@ -628,101 +836,103 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
       await seedProject(query, actorUserId, projectId);
       const { createAssetService } = await loadService();
       const service = createAssetService();
+      const applicationName = `stage2-asset-lock-${randomUUID()}`;
+      const lockPool = new Pool({
+        connectionString: withApplicationName(isolatedDatabaseUrl, applicationName),
+        connectionTimeoutMillis: 5_000,
+        max: 2,
+      });
+      const storageModule = await import('@/lib/asset-core/storage') as unknown as AssetStorageModule;
+      const lockService = createAssetService(storageModule.createPostgresAssetStorage(lockPool));
 
-      const createSource = await createVersion(service, actorUserId, projectId, 'create-race-source');
-      const finalPlacement = await service.createWorkspacePlacement({
-        actorUserId,
-        projectId,
-        assetVersionId: createSource.version.id,
-        workspace: 'canvas',
-        workspaceId: 'canvas-create-race',
-        entityType: 'canvas-image',
-        entityId: 'image-final-create-race',
-      });
-      await query('BEGIN');
-      await query('SELECT id FROM wujie_assets WHERE id = $1 FOR UPDATE', [createSource.asset.id]);
-      const concurrentCreate = service.createWorkspacePlacement({
-        actorUserId,
-        projectId,
-        assetVersionId: createSource.version.id,
-        workspace: 'canvas',
-        workspaceId: 'canvas-create-race',
-        entityType: 'canvas-image',
-        entityId: 'image-new-create-race',
-      });
-      const createBlocker = await query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
-      const blockedCreatePid = await observeBlockedAssetLock(
-        isolatedDatabaseUrl,
-        createBlocker.rows[0]?.pid ?? 0,
-      );
-      expect(blockedCreatePid).toBeGreaterThan(0);
-      const trashForCreate = service.trashPlacement({
-        actorUserId,
-        projectId,
-        placementId: finalPlacement.placement.id,
-      });
-      await query('COMMIT');
-      await Promise.all([trashForCreate, concurrentCreate]);
+      try {
+        const createSource = await createVersion(service, actorUserId, projectId, 'create-race-source');
+        const finalPlacement = await service.createWorkspacePlacement({
+          actorUserId,
+          projectId,
+          assetVersionId: createSource.version.id,
+          workspace: 'canvas',
+          workspaceId: 'canvas-create-race',
+          entityType: 'canvas-image',
+          entityId: 'image-final-create-race',
+        });
+        await exerciseAssetLockBarrier({
+          applicationName,
+          assetId: createSource.asset.id,
+          isolatedDatabaseUrl,
+          startBlockedOperation: () => lockService.createWorkspacePlacement({
+            actorUserId,
+            projectId,
+            assetVersionId: createSource.version.id,
+            workspace: 'canvas',
+            workspaceId: 'canvas-create-race',
+            entityType: 'canvas-image',
+            entityId: 'image-new-create-race',
+          }),
+          startConcurrentOperation: () => lockService.trashPlacement({
+            actorUserId,
+            projectId,
+            placementId: finalPlacement.placement.id,
+          }),
+        });
 
-      const createInvariant = await query<{ status: string; active_count: string }>(
-        `SELECT asset.status,
-                count(placement.id) FILTER (WHERE placement.status = 'active')::text AS active_count
-         FROM wujie_assets asset
-         LEFT JOIN wujie_workspace_placements placement ON placement.asset_id = asset.id
-         WHERE asset.id = $1
-         GROUP BY asset.id`,
-        [createSource.asset.id],
-      );
-      expect(createInvariant.rows).toEqual([{ status: 'active', active_count: '1' }]);
+        const createInvariant = await query<{ status: string; active_count: string }>(
+          `SELECT asset.status,
+                  count(placement.id) FILTER (WHERE placement.status = 'active')::text AS active_count
+           FROM wujie_assets asset
+           LEFT JOIN wujie_workspace_placements placement ON placement.asset_id = asset.id
+           WHERE asset.id = $1
+           GROUP BY asset.id`,
+          [createSource.asset.id],
+        );
+        expect(createInvariant.rows).toEqual([{ status: 'active', active_count: '1' }]);
 
-      const sendSource = await createVersion(service, actorUserId, projectId, 'send-race-source');
-      const finalSendPlacement = await service.createWorkspacePlacement({
-        actorUserId,
-        projectId,
-        assetVersionId: sendSource.version.id,
-        workspace: 'canvas',
-        workspaceId: 'canvas-send-race',
-        entityType: 'canvas-image',
-        entityId: 'image-final-send-race',
-      });
-      await query('BEGIN');
-      await query('SELECT id FROM wujie_assets WHERE id = $1 FOR UPDATE', [sendSource.asset.id]);
-      const concurrentSend = service.sendVersionToWorkspace({
-        actorUserId,
-        sourceVersionId: sendSource.version.id,
-        targetProjectId: projectId,
-        targetWorkspaceId: 'canvas-send-race',
-        entityType: 'canvas-image',
-        entityId: 'image-new-send-race',
-        idempotencyKey: 'send-race-key',
-        requestDigest: 'send-race-digest',
-      });
-      const sendBlocker = await query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
-      const blockedSendPid = await observeBlockedAssetLock(
-        isolatedDatabaseUrl,
-        sendBlocker.rows[0]?.pid ?? 0,
-      );
-      expect(blockedSendPid).toBeGreaterThan(0);
-      const trashForSend = service.trashPlacement({
-        actorUserId,
-        projectId,
-        placementId: finalSendPlacement.placement.id,
-      });
-      await query('COMMIT');
-      await Promise.all([trashForSend, concurrentSend]);
+        const sendSource = await createVersion(service, actorUserId, projectId, 'send-race-source');
+        const finalSendPlacement = await service.createWorkspacePlacement({
+          actorUserId,
+          projectId,
+          assetVersionId: sendSource.version.id,
+          workspace: 'canvas',
+          workspaceId: 'canvas-send-race',
+          entityType: 'canvas-image',
+          entityId: 'image-final-send-race',
+        });
+        await exerciseAssetLockBarrier({
+          applicationName,
+          assetId: sendSource.asset.id,
+          isolatedDatabaseUrl,
+          startBlockedOperation: () => lockService.sendVersionToWorkspace({
+            actorUserId,
+            sourceVersionId: sendSource.version.id,
+            targetProjectId: projectId,
+            targetWorkspaceId: 'canvas-send-race',
+            entityType: 'canvas-image',
+            entityId: 'image-new-send-race',
+            idempotencyKey: 'send-race-key',
+            requestDigest: 'send-race-digest',
+          }),
+          startConcurrentOperation: () => lockService.trashPlacement({
+            actorUserId,
+            projectId,
+            placementId: finalSendPlacement.placement.id,
+          }),
+        });
 
-      const sendInvariant = await query<{ status: string; active_count: string }>(
-        `SELECT asset.status,
-                count(placement.id) FILTER (WHERE placement.status = 'active')::text AS active_count
-         FROM wujie_assets asset
-         LEFT JOIN wujie_workspace_placements placement ON placement.asset_id = asset.id
-         WHERE asset.id = $1
-         GROUP BY asset.id`,
-        [sendSource.asset.id],
-      );
-      expect(sendInvariant.rows).toEqual([{ status: 'active', active_count: '1' }]);
+        const sendInvariant = await query<{ status: string; active_count: string }>(
+          `SELECT asset.status,
+                  count(placement.id) FILTER (WHERE placement.status = 'active')::text AS active_count
+           FROM wujie_assets asset
+           LEFT JOIN wujie_workspace_placements placement ON placement.asset_id = asset.id
+           WHERE asset.id = $1
+           GROUP BY asset.id`,
+          [sendSource.asset.id],
+        );
+        expect(sendInvariant.rows).toEqual([{ status: 'active', active_count: '1' }]);
+      } finally {
+        await bounded(lockPool.end(), 'asset-lock service pool cleanup');
+      }
     });
-  }, 15_000);
+  }, 30_000);
 
   postgresIt('maps sequential and concurrent restore collisions to ASSET_PLACEMENT_CONFLICT', async () => {
     await withIsolatedPostgres('stage-2-restore-conflict', async ({ databaseUrl: isolatedDatabaseUrl, query }) => {
