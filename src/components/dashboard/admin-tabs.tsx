@@ -864,7 +864,7 @@ export default function AdminTabs(props: AdminTabsProps) {
             <div className="flex items-center justify-center">
               <input type="checkbox" checked={selectedUserIds.size > 0 && selectedUserIds.size === filteredUsers.length} onChange={() => { if (selectedUserIds.size === filteredUsers.length) setSelectedUserIds(new Set()); else setSelectedUserIds(new Set(filteredUsers.map(u => u.id))); }} className="w-4 h-4 rounded border-border accent-primary" />
             </div>
-            <span>用户名</span><span>邮箱</span><span>分组</span><span>角色</span><span>状态</span><span>积分余额</span><span>作品数</span><span>注册时间</span><span>最后登录</span><span className="text-right">操作</span>
+            <span>用户名</span><span>邮箱</span><span>分组</span><span>角色</span><span>状态</span><span>积分余额</span><span>作品数</span><span>注册时间</span><span>最后活跃</span><span className="text-right">操作</span>
           </div>
           {/* 表体 */}
           <div className="divide-y divide-border/20">
@@ -890,7 +890,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <span className="text-sm font-medium text-foreground">{getUserCredits(u).toLocaleString('zh-CN')}</span>
                   <span className="text-sm text-muted-foreground">{getUserProjects(u) || '-'}</span>
                   <span className="text-xs text-muted-foreground">{formatDate(getUserCreated(u))}</span>
-                  <span className="text-xs text-muted-foreground">-</span>
+                  <span className="text-xs text-muted-foreground">{getUserLastLogin(u)}</span>
                   <div className="flex items-center justify-end gap-1">
                     <button onClick={() => setUserDetailId(u.id)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="详情"><Eye className="w-3.5 h-3.5" /></button>
                     <button onClick={() => setUserDetailId(u.id)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-primary" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>

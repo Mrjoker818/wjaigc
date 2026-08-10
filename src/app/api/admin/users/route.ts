@@ -27,10 +27,11 @@ export async function GET(request: NextRequest) {
     }
 
     const users = await listManagedUsers();
-    // Enrich users with credits and project count from user_data
+    // Enrich users with credits, project count and last activity from audit log
     const enrichedUsers = await Promise.all((users || []).map(async (u: User) => {
       let credits = 0;
       let projectCount = 0;
+      let lastLogin: number | undefined;
       try {
         const creditRows = await execSql('SELECT balance FROM wujie_credits WHERE user_id = $1', [u.id]);
         if (creditRows.rows.length > 0) {
@@ -38,17 +39,26 @@ export async function GET(request: NextRequest) {
         }
       } catch {}
       try {
-        const pd = await dbGetUserData(u.id, 'projects') as Record<string, unknown> | null;
-        if (pd && typeof pd === 'object' && 'data_value' in pd) {
-          const dv = (pd as Record<string, unknown>).data_value;
-          const parsed = typeof dv === 'string' ? JSON.parse(dv) : dv;
+        const pd = await dbGetUserData(u.id, 'projects');
+        if (pd) {
+          const parsed = typeof pd === 'string' ? JSON.parse(pd) : pd;
           projectCount = Array.isArray(parsed) ? parsed.length : (typeof parsed === 'object' ? Object.keys(parsed as Record<string, unknown>).length : 0);
+        }
+      } catch {}
+      try {
+        const loginRow = await execSql(
+          "SELECT MAX(created_at) as last_activity FROM wujie_audit_log WHERE user_id = $1",
+          [u.id]
+        );
+        if (loginRow.rows.length > 0 && loginRow.rows[0]?.last_activity) {
+          lastLogin = Number(loginRow.rows[0].last_activity);
         }
       } catch {}
       return {
         ...u,
         credits,
         project_count: projectCount,
+        last_login: lastLogin,
       };
     }));
     return NextResponse.json({ success: true, users: enrichedUsers });
