@@ -25,6 +25,15 @@ export type WorkspaceEntityType =
   | 'chat-attachment'
   | 'chat-result';
 
+export interface WorkspaceEntityTypes {
+  canvas: 'canvas-image';
+  workflow: 'workflow-input' | 'workflow-output';
+  chat: 'chat-attachment' | 'chat-result';
+}
+
+export type WorkspaceEntityTypeFor<TWorkspace extends WorkspaceKind> =
+  WorkspaceEntityTypes[TWorkspace];
+
 export type AssetGraphMode = 'legacy' | 'shadow' | 'asset-v3';
 
 export interface AssetFile {
@@ -62,15 +71,19 @@ export interface AssetVersion {
   createdAt: string;
 }
 
-export interface WorkspacePlacement {
+export type WorkspacePlacement = {
+  [TWorkspace in WorkspaceKind]: WorkspacePlacementFor<TWorkspace>;
+}[WorkspaceKind];
+
+export interface WorkspacePlacementFor<TWorkspace extends WorkspaceKind> {
   id: string;
   ownerId: string;
   projectId: string;
   assetId: string;
   assetVersionId: string;
-  workspace: WorkspaceKind;
+  workspace: TWorkspace;
   workspaceId: string;
-  entityType: WorkspaceEntityType;
+  entityType: WorkspaceEntityTypeFor<TWorkspace>;
   entityId: string;
   status: AssetStatus;
   deletedAt: string | null;
@@ -80,13 +93,17 @@ export interface WorkspacePlacement {
   updatedAt: string;
 }
 
-const WORKSPACE_ENTITY_TYPES: ReadonlySet<WorkspaceEntityType> = new Set([
-  'canvas-image',
-  'workflow-input',
-  'workflow-output',
-  'chat-attachment',
-  'chat-result',
-]);
+const WORKSPACE_ENTITY_TYPES = {
+  canvas: new Set<WorkspaceEntityTypeFor<'canvas'>>(['canvas-image']),
+  workflow: new Set<WorkspaceEntityTypeFor<'workflow'>>([
+    'workflow-input',
+    'workflow-output',
+  ]),
+  chat: new Set<WorkspaceEntityTypeFor<'chat'>>([
+    'chat-attachment',
+    'chat-result',
+  ]),
+} as const;
 
 export function isTerminalMediaAvailability(
   availability: MediaAvailability,
@@ -94,11 +111,12 @@ export function isTerminalMediaAvailability(
   return availability === 'ready' || availability === 'unrecoverable';
 }
 
-export function assertWorkspaceEntityType(
+export function assertWorkspaceEntityType<TWorkspace extends WorkspaceKind>(
+  workspace: TWorkspace,
   value: string,
-): WorkspaceEntityType {
-  if (WORKSPACE_ENTITY_TYPES.has(value as WorkspaceEntityType)) {
-    return value as WorkspaceEntityType;
+): WorkspaceEntityTypeFor<TWorkspace> {
+  if ((WORKSPACE_ENTITY_TYPES[workspace] as ReadonlySet<string>).has(value)) {
+    return value as WorkspaceEntityTypeFor<TWorkspace>;
   }
-  throw new Error(`Unsupported workspace entity type: ${value}`);
+  throw new Error(`Unsupported workspace entity type for ${workspace}: ${value}`);
 }
