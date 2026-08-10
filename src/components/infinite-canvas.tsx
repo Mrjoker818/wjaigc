@@ -12,6 +12,11 @@ import {
 import { getConstrainedImageToolbarPosition } from '@/lib/image-toolbar-position';
 import { getBottomToolbarDrawerPlacement, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
+import {
+  getCanvasMediaFilename,
+  isManagedCanvasMedia,
+} from '@/lib/asset-core/canvas-adapter';
+import type { MediaAvailability } from '@/lib/asset-core/types';
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
@@ -188,6 +193,7 @@ export interface CanvasImage {
   y: number;
   width: number;
   height: number;
+  rotation?: number;
   originalWidth?: number;
   originalHeight?: number;
   marked?: boolean;
@@ -201,6 +207,11 @@ export interface CanvasImage {
   size?: string;
   createdAt?: number;
   sourceUrl?: string;
+  mediaAvailability?: MediaAvailability;
+  mediaErrorCode?: string;
+  assetId?: string;
+  assetVersionId?: string;
+  placementId?: string;
   isProcessingPlaceholder?: boolean;
   groupId?: string;
   processing?: {
@@ -243,6 +254,8 @@ export interface CanvasImage {
   videoUrl?: string;
   videoDuration?: number;
   videoThumbnailUrl?: string;
+  isPlaying?: boolean;
+  relationType?: string;
   // 图层面板扩展字段
   /** 图层是否可见（默认true） */
   visible?: boolean;
@@ -2193,6 +2206,41 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   useEffect(() => {
     imagesRef.current = images;
   }, [images]);
+
+  const markCanvasMediaMissing = useCallback((imageId: string, mediaErrorCode: string) => {
+    const nextImages = imagesRef.current.map((image) => (
+      image.id === imageId
+        ? { ...image, mediaAvailability: 'missing' as const, mediaErrorCode }
+        : image
+    ));
+    imagesRef.current = nextImages;
+    onImagesChange(nextImages);
+  }, [onImagesChange]);
+
+  const retryMissingMedia = useCallback((image: CanvasImage) => {
+    const nextImages = imagesRef.current.map((candidate) => (
+      candidate.id === image.id
+        ? { ...candidate, mediaAvailability: 'ready' as const, mediaErrorCode: undefined }
+        : candidate
+    ));
+    imagesRef.current = nextImages;
+    onImagesChange(nextImages);
+  }, [onImagesChange]);
+
+  const recoverMissingMedia = useCallback((image: CanvasImage) => {
+    const nextImages = imagesRef.current.map((candidate) => (
+      candidate.id === image.id
+        ? {
+            ...candidate,
+            url: candidate.sourceUrl || candidate.url,
+            mediaAvailability: 'recovering' as const,
+            mediaErrorCode: undefined,
+          }
+        : candidate
+    ));
+    imagesRef.current = nextImages;
+    onImagesChange(nextImages);
+  }, [onImagesChange]);
 
   // 同步 genGroups ref
   useEffect(() => {
@@ -10880,8 +10928,41 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       )}
                     </div>
                   </div>
+                ) : image.mediaAvailability === 'missing' && isManagedCanvasMedia(image) ? (
+                  <div
+                    data-canvas-missing-media
+                    role="status"
+                    className={`flex h-full w-full flex-col items-center justify-center gap-2 border px-4 text-center ${isMonochrome ? 'border-red-200 bg-red-50 text-red-900' : 'border-red-500/40 bg-red-950/30 text-red-100'}`}
+                  >
+                    <span className="max-w-full truncate text-sm font-medium">{getCanvasMediaFilename(image)}</span>
+                    <span className={`max-w-full truncate text-xs ${isMonochrome ? 'text-red-700' : 'text-red-200/75'}`}>
+                      {image.mediaErrorCode || 'MEDIA_UNAVAILABLE'}
+                    </span>
+                    <div className="pointer-events-auto flex items-center gap-2">
+                      <button
+                        type="button"
+                        className={`px-3 py-1 text-xs font-medium transition-colors ${isMonochrome ? 'bg-red-700 text-white hover:bg-red-800' : 'bg-red-500 text-white hover:bg-red-400'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          retryMissingMedia(image);
+                        }}
+                      >
+                        重试
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-3 py-1 text-xs font-medium transition-colors ${isMonochrome ? 'bg-white text-red-800 ring-1 ring-red-200 hover:bg-red-100' : 'bg-white/10 text-red-100 hover:bg-white/20'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          recoverMissingMedia(image);
+                        }}
+                      >
+                        恢复
+                      </button>
+                    </div>
+                  </div>
                 ) : image.url ? (
-                  <NextImage unoptimized width={1} height={1}                     src={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}
+                  <NextImage key={`${image.id}:${image.mediaAvailability || 'ready'}`} unoptimized width={1} height={1}                     src={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}
                     alt={image.prompt ? image.prompt.replace(/^\[画布上下文[：:][^\]]*\]\s*/, '').substring(0, 60) : 'canvas image'}
                     className="w-full h-full object-cover pointer-events-none overflow-hidden"
                     draggable={false}
@@ -10895,6 +10976,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       // 如果缩略图失败，回退到原图
                       if (image.thumbnailUrl && img.src === image.thumbnailUrl) {
                         img.src = image.url;
+                        return;
+                      }
+                      if (isManagedCanvasMedia(image)) {
+                        markCanvasMediaMissing(image.id, 'MEDIA_LOAD_FAILED');
                         return;
                       }
                       const url = image.url;

@@ -30,4 +30,10 @@ describe('canvas project reopen contract', () => {
     expect(canvas).toContain('onClick={resetViewToContent}');
     expect(canvas).not.toContain('onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}');
   });
+
+  it('hydrates persisted canvas images through the asset placement adapter', () => {
+    expect(workspace).toContain("from '@/lib/asset-core/canvas-adapter';");
+    expect(workspace).toContain('hydrateCanvasPlacements');
+    expect(workspace).toContain('hydrateCanvasPlacements(targetProject.canvasImages)');
+  });
 });

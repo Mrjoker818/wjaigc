@@ -110,6 +110,10 @@ export interface CanvasImage {
   // 原始图片 URL（外部 CDN 地址），用于本地文件丢失时重新下载
   sourceUrl?: string;
   mediaAvailability?: MediaAvailability;
+  mediaErrorCode?: string;
+  assetId?: string;
+  assetVersionId?: string;
+  placementId?: string;
   // AI 模型与提供商信息
   modelName?: string;
   /** Stable provider identity used for task polling and routing. */

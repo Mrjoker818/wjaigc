@@ -83,6 +83,7 @@ interface FavoriteItem {
 }
 import { User, Project, ImageGroupData, CanvasImage as PersistableCanvasImage } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
+import { hydrateCanvasPlacements, serializeCanvasPlacements, shouldPersistCanvasPlacement } from '@/lib/asset-core/canvas-adapter';
 import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
 import { buildProjectWorkspaceUrl } from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
@@ -445,7 +446,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         // ★ 调试日志：追踪项目加载
         console.log('[page] loadProjectById:', targetProject.id, targetProject.name, 'canvasImages:', targetProject.canvasImages?.length || 0);
         if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
-          setImages(targetProject.canvasImages.map(img => ({
+          setImages(hydrateCanvasPlacements(targetProject.canvasImages).map(img => ({
+            ...img,
             id: img.id,
             url: img.url,
             prompt: img.prompt || '',
@@ -685,7 +687,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               if (targetProject) {
                 setCurrentProject(targetProject);
                 if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
-                  setImages(targetProject.canvasImages.map(img => ({
+                setImages(hydrateCanvasPlacements(targetProject.canvasImages).map(img => ({
+                  ...img,
                     id: img.id,
                     url: img.url,
                     prompt: img.prompt || '',
@@ -1264,8 +1267,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           ...img,
           url: urlMapping[img.url] || img.url,
         }));
-        const persistableCanvasImages = resolvedImages
+        const persistableCanvasImages = serializeCanvasPlacements(resolvedImages)
           .map(img => ({
+            ...img,
             id: img.id,
             url: img.url,
             x: img.x,
@@ -1302,14 +1306,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             annotationIds: img.annotationIds || undefined,
             svgDataUrl: img.svgDataUrl || '',
             svgUrl: img.svgUrl || '',
-            mediaType: img.mediaType || '',
+            mediaType: img.mediaType || undefined,
             videoUrl: img.videoUrl || '',
             videoDuration: img.videoDuration || undefined,
             videoThumbnailUrl: img.videoThumbnailUrl || '',
             isProcessingPlaceholder: img.isProcessingPlaceholder || false,
             processing: img.processing,
           }))
-          .filter(img => img.url || img.videoUrl || img.svgDataUrl || shouldPersistProcessingPlaceholder(img)) as PersistableCanvasImage[];
+          .filter(image => shouldPersistCanvasPlacement(image) || shouldPersistProcessingPlaceholder(image)) as PersistableCanvasImage[];
         const updatedMeta = {
           ...(project.metadata || {}),
           groups: groupsRef.current,
@@ -1369,8 +1373,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         // 验证用户一致性：确保只保存当前登录用户的数据
         if (!currentUserRef.current?.id) return;
         // 保留所有图片URL，包括 data: URL（避免异步持久化未完成时丢失图片）
-        const persistableCanvasImages = latestImagesRef.current
+        const persistableCanvasImages = serializeCanvasPlacements(latestImagesRef.current)
           .map(img => ({
+            ...img,
             id: img.id,
             url: img.url,
             x: img.x,
@@ -1407,14 +1412,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             annotationIds: img.annotationIds || undefined,
             svgDataUrl: img.svgDataUrl || '',
             svgUrl: img.svgUrl || '',
-            mediaType: img.mediaType || '',
+            mediaType: img.mediaType || undefined,
             videoUrl: img.videoUrl || '',
             videoDuration: img.videoDuration || undefined,
             videoThumbnailUrl: img.videoThumbnailUrl || '',
             isProcessingPlaceholder: img.isProcessingPlaceholder || false,
             processing: img.processing,
           }))
-          .filter(img => img.url || img.videoUrl || shouldPersistProcessingPlaceholder(img)) as PersistableCanvasImage[];
+          .filter(image => shouldPersistCanvasPlacement(image) || shouldPersistProcessingPlaceholder(image)) as PersistableCanvasImage[];
         // 1. localStorage 即时写入
         mgr.updateProject(proj.id, {
           canvasImages: persistableCanvasImages,
@@ -2798,7 +2803,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const previousImages = latestImagesRef.current;
     const uploaded = autoLayoutImages(previousImages, [baseImage])[0] || baseImage;
     const nextImages = [...previousImages, uploaded];
-    const persistableCanvasImages = nextImages.map((image) => ({
+    const persistableCanvasImages = serializeCanvasPlacements(nextImages).map((image) => ({
+      ...image,
       id: image.id,
       url: image.url,
       x: image.x,
@@ -2833,7 +2839,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       latestImagesRef.current = previousImages;
       setImages(previousImages);
       manager.updateProject(currentProject.id, {
-        canvasImages: previousImages.map((image) => ({
+        canvasImages: serializeCanvasPlacements(previousImages).map((image) => ({
+          ...image,
           id: image.id,
           url: image.url,
           x: image.x,
@@ -4890,10 +4897,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   if (r.status === 'fulfilled' && r.value) urlMapping[r.value.original] = r.value.persisted;
                 }
               }
-              const persistableCanvasImages = images
+              const persistableCanvasImages = serializeCanvasPlacements(images.map((img) => ({
+                ...img,
+                url: urlMapping[img.url] || img.url,
+              })))
                 .map(img => ({
+                  ...img,
                   id: img.id,
-                  url: urlMapping[img.url] || img.url,
+                  url: img.url,
                   x: img.x, y: img.y, width: img.width, height: img.height,
                   originalWidth: img.originalWidth || img.width * 2,
                   originalHeight: img.originalHeight || img.height * 2,
@@ -4916,14 +4927,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   annotationIds: img.annotationIds || undefined,
                   svgDataUrl: img.svgDataUrl || '',
                   svgUrl: img.svgUrl || '',
-                  mediaType: img.mediaType || '',
+                  mediaType: img.mediaType || undefined,
                   videoUrl: img.videoUrl || '',
                   videoDuration: img.videoDuration || undefined,
                   videoThumbnailUrl: img.videoThumbnailUrl || '',
                   isProcessingPlaceholder: img.isProcessingPlaceholder || false,
                   processing: img.processing,
                 }))
-                .filter(img => img.url || img.videoUrl || img.isProcessingPlaceholder) as PersistableCanvasImage[];
+                .filter(image => shouldPersistCanvasPlacement(image) || shouldPersistProcessingPlaceholder(image)) as PersistableCanvasImage[];
               mgr.updateProject(currentProject.id, {
                 canvasImages: persistableCanvasImages,
               metadata: {
@@ -5171,7 +5182,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             try {
               if (currentProject?.id) {
                 const mgr = UserManagerCore.getInstance();
-                const persistable = nextImages.map(img => ({
+                const persistable = serializeCanvasPlacements(nextImages).map(img => ({
+                  ...img,
                   id: img.id,
                   url: img.url,
                   x: img.x, y: img.y,

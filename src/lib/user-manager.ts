@@ -1,6 +1,7 @@
 // 用户数据管理器 - localStorage + 服务器数据库双重存储
 import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData } from './user-types';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
+import { serializeCanvasPlacements } from '@/lib/asset-core/canvas-adapter';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
@@ -46,6 +47,11 @@ interface ProjectSyncResponse {
   success?: boolean;
   error?: string;
   projectIdMap?: Record<string, string>;
+  assetGraphMappings?: Record<string, Record<string, {
+    assetId: string;
+    versionId: string;
+    placementId: string;
+  }>>;
 }
 
 export interface ProjectSyncResult {
@@ -485,7 +491,11 @@ export class UserManager {
         }
         return true;
       })
-      .map((project) => ({ ...project, userId: project.userId || currentUserId }));
+      .map((project) => ({
+        ...project,
+        userId: project.userId || currentUserId,
+        canvasImages: serializeCanvasPlacements(project.canvasImages),
+      }));
     const payloadImageCount = projectsPayload.reduce((sum, project) => sum + (project.canvasImages?.length || 0), 0);
     const memoryImageCount = userData.projects.reduce((sum, project) => sum + (project.canvasImages?.length || 0), 0);
     if (memoryImageCount > 0 && payloadImageCount === 0) {
@@ -527,6 +537,32 @@ export class UserManager {
     this.notifyProjectsChanged();
   }
 
+  private applyAssetGraphMappings(
+    assetGraphMappings: NonNullable<ProjectSyncResponse['assetGraphMappings']>,
+  ): void {
+    if (!this.currentUserId || !this.multiUserData || Object.keys(assetGraphMappings).length === 0) return;
+    const userData = this.multiUserData.userData[this.currentUserId];
+    if (!userData) return;
+    let changed = false;
+    userData.projects = userData.projects.map((project) => {
+      const mappings = assetGraphMappings[project.id];
+      if (!mappings) return project;
+      const canvasImages = project.canvasImages.map((image) => {
+        const mapping = mappings[image.id];
+        if (!mapping) return image;
+        changed = true;
+        return {
+          ...image,
+          assetId: mapping.assetId,
+          assetVersionId: mapping.versionId,
+          placementId: mapping.placementId,
+        };
+      });
+      return { ...project, canvasImages };
+    });
+    if (changed) this.saveData();
+  }
+
   /** 强制将当前项目快照提交到数据库；任何失败都会抛错并阻断依赖该快照的操作。 */
   async flushProjectsToServer(): Promise<ProjectSyncResult> {
     if (this.serverSyncTimer) {
@@ -557,6 +593,7 @@ export class UserManager {
       ? data.projectIdMap
       : {};
     this.applyProjectIdMap(projectIdMap);
+    this.applyAssetGraphMappings(data.assetGraphMappings || {});
     this._recentlyDeletedImageIds.clear();
     return { projectIdMap };
   }
@@ -585,6 +622,7 @@ export class UserManager {
         const data = await syncRes.json().catch(() => null) as ProjectSyncResponse | null;
         if (data?.success) {
           this.applyProjectIdMap(data.projectIdMap || {});
+          this.applyAssetGraphMappings(data.assetGraphMappings || {});
           console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
           this._recentlyDeletedImageIds.clear();
         } else {

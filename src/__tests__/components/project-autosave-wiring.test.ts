@@ -18,4 +18,9 @@ describe('project autosave wiring', () => {
     expect(autoSaveSource).toContain('lastAutoSaveSignatureRef');
     expect(autoSaveSource).toContain('if (lastAutoSaveSignatureRef.current === saveSignature) return;');
   });
+
+  it('serializes placements without filtering unavailable managed media from autosave', () => {
+    expect(autoSaveSource).toContain('serializeCanvasPlacements(resolvedImages)');
+    expect(autoSaveSource).toContain('shouldPersistCanvasPlacement(image)');
+  });
 });
