@@ -171,3 +171,119 @@ controller gates.
 - External media persistence cannot be transactionally erased after a later database
   rollback because physical deletion is forbidden; such files remain unreferenced and
   await the later orphan-media governance task.
+
+## Independent Review Fixes
+
+This follow-up closes all three implementation-blocking findings against commit
+`8b73b68d59675d2f5af20d8be6f8e6eee44750a4`. It remains limited to the two Task 3
+implementation files, their two covering test files, and this report.
+
+### Review RED
+
+The three new regressions were added before changing production code. Raw command:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/wujie_stage2_test?sslmode=disable'
+pnpm exec vitest run src/__tests__/lib/project-readers.test.ts tests/integration/stage-2-legacy-migration-postgres.test.ts
+```
+
+Pre-fix result:
+
+- exit code: `1`;
+- test files: `2 failed / 2`;
+- tests: `3 failed / 16 passed / 19 total`;
+- duration: `6.84s`;
+- failures:
+  - project description `/uploads/not-a-url-note` was incorrectly rewritten to a
+    serve-upload URL, proving normalization escaped media fields;
+  - semantically identical nested objects with different key insertion order returned
+    `project:projection-mismatch`;
+  - persistence adapters received no retry-stable mapping, so the failed-attempt values
+    were `undefined` while the retry returned new random graph IDs.
+
+### Fix 1: URL-Bearing Fields Only
+
+The reader now clones the full project without URL rewriting, then normalizes only these
+direct CanvasImage media fields: `url`, `videoUrl`, `videoThumbnailUrl`,
+`threeDModelUrl`, `svgUrl`, and `psdUrl`. It recursively normalizes values only inside
+the typed 3D URL containers `threeDModelUrls`, `threeDThumbnailUrls`, and
+`threeDTextureUrls`.
+
+Prompt, description, annotation text, group name/note, image unknown metadata, project
+unknown metadata, and `sourceUrl` are preserved exactly even when their text begins
+with `/uploads/`. Existing actual media URL projection remains
+`/api/serve-upload/uploads/...`.
+
+Focused reader proof after this change:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/project-readers.test.ts
+```
+
+Result: exit `0`, `1 passed / 1` file, `12 passed / 12` tests, duration `519ms`.
+
+### Fix 2: Rollback-Safe Stable Mappings
+
+Asset, version, and placement IDs are now deterministic UUID-shaped identifiers derived
+with SHA-256 from:
+
+```text
+wujie-legacy-migration-v1 + actor owner ID + project ID + legacy image ID + graph role
+```
+
+The migration checkpoint ID is likewise deterministic per owner/project. URL is not an
+input, so shared URLs do not merge and URLs still prove no ownership. The mapping is
+created before a `data:` persistence adapter runs and is included in the adapter input,
+allowing external persistence to use the same IDs across retries without retaining a
+failed database checkpoint.
+
+The real PostgreSQL regression uses two `data:` placements. Attempt one successfully
+returns from the first persistence call and fails on the second. It then proves all five
+database counts are zero, including checkpoints. The retry observes the exact same two
+mappings, commits one project graph, and proves final counts of `1 project / 2 assets /
+2 versions / 2 placements / 1 checkpoint`, with two distinct IDs in each graph table.
+
+No remote URL is downloaded, no URL is used for deduplication or authorization, no
+physical media is deleted, and the graph/schema pointer remains fully transactional.
+
+### Fix 3: Canonical Structural Comparison
+
+`compareLegacyAndAssetProjection` now recursively sorts object keys before comparison.
+Array order remains significant. The regression reverses top-level, image, settings,
+and nested metadata key insertion order while retaining identical values and expects
+`{ matches: true, differences: [] }`.
+
+### Review GREEN And Static Gates
+
+Raw focused command:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/wujie_stage2_test?sslmode=disable'
+pnpm exec vitest run src/__tests__/lib/project-readers.test.ts tests/integration/stage-2-legacy-migration-postgres.test.ts
+```
+
+Observed result after all three fixes:
+
+- exit code: `0`;
+- test files: `2 passed / 2`;
+- tests: `19 passed / 19`;
+- reader tests: `12 passed`;
+- real PostgreSQL migration tests: `7 passed`;
+- duration: `7.19s` (`6.11s` test body time).
+
+Additional commands:
+
+```powershell
+pnpm ts-check
+pnpm exec eslint src/lib/asset-core/project-readers.ts src/lib/asset-core/legacy-migration.ts src/__tests__/lib/project-readers.test.ts tests/integration/stage-2-legacy-migration-postgres.test.ts --quiet
+git diff --check -- src/lib/asset-core/project-readers.ts src/lib/asset-core/legacy-migration.ts src/__tests__/lib/project-readers.test.ts tests/integration/stage-2-legacy-migration-postgres.test.ts .superpowers/sdd/task-3-report.md
+```
+
+- `pnpm ts-check`: exit `0`;
+- changed-file ESLint: exit `0`, no output;
+- path diff check: exit `0`; the working-tree run emitted only Git LF-to-CRLF notices,
+  with no whitespace error. The staged commit is checked again before commit.
+
+The follow-up does not amend `8b73b68`, update controller progress, include an external
+review file, touch UI/Task 4+, or push any branch. Checkpoint A concerns above remain
+unchanged.

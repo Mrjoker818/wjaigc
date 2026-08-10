@@ -126,6 +126,57 @@ describe('readProjectSnapshot', () => {
     ]);
   });
 
+  it('normalizes only known media URL fields and preserves upload-like text', () => {
+    const fixture = loadFixture('v1-video-3d-svg.json').value as Record<string, unknown>;
+    const canvasImages = fixture.canvasImages as Record<string, unknown>[];
+    const raw = {
+      ...fixture,
+      description: '/uploads/not-a-url-note',
+      canvasImages: [{
+        ...canvasImages[0],
+        prompt: '/uploads/not-a-url-note',
+        unknownMetadata: { note: '/uploads/not-a-url-note' },
+      }],
+      metadata: {
+        groups: [{
+          id: 'text-group',
+          name: '/uploads/not-a-url-note',
+          note: '/uploads/not-a-url-note',
+          imageIds: ['legacy-rich-media'],
+        }],
+        annotationsV2: [{
+          id: 'text-annotation',
+          text: '/uploads/not-a-url-note',
+        }],
+        unknown: '/uploads/not-a-url-note',
+      },
+    };
+
+    const result = readProjectSnapshot(deepFreeze(raw));
+    const project = result.project as unknown as Record<string, unknown>;
+    const image = result.project?.canvasImages[0] as unknown as Record<string, unknown>;
+    const metadata = project.metadata as Record<string, unknown>;
+
+    expect(project.description).toBe('/uploads/not-a-url-note');
+    expect(image.prompt).toBe('/uploads/not-a-url-note');
+    expect(image.unknownMetadata).toEqual({ note: '/uploads/not-a-url-note' });
+    expect(metadata.unknown).toBe('/uploads/not-a-url-note');
+    expect(metadata.groups).toEqual([
+      expect.objectContaining({
+        name: '/uploads/not-a-url-note',
+        note: '/uploads/not-a-url-note',
+      }),
+    ]);
+    expect(metadata.annotationsV2).toEqual([
+      expect.objectContaining({ text: '/uploads/not-a-url-note' }),
+    ]);
+    expect(image.url).toBe('/api/serve-upload/uploads/preview.png');
+    expect(image.videoUrl).toBe('/api/serve-upload/uploads/clip.mp4');
+    expect(image.threeDModelUrls).toEqual({
+      glb: '/api/serve-upload/uploads/model.glb',
+    });
+  });
+
   it('preserves processing placeholders, annotations, and group metadata', () => {
     const processing = readProjectSnapshot(deepFreeze(loadFixture('v1-processing-matrix.json').value));
     const shared = readProjectSnapshot(deepFreeze(loadFixture('v1-shared-placement.json').value));
@@ -167,5 +218,58 @@ describe('readProjectSnapshot', () => {
     const comparison = compareLegacyAndAssetProjection({ legacy, assetProjection: projected });
 
     expect(comparison).toEqual({ matches: true, differences: [] });
+  });
+
+  it('compares semantically identical projections independent of object key order', () => {
+    const legacy = {
+      id: 'key-order-project',
+      userId: 'key-order-owner',
+      name: 'Key order',
+      createdAt: 1700000000000,
+      updatedAt: 1700000001000,
+      settings: { model: 'fixture-model', quality: 'high' },
+      metadata: { nested: { alpha: 1, beta: { first: true, second: false } } },
+      canvasImages: [{
+        id: 'key-order-image',
+        url: 'https://media.example.invalid/key-order.png',
+        x: 1,
+        y: 2,
+        width: 3,
+        height: 4,
+        originalWidth: 5,
+        originalHeight: 6,
+        rotation: 0,
+        zIndex: 1,
+        createdAt: 1700000000000,
+      }],
+    };
+    const reordered = {
+      schemaVersion: 3,
+      canvasImages: [{
+        createdAt: 1700000000000,
+        zIndex: 1,
+        rotation: 0,
+        originalHeight: 6,
+        originalWidth: 5,
+        height: 4,
+        width: 3,
+        y: 2,
+        x: 1,
+        url: 'https://media.example.invalid/key-order.png',
+        id: 'key-order-image',
+      }],
+      metadata: { nested: { beta: { second: false, first: true }, alpha: 1 } },
+      settings: { quality: 'high', model: 'fixture-model' },
+      updatedAt: 1700000001000,
+      createdAt: 1700000000000,
+      name: 'Key order',
+      userId: 'key-order-owner',
+      id: 'key-order-project',
+    };
+
+    expect(compareLegacyAndAssetProjection({
+      legacy: deepFreeze(legacy),
+      assetProjection: deepFreeze(reordered),
+    })).toEqual({ matches: true, differences: [] });
   });
 });

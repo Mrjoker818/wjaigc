@@ -40,6 +40,19 @@ export interface ProjectionComparison {
 }
 
 const AUDIT_FIELDS = new Set(['legacyAudit', 'legacyAuditPayload']);
+const IMAGE_URL_FIELDS = new Set([
+  'url',
+  'videoUrl',
+  'videoThumbnailUrl',
+  'threeDModelUrl',
+  'svgUrl',
+  'psdUrl',
+]);
+const IMAGE_URL_COLLECTION_FIELDS = new Set([
+  'threeDModelUrls',
+  'threeDThumbnailUrls',
+  'threeDTextureUrls',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -75,18 +88,28 @@ function normalizeLegacyUploadUrl(value: string): string {
   return `/api/serve-upload/uploads/${value.slice('/uploads/'.length)}`;
 }
 
-function normalizeReturnedUrls(value: unknown, fieldName?: string): unknown {
-  if (typeof value === 'string') {
-    return fieldName === 'sourceUrl' ? value : normalizeLegacyUploadUrl(value);
-  }
-  if (Array.isArray(value)) return value.map((item) => normalizeReturnedUrls(item));
+function normalizeUrlCollection(value: unknown): unknown {
+  if (typeof value === 'string') return normalizeLegacyUploadUrl(value);
+  if (Array.isArray(value)) return value.map((item) => normalizeUrlCollection(item));
   if (!isRecord(value)) return value;
 
   const normalized: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    normalized[key] = AUDIT_FIELDS.has(key)
-      ? item
-      : normalizeReturnedUrls(item, key);
+    normalized[key] = normalizeUrlCollection(item);
+  }
+  return normalized;
+}
+
+function normalizeImageUrls(value: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (IMAGE_URL_FIELDS.has(key) && typeof item === 'string') {
+      normalized[key] = normalizeLegacyUploadUrl(item);
+    } else if (IMAGE_URL_COLLECTION_FIELDS.has(key)) {
+      normalized[key] = normalizeUrlCollection(item);
+    } else {
+      normalized[key] = item;
+    }
   }
   return normalized;
 }
@@ -122,7 +145,7 @@ function prepareImages(
     if (imageIds.has(value.id)) return null;
     imageIds.add(value.id);
 
-    const image = value as unknown as CanvasImage;
+    const image = normalizeImageUrls(value) as unknown as CanvasImage;
     const availability = availabilityFor(image);
     const marked: CanvasImage = {
       ...image,
@@ -150,7 +173,7 @@ export function readProjectSnapshot(raw: unknown): ProjectReadResult {
 
   let cloned: Record<string, unknown>;
   try {
-    cloned = normalizeReturnedUrls(cloneValue(raw)) as Record<string, unknown>;
+    cloned = cloneValue(raw) as Record<string, unknown>;
   } catch {
     return quarantine(sourceSchemaVersion, 'Project snapshot cannot be cloned safely');
   }
@@ -198,6 +221,16 @@ function comparableProject(project: Project): Record<string, unknown> {
   return comparable;
 }
 
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => canonicalize(item));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, canonicalize(value[key])]),
+  );
+}
+
 export function compareLegacyAndAssetProjection(
   input: ProjectionComparisonInput,
 ): ProjectionComparison {
@@ -208,8 +241,8 @@ export function compareLegacyAndAssetProjection(
   if (!legacy.project) differences.push('legacy:quarantined');
   if (!asset.project) differences.push('assetProjection:quarantined');
   if (legacy.project && asset.project) {
-    const legacyJson = JSON.stringify(comparableProject(legacy.project));
-    const assetJson = JSON.stringify(comparableProject(asset.project));
+    const legacyJson = JSON.stringify(canonicalize(comparableProject(legacy.project)));
+    const assetJson = JSON.stringify(canonicalize(comparableProject(asset.project)));
     if (legacyJson !== assetJson) differences.push('project:projection-mismatch');
   }
 

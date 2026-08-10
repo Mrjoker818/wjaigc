@@ -172,6 +172,70 @@ describe('legacy project copy-on-write migration', () => {
     });
   });
 
+  postgresIt('reuses deterministic mappings after partial external persistence and full database rollback', async () => {
+    await withIsolatedPostgres('stage-2-legacy-retry-stable-mapping', async ({ databaseUrl: isolatedUrl, query }) => {
+      migrate(isolatedUrl);
+      const actorUserId = randomUUID();
+      const projectId = randomUUID();
+      const legacy = fixture('v1-data-url.json', actorUserId, projectId);
+      const firstImage = (legacy.canvasImages as Record<string, unknown>[])[0];
+      legacy.canvasImages = [
+        { ...firstImage, id: 'legacy-data-first' },
+        { ...firstImage, id: 'legacy-data-second', x: 80 },
+      ];
+      await seedLegacyProject(query, actorUserId, legacy);
+
+      const failedAttemptMappings = new Map<string, unknown>();
+      const retryMappings = new Map<string, unknown>();
+      let attempt: 'failing' | 'retry' = 'failing';
+      const persistMedia = vi.fn(async (input) => {
+        const target = attempt === 'failing' ? failedAttemptMappings : retryMappings;
+        target.set(input.legacyImageId, input.mapping);
+        if (attempt === 'failing' && input.legacyImageId === 'legacy-data-second') {
+          throw new Error('fixture second persistence failure');
+        }
+        return {
+          url: `/api/serve-upload/uploads/${input.legacyImageId}.png`,
+          storageKey: `uploads/${input.legacyImageId}.png`,
+          mimeType: 'image/png',
+        };
+      });
+
+      await expect(migrateLegacyProjectOnWrite({ actorUserId, projectId, persistMedia }))
+        .rejects.toMatchObject({
+          code: 'LEGACY_MEDIA_PERSIST_FAILED',
+        } satisfies Partial<LegacyMigrationError>);
+      expect(persistMedia).toHaveBeenCalledTimes(2);
+      await expect(graphCounts(query, actorUserId, projectId)).resolves.toEqual({
+        projects: '0', assets: '0', versions: '0', placements: '0', checkpoints: '0',
+      });
+
+      attempt = 'retry';
+      const retried = await migrateLegacyProjectOnWrite({ actorUserId, projectId, persistMedia });
+
+      expect(persistMedia).toHaveBeenCalledTimes(4);
+      expect(retryMappings).toEqual(failedAttemptMappings);
+      expect(Object.fromEntries(retryMappings)).toEqual(retried.mappings);
+      await expect(graphCounts(query, actorUserId, projectId)).resolves.toEqual({
+        projects: '1', assets: '2', versions: '2', placements: '2', checkpoints: '1',
+      });
+      const distinct = await query<{ assets: string; versions: string; placements: string }>(
+        `SELECT
+           count(DISTINCT asset.id)::text AS assets,
+           count(DISTINCT version.id)::text AS versions,
+           count(DISTINCT placement.id)::text AS placements
+         FROM wujie_assets asset
+         JOIN wujie_asset_versions version
+           ON version.asset_id = asset.id AND version.owner_id = $1 AND version.project_id = $2
+         JOIN wujie_workspace_placements placement
+           ON placement.asset_id = asset.id AND placement.owner_id = $1 AND placement.project_id = $2
+         WHERE asset.owner_id = $1 AND asset.project_id = $2`,
+        [actorUserId, projectId],
+      );
+      expect(distinct.rows).toEqual([{ assets: '2', versions: '2', placements: '2' }]);
+    });
+  });
+
   postgresIt('persists data media but never downloads remote recovery URLs', async () => {
     await withIsolatedPostgres('stage-2-legacy-media-policy', async ({ databaseUrl: isolatedUrl, query }) => {
       migrate(isolatedUrl);

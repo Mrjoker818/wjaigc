@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
 import type { PoolClient, QueryResultRow } from 'pg';
 
@@ -25,6 +25,7 @@ export interface LegacyMediaPersistenceInput {
   actorUserId: string;
   projectId: string;
   legacyImageId: string;
+  mapping: LegacyImageMapping;
   dataUrl: string;
 }
 
@@ -86,6 +87,34 @@ function migrationError(code: LegacyMigrationErrorCode, cause?: unknown): Legacy
 
 function cloneAuditPayload(value: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function deterministicUuid(parts: string[]): string {
+  const bytes = Buffer.from(
+    createHash('sha256').update(JSON.stringify(parts)).digest().subarray(0, 16),
+  );
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join('-');
+}
+
+function mappingForLegacyImage(
+  input: Pick<LegacyMigrationInput, 'actorUserId' | 'projectId'>,
+  legacyImageId: string,
+): LegacyImageMapping {
+  const namespace = ['wujie-legacy-migration-v1', input.actorUserId, input.projectId, legacyImageId];
+  return {
+    assetId: deterministicUuid([...namespace, 'asset']),
+    versionId: deterministicUuid([...namespace, 'version']),
+    placementId: deterministicUuid([...namespace, 'placement']),
+  };
 }
 
 function inferAssetKind(image: CanvasImage): AssetKind {
@@ -177,6 +206,7 @@ function migratedProject(
 async function fileForImage(
   input: LegacyMigrationInput,
   image: CanvasImage,
+  mapping: LegacyImageMapping,
 ): Promise<AssetFile> {
   const availability = image.mediaAvailability ?? 'ready';
   if (!image.url.startsWith('data:')) {
@@ -196,6 +226,7 @@ async function fileForImage(
       actorUserId: input.actorUserId,
       projectId: input.projectId,
       legacyImageId: image.id,
+      mapping,
       dataUrl: image.url,
     });
   } catch (error) {
@@ -263,10 +294,9 @@ async function insertGraphForImage(
   input: LegacyMigrationInput,
   image: CanvasImage,
 ): Promise<LegacyImageMapping> {
-  const file = await fileForImage(input, image);
-  const assetId = randomUUID();
-  const versionId = randomUUID();
-  const placementId = randomUUID();
+  const mapping = mappingForLegacyImage(input, image.id);
+  const file = await fileForImage(input, image, mapping);
+  const { assetId, versionId, placementId } = mapping;
   const createdAt = new Date(image.createdAt || Date.now()).toISOString();
   const metadata = JSON.stringify({ legacyImageId: image.id, legacyImage: image });
 
@@ -328,7 +358,7 @@ async function insertGraphForImage(
       createdAt,
     ],
   );
-  return { assetId, versionId, placementId };
+  return mapping;
 }
 
 export async function migrateLegacyProjectOnWrite(
@@ -383,7 +413,12 @@ export async function migrateLegacyProjectOnWrite(
         new Date(read.project.updatedAt || Date.now()).toISOString(),
       ],
     );
-    const checkpointId = randomUUID();
+    const checkpointId = deterministicUuid([
+      'wujie-legacy-migration-v1',
+      input.actorUserId,
+      input.projectId,
+      'checkpoint',
+    ]);
     await client.query(
       `INSERT INTO wujie_asset_migration_checkpoints(
          id, owner_id, project_id, legacy_project_id, status, checkpoint
