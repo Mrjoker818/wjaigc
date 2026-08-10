@@ -124,6 +124,23 @@ function responseRequestId(response: Response, payload: Record<string, unknown>)
 }
 
 test.describe('Stage 1 real task and billing gate', () => {
+  test('canvas returns to the dashboard before logout', async ({ page }, testInfo) => {
+    if (!username?.trim() || !password?.trim()) {
+      throw new Error('A real test account is required for the Stage 1 logout regression.');
+    }
+    const evidence = collectBrowserEvidence(page);
+    try {
+      await loginAndOpenCanvas(page);
+      await page.getByRole('button', { name: '工作台', exact: true }).click();
+      await expect(page.getByRole('heading', { name: '我的项目', exact: true })).toBeVisible({ timeout: 30_000 });
+      await page.getByTitle('查看用户信息').click();
+      await page.getByRole('button', { name: '退出登录', exact: true }).click();
+      await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
+    } finally {
+      await saveBrowserEvidence(page, testInfo, evidence, 'stage-1-canvas-dashboard-logout');
+    }
+  });
+
   test('n=1/2/3/4 uses exact routing, reaches terminal state, fills the canvas, and records billing evidence', async ({ page }, testInfo) => {
     test.setTimeout(25 * 60_000);
     testInfo.annotations.push(
@@ -222,6 +239,8 @@ test.describe('Stage 1 real task and billing gate', () => {
 
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.locator('[data-canvas-viewport] img')).toHaveCount(10, { timeout: 60_000 });
+      await page.getByRole('button', { name: '工作台', exact: true }).click();
+      await expect(page.getByRole('heading', { name: '我的项目', exact: true })).toBeVisible({ timeout: 30_000 });
       await page.getByTitle('查看用户信息').click();
       await page.getByRole('button', { name: '退出登录', exact: true }).click();
       await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();

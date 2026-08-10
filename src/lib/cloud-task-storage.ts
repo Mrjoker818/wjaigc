@@ -816,6 +816,17 @@ export async function terminateCloudTaskAndRefund(
             THEN 'refunded'
             ELSE candidate.previous_credit_status
           END,
+          refunded_transaction_id = CASE
+            WHEN candidate.previous_credit_status = 'pending'
+              AND candidate.credit_cost > 0
+              AND EXISTS (
+                SELECT 1
+                FROM locked_credit credit
+                WHERE credit.user_id = candidate.user_id
+              )
+            THEN $5
+            ELSE task.refunded_transaction_id
+          END,
           updated_at = $4
       FROM candidate
       WHERE task.id = candidate.id
@@ -838,9 +849,9 @@ export async function terminateCloudTaskAndRefund(
       RETURNING settled.id AS task_id, settled.user_id, settled.credit_cost, credit.balance
     ), recorded_refund AS (
       INSERT INTO wujie_credit_transactions (
-        id, user_id, amount, type, balance_after, description, reference_id, created_at
+        id, user_id, amount, type, balance_after, description, task_id, reference_id, created_at
       )
-      SELECT $5, user_id, credit_cost, 'refund', balance, $3, task_id, $4
+      SELECT $5, user_id, credit_cost, 'refund', balance, $3, task_id, task_id, $4
       FROM refunded_balance
       RETURNING reference_id
     )
@@ -911,13 +922,17 @@ export async function refundCloudTaskCredits(
       RETURNING refundable.id AS task_id, refundable.user_id, refundable.credit_cost, credit.balance
     ), settled_task AS (
       UPDATE cloud_tasks task
-      SET credit_status = 'refunded', updated_at = $2
+      SET credit_status = 'refunded',
+          refunded_transaction_id = $3,
+          updated_at = $2
       FROM refunded_balance
       WHERE task.id = refunded_balance.task_id
       RETURNING refunded_balance.task_id, refunded_balance.user_id, refunded_balance.credit_cost, refunded_balance.balance
     ), recorded_refund AS (
-      INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at)
-      SELECT $3, user_id, credit_cost, 'refund', balance, $4, task_id, $2
+      INSERT INTO wujie_credit_transactions (
+        id, user_id, amount, type, balance_after, description, task_id, reference_id, created_at
+      )
+      SELECT $3, user_id, credit_cost, 'refund', balance, $4, task_id, task_id, $2
       FROM settled_task
       RETURNING user_id
     )
@@ -975,6 +990,12 @@ export async function transitionCloudTaskToLocalFallbackAndRefund(
             THEN 'refunded'
             ELSE candidate.previous_credit_status
           END,
+          refunded_transaction_id = CASE
+            WHEN candidate.previous_credit_status = 'pending'
+              AND candidate.credit_cost > 0
+            THEN $4
+            ELSE task.refunded_transaction_id
+          END,
           updated_at = $3
       FROM candidate
       WHERE task.id = candidate.id
@@ -1006,9 +1027,9 @@ export async function transitionCloudTaskToLocalFallbackAndRefund(
                 credit.balance
     ), recorded_refund AS (
       INSERT INTO wujie_credit_transactions (
-        id, user_id, amount, type, balance_after, description, reference_id, created_at
+        id, user_id, amount, type, balance_after, description, task_id, reference_id, created_at
       )
-      SELECT $4, user_id, credit_cost, 'refund', balance, $5, task_id, $3
+      SELECT $4, user_id, credit_cost, 'refund', balance, $5, task_id, task_id, $3
       FROM refunded_balance
       RETURNING reference_id
     )
@@ -1102,6 +1123,7 @@ export async function chargeCloudTaskCredits(
       SET status = 'processing',
           credit_status = 'pending',
           credit_cost = deducted.credit_cost,
+          charged_transaction_id = $5,
           updated_at = $4
       FROM deducted
       WHERE task.id = deducted.task_id
@@ -1109,9 +1131,9 @@ export async function chargeCloudTaskCredits(
         deducted.credit_cost, deducted.balance
     ), recorded_charge AS (
       INSERT INTO wujie_credit_transactions (
-        id, user_id, amount, type, balance_after, description, reference_id, created_at
+        id, user_id, amount, type, balance_after, description, task_id, reference_id, created_at
       )
-      SELECT $5, user_id, -credit_cost, 'consume', balance, $6, task_id, $4
+      SELECT $5, user_id, -credit_cost, 'consume', balance, $6, task_id, task_id, $4
       FROM marked_task
       RETURNING user_id
     )

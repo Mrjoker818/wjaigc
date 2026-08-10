@@ -59,3 +59,9 @@ The candidate after `2682edbe11cbf75e2040d6899c028f897599a17e` was exercised aga
 | TypeScript / changed-file ESLint | PASS | TypeScript passed; ESLint 0 errors |
 
 The PostgreSQL item is removed from the open-blocker list. Full Vitest and TypeScript pass; ESLint exits with 0 errors and 960 historical warnings; the 112-page production build and 38/38 protected-feature gate pass. BUG-051 cloud credit reconciliation also passes. The current verdict remains **Not passed** because exact runtime identity, complete paid three-browser canvas evidence, deployed cancellation/timeout/late-result proof, and rollback rehearsal remain open.
+
+## 2026-08-10 Task 8 progress update
+
+The paid real-provider suite has now run in Chromium, Firefox, and WebKit. Each engine completed `n=1/2/3/4`, returned ten real images, reached durable terminal states, reconciled billing, filled the canvas, survived refresh, returned to the workbench, and logged out. Evidence bundles contain completed manifests, screenshots, Console logs, network logs, task billing, and four request IDs per engine.
+
+A real Pear cancellation also passed the behavioral boundary: the task was cancelled twice, refunded exactly once, restored 60 credits, and remained cancelled after 50 seconds. This run exposed BUG-052 because the task and transaction lacked durable transaction linkage. The minimal SQL fix passes `46/46` focused unit tests and a real isolated PostgreSQL 18 integration test. Stage 1 remains **Not passed** until that fix is accepted in cloud, a timeout-specific run passes, rollback is rehearsed, and the runtime SHA is independently exposed.

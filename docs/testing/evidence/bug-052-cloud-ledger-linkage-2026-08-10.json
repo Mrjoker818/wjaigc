@@ -1,0 +1,26 @@
+{
+  "recordedAt": "2026-08-10T14:40:00+08:00",
+  "environment": "Coze preview",
+  "candidateCommit": "aa0b1cf2520191e1ac9658811eebd396c5dbd484",
+  "runtimeCommitVerified": false,
+  "task": {
+    "id": "async-1786343121430-0-6e583w",
+    "batchId": "batch-e00fc47d8392624abafc89ba",
+    "statusImmediatelyAfterCancel": "cancelled",
+    "statusAfter50Seconds": "cancelled",
+    "creditStatus": "refunded",
+    "creditCost": 60,
+    "chargedTransactionId": null,
+    "refundedTransactionId": null
+  },
+  "billing": {
+    "balanceBeforeSubmit": 380,
+    "balanceAfterCharge": 320,
+    "balanceAfterRefund": 380,
+    "refundTransactionId": "ctx_1786343123622_nqjfks6l",
+    "refundTransactionTaskId": null,
+    "refundCount": 1,
+    "repeatedCancelReturnedSuccess": true
+  },
+  "conclusion": "Cancellation, late-result isolation and one-time refund passed, but task-to-ledger transaction linkage was missing."
+}

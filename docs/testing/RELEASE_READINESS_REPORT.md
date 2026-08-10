@@ -633,3 +633,10 @@ The kickoff now keeps driving the durable task through bounded recovery and proc
 The server-owned kickoff and progressive slot behavior now pass in the Coze sandbox. The stale 120-credit probe was cancelled and refunded once. A new durable `n=1` completed without browser polling, and canvas-shaped `n=2/3/4` requests returned unique per-slot task IDs quickly. All ten canvas slots completed with images and independent 60-credit charges; `n=3` provided direct evidence that faster slots completed before the slowest sibling.
 
 **Release decision remains Not passed.** BUG-051 is now closed in the updated Coze runtime: real task `direct-1786341342235-0-8pta21` completed with one image, deducted 60 credits, and persisted matching charged costs of 60 in both cloud-task fields. The exact runtime Git SHA was not exposed by Coze, canvas hydration/save-refresh/download still need a browser-visible run, and Firefox/WebKit paid evidence remains open.
+
+## 2026-08-10 latest Stage 1 disposition
+
+- Chromium, Firefox, and WebKit real paid `n=1/2/3/4` generation now have completed browser artifacts. Canvas result hydration and refresh persistence passed in all three engines.
+- Real cancellation, repeated cancellation, late-result isolation, one-time refund, and balance restoration passed for task `async-1786343121430-0-6e583w`.
+- That cancellation exposed BUG-052: correct money movement existed without durable task-to-ledger transaction IDs. The fix is locally green, including a real isolated PostgreSQL 18 test, but is not yet accepted on the deployed runtime.
+- Current verdict remains **Not passed**. Remaining blockers are BUG-052 cloud acceptance, timeout-specific deployed proof, `core-v2 -> legacy` rollback rehearsal, and exact runtime SHA identity.

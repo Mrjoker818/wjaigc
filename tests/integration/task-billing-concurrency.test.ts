@@ -184,6 +184,93 @@ describe('authoritative PostgreSQL task billing', () => {
         total_used: 0,
       });
 
+      const {
+        chargeCloudTaskCredits,
+        terminateCloudTaskAndRefund,
+      } = await import('@/lib/cloud-task-storage');
+      await query(
+        `INSERT INTO wujie_credits (
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, $3, $3, 0, $4, $4)`,
+        ['credits-linked-ledger', 'linked-ledger-user', 50, now],
+      );
+      await query(
+        `INSERT INTO cloud_tasks (
+          id, user_id, type, status, progress, credit_status, credit_cost,
+          idempotency_key, request_digest, revision, created_at, updated_at
+        ) VALUES ($1, $2, 'generate', 'pending', 0, 'not-applicable', 0,
+                  $3, $4, 0, $5, $5)`,
+        [
+          'linked-ledger-task',
+          'linked-ledger-user',
+          'linked-ledger-key',
+          'linked-ledger-digest',
+          now,
+        ],
+      );
+
+      await expect(chargeCloudTaskCredits(
+        'linked-ledger-task',
+        'linked-ledger-user',
+        9,
+        'Linked ledger charge',
+      )).resolves.toMatchObject({ charged: true, creditCost: 9, balance: 41 });
+      await expect(terminateCloudTaskAndRefund(
+        'linked-ledger-task',
+        'cancelled',
+        'Linked ledger refund',
+      )).resolves.toMatchObject({
+        status: 'cancelled',
+        transitioned: true,
+        refunded: true,
+        creditCost: 9,
+        balance: 50,
+      });
+
+      const linkedTask = await query<{
+        charged_transaction_id: string;
+        refunded_transaction_id: string;
+      }>(
+        `SELECT charged_transaction_id, refunded_transaction_id
+         FROM cloud_tasks WHERE id = $1`,
+        ['linked-ledger-task'],
+      );
+      const linkedTransactions = await query<{
+        id: string;
+        type: string;
+        task_id: string;
+        reference_id: string;
+      }>(
+        `SELECT id, type, task_id, reference_id
+         FROM wujie_credit_transactions
+         WHERE task_id = $1
+         ORDER BY type`,
+        ['linked-ledger-task'],
+      );
+      const linkedCredits = await query<{ balance: number; total_used: number }>(
+        'SELECT balance, total_used FROM wujie_credits WHERE user_id = $1',
+        ['linked-ledger-user'],
+      );
+
+      expect(linkedTask.rows[0]?.charged_transaction_id).not.toBe('');
+      expect(linkedTask.rows[0]?.refunded_transaction_id).not.toBe('');
+      expect(linkedTransactions.rows).toHaveLength(2);
+      expect(linkedTransactions.rows).toEqual(expect.arrayContaining([
+        {
+          id: linkedTask.rows[0]?.charged_transaction_id,
+          type: 'consume',
+          task_id: 'linked-ledger-task',
+          reference_id: 'linked-ledger-task',
+        },
+        {
+          id: linkedTask.rows[0]?.refunded_transaction_id,
+          type: 'refund',
+          task_id: 'linked-ledger-task',
+          reference_id: 'linked-ledger-task',
+        },
+      ]));
+      expect(linkedCredits.rows[0]).toMatchObject({ balance: 50, total_used: 0 });
+
       await query(
         `INSERT INTO wujie_credits (
           id, user_id, balance, total_recharged, total_used, created_at, updated_at

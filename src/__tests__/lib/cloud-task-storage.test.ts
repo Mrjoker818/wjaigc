@@ -656,6 +656,8 @@ describe('cloud-task-storage', () => {
     expect(settlement).toBeDefined();
     expect(settlement?.[0]).toContain("credit_status = 'pending'");
     expect(settlement?.[0]).toContain("SET credit_status = 'refunded'");
+    expect(settlement?.[0]).toContain('refunded_transaction_id = $3');
+    expect(settlement?.[0]).toMatch(/description,\s*task_id,\s*reference_id,\s*created_at/i);
     expect(refund).toEqual({ refunded: true, creditCost: 6, balance: 94, userId: 'user-a' });
   });
 
@@ -702,6 +704,8 @@ describe('cloud-task-storage', () => {
     expect(statement?.[0]).toContain("status = 'processing'");
     expect(statement?.[0]).toContain('lease_owner = $');
     expect(statement?.[0]).toContain('INSERT INTO wujie_credit_transactions');
+    expect(statement?.[0]).toMatch(/refunded_transaction_id\s*=\s*CASE[\s\S]*THEN \$4/);
+    expect(statement?.[0]).toMatch(/description,\s*task_id,\s*reference_id,\s*created_at/i);
     expect(statement?.[1]).toEqual(expect.arrayContaining([
       expect.stringContaining('"phase":"running-local-fallback"'),
       'worker-a',
@@ -739,6 +743,8 @@ describe('cloud-task-storage', () => {
     expect(taskUpdates).toHaveLength(1);
     expect(settlement?.[0]).toContain('FOR UPDATE');
     expect(settlement?.[0]).toMatch(/FOR UPDATE OF credit/i);
+    expect(settlement?.[0]).toMatch(/refunded_transaction_id\s*=\s*CASE[\s\S]*THEN \$5/);
+    expect(settlement?.[0]).toMatch(/description,\s*task_id,\s*reference_id,\s*created_at/i);
     expect(termination).toEqual({
       status: 'failed',
       transitioned: true,
@@ -766,6 +772,8 @@ describe('cloud-task-storage', () => {
     expect(settlement).toBeDefined();
     expect(settlement?.[0]).toContain("credit_status = 'not-applicable'");
     expect(settlement?.[0]).toContain("credit_status = 'pending'");
+    expect(settlement?.[0]).toContain('charged_transaction_id = $5');
+    expect(settlement?.[0]).toMatch(/description,\s*task_id,\s*reference_id,\s*created_at/i);
     expect(settlement?.[0]).toContain('balance >= chargeable.credit_cost');
     expect(charge).toEqual({ charged: true, creditCost: 6, balance: 88, userId: 'user-a' });
   });

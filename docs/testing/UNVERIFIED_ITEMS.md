@@ -458,3 +458,14 @@
 | Legacy zombie cleanup | VERIFIED IN CLOUD | Three synthetic tasks reached `cancelled/refunded`, each returned 60 credits, and repeated cancellation produced no second refund. |
 | Progressive `n=1/2/3/4` | TASK/BILLING VERIFIED; CANVAS UI PENDING | Unique `n=1/2/3/4` task slots all completed with images and independent charges. In `n=3`, two slots completed before the slowest. A browser-visible proof that each result appears on canvas, survives refresh, and downloads correctly is still required. |
 | Direct generation credit metadata | VERIFIED IN CLOUD (BUG-051 CLOSED) | Real Pear task `direct-1786341342235-0-8pta21` deducted 60 credits and persisted `creditCost=60` / `billing.cost=60` with charged status. Exact Coze runtime SHA remains unverified and is tracked separately. |
+
+## 2026-08-10 remaining Stage 1 evidence gaps
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Three-browser paid generation | VERIFIED | Chromium, Firefox, and WebKit completed real `n=1/2/3/4` task, billing, canvas-fill, refresh, workbench-return, and logout flows. |
+| Cancellation and late result | VERIFIED | Repeated cancellation produced one refund; the task remained cancelled after the provider completion window. |
+| BUG-052 ledger linkage | UNVERIFIED IN CLOUD | Deploy the local fix and prove non-empty task charge/refund IDs match the consume/refund transaction IDs and structured task IDs. |
+| Timeout-specific terminal behavior | UNVERIFIED | Force a real provider timeout and prove abort, stable timeout terminal state, no late completion, and at-most-one refund. |
+| Rollback rehearsal | UNVERIFIED | Demonstrate `core-v2 -> legacy` without data loss, duplicate tasks, or duplicate billing. |
+| Exact runtime SHA | UNVERIFIED | Expose the GitHub SHA from the running Coze instance or deployment metadata; behavior alone is not identity proof. |

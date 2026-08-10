@@ -973,3 +973,18 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Fix | Pass the exact deducted amount into durable creation for both synchronous `direct-*` results and asynchronous provider task IDs. No pricing, provider routing, or terminal transition behavior changed. |
 | Regression | Two RED/GREEN contract tests cover direct and asynchronous provider publication. Focused task persistence regression: 149/149 passed. Full TypeScript, full Vitest, protected-feature gate, and 112-page production build passed; ESLint remains 0 errors / 960 historical warnings. |
 | Status | **CLOSED 2026-08-10.** On the updated Coze runtime, real Pear task `direct-1786341342235-0-8pta21` completed with one image in 36.617s. The account balance changed from 140 to 80, the credit transaction was -60, and the same persisted task reported `creditStatus=charged`, `creditCost=60`, `billing.status=charged`, and `billing.cost=60`. Candidate commit: `aa0b1cf`; Coze did not expose the exact runtime SHA. Evidence: `docs/testing/evidence/bug-051-cloud-credit-reconciliation-2026-08-10.json`. |
+
+### BUG-052: Cloud task charge/refund rows lacked transaction linkage
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Durable cloud-task billing audit / PostgreSQL ledger |
+| Environment | Coze preview and local PostgreSQL 18, 2026-08-10 |
+| Reproduction | Submit one real paid Pear task, cancel it immediately, repeat the cancellation, then compare the cloud-task billing fields with the matching credit transaction. |
+| Expected | The task stores non-empty charge/refund transaction IDs, each transaction stores the same `task_id` and `reference_id`, and repeated cancellation produces exactly one refund. |
+| Actual | Task `async-1786343121430-0-6e583w` correctly restored 60 credits exactly once and stayed cancelled after 50 seconds, but both task transaction-ID fields and the refund transaction `taskId` were null. |
+| Root cause | Four cloud-task settlement SQL paths wrote only `reference_id` to `wujie_credit_transactions` and did not persist the generated transaction ID on `cloud_tasks`. |
+| Fix | Atomically persist `charged_transaction_id` or `refunded_transaction_id` in the guarded task update and write both `task_id` and `reference_id` in charge, ordinary refund, terminal failure/cancel/timeout refund, and Pear local-fallback refund paths. Pricing, provider routing, task terminal rules, and refund eligibility are unchanged. |
+| Regression | RED/GREEN unit coverage exercises all four SQL paths (`46/46`). A real isolated PostgreSQL 18 integration test proves matching charge/refund IDs, one consume row, one refund row, restored balance, and matching `task_id/reference_id`. |
+| Status | Fixed and verified locally; cloud deployment verification is required before closure. Evidence: `docs/testing/evidence/bug-052-cloud-ledger-linkage-2026-08-10.json`. |

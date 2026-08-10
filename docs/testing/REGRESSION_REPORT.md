@@ -748,3 +748,14 @@ This is not deployed acceptance. The paid `8bf0e20` task must first reach a stab
 Machine-readable evidence: `docs/testing/evidence/stage-1-cloud-generation-2026-08-10.json`.
 
 BUG-051 reconciliation evidence: `docs/testing/evidence/bug-051-cloud-credit-reconciliation-2026-08-10.json`.
+
+## 2026-08-10 three-browser and cancellation checkpoint
+
+| Check | Result | Evidence |
+|---|---|---|
+| Chromium paid `n=1/2/3/4` | PASS WITH TEST-FLOW CORRECTION | Ten real Pear images reached the canvas and survived refresh. The old test attempted logout directly from canvas; a separate non-paid regression now returns to `工作台` before logout and passes. |
+| Firefox paid `n=1/2/3/4` | PASS | Two tests passed; ten images, task terminal states, billing, canvas refresh, workbench return, and logout completed. |
+| WebKit paid `n=1/2/3/4` | PASS | Two tests passed; the HTTPS secure-cookie login path and the same paid canvas flow completed. |
+| Browser artifacts | PASS | Each browser has a completed Manifest, four request IDs, screenshot, Console log, network log, and task-billing record under `test-results/evidence/runtime-unverified-candidate-aa0b1cf/`. |
+| Real cancel and late-result isolation | PASS | Task `async-1786343121430-0-6e583w` charged 60, cancelled twice, refunded once, restored the balance, and remained cancelled after 50 seconds. |
+| Ledger transaction linkage | FAIL ON DEPLOYED CANDIDATE; PASS LOCALLY | BUG-052: deployed task/transaction IDs were null. The local SQL fix passes 46 unit tests and an isolated PostgreSQL 18 audit-linkage test. |
