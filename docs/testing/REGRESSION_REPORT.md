@@ -759,3 +759,17 @@ BUG-051 reconciliation evidence: `docs/testing/evidence/bug-051-cloud-credit-rec
 | Browser artifacts | PASS | Each browser has a completed Manifest, four request IDs, screenshot, Console log, network log, and task-billing record under `test-results/evidence/runtime-unverified-candidate-aa0b1cf/`. |
 | Real cancel and late-result isolation | PASS | Task `async-1786343121430-0-6e583w` charged 60, cancelled twice, refunded once, restored the balance, and remained cancelled after 50 seconds. |
 | Ledger transaction linkage | FAIL ON DEPLOYED CANDIDATE; PASS LOCALLY | BUG-052: deployed task/transaction IDs were null. The local SQL fix passes 46 unit tests and an isolated PostgreSQL 18 audit-linkage test. |
+
+## 2026-08-10 BUG-052 deployed regression
+
+| Check | Result | Evidence |
+|---|---|---|
+| Real Chrome submit and cancel | PASS | One new Pear `gpt-image-2-4k` slot was created and its new cancel control was used. |
+| Stable terminal state | PASS | `async-1786354360647-0-rhvubs` remained `cancelled` at the final 18:12 CST check. |
+| Task billing state | PASS | `creditStatus=refunded`, `creditCost=120`, with non-empty charged/refunded transaction IDs. |
+| One charge / one refund | PASS | One -120 consume transaction and one +120 refund transaction matched the IDs persisted on the task. |
+| Balance restoration | PASS | 378 -> 258 -> 378. |
+| Task correlation | PASS | The refund description contains `async-1786354360647-0-rhvubs`; isolated PostgreSQL coverage separately proves both structured `task_id` and `reference_id` columns. |
+| Runtime identity | PASS | Coze runtime `d531ce6` directly parents GitHub `main@32139c5`; the only local delta is the Coze startup environment loader. |
+
+BUG-052 is closed. Timeout-specific deployed behavior and rollback rehearsal remain outside this regression result.

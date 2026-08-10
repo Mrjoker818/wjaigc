@@ -1,26 +1,49 @@
 {
-  "recordedAt": "2026-08-10T14:40:00+08:00",
+  "recordedAt": "2026-08-10T18:12:31+08:00",
   "environment": "Coze preview",
-  "candidateCommit": "aa0b1cf2520191e1ac9658811eebd396c5dbd484",
-  "runtimeCommitVerified": false,
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "githubMainCommit": "32139c528f4c71284b4416739b4d5bbcf95874f2",
+  "runtimeWorktreeCommit": "d531ce65c1c3cb1dddaf9922696f1d11fe9c3452",
+  "runtimeBusinessParentCommit": "32139c528f4c71284b4416739b4d5bbcf95874f2",
+  "runtimeCommitVerified": true,
+  "runtime": {
+    "cwd": "/workspace/projects",
+    "pid": 3573,
+    "command": "next-server (v16.2.10)",
+    "buildId": "M_Yl150aYcK3uKYM_mbG_",
+    "launcherDelta": "Coze-only scripts/coze-start.sh environment loading; business source is the GitHub main parent"
+  },
+  "browser": {
+    "family": "Google Chrome",
+    "account": "Mr.joker",
+    "action": "Submit one real Pear gpt-image-2-4k slot, then cancel the newly created slot",
+    "newCancelButtonCountBeforeSubmit": 2,
+    "newCancelButtonCountAfterSubmit": 3,
+    "newCancelButtonCountAfterCancel": 2
+  },
   "task": {
-    "id": "async-1786343121430-0-6e583w",
-    "batchId": "batch-e00fc47d8392624abafc89ba",
+    "id": "async-1786354360647-0-rhvubs",
+    "providerId": "api_1780630178347_rjqlmam",
+    "model": "gpt-image-2-4k",
     "statusImmediatelyAfterCancel": "cancelled",
-    "statusAfter50Seconds": "cancelled",
+    "statusAtFinalCheck": "cancelled",
+    "finalCheckAt": "2026-08-10T18:12:31+08:00",
     "creditStatus": "refunded",
-    "creditCost": 60,
-    "chargedTransactionId": null,
-    "refundedTransactionId": null
+    "creditCost": 120,
+    "chargedTransactionId": "ctx_1786354360664_6lgxf98n",
+    "refundedTransactionId": "ctx_1786354388276_dbyvw059"
   },
   "billing": {
-    "balanceBeforeSubmit": 380,
-    "balanceAfterCharge": 320,
-    "balanceAfterRefund": 380,
-    "refundTransactionId": "ctx_1786343123622_nqjfks6l",
-    "refundTransactionTaskId": null,
+    "balanceBeforeSubmit": 378,
+    "balanceAfterCharge": 258,
+    "balanceAfterRefund": 378,
+    "chargeTransactionId": "ctx_1786354360664_6lgxf98n",
+    "chargeCount": 1,
+    "chargeAmount": -120,
+    "refundTransactionId": "ctx_1786354388276_dbyvw059",
     "refundCount": 1,
-    "repeatedCancelReturnedSuccess": true
+    "refundAmount": 120,
+    "refundDescriptionContainsTaskId": true
   },
-  "conclusion": "Cancellation, late-result isolation and one-time refund passed, but task-to-ledger transaction linkage was missing."
+  "conclusion": "PASS: the deployed task remained cancelled, was charged once and refunded once, restored the original balance, and persisted non-empty charge/refund transaction IDs that match the returned ledger transactions."
 }

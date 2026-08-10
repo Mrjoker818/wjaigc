@@ -465,7 +465,7 @@
 |---|---|---|
 | Three-browser paid generation | VERIFIED | Chromium, Firefox, and WebKit completed real `n=1/2/3/4` task, billing, canvas-fill, refresh, workbench-return, and logout flows. |
 | Cancellation and late result | VERIFIED | Repeated cancellation produced one refund; the task remained cancelled after the provider completion window. |
-| BUG-052 ledger linkage | UNVERIFIED IN CLOUD | Deploy the local fix and prove non-empty task charge/refund IDs match the consume/refund transaction IDs and structured task IDs. |
+| BUG-052 ledger linkage | VERIFIED IN CLOUD | Task `async-1786354360647-0-rhvubs` persisted non-empty transaction IDs matching exactly one consume and one refund; the refund description contains the same task ID and the balance returned to 378. Structured column linkage is also covered by the isolated PostgreSQL integration test. |
 | Timeout-specific terminal behavior | UNVERIFIED | Force a real provider timeout and prove abort, stable timeout terminal state, no late completion, and at-most-one refund. |
 | Rollback rehearsal | UNVERIFIED | Demonstrate `core-v2 -> legacy` without data loss, duplicate tasks, or duplicate billing. |
-| Exact runtime SHA | UNVERIFIED | Expose the GitHub SHA from the running Coze instance or deployment metadata; behavior alone is not identity proof. |
+| Exact runtime SHA | VERIFIED | Coze runtime `d531ce65` directly parents GitHub `main@32139c5`; process cwd, PID, Next server version, build ID, and the launcher-only delta were recorded. |

@@ -640,3 +640,9 @@ The server-owned kickoff and progressive slot behavior now pass in the Coze sand
 - Real cancellation, repeated cancellation, late-result isolation, one-time refund, and balance restoration passed for task `async-1786343121430-0-6e583w`.
 - That cancellation exposed BUG-052: correct money movement existed without durable task-to-ledger transaction IDs. The fix is locally green, including a real isolated PostgreSQL 18 test, but is not yet accepted on the deployed runtime.
 - Current verdict remains **Not passed**. Remaining blockers are BUG-052 cloud acceptance, timeout-specific deployed proof, `core-v2 -> legacy` rollback rehearsal, and exact runtime SHA identity.
+
+## 2026-08-10 BUG-052 and deployment-identity update
+
+- BUG-052 is closed in the deployed Coze preview. Real task `async-1786354360647-0-rhvubs` persisted matching non-empty charge/refund transaction IDs, produced one charge and one refund, restored the original balance, and remained cancelled.
+- Runtime identity is independently established: running Coze commit `d531ce65` directly parents GitHub `main@32139c5`; its only local delta is the environment-loading block in `scripts/coze-start.sh`.
+- Current verdict remains **Not passed**. The remaining Stage 1 blockers are the timeout-specific deployed proof and the `core-v2 -> legacy` rollback rehearsal. No Stage 2 work may begin before those gates are resolved or explicitly recorded as blocked.
