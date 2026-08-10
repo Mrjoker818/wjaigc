@@ -105,7 +105,7 @@ function deterministicUuid(parts: string[]): string {
   ].join('-');
 }
 
-function mappingForLegacyImage(
+export function mappingForLegacyImage(
   input: Pick<LegacyMigrationInput, 'actorUserId' | 'projectId'>,
   legacyImageId: string,
 ): LegacyImageMapping {
@@ -114,6 +114,45 @@ function mappingForLegacyImage(
     assetId: deterministicUuid([...namespace, 'asset']),
     versionId: deterministicUuid([...namespace, 'version']),
     placementId: deterministicUuid([...namespace, 'placement']),
+  };
+}
+
+export interface CanvasShadowReconciliationPlan {
+  additions: Array<{ image: CanvasImage; mapping: LegacyImageMapping }>;
+  updates: Array<{ image: CanvasImage; mapping: LegacyImageMapping }>;
+  removals: LegacyImageMapping[];
+  activeMappings: Record<string, LegacyImageMapping>;
+  checkpointMappings: Record<string, LegacyImageMapping>;
+}
+
+export function planCanvasShadowReconciliation(input: {
+  actorUserId: string;
+  projectId: string;
+  previousMappings: Record<string, LegacyImageMapping>;
+  images: CanvasImage[];
+}): CanvasShadowReconciliationPlan {
+  const additions: CanvasShadowReconciliationPlan['additions'] = [];
+  const updates: CanvasShadowReconciliationPlan['updates'] = [];
+  const activeMappings: Record<string, LegacyImageMapping> = {};
+  const checkpointMappings = { ...input.previousMappings };
+  const currentIds = new Set(input.images.map((image) => image.id));
+
+  for (const image of input.images) {
+    const existing = input.previousMappings[image.id];
+    const mapping = existing ?? mappingForLegacyImage(input, image.id);
+    activeMappings[image.id] = mapping;
+    checkpointMappings[image.id] = mapping;
+    (existing ? updates : additions).push({ image, mapping });
+  }
+
+  return {
+    additions,
+    updates,
+    removals: Object.entries(input.previousMappings)
+      .filter(([imageId]) => !currentIds.has(imageId))
+      .map(([, mapping]) => mapping),
+    activeMappings,
+    checkpointMappings,
   };
 }
 
@@ -255,8 +294,7 @@ function readCompletedProject(
 
 async function existingCompletedMigration(
   client: PoolClient,
-  actorUserId: string,
-  projectId: string,
+  input: LegacyMigrationInput,
   rawProject: Record<string, unknown>,
   sourceSchemaVersion: ProjectSchemaVersion,
 ): Promise<MigrationResult | null> {
@@ -265,7 +303,7 @@ async function existingCompletedMigration(
      FROM wujie_asset_migration_checkpoints
      WHERE owner_id = $1 AND project_id = $2 AND legacy_project_id = $2
      FOR UPDATE`,
-    [actorUserId, projectId],
+    [input.actorUserId, input.projectId],
   );
   const row = checkpoint.rows[0];
   if (!row || row.status !== 'completed') return null;
@@ -275,17 +313,52 @@ async function existingCompletedMigration(
      FROM wujie_projects
      WHERE owner_id = $1 AND id = $2 AND status = 'active'
      FOR UPDATE`,
-    [actorUserId, projectId],
+    [input.actorUserId, input.projectId],
   );
   if (project.rows[0]?.schema_version !== 3) {
     throw migrationError('LEGACY_MIGRATION_FAILED');
   }
+  const read = readProjectSnapshot(rawProject);
+  if (!read.project) throw migrationError('LEGACY_PROJECT_QUARANTINED');
+  const plan = planCanvasShadowReconciliation({
+    actorUserId: input.actorUserId,
+    projectId: input.projectId,
+    previousMappings: checkpointMappings(row.checkpoint),
+    images: read.project.canvasImages,
+  });
+
+  for (const { image, mapping } of plan.updates) {
+    const updated = await updateGraphForImage(client, input, image, mapping);
+    if (!updated) await insertGraphForImage(client, input, image, mapping);
+  }
+  for (const { image, mapping } of plan.additions) {
+    await insertGraphForImage(client, input, image, mapping);
+  }
+  for (const mapping of plan.removals) {
+    await trashGraphForImage(client, input, mapping);
+  }
+  await client.query(
+    `UPDATE wujie_asset_migration_checkpoints
+     SET checkpoint = $4::jsonb, error_code = NULL, updated_at = now()
+     WHERE owner_id = $1 AND project_id = $2 AND legacy_project_id = $3`,
+    [
+      input.actorUserId,
+      input.projectId,
+      input.projectId,
+      JSON.stringify({ sourceSchemaVersion, legacyImageMappings: plan.checkpointMappings }),
+    ],
+  );
+  await client.query(
+    `UPDATE wujie_projects SET name = $3, updated_at = now()
+     WHERE owner_id = $1 AND id = $2 AND status = 'active'`,
+    [input.actorUserId, input.projectId, read.project.name ?? ''],
+  );
   return {
     project: readCompletedProject(rawProject, sourceSchemaVersion),
     sourceSchemaVersion,
     migrated: false,
     reused: true,
-    mappings: checkpointMappings(row.checkpoint),
+    mappings: plan.activeMappings,
   };
 }
 
@@ -293,8 +366,9 @@ async function insertGraphForImage(
   client: PoolClient,
   input: LegacyMigrationInput,
   image: CanvasImage,
+  existingMapping?: LegacyImageMapping,
 ): Promise<LegacyImageMapping> {
-  const mapping = mappingForLegacyImage(input, image.id);
+  const mapping = existingMapping ?? mappingForLegacyImage(input, image.id);
   const file = await fileForImage(input, image, mapping);
   const { assetId, versionId, placementId } = mapping;
   const createdAt = new Date(image.createdAt || Date.now()).toISOString();
@@ -361,13 +435,91 @@ async function insertGraphForImage(
   return mapping;
 }
 
-export async function migrateLegacyProjectOnWrite(
+async function updateGraphForImage(
+  client: PoolClient,
+  input: LegacyMigrationInput,
+  image: CanvasImage,
+  mapping: LegacyImageMapping,
+): Promise<boolean> {
+  const file = await fileForImage(input, image, mapping);
+  const metadata = JSON.stringify({ legacyImageId: image.id, legacyImage: image });
+  const asset = await client.query(
+    `UPDATE wujie_assets
+     SET kind = $4, status = 'active', metadata = $5::jsonb, updated_at = now()
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
+    [mapping.assetId, input.actorUserId, input.projectId, inferAssetKind(image), metadata],
+  );
+  if ((asset.rowCount ?? 0) === 0) return false;
+  const version = await client.query(
+    `UPDATE wujie_asset_versions
+     SET file_url = $5, storage_key = $6, checksum = $7, mime_type = $8,
+         byte_size = $9, width = $10, height = $11, availability = $12,
+         recovery_source_url = $13, metadata = $14::jsonb
+     WHERE id = $1 AND asset_id = $2 AND owner_id = $3 AND project_id = $4`,
+    [
+      mapping.versionId,
+      mapping.assetId,
+      input.actorUserId,
+      input.projectId,
+      file.url,
+      file.storageKey ?? null,
+      file.checksum ?? null,
+      file.mimeType ?? null,
+      file.byteSize ?? null,
+      file.width ?? null,
+      file.height ?? null,
+      file.availability,
+      file.recoverySourceUrl ?? null,
+      metadata,
+    ],
+  );
+  if ((version.rowCount ?? 0) === 0) return false;
+  const placement = await client.query(
+    `UPDATE wujie_workspace_placements
+     SET asset_version_id = $4, status = 'active', deleted_at = NULL,
+         transform = $5::jsonb, metadata = $6::jsonb, updated_at = now()
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
+    [
+      mapping.placementId,
+      input.actorUserId,
+      input.projectId,
+      mapping.versionId,
+      JSON.stringify(imageTransform(image)),
+      metadata,
+    ],
+  );
+  return (placement.rowCount ?? 0) === 1;
+}
+
+async function trashGraphForImage(
+  client: PoolClient,
+  input: LegacyMigrationInput,
+  mapping: LegacyImageMapping,
+): Promise<void> {
+  await client.query(
+    `UPDATE wujie_workspace_placements
+     SET status = 'trashed', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'active'`,
+    [mapping.placementId, input.actorUserId, input.projectId],
+  );
+  await client.query(
+    `UPDATE wujie_assets asset
+     SET status = 'trashed', updated_at = now()
+     WHERE asset.id = $1 AND asset.owner_id = $2 AND asset.project_id = $3
+       AND NOT EXISTS (
+         SELECT 1 FROM wujie_workspace_placements placement
+         WHERE placement.asset_id = asset.id AND placement.owner_id = asset.owner_id
+           AND placement.project_id = asset.project_id AND placement.status = 'active'
+       )`,
+    [mapping.assetId, input.actorUserId, input.projectId],
+  );
+}
+
+export async function migrateLegacyProjectOnWriteInTransaction(
+  client: PoolClient,
   input: LegacyMigrationInput,
 ): Promise<MigrationResult> {
-  const pool = getPool();
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
     const rawProject = await loadAuthorizedLegacyProject(
       client,
       input.actorUserId,
@@ -380,15 +532,11 @@ export async function migrateLegacyProjectOnWrite(
     const sourceSchemaVersion = read.sourceSchemaVersion;
     const completed = await existingCompletedMigration(
       client,
-      input.actorUserId,
-      input.projectId,
+      input,
       rawProject,
       sourceSchemaVersion,
     );
-    if (completed) {
-      await client.query('COMMIT');
-      return completed;
-    }
+    if (completed) return completed;
 
     const existingProject = await client.query<ProjectRow>(
       `SELECT schema_version, metadata
@@ -457,7 +605,6 @@ export async function migrateLegacyProjectOnWrite(
         }),
       ],
     );
-    await client.query('COMMIT');
     return {
       project: migratedProject(read.project, sourceSchemaVersion, auditPayload),
       sourceSchemaVersion,
@@ -466,9 +613,24 @@ export async function migrateLegacyProjectOnWrite(
       mappings,
     };
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined);
     if (error instanceof LegacyMigrationError) throw error;
     throw migrationError('LEGACY_MIGRATION_FAILED', error);
+  }
+}
+
+export async function migrateLegacyProjectOnWrite(
+  input: LegacyMigrationInput,
+): Promise<MigrationResult> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await migrateLegacyProjectOnWriteInTransaction(client, input);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
   } finally {
     client.release();
   }

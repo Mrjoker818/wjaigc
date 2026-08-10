@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getCanvasMediaFailureAction,
   getAssetGraphReadStrategy,
   hydrateCanvasPlacements,
   serializeCanvasPlacements,
+  serializeCanvasWorkspacePlacements,
   shouldWriteAssetShadow,
 } from '@/lib/asset-core/canvas-adapter';
 
@@ -55,5 +57,48 @@ describe('canvas asset adapter', () => {
       mediaAvailability: 'missing',
       mediaErrorCode: 'MEDIA_LOAD_FAILED',
     });
+  });
+
+  it('preserves rotation and z-index at the shared workspace persistence boundary', () => {
+    const [serialized] = serializeCanvasWorkspacePlacements([{
+      ...persistedImage,
+      rotation: 37,
+      zIndex: 11,
+    }]);
+
+    expect(serialized).toMatchObject({ rotation: 37, zIndex: 11 });
+  });
+
+  it('retains empty managed media but drops empty/blob unmanaged legacy remnants', () => {
+    const managedMissing = { ...persistedImage, url: '', mediaAvailability: 'missing' as const };
+    const unmanagedMissing = {
+      ...persistedImage,
+      id: 'unmanaged-empty',
+      url: '',
+      assetId: undefined,
+      assetVersionId: undefined,
+      placementId: undefined,
+      mediaAvailability: 'missing' as const,
+    };
+    const unmanagedBlob = { ...unmanagedMissing, id: 'unmanaged-blob', url: 'blob:expired' };
+
+    expect(serializeCanvasWorkspacePlacements([
+      managedMissing,
+      unmanagedMissing,
+      unmanagedBlob,
+    ])).toEqual([
+      expect.objectContaining({ id: persistedImage.id, url: '', mediaAvailability: 'missing' }),
+    ]);
+  });
+
+  it('falls back from a thumbnail once, then marks final managed-original failure missing', () => {
+    expect(getCanvasMediaFailureAction(persistedImage, {
+      failedSource: 'thumbnail',
+      legacyRetryAttempted: false,
+    })).toBe('fallback-original');
+    expect(getCanvasMediaFailureAction(persistedImage, {
+      failedSource: 'original',
+      legacyRetryAttempted: false,
+    })).toBe('mark-missing');
   });
 });

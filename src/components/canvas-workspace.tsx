@@ -83,7 +83,12 @@ interface FavoriteItem {
 }
 import { User, Project, ImageGroupData, CanvasImage as PersistableCanvasImage } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
-import { hydrateCanvasPlacements, serializeCanvasPlacements, shouldPersistCanvasPlacement } from '@/lib/asset-core/canvas-adapter';
+import {
+  hydrateCanvasPlacements,
+  serializeCanvasWorkspacePlacements,
+  shouldPersistCanvasPlacement,
+  shouldRetainCanvasPlacementDuringMerge,
+} from '@/lib/asset-core/canvas-adapter';
 import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
 import { buildProjectWorkspaceUrl } from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
@@ -1267,7 +1272,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           ...img,
           url: urlMapping[img.url] || img.url,
         }));
-        const persistableCanvasImages = serializeCanvasPlacements(resolvedImages)
+        const persistableCanvasImages = serializeCanvasWorkspacePlacements(resolvedImages)
           .map(img => ({
             ...img,
             id: img.id,
@@ -1278,8 +1283,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             height: img.height,
             originalWidth: img.originalWidth || img.width * 2,
             originalHeight: img.originalHeight || img.height * 2,
-            rotation: 0,
-            zIndex: 0,
+            rotation: img.rotation ?? 0,
+            zIndex: img.zIndex ?? 0,
             createdAt: img.createdAt || Date.now(),
             prompt: img.prompt || '',
             modifyPrompt: img.modifyPrompt || '',
@@ -1373,7 +1378,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         // 验证用户一致性：确保只保存当前登录用户的数据
         if (!currentUserRef.current?.id) return;
         // 保留所有图片URL，包括 data: URL（避免异步持久化未完成时丢失图片）
-        const persistableCanvasImages = serializeCanvasPlacements(latestImagesRef.current)
+        const persistableCanvasImages = serializeCanvasWorkspacePlacements(latestImagesRef.current)
           .map(img => ({
             ...img,
             id: img.id,
@@ -1384,8 +1389,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             height: img.height,
             originalWidth: img.originalWidth || img.width * 2,
             originalHeight: img.originalHeight || img.height * 2,
-            rotation: 0,
-            zIndex: 0,
+            rotation: img.rotation ?? 0,
+            zIndex: img.zIndex ?? 0,
             createdAt: img.createdAt || Date.now(),
             prompt: img.prompt || '',
             modifyPrompt: img.modifyPrompt || '',
@@ -1515,7 +1520,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               // ★ BUG3 修复：如果服务器数据中 URL 为空但本地有有效 URL，不从 validImages 中移除
               // 后续 enrichment 会从 localImgMap 恢复 URL
               const validImages = latest.canvasImages.filter(
-                (img) => img.url || shouldPersistProcessingPlaceholder(img) || img._needsPersist
+                (img) => shouldRetainCanvasPlacementDuringMerge(img) || img._needsPersist
               );
               // ★ 过滤近期删除的图片：防止服务器同步把刚删除的图片恢复回来
               const afterDeletedFilter = validImages.filter(
@@ -1534,7 +1539,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 li => li.id && !serverImgIdSet.has(li.id)
                   && !recentlyDeletedIdsRef.current.has(li.id)
                   && !li.isProcessingPlaceholder
-                  && li.url // 必须有有效 URL
+                  && shouldRetainCanvasPlacementDuringMerge(li)
               );
               const enrichedImages = afterDeletedFilter.map((img) => {
                 const localImg = localImgMap.get(img.id);
@@ -2803,7 +2808,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const previousImages = latestImagesRef.current;
     const uploaded = autoLayoutImages(previousImages, [baseImage])[0] || baseImage;
     const nextImages = [...previousImages, uploaded];
-    const persistableCanvasImages = serializeCanvasPlacements(nextImages).map((image) => ({
+    const persistableCanvasImages = serializeCanvasWorkspacePlacements(nextImages).map((image) => ({
       ...image,
       id: image.id,
       url: image.url,
@@ -2813,8 +2818,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       height: image.height,
       originalWidth: image.originalWidth || image.width,
       originalHeight: image.originalHeight || image.height,
-      rotation: 0,
-      zIndex: image.zIndex || 0,
+      rotation: image.rotation ?? 0,
+      zIndex: image.zIndex ?? 0,
       createdAt: image.createdAt || Date.now(),
       prompt: image.prompt || '',
       ...(image.annotationVersionId ? { annotationVersionId: image.annotationVersionId } : {}),
@@ -2839,7 +2844,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       latestImagesRef.current = previousImages;
       setImages(previousImages);
       manager.updateProject(currentProject.id, {
-        canvasImages: serializeCanvasPlacements(previousImages).map((image) => ({
+        canvasImages: serializeCanvasWorkspacePlacements(previousImages).map((image) => ({
           ...image,
           id: image.id,
           url: image.url,
@@ -2849,8 +2854,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           height: image.height,
           originalWidth: image.originalWidth || image.width,
           originalHeight: image.originalHeight || image.height,
-          rotation: 0,
-          zIndex: image.zIndex || 0,
+          rotation: image.rotation ?? 0,
+          zIndex: image.zIndex ?? 0,
           createdAt: image.createdAt || Date.now(),
           prompt: image.prompt || '',
           ...(image.annotationVersionId ? { annotationVersionId: image.annotationVersionId } : {}),
@@ -4897,7 +4902,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   if (r.status === 'fulfilled' && r.value) urlMapping[r.value.original] = r.value.persisted;
                 }
               }
-              const persistableCanvasImages = serializeCanvasPlacements(images.map((img) => ({
+              const persistableCanvasImages = serializeCanvasWorkspacePlacements(images.map((img) => ({
                 ...img,
                 url: urlMapping[img.url] || img.url,
               })))
@@ -4908,7 +4913,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   x: img.x, y: img.y, width: img.width, height: img.height,
                   originalWidth: img.originalWidth || img.width * 2,
                   originalHeight: img.originalHeight || img.height * 2,
-                  rotation: 0, zIndex: 0, createdAt: img.createdAt || Date.now(),
+                  rotation: img.rotation ?? 0, zIndex: img.zIndex ?? 0, createdAt: img.createdAt || Date.now(),
                   prompt: img.prompt || '', modifyPrompt: img.modifyPrompt || '',
                   model: img.model || '', quality: img.quality || '',
                   aspectRatio: img.aspectRatio || '', stylePreset: img.stylePreset || '',
@@ -5182,35 +5187,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             try {
               if (currentProject?.id) {
                 const mgr = UserManagerCore.getInstance();
-                const persistable = serializeCanvasPlacements(nextImages).map(img => ({
-                  ...img,
-                  id: img.id,
-                  url: img.url,
-                  x: img.x, y: img.y,
-                  width: img.width, height: img.height,
-                  originalWidth: img.originalWidth || img.width,
-                  originalHeight: img.originalHeight || img.height,
-                  rotation: 0, zIndex: 0,
-                   createdAt: img.createdAt || Date.now(),
-                   prompt: img.prompt || '',
-                   ...(img.generationRouteAudit ? { generationRouteAudit: img.generationRouteAudit } : {}),
-                   ...(img.groupId ? { groupId: img.groupId } : {}),
-                   ...(img.annotationVersionId ? {
-                     annotationVersionId: img.annotationVersionId,
-                   } : {}),
-                   ...(img.annotationSourceImageId ? {
-                     annotationSourceImageId: img.annotationSourceImageId,
-                   } : {}),
-                   ...(img.annotationSourceVersionId ? {
-                     annotationSourceVersionId: img.annotationSourceVersionId,
-                   } : {}),
-                   ...(img.annotationBundleId ? {
-                     annotationBundleId: img.annotationBundleId,
-                   } : {}),
-                   ...(img.annotationIds ? {
-                     annotationIds: img.annotationIds,
-                   } : {}),
-                 }));
+                const persistable = serializeCanvasWorkspacePlacements(nextImages);
                 mgr.updateProject(currentProject.id, {
                   canvasImages: persistable,
                   metadata: {

@@ -1,7 +1,7 @@
 // 用户数据管理器 - localStorage + 服务器数据库双重存储
 import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData } from './user-types';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
-import { serializeCanvasPlacements } from '@/lib/asset-core/canvas-adapter';
+import { serializeCanvasWorkspacePlacements } from '@/lib/asset-core/canvas-adapter';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
@@ -494,7 +494,7 @@ export class UserManager {
       .map((project) => ({
         ...project,
         userId: project.userId || currentUserId,
-        canvasImages: serializeCanvasPlacements(project.canvasImages),
+        canvasImages: serializeCanvasWorkspacePlacements(project.canvasImages),
       }));
     const payloadImageCount = projectsPayload.reduce((sum, project) => sum + (project.canvasImages?.length || 0), 0);
     const memoryImageCount = userData.projects.reduce((sum, project) => sum + (project.canvasImages?.length || 0), 0);

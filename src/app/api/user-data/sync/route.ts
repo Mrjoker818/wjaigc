@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 import { execSql } from '@/lib/db-client';
-import { migrateLegacyProjectOnWrite } from '@/lib/asset-core/legacy-migration';
 import { resolveAssetGraphMode } from '@/lib/asset-core/mode';
-import { shouldWriteAssetShadow } from '@/lib/asset-core/canvas-adapter';
+import { getAssetGraphReadStrategy, shouldWriteAssetShadow } from '@/lib/asset-core/canvas-adapter';
+import {
+  executeCanvasProjectSync,
+  readAssetV3Projects,
+  type AssetGraphMappings,
+} from '@/lib/asset-core/canvas-project-sync';
+import type { Project } from '@/lib/user-types';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,62 +37,6 @@ function filterProjectsForUser(projects: unknown[], userId: string): unknown[] {
     }
     return String(pUserId) === userId;
   });
-}
-
-interface AssetGraphMapping {
-  assetId: string;
-  versionId: string;
-  placementId: string;
-}
-
-type AssetGraphMappings = Record<string, Record<string, AssetGraphMapping>>;
-
-function applyAssetGraphMappings(
-  projects: Record<string, unknown>[],
-  mappings: AssetGraphMappings,
-): Record<string, unknown>[] {
-  return projects.map((project) => {
-    const projectId = typeof project.id === 'string' ? project.id : '';
-    const imageMappings = mappings[projectId];
-    if (!imageMappings || !Array.isArray(project.canvasImages)) return project;
-    return {
-      ...project,
-      canvasImages: project.canvasImages.map((image) => {
-        if (!image || typeof image !== 'object') return image;
-        const imageRecord = image as Record<string, unknown>;
-        const imageId = typeof imageRecord.id === 'string' ? imageRecord.id : '';
-        const mapping = imageMappings[imageId];
-        return mapping
-          ? {
-              ...imageRecord,
-              assetId: mapping.assetId,
-              assetVersionId: mapping.versionId,
-              placementId: mapping.placementId,
-            }
-          : image;
-      }),
-    };
-  });
-}
-
-async function writeAssetShadow(
-  projects: Record<string, unknown>[],
-  userId: string,
-): Promise<AssetGraphMappings> {
-  const mappings: AssetGraphMappings = {};
-  for (const project of projects) {
-    if (typeof project.id !== 'string' || project.id.length === 0) continue;
-    try {
-      const migration = await migrateLegacyProjectOnWrite({
-        actorUserId: userId,
-        projectId: project.id,
-      });
-      mappings[project.id] = migration.mappings;
-    } catch (error) {
-      console.warn(`[Sync] asset shadow migration skipped for project ${project.id}:`, error);
-    }
-  }
-  return mappings;
 }
 
 /**
@@ -167,6 +116,10 @@ export async function GET(request: NextRequest) {
       if (removed > 0) {
         console.warn(`[Sync] GET projects: filtered out ${removed} cross-user projects for user ${sessionUser.id} (response only, not persisted)`);
       }
+      const assetGraphMode = resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE);
+      if (getAssetGraphReadStrategy(assetGraphMode) === 'asset-authoritative') {
+        value = await readAssetV3Projects(sessionUser.id, value as Project[]);
+      }
     }
 
     return NextResponse.json({ success: true, key, value });
@@ -243,14 +196,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    await dbSetUserData(sessionUser.id, key, value);
-    if (key === 'projects' && Array.isArray(value)) {
-      const assetGraphMode = resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE);
-      if (shouldWriteAssetShadow(assetGraphMode)) {
-        assetGraphMappings = await writeAssetShadow(value as Record<string, unknown>[], sessionUser.id);
-        value = applyAssetGraphMappings(value as Record<string, unknown>[], assetGraphMappings);
-        await dbSetUserData(sessionUser.id, key, value);
-      }
+    const assetGraphMode = resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE);
+    if (key === 'projects' && Array.isArray(value) && shouldWriteAssetShadow(assetGraphMode)) {
+      const result = await executeCanvasProjectSync({
+        actorUserId: sessionUser.id,
+        projects: value as Project[],
+      });
+      value = result.projects;
+      assetGraphMappings = result.mappings;
+    } else if (!await dbSetUserData(sessionUser.id, key, value)) {
+      throw new Error('Failed to write user data');
     }
     return NextResponse.json({ success: true, key, projectIdMap, assetGraphMappings });
   } catch (error) {

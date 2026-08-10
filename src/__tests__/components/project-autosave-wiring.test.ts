@@ -20,7 +20,7 @@ describe('project autosave wiring', () => {
   });
 
   it('serializes placements without filtering unavailable managed media from autosave', () => {
-    expect(autoSaveSource).toContain('serializeCanvasPlacements(resolvedImages)');
-    expect(autoSaveSource).toContain('shouldPersistCanvasPlacement(image)');
+    expect(autoSaveSource).toContain('serializeCanvasWorkspacePlacements(resolvedImages)');
+    expect(autoSaveSource).toContain('shouldRetainCanvasPlacementDuringMerge(img)');
   });
 });

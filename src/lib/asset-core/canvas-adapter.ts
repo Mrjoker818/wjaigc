@@ -4,6 +4,7 @@ import type { CanvasImage as PersistedCanvasImage } from '@/lib/user-types';
 import type { AssetGraphMode, MediaAvailability } from './types';
 
 export type AssetGraphReadStrategy = 'legacy-authoritative' | 'asset-authoritative';
+export type CanvasMediaFailureAction = 'fallback-original' | 'mark-missing' | 'legacy-fallback' | 'ignore';
 
 type CanvasPlacementImage = PersistedCanvasImage | CanvasViewImage;
 
@@ -26,9 +27,22 @@ export function isManagedCanvasMedia(image: CanvasPlacementImage): boolean {
   return Boolean(image.assetId || image.assetVersionId);
 }
 
-export function shouldPersistCanvasPlacement(image: PersistedCanvasImage): boolean {
-  return image.mediaAvailability === 'missing'
-    || Boolean(image.url || image.videoUrl || image.svgDataUrl || image.isProcessingPlaceholder);
+export function shouldPersistCanvasPlacement(image: CanvasPlacementImage): boolean {
+  if (image.mediaAvailability === 'missing') return isManagedCanvasMedia(image);
+  return Boolean(image.url || image.videoUrl || image.svgDataUrl || image.isProcessingPlaceholder);
+}
+
+export function shouldRetainCanvasPlacementDuringMerge(image: CanvasPlacementImage): boolean {
+  return shouldPersistCanvasPlacement(image);
+}
+
+export function getCanvasMediaFailureAction(
+  image: CanvasPlacementImage,
+  state: { failedSource: 'thumbnail' | 'original'; legacyRetryAttempted: boolean },
+): CanvasMediaFailureAction {
+  if (state.failedSource === 'thumbnail') return 'fallback-original';
+  if (isManagedCanvasMedia(image)) return 'mark-missing';
+  return state.legacyRetryAttempted ? 'ignore' : 'legacy-fallback';
 }
 
 export function getCanvasMediaFilename(image: CanvasPlacementImage): string {
@@ -64,4 +78,11 @@ export function serializeCanvasPlacements(
     createdAt: image.createdAt || Date.now(),
     mediaAvailability: mediaAvailabilityFor(image),
   }));
+}
+
+export function serializeCanvasWorkspacePlacements(
+  images: CanvasViewImage[],
+  mode: AssetGraphMode = 'legacy',
+): PersistedCanvasImage[] {
+  return serializeCanvasPlacements(images, mode).filter(shouldPersistCanvasPlacement);
 }

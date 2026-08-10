@@ -13,6 +13,7 @@ import { getConstrainedImageToolbarPosition } from '@/lib/image-toolbar-position
 import { getBottomToolbarDrawerPlacement, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import {
+  getCanvasMediaFailureAction,
   getCanvasMediaFilename,
   isManagedCanvasMedia,
 } from '@/lib/asset-core/canvas-adapter';
@@ -10968,20 +10969,25 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     draggable={false}
                     loading="lazy"
                     decoding="async"
+                    data-canvas-media-source={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) || !image.thumbnailUrl ? 'original' : 'thumbnail'}
                     style={{ contain: 'paint', imageRendering: zoom > 1 ? 'auto' : undefined }}
                     onError={(e) => {
                       const img = e.currentTarget;
-                      if (img.dataset.retried) return; // 已重试过，不再循环
-                      img.dataset.retried = '1';
-                      // 如果缩略图失败，回退到原图
-                      if (image.thumbnailUrl && img.src === image.thumbnailUrl) {
+                      const action = getCanvasMediaFailureAction(image, {
+                        failedSource: img.dataset.canvasMediaSource === 'thumbnail' ? 'thumbnail' : 'original',
+                        legacyRetryAttempted: img.dataset.retried === '1',
+                      });
+                      if (action === 'ignore') return;
+                      if (action === 'fallback-original') {
+                        img.dataset.canvasMediaSource = 'original';
                         img.src = image.url;
                         return;
                       }
-                      if (isManagedCanvasMedia(image)) {
+                      if (action === 'mark-missing') {
                         markCanvasMediaMissing(image.id, 'MEDIA_LOAD_FAILED');
                         return;
                       }
+                      img.dataset.retried = '1';
                       const url = image.url;
                       // /uploads/xxx → /api/serve-upload/xxx (S3回退恢复)
                       if (url.startsWith('/uploads/')) {
