@@ -969,4 +969,7 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Expected | The completed direct task records the same charged amount shown by the balance and credit transaction. |
 | Actual | Task `direct-1786328089709-0-1c7c9r` completed with an image and reduced the balance by 60, but the persisted task reports `creditStatus=charged` and `creditCost=0`. |
 | Risk | Administrator billing audit cannot reconcile the direct task with the real debit; restart-time compensation cannot rely on the persisted cost. |
-| Status | Open. Stable reproduction and cloud evidence captured; no business-code change made in this acceptance pass. |
+| Root cause | The non-`submitOnly` generation path deducted credits before provider execution, but both durable task creation callbacks omitted `creditCost: deductedCredits`. Terminal persistence changed only `creditStatus` to `charged`, leaving the database default cost at zero. |
+| Fix | Pass the exact deducted amount into durable creation for both synchronous `direct-*` results and asynchronous provider task IDs. No pricing, provider routing, or terminal transition behavior changed. |
+| Regression | Two RED/GREEN contract tests cover direct and asynchronous provider publication. Focused task persistence regression: 149/149 passed. Full TypeScript, full Vitest, protected-feature gate, and 112-page production build passed; ESLint remains 0 errors / 960 historical warnings. |
+| Status | Fixed locally and pushed for Coze verification. A fresh real direct task must show the same non-zero amount in the balance transaction and persisted cloud-task record before closure. |

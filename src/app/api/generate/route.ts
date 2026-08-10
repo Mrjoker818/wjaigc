@@ -2971,6 +2971,7 @@ export async function POST(request: NextRequest) {
                 messageId: typeof messageId === 'string' ? messageId : undefined,
                 providerId: usedProviderId,
                 model: usedModelId,
+                creditCost: deductedCredits,
               }),
               prepareCompletion: async () => {
                 try {
@@ -3057,6 +3058,7 @@ export async function POST(request: NextRequest) {
         providerId: usedProviderId,
         model: usedModelId,
         submissionPayload: generationRouteAudit ? { generationRouteAudit } : undefined,
+        creditCost: deductedCredits,
       }),
       publishProcessing: (tid) => {
         if (!getTaskInfo(tid)) {

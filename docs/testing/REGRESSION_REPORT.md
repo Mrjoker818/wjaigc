@@ -743,6 +743,6 @@ This is not deployed acceptance. The paid `8bf0e20` task must first reach a stab
 | Canvas `n=4` | PASS | Four unique slots returned in 1.007s; all completed with images and independent 60-credit charges. |
 | Chrome admin task monitor | PASS | The real UI showed the `4/4`, `3/4`, `2/4`, and `1/4` rows as completed, attributed to PearAPI `gpt-image-2`, each `charged / 60`. |
 | Exact runtime Git SHA | UNVERIFIED | Coze displayed internal snapshot `bb27e1a` and a generic latest-main pull record, but did not print `7baa4f9`; behavior alone is not used as SHA proof. |
-| Direct-task credit metadata | FAIL | `direct-1786328089709-0-1c7c9r` debited 60 but persisted `creditCost=0` (BUG-051). |
+| Direct-task credit metadata | LOCAL PASS / CLOUD PENDING | BUG-051 root cause was reproduced by two failing tests and fixed by persisting `deductedCredits` on both direct and asynchronous provider task creation. Local gates pass; a newly deployed real debit still needs cloud reconciliation evidence. |
 
 Machine-readable evidence: `docs/testing/evidence/stage-1-cloud-generation-2026-08-10.json`.

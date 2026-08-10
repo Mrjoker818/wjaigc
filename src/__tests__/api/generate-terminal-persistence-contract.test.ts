@@ -89,6 +89,30 @@ describe('generate authoritative terminal persistence contract', () => {
     expect(directBranch).not.toContain('void recordImageTaskTerminal');
   });
 
+  it('persists the charged credit cost for synchronous direct image tasks', () => {
+    const directStart = source.indexOf('if (directImageUrls.length > 0)');
+    const publicationStart = source.indexOf(
+      'const taskPublication = await publishGenerateTaskCandidates',
+      directStart,
+    );
+    const directBranch = source.slice(directStart, publicationStart);
+    const durableCreateStart = directBranch.indexOf(
+      'createTask: () => recordImageTaskSubmitted({',
+    );
+    const durableCreateEnd = directBranch.indexOf(
+      '}),',
+      durableCreateStart,
+    );
+    const durableCreate = directBranch.slice(
+      durableCreateStart,
+      durableCreateEnd,
+    );
+
+    expect(directStart).toBeGreaterThan(-1);
+    expect(durableCreateStart).toBeGreaterThan(-1);
+    expect(durableCreate).toContain('creditCost: deductedCredits');
+  });
+
   it('awaits provider task durability and filters the final polling response', () => {
     const publicationStart = source.indexOf(
       'const taskPublication = await publishGenerateTaskCandidates',
@@ -109,6 +133,28 @@ describe('generate authoritative terminal persistence contract', () => {
     expect(publicationBranch).toContain('taskIds: publishedTaskIds');
     expect(publicationBranch).toContain('count: publishedTaskIds.length');
     expect(publicationBranch).not.toContain('void recordImageTaskSubmitted');
+  });
+
+  it('persists the charged credit cost for asynchronous provider tasks', () => {
+    const publicationStart = source.indexOf(
+      'const taskPublication = await publishGenerateTaskCandidates',
+    );
+    const publicationBranch = source.slice(publicationStart);
+    const durableCreateStart = publicationBranch.indexOf(
+      'createDurableTask: (tid) => recordImageTaskSubmitted({',
+    );
+    const durableCreateEnd = publicationBranch.indexOf(
+      '}),',
+      durableCreateStart,
+    );
+    const durableCreate = publicationBranch.slice(
+      durableCreateStart,
+      durableCreateEnd,
+    );
+
+    expect(publicationStart).toBeGreaterThan(-1);
+    expect(durableCreateStart).toBeGreaterThan(-1);
+    expect(durableCreate).toContain('creditCost: deductedCredits');
   });
 
   it('marks completed direct ids before registry publication and skips them in the provider loop', () => {
