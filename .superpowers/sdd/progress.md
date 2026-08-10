@@ -3,7 +3,8 @@
 Baseline: `origin/main@ffe810939a446bbf7288d177b95040b36a05484c`  
 Branch: `codex/wj-stable-s2`  
 Plan: `docs/superpowers/plans/2026-08-10-wujie-stable-asset-version-graph-stage-2.md`  
-Protected branch: `stable@a53da24aa9f3813aae24f697dfb90d0b67f0a455` (read-only)
+Protected branch baseline: `stable@a53da24aa9f3813aae24f697dfb90d0b67f0a455` (expected read-only)  
+Remote observation 2026-08-11: `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`; external forward update, not made or accepted by this Stage 2 branch
 
 | Task | Status | RED evidence | GREEN evidence | Review | Commit | Cloud SHA | Unverified |
 |---|---|---|---|---|---|---|---|
@@ -23,3 +24,10 @@ Protected branch: `stable@a53da24aa9f3813aae24f697dfb90d0b67f0a455` (read-only)
 - In scope: Asset, AssetVersion, WorkspacePlacement, lineage, transfers, trash, orphan media, broken media, legacy compatibility.
 - Out of scope: Stage 3 canvas kernel, Stage 4 node/Agent redesign, Stage 5 business tool quality work, BUG-053 unless it blocks Stage 2.
 - Rollback: switch `WUJIE_ASSET_GRAPH_MODE` to `legacy`; do not drop tables or delete versions.
+
+## External Branch Drift
+
+- Read-only `git ls-remote` observed `stable` move from the approved baseline `a53da24` to `52f7c60` while `main` remained `dd20b84`.
+- `a53da24` is an ancestor of `52f7c60`; the new tip is `chore: confirm stable branch` and includes product-source changes.
+- This Stage 2 worktree performed no write to `stable` and will not revert or overwrite the external change.
+- Local Task 2 may continue in isolation, but Checkpoint A push/deploy is blocked until the new `stable` tip is explicitly reconciled with the user's branch-governance decision.
