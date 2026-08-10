@@ -28,13 +28,19 @@ export interface AssetStorageTransaction {
   findAsset(ownerId: string, projectId: string, assetId: string): Promise<Asset | null>;
   lockAsset(ownerId: string, projectId: string, assetId: string): Promise<Asset | null>;
   insertAsset(asset: Asset): Promise<void>;
-  findVersion(ownerId: string, versionId: string): Promise<AssetVersion | null>;
+  resolveVersionProject(ownerId: string, versionId: string): Promise<string | null>;
+  findVersion(ownerId: string, projectId: string, versionId: string): Promise<AssetVersion | null>;
+  lockVersionIdempotency(ownerId: string, projectId: string, idempotencyKey: string): Promise<void>;
   findVersionByIdempotency(
     ownerId: string,
     projectId: string,
     idempotencyKey: string,
   ): Promise<StoredVersion | null>;
-  insertVersion(version: AssetVersion, requestDigest: string): Promise<void>;
+  insertVersion(
+    version: AssetVersion,
+    requestDigest: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void>;
   insertParents(version: AssetVersion, parentVersionIds: string[]): Promise<void>;
   updateAssetCurrentVersion(
     ownerId: string,
@@ -62,7 +68,12 @@ export interface AssetStorageTransaction {
     entityId: string,
     idempotencyKey: string,
   ): Promise<StoredTransfer | null>;
-  insertTransferPlacement(placement: WorkspacePlacement, requestDigest: string): Promise<boolean>;
+  insertTransferPlacement(
+    placement: WorkspacePlacement,
+    sourceVersionId: string,
+    idempotencyKey: string,
+    requestDigest: string,
+  ): Promise<boolean>;
   trashPlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null>;
   countActivePlacements(ownerId: string, projectId: string, assetId: string): Promise<number>;
   trashAsset(ownerId: string, projectId: string, assetId: string): Promise<boolean>;
@@ -123,6 +134,7 @@ interface PlacementRow extends QueryResultRow {
   created_at: Date;
   updated_at: Date;
   request_digest?: string | null;
+  source_version_id?: string | null;
 }
 
 function toIso(value: Date): string {
@@ -240,14 +252,37 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
     );
   }
 
-  async findVersion(ownerId: string, versionId: string): Promise<AssetVersion | null> {
-    const result = await this.client.query<VersionRow>(
-      `${versionSelect}
-       WHERE v.id = $1 AND v.owner_id = $2
-       GROUP BY v.id`,
+  async resolveVersionProject(ownerId: string, versionId: string): Promise<string | null> {
+    const result = await this.client.query<{ project_id: string }>(
+      `SELECT version.project_id
+       FROM wujie_asset_versions version
+       JOIN wujie_projects project
+         ON project.id = version.project_id AND project.owner_id = version.owner_id
+       WHERE version.id = $1 AND version.owner_id = $2 AND project.status = 'active'`,
       [versionId, ownerId],
     );
+    return result.rows[0]?.project_id ?? null;
+  }
+
+  async findVersion(ownerId: string, projectId: string, versionId: string): Promise<AssetVersion | null> {
+    const result = await this.client.query<VersionRow>(
+      `${versionSelect}
+       WHERE v.id = $1 AND v.owner_id = $2 AND v.project_id = $3
+       GROUP BY v.id`,
+      [versionId, ownerId, projectId],
+    );
     return result.rows[0] ? mapVersion(result.rows[0]) : null;
+  }
+
+  async lockVersionIdempotency(
+    ownerId: string,
+    projectId: string,
+    idempotencyKey: string,
+  ): Promise<void> {
+    await this.client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [`asset-version:${ownerId}:${projectId}:${idempotencyKey}`],
+    );
   }
 
   async findVersionByIdempotency(
@@ -268,7 +303,11 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
     } : null;
   }
 
-  async insertVersion(version: AssetVersion, requestDigest: string): Promise<void> {
+  async insertVersion(
+    version: AssetVersion,
+    requestDigest: string,
+    metadata: Record<string, unknown> = {},
+  ): Promise<void> {
     await this.client.query(
       `INSERT INTO wujie_asset_versions(
         id, asset_id, owner_id, project_id, file_url, storage_key, checksum, mime_type,
@@ -282,7 +321,7 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
         version.file.storageKey ?? null, version.file.checksum ?? null, version.file.mimeType ?? null,
         version.file.byteSize ?? null, version.file.width ?? null, version.file.height ?? null,
         version.file.availability, version.file.recoverySourceUrl ?? null, version.taskId ?? null,
-        version.idempotencyKey ?? null, JSON.stringify({ requestDigest }), version.createdAt,
+        version.idempotencyKey ?? null, JSON.stringify({ ...metadata, requestDigest }), version.createdAt,
       ],
     );
   }
@@ -370,7 +409,7 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
   ): Promise<StoredTransfer | null> {
     const result = await this.client.query<PlacementRow>(
       `SELECT * FROM wujie_workspace_placements
-       WHERE owner_id = $1 AND asset_version_id = $2 AND project_id = $3
+       WHERE owner_id = $1 AND source_version_id = $2 AND project_id = $3
          AND workspace_kind = $4 AND workspace_id = $5 AND entity_type = $6 AND entity_id = $7
          AND idempotency_key = $8`,
       [ownerId, sourceVersionId, targetProjectId, workspace, workspaceId, entityType, entityId, idempotencyKey],
@@ -379,21 +418,26 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
     return row ? { placement: mapPlacement(row), requestDigest: row.request_digest ?? '' } : null;
   }
 
-  async insertTransferPlacement(placement: WorkspacePlacement, requestDigest: string): Promise<boolean> {
+  async insertTransferPlacement(
+    placement: WorkspacePlacement,
+    sourceVersionId: string,
+    idempotencyKey: string,
+    requestDigest: string,
+  ): Promise<boolean> {
     const result = await this.client.query(
       `INSERT INTO wujie_workspace_placements(
         id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
         entity_type, entity_id, status, deleted_at, transform, metadata, idempotency_key,
-        request_digest, created_at, updated_at
+        request_digest, source_version_id, created_at, updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15, $16, $17
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15, $16, $17, $18
       ) ON CONFLICT DO NOTHING`,
       [
         placement.id, placement.ownerId, placement.projectId, placement.assetId, placement.assetVersionId,
         placement.workspace, placement.workspaceId, placement.entityType, placement.entityId,
         placement.status, placement.deletedAt, JSON.stringify(placement.transform ?? {}),
-        JSON.stringify(placement.metadata ?? {}), placement.metadata?.idempotencyKey ?? null,
-        requestDigest, placement.createdAt, placement.updatedAt,
+        JSON.stringify(placement.metadata ?? {}), idempotencyKey,
+        requestDigest, sourceVersionId, placement.createdAt, placement.updatedAt,
       ],
     );
     return (result.rowCount ?? 0) === 1;
@@ -452,16 +496,25 @@ export class PostgresAssetStorage implements AssetStorage {
 
   async transaction<T>(callback: (transaction: AssetStorageTransaction) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
+    let released = false;
     try {
       await client.query('BEGIN');
       const result = await callback(new PostgresAssetStorageTransaction(client));
       await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        const releaseError = rollbackError instanceof Error
+          ? rollbackError
+          : new Error(String(rollbackError));
+        client.release(releaseError);
+        released = true;
+      }
       throw error;
     } finally {
-      client.release();
+      if (!released) client.release();
     }
   }
 }

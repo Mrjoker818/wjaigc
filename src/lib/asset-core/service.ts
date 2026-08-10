@@ -84,6 +84,12 @@ function placementConflict(): never {
   throw new AssetServiceError('ASSET_PLACEMENT_CONFLICT');
 }
 
+function isDatabaseConflict(error: unknown, constraint: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const databaseError = error as { code?: unknown; constraint?: unknown };
+  return databaseError.code === '23505' && databaseError.constraint === constraint;
+}
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -135,6 +141,11 @@ export class AssetService {
   }> {
     return this.storage.transaction(async (transaction) => {
       if (!await transaction.findProject(input.actorUserId, input.projectId)) notFound();
+      await transaction.lockVersionIdempotency(
+        input.actorUserId,
+        input.projectId,
+        input.idempotencyKey,
+      );
 
       const existing = await transaction.findVersionByIdempotency(
         input.actorUserId,
@@ -169,8 +180,8 @@ export class AssetService {
 
       const parentVersionIds = input.parentVersionIds ?? [];
       for (const parentVersionId of parentVersionIds) {
-        const parent = await transaction.findVersion(input.actorUserId, parentVersionId);
-        if (!parent || parent.projectId !== input.projectId || parent.assetId !== asset.id) notFound();
+        const parent = await transaction.findVersion(input.actorUserId, input.projectId, parentVersionId);
+        if (!parent || parent.assetId !== asset.id) notFound();
       }
 
       const version: AssetVersion = {
@@ -183,7 +194,7 @@ export class AssetService {
         idempotencyKey: input.idempotencyKey,
         createdAt: now(),
       };
-      await transaction.insertVersion(version, input.requestDigest);
+      await transaction.insertVersion(version, input.requestDigest, input.metadata);
       await transaction.insertParents(version, parentVersionIds);
       const updatedAsset = await transaction.updateAssetCurrentVersion(
         input.actorUserId,
@@ -201,8 +212,12 @@ export class AssetService {
   }> {
     return this.storage.transaction(async (transaction) => {
       if (!await transaction.findProject(input.actorUserId, input.projectId)) notFound();
-      const version = await transaction.findVersion(input.actorUserId, input.assetVersionId);
-      if (!version || version.projectId !== input.projectId) notFound();
+      const version = await transaction.findVersion(input.actorUserId, input.projectId, input.assetVersionId);
+      if (!version) notFound();
+      const asset = await transaction.lockAsset(input.actorUserId, input.projectId, version.assetId);
+      if (!asset) notFound();
+      if (asset.status === 'trashed'
+        && !await transaction.activateAsset(input.actorUserId, input.projectId, asset.id)) notFound();
 
       const existing = await transaction.findActivePlacement(
         input.actorUserId, input.projectId, input.workspace, input.workspaceId, input.entityType, input.entityId,
@@ -234,8 +249,23 @@ export class AssetService {
   }> {
     return this.storage.transaction(async (transaction) => {
       if (!await transaction.findProject(input.actorUserId, input.targetProjectId)) notFound();
-      const version = await transaction.findVersion(input.actorUserId, input.sourceVersionId);
-      if (!version || version.projectId !== input.targetProjectId) notFound();
+      const sourceProjectId = await transaction.resolveVersionProject(
+        input.actorUserId,
+        input.sourceVersionId,
+      );
+      if (!sourceProjectId) notFound();
+      const sourceVersion = await transaction.findVersion(
+        input.actorUserId,
+        sourceProjectId,
+        input.sourceVersionId,
+      );
+      if (!sourceVersion) notFound();
+      const sourceAsset = await transaction.lockAsset(
+        input.actorUserId,
+        sourceProjectId,
+        sourceVersion.assetId,
+      );
+      if (!sourceAsset) notFound();
 
       const existing = await transaction.findTransfer(
         input.actorUserId, input.sourceVersionId, input.targetProjectId, workspaceForEntityType(input.entityType), input.targetWorkspaceId,
@@ -243,13 +273,59 @@ export class AssetService {
       );
       if (existing) {
         if (existing.requestDigest !== input.requestDigest) conflict();
-        return { version, placement: existing.placement, reused: true };
+        const targetVersion = await transaction.findVersion(
+          input.actorUserId,
+          input.targetProjectId,
+          existing.placement.assetVersionId,
+        );
+        if (!targetVersion) notFound();
+        return { version: targetVersion, placement: existing.placement, reused: true };
+      }
+
+      let targetVersion = sourceVersion;
+      if (sourceProjectId === input.targetProjectId) {
+        if (sourceAsset.status === 'trashed'
+          && !await transaction.activateAsset(input.actorUserId, sourceProjectId, sourceAsset.id)) notFound();
+      } else {
+        const timestamp = now();
+        const targetAsset: Asset = {
+          id: randomUUID(),
+          ownerId: input.actorUserId,
+          projectId: input.targetProjectId,
+          kind: sourceAsset.kind,
+          status: 'active',
+          currentVersionId: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        await transaction.insertAsset(targetAsset);
+        targetVersion = {
+          id: randomUUID(),
+          assetId: targetAsset.id,
+          ownerId: input.actorUserId,
+          projectId: input.targetProjectId,
+          file: { ...sourceVersion.file },
+          parentVersionIds: [],
+          createdAt: timestamp,
+        };
+        await transaction.insertVersion(targetVersion, input.requestDigest, {
+          ...input.metadata,
+          sourceProjectId,
+          sourceVersionId: sourceVersion.id,
+          transferIdempotencyKey: input.idempotencyKey,
+        });
+        await transaction.updateAssetCurrentVersion(
+          input.actorUserId,
+          input.targetProjectId,
+          targetAsset.id,
+          targetVersion.id,
+        );
       }
 
       const placement = createPlacement(
         input.actorUserId,
         input.targetProjectId,
-        version,
+        targetVersion,
         workspaceForEntityType(input.entityType),
         input.targetWorkspaceId,
         input.entityType,
@@ -257,8 +333,13 @@ export class AssetService {
         input.transform,
         { ...input.metadata, idempotencyKey: input.idempotencyKey },
       );
-      if (await transaction.insertTransferPlacement(placement, input.requestDigest)) {
-        return { version, placement, reused: false };
+      if (await transaction.insertTransferPlacement(
+        placement,
+        sourceVersion.id,
+        input.idempotencyKey,
+        input.requestDigest,
+      )) {
+        return { version: targetVersion, placement, reused: false };
       }
 
       const raced = await transaction.findTransfer(
@@ -267,7 +348,13 @@ export class AssetService {
       );
       if (raced) {
         if (raced.requestDigest !== input.requestDigest) conflict();
-        return { version, placement: raced.placement, reused: true };
+        const racedVersion = await transaction.findVersion(
+          input.actorUserId,
+          input.targetProjectId,
+          raced.placement.assetVersionId,
+        );
+        if (!racedVersion) notFound();
+        return { version: racedVersion, placement: raced.placement, reused: true };
       }
       placementConflict();
     });
@@ -299,17 +386,41 @@ export class AssetService {
     placement: WorkspacePlacement;
     asset: Asset;
   }> {
-    return this.storage.transaction(async (transaction) => {
-      const placement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
-      if (!placement) notFound();
-      const asset = await transaction.activateAsset(input.actorUserId, input.projectId, placement.assetId);
-      if (!asset) notFound();
-      const restored = placement.status === 'active'
-        ? placement
-        : await transaction.restorePlacement(input.actorUserId, input.projectId, placement.id);
-      if (!restored) placementConflict();
-      return { placement: restored, asset };
-    });
+    try {
+      return await this.storage.transaction(async (transaction) => {
+        const placement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
+        if (!placement) notFound();
+        const lockedAsset = await transaction.lockAsset(
+          input.actorUserId,
+          input.projectId,
+          placement.assetId,
+        );
+        if (!lockedAsset) notFound();
+        const occupied = await transaction.findActivePlacement(
+          input.actorUserId,
+          input.projectId,
+          placement.workspace,
+          placement.workspaceId,
+          placement.entityType,
+          placement.entityId,
+        );
+        if (occupied && occupied.id !== placement.id) placementConflict();
+        const asset = lockedAsset.status === 'active'
+          ? lockedAsset
+          : await transaction.activateAsset(input.actorUserId, input.projectId, placement.assetId);
+        if (!asset) notFound();
+        const restored = placement.status === 'active'
+          ? placement
+          : await transaction.restorePlacement(input.actorUserId, input.projectId, placement.id);
+        if (!restored) placementConflict();
+        return { placement: restored, asset };
+      });
+    } catch (error) {
+      if (isDatabaseConflict(error, 'wujie_workspace_placements_active_entity_unique')) {
+        placementConflict();
+      }
+      throw error;
+    }
   }
 }
 

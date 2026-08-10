@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   Asset,
@@ -66,6 +66,7 @@ type MemoryRecord = {
   assets: Map<string, Asset>;
   versions: Map<string, AssetVersion>;
   versionDigests: Map<string, string>;
+  versionMetadata: Map<string, Record<string, unknown>>;
   parents: Map<string, string[]>;
   placements: Map<string, WorkspacePlacement>;
 };
@@ -83,6 +84,7 @@ class MemoryStorage {
       assets: new Map(),
       versions: new Map(),
       versionDigests: new Map(),
+      versionMetadata: new Map(),
       parents: new Map(),
       placements: new Map(),
     };
@@ -109,9 +111,18 @@ class MemoryStorage {
     this.data.assets.set(asset.id, asset);
   }
 
-  async findVersion(ownerId: string, versionId: string): Promise<AssetVersion | null> {
+  async findVersion(ownerId: string, projectId: string, versionId: string): Promise<AssetVersion | null> {
     const version = this.data.versions.get(versionId);
-    return version?.ownerId === ownerId ? version : null;
+    return version?.ownerId === ownerId && version.projectId === projectId ? version : null;
+  }
+
+  async resolveVersionProject(ownerId: string, versionId: string): Promise<string | null> {
+    const version = this.data.versions.get(versionId);
+    return version?.ownerId === ownerId ? version.projectId : null;
+  }
+
+  async lockVersionIdempotency(): Promise<void> {
+    // In-memory tests execute serially; PostgreSQL coverage proves lock behavior.
   }
 
   async findVersionByIdempotency(
@@ -131,9 +142,14 @@ class MemoryStorage {
     return null;
   }
 
-  async insertVersion(version: AssetVersion, requestDigest: string): Promise<void> {
+  async insertVersion(
+    version: AssetVersion,
+    requestDigest: string,
+    metadata: Record<string, unknown> = {},
+  ): Promise<void> {
     this.data.versions.set(version.id, version);
     this.data.versionDigests.set(version.id, requestDigest);
+    this.data.versionMetadata.set(version.id, { ...metadata, requestDigest });
   }
 
   async insertParents(version: AssetVersion, parentVersionIds: string[]): Promise<void> {
@@ -227,6 +243,26 @@ class MemoryStorage {
     this.data.assets.set(assetId, { ...asset, status: 'trashed' });
     return true;
   }
+
+  async activateAsset(ownerId: string, projectId: string, assetId: string): Promise<Asset | null> {
+    const asset = await this.findAsset(ownerId, projectId, assetId);
+    if (!asset) return null;
+    const active = { ...asset, status: 'active' as const };
+    this.data.assets.set(assetId, active);
+    return active;
+  }
+
+  async restorePlacement(
+    ownerId: string,
+    projectId: string,
+    placementId: string,
+  ): Promise<WorkspacePlacement | null> {
+    const placement = await this.findPlacement(ownerId, projectId, placementId);
+    if (!placement) return null;
+    const active = { ...placement, status: 'active' as const, deletedAt: null } as WorkspacePlacement;
+    this.data.placements.set(placementId, active);
+    return active;
+  }
 }
 
 async function loadService(): Promise<AssetServiceModule> {
@@ -285,6 +321,27 @@ describe('asset graph service', () => {
 
     await expect(service.createAssetVersion({ ...input, requestDigest: 'digest-b' }))
       .rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
+  });
+
+  it('persists caller metadata without allowing it to replace the internal request digest', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+
+    const created = await service.createAssetVersion(createVersionInput(ownerId, projectId, {
+      requestDigest: 'trusted-digest',
+      metadata: {
+        requestDigest: 'caller-spoof',
+        provenance: 'unit-test',
+      },
+    }));
+
+    expect(storage.data.versionMetadata.get(created.version.id)).toEqual({
+      provenance: 'unit-test',
+      requestDigest: 'trusted-digest',
+    });
   });
 
   it('preserves parent version order', async () => {
@@ -359,5 +416,29 @@ describe('asset graph service', () => {
 
     expect(result).toEqual({ placementTrashed: true, assetTrashed: true });
     expect(storage.data.assets.get(version.asset.id)?.status).toBe('trashed');
+  });
+});
+
+describe('PostgresAssetStorage transaction recovery', () => {
+  it('destroys a client when rollback fails while preserving the original error', async () => {
+    const originalError = new Error('callback failed');
+    const rollbackError = new Error('rollback failed');
+    const release = vi.fn();
+    const query = vi.fn(async (sql: string) => {
+      if (sql === 'ROLLBACK') throw rollbackError;
+      return { rows: [], rowCount: 0 };
+    });
+    const pool = {
+      connect: vi.fn(async () => ({ query, release })),
+    };
+    const { PostgresAssetStorage } = await import('@/lib/asset-core/storage');
+    const storage = new PostgresAssetStorage(pool as never);
+
+    await expect(storage.transaction(async () => {
+      throw originalError;
+    })).rejects.toBe(originalError);
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(rollbackError);
   });
 });
