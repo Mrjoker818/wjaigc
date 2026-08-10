@@ -1,0 +1,54 @@
+{
+  "id": "fixture-processing-project",
+  "userId": "fixture-owner",
+  "name": "Processing fixture",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000001000,
+  "canvasImages": [
+    {
+      "id": "legacy-processing-active",
+      "url": "/uploads/source.png",
+      "isProcessingPlaceholder": true,
+      "processing": {
+        "label": "Generating",
+        "status": "processing",
+        "progress": 42,
+        "taskId": "fixture-task-active",
+        "sourceUrl": "/uploads/source.png",
+        "startTime": 1700000000000
+      },
+      "x": 0,
+      "y": 0,
+      "width": 128,
+      "height": 128,
+      "originalWidth": 128,
+      "originalHeight": 128,
+      "rotation": 0,
+      "zIndex": 1,
+      "createdAt": 1700000000000
+    },
+    {
+      "id": "legacy-processing-failed",
+      "url": "",
+      "isProcessingPlaceholder": true,
+      "processing": {
+        "label": "Failed",
+        "status": "failed",
+        "progress": 67,
+        "taskId": "fixture-task-failed",
+        "error": "fixture failure",
+        "retryable": true
+      },
+      "x": 140,
+      "y": 0,
+      "width": 128,
+      "height": 128,
+      "originalWidth": 128,
+      "originalHeight": 128,
+      "rotation": 0,
+      "zIndex": 2,
+      "createdAt": 1700000000001
+    }
+  ],
+  "settings": {}
+}

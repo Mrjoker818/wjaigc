@@ -1,0 +1,11 @@
+{
+  "id": "fixture-corrupt-project",
+  "userId": "fixture-owner",
+  "name": "Corrupt fixture",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000001000,
+  "canvasImages": {
+    "unexpected": "object"
+  },
+  "settings": {}
+}

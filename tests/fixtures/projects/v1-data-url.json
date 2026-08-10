@@ -1,0 +1,23 @@
+{
+  "id": "fixture-data-project",
+  "userId": "fixture-owner",
+  "name": "Data URL fixture",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000001000,
+  "canvasImages": [
+    {
+      "id": "legacy-data-image",
+      "url": "data:image/png;base64,aGVsbG8=",
+      "x": 0,
+      "y": 0,
+      "width": 64,
+      "height": 64,
+      "originalWidth": 64,
+      "originalHeight": 64,
+      "rotation": 0,
+      "zIndex": 1,
+      "createdAt": 1700000000000
+    }
+  ],
+  "settings": {}
+}

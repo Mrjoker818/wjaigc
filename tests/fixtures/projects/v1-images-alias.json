@@ -1,0 +1,23 @@
+{
+  "id": "fixture-alias-project",
+  "userId": "fixture-owner",
+  "name": "Alias fixture",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000001000,
+  "images": [
+    {
+      "id": "legacy-alias-image",
+      "url": "/uploads/alias.png",
+      "x": 10,
+      "y": 20,
+      "width": 320,
+      "height": 240,
+      "originalWidth": 640,
+      "originalHeight": 480,
+      "rotation": 0,
+      "zIndex": 1,
+      "createdAt": 1700000000000
+    }
+  ],
+  "settings": {}
+}

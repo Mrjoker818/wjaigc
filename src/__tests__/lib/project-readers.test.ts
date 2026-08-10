@@ -1,0 +1,171 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  compareLegacyAndAssetProjection,
+  readProjectSnapshot,
+} from '@/lib/asset-core/project-readers';
+
+const fixturesDirectory = resolve(process.cwd(), 'tests/fixtures/projects');
+
+function loadFixture(name: string): { bytes: Buffer; value: unknown } {
+  const bytes = readFileSync(resolve(fixturesDirectory, name));
+  return { bytes, value: JSON.parse(bytes.toString('utf8')) as unknown };
+}
+
+function deepFreeze(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+describe('readProjectSnapshot', () => {
+  it('reads absent schemaVersion as v1, aliases images, and does not mutate JSON bytes', () => {
+    const fixture = loadFixture('v1-images-alias.json');
+    const input = deepFreeze(fixture.value);
+    const before = Buffer.from(JSON.stringify(input));
+
+    const result = readProjectSnapshot(input);
+
+    expect(result.sourceSchemaVersion).toBe(1);
+    expect(result.writeTargetVersion).toBe(3);
+    expect(result.project?.canvasImages).toHaveLength(1);
+    expect(result.project?.canvasImages[0]?.url).toBe('/api/serve-upload/uploads/alias.png');
+    expect((input as { canvasImages?: unknown }).canvasImages).toBeUndefined();
+    expect(Buffer.from(JSON.stringify(input))).toEqual(before);
+    expect(fixture.bytes.equals(readFileSync(resolve(fixturesDirectory, 'v1-images-alias.json')))).toBe(true);
+  });
+
+  it('uses explicit transitional and unified readers for v2 and v3', () => {
+    const base = loadFixture('v1-images-alias.json').value as Record<string, unknown>;
+    const images = base.images;
+    const v2 = readProjectSnapshot(deepFreeze({ ...base, schemaVersion: 2 }));
+    const v3 = readProjectSnapshot(deepFreeze({
+      ...base,
+      schemaVersion: 3,
+      canvasImages: images,
+      images: undefined,
+    }));
+
+    expect(v2.sourceSchemaVersion).toBe(2);
+    expect(v2.warnings.map((warning) => warning.code)).toContain('PROJECT_V2_TRANSITIONAL');
+    expect(v2.project?.canvasImages).toHaveLength(1);
+    expect(v3.sourceSchemaVersion).toBe(3);
+    expect(v3.warnings).toEqual([]);
+    expect(v3.project?.canvasImages).toHaveLength(1);
+  });
+
+  it('quarantines corrupt input instead of replacing it with an empty canvas', () => {
+    const { value } = loadFixture('v1-corrupt-project.json');
+    const result = readProjectSnapshot(deepFreeze(value));
+
+    expect(result.project).toBeNull();
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'PROJECT_QUARANTINED', severity: 'error' }),
+    ]));
+    expect(JSON.stringify(result)).not.toContain('"canvasImages":[]');
+  });
+
+  it('classifies data URLs as pending-persist without dropping their placement', () => {
+    const result = readProjectSnapshot(deepFreeze(loadFixture('v1-data-url.json').value));
+
+    expect(result.project?.canvasImages).toHaveLength(1);
+    expect(result.project?.canvasImages[0]).toMatchObject({
+      id: 'legacy-data-image',
+      mediaAvailability: 'pending-persist',
+      _pendingPersist: true,
+    });
+    expect(result.unresolvedMedia).toEqual([
+      expect.objectContaining({ imageId: 'legacy-data-image', availability: 'pending-persist' }),
+    ]);
+  });
+
+  it('classifies expired blob URLs as missing without dropping their placement', () => {
+    const result = readProjectSnapshot(deepFreeze(loadFixture('v1-blob-url.json').value));
+
+    expect(result.project?.canvasImages).toHaveLength(1);
+    expect(result.project?.canvasImages[0]).toMatchObject({
+      id: 'legacy-blob-image',
+      url: 'blob:https://app.example.invalid/expired',
+      mediaAvailability: 'missing',
+    });
+    expect(result.unresolvedMedia).toEqual([
+      expect.objectContaining({ imageId: 'legacy-blob-image', availability: 'missing' }),
+    ]);
+  });
+
+  it('preserves sourceUrl as a recovery source when the primary URL is absent', () => {
+    const result = readProjectSnapshot(deepFreeze(loadFixture('v1-source-url-recovery.json').value));
+    const image = result.project?.canvasImages[0];
+
+    expect(image?.url).toBe('');
+    expect(image?.sourceUrl).toBe('https://media.example.invalid/original.png');
+    expect(image?.mediaAvailability).toBe('missing');
+    expect(result.unresolvedMedia[0]).toMatchObject({
+      recoverySourceUrl: 'https://media.example.invalid/original.png',
+    });
+  });
+
+  it('preserves video, 3D, SVG, and PSD fields while normalizing legacy local URLs', () => {
+    const result = readProjectSnapshot(deepFreeze(loadFixture('v1-video-3d-svg.json').value));
+    const image = result.project?.canvasImages[0] as Record<string, unknown> | undefined;
+
+    expect(image).toMatchObject({
+      sourceUrl: 'https://media.example.invalid/preview.png',
+      mediaType: 'video',
+      videoUrl: '/api/serve-upload/uploads/clip.mp4',
+      threeDModelUrl: '/api/serve-upload/uploads/model.glb',
+      svgDataUrl: 'data:image/svg+xml;base64,PHN2Zy8+',
+      svgUrl: '/api/serve-upload/uploads/vector.svg',
+      psdUrl: '/api/serve-upload/uploads/layers.psd',
+    });
+    expect(image?.threeDTextureUrls).toEqual([
+      { diffuse: '/api/serve-upload/uploads/diffuse.png' },
+    ]);
+  });
+
+  it('preserves processing placeholders, annotations, and group metadata', () => {
+    const processing = readProjectSnapshot(deepFreeze(loadFixture('v1-processing-matrix.json').value));
+    const shared = readProjectSnapshot(deepFreeze(loadFixture('v1-shared-placement.json').value));
+
+    expect(processing.project?.canvasImages).toHaveLength(2);
+    expect(processing.project?.canvasImages[0]?.processing).toMatchObject({
+      status: 'processing',
+      progress: 42,
+      taskId: 'fixture-task-active',
+    });
+    expect(processing.project?.canvasImages[1]?.processing).toMatchObject({
+      status: 'failed',
+      retryable: true,
+    });
+    expect(shared.project?.metadata?.groups).toEqual([
+      expect.objectContaining({ id: 'fixture-group', collapsed: true }),
+    ]);
+    expect(shared.project?.metadata?.annotationsV2).toEqual([
+      expect.objectContaining({ id: 'fixture-annotation', sourceImageId: 'legacy-shared-a' }),
+    ]);
+  });
+
+  it('keeps separate placements when two legacy IDs share one URL', () => {
+    const result = readProjectSnapshot(deepFreeze(loadFixture('v1-shared-placement.json').value));
+
+    expect(result.project?.canvasImages.map((image) => image.id)).toEqual([
+      'legacy-shared-a',
+      'legacy-shared-b',
+    ]);
+    expect(new Set(result.project?.canvasImages.map((image) => image.url))).toEqual(
+      new Set(['https://media.example.invalid/shared.png']),
+    );
+  });
+
+  it('compares lossless legacy and asset projections without mutating either side', () => {
+    const legacy = deepFreeze(loadFixture('v1-shared-placement.json').value);
+    const projected = readProjectSnapshot(legacy).project;
+
+    const comparison = compareLegacyAndAssetProjection({ legacy, assetProjection: projected });
+
+    expect(comparison).toEqual({ matches: true, differences: [] });
+  });
+});

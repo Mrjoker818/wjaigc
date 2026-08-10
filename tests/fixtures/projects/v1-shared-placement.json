@@ -1,0 +1,60 @@
+{
+  "id": "fixture-shared-project",
+  "userId": "fixture-owner",
+  "name": "Shared URL fixture",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000001000,
+  "canvasImages": [
+    {
+      "id": "legacy-shared-a",
+      "url": "https://media.example.invalid/shared.png",
+      "groupId": "fixture-group",
+      "annotationIds": ["fixture-annotation"],
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 100,
+      "originalWidth": 100,
+      "originalHeight": 100,
+      "rotation": 0,
+      "zIndex": 1,
+      "createdAt": 1700000000000
+    },
+    {
+      "id": "legacy-shared-b",
+      "url": "https://media.example.invalid/shared.png",
+      "groupId": "fixture-group",
+      "x": 120,
+      "y": 0,
+      "width": 100,
+      "height": 100,
+      "originalWidth": 100,
+      "originalHeight": 100,
+      "rotation": 0,
+      "zIndex": 2,
+      "createdAt": 1700000000001
+    }
+  ],
+  "settings": {},
+  "metadata": {
+    "groups": [
+      {
+        "id": "fixture-group",
+        "name": "Fixture group",
+        "note": "Preserve me",
+        "imageIds": ["legacy-shared-a", "legacy-shared-b"],
+        "collapsed": true
+      }
+    ],
+    "annotationsV2": [
+      {
+        "id": "fixture-annotation",
+        "projectId": "fixture-shared-project",
+        "sourceImageId": "legacy-shared-a",
+        "kind": "text",
+        "status": "open",
+        "text": "Fixture note"
+      }
+    ]
+  }
+}

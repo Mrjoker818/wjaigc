@@ -1,0 +1,23 @@
+{
+  "id": "fixture-blob-project",
+  "userId": "fixture-owner",
+  "name": "Blob URL fixture",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000001000,
+  "canvasImages": [
+    {
+      "id": "legacy-blob-image",
+      "url": "blob:https://app.example.invalid/expired",
+      "x": 0,
+      "y": 0,
+      "width": 80,
+      "height": 60,
+      "originalWidth": 80,
+      "originalHeight": 60,
+      "rotation": 0,
+      "zIndex": 1,
+      "createdAt": 1700000000000
+    }
+  ],
+  "settings": {}
+}

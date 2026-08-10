@@ -1,0 +1,36 @@
+{
+  "id": "fixture-rich-media-project",
+  "userId": "fixture-owner",
+  "name": "Rich media fixture",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000001000,
+  "canvasImages": [
+    {
+      "id": "legacy-rich-media",
+      "url": "/uploads/preview.png",
+      "sourceUrl": "https://media.example.invalid/preview.png",
+      "mediaType": "video",
+      "videoUrl": "/uploads/clip.mp4",
+      "videoDuration": 4.5,
+      "videoThumbnailUrl": "/uploads/clip-thumb.png",
+      "threeDModelUrl": "/uploads/model.glb",
+      "threeDModelUrls": { "glb": "/uploads/model.glb" },
+      "threeDThumbnailUrls": { "front": "/uploads/model-front.png" },
+      "threeDTextureUrls": [{ "diffuse": "/uploads/diffuse.png" }],
+      "threeDModelInfo": { "faceCount": 12, "vertexCount": 24, "fileSize": "1 KB" },
+      "svgDataUrl": "data:image/svg+xml;base64,PHN2Zy8+",
+      "svgUrl": "/uploads/vector.svg",
+      "psdUrl": "/uploads/layers.psd",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 100,
+      "originalWidth": 200,
+      "originalHeight": 100,
+      "rotation": 3,
+      "zIndex": 2,
+      "createdAt": 1700000000000
+    }
+  ],
+  "settings": {}
+}
