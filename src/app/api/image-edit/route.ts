@@ -53,6 +53,41 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
+/**
+ * 检测 302.AI 放大错误是否为内容审核拒绝。
+ * 内容审核拒绝是图片级别的问题（该提供商不接受此图片），
+ * 其他放大方法（通用 AI 模型、本地 upscayl-node）可能正常处理同一图片，
+ * 因此应降级到其他方法而非直接返回错误。
+ */
+function is302ContentReviewError(error: unknown): boolean {
+  if (error instanceof UpscaleProviderError) {
+    if (error.providerCode === '-10021') return true;
+    if (error.code === 'UPSCALE_PROVIDER_REJECTED') {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('content checker')
+        || msg.includes('material flagged')
+        || msg.includes('content could not be processed')
+        || msg.includes('内容检查器')
+        || msg.includes('内容审核')) {
+        return true;
+      }
+    }
+  }
+  // 也检查普通 Error 的消息（parse302UpscaleProviderError 包装前的原始错误）
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes('content checker')
+      || msg.includes('material flagged')
+      || msg.includes('content could not be processed')
+      || msg.includes('内容检查器')
+      || msg.includes('内容审核')
+      || msg.includes('-10021')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function findClosestAspectRatio(aspectRatio: string): string {
   if (SUPPORTED_RATIOS.includes(aspectRatio)) return aspectRatio;
   const parts = aspectRatio.split(':').map(Number);
@@ -1605,8 +1640,8 @@ export async function POST(request: NextRequest) {
       console.debug(`[image-edit] Stripped provider prefix from model: "${rawModel}" → "${modelStr}" (providerId via field: "${providerId || 'none'}")`);
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
-    const requestedUpscaleModel = body.upscaleModel?.trim() || null;
-    const requested302UpscaleModel = requestedUpscaleModel
+    let requestedUpscaleModel = body.upscaleModel?.trim() || null;
+    let requested302UpscaleModel = requestedUpscaleModel
       ? resolve302UpscaleModelId(requestedUpscaleModel)
       : null;
     const engineMode = (
@@ -2296,7 +2331,7 @@ export async function POST(request: NextRequest) {
         requestedMode,
         Boolean(requestedUpscaleModel),
       );
-      const upscaleMode: 'auto' | 'ai' | 'cpu' = productMode === 'ai-only'
+      let upscaleMode: 'auto' | 'ai' | 'cpu' = productMode === 'ai-only'
         ? 'ai'
         : productMode === 'fidelity'
           ? 'cpu'
@@ -2310,6 +2345,8 @@ export async function POST(request: NextRequest) {
       }
 
       const { isUpscalerModel } = await import('@/lib/model-capabilities');
+      // 当 302.AI 内容审核拒绝后降级时，跳过 Step 0 的 302.AI 候选（已知会被拒绝）
+      let skip302AiCandidates = false;
       const dedicatedCandidates = candidateModels.filter(candidate => isUpscalerModel(candidate.model));
       const providerCandidates = dedicatedCandidates.map((candidate, index) => ({
         id: `${index}:${candidate.source}:${candidate.model}`,
@@ -2580,25 +2617,47 @@ export async function POST(request: NextRequest) {
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (requested302UpscaleModel) {
-              const failure = await settleRequested302Failure(error);
-              return NextResponse.json(failure, { status: failure.providerStatus });
-            }
-            if (executionPlan.fallbackAllowed) {
+              // 内容审核拒绝：退款并降级到其他放大方法（通用AI模型/本地upscayl）
+              if (is302ContentReviewError(error)) {
+                console.warn(`[image-edit] 302.AI content review rejection in single-pass, falling back to other methods: ${errorMessage}`);
+                await settleRequested302Failure(error);
+                requestedUpscaleModel = null;
+                requested302UpscaleModel = null;
+                upscaleMode = 'auto';
+                skip302AiCandidates = true;
+                // 跳出 catch 块，继续执行后续 Step 0/A/B/C 和本地 CPU 降级
+              } else {
+                const failure = await settleRequested302Failure(error);
+                return NextResponse.json(failure, { status: failure.providerStatus });
+              }
+            } else if (executionPlan.fallbackAllowed) {
               console.warn(`[image-edit] dedicated AI upscale failed, falling back to fidelity: ${errorMessage}`);
               const fidelityResult = await runLocalCpuUpscale(`专用 AI 超分失败，已降级到保真模式：${errorMessage}`);
               if (fidelityResult) return fidelityResult;
+              return NextResponse.json({
+                success: false,
+                error: errorMessage,
+                engine: executionPlan.engine,
+                providerId: executionPlan.providerId,
+                tiled: false,
+                fallbackAllowed: executionPlan.fallbackAllowed,
+                fallbackReason: executionPlan.fallbackAllowed
+                  ? `专用 AI 超分失败且保真降级不可用：${errorMessage}`
+                  : null,
+              }, { status: 502 });
+            } else {
+              return NextResponse.json({
+                success: false,
+                error: errorMessage,
+                engine: executionPlan.engine,
+                providerId: executionPlan.providerId,
+                tiled: false,
+                fallbackAllowed: executionPlan.fallbackAllowed,
+                fallbackReason: executionPlan.fallbackAllowed
+                  ? `专用 AI 超分失败且保真降级不可用：${errorMessage}`
+                  : null,
+              }, { status: 502 });
             }
-            return NextResponse.json({
-              success: false,
-              error: errorMessage,
-              engine: executionPlan.engine,
-              providerId: executionPlan.providerId,
-              tiled: false,
-              fallbackAllowed: executionPlan.fallbackAllowed,
-              fallbackReason: executionPlan.fallbackAllowed
-                ? `专用 AI 超分失败且保真降级不可用：${errorMessage}`
-                : null,
-            }, { status: 502 });
           }
         }
       }
@@ -2732,17 +2791,28 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           if (requested302UpscaleModel) {
-            updateTaskProgress(taskId, { status: 'failed', error: errorMessage });
-            const failure = await settleRequested302Failure(error);
-            return NextResponse.json({
-              ...failure,
-              taskId,
-              engine: executionPlan.engine,
-              providerId: executionPlan.providerId,
-              tiled: executionPlan.tiled,
-            }, { status: failure.providerStatus });
-          }
-          if (isTaskCancelled(taskId)) {
+            // 内容审核拒绝：退款并降级到其他放大方法（通用AI模型/本地upscayl）
+            if (is302ContentReviewError(error)) {
+              console.warn(`[image-edit] 302.AI content review rejection in tiled path, falling back to other methods: ${errorMessage}`);
+              updateTaskProgress(taskId, { status: 'failed', error: errorMessage });
+              await settleRequested302Failure(error);
+              requestedUpscaleModel = null;
+              requested302UpscaleModel = null;
+              upscaleMode = 'auto';
+              skip302AiCandidates = true;
+              // 继续执行后续 Step A/B/C 和本地 CPU 降级
+            } else {
+              updateTaskProgress(taskId, { status: 'failed', error: errorMessage });
+              const failure = await settleRequested302Failure(error);
+              return NextResponse.json({
+                ...failure,
+                taskId,
+                engine: executionPlan.engine,
+                providerId: executionPlan.providerId,
+                tiled: executionPlan.tiled,
+              }, { status: failure.providerStatus });
+            }
+          } else if (isTaskCancelled(taskId)) {
             updateTaskProgress(taskId, { status: 'cancelled', error: errorMessage });
             return NextResponse.json({
               success: false,
@@ -2871,7 +2941,8 @@ export async function POST(request: NextRequest) {
       let aiError: Error | null = null;
 
       // Step 0: 302.AI 专用放大端点（如果有302.AI放大模型）
-      const aiUpscaler302Candidates = specialUpscalerCandidates.filter(c => {
+      // 当内容审核降级时跳过 302.AI（已知会被拒绝）
+      const aiUpscaler302Candidates = skip302AiCandidates ? [] : specialUpscalerCandidates.filter(c => {
         const modelId = resolve302UpscaleModelId(c.model);
         return Boolean(modelId) && is302AiUpscaleBaseUrl(c.apiBaseUrl)
           && (!requested302UpscaleModel || modelId === requested302UpscaleModel);
@@ -2959,15 +3030,25 @@ export async function POST(request: NextRequest) {
       }
 
       if (requested302UpscaleModel && !aiResult) {
-        const failure = await settleRequested302Failure(
-          aiError || new UpscaleProviderError(
-            `302.AI 未返回结果：${requested302UpscaleModel}`,
-            502,
-            'UPSCALE_PROVIDER_UNAVAILABLE',
-            true,
-          ),
-        );
-        return NextResponse.json(failure, { status: failure.providerStatus });
+        // 内容审核拒绝：退款并降级到其他放大方法（通用AI模型/本地upscayl）
+        if (aiError && is302ContentReviewError(aiError)) {
+          console.warn(`[image-edit] 302.AI content review rejection in Step 0, falling back to other methods: ${aiError.message}`);
+          await settleRequested302Failure(aiError);
+          requestedUpscaleModel = null;
+          requested302UpscaleModel = null;
+          upscaleMode = 'auto';
+          // 继续执行后续 Step A/B/C 和本地 CPU 降级
+        } else {
+          const failure = await settleRequested302Failure(
+            aiError || new UpscaleProviderError(
+              `302.AI 未返回结果：${requested302UpscaleModel}`,
+              502,
+              'UPSCALE_PROVIDER_UNAVAILABLE',
+              true,
+            ),
+          );
+          return NextResponse.json(failure, { status: failure.providerStatus });
+        }
       }
 
       // Step A: 先用专用upscaler模型尝试（如果有，且302.AI未成功）

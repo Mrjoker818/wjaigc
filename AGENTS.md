@@ -826,6 +826,14 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
+### v4.2.6
+
+**P0: 放大功能内容审核降级修复 — 302.AI 内容审核拒绝后自动降级到其他放大方法**
+
+- **根因**: 用户在 ai-only 模式选择 302.AI 放大模型时，如果图片未通过 302.AI 的内容审核（providerCode `-10021` 或消息含 "content checker"/"material flagged" 等），后端在三条代码路径（单次放大 Path 1、分块放大 Path 3、Step 0 候选遍历 Path 2）均直接返回错误，不尝试任何降级方法。导致用户看到"当前图片未通过302.AI的内容审核，请更换图片或改用其他放大模型"后放大功能完全不可用
+- **修复**: 新增 `is302ContentReviewError()` 辅助函数检测内容审核拒绝错误（检查 `UpscaleProviderError.providerCode === '-10021'`、`code === 'UPSCALE_PROVIDER_REJECTED'` 及消息关键词）。三条路径在检测到内容审核拒绝时：退款 302.AI 积分（`settleRequested302Failure`）、清除 `requestedUpscaleModel`/`requested302UpscaleModel`/`upscaleMode` 标志、设置 `skip302AiCandidates = true` 跳过 Step 0 的 302.AI 候选，然后继续执行 Step A（专用 upscaler 模型）、Step B（通用 AI 模型）、最终本地 CPU upscayl-node 降级（涉及 `src/app/api/image-edit/route.ts`）
+- **降级链路**: 302.AI 内容审核拒绝 → Step A 专用 upscaler 模型（排除 302.AI）→ Step B 通用 image 模型 AI 放大 → 本地 CPU upscayl-node 保真放大 → 全部失败才返回错误
+
 ### v4.2.5
 
 **P0: 智能对话联网搜索0结果修复 — 搜索结果snippet含换行符导致前端正则解析失败**
