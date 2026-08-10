@@ -719,3 +719,15 @@ The browser remains a progress observer and compatibility fallback. It is no lon
 | Production build | PASS | Next.js 16.2.10 production build generated 112 static pages and completed successfully. |
 
 This follow-up is not a cloud pass. The new exact commit must be deployed before repeating the no-browser-poll probe and the progressive paid `n=1/2/3/4` run.
+
+## 2026-08-10 Recovery-backoff follow-up
+
+| Check | Result | Evidence |
+|---|---|---|
+| No-browser-poll probe on `8bf0e20` | FAIL | Task `async-1786322172707-0-uzo191` stayed `processing` at 0% for more than 31 minutes with 120 credits pending. The selected and actual route both remained PearAPI `gpt-image-2`, so this is an application recovery defect rather than a provider/model mismatch. |
+| Deterministic root cause | CONFIRMED | The first authenticated internal poll returned HTTP 200 with `recoveryPending: true`, `reason: recent-update`, and an approximately three-second retry delay. The one-shot helper exited instead of retrying after the durable-task freshness backoff. |
+| RED/GREEN regression | PASS LOCALLY | A new fake-timer test requires three internal polls across `recoveryPending -> processing -> completed`; it failed with one call before the repair and passes with three calls after it. |
+| Focused generation/cancellation suite | PASS | 5 files / 43 tests passed. |
+| Full local gates | PASS WITH DECLARED LIMITS | TypeScript passed; ESLint exited 0 with 960 historical warnings; full Vitest exited 0 with PostgreSQL environment skips declared; production build generated 112 pages. |
+
+This is not deployed acceptance. The paid `8bf0e20` task must first reach a stable cancelled/failed terminal state with exactly one refund, then the new exact commit must prove server-owned `n=1` completion before any larger paid batch is attempted.

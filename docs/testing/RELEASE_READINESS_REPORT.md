@@ -619,3 +619,11 @@ The first deployed server-kickoff candidate (`9392b50`) did not pass its no-brow
 Unified request authentication is now covered locally by a RED/GREEN regression test, the focused suite passes 47 tests, the full Vitest suite exits 0 with the PostgreSQL environment skips declared, and the production build passes.
 
 **Release decision remains Not passed.** The internal-auth follow-up is not yet deployed. Server-owned first submission, concurrent wakeup idempotency, progressive paid `n=1/2/3/4`, and exact deployed ledger evidence remain release blockers.
+
+### 2026-08-10 recovery-backoff correction
+
+The deployed internal-auth follow-up `8bf0e20` also failed its no-browser-poll acceptance. Task `async-1786322172707-0-uzo191` remained at 0% for more than 31 minutes with 120 credits pending because the server kickoff stopped after the recovery route returned a successful but non-terminal `recoveryPending` response during the normal fresh-task backoff window.
+
+The kickoff now keeps driving the durable task through bounded recovery and processing responses until a terminal state. The exact failure sequence has RED/GREEN regression coverage, and all local TypeScript, lint error, Vitest, protected-feature, and production-build gates pass after the reviewed source file is added to the exact Stage 1 allowlist.
+
+**Release decision remains Not passed.** This repair has not yet been deployed. The stale paid task requires one-time cancellation/refund evidence, and a fresh `n=1` no-browser-poll probe must reach a provider-backed terminal state before `n=2/3/4` testing resumes.

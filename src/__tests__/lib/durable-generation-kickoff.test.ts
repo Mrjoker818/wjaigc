@@ -30,7 +30,7 @@ describe('durable generation server kickoff', () => {
   it('wakes every unique slot through the lease-protected poll route', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       success: true,
-      status: 'processing',
+      status: 'completed',
     }), { status: 200 }));
 
     const result = await kickoffDurableGenerationTasks({
@@ -73,5 +73,42 @@ describe('durable generation server kickoff', () => {
     expect(result.attempted).toBe(2);
     expect(result.accepted).toBe(1);
     expect(result.failed).toEqual([{ taskId: 'task-1', error: 'temporary disconnect' }]);
+  });
+
+  it('keeps driving a slot after recovery backoff until it reaches a terminal state', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          success: true,
+          status: 'processing',
+          recoveryPending: true,
+          retryAfterMs: 3_000,
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          success: true,
+          status: 'processing',
+          progress: 10,
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          success: true,
+          status: 'completed',
+          progress: 100,
+        }), { status: 200 }));
+
+      const kickoff = kickoffDurableGenerationTasks({
+        taskIds: ['task-1'],
+        userId: 'user-a',
+        userRole: 'admin',
+        fetchImpl,
+      });
+
+      await vi.runAllTimersAsync();
+
+      await expect(kickoff).resolves.toEqual({ attempted: 1, accepted: 1, failed: [] });
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

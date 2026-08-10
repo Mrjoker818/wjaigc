@@ -52,6 +52,7 @@
     "src/lib/model-type-classification.ts",
     "src/lib/server-api-config.ts",
     "src/lib/task-core/billing-service.ts",
+    "src/lib/task-core/durable-generation-kickoff.ts",
     "src/lib/task-core/entry-migration.ts",
     "src/lib/task-core/generation-batch.ts",
     "src/lib/task-core/idempotency.ts",

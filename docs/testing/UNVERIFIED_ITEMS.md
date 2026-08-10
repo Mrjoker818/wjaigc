@@ -453,7 +453,7 @@
 
 | Item | Status | Required proof |
 |---|---|---|
-| Server-owned first submission | FAILED ON `9392b50`; FIX PENDING REDEPLOYMENT | The first cloud probe exposed missing signed-internal authentication in `/api/poll-task`. Deploy the follow-up, submit a paid task, stop browser polling immediately, and verify a real provider task ID plus terminal state. |
+| Server-owned first submission | FAILED ON `9392b50` AND `8bf0e20`; RECOVERY-BACKOFF FIX PENDING DEPLOYMENT | `9392b50` lacked signed-internal authentication. `8bf0e20` authenticated correctly but stopped after the route returned `recoveryPending` during the normal fresh-task backoff, leaving task `async-1786322172707-0-uzo191` at 0% with 120 credits pending. Deploy the bounded monitoring follow-up and require a real provider task ID plus stable terminal state without browser polling. |
 | Concurrent server/browser wakeup | PENDING DEPLOYMENT | Capture the database lease and provider ledger proving one provider task and one charge per slot. |
 | Legacy zombie cleanup | VERIFIED IN CLOUD | Three synthetic tasks reached `cancelled/refunded`, each returned 60 credits, and repeated cancellation produced no second refund. |
 | Progressive `n=1/2/3/4` | PENDING DEPLOYMENT | Each slot appears as soon as its provider result completes and does not wait for the slowest sibling. |
