@@ -779,3 +779,11 @@ BUG-052 is closed. Timeout-specific deployed behavior and rollback rehearsal rem
 The first deterministic timeout attempt did **not** pass the timeout gate. Coze disconnected the delayed external provider before the application timeout. Task `async-1786357844914-0-s1t99g` therefore settled as `failed/refunded`, not `timeout`. Billing remained correct: one -140 charge, one +140 refund, and balance restoration from 238 to 378. The temporary provider was deleted and confirmed absent.
 
 This run is retained as negative evidence and exposed BUG-053: the terminal failed task still displayed a retrying label/error. A valid timeout acceptance still requires a Coze-local delayed provider that keeps the socket open past the application deadline, so the application AbortController owns the timeout transition.
+
+## 2026-08-10 timeout probe attempt 2 and BUG-054
+
+A Coze-local delayed provider kept the upstream connection open long enough to exercise the application deadline. Paid task `async-1786358975492-0-mq23bl` remained `processing/pending` after 666 seconds, retaining 280 credits instead of reaching `timeout/refunded`. Manual cancellation then produced exactly one refund and restored the balance from 98 to 378; the temporary provider was removed.
+
+The failure is reproducible and is not a provider/model mismatch. Recovery requests were each granted a fresh timeout window, with no absolute deadline based on the original durable task creation time. A minimal TDD repair now checks a 10-minute `createdAt` deadline before recovery backoff and lease acquisition, aborts the active execution, and settles through the existing conditional terminal/refund path.
+
+Local verification passes: focused deadline tests 19/19, broader task suite 7 files / 100 tests, TypeScript, ESLint with 0 errors and 960 historical warnings, full Vitest, and the 112-page production build. This remains **pending deployed acceptance**; the cloud must prove automatic `timeout/refunded`, one charge/one refund, and no late completion.

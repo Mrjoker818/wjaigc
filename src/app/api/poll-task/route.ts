@@ -12,6 +12,7 @@ import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
 import {
+  abortTaskExecution,
   getTaskInfo,
   isTaskCancelled,
   registerTask,
@@ -46,7 +47,10 @@ import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';
 import { getLayerTaskStatus } from '@/lib/layer-decomposition/service';
 import { projectCanonicalGenerationSlot } from '@/lib/task-core/generation-batch';
 import { createTaskAbortScope, getTaskRecoveryBackoff } from '@/lib/task-core/task-abort';
-import { classifyRecoverySubmissionFailure } from '@/lib/task-core/recovery-submission';
+import {
+  classifyRecoverySubmissionFailure,
+  getRecoverySubmissionDeadline,
+} from '@/lib/task-core/recovery-submission';
 import {
   normalizeTaskError,
 } from '@/lib/task-core/task-error';
@@ -942,6 +946,48 @@ export async function POST(request: NextRequest) {
             error,
             retryable: true,
           }, { status: 200 });
+        }
+        const recoveryDeadline = getRecoverySubmissionDeadline({
+          createdAt: persistedTask.createdAt,
+        });
+        if (requiresSubmissionRecovery && recoveryDeadline.expired) {
+          const taskError = normalizeTaskError(null, {
+            code: 'TASK_TIMEOUT',
+            message: '任务处理超时，请重试',
+            source: 'wujie',
+            retryable: true,
+            requestId,
+          });
+          abortTaskExecution(recovery.taskId, 'timeout');
+          const termination = await terminateCloudTaskAndRefund(
+            recovery.taskId,
+            'timeout',
+            taskError.message,
+          );
+          if (termination.transitioned || termination.status === 'timeout') {
+            updateTaskProgress(recovery.taskId, {
+              status: 'timeout',
+              progress: 0,
+              label: taskError.message,
+              error: taskError.message,
+            });
+            failedTaskCache.set(recovery.taskId, {
+              userId: recovery.userId,
+              error: taskError.message,
+              taskResult: {
+                ...persistedResult,
+                taskError,
+              },
+              timestamp: Date.now(),
+            });
+            releaseQueueSlot(recovery.taskId);
+            return NextResponse.json(withGenerationSlotMetadata({
+              success: false,
+              status: 'timeout',
+              error: taskError.message,
+              retryable: true,
+            }, persistedTask.result, taskId), { status: 200 });
+          }
         }
         const recoveryBackoff = getTaskRecoveryBackoff(persistedTask);
         if (!recoveryBackoff.recoveryAllowed) {

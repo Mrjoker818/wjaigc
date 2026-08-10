@@ -140,4 +140,21 @@ describe('poll-task recovery lease contract', () => {
     expect(backoff).toBeGreaterThan(recoveryStart);
     expect(leaseClaim).toBeGreaterThan(backoff);
   });
+
+  it('expires recovery against the original task deadline before retry backoff', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const recoveryStart = source.indexOf('const recovery = buildRecoveredTaskContext');
+    const deadline = source.indexOf('getRecoverySubmissionDeadline(', recoveryStart);
+    const abort = source.indexOf("abortTaskExecution(recovery.taskId, 'timeout')", deadline);
+    const settlement = source.indexOf(
+      "terminateCloudTaskAndRefund(\n            recovery.taskId,\n            'timeout'",
+      abort,
+    );
+    const backoff = source.indexOf('getTaskRecoveryBackoff(persistedTask)', recoveryStart);
+
+    expect(deadline).toBeGreaterThan(recoveryStart);
+    expect(abort).toBeGreaterThan(deadline);
+    expect(settlement).toBeGreaterThan(abort);
+    expect(backoff).toBeGreaterThan(settlement);
+  });
 });

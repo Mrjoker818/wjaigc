@@ -1002,3 +1002,19 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Billing impact | No leak in this probe: one 140-credit charge, one 140-credit refund, balance restored to 378, and both transaction IDs were persisted. |
 | Cleanup | Temporary provider `api_1786357783653_d54wt7w` was deleted and confirmed absent. |
 | Status | Open. Register for the next minimal fix after the timeout evidence method is made deterministic; do not misclassify this failed probe as timeout acceptance. Evidence: `docs/testing/evidence/stage-1-timeout-probe-2026-08-10.json`. |
+
+### BUG-054: Durable generation recovery has no absolute timeout deadline
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Durable generation recovery / task timeout / credit settlement |
+| Environment | Coze preview, GitHub business source `32139c5`, 2026-08-10 |
+| Reproduction | Configure a temporary Coze-local provider that keeps the upstream socket open, submit one paid durable image slot, and observe it beyond the intended 10-minute application timeout. |
+| Expected | The original task deadline aborts the active execution, atomically transitions the task to `timeout`, refunds exactly once, and rejects any late completion. |
+| Actual | Task `async-1786358975492-0-mq23bl` remained `processing/pending` after 666 seconds and held 280 credits until it was manually cancelled. |
+| Root cause | Every recovery invocation received a fresh request/upstream timeout. The recovery loop had no deadline derived from the durable task's original `createdAt`, so transient recovery could extend the task indefinitely. |
+| Fix | Add a single 10-minute `createdAt`-based recovery deadline before retry backoff/lease acquisition; on expiry abort execution and use the existing conditional terminal/refund path. |
+| Regression | RED/GREEN coverage in `recovery-submission.test.ts` and `poll-task-recovery-lease-contract.test.ts`; focused task suite 7 files / 100 tests, full Vitest, TypeScript, ESLint, and production build pass locally. |
+| Billing cleanup | Manual cancellation produced one 280-credit refund and restored balance `98 -> 378`; the temporary provider was deleted. |
+| Status | Fixed locally, not closed. The exact commit must be deployed and the same probe must automatically reach stable `timeout/refunded`, preserve one charge/one refund, and resist late completion. Evidence: `docs/testing/evidence/stage-1-timeout-probe-local-2026-08-10.json`. |

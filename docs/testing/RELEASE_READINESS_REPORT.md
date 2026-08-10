@@ -646,3 +646,11 @@ The server-owned kickoff and progressive slot behavior now pass in the Coze sand
 - BUG-052 is closed in the deployed Coze preview. Real task `async-1786354360647-0-rhvubs` persisted matching non-empty charge/refund transaction IDs, produced one charge and one refund, restored the original balance, and remained cancelled.
 - Runtime identity is independently established: running Coze commit `d531ce65` directly parents GitHub `main@32139c5`; its only local delta is the environment-loading block in `scripts/coze-start.sh`.
 - Current verdict remains **Not passed**. The remaining Stage 1 blockers are the timeout-specific deployed proof and the `core-v2 -> legacy` rollback rehearsal. No Stage 2 work may begin before those gates are resolved or explicitly recorded as blocked.
+
+## 2026-08-10 BUG-054 absolute-timeout update
+
+- A Coze-local delayed-provider probe validly reproduced the timeout defect: task `async-1786358975492-0-mq23bl` was still `processing/pending` after 666 seconds with 280 credits held.
+- Manual cancellation refunded exactly once and restored the balance; this cleanup is not timeout acceptance.
+- The local candidate now enforces one absolute 10-minute recovery deadline from the durable task `createdAt`, aborts execution, and uses the database conditional terminal/refund path.
+- Local focused, full-test, TypeScript, ESLint, and production-build gates pass.
+- Current verdict remains **Not passed**. BUG-054 requires exact-deployment cloud acceptance, followed by the `core-v2 -> legacy` rollback rehearsal. Stage 2 remains prohibited.

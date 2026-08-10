@@ -12,6 +12,20 @@ interface RecoverySubmissionFailureInput {
   requestId: string;
 }
 
+interface RecoverySubmissionDeadlineInput {
+  createdAt: number;
+  now?: number;
+  timeoutMs?: number;
+}
+
+export interface RecoverySubmissionDeadline {
+  expired: boolean;
+  deadlineAt: number;
+  remainingMs: number;
+}
+
+export const RECOVERY_SUBMISSION_TIMEOUT_MS = 10 * 60_000;
+
 export interface RecoverySubmissionFailureDecision {
   defer: boolean;
   retryDelayMs: number;
@@ -73,6 +87,22 @@ function getRawFailureMessage(input: RecoverySubmissionFailureInput): string {
   const responseMessage = input.responseData?.message;
   if (typeof responseMessage === 'string') return responseMessage;
   return input.status ? `Recovery submission failed (${input.status})` : 'Recovery submission failed';
+}
+
+export function getRecoverySubmissionDeadline(
+  input: RecoverySubmissionDeadlineInput,
+): RecoverySubmissionDeadline {
+  const now = input.now ?? Date.now();
+  const timeoutMs = Math.max(1, input.timeoutMs ?? RECOVERY_SUBMISSION_TIMEOUT_MS);
+  const createdAt = Number.isFinite(input.createdAt) ? input.createdAt : now;
+  const deadlineAt = createdAt + timeoutMs;
+  const remainingMs = Math.max(0, deadlineAt - now);
+
+  return {
+    expired: remainingMs === 0,
+    deadlineAt,
+    remainingMs,
+  };
 }
 
 export function classifyRecoverySubmissionFailure(

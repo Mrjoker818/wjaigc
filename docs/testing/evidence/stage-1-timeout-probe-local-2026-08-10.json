@@ -1,0 +1,39 @@
+{
+  "recordedAt": "2026-08-10T19:01:19+08:00",
+  "environment": "Coze preview",
+  "method": "Coze-local delayed provider bound to 127.0.0.1:5999",
+  "temporaryProvider": {
+    "id": "api_1786358867086_8rzmve2",
+    "name": "[TEST] Stage1 Local Timeout Probe",
+    "model": "stage1-timeout-local-probe",
+    "deletedAfterProbe": true,
+    "existsAfterCleanup": false
+  },
+  "task": {
+    "id": "async-1786358975492-0-mq23bl",
+    "batchId": "batch-b7f5261cfb595c5dffd9bca2",
+    "createdAt": "2026-08-10T18:49:35.492+08:00",
+    "initialResponseMs": 902,
+    "observedAfterSeconds": 666,
+    "statusAfterDeadline": "processing",
+    "creditStatusAfterDeadline": "pending",
+    "creditCost": 280,
+    "manualFinalStatus": "cancelled",
+    "manualFinalCreditStatus": "refunded"
+  },
+  "billing": {
+    "balanceBefore": 378,
+    "balanceAfterCharge": 98,
+    "balanceAfterCleanup": 378,
+    "chargeTransactionId": "ctx_1786358975510_annl42n5",
+    "refundTransactionId": "ctx_1786359679184_pltlcf43",
+    "chargeCount": 1,
+    "refundCount": 1
+  },
+  "cleanup": {
+    "providerDeleted": true,
+    "delayServiceStopCommandSent": true,
+    "delayServiceStopAcknowledgementObserved": false
+  },
+  "conclusion": "FAIL: the task exceeded the 10-minute application deadline without automatically reaching timeout/refunded. Manual cancellation restored the balance exactly once. A local TDD fix now enforces one createdAt-based absolute recovery deadline; deployed verification is pending."
+}

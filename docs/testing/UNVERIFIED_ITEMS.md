@@ -469,3 +469,12 @@
 | Timeout-specific terminal behavior | BLOCKED AFTER ATTEMPT 1 | External delayed-provider probe was cut off by Coze egress and correctly became `failed/refunded`, so it is not timeout evidence. Start a Coze-local delayed provider, then prove application-owned abort, stable `timeout`, no late completion, and at-most-one refund. |
 | Rollback rehearsal | UNVERIFIED | Demonstrate `core-v2 -> legacy` without data loss, duplicate tasks, or duplicate billing. |
 | Exact runtime SHA | VERIFIED | Coze runtime `d531ce65` directly parents GitHub `main@32139c5`; process cwd, PID, Next server version, build ID, and the launcher-only delta were recorded. |
+
+## 2026-08-10 timeout attempt 2 status
+
+| Item | Status | Required evidence |
+|---|---|---|
+| BUG-054 absolute timeout | REPRODUCED; FIXED LOCALLY; DEPLOYMENT PENDING | Deploy the exact candidate, rerun the Coze-local delayed-provider probe, and prove automatic `timeout/refunded` after the original task deadline. |
+| Timeout billing | MANUAL CLEANUP VERIFIED ONLY | Candidate deployment must produce exactly one automatic refund and restore the balance without manual cancellation. |
+| Late completion isolation | UNVERIFIED FOR TIMEOUT | Observe the task beyond the delayed provider response window and prove it cannot transition from `timeout` to `completed`. |
+| Delay-service cleanup | PARTIALLY VERIFIED | The stop command was sent, but its terminal acknowledgement was not captured because browser control timed out; confirm no listener remains before the next probe. |

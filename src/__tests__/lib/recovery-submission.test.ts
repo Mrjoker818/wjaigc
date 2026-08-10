@@ -1,8 +1,34 @@
 import { describe, expect, it } from 'vitest';
 
-import { classifyRecoverySubmissionFailure } from '@/lib/task-core/recovery-submission';
+import {
+  classifyRecoverySubmissionFailure,
+  getRecoverySubmissionDeadline,
+  RECOVERY_SUBMISSION_TIMEOUT_MS,
+} from '@/lib/task-core/recovery-submission';
 
 describe('recovery submission failure policy', () => {
+  it('uses one absolute deadline across every recovery attempt', () => {
+    const createdAt = 1_000;
+
+    expect(getRecoverySubmissionDeadline({
+      createdAt,
+      now: createdAt + RECOVERY_SUBMISSION_TIMEOUT_MS - 1,
+    })).toEqual({
+      expired: false,
+      deadlineAt: createdAt + RECOVERY_SUBMISSION_TIMEOUT_MS,
+      remainingMs: 1,
+    });
+
+    expect(getRecoverySubmissionDeadline({
+      createdAt,
+      now: createdAt + RECOVERY_SUBMISSION_TIMEOUT_MS,
+    })).toEqual({
+      expired: true,
+      deadlineAt: createdAt + RECOVERY_SUBMISSION_TIMEOUT_MS,
+      remainingMs: 0,
+    });
+  });
+
   it('defers the first rate-limited submission instead of refunding it', () => {
     const decision = classifyRecoverySubmissionFailure({
       status: 429,

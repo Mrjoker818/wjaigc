@@ -71,3 +71,11 @@ The deployed fix is now accepted. Google Chrome submitted one real Pear `gpt-ima
 Runtime identity is also closed for this acceptance run. The process on port 5000 was PID 3573, cwd `/workspace/projects`, command `next-server (v16.2.10)`, build ID `M_Yl150aYcK3uKYM_mbG_`, and worktree commit `d531ce65c1c3cb1dddaf9922696f1d11fe9c3452`. That Coze-only launcher commit has GitHub `main@32139c528f4c71284b4416739b4d5bbcf95874f2` as its direct parent; its only delta loads `.env` in `scripts/coze-start.sh`. The tested business source is therefore independently tied to GitHub main without claiming that the Coze launcher commit itself exists on GitHub.
 
 Stage 1 remains **Not passed**. The remaining gates are a timeout-specific deployed proof and the `core-v2 -> legacy` rollback rehearsal. BUG-052 and exact runtime identity are no longer blockers.
+
+## 2026-08-10 BUG-054 timeout checkpoint
+
+The second timeout probe used a Coze-local delayed provider and therefore reached the application boundary that the first external probe could not reach. Task `async-1786358975492-0-mq23bl` exceeded the intended 10-minute deadline, remained `processing/pending` after 666 seconds, and held 280 credits. Manual cancellation refunded once and restored the starting balance; it does not count as timeout acceptance.
+
+The root cause is the absence of a durable absolute deadline across recovery attempts. The local candidate adds a 10-minute deadline derived from the original task `createdAt` before retry backoff and lease acquisition, then aborts and settles through the existing conditional terminal/refund path. Focused and full local gates pass.
+
+Stage 1 remains **Not passed**. The next action is to deploy this exact candidate and prove automatic `timeout/refunded`, no late completion, and one-time refund. Only then may Task 8 proceed to the `core-v2 -> legacy` rollback rehearsal; Stage 2 remains prohibited.
