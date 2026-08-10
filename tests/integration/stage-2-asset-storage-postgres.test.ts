@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+import { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -70,6 +72,8 @@ interface AssetServiceModule {
 
 const databaseUrl = process.env.POSTGRES_TEST_DATABASE_URL?.trim();
 const postgresIt = databaseUrl ? it : it.skip;
+const migrationsDirectory = resolve(process.cwd(), 'migrations');
+const lineageMigration = '20260811_wj_stable_s2_transfer_lineage_invariants.sql';
 
 if (!databaseUrl) {
   console.warn(
@@ -84,6 +88,11 @@ function migrate(isolatedDatabaseUrl: string): void {
     env: { ...process.env, DATABASE_URL: isolatedDatabaseUrl, PGDATABASE_URL: isolatedDatabaseUrl },
   });
   expect(result.status, result.stderr || result.stdout).toBe(0);
+}
+
+async function applyMigration(query: QueryFn, migration: string): Promise<void> {
+  const sql = await readFile(resolve(migrationsDirectory, migration), 'utf8');
+  await query(sql);
 }
 
 async function loadService(): Promise<AssetServiceModule> {
@@ -120,8 +129,56 @@ function errorCode(result: PromiseSettledResult<unknown>): unknown {
     : undefined;
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+async function waitForBlockedAssetLock(query: QueryFn, blockerPid: number): Promise<number> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const blocked = await query<{ pid: number }>(
+      `SELECT activity.pid
+       FROM pg_stat_activity activity
+       WHERE activity.datname = current_database()
+         AND activity.pid <> pg_backend_pid()
+         AND activity.wait_event_type = 'Lock'
+         AND activity.query LIKE '%FROM wujie_assets%'
+         AND activity.query LIKE '%FOR UPDATE%'
+         AND $1 = ANY(pg_blocking_pids(activity.pid))
+       LIMIT 1`,
+      [blockerPid],
+    );
+    const blockedPid = blocked.rows[0]?.pid;
+    if (blockedPid) return blockedPid;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+  const diagnostics = await query<{
+    blockers: number[];
+    pid: number;
+    query: string;
+    wait_event: string | null;
+    wait_event_type: string | null;
+  }>(
+    `SELECT activity.pid, activity.wait_event_type, activity.wait_event, activity.query,
+            pg_blocking_pids(activity.pid) AS blockers
+     FROM pg_stat_activity activity
+     WHERE activity.datname = current_database()
+       AND activity.pid <> pg_backend_pid()
+     ORDER BY activity.pid`,
+  );
+  throw new Error(
+    `No asset-lock waiter observed for blocker PID ${blockerPid}: ${JSON.stringify(diagnostics.rows)}`,
+  );
+}
+
+async function observeBlockedAssetLock(
+  isolatedDatabaseUrl: string,
+  blockerPid: number,
+): Promise<number> {
+  const observer = new Client({ connectionString: isolatedDatabaseUrl });
+  await observer.connect();
+  try {
+    const observerQuery: QueryFn = (text, values) => observer.query(text, values);
+    return await waitForBlockedAssetLock(observerQuery, blockerPid);
+  } finally {
+    await observer.end();
+  }
 }
 
 describe('Stage 2 asset storage on real PostgreSQL', () => {
@@ -129,22 +186,25 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
     await withIsolatedPostgres('stage-2-transfer-index', async ({ databaseUrl: isolatedDatabaseUrl, query }) => {
       migrate(isolatedDatabaseUrl);
 
-      const columns = await query<{ column_name: string }>(
-        `SELECT column_name
-         FROM information_schema.columns
-         WHERE table_schema = current_schema()
-           AND table_name = 'wujie_workspace_placements'
-           AND column_name IN ('idempotency_key', 'request_digest', 'source_version_id')`,
+      const columns = await query<{ column_name: string; attnotnull: boolean }>(
+        `SELECT attribute.attname::text AS column_name, attribute.attnotnull
+         FROM pg_attribute attribute
+         JOIN pg_class relation ON relation.oid = attribute.attrelid
+         JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+         WHERE namespace.nspname = current_schema()
+           AND relation.relname = 'wujie_workspace_placements'
+           AND attribute.attname IN ('idempotency_key', 'request_digest', 'source_version_id')`,
       );
-      expect(columns.rows.map((row) => row.column_name).sort()).toEqual([
-        'idempotency_key',
-        'request_digest',
-        'source_version_id',
+      expect(columns.rows.sort((left, right) => left.column_name.localeCompare(right.column_name))).toEqual([
+        { column_name: 'idempotency_key', attnotnull: false },
+        { column_name: 'request_digest', attnotnull: false },
+        { column_name: 'source_version_id', attnotnull: false },
       ]);
 
-      const index = await query<{ columns: string[]; predicate: string }>(
+      const index = await query<{ columns: string[]; predicate: string; indisunique: boolean }>(
         `SELECT array_agg(attribute.attname::text ORDER BY key.ordinality) AS columns,
-                pg_get_expr(index.indpred, index.indrelid) AS predicate
+                pg_get_expr(index.indpred, index.indrelid) AS predicate,
+                index.indisunique
          FROM pg_class index_class
          JOIN pg_namespace namespace ON namespace.oid = index_class.relnamespace
          JOIN pg_index index ON index.indexrelid = index_class.oid
@@ -153,9 +213,10 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
            ON attribute.attrelid = index.indrelid AND attribute.attnum = key.attnum
          WHERE namespace.nspname = current_schema()
            AND index_class.relname = 'wujie_workspace_placements_transfer_source_idempotency_unique'
-         GROUP BY index.indpred, index.indrelid`,
+         GROUP BY index.indpred, index.indrelid, index.indisunique`,
       );
       expect(index.rows).toHaveLength(1);
+      expect(index.rows[0]?.indisunique).toBe(true);
       expect(index.rows[0]?.columns).toEqual([
         'owner_id',
         'source_version_id',
@@ -166,7 +227,163 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
         'idempotency_key',
       ]);
       expect(index.rows[0]?.predicate).toContain('idempotency_key IS NOT NULL');
-      expect(index.rows[0]?.predicate).toContain('source_version_id IS NOT NULL');
+      expect(index.rows[0]?.predicate).not.toContain('source_version_id IS NOT NULL');
+
+      const supersededIndex = await query<{ count: string }>(
+        `SELECT count(*)::text AS count
+         FROM pg_class index_class
+         JOIN pg_namespace namespace ON namespace.oid = index_class.relnamespace
+         WHERE namespace.nspname = current_schema()
+           AND index_class.relname = 'wujie_workspace_placements_transfer_idempotency_unique'`,
+      );
+      expect(supersededIndex.rows).toEqual([{ count: '0' }]);
+    });
+  });
+
+  postgresIt('upgrades old transfer rows and enforces conditional owner-consistent lineage', async () => {
+    await withIsolatedPostgres('stage-2-transfer-lineage-upgrade', async ({ query }) => {
+      await applyMigration(query, '20260810_wj_stable_s2_assets.sql');
+      await applyMigration(query, '20260810_wj_stable_s2_workspace_entity_pairs.sql');
+      await applyMigration(query, '20260811_wj_stable_s2_asset_transfer_idempotency.sql');
+
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const versionId = randomUUID();
+      const oldPlacementId = randomUUID();
+      await seedProject(query, ownerId, projectId);
+      await query(
+        'INSERT INTO wujie_assets(id, owner_id, project_id, kind) VALUES ($1, $2, $3, $4)',
+        [assetId, ownerId, projectId, 'image'],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(id, asset_id, owner_id, project_id, file_url)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [versionId, assetId, ownerId, projectId, 'https://example.test/legacy-transfer.png'],
+      );
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
+           workspace_id, entity_type, entity_id, idempotency_key, request_digest
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)`,
+        [
+          oldPlacementId,
+          ownerId,
+          projectId,
+          assetId,
+          versionId,
+          'canvas',
+          'legacy-canvas',
+          'canvas-image',
+          'legacy-image',
+          'legacy-transfer-key',
+        ],
+      );
+      await applyMigration(query, '20260811_wj_stable_s2_cross_project_transfer.sql');
+      await query(
+        'UPDATE wujie_workspace_placements SET source_version_id = NULL WHERE id = $1',
+        [oldPlacementId],
+      );
+
+      await applyMigration(query, lineageMigration);
+
+      const backfilled = await query<{ source_version_id: string; request_digest: string }>(
+        'SELECT source_version_id, request_digest FROM wujie_workspace_placements WHERE id = $1',
+        [oldPlacementId],
+      );
+      expect(backfilled.rows[0]?.source_version_id).toBe(versionId);
+      expect(backfilled.rows[0]?.request_digest).toBe(`legacy-transfer:${oldPlacementId}`);
+
+      const lineageCheck = await query<{ definition: string }>(
+        `SELECT pg_get_constraintdef(constraint_row.oid) AS definition
+         FROM pg_constraint constraint_row
+         JOIN pg_class relation ON relation.oid = constraint_row.conrelid
+         JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+         WHERE namespace.nspname = current_schema()
+           AND constraint_row.conname = 'wujie_workspace_placements_transfer_lineage_check'`,
+      );
+      expect(lineageCheck.rows).toHaveLength(1);
+      expect(lineageCheck.rows[0]?.definition).toContain('idempotency_key IS NULL');
+      expect(lineageCheck.rows[0]?.definition).toContain('source_version_id IS NOT NULL');
+      expect(lineageCheck.rows[0]?.definition).toContain('request_digest IS NOT NULL');
+
+      const lineageForeignKey = await query<{
+        local_columns: string[];
+        referenced_columns: string[];
+      }>(
+        `SELECT
+           ARRAY(
+             SELECT attribute.attname::text
+             FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key(attnum, ordinality)
+             JOIN pg_attribute attribute
+               ON attribute.attrelid = constraint_row.conrelid AND attribute.attnum = key.attnum
+             ORDER BY key.ordinality
+           ) AS local_columns,
+           ARRAY(
+             SELECT attribute.attname::text
+             FROM unnest(constraint_row.confkey) WITH ORDINALITY AS key(attnum, ordinality)
+             JOIN pg_attribute attribute
+               ON attribute.attrelid = constraint_row.confrelid AND attribute.attnum = key.attnum
+             ORDER BY key.ordinality
+           ) AS referenced_columns
+         FROM pg_constraint constraint_row
+         JOIN pg_class relation ON relation.oid = constraint_row.conrelid
+         JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+         WHERE namespace.nspname = current_schema()
+           AND constraint_row.conname = 'wujie_workspace_placements_source_version_owner_fk'
+           AND constraint_row.contype = 'f'`,
+      );
+      expect(lineageForeignKey.rows).toEqual([{
+        local_columns: ['source_version_id', 'owner_id'],
+        referenced_columns: ['id', 'owner_id'],
+      }]);
+
+      await expect(query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
+           workspace_id, entity_type, entity_id
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', $6, 'canvas-image', $7)`,
+        [randomUUID(), ownerId, projectId, assetId, versionId, 'ordinary-canvas', 'ordinary-image'],
+      )).resolves.toBeDefined();
+      await expect(query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
+           workspace_id, entity_type, entity_id, idempotency_key, request_digest
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', $6, 'canvas-image', $7, $8, $9)`,
+        [randomUUID(), ownerId, projectId, assetId, versionId, 'missing-source', 'missing-source', 'key-a', 'digest-a'],
+      )).rejects.toMatchObject({ code: '23514' });
+      await expect(query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, source_version_id,
+           workspace_kind, workspace_id, entity_type, entity_id, idempotency_key
+         ) VALUES ($1, $2, $3, $4, $5, $5, 'canvas', $6, 'canvas-image', $7, $8)`,
+        [randomUUID(), ownerId, projectId, assetId, versionId, 'missing-digest', 'missing-digest', 'key-b'],
+      )).rejects.toMatchObject({ code: '23514' });
+
+      const foreignOwnerId = randomUUID();
+      const foreignProjectId = randomUUID();
+      const foreignAssetId = randomUUID();
+      const foreignVersionId = randomUUID();
+      await seedProject(query, foreignOwnerId, foreignProjectId);
+      await query(
+        'INSERT INTO wujie_assets(id, owner_id, project_id, kind) VALUES ($1, $2, $3, $4)',
+        [foreignAssetId, foreignOwnerId, foreignProjectId, 'image'],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(id, asset_id, owner_id, project_id, file_url)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [foreignVersionId, foreignAssetId, foreignOwnerId, foreignProjectId, 'https://example.test/foreign-lineage.png'],
+      );
+      await expect(query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, source_version_id,
+           workspace_kind, workspace_id, entity_type, entity_id, idempotency_key, request_digest
+         ) VALUES ($1, $2, $3, $4, $5, $6, 'canvas', $7, 'canvas-image', $8, $9, $10)`,
+        [
+          randomUUID(), ownerId, projectId, assetId, versionId, foreignVersionId,
+          'foreign-source-owner', 'foreign-source-owner', 'key-c', 'digest-c',
+        ],
+      )).rejects.toMatchObject({ code: '23503' });
     });
   });
 
@@ -324,6 +541,21 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
       });
       expect(physicalGraph.rows[0]?.target_version_id).not.toBe(source.version.id);
       expect(physicalGraph.rows[0]?.target_asset_id).not.toBe(source.asset.id);
+      const targetAssets = await query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM wujie_assets WHERE owner_id = $1 AND project_id = $2',
+        [actorUserId, targetProjectId],
+      );
+      const targetVersions = await query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM wujie_asset_versions WHERE owner_id = $1 AND project_id = $2',
+        [actorUserId, targetProjectId],
+      );
+      const targetPlacements = await query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM wujie_workspace_placements WHERE owner_id = $1 AND project_id = $2',
+        [actorUserId, targetProjectId],
+      );
+      expect(targetAssets.rows).toEqual([{ count: '1' }]);
+      expect(targetVersions.rows).toEqual([{ count: '1' }]);
+      expect(targetPlacements.rows).toEqual([{ count: '1' }]);
       const sourceGraph = await query<{ asset_count: string; version_count: string }>(
         `SELECT
            (SELECT count(*) FROM wujie_assets WHERE id = $1 AND project_id = $2)::text AS asset_count,
@@ -409,12 +641,6 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
       });
       await query('BEGIN');
       await query('SELECT id FROM wujie_assets WHERE id = $1 FOR UPDATE', [createSource.asset.id]);
-      let createSettled = false;
-      const trashForCreate = service.trashPlacement({
-        actorUserId,
-        projectId,
-        placementId: finalPlacement.placement.id,
-      });
       const concurrentCreate = service.createWorkspacePlacement({
         actorUserId,
         projectId,
@@ -423,12 +649,20 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
         workspaceId: 'canvas-create-race',
         entityType: 'canvas-image',
         entityId: 'image-new-create-race',
-      }).finally(() => { createSettled = true; });
-      await delay(75);
-      const createWaitedForLifecycleLock = !createSettled;
+      });
+      const createBlocker = await query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+      const blockedCreatePid = await observeBlockedAssetLock(
+        isolatedDatabaseUrl,
+        createBlocker.rows[0]?.pid ?? 0,
+      );
+      expect(blockedCreatePid).toBeGreaterThan(0);
+      const trashForCreate = service.trashPlacement({
+        actorUserId,
+        projectId,
+        placementId: finalPlacement.placement.id,
+      });
       await query('COMMIT');
       await Promise.all([trashForCreate, concurrentCreate]);
-      expect(createWaitedForLifecycleLock).toBe(true);
 
       const createInvariant = await query<{ status: string; active_count: string }>(
         `SELECT asset.status,
@@ -453,12 +687,6 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
       });
       await query('BEGIN');
       await query('SELECT id FROM wujie_assets WHERE id = $1 FOR UPDATE', [sendSource.asset.id]);
-      let sendSettled = false;
-      const trashForSend = service.trashPlacement({
-        actorUserId,
-        projectId,
-        placementId: finalSendPlacement.placement.id,
-      });
       const concurrentSend = service.sendVersionToWorkspace({
         actorUserId,
         sourceVersionId: sendSource.version.id,
@@ -468,12 +696,20 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
         entityId: 'image-new-send-race',
         idempotencyKey: 'send-race-key',
         requestDigest: 'send-race-digest',
-      }).finally(() => { sendSettled = true; });
-      await delay(75);
-      const sendWaitedForLifecycleLock = !sendSettled;
+      });
+      const sendBlocker = await query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+      const blockedSendPid = await observeBlockedAssetLock(
+        isolatedDatabaseUrl,
+        sendBlocker.rows[0]?.pid ?? 0,
+      );
+      expect(blockedSendPid).toBeGreaterThan(0);
+      const trashForSend = service.trashPlacement({
+        actorUserId,
+        projectId,
+        placementId: finalSendPlacement.placement.id,
+      });
       await query('COMMIT');
       await Promise.all([trashForSend, concurrentSend]);
-      expect(sendWaitedForLifecycleLock).toBe(true);
 
       const sendInvariant = await query<{ status: string; active_count: string }>(
         `SELECT asset.status,
@@ -486,7 +722,7 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
       );
       expect(sendInvariant.rows).toEqual([{ status: 'active', active_count: '1' }]);
     });
-  });
+  }, 15_000);
 
   postgresIt('maps sequential and concurrent restore collisions to ASSET_PLACEMENT_CONFLICT', async () => {
     await withIsolatedPostgres('stage-2-restore-conflict', async ({ databaseUrl: isolatedDatabaseUrl, query }) => {

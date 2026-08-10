@@ -200,3 +200,81 @@ Actual result: all three commands passed.
 - No legacy reader, rollout mode, product UI, canvas, node editor, Agent, Task 3+
   path, Obsidian file, or `.superpowers/sdd/progress.md` was modified. Full-suite
   and production-build verification remain outside this focused Task 2 repair run.
+
+## Review R2 Remediation - 2026-08-11
+
+### R2 RED Evidence
+
+Command:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/wujie_stage2_test?sslmode=disable'
+pnpm exec vitest run src/__tests__/lib/asset-service.test.ts tests/integration/stage-2-asset-storage-postgres.test.ts
+```
+
+The first draft RED run reported 3 failed / 11 passed out of 14. Two failures
+were the intended schema RED: the exact index still had the extra
+`source_version_id IS NOT NULL` predicate and the follow-up lineage migration did
+not exist. The third was a test-infrastructure timeout because the lock observer
+reused the connection holding the asset lock. Moving observation to an independent
+PostgreSQL client made the lifecycle test deterministically observe the blocked
+`wujie_assets ... FOR UPDATE` query and pass in isolation.
+
+The corrected, stable RED run reported 2 failed / 12 passed out of 14. Only the
+two intended R2-I1 failures remained: the superseded index/schema semantics were
+still installed, and
+`20260811_wj_stable_s2_transfer_lineage_invariants.sql` was absent.
+
+### R2 GREEN Evidence
+
+The same focused command passed 2 files and 14/14 tests: 7 unit tests and 7 real
+PostgreSQL integration tests. This preserves all previous 13 tests and adds one
+migration-upgrade test.
+
+Additional verification:
+
+```powershell
+pnpm ts-check
+pnpm exec eslint src/lib/asset-core/storage.ts src/lib/asset-core/service.ts src/__tests__/lib/asset-service.test.ts tests/integration/stage-2-asset-storage-postgres.test.ts
+git diff --check -- migrations/20260811_wj_stable_s2_transfer_lineage_invariants.sql tests/integration/stage-2-asset-storage-postgres.test.ts .superpowers/sdd/task-2-report.md
+```
+
+Actual result: all commands passed.
+
+### R2 Findings Closed
+
+- **R2-I1:** the new additive migration backfills transfer-shaped rows missing
+  source lineage to their existing target version and assigns a deterministic
+  `legacy-transfer:<placement-id>` digest only when an old transfer digest is
+  absent. A validated conditional CHECK requires every non-null idempotency key
+  to have both `source_version_id` and `request_digest`, while ordinary placements
+  retain nullable transfer fields. A validated composite FK now binds
+  `(source_version_id, owner_id)` to `(version.id, version.owner_id)`. The old
+  single-column FK and both superseded transfer indexes are removed; the only
+  transfer-idempotency index is unique on the exact ordered brief scope with only
+  `idempotency_key IS NOT NULL` as its predicate.
+- **R2-I2:** PostgreSQL tests inspect conditional nullability behavior, CHECK and
+  composite FK definitions, legacy-row backfill, old-index absence, `indisunique`,
+  exact ordered index columns, and the exact predicate. The 20-call cross-project
+  test independently counts target `wujie_assets`, `wujie_asset_versions`, and
+  `wujie_workspace_placements` and requires each count to equal one. Lifecycle
+  coverage uses a separate observer connection plus `pg_blocking_pids` and
+  `pg_stat_activity` to prove create and send wait on the held asset lock before
+  release, then verifies the final active-placement/active-asset invariant.
+
+### R2 Files And Self-Review
+
+- Added `migrations/20260811_wj_stable_s2_transfer_lineage_invariants.sql`.
+- Modified `tests/integration/stage-2-asset-storage-postgres.test.ts`.
+- Appended `.superpowers/sdd/task-2-report.md`.
+- No previously applied migration bytes changed, and dropping the obsolete index
+  deletes no business rows. Existing owner-consistent rows are validated in place.
+- A pre-existing non-null lineage value pointing to another owner causes migration
+  validation to fail rather than being silently rewritten. Missing legacy lineage
+  and digest values are backfilled before validation.
+- A synthetic legacy digest intentionally conflicts with a later request carrying
+  a different digest; this is fail-closed and avoids treating unverifiable legacy
+  input as an idempotent replay.
+- Review reports/packages remain untracked and excluded. Stable, main, Obsidian,
+  progress, product UI, Task 3+, and all previously closed service behavior are
+  unchanged.
