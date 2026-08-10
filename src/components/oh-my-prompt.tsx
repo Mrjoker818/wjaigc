@@ -613,9 +613,7 @@ export default function OhMyPrompt({
   // panel header, which made dragging appear broken. Window-level pointermove /
   // pointerup listeners work in every modern browser (mouse / touch / pen).
   const handleDragStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
+    if (e.button !== 0 || dragRef.current.dragging) return;
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
@@ -762,8 +760,8 @@ export default function OhMyPrompt({
   if (floating && typeof document !== 'undefined') {
     return createPortal(
       <div
-        className="fixed w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[9999]"
-        style={{ left: position.x, top: position.y }}
+        className="fixed w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[9999] select-none"
+        style={{ left: position.x, top: position.y, pointerEvents: 'auto' }}
       >
         {panel}
       </div>,
