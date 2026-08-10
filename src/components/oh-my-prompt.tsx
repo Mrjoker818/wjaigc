@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Lightbulb, X, Upload, Wand2, Eye, Sparkles, Loader2, Copy, Check, Send, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp, Zap, GripHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -583,7 +584,7 @@ export default function OhMyPrompt({
     return { x: 0, y: 0 };
   });
   const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef({ startX: 0, startY: 0, offsetX: 0, offsetY: 0, dragging: false });
+  const dragRef = useRef({ startX: 0, startY: 0, originX: 0, originY: 0, dragging: false });
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -606,27 +607,53 @@ export default function OhMyPrompt({
     return () => clearTimeout(timer);
   }, [isOpen]);
 
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
+  // Pointer-event drag with window-level listeners.
+  // NOTE: we intentionally do NOT use setPointerCapture here — in the previous
+  // implementation captured pointer events were not reliably delivered to the
+  // panel header, which made dragging appear broken. Window-level pointermove /
+  // pointerup listeners work in every modern browser (mouse / touch / pen).
+  const handleDragStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     e.preventDefault();
-    const startX = e.clientX - position.x;
-    const startY = e.clientY - position.y;
-    dragRef.current = { startX, startY, offsetX: position.x, offsetY: position.y, dragging: true };
+    e.stopPropagation();
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: position.x,
+      originY: position.y,
+      dragging: true,
+    };
     setIsDragging(true);
   }, [position]);
 
-  const handleDragMove = useCallback((e: React.MouseEvent) => {
+  const handleWindowDragMove = useCallback((e: PointerEvent) => {
     if (!dragRef.current.dragging) return;
     e.preventDefault();
+    const panelWidth = panelRef.current?.offsetWidth ?? 320;
+    const panelHeight = panelRef.current?.offsetHeight ?? 520;
+    const nextX = dragRef.current.originX + e.clientX - dragRef.current.startX;
+    const nextY = dragRef.current.originY + e.clientY - dragRef.current.startY;
     setPosition({
-      x: Math.max(0, e.clientX - dragRef.current.startX),
-      y: Math.max(0, e.clientY - dragRef.current.startY),
+      x: Math.min(Math.max(0, nextX), Math.max(0, window.innerWidth - panelWidth)),
+      y: Math.min(Math.max(0, nextY), Math.max(0, window.innerHeight - panelHeight)),
     });
   }, []);
 
-  const handleDragEnd = useCallback(() => {
+  const handleWindowDragEnd = useCallback(() => {
     dragRef.current.dragging = false;
     setIsDragging(false);
   }, []);
+
+  useEffect(() => {
+    window.addEventListener('pointermove', handleWindowDragMove);
+    window.addEventListener('pointerup', handleWindowDragEnd);
+    window.addEventListener('pointercancel', handleWindowDragEnd);
+    return () => {
+      window.removeEventListener('pointermove', handleWindowDragMove);
+      window.removeEventListener('pointerup', handleWindowDragEnd);
+      window.removeEventListener('pointercancel', handleWindowDragEnd);
+    };
+  }, [handleWindowDragMove, handleWindowDragEnd]);
 
   useEffect(() => {
     saveSettings({ visionDefaultFormat: settings.visionDefaultFormat });
@@ -651,27 +678,41 @@ export default function OhMyPrompt({
 
   const isGold = themeStyle === 'gold';
   const panelClass = floating
-    ? 'fixed w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[200]'
+    ? 'fixed w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[9999]'
     : 'fixed inset-0 z-50 bg-black/40 backdrop-blur-sm';
   const innerClass = floating
     ? 'w-full flex flex-col bg-[#1a1a1a]'
     : 'fixed w-full max-w-xl bg-background rounded-2xl shadow-2xl border border-border overflow-hidden flex flex-col';
 
-  return (
-    <div className={panelClass} onMouseMove={handleDragMove} onMouseUp={handleDragEnd} onMouseLeave={handleDragEnd}
-      style={floating ? { left: position.x, top: position.y } : undefined}>
+  // Floating mode: render via portal into <body> so the panel escapes the canvas
+  // stacking context (no z-index / transform / overflow interference) and is
+  // always interactive and on top of everything else.
+  const panel = (
+    <>
       <div ref={panelRef} className={innerClass}
         style={floating
           ? { height: '520px', cursor: isDragging ? 'grabbing' : 'default' }
           : { height: '720px', maxHeight: '90vh', left: position.x, top: position.y, cursor: isDragging ? 'grabbing' : 'default' }
         }>
         {/* Header */}
-        <div onMouseDown={handleDragStart} className={`flex items-center justify-between px-4 py-3 border-b cursor-grab active:cursor-grabbing select-none ${floating ? 'border-[#333]' : 'border-border bg-gradient-to-r from-primary/5 to-transparent'}`}>
-          <div className="flex items-center gap-2">
+        <div
+          onPointerDown={handleDragStart}
+          className={`flex touch-none items-center justify-between px-4 py-3 border-b cursor-grab active:cursor-grabbing select-none ${floating ? 'border-[#333]' : 'border-border bg-gradient-to-r from-primary/5 to-transparent'}`}
+        >
+          <div className="flex items-center gap-2 pointer-events-none">
             <Lightbulb className={`w-5 h-5 ${floating ? 'text-[#d4af37]' : 'text-primary'}`} />
             <h2 className={`text-base font-semibold ${floating ? 'text-white' : 'text-foreground'}`}>灵感工坊</h2>
           </div>
-          <button onClick={onClose} className={floating ? 'text-muted-foreground hover:text-white' : 'text-muted-foreground hover:text-foreground'}>
+          <button
+            type="button"
+            aria-label="关闭灵感工坊"
+            onPointerDown={(event: React.PointerEvent<HTMLButtonElement>) => event.stopPropagation()}
+            onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
+              event.stopPropagation();
+              onClose();
+            }}
+            className={`flex h-8 w-8 items-center justify-center rounded-md ${floating ? 'text-muted-foreground hover:bg-white/10 hover:text-white' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -715,6 +756,27 @@ export default function OhMyPrompt({
           )}
         </div>
       </div>
+    </>
+  );
+
+  if (floating && typeof document !== 'undefined') {
+    return createPortal(
+      <div
+        className="fixed w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[9999]"
+        style={{ left: position.x, top: position.y }}
+      >
+        {panel}
+      </div>,
+      document.body
+    );
+  }
+
+  return (
+    <div
+      className={panelClass}
+      style={floating ? { left: position.x, top: position.y } : undefined}
+    >
+      {panel}
     </div>
   );
 }
