@@ -1,0 +1,52 @@
+{
+  "evidenceId": "BUG-051-CLOUD-20260810",
+  "capturedAt": "2026-08-10T06:15:42+08:00",
+  "environment": {
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "candidateCommit": "aa0b1cf2520191e1ac9658811eebd396c5dbd484",
+    "runtimeCommit": null,
+    "runtimeCommitStatus": "unverified",
+    "browser": "Google Chrome",
+    "authenticatedRole": "admin"
+  },
+  "testCreditPreparation": {
+    "balanceBefore": 40,
+    "rechargeAmount": 100,
+    "balanceAfter": 140,
+    "description": "BUG-051 cloud verification test credit"
+  },
+  "request": {
+    "endpoint": "/api/generate",
+    "providerId": "api_1780630178347_rjqlmam",
+    "modelId": "gpt-image-2",
+    "projectId": "project_1786292967408_hvsznuh5k",
+    "outputCount": 1,
+    "submitOnly": false
+  },
+  "result": {
+    "success": true,
+    "durationMs": 36617,
+    "taskId": "direct-1786341342235-0-8pta21",
+    "directImageCount": 1,
+    "imageCount": 1,
+    "taskStatus": "completed"
+  },
+  "billingReconciliation": {
+    "balanceBefore": 140,
+    "balanceAfter": 80,
+    "balanceDelta": -60,
+    "transactionType": "consume",
+    "transactionAmount": -60,
+    "transactionBalanceAfter": 80,
+    "creditStatus": "charged",
+    "creditCost": 60,
+    "billingStatus": "charged",
+    "billingCost": 60,
+    "reconciled": true
+  },
+  "decision": "pass",
+  "limitations": [
+    "Coze did not expose the exact runtime Git commit, so runtimeCommit remains unverified.",
+    "This evidence closes BUG-051 only; it does not close the remaining Stage 1 browser, cancellation, rollback, or deployment-identity gates."
+  ]
+}

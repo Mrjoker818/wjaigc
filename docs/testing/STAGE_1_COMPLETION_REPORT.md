@@ -5,10 +5,10 @@
 | Field | Value |
 |---|---|
 | Stage | `WJ-STABLE-001 / S1` |
-| Latest formal main | `9ff09fb08f0e97134f0112617794cde9cde3f545` |
-| Candidate branch | `codex/wj-stable-s1` |
-| Candidate checkpoint | `2682edbe11cbf75e2040d6899c028f897599a17e` plus the current PostgreSQL fixes and evidence |
-| Test time | 2026-08-09, Asia/Shanghai |
+| Latest formal main | `aa0b1cf2520191e1ac9658811eebd396c5dbd484` |
+| Candidate branch | `codex/wj-stable-s1-recovery` |
+| Candidate checkpoint | `aa0b1cf2520191e1ac9658811eebd396c5dbd484` plus the current cloud evidence documentation |
+| Test time | 2026-08-10, Asia/Shanghai |
 | Current verdict | **Not passed** |
 
 ## Completed in Task 8
@@ -30,14 +30,15 @@
 | PostgreSQL-focused test command | PASS | 3 files / 9 authoritative tests passed against isolated PostgreSQL 18; 0 skipped |
 | Doctor | PASS FOR LOCAL DATABASE GATE | 22 pass, 12 warnings, 0 failures, 0 blocked with `POSTGRES_TEST_DATABASE_URL` supplied |
 | Stage 1 Playwright compilation/discovery | PASS | Four browser projects list the real task/billing test |
-| Real paid provider run | NOT EXECUTED | No deployment URL/SHA/account/model secrets were supplied to this local run |
+| Real paid provider run | PARTIAL PASS | Coze Pear `gpt-image-2` direct generation and progressive `n=1/2/3/4` task/billing acceptance passed. Firefox/WebKit and browser-visible canvas persistence/download remain open. |
+| Direct credit reconciliation | PASS | BUG-051 task `direct-1786341342235-0-8pta21`: one image, balance/transaction -60, persisted `creditCost=60`, `billing.cost=60`, charged status. |
 
 ## Open release blockers
 
-1. Full repository lint still has the inherited 4 errors / 960 warnings recorded at the Task 7 checkpoint.
-2. Full repository tests still have the inherited 10 failures recorded at the Task 7 checkpoint.
-3. The exact deployed commit must pass the paid `n=1/2/3/4` run in Chromium, Firefox, and WebKit with request IDs, task IDs, provider route, canvas results, and ledger evidence.
-4. Cancellation, timeout, late provider completion, one-time refund, and `core-v2 -> legacy` rollback still require deployed evidence.
+1. The exact Coze runtime commit is still not exposed; behavior cannot substitute for deployment identity.
+2. Firefox and WebKit paid-provider evidence remains open, and Chrome still needs browser-visible canvas hydration, save-refresh recovery, and result download proof.
+3. Concurrent server/browser wakeup, cancellation, timeout, late provider completion, and one-time refund still require deployed evidence.
+4. The `core-v2 -> legacy` rollback rehearsal still requires deployed proof without data loss, duplicate task creation, or duplicate billing.
 
 ## Completion rule
 
@@ -57,4 +58,4 @@ The candidate after `2682edbe11cbf75e2040d6899c028f897599a17e` was exercised aga
 | Focused task/billing regression | PASS | 4 files / 77 tests |
 | TypeScript / changed-file ESLint | PASS | TypeScript passed; ESLint 0 errors |
 
-The PostgreSQL item is removed from the open-blocker list. The current verdict remains **Not passed** because exact-deployment paid three-browser evidence, real provider ledger/cancellation/timeout proof, rollback rehearsal, and inherited repository-wide blockers are still open.
+The PostgreSQL item is removed from the open-blocker list. Full Vitest and TypeScript pass; ESLint exits with 0 errors and 960 historical warnings; the 112-page production build and 38/38 protected-feature gate pass. BUG-051 cloud credit reconciliation also passes. The current verdict remains **Not passed** because exact runtime identity, complete paid three-browser canvas evidence, deployed cancellation/timeout/late-result proof, and rollback rehearsal remain open.
