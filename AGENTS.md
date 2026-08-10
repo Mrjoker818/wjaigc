@@ -826,6 +826,19 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
+### v4.2.5
+
+**P0: 智能对话 404 修复 — simple-chat 未使用 /v1 重试**
+
+- **根因**: `src/app/api/simple-chat/chat/route.ts` 使用 `fetchWithTimeout` 直接请求 `${baseUrl}/chat/completions`，未使用 `fetchWithV1Retry` 的 `/v1` 自动重试机制。当管理员配置的 API 提供商 `baseUrl` 不含 `/v1` 后缀时（如 `https://api.example.com`），请求 URL 为 `https://api.example.com/chat/completions`，上游 nginx 返回 404。主聊天路由 `/api/chat` 已使用 `fetchWithV1Retry`，但 simple-chat 路由遗漏
+- **修复**: 将 `fetchWithTimeout` 替换为 `fetchWithV1Retry(baseUrl, '/chat/completions', ...)`，首次请求失败后自动重试 `baseUrl/v1/chat/completions`，与主聊天路由行为一致（涉及 `src/app/api/simple-chat/chat/route.ts`）
+
+**P0: 用户管理页面积分/项目数显示为0 — 字段映射丢失**
+
+- **根因**: `dashboard-view.tsx` 将 `User[]` 映射为 `AdminTabsUser[]` 时遗漏了 `credits`、`project_count`、`last_login` 三个字段，API 返回的数据在传递给 `AdminTabs` 组件前被丢弃
+- **修复**: User 接口新增三个可选字段；映射逻辑补上三个字段；AdminUser 的 `last_login` 类型对齐为 `string | number`（涉及 `src/lib/user-types.ts`、`src/components/dashboard/dashboard-view.tsx`、`src/components/dashboard/admin-tabs.tsx`）
+- **API 修复**: `/api/admin/users` GET 路由中 `dbGetUserData()` 返回的是 JSONB 已解析数据，但代码检查 `'data_value' in pd` 条件永远 false 导致 `project_count` 为0；新增 `last_login` 从审计日志取最后活动时间（涉及 `src/app/api/admin/users/route.ts`）
+
 ### v4.2.4
 
 **P0: 部署后登录失败修复 — auth_secret 轮换导致密码哈希失效**

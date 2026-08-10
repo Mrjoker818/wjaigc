@@ -3,7 +3,7 @@ import { findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
-import { fetchWithTimeout } from '@/lib/api-helpers';
+import { fetchWithV1Retry, API_TIMEOUTS } from '@/lib/api-helpers';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 
@@ -213,8 +213,6 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        const apiUrl = `${baseUrl}/chat/completions`;
-
         // 添加工具定义
         const tools: Record<string, unknown>[] = [
           {
@@ -241,21 +239,27 @@ export async function POST(request: NextRequest) {
           },
         ];
 
-        const fetchRes = await fetchWithTimeout(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
+        const fetchRes = await fetchWithV1Retry(
+          baseUrl,
+          '/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              messages: fullMessages,
+              stream: true,
+              tools,
+              tool_choice: 'auto',
+              ...chatControls.requestParams,
+            }),
           },
-          body: JSON.stringify({
-            model,
-            messages: fullMessages,
-            stream: true,
-            tools,
-            tool_choice: 'auto',
-            ...chatControls.requestParams,
-          }),
-        }, 'chat');
+          true,
+          API_TIMEOUTS.chat
+        );
 
         if (!fetchRes.ok) {
           const errText = await fetchRes.text().catch(() => '');
