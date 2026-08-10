@@ -146,10 +146,12 @@ describe('poll-task recovery lease contract', () => {
     const recoveryStart = source.indexOf('const recovery = buildRecoveredTaskContext');
     const deadline = source.indexOf('getRecoverySubmissionDeadline(', recoveryStart);
     const abort = source.indexOf("abortTaskExecution(recovery.taskId, 'timeout')", deadline);
-    const settlement = source.indexOf(
-      "terminateCloudTaskAndRefund(\n            recovery.taskId,\n            'timeout'",
-      abort,
+    const settlementMatch = source.slice(abort).match(
+      /terminateCloudTaskAndRefund\(\s*recovery\.taskId,\s*'timeout'/,
     );
+    const settlement = settlementMatch?.index === undefined
+      ? -1
+      : abort + settlementMatch.index;
     const backoff = source.indexOf('getTaskRecoveryBackoff(persistedTask)', recoveryStart);
 
     expect(deadline).toBeGreaterThan(recoveryStart);
