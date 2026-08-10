@@ -572,8 +572,16 @@ export default function OhMyPrompt({
   const [activeTab, setActiveTab] = useState<OmpActiveTab>(defaultActiveTab || initialTab);
   const settings = loadSettings();
 
-  // Drag state
-  const [position, setPosition] = useState({ x: 0, y: 0 });
+  // Drag state — initialize to viewport center to avoid flash at (0,0)
+  const [position, setPosition] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return {
+        x: Math.max(0, (window.innerWidth - 320) / 2),
+        y: Math.max(0, (window.innerHeight - 520) / 2),
+      };
+    }
+    return { x: 0, y: 0 };
+  });
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, offsetX: 0, offsetY: 0, dragging: false });
   const panelRef = useRef<HTMLDivElement>(null);
@@ -582,9 +590,9 @@ export default function OhMyPrompt({
     if (defaultActiveTab) setActiveTab(defaultActiveTab);
   }, [defaultActiveTab, isOpen]);
 
-  // Center the panel on mount
+  // Center the panel on mount (both floating and non-floating)
   useEffect(() => {
-    if (!isOpen || floating) return;
+    if (!isOpen) return;
     // Delay to ensure DOM is ready
     const timer = setTimeout(() => {
       if (panelRef.current) {
@@ -596,25 +604,24 @@ export default function OhMyPrompt({
       }
     }, 50);
     return () => clearTimeout(timer);
-  }, [isOpen, floating]);
+  }, [isOpen]);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
-    if (floating) return;
     e.preventDefault();
     const startX = e.clientX - position.x;
     const startY = e.clientY - position.y;
     dragRef.current = { startX, startY, offsetX: position.x, offsetY: position.y, dragging: true };
     setIsDragging(true);
-  }, [floating, position]);
+  }, [position]);
 
   const handleDragMove = useCallback((e: React.MouseEvent) => {
-    if (!dragRef.current.dragging || floating) return;
+    if (!dragRef.current.dragging) return;
     e.preventDefault();
     setPosition({
       x: Math.max(0, e.clientX - dragRef.current.startX),
       y: Math.max(0, e.clientY - dragRef.current.startY),
     });
-  }, [floating]);
+  }, []);
 
   const handleDragEnd = useCallback(() => {
     dragRef.current.dragging = false;
@@ -643,18 +650,19 @@ export default function OhMyPrompt({
   if (!isOpen) return null;
 
   const isGold = themeStyle === 'gold';
-  const panelClass = floating 
-    ? 'fixed right-2 bottom-16 w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[200]'
+  const panelClass = floating
+    ? 'fixed w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[200]'
     : 'fixed inset-0 z-50 bg-black/40 backdrop-blur-sm';
   const innerClass = floating
     ? 'w-full flex flex-col bg-[#1a1a1a]'
-    : 'w-full max-w-xl bg-background rounded-2xl shadow-2xl border border-border overflow-hidden flex flex-col';
+    : 'fixed w-full max-w-xl bg-background rounded-2xl shadow-2xl border border-border overflow-hidden flex flex-col';
 
   return (
-    <div className={panelClass} onMouseMove={handleDragMove} onMouseUp={handleDragEnd} onMouseLeave={handleDragEnd}>
-      <div ref={floating ? undefined : panelRef} className={`${floating ? '' : 'fixed'} ${innerClass}`} 
-        style={floating 
-          ? { height: '520px' } 
+    <div className={panelClass} onMouseMove={handleDragMove} onMouseUp={handleDragEnd} onMouseLeave={handleDragEnd}
+      style={floating ? { left: position.x, top: position.y } : undefined}>
+      <div ref={panelRef} className={innerClass}
+        style={floating
+          ? { height: '520px', cursor: isDragging ? 'grabbing' : 'default' }
           : { height: '720px', maxHeight: '90vh', left: position.x, top: position.y, cursor: isDragging ? 'grabbing' : 'default' }
         }>
         {/* Header */}
