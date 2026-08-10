@@ -453,7 +453,8 @@
 
 | Item | Status | Required proof |
 |---|---|---|
-| Server-owned first submission | FAILED ON `9392b50` AND `8bf0e20`; RECOVERY-BACKOFF FIX PENDING DEPLOYMENT | `9392b50` lacked signed-internal authentication. `8bf0e20` authenticated correctly but stopped after the route returned `recoveryPending` during the normal fresh-task backoff, leaving task `async-1786322172707-0-uzo191` at 0% with 120 credits pending. Deploy the bounded monitoring follow-up and require a real provider task ID plus stable terminal state without browser polling. |
+| Server-owned first submission | VERIFIED IN COZE RUNTIME; EXACT SHA UNVERIFIED | Stale task `async-1786322172707-0-uzo191` was cancelled/refunded once. Fresh task `async-1786328158112-0-c83jkr` completed with an image and `charged/60` without a client `/api/poll-task` call. Coze did not expose the exact pulled Git SHA, so runtime identity remains open. |
 | Concurrent server/browser wakeup | PENDING DEPLOYMENT | Capture the database lease and provider ledger proving one provider task and one charge per slot. |
 | Legacy zombie cleanup | VERIFIED IN CLOUD | Three synthetic tasks reached `cancelled/refunded`, each returned 60 credits, and repeated cancellation produced no second refund. |
-| Progressive `n=1/2/3/4` | PENDING DEPLOYMENT | Each slot appears as soon as its provider result completes and does not wait for the slowest sibling. |
+| Progressive `n=1/2/3/4` | TASK/BILLING VERIFIED; CANVAS UI PENDING | Unique `n=1/2/3/4` task slots all completed with images and independent charges. In `n=3`, two slots completed before the slowest. A browser-visible proof that each result appears on canvas, survives refresh, and downloads correctly is still required. |
+| Direct generation credit metadata | OPEN (BUG-051) | A synchronous direct task debited 60 but persisted `creditCost=0`; reconcile the direct-task record with the credit transaction and add a restart/refund regression. |

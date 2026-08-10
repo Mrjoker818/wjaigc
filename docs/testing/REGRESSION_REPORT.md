@@ -731,3 +731,18 @@ This follow-up is not a cloud pass. The new exact commit must be deployed before
 | Full local gates | PASS WITH DECLARED LIMITS | TypeScript passed; ESLint exited 0 with 960 historical warnings; full Vitest exited 0 with PostgreSQL environment skips declared; production build generated 112 pages. |
 
 This is not deployed acceptance. The paid `8bf0e20` task must first reach a stable cancelled/failed terminal state with exactly one refund, then the new exact commit must prove server-owned `n=1` completion before any larger paid batch is attempted.
+
+## 2026-08-10 Coze cloud generation acceptance
+
+| Check | Result | Evidence |
+|---|---|---|
+| Stale probe cleanup | PASS | `async-1786322172707-0-uzo191` reached `cancelled/refunded`; 120 credits returned and balance restored to 400. |
+| Durable `n=1` without browser poll | PASS | `async-1786328158112-0-c83jkr` returned in 1.016s and completed with one image, `charged/60`, with zero client `/api/poll-task` calls. |
+| Canvas `n=2` | PASS | Two unique slots returned in 941ms; both completed with images and independent 60-credit charges. |
+| Canvas `n=3` progressive completion | PASS | Three unique slots returned in 814ms. Slots 2 and 3 completed at 10:22:33 and 10:22:36 while slot 1 remained processing until 10:22:45. |
+| Canvas `n=4` | PASS | Four unique slots returned in 1.007s; all completed with images and independent 60-credit charges. |
+| Chrome admin task monitor | PASS | The real UI showed the `4/4`, `3/4`, `2/4`, and `1/4` rows as completed, attributed to PearAPI `gpt-image-2`, each `charged / 60`. |
+| Exact runtime Git SHA | UNVERIFIED | Coze displayed internal snapshot `bb27e1a` and a generic latest-main pull record, but did not print `7baa4f9`; behavior alone is not used as SHA proof. |
+| Direct-task credit metadata | FAIL | `direct-1786328089709-0-1c7c9r` debited 60 but persisted `creditCost=0` (BUG-051). |
+
+Machine-readable evidence: `docs/testing/evidence/stage-1-cloud-generation-2026-08-10.json`.

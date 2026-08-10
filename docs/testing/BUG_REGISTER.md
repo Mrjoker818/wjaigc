@@ -952,3 +952,21 @@ The isolated PostgreSQL blocker is closed locally: doctor verified the required 
 | Cloud evidence | On `9392b50`, paid task `async-1786318164491-0-etn2wk` remained at progress 0 with an unchanged timestamp and no real provider task ID when no browser poll was sent. It was cancelled immediately and refunded once. Three older synthetic zombie tasks were also cancelled; each produced exactly one 60-credit refund and a repeated cancellation produced no second refund. |
 | Additional cloud evidence | On `8bf0e20`, paid task `async-1786322172707-0-uzo191` remained `processing` at 0% from 08:36 through at least 09:07 CST without browser polling. The task used PearAPI `gpt-image-2`, retained `creditStatus=pending`, and reserved 120 credits. No additional paid slots were created after this deterministic failure. |
 | Status | Recovery-backoff follow-up fixed and fully verified locally; exact-deployment provider start, cleanup/refund of the `8bf0e20` probe, and progressive `n=1/2/3/4` acceptance remain open. |
+
+### 2026-08-10 cloud acceptance update
+
+The recovery-backoff behavior is now accepted in the Coze sandbox. Stale task `async-1786322172707-0-uzo191` transitioned once to `cancelled/refunded`, returned 120 credits, and restored the balance to 400. A fresh durable task `async-1786328158112-0-c83jkr` returned in 1.016 seconds and reached `completed/charged` with an image without any client `/api/poll-task` request. Canvas-shaped `n=2/3/4` submissions returned 2, 3, and 4 unique task IDs in 0.8-1.0 seconds; every slot completed with one image and one 60-credit charge. During `n=3`, slots 2 and 3 completed while slot 1 remained processing, proving progressive per-slot completion rather than whole-batch release.
+
+The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose the exact pulled Git SHA; exact runtime-commit identity remains an evidence gap rather than being inferred from behavior.
+
+### BUG-051: Synchronous direct generation persists zero credit cost after a real debit
+
+| Field | Detail |
+|---|---|
+| Severity | P2 |
+| Module | Direct image generation / admin cloud-task billing observability |
+| Reproduction | Submit one Pear `gpt-image-2` request without `submitOnly` or `generationChannel=canvas-direct`, then compare the user balance with `/api/admin/cloud-tasks`. |
+| Expected | The completed direct task records the same charged amount shown by the balance and credit transaction. |
+| Actual | Task `direct-1786328089709-0-1c7c9r` completed with an image and reduced the balance by 60, but the persisted task reports `creditStatus=charged` and `creditCost=0`. |
+| Risk | Administrator billing audit cannot reconcile the direct task with the real debit; restart-time compensation cannot rely on the persisted cost. |
+| Status | Open. Stable reproduction and cloud evidence captured; no business-code change made in this acceptance pass. |

@@ -627,3 +627,9 @@ The deployed internal-auth follow-up `8bf0e20` also failed its no-browser-poll a
 The kickoff now keeps driving the durable task through bounded recovery and processing responses until a terminal state. The exact failure sequence has RED/GREEN regression coverage, and all local TypeScript, lint error, Vitest, protected-feature, and production-build gates pass after the reviewed source file is added to the exact Stage 1 allowlist.
 
 **Release decision remains Not passed.** This repair has not yet been deployed. The stale paid task requires one-time cancellation/refund evidence, and a fresh `n=1` no-browser-poll probe must reach a provider-backed terminal state before `n=2/3/4` testing resumes.
+
+### 2026-08-10 Coze acceptance result
+
+The server-owned kickoff and progressive slot behavior now pass in the Coze sandbox. The stale 120-credit probe was cancelled and refunded once. A new durable `n=1` completed without browser polling, and canvas-shaped `n=2/3/4` requests returned unique per-slot task IDs quickly. All ten canvas slots completed with images and independent 60-credit charges; `n=3` provided direct evidence that faster slots completed before the slowest sibling.
+
+**Release decision remains Not passed.** The exact runtime Git SHA was not exposed by Coze, canvas hydration/save-refresh/download still need a browser-visible run, Firefox/WebKit paid evidence remains open, and BUG-051 shows a 60-credit direct debit persisted with `creditCost=0` in the admin task record.

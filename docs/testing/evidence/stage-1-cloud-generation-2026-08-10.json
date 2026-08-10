@@ -1,0 +1,84 @@
+{
+  "capturedAt": "2026-08-10T10:35:00+08:00",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "cozeProjectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+  "expectedGitCommit": "7baa4f971f7fe4907ba9090b329f2c1b7ca7ae5c",
+  "exactRuntimeGitCommit": null,
+  "runtimeCommitNote": "The user reported the cloud update and runtime behavior matches the recovery-backoff repair. The Coze conversation only exposed its internal snapshot bb27e1a and did not print the pulled Git SHA.",
+  "browser": {
+    "family": "Google Chrome",
+    "profile": "用户1",
+    "adminUiTaskMonitorVerified": true,
+    "nativeDialogAndConsoleCapture": "unverified because the extension timed out after the task-monitor capture"
+  },
+  "provider": {
+    "providerId": "api_1780630178347_rjqlmam",
+    "providerName": "PearAPI 图像",
+    "modelId": "gpt-image-2",
+    "resolution": "1K"
+  },
+  "cleanup": {
+    "taskId": "async-1786322172707-0-uzo191",
+    "before": { "status": "processing", "progress": 0, "creditStatus": "pending", "creditCost": 120 },
+    "after": { "status": "cancelled", "progress": 0, "creditStatus": "refunded", "creditCost": 120 },
+    "balanceAfterRefund": 400
+  },
+  "tests": [
+    {
+      "name": "synchronous-direct-control",
+      "taskIds": ["direct-1786328089709-0-1c7c9r"],
+      "submitElapsedMs": 57000,
+      "terminal": "completed",
+      "imageCount": 1,
+      "actualBalanceDebit": 60,
+      "persistedCreditCost": 0,
+      "result": "failed-accounting-observability"
+    },
+    {
+      "name": "durable-no-browser-poll-n1",
+      "taskIds": ["async-1786328158112-0-c83jkr"],
+      "submittedAt": "2026-08-10T10:15:58.112+08:00",
+      "completedAt": "2026-08-10T10:17:47.264+08:00",
+      "submitElapsedMs": 1016,
+      "terminal": "completed",
+      "credit": { "status": "charged", "cost": 60 },
+      "imageCount": 1,
+      "pollTaskCallsAfterSubmission": 0
+    },
+    {
+      "name": "canvas-direct-n2",
+      "taskIds": ["async-1786328382718-0-lec0hr", "async-1786328382718-1-ih3yjh"],
+      "submitElapsedMs": 941,
+      "completedAt": ["2026-08-10T10:20:15.442+08:00", "2026-08-10T10:20:15.441+08:00"],
+      "terminalCounts": { "completed": 2, "failed": 0 },
+      "credit": { "chargedTasks": 2, "costPerTask": 60 },
+      "imageCount": 2
+    },
+    {
+      "name": "canvas-direct-n3-progressive",
+      "taskIds": ["async-1786328521432-0-uv8y5v", "async-1786328521432-1-lz4pd8", "async-1786328521432-2-s9co05"],
+      "submitElapsedMs": 814,
+      "completedAt": ["2026-08-10T10:22:45.833+08:00", "2026-08-10T10:22:33.040+08:00", "2026-08-10T10:22:36.651+08:00"],
+      "progressiveEvidence": "slots 1 and 2 completed with images while slot 0 remained processing",
+      "terminalCounts": { "completed": 3, "failed": 0 },
+      "credit": { "chargedTasks": 3, "costPerTask": 60 },
+      "imageCount": 3
+    },
+    {
+      "name": "canvas-direct-n4",
+      "taskIds": ["async-1786328606878-0-7qsw9o", "async-1786328606878-1-tui8s9", "async-1786328606878-2-lmklyg", "async-1786328606878-3-84ms8n"],
+      "submitElapsedMs": 1007,
+      "completedAt": ["2026-08-10T10:23:58.616+08:00", "2026-08-10T10:23:59.963+08:00", "2026-08-10T10:24:01.858+08:00", "2026-08-10T10:24:01.890+08:00"],
+      "terminalCounts": { "completed": 4, "failed": 0 },
+      "credit": { "chargedTasks": 4, "costPerTask": 60 },
+      "imageCount": 4
+    }
+  ],
+  "creditSummary": {
+    "startingBalanceAfterCleanup": 400,
+    "testRecharge": 300,
+    "paidGenerationDebit": 660,
+    "endingBalance": 40
+  },
+  "verdict": "server-kickoff-and-progressive-task-state-passed; full browser canvas hydration and exact runtime SHA remain unverified"
+}
