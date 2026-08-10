@@ -1,0 +1,35 @@
+{
+  "recordedAt": "2026-08-10T18:32:21+08:00",
+  "environment": "Coze preview",
+  "githubMainCommit": "32139c528f4c71284b4416739b4d5bbcf95874f2",
+  "runtimeWorktreeCommit": "d531ce65c1c3cb1dddaf9922696f1d11fe9c3452",
+  "method": "Temporary admin-only image provider backed by a delayed external response",
+  "temporaryProvider": {
+    "id": "api_1786357783653_d54wt7w",
+    "name": "[TEST] Stage1 Timeout Probe",
+    "model": "stage1-timeout-probe",
+    "deletedAfterProbe": true,
+    "existsAfterCleanup": false
+  },
+  "task": {
+    "id": "async-1786357844914-0-s1t99g",
+    "batchId": "batch-1786357844914-0660vg",
+    "initialResponseMs": 2709,
+    "initialStatus": "processing",
+    "finalStatus": "failed",
+    "finalCreditStatus": "refunded",
+    "creditCost": 140,
+    "chargedTransactionId": "ctx_1786357845039_6i88cyjl",
+    "refundedTransactionId": "ctx_1786357894305_3qtalzzc",
+    "staleFinalLabel": "任务恢复连接暂时中断，正在自动重试",
+    "staleFinalError": "任务恢复连接暂时中断，正在自动重试"
+  },
+  "billing": {
+    "balanceBefore": 378,
+    "balanceAfterCharge": 238,
+    "balanceAfterRefund": 378,
+    "chargeCount": 1,
+    "refundCount": 1
+  },
+  "conclusion": "NOT A TIMEOUT PASS: the Coze egress path disconnected before the application timeout and the task correctly settled as failed/refunded. The probe is useful negative evidence only. It also exposed BUG-053: a terminal failed task retained a retrying label and error."
+}

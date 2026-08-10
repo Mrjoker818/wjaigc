@@ -988,3 +988,17 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Fix | Atomically persist `charged_transaction_id` or `refunded_transaction_id` in the guarded task update and write both `task_id` and `reference_id` in charge, ordinary refund, terminal failure/cancel/timeout refund, and Pear local-fallback refund paths. Pricing, provider routing, task terminal rules, and refund eligibility are unchanged. |
 | Regression | RED/GREEN unit coverage exercises all four SQL paths (`46/46`). A real isolated PostgreSQL 18 integration test proves matching charge/refund IDs, one consume row, one refund row, restored balance, and matching `task_id/reference_id`. |
 | Status | **CLOSED 2026-08-10.** Deployed task `async-1786354360647-0-rhvubs` remained `cancelled/refunded`, persisted charge transaction `ctx_1786354360664_6lgxf98n` and refund transaction `ctx_1786354388276_dbyvw059`, produced exactly one -120 consume and one +120 refund, and restored the balance from 258 to 378. The refund description contains the same task ID. Runtime business source was independently tied to GitHub `main@32139c5` through Coze runtime commit `d531ce6` whose parent is `32139c5`. Evidence: `docs/testing/evidence/bug-052-cloud-ledger-linkage-2026-08-10.json`. |
+
+### BUG-053: Failed recovery task retains a retrying label and error
+
+| Field | Detail |
+|---|---|
+| Severity | P2 |
+| Module | Durable task recovery / administrator task projection |
+| Environment | Coze preview, GitHub business source `32139c5`, 2026-08-10 |
+| Reproduction | Submit a durable image slot through a provider whose connection is interrupted during recovery submission, then inspect the final task after retries are exhausted. |
+| Expected | A terminal `failed` task exposes a stable failure label/error and never tells the user that it is still retrying. |
+| Actual | Task `async-1786357844914-0-s1t99g` reached `failed/refunded`, but both its label and error remained `任务恢复连接暂时中断，正在自动重试`. |
+| Billing impact | No leak in this probe: one 140-credit charge, one 140-credit refund, balance restored to 378, and both transaction IDs were persisted. |
+| Cleanup | Temporary provider `api_1786357783653_d54wt7w` was deleted and confirmed absent. |
+| Status | Open. Register for the next minimal fix after the timeout evidence method is made deterministic; do not misclassify this failed probe as timeout acceptance. Evidence: `docs/testing/evidence/stage-1-timeout-probe-2026-08-10.json`. |

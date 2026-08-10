@@ -773,3 +773,9 @@ BUG-051 reconciliation evidence: `docs/testing/evidence/bug-051-cloud-credit-rec
 | Runtime identity | PASS | Coze runtime `d531ce6` directly parents GitHub `main@32139c5`; the only local delta is the Coze startup environment loader. |
 
 BUG-052 is closed. Timeout-specific deployed behavior and rollback rehearsal remain outside this regression result.
+
+## 2026-08-10 timeout probe attempt 1
+
+The first deterministic timeout attempt did **not** pass the timeout gate. Coze disconnected the delayed external provider before the application timeout. Task `async-1786357844914-0-s1t99g` therefore settled as `failed/refunded`, not `timeout`. Billing remained correct: one -140 charge, one +140 refund, and balance restoration from 238 to 378. The temporary provider was deleted and confirmed absent.
+
+This run is retained as negative evidence and exposed BUG-053: the terminal failed task still displayed a retrying label/error. A valid timeout acceptance still requires a Coze-local delayed provider that keeps the socket open past the application deadline, so the application AbortController owns the timeout transition.

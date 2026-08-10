@@ -466,6 +466,6 @@
 | Three-browser paid generation | VERIFIED | Chromium, Firefox, and WebKit completed real `n=1/2/3/4` task, billing, canvas-fill, refresh, workbench-return, and logout flows. |
 | Cancellation and late result | VERIFIED | Repeated cancellation produced one refund; the task remained cancelled after the provider completion window. |
 | BUG-052 ledger linkage | VERIFIED IN CLOUD | Task `async-1786354360647-0-rhvubs` persisted non-empty transaction IDs matching exactly one consume and one refund; the refund description contains the same task ID and the balance returned to 378. Structured column linkage is also covered by the isolated PostgreSQL integration test. |
-| Timeout-specific terminal behavior | UNVERIFIED | Force a real provider timeout and prove abort, stable timeout terminal state, no late completion, and at-most-one refund. |
+| Timeout-specific terminal behavior | BLOCKED AFTER ATTEMPT 1 | External delayed-provider probe was cut off by Coze egress and correctly became `failed/refunded`, so it is not timeout evidence. Start a Coze-local delayed provider, then prove application-owned abort, stable `timeout`, no late completion, and at-most-one refund. |
 | Rollback rehearsal | UNVERIFIED | Demonstrate `core-v2 -> legacy` without data loss, duplicate tasks, or duplicate billing. |
 | Exact runtime SHA | VERIFIED | Coze runtime `d531ce65` directly parents GitHub `main@32139c5`; process cwd, PID, Next server version, build ID, and the launcher-only delta were recorded. |
