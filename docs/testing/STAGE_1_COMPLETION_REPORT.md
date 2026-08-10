@@ -5,11 +5,11 @@
 | Field | Value |
 |---|---|
 | Stage | `WJ-STABLE-001 / S1` |
-| Latest formal main | `32139c528f4c71284b4416739b4d5bbcf95874f2` |
+| Latest formal main | `104b140ed8189d22e14330dae78b17b3abb200c5` |
 | Candidate branch | `codex/wj-stable-s1-recovery` |
-| Candidate checkpoint | `32139c528f4c71284b4416739b4d5bbcf95874f2` plus the current cloud evidence documentation |
+| Candidate checkpoint | `104b140ed8189d22e14330dae78b17b3abb200c5` plus the current rollback evidence documentation |
 | Test time | 2026-08-10, Asia/Shanghai |
-| Current verdict | **Not passed** |
+| Current verdict | **PASS** |
 
 ## Completed in Task 8
 
@@ -79,3 +79,36 @@ The second timeout probe used a Coze-local delayed provider and therefore reache
 The root cause is the absence of a durable absolute deadline across recovery attempts. The local candidate adds a 10-minute deadline derived from the original task `createdAt` before retry backoff and lease acquisition, then aborts and settles through the existing conditional terminal/refund path. Focused and full local gates pass.
 
 Stage 1 remains **Not passed**. The next action is to deploy this exact candidate and prove automatic `timeout/refunded`, no late completion, and one-time refund. Only then may Task 8 proceed to the `core-v2 -> legacy` rollback rehearsal; Stage 2 remains prohibited.
+
+## 2026-08-10 BUG-054 cloud acceptance
+
+The deployed behavior now passes the timeout gate. Paid task `async-1786366442668-0-dzxu9y` returned in 1.219 seconds, stayed processing until the original 10-minute deadline, then atomically reached `timeout/refunded` at 602.934 seconds. Its single -140 charge was offset by one +140 refund, restoring the balance from 238 to 378.
+
+At 1132.6 seconds, after the provider's 900-second delayed response window and a Coze sandbox restart, the task and its `updatedAt` remained unchanged. BUG-054 is closed. BUG-053 remains open at P2 because the terminal row retained a retrying label. Stage 1 remains **Not passed** until the `core-v2 -> legacy` rollback rehearsal is executed and recorded. Stage 2 remains prohibited.
+
+## 2026-08-10 Stage 1 completion
+
+The final rollback gate passed. The cloud first ran `WUJIE_TASK_CORE_MODE=core-v2` and created two durable Agent tasks with `handlerVersion=task-core-v2`. The sandbox then changed only `.env` to `legacy`, performed no data migration, restarted successfully, and created a new task with `handlerVersion=legacy`.
+
+Both pre-rollback core-v2 tasks remained readable and byte-for-byte stable for their task identity, terminal status, revision, charge transaction ID, and refund transaction ID. Across the two core-v2 probes and one legacy probe, each request produced exactly one charge and one refund, and the account balance remained 378. No duplicate task, charge, refund, or terminal resurrection occurred.
+
+The cloud worktree reported `HEAD=413cb46d29083a17cc2b9a29d3fedf5c31cf131d`. A read-only fetch resolved `origin/main=104b140ed8189d22e14330dae78b17b3abb200c5`; the only source diff was the known Coze `.env` loader in `scripts/coze-start.sh`, so the tested business source matches current GitHub main. `stable@a53da24` remained untouched.
+
+**WJ-STABLE-001 Stage 1 is complete and passes its task/billing release gate.** BUG-053 remains open at P2 and is not hidden. This report does not authorize or claim completion of Stage 2 or later stages.
+
+Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json`.
+
+### Final local release gates
+
+| Gate | Final result |
+|---|---|
+| Frozen dependency install | PASS: `pnpm install --frozen-lockfile` exited 0 |
+| Doctor | PASS: `pnpm doctor` exited 0 |
+| TypeScript | PASS: `pnpm ts-check` exited 0 |
+| ESLint | PASS: 0 errors / 960 historical warnings |
+| Full Vitest | PASS: 356 files / 1807 tests; 8 environment-gated PostgreSQL tests skipped in this command |
+| Authoritative PostgreSQL rollback/billing | PASS: 4 files / 10 tests against isolated PostgreSQL 18, plus 12 entry-migration regressions; 0 skipped |
+| Production build | PASS: `pnpm build` exited 0 |
+| Protected baseline | PASS: 38/38 feature IDs, no unapproved drift, 0 warnings, using the repository-approved Stage 1 base `275202a9e523955fe1b8ae6f36866ff192fd5334` and exact per-file allowlist |
+
+The older plan example `e5867f0` predates the approved Stage 1 allowlist base and therefore reports already-landed pre-stage source changes as unapproved. It is retained as historical plan text but is not used to override the machine-readable baseline contract.

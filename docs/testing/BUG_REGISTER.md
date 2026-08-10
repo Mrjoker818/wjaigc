@@ -998,10 +998,10 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Environment | Coze preview, GitHub business source `32139c5`, 2026-08-10 |
 | Reproduction | Submit a durable image slot through a provider whose connection is interrupted during recovery submission, then inspect the final task after retries are exhausted. |
 | Expected | A terminal `failed` task exposes a stable failure label/error and never tells the user that it is still retrying. |
-| Actual | Task `async-1786357844914-0-s1t99g` reached `failed/refunded`, but both its label and error remained `任务恢复连接暂时中断，正在自动重试`. |
+| Actual | Task `async-1786357844914-0-s1t99g` reached `failed/refunded`, but both its label and error remained `任务恢复连接暂时中断，正在自动重试`. The deterministic BUG-054 acceptance task `async-1786366442668-0-dzxu9y` likewise reached `timeout/refunded` while retaining the retrying label, although its error was correctly terminal. |
 | Billing impact | No leak in this probe: one 140-credit charge, one 140-credit refund, balance restored to 378, and both transaction IDs were persisted. |
 | Cleanup | Temporary provider `api_1786357783653_d54wt7w` was deleted and confirmed absent. |
-| Status | Open. Register for the next minimal fix after the timeout evidence method is made deterministic; do not misclassify this failed probe as timeout acceptance. Evidence: `docs/testing/evidence/stage-1-timeout-probe-2026-08-10.json`. |
+| Status | Open. The stale terminal label is now reproduced on both `failed` and `timeout` recovery outcomes. It does not invalidate the atomic timeout/refund or rollback result, but remains a P2 state-projection defect. Stage 1 closes with this P2 explicitly carried forward. Evidence: `docs/testing/evidence/stage-1-timeout-probe-2026-08-10.json`, `docs/testing/evidence/bug-054-cloud-timeout-acceptance-2026-08-10.json`, and `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json`. |
 
 ### BUG-054: Durable generation recovery has no absolute timeout deadline
 
@@ -1017,4 +1017,4 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Fix | Add a single 10-minute `createdAt`-based recovery deadline before retry backoff/lease acquisition; on expiry abort execution and use the existing conditional terminal/refund path. |
 | Regression | RED/GREEN coverage in `recovery-submission.test.ts` and `poll-task-recovery-lease-contract.test.ts`; focused task suite 7 files / 100 tests, full Vitest, TypeScript, ESLint, and production build pass locally. |
 | Billing cleanup | Manual cancellation produced one 280-credit refund and restored balance `98 -> 378`; the temporary provider was deleted. |
-| Status | Fixed locally, not closed. The exact commit must be deployed and the same probe must automatically reach stable `timeout/refunded`, preserve one charge/one refund, and resist late completion. Evidence: `docs/testing/evidence/stage-1-timeout-probe-local-2026-08-10.json`. |
+| Status | **CLOSED 2026-08-10.** Paid cloud task `async-1786366442668-0-dzxu9y` returned its wrapper in 1.219s, reached automatic `timeout/refunded` at 602.934s, restored balance `378 -> 238 -> 378`, and persisted exactly one -140 charge plus one +140 refund. It remained unchanged through 1132.6s, after the 900-second delayed response window and a Coze sandbox restart. Temporary provider cleanup passed. The later read-only rollback audit identified cloud `HEAD=413cb46d`, `origin/main=104b140`, and only the reviewed `scripts/coze-start.sh` launcher difference, closing the earlier runtime-provenance limitation. Evidence: `docs/testing/evidence/bug-054-cloud-timeout-acceptance-2026-08-10.json` and `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json`. |

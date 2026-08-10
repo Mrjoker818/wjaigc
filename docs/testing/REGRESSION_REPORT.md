@@ -787,3 +787,33 @@ A Coze-local delayed provider kept the upstream connection open long enough to e
 The failure is reproducible and is not a provider/model mismatch. Recovery requests were each granted a fresh timeout window, with no absolute deadline based on the original durable task creation time. A minimal TDD repair now checks a 10-minute `createdAt` deadline before recovery backoff and lease acquisition, aborts the active execution, and settles through the existing conditional terminal/refund path.
 
 Local verification passes: focused deadline tests 19/19, broader task suite 7 files / 100 tests, TypeScript, ESLint with 0 errors and 960 historical warnings, full Vitest, and the 112-page production build. This remains **pending deployed acceptance**; the cloud must prove automatic `timeout/refunded`, one charge/one refund, and no late completion.
+
+## 2026-08-10 BUG-054 deployed timeout acceptance
+
+| Check | Result | Evidence |
+|---|---|---|
+| Fast wrapper response | PASS | The paid durable slot returned in 1.219s with task `async-1786366442668-0-dzxu9y`; the client did not wait for the provider response. |
+| Absolute deadline | PASS | The task changed from `processing/pending` to `timeout/refunded` at 602.934s from its original durable `createdAt`. |
+| One-time billing | PASS | Balance `378 -> 238 -> 378`; exactly one -140 consume and one +140 refund matched the transaction IDs stored on the task. |
+| Late-result isolation | PASS | The provider's delayed body was scheduled after 900s. At 1132.6s and after a Coze sandbox restart, the task remained `timeout/refunded`, `updatedAt` was unchanged, and the ledger still contained two related rows. |
+| Cleanup | PASS | Temporary provider `api_1786366406082_izjuy5a` was deleted and confirmed absent; the local heartbeat server and public tunnel were stopped. |
+| Runtime SHA | UNVERIFIED | GitHub candidate is `104b140`; the user confirmed the latest pull, but Coze did not expose an independently verifiable runtime SHA in this run. |
+| Residual label state | OPEN P2 | BUG-053 persists: the terminal timeout row retained the retrying label although status, error, refund, and balance were correct. |
+
+Machine-readable evidence: `docs/testing/evidence/bug-054-cloud-timeout-acceptance-2026-08-10.json`.
+
+## 2026-08-10 Stage 1 core-v2 to legacy rollback rehearsal
+
+| Check | Result | Evidence |
+|---|---|---|
+| Runtime provenance | PASS | Cloud `HEAD=413cb46d29083a17cc2b9a29d3fedf5c31cf131d`; read-only fetch resolved `origin/main=104b140ed8189d22e14330dae78b17b3abb200c5`. The only non-`.env` diff was the known Coze launcher change in `scripts/coze-start.sh`; business source matches GitHub main. |
+| Core-v2 admission | PASS | Tasks `agent-1786370677352-kjnqfj` and `agent-1786371202567-z7urgq` persisted `mode=core-v2` and `handlerVersion=task-core-v2`. |
+| Rollback operation | PASS | Only `.env` changed from `core-v2` to `legacy`; no checkout, pull, business-source edit, data migration, or stable-branch operation occurred. Preview restarted as PID 2227 and returned HTTP 200. |
+| Legacy admission after rollback | PASS | Task `agent-1786371761478-elb9d1` persisted `mode=legacy` and `handlerVersion=legacy`. |
+| Old-task compatibility | PASS | Both core-v2 tasks remained readable with identical IDs, terminal states, handler versions, charge IDs, refund IDs, and revisions after rollback. |
+| Billing consistency | PASS | Each of three probes produced one -12 consume and one +12 refund. Balance remained `378`; no duplicate charge or refund appeared. |
+| Data safety | PASS | No task migration was performed. Existing rows were interpreted from their saved `handlerVersion`; no task was duplicated or rewritten. |
+
+The upstream APImartLLM model returned 500 for all three minimal probes. That provider outcome is not counted as a successful content-generation result, but it is sufficient for the rollback boundary because both execution modes reached durable terminal settlement and exact one-time refund. BUG-053 remains open at P2 for stale retry wording on terminal rows.
+
+Machine-readable evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json`.

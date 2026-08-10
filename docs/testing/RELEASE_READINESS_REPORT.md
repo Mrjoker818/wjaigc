@@ -654,3 +654,22 @@ The server-owned kickoff and progressive slot behavior now pass in the Coze sand
 - The local candidate now enforces one absolute 10-minute recovery deadline from the durable task `createdAt`, aborts execution, and uses the database conditional terminal/refund path.
 - Local focused, full-test, TypeScript, ESLint, and production-build gates pass.
 - Current verdict remains **Not passed**. BUG-054 requires exact-deployment cloud acceptance, followed by the `core-v2 -> legacy` rollback rehearsal. Stage 2 remains prohibited.
+
+## 2026-08-10 BUG-054 cloud gate closure
+
+- BUG-054 is closed by a real paid Coze run. Task `async-1786366442668-0-dzxu9y` automatically reached `timeout/refunded` 602.934 seconds after its durable creation time.
+- Billing was exactly once: balance `378 -> 238 -> 378`, one -140 consume, one +140 refund, and both transaction IDs persisted on the task.
+- At 1132.6 seconds, after the 900-second delayed response window and a sandbox restart, status, `updatedAt`, balance, and the two-row ledger remained unchanged.
+- Temporary provider cleanup passed. Exact runtime SHA was not independently exposed in this run and remains a declared provenance limitation.
+- Current verdict remains **Not passed**. The only remaining Stage 1 completion action is the documented `core-v2 -> legacy` rollback rehearsal. BUG-053 remains an open P2 terminal-label defect; Stage 2 remains prohibited.
+
+## 2026-08-10 Stage 1 final gate
+
+- The `core-v2 -> legacy` cloud rollback rehearsal passed on the current GitHub `main@104b140` business source. Coze `HEAD=413cb46d` differs only by the reviewed `.env` loading change in `scripts/coze-start.sh`.
+- Before rollback, two paid Agent probes persisted `handlerVersion=task-core-v2`. After changing only `.env` and restarting, a new probe persisted `handlerVersion=legacy`.
+- Existing core-v2 task IDs, terminal states, revisions, charge IDs, and refund IDs remained unchanged and readable after rollback. No data migration occurred.
+- All three probes had exactly one 12-credit consume and one 12-credit refund; balance stayed at 378. No duplicate task, charge, or refund was observed.
+- **Stage 1 verdict: PASS.** All Stage 1 P0/P1 task-and-billing gates are closed. BUG-053 remains an open P2 presentation defect and must stay registered.
+- **Whole-program release verdict: CONDITIONAL / NOT YET FINAL.** Later WJ-STABLE stages have not been executed in this task. Stage 2 was not started and `stable@a53da24` was not touched.
+
+Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json`.

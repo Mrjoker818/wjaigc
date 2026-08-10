@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "title": "WJ-STABLE-001 Stage 1 core-v2 to legacy rollback rehearsal",
+  "testedAt": "2026-08-10T22:22:48+08:00",
+  "verdict": "PASS",
+  "scope": "S1 Task 8 only; Stage 2 was not started",
+  "environment": {
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "githubMain": "104b140ed8189d22e14330dae78b17b3abb200c5",
+    "githubStable": "a53da24aa9f3813aae24f697dfb90d0b67f0a455",
+    "cloudHead": "413cb46d29083a17cc2b9a29d3fedf5c31cf131d",
+    "cloudOriginMain": "104b140ed8189d22e14330dae78b17b3abb200c5",
+    "cloudDiffFromOriginMain": [
+      {
+        "status": "M",
+        "path": "scripts/coze-start.sh",
+        "reason": "Coze launcher loads .env before starting Next.js"
+      }
+    ],
+    "businessSourceMatchesOriginMain": true
+  },
+  "modeTransitions": [
+    {
+      "mode": "core-v2",
+      "pid": 2045,
+      "command": "next-server (v16.2.10)",
+      "httpStatus": 200
+    },
+    {
+      "mode": "legacy",
+      "pid": 2227,
+      "command": "next-server (v16.2.10)",
+      "httpStatus": 200,
+      "workspaceChanges": [".env"],
+      "dataMigrationPerformed": false
+    }
+  ],
+  "tasks": [
+    {
+      "taskId": "agent-1786370677352-kjnqfj",
+      "mode": "core-v2",
+      "handlerVersion": "task-core-v2",
+      "status": "failed",
+      "creditCost": 12,
+      "creditStatus": "refunded",
+      "chargedTransactionId": "ctx_charge_83a5882549f370675df1ec5cc9820f62",
+      "refundedTransactionId": "ctx_refund_9fc56b7409befacd517772da5845139f",
+      "preservedAfterRollback": true
+    },
+    {
+      "taskId": "agent-1786371202567-z7urgq",
+      "mode": "core-v2",
+      "handlerVersion": "task-core-v2",
+      "status": "failed",
+      "creditCost": 12,
+      "creditStatus": "refunded",
+      "chargedTransactionId": "ctx_charge_0a9a49cfecd1126f97f132f13a2a865b",
+      "refundedTransactionId": "ctx_refund_499356e69960226e5f0f5743beca38f6",
+      "preservedAfterRollback": true
+    },
+    {
+      "taskId": "agent-1786371761478-elb9d1",
+      "mode": "legacy",
+      "handlerVersion": "legacy",
+      "status": "failed",
+      "creditCost": 12,
+      "creditStatus": "refunded",
+      "consumeTransactionId": "ctx_1786371761472_8xqz75vr",
+      "refundedTransactionId": "ctx_refund_e0ba471832cbb96356e724326e85db52"
+    }
+  ],
+  "billing": {
+    "balanceBefore": 378,
+    "balanceAfter": 378,
+    "coreV2Pairs": 2,
+    "legacyPairs": 1,
+    "duplicateCharges": 0,
+    "duplicateRefunds": 0
+  },
+  "assertions": {
+    "newTaskUsesCoreV2BeforeRollback": "PASS",
+    "newTaskUsesLegacyAfterRollback": "PASS",
+    "oldCoreV2TasksRemainReadable": "PASS",
+    "oldTaskIdsAndTerminalStatesUnchanged": "PASS",
+    "oldBillingTransactionIdsUnchanged": "PASS",
+    "noDataMigration": "PASS",
+    "noDuplicateTaskForEachIdempotencyKey": "PASS",
+    "noDuplicateChargeOrRefund": "PASS",
+    "previewHealthyAfterRollback": "PASS",
+    "stableBranchUntouched": "PASS"
+  },
+  "limitations": [
+    "The selected APImartLLM model returned an upstream 500, so these probes validate task admission, terminal settlement, persistence, rollback compatibility, and billing rather than successful model content.",
+    "BUG-053 remains open at P2 because terminal task labels can retain retry wording after failure or timeout."
+  ]
+}

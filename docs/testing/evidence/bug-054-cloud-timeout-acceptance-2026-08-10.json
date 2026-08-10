@@ -1,0 +1,56 @@
+{
+  "recordedAt": "2026-08-10T21:13:00+08:00",
+  "environment": "Coze preview",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "githubCandidateCommit": "104b140ed8189d22e14330dae78b17b3abb200c5",
+  "cloudRuntimeCommit": null,
+  "cloudRuntimeIdentity": "The user confirmed that Coze pulled latest main. Coze did not independently expose the exact runtime SHA for this run; behavior is not substituted for SHA identity.",
+  "method": "One real paid durable image slot used a heartbeat response that stayed open beyond the 10-minute application deadline and returned its final body after 900 seconds.",
+  "temporaryProvider": {
+    "id": "api_1786366406082_izjuy5a",
+    "name": "[TEST] Stage1 Tunnel Timeout Probe",
+    "model": "stage1-timeout-tunnel-probe",
+    "connectionProbeStatus": 200,
+    "deletedAfterProbe": true,
+    "existsAfterCleanup": false
+  },
+  "task": {
+    "id": "async-1786366442668-0-dzxu9y",
+    "batchId": "batch-d93b25feb0b16b339635a56e",
+    "createdAt": "2026-08-10T20:54:02.6770000+08:00",
+    "terminalUpdatedAt": "2026-08-10T21:04:05.6110000+08:00",
+    "durationMs": 602934,
+    "initialResponseMs": 1219,
+    "initialStatus": "processing",
+    "terminalStatus": "timeout",
+    "terminalCreditStatus": "refunded",
+    "attemptCount": 2,
+    "creditCost": 140,
+    "chargedTransactionId": "ctx_1786366442782_r1s4enpb",
+    "refundedTransactionId": "ctx_1786367045611_zimt7yaa",
+    "stableObservationAtSeconds": 1132.6,
+    "lateResultRejected": true,
+    "terminalUpdatedAtUnchangedAfterLateResultAndSandboxRestart": true
+  },
+  "billing": {
+    "balanceBefore": 378,
+    "balanceAfterCharge": 238,
+    "balanceAfterRefund": 378,
+    "chargeCount": 1,
+    "refundCount": 1,
+    "transactionCount": 2
+  },
+  "timeline": [
+    { "elapsedSeconds": 69.6, "status": "processing", "creditStatus": "pending", "balance": 238 },
+    { "elapsedSeconds": 303.4, "status": "processing", "creditStatus": "pending", "balance": 238 },
+    { "elapsedSeconds": 571.5, "status": "processing", "creditStatus": "pending", "balance": 238 },
+    { "elapsedSeconds": 604.7, "status": "timeout", "creditStatus": "refunded", "balance": 378 },
+    { "elapsedSeconds": 740.1, "status": "timeout", "creditStatus": "refunded", "balance": 378 },
+    { "elapsedSeconds": 1132.6, "status": "timeout", "creditStatus": "refunded", "balance": 378 }
+  ],
+  "residualFinding": {
+    "bugId": "BUG-053",
+    "detail": "The terminal timeout task retained the retrying label even though its status and error were terminal."
+  },
+  "conclusion": "PASS for BUG-054: the durable createdAt deadline produced automatic timeout and exactly one refund, and the late response could not replace the terminal state."
+}

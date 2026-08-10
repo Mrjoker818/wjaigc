@@ -478,3 +478,25 @@
 | Timeout billing | MANUAL CLEANUP VERIFIED ONLY | Candidate deployment must produce exactly one automatic refund and restore the balance without manual cancellation. |
 | Late completion isolation | UNVERIFIED FOR TIMEOUT | Observe the task beyond the delayed provider response window and prove it cannot transition from `timeout` to `completed`. |
 | Delay-service cleanup | PARTIALLY VERIFIED | The stop command was sent, but its terminal acknowledgement was not captured because browser control timed out; confirm no listener remains before the next probe. |
+
+## 2026-08-10 timeout acceptance update
+
+| Item | Status | Evidence |
+|---|---|---|
+| BUG-054 absolute timeout | VERIFIED IN CLOUD | Task `async-1786366442668-0-dzxu9y` reached automatic `timeout/refunded` at 602.934s from durable creation. |
+| Timeout billing | VERIFIED IN CLOUD | One -140 consume and one +140 refund restored balance `378 -> 238 -> 378`; transaction IDs remained attached to the task. |
+| Late completion isolation | VERIFIED IN CLOUD | The task remained unchanged at 1132.6s after the 900-second response window and a Coze sandbox restart. |
+| Delay-service cleanup | VERIFIED | The temporary provider was deleted and confirmed absent; local heartbeat and public tunnel processes were stopped. |
+| BUG-053 terminal recovery label | UNVERIFIED / OPEN P2 | Failed and timeout recovery tasks can retain a label that says the task is still retrying. |
+| Stage 1 rollback rehearsal | UNVERIFIED / BLOCKING | `core-v2 -> legacy` must still be exercised and documented before Stage 1 can close. |
+
+## 2026-08-10 Stage 1 rollback update
+
+| Item | Status | Evidence |
+|---|---|---|
+| Stage 1 rollback rehearsal | VERIFIED IN CLOUD | Core-v2 tasks remained readable after changing only `.env` to `legacy`; the next task used `handlerVersion=legacy`. |
+| Rollback data migration | VERIFIED ABSENT | No data migration, checkout, reset, pull, or business-source edit occurred during rollback. |
+| Rollback billing | VERIFIED IN CLOUD | Three task probes each produced one consume and one refund; balance remained 378 with no duplicates. |
+| Runtime business source | VERIFIED | Cloud `origin/main=104b140`; only `scripts/coze-start.sh` differed for `.env` loading. |
+| BUG-053 terminal label | OPEN P2 | Terminal failed/timeout rows can retain retry wording; this remains registered and is not a Stage 1 P0/P1 blocker. |
+| Stage 2 and later stages | NOT STARTED | Deliberately outside this task. Stage 1 completion must not be read as whole-program completion. |
