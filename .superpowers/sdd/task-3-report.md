@@ -287,3 +287,21 @@ git diff --check -- src/lib/asset-core/project-readers.ts src/lib/asset-core/leg
 The follow-up does not amend `8b73b68`, update controller progress, include an external
 review file, touch UI/Task 4+, or push any branch. Checkpoint A concerns above remain
 unchanged.
+
+## Controller Gate Results
+
+After the second independent review approved the task with zero findings, the
+controller ran the complete local Checkpoint A gate against
+`b1fc8f40f4c8aa41f798e0dc3c03463675b6c9a0`:
+
+- real PostgreSQL Task 3 suite: `19/19` passed;
+- login protection suite: `18/18` passed;
+- `pnpm ts-check`: exit `0`;
+- `pnpm lint:build`: exit `0`;
+- full `pnpm test`: exit `0`;
+- `pnpm build`: exit `0`, `112/112` routes/pages generated;
+- protected baseline: `38/38`, no unapproved drift and zero warnings.
+
+The all-suite run intentionally retained environment-gated PostgreSQL skips; Task 1-3
+database behavior has separate fresh evidence against the isolated PostgreSQL 18
+database. No cloud or exact-runtime conclusion is inferred from local evidence.
