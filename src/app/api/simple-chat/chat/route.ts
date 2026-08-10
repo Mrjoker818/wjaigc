@@ -133,6 +133,7 @@ export async function POST(request: NextRequest) {
 
   // 联网搜索
   let searchResults: string | null = null;
+  let searchError: string | null = null;
   if (webSearch) {
     try {
       // 取最后一条用户消息作为搜索 query
@@ -141,11 +142,16 @@ export async function POST(request: NextRequest) {
       if (searchQuery) {
         const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
         const searchClient = new SearchClient(new Config(), customHeaders);
+        console.log('[simple-chat] Web search query:', searchQuery.slice(0, 100));
         const searchResp = await searchClient.webSearch(searchQuery, 5, true);
+        console.log('[simple-chat] Web search response:', JSON.stringify({
+          webItemsCount: searchResp.web_items?.length || 0,
+          hasSummary: !!searchResp.summary,
+        }));
 
         if (searchResp.web_items && searchResp.web_items.length > 0) {
           const items = searchResp.web_items.slice(0, 5).map((item, i) =>
-            `[${i + 1}] ${item.title}\nURL: ${item.url || '无'}\n摘要: ${item.snippet || ''}${item.summary ? '\nAI摘要: ' + item.summary : ''}`
+            `[${i + 1}] ${(item.title || '').replace(/\n/g, ' ')}\nURL: ${item.url || '无'}\n摘要: ${(item.snippet || '').replace(/\n/g, ' ')}${item.summary ? '\nAI摘要: ' + item.summary.replace(/\n/g, ' ') : ''}`
           ).join('\n\n');
 
           searchResults = `## 联网搜索结果\n搜索关键词: "${searchQuery}"\n\n${items}`;
@@ -154,12 +160,18 @@ export async function POST(request: NextRequest) {
           }
           enhancedSystemPrompt += `\n\n${searchResults}\n\n请基于以上联网搜索结果回答用户问题。如有引用，请标注来源编号（如 [1]、[2]）。`;
         } else {
+          console.warn('[simple-chat] Web search returned 0 results');
           enhancedSystemPrompt += `\n\n(联网搜索未找到相关结果，请基于已有知识回答)`;
         }
       }
     } catch (e: unknown) {
       const message = errorMessage(e, 'Web search unavailable');
-      console.error('Web search failed:', message);
+      const errorDetail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      console.error('[simple-chat] Web search failed:', message, errorDetail);
+      if (e instanceof Error && e.stack) {
+        console.error('[simple-chat] Web search stack:', e.stack.slice(0, 500));
+      }
+      searchError = message;
       enhancedSystemPrompt += `\n\n(联网搜索暂时不可用: ${message})`;
     }
   }
@@ -209,7 +221,7 @@ export async function POST(request: NextRequest) {
             const resultCount = (searchResults.match(/\[\d+\]/g)?.length || 0);
             send({ type: 'search_status', status: 'completed', resultCount, searchResults });
           } else {
-            send({ type: 'search_status', status: 'failed', resultCount: 0 });
+            send({ type: 'search_status', status: 'failed', resultCount: 0, error: searchError || '未找到相关结果' });
           }
         }
 

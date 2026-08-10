@@ -828,6 +828,12 @@ UPSCALE_TIMEOUT_MS=300000
 
 ### v4.2.5
 
+**P0: 智能对话联网搜索0结果修复 — 搜索结果snippet含换行符导致前端正则解析失败**
+
+- **根因**: `SearchResultsCard` 组件使用正则 `\[(\d+)\]\s+(.+?)\nURL:\s*(.+?)\n摘要:\s*(.+?)...` 解析搜索结果，但 `(.+?)` 不匹配换行符（JS `.` 默认不匹配 `\n`）。搜索 API 返回的 `snippet` 字段包含嵌入的换行符（如新闻摘要中的 `\nITBEAR\n2026-08-09...`），导致正则无法匹配任何条目，前端显示"0条结果"。后端 `searchResults` 字符串实际包含正确的 `[1]`、`[2]` 等标记（`resultCount > 0`），但前端 `SearchResultsCard` 解析出 0 个 items
+- **修复**: 后端构建搜索结果字符串时，将 `title`/`snippet`/`summary` 字段中的 `\n` 替换为空格（`replace(/\n/g, ' ')`），保留字段间的 `\n` 分隔符；前端正则将 `(.+?)` 改为 `([\s\S]+?)` 作为防御性措施（涉及 `src/app/api/simple-chat/chat/route.ts`、`src/components/simple-chat/chat-area.tsx`）
+- **增强**: 添加搜索调试日志（query/response/error），前端搜索失败时显示具体错误信息而非通用的"正在搜索..."
+
 **P0: 智能对话 404 修复 — simple-chat 未使用 /v1 重试**
 
 - **根因**: `src/app/api/simple-chat/chat/route.ts` 使用 `fetchWithTimeout` 直接请求 `${baseUrl}/chat/completions`，未使用 `fetchWithV1Retry` 的 `/v1` 自动重试机制。当管理员配置的 API 提供商 `baseUrl` 不含 `/v1` 后缀时（如 `https://api.example.com`），请求 URL 为 `https://api.example.com/chat/completions`，上游 nginx 返回 404。主聊天路由 `/api/chat` 已使用 `fetchWithV1Retry`，但 simple-chat 路由遗漏

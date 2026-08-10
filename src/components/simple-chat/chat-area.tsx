@@ -72,7 +72,7 @@ function SearchResultsCard({ content }: { content: string }) {
     const keywordMatch = content.match(/搜索关键词[：:]\s*"?(.+?)"?\n/);
     const keyword = keywordMatch?.[1] || '';
 
-    const regex = /\[(\d+)\]\s+(.+?)\nURL:\s*(.+?)\n摘要:\s*(.+?)(?:\nAI摘要:\s*(.+?))?(?=\n\n\[|$)/g;
+    const regex = /\[(\d+)\]\s+(.+?)\nURL:\s*(.+?)\n摘要:\s*([\s\S]+?)(?:\nAI摘要:\s*([\s\S]+?))?(?=\n\n\[|$)/g;
     let match;
     while ((match = regex.exec(content)) !== null) {
       items.push({
@@ -723,7 +723,13 @@ export default function ChatArea({
                 setControlNotice(notices[0] || `已应用：推理 ${parsed.appliedReasoningEffort || '默认'}，速度 ${parsed.appliedResponseSpeed || '均衡'}`);
                 setAppliedChatControls(appliedControls);
               } else if (parsed.type === 'search_status') {
-                setSearchStatus(parsed.status === 'completed' ? `搜索完成，找到 ${parsed.resultCount || 0} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
+                if (parsed.status === 'completed') {
+                  setSearchStatus(`搜索完成，找到 ${parsed.resultCount || 0} 条结果`);
+                } else if (parsed.status === 'failed' || parsed.status === 'error') {
+                  setSearchStatus(null);
+                } else {
+                  setSearchStatus('正在搜索...');
+                }
                 // 搜索完成后，添加一条系统消息展示搜索结果
                 if (parsed.status === 'completed' && parsed.resultCount > 0) {
                   const searchMsg = {
@@ -741,6 +747,18 @@ export default function ChatArea({
                       id: 'search-' + Math.random().toString(36).slice(2, 8),
                       role: 'system',
                       content: `🌐 联网搜索未找到相关结果`,
+                      createdAt: Date.now(),
+                    });
+                    return updated;
+                  });
+                } else if (parsed.status === 'failed' || parsed.status === 'error') {
+                  // 搜索失败 — 显示错误信息
+                  setMessages(prev => {
+                    const updated = [...prev];
+                    updated.splice(updated.length - 1, 0, {
+                      id: 'search-' + Math.random().toString(36).slice(2, 8),
+                      role: 'system',
+                      content: `🌐 联网搜索失败：${parsed.error || '服务暂时不可用'}`,
                       createdAt: Date.now(),
                     });
                     return updated;
