@@ -572,19 +572,22 @@ export default function OhMyPrompt({
 }: OhMyPromptProps) {
   const [activeTab, setActiveTab] = useState<OmpActiveTab>(defaultActiveTab || initialTab);
   const settings = loadSettings();
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState('');
+  const [optimizeHistory, setOptimizeHistory] = useState<Array<{prompt: string; result: string; ts: number}>>([]);
 
   // Drag state — initialize to viewport center to avoid flash at (0,0)
   const [position, setPosition] = useState(() => {
     if (typeof window !== 'undefined') {
       return {
-        x: Math.max(0, (window.innerWidth - 320) / 2),
-        y: Math.max(0, (window.innerHeight - 520) / 2),
+        x: Math.max(0, (window.innerWidth - 340) / 2),
+        y: Math.max(0, (window.innerHeight - 560) / 2),
       };
     }
     return { x: 0, y: 0 };
   });
   const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef({ startX: 0, startY: 0, originX: 0, originY: 0, dragging: false });
+  const dragRef = useRef({ startX: 0, startY: 0, originX: 0, originY: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -603,55 +606,48 @@ export default function OhMyPrompt({
           y: Math.max(0, (window.innerHeight - rect.height) / 2),
         });
       }
-    }, 50);
+    }, 60);
     return () => clearTimeout(timer);
   }, [isOpen]);
 
-  // Pointer-event drag with window-level listeners.
-  // NOTE: we intentionally do NOT use setPointerCapture here — in the previous
-  // implementation captured pointer events were not reliably delivered to the
-  // panel header, which made dragging appear broken. Window-level pointermove /
-  // pointerup listeners work in every modern browser (mouse / touch / pen).
-  const handleDragStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || dragRef.current.dragging) return;
+  // Standard floating panel drag pattern — pure Mouse Events with stopPropagation,
+  // does NOT use pointer capture and dynamically attaches/detaches window listeners.
+  // This is the exact pattern used by font-design-panel, brand-ecommerce-panel,
+  // agent-editor and other golden-theme floating panels in the project, guaranteed
+  // NOT to interfere with canvas panning, selection, or any other canvas events.
+  const handleDragStart = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
       originX: position.x,
       originY: position.y,
-      dragging: true,
     };
     setIsDragging(true);
-  }, [position]);
 
-  const handleWindowDragMove = useCallback((e: PointerEvent) => {
-    if (!dragRef.current.dragging) return;
-    e.preventDefault();
-    const panelWidth = panelRef.current?.offsetWidth ?? 320;
-    const panelHeight = panelRef.current?.offsetHeight ?? 520;
-    const nextX = dragRef.current.originX + e.clientX - dragRef.current.startX;
-    const nextY = dragRef.current.originY + e.clientY - dragRef.current.startY;
-    setPosition({
-      x: Math.min(Math.max(0, nextX), Math.max(0, window.innerWidth - panelWidth)),
-      y: Math.min(Math.max(0, nextY), Math.max(0, window.innerHeight - panelHeight)),
-    });
-  }, []);
-
-  const handleWindowDragEnd = useCallback(() => {
-    dragRef.current.dragging = false;
-    setIsDragging(false);
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('pointermove', handleWindowDragMove);
-    window.addEventListener('pointerup', handleWindowDragEnd);
-    window.addEventListener('pointercancel', handleWindowDragEnd);
-    return () => {
-      window.removeEventListener('pointermove', handleWindowDragMove);
-      window.removeEventListener('pointerup', handleWindowDragEnd);
-      window.removeEventListener('pointercancel', handleWindowDragEnd);
+    const handleWindowMove = (evt: MouseEvent) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      const panelWidth = panelRef.current?.offsetWidth ?? 340;
+      const panelHeight = panelRef.current?.offsetHeight ?? 560;
+      const nextX = dragRef.current.originX + evt.clientX - dragRef.current.startX;
+      const nextY = dragRef.current.originY + evt.clientY - dragRef.current.startY;
+      setPosition({
+        x: Math.min(Math.max(0, nextX), Math.max(0, window.innerWidth - panelWidth)),
+        y: Math.min(Math.max(0, nextY), Math.max(0, window.innerHeight - panelHeight)),
+      });
     };
-  }, [handleWindowDragMove, handleWindowDragEnd]);
+    const handleWindowUp = (evt: MouseEvent) => {
+      evt.stopPropagation();
+      setIsDragging(false);
+      window.removeEventListener('mousemove', handleWindowMove, true);
+      window.removeEventListener('mouseup', handleWindowUp, true);
+    };
+    window.addEventListener('mousemove', handleWindowMove, true);
+    window.addEventListener('mouseup', handleWindowUp, true);
+  }, [position]);
 
   useEffect(() => {
     saveSettings({ visionDefaultFormat: settings.visionDefaultFormat });
@@ -675,9 +671,118 @@ export default function OhMyPrompt({
   if (!isOpen) return null;
 
   const isGold = themeStyle === 'gold';
+
+  // Gold-mode floating panel — follows exactly the project's standard golden
+  // floating panel spec: subtle gradient border, glow shadow, backdrop blur,
+  // elegant rounded corners, consistent with font-design-panel.tsx.
+  if (floating && typeof document !== 'undefined') {
+    return createPortal(
+      <div
+        data-floating-panel="oh-my-prompt"
+        ref={panelRef}
+        className="fixed z-[9999] w-[340px] backdrop-blur-xl rounded-2xl overflow-hidden flex flex-col select-none pointer-events-auto"
+        style={{
+          left: position.x,
+          top: position.y,
+          transition: !isDragging ? 'box-shadow 0.2s ease, transform 0.15s ease, border-color 0.15s ease' : undefined,
+          boxShadow: isDragging
+            ? '0 35px 60px -15px rgba(0,0,0,0.7), 0 0 0 1px rgba(212,175,55,0.3)'
+            : '0 25px 50px -12px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)',
+          transform: isDragging ? 'scale(1.02)' : 'scale(1)',
+          background: isGold
+            ? 'linear-gradient(180deg, #1c1a15 0%, #141310 100%)'
+            : '#18181b',
+          borderColor: isGold
+            ? (isDragging ? 'rgba(212,175,55,0.7)' : 'rgba(212,175,55,0.3)')
+            : (isDragging ? 'rgba(161,161,170,0.4)' : 'rgba(63,63,70,0.5)'),
+          borderWidth: '1px',
+        }}
+      >
+        {/* Header — grabbable drag region with subtle gold gradient accent line */}
+        <div
+          onMouseDown={handleDragStart}
+          data-drag-handle
+          className={`relative px-4 py-3.5 flex items-center justify-between text-white cursor-grab active:cursor-grabbing select-none ${
+            isGold
+              ? 'bg-gradient-to-b from-[#2a251d] to-[#1c1a15]'
+              : 'bg-gradient-to-b from-[#27272a] to-[#18181b]'
+          }`}
+        >
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[rgba(212,175,55,0.25)] to-transparent" />
+          <div className="flex items-center gap-2 pointer-events-none">
+            <div className="relative">
+              <Lightbulb
+                className={`w-5 h-5 drop-shadow-sm ${isGold ? 'text-[#d4af37]' : 'text-[#a1a1aa]'}`}
+                style={{ filter: isGold ? 'drop-shadow(0 0 6px rgba(212,175,55,0.35))' : 'none' }}
+              />
+              <div className={`absolute inset-0 ${isGold ? 'bg-[#d4af37]/15' : 'bg-white/5'} blur-md rounded-full scale-150`} />
+            </div>
+            <h2 className="text-base font-semibold tracking-[-0.01em]">灵感工坊</h2>
+          </div>
+          <button
+            type="button"
+            aria-label="关闭灵感工坊"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-150 cursor-pointer ${
+              isGold
+                ? 'bg-transparent hover:bg-[#d4af37]/15 hover:text-[#d4af37] text-zinc-400'
+                : 'bg-transparent hover:bg-zinc-700/60 hover:text-white text-zinc-500'
+            }`}
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as OmpActiveTab)} className="flex-1 overflow-hidden flex flex-col">
+          <TabsList className="mx-3 mt-3 bg-zinc-800/40 h-10 rounded-xl p-1 gap-1">
+            <TabsTrigger
+              value="vision"
+              className="rounded-lg h-8 text-sm data-[state=active]:bg-[#d4af37] data-[state=active]:text-black data-[state=active]:shadow-sm transition-all"
+            >
+              <Eye className="w-3.5 h-3.5 mr-1.5" />
+              识词
+            </TabsTrigger>
+            <TabsTrigger
+              value="agent"
+              className="rounded-lg h-8 text-sm data-[state=active]:bg-[#d4af37] data-[state=active]:text-black data-[state=active]:shadow-sm transition-all"
+            >
+              <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+              AI增强
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="vision" className="flex-1 mt-2.5 mb-0 px-0 outline-none overflow-hidden flex flex-col data-[state=inactive]:hidden">
+            <VisionTab
+              initialImageUrl={undefined}
+              onInsertPrompt={onInsertPrompt}
+              onOptimizePrompt={() => {}}
+              externalResult={null}
+              externalAnalyzing={false}
+              floating={floating}
+            />
+          </TabsContent>
+
+          <TabsContent value="agent" className="flex-1 mt-2.5 mb-0 px-0 outline-none overflow-hidden flex flex-col data-[state=inactive]:hidden">
+            <AgentEnhanceTab
+              initialPrompt=""
+              onInsertPrompt={onInsertPrompt}
+              onClose={() => { if (onClose) onClose(); }}
+              floating={floating}
+            />
+          </TabsContent>
+        </Tabs>
+      </div>,
+      document.body,
+    );
+  }
+
   const panelClass = floating
-    ? 'fixed w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[9999]'
-    : 'fixed inset-0 z-50 bg-black/40 backdrop-blur-sm';
+    ? 'fixed w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[200]'
+    : 'fixed inset-0 z-50 bg-black/50 backdrop-blur-sm';
   const innerClass = floating
     ? 'w-full flex flex-col bg-[#1a1a1a]'
     : 'fixed w-full max-w-xl bg-background rounded-2xl shadow-2xl border border-border overflow-hidden flex flex-col';
