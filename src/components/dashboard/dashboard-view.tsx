@@ -2616,6 +2616,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               monthlyTokenLimit: u.monthlyTokenLimit,
               dailyImageLimit: u.dailyImageLimit,
               groupId: u.groupId,
+              credits: u.credits,
+              project_count: u.project_count,
+              last_login: u.last_login,
             }))}
             adminGroups={adminGroups.map((group): AdminTabsGroup => ({
               ...group,

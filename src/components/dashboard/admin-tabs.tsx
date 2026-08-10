@@ -23,7 +23,7 @@ export interface AdminGroup {
 export interface AdminUser {
   id: string; name: string; role: string; status: string;
   email?: string; credits?: number; createdAt?: number; created_at?: string;
-  last_login?: string; project_count?: number; api_permissions?: string[];
+  last_login?: string | number; project_count?: number; api_permissions?: string[];
   apiPermissions?: Record<string, boolean>;
   productType?: string;
   chatModels?: string[];

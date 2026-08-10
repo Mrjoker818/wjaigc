@@ -36,6 +36,10 @@ export interface User {
   email?: string;
   createdAt: number;
   updatedAt: number;
+  // Admin-enriched fields (populated by /api/admin/users GET)
+  credits?: number;
+  project_count?: number;
+  last_login?: string | number;
 }
 
 export interface UserUsageRecord {
