@@ -65,7 +65,14 @@ interface Message {
   generateImageCount?: number; // 生成图片数量
   generateError?: string; // 生成失败时的错误信息
   pendingGenerationTasks?: ChatPendingGenerationTask[];
-  imageAnchors?: Array<{ imageId: string; imageUrl: string; imageName: string }>; // 画布图片锚点（Lovart风格）
+  imageAnchors?: Array<{
+    imageId: string;
+    imageUrl: string;
+    imageName: string;
+    assetId?: string;
+    assetVersionId?: string;
+    placementId?: string;
+  }>; // 画布图片锚点（Lovart风格）
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
   toolExecutions?: ToolExecution[]; // Agent工具执行记录
@@ -1249,7 +1256,14 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   const [hoveredMode, setHoveredMode] = useState<'enhance' | 'expand' | 'simplify' | null>(null);
   const [selectedOutputLang, setSelectedOutputLang] = useState<'en' | 'cn'>('en');
   // 图片上传相关状态
-  const [pendingImages, setPendingImages] = useState<Array<{id: string; url: string; name: string}>>([]);
+  const [pendingImages, setPendingImages] = useState<Array<{
+    id: string;
+    url: string;
+    name: string;
+    assetId?: string;
+    assetVersionId?: string;
+    placementId?: string;
+  }>>([]);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   // 第三方模型相关状态
   const [showThirdPartyDialog, setShowThirdPartyDialog] = useState(false);
@@ -1384,6 +1398,9 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
     id: string;
     label: string;
     imageUrl?: string;
+    assetId?: string;
+    assetVersionId?: string;
+    placementId?: string;
     data?: Record<string, unknown>;
   }
   const [activeMentions, setActiveMentions] = useState<MentionRef[]>([]);
@@ -1420,6 +1437,9 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
           id: chatInitialImage.id,
           url: chatInitialImage.url,
           name: chatInitialImage.prompt?.slice(0, 20) || '画布图片',
+          assetId: chatInitialImage.assetId,
+          assetVersionId: chatInitialImage.assetVersionId,
+          placementId: chatInitialImage.placementId,
         }];
       });
       setActiveTab('chat');
@@ -1450,6 +1470,9 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
         id: selectedCanvasImage.id,
         url: selectedCanvasImage.url,
         name: selectedCanvasImage.prompt?.slice(0, 20) || '画布图片',
+        assetId: selectedCanvasImage.assetId,
+        assetVersionId: selectedCanvasImage.assetVersionId,
+        placementId: selectedCanvasImage.placementId,
       }];
     });
 
@@ -1471,6 +1494,9 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
         id: img.id,
         label: img.prompt ? `#${num} ${img.prompt.slice(0, 30)}${img.prompt.length > 30 ? '...' : ''}` : `图片 #${num}`,
         imageUrl: img.url,
+        assetId: img.assetId,
+        assetVersionId: img.assetVersionId,
+        placementId: img.placementId,
         data: { url: img.url, prompt: img.prompt || '', width: img.width, height: img.height, num },
       });
     });
@@ -1575,7 +1601,14 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
     if (item.type === 'canvas-image' && item.imageUrl) {
       setPendingImages(prev => {
         if (prev.some(p => p.id === item.id)) return prev;
-        return [...prev, { id: item.id!, url: item.imageUrl!, name: item.label }];
+        return [...prev, {
+          id: item.id!,
+          url: item.imageUrl!,
+          name: item.label,
+          assetId: item.assetId,
+          assetVersionId: item.assetVersionId,
+          placementId: item.placementId,
+        }];
       });
     }
     setMentionPickerOpen(false);
@@ -3624,16 +3657,37 @@ IP角色设计规范：
     const intentLevel = intentResult.clarity;
 
     // 收集图片锚点（来自pendingImages、@图片引用）
-    const imageAnchors: { imageId: string; imageUrl: string; imageName: string }[] = [];
+    const imageAnchors: Array<{
+      imageId: string;
+      imageUrl: string;
+      imageName: string;
+      assetId?: string;
+      assetVersionId?: string;
+      placementId?: string;
+    }> = [];
     activeMentions.filter(m => m.type === 'canvas-image').forEach(m => {
       if (!imageAnchors.find(a => a.imageId === m.id)) {
-        imageAnchors.push({ imageId: m.id, imageUrl: m.imageUrl || '', imageName: m.label });
+        imageAnchors.push({
+          imageId: m.id,
+          imageUrl: m.imageUrl || '',
+          imageName: m.label,
+          assetId: m.assetId,
+          assetVersionId: m.assetVersionId,
+          placementId: m.placementId,
+        });
       }
     });
     // Add pending images as anchors
     pendingImages.forEach(img => {
       if (!imageAnchors.find(a => a.imageId === img.id)) {
-        imageAnchors.push({ imageId: img.id, imageUrl: img.url, imageName: img.name });
+        imageAnchors.push({
+          imageId: img.id,
+          imageUrl: img.url,
+          imageName: img.name,
+          assetId: img.assetId,
+          assetVersionId: img.assetVersionId,
+          placementId: img.placementId,
+        });
       }
     });
 

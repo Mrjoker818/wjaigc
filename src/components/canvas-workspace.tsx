@@ -57,7 +57,7 @@ import {
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell } from 'lucide-react';
-import { type Workflow } from '@/lib/workflow-engine';
+import { type Workflow, type WorkspaceAssetReference } from '@/lib/workflow-engine';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 
@@ -869,6 +869,47 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
+
+  const handleSendCanvasImageToChat = useCallback(async (image: CanvasImage) => {
+    let transferredImage = image;
+    if (currentProject?.id && image.assetVersionId) {
+      transferredImage = {
+        ...image,
+        assetId: undefined,
+        assetVersionId: undefined,
+        placementId: undefined,
+      };
+      try {
+        const response = await fetch('/api/assets/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceVersion: image.assetVersionId,
+            targetProject: currentProject.id,
+            targetWorkspace: `embedded-chat:${currentProject.id}`,
+            entityType: 'chat-attachment',
+            entityId: image.id,
+            idempotencyKey: `canvas-chat:${currentProject.id}:${image.id}:${image.assetVersionId}`,
+            metadata: { name: image.prompt?.slice(0, 80) || '画布图片', source: 'canvas' },
+          }),
+        });
+        if (response.ok) {
+          const transferred = await response.json() as WorkspaceAssetReference;
+          transferredImage = {
+            ...image,
+            url: transferred.url,
+            assetId: transferred.assetId ?? image.assetId,
+            assetVersionId: transferred.assetVersionId ?? image.assetVersionId,
+            placementId: transferred.placementId ?? image.placementId,
+          };
+        }
+      } catch (error) {
+        console.warn('[CanvasWorkspace] Canvas-to-chat asset transfer failed:', error);
+      }
+    }
+    setChatInitialImage(transferredImage);
+    setChatTabOpen(true);
+  }, [currentProject?.id]);
   const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);
   const shotTaskIdMapRef = useRef<Map<string, string>>(new Map());
   const groupsRef = useRef<ImageGroupData[]>([]);
@@ -2645,7 +2686,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // 加载图片真实尺寸
   // 添加多张图片到画布（自动排列布局）
-  const handleAddImages = useCallback(async (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType }) => {
+  const handleAddImages = useCallback(async (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType; assetReferences?: WorkspaceAssetReference[] }) => {
     const newImages: CanvasImage[] = [];
 
     // Find source image for positioning if provided
@@ -2657,6 +2698,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
     for (let i = 0; i < imageUrls.length; i++) {
       let rawUrl = imageUrls[i];
+      const transferredReference = meta?.assetReferences?.find(reference => reference.url === rawUrl);
+      if (transferredReference) rawUrl = transferredReference.url;
       // 将 blob: URL 转为 data URL（blob: 在页面刷新后失效）
       if (rawUrl.startsWith('blob:')) {
         try {
@@ -2672,7 +2715,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
 
       // 将 data: URL 和外部 HTTP URL 持久化到服务器（避免数据丢失和外部 URL 过期）
-      if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) {
+      if (!transferredReference && (rawUrl.startsWith('data:') || rawUrl.startsWith('http'))) {
         try {
           const saveResp = await fetch('/api/save-image', {
             method: 'POST',
@@ -2695,7 +2738,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
 
       // 跳过已存在的图片
-      if (images.some(img => img.url === rawUrl) || newImages.some(img => img.url === rawUrl)) {
+      if (!transferredReference && (images.some(img => img.url === rawUrl) || newImages.some(img => img.url === rawUrl))) {
         continue;
       }
       // 先获取图片真实尺寸
@@ -2719,6 +2762,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         originalHeight: natH,
         createdAt: Date.now(),
         generatedFromImageId: sourceImageId,
+        ...(transferredReference?.assetId ? { assetId: transferredReference.assetId } : {}),
+        ...(transferredReference?.assetVersionId ? { assetVersionId: transferredReference.assetVersionId } : {}),
+        ...(transferredReference?.placementId ? { placementId: transferredReference.placementId } : {}),
         // ★ 保留模型信息和API提供商信息
         ...(effectiveModelName ? { modelName: effectiveModelName } : {}),
         ...(effectiveApiProvider ? { apiProvider: effectiveApiProvider } : {}),
@@ -4841,6 +4887,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             img.createdAt,
             img.url,
           ),
+          assetId: img.assetId,
+          assetVersionId: img.assetVersionId,
+          placementId: img.placementId,
+          projectId: currentProject?.id,
         }))}
         themeStyle={themeStyle}
         preferredAnnotationModelId={preferredAnnotationModelId}
@@ -5209,10 +5259,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             } catch {}
           }}
           onEditImage={handleEditImage}
-          onSendToChat={(image) => {
-            setChatInitialImage(image);
-            setChatTabOpen(true);
-          }}
+          onSendToChat={(image) => { void handleSendCanvasImageToChat(image); }}
           connections={canvasConnections}
           onConnectionsChange={setCanvasConnections}
           versionHistoryManager={treeHistoryRef.current}

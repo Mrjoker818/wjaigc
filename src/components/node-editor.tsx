@@ -10,6 +10,7 @@ import {
   createWorkflowNode, createConnection, createEmptyWorkflow,
   getNodePropertyFields, getNodeCategory, NODE_TEMPLATES,
   canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
+  resolveWorkflowOutputAssetReference, type WorkspaceAssetReference,
 } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { computePortPosition } from '@/lib/node-port-position';
@@ -112,6 +113,10 @@ interface CanvasImageRef {
   width?: number;
   height?: number;
   versionId?: string;
+  assetId?: string;
+  assetVersionId?: string;
+  placementId?: string;
+  projectId?: string;
 }
 
 interface NodeAnnotationSession {
@@ -636,7 +641,7 @@ interface NodeEditorProps {
   /** 主题风格: gold(黑金) / monochrome(单色) */
   themeStyle?: 'gold' | 'monochrome';
   /** 生成图片后回调，将图片添加到项目 */
-  onAddImages?: (imageUrls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
+  onAddImages?: (imageUrls: string[], meta?: { modelName?: string; apiProvider?: string; assetReferences?: WorkspaceAssetReference[] }) => void;
   preferredAnnotationModelId?: string;
 }
 
@@ -1330,7 +1335,17 @@ ${contextInfo}
         const cfg = n.config as Record<string, unknown>;
         const url = (cfg?.imageUrl as string) || (cfg?.outputUrl as string) || '';
         const name = (cfg?.label as string) || n.label || n.type;
-        return { id: n.id, url, name, label: name, description: name };
+        return {
+          id: n.id,
+          url,
+          name,
+          label: name,
+          description: name,
+          assetId: typeof cfg.assetId === 'string' ? cfg.assetId : undefined,
+          assetVersionId: typeof cfg.assetVersionId === 'string' ? cfg.assetVersionId : undefined,
+          placementId: typeof cfg.placementId === 'string' ? cfg.placementId : undefined,
+          projectId: typeof cfg.projectId === 'string' ? cfg.projectId : undefined,
+        };
       })
       .filter(img => img.url);
     // 合并外部传入的画布图片
@@ -1654,6 +1669,77 @@ ${contextInfo}
   }, [setWf]);
   useEffect(() => { handleDeleteNodeRef.current = handleDeleteNode; }, [handleDeleteNode]);
 
+  const transferCanvasImageToWorkflow = useCallback(async (
+    nodeId: string,
+    image: CanvasImageRef,
+  ): Promise<void> => {
+    const applyLegacyReference = (): void => {
+      setWf(prev => ({
+        ...prev,
+        nodes: prev.nodes.map(node => node.id === nodeId
+          ? {
+              ...node,
+              config: {
+                ...node.config,
+                imageUrl: image.url,
+                source: 'canvas',
+                sourceImageId: image.id,
+                projectId: undefined,
+                assetId: undefined,
+                assetVersionId: undefined,
+                placementId: undefined,
+              },
+            }
+          : node),
+      }));
+    };
+    if (!projectId || !image.assetVersionId) {
+      applyLegacyReference();
+      return;
+    }
+    try {
+      const response = await fetch('/api/assets/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceVersion: image.assetVersionId,
+          targetProject: projectId,
+          targetWorkspace: wf.id,
+          entityType: 'workflow-input',
+          entityId: nodeId,
+          idempotencyKey: `canvas-workflow:${wf.id}:${nodeId}:${image.assetVersionId}`,
+          metadata: { name: image.name, source: 'canvas', sourceImageId: image.id },
+        }),
+      });
+      if (!response.ok) {
+        applyLegacyReference();
+        return;
+      }
+      const transferred = await response.json() as WorkspaceAssetReference;
+      setWf(prev => ({
+        ...prev,
+        nodes: prev.nodes.map(node => node.id === nodeId
+          ? {
+              ...node,
+              config: {
+                ...node.config,
+                imageUrl: transferred.url,
+                source: 'canvas',
+                sourceImageId: image.id,
+                projectId,
+                assetId: transferred.assetId,
+                assetVersionId: transferred.assetVersionId,
+                placementId: transferred.placementId,
+              },
+            }
+          : node),
+      }));
+    } catch (error) {
+      console.warn('[NodeEditor] Canvas-to-workflow asset transfer failed:', error);
+      applyLegacyReference();
+    }
+  }, [projectId, setWf, wf.id]);
+
 
   // 从内容面板拖拽图片到画布 → 创建 input-image 节点
   const handleCanvasImageDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -1682,12 +1768,17 @@ ${contextInfo}
       source: 'canvas-ref',
       sourceImageId: refImage?.id,
       sourceVersionId: refImage?.versionId,
+      projectId,
+      assetId: refImage?.assetId,
+      assetVersionId: refImage?.assetVersionId,
+      placementId: refImage?.placementId,
     };
     node.width = nodeW;
     node.height = nodeH;
     setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
     setSelectedNodeIds(new Set([node.id]));
-  }, [canvasImages, setWf]);
+    if (refImage) void transferCanvasImageToWorkflow(node.id, refImage);
+  }, [canvasImages, projectId, setWf, transferCanvasImageToWorkflow]);
 
   const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
     setWf(prev => ({
@@ -2347,11 +2438,12 @@ ${contextInfo}
           }, 3000);
           // 持久化: 将工作流生成的图片添加到项目
           if (data.status === 'completed' && onAddImages && data.results) {
+            const workflowResults = data.results as Record<string, { status: string; output?: Record<string, unknown> }>;
             const generatedUrls: string[] = [];
             // ★ 收集工作流中使用的模型信息
             let workflowModelName: string | undefined;
             let workflowApiProvider: string | undefined;
-            for (const [, result] of Object.entries(data.results as Record<string, { status: string; output?: Record<string, unknown> }>)) {
+            for (const [, result] of Object.entries(workflowResults)) {
               if (result.status === 'success' && result.output) {
                 const imgUrls = result.output.imageUrls as string[] | undefined;
                 const imgUrl = result.output.imageUrl as string | undefined;
@@ -2366,6 +2458,46 @@ ${contextInfo}
               }
             }
             if (generatedUrls.length > 0) {
+              const transferredReferences: WorkspaceAssetReference[] = [];
+              if (projectId) {
+                for (const outputNode of wf.nodes.filter(node => getNodeCategory(node.type) === 'output')) {
+                  const outputReference = resolveWorkflowOutputAssetReference(
+                    outputNode.id,
+                    wf.nodes,
+                    wf.connections,
+                    workflowResults,
+                  );
+                  if (!outputReference) continue;
+                  try {
+                    const response = await fetch('/api/assets/transfer', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        sourceVersion: outputReference.assetVersionId,
+                        targetProject: projectId,
+                        targetWorkspace: `canvas:${projectId}`,
+                        entityType: 'canvas-image',
+                        entityId: `${executionId}:${outputNode.id}`,
+                        idempotencyKey: `workflow-canvas:${executionId}:${outputNode.id}:${outputReference.assetVersionId}`,
+                        metadata: {
+                          name: outputNode.label,
+                          source: 'workflow',
+                          workflowId: wf.id,
+                          executionId,
+                          outputNodeId: outputNode.id,
+                        },
+                      }),
+                    });
+                    if (!response.ok) continue;
+                    const transferred = await response.json() as WorkspaceAssetReference;
+                    transferredReferences.push(transferred);
+                    const sourceUrlIndex = generatedUrls.indexOf(outputReference.url);
+                    if (sourceUrlIndex >= 0) generatedUrls[sourceUrlIndex] = transferred.url;
+                  } catch (error) {
+                    console.warn('[NodeEditor] Workflow-to-canvas asset transfer failed:', error);
+                  }
+                }
+              }
               // ★ 如果输出没有模型信息，从工作流节点中查找
               if (!workflowModelName && wf.nodes) {
                 const genNode = wf.nodes.find(n => n.type === 'ai-generate' && n.config?.model);
@@ -2375,10 +2507,14 @@ ${contextInfo}
                   if (!workflowApiProvider && model.includes('::')) workflowApiProvider = model.split('::')[0];
                 }
               }
-              const meta: { modelName?: string; apiProvider?: string } = {};
+              const meta: { modelName?: string; apiProvider?: string; assetReferences?: WorkspaceAssetReference[] } = {};
               if (workflowModelName) meta.modelName = workflowModelName;
               if (workflowApiProvider) meta.apiProvider = workflowApiProvider;
-              onAddImages(generatedUrls, Object.keys(meta).length > 0 ? meta : undefined);
+              if (transferredReferences.length > 0) meta.assetReferences = transferredReferences;
+              onAddImages(Array.from(new Set(generatedUrls)), Object.keys(meta).length > 0 ? {
+                ...meta,
+                assetReferences: transferredReferences,
+              } : undefined);
             }
           }
           return; // done, don't schedule next poll
@@ -2415,7 +2551,7 @@ ${contextInfo}
     };
     poll();
     return () => { if (timerId) clearTimeout(timerId); };
-  }, [execStatus, executionId, onAddImages, wf.nodes]);
+  }, [execStatus, executionId, onAddImages, projectId, wf.connections, wf.id, wf.nodes]);
 
   // ─── 保存工作流 ───
 
@@ -2496,7 +2632,14 @@ ${contextInfo}
       const res = await fetch('/api/save-image', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.url) {
-        handleNodeUpdate(nodeId, { config: { imageUrl: data.url, source: 'upload' } });
+        handleNodeUpdate(nodeId, { config: {
+          imageUrl: data.url,
+          source: 'upload',
+          projectId: '',
+          assetId: '',
+          assetVersionId: '',
+          placementId: '',
+        } });
         resizeNodeForImageUrl(nodeId, data.url);
       }
     } catch (err) {
@@ -2511,7 +2654,14 @@ ${contextInfo}
       const res = await fetch('/api/save-image', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.url) {
-        handleNodeUpdate(nodeId, { config: { imageUrl: data.url, source: 'upload' } });
+        handleNodeUpdate(nodeId, { config: {
+          imageUrl: data.url,
+          source: 'upload',
+          projectId: '',
+          assetId: '',
+          assetVersionId: '',
+          placementId: '',
+        } });
         resizeNodeForImageUrl(nodeId, data.url);
       }
     } catch (e) {
@@ -3259,6 +3409,7 @@ ${contextInfo}
               onDelete={handleDeleteNode}
               onImageUpload={handleImageUpload}
               canvasImages={allCanvasImages}
+              onCanvasImageSelect={transferCanvasImageToWorkflow}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
@@ -4417,9 +4568,10 @@ interface PropertyPanelProps {
   onImageUpload: (nodeId: string, file: File) => void;
   /** P0: 画布图片列表，用于@图片引用 */
   canvasImages?: CanvasImageRef[];
+  onCanvasImageSelect: (nodeId: string, image: CanvasImageRef) => Promise<void>;
 }
 
-function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImageUpload, canvasImages }: PropertyPanelProps) {
+function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect }: PropertyPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [localTextValues, setLocalTextValues] = useState<Record<string, string>>({});
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -4769,7 +4921,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                           key={img.id}
                           className="w-full px-3 py-2 text-left text-xs text-foreground hover:bg-primary/10 hover:text-primary cursor-pointer truncate transition-colors"
                           onClick={() => {
-                            onUpdate(node.id, { config: { [field.key]: img.url, source: 'canvas' } });
+                            void onCanvasImageSelect(node.id, img);
                             const dropdown = document.querySelector('.group\\/canvas > div:last-child') as HTMLElement;
                             if (dropdown) dropdown.style.display = 'none';
                           }}

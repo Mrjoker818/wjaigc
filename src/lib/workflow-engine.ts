@@ -279,6 +279,14 @@ export interface WorkflowNode {
   execResult?: { status: string; output?: Record<string, unknown>; error?: string };
 }
 
+export interface WorkspaceAssetReference {
+  assetId?: string;
+  assetVersionId?: string;
+  placementId?: string;
+  url: string;
+  name?: string;
+}
+
 export interface WorkflowConnection {
   id: string;
   fromNodeId: string;
@@ -1459,9 +1467,17 @@ export function getNodeInputs(
     const current = Array.isArray(inputs.imageUrls)
       ? inputs.imageUrls.filter((url): url is string => typeof url === 'string')
       : (typeof inputs.imageUrl === 'string' ? [inputs.imageUrl] : []);
+    const primaryCandidate = candidates[0];
     const imageUrls = Array.from(new Set([...current, ...candidates]));
+    const shouldAdoptAssetIdentity = !inputs.assetVersionId
+      && (!inputs.imageUrl || inputs.imageUrl === primaryCandidate);
     inputs.imageUrls = imageUrls;
     if (!inputs.imageUrl) inputs.imageUrl = imageUrls[0];
+    if (shouldAdoptAssetIdentity) {
+      if (typeof output.assetVersionId === 'string') inputs.assetVersionId = output.assetVersionId;
+      if (typeof output.assetId === 'string') inputs.assetId = output.assetId;
+      if (typeof output.placementId === 'string') inputs.placementId = output.placementId;
+    }
   };
   // P1: 输入引用阻断 — 获取被阻断的连接ID列表
   const blockedInputs = new Set<string>(Array.isArray(node.config?.blockedInputs) ? node.config.blockedInputs as string[] : []);
@@ -1549,6 +1565,58 @@ export function getNodeInputs(
   return inputs;
 }
 
+export function resolveWorkflowOutputAssetReference(
+  outputNodeId: string,
+  nodes: WorkflowNode[],
+  connections: WorkflowConnection[],
+  results: Record<string, { output?: Record<string, unknown> }>,
+): WorkspaceAssetReference | null {
+  const output = results[outputNodeId]?.output;
+  const outputUrl = typeof output?.imageUrl === 'string' ? output.imageUrl : '';
+  if (!outputUrl) return null;
+  if (typeof output?.assetVersionId === 'string') {
+    return {
+      ...(typeof output.assetId === 'string' ? { assetId: output.assetId } : {}),
+      assetVersionId: output.assetVersionId,
+      ...(typeof output.placementId === 'string' ? { placementId: output.placementId } : {}),
+      url: outputUrl,
+    };
+  }
+
+  const nodesById = new Map(nodes.map(node => [node.id, node]));
+  const queue = connections
+    .filter(connection => connection.toNodeId === outputNodeId)
+    .map(connection => connection.fromNodeId);
+  const visited = new Set<string>();
+  const matchingReferences = new Map<string, WorkspaceAssetReference>();
+  while (queue.length > 0) {
+    const nodeId = queue.shift()!;
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
+    const node = nodesById.get(nodeId);
+    if (!node) continue;
+    const canonicalInputUrl = results[nodeId]?.output?.imageUrl;
+    if (
+      node.type === 'input-image'
+      && canonicalInputUrl === outputUrl
+      && typeof node.config.assetVersionId === 'string'
+    ) {
+      matchingReferences.set(node.config.assetVersionId, {
+        ...(typeof node.config.assetId === 'string' ? { assetId: node.config.assetId } : {}),
+        assetVersionId: node.config.assetVersionId,
+        ...(typeof node.config.placementId === 'string' ? { placementId: node.config.placementId } : {}),
+        url: outputUrl,
+      });
+    }
+    queue.push(...connections
+      .filter(connection => connection.toNodeId === nodeId)
+      .map(connection => connection.fromNodeId));
+  }
+  return matchingReferences.size === 1
+    ? matchingReferences.values().next().value ?? null
+    : null;
+}
+
 /**
  * 构建节点执行请求体
  * 根据节点类型映射到对应的API端点和参数
@@ -1582,9 +1650,24 @@ export function buildNodeExecutionRequest(
   }
 
   switch (node.type) {
-    case 'input-image':
-      // 图片输入节点：直接输出图片URL，不需要调用API
+    case 'input-image': {
+      const projectId = getConfigString(config, 'projectId');
+      const assetVersionId = getConfigString(config, 'assetVersionId');
+      const placementId = getConfigString(config, 'placementId');
+      if (projectId && assetVersionId) {
+        return {
+          endpoint: '/api/assets',
+          method: 'POST',
+          body: {
+            projectId,
+            assetVersionId,
+            ...(placementId ? { placementId } : {}),
+          },
+        };
+      }
+      // URL-only legacy nodes remain local no-op inputs.
       return null;
+    }
 
     case 'input-text':
       // 文本输入节点：直接输出文本，不需要调用API优化

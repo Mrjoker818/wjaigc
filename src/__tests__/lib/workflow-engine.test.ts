@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildNodeExecutionRequest, evaluateWorkflowCondition, getNodeInputs, getNodePropertyFields, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
+import { buildNodeExecutionRequest, evaluateWorkflowCondition, getNodeInputs, getNodePropertyFields, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, resolveWorkflowOutputAssetReference, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
 import type { NodeType, WorkflowNode, WorkflowConnection } from '@/lib/workflow-engine';
 
 /** 创建最小合法 WorkflowNode */
@@ -96,6 +96,133 @@ describe('workflow inputs', () => {
       imageUrl: '/a.png',
       imageUrls: ['/a.png', '/b.png'],
     });
+  });
+
+  it('propagates asset version identity with an upstream image reference', () => {
+    const target = makeNode('target', 'output-image');
+    const results = new Map([[
+      'source',
+      {
+        nodeId: 'source',
+        status: 'success' as const,
+        output: { imageUrl: '/canonical.png', assetVersionId: 'version-a' },
+        durationMs: 0,
+      },
+    ]]);
+
+    expect(getNodeInputs(
+      target,
+      [{ ...makeConn('image', 'source', target.id), type: 'image' }],
+      results,
+    )).toMatchObject({
+      imageUrl: '/canonical.png',
+      assetVersionId: 'version-a',
+    });
+  });
+
+  it('keeps the primary image URL aligned with its asset version identity', () => {
+    const target = makeNode('target', 'output-image');
+    const results = new Map([
+      ['source-a', {
+        nodeId: 'source-a',
+        status: 'success' as const,
+        output: { imageUrl: '/a.png', assetVersionId: 'version-a' },
+        durationMs: 0,
+      }],
+      ['source-b', {
+        nodeId: 'source-b',
+        status: 'success' as const,
+        output: { imageUrl: '/b.png', assetVersionId: 'version-b' },
+        durationMs: 0,
+      }],
+    ]);
+
+    expect(getNodeInputs(
+      target,
+      [
+        { ...makeConn('first', 'source-a', target.id), type: 'image' },
+        { ...makeConn('second', 'source-b', target.id), type: 'image' },
+      ],
+      results,
+    )).toMatchObject({
+      imageUrl: '/a.png',
+      imageUrls: ['/a.png', '/b.png'],
+      assetVersionId: 'version-a',
+    });
+  });
+
+  it('resolves a matching workflow output to the original asset version', () => {
+    const input = makeNode('input', 'input-image');
+    input.config = {
+      imageUrl: '/client-substituted.png',
+      assetVersionId: 'version-a',
+      placementId: 'workflow-placement-a',
+    };
+    const output = makeNode('output', 'output-image');
+    const connections = [{ ...makeConn('image', input.id, output.id), type: 'image' as const }];
+    const results = {
+      input: { status: 'success', output: { imageUrl: '/canonical.png' } },
+      output: { status: 'success', output: { imageUrl: '/canonical.png' } },
+    };
+
+    expect(resolveWorkflowOutputAssetReference(output.id, [input, output], connections, results)).toEqual({
+      assetVersionId: 'version-a',
+      placementId: 'workflow-placement-a',
+      url: '/canonical.png',
+    });
+  });
+
+  it('does not guess an asset version when multiple inputs share the output URL', () => {
+    const inputA = makeNode('input-a', 'input-image');
+    inputA.config = { assetVersionId: 'version-a' };
+    const inputB = makeNode('input-b', 'input-image');
+    inputB.config = { assetVersionId: 'version-b' };
+    const output = makeNode('output', 'output-image');
+    const connections = [
+      { ...makeConn('a', inputA.id, output.id), type: 'image' as const },
+      { ...makeConn('b', inputB.id, output.id), type: 'image' as const },
+    ];
+    const results = {
+      'input-a': { output: { imageUrl: '/same.png' } },
+      'input-b': { output: { imageUrl: '/same.png' } },
+      output: { output: { imageUrl: '/same.png' } },
+    };
+
+    expect(resolveWorkflowOutputAssetReference(
+      output.id,
+      [inputA, inputB, output],
+      connections,
+      results,
+    )).toBeNull();
+  });
+});
+
+describe('versioned workflow image resolution', () => {
+  it('resolves versioned image nodes on the server without sending a client-substituted URL', () => {
+    const node = makeNode('input', 'input-image');
+    node.config = {
+      projectId: 'project-a',
+      assetVersionId: 'version-a',
+      placementId: 'workflow-placement-a',
+      imageUrl: '/client-substituted.png',
+    };
+
+    expect(buildNodeExecutionRequest(node, {})).toEqual({
+      endpoint: '/api/assets',
+      method: 'POST',
+      body: {
+        projectId: 'project-a',
+        assetVersionId: 'version-a',
+        placementId: 'workflow-placement-a',
+      },
+    });
+  });
+
+  it('keeps URL-only legacy image nodes on the existing no-request path', () => {
+    const node = makeNode('legacy-input', 'input-image');
+    node.config = { imageUrl: '/legacy.png' };
+
+    expect(buildNodeExecutionRequest(node, {})).toBeNull();
   });
 });
 
