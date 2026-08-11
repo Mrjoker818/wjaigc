@@ -120,4 +120,62 @@ describe('user-data asset graph sync route', () => {
       .rejects.toThrow('LEGACY_MEDIA_PERSIST_FAILED');
     expect(mocks.persistResultImage).not.toHaveBeenCalled();
   });
+
+  it('returns only canonical canvas media fields and graph IDs after data URL persistence', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'shadow';
+    const canonicalProjects = [{
+      ...projects[0],
+      name: 'must-not-leak-project-name',
+      settings: { secret: 'must-not-leak-settings' },
+      canvasImages: [{
+        id: 'encoded',
+        url: '/api/serve-upload/uploads/canonical.png',
+        sourceUrl: '/api/serve-upload/uploads/source.png',
+        thumbnailUrl: '/api/serve-upload/uploads/thumb.png',
+        mediaAvailability: 'ready',
+        originalWidth: 1024,
+        originalHeight: 768,
+        assetId: 'asset-a',
+        assetVersionId: 'version-a',
+        placementId: 'placement-a',
+        prompt: 'must-not-leak-prompt',
+      }],
+    }];
+    mocks.executeCanvasProjectSync.mockResolvedValue({
+      projects: canonicalProjects,
+      mappings: {
+        'project-1': {
+          encoded: { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' },
+        },
+      },
+    });
+
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'projects', value: projects }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.assetGraphUpdates).toEqual({
+      'project-1': {
+        encoded: {
+          assetId: 'asset-a',
+          versionId: 'version-a',
+          placementId: 'placement-a',
+          url: '/api/serve-upload/uploads/canonical.png',
+          sourceUrl: '/api/serve-upload/uploads/source.png',
+          thumbnailUrl: '/api/serve-upload/uploads/thumb.png',
+          mediaAvailability: 'ready',
+          mediaErrorCode: null,
+          originalWidth: 1024,
+          originalHeight: 768,
+        },
+      },
+    });
+    expect(body).not.toHaveProperty('value');
+    expect(body).not.toHaveProperty('projects');
+    expect(JSON.stringify(body)).not.toContain('must-not-leak');
+  });
 });

@@ -23,6 +23,47 @@ function isKeyAllowed(key: string): boolean {
   return ALLOWED_KEY_PREFIXES.some(prefix => key.startsWith(prefix));
 }
 
+interface CanvasAssetGraphUpdate {
+  assetId: string;
+  versionId: string;
+  placementId: string;
+  url: string;
+  sourceUrl: string | null;
+  thumbnailUrl: string | null;
+  mediaAvailability: Project['canvasImages'][number]['mediaAvailability'];
+  mediaErrorCode: string | null;
+  originalWidth: number;
+  originalHeight: number;
+}
+
+function buildAssetGraphUpdates(
+  projects: Project[],
+  mappings: AssetGraphMappings,
+): Record<string, Record<string, CanvasAssetGraphUpdate>> {
+  const updates: Record<string, Record<string, CanvasAssetGraphUpdate>> = {};
+  for (const project of projects) {
+    const projectMappings = mappings[project.id];
+    if (!projectMappings) continue;
+    for (const image of project.canvasImages) {
+      const mapping = projectMappings[image.id];
+      if (!mapping) continue;
+      (updates[project.id] ??= {})[image.id] = {
+        assetId: mapping.assetId,
+        versionId: mapping.versionId,
+        placementId: mapping.placementId,
+        url: image.url,
+        sourceUrl: image.sourceUrl ?? null,
+        thumbnailUrl: image.thumbnailUrl ?? null,
+        mediaAvailability: image.mediaAvailability ?? 'ready',
+        mediaErrorCode: image.mediaErrorCode ?? null,
+        originalWidth: image.originalWidth,
+        originalHeight: image.originalHeight,
+      };
+    }
+  }
+  return updates;
+}
+
 /**
  * Filter projects to only include those belonging to the specified userId.
  * Strict isolation: only keep projects where userId matches the session user.
@@ -172,6 +213,7 @@ export async function POST(request: NextRequest) {
     let value: unknown = body.value ?? null;
     const projectIdMap: Record<string, string> = {};
     let assetGraphMappings: AssetGraphMappings = {};
+    let assetGraphUpdates: Record<string, Record<string, CanvasAssetGraphUpdate>> = {};
 
     // 【数据隔离】对 projects 类型数据做服务端验证和清洗
     // 1. 强制过滤只保留属于当前会话用户的项目
@@ -222,10 +264,11 @@ export async function POST(request: NextRequest) {
       });
       value = result.projects;
       assetGraphMappings = result.mappings;
+      assetGraphUpdates = buildAssetGraphUpdates(result.projects, result.mappings);
     } else if (!await dbSetUserData(sessionUser.id, key, value)) {
       throw new Error('Failed to write user data');
     }
-    return NextResponse.json({ success: true, key, projectIdMap, assetGraphMappings });
+    return NextResponse.json({ success: true, key, projectIdMap, assetGraphMappings, assetGraphUpdates });
   } catch (error) {
     return NextResponse.json({
       success: false,

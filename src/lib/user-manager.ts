@@ -1,5 +1,5 @@
 // 用户数据管理器 - localStorage + 服务器数据库双重存储
-import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData } from './user-types';
+import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData, CanvasImage } from './user-types';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import {
   selectCanvasPlacementSnapshot,
@@ -55,6 +55,18 @@ interface ProjectSyncResponse {
     assetId: string;
     versionId: string;
     placementId: string;
+  }>>;
+  assetGraphUpdates?: Record<string, Record<string, {
+    assetId: string;
+    versionId: string;
+    placementId: string;
+    url: string;
+    sourceUrl: string | null;
+    thumbnailUrl: string | null;
+    mediaAvailability: CanvasImage['mediaAvailability'];
+    mediaErrorCode: string | null;
+    originalWidth: number;
+    originalHeight: number;
   }>>;
   assetGraphMode?: AssetGraphMode;
 }
@@ -320,7 +332,7 @@ export class UserManager {
     this.saveData();
   }
 
-  private saveData(): void {
+  private commitLocalDataOnly(): void {
     if (!this.canUseStorage()) return;
 
     try {
@@ -350,6 +362,11 @@ export class UserManager {
       console.error('Failed to save user data:', error);
     }
 
+  }
+
+  private saveData(): void {
+    if (!this.canUseStorage()) return;
+    this.commitLocalDataOnly();
     // 同步当前用户的项目数据到服务器数据库（防抖）
     this.scheduleServerSync();
   }
@@ -549,28 +566,53 @@ export class UserManager {
 
   private applyAssetGraphMappings(
     assetGraphMappings: NonNullable<ProjectSyncResponse['assetGraphMappings']>,
+    assetGraphUpdates: NonNullable<ProjectSyncResponse['assetGraphUpdates']>,
   ): void {
-    if (!this.currentUserId || !this.multiUserData || Object.keys(assetGraphMappings).length === 0) return;
+    if (
+      !this.currentUserId
+      || !this.multiUserData
+      || (Object.keys(assetGraphMappings).length === 0 && Object.keys(assetGraphUpdates).length === 0)
+    ) return;
     const userData = this.multiUserData.userData[this.currentUserId];
     if (!userData) return;
     let changed = false;
     userData.projects = userData.projects.map((project) => {
       const mappings = assetGraphMappings[project.id];
-      if (!mappings) return project;
+      const updates = assetGraphUpdates[project.id];
+      if (!mappings && !updates) return project;
+      let projectChanged = false;
       const canvasImages = project.canvasImages.map((image) => {
-        const mapping = mappings[image.id];
-        if (!mapping) return image;
-        changed = true;
-        return {
-          ...image,
-          assetId: mapping.assetId,
-          assetVersionId: mapping.versionId,
-          placementId: mapping.placementId,
+        const mapping = mappings?.[image.id];
+        const update = updates?.[image.id];
+        if (!mapping && !update) return image;
+        const nextFields: Partial<CanvasImage> = {
+          assetId: update?.assetId ?? mapping?.assetId,
+          assetVersionId: update?.versionId ?? mapping?.versionId,
+          placementId: update?.placementId ?? mapping?.placementId,
+          ...(update ? {
+            url: update.url,
+            sourceUrl: update.sourceUrl ?? undefined,
+            thumbnailUrl: update.thumbnailUrl ?? undefined,
+            mediaAvailability: update.mediaAvailability,
+            mediaErrorCode: update.mediaErrorCode ?? undefined,
+            originalWidth: update.originalWidth,
+            originalHeight: update.originalHeight,
+          } : {}),
         };
+        const fieldChanged = Object.entries(nextFields).some(([key, value]) => (
+          image[key as keyof CanvasImage] !== value
+        ));
+        if (!fieldChanged) return image;
+        changed = true;
+        projectChanged = true;
+        return { ...image, ...nextFields };
       });
-      return { ...project, canvasImages };
+      return projectChanged ? { ...project, canvasImages } : project;
     });
-    if (changed) this.saveData();
+    if (changed) {
+      this.commitLocalDataOnly();
+      this.notifyProjectsChanged();
+    }
   }
 
   /** 强制将当前项目快照提交到数据库；任何失败都会抛错并阻断依赖该快照的操作。 */
@@ -603,7 +645,7 @@ export class UserManager {
       ? data.projectIdMap
       : {};
     this.applyProjectIdMap(projectIdMap);
-    this.applyAssetGraphMappings(data.assetGraphMappings || {});
+    this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
     this._recentlyDeletedImageIds.clear();
     return { projectIdMap };
   }
@@ -632,7 +674,7 @@ export class UserManager {
         const data = await syncRes.json().catch(() => null) as ProjectSyncResponse | null;
         if (data?.success) {
           this.applyProjectIdMap(data.projectIdMap || {});
-          this.applyAssetGraphMappings(data.assetGraphMappings || {});
+          this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
           console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
           this._recentlyDeletedImageIds.clear();
         } else {

@@ -113,16 +113,124 @@ describe('continuous canvas shadow synchronization', () => {
     }));
   });
 
+  it('executes append-only reconciliation with lineage, current, placement, and checkpoint in one transaction state', async () => {
+    const previousMapping = {
+      assetId: 'asset-a',
+      versionId: 'version-old',
+      placementId: 'placement-a',
+    };
+    const rawProject = project([image('retained', {
+      url: '/media/replacement.png',
+      sourceUrl: 'https://recovery.test/replacement.png',
+      originalWidth: 1200,
+      originalHeight: 800,
+    })]);
+    const oldVersion = {
+      id: 'version-old',
+      file_url: '/media/original.png',
+      storage_key: 'original-key',
+      checksum: 'old-checksum',
+      mime_type: 'image/png',
+      byte_size: '1234',
+      width: 600,
+      height: 400,
+      availability: 'ready' as const,
+      recovery_source_url: 'https://recovery.test/original.png',
+      metadata: { immutable: 'old-version-metadata' },
+    };
+    const originalVersionSnapshot = structuredClone(oldVersion);
+    const state: {
+      childVersion?: { id: string; assetId: string; fileUrl: string; metadata: unknown };
+      parent?: { versionId: string; parentVersionId: string };
+      currentVersionId?: string;
+      placementVersionId?: string;
+      checkpointMapping?: { assetId: string; versionId: string; placementId: string };
+    } = {};
+    const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT legacy.value AS legacy_project')) return { rows: [{ legacy_project: rawProject }], rowCount: 1 };
+      if (sql.includes('FROM wujie_asset_migration_checkpoints') && sql.includes('SELECT status')) {
+        return {
+          rows: [{
+            status: 'completed',
+            checkpoint: { sourceSchemaVersion: 1, legacyImageMappings: { retained: previousMapping } },
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('SELECT schema_version, metadata') && sql.includes('FROM wujie_projects')) {
+        return { rows: [{ schema_version: 3, metadata: {} }], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_assets') && sql.includes('SET kind =')) return { rows: [], rowCount: 1 };
+      if (sql.includes('FROM wujie_asset_versions') && sql.includes('FOR UPDATE')) {
+        return { rows: [oldVersion], rowCount: 1 };
+      }
+      if (sql.includes('INSERT INTO wujie_asset_versions')) {
+        state.childVersion = {
+          id: String(params[0]),
+          assetId: String(params[1]),
+          fileUrl: String(params[4]),
+          metadata: JSON.parse(String(params[14])),
+        };
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('INSERT INTO wujie_asset_version_parents')) {
+        state.parent = { versionId: String(params[3]), parentVersionId: String(params[4]) };
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_assets SET current_version_id')) {
+        state.currentVersionId = String(params[3]);
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_workspace_placements')) {
+        state.placementVersionId = String(params[3]);
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_asset_migration_checkpoints')) {
+        const checkpoint = JSON.parse(String(params[3])) as {
+          legacyImageMappings: Record<string, { assetId: string; versionId: string; placementId: string }>;
+        };
+        state.checkpointMapping = checkpoint.legacyImageMappings.retained;
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_projects SET name')) return { rows: [], rowCount: 1 };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+    const client = { query } as unknown as Parameters<typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction>[0];
+
+    const result = await legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    expect(oldVersion).toEqual(originalVersionSnapshot);
+    expect(query.mock.calls.some(([sql]) => String(sql).includes('UPDATE wujie_asset_versions'))).toBe(false);
+    expect(state.childVersion).toMatchObject({
+      assetId: 'asset-a',
+      fileUrl: '/media/replacement.png',
+      metadata: expect.objectContaining({ legacyImageId: 'retained' }),
+    });
+    expect(state.childVersion?.id).not.toBe('version-old');
+    expect(state.parent).toEqual({ versionId: state.childVersion?.id, parentVersionId: 'version-old' });
+    expect(state.currentVersionId).toBe(state.childVersion?.id);
+    expect(state.placementVersionId).toBe(state.childVersion?.id);
+    expect(state.checkpointMapping).toEqual({
+      assetId: 'asset-a',
+      versionId: state.childVersion?.id,
+      placementId: 'placement-a',
+    });
+    expect(result.mappings.retained).toEqual(state.checkpointMapping);
+  });
+
   it('persists data URLs before opening the atomic database transaction', async () => {
     let transactionStarted = false;
-    let synchronizedUrl = '';
+    let synchronizedMedia: Pick<CanvasImage, 'url' | 'sourceUrl' | 'thumbnailUrl'> | undefined;
     const storage: CanvasProjectSyncStorage = {
       async transaction(callback) {
         transactionStarted = true;
         return callback({
           async writeProjects() {},
           async syncProject(nextProject) {
-            synchronizedUrl = nextProject.canvasImages[0].url;
+            synchronizedMedia = nextProject.canvasImages[0];
             return {
               project: nextProject,
               sourceSchemaVersion: 3,
@@ -136,17 +244,28 @@ describe('continuous canvas shadow synchronization', () => {
         });
       },
     };
-    const persistMedia = vi.fn().mockResolvedValue({ url: '/api/serve-upload/uploads/persisted.png' });
+    const persistMedia = vi.fn(async ({ dataUrl }: { dataUrl: string }) => ({
+      url: `/api/serve-upload/uploads/${dataUrl.slice(-4).toLowerCase()}.png`,
+    }));
 
     await executeCanvasProjectSync({
       actorUserId: 'user-1',
-      projects: [project([image('encoded', { url: 'data:image/png;base64,AAAA' })])],
+      projects: [project([image('encoded', {
+        url: 'data:image/png;base64,AAAA',
+        sourceUrl: 'data:image/png;base64,BBBB',
+        thumbnailUrl: 'data:image/png;base64,CCCC',
+      })])],
       persistMedia,
     } as Parameters<typeof executeCanvasProjectSync>[0] & { persistMedia: typeof persistMedia }, storage);
 
-    expect(persistMedia).toHaveBeenCalledOnce();
+    expect(persistMedia).toHaveBeenCalledTimes(3);
     expect(transactionStarted).toBe(true);
-    expect(synchronizedUrl).toBe('/api/serve-upload/uploads/persisted.png');
+    expect(synchronizedMedia).toMatchObject({
+      url: '/api/serve-upload/uploads/aaaa.png',
+      sourceUrl: '/api/serve-upload/uploads/bbbb.png',
+      thumbnailUrl: '/api/serve-upload/uploads/cccc.png',
+    });
+    expect(JSON.stringify(synchronizedMedia)).not.toContain('data:image');
   });
 
   it('returns persistence failure without beginning or partially writing a database transaction', async () => {
@@ -166,6 +285,47 @@ describe('continuous canvas shadow synchronization', () => {
     } as Parameters<typeof executeCanvasProjectSync>[0] & { persistMedia: typeof persistMedia }, storage))
       .rejects.toThrow('LEGACY_MEDIA_PERSIST_FAILED');
     expect(transactionStarted).toBe(false);
+  });
+
+  it('preserves missing primary availability when only recovery media needs persistence', async () => {
+    let synchronizedImage: CanvasImage | undefined;
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        return callback({
+          async writeProjects() {},
+          async syncProject(nextProject) {
+            synchronizedImage = nextProject.canvasImages[0];
+            return {
+              project: nextProject,
+              sourceSchemaVersion: 3,
+              migrated: false,
+              reused: true,
+              mappings: {
+                missing: { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' },
+              },
+            };
+          },
+        });
+      },
+    };
+
+    await executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [project([image('missing', {
+        url: '',
+        sourceUrl: 'data:image/png;base64,BBBB',
+        mediaAvailability: 'missing',
+        mediaErrorCode: 'MEDIA_LOAD_FAILED',
+      })])],
+      persistMedia: async () => ({ url: '/api/serve-upload/uploads/recovery.png' }),
+    }, storage);
+
+    expect(synchronizedImage).toMatchObject({
+      url: '',
+      sourceUrl: '/api/serve-upload/uploads/recovery.png',
+      mediaAvailability: 'missing',
+      mediaErrorCode: 'MEDIA_LOAD_FAILED',
+    });
   });
 
   it('does not commit the legacy snapshot when graph synchronization fails', async () => {

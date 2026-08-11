@@ -43,28 +43,44 @@ async function persistCanvasProjectMedia(input: CanvasProjectSyncInput): Promise
   for (const project of input.projects) {
     const canvasImages: CanvasImage[] = [];
     for (const image of project.canvasImages) {
-      if (!image.url.startsWith('data:')) {
+      const dataUrls = [image.url, image.sourceUrl, image.thumbnailUrl]
+        .filter((url): url is string => typeof url === 'string' && url.startsWith('data:'));
+      if (dataUrls.length === 0) {
         canvasImages.push(image);
         continue;
       }
       if (!input.persistMedia) throw new LegacyMigrationError('LEGACY_MEDIA_PERSIST_FAILED');
       try {
-        const persisted = await input.persistMedia({
-          actorUserId: input.actorUserId,
-          projectId: project.id,
-          legacyImageId: image.id,
-          mapping: mappingForLegacyImage({ actorUserId: input.actorUserId, projectId: project.id }, image.id),
-          dataUrl: image.url,
-        });
-        if (!persisted.url || persisted.url.startsWith('data:') || persisted.url.startsWith('blob:')) {
-          throw new Error('Persistence returned a temporary URL');
+        const persistedByDataUrl = new Map<string, Awaited<ReturnType<NonNullable<CanvasProjectSyncInput['persistMedia']>>>>();
+        const mapping = mappingForLegacyImage({ actorUserId: input.actorUserId, projectId: project.id }, image.id);
+        for (const dataUrl of new Set(dataUrls)) {
+          if (persistedByDataUrl.has(dataUrl)) continue;
+          const persisted = await input.persistMedia({
+            actorUserId: input.actorUserId,
+            projectId: project.id,
+            legacyImageId: image.id,
+            mapping,
+            dataUrl,
+          });
+          if (!persisted.url || persisted.url.startsWith('data:') || persisted.url.startsWith('blob:')) {
+            throw new Error('Persistence returned a temporary URL');
+          }
+          persistedByDataUrl.set(dataUrl, persisted);
         }
+        const persistedPrimary = persistedByDataUrl.get(image.url);
         canvasImages.push({
           ...image,
-          url: persisted.url,
-          originalWidth: persisted.width ?? image.originalWidth,
-          originalHeight: persisted.height ?? image.originalHeight,
-          mediaAvailability: 'ready',
+          url: persistedPrimary?.url ?? image.url,
+          ...(image.sourceUrl?.startsWith('data:')
+            ? { sourceUrl: persistedByDataUrl.get(image.sourceUrl)?.url }
+            : {}),
+          ...(image.thumbnailUrl?.startsWith('data:')
+            ? { thumbnailUrl: persistedByDataUrl.get(image.thumbnailUrl)?.url }
+            : {}),
+          originalWidth: persistedPrimary?.width ?? image.originalWidth,
+          originalHeight: persistedPrimary?.height ?? image.originalHeight,
+          mediaAvailability: persistedPrimary ? 'ready' : image.mediaAvailability,
+          mediaErrorCode: persistedPrimary ? undefined : image.mediaErrorCode,
         });
       } catch (error) {
         throw new LegacyMigrationError('LEGACY_MEDIA_PERSIST_FAILED', { cause: error });
