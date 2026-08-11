@@ -817,3 +817,11 @@ Machine-readable evidence: `docs/testing/evidence/bug-054-cloud-timeout-acceptan
 The upstream APImartLLM model returned 500 for all three minimal probes. That provider outcome is not counted as a successful content-generation result, but it is sufficient for the rollback boundary because both execution modes reached durable terminal settlement and exact one-time refund. BUG-053 remains open at P2 for stale retry wording on terminal rows.
 
 Machine-readable evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json`.
+
+## 2026-08-11 Stage 2 Checkpoint B cloud reproduction
+
+Three transfer directions passed in Coze `shadow`: Canvas to embedded chat, Canvas to workflow, and workflow output to Canvas. The fourth direction, standalone chat to a selected Canvas, created exactly one database placement but failed media rendering.
+
+The provider response contained a valid origin-relative image URL. The application failed to resolve it before persistence, then stored the raw path as a ready AssetVersion. A focused RED test reproduced the parser defect; the minimal fix resolves direct image URLs against `Response.url`. Fresh gates pass: compatibility 16/16, related 60/60, Task 6 57/57, Task 5 64/64, Task 4 108/108, TypeScript, full Vitest, protected baseline 38/38, ESLint 0 errors / 957 warnings, and the 114-page production build.
+
+This is **local candidate evidence only**. Checkpoint B remains open until the exact commit is deployed and Chrome proves that a new standalone-chat result renders in the target Canvas. BUG-056 and BUG-057 remain open. Six PostgreSQL integration groups were skipped because `POSTGRES_TEST_DATABASE_URL` is not configured.

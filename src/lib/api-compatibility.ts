@@ -1974,6 +1974,34 @@ export interface ParsedImageResponse {
   raw: Record<string, unknown>;
 }
 
+export interface ParseImageResponseOptions {
+  /** Final provider response URL, used to resolve provider-relative media paths. */
+  responseUrl?: string;
+}
+
+function resolveProviderImageUrl(imageUrl: string, responseUrl?: string): string {
+  const value = imageUrl.trim();
+  if (!value || value.startsWith('data:')) return value;
+
+  try {
+    const absolute = new URL(value);
+    if (absolute.protocol === 'http:' || absolute.protocol === 'https:') return absolute.toString();
+  } catch {
+    // Provider-relative URLs are resolved below when the response origin is known.
+  }
+
+  if (responseUrl) {
+    try {
+      const resolved = new URL(value, responseUrl);
+      if (resolved.protocol === 'http:' || resolved.protocol === 'https:') return resolved.toString();
+    } catch {
+      // Preserve the original value so existing compatibility fallbacks remain unchanged.
+    }
+  }
+
+  return value;
+}
+
 /**
  * Parse an API response according to the compatibility profile.
  *
@@ -1983,6 +2011,7 @@ export interface ParsedImageResponse {
 export function parseResponseForProfile(
   apiResponse: Record<string, unknown>,
   _profile: ApiCompatProfile,
+  options: ParseImageResponseOptions = {},
 ): ParsedImageResponse {
   const directImageUrls: string[] = [];
   const taskIds: string[] = [];
@@ -2147,11 +2176,14 @@ export function parseResponseForProfile(
   // Determine actual response mode based on what we found
   // ★ 如果同时有 directImageUrls 和 taskIds，优先认为 direct 模式
   // （有直接图片说明已完成，taskIds 可能是额外信息）
-  const mode: ResponseMode = directImageUrls.length > 0 ? 'direct'
+  const normalizedDirectImageUrls = directImageUrls.map(url => (
+    resolveProviderImageUrl(url, options.responseUrl)
+  ));
+  const mode: ResponseMode = normalizedDirectImageUrls.length > 0 ? 'direct'
     : taskIds.length > 0 ? 'polling'
     : 'direct';
 
-  return { mode, directImageUrls, taskIds, raw: apiResponse };
+  return { mode, directImageUrls: normalizedDirectImageUrls, taskIds, raw: apiResponse };
 }
 
 // ---------------------------------------------------------------------------

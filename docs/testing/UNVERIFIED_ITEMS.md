@@ -500,3 +500,13 @@
 | Runtime business source | VERIFIED | Cloud `origin/main=104b140`; only `scripts/coze-start.sh` differed for `.env` loading. |
 | BUG-053 terminal label | OPEN P2 | Terminal failed/timeout rows can retain retry wording; this remains registered and is not a Stage 1 P0/P1 blocker. |
 | Stage 2 and later stages | NOT STARTED | Deliberately outside this task. Stage 1 completion must not be read as whole-program completion. |
+
+## 2026-08-11 Stage 2 Checkpoint B open items
+
+| Item | Status | Required evidence |
+|---|---|---|
+| BUG-055 provider-relative result persistence | FIXED LOCALLY / CLOUD PENDING | Deploy the exact candidate in `shadow`; generate a fresh standalone-chat image; prove controlled persistence, one placement, usable Canvas rendering, and idempotent retry. |
+| BUG-056 pasted reference data URL | REPRODUCED / OPEN P1 | Add a separate failing test for the exact encoded payload path, then verify a real provider reference-image request. |
+| BUG-057 stale generating label | REPRODUCED / OPEN P2 | Prove terminal UI projection replaces `图片生成中... 1` after result arrival. |
+| Stage 2 PostgreSQL concurrency | UNVERIFIED | Configure an isolated `POSTGRES_TEST_DATABASE_URL` and run the six skipped schema/storage/migration/billing/task-state suites. |
+| Checkpoint B | NOT PASSED | All four transfer paths must pass in cloud `shadow`; Task 7 and `asset-v3` remain prohibited until then. |

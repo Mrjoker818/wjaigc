@@ -5,6 +5,7 @@ import {
   PROFILE_4SAPI,
   PROFILE_OPENAI,
   adjustRequestForProfile,
+  parseResponseForProfile,
   resolveProviderPixelSize,
   resolveProfileForModel,
 } from '@/lib/api-compatibility';
@@ -19,6 +20,21 @@ import {
 } from '@/lib/canvas-generation-group';
 
 describe('provider request contracts', () => {
+  it('resolves provider-relative direct image URLs against the actual response URL', () => {
+    const parsed = parseResponseForProfile({
+      data: [{
+        url: '/v1/images/proxy/img_example',
+        b64_json: 'aW1hZ2U=',
+      }],
+    }, PROFILE_OPENAI, {
+      responseUrl: 'https://www.ai-link.shop/v1/images/generations',
+    });
+
+    expect(parsed.directImageUrls).toEqual([
+      'https://www.ai-link.shop/v1/images/proxy/img_example',
+    ]);
+  });
+
   it('selects the dedicated 4SAPI profile instead of the generic OpenAI profile', () => {
     const profile = resolveProfileForModel('gpt-image-2', {
       baseUrl: 'https://4sapi.com/v1',

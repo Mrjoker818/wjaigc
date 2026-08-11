@@ -673,3 +673,11 @@ The server-owned kickoff and progressive slot behavior now pass in the Coze sand
 - **Whole-program release verdict: CONDITIONAL / NOT YET FINAL.** Later WJ-STABLE stages have not been executed in this task. Stage 2 was not started and `stable@a53da24` was not touched.
 
 Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json`.
+
+## 2026-08-11 Stage 2 Checkpoint B status
+
+- Three of four required workspace-transfer paths pass in the Coze `shadow` runtime.
+- Standalone chat to Canvas is blocked by BUG-055: a provider-relative result URL was stored as a ready AssetVersion and rendered as `MEDIA_LOAD_FAILED`.
+- BUG-055 is fixed and fully gated locally, but cloud deployment and real Chrome revalidation are still pending. BUG-056 (reference-image data URL decoding) and BUG-057 (stale generating label) remain open.
+- Six PostgreSQL integration suites remain unverified locally without `POSTGRES_TEST_DATABASE_URL`.
+- **Current Stage 2 verdict: NOT PASSED.** Task 7 must not start until Checkpoint B is closed in cloud `shadow`. `asset-v3` remains prohibited and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.

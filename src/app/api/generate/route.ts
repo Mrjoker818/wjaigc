@@ -2350,7 +2350,7 @@ export async function POST(request: NextRequest) {
 
         // 使用兼容性层解析响应（自动识别直接返回 vs 异步轮询）
         console.log('[generate] API response for model', currentModelConfig.modelId, ':', JSON.stringify(submitResult).substring(0, 500));
-        const parsed = parseResponseForProfile(submitResult, profile);
+        const parsed = parseResponseForProfile(submitResult, profile, { responseUrl: resp.url });
         console.log('[generate] parsed mode:', parsed.mode, 'taskIds:', parsed.taskIds.length, 'directUrls:', parsed.directImageUrls.length);
 
         if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {

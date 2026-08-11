@@ -81,3 +81,11 @@ Governance confirmation 2026-08-11: the user intentionally updated `stable` from
 - The verified functional candidate was fast-forwarded as `3431e7d522a31f0e46dee8bede8557c1cf592272`; documentation-only bookkeeping commits follow it on `main`. GitHub `stable` remained exactly `52f7c601ed150769e15d06fb435c6e360e28c9e7` and was not pushed or modified.
 - Checkpoint B is now **pushed / cloud UNVERIFIED**. Coze must pull the exact final bookkeeping SHA, start in `shadow`, and prove Canvas, embedded chat, workflow, and standalone chat transfers without enabling `asset-v3`.
 - Live PostgreSQL concurrency remains **UNVERIFIED** because the local database URL is absent. This unresolved evidence must remain visible during the cloud checkpoint.
+
+## Checkpoint B Cloud Reproduction and Candidate Repair
+
+- In Coze `shadow`, Canvas to embedded chat, Canvas to workflow, and workflow output to Canvas passed browser and database verification.
+- Standalone chat to the selected Canvas wrote exactly one placement and showed `已添加 1 张图片`, but the Canvas rendered `MEDIA_LOAD_FAILED`. The provider returned `/v1/images/proxy/img_96d9753789af4461aaceaf9f5d3d951a`; persistence rejected that relative URL and the raw path was incorrectly stored as a ready AssetVersion.
+- BUG-055 has a minimal TDD candidate: `parseResponseForProfile` resolves provider-relative direct image URLs against the actual response URL, and `/api/generate` supplies `resp.url`. The focused regression is 16/16; Task 6 is 57/57, Task 5 is 64/64, Task 4 is 108/108, TypeScript passes, ESLint is 0 errors / 957 historical warnings, full Vitest exits 0, the 114-page production build passes, and protected baseline is 38/38.
+- Two additional cloud defects remain registered, not repaired in this candidate: BUG-056 (standalone-chat pasted data URL reference fails provider base64 decoding) and BUG-057 (completed generated result still displays `图片生成中... 1`).
+- Checkpoint B remains **OPEN** until the exact candidate is deployed and a fresh standalone-chat result renders as a usable Canvas image without duplicate placement. Task 7 remains prohibited. PostgreSQL integration suites remain **UNVERIFIED** locally because `POSTGRES_TEST_DATABASE_URL` is absent.

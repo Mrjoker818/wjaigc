@@ -1018,3 +1018,42 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Regression | RED/GREEN coverage in `recovery-submission.test.ts` and `poll-task-recovery-lease-contract.test.ts`; focused task suite 7 files / 100 tests, full Vitest, TypeScript, ESLint, and production build pass locally. |
 | Billing cleanup | Manual cancellation produced one 280-credit refund and restored balance `98 -> 378`; the temporary provider was deleted. |
 | Status | **CLOSED 2026-08-10.** Paid cloud task `async-1786366442668-0-dzxu9y` returned its wrapper in 1.219s, reached automatic `timeout/refunded` at 602.934s, restored balance `378 -> 238 -> 378`, and persisted exactly one -140 charge plus one +140 refund. It remained unchanged through 1132.6s, after the 900-second delayed response window and a Coze sandbox restart. Temporary provider cleanup passed. The later read-only rollback audit identified cloud `HEAD=413cb46d`, `origin/main=104b140`, and only the reviewed `scripts/coze-start.sh` launcher difference, closing the earlier runtime-provenance limitation. Evidence: `docs/testing/evidence/bug-054-cloud-timeout-acceptance-2026-08-10.json` and `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json`. |
+
+### BUG-055: Provider-relative direct image URL becomes a broken Canvas asset
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Image generation persistence / standalone chat to Canvas transfer |
+| Environment | Coze preview, `shadow`, GitHub main `8e98daff16cfcd76a1c6a452deaa016d3653fd3a`, Chrome, 2026-08-11 |
+| Reproduction | Generate a real Pear image from standalone chat, select project `project_1786342484250_vjti42ltw`, click `添加到画布`, then open that Canvas. |
+| Expected | The provider result is persisted to controlled storage and the transferred Canvas placement renders a usable image. |
+| Actual | UI reports `已添加 1 张图片`, but Canvas shows `MEDIA_LOAD_FAILED`. The stored ready AssetVersion points to `/v1/images/proxy/img_96d9753789af4461aaceaf9f5d3d951a` with no storage key or dimensions. |
+| Root cause | The provider returned a URL relative to its response origin. `persistRemoteImage` received the unresolved path, threw `ERR_INVALID_URL`, and the fallback persisted the raw relative path as ready. |
+| Fix | Resolve provider-relative direct image URLs against the actual response URL in the compatibility parser; pass `resp.url` from `/api/generate`. No routing, pricing, task-state, or transfer semantics changed. |
+| Regression | RED: 1 failed / 15 passed. GREEN: compatibility 16/16; related 60/60; Task 6 57/57; Task 5 64/64; Task 4 108/108; TypeScript, full Vitest, protected baseline, and 114-page production build pass; ESLint 0 errors / 957 warnings. |
+| Status | Fixed locally; cloud redeploy and fresh standalone-chat-to-Canvas rendering are required before closure. Checkpoint B remains open. |
+
+### BUG-056: Standalone-chat pasted data URL reference fails image decoding
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Standalone chat reference-image generation |
+| Environment | Coze preview, Chrome, 2026-08-11 |
+| Reproduction | Paste a valid 64x64 PNG into standalone chat and request image generation based on that reference. |
+| Expected | The reference image is decoded and submitted in the provider-supported format. |
+| Actual | Real provider returns HTTP 500 with `decode base64 image data failed` and `illegal base64 data at input byte 10`. |
+| Status | Open. Reproduced with real provider evidence; deliberately not folded into BUG-055 without a separate root-cause test. |
+
+### BUG-057: Completed standalone-chat image retains a generating label
+
+| Field | Detail |
+|---|---|
+| Severity | P2 |
+| Module | Standalone chat generation state projection |
+| Environment | Coze preview, Chrome, 2026-08-11 |
+| Reproduction | Complete a text-only image generation and wait until the result and `添加到画布` action are visible. |
+| Expected | The generating placeholder is replaced by a completed result state. |
+| Actual | The result and transfer action appear, but assistant text still says `图片生成中... 1`. |
+| Status | Open. Real browser reproduction retained for the later state-projection task. |
