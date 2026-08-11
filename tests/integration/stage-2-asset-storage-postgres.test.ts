@@ -51,6 +51,27 @@ interface AssetService {
     placement: { id: string; assetId: string; assetVersionId: string; status: string };
     reused: boolean;
   }>;
+  createVersionWithPlacement(input: {
+    actorUserId: string;
+    projectId: string;
+    kind: 'image';
+    resolveFile: () => Promise<{ url: string; availability: 'ready'; checksum?: string }>;
+    idempotencyKey: string;
+    requestDigest: string;
+    metadata?: Record<string, unknown>;
+    placement: {
+      workspace: 'chat';
+      workspaceId: string;
+      entityType: 'chat-attachment' | 'chat-result';
+      entityId: string;
+      metadata?: Record<string, unknown>;
+    };
+  }): Promise<{
+    asset: { id: string; projectId: string };
+    version: { id: string; assetId: string; projectId: string };
+    placement: { id: string; assetVersionId: string; status: string };
+    reused: boolean;
+  }>;
   sendVersionToWorkspace(input: TransferVersionInput): Promise<{
     version: { id: string; assetId: string; projectId: string };
     placement: { id: string; assetId: string; assetVersionId: string; ownerId: string; status: string };
@@ -876,6 +897,85 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
         })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
       } finally {
         await bounded(servicePool.end(), 'version barrier service pool cleanup', 10_000);
+      }
+    });
+  }, 30_000);
+
+  postgresIt('atomically creates version plus placement and serializes media resolution by registration key', async () => {
+    await withIsolatedPostgres('stage-2-atomic-version-placement', async ({ databaseUrl: isolatedDatabaseUrl, query }) => {
+      migrate(isolatedDatabaseUrl);
+      const actorUserId = randomUUID();
+      const projectId = randomUUID();
+      await seedProject(query, actorUserId, projectId);
+      const { createAssetService } = await loadService();
+      const servicePool = new Pool({
+        connectionString: isolatedDatabaseUrl,
+        connectionTimeoutMillis: 5_000,
+        max: 10,
+      });
+      const storageModule = await import('@/lib/asset-core/storage') as unknown as AssetStorageModule;
+      const service = createAssetService(storageModule.createPostgresAssetStorage(servicePool));
+      expect(service.createVersionWithPlacement).toBeTypeOf('function');
+      if (typeof service.createVersionWithPlacement !== 'function') return;
+      let mediaResolutionCount = 0;
+      const input = {
+        actorUserId,
+        projectId,
+        kind: 'image' as const,
+        resolveFile: async () => {
+          mediaResolutionCount += 1;
+          return {
+            url: '/api/serve-upload/uploads/content-addressed.png',
+            availability: 'ready' as const,
+            checksum: 'sha256:original-data-url-content',
+          };
+        },
+        idempotencyKey: 'atomic-chat-registration',
+        requestDigest: 'stable-original-data-url-digest',
+        metadata: { source: 'standalone-chat' },
+        placement: {
+          workspace: 'chat' as const,
+          workspaceId: 'standalone-chat:project-a',
+          entityType: 'chat-result' as const,
+          entityId: 'message-a:0',
+        },
+      };
+
+      try {
+        const results = await Promise.all(
+          Array.from({ length: 10 }, () => service.createVersionWithPlacement(input)),
+        );
+        expect(new Set(results.map(result => result.version.id)).size).toBe(1);
+        expect(new Set(results.map(result => result.placement.id)).size).toBe(1);
+        expect(results.filter(result => !result.reused)).toHaveLength(1);
+        expect(mediaResolutionCount).toBe(1);
+
+        const graph = await query<{ assets: string; versions: string; placements: string }>(
+          `SELECT
+             (SELECT count(*) FROM wujie_assets WHERE owner_id = $1 AND project_id = $2)::text AS assets,
+             (SELECT count(*) FROM wujie_asset_versions WHERE owner_id = $1 AND project_id = $2)::text AS versions,
+             (SELECT count(*) FROM wujie_workspace_placements WHERE owner_id = $1 AND project_id = $2)::text AS placements`,
+          [actorUserId, projectId],
+        );
+        expect(graph.rows).toEqual([{ assets: '1', versions: '1', placements: '1' }]);
+
+        await expect(service.createVersionWithPlacement({
+          ...input,
+          idempotencyKey: 'placement-conflict-registration',
+          requestDigest: 'placement-conflict-digest',
+          resolveFile: async () => ({
+            url: '/api/serve-upload/uploads/must-rollback.png',
+            availability: 'ready' as const,
+          }),
+        })).rejects.toMatchObject({ code: 'ASSET_PLACEMENT_CONFLICT' });
+        const rolledBack = await query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM wujie_asset_versions
+           WHERE owner_id = $1 AND project_id = $2 AND idempotency_key = $3`,
+          [actorUserId, projectId, 'placement-conflict-registration'],
+        );
+        expect(rolledBack.rows).toEqual([{ count: '0' }]);
+      } finally {
+        await bounded(servicePool.end(), 'atomic version placement pool cleanup', 10_000);
       }
     });
   }, 30_000);

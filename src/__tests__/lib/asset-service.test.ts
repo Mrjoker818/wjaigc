@@ -35,6 +35,11 @@ type CreatePlacementInput = {
   metadata?: Record<string, unknown>;
 };
 
+type CreateVersionWithPlacementInput = Omit<CreateAssetVersionInput, 'file'> & {
+  resolveFile: () => Promise<AssetFile>;
+  placement: Omit<CreatePlacementInput, 'actorUserId' | 'projectId' | 'assetVersionId'>;
+};
+
 type PlacementCommand = {
   actorUserId: string;
   projectId: string;
@@ -59,6 +64,12 @@ type AssetService = {
     reused: boolean;
   }>;
   createWorkspacePlacement(input: CreatePlacementInput): Promise<{
+    placement: WorkspacePlacement;
+    reused: boolean;
+  }>;
+  createVersionWithPlacement(input: CreateVersionWithPlacementInput): Promise<{
+    asset: Asset;
+    version: AssetVersion;
     placement: WorkspacePlacement;
     reused: boolean;
   }>;
@@ -123,7 +134,31 @@ class MemoryStorage {
   }
 
   async transaction<T>(callback: (transaction: MemoryStorage) => Promise<T>): Promise<T> {
-    return callback(this);
+    const snapshot: MemoryRecord = {
+      projects: new Set(this.data.projects),
+      assets: new Map(this.data.assets),
+      versions: new Map(this.data.versions),
+      versionDigests: new Map(this.data.versionDigests),
+      versionMetadata: new Map(this.data.versionMetadata),
+      parents: new Map([...this.data.parents].map(([key, value]) => [key, [...value]])),
+      placements: new Map(this.data.placements),
+      transferDigests: new Map(this.data.transferDigests),
+      transferSources: new Map(this.data.transferSources),
+    };
+    try {
+      return await callback(this);
+    } catch (error) {
+      this.data.projects = snapshot.projects;
+      this.data.assets = snapshot.assets;
+      this.data.versions = snapshot.versions;
+      this.data.versionDigests = snapshot.versionDigests;
+      this.data.versionMetadata = snapshot.versionMetadata;
+      this.data.parents = snapshot.parents;
+      this.data.placements = snapshot.placements;
+      this.data.transferDigests = snapshot.transferDigests;
+      this.data.transferSources = snapshot.transferSources;
+      throw error;
+    }
   }
 
   async findProject(ownerId: string, projectId: string): Promise<boolean> {
@@ -389,6 +424,92 @@ function createVersionInput(ownerId: string, projectId: string, overrides: Parti
 }
 
 describe('asset graph service', () => {
+  it('I4 atomically creates a version and placement and replays without persisting media twice', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    expect(service.createVersionWithPlacement).toBeTypeOf('function');
+    if (typeof service.createVersionWithPlacement !== 'function') return;
+    const resolveFile = vi.fn(async () => file('https://canonical.test/atomic.png'));
+    const input: CreateVersionWithPlacementInput = {
+      actorUserId: ownerId,
+      projectId,
+      kind: 'image',
+      resolveFile,
+      idempotencyKey: 'atomic-registration',
+      requestDigest: 'stable-original-content-digest',
+      metadata: { source: 'standalone-chat' },
+      placement: {
+        workspace: 'chat',
+        workspaceId: 'standalone-chat:project-a',
+        entityType: 'chat-result',
+        entityId: 'message-a:0',
+      },
+    };
+
+    const first = await service.createVersionWithPlacement(input);
+    const replay = await service.createVersionWithPlacement(input);
+
+    expect(first.reused).toBe(false);
+    expect(replay.reused).toBe(true);
+    expect(replay.version.id).toBe(first.version.id);
+    expect(replay.placement.id).toBe(first.placement.id);
+    expect(resolveFile).toHaveBeenCalledTimes(1);
+    expect(storage.data.versions.size).toBe(1);
+    expect(storage.data.placements.size).toBe(1);
+  });
+
+  it('I4 rolls back a newly created version when its required placement cannot be inserted', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    expect(service.createVersionWithPlacement).toBeTypeOf('function');
+    if (typeof service.createVersionWithPlacement !== 'function') return;
+    const existing = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    await service.createWorkspacePlacement({
+      actorUserId: ownerId,
+      projectId,
+      assetVersionId: existing.version.id,
+      workspace: 'chat',
+      workspaceId: 'standalone-chat:project-a',
+      entityType: 'chat-result',
+      entityId: 'message-a:0',
+    });
+    const before = {
+      assets: storage.data.assets.size,
+      versions: storage.data.versions.size,
+      placements: storage.data.placements.size,
+    };
+
+    await expect(service.createVersionWithPlacement({
+      actorUserId: ownerId,
+      projectId,
+      kind: 'image',
+      resolveFile: async () => file('https://canonical.test/rolled-back.png'),
+      idempotencyKey: 'conflicting-atomic-registration',
+      requestDigest: 'conflicting-atomic-digest',
+      placement: {
+        workspace: 'chat',
+        workspaceId: 'standalone-chat:project-a',
+        entityType: 'chat-result',
+        entityId: 'message-a:0',
+      },
+    })).rejects.toMatchObject({ code: 'ASSET_PLACEMENT_CONFLICT' });
+
+    expect({
+      assets: storage.data.assets.size,
+      versions: storage.data.versions.size,
+      placements: storage.data.placements.size,
+    }).toEqual(before);
+    expect([...storage.data.versions.values()]).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ idempotencyKey: 'conflicting-atomic-registration' }),
+    ]));
+  });
+
   it('resolves a canonical actor-owned version and placement reference', async () => {
     const ownerId = randomUUID();
     const projectId = randomUUID();
