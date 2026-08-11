@@ -1,7 +1,11 @@
 // 用户数据管理器 - localStorage + 服务器数据库双重存储
 import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData } from './user-types';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
-import { serializeCanvasWorkspacePlacements } from '@/lib/asset-core/canvas-adapter';
+import {
+  selectCanvasPlacementSnapshot,
+  serializeCanvasWorkspacePlacements,
+} from '@/lib/asset-core/canvas-adapter';
+import type { AssetGraphMode } from '@/lib/asset-core/types';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
@@ -52,6 +56,7 @@ interface ProjectSyncResponse {
     versionId: string;
     placementId: string;
   }>>;
+  assetGraphMode?: AssetGraphMode;
 }
 
 export interface ProjectSyncResult {
@@ -63,6 +68,7 @@ export class UserManager {
   private multiUserData: MultiUserData | null = null;
   private currentUserId: string | null = null;
   private _serverSyncReady = false; // 在 loadProjectsFromServer 成功前阻止 syncToServer 上传空数据
+  private _assetGraphMode: AssetGraphMode = 'legacy';
   private _onProjectsChanged: (() => void) | null = null;
   // ★ 跟踪最近删除的图片ID，防止服务器同步时将已删除的图片合并回来
   // Map: imageId → 删除时间戳(ms)，60秒后自动清理
@@ -537,6 +543,10 @@ export class UserManager {
     this.notifyProjectsChanged();
   }
 
+  getAssetGraphMode(): AssetGraphMode {
+    return this._assetGraphMode;
+  }
+
   private applyAssetGraphMappings(
     assetGraphMappings: NonNullable<ProjectSyncResponse['assetGraphMappings']>,
   ): void {
@@ -657,7 +667,7 @@ export class UserManager {
         }
         return false;
       }
-      const data = await res.json() as { success: boolean; value?: unknown };
+      const data = await res.json() as { success: boolean; value?: unknown; assetGraphMode?: AssetGraphMode };
       if (!data.success) {
         if (retryCount > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -666,6 +676,9 @@ export class UserManager {
         console.warn('[Sync] loadProjectsFromServer: unsuccessful response', data);
         return false;
       }
+      this._assetGraphMode = data.assetGraphMode === 'shadow' || data.assetGraphMode === 'asset-v3'
+        ? data.assetGraphMode
+        : 'legacy';
 
       if (data.value === undefined || data.value === null) {
         // A missing record is a valid first-login state, not a failed sync.
@@ -883,9 +896,14 @@ export class UserManager {
             // 取双方较新的 updatedAt
             const localTime = lp.updatedAt || lp.createdAt || 0;
             const serverTime = sp.updatedAt || sp.createdAt || 0;
+            const selectedImages = selectCanvasPlacementSnapshot(
+              this._assetGraphMode,
+              sp.canvasImages,
+              () => mergedImages,
+            );
             const baseProject: Project = serverTime >= localTime
-              ? { ...sp, canvasImages: mergedImages }
-              : { ...lp, canvasImages: mergedImages, updatedAt: Math.max(localTime, serverTime) };
+              ? { ...sp, canvasImages: selectedImages }
+              : { ...lp, canvasImages: selectedImages, updatedAt: Math.max(localTime, serverTime) };
             // 补充合并 metadata.groups（按 group ID 并集）
             if (lp.metadata?.groups || sp.metadata?.groups) {
               const localGroups = new Map(((lp.metadata?.groups ?? []) as ImageGroupData[]).map(g => [g.id, g]));

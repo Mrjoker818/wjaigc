@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   executeCanvasProjectSync,
@@ -6,6 +6,8 @@ import {
   planCanvasShadowReconciliation,
   type CanvasProjectSyncStorage,
 } from '@/lib/asset-core/canvas-project-sync';
+import * as legacyMigration from '@/lib/asset-core/legacy-migration';
+import type { AssetFile } from '@/lib/asset-core/types';
 import type { CanvasImage, Project } from '@/lib/user-types';
 
 const image = (id: string, overrides: Partial<CanvasImage> = {}): CanvasImage => ({
@@ -64,6 +66,106 @@ describe('continuous canvas shadow synchronization', () => {
       retained: previousMappings.retained,
       added: expect.objectContaining({ assetId: expect.any(String), placementId: expect.any(String) }),
     }));
+  });
+
+  it('appends a child version for media identity changes and reuses the version for geometry only', () => {
+    const planVersion = Reflect.get(legacyMigration, 'planCanvasAssetVersionUpdate') as undefined | ((input: {
+      actorUserId: string;
+      projectId: string;
+      imageId: string;
+      mapping: { assetId: string; versionId: string; placementId: string };
+      currentFile: AssetFile;
+      nextFile: AssetFile;
+    }) => {
+      action: 'reuse' | 'append';
+      mapping: { assetId: string; versionId: string; placementId: string };
+      parentVersionIds: string[];
+    });
+    expect(planVersion).toBeTypeOf('function');
+
+    const mapping = { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' };
+    const currentFile: AssetFile = {
+      url: '/media/original.png',
+      availability: 'ready',
+      recoverySourceUrl: 'https://recovery.test/original.png',
+      checksum: 'old-checksum',
+      width: 600,
+      height: 400,
+    };
+    const geometryOnly = planVersion!({
+      actorUserId: 'user-1', projectId: 'project-1', imageId: 'retained', mapping,
+      currentFile,
+      nextFile: { ...currentFile },
+    });
+    expect(geometryOnly).toEqual({ action: 'reuse', mapping, parentVersionIds: [] });
+
+    const changed = planVersion!({
+      actorUserId: 'user-1', projectId: 'project-1', imageId: 'retained', mapping,
+      currentFile,
+      nextFile: { ...currentFile, url: '/media/replacement.png', availability: 'missing', width: 1200 },
+    });
+    expect(changed.action).toBe('append');
+    expect(changed.mapping).toMatchObject({ assetId: mapping.assetId, placementId: mapping.placementId });
+    expect(changed.mapping.versionId).not.toBe(mapping.versionId);
+    expect(changed.parentVersionIds).toEqual([mapping.versionId]);
+    expect(currentFile).toEqual(expect.objectContaining({
+      url: '/media/original.png', availability: 'ready', width: 600,
+    }));
+  });
+
+  it('persists data URLs before opening the atomic database transaction', async () => {
+    let transactionStarted = false;
+    let synchronizedUrl = '';
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        transactionStarted = true;
+        return callback({
+          async writeProjects() {},
+          async syncProject(nextProject) {
+            synchronizedUrl = nextProject.canvasImages[0].url;
+            return {
+              project: nextProject,
+              sourceSchemaVersion: 3,
+              migrated: false,
+              reused: true,
+              mappings: {
+                encoded: { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' },
+              },
+            };
+          },
+        });
+      },
+    };
+    const persistMedia = vi.fn().mockResolvedValue({ url: '/api/serve-upload/uploads/persisted.png' });
+
+    await executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [project([image('encoded', { url: 'data:image/png;base64,AAAA' })])],
+      persistMedia,
+    } as Parameters<typeof executeCanvasProjectSync>[0] & { persistMedia: typeof persistMedia }, storage);
+
+    expect(persistMedia).toHaveBeenCalledOnce();
+    expect(transactionStarted).toBe(true);
+    expect(synchronizedUrl).toBe('/api/serve-upload/uploads/persisted.png');
+  });
+
+  it('returns persistence failure without beginning or partially writing a database transaction', async () => {
+    let transactionStarted = false;
+    const storage: CanvasProjectSyncStorage = {
+      async transaction() {
+        transactionStarted = true;
+        throw new Error('transaction must not start');
+      },
+    };
+    const persistMedia = vi.fn().mockRejectedValue(new Error('persist failed'));
+
+    await expect(executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [project([image('encoded', { url: 'data:image/png;base64,AAAA' })])],
+      persistMedia,
+    } as Parameters<typeof executeCanvasProjectSync>[0] & { persistMedia: typeof persistMedia }, storage))
+      .rejects.toThrow('LEGACY_MEDIA_PERSIST_FAILED');
+    expect(transactionStarted).toBe(false);
   });
 
   it('does not commit the legacy snapshot when graph synchronization fails', async () => {

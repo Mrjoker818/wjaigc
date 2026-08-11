@@ -75,6 +75,18 @@ interface CheckpointRow extends QueryResultRow {
   checkpoint: Record<string, unknown>;
 }
 
+interface VersionFileRow extends QueryResultRow {
+  file_url: string;
+  storage_key: string | null;
+  checksum: string | null;
+  mime_type: string | null;
+  byte_size: string | null;
+  width: number | null;
+  height: number | null;
+  availability: AssetFile['availability'];
+  recovery_source_url: string | null;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -114,6 +126,51 @@ export function mappingForLegacyImage(
     assetId: deterministicUuid([...namespace, 'asset']),
     versionId: deterministicUuid([...namespace, 'version']),
     placementId: deterministicUuid([...namespace, 'placement']),
+  };
+}
+
+function assetFileIdentity(file: AssetFile): Record<string, unknown> {
+  return {
+    url: file.url,
+    availability: file.availability,
+    recoverySourceUrl: file.recoverySourceUrl ?? null,
+    storageKey: file.storageKey ?? null,
+    checksum: file.checksum ?? null,
+    mimeType: file.mimeType ?? null,
+    byteSize: file.byteSize ?? null,
+    width: file.width ?? null,
+    height: file.height ?? null,
+  };
+}
+
+export function planCanvasAssetVersionUpdate(input: {
+  actorUserId: string;
+  projectId: string;
+  imageId: string;
+  mapping: LegacyImageMapping;
+  currentFile: AssetFile;
+  nextFile: AssetFile;
+}): {
+  action: 'reuse' | 'append';
+  mapping: LegacyImageMapping;
+  parentVersionIds: string[];
+} {
+  if (JSON.stringify(assetFileIdentity(input.currentFile)) === JSON.stringify(assetFileIdentity(input.nextFile))) {
+    return { action: 'reuse', mapping: input.mapping, parentVersionIds: [] };
+  }
+  const versionId = deterministicUuid([
+    'wujie-legacy-migration-v1',
+    input.actorUserId,
+    input.projectId,
+    input.imageId,
+    'version',
+    input.mapping.versionId,
+    JSON.stringify(assetFileIdentity(input.nextFile)),
+  ]);
+  return {
+    action: 'append',
+    mapping: { ...input.mapping, versionId },
+    parentVersionIds: [input.mapping.versionId],
   };
 }
 
@@ -329,10 +386,14 @@ async function existingCompletedMigration(
 
   for (const { image, mapping } of plan.updates) {
     const updated = await updateGraphForImage(client, input, image, mapping);
-    if (!updated) await insertGraphForImage(client, input, image, mapping);
+    const activeMapping = updated ?? await insertGraphForImage(client, input, image, mapping);
+    plan.activeMappings[image.id] = activeMapping;
+    plan.checkpointMappings[image.id] = activeMapping;
   }
   for (const { image, mapping } of plan.additions) {
-    await insertGraphForImage(client, input, image, mapping);
+    const activeMapping = await insertGraphForImage(client, input, image, mapping);
+    plan.activeMappings[image.id] = activeMapping;
+    plan.checkpointMappings[image.id] = activeMapping;
   }
   for (const mapping of plan.removals) {
     await trashGraphForImage(client, input, mapping);
@@ -440,7 +501,7 @@ async function updateGraphForImage(
   input: LegacyMigrationInput,
   image: CanvasImage,
   mapping: LegacyImageMapping,
-): Promise<boolean> {
+): Promise<LegacyImageMapping | null> {
   const file = await fileForImage(input, image, mapping);
   const metadata = JSON.stringify({ legacyImageId: image.id, legacyImage: image });
   const asset = await client.query(
@@ -449,31 +510,77 @@ async function updateGraphForImage(
      WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
     [mapping.assetId, input.actorUserId, input.projectId, inferAssetKind(image), metadata],
   );
-  if ((asset.rowCount ?? 0) === 0) return false;
-  const version = await client.query(
-    `UPDATE wujie_asset_versions
-     SET file_url = $5, storage_key = $6, checksum = $7, mime_type = $8,
-         byte_size = $9, width = $10, height = $11, availability = $12,
-         recovery_source_url = $13, metadata = $14::jsonb
-     WHERE id = $1 AND asset_id = $2 AND owner_id = $3 AND project_id = $4`,
-    [
-      mapping.versionId,
-      mapping.assetId,
-      input.actorUserId,
-      input.projectId,
-      file.url,
-      file.storageKey ?? null,
-      file.checksum ?? null,
-      file.mimeType ?? null,
-      file.byteSize ?? null,
-      file.width ?? null,
-      file.height ?? null,
-      file.availability,
-      file.recoverySourceUrl ?? null,
-      metadata,
-    ],
+  if ((asset.rowCount ?? 0) === 0) return null;
+  const currentVersion = await client.query<VersionFileRow>(
+    `SELECT file_url, storage_key, checksum, mime_type, byte_size, width, height,
+            availability, recovery_source_url
+     FROM wujie_asset_versions
+     WHERE id = $1 AND asset_id = $2 AND owner_id = $3 AND project_id = $4
+     FOR UPDATE`,
+    [mapping.versionId, mapping.assetId, input.actorUserId, input.projectId],
   );
-  if ((version.rowCount ?? 0) === 0) return false;
+  const row = currentVersion.rows[0];
+  if (!row) throw migrationError('LEGACY_MIGRATION_FAILED');
+  const currentFile: AssetFile = {
+    url: row.file_url,
+    availability: row.availability,
+    ...(row.storage_key ? { storageKey: row.storage_key } : {}),
+    ...(row.checksum ? { checksum: row.checksum } : {}),
+    ...(row.mime_type ? { mimeType: row.mime_type } : {}),
+    ...(row.byte_size === null ? {} : { byteSize: Number(row.byte_size) }),
+    ...(row.width === null ? {} : { width: row.width }),
+    ...(row.height === null ? {} : { height: row.height }),
+    ...(row.recovery_source_url ? { recoverySourceUrl: row.recovery_source_url } : {}),
+  };
+  const versionPlan = planCanvasAssetVersionUpdate({
+    actorUserId: input.actorUserId,
+    projectId: input.projectId,
+    imageId: image.id,
+    mapping,
+    currentFile,
+    nextFile: file,
+  });
+  if (versionPlan.action === 'append') {
+    const createdAt = new Date().toISOString();
+    await client.query(
+      `INSERT INTO wujie_asset_versions(
+         id, asset_id, owner_id, project_id, file_url, storage_key, checksum, mime_type,
+         byte_size, width, height, availability, recovery_source_url, idempotency_key,
+         metadata, created_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16
+       )`,
+      [
+        versionPlan.mapping.versionId,
+        mapping.assetId,
+        input.actorUserId,
+        input.projectId,
+        file.url,
+        file.storageKey ?? null,
+        file.checksum ?? null,
+        file.mimeType ?? null,
+        file.byteSize ?? null,
+        file.width ?? null,
+        file.height ?? null,
+        file.availability,
+        file.recoverySourceUrl ?? null,
+        `legacy:${input.projectId}:${image.id}:${versionPlan.mapping.versionId}`,
+        metadata,
+        createdAt,
+      ],
+    );
+    await client.query(
+      `INSERT INTO wujie_asset_version_parents(
+         asset_id, owner_id, project_id, version_id, parent_version_id, parent_order
+       ) VALUES ($1, $2, $3, $4, $5, 0)`,
+      [mapping.assetId, input.actorUserId, input.projectId, versionPlan.mapping.versionId, mapping.versionId],
+    );
+    await client.query(
+      `UPDATE wujie_assets SET current_version_id = $4, updated_at = now()
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
+      [mapping.assetId, input.actorUserId, input.projectId, versionPlan.mapping.versionId],
+    );
+  }
   const placement = await client.query(
     `UPDATE wujie_workspace_placements
      SET asset_version_id = $4, status = 'active', deleted_at = NULL,
@@ -483,12 +590,13 @@ async function updateGraphForImage(
       mapping.placementId,
       input.actorUserId,
       input.projectId,
-      mapping.versionId,
+      versionPlan.mapping.versionId,
       JSON.stringify(imageTransform(image)),
       metadata,
     ],
   );
-  return (placement.rowCount ?? 0) === 1;
+  if ((placement.rowCount ?? 0) !== 1) throw migrationError('LEGACY_MIGRATION_FAILED');
+  return versionPlan.mapping;
 }
 
 async function trashGraphForImage(

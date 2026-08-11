@@ -85,6 +85,7 @@ import { User, Project, ImageGroupData, CanvasImage as PersistableCanvasImage } 
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import {
   hydrateCanvasPlacements,
+  selectCanvasPlacementSnapshot,
   serializeCanvasWorkspacePlacements,
   shouldPersistCanvasPlacement,
   shouldRetainCanvasPlacementDuringMerge,
@@ -1621,11 +1622,16 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 }
                 return enriched;
               });
-              setImages([
+              const legacyMergedImages = [
                 ...(enrichedImages as CanvasImage[]),
                 ...(localOnlyImages as CanvasImage[]),
                 ...uniquePlaceholders,
-              ]);
+              ];
+              setImages(selectCanvasPlacementSnapshot(
+                userMgr.getAssetGraphMode(),
+                hydrateCanvasPlacements(latest.canvasImages, 'asset-v3'),
+                () => legacyMergedImages,
+              ));
               // ★ 调试日志：追踪图片恢复
               console.log('[page] onProjectsChanged: setImages total=', enrichedImages.length + localOnlyImages.length + uniquePlaceholders.length,
                 'enriched=', enrichedImages.length, 'localOnly=', localOnlyImages.length, 'placeholders=', uniquePlaceholders.length);

@@ -8,6 +8,8 @@ import {
   serializeCanvasWorkspacePlacements,
   shouldWriteAssetShadow,
 } from '@/lib/asset-core/canvas-adapter';
+import * as canvasAdapter from '@/lib/asset-core/canvas-adapter';
+import type { CanvasImage } from '@/lib/user-types';
 
 describe('canvas asset adapter', () => {
   const persistedImage = {
@@ -31,6 +33,65 @@ describe('canvas asset adapter', () => {
   it('keeps legacy reads legacy-authoritative and does not enable shadow writes', () => {
     expect(getAssetGraphReadStrategy('legacy')).toBe('legacy-authoritative');
     expect(shouldWriteAssetShadow('legacy')).toBe(false);
+  });
+
+  it('keeps graph placements authoritative only in explicit asset-v3 client merges', () => {
+    const selectSnapshot = Reflect.get(canvasAdapter, 'selectCanvasPlacementSnapshot') as undefined | (<T>(
+      mode: 'legacy' | 'shadow' | 'asset-v3',
+      server: T[],
+      legacyMerge: () => T[],
+    ) => T[]);
+    expect(selectSnapshot).toBeTypeOf('function');
+
+    const server = [{ id: 'graph-only', x: 44 }];
+    const legacyMerged = [{ id: 'graph-only', x: 999 }, { id: 'local-only', x: 1 }];
+    let legacyMergeCalls = 0;
+    const mergeLegacy = () => {
+      legacyMergeCalls += 1;
+      return legacyMerged;
+    };
+
+    expect(selectSnapshot!('asset-v3', server, mergeLegacy)).toEqual(server);
+    expect(legacyMergeCalls).toBe(0);
+    expect(selectSnapshot!('legacy', server, mergeLegacy)).toEqual(legacyMerged);
+    expect(selectSnapshot!('shadow', server, mergeLegacy)).toEqual(legacyMerged);
+    expect(legacyMergeCalls).toBe(2);
+  });
+
+  it('drives thumbnail then original failure into managed missing state without a legacy retry', () => {
+    const handleFailure = Reflect.get(canvasAdapter, 'handleCanvasMediaElementFailure') as undefined | ((input: {
+      image: CanvasImage;
+      element: { src: string; dataset: Record<string, string | undefined> };
+      markMissing: (imageId: string, code: string) => void;
+    }) => string);
+    expect(handleFailure).toBeTypeOf('function');
+
+    let state: CanvasImage = {
+      ...persistedImage,
+      assetId: 'asset-1',
+      assetVersionId: 'version-1',
+      mediaAvailability: 'ready',
+    };
+    const element: { src: string; dataset: Record<string, string | undefined> } = {
+      src: '/media/thumb.png',
+      dataset: { canvasMediaSource: 'thumbnail' },
+    };
+    const markMissing = (imageId: string, code: string) => {
+      expect(imageId).toBe(state.id);
+      state = { ...state, mediaAvailability: 'missing', mediaErrorCode: code };
+    };
+
+    expect(handleFailure!({ image: state, element, markMissing })).toBe('fallback-original');
+    expect(element).toEqual({
+      src: state.url,
+      dataset: { canvasMediaSource: 'original' },
+    });
+    expect(handleFailure!({ image: state, element, markMissing })).toBe('mark-missing');
+    expect(state).toMatchObject({
+      mediaAvailability: 'missing',
+      mediaErrorCode: 'MEDIA_LOAD_FAILED',
+    });
+    expect(element.dataset.retried).toBeUndefined();
   });
 
   it('keeps asset-v3 strategy support without changing the shadow write policy', () => {

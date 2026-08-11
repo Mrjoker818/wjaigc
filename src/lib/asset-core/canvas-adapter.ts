@@ -23,6 +23,16 @@ export function shouldWriteAssetShadow(mode: AssetGraphMode): boolean {
   return mode === 'shadow' || mode === 'asset-v3';
 }
 
+export function selectCanvasPlacementSnapshot<T>(
+  mode: AssetGraphMode,
+  serverPlacements: T[],
+  mergeLegacyPlacements: () => T[],
+): T[] {
+  return getAssetGraphReadStrategy(mode) === 'asset-authoritative'
+    ? serverPlacements
+    : mergeLegacyPlacements();
+}
+
 export function isManagedCanvasMedia(image: CanvasPlacementImage): boolean {
   return Boolean(image.assetId || image.assetVersionId);
 }
@@ -43,6 +53,24 @@ export function getCanvasMediaFailureAction(
   if (state.failedSource === 'thumbnail') return 'fallback-original';
   if (isManagedCanvasMedia(image)) return 'mark-missing';
   return state.legacyRetryAttempted ? 'ignore' : 'legacy-fallback';
+}
+
+export function handleCanvasMediaElementFailure(input: {
+  image: CanvasPlacementImage;
+  element: { src: string; dataset: Record<string, string | undefined> };
+  markMissing: (imageId: string, errorCode: string) => void;
+}): CanvasMediaFailureAction {
+  const action = getCanvasMediaFailureAction(input.image, {
+    failedSource: input.element.dataset.canvasMediaSource === 'thumbnail' ? 'thumbnail' : 'original',
+    legacyRetryAttempted: input.element.dataset.retried === '1',
+  });
+  if (action === 'fallback-original') {
+    input.element.dataset.canvasMediaSource = 'original';
+    input.element.src = input.image.url;
+  } else if (action === 'mark-missing') {
+    input.markMissing(input.image.id, 'MEDIA_LOAD_FAILED');
+  }
+  return action;
 }
 
 export function getCanvasMediaFilename(image: CanvasPlacementImage): string {

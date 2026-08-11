@@ -13,8 +13,8 @@ import { getConstrainedImageToolbarPosition } from '@/lib/image-toolbar-position
 import { getBottomToolbarDrawerPlacement, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import {
-  getCanvasMediaFailureAction,
   getCanvasMediaFilename,
+  handleCanvasMediaElementFailure,
   isManagedCanvasMedia,
 } from '@/lib/asset-core/canvas-adapter';
 import type { MediaAvailability } from '@/lib/asset-core/types';
@@ -10973,20 +10973,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     style={{ contain: 'paint', imageRendering: zoom > 1 ? 'auto' : undefined }}
                     onError={(e) => {
                       const img = e.currentTarget;
-                      const action = getCanvasMediaFailureAction(image, {
-                        failedSource: img.dataset.canvasMediaSource === 'thumbnail' ? 'thumbnail' : 'original',
-                        legacyRetryAttempted: img.dataset.retried === '1',
+                      const action = handleCanvasMediaElementFailure({
+                        image,
+                        element: img,
+                        markMissing: markCanvasMediaMissing,
                       });
                       if (action === 'ignore') return;
-                      if (action === 'fallback-original') {
-                        img.dataset.canvasMediaSource = 'original';
-                        img.src = image.url;
-                        return;
-                      }
-                      if (action === 'mark-missing') {
-                        markCanvasMediaMissing(image.id, 'MEDIA_LOAD_FAILED');
-                        return;
-                      }
+                      if (action === 'fallback-original' || action === 'mark-missing') return;
                       img.dataset.retried = '1';
                       const url = image.url;
                       // /uploads/xxx → /api/serve-upload/xxx (S3回退恢复)

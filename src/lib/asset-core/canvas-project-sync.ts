@@ -4,9 +4,12 @@ import { getPool } from '@/lib/db-client';
 import type { CanvasImage, Project } from '@/lib/user-types';
 
 import {
+  LegacyMigrationError,
+  mappingForLegacyImage,
   migrateLegacyProjectOnWriteInTransaction,
   planCanvasShadowReconciliation,
   type LegacyImageMapping,
+  type LegacyMigrationInput,
   type MigrationResult,
 } from './legacy-migration';
 import type { MediaAvailability } from './types';
@@ -27,6 +30,49 @@ export interface CanvasProjectSyncStorage {
 export interface CanvasProjectSyncResult {
   projects: Project[];
   mappings: AssetGraphMappings;
+}
+
+export interface CanvasProjectSyncInput {
+  actorUserId: string;
+  projects: Project[];
+  persistMedia?: LegacyMigrationInput['persistMedia'];
+}
+
+async function persistCanvasProjectMedia(input: CanvasProjectSyncInput): Promise<Project[]> {
+  const projects: Project[] = [];
+  for (const project of input.projects) {
+    const canvasImages: CanvasImage[] = [];
+    for (const image of project.canvasImages) {
+      if (!image.url.startsWith('data:')) {
+        canvasImages.push(image);
+        continue;
+      }
+      if (!input.persistMedia) throw new LegacyMigrationError('LEGACY_MEDIA_PERSIST_FAILED');
+      try {
+        const persisted = await input.persistMedia({
+          actorUserId: input.actorUserId,
+          projectId: project.id,
+          legacyImageId: image.id,
+          mapping: mappingForLegacyImage({ actorUserId: input.actorUserId, projectId: project.id }, image.id),
+          dataUrl: image.url,
+        });
+        if (!persisted.url || persisted.url.startsWith('data:') || persisted.url.startsWith('blob:')) {
+          throw new Error('Persistence returned a temporary URL');
+        }
+        canvasImages.push({
+          ...image,
+          url: persisted.url,
+          originalWidth: persisted.width ?? image.originalWidth,
+          originalHeight: persisted.height ?? image.originalHeight,
+          mediaAvailability: 'ready',
+        });
+      } catch (error) {
+        throw new LegacyMigrationError('LEGACY_MEDIA_PERSIST_FAILED', { cause: error });
+      }
+    }
+    projects.push({ ...project, canvasImages });
+  }
+  return projects;
 }
 
 function applyMappings(projects: Project[], mappings: AssetGraphMappings): Project[] {
@@ -81,17 +127,18 @@ class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
 }
 
 export async function executeCanvasProjectSync(
-  input: { actorUserId: string; projects: Project[] },
+  input: CanvasProjectSyncInput,
   storage: CanvasProjectSyncStorage = new PostgresCanvasProjectSyncStorage(input.actorUserId),
 ): Promise<CanvasProjectSyncResult> {
+  const persistedProjects = await persistCanvasProjectMedia(input);
   return storage.transaction(async (transaction) => {
-    await transaction.writeProjects(input.projects);
+    await transaction.writeProjects(persistedProjects);
     const mappings: AssetGraphMappings = {};
-    for (const project of input.projects) {
+    for (const project of persistedProjects) {
       const result = await transaction.syncProject(project);
       mappings[project.id] = result.mappings;
     }
-    const projects = applyMappings(input.projects, mappings);
+    const projects = applyMappings(persistedProjects, mappings);
     await transaction.writeProjects(projects);
     return { projects, mappings };
   });

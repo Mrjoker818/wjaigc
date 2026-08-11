@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 import { execSql } from '@/lib/db-client';
+import { persistResultImage } from '@/lib/persist-result-image';
 import { resolveAssetGraphMode } from '@/lib/asset-core/mode';
 import { getAssetGraphReadStrategy, shouldWriteAssetShadow } from '@/lib/asset-core/canvas-adapter';
 import {
@@ -10,6 +11,8 @@ import {
   type AssetGraphMappings,
 } from '@/lib/asset-core/canvas-project-sync';
 import type { Project } from '@/lib/user-types';
+import type { AssetGraphMode } from '@/lib/asset-core/types';
+import type { LegacyMediaPersistenceInput, LegacyMediaPersistenceResult } from '@/lib/asset-core/legacy-migration';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +40,19 @@ function filterProjectsForUser(projects: unknown[], userId: string): unknown[] {
     }
     return String(pUserId) === userId;
   });
+}
+
+async function persistCanvasDataUrl(
+  input: LegacyMediaPersistenceInput,
+): Promise<LegacyMediaPersistenceResult> {
+  if (!input.dataUrl.startsWith('data:image/')) {
+    throw new Error('LEGACY_MEDIA_PERSIST_FAILED');
+  }
+  const url = await persistResultImage(input.dataUrl);
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) {
+    throw new Error('LEGACY_MEDIA_PERSIST_FAILED');
+  }
+  return { url };
 }
 
 /**
@@ -96,6 +112,7 @@ export async function GET(request: NextRequest) {
     }
 
     let value: unknown = await dbGetUserData(sessionUser.id, key);
+    let assetGraphMode: AssetGraphMode | undefined;
 
     // 【数据隔离】对 projects 类型数据做服务端过滤，防止跨用户数据泄漏
     // 注意：GET 请求只过滤响应数据，不回写数据库，避免永久删除用户数据
@@ -116,13 +133,13 @@ export async function GET(request: NextRequest) {
       if (removed > 0) {
         console.warn(`[Sync] GET projects: filtered out ${removed} cross-user projects for user ${sessionUser.id} (response only, not persisted)`);
       }
-      const assetGraphMode = resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE);
+      assetGraphMode = resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE);
       if (getAssetGraphReadStrategy(assetGraphMode) === 'asset-authoritative') {
         value = await readAssetV3Projects(sessionUser.id, value as Project[]);
       }
     }
 
-    return NextResponse.json({ success: true, key, value });
+    return NextResponse.json({ success: true, key, value, ...(assetGraphMode ? { assetGraphMode } : {}) });
   } catch (error) {
     return NextResponse.json({
       success: false,
@@ -201,6 +218,7 @@ export async function POST(request: NextRequest) {
       const result = await executeCanvasProjectSync({
         actorUserId: sessionUser.id,
         projects: value as Project[],
+        persistMedia: persistCanvasDataUrl,
       });
       value = result.projects;
       assetGraphMappings = result.mappings;
