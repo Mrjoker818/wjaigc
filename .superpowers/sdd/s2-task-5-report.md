@@ -313,3 +313,93 @@ was weakened and no migration was required.
 - `src/__tests__/lib/workspace-asset-transfer.test.ts`
 - `tests/integration/stage-2-asset-storage-postgres.test.ts`
 - `.superpowers/sdd/s2-task-5-report.md`
+
+## R2 Independent Review Remediation
+
+### Status
+
+IMPLEMENTED AND COMMITTED in `1f4d3a328c8040a8d0c022bf08be73df54ec9e12`.
+R2-I1 and R2-I2 are closed without changing standalone simple-chat, Task 6+,
+stable, server authorization, or database contracts. Nothing was pushed.
+
+### TDD Evidence
+
+R2-I1 RED:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workspace-asset-transfer.test.ts
+```
+
+Result before implementation: 3 failed, 2 passed. The insertion result had no
+structured `items`, including the new same-canonical-URL test for output A /
+version A and output B / version B.
+
+R2-I2 RED:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workflow-input-transfer-race.test.ts
+```
+
+Result before implementation: 2/2 failed because the pending-reference builder
+and generation guard did not exist. A follow-up clear-operation regression was
+also observed RED at 1 failed, 2 passed before adding the shared invalidation
+predicate. The deferred promises prove that manual replacement/clear and a newer
+selection prevent a late older success from mutating node state.
+
+Final focused result: 9/9 files and 60/60 tests passed.
+
+### Implementation
+
+- Workflow completion now emits `WorkflowCanvasInsertionItem` values containing
+  `outputNodeId`, canonical `url`, and the exact transferred
+  `WorkspaceAssetReference` for managed outputs. NodeEditor passes the item list
+  without a URL `Set`; CanvasWorkspace reads identity directly from each item,
+  never from a URL lookup. Managed outputs sharing one URL therefore create two
+  canvas items with their own version and placement.
+- Canvas-to-workflow selection now starts with an explicit pending URL-only
+  config. It does not copy the original canvas project/asset/version/placement.
+  A per-node generation guard permits only the latest request to apply success
+  or failure. Manual URL replacement, empty-string/undefined clear, node delete,
+  and a newer selection synchronously invalidate older requests.
+- Transfer success installs the workflow-input identity and clears pending.
+  Current-request failure retains the URL-only compatibility path; stale success
+  and stale failure perform no write.
+
+### Verification
+
+- R2 behavior helpers and component contract: 3/3 files, 10/10 tests passed.
+- Task 5 extended focused: 9/9 files, 60/60 tests passed.
+- Task 4 regression: 11/11 files, 108/108 tests passed.
+- Login/session: 7/7 files, 25/25 tests passed.
+- `pnpm ts-check`: passed.
+- Targeted ESLint over the six R2 code/test files: exit 0, 0 errors, 8 existing
+  warnings in the large component files. The one warning introduced during R2
+  was removed before the final run.
+- Protected baseline from `2d28516` to the R2 implementation commit using only
+  the existing Task 5 allow paths: 38/38 feature IDs present, no unapproved
+  source drift, all path/evidence/ref checks passed, 0 warnings.
+- Full `pnpm test`: exit 0 in 172.9 seconds. PostgreSQL-backed integration groups
+  explicitly skipped because their database environment is absent.
+- `pnpm build`: exit 0 in 112.3 seconds; compile, TypeScript, and 114/114 static
+  page generation completed.
+- `git diff --cached --check`: passed before the implementation commit.
+- Review diff `.superpowers/sdd/review-3ca3157..1f4d3a3-task5-r2.diff`
+  SHA-256: `D19555B479EA61F438C6A827CDDD52178E7CD7EB418B87BA4D8A4FC6E0D39085`.
+- Historical `.superpowers/sdd/task-4-report.md` remains byte-identical at
+  SHA-256 `943816946B0E33AC20443C1AECE527CA70186B869B7130F72573FF7D9143D69D`.
+
+### Remaining Concern
+
+Live PostgreSQL remains unverified because `POSTGRES_TEST_DATABASE_URL` is not
+configured. R2 made no service, storage, schema, migration, route, or database
+contract changes.
+
+### R2 Files
+
+- `src/components/canvas-workspace.tsx`
+- `src/components/node-editor.tsx`
+- `src/lib/asset-core/workspace-transfer.ts`
+- `src/__tests__/components/node-editor-asset-reference.test.ts`
+- `src/__tests__/lib/workspace-asset-transfer.test.ts`
+- `src/__tests__/lib/workflow-input-transfer-race.test.ts`
+- `.superpowers/sdd/s2-task-5-report.md`
