@@ -6,7 +6,9 @@ import { persistResultImage } from '@/lib/persist-result-image';
 import { resolveAssetGraphMode } from '@/lib/asset-core/mode';
 import { getAssetGraphReadStrategy, shouldWriteAssetShadow } from '@/lib/asset-core/canvas-adapter';
 import {
+  CanvasProjectSyncConflictError,
   executeCanvasProjectSync,
+  readCanvasProjectRevision,
   readAssetV3Projects,
   type AssetGraphMappings,
 } from '@/lib/asset-core/canvas-project-sync';
@@ -152,8 +154,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Key not allowed' }, { status: 403 });
     }
 
-    let value: unknown = await dbGetUserData(sessionUser.id, key);
     let assetGraphMode: AssetGraphMode | undefined;
+    // Read the revision first: a concurrent commit between these reads yields
+    // an older revision with newer data, which CAS rejects safely on write.
+    const projectRevision = key === 'projects'
+      ? await readCanvasProjectRevision(sessionUser.id)
+      : undefined;
+    let value: unknown = await dbGetUserData(sessionUser.id, key);
 
     // 【数据隔离】对 projects 类型数据做服务端过滤，防止跨用户数据泄漏
     // 注意：GET 请求只过滤响应数据，不回写数据库，避免永久删除用户数据
@@ -180,7 +187,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, key, value, ...(assetGraphMode ? { assetGraphMode } : {}) });
+    return NextResponse.json({
+      success: true,
+      key,
+      value,
+      ...(assetGraphMode ? { assetGraphMode } : {}),
+      ...(projectRevision === undefined ? {} : { projectRevision }),
+    });
   } catch (error) {
     return NextResponse.json({
       success: false,
@@ -201,7 +214,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Login required' }, { status: 401 });
     }
 
-    const body = await request.json() as { key?: string; value?: unknown };
+    const body = await request.json() as { key?: string; value?: unknown; projectRevision?: unknown };
     const key = body.key;
     if (!key) {
       return NextResponse.json({ success: false, error: 'Missing key parameter' }, { status: 400 });
@@ -214,6 +227,7 @@ export async function POST(request: NextRequest) {
     const projectIdMap: Record<string, string> = {};
     let assetGraphMappings: AssetGraphMappings = {};
     let assetGraphUpdates: Record<string, Record<string, CanvasAssetGraphUpdate>> = {};
+    let projectRevision: number | undefined;
 
     // 【数据隔离】对 projects 类型数据做服务端验证和清洗
     // 1. 强制过滤只保留属于当前会话用户的项目
@@ -257,19 +271,42 @@ export async function POST(request: NextRequest) {
 
     const assetGraphMode = resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE);
     if (key === 'projects' && Array.isArray(value) && shouldWriteAssetShadow(assetGraphMode)) {
+      if (!Number.isSafeInteger(body.projectRevision) || Number(body.projectRevision) < 0) {
+        return NextResponse.json({
+          success: false,
+          error: 'Canvas project revision is required',
+          currentRevision: await readCanvasProjectRevision(sessionUser.id),
+        }, { status: 409 });
+      }
       const result = await executeCanvasProjectSync({
         actorUserId: sessionUser.id,
         projects: value as Project[],
+        expectedRevision: Number(body.projectRevision),
         persistMedia: persistCanvasDataUrl,
       });
       value = result.projects;
       assetGraphMappings = result.mappings;
       assetGraphUpdates = buildAssetGraphUpdates(result.projects, result.mappings);
+      projectRevision = result.revision;
     } else if (!await dbSetUserData(sessionUser.id, key, value)) {
       throw new Error('Failed to write user data');
     }
-    return NextResponse.json({ success: true, key, projectIdMap, assetGraphMappings, assetGraphUpdates });
+    return NextResponse.json({
+      success: true,
+      key,
+      projectIdMap,
+      assetGraphMappings,
+      assetGraphUpdates,
+      ...(projectRevision === undefined ? {} : { projectRevision }),
+    });
   } catch (error) {
+    if (error instanceof CanvasProjectSyncConflictError) {
+      return NextResponse.json({
+        success: false,
+        error: error.message,
+        currentRevision: error.currentRevision,
+      }, { status: 409 });
+    }
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to write user data',

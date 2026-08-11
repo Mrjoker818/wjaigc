@@ -19,6 +19,7 @@ export type AssetGraphMappings = Record<string, Record<string, LegacyImageMappin
 export { planCanvasShadowReconciliation };
 
 export interface CanvasProjectSyncTransaction {
+  claimRevision?(expectedRevision: number): Promise<number>;
   writeProjects(projects: Project[]): Promise<void>;
   syncProject(project: Project): Promise<MigrationResult>;
 }
@@ -30,12 +31,38 @@ export interface CanvasProjectSyncStorage {
 export interface CanvasProjectSyncResult {
   projects: Project[];
   mappings: AssetGraphMappings;
+  revision?: number;
 }
 
 export interface CanvasProjectSyncInput {
   actorUserId: string;
   projects: Project[];
+  expectedRevision?: number;
   persistMedia?: LegacyMigrationInput['persistMedia'];
+}
+
+const PROJECT_REVISION_DATA_KEY = '__asset_graph_projects_revision';
+
+interface ProjectRevisionRow extends QueryResultRow {
+  data_value: unknown;
+}
+
+function parseProjectRevision(value: unknown): number {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  return 0;
+}
+
+export class CanvasProjectSyncConflictError extends Error {
+  readonly code = 'CANVAS_PROJECT_SYNC_CONFLICT';
+
+  constructor(readonly currentRevision: number) {
+    super('Canvas project snapshot is stale');
+    this.name = 'CanvasProjectSyncConflictError';
+  }
 }
 
 async function persistCanvasProjectMedia(input: CanvasProjectSyncInput): Promise<Project[]> {
@@ -117,6 +144,47 @@ async function writeProjects(client: PoolClient, actorUserId: string, projects: 
   );
 }
 
+async function claimProjectRevision(
+  client: PoolClient,
+  actorUserId: string,
+  expectedRevision: number,
+): Promise<number> {
+  await client.query(
+    'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+    [actorUserId, PROJECT_REVISION_DATA_KEY],
+  );
+  const result = await client.query<ProjectRevisionRow>(
+    `SELECT data_value
+       FROM wujie_user_data
+      WHERE user_id = $1 AND data_key = $2`,
+    [actorUserId, PROJECT_REVISION_DATA_KEY],
+  );
+  const currentRevision = parseProjectRevision(result.rows[0]?.data_value);
+  if (currentRevision !== expectedRevision) {
+    throw new CanvasProjectSyncConflictError(currentRevision);
+  }
+  const nextRevision = currentRevision + 1;
+  await client.query(
+    `INSERT INTO wujie_user_data (user_id, data_key, data_value, updated_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, data_key) DO UPDATE SET
+       data_value = EXCLUDED.data_value,
+       updated_at = EXCLUDED.updated_at`,
+    [actorUserId, PROJECT_REVISION_DATA_KEY, JSON.stringify(nextRevision), Date.now()],
+  );
+  return nextRevision;
+}
+
+export async function readCanvasProjectRevision(actorUserId: string): Promise<number> {
+  const result = await getPool().query<ProjectRevisionRow>(
+    `SELECT data_value
+       FROM wujie_user_data
+      WHERE user_id = $1 AND data_key = $2`,
+    [actorUserId, PROJECT_REVISION_DATA_KEY],
+  );
+  return parseProjectRevision(result.rows[0]?.data_value);
+}
+
 class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
   constructor(private readonly actorUserId: string) {}
 
@@ -125,6 +193,7 @@ class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
     try {
       await client.query('BEGIN');
       const result = await callback({
+        claimRevision: (expectedRevision) => claimProjectRevision(client, this.actorUserId, expectedRevision),
         writeProjects: (projects) => writeProjects(client, this.actorUserId, projects),
         syncProject: (project) => migrateLegacyProjectOnWriteInTransaction(client, {
           actorUserId: this.actorUserId,
@@ -148,6 +217,13 @@ export async function executeCanvasProjectSync(
 ): Promise<CanvasProjectSyncResult> {
   const persistedProjects = await persistCanvasProjectMedia(input);
   return storage.transaction(async (transaction) => {
+    let revision: number | undefined;
+    if (input.expectedRevision !== undefined) {
+      if (!transaction.claimRevision) {
+        throw new Error('Canvas project sync storage does not support revision checks');
+      }
+      revision = await transaction.claimRevision(input.expectedRevision);
+    }
     await transaction.writeProjects(persistedProjects);
     const mappings: AssetGraphMappings = {};
     for (const project of persistedProjects) {
@@ -156,7 +232,7 @@ export async function executeCanvasProjectSync(
     }
     const projects = applyMappings(persistedProjects, mappings);
     await transaction.writeProjects(projects);
-    return { projects, mappings };
+    return { projects, mappings, ...(revision === undefined ? {} : { revision }) };
   });
 }
 

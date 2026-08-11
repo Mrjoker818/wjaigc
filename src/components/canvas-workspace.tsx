@@ -1440,6 +1440,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         if (currentUserRef.current?.id) {
           const payload = {
             key: 'projects',
+            projectRevision: mgr.getProjectSyncRevision(),
             value: mgr.getProjects().map(p => ({
               id: p.id,
               name: p.name,

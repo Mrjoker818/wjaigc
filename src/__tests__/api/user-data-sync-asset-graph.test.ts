@@ -7,8 +7,16 @@ const mocks = vi.hoisted(() => ({
   dbSetUserData: vi.fn(),
   execSql: vi.fn(),
   executeCanvasProjectSync: vi.fn(),
+  readCanvasProjectRevision: vi.fn(),
   readAssetV3Projects: vi.fn(),
   persistResultImage: vi.fn(),
+  CanvasProjectSyncConflictError: class CanvasProjectSyncConflictError extends Error {
+    readonly currentRevision: number;
+    constructor(currentRevision: number) {
+      super('Canvas project snapshot is stale');
+      this.currentRevision = currentRevision;
+    }
+  },
 }));
 
 vi.mock('server-only', () => ({}));
@@ -19,7 +27,9 @@ vi.mock('@/lib/db-storage', () => ({
 }));
 vi.mock('@/lib/db-client', () => ({ execSql: mocks.execSql }));
 vi.mock('@/lib/asset-core/canvas-project-sync', () => ({
+  CanvasProjectSyncConflictError: mocks.CanvasProjectSyncConflictError,
   executeCanvasProjectSync: mocks.executeCanvasProjectSync,
+  readCanvasProjectRevision: mocks.readCanvasProjectRevision,
   readAssetV3Projects: mocks.readAssetV3Projects,
 }));
 vi.mock('@/lib/persist-result-image', () => ({ persistResultImage: mocks.persistResultImage }));
@@ -40,10 +50,14 @@ describe('user-data asset graph sync route', () => {
   const originalMode = process.env.WUJIE_ASSET_GRAPH_MODE;
 
   beforeEach(() => {
-    Object.values(mocks).forEach((mock) => mock.mockReset());
+    Object.values(mocks).forEach((mock) => {
+      const reset = (mock as { mockReset?: () => void }).mockReset;
+      if (reset) reset.call(mock);
+    });
     mocks.getSessionUser.mockResolvedValue({ id: 'user-1' });
     mocks.execSql.mockResolvedValue({ rows: [], rowCount: 0 });
     mocks.dbSetUserData.mockResolvedValue(true);
+    mocks.readCanvasProjectRevision.mockResolvedValue(0);
     mocks.persistResultImage.mockImplementation(async (url: string) => url);
   });
 
@@ -58,12 +72,34 @@ describe('user-data asset graph sync route', () => {
 
     const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
       method: 'POST',
-      body: JSON.stringify({ key: 'projects', value: projects }),
+      body: JSON.stringify({ key: 'projects', value: projects, projectRevision: 0 }),
       headers: { 'content-type': 'application/json' },
     }));
 
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ success: false, error: 'atomic graph failure' });
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('returns the current revision without project data when shadow CAS rejects a stale snapshot', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'shadow';
+    mocks.executeCanvasProjectSync.mockRejectedValue(new mocks.CanvasProjectSyncConflictError(7));
+
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'projects', value: projects, projectRevision: 6 }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toEqual({
+      success: false,
+      error: 'Canvas project snapshot is stale',
+      currentRevision: 7,
+    });
+    expect(body).not.toHaveProperty('value');
+    expect(body).not.toHaveProperty('projects');
     expect(mocks.dbSetUserData).not.toHaveBeenCalled();
   });
 
@@ -98,18 +134,20 @@ describe('user-data asset graph sync route', () => {
 
   it('injects the established data URL persistence boundary into atomic shadow sync', async () => {
     process.env.WUJIE_ASSET_GRAPH_MODE = 'shadow';
-    mocks.executeCanvasProjectSync.mockResolvedValue({ projects, mappings: {} });
+    mocks.executeCanvasProjectSync.mockResolvedValue({ projects, mappings: {}, revision: 1 });
 
     const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
       method: 'POST',
-      body: JSON.stringify({ key: 'projects', value: projects }),
+      body: JSON.stringify({ key: 'projects', value: projects, projectRevision: 0 }),
       headers: { 'content-type': 'application/json' },
     }));
 
     expect(response.status).toBe(200);
     const input = mocks.executeCanvasProjectSync.mock.calls[0][0] as {
+      expectedRevision?: number;
       persistMedia?: (value: { dataUrl: string }) => Promise<{ url: string }>;
     };
+    expect(input.expectedRevision).toBe(0);
     expect(input.persistMedia).toBeTypeOf('function');
     mocks.persistResultImage.mockResolvedValue('/api/serve-upload/uploads/persisted.png');
     await expect(input.persistMedia!({ dataUrl: 'data:image/png;base64,AAAA' }))
@@ -143,6 +181,7 @@ describe('user-data asset graph sync route', () => {
     }];
     mocks.executeCanvasProjectSync.mockResolvedValue({
       projects: canonicalProjects,
+      revision: 1,
       mappings: {
         'project-1': {
           encoded: { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' },
@@ -152,12 +191,13 @@ describe('user-data asset graph sync route', () => {
 
     const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
       method: 'POST',
-      body: JSON.stringify({ key: 'projects', value: projects }),
+      body: JSON.stringify({ key: 'projects', value: projects, projectRevision: 0 }),
       headers: { 'content-type': 'application/json' },
     }));
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(body.projectRevision).toBe(1);
     expect(body.assetGraphUpdates).toEqual({
       'project-1': {
         encoded: {

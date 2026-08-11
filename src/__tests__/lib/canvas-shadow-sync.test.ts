@@ -4,6 +4,7 @@ import {
   executeCanvasProjectSync,
   hydrateAssetV3Projects,
   planCanvasShadowReconciliation,
+  type CanvasProjectSyncTransaction,
   type CanvasProjectSyncStorage,
 } from '@/lib/asset-core/canvas-project-sync';
 import * as legacyMigration from '@/lib/asset-core/legacy-migration';
@@ -266,6 +267,94 @@ describe('continuous canvas shadow synchronization', () => {
       thumbnailUrl: '/api/serve-upload/uploads/cccc.png',
     });
     expect(JSON.stringify(synchronizedMedia)).not.toContain('data:image');
+  });
+
+  it('rejects an older pre-transaction sync after a newer deletion commits', async () => {
+    const originalProject = project([image('retained', { url: 'data:image/png;base64,AAAA' })]);
+    const deletedProject = project([]);
+    const state = {
+      revision: 0,
+      projects: [originalProject],
+      activeImageIds: ['retained'],
+    };
+    let releaseOldPersistence!: () => void;
+    const oldPersistenceGate = new Promise<void>((resolve) => {
+      releaseOldPersistence = resolve;
+    });
+    let markOldPersistenceStarted!: () => void;
+    const oldPersistenceStarted = new Promise<void>((resolve) => {
+      markOldPersistenceStarted = resolve;
+    });
+
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        const draft = structuredClone(state);
+        const transaction = {
+          async claimRevision(expectedRevision: number): Promise<number> {
+            if (expectedRevision !== state.revision) {
+              throw Object.assign(new Error('stale canvas project revision'), {
+                code: 'CANVAS_PROJECT_SYNC_CONFLICT',
+                currentRevision: state.revision,
+              });
+            }
+            draft.revision = expectedRevision + 1;
+            return draft.revision;
+          },
+          async writeProjects(projects: Project[]): Promise<void> {
+            draft.projects = structuredClone(projects);
+          },
+          async syncProject(nextProject: Project) {
+            draft.activeImageIds = nextProject.canvasImages.map((item) => item.id);
+            return {
+              project: nextProject,
+              sourceSchemaVersion: 3,
+              migrated: false,
+              reused: true,
+              mappings: Object.fromEntries(nextProject.canvasImages.map((item) => [item.id, {
+                assetId: `asset-${item.id}`,
+                versionId: `version-${item.id}`,
+                placementId: `placement-${item.id}`,
+              }])),
+            };
+          },
+        } satisfies CanvasProjectSyncTransaction;
+
+        const result = await callback(transaction);
+        state.revision = draft.revision;
+        state.projects = draft.projects;
+        state.activeImageIds = draft.activeImageIds;
+        return result;
+      },
+    };
+
+    const olderSync = executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [originalProject],
+      expectedRevision: 0,
+      persistMedia: async ({ dataUrl }) => {
+        markOldPersistenceStarted();
+        await oldPersistenceGate;
+        return { url: `/media/persisted-${dataUrl.slice(-4).toLowerCase()}.png` };
+      },
+    }, storage);
+
+    await oldPersistenceStarted;
+    const newerSync = await executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [deletedProject],
+      expectedRevision: 0,
+      persistMedia: async ({ dataUrl }) => ({ url: dataUrl }),
+    }, storage);
+    releaseOldPersistence();
+
+    await expect(olderSync).rejects.toMatchObject({
+      code: 'CANVAS_PROJECT_SYNC_CONFLICT',
+      currentRevision: 1,
+    });
+    expect(newerSync).toMatchObject({ revision: 1 });
+    expect(state.revision).toBe(1);
+    expect(state.projects[0]?.canvasImages).toEqual([]);
+    expect(state.activeImageIds).toEqual([]);
   });
 
   it('returns persistence failure without beginning or partially writing a database transaction', async () => {

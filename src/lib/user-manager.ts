@@ -50,6 +50,8 @@ interface SnapshotUserData {
 interface ProjectSyncResponse {
   success?: boolean;
   error?: string;
+  projectRevision?: number;
+  currentRevision?: number;
   projectIdMap?: Record<string, string>;
   assetGraphMappings?: Record<string, Record<string, {
     assetId: string;
@@ -81,6 +83,9 @@ export class UserManager {
   private currentUserId: string | null = null;
   private _serverSyncReady = false; // 在 loadProjectsFromServer 成功前阻止 syncToServer 上传空数据
   private _assetGraphMode: AssetGraphMode = 'legacy';
+  private _projectSyncRevision = 0;
+  private _projectSyncRequestEpoch = 0;
+  private _projectSyncSessionEpoch = 0;
   private _onProjectsChanged: (() => void) | null = null;
   // ★ 跟踪最近删除的图片ID，防止服务器同步时将已删除的图片合并回来
   // Map: imageId → 删除时间戳(ms)，60秒后自动清理
@@ -480,6 +485,42 @@ export class UserManager {
   private serverSyncTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly SYNC_DEBOUNCE_MS = 2000; // 2秒防抖
 
+  private resetProjectSyncSession(): void {
+    this._projectSyncSessionEpoch += 1;
+    this._projectSyncRequestEpoch += 1;
+    this._projectSyncRevision = 0;
+    this._recentlyDeletedImageIds.clear();
+  }
+
+  private beginProjectSyncRequest(): {
+    userId: string;
+    requestEpoch: number;
+    sessionEpoch: number;
+    revision: number;
+  } | null {
+    if (!this.currentUserId) return null;
+    return {
+      userId: this.currentUserId,
+      requestEpoch: ++this._projectSyncRequestEpoch,
+      sessionEpoch: this._projectSyncSessionEpoch,
+      revision: this._projectSyncRevision,
+    };
+  }
+
+  private isCurrentProjectSyncRequest(request: {
+    userId: string;
+    requestEpoch: number;
+    sessionEpoch: number;
+  }): boolean {
+    return this.currentUserId === request.userId
+      && this._projectSyncSessionEpoch === request.sessionEpoch
+      && this._projectSyncRequestEpoch === request.requestEpoch;
+  }
+
+  getProjectSyncRevision(): number {
+    return this._projectSyncRevision;
+  }
+
   private scheduleServerSync(): void {
     if (typeof window === 'undefined') return;
     if (this.serverSyncTimer) clearTimeout(this.serverSyncTimer);
@@ -616,7 +657,7 @@ export class UserManager {
   }
 
   /** 强制将当前项目快照提交到数据库；任何失败都会抛错并阻断依赖该快照的操作。 */
-  async flushProjectsToServer(): Promise<ProjectSyncResult> {
+  async flushProjectsToServer(conflictRetries = 1): Promise<ProjectSyncResult> {
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
       this.serverSyncTimer = null;
@@ -625,6 +666,8 @@ export class UserManager {
     if (!projectsPayload) {
       throw new Error('项目数据尚未准备完成');
     }
+    const request = this.beginProjectSyncRequest();
+    if (!request) throw new Error('登录状态已失效，请重新登录');
     const response = await fetch('/api/user-data/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -632,9 +675,21 @@ export class UserManager {
       signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)
         : undefined,
-      body: JSON.stringify({ key: 'projects', value: projectsPayload }),
+      body: JSON.stringify({ key: 'projects', value: projectsPayload, projectRevision: request.revision }),
     });
     const data = await response.json().catch(() => null) as ProjectSyncResponse | null;
+    if (!this.isCurrentProjectSyncRequest(request)) {
+      return { projectIdMap: {} };
+    }
+    if (
+      response.status === 409
+      && Number.isSafeInteger(data?.currentRevision)
+      && Number(data?.currentRevision) >= 0
+      && conflictRetries > 0
+    ) {
+      this._projectSyncRevision = Number(data?.currentRevision);
+      return this.flushProjectsToServer(conflictRetries - 1);
+    }
     if (!response.ok || !data?.success) {
       if (response.status === 401 || response.status === 403) {
         throw new Error('登录状态已失效，请重新登录');
@@ -644,6 +699,9 @@ export class UserManager {
     const projectIdMap = data.projectIdMap && typeof data.projectIdMap === 'object'
       ? data.projectIdMap
       : {};
+    if (Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0) {
+      this._projectSyncRevision = Number(data.projectRevision);
+    }
     this.applyProjectIdMap(projectIdMap);
     this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
     this._recentlyDeletedImageIds.clear();
@@ -654,10 +712,16 @@ export class UserManager {
    * @param immediate 是否立即同步（跳过防抖），用于删除等关键操作
    * @param silent 静默模式（退出登录时使用），不向 console.error 输出 fetch 失败
    */
-  private async syncToServer(immediate: boolean = false, silent: boolean = false): Promise<void> {
+  private async syncToServer(
+    immediate: boolean = false,
+    silent: boolean = false,
+    conflictRetries = 1,
+  ): Promise<void> {
     try {
       const projectsPayload = this.buildProjectsSyncPayload(false);
       if (!projectsPayload) return;
+      const request = this.beginProjectSyncRequest();
+      if (!request) return;
       const syncRes = await fetch('/api/user-data/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -666,13 +730,27 @@ export class UserManager {
         signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
           ? AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)
           : undefined,
-        body: JSON.stringify({ key: 'projects', value: projectsPayload }),
+        body: JSON.stringify({ key: 'projects', value: projectsPayload, projectRevision: request.revision }),
       });
+      const data = await syncRes.json().catch(() => null) as ProjectSyncResponse | null;
+      if (!this.isCurrentProjectSyncRequest(request)) return;
+      if (
+        syncRes.status === 409
+        && Number.isSafeInteger(data?.currentRevision)
+        && Number(data?.currentRevision) >= 0
+        && conflictRetries > 0
+      ) {
+        this._projectSyncRevision = Number(data?.currentRevision);
+        await this.syncToServer(immediate, silent, conflictRetries - 1);
+        return;
+      }
       if (!syncRes.ok) {
         console.warn('[Sync] syncToServer: server returned', syncRes.status);
       } else {
-        const data = await syncRes.json().catch(() => null) as ProjectSyncResponse | null;
         if (data?.success) {
+          if (Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0) {
+            this._projectSyncRevision = Number(data.projectRevision);
+          }
           this.applyProjectIdMap(data.projectIdMap || {});
           this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
           console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
@@ -693,13 +771,14 @@ export class UserManager {
     if (!expectedUserId || !this.multiUserData) return false;
     const userData = this.multiUserData.userData[expectedUserId];
     if (!userData) return false;
+    const sessionEpoch = this._projectSyncSessionEpoch;
 
     try {
       const res = await fetch('/api/user-data/sync?key=projects', {
         credentials: 'include',
         signal: AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS),
       });
-      if (this.currentUserId !== expectedUserId) return false;
+      if (this.currentUserId !== expectedUserId || this._projectSyncSessionEpoch !== sessionEpoch) return false;
       if (!res.ok) {
         console.warn('[Sync] loadProjectsFromServer: server returned', res.status);
         // 重试：登录后 session cookie 可能尚未生效
@@ -709,7 +788,12 @@ export class UserManager {
         }
         return false;
       }
-      const data = await res.json() as { success: boolean; value?: unknown; assetGraphMode?: AssetGraphMode };
+      const data = await res.json() as {
+        success: boolean;
+        value?: unknown;
+        assetGraphMode?: AssetGraphMode;
+        projectRevision?: number;
+      };
       if (!data.success) {
         if (retryCount > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -721,6 +805,9 @@ export class UserManager {
       this._assetGraphMode = data.assetGraphMode === 'shadow' || data.assetGraphMode === 'asset-v3'
         ? data.assetGraphMode
         : 'legacy';
+      this._projectSyncRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
+        ? Number(data.projectRevision)
+        : 0;
 
       if (data.value === undefined || data.value === null) {
         // A missing record is a valid first-login state, not a failed sync.
@@ -1064,6 +1151,7 @@ export class UserManager {
     }
 
     // 始终尝试从服务器加载项目数据（解决跨设备同步问题）
+    this.resetProjectSyncSession();
     this.currentUserId = nextUser.id;
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
@@ -1120,6 +1208,7 @@ export class UserManager {
     }
     this._serverSyncReady = false; // 重置同步状态，需要重新从服务器加载
 
+    this.resetProjectSyncSession();
     this.currentUserId = user.id;
     this.saveData();
     return user;
@@ -1160,6 +1249,7 @@ export class UserManager {
     };
 
     // 设置为当前用户
+    this.resetProjectSyncSession();
     this.currentUserId = user.id;
 
     this.saveData();
@@ -1170,6 +1260,7 @@ export class UserManager {
     if (!this.isCurrentAdmin()) throw new Error('Only administrator can create users');
     const previousUserId = this.currentUserId;
     const user = this.createUser(name, email, password);
+    this.resetProjectSyncSession();
     this.currentUserId = previousUserId;
     this.saveData();
     void this.syncAdminUserAction('create', { name, password, email });
@@ -1218,6 +1309,7 @@ export class UserManager {
 
     // ??????????????????????????
     if (this.currentUserId === userId) {
+      this.resetProjectSyncSession();
       this.currentUserId = null;
       if (this.canUseStorage()) {
         localStorage.removeItem(CURRENT_USER_KEY);
@@ -1231,6 +1323,7 @@ export class UserManager {
     const user = this.multiUserData.users.find(u => u.id === userId);
     if (!user || user.status === 'disabled') return false;
 
+    if (this.currentUserId !== userId) this.resetProjectSyncSession();
     this.currentUserId = userId;
     this.saveData();
     return true;
@@ -1724,6 +1817,7 @@ export class UserManager {
   // 清空数据（用于测试）
   clearAllData(): void {
     this.multiUserData = null;
+    this.resetProjectSyncSession();
     this.currentUserId = null;
     if (this.canUseStorage()) {
       localStorage.removeItem(STORAGE_KEY);
@@ -1743,6 +1837,7 @@ export class UserManager {
     }
     await this.syncToServer(true, true);
     this._serverSyncReady = false; // 重置同步状态，新用户登录后需重新加载
+    this.resetProjectSyncSession();
     this.currentUserId = null;
     if (this.canUseStorage()) {
       localStorage.removeItem(CURRENT_USER_KEY);
