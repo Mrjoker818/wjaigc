@@ -21,9 +21,31 @@ type ConsumeBridge = (input: {
   remove: () => void;
 }) => Promise<{ status: 'waiting' | 'consumed'; references: AssetReference[] }>;
 
+type ResolveBridgeReference = (
+  input: { projectId: string; assetVersionId: string; placementId: string },
+  fetcher?: typeof fetch,
+) => Promise<AssetReference>;
+
 function consumeBridge(): ConsumeBridge | undefined {
   return (simpleChatTypes as unknown as { consumeSimpleChatCanvasBridge?: ConsumeBridge })
     .consumeSimpleChatCanvasBridge;
+}
+
+function resolveBridgeReference(): ResolveBridgeReference | undefined {
+  return (simpleChatTypes as unknown as {
+    resolveSimpleChatCanvasReference?: ResolveBridgeReference;
+  }).resolveSimpleChatCanvasReference;
+}
+
+function managedPayload(): Record<string, unknown> {
+  return {
+    projectId: 'canvas-a',
+    images: [{
+      url: '/client-controlled.png',
+      assetVersionId: 'owned-version',
+      placementId: 'owned-placement',
+    }],
+  };
 }
 
 describe('standalone chat Canvas bridge behavior', () => {
@@ -93,7 +115,12 @@ describe('standalone chat Canvas bridge behavior', () => {
       assetVersionId: string;
       placementId: string;
     }) => {
-      if (input.assetVersionId === 'foreign-version') throw new Error('ASSET_NOT_FOUND');
+      if (input.assetVersionId === 'foreign-version') {
+        throw Object.assign(new Error('ASSET_NOT_FOUND'), {
+          code: 'ASSET_NOT_FOUND',
+          status: 404,
+        });
+      }
       return {
         url: '/canonical.png',
         assetId: 'canonical-asset',
@@ -152,5 +179,68 @@ describe('standalone chat Canvas bridge behavior', () => {
     expect(result.references[0]).not.toHaveProperty('assetVersionId');
     expect(resolveReference).not.toHaveBeenCalled();
     expect(merge).toHaveBeenCalledWith([{ url: '/legacy-array.png' }]);
+  });
+
+  it.each([
+    ['503', Object.assign(new Error('ASSET_RESOLVE_FAILED'), { status: 503 })],
+    ['network error', new TypeError('fetch failed')],
+  ])('I1 preserves the entire bridge when structured resolution has a %s', async (_label, failure) => {
+    const consume = consumeBridge();
+    expect(consume).toBeTypeOf('function');
+    if (!consume) return;
+    const merge = vi.fn();
+    const remove = vi.fn();
+
+    await expect(consume({
+      payload: managedPayload(),
+      currentProjectId: 'canvas-a',
+      resolveReference: vi.fn().mockRejectedValue(failure),
+      merge,
+      remove,
+    })).rejects.toBe(failure);
+    expect(merge).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('I1 preserves the entire bridge when structured resolution returns malformed 200 data', async () => {
+    const consume = consumeBridge();
+    expect(consume).toBeTypeOf('function');
+    if (!consume) return;
+    const merge = vi.fn();
+    const remove = vi.fn();
+
+    await expect(consume({
+      payload: managedPayload(),
+      currentProjectId: 'canvas-a',
+      resolveReference: vi.fn().mockResolvedValue({
+        url: '/canonical.png',
+        assetVersionId: 'owned-version',
+      }),
+      merge,
+      remove,
+    })).rejects.toThrow('ASSET_REFERENCE_INVALID');
+    expect(merge).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('I1 maps only an explicit 404 ASSET_NOT_FOUND response to a droppable bridge error', async () => {
+    const resolve = resolveBridgeReference();
+    expect(resolve).toBeTypeOf('function');
+    if (!resolve) return;
+    const input = {
+      projectId: 'canvas-a',
+      assetVersionId: 'absent-version',
+      placementId: 'absent-placement',
+    };
+
+    await expect(resolve(input, vi.fn(async () => new Response(
+      JSON.stringify({ error: 'ASSET_NOT_FOUND' }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } },
+    )))).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND', status: 404 });
+
+    await expect(resolve(input, vi.fn(async () => new Response(
+      JSON.stringify({ error: 'UPSTREAM_UNAVAILABLE' }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } },
+    )))).rejects.toMatchObject({ status: 503 });
   });
 });

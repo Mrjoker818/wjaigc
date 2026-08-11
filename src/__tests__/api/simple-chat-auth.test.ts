@@ -65,6 +65,50 @@ function request(): NextRequest {
   });
 }
 
+function imageToolRequest(
+  origin = 'https://attacker.example',
+): NextRequest {
+  return new NextRequest(`${origin}/api/simple-chat/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'Generate a lighthouse at night' }],
+      model: 'chat-model',
+      providerId: 'chat-provider',
+      imageModel: 'image-model',
+      imageProviderId: 'image-provider',
+    }),
+  });
+}
+
+function imageToolCallResponse(): Response {
+  const toolCall = JSON.stringify({
+    choices: [{
+      delta: {
+        tool_calls: [{
+          index: 0,
+          id: 'tool-call-1',
+          function: {
+            name: 'generate_image',
+            arguments: JSON.stringify({ prompt: 'A lighthouse at night', size: '1024x1024' }),
+          },
+        }],
+      },
+    }],
+  });
+  return new Response(`data: ${toolCall}\n\ndata: [DONE]\n\n`, {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+
+function jsonResponse(body: Record<string, unknown>): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 function registerRequest(overrides: Record<string, unknown> = {}): NextRequest {
   return new NextRequest('http://localhost/api/simple-chat/chat', {
     method: 'POST',
@@ -88,7 +132,10 @@ describe('POST /api/simple-chat/chat', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
     mocks.getInternalApiUrl.mockImplementation((path: string) => `http://127.0.0.1:5000${path}`);
-    mocks.getInternalRequestHeaders.mockResolvedValue({ Authorization: 'Bearer internal-test' });
+    mocks.getInternalRequestHeaders.mockResolvedValue({
+      Authorization: 'Bearer internal-test',
+      'x-wujie-internal-secret': 'internal-secret',
+    });
     mocks.getSessionUser.mockResolvedValue({
       id: 'user-1',
       role: 'user',
@@ -122,6 +169,7 @@ describe('POST /api/simple-chat/chat', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -218,6 +266,77 @@ describe('POST /api/simple-chat/chat', () => {
       expect.anything(),
     );
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
+  });
+
+  it('C1 sends a direct generate_image tool request with internal auth only to getInternalApiUrl', async () => {
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider',
+      apiKey: 'chat-key',
+      baseUrl: 'https://chat.example/v1',
+      advancedParams: {},
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
+      if (url === 'http://127.0.0.1:5000/api/generate') {
+        return jsonResponse({ success: true, directImageUrls: ['/api/serve-upload/direct.png'] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(imageToolRequest());
+    const events = await response.text();
+    const secretUrls = fetchMock.mock.calls
+      .filter(([, init]) => new Headers(init?.headers).get('x-wujie-internal-secret') === 'internal-secret')
+      .map(([input]) => String(input));
+
+    expect(events).toContain('/api/serve-upload/direct.png');
+    expect(mocks.getInternalApiUrl).toHaveBeenCalledWith('/api/generate');
+    expect(secretUrls).toEqual(['http://127.0.0.1:5000/api/generate']);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'https://attacker.example/api/generate',
+      expect.anything(),
+    );
+  });
+
+  it('C1 sends async generate_image polling with internal auth only to getInternalApiUrl', async () => {
+    vi.useFakeTimers();
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider',
+      apiKey: 'chat-key',
+      baseUrl: 'https://chat.example/v1',
+      advancedParams: {},
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
+      if (url === 'http://127.0.0.1:5000/api/generate') {
+        return jsonResponse({ success: true, taskIds: ['task-async-1'] });
+      }
+      if (url === 'http://127.0.0.1:5000/api/poll-task') {
+        return jsonResponse({ status: 'completed', imageUrl: '/api/serve-upload/async.png' });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(imageToolRequest());
+    const eventsPromise = response.text();
+    await vi.runAllTimersAsync();
+    const events = await eventsPromise;
+    const secretUrls = fetchMock.mock.calls
+      .filter(([, init]) => new Headers(init?.headers).get('x-wujie-internal-secret') === 'internal-secret')
+      .map(([input]) => String(input));
+
+    expect(events).toContain('/api/serve-upload/async.png');
+    expect(mocks.getInternalApiUrl).toHaveBeenCalledWith('/api/generate');
+    expect(mocks.getInternalApiUrl).toHaveBeenCalledWith('/api/poll-task');
+    expect(secretUrls).toEqual([
+      'http://127.0.0.1:5000/api/generate',
+      'http://127.0.0.1:5000/api/poll-task',
+    ]);
+    expect(secretUrls.every(url => !url.startsWith('https://attacker.example'))).toBe(true);
   });
 
   it('I4 derives a stable registration digest from original data content, not persisted URLs', async () => {
