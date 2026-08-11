@@ -1,0 +1,39 @@
+{
+  "checkpoint": "WJ-STABLE-001 Stage 2 Checkpoint B",
+  "testedAt": "2026-08-11T21:45:31+08:00",
+  "browser": "Google Chrome",
+  "cloudUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "githubCommit": "846c0c4e923bb5fad227c16ace17ce8aaf5c99cf",
+  "runtimeCommit": "ff0242e2c243979850bb38013a2ff9a0b32228df",
+  "runtimeParent": "846c0c4e923bb5fad227c16ace17ce8aaf5c99cf",
+  "runtimeDelta": ["scripts/coze-start.sh"],
+  "assetGraphMode": "shadow",
+  "taskCoreMode": "legacy",
+  "targetProjectId": "project_1786342484250_vjti42ltw",
+  "providerModel": "Gpt Image 2",
+  "assetVersion": {
+    "id": "5560a3a4-8932-4602-a4e7-7c2a42d1c5c1",
+    "assetId": "b5b34f88-f022-4037-88a5-88d54c9dc3cc",
+    "fileUrl": "/api/serve-upload/uploads/gen-1786455914641-nimwmk.png",
+    "availability": "ready",
+    "mimeType": "image/png"
+  },
+  "targetPlacement": {
+    "id": "41320144-68ba-4cb3-bfa0-ac1494526eb3",
+    "workspaceId": "project_1786342484250_vjti42ltw",
+    "entityType": "canvas-image",
+    "entityId": "simple-chat:zm6v1wr6msopkjyo:cxxghmzq:0",
+    "idempotencyKey": "simple-chat-canvas:project_1786342484250_vjti42ltw:zm6v1wr6msopkjyo:cxxghmzq:0:5560a3a4-8932-4602-a4e7-7c2a42d1c5c1"
+  },
+  "transferClicks": 2,
+  "targetPlacementCount": 1,
+  "renderedInCanvas": true,
+  "historicalBrokenMediaIsolated": true,
+  "otherTransferDirectionsPassed": [
+    "canvas-to-embedded-chat",
+    "canvas-to-workflow-input",
+    "workflow-output-to-canvas"
+  ],
+  "openDefects": ["BUG-056", "BUG-057"],
+  "localPostgresSuites": "UNVERIFIED: POSTGRES_TEST_DATABASE_URL absent"
+}

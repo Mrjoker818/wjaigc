@@ -681,3 +681,10 @@ Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json
 - BUG-055 is fixed and fully gated locally, but cloud deployment and real Chrome revalidation are still pending. BUG-056 (reference-image data URL decoding) and BUG-057 (stale generating label) remain open.
 - Six PostgreSQL integration suites remain unverified locally without `POSTGRES_TEST_DATABASE_URL`.
 - **Current Stage 2 verdict: NOT PASSED.** Task 7 must not start until Checkpoint B is closed in cloud `shadow`. `asset-v3` remains prohibited and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+
+## 2026-08-11 Stage 2 Checkpoint B closure
+
+- All four required transfer directions now pass in the Coze `shadow` runtime, including a fresh paid standalone-chat generation rendered in the selected Canvas.
+- BUG-055 is closed with controlled media persistence and database-backed idempotency evidence.
+- **Checkpoint B verdict: PASS.** Task 7 may begin. This does not mean Stage 2 or the whole program is release-ready.
+- BUG-056 and BUG-057 remain open. Six local PostgreSQL integration suites remain unverified without `POSTGRES_TEST_DATABASE_URL`; `asset-v3` remains prohibited and stable remains read-only.

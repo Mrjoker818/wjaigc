@@ -825,3 +825,9 @@ Three transfer directions passed in Coze `shadow`: Canvas to embedded chat, Canv
 The provider response contained a valid origin-relative image URL. The application failed to resolve it before persistence, then stored the raw path as a ready AssetVersion. A focused RED test reproduced the parser defect; the minimal fix resolves direct image URLs against `Response.url`. Fresh gates pass: compatibility 16/16, related 60/60, Task 6 57/57, Task 5 64/64, Task 4 108/108, TypeScript, full Vitest, protected baseline 38/38, ESLint 0 errors / 957 warnings, and the 114-page production build.
 
 This is **local candidate evidence only**. Checkpoint B remains open until the exact commit is deployed and Chrome proves that a new standalone-chat result renders in the target Canvas. BUG-056 and BUG-057 remain open. Six PostgreSQL integration groups were skipped because `POSTGRES_TEST_DATABASE_URL` is not configured.
+
+## 2026-08-11 Stage 2 Checkpoint B cloud closure
+
+The candidate is now proven in Coze `shadow`. Runtime commit `ff0242e2` directly parents GitHub `main@846c0c4e`; the only runtime delta is the established Coze launcher adapter. A fresh real Gpt Image 2 result persisted to `/api/serve-upload/uploads/gen-1786455914641-nimwmk.png` and visibly rendered in the selected Canvas.
+
+The generated AssetVersion is `ready` with `image/png`. The target project contains one `canvas-image` placement for that version after two Add-to-Canvas clicks, proving idempotent retry. Together with the three previously passed directions, all four Checkpoint B transfer paths pass. BUG-055 is closed; BUG-056 and BUG-057 remain open. Machine-readable evidence: `docs/testing/evidence/stage-2-checkpoint-b-cloud-2026-08-11.json`.

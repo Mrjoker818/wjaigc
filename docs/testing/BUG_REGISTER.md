@@ -1032,7 +1032,7 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Root cause | The provider returned a URL relative to its response origin. `persistRemoteImage` received the unresolved path, threw `ERR_INVALID_URL`, and the fallback persisted the raw relative path as ready. |
 | Fix | Resolve provider-relative direct image URLs against the actual response URL in the compatibility parser; pass `resp.url` from `/api/generate`. No routing, pricing, task-state, or transfer semantics changed. |
 | Regression | RED: 1 failed / 15 passed. GREEN: compatibility 16/16; related 60/60; Task 6 57/57; Task 5 64/64; Task 4 108/108; TypeScript, full Vitest, protected baseline, and 114-page production build pass; ESLint 0 errors / 957 warnings. |
-| Status | Fixed locally; cloud redeploy and fresh standalone-chat-to-Canvas rendering are required before closure. Checkpoint B remains open. |
+| Status | **CLOSED 2026-08-11.** Coze runtime `ff0242e2` directly parents GitHub `846c0c4e`. A fresh real Gpt Image 2 result persisted as `/api/serve-upload/uploads/gen-1786455914641-nimwmk.png`, rendered in the selected Canvas, and created exactly one target placement after two transfer clicks. Evidence: `docs/testing/evidence/stage-2-checkpoint-b-cloud-2026-08-11.json`. |
 
 ### BUG-056: Standalone-chat pasted data URL reference fails image decoding
 

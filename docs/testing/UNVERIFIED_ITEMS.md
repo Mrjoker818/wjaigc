@@ -510,3 +510,13 @@
 | BUG-057 stale generating label | REPRODUCED / OPEN P2 | Prove terminal UI projection replaces `图片生成中... 1` after result arrival. |
 | Stage 2 PostgreSQL concurrency | UNVERIFIED | Configure an isolated `POSTGRES_TEST_DATABASE_URL` and run the six skipped schema/storage/migration/billing/task-state suites. |
 | Checkpoint B | NOT PASSED | All four transfer paths must pass in cloud `shadow`; Task 7 and `asset-v3` remain prohibited until then. |
+
+## 2026-08-11 Checkpoint B closure update
+
+| Item | Status | Evidence |
+|---|---|---|
+| BUG-055 provider-relative result persistence | VERIFIED IN CLOUD | Fresh controlled upload URL rendered in Canvas; one target placement remained after two transfer clicks. |
+| Checkpoint B | VERIFIED IN CLOUD | Four of four transfer directions pass in `shadow`; Task 7 is permitted. |
+| BUG-056 pasted reference data URL | OPEN P1 | Real provider base64 decode failure remains reproduced and unfixed. |
+| BUG-057 stale generating label | OPEN P2 | The completed result still displayed `图片生成中... 1` during the successful cloud run. |
+| Stage 2 PostgreSQL concurrency | UNVERIFIED | Six suites remain skipped until an isolated `POSTGRES_TEST_DATABASE_URL` is supplied. |
