@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Project } from '@/lib/user-types';
 
 const storage = new Map<string, string>();
 
@@ -96,6 +97,301 @@ afterEach(() => {
 });
 
 describe('UserManager project sync response isolation', () => {
+  it('uses a persisted per-user authoritative base after reload and preserves twelve remote deletions', async () => {
+    const images = Array.from({ length: 13 }, (_, index) => (
+      imageWithId(`remote-${index}`, `/media/remote-${index}.png`)
+    ));
+    let revision = 1;
+    let serverProjects = [{ ...project('user-a', '/media/a.png'), canvasImages: images }];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      value: serverProjects,
+      assetGraphMode: 'shadow',
+      projectRevision: revision,
+    }), { status: 200 })));
+    storage.set('unbounded_ai_user_data', JSON.stringify({
+      users,
+      userData: {
+        'user-a': { user: users[0], projects: serverProjects, apiKeys: [], usageStats: [] },
+        'user-b': { user: users[1], projects: [project('user-b', '/media/b.png')], apiKeys: [], usageStats: [] },
+      },
+    }));
+
+    const firstModule = await import('@/lib/user-manager');
+    const firstManager = firstModule.UserManager.getInstance();
+    await expect(firstManager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    expect(firstManager.getProject('project-a')?.canvasImages).toHaveLength(13);
+    const baseKey = [...storage.keys()].find((key) => (
+      key.includes('authoritative_base') && key.includes('user-a')
+    ));
+    expect(baseKey).toBeTruthy();
+    expect(JSON.parse(storage.get(baseKey!)!)).toMatchObject({
+      version: 1,
+      userId: 'user-a',
+      revision: 1,
+      projects: [expect.objectContaining({ id: 'project-a' })],
+    });
+    expect(storage.get(baseKey!)!.length).toBeLessThanOrEqual(5_000_000);
+
+    serverProjects = [{ ...serverProjects[0], updatedAt: 2, canvasImages: [images[12]] }];
+    revision = 2;
+    vi.resetModules();
+    const reloadedModule = await import('@/lib/user-manager');
+    const reloadedManager = reloadedModule.UserManager.getInstance();
+    await expect(reloadedManager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+
+    expect(reloadedManager.getProject('project-a')?.canvasImages.map((item) => item.id)).toEqual(['remote-12']);
+  });
+
+  it('does not adopt a revision or remote winner when a required conflict backup exceeds quota', async () => {
+    let revision = 1;
+    let serverProjects = [project('user-a', '/media/base.png')];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      value: serverProjects,
+      assetGraphMode: 'shadow',
+      projectRevision: revision,
+    }), { status: 200 })));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    manager.updateProject('project-a', { canvasImages: [canvasImage('/media/local-draft.png')] });
+    serverProjects = [project('user-a', '/media/remote-winner.png')];
+    revision = 2;
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (key.includes('project_conflict_backups')) throw new DOMException('quota', 'QuotaExceededError');
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => storage.delete(key),
+    });
+
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(false);
+    expect(manager.getProjectSyncRevision()).toBe(1);
+    expect(manager.getProject('project-a')?.canvasImages[0]?.url).toBe('/media/local-draft.png');
+  });
+
+  it('rejects a malformed per-user conflict backup before adopting remote conflict state', async () => {
+    let revision = 1;
+    let serverProjects = [project('user-a', '/media/base.png')];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      value: serverProjects,
+      assetGraphMode: 'shadow',
+      projectRevision: revision,
+    }), { status: 200 })));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    manager.updateProject('project-a', { canvasImages: [canvasImage('/media/local-draft.png')] });
+    storage.set('unbounded_ai_project_conflict_backups_v1:user-a', '{not-json');
+    serverProjects = [project('user-a', '/media/remote-winner.png')];
+    revision = 2;
+
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(false);
+    expect(manager.getProjectSyncRevision()).toBe(1);
+    expect(manager.getProject('project-a')?.canvasImages[0]?.url).toBe('/media/local-draft.png');
+  });
+
+  it('does not adopt a response revision before the project payload parses and validates', async () => {
+    let responseBody: Record<string, unknown> = {
+      success: true,
+      value: [project('user-a', '/media/base.png')],
+      assetGraphMode: 'shadow',
+      projectRevision: 3,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(responseBody), { status: 200 })));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    responseBody = {
+      success: true,
+      value: '{broken-json',
+      assetGraphMode: 'asset-v3',
+      projectRevision: 9,
+    };
+
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(false);
+    expect(manager.getProjectSyncRevision()).toBe(3);
+    expect(manager.getAssetGraphMode()).toBe('shadow');
+  });
+
+  it('does not patch a newer local mutation with an in-flight POST response', async () => {
+    const response = deferredResponse();
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: [project('user-a', '/media/base.png')],
+          assetGraphMode: 'shadow',
+          projectRevision: 0,
+        }), { status: 200 });
+      }
+      return response.promise;
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    const request = manager.flushProjectsToServer();
+    manager.updateProject('project-a', {
+      canvasImages: [canvasImage('/media/newer-local.png')],
+      name: 'Newer local name',
+    });
+    response.resolve(new Response(JSON.stringify({
+      success: true,
+      projectRevision: 1,
+      assetGraphUpdates: {
+        'project-a': { 'image-shared': graphUpdate('/media/stale-canonical.png', 'version-stale') },
+      },
+    }), { status: 200 }));
+    await request;
+
+    expect(manager.getProject('project-a')).toMatchObject({
+      name: 'Newer local name',
+      canvasImages: [expect.objectContaining({ url: '/media/newer-local.png' })],
+    });
+    expect(manager.getProjectSyncRevision()).toBe(0);
+  });
+
+  it('rolls back a POST canonical patch when the persistent authoritative base cannot be written', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: [project('user-a', '/media/base.png')],
+          assetGraphMode: 'shadow',
+          projectRevision: 0,
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        success: true,
+        projectRevision: 1,
+        assetGraphUpdates: {
+          'project-a': { 'image-shared': graphUpdate('/media/canonical.png', 'version-canonical') },
+        },
+      }), { status: 200 });
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (key.includes('project_authoritative_base')) throw new DOMException('quota', 'QuotaExceededError');
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => storage.delete(key),
+    });
+
+    await expect(manager.flushProjectsToServer()).rejects.toThrow('quota');
+
+    expect(manager.getProjectSyncRevision()).toBe(0);
+    expect(manager.getProject('project-a')?.canvasImages[0]?.url).toBe('/media/base.png');
+    expect(manager.getProject('project-a')?.canvasImages[0]?.assetVersionId).toBeUndefined();
+  });
+
+  it('backs up every remote-wins image and project conflict in a versioned user-scoped envelope', async () => {
+    const mainBase: Project = {
+      ...project('user-a', '/media/unused.png', 'project-a'),
+      name: 'Main base',
+      metadata: { label: 'base' },
+      canvasImages: [
+        imageWithId('remote-delete', '/media/remote-delete-base.png'),
+        imageWithId('local-delete', '/media/local-delete-base.png'),
+      ],
+    };
+    const remoteDeleteBase: Project = {
+      ...project('user-a', '/media/project-remote-delete.png', 'project-remote-delete'),
+      name: 'Remote delete base',
+    };
+    const localDeleteBase: Project = {
+      ...project('user-a', '/media/project-local-delete.png', 'project-local-delete'),
+      name: 'Local delete base',
+    };
+    let revision = 1;
+    let serverProjects = [mainBase, remoteDeleteBase, localDeleteBase];
+    storage.set('unbounded_ai_user_data', JSON.stringify({
+      users,
+      userData: {
+        'user-a': { user: users[0], projects: serverProjects, apiKeys: [], usageStats: [] },
+        'user-b': { user: users[1], projects: [project('user-b', '/media/b.png')], apiKeys: [], usageStats: [] },
+      },
+    }));
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: serverProjects,
+          assetGraphMode: 'shadow',
+          projectRevision: revision,
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ success: false, currentRevision: revision }), { status: 409 });
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    manager.updateProject('project-a', {
+      name: 'Main local',
+      metadata: { label: 'local' },
+      canvasImages: [imageWithId('remote-delete', '/media/remote-delete-local-edit.png')],
+    });
+    manager.updateProject('project-remote-delete', { name: 'Remote delete local edit' });
+    await manager.deleteProjects(['project-local-delete']);
+
+    serverProjects = [{
+      ...mainBase,
+      name: 'Main remote',
+      metadata: { label: 'remote' },
+      updatedAt: 4,
+      canvasImages: [imageWithId('local-delete', '/media/local-delete-remote-edit.png')],
+    }, {
+      ...localDeleteBase,
+      name: 'Local delete remote edit',
+      updatedAt: 4,
+    }];
+    revision = 2;
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+
+    expect(manager.getProject('project-a')).toMatchObject({
+      name: 'Main remote',
+      metadata: { label: 'remote' },
+      canvasImages: [expect.objectContaining({
+        id: 'local-delete',
+        url: '/media/local-delete-remote-edit.png',
+      })],
+    });
+    expect(manager.getProject('project-remote-delete')).toBeNull();
+    expect(manager.getProject('project-local-delete')?.name).toBe('Local delete remote edit');
+
+    const backupKey = [...storage.keys()].find((key) => (
+      key.includes('project_conflict_backups') && key.includes('user-a')
+    ));
+    expect(backupKey).toBeTruthy();
+    const envelope = JSON.parse(storage.get(backupKey!)!) as {
+      version: number;
+      userId: string;
+      entries: Array<{ conflictType: string }>;
+    };
+    expect(envelope).toMatchObject({ version: 1, userId: 'user-a' });
+    expect(envelope.entries).toHaveLength(5);
+    expect(envelope.entries.map((entry) => entry.conflictType)).toEqual(expect.arrayContaining([
+      'remote-image-delete-local-edit',
+      'local-image-delete-remote-edit',
+      'concurrent-project-edit',
+      'remote-project-delete-local-edit',
+      'local-project-delete-remote-edit',
+    ]));
+    expect(envelope.entries.length).toBeLessThanOrEqual(50);
+  });
+
   it('rebases a rev0 conflict through GET and later autosave without resurrecting a remote deletion', async () => {
     const initial = {
       ...project('user-a', '/media/deleted.png'),
@@ -202,7 +498,7 @@ describe('UserManager project sync response isolation', () => {
     ]);
     expect(rebased.canvasImages.find((item) => item.id === 'safe-local-edit')?.x).toBe(91);
     expect(rebased.canvasImages.find((item) => item.id === 'concurrent-edit')?.url).toBe('/media/remote-winner.png');
-    expect(storage.get('unbounded_ai_project_conflict_backups')).toContain('/media/local-draft.png');
+    expect(storage.get('unbounded_ai_project_conflict_backups_v1:user-a')).toContain('/media/local-draft.png');
 
     manager.updateProject('project-a', {
       canvasImages: rebased.canvasImages.map((item) => (

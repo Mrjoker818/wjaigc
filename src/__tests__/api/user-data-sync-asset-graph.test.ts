@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   dbGetUserData: vi.fn(),
   dbSetUserData: vi.fn(),
   execSql: vi.fn(),
+  getPool: vi.fn(),
   executeCanvasProjectSync: vi.fn(),
   readCanvasProjectRevision: vi.fn(),
   readAssetV3Projects: vi.fn(),
@@ -25,7 +26,7 @@ vi.mock('@/lib/db-storage', () => ({
   dbGetUserData: mocks.dbGetUserData,
   dbSetUserData: mocks.dbSetUserData,
 }));
-vi.mock('@/lib/db-client', () => ({ execSql: mocks.execSql }));
+vi.mock('@/lib/db-client', () => ({ execSql: mocks.execSql, getPool: mocks.getPool }));
 vi.mock('@/lib/asset-core/canvas-project-sync', () => ({
   CanvasProjectSyncConflictError: mocks.CanvasProjectSyncConflictError,
   executeCanvasProjectSync: mocks.executeCanvasProjectSync,
@@ -217,5 +218,86 @@ describe('user-data asset graph sync route', () => {
     expect(body).not.toHaveProperty('value');
     expect(body).not.toHaveProperty('projects');
     expect(JSON.stringify(body)).not.toContain('must-not-leak');
+  });
+
+  it('executes whole-project deletion reconciliation owner-scoped in the API transaction', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'shadow';
+    const sqlEvents: string[] = [];
+    const query = vi.fn(async (sql: string) => {
+      sqlEvents.push(sql.trim().split(/\s+/).slice(0, 3).join(' '));
+      if (sql.includes('SELECT data_value')) {
+        return { rows: [{ data_value: JSON.stringify(0) }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const release = vi.fn();
+    mocks.getPool.mockReturnValue({
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    });
+    const actual = await vi.importActual<typeof import('@/lib/asset-core/canvas-project-sync')>(
+      '@/lib/asset-core/canvas-project-sync',
+    );
+    mocks.executeCanvasProjectSync.mockImplementationOnce(actual.executeCanvasProjectSync);
+
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'projects', value: [], projectRevision: 0 }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.projectRevision).toBe(1);
+    expect(body.assetGraphMappings).toEqual({});
+    expect(query.mock.calls[0]?.[0]).toBe('BEGIN');
+    expect(query.mock.calls.at(-1)?.[0]).toBe('COMMIT');
+    expect(release).toHaveBeenCalledOnce();
+
+    const placementUpdate = query.mock.calls.find(([sql]) => String(sql).includes('UPDATE wujie_workspace_placements'));
+    const assetUpdate = query.mock.calls.find(([sql]) => String(sql).includes('UPDATE wujie_assets'));
+    const projectUpdate = query.mock.calls.find(([sql]) => String(sql).includes('UPDATE wujie_projects'));
+    expect(placementUpdate?.[1]).toEqual(['user-1', []]);
+    expect(projectUpdate?.[1]).toEqual(['user-1', []]);
+    expect(String(assetUpdate?.[0])).toContain('NOT EXISTS');
+    expect(assetUpdate?.[1]).toEqual(['user-1']);
+    expect(sqlEvents).toEqual(expect.arrayContaining([
+      'UPDATE wujie_workspace_placements SET',
+      'UPDATE wujie_assets asset',
+      'UPDATE wujie_projects SET',
+    ]));
+    expect(query.mock.calls.some(([sql]) => /DELETE\s+FROM|wujie_asset_versions/i.test(String(sql)))).toBe(false);
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the API transaction when whole-project asset reconciliation fails', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'shadow';
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT data_value')) {
+        return { rows: [{ data_value: JSON.stringify(0) }], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_assets')) throw new Error('asset reconciliation failed');
+      return { rows: [], rowCount: 1 };
+    });
+    const release = vi.fn();
+    mocks.getPool.mockReturnValue({
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    });
+    const actual = await vi.importActual<typeof import('@/lib/asset-core/canvas-project-sync')>(
+      '@/lib/asset-core/canvas-project-sync',
+    );
+    mocks.executeCanvasProjectSync.mockImplementationOnce(actual.executeCanvasProjectSync);
+
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'projects', value: [], projectRevision: 0 }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ success: false, error: 'asset reconciliation failed' });
+    expect(query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(true);
+    expect(query.mock.calls.some(([sql]) => sql === 'COMMIT')).toBe(false);
+    expect(release).toHaveBeenCalledOnce();
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
   });
 });

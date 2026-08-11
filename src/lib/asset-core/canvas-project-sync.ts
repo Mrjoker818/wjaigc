@@ -22,6 +22,7 @@ export interface CanvasProjectSyncTransaction {
   claimRevision?(expectedRevision: number): Promise<number>;
   writeProjects(projects: Project[]): Promise<void>;
   syncProject(project: Project): Promise<MigrationResult>;
+  reconcileDeletedProjects?(activeProjectIds: string[]): Promise<void>;
 }
 
 export interface CanvasProjectSyncStorage {
@@ -144,6 +145,39 @@ async function writeProjects(client: PoolClient, actorUserId: string, projects: 
   );
 }
 
+export async function reconcileDeletedCanvasProjectsInTransaction(
+  client: PoolClient,
+  actorUserId: string,
+  activeProjectIds: string[],
+): Promise<void> {
+  await client.query(
+    `UPDATE wujie_workspace_placements
+     SET status = 'trashed', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
+     WHERE owner_id = $1 AND status = 'active'
+       AND NOT (project_id = ANY($2::text[]))`,
+    [actorUserId, activeProjectIds],
+  );
+  await client.query(
+    `UPDATE wujie_assets asset
+     SET status = 'trashed', updated_at = now()
+     WHERE asset.owner_id = $1 AND asset.status = 'active'
+       AND NOT EXISTS (
+         SELECT 1 FROM wujie_workspace_placements placement
+         WHERE placement.asset_id = asset.id
+           AND placement.owner_id = asset.owner_id
+           AND placement.status = 'active'
+       )`,
+    [actorUserId],
+  );
+  await client.query(
+    `UPDATE wujie_projects
+     SET status = 'trashed', updated_at = now()
+     WHERE owner_id = $1 AND status = 'active'
+       AND NOT (id = ANY($2::text[]))`,
+    [actorUserId, activeProjectIds],
+  );
+}
+
 async function claimProjectRevision(
   client: PoolClient,
   actorUserId: string,
@@ -199,6 +233,11 @@ class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
           actorUserId: this.actorUserId,
           projectId: project.id,
         }),
+        reconcileDeletedProjects: (activeProjectIds) => reconcileDeletedCanvasProjectsInTransaction(
+          client,
+          this.actorUserId,
+          activeProjectIds,
+        ),
       });
       await client.query('COMMIT');
       return result;
@@ -230,6 +269,7 @@ export async function executeCanvasProjectSync(
       const result = await transaction.syncProject(project);
       mappings[project.id] = result.mappings;
     }
+    await transaction.reconcileDeletedProjects?.(persistedProjects.map((project) => project.id));
     const projects = applyMappings(persistedProjects, mappings);
     await transaction.writeProjects(projects);
     return { projects, mappings, ...(revision === undefined ? {} : { revision }) };

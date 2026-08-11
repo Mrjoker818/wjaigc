@@ -9,7 +9,12 @@ import type { AssetGraphMode } from '@/lib/asset-core/types';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
-const PROJECT_CONFLICT_BACKUP_KEY = 'unbounded_ai_project_conflict_backups';
+const PROJECT_AUTHORITATIVE_BASE_KEY_PREFIX = 'unbounded_ai_project_authoritative_base_v1:';
+const PROJECT_CONFLICT_BACKUP_KEY_PREFIX = 'unbounded_ai_project_conflict_backups_v1:';
+const PROJECT_SYNC_STORAGE_VERSION = 1;
+const MAX_PROJECT_CONFLICT_BACKUPS = 50;
+const MAX_PROJECT_CONFLICT_BACKUP_BYTES = 2_000_000;
+const MAX_PROJECT_AUTHORITATIVE_BASE_BYTES = 5_000_000;
 const DEFAULT_ADMIN_NAME = 'Mr.joker';
 const PROJECT_SYNC_TIMEOUT_MS = 8_000;
 // Default admin password is no longer stored in client code for security.
@@ -88,13 +93,43 @@ export class ProjectSyncConflictError extends Error {
   }
 }
 
+type ProjectConflictType =
+  | 'concurrent-image-add'
+  | 'concurrent-image-edit'
+  | 'remote-image-delete-local-edit'
+  | 'local-image-delete-remote-edit'
+  | 'concurrent-project-add'
+  | 'concurrent-project-edit'
+  | 'remote-project-delete-local-edit'
+  | 'local-project-delete-remote-edit';
+
 interface ProjectConflictBackup {
+  conflictType: ProjectConflictType;
   userId: string;
   projectId: string;
-  imageId: string;
-  localImage: CanvasImage;
-  remoteImage: CanvasImage;
+  imageId?: string;
+  localValue: Project | CanvasImage | null;
+  remoteValue: Project | CanvasImage | null;
   createdAt: number;
+}
+
+interface ProjectConflictBackupEnvelope {
+  version: 1;
+  userId: string;
+  entries: ProjectConflictBackup[];
+}
+
+interface ProjectAuthoritativeBaseEnvelope {
+  version: 1;
+  userId: string;
+  revision: number;
+  projects: Project[];
+  updatedAt: number;
+}
+
+interface ProjectRebaseResult {
+  projects: Project[];
+  conflicts: ProjectConflictBackup[];
 }
 
 function cloneProjects(projects: Project[]): Project[] {
@@ -117,6 +152,43 @@ function snapshotsEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(canonicalizeSnapshot(left)) === JSON.stringify(canonicalizeSnapshot(right));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isValidProjectSnapshot(value: unknown, userId: string): value is Project {
+  if (!isRecord(value) || typeof value.id !== 'string' || !Array.isArray(value.canvasImages)) return false;
+  if (value.userId !== undefined && value.userId !== userId) return false;
+  return value.canvasImages.every((image) => (
+    isRecord(image) && typeof image.id === 'string' && typeof image.url === 'string'
+  ));
+}
+
+function isValidProjectSnapshotArray(value: unknown, userId: string): value is Project[] {
+  return Array.isArray(value) && value.every((project) => isValidProjectSnapshot(project, userId));
+}
+
+function isValidConflictBackup(value: unknown, userId: string): value is ProjectConflictBackup {
+  if (!isRecord(value)) return false;
+  const validTypes = new Set<ProjectConflictType>([
+    'concurrent-image-add',
+    'concurrent-image-edit',
+    'remote-image-delete-local-edit',
+    'local-image-delete-remote-edit',
+    'concurrent-project-add',
+    'concurrent-project-edit',
+    'remote-project-delete-local-edit',
+    'local-project-delete-remote-edit',
+  ]);
+  return value.userId === userId
+    && typeof value.projectId === 'string'
+    && typeof value.conflictType === 'string'
+    && validTypes.has(value.conflictType as ProjectConflictType)
+    && typeof value.createdAt === 'number'
+    && (value.localValue === null || isRecord(value.localValue))
+    && (value.remoteValue === null || isRecord(value.remoteValue));
+}
+
 function projectWithoutImages(project: Project): Omit<Project, 'canvasImages'> {
   const fields: Partial<Project> = { ...project };
   delete fields.canvasImages;
@@ -127,12 +199,41 @@ function rebaseProjectSnapshots(
   baseProjects: Project[],
   localProjects: Project[],
   remoteProjects: Project[],
-  backupConflict: (projectId: string, localImage: CanvasImage, remoteImage: CanvasImage) => void,
-): Project[] {
+  userId: string,
+): ProjectRebaseResult {
   const baseById = new Map(baseProjects.map((project) => [project.id, project]));
   const localById = new Map(localProjects.map((project) => [project.id, project]));
   const remoteById = new Map(remoteProjects.map((project) => [project.id, project]));
   const rebased: Project[] = [];
+  const conflicts: ProjectConflictBackup[] = [];
+  const backup = (
+    conflictType: ProjectConflictType,
+    projectId: string,
+    localValue: Project | CanvasImage | null,
+    remoteValue: Project | CanvasImage | null,
+    imageId?: string,
+  ): void => {
+    conflicts.push({
+      conflictType,
+      userId,
+      projectId,
+      ...(imageId ? { imageId } : {}),
+      localValue: localValue === null ? null : JSON.parse(JSON.stringify(localValue)) as Project | CanvasImage,
+      remoteValue: remoteValue === null ? null : JSON.parse(JSON.stringify(remoteValue)) as Project | CanvasImage,
+      createdAt: Date.now(),
+    });
+  };
+
+  for (const baseProject of baseProjects) {
+    const localProject = localById.get(baseProject.id);
+    const remoteProject = remoteById.get(baseProject.id);
+    if (!remoteProject && localProject) {
+      if (!snapshotsEqual(localProject, baseProject)) {
+        backup('remote-project-delete-local-edit', baseProject.id, localProject, null);
+      }
+      localById.delete(baseProject.id);
+    }
+  }
 
   for (const remoteProject of remoteProjects) {
     const baseProject = baseById.get(remoteProject.id);
@@ -140,6 +241,7 @@ function rebaseProjectSnapshots(
     if (baseProject && !localProject) {
       if (snapshotsEqual(projectWithoutImages(remoteProject), projectWithoutImages(baseProject))
         && snapshotsEqual(remoteProject.canvasImages, baseProject.canvasImages)) continue;
+      backup('local-project-delete-remote-edit', remoteProject.id, null, remoteProject);
       rebased.push(remoteProject);
       continue;
     }
@@ -158,6 +260,7 @@ function rebaseProjectSnapshots(
       const localImage = localImages.get(remoteImage.id);
       if (baseImage && !localImage) {
         if (snapshotsEqual(remoteImage, baseImage)) continue;
+        backup('local-image-delete-remote-edit', remoteProject.id, null, remoteImage, remoteImage.id);
         canvasImages.push(remoteImage);
         continue;
       }
@@ -167,7 +270,7 @@ function rebaseProjectSnapshots(
       }
       if (!baseImage) {
         if (!snapshotsEqual(localImage, remoteImage)) {
-          backupConflict(remoteProject.id, localImage, remoteImage);
+          backup('concurrent-image-add', remoteProject.id, localImage, remoteImage, remoteImage.id);
         }
         canvasImages.push(remoteImage);
         continue;
@@ -177,7 +280,7 @@ function rebaseProjectSnapshots(
       if (localChanged && !remoteChanged) {
         canvasImages.push(localImage);
       } else if (localChanged && remoteChanged && !snapshotsEqual(localImage, remoteImage)) {
-        backupConflict(remoteProject.id, localImage, remoteImage);
+        backup('concurrent-image-edit', remoteProject.id, localImage, remoteImage, remoteImage.id);
         canvasImages.push(remoteImage);
       } else {
         canvasImages.push(remoteImage);
@@ -186,16 +289,31 @@ function rebaseProjectSnapshots(
 
     for (const localImage of localProject.canvasImages) {
       if (remoteImages.has(localImage.id)) continue;
-      if (baseImages.has(localImage.id)) continue;
+      const baseImage = baseImages.get(localImage.id);
+      if (baseImage) {
+        if (!snapshotsEqual(localImage, baseImage)) {
+          backup('remote-image-delete-local-edit', remoteProject.id, localImage, null, localImage.id);
+        }
+        continue;
+      }
       canvasImages.push(localImage);
     }
 
     const baseFields = baseProject ? projectWithoutImages(baseProject) : undefined;
     const localFields = projectWithoutImages(localProject);
     const remoteFields = projectWithoutImages(remoteProject);
-    const fields = baseFields && !snapshotsEqual(localFields, baseFields) && snapshotsEqual(remoteFields, baseFields)
-      ? localFields
-      : remoteFields;
+    let fields = remoteFields;
+    if (baseFields) {
+      const localChanged = !snapshotsEqual(localFields, baseFields);
+      const remoteChanged = !snapshotsEqual(remoteFields, baseFields);
+      if (localChanged && !remoteChanged) {
+        fields = localFields;
+      } else if (localChanged && remoteChanged && !snapshotsEqual(localFields, remoteFields)) {
+        backup('concurrent-project-edit', remoteProject.id, localProject, remoteProject);
+      }
+    } else if (!snapshotsEqual(localProject, remoteProject)) {
+      backup('concurrent-project-add', remoteProject.id, localProject, remoteProject);
+    }
     rebased.push({ ...fields, canvasImages });
     localById.delete(remoteProject.id);
   }
@@ -203,7 +321,7 @@ function rebaseProjectSnapshots(
   for (const localProject of localById.values()) {
     if (!baseById.has(localProject.id) && !remoteById.has(localProject.id)) rebased.push(localProject);
   }
-  return rebased;
+  return { projects: rebased, conflicts };
 }
 
 export class UserManager {
@@ -215,6 +333,7 @@ export class UserManager {
   private _projectSyncRevision = 0;
   private _projectSyncRequestEpoch = 0;
   private _projectSyncSessionEpoch = 0;
+  private _projectMutationGeneration = 0;
   private _projectSyncInFlightTokens = new Set<string>();
   private _lastAuthoritativeProjects = new Map<string, Project[]>();
   private _onProjectsChanged: (() => void) | null = null;
@@ -468,18 +587,18 @@ export class UserManager {
     this.saveData();
   }
 
-  private commitLocalDataOnly(): void {
+  private commitLocalDataOnly(authoritative = false): void {
     if (!this.canUseStorage()) return;
 
     try {
       if (this.multiUserData) {
         // ★ 图片数量断崖检测：保存前快照保护，防止bug导致图片被清空
-        this.protectAgainstDataLoss();
+        if (!authoritative) this.protectAgainstDataLoss();
         // ★ 保存到 localStorage 时，data: URL 可能导致配额溢出
         // 先尝试直接保存，如果配额不足则将 data: URL 替换为空字符串后重试
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(this.multiUserData));
-        } catch (quotaError) {
+        } catch {
           // localStorage 配额溢出，将 data:/blob: URL 替换为空字符串后重试
           console.warn('[saveData] localStorage quota exceeded, retrying without data:/blob: URLs');
           const trimmedData = JSON.parse(JSON.stringify(this.multiUserData));
@@ -529,8 +648,6 @@ export class UserManager {
       } catch { snapshots = []; }
 
       // 检测异常：如果某个项目从≥N张掉到0，标记，用快照数据修复
-      let needRestore = false;
-      let restoreSnapshot: unknown = null;
       for (const [uid, ud] of Object.entries(this.multiUserData.userData as unknown as Record<string, SnapshotUserData>)) {
         const projects = ud?.projects || [];
         for (const proj of projects) {
@@ -550,8 +667,6 @@ export class UserManager {
                 if (snapProj && (snapProj.canvasImages || []).length >= 10) {
                   proj.canvasImages = snapProj.canvasImages;
                   proj.updatedAt = Date.now();
-                  restoreSnapshot = true;
-                  needRestore = true;
                   break;
                 }
               } catch {}
@@ -620,6 +735,7 @@ export class UserManager {
     this._projectSyncSessionEpoch += 1;
     this._projectSyncRequestEpoch += 1;
     this._projectSyncRevision = 0;
+    this._projectMutationGeneration = 0;
     this._recentlyDeletedImageIds.clear();
   }
 
@@ -628,6 +744,7 @@ export class UserManager {
     requestEpoch: number;
     sessionEpoch: number;
     revision: number;
+    mutationGeneration: number;
     token: string;
   } | null {
     if (!this.currentUserId) return null;
@@ -639,6 +756,7 @@ export class UserManager {
       requestEpoch,
       sessionEpoch: this._projectSyncSessionEpoch,
       revision: this._projectSyncRevision,
+      mutationGeneration: this._projectMutationGeneration,
       token,
     };
   }
@@ -647,10 +765,12 @@ export class UserManager {
     userId: string;
     requestEpoch: number;
     sessionEpoch: number;
+    mutationGeneration: number;
   }): boolean {
     return this.currentUserId === request.userId
       && this._projectSyncSessionEpoch === request.sessionEpoch
-      && this._projectSyncRequestEpoch === request.requestEpoch;
+      && this._projectSyncRequestEpoch === request.requestEpoch
+      && this._projectMutationGeneration === request.mutationGeneration;
   }
 
   getProjectSyncRevision(): number {
@@ -666,24 +786,111 @@ export class UserManager {
     this._projectSyncInFlightTokens.delete(request.token);
   }
 
-  private backupProjectConflict(projectId: string, localImage: CanvasImage, remoteImage: CanvasImage): void {
-    if (!this.currentUserId || !this.canUseStorage()) return;
-    let backups: ProjectConflictBackup[] = [];
+  private projectSyncStorageKey(prefix: string, userId: string): string {
+    return `${prefix}${encodeURIComponent(userId)}`;
+  }
+
+  private readPersistedAuthoritativeBase(userId: string): ProjectAuthoritativeBaseEnvelope | undefined {
+    if (!this.canUseStorage()) return undefined;
+    const stored = localStorage.getItem(this.projectSyncStorageKey(PROJECT_AUTHORITATIVE_BASE_KEY_PREFIX, userId));
+    if (!stored) return undefined;
+    let parsed: unknown;
     try {
-      const stored = localStorage.getItem(PROJECT_CONFLICT_BACKUP_KEY);
-      if (stored) backups = JSON.parse(stored) as ProjectConflictBackup[];
+      parsed = JSON.parse(stored);
     } catch {
-      backups = [];
+      throw new Error('PROJECT_SYNC_AUTHORITATIVE_BASE_INVALID');
     }
-    backups.push({
-      userId: this.currentUserId,
-      projectId,
-      imageId: localImage.id,
-      localImage: JSON.parse(JSON.stringify(localImage)) as CanvasImage,
-      remoteImage: JSON.parse(JSON.stringify(remoteImage)) as CanvasImage,
-      createdAt: Date.now(),
-    });
-    localStorage.setItem(PROJECT_CONFLICT_BACKUP_KEY, JSON.stringify(backups.slice(-50)));
+    if (
+      !isRecord(parsed)
+      || parsed.version !== PROJECT_SYNC_STORAGE_VERSION
+      || parsed.userId !== userId
+      || !Number.isSafeInteger(parsed.revision)
+      || Number(parsed.revision) < 0
+      || !isValidProjectSnapshotArray(parsed.projects, userId)
+    ) {
+      throw new Error('PROJECT_SYNC_AUTHORITATIVE_BASE_INVALID');
+    }
+    return parsed as unknown as ProjectAuthoritativeBaseEnvelope;
+  }
+
+  private persistAuthoritativeBase(userId: string, revision: number, projects: Project[]): void {
+    if (!this.canUseStorage()) return;
+    const envelope: ProjectAuthoritativeBaseEnvelope = {
+      version: PROJECT_SYNC_STORAGE_VERSION,
+      userId,
+      revision,
+      projects: cloneProjects(projects),
+      updatedAt: Date.now(),
+    };
+    const serialized = JSON.stringify(envelope);
+    if (serialized.length > MAX_PROJECT_AUTHORITATIVE_BASE_BYTES) {
+      throw new Error('PROJECT_SYNC_AUTHORITATIVE_BASE_TOO_LARGE');
+    }
+    localStorage.setItem(
+      this.projectSyncStorageKey(PROJECT_AUTHORITATIVE_BASE_KEY_PREFIX, userId),
+      serialized,
+    );
+  }
+
+  private persistProjectConflictBackups(userId: string, conflicts: ProjectConflictBackup[]): void {
+    if (conflicts.length === 0 || !this.canUseStorage()) return;
+    const key = this.projectSyncStorageKey(PROJECT_CONFLICT_BACKUP_KEY_PREFIX, userId);
+    const stored = localStorage.getItem(key);
+    let existing: ProjectConflictBackup[] = [];
+    if (stored) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(stored);
+      } catch {
+        throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_INVALID');
+      }
+      if (
+        !isRecord(parsed)
+        || parsed.version !== PROJECT_SYNC_STORAGE_VERSION
+        || parsed.userId !== userId
+        || !Array.isArray(parsed.entries)
+        || parsed.entries.some((entry) => !isValidConflictBackup(entry, userId))
+      ) {
+        throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_INVALID');
+      }
+      existing = parsed.entries as unknown as ProjectConflictBackup[];
+    }
+
+    if (conflicts.length > MAX_PROJECT_CONFLICT_BACKUPS) {
+      throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_TOO_LARGE');
+    }
+    let retainedExisting = existing.slice(-MAX_PROJECT_CONFLICT_BACKUPS);
+    const required = conflicts;
+    while (retainedExisting.length + required.length > MAX_PROJECT_CONFLICT_BACKUPS) {
+      retainedExisting = retainedExisting.slice(1);
+    }
+    const write = (): void => {
+      const entries = [...retainedExisting, ...required].slice(-MAX_PROJECT_CONFLICT_BACKUPS);
+      const envelope: ProjectConflictBackupEnvelope = {
+        version: PROJECT_SYNC_STORAGE_VERSION,
+        userId,
+        entries,
+      };
+      const serialized = JSON.stringify(envelope);
+      if (serialized.length > MAX_PROJECT_CONFLICT_BACKUP_BYTES) {
+        throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_TOO_LARGE');
+      }
+      localStorage.setItem(key, serialized);
+    };
+
+    while (true) {
+      try {
+        write();
+        return;
+      } catch (error) {
+        if (retainedExisting.length === 0) throw error;
+        retainedExisting = retainedExisting.slice(1);
+      }
+    }
+  }
+
+  private markProjectMutation(): void {
+    this._projectMutationGeneration += 1;
   }
 
   private scheduleServerSync(): void {
@@ -822,6 +1029,33 @@ export class UserManager {
   }
 
   /** 强制将当前项目快照提交到数据库；任何失败都会抛错并阻断依赖该快照的操作。 */
+  private acceptProjectSyncSuccess(data: ProjectSyncResponse, nextRevision: number): void {
+    const userId = this.currentUserId;
+    const userData = userId ? this.multiUserData?.userData[userId] : undefined;
+    const projectsBeforeResponse = userData ? cloneProjects(userData.projects) : undefined;
+    try {
+      this.applyProjectIdMap(data.projectIdMap || {});
+      this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
+      if (userId && userData) {
+        const authoritativeProjects = cloneProjects(userData.projects);
+        this.persistAuthoritativeBase(userId, nextRevision, authoritativeProjects);
+        this._lastAuthoritativeProjects.set(userId, authoritativeProjects);
+      }
+      this._projectSyncRevision = nextRevision;
+      this._recentlyDeletedImageIds.clear();
+    } catch (error) {
+      if (userId && projectsBeforeResponse && this.currentUserId === userId) {
+        const activeUserData = this.multiUserData?.userData[userId];
+        if (activeUserData) {
+          activeUserData.projects = projectsBeforeResponse;
+          this.commitLocalDataOnly(true);
+          this.notifyProjectsChanged();
+        }
+      }
+      throw error;
+    }
+  }
+
   async flushProjectsToServer(): Promise<ProjectSyncResult> {
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
@@ -863,18 +1097,10 @@ export class UserManager {
       const projectIdMap = data.projectIdMap && typeof data.projectIdMap === 'object'
         ? data.projectIdMap
         : {};
-      if (Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0) {
-        this._projectSyncRevision = Number(data.projectRevision);
-      }
-      this.applyProjectIdMap(projectIdMap);
-      this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
-      if (this.currentUserId && this.multiUserData?.userData[this.currentUserId]) {
-        this._lastAuthoritativeProjects.set(
-          this.currentUserId,
-          cloneProjects(this.multiUserData.userData[this.currentUserId].projects),
-        );
-      }
-      this._recentlyDeletedImageIds.clear();
+      const nextRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
+        ? Number(data.projectRevision)
+        : this._projectSyncRevision;
+      this.acceptProjectSyncSuccess(data, nextRevision);
       return { projectIdMap };
     } finally {
       this.finishProjectSyncRequest(request);
@@ -916,19 +1142,11 @@ export class UserManager {
         console.warn('[Sync] syncToServer: server returned', syncRes.status);
       } else {
         if (data?.success) {
-          if (Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0) {
-            this._projectSyncRevision = Number(data.projectRevision);
-          }
-          this.applyProjectIdMap(data.projectIdMap || {});
-          this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
-          if (this.currentUserId && this.multiUserData?.userData[this.currentUserId]) {
-            this._lastAuthoritativeProjects.set(
-              this.currentUserId,
-              cloneProjects(this.multiUserData.userData[this.currentUserId].projects),
-            );
-          }
+          const nextRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
+            ? Number(data.projectRevision)
+            : this._projectSyncRevision;
+          this.acceptProjectSyncSuccess(data, nextRevision);
           console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
-          this._recentlyDeletedImageIds.clear();
         } else {
           console.warn('[Sync] syncToServer: invalid success response');
         }
@@ -948,6 +1166,8 @@ export class UserManager {
     const userData = this.multiUserData.userData[expectedUserId];
     if (!userData) return false;
     const sessionEpoch = this._projectSyncSessionEpoch;
+    const projectsBeforeAdoption = cloneProjects(userData.projects);
+    let adoptionStarted = false;
 
     try {
       const res = await fetch('/api/user-data/sync?key=projects', {
@@ -979,15 +1199,19 @@ export class UserManager {
         console.warn('[Sync] loadProjectsFromServer: unsuccessful response', data);
         return false;
       }
-      this._assetGraphMode = data.assetGraphMode === 'shadow' || data.assetGraphMode === 'asset-v3'
+      const nextAssetGraphMode = data.assetGraphMode === 'shadow' || data.assetGraphMode === 'asset-v3'
         ? data.assetGraphMode
         : 'legacy';
-      this._projectSyncRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
+      const nextProjectSyncRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
         ? Number(data.projectRevision)
         : 0;
 
       if (data.value === undefined || data.value === null) {
         // A missing record is a valid first-login state, not a failed sync.
+        this.persistAuthoritativeBase(expectedUserId, nextProjectSyncRevision, []);
+        this._lastAuthoritativeProjects.set(expectedUserId, []);
+        this._assetGraphMode = nextAssetGraphMode;
+        this._projectSyncRevision = nextProjectSyncRevision;
         this._serverSyncReady = true;
         await this.syncToServer();
         return true;
@@ -1009,6 +1233,10 @@ export class UserManager {
 
       if (serverProjects.length === 0 && userData.projects.length === 0) {
         console.log('[Sync] loadProjectsFromServer: both local and server empty');
+        this.persistAuthoritativeBase(expectedUserId, nextProjectSyncRevision, []);
+        this._lastAuthoritativeProjects.set(expectedUserId, []);
+        this._assetGraphMode = nextAssetGraphMode;
+        this._projectSyncRevision = nextProjectSyncRevision;
         this._serverSyncReady = true;
         return true;
       }
@@ -1093,15 +1321,24 @@ export class UserManager {
         }
       }
 
-      const authoritativeBase = this._lastAuthoritativeProjects.get(currentUserId);
+      const inMemoryBase = this._lastAuthoritativeProjects.get(currentUserId);
+      const persistedBase = inMemoryBase ? undefined : this.readPersistedAuthoritativeBase(currentUserId);
+      const authoritativeBase = inMemoryBase ?? persistedBase?.projects;
+      let authoritativeBasePersisted = false;
       if (authoritativeBase) {
-        userData.projects = rebaseProjectSnapshots(
+        const rebase = rebaseProjectSnapshots(
           authoritativeBase,
           localProjectsFiltered,
           serverProjects,
-          (projectId, localImage, remoteImage) => this.backupProjectConflict(projectId, localImage, remoteImage),
+          currentUserId,
         );
+        this.persistProjectConflictBackups(currentUserId, rebase.conflicts);
+        this.persistAuthoritativeBase(currentUserId, nextProjectSyncRevision, serverProjects);
+        authoritativeBasePersisted = true;
+        adoptionStarted = true;
+        userData.projects = rebase.projects;
       } else {
+      adoptionStarted = true;
       // 合并策略：按项目 ID 合并，保留更新时间更晚的版本
       const localHasData = localProjectsFiltered.length > 0;
       const serverHasData = serverProjects.length > 0;
@@ -1212,7 +1449,7 @@ export class UserManager {
             const localTime = lp.updatedAt || lp.createdAt || 0;
             const serverTime = sp.updatedAt || sp.createdAt || 0;
             const selectedImages = selectCanvasPlacementSnapshot(
-              this._assetGraphMode,
+              nextAssetGraphMode,
               sp.canvasImages,
               () => mergedImages,
             );
@@ -1259,9 +1496,15 @@ export class UserManager {
         }
       }
 
+      if (!authoritativeBasePersisted) {
+        this.persistAuthoritativeBase(currentUserId, nextProjectSyncRevision, serverProjects);
+      }
+      this._assetGraphMode = nextAssetGraphMode;
+      this._projectSyncRevision = nextProjectSyncRevision;
       this._serverSyncReady = true; // 标记服务器数据已加载，允许后续 syncToServer
       this._lastAuthoritativeProjects.set(currentUserId, cloneProjects(serverProjects));
-      this.commitLocalDataOnly();
+      this.commitLocalDataOnly(true);
+      adoptionStarted = false;
       this.notifyProjectsChanged(); // 通知 UI 刷新
       // ★ 调试日志：帮助追踪数据恢复
       const totalImages = userData.projects.reduce((sum, p) => sum + (p.canvasImages?.length || 0), 0);
@@ -1271,6 +1514,9 @@ export class UserManager {
       }
       return true;
     } catch (error) {
+      if (adoptionStarted && this.currentUserId === expectedUserId) {
+        userData.projects = projectsBeforeAdoption;
+      }
       // Downgrade to warn: fetch failures during session teardown (logout/reload) are expected, not code errors
       console.warn('[Sync] loadProjectsFromServer error:', error);
       if (retryCount > 0) {
@@ -1571,6 +1817,7 @@ export class UserManager {
     };
 
     userData.projects.unshift(project);
+    this.markProjectMutation();
     this.saveData();
     return project;
   }
@@ -1664,6 +1911,7 @@ export class UserManager {
       updatedAt: Date.now(),
     };
 
+    this.markProjectMutation();
     this.saveData();
     return userData.projects[index];
   }
@@ -1685,6 +1933,7 @@ export class UserManager {
 
     const deletedIdSet = new Set(deletedIds);
     userData.projects = userData.projects.filter(project => !deletedIdSet.has(project.id));
+    this.markProjectMutation();
     this.saveData();
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
@@ -2350,6 +2599,7 @@ export class UserManager {
       updatedAt: Date.now(),
     };
     userData.projects.unshift(project);
+    this.markProjectMutation();
     this.saveData();
     return project;
   }

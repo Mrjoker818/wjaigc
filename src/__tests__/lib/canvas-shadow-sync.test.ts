@@ -6,10 +6,12 @@ import {
   executeCanvasProjectSync,
   hydrateAssetV3Projects,
   planCanvasShadowReconciliation,
+  reconcileDeletedCanvasProjectsInTransaction,
   type CanvasProjectSyncTransaction,
   type CanvasProjectSyncStorage,
 } from '@/lib/asset-core/canvas-project-sync';
 import * as legacyMigration from '@/lib/asset-core/legacy-migration';
+import { serializeCanvasWorkspacePlacements } from '@/lib/asset-core/canvas-adapter';
 import type { AssetFile } from '@/lib/asset-core/types';
 import type { CanvasImage, Project } from '@/lib/user-types';
 
@@ -39,6 +41,145 @@ const project = (canvasImages: CanvasImage[]): Project => ({
 });
 
 describe('continuous canvas shadow synchronization', () => {
+  it('retains unmanaged blob and missing broken-media placements during autosave', () => {
+    const serialized = serializeCanvasWorkspacePlacements([
+      image('blob-media', { url: 'blob:expired-session-media' }),
+      image('missing-media', {
+        url: '',
+        mediaAvailability: 'missing',
+        mediaErrorCode: 'MEDIA_LOAD_FAILED',
+      }),
+    ]);
+
+    expect(serialized).toHaveLength(2);
+    expect(serialized).toEqual([
+      expect.objectContaining({
+        id: 'blob-media',
+        url: 'blob:expired-session-media',
+        mediaAvailability: 'missing',
+      }),
+      expect.objectContaining({
+        id: 'missing-media',
+        url: '',
+        mediaAvailability: 'missing',
+        mediaErrorCode: 'MEDIA_LOAD_FAILED',
+      }),
+    ]);
+  });
+
+  it('tombstones whole-project graph state owner-scoped and preserves assets with a live reference', async () => {
+    const state = {
+      placements: [
+        { id: 'placement-deleted-only', ownerId: 'user-1', projectId: 'deleted-project', assetId: 'asset-deleted-only', status: 'active' },
+        { id: 'placement-shared-deleted', ownerId: 'user-1', projectId: 'deleted-project', assetId: 'asset-shared', status: 'active' },
+        { id: 'placement-shared-live', ownerId: 'user-1', projectId: 'active-project', assetId: 'asset-shared', status: 'active' },
+        { id: 'placement-other-owner', ownerId: 'user-2', projectId: 'deleted-project', assetId: 'asset-other-owner', status: 'active' },
+      ],
+      assets: [
+        { id: 'asset-deleted-only', ownerId: 'user-1', status: 'active' },
+        { id: 'asset-shared', ownerId: 'user-1', status: 'active' },
+        { id: 'asset-other-owner', ownerId: 'user-2', status: 'active' },
+      ],
+      projects: [
+        { id: 'deleted-project', ownerId: 'user-1', status: 'active' },
+        { id: 'active-project', ownerId: 'user-1', status: 'active' },
+        { id: 'deleted-project', ownerId: 'user-2', status: 'active' },
+      ],
+      versions: ['version-deleted-only', 'version-shared'],
+    };
+    const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+      const ownerId = String(params[0]);
+      const activeIds = new Set((params[1] as string[] | undefined) ?? []);
+      if (sql.includes('UPDATE wujie_workspace_placements')) {
+        for (const placement of state.placements) {
+          if (placement.ownerId === ownerId && !activeIds.has(placement.projectId) && placement.status === 'active') {
+            placement.status = 'trashed';
+          }
+        }
+        return { rows: [], rowCount: 2 };
+      }
+      if (sql.includes('UPDATE wujie_assets')) {
+        for (const asset of state.assets) {
+          const hasLiveReference = state.placements.some((placement) => (
+            placement.ownerId === ownerId && placement.assetId === asset.id && placement.status === 'active'
+          ));
+          if (asset.ownerId === ownerId && !hasLiveReference) asset.status = 'trashed';
+        }
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_projects')) {
+        for (const graphProject of state.projects) {
+          if (graphProject.ownerId === ownerId && !activeIds.has(graphProject.id) && graphProject.status === 'active') {
+            graphProject.status = 'trashed';
+          }
+        }
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    await reconcileDeletedCanvasProjectsInTransaction(
+      { query } as unknown as Parameters<typeof reconcileDeletedCanvasProjectsInTransaction>[0],
+      'user-1',
+      ['active-project'],
+    );
+
+    expect(state.placements.find((item) => item.id === 'placement-deleted-only')?.status).toBe('trashed');
+    expect(state.placements.find((item) => item.id === 'placement-other-owner')?.status).toBe('active');
+    expect(state.assets.find((item) => item.id === 'asset-deleted-only')?.status).toBe('trashed');
+    expect(state.assets.find((item) => item.id === 'asset-shared')?.status).toBe('active');
+    expect(state.assets.find((item) => item.id === 'asset-other-owner')?.status).toBe('active');
+    expect(state.projects.find((item) => item.ownerId === 'user-1' && item.id === 'deleted-project')?.status).toBe('trashed');
+    expect(state.projects.find((item) => item.ownerId === 'user-2' && item.id === 'deleted-project')?.status).toBe('active');
+    expect(state.versions).toEqual(['version-deleted-only', 'version-shared']);
+    expect(query.mock.calls.some(([sql]) => String(sql).includes('wujie_asset_versions'))).toBe(false);
+  });
+
+  it('runs whole-project reconciliation in the same atomic sync transaction', async () => {
+    const transactionEvents: string[] = [];
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        transactionEvents.push('begin');
+        const result = await callback({
+          async writeProjects() {
+            transactionEvents.push('write-projects');
+          },
+          async syncProject(nextProject) {
+            transactionEvents.push(`sync:${nextProject.id}`);
+            return {
+              project: nextProject,
+              sourceSchemaVersion: 3,
+              migrated: false,
+              reused: true,
+              mappings: {},
+            };
+          },
+          async reconcileDeletedProjects(activeProjectIds: string[]) {
+            transactionEvents.push(`reconcile:${activeProjectIds.join(',')}`);
+          },
+        } as CanvasProjectSyncTransaction & {
+          reconcileDeletedProjects(activeProjectIds: string[]): Promise<void>;
+        });
+        transactionEvents.push('commit');
+        return result;
+      },
+    };
+
+    await executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [{ ...project([]), id: 'active-project' }],
+    }, storage);
+
+    expect(transactionEvents).toEqual([
+      'begin',
+      'write-projects',
+      'sync:active-project',
+      'reconcile:active-project',
+      'write-projects',
+      'commit',
+    ]);
+  });
+
   it('locks the placement before the asset using the placement lifecycle owner/project contract', () => {
     const migrationSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),

@@ -130,7 +130,7 @@ describe('canvas asset adapter', () => {
     expect(serialized).toMatchObject({ rotation: 37, zIndex: 11 });
   });
 
-  it('retains empty managed media but drops empty/blob unmanaged legacy remnants', () => {
+  it('retains managed and unmanaged empty/blob media as explicit broken placements', () => {
     const managedMissing = { ...persistedImage, url: '', mediaAvailability: 'missing' as const };
     const unmanagedMissing = {
       ...persistedImage,
@@ -149,6 +149,8 @@ describe('canvas asset adapter', () => {
       unmanagedBlob,
     ])).toEqual([
       expect.objectContaining({ id: persistedImage.id, url: '', mediaAvailability: 'missing' }),
+      expect.objectContaining({ id: 'unmanaged-empty', url: '', mediaAvailability: 'missing' }),
+      expect.objectContaining({ id: 'unmanaged-blob', url: 'blob:expired', mediaAvailability: 'missing' }),
     ]);
   });
 

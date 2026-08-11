@@ -38,7 +38,7 @@ export function isManagedCanvasMedia(image: CanvasPlacementImage): boolean {
 }
 
 export function shouldPersistCanvasPlacement(image: CanvasPlacementImage): boolean {
-  if (image.mediaAvailability === 'missing') return isManagedCanvasMedia(image);
+  if (image.mediaAvailability === 'missing') return true;
   return Boolean(image.url || image.videoUrl || image.svgDataUrl || image.isProcessingPlaceholder);
 }
 
