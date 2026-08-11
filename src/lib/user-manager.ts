@@ -11,10 +11,11 @@ const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
 const PROJECT_AUTHORITATIVE_BASE_KEY_PREFIX = 'unbounded_ai_project_authoritative_base_v1:';
 const PROJECT_CONFLICT_BACKUP_KEY_PREFIX = 'unbounded_ai_project_conflict_backups_v1:';
+const PROJECT_ADOPTION_COMMIT_KEY_PREFIX = 'unbounded_ai_project_adoption_commit_v2:';
 const PROJECT_SYNC_STORAGE_VERSION = 1;
+const PROJECT_ADOPTION_COMMIT_VERSION = 2;
 const MAX_PROJECT_CONFLICT_BACKUPS = 50;
-const MAX_PROJECT_CONFLICT_BACKUP_BYTES = 2_000_000;
-const MAX_PROJECT_AUTHORITATIVE_BASE_BYTES = 5_000_000;
+const MAX_PROJECT_ADOPTION_COMMIT_BYTES = 12_000_000;
 const DEFAULT_ADMIN_NAME = 'Mr.joker';
 const PROJECT_SYNC_TIMEOUT_MS = 8_000;
 // Default admin password is no longer stored in client code for security.
@@ -113,18 +114,32 @@ interface ProjectConflictBackup {
   createdAt: number;
 }
 
-interface ProjectConflictBackupEnvelope {
-  version: 1;
-  userId: string;
-  entries: ProjectConflictBackup[];
-}
-
 interface ProjectAuthoritativeBaseEnvelope {
   version: 1;
   userId: string;
   revision: number;
   projects: Project[];
   updatedAt: number;
+}
+
+interface ProjectAdoptionCommitEnvelope {
+  version: 2;
+  userId: string;
+  revision: number;
+  assetGraphMode: AssetGraphMode;
+  authoritativeBase: Project[];
+  adoptedDraft: Project[];
+  conflictBackups: ProjectConflictBackup[];
+  updatedAt: number;
+  pending?: {
+    startedAt: number;
+  };
+}
+
+interface LocalDataCommitResult {
+  ok: boolean;
+  persistedData?: MultiUserData;
+  error?: unknown;
 }
 
 interface ProjectRebaseResult {
@@ -156,12 +171,57 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isValidCanvasImageSnapshot(value: unknown): value is CanvasImage {
+  if (!isRecord(value) || typeof value.id !== 'string' || value.id.length === 0 || typeof value.url !== 'string') {
+    return false;
+  }
+  if (
+    !isFiniteNumber(value.x)
+    || !isFiniteNumber(value.y)
+    || !isFiniteNumber(value.width)
+    || value.width <= 0
+    || !isFiniteNumber(value.height)
+    || value.height <= 0
+    || !isFiniteNumber(value.originalWidth)
+    || value.originalWidth <= 0
+    || !isFiniteNumber(value.originalHeight)
+    || value.originalHeight <= 0
+    || !isFiniteNumber(value.rotation)
+    || !isFiniteNumber(value.zIndex)
+    || !isFiniteNumber(value.createdAt)
+  ) {
+    return false;
+  }
+  const optionalStrings = [
+    value.sourceUrl,
+    value.thumbnailUrl,
+    value.mediaErrorCode,
+    value.assetId,
+    value.assetVersionId,
+    value.placementId,
+  ];
+  return optionalStrings.every((entry) => entry === undefined || typeof entry === 'string');
+}
+
 function isValidProjectSnapshot(value: unknown, userId: string): value is Project {
-  if (!isRecord(value) || typeof value.id !== 'string' || !Array.isArray(value.canvasImages)) return false;
+  if (
+    !isRecord(value)
+    || typeof value.id !== 'string'
+    || value.id.length === 0
+    || typeof value.name !== 'string'
+    || !isFiniteNumber(value.createdAt)
+    || !isFiniteNumber(value.updatedAt)
+    || !isRecord(value.settings)
+    || !Array.isArray(value.canvasImages)
+  ) return false;
   if (value.userId !== undefined && value.userId !== userId) return false;
-  return value.canvasImages.every((image) => (
-    isRecord(image) && typeof image.id === 'string' && typeof image.url === 'string'
-  ));
+  if (value.description !== undefined && typeof value.description !== 'string') return false;
+  if (value.metadata !== undefined && !isRecord(value.metadata)) return false;
+  return value.canvasImages.every(isValidCanvasImageSnapshot);
 }
 
 function isValidProjectSnapshotArray(value: unknown, userId: string): value is Project[] {
@@ -170,23 +230,38 @@ function isValidProjectSnapshotArray(value: unknown, userId: string): value is P
 
 function isValidConflictBackup(value: unknown, userId: string): value is ProjectConflictBackup {
   if (!isRecord(value)) return false;
-  const validTypes = new Set<ProjectConflictType>([
+  const imageConflictTypes = new Set<ProjectConflictType>([
     'concurrent-image-add',
     'concurrent-image-edit',
     'remote-image-delete-local-edit',
     'local-image-delete-remote-edit',
+  ]);
+  const projectConflictTypes = new Set<ProjectConflictType>([
     'concurrent-project-add',
     'concurrent-project-edit',
     'remote-project-delete-local-edit',
     'local-project-delete-remote-edit',
   ]);
-  return value.userId === userId
+  const conflictType = value.conflictType as ProjectConflictType;
+  const isImageConflict = imageConflictTypes.has(conflictType);
+  const isProjectConflict = projectConflictTypes.has(conflictType);
+  const isValidValue = (candidate: unknown): boolean => candidate === null || (
+    isImageConflict
+      ? isValidCanvasImageSnapshot(candidate)
+      : isProjectConflict && isValidProjectSnapshot(candidate, userId)
+  );
+  return (isImageConflict || isProjectConflict)
+    && value.userId === userId
     && typeof value.projectId === 'string'
     && typeof value.conflictType === 'string'
-    && validTypes.has(value.conflictType as ProjectConflictType)
-    && typeof value.createdAt === 'number'
-    && (value.localValue === null || isRecord(value.localValue))
-    && (value.remoteValue === null || isRecord(value.remoteValue));
+    && (isImageConflict ? typeof value.imageId === 'string' : value.imageId === undefined)
+    && isFiniteNumber(value.createdAt)
+    && isValidValue(value.localValue)
+    && isValidValue(value.remoteValue);
+}
+
+function serializedByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function projectWithoutImages(project: Project): Omit<Project, 'canvasImages'> {
@@ -491,6 +566,7 @@ export class UserManager {
       }
 
       // 规范化图片 URL：将旧格式 /uploads/xxx 转换为 /api/serve-upload/uploads/xxx
+      this.restoreProjectAdoptionState();
       this.normalizeImageUrls();
       // 持久化规范化后的 URL 到 localStorage，避免每次重复转换
       this.saveData();
@@ -587,10 +663,13 @@ export class UserManager {
     this.saveData();
   }
 
-  private commitLocalDataOnly(authoritative = false): void {
-    if (!this.canUseStorage()) return;
+  private commitLocalDataOnly(authoritative = false): LocalDataCommitResult {
+    if (!this.canUseStorage()) {
+      return { ok: false, error: new Error('PROJECT_SYNC_STORAGE_UNAVAILABLE') };
+    }
 
     try {
+      let persistedData = this.multiUserData ?? undefined;
       if (this.multiUserData) {
         // ★ 图片数量断崖检测：保存前快照保护，防止bug导致图片被清空
         if (!authoritative) this.protectAgainstDataLoss();
@@ -605,16 +684,20 @@ export class UserManager {
           this.trimDataUrls(trimmedData);
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedData));
+            persistedData = trimmedData as MultiUserData;
           } catch (retryError) {
             console.error('[saveData] localStorage still exceeded after trimming data URLs:', retryError);
+            return { ok: false, error: retryError };
           }
         }
       }
       if (this.currentUserId) {
         localStorage.setItem(CURRENT_USER_KEY, this.currentUserId);
       }
+      return { ok: true, persistedData };
     } catch (error) {
       console.error('Failed to save user data:', error);
+      return { ok: false, error };
     }
 
   }
@@ -790,6 +873,70 @@ export class UserManager {
     return `${prefix}${encodeURIComponent(userId)}`;
   }
 
+  private readProjectAdoptionCommit(userId: string): ProjectAdoptionCommitEnvelope | undefined {
+    if (!this.canUseStorage()) return undefined;
+    const stored = localStorage.getItem(this.projectSyncStorageKey(PROJECT_ADOPTION_COMMIT_KEY_PREFIX, userId));
+    if (!stored) return undefined;
+    if (serializedByteLength(stored) > MAX_PROJECT_ADOPTION_COMMIT_BYTES) {
+      throw new Error('PROJECT_SYNC_ADOPTION_COMMIT_TOO_LARGE');
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stored);
+    } catch {
+      throw new Error('PROJECT_SYNC_ADOPTION_COMMIT_INVALID');
+    }
+    if (
+      !isRecord(parsed)
+      || parsed.version !== PROJECT_ADOPTION_COMMIT_VERSION
+      || parsed.userId !== userId
+      || !Number.isSafeInteger(parsed.revision)
+      || Number(parsed.revision) < 0
+      || !['legacy', 'shadow', 'asset-v3'].includes(String(parsed.assetGraphMode))
+      || !isValidProjectSnapshotArray(parsed.authoritativeBase, userId)
+      || !isValidProjectSnapshotArray(parsed.adoptedDraft, userId)
+      || !Array.isArray(parsed.conflictBackups)
+      || parsed.conflictBackups.length > MAX_PROJECT_CONFLICT_BACKUPS
+      || parsed.conflictBackups.some((entry) => !isValidConflictBackup(entry, userId))
+      || !isFiniteNumber(parsed.updatedAt)
+      || (parsed.pending !== undefined && (
+        !isRecord(parsed.pending) || !isFiniteNumber(parsed.pending.startedAt)
+      ))
+    ) {
+      throw new Error('PROJECT_SYNC_ADOPTION_COMMIT_INVALID');
+    }
+    return parsed as unknown as ProjectAdoptionCommitEnvelope;
+  }
+
+  private serializeProjectAdoptionCommit(
+    envelope: ProjectAdoptionCommitEnvelope,
+    requiredBackupCount = 0,
+  ): string {
+    if (requiredBackupCount > MAX_PROJECT_CONFLICT_BACKUPS) {
+      throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_TOO_LARGE');
+    }
+    const minimumRetained = Math.min(requiredBackupCount, envelope.conflictBackups.length);
+    while (true) {
+      const serialized = JSON.stringify(envelope);
+      if (serializedByteLength(serialized) <= MAX_PROJECT_ADOPTION_COMMIT_BYTES) return serialized;
+      if (envelope.conflictBackups.length <= minimumRetained) {
+        throw new Error('PROJECT_SYNC_ADOPTION_COMMIT_TOO_LARGE');
+      }
+      envelope.conflictBackups.shift();
+    }
+  }
+
+  private writeProjectAdoptionCommit(
+    envelope: ProjectAdoptionCommitEnvelope,
+    requiredBackupCount = 0,
+  ): void {
+    if (!this.canUseStorage()) throw new Error('PROJECT_SYNC_STORAGE_UNAVAILABLE');
+    localStorage.setItem(
+      this.projectSyncStorageKey(PROJECT_ADOPTION_COMMIT_KEY_PREFIX, envelope.userId),
+      this.serializeProjectAdoptionCommit(envelope, requiredBackupCount),
+    );
+  }
+
   private readPersistedAuthoritativeBase(userId: string): ProjectAuthoritativeBaseEnvelope | undefined {
     if (!this.canUseStorage()) return undefined;
     const stored = localStorage.getItem(this.projectSyncStorageKey(PROJECT_AUTHORITATIVE_BASE_KEY_PREFIX, userId));
@@ -813,79 +960,164 @@ export class UserManager {
     return parsed as unknown as ProjectAuthoritativeBaseEnvelope;
   }
 
-  private persistAuthoritativeBase(userId: string, revision: number, projects: Project[]): void {
-    if (!this.canUseStorage()) return;
-    const envelope: ProjectAuthoritativeBaseEnvelope = {
-      version: PROJECT_SYNC_STORAGE_VERSION,
-      userId,
-      revision,
-      projects: cloneProjects(projects),
-      updatedAt: Date.now(),
-    };
-    const serialized = JSON.stringify(envelope);
-    if (serialized.length > MAX_PROJECT_AUTHORITATIVE_BASE_BYTES) {
-      throw new Error('PROJECT_SYNC_AUTHORITATIVE_BASE_TOO_LARGE');
+  private readLegacyConflictBackups(userId: string): ProjectConflictBackup[] {
+    if (!this.canUseStorage()) return [];
+    const stored = localStorage.getItem(this.projectSyncStorageKey(PROJECT_CONFLICT_BACKUP_KEY_PREFIX, userId));
+    if (!stored) return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stored);
+    } catch {
+      throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_INVALID');
     }
-    localStorage.setItem(
-      this.projectSyncStorageKey(PROJECT_AUTHORITATIVE_BASE_KEY_PREFIX, userId),
-      serialized,
-    );
+    if (
+      !isRecord(parsed)
+      || parsed.version !== PROJECT_SYNC_STORAGE_VERSION
+      || parsed.userId !== userId
+      || !Array.isArray(parsed.entries)
+      || parsed.entries.length > MAX_PROJECT_CONFLICT_BACKUPS
+      || parsed.entries.some((entry) => !isValidConflictBackup(entry, userId))
+    ) {
+      throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_INVALID');
+    }
+    return parsed.entries as unknown as ProjectConflictBackup[];
   }
 
-  private persistProjectConflictBackups(userId: string, conflicts: ProjectConflictBackup[]): void {
-    if (conflicts.length === 0 || !this.canUseStorage()) return;
-    const key = this.projectSyncStorageKey(PROJECT_CONFLICT_BACKUP_KEY_PREFIX, userId);
-    const stored = localStorage.getItem(key);
-    let existing: ProjectConflictBackup[] = [];
-    if (stored) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(stored);
-      } catch {
-        throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_INVALID');
+  private restoreProjectAdoptionState(): void {
+    const userId = this.currentUserId;
+    const userData = userId ? this.multiUserData?.userData[userId] : undefined;
+    if (!userId || !userData) return;
+    try {
+      const envelope = this.readProjectAdoptionCommit(userId);
+      if (!envelope) return;
+      if (envelope.pending) {
+        userData.projects = cloneProjects(envelope.adoptedDraft);
+        const recovery = this.commitLocalDataOnly(true);
+        if (!recovery.ok) {
+          console.warn('[Sync] failed to persist recovered project draft:', recovery.error);
+        } else {
+          const settled = { ...envelope };
+          delete settled.pending;
+          try {
+            this.writeProjectAdoptionCommit({
+              ...settled,
+              updatedAt: Date.now(),
+            });
+          } catch (error) {
+            console.warn('[Sync] failed to settle recovered project adoption commit:', error);
+          }
+        }
       }
-      if (
-        !isRecord(parsed)
-        || parsed.version !== PROJECT_SYNC_STORAGE_VERSION
-        || parsed.userId !== userId
-        || !Array.isArray(parsed.entries)
-        || parsed.entries.some((entry) => !isValidConflictBackup(entry, userId))
-      ) {
-        throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_INVALID');
-      }
-      existing = parsed.entries as unknown as ProjectConflictBackup[];
+      this._projectSyncRevision = envelope.revision;
+      this._assetGraphMode = envelope.assetGraphMode;
+      this._lastAuthoritativeProjects.set(userId, cloneProjects(envelope.authoritativeBase));
+    } catch (error) {
+      console.warn('[Sync] ignored invalid project adoption commit during reload:', error);
+    }
+  }
+
+  private hasPersistedProjectDraft(userId: string, projects: Project[]): boolean {
+    if (!this.canUseStorage()) return false;
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (!stored) return false;
+      const parsed = JSON.parse(stored) as MultiUserData;
+      return snapshotsEqual(parsed.userData?.[userId]?.projects, projects);
+    } catch {
+      return false;
+    }
+  }
+
+  private commitProjectAdoption(input: {
+    userId: string;
+    revision: number;
+    assetGraphMode: AssetGraphMode;
+    authoritativeBase: Project[];
+    adoptedDraft: Project[];
+    requiredBackups: ProjectConflictBackup[];
+  }): void {
+    if (!this.canUseStorage()) throw new Error('PROJECT_SYNC_STORAGE_UNAVAILABLE');
+    const userData = this.multiUserData?.userData[input.userId];
+    if (!userData || this.currentUserId !== input.userId) throw new Error('PROJECT_SYNC_SESSION_CHANGED');
+    if (
+      !isValidProjectSnapshotArray(input.authoritativeBase, input.userId)
+      || !isValidProjectSnapshotArray(input.adoptedDraft, input.userId)
+    ) {
+      throw new Error('PROJECT_SYNC_PROJECT_PAYLOAD_INVALID');
     }
 
-    if (conflicts.length > MAX_PROJECT_CONFLICT_BACKUPS) {
-      throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_TOO_LARGE');
-    }
-    let retainedExisting = existing.slice(-MAX_PROJECT_CONFLICT_BACKUPS);
-    const required = conflicts;
-    while (retainedExisting.length + required.length > MAX_PROJECT_CONFLICT_BACKUPS) {
-      retainedExisting = retainedExisting.slice(1);
-    }
-    const write = (): void => {
-      const entries = [...retainedExisting, ...required].slice(-MAX_PROJECT_CONFLICT_BACKUPS);
-      const envelope: ProjectConflictBackupEnvelope = {
-        version: PROJECT_SYNC_STORAGE_VERSION,
-        userId,
-        entries,
-      };
-      const serialized = JSON.stringify(envelope);
-      if (serialized.length > MAX_PROJECT_CONFLICT_BACKUP_BYTES) {
-        throw new Error('PROJECT_SYNC_CONFLICT_BACKUP_TOO_LARGE');
-      }
-      localStorage.setItem(key, serialized);
+    const existing = this.readProjectAdoptionCommit(input.userId);
+    const legacyBase = existing ? undefined : this.readPersistedAuthoritativeBase(input.userId);
+    const acceptedRevision = Math.max(
+      this._projectSyncRevision,
+      existing?.revision ?? 0,
+      legacyBase?.revision ?? 0,
+    );
+    if (input.revision < acceptedRevision) throw new Error('PROJECT_SYNC_STALE_REVISION');
+
+    const previousProjects = cloneProjects(userData.projects);
+    const previousBase = cloneProjects(
+      this._lastAuthoritativeProjects.get(input.userId)
+      ?? existing?.authoritativeBase
+      ?? legacyBase?.projects
+      ?? [],
+    );
+    const previousBackups = (
+      existing?.conflictBackups
+      ?? this.readLegacyConflictBackups(input.userId)
+    ).slice(-MAX_PROJECT_CONFLICT_BACKUPS);
+    const prepared: ProjectAdoptionCommitEnvelope = {
+      version: PROJECT_ADOPTION_COMMIT_VERSION,
+      userId: input.userId,
+      revision: acceptedRevision,
+      assetGraphMode: existing?.assetGraphMode ?? this._assetGraphMode,
+      authoritativeBase: previousBase,
+      adoptedDraft: previousProjects,
+      conflictBackups: previousBackups,
+      updatedAt: Date.now(),
+      pending: { startedAt: Date.now() },
     };
 
-    while (true) {
-      try {
-        write();
-        return;
-      } catch (error) {
-        if (retainedExisting.length === 0) throw error;
-        retainedExisting = retainedExisting.slice(1);
+    this.writeProjectAdoptionCommit(prepared);
+    try {
+      userData.projects = cloneProjects(input.adoptedDraft);
+      let persistedDraft = cloneProjects(input.adoptedDraft);
+      if (!this.hasPersistedProjectDraft(input.userId, input.adoptedDraft)) {
+        const mainCommit = this.commitLocalDataOnly(true);
+        if (!mainCommit.ok) throw mainCommit.error ?? new Error('PROJECT_SYNC_DRAFT_PERSIST_FAILED');
+        persistedDraft = cloneProjects(
+          mainCommit.persistedData?.userData[input.userId]?.projects ?? input.adoptedDraft,
+        );
       }
+      const retainedExistingCount = Math.max(0, MAX_PROJECT_CONFLICT_BACKUPS - input.requiredBackups.length);
+      const conflictBackups = [
+        ...previousBackups.slice(-retainedExistingCount),
+        ...input.requiredBackups,
+      ];
+      const committed: ProjectAdoptionCommitEnvelope = {
+        version: PROJECT_ADOPTION_COMMIT_VERSION,
+        userId: input.userId,
+        revision: input.revision,
+        assetGraphMode: input.assetGraphMode,
+        authoritativeBase: cloneProjects(input.authoritativeBase),
+        adoptedDraft: persistedDraft,
+        conflictBackups,
+        updatedAt: Date.now(),
+      };
+      this.writeProjectAdoptionCommit(committed, input.requiredBackups.length);
+
+      userData.projects = persistedDraft;
+      this._projectSyncRevision = input.revision;
+      this._assetGraphMode = input.assetGraphMode;
+      this._lastAuthoritativeProjects.set(input.userId, cloneProjects(input.authoritativeBase));
+      this._serverSyncReady = true;
+    } catch (error) {
+      userData.projects = previousProjects;
+      const rollback = this.commitLocalDataOnly(true);
+      if (!rollback.ok) {
+        console.warn('[Sync] project draft rollback will be completed from pending envelope on reload:', rollback.error);
+      }
+      throw error;
     }
   }
 
@@ -963,14 +1195,6 @@ export class UserManager {
         : project.metadata;
       return { ...project, id: nextId, metadata: nextMetadata, updatedAt: Date.now() };
     });
-    if (this.canUseStorage()) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.multiUserData));
-      } catch (error) {
-        throw new Error(error instanceof Error ? `项目 ID 映射保存失败：${error.message}` : '项目 ID 映射保存失败');
-      }
-    }
-    this.notifyProjectsChanged();
   }
 
   getAssetGraphMode(): AssetGraphMode {
@@ -1022,38 +1246,34 @@ export class UserManager {
       });
       return projectChanged ? { ...project, canvasImages } : project;
     });
-    if (changed) {
-      this.commitLocalDataOnly();
-      this.notifyProjectsChanged();
-    }
+    void changed;
   }
 
   /** 强制将当前项目快照提交到数据库；任何失败都会抛错并阻断依赖该快照的操作。 */
   private acceptProjectSyncSuccess(data: ProjectSyncResponse, nextRevision: number): void {
     const userId = this.currentUserId;
     const userData = userId ? this.multiUserData?.userData[userId] : undefined;
-    const projectsBeforeResponse = userData ? cloneProjects(userData.projects) : undefined;
+    if (!userId || !userData) throw new Error('PROJECT_SYNC_SESSION_CHANGED');
+    const projectsBeforeResponse = userData.projects;
+    let candidateProjects: Project[];
     try {
+      userData.projects = cloneProjects(projectsBeforeResponse);
       this.applyProjectIdMap(data.projectIdMap || {});
       this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
-      if (userId && userData) {
-        const authoritativeProjects = cloneProjects(userData.projects);
-        this.persistAuthoritativeBase(userId, nextRevision, authoritativeProjects);
-        this._lastAuthoritativeProjects.set(userId, authoritativeProjects);
-      }
-      this._projectSyncRevision = nextRevision;
-      this._recentlyDeletedImageIds.clear();
-    } catch (error) {
-      if (userId && projectsBeforeResponse && this.currentUserId === userId) {
-        const activeUserData = this.multiUserData?.userData[userId];
-        if (activeUserData) {
-          activeUserData.projects = projectsBeforeResponse;
-          this.commitLocalDataOnly(true);
-          this.notifyProjectsChanged();
-        }
-      }
-      throw error;
+      candidateProjects = cloneProjects(userData.projects);
+    } finally {
+      userData.projects = projectsBeforeResponse;
     }
+    this.commitProjectAdoption({
+      userId,
+      revision: nextRevision,
+      assetGraphMode: this._assetGraphMode,
+      authoritativeBase: candidateProjects,
+      adoptedDraft: candidateProjects,
+      requiredBackups: [],
+    });
+    this._recentlyDeletedImageIds.clear();
+    this.notifyProjectsChanged();
   }
 
   async flushProjectsToServer(): Promise<ProjectSyncResult> {
@@ -1160,21 +1380,48 @@ export class UserManager {
     }
   }
 
+  private parseServerProjects(value: unknown, userId: string): Project[] | null {
+    let parsed = value;
+    if (typeof parsed === 'string') {
+      try {
+        parsed = JSON.parse(parsed) as unknown;
+      } catch {
+        return null;
+      }
+    }
+    if (!Array.isArray(parsed)) return null;
+    const normalized = parsed
+      .filter((project) => !isRecord(project) || project.userId === undefined || project.userId === userId)
+      .map((project) => {
+        if (!isRecord(project)) return project;
+        const clone = structuredClone(project);
+        if (clone.canvasImages === undefined && Array.isArray(clone.images)) {
+          clone.canvasImages = clone.images;
+        }
+        if (clone.userId === undefined) clone.userId = userId;
+        return clone;
+      });
+    return isValidProjectSnapshotArray(normalized, userId) ? normalized : null;
+  }
+
   /** 从服务器加载当前用户的项目数据 */
   async loadProjectsFromServer(retryCount = 1, expectedUserId: string | null = this.currentUserId): Promise<boolean> {
     if (!expectedUserId || !this.multiUserData) return false;
-    const userData = this.multiUserData.userData[expectedUserId];
-    if (!userData) return false;
-    const sessionEpoch = this._projectSyncSessionEpoch;
-    const projectsBeforeAdoption = cloneProjects(userData.projects);
-    let adoptionStarted = false;
+    const activeUserData = this.multiUserData.userData[expectedUserId];
+    if (!activeUserData) return false;
+    const request = this.beginProjectSyncRequest();
+    if (!request || request.userId !== expectedUserId) {
+      if (request) this.finishProjectSyncRequest(request);
+      return false;
+    }
+    const userData: UserData = { ...activeUserData, projects: cloneProjects(activeUserData.projects) };
 
     try {
       const res = await fetch('/api/user-data/sync?key=projects', {
         credentials: 'include',
         signal: AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS),
       });
-      if (this.currentUserId !== expectedUserId || this._projectSyncSessionEpoch !== sessionEpoch) return false;
+      if (!this.isCurrentProjectSyncRequest(request)) return false;
       if (!res.ok) {
         console.warn('[Sync] loadProjectsFromServer: server returned', res.status);
         // 重试：登录后 session cookie 可能尚未生效
@@ -1190,7 +1437,7 @@ export class UserManager {
         assetGraphMode?: AssetGraphMode;
         projectRevision?: number;
       };
-      if (this.currentUserId !== expectedUserId || this._projectSyncSessionEpoch !== sessionEpoch) return false;
+      if (!this.isCurrentProjectSyncRequest(request)) return false;
       if (!data.success) {
         if (retryCount > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -1205,39 +1452,45 @@ export class UserManager {
       const nextProjectSyncRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
         ? Number(data.projectRevision)
         : 0;
+      const persistedCommit = this.readProjectAdoptionCommit(expectedUserId);
+      const persistedLegacyBase = persistedCommit
+        ? undefined
+        : this.readPersistedAuthoritativeBase(expectedUserId);
+      const acceptedRevision = Math.max(
+        request.revision,
+        this._projectSyncRevision,
+        persistedCommit?.revision ?? 0,
+        persistedLegacyBase?.revision ?? 0,
+      );
+      if (nextProjectSyncRevision < acceptedRevision) return false;
 
       if (data.value === undefined || data.value === null) {
         // A missing record is a valid first-login state, not a failed sync.
-        this.persistAuthoritativeBase(expectedUserId, nextProjectSyncRevision, []);
-        this._lastAuthoritativeProjects.set(expectedUserId, []);
-        this._assetGraphMode = nextAssetGraphMode;
-        this._projectSyncRevision = nextProjectSyncRevision;
-        this._serverSyncReady = true;
+        this.commitProjectAdoption({
+          userId: expectedUserId,
+          revision: nextProjectSyncRevision,
+          assetGraphMode: nextAssetGraphMode,
+          authoritativeBase: [],
+          adoptedDraft: userData.projects,
+          requiredBackups: [],
+        });
         await this.syncToServer();
         return true;
       }
 
-      // value 可能是字符串（需要 JSON.parse）或已解析的对象
-      let serverProjects: Project[];
-      if (typeof data.value === 'string') {
-        try {
-          serverProjects = JSON.parse(data.value) as Project[];
-        } catch {
-          return false;
-        }
-      } else if (Array.isArray(data.value)) {
-        serverProjects = data.value as Project[];
-      } else {
-        return false;
-      }
+      const serverProjects = this.parseServerProjects(data.value, expectedUserId);
+      if (!serverProjects) return false;
 
       if (serverProjects.length === 0 && userData.projects.length === 0) {
         console.log('[Sync] loadProjectsFromServer: both local and server empty');
-        this.persistAuthoritativeBase(expectedUserId, nextProjectSyncRevision, []);
-        this._lastAuthoritativeProjects.set(expectedUserId, []);
-        this._assetGraphMode = nextAssetGraphMode;
-        this._projectSyncRevision = nextProjectSyncRevision;
-        this._serverSyncReady = true;
+        this.commitProjectAdoption({
+          userId: expectedUserId,
+          revision: nextProjectSyncRevision,
+          assetGraphMode: nextAssetGraphMode,
+          authoritativeBase: [],
+          adoptedDraft: [],
+          requiredBackups: [],
+        });
         return true;
       }
 
@@ -1246,11 +1499,6 @@ export class UserManager {
       // 严格用户隔离：仅保留当前用户的项目
       // - 有 userId 的项目必须匹配当前用户
       // - 无 userId 的旧数据（历史遗留）补上当前用户ID后保留
-      serverProjects = serverProjects.filter(p => {
-        if (p.userId && p.userId !== currentUserId) return false;
-        if (!p.userId) p.userId = currentUserId; // 历史数据补上 userId
-        return true;
-      });
       const localProjectsFiltered = userData.projects.filter(p => {
         if (p.userId && p.userId !== currentUserId) return false;
         if (!p.userId) p.userId = currentUserId;
@@ -1322,9 +1570,10 @@ export class UserManager {
       }
 
       const inMemoryBase = this._lastAuthoritativeProjects.get(currentUserId);
-      const persistedBase = inMemoryBase ? undefined : this.readPersistedAuthoritativeBase(currentUserId);
-      const authoritativeBase = inMemoryBase ?? persistedBase?.projects;
-      let authoritativeBasePersisted = false;
+      const authoritativeBase = inMemoryBase
+        ?? persistedCommit?.authoritativeBase
+        ?? persistedLegacyBase?.projects;
+      let requiredBackups: ProjectConflictBackup[] = [];
       if (authoritativeBase) {
         const rebase = rebaseProjectSnapshots(
           authoritativeBase,
@@ -1332,13 +1581,9 @@ export class UserManager {
           serverProjects,
           currentUserId,
         );
-        this.persistProjectConflictBackups(currentUserId, rebase.conflicts);
-        this.persistAuthoritativeBase(currentUserId, nextProjectSyncRevision, serverProjects);
-        authoritativeBasePersisted = true;
-        adoptionStarted = true;
+        requiredBackups = rebase.conflicts;
         userData.projects = rebase.projects;
       } else {
-      adoptionStarted = true;
       // 合并策略：按项目 ID 合并，保留更新时间更晚的版本
       const localHasData = localProjectsFiltered.length > 0;
       const serverHasData = serverProjects.length > 0;
@@ -1496,15 +1741,15 @@ export class UserManager {
         }
       }
 
-      if (!authoritativeBasePersisted) {
-        this.persistAuthoritativeBase(currentUserId, nextProjectSyncRevision, serverProjects);
-      }
-      this._assetGraphMode = nextAssetGraphMode;
-      this._projectSyncRevision = nextProjectSyncRevision;
-      this._serverSyncReady = true; // 标记服务器数据已加载，允许后续 syncToServer
-      this._lastAuthoritativeProjects.set(currentUserId, cloneProjects(serverProjects));
-      this.commitLocalDataOnly(true);
-      adoptionStarted = false;
+      if (!this.isCurrentProjectSyncRequest(request)) return false;
+      this.commitProjectAdoption({
+        userId: currentUserId,
+        revision: nextProjectSyncRevision,
+        assetGraphMode: nextAssetGraphMode,
+        authoritativeBase: serverProjects,
+        adoptedDraft: userData.projects,
+        requiredBackups,
+      });
       this.notifyProjectsChanged(); // 通知 UI 刷新
       // ★ 调试日志：帮助追踪数据恢复
       const totalImages = userData.projects.reduce((sum, p) => sum + (p.canvasImages?.length || 0), 0);
@@ -1514,9 +1759,6 @@ export class UserManager {
       }
       return true;
     } catch (error) {
-      if (adoptionStarted && this.currentUserId === expectedUserId) {
-        userData.projects = projectsBeforeAdoption;
-      }
       // Downgrade to warn: fetch failures during session teardown (logout/reload) are expected, not code errors
       console.warn('[Sync] loadProjectsFromServer error:', error);
       if (retryCount > 0) {
@@ -1524,6 +1766,8 @@ export class UserManager {
         return this.loadProjectsFromServer(retryCount - 1, expectedUserId);
       }
       return false;
+    } finally {
+      this.finishProjectSyncRequest(request);
     }
   }
 
@@ -1593,9 +1837,15 @@ export class UserManager {
     }
     this._serverSyncReady = false;
     const syncUserId = nextUser.id;
+    const fallbackMutationGeneration = this._projectMutationGeneration;
     void this.loadProjectsFromServer(1, syncUserId).then(loadSuccess => {
       // Do not let a delayed sync for a previous account change the next account's data.
-      if (!loadSuccess && this.currentUserId === syncUserId && existingLocalProjects.length > 0) {
+      if (
+        !loadSuccess
+        && this.currentUserId === syncUserId
+        && this._projectMutationGeneration === fallbackMutationGeneration
+        && existingLocalProjects.length > 0
+      ) {
         const activeUserData = this.multiUserData?.userData[syncUserId];
         if (activeUserData) {
           activeUserData.projects = existingLocalProjects;
