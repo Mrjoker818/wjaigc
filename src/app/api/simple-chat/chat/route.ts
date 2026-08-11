@@ -5,11 +5,12 @@ import { findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
-import { fetchWithTimeout } from '@/lib/api-helpers';
+import { fetchWithTimeout, getInternalApiUrl } from '@/lib/api-helpers';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import { getSafeImageTypeFromDataUrl, getSafeMediaTypeFromResponse } from '@/lib/media-validation';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -43,21 +44,91 @@ interface AssetRegistrationRequest {
   };
 }
 
+const REGISTRATION_LIMITS = {
+  projectId: 128,
+  workspaceId: 256,
+  entityId: 256,
+  idempotencyKey: 256,
+  name: 256,
+  mimeType: 128,
+  url: 4096,
+  dataUrl: 28 * 1024 * 1024,
+  decodedImage: 20 * 1024 * 1024,
+} as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function boundedString(value: unknown, maximum: number): string {
+  if (typeof value !== 'string') return '';
+  const result = value.trim();
+  return result && result.length <= maximum ? result : '';
+}
+
+function parseDataImage(url: string): { bytes: Buffer; mimeType: string } | null {
+  if (url.length > REGISTRATION_LIMITS.dataUrl) return null;
+  const safeType = getSafeImageTypeFromDataUrl(url);
+  const match = url.match(/^data:image\/[\w+.-]+;base64,([A-Za-z0-9+/]+={0,2})$/i);
+  if (!safeType || !match || match[1].length % 4 !== 0) return null;
+  const bytes = Buffer.from(match[1], 'base64');
+  if (
+    bytes.length === 0
+    || bytes.length > REGISTRATION_LIMITS.decodedImage
+    || bytes.toString('base64') !== match[1]
+    || !getSafeMediaTypeFromResponse(safeType.mimeType, bytes, false)
+  ) return null;
+  return { bytes, mimeType: safeType.mimeType };
+}
+
+function isAllowedAssetMediaUrl(url: string): boolean {
+  if (url.startsWith('data:')) return parseDataImage(url) !== null;
+  if (!url || url.length > REGISTRATION_LIMITS.url) return false;
+  if (url.startsWith('/api/serve-upload/') || url.startsWith('/uploads/')) {
+    try {
+      const decoded = decodeURIComponent(url);
+      return !decoded.includes('..') && !decoded.includes('\\');
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && !parsed.username
+      && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
 function parseAssetRegistration(body: Record<string, unknown>): AssetRegistrationRequest | null {
   if (body.assetAction !== 'register' || !isRecord(body.image)) return null;
-  const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
-  const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId.trim() : '';
+  const projectId = boundedString(body.projectId, REGISTRATION_LIMITS.projectId);
+  const workspaceId = boundedString(body.workspaceId, REGISTRATION_LIMITS.workspaceId);
   const entityType = body.entityType === 'chat-attachment' || body.entityType === 'chat-result'
     ? body.entityType
     : null;
-  const entityId = typeof body.entityId === 'string' ? body.entityId.trim() : '';
-  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
-  const url = typeof body.image.url === 'string' ? body.image.url.trim() : '';
-  if (!projectId || !workspaceId || !entityType || !entityId || !idempotencyKey || !url) return null;
+  const entityId = boundedString(body.entityId, REGISTRATION_LIMITS.entityId);
+  const idempotencyKey = boundedString(body.idempotencyKey, REGISTRATION_LIMITS.idempotencyKey);
+  const rawUrl = typeof body.image.url === 'string' ? body.image.url : '';
+  const url = rawUrl.startsWith('data:') ? rawUrl : rawUrl.trim();
+  const name = body.image.name === undefined
+    ? ''
+    : boundedString(body.image.name, REGISTRATION_LIMITS.name);
+  const mimeType = body.image.mimeType === undefined
+    ? ''
+    : boundedString(body.image.mimeType, REGISTRATION_LIMITS.mimeType);
+  if (
+    !projectId
+    || !workspaceId
+    || !entityType
+    || !entityId
+    || !idempotencyKey
+    || !isAllowedAssetMediaUrl(url)
+    || (body.image.name !== undefined && !name)
+    || (body.image.mimeType !== undefined && !mimeType)
+  ) return null;
   return {
     projectId,
     workspaceId,
@@ -66,35 +137,39 @@ function parseAssetRegistration(body: Record<string, unknown>): AssetRegistratio
     idempotencyKey,
     image: {
       url,
-      ...(typeof body.image.name === 'string' && body.image.name.trim()
-        ? { name: body.image.name.trim() }
-        : {}),
-      ...(typeof body.image.mimeType === 'string' && body.image.mimeType.trim()
-        ? { mimeType: body.image.mimeType.trim() }
-        : {}),
+      ...(name ? { name } : {}),
+      ...(mimeType ? { mimeType } : {}),
     },
   };
 }
 
-function assetRegistrationDigest(input: AssetRegistrationRequest, url: string): string {
+function assetMediaDigest(url: string): string {
+  const dataImage = url.startsWith('data:') ? parseDataImage(url) : null;
+  return createHash('sha256')
+    .update(dataImage ? dataImage.bytes : Buffer.from(url, 'utf8'))
+    .digest('hex');
+}
+
+function assetRegistrationDigest(input: AssetRegistrationRequest): string {
   return createHash('sha256').update(JSON.stringify({
     projectId: input.projectId,
     workspaceId: input.workspaceId,
     entityType: input.entityType,
     entityId: input.entityId,
-    url,
+    mediaDigest: assetMediaDigest(input.image.url),
+    name: input.image.name ?? '',
+    mimeType: input.image.mimeType ?? '',
   })).digest('hex');
 }
 
 async function persistNewChatImage(
-  request: NextRequest,
   userId: string,
   userRole: string | undefined,
   imageUrl: string,
 ): Promise<string> {
   if (!imageUrl.startsWith('data:')) return imageUrl;
   const internalHeaders = await getInternalRequestHeaders(userId, userRole === 'admin' ? 'admin' : 'user');
-  const response = await fetch(`${request.nextUrl.origin}/api/save-image`, {
+  const response = await fetch(getInternalApiUrl('/api/save-image'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...internalHeaders },
     body: JSON.stringify({ imageUrl }),
@@ -106,48 +181,51 @@ async function persistNewChatImage(
 }
 
 async function registerStandaloneChatAsset(
-  request: NextRequest,
   actor: { id: string; role?: string },
   input: AssetRegistrationRequest,
 ): Promise<WorkspaceAssetReference> {
-  const url = await persistNewChatImage(request, actor.id, actor.role, input.image.url);
   const service = createAssetService();
-  const created = await service.createAssetVersion({
+  const sourceDigest = assetMediaDigest(input.image.url);
+  const created = await service.createVersionWithPlacement({
     actorUserId: actor.id,
     projectId: input.projectId,
     kind: 'image',
-    file: {
-      url,
-      availability: 'ready',
-      ...(input.image.mimeType ? { mimeType: input.image.mimeType } : {}),
-      ...(/^https?:\/\//.test(input.image.url) ? { recoverySourceUrl: input.image.url } : {}),
+    resolveFile: async () => {
+      const url = await persistNewChatImage(actor.id, actor.role, input.image.url);
+      const dataImage = input.image.url.startsWith('data:') ? parseDataImage(input.image.url) : null;
+      return {
+        url,
+        availability: 'ready',
+        ...(input.image.mimeType || dataImage?.mimeType
+          ? { mimeType: input.image.mimeType || dataImage?.mimeType }
+          : {}),
+        ...(dataImage ? { checksum: `sha256:${sourceDigest}` } : {}),
+        ...(/^https?:\/\//.test(input.image.url) ? { recoverySourceUrl: input.image.url } : {}),
+      };
     },
     idempotencyKey: input.idempotencyKey,
-    requestDigest: assetRegistrationDigest(input, url),
+    requestDigest: assetRegistrationDigest(input),
     metadata: {
       source: 'standalone-chat',
       entityType: input.entityType,
       entityId: input.entityId,
       ...(input.image.name ? { name: input.image.name } : {}),
     },
-  });
-  const placed = await service.createWorkspacePlacement({
-    actorUserId: actor.id,
-    projectId: input.projectId,
-    assetVersionId: created.version.id,
-    workspace: 'chat',
-    workspaceId: input.workspaceId,
-    entityType: input.entityType,
-    entityId: input.entityId,
-    metadata: {
-      source: 'standalone-chat',
-      ...(input.image.name ? { name: input.image.name } : {}),
+    placement: {
+      workspace: 'chat',
+      workspaceId: input.workspaceId,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      metadata: {
+        source: 'standalone-chat',
+        ...(input.image.name ? { name: input.image.name } : {}),
+      },
     },
   });
   return {
     assetId: created.version.assetId,
     assetVersionId: created.version.id,
-    placementId: placed.placement.id,
+    placementId: created.placement.id,
     url: created.version.file.url,
     ...(input.image.name ? { name: input.image.name } : {}),
   };
@@ -228,7 +306,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'ASSET_REQUEST_INVALID' }, { status: 400 });
     }
     try {
-      return Response.json(await registerStandaloneChatAsset(request, user, registration));
+      return Response.json(await registerStandaloneChatAsset(user, registration));
     } catch (error) {
       return assetRegistrationError(error);
     }
@@ -359,7 +437,7 @@ export async function POST(request: NextRequest) {
         let imageRef: WorkspaceAssetReference | undefined;
         if (body.assetProjectId && body.projectId && body.taskId && body.responseMessageId) {
           try {
-            imageRef = await registerStandaloneChatAsset(request, user, {
+            imageRef = await registerStandaloneChatAsset(user, {
               projectId: body.assetProjectId,
               workspaceId: `standalone-chat:${body.projectId}`,
               entityType: 'chat-result',

@@ -67,6 +67,8 @@ type SendMediaToCanvas = (input: {
   writeBridge: (references: AssetReference[]) => void;
 }) => Promise<{ ok: boolean; references: AssetReference[]; reason?: string }>;
 
+type CanTransferMedia = (images: string[], references: AssetReference[]) => boolean;
+
 function bridgeReader(): BridgeReader | undefined {
   return (simpleChatTypes as unknown as { parseSimpleChatCanvasBridgePayload?: BridgeReader })
     .parseSimpleChatCanvasBridgePayload;
@@ -80,6 +82,11 @@ function alignMediaSlots(): AlignMediaSlots | undefined {
 function sendMediaToCanvas(): SendMediaToCanvas | undefined {
   return (simpleChatTypes as unknown as { sendSimpleChatMediaToCanvas?: SendMediaToCanvas })
     .sendSimpleChatMediaToCanvas;
+}
+
+function canTransferMedia(): CanTransferMedia | undefined {
+  return (simpleChatTypes as unknown as { canTransferSimpleChatMedia?: CanTransferMedia })
+    .canTransferSimpleChatMedia;
 }
 
 describe('standalone simple-chat asset transfer', () => {
@@ -167,20 +174,22 @@ describe('standalone simple-chat asset transfer', () => {
   });
 
   it('uses authorized resolve and Task 5 transfer without re-uploading managed media', () => {
-    expect(chatAreaSource).toMatch(/fetch\(\s*['"]\/api\/assets['"]/);
     expect(chatAreaSource).toMatch(/fetch\(\s*['"]\/api\/assets\/transfer['"]/);
+    expect(chatAreaSource).not.toMatch(/fetch\(\s*['"]\/api\/assets['"]\s*,/);
     expect(chatAreaSource).not.toMatch(/fetch\(\s*['"]\/api\/save-image['"]/);
-    expect(chatAreaSource).toMatch(/transferred\.assetVersionId\s*!==\s*reference\.assetVersionId/);
-    expect(chatAreaSource).toMatch(/targetProject:\s*targetProjectId/);
+    expect(chatAreaSource).toContain('sendSimpleChatMediaToCanvas');
+    expect(chatAreaSource).not.toMatch(/imageRefs\?\.find\(/);
+    expect(chatAreaSource).not.toMatch(/transferred\.assetVersionId\s*!==/);
+    expect(chatAreaSource).toMatch(/targetProject:\s*transferProjectId/);
     expect(chatAreaSource).toMatch(/entityType:\s*['"]canvas-image['"]/);
   });
 
   it('creates chat placements before exposing managed references and never migrates URL-only history on read', () => {
     expect(chatRouteSource).toMatch(/entityType:\s*['"]chat-(?:result|attachment)['"]/);
-    expect(chatRouteSource).toMatch(/createWorkspacePlacement/);
+    expect(chatRouteSource).toMatch(/createVersionWithPlacement/);
     expect(chatAreaSource).toMatch(/parsed\.imageRef/);
     expect(chatAreaSource).not.toMatch(/messages[\s\S]{0,300}\/api\/save-image/);
-    expect(canvasWorkspaceSource).toMatch(/parseSimpleChatCanvasBridgePayload/);
+    expect(canvasWorkspaceSource).toMatch(/consumeSimpleChatCanvasBridge/);
   });
 
   it('I1 keeps failed registration slots visible but blocks the entire Canvas bridge write', async () => {
@@ -238,6 +247,20 @@ describe('standalone simple-chat asset transfer', () => {
     expect(result).toEqual({ ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' });
     expect(transfer).not.toHaveBeenCalled();
     expect(writeBridge).not.toHaveBeenCalled();
+  });
+
+  it('I1 exposes an explicit transferable state only for complete index-aligned managed slots', () => {
+    const canTransfer = canTransferMedia();
+    expect(canTransfer).toBeTypeOf('function');
+    if (!canTransfer) return;
+
+    expect(canTransfer(['/historical.png'], [{ url: '/historical.png' }])).toBe(false);
+    expect(canTransfer(['/a.png', '/b.png'], [{
+      url: '/a.png', assetVersionId: 'version-a', placementId: 'placement-a',
+    }])).toBe(false);
+    expect(canTransfer(['/a.png'], [{
+      url: '/a.png', assetVersionId: 'version-a', placementId: 'placement-a',
+    }])).toBe(true);
   });
 
   it('I2 binds equal URLs to their version by index instead of searching by URL', async () => {

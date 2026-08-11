@@ -144,6 +144,144 @@ export function parseSimpleChatCanvasBridgePayload(value: unknown): WorkspaceAss
     .filter((reference): reference is WorkspaceAssetReference => reference !== null);
 }
 
+export function hasManagedAssetIdentity(
+  reference: WorkspaceAssetReference | null | undefined,
+): reference is WorkspaceAssetReference & { assetVersionId: string; placementId: string } {
+  return Boolean(reference?.assetVersionId && reference.placementId);
+}
+
+export function alignSimpleChatMediaSlots(
+  attachments: ChatAttachment[],
+  registrations: Array<WorkspaceAssetReference | null>,
+): {
+  images: string[];
+  imageRefs: WorkspaceAssetReference[];
+  attachments: ChatAttachment[];
+} {
+  const alignedAttachments: ChatAttachment[] = [];
+  const images: string[] = [];
+  const imageRefs: WorkspaceAssetReference[] = [];
+
+  attachments.forEach((attachment, index) => {
+    const fallbackUrl = attachment.url || '';
+    const registered = registrations[index];
+    const reference = hasManagedAssetIdentity(registered)
+      ? registered
+      : { url: fallbackUrl };
+    const legacyAttachment = { ...attachment };
+    delete legacyAttachment.assetId;
+    delete legacyAttachment.assetVersionId;
+    delete legacyAttachment.placementId;
+    images.push(reference.url);
+    imageRefs.push(reference);
+    alignedAttachments.push(hasManagedAssetIdentity(reference) ? {
+      ...legacyAttachment,
+      url: reference.url,
+      ...(reference.assetId ? { assetId: reference.assetId } : {}),
+      assetVersionId: reference.assetVersionId,
+      placementId: reference.placementId,
+    } : {
+      ...legacyAttachment,
+      url: fallbackUrl,
+    });
+  });
+
+  return { images, imageRefs, attachments: alignedAttachments };
+}
+
+export async function sendSimpleChatMediaToCanvas(input: {
+  images: string[];
+  imageRefs: WorkspaceAssetReference[];
+  targetProjectId: string;
+  transfer: (input: {
+    sourceVersionId: string;
+    targetProjectId: string;
+    index: number;
+  }) => Promise<WorkspaceAssetReference>;
+  writeBridge: (references: WorkspaceAssetReference[]) => void;
+}): Promise<{
+  ok: boolean;
+  references: WorkspaceAssetReference[];
+  reason?: 'UNMANAGED_IMAGE_SLOT';
+}> {
+  if (!input.targetProjectId || !canTransferSimpleChatMedia(input.images, input.imageRefs)) {
+    return { ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' };
+  }
+
+  const references: WorkspaceAssetReference[] = [];
+  for (const [index, reference] of input.imageRefs.entries()) {
+    if (!hasManagedAssetIdentity(reference)) {
+      return { ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' };
+    }
+    const transferred = await input.transfer({
+      sourceVersionId: reference.assetVersionId,
+      targetProjectId: input.targetProjectId,
+      index,
+    });
+    if (!hasManagedAssetIdentity(transferred)) {
+      throw new Error('ASSET_TRANSFER_INVALID');
+    }
+    references.push(transferred);
+  }
+  input.writeBridge(references);
+  return { ok: true, references };
+}
+
+export function canTransferSimpleChatMedia(
+  images: string[],
+  imageRefs: WorkspaceAssetReference[],
+): boolean {
+  return images.length > 0
+    && images.length === imageRefs.length
+    && imageRefs.every(reference => hasManagedAssetIdentity(reference));
+}
+
+export async function consumeSimpleChatCanvasBridge(input: {
+  payload: unknown;
+  currentProjectId: string | null;
+  resolveReference: (input: {
+    projectId: string;
+    assetVersionId: string;
+    placementId: string;
+  }) => Promise<WorkspaceAssetReference>;
+  merge: (references: WorkspaceAssetReference[]) => void | Promise<void>;
+  remove: () => void;
+}): Promise<{
+  status: 'waiting' | 'consumed';
+  references: WorkspaceAssetReference[];
+}> {
+  if (!input.currentProjectId) return { status: 'waiting', references: [] };
+  const bridgeProjectId = isRecord(input.payload) && typeof input.payload.projectId === 'string'
+    ? input.payload.projectId
+    : null;
+  if (bridgeProjectId && bridgeProjectId !== input.currentProjectId) {
+    return { status: 'waiting', references: [] };
+  }
+
+  const references: WorkspaceAssetReference[] = [];
+  for (const candidate of parseSimpleChatCanvasBridgePayload(input.payload)) {
+    if (hasManagedAssetIdentity(candidate)) {
+      try {
+        const canonical = await input.resolveReference({
+          projectId: input.currentProjectId,
+          assetVersionId: candidate.assetVersionId,
+          placementId: candidate.placementId,
+        });
+        if (hasManagedAssetIdentity(canonical)) references.push(canonical);
+      } catch {
+        // Foreign and absent references are intentionally indistinguishable and omitted.
+      }
+      continue;
+    }
+    if (candidate.assetId || candidate.assetVersionId || candidate.placementId) continue;
+    references.push({ url: candidate.url });
+  }
+
+  await input.merge(references);
+  input.remove();
+  return { status: 'consumed', references };
+}
+
 export interface ChatArtifact {
   id: string;
   projectId: string;

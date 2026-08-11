@@ -16,7 +16,9 @@ import { UsageStats } from "./usage-stats";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
-  PRESET_SKILLS, PresetSkill, parseSimpleChatCanvasBridgePayload, type WorkspaceAssetReference
+  PRESET_SKILLS, PresetSkill, alignSimpleChatMediaSlots, canTransferSimpleChatMedia,
+  parseSimpleChatCanvasBridgePayload,
+  sendSimpleChatMediaToCanvas, type WorkspaceAssetReference
 } from "./simple-chat-types";
 import { User } from "@/lib/user-types";
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from "@/lib/chat-generation-controls";
@@ -671,25 +673,14 @@ export default function ChatArea({
     const attachmentRefs = await Promise.all(uploadedImages.map((attachment, index) => (
       registerChatAttachment(attachment, userMessageId, index, project.id, task.id)
     )));
-    const preparedAttachments = uploadedImages.map((attachment, index) => {
-      const reference = attachmentRefs[index];
-      return reference ? {
-        ...attachment,
-        url: reference.url,
-        assetId: reference.assetId,
-        assetVersionId: reference.assetVersionId,
-        placementId: reference.placementId,
-      } : attachment;
-    });
-    const managedAttachmentRefs = attachmentRefs
-      .filter((reference): reference is WorkspaceAssetReference => reference !== null);
+    const mediaSlots = alignSimpleChatMediaSlots(uploadedImages, attachmentRefs);
 
     const userMsg: SimpleChatMessage = {
       id: userMessageId,
       role: 'user', content,
-      images: preparedAttachments.map(image => image.url).filter(Boolean) as string[],
-      imageRefs: managedAttachmentRefs.length > 0 ? managedAttachmentRefs : undefined,
-      attachments: preparedAttachments.length > 0 ? preparedAttachments : undefined,
+      images: mediaSlots.images,
+      imageRefs: mediaSlots.imageRefs,
+      attachments: mediaSlots.attachments,
       createdAt: Date.now(),
     };
 
@@ -865,13 +856,27 @@ export default function ChatArea({
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
                   if (last?.role === 'assistant') {
+                    const imageUrl = imageRef?.url || parsed.imageUrl;
+                    const imageIndex = last.images?.length || 0;
                     updated[updated.length - 1] = {
                       ...last,
                       content: last.content || '图片已生成',
-                      images: [...(last.images || []), imageRef?.url || parsed.imageUrl],
-                      ...(imageRef?.assetVersionId && imageRef.placementId
-                        ? { imageRefs: [...(last.imageRefs || []), imageRef] }
-                        : {}),
+                      images: [...(last.images || []), imageUrl],
+                      imageRefs: [...(last.imageRefs || []), imageRef?.assetVersionId && imageRef.placementId
+                        ? imageRef
+                        : { url: imageUrl }],
+                      attachments: [...(last.attachments || []), {
+                        id: `${last.id}-image-${imageIndex}`,
+                        type: 'image',
+                        name: typeof parsed.prompt === 'string' && parsed.prompt
+                          ? parsed.prompt.slice(0, 120)
+                          : `generated-${imageIndex + 1}.png`,
+                        mimeType: 'image/png',
+                        url: imageUrl,
+                        ...(imageRef?.assetId ? { assetId: imageRef.assetId } : {}),
+                        ...(imageRef?.assetVersionId ? { assetVersionId: imageRef.assetVersionId } : {}),
+                        ...(imageRef?.placementId ? { placementId: imageRef.placementId } : {}),
+                      }],
                     };
                   }
                   return updated;
@@ -1186,70 +1191,53 @@ export default function ChatArea({
       return;
     }
     try {
-      const imageUrls = message.images || [];
-      const transferredImages: WorkspaceAssetReference[] = [];
-      for (let index = 0; index < imageUrls.length; index++) {
-        const imageUrl = imageUrls[index];
-        const reference = message.imageRefs?.find(candidate => candidate.url === imageUrl);
-        if (!reference?.assetVersionId || !reference.placementId) {
-          transferredImages.push({ url: imageUrl });
-          continue;
-        }
-
-        const resolveResponse = await fetch('/api/assets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+      const transferResult = await sendSimpleChatMediaToCanvas({
+        images: message.images || [],
+        imageRefs: message.imageRefs || [],
+        targetProjectId,
+        transfer: async ({ sourceVersionId, targetProjectId: transferProjectId, index }) => {
+          const transferResponse = await fetch('/api/assets/transfer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sourceVersion: sourceVersionId,
+              targetProject: transferProjectId,
+              targetWorkspace: transferProjectId,
+              entityType: 'canvas-image',
+              entityId: `simple-chat:${task.id}:${message.id}:${index}`,
+              idempotencyKey: `simple-chat-canvas:${transferProjectId}:${task.id}:${message.id}:${index}:${sourceVersionId}`,
+              metadata: { source: 'standalone-chat', messageId: message.id, imageIndex: index },
+            }),
+          });
+          if (!transferResponse.ok) throw new Error('Asset transfer failed');
+          const transferred = readWorkspaceAssetReference(await transferResponse.json());
+          if (!transferred?.assetVersionId || !transferred.placementId) {
+            throw new Error('Asset transfer returned an incomplete reference');
+          }
+          return transferred;
+        },
+        writeBridge: transferredImages => {
+          const rawExisting = localStorage.getItem('wujie_canvas_bridge');
+          let existingPayload: unknown = [];
+          try { existingPayload = rawExisting ? JSON.parse(rawExisting) : []; } catch {}
+          const existingProjectId = existingPayload && typeof existingPayload === 'object' && !Array.isArray(existingPayload)
+            && typeof (existingPayload as Record<string, unknown>).projectId === 'string'
+            ? (existingPayload as Record<string, unknown>).projectId as string
+            : null;
+          const existingImages = !existingProjectId || existingProjectId === targetProjectId
+            ? parseSimpleChatCanvasBridgePayload(existingPayload)
+            : [];
+          localStorage.setItem('wujie_canvas_bridge', JSON.stringify({
             projectId: targetProjectId,
-            assetVersionId: reference.assetVersionId,
-            placementId: reference.placementId,
-          }),
-        });
-        if (!resolveResponse.ok) throw new Error('Asset is not available in the selected project');
-        const resolved = readWorkspaceAssetReference(await resolveResponse.json());
-        if (resolved?.assetVersionId !== reference.assetVersionId) {
-          throw new Error('Asset version changed during authorization');
-        }
-
-        const transferResponse = await fetch('/api/assets/transfer', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sourceVersion: reference.assetVersionId,
-            targetProject: targetProjectId,
-            targetWorkspace: targetProjectId,
-            entityType: 'canvas-image',
-            entityId: `simple-chat:${task.id}:${message.id}:${index}`,
-            idempotencyKey: `simple-chat-canvas:${targetProjectId}:${task.id}:${message.id}:${index}:${reference.assetVersionId}`,
-            metadata: { source: 'standalone-chat', messageId: message.id, imageIndex: index },
-          }),
-        });
-        if (!transferResponse.ok) throw new Error('Asset transfer failed');
-        const transferred = readWorkspaceAssetReference(await transferResponse.json());
-        if (
-          !transferred?.placementId
-          || transferred.assetVersionId !== reference.assetVersionId
-        ) {
-          throw new Error('Asset transfer returned a different version');
-        }
-        transferredImages.push(transferred);
+            images: [...existingImages, ...transferredImages],
+          }));
+        },
+      });
+      if (!transferResult.ok) {
+        setControlNotice('历史图片或登记失败的图片仅可查看，无法发送到画布');
+        return;
       }
-
-      if (transferredImages.length === 0) return;
-      const rawExisting = localStorage.getItem('wujie_canvas_bridge');
-      let existingPayload: unknown = [];
-      try { existingPayload = rawExisting ? JSON.parse(rawExisting) : []; } catch {}
-      const existingProjectId = existingPayload && typeof existingPayload === 'object' && !Array.isArray(existingPayload)
-        && typeof (existingPayload as Record<string, unknown>).projectId === 'string'
-        ? (existingPayload as Record<string, unknown>).projectId as string
-        : null;
-      const existingImages = !existingProjectId || existingProjectId === targetProjectId
-        ? parseSimpleChatCanvasBridgePayload(existingPayload)
-        : [];
-      localStorage.setItem('wujie_canvas_bridge', JSON.stringify({
-        projectId: targetProjectId,
-        images: [...existingImages, ...transferredImages],
-      }));
+      const transferredImages = transferResult.references;
       const toast = document.createElement('div');
       toast.className = 'fixed bottom-20 right-6 z-[9999] bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer hover:bg-blue-700 transition-colors text-sm flex items-center gap-2';
       // P3 fix: 用 DOM API 构建子节点，避免 innerHTML 拼接（低风险但非最佳实践）
@@ -1618,8 +1606,14 @@ export default function ChatArea({
                       </button>
                     )}
                     {msg.images && msg.images.length > 0 && (
-                      <button onClick={() => { void sendImagesToCanvas(msg); }}
-                        className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors" title="添加到画布">
+                      <button
+                        onClick={() => { void sendImagesToCanvas(msg); }}
+                        disabled={!canTransferSimpleChatMedia(msg.images, msg.imageRefs || [])}
+                        className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                        title={canTransferSimpleChatMedia(msg.images, msg.imageRefs || [])
+                          ? '添加到画布'
+                          : '历史图片或登记失败的图片不可转移'}
+                      >
                         <Send className="w-3 h-3" />
                       </button>
                     )}

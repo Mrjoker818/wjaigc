@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   createWorkspacePlacement: vi.fn(),
   createVersionWithPlacement: vi.fn(),
   getInternalApiUrl: vi.fn((path: string) => `http://127.0.0.1:5000${path}`),
+  getInternalRequestHeaders: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -27,6 +28,10 @@ vi.mock('@/lib/api-helpers', async (importOriginal) => {
     getInternalApiUrl: mocks.getInternalApiUrl,
   };
 });
+
+vi.mock('@/lib/api-auth', () => ({
+  getInternalRequestHeaders: mocks.getInternalRequestHeaders,
+}));
 
 vi.mock('@/lib/asset-core/service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/asset-core/service')>();
@@ -82,6 +87,8 @@ const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1H
 describe('POST /api/simple-chat/chat', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
+    mocks.getInternalApiUrl.mockImplementation((path: string) => `http://127.0.0.1:5000${path}`);
+    mocks.getInternalRequestHeaders.mockResolvedValue({ Authorization: 'Bearer internal-test' });
     mocks.getSessionUser.mockResolvedValue({
       id: 'user-1',
       role: 'user',
@@ -199,8 +206,8 @@ describe('POST /api/simple-chat/chat', () => {
     });
 
     const response = await POST(hostile);
+    const responseBody = await response.clone().json();
 
-    expect(response.status).toBe(200);
     expect(mocks.getInternalApiUrl).toHaveBeenCalledWith('/api/save-image');
     expect(fetchMock).toHaveBeenCalledWith(
       'http://127.0.0.1:5000/api/save-image',
@@ -210,6 +217,7 @@ describe('POST /api/simple-chat/chat', () => {
       'https://attacker.example/api/save-image',
       expect.anything(),
     );
+    expect(response.status, JSON.stringify(responseBody)).toBe(200);
   });
 
   it('I4 derives a stable registration digest from original data content, not persisted URLs', async () => {

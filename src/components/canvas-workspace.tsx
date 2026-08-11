@@ -61,7 +61,7 @@ import { type Workflow, type WorkspaceAssetReference } from '@/lib/workflow-engi
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
-import { parseSimpleChatCanvasBridgePayload } from '@/components/simple-chat/simple-chat-types';
+import { consumeSimpleChatCanvasBridge } from '@/components/simple-chat/simple-chat-types';
 
 interface FavoriteItem {
   id: number;
@@ -933,48 +933,62 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // 从 simple-chat 传来的图片桥接
   useEffect(() => {
+    if (!currentProject?.id) return;
     const bridgeKey = 'wujie_canvas_bridge';
+    let cancelled = false;
     try {
       const raw = localStorage.getItem(bridgeKey);
       if (!raw) return;
       const data = JSON.parse(raw) as unknown;
-      const bridgeProjectId = data && typeof data === 'object' && !Array.isArray(data)
-        && typeof (data as Record<string, unknown>).projectId === 'string'
-        ? (data as Record<string, unknown>).projectId as string
-        : null;
-      if (bridgeProjectId && bridgeProjectId !== initialProjectIdRef.current) return;
-      const references = parseSimpleChatCanvasBridgePayload(data);
-      if (references.length === 0) return;
-      localStorage.removeItem(bridgeKey);
-      const timestamp = Date.now();
-      const newImages: CanvasImage[] = references.map((reference, idx) => ({
-        id: `chat-bridge-${timestamp}-${idx}`,
-        url: reference.url,
-        prompt: reference.name || '',
-        model: '',
-        quality: 'standard',
-        aspectRatio: '1:1',
-        stylePreset: '',
-        category: 'general',
-        size: '1024x1024',
-        x: 200 + (idx % 5) * 220,
-        y: 200 + Math.floor(idx / 5) * 220,
-        width: 512,
-        height: 512,
-        originalWidth: 1024,
-        originalHeight: 1024,
-        isAiGenerated: true,
-        ...(reference.assetId ? { assetId: reference.assetId } : {}),
-        ...(reference.assetVersionId ? { assetVersionId: reference.assetVersionId } : {}),
-        ...(reference.placementId ? { placementId: reference.placementId } : {}),
-      }));
+      void consumeSimpleChatCanvasBridge({
+        payload: data,
+        currentProjectId: currentProject.id,
+        resolveReference: async ({ projectId, assetVersionId, placementId }) => {
+          const response = await fetch('/api/assets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId, assetVersionId, placementId }),
+          });
+          if (!response.ok) throw new Error('ASSET_NOT_FOUND');
+          return response.json() as Promise<WorkspaceAssetReference>;
+        },
+        merge: references => {
+          if (cancelled) throw new Error('BRIDGE_CONSUMPTION_CANCELLED');
+          const timestamp = Date.now();
+          const newImages: CanvasImage[] = references.map((reference, idx) => ({
+            id: `chat-bridge-${timestamp}-${idx}`,
+            url: reference.url,
+            prompt: reference.name || '',
+            model: '',
+            quality: 'standard',
+            aspectRatio: '1:1',
+            stylePreset: '',
+            category: 'general',
+            size: '1024x1024',
+            x: 200 + (idx % 5) * 220,
+            y: 200 + Math.floor(idx / 5) * 220,
+            width: 512,
+            height: 512,
+            originalWidth: 1024,
+            originalHeight: 1024,
+            isAiGenerated: true,
+            ...(reference.assetId ? { assetId: reference.assetId } : {}),
+            ...(reference.assetVersionId ? { assetVersionId: reference.assetVersionId } : {}),
+            ...(reference.placementId ? { placementId: reference.placementId } : {}),
+          }));
       // ★ 修复：使用 setImages 包装器而非直接 setImagesRaw，确保 prevImagesRef 同步更新
       // 之前直接调用 setImagesRaw 导致 prevImagesRef 过期，后续 setImages 调用会使用过期的基准计算 diff
-      setImages(prev => [...prev, ...newImages]);
+          setImages(prev => [...prev, ...newImages]);
+        },
+        remove: () => localStorage.removeItem(bridgeKey),
+      }).catch(() => {
+        // Keep the bridge payload for a later successful hydrated merge.
+      });
     } catch {
       // ignore parse errors
     }
-  }, []);
+    return () => { cancelled = true; };
+  }, [currentProject?.id, setImages]);
 
   // 应用主题
   useEffect(() => {

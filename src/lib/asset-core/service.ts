@@ -53,6 +53,11 @@ export interface CreatePlacementInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface CreateVersionWithPlacementInput extends Omit<CreateAssetVersionInput, 'file'> {
+  resolveFile: () => Promise<AssetFile>;
+  placement: Omit<CreatePlacementInput, 'actorUserId' | 'projectId' | 'assetVersionId'>;
+}
+
 export interface TransferVersionInput {
   actorUserId: string;
   sourceVersionId: string;
@@ -260,6 +265,149 @@ export class AssetService {
         version.id,
       );
       return { asset: updatedAsset, version, reused: false };
+    });
+  }
+
+  async createVersionWithPlacement(input: CreateVersionWithPlacementInput): Promise<{
+    asset: Asset;
+    version: AssetVersion;
+    placement: WorkspacePlacement;
+    reused: boolean;
+  }> {
+    return this.storage.transaction(async (transaction) => {
+      if (!await transaction.findProject(input.actorUserId, input.projectId)) notFound();
+      await transaction.lockVersionIdempotency(
+        input.actorUserId,
+        input.projectId,
+        input.idempotencyKey,
+      );
+
+      const existing = await transaction.findVersionByIdempotency(
+        input.actorUserId,
+        input.projectId,
+        input.idempotencyKey,
+      );
+      if (existing) {
+        if (existing.requestDigest !== input.requestDigest) conflict();
+        const asset = await transaction.findAsset(
+          input.actorUserId,
+          input.projectId,
+          existing.version.assetId,
+        );
+        if (!asset) notFound();
+        const existingPlacement = await transaction.findActivePlacement(
+          input.actorUserId,
+          input.projectId,
+          input.placement.workspace,
+          input.placement.workspaceId,
+          input.placement.entityType,
+          input.placement.entityId,
+        );
+        if (existingPlacement) {
+          if (existingPlacement.assetVersionId !== existing.version.id) placementConflict();
+          return {
+            asset,
+            version: existing.version,
+            placement: existingPlacement,
+            reused: true,
+          };
+        }
+        const repairedPlacement = createPlacement(
+          input.actorUserId,
+          input.projectId,
+          existing.version,
+          input.placement.workspace,
+          input.placement.workspaceId,
+          input.placement.entityType,
+          input.placement.entityId,
+          input.placement.transform,
+          input.placement.metadata,
+        );
+        if (!await transaction.insertPlacement(repairedPlacement)) placementConflict();
+        return {
+          asset,
+          version: existing.version,
+          placement: repairedPlacement,
+          reused: true,
+        };
+      }
+
+      const occupiedPlacement = await transaction.findActivePlacement(
+        input.actorUserId,
+        input.projectId,
+        input.placement.workspace,
+        input.placement.workspaceId,
+        input.placement.entityType,
+        input.placement.entityId,
+      );
+      if (occupiedPlacement) placementConflict();
+
+      const file = await input.resolveFile();
+      let asset: Asset;
+      if (input.assetId) {
+        const existingAsset = await transaction.findAsset(
+          input.actorUserId,
+          input.projectId,
+          input.assetId,
+        );
+        if (!existingAsset) notFound();
+        asset = existingAsset;
+      } else {
+        const timestamp = now();
+        asset = {
+          id: randomUUID(),
+          ownerId: input.actorUserId,
+          projectId: input.projectId,
+          kind: input.kind,
+          status: 'active',
+          currentVersionId: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        await transaction.insertAsset(asset);
+      }
+
+      const parentVersionIds = input.parentVersionIds ?? [];
+      for (const parentVersionId of parentVersionIds) {
+        const parent = await transaction.findVersion(
+          input.actorUserId,
+          input.projectId,
+          parentVersionId,
+        );
+        if (!parent || parent.assetId !== asset.id) notFound();
+      }
+
+      const version: AssetVersion = {
+        id: randomUUID(),
+        assetId: asset.id,
+        ownerId: input.actorUserId,
+        projectId: input.projectId,
+        file,
+        parentVersionIds: [...parentVersionIds],
+        idempotencyKey: input.idempotencyKey,
+        createdAt: now(),
+      };
+      await transaction.insertVersion(version, input.requestDigest, input.metadata);
+      await transaction.insertParents(version, parentVersionIds);
+      const updatedAsset = await transaction.updateAssetCurrentVersion(
+        input.actorUserId,
+        input.projectId,
+        asset.id,
+        version.id,
+      );
+      const placement = createPlacement(
+        input.actorUserId,
+        input.projectId,
+        version,
+        input.placement.workspace,
+        input.placement.workspaceId,
+        input.placement.entityType,
+        input.placement.entityId,
+        input.placement.transform,
+        input.placement.metadata,
+      );
+      if (!await transaction.insertPlacement(placement)) placementConflict();
+      return { asset: updatedAsset, version, placement, reused: false };
     });
   }
 
