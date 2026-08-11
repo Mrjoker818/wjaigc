@@ -16,7 +16,7 @@ import { UsageStats } from "./usage-stats";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
-  PRESET_SKILLS, PresetSkill
+  PRESET_SKILLS, PresetSkill, parseSimpleChatCanvasBridgePayload, type WorkspaceAssetReference
 } from "./simple-chat-types";
 import { User } from "@/lib/user-types";
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from "@/lib/chat-generation-controls";
@@ -31,6 +31,24 @@ type ChatModelInfo = {
   providerName?: string;
   tags?: string[];
 };
+
+type CanvasProjectOption = {
+  id: string;
+  name: string;
+};
+
+function readWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.url !== 'string' || !candidate.url) return null;
+  return {
+    url: candidate.url,
+    ...(typeof candidate.name === 'string' ? { name: candidate.name } : {}),
+    ...(typeof candidate.assetId === 'string' ? { assetId: candidate.assetId } : {}),
+    ...(typeof candidate.assetVersionId === 'string' ? { assetVersionId: candidate.assetVersionId } : {}),
+    ...(typeof candidate.placementId === 'string' ? { placementId: candidate.placementId } : {}),
+  };
+}
 interface ChatAreaProps {
   user: User;
   project: SimpleChatProject | null;
@@ -159,6 +177,8 @@ export default function ChatArea({
   const [imageModels, setImageModels] = useState<Array<ChatModelInfo>>([]);
   const [selectedImageModel, setSelectedImageModel] = useState('');
   const [selectedImageProviderId, setSelectedImageProviderId] = useState('');
+  const [canvasProjects, setCanvasProjects] = useState<CanvasProjectOption[]>([]);
+  const [selectedCanvasProjectId, setSelectedCanvasProjectId] = useState('');
 
   // Instructions draft
   const [instructionsDraft, setInstructionsDraft] = useState<ProjectInstructions>(
@@ -327,6 +347,30 @@ export default function ChatArea({
 
   useEffect(() => { fetchImageModels(); }, []);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/user-data/sync?key=projects', { credentials: 'include' })
+      .then(response => response.ok ? response.json() : null)
+      .then((payload: { success?: boolean; value?: unknown } | null) => {
+        if (cancelled || !payload?.success || !Array.isArray(payload.value)) return;
+        const options = payload.value.flatMap((value): CanvasProjectOption[] => {
+          if (!value || typeof value !== 'object') return [];
+          const projectValue = value as Record<string, unknown>;
+          if (typeof projectValue.id !== 'string' || !projectValue.id) return [];
+          return [{
+            id: projectValue.id,
+            name: typeof projectValue.name === 'string' && projectValue.name
+              ? projectValue.name
+              : '未命名画布',
+          }];
+        });
+        setCanvasProjects(options);
+        setSelectedCanvasProjectId(current => current || options[0]?.id || '');
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // 加载用户记忆
   useEffect(() => {
@@ -581,22 +625,76 @@ export default function ChatArea({
 
   const handleSendRef = useRef<(() => void) | null>(null);
 
+  const registerChatAttachment = useCallback(async (
+    attachment: ChatAttachment,
+    messageId: string,
+    index: number,
+    chatProjectId: string,
+    chatTaskId: string,
+  ): Promise<WorkspaceAssetReference | null> => {
+    if (!selectedCanvasProjectId || !attachment.url) return null;
+    try {
+      const response = await fetch('/api/simple-chat/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assetAction: 'register',
+          projectId: selectedCanvasProjectId,
+          workspaceId: `standalone-chat:${chatProjectId}`,
+          entityType: 'chat-attachment',
+          entityId: `${messageId}:${index}`,
+          idempotencyKey: `simple-chat-attachment:${chatTaskId}:${messageId}:${index}`,
+          image: {
+            url: attachment.url,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+          },
+        }),
+      });
+      if (!response.ok) return null;
+      const reference = readWorkspaceAssetReference(await response.json());
+      return reference?.assetVersionId && reference.placementId ? reference : null;
+    } catch {
+      return null;
+    }
+  }, [selectedCanvasProjectId]);
+
   // Handle send
   const handleSend = useCallback(async () => {
     const content = input.trim();
     if (!content && uploadedImages.length === 0) return;
     if (isStreaming || !project || !task) return;
 
+    setIsStreaming(true);
+    const userMessageId = Math.random().toString(36).slice(2, 10);
+    const assistantMessageId = Math.random().toString(36).slice(2, 10);
+    const attachmentRefs = await Promise.all(uploadedImages.map((attachment, index) => (
+      registerChatAttachment(attachment, userMessageId, index, project.id, task.id)
+    )));
+    const preparedAttachments = uploadedImages.map((attachment, index) => {
+      const reference = attachmentRefs[index];
+      return reference ? {
+        ...attachment,
+        url: reference.url,
+        assetId: reference.assetId,
+        assetVersionId: reference.assetVersionId,
+        placementId: reference.placementId,
+      } : attachment;
+    });
+    const managedAttachmentRefs = attachmentRefs
+      .filter((reference): reference is WorkspaceAssetReference => reference !== null);
+
     const userMsg: SimpleChatMessage = {
-      id: Math.random().toString(36).slice(2, 10),
+      id: userMessageId,
       role: 'user', content,
-      images: uploadedImages.map(i => i.url).filter(Boolean) as string[],
-      attachments: uploadedImages.length > 0 ? uploadedImages : undefined,
+      images: preparedAttachments.map(image => image.url).filter(Boolean) as string[],
+      imageRefs: managedAttachmentRefs.length > 0 ? managedAttachmentRefs : undefined,
+      attachments: preparedAttachments.length > 0 ? preparedAttachments : undefined,
       createdAt: Date.now(),
     };
 
     const aiMsg: SimpleChatMessage = {
-      id: Math.random().toString(36).slice(2, 10),
+      id: assistantMessageId,
       role: 'assistant', content: '',
       model: selectedModel, providerId: selectedProviderId,
       createdAt: Date.now(),
@@ -605,7 +703,6 @@ export default function ChatArea({
     setMessages(prev => [...prev, userMsg, aiMsg]);
     setInput("");
     setUploadedImages([]);
-    setIsStreaming(true);
 
     // 提升作用域供 finally 中统计 token 用量
     let allMessages: Array<{ role: string; content: string; images?: string[] }> = [];
@@ -685,6 +782,8 @@ export default function ChatArea({
           messages: allMessages, model: selectedModel, providerId: selectedProviderId,
           imageModel: selectedImageModel, imageProviderId: selectedImageProviderId,
           webSearch, knowledgeItems: apiKnowledgeItems, projectId: project.id, taskId: task.id,
+          assetProjectId: selectedCanvasProjectId || undefined,
+          responseMessageId: assistantMessageId,
           memories: memories.map(m => ({ category: m.category, content: m.content })),
           deepAnalysis: isDeepAnalysis,
           reasoningEffort,
@@ -761,6 +860,7 @@ export default function ChatArea({
                 });
               } else if (parsed.type === 'image' && parsed.imageUrl) {
                 setSearchStatus(null);
+                const imageRef = readWorkspaceAssetReference(parsed.imageRef);
                 setMessages(prev => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
@@ -768,7 +868,10 @@ export default function ChatArea({
                     updated[updated.length - 1] = {
                       ...last,
                       content: last.content || '图片已生成',
-                      images: [...(last.images || []), parsed.imageUrl],
+                      images: [...(last.images || []), imageRef?.url || parsed.imageUrl],
+                      ...(imageRef?.assetVersionId && imageRef.placementId
+                        ? { imageRefs: [...(last.imageRefs || []), imageRef] }
+                        : {}),
                     };
                   }
                   return updated;
@@ -827,7 +930,7 @@ export default function ChatArea({
         totalTokens: (prev?.totalTokens || 0) + promptEst + completionEst,
       }));
     }
-  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive]);
+  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment]);
 
   // 供消息编辑后重新生成调用
   handleSendRef.current = handleSend;
@@ -1076,26 +1179,97 @@ export default function ChatArea({
     window.URL.revokeObjectURL(url);
   }, []);
 
-  const sendImagesToCanvas = useCallback((imageUrls: string[]) => {
+  const sendImagesToCanvas = useCallback(async (message: SimpleChatMessage) => {
+    const targetProjectId = selectedCanvasProjectId;
+    if (!targetProjectId || !task) {
+      setControlNotice('请先选择目标画布项目');
+      return;
+    }
     try {
-      const existing = JSON.parse(localStorage.getItem('wujie_canvas_bridge') || '[]');
-      const merged = [...existing, ...imageUrls];
-      localStorage.setItem('wujie_canvas_bridge', JSON.stringify(merged));
+      const imageUrls = message.images || [];
+      const transferredImages: WorkspaceAssetReference[] = [];
+      for (let index = 0; index < imageUrls.length; index++) {
+        const imageUrl = imageUrls[index];
+        const reference = message.imageRefs?.find(candidate => candidate.url === imageUrl);
+        if (!reference?.assetVersionId || !reference.placementId) {
+          transferredImages.push({ url: imageUrl });
+          continue;
+        }
+
+        const resolveResponse = await fetch('/api/assets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: targetProjectId,
+            assetVersionId: reference.assetVersionId,
+            placementId: reference.placementId,
+          }),
+        });
+        if (!resolveResponse.ok) throw new Error('Asset is not available in the selected project');
+        const resolved = readWorkspaceAssetReference(await resolveResponse.json());
+        if (resolved?.assetVersionId !== reference.assetVersionId) {
+          throw new Error('Asset version changed during authorization');
+        }
+
+        const transferResponse = await fetch('/api/assets/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceVersion: reference.assetVersionId,
+            targetProject: targetProjectId,
+            targetWorkspace: targetProjectId,
+            entityType: 'canvas-image',
+            entityId: `simple-chat:${task.id}:${message.id}:${index}`,
+            idempotencyKey: `simple-chat-canvas:${targetProjectId}:${task.id}:${message.id}:${index}:${reference.assetVersionId}`,
+            metadata: { source: 'standalone-chat', messageId: message.id, imageIndex: index },
+          }),
+        });
+        if (!transferResponse.ok) throw new Error('Asset transfer failed');
+        const transferred = readWorkspaceAssetReference(await transferResponse.json());
+        if (
+          !transferred?.placementId
+          || transferred.assetVersionId !== reference.assetVersionId
+        ) {
+          throw new Error('Asset transfer returned a different version');
+        }
+        transferredImages.push(transferred);
+      }
+
+      if (transferredImages.length === 0) return;
+      const rawExisting = localStorage.getItem('wujie_canvas_bridge');
+      let existingPayload: unknown = [];
+      try { existingPayload = rawExisting ? JSON.parse(rawExisting) : []; } catch {}
+      const existingProjectId = existingPayload && typeof existingPayload === 'object' && !Array.isArray(existingPayload)
+        && typeof (existingPayload as Record<string, unknown>).projectId === 'string'
+        ? (existingPayload as Record<string, unknown>).projectId as string
+        : null;
+      const existingImages = !existingProjectId || existingProjectId === targetProjectId
+        ? parseSimpleChatCanvasBridgePayload(existingPayload)
+        : [];
+      localStorage.setItem('wujie_canvas_bridge', JSON.stringify({
+        projectId: targetProjectId,
+        images: [...existingImages, ...transferredImages],
+      }));
       const toast = document.createElement('div');
       toast.className = 'fixed bottom-20 right-6 z-[9999] bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer hover:bg-blue-700 transition-colors text-sm flex items-center gap-2';
       // P3 fix: 用 DOM API 构建子节点，避免 innerHTML 拼接（低风险但非最佳实践）
       const span1 = document.createElement('span');
-      span1.textContent = `已添加 ${imageUrls.length} 张图片`;
+      span1.textContent = `已添加 ${transferredImages.length} 张图片`;
       const span2 = document.createElement('span');
       span2.className = 'underline';
       span2.textContent = '前往画布查看';
       toast.appendChild(span1);
       toast.appendChild(span2);
-      toast.onclick = () => { window.open('/', '_blank'); toast.remove(); };
+      toast.onclick = () => {
+        window.open(`/?projectId=${encodeURIComponent(targetProjectId)}`, '_blank');
+        toast.remove();
+      };
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 8000);
-    } catch { /* ignore */ }
-  }, []);
+    } catch {
+      setControlNotice('图片无法发送到所选画布');
+    }
+  }, [selectedCanvasProjectId, task]);
 
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
@@ -1444,7 +1618,7 @@ export default function ChatArea({
                       </button>
                     )}
                     {msg.images && msg.images.length > 0 && (
-                      <button onClick={() => sendImagesToCanvas(msg.images || [])}
+                      <button onClick={() => { void sendImagesToCanvas(msg); }}
                         className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors" title="添加到画布">
                         <Send className="w-3 h-3" />
                       </button>
@@ -1625,7 +1799,21 @@ export default function ChatArea({
                 });
               }} />
           </div>
-          <p className="text-xs text-muted-foreground/50 text-center mt-2 flex items-center justify-center gap-3">
+          <div className="text-xs text-muted-foreground/50 text-center mt-2 flex flex-wrap items-center justify-center gap-3">
+            <label className="inline-flex items-center gap-1">
+              <span>目标画布</span>
+              <select
+                aria-label="目标画布项目"
+                value={selectedCanvasProjectId}
+                onChange={event => setSelectedCanvasProjectId(event.target.value)}
+                className="max-w-36 bg-transparent text-foreground border border-border rounded px-1.5 py-0.5 outline-none"
+              >
+                <option value="">未选择</option>
+                {canvasProjects.map(canvasProject => (
+                  <option key={canvasProject.id} value={canvasProject.id}>{canvasProject.name}</option>
+                ))}
+              </select>
+            </label>
             <button onClick={toggleTheme} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
               {theme === 'dark' ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
               {theme === 'dark' ? '亮色模式' : '暗色模式'}
@@ -1636,7 +1824,7 @@ export default function ChatArea({
             <button onClick={() => setShowGlobalSearch(true)} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
               <Search className="w-3 h-3" />全局搜索
             </button>
-          </p>
+          </div>
         </div>
       </div>
 

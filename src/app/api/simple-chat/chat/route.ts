@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { NextRequest } from 'next/server';
 import { findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
@@ -6,6 +8,8 @@ import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { fetchWithTimeout } from '@/lib/api-helpers';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
+import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
+import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -26,12 +30,151 @@ type ChatContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string; detail: 'auto' } };
 
+interface AssetRegistrationRequest {
+  projectId: string;
+  workspaceId: string;
+  entityType: 'chat-attachment' | 'chat-result';
+  entityId: string;
+  idempotencyKey: string;
+  image: {
+    url: string;
+    name?: string;
+    mimeType?: string;
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseAssetRegistration(body: Record<string, unknown>): AssetRegistrationRequest | null {
+  if (body.assetAction !== 'register' || !isRecord(body.image)) return null;
+  const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
+  const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId.trim() : '';
+  const entityType = body.entityType === 'chat-attachment' || body.entityType === 'chat-result'
+    ? body.entityType
+    : null;
+  const entityId = typeof body.entityId === 'string' ? body.entityId.trim() : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
+  const url = typeof body.image.url === 'string' ? body.image.url.trim() : '';
+  if (!projectId || !workspaceId || !entityType || !entityId || !idempotencyKey || !url) return null;
+  return {
+    projectId,
+    workspaceId,
+    entityType,
+    entityId,
+    idempotencyKey,
+    image: {
+      url,
+      ...(typeof body.image.name === 'string' && body.image.name.trim()
+        ? { name: body.image.name.trim() }
+        : {}),
+      ...(typeof body.image.mimeType === 'string' && body.image.mimeType.trim()
+        ? { mimeType: body.image.mimeType.trim() }
+        : {}),
+    },
+  };
+}
+
+function assetRegistrationDigest(input: AssetRegistrationRequest, url: string): string {
+  return createHash('sha256').update(JSON.stringify({
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    url,
+  })).digest('hex');
+}
+
+async function persistNewChatImage(
+  request: NextRequest,
+  userId: string,
+  userRole: string | undefined,
+  imageUrl: string,
+): Promise<string> {
+  if (!imageUrl.startsWith('data:')) return imageUrl;
+  const internalHeaders = await getInternalRequestHeaders(userId, userRole === 'admin' ? 'admin' : 'user');
+  const response = await fetch(`${request.nextUrl.origin}/api/save-image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...internalHeaders },
+    body: JSON.stringify({ imageUrl }),
+  });
+  if (!response.ok) throw new Error('ASSET_MEDIA_PERSIST_FAILED');
+  const payload = await response.json() as { url?: unknown };
+  if (typeof payload.url !== 'string' || !payload.url) throw new Error('ASSET_MEDIA_PERSIST_FAILED');
+  return payload.url;
+}
+
+async function registerStandaloneChatAsset(
+  request: NextRequest,
+  actor: { id: string; role?: string },
+  input: AssetRegistrationRequest,
+): Promise<WorkspaceAssetReference> {
+  const url = await persistNewChatImage(request, actor.id, actor.role, input.image.url);
+  const service = createAssetService();
+  const created = await service.createAssetVersion({
+    actorUserId: actor.id,
+    projectId: input.projectId,
+    kind: 'image',
+    file: {
+      url,
+      availability: 'ready',
+      ...(input.image.mimeType ? { mimeType: input.image.mimeType } : {}),
+      ...(/^https?:\/\//.test(input.image.url) ? { recoverySourceUrl: input.image.url } : {}),
+    },
+    idempotencyKey: input.idempotencyKey,
+    requestDigest: assetRegistrationDigest(input, url),
+    metadata: {
+      source: 'standalone-chat',
+      entityType: input.entityType,
+      entityId: input.entityId,
+      ...(input.image.name ? { name: input.image.name } : {}),
+    },
+  });
+  const placed = await service.createWorkspacePlacement({
+    actorUserId: actor.id,
+    projectId: input.projectId,
+    assetVersionId: created.version.id,
+    workspace: 'chat',
+    workspaceId: input.workspaceId,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    metadata: {
+      source: 'standalone-chat',
+      ...(input.image.name ? { name: input.image.name } : {}),
+    },
+  });
+  return {
+    assetId: created.version.assetId,
+    assetVersionId: created.version.id,
+    placementId: placed.placement.id,
+    url: created.version.file.url,
+    ...(input.image.name ? { name: input.image.name } : {}),
+  };
+}
+
+function assetRegistrationError(error: unknown): Response {
+  if (error instanceof AssetServiceError) {
+    if (error.code === 'ASSET_NOT_FOUND') {
+      return Response.json({ error: 'ASSET_NOT_FOUND' }, { status: 404 });
+    }
+    if (error.code === 'ASSET_IDEMPOTENCY_CONFLICT' || error.code === 'ASSET_PLACEMENT_CONFLICT') {
+      return Response.json({ error: error.code }, { status: 409 });
+    }
+  }
+  if (error instanceof Error && error.message === 'ASSET_MEDIA_PERSIST_FAILED') {
+    return Response.json({ error: error.message }, { status: 502 });
+  }
+  return Response.json({ error: 'ASSET_REGISTRATION_FAILED' }, { status: 500 });
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export async function POST(request: NextRequest) {
   const body = await request.json() as {
+    assetAction?: string;
     messages?: { role: string; content: string; images?: string[] }[];
     model?: string;
     providerId?: string;
@@ -40,6 +183,13 @@ export async function POST(request: NextRequest) {
     knowledgeItems?: KnowledgeItem[];
     projectId?: string;
     taskId?: string;
+    assetProjectId?: string;
+    responseMessageId?: string;
+    workspaceId?: string;
+    entityType?: string;
+    entityId?: string;
+    idempotencyKey?: string;
+    image?: { url?: string; name?: string; mimeType?: string };
     imageModel?: string;
     imageProviderId?: string;
     memories?: string[];
@@ -70,6 +220,18 @@ export async function POST(request: NextRequest) {
     (productTypes.length > 0 && !productTypes.includes('chat'))
   )) {
     return Response.json({ error: 'You are not authorized to use intelligent chat' }, { status: 403 });
+  }
+
+  if (body.assetAction === 'register') {
+    const registration = parseAssetRegistration(body as Record<string, unknown>);
+    if (!registration) {
+      return Response.json({ error: 'ASSET_REQUEST_INVALID' }, { status: 400 });
+    }
+    try {
+      return Response.json(await registerStandaloneChatAsset(request, user, registration));
+    } catch (error) {
+      return assetRegistrationError(error);
+    }
   }
 
   // 查找提供商
@@ -190,6 +352,36 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       const send = (data: Record<string, unknown>) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      };
+      let generatedOutputIndex = 0;
+      const sendGeneratedImage = async (imageUrl: string, prompt: string): Promise<void> => {
+        const outputIndex = generatedOutputIndex++;
+        let imageRef: WorkspaceAssetReference | undefined;
+        if (body.assetProjectId && body.projectId && body.taskId && body.responseMessageId) {
+          try {
+            imageRef = await registerStandaloneChatAsset(request, user, {
+              projectId: body.assetProjectId,
+              workspaceId: `standalone-chat:${body.projectId}`,
+              entityType: 'chat-result',
+              entityId: `${body.responseMessageId}:${outputIndex}`,
+              idempotencyKey: `simple-chat-result:${body.taskId}:${body.responseMessageId}:${outputIndex}`,
+              image: { url: imageUrl, name: prompt.slice(0, 120) || 'Generated image' },
+            });
+          } catch {
+            send({
+              type: 'tool_status',
+              tool: 'registering_asset',
+              status: 'failed',
+              label: '图片已生成，但素材登记失败',
+            });
+          }
+        }
+        send({
+          type: 'image',
+          imageUrl: imageRef?.url || imageUrl,
+          prompt,
+          ...(imageRef ? { imageRef } : {}),
+        });
       };
 
       try {
@@ -355,7 +547,7 @@ export async function POST(request: NextRequest) {
               // 直接返回图片的情况（同步提供商）
               const directUrls = imgData.directImageUrls || imgData.imageUrls;
               if (imgData.success && directUrls?.length && !imgData.taskIds?.length) {
-                send({ type: 'image', imageUrl: directUrls[0], prompt: imgPrompt });
+                await sendGeneratedImage(directUrls[0], imgPrompt);
               } else if (imgData.success && imgData.taskIds?.length) {
                 const taskId = imgData.taskIds[0];
                 send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: '图片生成中...', taskId });
@@ -372,7 +564,7 @@ export async function POST(request: NextRequest) {
                   const pollData = await pollRes.json() as { status?: string; imageUrl?: string; progress?: number };
 
                   if (pollData.status === 'completed' && pollData.imageUrl) {
-                    send({ type: 'image', imageUrl: pollData.imageUrl, prompt: imgPrompt });
+                    await sendGeneratedImage(pollData.imageUrl, imgPrompt);
                     break;
                   }
                   if (pollData.status === 'failed') {

@@ -32,7 +32,7 @@ describe('simple-chat workspace return contract', () => {
   });
 
   it('opens the explicitly selected canvas project without routing through login or bare Canvas', () => {
-    expect(chatArea).toMatch(/window\.open\(\s*`\/\?projectId=\$\{encodeURIComponent\(targetProjectId\)\}`\s*,\s*['_"]blank['"]\s*\)/);
+    expect(chatArea).toMatch(/window\.open\(\s*`\/\?projectId=\$\{encodeURIComponent\(targetProjectId\)\}`\s*,\s*['"]_blank['"]\s*\)/);
     expect(chatArea).not.toContain("window.open('/', '_blank')");
     expect(simpleChatPage).not.toMatch(/router\.(?:push|replace)\(\s*['"]\/(?:login|canvas)['"]/);
     expect(simpleChatPage).not.toContain("onBackToWorkspace={() => window.location.href = '/'}");

@@ -1,6 +1,9 @@
 // ========== 项目化聊天类型定义 (对齐开发文档) ==========
 
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from '@/lib/chat-generation-controls';
+import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+
+export type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 
 export interface SimpleChatProject {
   id: string;
@@ -37,6 +40,7 @@ export interface SimpleChatMessage {
   role: 'user' | 'assistant' | 'system' | 'search';
   content: string;
   images?: string[];
+  imageRefs?: WorkspaceAssetReference[];
   attachments?: ChatAttachment[];
   artifacts?: ChatArtifact[];
   model?: string;
@@ -104,8 +108,40 @@ export interface ChatAttachment {
   name: string;
   mimeType: string;
   url?: string;
+  assetId?: string;
+  assetVersionId?: string;
+  placementId?: string;
   textContent?: string;
   summary?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function toWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | null {
+  if (typeof value === 'string') {
+    return value ? { url: value } : null;
+  }
+  if (!isRecord(value) || typeof value.url !== 'string' || !value.url) return null;
+  return {
+    url: value.url,
+    ...(typeof value.name === 'string' ? { name: value.name } : {}),
+    ...(typeof value.assetId === 'string' ? { assetId: value.assetId } : {}),
+    ...(typeof value.assetVersionId === 'string' ? { assetVersionId: value.assetVersionId } : {}),
+    ...(typeof value.placementId === 'string' ? { placementId: value.placementId } : {}),
+  };
+}
+
+export function parseSimpleChatCanvasBridgePayload(value: unknown): WorkspaceAssetReference[] {
+  const images = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.images)
+      ? value.images
+      : [];
+  return images
+    .map(toWorkspaceAssetReference)
+    .filter((reference): reference is WorkspaceAssetReference => reference !== null);
 }
 
 export interface ChatArtifact {
