@@ -223,7 +223,8 @@ describe('user-data asset graph sync route', () => {
   it('executes whole-project deletion reconciliation owner-scoped in the API transaction', async () => {
     process.env.WUJIE_ASSET_GRAPH_MODE = 'shadow';
     const sqlEvents: string[] = [];
-    const query = vi.fn(async (sql: string) => {
+    const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+      void params;
       sqlEvents.push(sql.trim().split(/\s+/).slice(0, 3).join(' '));
       if (sql.includes('SELECT data_value')) {
         return { rows: [{ data_value: JSON.stringify(0) }], rowCount: 1 };
