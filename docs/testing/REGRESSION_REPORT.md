@@ -831,3 +831,11 @@ This is **local candidate evidence only**. Checkpoint B remains open until the e
 The candidate is now proven in Coze `shadow`. Runtime commit `ff0242e2` directly parents GitHub `main@846c0c4e`; the only runtime delta is the established Coze launcher adapter. A fresh real Gpt Image 2 result persisted to `/api/serve-upload/uploads/gen-1786455914641-nimwmk.png` and visibly rendered in the selected Canvas.
 
 The generated AssetVersion is `ready` with `image/png`. The target project contains one `canvas-image` placement for that version after two Add-to-Canvas clicks, proving idempotent retry. Together with the three previously passed directions, all four Checkpoint B transfer paths pass. BUG-055 is closed; BUG-056 and BUG-057 remain open. Machine-readable evidence: `docs/testing/evidence/stage-2-checkpoint-b-cloud-2026-08-11.json`.
+
+## 2026-08-11 Stage 2 Task 7 local closure
+
+Commit `12a9026eaf35e60410f775ae59f10c5d7eabe769` implements completed-task projection to immutable asset versions across image, edit, Agent, annotation, video, 3D, workflow, embedded chat, and standalone chat completion boundaries. Replays reuse existing versions; non-completed and late results cannot create active placements; projection write failures retain the completed task and record retryable `projection_pending` audit state.
+
+The extended Task 7 suite passed `84` tests and skipped `4` PostgreSQL-only tests. The final 3D/workflow security set passed `23/23`; `pnpm ts-check`, full `pnpm test`, full ESLint (`0 errors / 957 historical warnings`), the `114/114` production build, and the protected baseline (`38/38`, zero warnings) all exited successfully. Independent review R6 returned `APPROVED` with no findings.
+
+The four skipped PostgreSQL tests remain **UNVERIFIED**, not passed, because `POSTGRES_TEST_DATABASE_URL` is unavailable. Coze `shadow` deployment and real completed-task projection evidence are also pending. `asset-v3` remains disabled.

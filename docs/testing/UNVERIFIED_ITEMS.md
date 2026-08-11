@@ -520,3 +520,13 @@
 | BUG-056 pasted reference data URL | OPEN P1 | Real provider base64 decode failure remains reproduced and unfixed. |
 | BUG-057 stale generating label | OPEN P2 | The completed result still displayed `图片生成中... 1` during the successful cloud run. |
 | Stage 2 PostgreSQL concurrency | UNVERIFIED | Six suites remain skipped until an isolated `POSTGRES_TEST_DATABASE_URL` is supplied. |
+
+## 2026-08-11 Task 7 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Completed-task projection on PostgreSQL | UNVERIFIED | Configure isolated `POSTGRES_TEST_DATABASE_URL`; run task projection, task-state, and billing concurrency suites without skips; prove one version/placement under concurrent replay. |
+| Workflow 3D billing and ownership | FIXED LOCALLY / CLOUD PENDING | Deploy `12a9026` in `shadow`; submit one real 3D workflow task; prove caller ownership, one charge, persisted provider/model, and authorized polling. |
+| Workflow 3D explicit retry | FIXED LOCALLY / CLOUD PENDING | Prove ambiguous retransmission reuses one task while a deliberate retry creates a distinct attempt without duplicate charge for either attempt. |
+| Task 7 cloud projection | UNVERIFIED | In Coze `shadow`, complete representative image/edit/video/3D tasks and verify immutable versions plus placements, idempotent replay, and `projection_pending` recovery. |
+| Task 8 lifecycle governance | NOT STARTED | Implement and verify trash, restore, media-health, and orphan governance; keep physical purge disabled until the final gate. |

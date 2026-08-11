@@ -1057,3 +1057,32 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Expected | The generating placeholder is replaced by a completed result state. |
 | Actual | The result and transfer action appear, but assistant text still says `图片生成中... 1`. |
 | Status | Open. Real browser reproduction retained for the later state-projection task. |
+
+### BUG-058: Workflow 3D task loses signed user identity and exposes unowned remote polling
+
+| Field | Detail |
+|---|---|
+| Severity | P0 |
+| Module | Workflow 3D submission, billing, polling authorization |
+| Environment | Stage 2 Task 7 local review, 2026-08-11 |
+| Reproduction | Submit an `ai-3d-model` workflow node through the signed internal API path, then inspect task ownership and poll an arbitrary provider task ID that has no local cloud-task row. |
+| Expected | Internal identity is preserved through admission and billing; polling requires an existing local task owned by the caller and uses the persisted provider/model. |
+| Actual | Cookie-only authentication reduced the workflow actor to anonymous, producing zero planned billing and anonymous task projection. The poll route accepted a missing local task and used the supplied ID with administrator-managed provider credentials. |
+| Root cause | `/api/image-to-3d` and `/api/poll-3d-task` bypassed the unified internal-aware authentication helper; polling treated local persistence as optional. |
+| Fix | Use `getRequestUser`, reject unauthenticated requests, persist the real actor, require a local owner-matched task, and resolve provider/model only from durable task facts. |
+| Regression | New security contract plus 3D admission/identity tests pass `23/23`; independent R6 review found no Critical/Important/Minor issues. |
+| Status | **CLOSED LOCALLY 2026-08-11** in `12a9026`; Coze `shadow` and real PostgreSQL evidence remain pending. |
+
+### BUG-059: Workflow 3D retry can duplicate billing or replay a failed terminal
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Workflow asynchronous submission / 3D idempotency and timeout |
+| Environment | Stage 2 Task 7 local review, 2026-08-11 |
+| Reproduction | Let a 3D provider submission exceed the workflow's former 30-second timeout, or explicitly retry a terminal workflow node. |
+| Expected | Generative 3D submission receives the long generation timeout; ambiguous retransmission reuses the same attempt key, while a user-requested retry gets a new attempt identity. |
+| Actual | 3D used the short timeout and initially had no deterministic route idempotency key. A first correction made the key stable but also reused it across explicit retries, replaying the failed terminal or causing a digest conflict. |
+| Fix | Classify `/api/image-to-3d` as a long-running generator, set the route idempotency header from `sourceEntityId`, and assign explicit retries `attempt:{n}` source identities. |
+| Regression | RED/GREEN security contract, workflow wiring, TypeScript, full Vitest, production build, and independent R6 review pass. |
+| Status | **CLOSED LOCALLY 2026-08-11** in `12a9026`; deployed provider retry/billing evidence remains pending. |

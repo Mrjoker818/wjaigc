@@ -688,3 +688,10 @@ Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json
 - BUG-055 is closed with controlled media persistence and database-backed idempotency evidence.
 - **Checkpoint B verdict: PASS.** Task 7 may begin. This does not mean Stage 2 or the whole program is release-ready.
 - BUG-056 and BUG-057 remain open. Six local PostgreSQL integration suites remain unverified without `POSTGRES_TEST_DATABASE_URL`; `asset-v3` remains prohibited and stable remains read-only.
+
+## 2026-08-11 Stage 2 Task 7 local decision
+
+- Task 7 is locally complete at `12a9026eaf35e60410f775ae59f10c5d7eabe769`; independent review R6 is approved with zero findings and all available local gates pass.
+- Completed tasks now project idempotently to immutable versions and placements without changing task/billing terminal authority. Projection failure is recoverable and does not turn a completed generation into a failed or recharged task.
+- Workflow 3D internal authentication, ownership, provider/model binding, per-attempt idempotency, and long-submit timeout are covered by permanent regressions.
+- **Stage 2 remains NOT PASSED.** Task 8, real isolated PostgreSQL concurrency, Checkpoint C cloud `shadow` validation, and final multi-workspace E2E/rollback are still incomplete. `asset-v3` must remain disabled and `stable` remains protected.
