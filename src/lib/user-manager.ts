@@ -5,6 +5,7 @@ import {
   selectCanvasPlacementSnapshot,
   serializeCanvasWorkspacePlacements,
 } from '@/lib/asset-core/canvas-adapter';
+import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
 import type { AssetGraphMode } from '@/lib/asset-core/types';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
@@ -225,7 +226,23 @@ function isValidProjectSnapshot(value: unknown, userId: string): value is Projec
 }
 
 function isValidProjectSnapshotArray(value: unknown, userId: string): value is Project[] {
-  return Array.isArray(value) && value.every((project) => isValidProjectSnapshot(project, userId));
+  if (!Array.isArray(value)) return false;
+  const projectIds = new Set<string>();
+  for (const project of value) {
+    if (!isValidProjectSnapshot(project, userId) || projectIds.has(project.id)) return false;
+    projectIds.add(project.id);
+    const imageIds = new Set<string>();
+    const placementIds = new Set<string>();
+    for (const image of project.canvasImages) {
+      if (imageIds.has(image.id)) return false;
+      imageIds.add(image.id);
+      if (image.placementId !== undefined) {
+        if (placementIds.has(image.placementId)) return false;
+        placementIds.add(image.placementId);
+      }
+    }
+  }
+  return true;
 }
 
 function isValidConflictBackup(value: unknown, userId: string): value is ProjectConflictBackup {
@@ -937,6 +954,25 @@ export class UserManager {
     );
   }
 
+  private settleProjectAdoptionCommit(envelope: ProjectAdoptionCommitEnvelope): void {
+    const settled = { ...envelope, updatedAt: Date.now() };
+    delete settled.pending;
+    try {
+      this.writeProjectAdoptionCommit(settled);
+    } catch (error) {
+      if (this.canUseStorage()) {
+        try {
+          localStorage.removeItem(
+            this.projectSyncStorageKey(PROJECT_ADOPTION_COMMIT_KEY_PREFIX, envelope.userId),
+          );
+        } catch (removeError) {
+          console.warn('[Sync] failed to clear unsettled project adoption commit:', removeError);
+        }
+      }
+      throw error;
+    }
+  }
+
   private readPersistedAuthoritativeBase(userId: string): ProjectAuthoritativeBaseEnvelope | undefined {
     if (!this.canUseStorage()) return undefined;
     const stored = localStorage.getItem(this.projectSyncStorageKey(PROJECT_AUTHORITATIVE_BASE_KEY_PREFIX, userId));
@@ -996,13 +1032,8 @@ export class UserManager {
         if (!recovery.ok) {
           console.warn('[Sync] failed to persist recovered project draft:', recovery.error);
         } else {
-          const settled = { ...envelope };
-          delete settled.pending;
           try {
-            this.writeProjectAdoptionCommit({
-              ...settled,
-              updatedAt: Date.now(),
-            });
+            this.settleProjectAdoptionCommit(envelope);
           } catch (error) {
             console.warn('[Sync] failed to settle recovered project adoption commit:', error);
           }
@@ -1116,6 +1147,12 @@ export class UserManager {
       const rollback = this.commitLocalDataOnly(true);
       if (!rollback.ok) {
         console.warn('[Sync] project draft rollback will be completed from pending envelope on reload:', rollback.error);
+      } else {
+        try {
+          this.settleProjectAdoptionCommit(prepared);
+        } catch (settleError) {
+          console.warn('[Sync] failed to settle rolled-back project adoption commit:', settleError);
+        }
       }
       throw error;
     }
@@ -1390,17 +1427,52 @@ export class UserManager {
       }
     }
     if (!Array.isArray(parsed)) return null;
-    const normalized = parsed
-      .filter((project) => !isRecord(project) || project.userId === undefined || project.userId === userId)
-      .map((project) => {
-        if (!isRecord(project)) return project;
-        const clone = structuredClone(project);
-        if (clone.canvasImages === undefined && Array.isArray(clone.images)) {
-          clone.canvasImages = clone.images;
-        }
-        if (clone.userId === undefined) clone.userId = userId;
-        return clone;
+    const normalized: Project[] = [];
+    for (const rawProject of parsed) {
+      if (!isRecord(rawProject)) return null;
+      if (rawProject.userId !== undefined) {
+        if (typeof rawProject.userId !== 'string') return null;
+        if (rawProject.userId !== userId) continue;
+      }
+      if (rawProject.settings !== undefined && !isRecord(rawProject.settings)) return null;
+      const read = readProjectSnapshot(rawProject);
+      if (!read.project || read.sourceSchemaVersion === null) return null;
+
+      const projectRecord = read.project as unknown as Record<string, unknown>;
+      const createdAt = projectRecord.createdAt === undefined ? 0 : projectRecord.createdAt;
+      const updatedAt = projectRecord.updatedAt === undefined ? createdAt : projectRecord.updatedAt;
+      const canvasImages = read.project.canvasImages.map((image, index) => {
+        const imageRecord = image as unknown as Record<string, unknown>;
+        const width = imageRecord.width === undefined
+          ? (imageRecord.originalWidth === undefined ? 1 : imageRecord.originalWidth)
+          : imageRecord.width;
+        const height = imageRecord.height === undefined
+          ? (imageRecord.originalHeight === undefined ? 1 : imageRecord.originalHeight)
+          : imageRecord.height;
+        return {
+          ...image,
+          x: imageRecord.x === undefined ? 0 : imageRecord.x,
+          y: imageRecord.y === undefined ? 0 : imageRecord.y,
+          width,
+          height,
+          originalWidth: imageRecord.originalWidth === undefined ? width : imageRecord.originalWidth,
+          originalHeight: imageRecord.originalHeight === undefined ? height : imageRecord.originalHeight,
+          rotation: imageRecord.rotation === undefined ? 0 : imageRecord.rotation,
+          zIndex: imageRecord.zIndex === undefined ? index : imageRecord.zIndex,
+          createdAt: imageRecord.createdAt === undefined ? createdAt : imageRecord.createdAt,
+        } as CanvasImage;
       });
+      normalized.push({
+        ...read.project,
+        userId,
+        name: projectRecord.name === undefined ? '' : read.project.name,
+        schemaVersion: read.sourceSchemaVersion,
+        createdAt: createdAt as number,
+        updatedAt: updatedAt as number,
+        settings: read.project.settings,
+        canvasImages,
+      });
+    }
     return isValidProjectSnapshotArray(normalized, userId) ? normalized : null;
   }
 

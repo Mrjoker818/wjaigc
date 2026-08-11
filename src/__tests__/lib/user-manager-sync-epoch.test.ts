@@ -1057,6 +1057,7 @@ describe('UserManager project sync response isolation', () => {
       canvasImages: [{ ...canvasImage('/media/invalid.png'), width: 'wide' }],
     }]],
     ['invalid project fields', [{ ...project('user-a', '/media/invalid.png'), name: 42 }]],
+    ['invalid legacy settings type', [{ ...project('user-a', '/media/invalid.png'), settings: [] }]],
   ])('rejects parseable server payload with %s', async (_label, invalidProjects) => {
     let body: Record<string, unknown> = {
       success: true,
@@ -1080,6 +1081,100 @@ describe('UserManager project sync response isolation', () => {
     expect(manager.getProjectSyncRevision()).toBe(4);
     expect(manager.getAssetGraphMode()).toBe('shadow');
     expect(manager.getProject('project-a')?.canvasImages[0]?.url).toBe('/media/base.png');
+  });
+
+  it('opens an approved legacy v1 project on fresh login by filling safe compatibility defaults', async () => {
+    const seeded = JSON.parse(storage.get('unbounded_ai_user_data')!) as {
+      userData: Record<string, { projects: unknown[] }>;
+    };
+    seeded.userData['user-a'].projects = [];
+    storage.set('unbounded_ai_user_data', JSON.stringify(seeded));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      value: [{
+        id: 'legacy-project',
+        userId: 'user-a',
+        name: 'Legacy project',
+        images: [{ id: 'legacy-image', url: '/uploads/legacy.png' }],
+      }],
+      assetGraphMode: 'legacy',
+      projectRevision: 1,
+    }), { status: 200 })));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    expect(manager.getProject('legacy-project')).toEqual(expect.objectContaining({
+      id: 'legacy-project',
+      userId: 'user-a',
+      name: 'Legacy project',
+      schemaVersion: 1,
+      createdAt: 0,
+      updatedAt: 0,
+      settings: {},
+      canvasImages: [expect.objectContaining({
+        id: 'legacy-image',
+        url: '/api/serve-upload/uploads/legacy.png',
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        originalWidth: 1,
+        originalHeight: 1,
+        rotation: 0,
+        zIndex: 0,
+        createdAt: 0,
+      })],
+    }));
+    expect(manager.getProjectSyncRevision()).toBe(1);
+  });
+
+  it.each([
+    ['project ID', [
+      project('user-a', '/media/duplicate-project-a.png', 'duplicate-project'),
+      project('user-a', '/media/duplicate-project-b.png', 'duplicate-project'),
+    ]],
+    ['image ID', [{
+      ...project('user-a', '/media/base.png'),
+      canvasImages: [
+        imageWithId('duplicate-image', '/media/duplicate-image-a.png'),
+        imageWithId('duplicate-image', '/media/duplicate-image-b.png'),
+      ],
+    }]],
+    ['placement ID', [{
+      ...project('user-a', '/media/base.png'),
+      canvasImages: [
+        imageWithId('image-a', '/media/placement-a.png', { placementId: 'duplicate-placement' }),
+        imageWithId('image-b', '/media/placement-b.png', { placementId: 'duplicate-placement' }),
+      ],
+    }]],
+  ])('rejects duplicate %s before polluting revision, base, or draft', async (_identity, duplicates) => {
+    let body: Record<string, unknown> = {
+      success: true,
+      value: [project('user-a', '/media/base.png')],
+      assetGraphMode: 'shadow',
+      projectRevision: 4,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })));
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    const commitKey = [...storage.keys()].find((key) => key.includes('project_adoption_commit'))!;
+    const acceptedCommit = storage.get(commitKey);
+
+    body = {
+      success: true,
+      value: duplicates,
+      assetGraphMode: 'asset-v3',
+      projectRevision: 5,
+    };
+
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(false);
+    expect(manager.getProjectSyncRevision()).toBe(4);
+    expect(manager.getAssetGraphMode()).toBe('shadow');
+    expect(manager.getProject('project-a')?.canvasImages[0]?.url).toBe('/media/base.png');
+    expect(storage.get(commitKey)).toBe(acceptedCommit);
   });
 
   it('rejects a GET revision older than both memory and the persisted commit', async () => {
@@ -1204,16 +1299,16 @@ describe('UserManager project sync response isolation', () => {
     await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(false);
     expect(manager.getProjectSyncRevision()).toBe(1);
     expect(manager.getProject('project-a')?.canvasImages[0]?.url).toBe('/media/local-draft.png');
+    const commitKey = [...storage.keys()].find((key) => key.includes('project_adoption_commit'))!;
+    expect(JSON.parse(storage.get(commitKey)!)).toMatchObject({ revision: 1 });
+    expect(JSON.parse(storage.get(commitKey)!).pending).toBeUndefined();
 
-    vi.stubGlobal('localStorage', {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => storage.set(key, value),
-      removeItem: (key: string) => storage.delete(key),
-    });
+    manager.updateProject('project-a', { name: 'Mutation after failed adoption' });
     vi.resetModules();
     const reloadedModule = await import('@/lib/user-manager');
     const reloaded = reloadedModule.UserManager.getInstance();
     expect(reloaded.getProject('project-a')?.canvasImages[0]?.url).toBe('/media/local-draft.png');
+    expect(reloaded.getProject('project-a')?.name).toBe('Mutation after failed adoption');
     expect(reloaded.getProjectSyncRevision()).toBe(1);
   });
 
