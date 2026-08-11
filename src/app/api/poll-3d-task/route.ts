@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
-import { getSessionUser } from '@/lib/server-auth';
+import { getRequestUser } from '@/lib/api-auth';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { recordThreeDTaskTerminal } from '@/lib/cloud-task-persistence';
 import { getCloudTaskById } from '@/lib/cloud-task-storage';
@@ -197,9 +197,33 @@ async function resolvePollRequest(body: PollRequest & { providerId?: string }): 
 
 export async function POST(request: NextRequest) {
   try {
-    let body = await resolvePollRequest(await request.json() as PollRequest & { providerId?: string });
-    // Verify session (getSessionUser throws on unauthenticated)
-    const sessionUser = await getSessionUser(request);
+    const requestUser = await getRequestUser(request);
+    if (!requestUser) {
+      return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+    }
+    const sessionUser = requestUser.user;
+    const requestedBody = await request.json() as PollRequest & { providerId?: string };
+    if (!requestedBody.taskId) {
+      return NextResponse.json({ success: false, error: 'Missing taskId' }, { status: 400 });
+    }
+
+    const persistedTask = await getCloudTaskById(requestedBody.taskId);
+    if (!persistedTask) {
+      return NextResponse.json({ success: false, error: '3D task not found' }, { status: 404 });
+    }
+    if (persistedTask.userId !== sessionUser.id) {
+      return NextResponse.json({ success: false, error: '无权访问该 3D 任务' }, { status: 403 });
+    }
+
+    let body = await resolvePollRequest({
+      ...requestedBody,
+      providerId: persistedTask.providerId,
+      provider: {
+        ...requestedBody.provider,
+        id: persistedTask.providerId,
+        model: persistedTask.model,
+      },
+    });
     if (!body) {
       return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
     }
@@ -210,13 +234,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
     }
 
-    const persistedTask = await getCloudTaskById(body.taskId);
-    if (persistedTask && sessionUser && persistedTask.userId !== sessionUser.id) {
-      return NextResponse.json({ success: false, error: '无权访问该 3D 任务' }, { status: 403 });
-    }
-    const persistenceTaskId = persistedTask?.id || body.taskId;
-    const persistedResult = persistedTask?.result || {};
-    if (persistedTask?.status === 'completed') {
+    const persistenceTaskId = persistedTask.id;
+    const persistedResult = persistedTask.result || {};
+    if (persistedTask.status === 'completed') {
       return NextResponse.json({
         success: true,
         taskId: persistenceTaskId,
@@ -228,12 +248,9 @@ export async function POST(request: NextRequest) {
       });
     }
     if (
-      persistedTask
-      && (
-        persistedTask.status === 'failed'
-        || persistedTask.status === 'cancelled'
-        || persistedTask.status === 'timeout'
-      )
+      persistedTask.status === 'failed'
+      || persistedTask.status === 'cancelled'
+      || persistedTask.status === 'timeout'
     ) {
       return NextResponse.json({
         success: true,
@@ -243,7 +260,7 @@ export async function POST(request: NextRequest) {
         replayed: true,
       });
     }
-    if (persistedTask?.remoteTaskId) {
+    if (persistedTask.remoteTaskId) {
       body = { ...body, taskId: persistedTask.remoteTaskId };
     }
 
@@ -251,7 +268,6 @@ export async function POST(request: NextRequest) {
       completedAssetUrl?: string,
       completedPreviewImageUrl?: string,
     ): Promise<void> => {
-      if (!persistedTask) return;
       const terminal = await recordThreeDTaskTerminal(persistenceTaskId, {
         status: 'completed',
         assetUrl: completedAssetUrl,
@@ -266,7 +282,6 @@ export async function POST(request: NextRequest) {
     };
 
     const persistFailedTask = async (message: string): Promise<void> => {
-      if (!persistedTask) return;
       const terminal = await settleFailedTask({
         taskId: persistenceTaskId,
         status: 'failed',

@@ -11,7 +11,7 @@ const source = readFileSync(
 describe('image-to-3d task admission contract', () => {
   it('validates the request before charging credits', () => {
     const validation = source.indexOf("const mode = body.mode || 'single-image'");
-    const charge = source.indexOf("consumeCredits(sessionUser.id, '3d_model')");
+    const charge = source.indexOf("consumeCredits(authenticatedUser.id, '3d_model')");
 
     expect(validation).toBeGreaterThan(0);
     expect(charge).toBeGreaterThan(validation);

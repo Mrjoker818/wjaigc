@@ -2103,6 +2103,8 @@ export function buildNodeExecutionRequest(
       const t3dBody: Record<string, unknown> = {
         imageUrl: config.imageUrl || '',
         model: config.model || '',
+        backend: 'api',
+        type: config.type || 'ip',
         quality: config.quality || 'standard',
         mode: t3dMode,
         texture: config.texture || 'standard',
@@ -2130,7 +2132,7 @@ export function buildNodeExecutionRequest(
       }
       if (config.providerId) t3dBody.providerId = config.providerId;
       return {
-        endpoint: '/api/poll-3d-task',
+        endpoint: '/api/image-to-3d',
         method: 'POST',
         body: t3dBody,
       };

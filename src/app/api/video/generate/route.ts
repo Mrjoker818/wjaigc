@@ -94,6 +94,8 @@ export async function POST(request: NextRequest) {
       seed,
       providerId,
       projectId,
+      sessionId,
+      messageId,
       // === 新增高级参数 ===
       cameraControl,
       motionBrush,
@@ -367,7 +369,21 @@ export async function POST(request: NextRequest) {
       negativePrompt,
       seed,
       projectId,
+      sessionId,
+      messageId,
     })).digest('hex');
+    const submissionPayload = {
+      prompt,
+      imageUrl,
+      lastFrameImageUrl,
+      referenceImages,
+      aspectRatio,
+      duration,
+      mode,
+      generateAudio,
+      negativePrompt,
+      seed,
+    };
     const migration = await executeTaskEntryMigration({
       mode: taskCoreMode,
       legacy: async () => {
@@ -375,12 +391,15 @@ export async function POST(request: NextRequest) {
           taskId,
           userId: sessionUser?.id,
           projectId: typeof projectId === 'string' ? projectId : undefined,
+          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+          messageId: typeof messageId === 'string' ? messageId : undefined,
           providerId: provider.id,
           model: pureModel,
           label: `${modeLabel} - ${modelName}`,
           creditCost: plannedCreditCost,
           deferCreditCharge: true,
           taskEntryAudit,
+          submissionPayload,
         });
         const charge = await chargeCloudTaskCredits(
           taskId,
@@ -406,6 +425,8 @@ export async function POST(request: NextRequest) {
           task: {
             id: taskId,
             projectId: typeof projectId === 'string' ? projectId : undefined,
+            sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+            messageId: typeof messageId === 'string' ? messageId : undefined,
             type: 'video',
             status: 'processing',
             providerId: provider.id,
@@ -413,7 +434,7 @@ export async function POST(request: NextRequest) {
             remoteTaskId: taskId,
             progress: 0,
             label: `${modeLabel} - ${modelName}`,
-            result: { taskEntryAudit },
+            result: { taskEntryAudit, submissionPayload },
             createdAt: now,
             updatedAt: now,
           },

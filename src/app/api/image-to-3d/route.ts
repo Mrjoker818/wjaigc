@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
-import { getSessionUser } from '@/lib/server-auth';
+import { getRequestUser } from '@/lib/api-auth';
+import type { User } from '@/lib/user-types';
 import {
   calculateConfiguredCreditCost,
   consumeCredits,
@@ -14,7 +15,10 @@ import fsSync from 'fs';
 import path from 'path';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS } from '@/lib/op-log';
-import { recordThreeDTaskSubmitted } from '@/lib/cloud-task-persistence';
+import {
+  projectPersistedCompletedTask,
+  recordThreeDTaskSubmitted,
+} from '@/lib/cloud-task-persistence';
 import {
   createTaskEntryAudit,
   executeTaskEntryMigration,
@@ -58,6 +62,11 @@ interface MultiViewImage {
 }
 
 interface ImageTo3DRequest {
+  projectId?: string;
+  sessionId?: string;
+  messageId?: string;
+  assetParentVersionIds?: string[];
+  assetProjectionMode?: 'derived' | 'revision';
   imageUrl: string;              // 主图（单图模式必填）
   images?: MultiViewImage[];     // 多图模式：多视角图片列表
   prompt?: string;               // 文生3D描述
@@ -1088,10 +1097,17 @@ export async function POST(request: NextRequest) {
   let deductedCredits = 0;
   let localTaskId: string | null = null;
   let usesAtomicBilling = false;
-  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+  let sessionUser: User | null = null;
   const finalModel = '';
   const finalProviderId = '';
   try {
+    const requestUser = await getRequestUser(request);
+    if (!requestUser) {
+      return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+    }
+    sessionUser = requestUser.user;
+    const authenticatedUser = requestUser.user;
+
     const runtimeSettings = await getRuntimeSettings();
     if (!runtimeSettings.threeDModelEnabled) {
       return NextResponse.json({ success: false, error: '3D generation is currently disabled by the administrator' }, { status: 403 });
@@ -1107,9 +1123,6 @@ export async function POST(request: NextRequest) {
     if (_validationError) {
       return NextResponse.json({ error: _validationError }, { status: 400 });
     }
-
-    // Verify session (getSessionUser throws on unauthenticated)
-    sessionUser = await getSessionUser(request);
 
     // Validate: text-to-3d needs prompt; single-image/multi-image needs imageUrl
     const mode = body.mode || 'single-image';
@@ -1137,9 +1150,7 @@ export async function POST(request: NextRequest) {
       status: DurableTaskStatus;
       result?: Record<string, unknown>;
     };
-    const plannedCreditCost = sessionUser
-      ? await calculateConfiguredCreditCost('3d_model')
-      : 0;
+    const plannedCreditCost = await calculateConfiguredCreditCost('3d_model');
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
     const requestDigest = createHash('sha256').update(JSON.stringify({
       providerId: body.provider?.id,
@@ -1155,17 +1166,34 @@ export async function POST(request: NextRequest) {
       enablePBR: body.enablePBR,
       faceCount: body.faceCount,
       pose: body.pose,
+      projectId: body.projectId,
+      sessionId: body.sessionId,
+      messageId: body.messageId,
+      assetParentVersionIds: body.assetParentVersionIds,
+      assetProjectionMode: body.assetProjectionMode,
     })).digest('hex');
+    const submissionPayload = {
+      prompt: body.prompt,
+      mode: body.mode,
+      imageUrl: body.imageUrl,
+      images: body.images,
+      quality: body.quality,
+      texture: body.texture,
+      format: body.format,
+      version: body.version,
+      enablePBR: body.enablePBR,
+      faceCount: body.faceCount,
+      pose: body.pose,
+      assetParentVersionIds: body.assetParentVersionIds || [],
+      assetProjectionMode: body.assetProjectionMode === 'revision' ? 'revision' : 'derived',
+    };
     const admission = await executeTaskEntryMigration<ThreeDAdmission>({
       mode: taskCoreMode,
       legacy: async () => {
-        if (!sessionUser) {
-          return { taskId: null, creditCost: 0, reused: false, status: 'processing' };
-        }
-        const creditResult = await consumeCredits(sessionUser.id, '3d_model');
+        const creditResult = await consumeCredits(authenticatedUser.id, '3d_model');
         if (!creditResult.success) {
           throw new InsufficientCreditsError(
-            sessionUser.id,
+            authenticatedUser.id,
             plannedCreditCost,
             creditResult.balance || 0,
           );
@@ -1180,18 +1208,22 @@ export async function POST(request: NextRequest) {
       coreV2: async () => {
         const now = Date.now();
         const result = await createBillableTask({
-          userId: sessionUser?.id || 'anonymous',
+          userId: authenticatedUser.id,
           idempotencyKey,
           requestDigest,
           creditCost: plannedCreditCost,
           task: {
             id: `3d_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+            projectId: body.projectId,
+            sessionId: body.sessionId,
+            messageId: body.messageId,
             type: '3d-model',
             status: 'processing',
             providerId: body.provider?.id,
             model: body.provider?.model,
             progress: 0,
             label: '3D model generation',
+            result: { submissionPayload },
             createdAt: now,
             updatedAt: now,
           },
@@ -1314,6 +1346,7 @@ export async function POST(request: NextRequest) {
             progress: 5,
             remoteTaskId: external.taskId,
             result: { taskEntryAudit },
+            mergeResult: true,
           });
           if (!remoteIdentityPersisted) {
             throw new Error('Unable to persist the 3D supplier task identity');
@@ -1328,23 +1361,28 @@ export async function POST(request: NextRequest) {
           if (!completionPersisted) {
             throw new Error('Unable to persist the completed 3D task');
           }
+          await projectPersistedCompletedTask(localTaskId, authenticatedUser.id);
         }
       } else if (external.taskId) {
         await recordThreeDTaskSubmitted({
           taskId: external.taskId,
-          userId: sessionUser?.id,
+          userId: authenticatedUser.id,
+          projectId: body.projectId,
+          sessionId: body.sessionId,
+          messageId: body.messageId,
           providerId: body.provider?.id,
           model: body.provider?.model,
           label: '3D model generation',
           creditCost: deductedCredits,
           creditStatus: deductedCredits > 0 ? 'pending' : 'not-applicable',
           taskEntryAudit,
+          submissionPayload,
         });
       }
       // 记录成功日志
       logOperation({
-        userId: sessionUser?.id || 'anonymous',
-        userName: sessionUser?.name || '匿名用户',
+        userId: authenticatedUser.id,
+        userName: authenticatedUser.name || '匿名用户',
         action: OP_ACTIONS.MODEL_3D_GENERATE,
         level: 'info',
         detail: `3D转换成功: backend=${body.backend}`,

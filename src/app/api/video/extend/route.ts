@@ -78,6 +78,8 @@ export async function POST(request: NextRequest) {
       cameraControl,
       seed,
       projectId,
+      sessionId,
+      messageId,
     } = body;
 
     if (!videoUrl || !model) {
@@ -253,12 +255,23 @@ export async function POST(request: NextRequest) {
         taskId,
         userId: sessionUser?.id,
         projectId: typeof projectId === 'string' ? projectId : undefined,
+        sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+        messageId: typeof messageId === 'string' ? messageId : undefined,
         type: 'video-extend',
         providerId: provider.id,
         model: pureModel,
         label: `视频延长 - ${modelName}`,
         creditCost: plannedCreditCost,
         deferCreditCharge: true,
+        submissionPayload: {
+          videoUrl,
+          prompt: rawPrompt,
+          extendDuration,
+          generateAudio,
+          negativePrompt,
+          cameraControl,
+          seed,
+        },
       });
     } catch (error) {
       console.error('[video/extend] Cloud task submit persistence failed:', error);

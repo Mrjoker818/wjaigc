@@ -107,7 +107,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: _validationError }, { status: 400 });
     }
 
-    const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt, imageModel, imageProviderId, quality, aspectRatio } = body;
+    const {
+      image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt,
+      imageModel, imageProviderId, quality, aspectRatio, projectId, sessionId,
+      messageId, assetParentVersionIds, assetProjectionMode,
+    } = body;
 
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
     let pureModel = model;
@@ -200,11 +204,18 @@ export async function POST(request: NextRequest) {
         const created = await recordAgentTaskSubmitted({
           taskId,
           userId: authResult.userId,
+          projectId: typeof projectId === 'string' ? projectId : undefined,
+          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+          messageId: typeof messageId === 'string' ? messageId : undefined,
           providerId: typeof providerId === 'string' ? providerId : undefined,
           model: typeof pureModel === 'string' ? pureModel : undefined,
           label: 'Agent processing',
           creditCost,
           creditStatus: creditCost > 0 ? 'pending' : 'not-applicable',
+          submissionPayload: {
+            assetParentVersionIds: Array.isArray(assetParentVersionIds) ? assetParentVersionIds : [],
+            assetProjectionMode: assetProjectionMode === 'revision' ? 'revision' : 'derived',
+          },
           taskEntryAudit: createTaskEntryAudit({
             entry: 'agent',
             mode: taskCoreMode,
@@ -230,6 +241,9 @@ export async function POST(request: NextRequest) {
           creditCost: plannedCreditCost,
           task: {
             id: `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            projectId: typeof projectId === 'string' ? projectId : undefined,
+            sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+            messageId: typeof messageId === 'string' ? messageId : undefined,
             type: 'agent-edit',
             status: 'processing',
             providerId: typeof providerId === 'string' ? providerId : undefined,
@@ -237,6 +251,10 @@ export async function POST(request: NextRequest) {
             progress: 5,
             label: 'Agent processing',
             result: {
+              submissionPayload: {
+                assetParentVersionIds: Array.isArray(assetParentVersionIds) ? assetParentVersionIds : [],
+                assetProjectionMode: assetProjectionMode === 'revision' ? 'revision' : 'derived',
+              },
               taskEntryAudit: createTaskEntryAudit({
                 entry: 'agent',
                 mode: 'core-v2',

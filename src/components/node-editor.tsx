@@ -1872,7 +1872,7 @@ ${contextInfo}
       const res = await fetch('/api/workflow/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start', ...payload }),
+        body: JSON.stringify({ action: 'start', projectId, ...payload }),
       });
       const data = await res.json();
       if (!res.ok || !data.executionId) {
@@ -1889,7 +1889,7 @@ ${contextInfo}
     } catch {
       setExecStatus('failed');
     }
-  }, []);
+  }, [projectId]);
 
   // P0: 级联一键运行 — 找到当前节点的整条链，从上游到下游依次执行
   const handleCascadeRun = useCallback(async (startNodeId: string) => {

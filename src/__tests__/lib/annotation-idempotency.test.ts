@@ -39,6 +39,38 @@ describe('annotation database idempotency', () => {
     expect(mocks.createCloudTask).toHaveBeenCalledTimes(1);
   });
 
+  it('persists workflow identity and projection metadata on the legacy edit task', async () => {
+    mocks.createCloudTask.mockResolvedValue(true);
+
+    await claimAnnotationEditTask({
+      userId: 'user-1',
+      idempotencyKey: 'workflow:execution-1:node-1:0',
+      requestHash: 'hash-1',
+      providerId: 'provider-1',
+      model: 'gpt-image-1',
+      projectId: 'project-1',
+      sessionId: 'workflow:project-1',
+      messageId: 'execution-1:node-1',
+      submissionPayload: {
+        assetParentVersionIds: ['source-version-1'],
+        assetProjectionMode: 'revision',
+      },
+    });
+
+    expect(mocks.createCloudTask).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-1',
+      sessionId: 'workflow:project-1',
+      messageId: 'execution-1:node-1',
+      result: {
+        requestHash: 'hash-1',
+        submissionPayload: {
+          assetParentVersionIds: ['source-version-1'],
+          assetProjectionMode: 'revision',
+        },
+      },
+    }));
+  });
+
   it('returns the existing task for a concurrent duplicate request', async () => {
     mocks.createCloudTask.mockResolvedValue(false);
     mocks.getCloudTaskForUserByIdempotencyKey.mockResolvedValue({

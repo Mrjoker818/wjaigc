@@ -30,6 +30,7 @@ describe('annotation database terminal state machine', () => {
       .find((sql) => sql.includes("status = 'completed'")) || '';
     expect(statement).toContain("status = 'completed'");
     expect(statement).toContain("WHERE id = $1 AND status = 'processing'");
+    expect(statement).toContain("COALESCE(result, '{}'::jsonb) || $2::jsonb");
   });
 
   it('refuses a late completion after another terminal state won', async () => {

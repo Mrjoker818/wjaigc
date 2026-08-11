@@ -11,6 +11,7 @@ import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { getSafeImageTypeFromDataUrl, getSafeMediaTypeFromResponse } from '@/lib/media-validation';
+import { projectCompletedTaskToAssets } from '@/lib/asset-core/task-projector';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -432,19 +433,45 @@ export async function POST(request: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
       let generatedOutputIndex = 0;
-      const sendGeneratedImage = async (imageUrl: string, prompt: string): Promise<void> => {
+      const sendGeneratedImage = async (
+        imageUrl: string,
+        prompt: string,
+        authoritativeTaskId?: string,
+      ): Promise<void> => {
         const outputIndex = generatedOutputIndex++;
         let imageRef: WorkspaceAssetReference | undefined;
         if (body.assetProjectId && body.projectId && body.taskId && body.responseMessageId) {
           try {
-            imageRef = await registerStandaloneChatAsset(user, {
-              projectId: body.assetProjectId,
-              workspaceId: `standalone-chat:${body.projectId}`,
-              entityType: 'chat-result',
-              entityId: `${body.responseMessageId}:${outputIndex}`,
-              idempotencyKey: `simple-chat-result:${body.taskId}:${body.responseMessageId}:${outputIndex}`,
-              image: { url: imageUrl, name: prompt.slice(0, 120) || 'Generated image' },
-            });
+            if (authoritativeTaskId) {
+              const projected = await projectCompletedTaskToAssets({
+                actorUserId: user.id,
+                taskId: authoritativeTaskId,
+                targetProjectId: body.assetProjectId,
+                workspace: 'chat',
+                workspaceId: `standalone-chat:${body.projectId}`,
+                sourceEntityId: body.responseMessageId,
+                parentVersionIds: [],
+              });
+              const version = projected.versions.find(item => item.file.url === imageUrl)
+                || projected.versions[0];
+              if (version) {
+                imageRef = {
+                  assetId: version.assetId,
+                  assetVersionId: version.id,
+                  url: version.file.url,
+                  name: prompt.slice(0, 120) || 'Generated image',
+                };
+              }
+            } else {
+              imageRef = await registerStandaloneChatAsset(user, {
+                projectId: body.assetProjectId,
+                workspaceId: `standalone-chat:${body.projectId}`,
+                entityType: 'chat-result',
+                entityId: `${body.responseMessageId}:${outputIndex}`,
+                idempotencyKey: `simple-chat-result:${body.taskId}:${body.responseMessageId}:${outputIndex}`,
+                image: { url: imageUrl, name: prompt.slice(0, 120) || 'Generated image' },
+              });
+            }
           } catch {
             send({
               type: 'tool_status',
@@ -617,6 +644,9 @@ export async function POST(request: NextRequest) {
                   size: imgSize,
                   count: 1,
                   submitOnly: true,
+                  projectId: body.assetProjectId,
+                  sessionId: `standalone-chat:${body.projectId}`,
+                  messageId: body.responseMessageId,
                   ...(referenceImage ? { imageUrl: referenceImage, strength: i2iStrength } : {}),
                 }),
               });
@@ -642,7 +672,7 @@ export async function POST(request: NextRequest) {
                   const pollData = await pollRes.json() as { status?: string; imageUrl?: string; progress?: number };
 
                   if (pollData.status === 'completed' && pollData.imageUrl) {
-                    await sendGeneratedImage(pollData.imageUrl, imgPrompt);
+                    await sendGeneratedImage(pollData.imageUrl, imgPrompt, taskId);
                     break;
                   }
                   if (pollData.status === 'failed') {

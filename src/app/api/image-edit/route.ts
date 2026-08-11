@@ -25,7 +25,11 @@ import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { calculateConfiguredCreditCost, consumeCredits, refundCredits } from '@/lib/credits';
 import { validateImageUrl } from '@/lib/input-validation';
 import { enhanceViaAI } from '@/lib/quality-enhance';
-import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
+import {
+  projectPersistedCompletedTask,
+  recordImageTaskSubmitted,
+  recordImageTaskTerminal,
+} from '@/lib/cloud-task-persistence';
 import { completeCloudTask, terminateCloudTaskAndRefund } from '@/lib/cloud-task-storage';
 import {
   is302AiUpscaleBaseUrl,
@@ -429,6 +433,11 @@ export const dynamic = 'force-dynamic';
 type EditAction = 'inpaint' | 'outpaint' | 'extend' | 'remove_background' | 'removebg' | 'upscale' | 'multi_angle' | 'display_decompose' | 'erase' | 'mask';
 
 interface EditRequest {
+  projectId?: string;
+  sessionId?: string;
+  messageId?: string;
+  assetParentVersionIds?: string[];
+  assetProjectionMode?: 'derived' | 'revision';
   action: EditAction;
   imageUrl: string;
   maskImage?: string; // base64 encoded mask
@@ -2531,6 +2540,8 @@ export async function POST(request: NextRequest) {
           targetWidth: targetW,
           targetHeight: targetH,
           requestedModel: requested302UpscaleModel,
+          assetParentVersionIds: body.assetParentVersionIds || [],
+          assetProjectionMode: body.assetProjectionMode === 'revision' ? 'revision' : 'derived',
         };
         const taskId = `upscale-302-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         const admission = await executeTaskEntryMigration<Requested302Admission>({
@@ -2549,6 +2560,9 @@ export async function POST(request: NextRequest) {
             const recorded = await recordImageTaskSubmitted({
           taskId,
           userId: sessionUser.id,
+          projectId: body.projectId,
+          sessionId: body.sessionId,
+          messageId: body.messageId,
           type: 'upscale',
           providerId: effectiveProviderId,
           model: requested302UpscaleModel,
@@ -2577,7 +2591,10 @@ export async function POST(request: NextRequest) {
               requestDigest,
               creditCost: deductedCredits,
               task: {
-                id: taskId,
+              id: taskId,
+              projectId: body.projectId,
+              sessionId: body.sessionId,
+              messageId: body.messageId,
                 type: 'upscale',
                 status: 'processing',
                 providerId: effectiveProviderId,
@@ -2651,12 +2668,15 @@ export async function POST(request: NextRequest) {
 
       const completeRequested302CreditTask = async (imageUrlResult: string): Promise<void> => {
         if (!upscaleCreditTaskId) return;
-        await completeCloudTask(upscaleCreditTaskId, {
+        const committed = await completeCloudTask(upscaleCreditTaskId, {
           imageUrl: imageUrlResult,
           action: 'upscale',
           providerId: effectiveProviderId,
           model: requested302UpscaleModel,
         });
+        if (committed && sessionUser) {
+          await projectPersistedCompletedTask(upscaleCreditTaskId, sessionUser.id);
+        }
       };
 
       const settleRequested302Failure = async (error: unknown) => {

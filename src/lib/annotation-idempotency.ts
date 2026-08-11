@@ -20,6 +20,10 @@ interface ClaimAnnotationEditTaskInput {
   requestHash: string;
   providerId: string;
   model: string;
+  projectId?: string;
+  sessionId?: string;
+  messageId?: string;
+  submissionPayload?: Record<string, unknown>;
 }
 
 export interface AnnotationEditTaskClaim {
@@ -51,18 +55,28 @@ export async function claimAnnotationEditTask({
   requestHash,
   providerId,
   model,
+  projectId,
+  sessionId,
+  messageId,
+  submissionPayload,
 }: ClaimAnnotationEditTaskInput): Promise<AnnotationEditTaskClaim> {
   const now = Date.now();
   const taskId = `edit_${randomUUID()}`;
   const inserted = await createCloudTask({
     id: taskId,
     userId,
+    projectId,
+    sessionId,
+    messageId,
     type: 'annotation-edit',
     status: 'pending',
     providerId,
     model,
     progress: 0,
-    result: { requestHash },
+    result: {
+      requestHash,
+      ...(submissionPayload ? { submissionPayload } : {}),
+    },
     creditStatus: 'not-applicable',
     creditCost: 0,
     idempotencyKey,

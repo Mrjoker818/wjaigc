@@ -3,12 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   createCloudTask,
   getCloudTaskById,
+  projectCompletedTaskToAssets,
+  recordTaskProjectionCompleted,
+  recordTaskLateResultAudit,
+  recordTaskProjectionPending,
   transitionCloudTaskStatus,
   transitionTask,
   updateCloudTask,
 } = vi.hoisted(() => ({
   createCloudTask: vi.fn(),
   getCloudTaskById: vi.fn(),
+  projectCompletedTaskToAssets: vi.fn(),
+  recordTaskProjectionCompleted: vi.fn(),
+  recordTaskLateResultAudit: vi.fn(),
+  recordTaskProjectionPending: vi.fn(),
   transitionCloudTaskStatus: vi.fn(),
   transitionTask: vi.fn(),
   updateCloudTask: vi.fn(),
@@ -21,6 +29,12 @@ vi.mock('@/lib/cloud-task-storage', () => ({
   updateCloudTask,
 }));
 vi.mock('@/lib/task-core/task-service', () => ({ transitionTask }));
+vi.mock('@/lib/asset-core/task-projector', () => ({
+  projectCompletedTaskToAssets,
+  recordTaskProjectionCompleted,
+  recordTaskLateResultAudit,
+  recordTaskProjectionPending,
+}));
 
 import {
   recordImageTaskSubmitted,
@@ -38,6 +52,13 @@ describe('cloud-task-persistence', () => {
   beforeEach(() => {
     createCloudTask.mockReset().mockResolvedValue(true);
     getCloudTaskById.mockReset();
+    projectCompletedTaskToAssets.mockReset().mockResolvedValue({
+      versions: [{ id: 'version-result-1' }],
+      reused: false,
+    });
+    recordTaskProjectionCompleted.mockReset().mockResolvedValue(undefined);
+    recordTaskLateResultAudit.mockReset().mockResolvedValue(undefined);
+    recordTaskProjectionPending.mockReset().mockResolvedValue(undefined);
     transitionCloudTaskStatus.mockReset();
     transitionTask.mockReset().mockResolvedValue({
       transitioned: true,
@@ -172,6 +193,42 @@ describe('cloud-task-persistence', () => {
   });
 
   it('records a completed image result as a terminal cloud task state', async () => {
+    getCloudTaskById.mockResolvedValueOnce({
+      id: 'remote-task-1',
+      userId: 'user-a',
+      projectId: 'project-a',
+      sessionId: '',
+      messageId: '',
+      status: 'processing',
+      result: {
+        submissionPayload: {
+          prompt: 'preserve me',
+          referenceImages: ['source-a'],
+        },
+      },
+    });
+    transitionTask.mockResolvedValueOnce({
+      transitioned: true,
+      task: {
+        id: 'remote-task-1',
+        userId: 'user-a',
+        projectId: 'project-a',
+        sessionId: '',
+        messageId: '',
+        status: 'completed',
+        result: {
+          submissionPayload: {
+            prompt: 'preserve me',
+            referenceImages: ['source-a'],
+          },
+          imageUrl: '/uploads/result.png',
+          imageUrls: ['/uploads/result.png'],
+          maskUrl: '/uploads/mask.png',
+          maskUrls: ['/uploads/mask.png'],
+        },
+      },
+    });
+
     await recordImageTaskTerminal('remote-task-1', {
       status: 'completed',
       imageUrl: '/uploads/result.png',
@@ -185,13 +242,130 @@ describe('cloud-task-persistence', () => {
       to: 'completed',
       creditStatus: 'charged',
       result: {
+        submissionPayload: {
+          prompt: 'preserve me',
+          referenceImages: ['source-a'],
+        },
         imageUrl: '/uploads/result.png',
         imageUrls: ['/uploads/result.png'],
         maskUrl: '/uploads/mask.png',
         maskUrls: ['/uploads/mask.png'],
       },
     }));
+    expect(projectCompletedTaskToAssets).toHaveBeenCalledWith({
+      actorUserId: 'user-a',
+      taskId: 'remote-task-1',
+      targetProjectId: 'project-a',
+      workspace: 'canvas',
+      sourceEntityId: 'remote-task-1',
+      parentVersionIds: [],
+    });
+    expect(recordTaskProjectionCompleted).toHaveBeenCalledWith({
+      actorUserId: 'user-a',
+      taskId: 'remote-task-1',
+      versionIds: ['version-result-1'],
+    });
     expect(updateCloudTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps the completed terminal authoritative and marks projection_pending on asset failure', async () => {
+    getCloudTaskById.mockResolvedValueOnce({
+      id: 'remote-task-projection-failure',
+      userId: 'user-a',
+      projectId: 'project-a',
+      sessionId: '',
+      messageId: '',
+      status: 'processing',
+      result: { submissionPayload: { prompt: 'keep terminal completed' } },
+    });
+    transitionTask.mockResolvedValueOnce({
+      transitioned: true,
+      task: {
+        id: 'remote-task-projection-failure',
+        userId: 'user-a',
+        projectId: 'project-a',
+        sessionId: '',
+        messageId: '',
+        status: 'completed',
+        result: {
+          submissionPayload: { prompt: 'keep terminal completed' },
+          imageUrl: '/uploads/result.png',
+          imageUrls: ['/uploads/result.png'],
+        },
+      },
+    });
+    projectCompletedTaskToAssets.mockRejectedValueOnce(new Error('asset database unavailable'));
+
+    const terminal = await recordImageTaskTerminal('remote-task-projection-failure', {
+      status: 'completed',
+      imageUrl: '/uploads/result.png',
+      creditStatus: 'charged',
+    });
+
+    expect(terminal?.task.status).toBe('completed');
+    expect(recordTaskProjectionPending).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: 'user-a',
+      taskId: 'remote-task-projection-failure',
+      reason: 'asset database unavailable',
+    }));
+    expect(transitionTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fail an already completed task when the projection-pending audit cannot be written', async () => {
+    getCloudTaskById.mockResolvedValueOnce({
+      id: 'remote-task-pending-write-failure',
+      userId: 'user-a',
+      projectId: 'project-a',
+      status: 'processing',
+      result: {},
+    });
+    transitionTask.mockResolvedValueOnce({
+      transitioned: true,
+      task: {
+        id: 'remote-task-pending-write-failure',
+        userId: 'user-a',
+        projectId: 'project-a',
+        status: 'completed',
+        result: { imageUrl: '/result.png' },
+      },
+    });
+    projectCompletedTaskToAssets.mockRejectedValueOnce(new Error('projection failed'));
+    recordTaskProjectionPending.mockRejectedValueOnce(new Error('database unavailable'));
+
+    await expect(recordImageTaskTerminal('remote-task-pending-write-failure', {
+      status: 'completed',
+      imageUrl: '/result.png',
+    })).resolves.toMatchObject({ transitioned: true });
+  });
+
+  it('isolates a late completed URL when another terminal state won the race', async () => {
+    getCloudTaskById.mockResolvedValueOnce({
+      id: 'remote-task-1',
+      userId: 'user-a',
+      status: 'processing',
+      result: {},
+    });
+    transitionTask.mockResolvedValueOnce({
+      transitioned: false,
+      task: {
+        id: 'remote-task-1',
+        userId: 'user-a',
+        status: 'cancelled',
+        result: {},
+      },
+    });
+
+    await recordImageTaskTerminal('remote-task-1', {
+      status: 'completed',
+      imageUrl: '/late-result.png',
+    });
+
+    expect(recordTaskLateResultAudit).toHaveBeenCalledWith({
+      actorUserId: 'user-a',
+      taskId: 'remote-task-1',
+      terminalStatus: 'cancelled',
+      urls: ['/late-result.png'],
+    });
   });
 
   it('persists all batch image and mask URLs while keeping the first item compatible', async () => {
@@ -360,6 +534,7 @@ describe('cloud-task-persistence', () => {
         thirdPartyTaskId: 'supplier-video-task-9',
         usedImagesEndpoint: true,
       },
+      mergeResult: true,
     }));
     expect(JSON.stringify(updateCloudTask.mock.calls[0][1])).not.toContain('apiKey');
   });
@@ -368,15 +543,25 @@ describe('cloud-task-persistence', () => {
     await recordThreeDTaskSubmitted({
       taskId: 'three-d-task-1',
       userId: 'user-a',
+      projectId: 'project-a',
+      sessionId: 'workflow:project-a',
+      messageId: 'execution-a:node-3d',
       providerId: 'provider-3d',
       model: 'hunyuan-3d',
+      submissionPayload: { prompt: 'product turntable', assetProjectionMode: 'derived' },
     });
 
     expect(createCloudTask).toHaveBeenCalledWith(expect.objectContaining({
       id: 'three-d-task-1',
+      projectId: 'project-a',
+      sessionId: 'workflow:project-a',
+      messageId: 'execution-a:node-3d',
       type: '3d-model',
       providerId: 'provider-3d',
       model: 'hunyuan-3d',
+      result: {
+        submissionPayload: { prompt: 'product turntable', assetProjectionMode: 'derived' },
+      },
     }));
     expect(JSON.stringify(createCloudTask.mock.calls[0][0])).not.toContain('apiKey');
 
@@ -395,6 +580,44 @@ describe('cloud-task-persistence', () => {
       },
     }));
     expect(updateCloudTask).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['video', () => recordVideoTaskTerminal('video-task-project', {
+      status: 'completed',
+      videoUrl: '/uploads/result.mp4',
+    })],
+    ['3d', () => recordThreeDTaskTerminal('three-d-task-project', {
+      status: 'completed',
+      assetUrl: '/uploads/result.glb',
+    })],
+  ] as const)('projects a completed %s task after the durable transition wins', async (_kind, complete) => {
+    getCloudTaskById.mockResolvedValueOnce({
+      id: 'terminal-task',
+      userId: 'user-a',
+      projectId: 'project-a',
+      status: 'processing',
+      result: {},
+    });
+    transitionTask.mockResolvedValueOnce({
+      transitioned: true,
+      task: {
+        id: 'terminal-task',
+        userId: 'user-a',
+        projectId: 'project-a',
+        status: 'completed',
+        result: { videoUrl: '/uploads/result.mp4', assetUrl: '/uploads/result.glb' },
+      },
+    });
+
+    await complete();
+
+    expect(projectCompletedTaskToAssets).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: 'user-a',
+      targetProjectId: 'project-a',
+      workspace: 'canvas',
+    }));
+    expect(recordTaskProjectionCompleted).toHaveBeenCalled();
   });
 
   it.each([

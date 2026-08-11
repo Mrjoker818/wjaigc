@@ -48,6 +48,7 @@ import { createBillableTask } from '@/lib/task-core/billing-service';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import type { DurableTaskStatus } from '@/lib/task-core/task-state';
 import { getRequestId } from '@/lib/request-id';
+import { projectPersistedCompletedTask } from '@/lib/cloud-task-persistence';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
@@ -72,6 +73,11 @@ interface EditTaskResult {
 }
 
 interface EditRequestBody {
+  projectId?: string;
+  sessionId?: string;
+  messageId?: string;
+  assetParentVersionIds?: string[];
+  assetProjectionMode?: 'derived' | 'revision';
   image?: string;
   prompt?: string;
   mask?: string;
@@ -371,6 +377,9 @@ export async function POST(request: NextRequest) {
       llmModelId,    // 可选，LLM辅助模型ID
       llmProviderId, // 可选，LLM辅助模型提供商ID
       referenceImages, // 可选，参考图URL数组（多图模式）
+      projectId, sessionId, messageId,
+      assetParentVersionIds,
+      assetProjectionMode,
     } = parsedRequestBody;
     const usableReferenceImages = (referenceImages || [])
       .map((reference) => typeof reference === 'string' ? reference : reference.url || '')
@@ -497,6 +506,13 @@ export async function POST(request: NextRequest) {
             requestHash,
             providerId: actualProviderId,
             model: pureModel,
+            projectId,
+            sessionId,
+            messageId,
+            submissionPayload: {
+              assetParentVersionIds: assetParentVersionIds || [],
+              assetProjectionMode: assetProjectionMode === 'revision' ? 'revision' : 'derived',
+            },
           });
           claimedTaskId = claim.taskId;
           reused = !claim.owner;
@@ -549,13 +565,22 @@ export async function POST(request: NextRequest) {
           creditCost: plannedCreditCost,
           task: {
             id: `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            projectId,
+            sessionId,
+            messageId,
             type: 'edit',
             status: 'processing',
             providerId: actualProviderId || undefined,
             model: pureModel,
             progress: 0,
             label: '语言修图',
-            result: { requestHash },
+            result: {
+              requestHash,
+              submissionPayload: {
+                assetParentVersionIds: assetParentVersionIds || [],
+                assetProjectionMode: assetProjectionMode === 'revision' ? 'revision' : 'derived',
+              },
+            },
             createdAt: now,
             updatedAt: now,
           },
@@ -620,6 +645,7 @@ export async function POST(request: NextRequest) {
           requestHash: createAnnotationRequestHash(parsedRequestBody),
           taskEntryAudit,
         },
+        mergeResult: true,
       });
     }
     setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
@@ -661,6 +687,7 @@ export async function POST(request: NextRequest) {
             ...result,
           });
           if (!committed) return false;
+          await projectPersistedCompletedTask(taskId, authResult.userId);
         }
         updateTaskProgress(taskId, { status: 'completed', progress: 100 });
         setEditTask(taskId, {

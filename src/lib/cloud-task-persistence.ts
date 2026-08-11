@@ -1,5 +1,7 @@
 import {
   createCloudTask,
+  getCloudTaskById,
+  getCloudTaskForUser,
   updateCloudTask,
   type CloudTask,
   type CloudTaskCreditStatus,
@@ -15,6 +17,13 @@ import type {
 } from '@/lib/task-core/task-state';
 import { normalizeTaskError } from '@/lib/task-core/task-error';
 import type { TaskEntryAudit } from '@/lib/task-core/entry-migration';
+import {
+  projectCompletedTaskToAssets,
+  recordTaskProjectionCompleted,
+  recordTaskLateResultAudit,
+  recordTaskProjectionPending,
+  type ProjectCompletedTaskInput,
+} from '@/lib/asset-core/task-projector';
 
 interface ImageTaskSubmission {
   taskId: string;
@@ -56,6 +65,8 @@ interface VideoTaskSubmission {
   taskId: string;
   userId?: string;
   projectId?: string;
+  sessionId?: string;
+  messageId?: string;
   type?: string;
   providerId?: string;
   model?: string;
@@ -63,6 +74,7 @@ interface VideoTaskSubmission {
   creditCost?: number;
   deferCreditCharge?: boolean;
   taskEntryAudit?: TaskEntryAudit;
+  submissionPayload?: Record<string, unknown>;
 }
 
 interface VideoTaskTerminal {
@@ -81,12 +93,16 @@ interface VideoTaskRemotePolling {
 interface ThreeDTaskSubmission {
   taskId: string;
   userId?: string;
+  projectId?: string;
+  sessionId?: string;
+  messageId?: string;
   providerId?: string;
   model?: string;
   label?: string;
   creditCost?: number;
   creditStatus?: CloudTaskCreditStatus;
   taskEntryAudit?: TaskEntryAudit;
+  submissionPayload?: Record<string, unknown>;
 }
 
 interface ThreeDTaskTerminal {
@@ -116,6 +132,7 @@ async function persistTerminalTask(
   taskId: string,
   input: PersistTerminalTaskInput,
 ): Promise<TransitionTaskResult> {
+  const current = await getCloudTaskById(taskId);
   const creditStatus = input.creditStatus || 'pending';
   const error = input.error
     ? normalizeTaskError(
@@ -134,10 +151,146 @@ async function persistTerminalTask(
       ? ['processing']
       : FAILURE_TERMINAL_FROM,
     to: input.status,
-    result: input.result,
+    result: input.result === undefined
+      ? current?.result
+      : { ...(current?.result || {}), ...input.result },
     error,
     creditStatus,
   });
+}
+
+interface ProjectableTask {
+  id: string;
+  userId: string;
+  projectId?: string;
+  sessionId?: string;
+  messageId?: string;
+  status: string;
+  result?: Record<string, unknown>;
+}
+
+function taskProjectionTarget(task: ProjectableTask): {
+  workspace: 'canvas' | 'workflow' | 'chat';
+  workspaceId?: string;
+  sourceEntityId: string;
+  parentVersionIds: string[];
+  projectionMode?: 'derived' | 'revision';
+} {
+  const payload = task.result?.submissionPayload;
+  const submission = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {};
+  const explicitWorkspace = submission.assetWorkspace;
+  const workspace = explicitWorkspace === 'workflow' || explicitWorkspace === 'chat'
+    ? explicitWorkspace
+    : task.sessionId?.startsWith('workflow:')
+      ? 'workflow'
+      : task.sessionId?.startsWith('standalone-chat:')
+        ? 'chat'
+        : 'canvas';
+  const explicitWorkspaceId = typeof submission.assetWorkspaceId === 'string'
+    ? submission.assetWorkspaceId
+    : '';
+  const workspaceId = explicitWorkspaceId
+    || (workspace !== 'canvas' ? task.sessionId || '' : '');
+  const sourceEntityId = typeof submission.assetSourceEntityId === 'string'
+    && submission.assetSourceEntityId
+    ? submission.assetSourceEntityId
+    : task.messageId || task.id;
+  const parentVersionIds = Array.isArray(submission.assetParentVersionIds)
+    ? submission.assetParentVersionIds.filter(
+        (id): id is string => typeof id === 'string' && id.length > 0,
+      )
+    : [];
+  const projectionMode = submission.assetProjectionMode === 'revision'
+    ? 'revision' as const
+    : undefined;
+  return {
+    workspace,
+    ...(workspaceId ? { workspaceId } : {}),
+    sourceEntityId,
+    parentVersionIds,
+    ...(projectionMode ? { projectionMode } : {}),
+  };
+}
+
+async function recordProjectionPendingSafely(input: {
+  actorUserId: string;
+  taskId: string;
+  reason: string;
+  retry: Omit<ProjectCompletedTaskInput, 'actorUserId' | 'taskId'>;
+}): Promise<void> {
+  try {
+    await recordTaskProjectionPending(input);
+  } catch (pendingError) {
+    console.error('[task-projection] Unable to persist projection_pending audit', pendingError);
+  }
+}
+
+async function projectCompletedTask(task: ProjectableTask): Promise<void> {
+  if (task.status !== 'completed' || !task.userId || !task.projectId) {
+    return;
+  }
+  const target = taskProjectionTarget(task);
+  try {
+    const projected = await projectCompletedTaskToAssets({
+      actorUserId: task.userId,
+      taskId: task.id,
+      targetProjectId: task.projectId,
+      ...target,
+    });
+    await recordTaskProjectionCompleted({
+      actorUserId: task.userId,
+      taskId: task.id,
+      versionIds: projected.versions.map((version) => version.id),
+    });
+  } catch (error) {
+    await recordProjectionPendingSafely({
+      actorUserId: task.userId,
+      taskId: task.id,
+      reason: error instanceof Error ? error.message : String(error),
+      retry: {
+        targetProjectId: task.projectId,
+        ...target,
+        projectionMode: target.projectionMode ?? 'derived',
+      },
+    });
+  }
+}
+
+async function reconcileCompletedProjection(
+  terminal: TransitionTaskResult,
+  urls: string[],
+): Promise<void> {
+  if (terminal.transitioned) {
+    await projectCompletedTask(terminal.task);
+    return;
+  }
+  if (
+    urls.length === 0
+    || !['failed', 'cancelled', 'timeout'].includes(terminal.task.status)
+  ) {
+    return;
+  }
+  try {
+    await recordTaskLateResultAudit({
+      actorUserId: terminal.task.userId,
+      taskId: terminal.task.id,
+      terminalStatus: terminal.task.status as 'failed' | 'cancelled' | 'timeout',
+      urls,
+    });
+  } catch (auditError) {
+    console.error('[task-projection] Unable to persist late-result audit', auditError);
+  }
+}
+
+export async function projectPersistedCompletedTask(
+  taskId: string,
+  actorUserId: string,
+): Promise<void> {
+  const task = await getCloudTaskForUser(taskId, actorUserId);
+  if (!task || task.status !== 'completed') return;
+  await projectCompletedTask(task);
 }
 
 export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Promise<boolean> {
@@ -208,20 +361,32 @@ export async function recordImageTaskTerminal(
       }
     : undefined;
 
-  return persistTerminalTask(taskId, {
+  const terminal = await persistTerminalTask(taskId, {
     status: input.status,
     result,
     error: input.error,
     creditStatus: input.creditStatus,
   });
+  if (input.status === 'completed') {
+    await reconcileCompletedProjection(terminal, imageUrls);
+  }
+  return terminal;
 }
 
 export async function recordVideoTaskSubmitted(input: VideoTaskSubmission): Promise<void> {
   const now = Date.now();
+  const result = input.taskEntryAudit || input.submissionPayload
+    ? {
+        ...(input.taskEntryAudit ? { taskEntryAudit: input.taskEntryAudit } : {}),
+        ...(input.submissionPayload ? { submissionPayload: input.submissionPayload } : {}),
+      }
+    : undefined;
   await createCloudTask({
     id: input.taskId,
     userId: input.userId || 'anonymous',
     projectId: input.projectId,
+    sessionId: input.sessionId,
+    messageId: input.messageId,
     type: input.type || 'video',
     status: input.deferCreditCharge ? 'pending' : 'processing',
     providerId: input.providerId,
@@ -229,7 +394,7 @@ export async function recordVideoTaskSubmitted(input: VideoTaskSubmission): Prom
     remoteTaskId: input.taskId,
     progress: input.deferCreditCharge ? 0 : 5,
     label: input.label || 'Video generation',
-    result: input.taskEntryAudit ? { taskEntryAudit: input.taskEntryAudit } : undefined,
+    result,
     creditStatus: input.deferCreditCharge ? 'not-applicable' : undefined,
     creditCost: input.deferCreditCharge ? 0 : input.creditCost,
     createdAt: now,
@@ -249,6 +414,7 @@ export async function recordVideoTaskRemotePolling(
       thirdPartyTaskId: input.remoteTaskId,
       usedImagesEndpoint: input.usedImagesEndpoint === true,
     },
+    mergeResult: true,
   });
 }
 
@@ -260,19 +426,32 @@ export async function recordVideoTaskTerminal(
     ? { videoUrl: input.videoUrl, imageUrl: input.imageUrl || '' }
     : undefined;
 
-  return persistTerminalTask(taskId, {
+  const terminal = await persistTerminalTask(taskId, {
     status: input.status,
     result,
     error: input.error,
     creditStatus: input.creditStatus,
   });
+  if (input.status === 'completed') {
+    await reconcileCompletedProjection(terminal, input.videoUrl ? [input.videoUrl] : []);
+  }
+  return terminal;
 }
 
 export async function recordThreeDTaskSubmitted(input: ThreeDTaskSubmission): Promise<void> {
   const now = Date.now();
+  const result = input.taskEntryAudit || input.submissionPayload
+    ? {
+        ...(input.taskEntryAudit ? { taskEntryAudit: input.taskEntryAudit } : {}),
+        ...(input.submissionPayload ? { submissionPayload: input.submissionPayload } : {}),
+      }
+    : undefined;
   await createCloudTask({
     id: input.taskId,
     userId: input.userId || 'anonymous',
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    messageId: input.messageId,
     type: '3d-model',
     status: 'processing',
     providerId: input.providerId,
@@ -280,7 +459,7 @@ export async function recordThreeDTaskSubmitted(input: ThreeDTaskSubmission): Pr
     remoteTaskId: input.taskId,
     progress: 5,
     label: input.label || '3D model generation',
-    result: input.taskEntryAudit ? { taskEntryAudit: input.taskEntryAudit } : undefined,
+    result,
     creditCost: input.creditCost,
     creditStatus: input.creditStatus,
     createdAt: now,
@@ -296,12 +475,16 @@ export async function recordThreeDTaskTerminal(
     ? { assetUrl: input.assetUrl, previewImageUrl: input.previewImageUrl || '' }
     : undefined;
 
-  return persistTerminalTask(taskId, {
+  const terminal = await persistTerminalTask(taskId, {
     status: input.status,
     result,
     error: input.error,
     creditStatus: input.creditStatus,
   });
+  if (input.status === 'completed') {
+    await reconcileCompletedProjection(terminal, input.assetUrl ? [input.assetUrl] : []);
+  }
+  return terminal;
 }
 
 export async function recordCloudTaskCancelled(

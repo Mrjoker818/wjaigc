@@ -78,6 +78,7 @@ export interface UpdateCloudTaskInput {
   progress?: number;
   label?: string;
   result?: Record<string, unknown>;
+  mergeResult?: boolean;
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
   creditCost?: number;
@@ -624,7 +625,12 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.status !== undefined) { sets.push(`status = $${index++}`); params.push(input.status); }
   if (input.progress !== undefined) { sets.push(`progress = $${index++}`); params.push(input.progress); }
   if (input.label !== undefined) { sets.push(`label = $${index++}`); params.push(input.label); }
-  if (input.result !== undefined) { sets.push(`result = $${index++}`); params.push(JSON.stringify(input.result)); }
+  if (input.result !== undefined) {
+    sets.push(input.mergeResult
+      ? `result = COALESCE(result, '{}'::jsonb) || $${index++}::jsonb`
+      : `result = $${index++}`);
+    params.push(JSON.stringify(input.result));
+  }
   if (input.error !== undefined) { sets.push(`error = $${index++}`); params.push(input.error); }
   if (input.creditStatus !== undefined) { sets.push(`credit_status = $${index++}`); params.push(input.creditStatus); }
   if (input.creditCost !== undefined) { sets.push(`credit_cost = $${index++}`); params.push(input.creditCost); }
@@ -746,7 +752,7 @@ export async function completeCloudTask(
     UPDATE cloud_tasks
     SET status = 'completed',
         progress = 100,
-        result = $2,
+        result = COALESCE(result, '{}'::jsonb) || $2::jsonb,
         error = '',
         credit_status = CASE
           WHEN credit_status = 'pending' THEN 'charged'

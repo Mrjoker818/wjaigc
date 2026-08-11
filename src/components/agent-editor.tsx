@@ -6,6 +6,8 @@ import { useProgressTimer } from '@/hooks/useProgressTimer';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
 
 interface AgentEditorProps {
+  projectId?: string;
+  sourceVersionId?: string;
   imageUrl?: string;
   imagePrompt?: string;
   imageWidth?: number;
@@ -78,6 +80,8 @@ function translateErrorFrontend(msg: string): string {
 }
 
 export function AgentEditor({
+  projectId,
+  sourceVersionId,
   imageUrl,
   imagePrompt,
   imageWidth,
@@ -287,6 +291,9 @@ export function AgentEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image: imageUrl || '',
+          projectId,
+          assetParentVersionIds: sourceVersionId ? [sourceVersionId] : [],
+          assetProjectionMode: sourceVersionId ? 'revision' : 'derived',
           prompt: prompt.trim(),
           imagePrompt: imagePrompt || '',
           maskDataUrl: '',

@@ -55,8 +55,9 @@ describe('workflow annotation internal authentication wiring', () => {
   });
 
   it('reuses signed workflow headers while polling an asynchronous task', () => {
+    expect(source).toContain("const pollEndpoint = isThreeDTask ? '/api/poll-3d-task' : '/api/poll-task'");
     expect(source).toMatch(
-      /fetch\(`http:\/\/localhost:\$\{port\}\/api\/poll-task`, \{[\s\S]+?headers: fetchOptions\.headers/,
+      /fetch\(`http:\/\/localhost:\$\{port\}\$\{pollEndpoint\}`, \{[\s\S]+?headers: fetchOptions\.headers/,
     );
   });
 });

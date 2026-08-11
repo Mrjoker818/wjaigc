@@ -211,7 +211,15 @@ const versionSelect = `
   SELECT v.*, COALESCE(
     array_agg(p.parent_version_id ORDER BY p.parent_order)
       FILTER (WHERE p.parent_version_id IS NOT NULL),
-    '{}'::text[]
+    ARRAY(
+      SELECT jsonb_array_elements_text(
+        CASE
+          WHEN jsonb_typeof(v.metadata->'sourceVersionIds') = 'array'
+          THEN v.metadata->'sourceVersionIds'
+          ELSE '[]'::jsonb
+        END
+      )
+    )
   ) AS parent_version_ids
   FROM wujie_asset_versions v
   LEFT JOIN wujie_asset_version_parents p ON p.version_id = v.id

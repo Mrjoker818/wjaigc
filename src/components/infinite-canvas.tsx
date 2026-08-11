@@ -8745,6 +8745,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          projectId: projectId || brandProject?.id,
+          assetParentVersionIds: sourceImage?.assetVersionId ? [sourceImage.assetVersionId] : [],
+          assetProjectionMode: 'derived',
           imageUrl: singleImageUrl,
           mode: threeDMode,
           images: threeDMode === 'multi-image' ? threeDMultiImages : undefined,
@@ -8960,7 +8963,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       );
       setThreeDProgress(null);
     }
-  }, [getActiveImageData, threeDSingleImageUrl, selectedImageData, threeDMode, threeDPrompt, threeDMultiImages, getCurrentModel, getThreeDProviders, threeDBackend, threeDProviderId, createProcessingFrameRightOf, updateProcessingFrame, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, completeProcessingFrame, toast]);
+  }, [brandProject?.id, projectId, getActiveImageData, threeDSingleImageUrl, selectedImageData, threeDMode, threeDPrompt, threeDMultiImages, getCurrentModel, getThreeDProviders, threeDBackend, threeDProviderId, createProcessingFrameRightOf, updateProcessingFrame, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, completeProcessingFrame, toast]);
 
   // 4. ERASE - floating window mode
   const handleOpenErase = useCallback(() => {
@@ -16067,6 +16070,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         {showAgentEditor && (
           <Suspense fallback={null}>
             <AgentEditor
+              projectId={projectId || brandProject?.id}
+              sourceVersionId={agentEditImage?.assetVersionId}
               imageUrl={agentEditImage?.url}
               imagePrompt={agentEditImage?.prompt}
               isMonochrome={isMonochrome}

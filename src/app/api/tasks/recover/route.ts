@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { listCloudTasks } from '@/lib/cloud-task-storage';
 import { getSessionUser } from '@/lib/server-auth';
 import { getTaskRecoveryBackoff } from '@/lib/task-core/task-abort';
+import { projectPersistedCompletedTask } from '@/lib/cloud-task-persistence';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,6 +46,12 @@ export async function GET(request: NextRequest) {
   const includeLegacyUnassigned = request.nextUrl.searchParams.get('includeLegacyUnassigned') === '1';
   const allTasks = await listCloudTasks({ userId: user.id, limit: 100 });
   const projectTasks = allTasks.filter((task) => task.projectId === projectId);
+  await Promise.allSettled(projectTasks.map(async (task) => {
+    const assetProjection = task.result?.assetProjection as Record<string, unknown> | undefined;
+    if (task.status === 'completed' && assetProjection?.status === 'projection_pending') {
+      await projectPersistedCompletedTask(task.id, user.id);
+    }
+  }));
   const legacyTasks = includeLegacyUnassigned
     ? allTasks.filter((task) => !task.projectId && (task.type === 'generate' || task.type === 'generate-async'))
     : [];

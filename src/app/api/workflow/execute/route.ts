@@ -49,6 +49,7 @@ interface WorkflowExecutionState {
   completedAt: number | null;
   error?: string;
   userId?: string;
+  projectId?: string;
   userRole?: 'user' | 'admin';
   totalNodes: number;
   activeLayerTasks?: Record<string, string>;
@@ -65,6 +66,7 @@ const ASYNC_WORKFLOW_ENDPOINTS = new Set([
   '/api/annotations/execute',
   '/api/video/generate',
   '/api/video/extend',
+  '/api/image-to-3d',
   '/api/layered-decompose',
 ]);
 
@@ -81,17 +83,34 @@ async function executeTrackedWorkflowTask(
   executionId: string,
   execState: WorkflowExecutionState,
   attemptCount: number,
+  sourceEntityId = `${executionId}:${node.id}`,
 ): Promise<ExecutionResult> {
+  const trackedBody: Record<string, unknown> = {
+    ...body,
+    projectId: execState.projectId,
+    sessionId: `workflow:${execState.projectId}`,
+    messageId: sourceEntityId,
+  };
+  const trackedHeaders = new Headers(fetchOptions.headers);
+  const taskIdempotencyKey = `workflow:${sourceEntityId}`;
+  trackedHeaders.set('idempotency-key', taskIdempotencyKey);
+  if (endpoint === '/api/edit') {
+    trackedHeaders.set('x-idempotency-key', taskIdempotencyKey);
+  }
+  const trackedFetchOptions: RequestInit = {
+    ...fetchOptions,
+    headers: trackedHeaders,
+  };
   if (endpoint !== '/api/layered-decompose') {
-    return executeAsyncTask(submitUrl, body, fetchOptions, node.id, node.type as NodeType);
+    return executeAsyncTask(submitUrl, trackedBody, trackedFetchOptions, node.id, node.type as NodeType);
   }
 
   execState.activeLayerTasks ||= {};
   try {
     return await executeLayerWorkflowTask({
       submitUrl,
-      body,
-      fetchOptions,
+      body: trackedBody,
+      fetchOptions: trackedFetchOptions,
       nodeId: node.id,
       idempotencyKey: buildWorkflowLayerIdempotencyKey(executionId, node.id, attemptCount),
       onTaskId: async (taskId) => {
@@ -107,7 +126,7 @@ async function executeTrackedWorkflowTask(
             status: task.status,
             phase: task.phase,
             progress: task.progress,
-            engine: body.engine,
+            engine: trackedBody.engine,
           },
           durationMs: Date.now() - execState.startedAt,
         };
@@ -157,6 +176,10 @@ async function persistWorkflowExecution(executionId: string, execState: Workflow
         results: execState.results,
         startedAt: execState.startedAt,
         completedAt: execState.completedAt,
+        submissionPayload: {
+          assetWorkspace: 'workflow',
+          assetWorkspaceId: `workflow:${execState.projectId || executionId}`,
+        },
       },
       error: execState.error,
     });
@@ -214,7 +237,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: _validationError }, { status: 400 });
     }
 
-    const { action, executionId, nodes, connections } = body;
+    const { action, executionId, nodes, connections, projectId } = body;
 
     // ─── 查询执行状态 ───
     if (action === 'status') {
@@ -371,6 +394,7 @@ export async function POST(request: NextRequest) {
             executionId,
             exec,
             retryAttempt,
+            `${executionId}:${retryNode.id}:attempt:${retryAttempt}`,
           );
           exec.results[nodeId] = retryResult;
           await persistWorkflowExecution(executionId, exec);
@@ -420,6 +444,7 @@ export async function POST(request: NextRequest) {
       startedAt: Date.now(),
       completedAt: null,
       userId: auth.userId,
+      projectId: typeof projectId === 'string' ? projectId : undefined,
       userRole: auth.userRole === 'admin' ? 'admin' : 'user',
       totalNodes: nodes.length,
       activeLayerTasks: {},
@@ -432,11 +457,21 @@ export async function POST(request: NextRequest) {
         await createCloudTask({
           id: executionIdNew,
           userId: auth.userId,
+          projectId: execState.projectId,
           type: 'workflow',
           status: 'processing',
           progress: 0,
           label: '工作流执行',
-          result: { currentNodeId: null, results: {}, startedAt: execState.startedAt, completedAt: null },
+          result: {
+            currentNodeId: null,
+            results: {},
+            startedAt: execState.startedAt,
+            completedAt: null,
+            submissionPayload: {
+              assetWorkspace: 'workflow',
+              assetWorkspaceId: `workflow:${execState.projectId || executionIdNew}`,
+            },
+          },
           createdAt: execState.startedAt,
           updatedAt: execState.startedAt,
         });
@@ -957,7 +992,17 @@ async function executeWorkflow(
             ...(storyboard.continueMode === 'img2img' && lastImageUrl ? { imageUrl: lastImageUrl, strength: storyboard.strength } : {}),
           };
 
-          const sceneResult = await executeAsyncTask(apiUrl, sceneReqBody, fetchOptions, node.id, node.type as NodeType);
+          const sceneResult = await executeTrackedWorkflowTask(
+            apiUrl,
+            req.endpoint,
+            sceneReqBody,
+            fetchOptions,
+            node,
+            executionId,
+            execState,
+            si,
+            `${executionId}:${node.id}:scene:${si}`,
+          );
 
           if (sceneResult.status === 'success' && sceneResult.output?.imageUrl) {
             lastImageUrl = sceneResult.output.imageUrl as string;
@@ -1098,7 +1143,7 @@ async function executeAsyncTask(
   const start = Date.now();
 
   // 提交任务（/api/generate 在 direct 模式下可能同步等待数分钟，需要足够长的超时）
-  const isGenerateEndpoint = submitUrl.includes('/api/generate') || submitUrl.includes('/api/edit') || submitUrl.includes('/api/image-edit') || submitUrl.includes('/api/annotations/execute') || submitUrl.includes('/api/video/generate') || submitUrl.includes('/api/video/extend');
+  const isGenerateEndpoint = submitUrl.includes('/api/generate') || submitUrl.includes('/api/edit') || submitUrl.includes('/api/image-edit') || submitUrl.includes('/api/annotations/execute') || submitUrl.includes('/api/video/generate') || submitUrl.includes('/api/video/extend') || submitUrl.includes('/api/image-to-3d');
   const submitTimeoutMs = isGenerateEndpoint ? 600000 : 30000; // 生成/编辑类接口10分钟，其他30秒
   const submitRes = await fetch(submitUrl, {
     ...fetchOptions,
@@ -1168,18 +1213,31 @@ async function executeAsyncTask(
     // 并行轮询所有待完成的taskIds
     const pollPromises = Array.from(pendingTaskIds).map(async (tid) => {
       try {
-        const pollRes = await fetch(`http://localhost:${port}/api/poll-task`, {
+        const isThreeDTask = nodeType === 'ai-3d-model';
+        const pollEndpoint = isThreeDTask ? '/api/poll-3d-task' : '/api/poll-task';
+        const pollRes = await fetch(`http://localhost:${port}${pollEndpoint}`, {
           method: 'POST',
           headers: fetchOptions.headers,
-          body: JSON.stringify({ taskId: tid, model: body.model, providerId: body.providerId }),
+          body: JSON.stringify(isThreeDTask
+            ? {
+                taskId: tid,
+                mode: body.mode,
+                providerId: body.providerId,
+                provider: { id: body.providerId, model: body.model },
+              }
+            : { taskId: tid, model: body.model, providerId: body.providerId }),
           signal: AbortSignal.timeout(10000),
         });
         const pollData = await pollRes.json();
 
-        if (pollData.status === 'completed') {
+        if (pollData.status === 'completed' || pollData.status === 'succeeded') {
           pendingTaskIds.delete(tid);
           completedResults.push(pollData);
-        } else if (pollData.status === 'failed') {
+        } else if (
+          pollData.status === 'failed'
+          || pollData.status === 'cancelled'
+          || pollData.status === 'timeout'
+        ) {
           pendingTaskIds.delete(tid);
           console.warn(`[workflow] taskId=${tid} 失败: ${pollData.error}`);
         }
@@ -1381,6 +1439,7 @@ function parseApiOutput(nodeType: NodeType, data: Record<string, unknown>): Reco
 
   // 3D模型输出
   if (data.modelUrl) output.modelUrl = data.modelUrl;
+  if (data.assetUrl) output.modelUrl = data.assetUrl;
   if (data.modelData) output.modelData = data.modelData;
 
   // 视频输出

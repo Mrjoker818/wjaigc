@@ -31,7 +31,12 @@ import { getFontDesignResult } from '@/app/api/font-design/generate-image/route'
 import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
 import { isPendingLocalAsyncGenerateTask, isRecoverableSubmitOnlySubmission, shouldPollRemoteAsyncGenerateTask } from '@/lib/async-generate-task';
 import { enhanceViaAI } from '@/lib/quality-enhance';
-import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
+import {
+  buildRecoveredTaskContext,
+  projectPersistedCompletedTask,
+  recordImageTaskTerminal,
+  recordVideoTaskTerminal,
+} from '@/lib/cloud-task-persistence';
 import {
   claimCloudTaskLease,
   completeCloudTask,
@@ -167,6 +172,10 @@ async function getDurableGenerationSlotResponse(
 
   const result = (persistedTask.result as Record<string, unknown>) || {};
   if (persistedTask.status === 'completed' && typeof result.imageUrl === 'string' && result.imageUrl) {
+    const assetProjection = result.assetProjection as Record<string, unknown> | undefined;
+    if (assetProjection?.status === 'projection_pending') {
+      await projectPersistedCompletedTask(taskId, userId);
+    }
     const providerName = await resolveCanonicalTaskProviderName(
       persistedTask.providerId,
       result.providerName,
@@ -558,6 +567,7 @@ export async function POST(request: NextRequest) {
                       retryable: false,
                     }, { status: 200 });
                   }
+                  await projectPersistedCompletedTask(taskId, sessionUser!.id);
                 }
                 updateTaskProgress(taskId, { status: 'completed', progress: 100 });
                 setEditTask(taskId, {
@@ -617,6 +627,7 @@ export async function POST(request: NextRequest) {
                         retryable: false,
                       }, { status: 200 });
                     }
+                    await projectPersistedCompletedTask(taskId, sessionUser!.id);
                   }
                   setEditTask(taskId, {
                     ...(existingTask || { id: taskId, progress: 0, createdAt: Date.now() }),
@@ -1117,6 +1128,7 @@ export async function POST(request: NextRequest) {
                 });
                 return;
               }
+              await projectPersistedCompletedTask(recovered.taskId, recovery.userId);
 
               updateTaskProgress(recovered.taskId, {
                 status: 'completed',
@@ -1644,11 +1656,12 @@ export async function POST(request: NextRequest) {
               if (hasDurableVideoTask) {
                 const completed = await completeCloudTask(taskId, completedResult);
                 if (!completed) return getDurableVideoTerminalResponse();
+                await projectPersistedCompletedTask(taskId, userId);
               } else {
-                void recordVideoTaskTerminal(taskId, {
+                await recordVideoTaskTerminal(taskId, {
                   status: 'completed',
                   videoUrl: persistedVideoUrl,
-                }).catch((error) => console.warn('[poll-task] Video completion persistence failed:', error));
+                });
               }
               updateTaskProgress(taskId, {
                 status: 'completed',
@@ -2699,6 +2712,9 @@ export async function POST(request: NextRequest) {
             retryable: true,
           }, { status: 409 });
         }
+        if (generationCompletion) {
+          await projectPersistedCompletedTask(taskId, userId);
+        }
       }
       await appendUserJsonl(userId, 'images', {
         type: 'completed',
@@ -2710,7 +2726,7 @@ export async function POST(request: NextRequest) {
       });
       updateTaskProgress(taskId, { status: 'completed', progress: 100, result: completedTaskResult });
       if (!durableGenerationSlot) {
-        void recordImageTaskTerminal(taskId, {
+        await recordImageTaskTerminal(taskId, {
           status: 'completed',
           imageUrl: imageUrls[0],
           imageUrls,
