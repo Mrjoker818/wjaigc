@@ -607,7 +607,7 @@ export async function POST(request: NextRequest) {
 
             try {
               const internalHeaders = await getInternalRequestHeaders(user.id, user.role === 'admin' ? 'admin' : 'user');
-              const imgRes = await fetch(`${request.nextUrl.origin}/api/generate`, {
+              const imgRes = await fetch(getInternalApiUrl('/api/generate'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...internalHeaders },
                 body: JSON.stringify({
@@ -634,7 +634,7 @@ export async function POST(request: NextRequest) {
                 let attempts = 0;
                 while (attempts < 100) {
                   await new Promise(r => setTimeout(r, 3000));
-                  const pollRes = await fetch(`${request.nextUrl.origin}/api/poll-task`, {
+                  const pollRes = await fetch(getInternalApiUrl('/api/poll-task'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...internalHeaders },
                     body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),

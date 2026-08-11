@@ -61,7 +61,10 @@ import { type Workflow, type WorkspaceAssetReference } from '@/lib/workflow-engi
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
-import { consumeSimpleChatCanvasBridge } from '@/components/simple-chat/simple-chat-types';
+import {
+  consumeSimpleChatCanvasBridge,
+  resolveSimpleChatCanvasReference,
+} from '@/components/simple-chat/simple-chat-types';
 
 interface FavoriteItem {
   id: number;
@@ -943,15 +946,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       void consumeSimpleChatCanvasBridge({
         payload: data,
         currentProjectId: currentProject.id,
-        resolveReference: async ({ projectId, assetVersionId, placementId }) => {
-          const response = await fetch('/api/assets', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectId, assetVersionId, placementId }),
-          });
-          if (!response.ok) throw new Error('ASSET_NOT_FOUND');
-          return response.json() as Promise<WorkspaceAssetReference>;
-        },
+        resolveReference: resolveSimpleChatCanvasReference,
         merge: references => {
           if (cancelled) throw new Error('BRIDGE_CONSUMPTION_CANCELLED');
           const timestamp = Date.now();

@@ -150,6 +150,57 @@ export function hasManagedAssetIdentity(
   return Boolean(reference?.assetVersionId && reference.placementId);
 }
 
+function bridgeReferenceError(message: string, status?: number, code?: string): Error {
+  return Object.assign(new Error(message), {
+    ...(status === undefined ? {} : { status }),
+    ...(code ? { code } : {}),
+  });
+}
+
+function isExplicitAssetNotFound(error: unknown): boolean {
+  return isRecord(error)
+    && error.status === 404
+    && error.code === 'ASSET_NOT_FOUND';
+}
+
+export async function resolveSimpleChatCanvasReference(
+  input: { projectId: string; assetVersionId: string; placementId: string },
+  fetcher: typeof fetch = fetch,
+): Promise<WorkspaceAssetReference> {
+  const response = await fetcher('/api/assets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw bridgeReferenceError('ASSET_REFERENCE_INVALID', response.status);
+  }
+
+  if (!response.ok) {
+    if (
+      response.status === 404
+      && isRecord(payload)
+      && payload.error === 'ASSET_NOT_FOUND'
+    ) {
+      throw bridgeReferenceError('ASSET_NOT_FOUND', 404, 'ASSET_NOT_FOUND');
+    }
+    throw bridgeReferenceError('ASSET_REFERENCE_RESOLVE_FAILED', response.status);
+  }
+
+  const reference = toWorkspaceAssetReference(payload);
+  if (
+    !hasManagedAssetIdentity(reference)
+    || reference.assetVersionId !== input.assetVersionId
+    || reference.placementId !== input.placementId
+  ) {
+    throw bridgeReferenceError('ASSET_REFERENCE_INVALID', response.status);
+  }
+  return reference;
+}
+
 export function alignSimpleChatMediaSlots(
   attachments: ChatAttachment[],
   registrations: Array<WorkspaceAssetReference | null>,
@@ -267,9 +318,17 @@ export async function consumeSimpleChatCanvasBridge(input: {
           assetVersionId: candidate.assetVersionId,
           placementId: candidate.placementId,
         });
-        if (hasManagedAssetIdentity(canonical)) references.push(canonical);
-      } catch {
-        // Foreign and absent references are intentionally indistinguishable and omitted.
+        if (
+          !hasManagedAssetIdentity(canonical)
+          || canonical.assetVersionId !== candidate.assetVersionId
+          || canonical.placementId !== candidate.placementId
+        ) {
+          throw bridgeReferenceError('ASSET_REFERENCE_INVALID');
+        }
+        references.push(canonical);
+      } catch (error) {
+        if (isExplicitAssetNotFound(error)) continue;
+        throw error;
       }
       continue;
     }

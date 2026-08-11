@@ -242,5 +242,10 @@ describe('standalone chat Canvas bridge behavior', () => {
       JSON.stringify({ error: 'UPSTREAM_UNAVAILABLE' }),
       { status: 503, headers: { 'Content-Type': 'application/json' } },
     )))).rejects.toMatchObject({ status: 503 });
+
+    await expect(resolve(input, vi.fn(async () => new Response(
+      JSON.stringify({ url: '/incomplete.png', assetVersionId: 'absent-version' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))).rejects.toThrow('ASSET_REFERENCE_INVALID');
   });
 });

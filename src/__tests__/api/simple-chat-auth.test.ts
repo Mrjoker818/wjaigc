@@ -275,7 +275,7 @@ describe('POST /api/simple-chat/chat', () => {
       baseUrl: 'https://chat.example/v1',
       advancedParams: {},
     });
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const fetchMock = vi.fn<typeof fetch>(async input => {
       const url = String(input);
       if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
       if (url === 'http://127.0.0.1:5000/api/generate') {
@@ -308,7 +308,7 @@ describe('POST /api/simple-chat/chat', () => {
       baseUrl: 'https://chat.example/v1',
       advancedParams: {},
     });
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const fetchMock = vi.fn<typeof fetch>(async input => {
       const url = String(input);
       if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
       if (url === 'http://127.0.0.1:5000/api/generate') {
