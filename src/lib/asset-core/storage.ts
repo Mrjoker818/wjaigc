@@ -11,7 +11,8 @@ import type {
   WorkspacePlacement,
 } from './types';
 
-type SqlClient = Pick<PoolClient, 'query'>;
+export type AssetCoreSqlTransaction = Pick<PoolClient, 'query'>;
+type SqlClient = AssetCoreSqlTransaction;
 
 export interface StoredVersion {
   version: AssetVersion;
@@ -560,4 +561,23 @@ export class PostgresAssetStorage implements AssetStorage {
 
 export function createPostgresAssetStorage(pool?: Pool): AssetStorage {
   return new PostgresAssetStorage(pool);
+}
+
+/** Runs lifecycle-only SQL through the same BEGIN/COMMIT discipline as asset storage. */
+export async function withAssetCoreTransaction<T>(
+  callback: (transaction: AssetCoreSqlTransaction) => Promise<T>,
+  pool: Pool = getPool(),
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }

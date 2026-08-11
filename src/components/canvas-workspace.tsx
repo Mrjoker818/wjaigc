@@ -5646,8 +5646,26 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           negativePrompt: img.negativePrompt,
           modelName: img.modelName,
           apiProvider: img.apiProvider,
+          assetId: img.assetId,
+          placementId: img.placementId,
+          mediaAvailability: img.mediaAvailability,
         }))}
-        onDeleteImages={(ids) => {
+        onDeleteImages={async (ids) => {
+          const selected = images.filter((image) => ids.includes(image.id));
+          try {
+            for (const image of selected) {
+              if (!image.assetId || !image.placementId || !currentProject?.id) {
+                throw new Error('素材尚未同步到可删除的 placement');
+              }
+              const response = await fetch(`/api/assets/placements/${image.placementId}?projectId=${encodeURIComponent(currentProject.id)}`, {
+                method: 'DELETE',
+              });
+              if (!response.ok) throw new Error('素材 placement 删除失败');
+            }
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : '素材删除失败');
+            return;
+          }
           setImages(prev => prev.filter(img => !ids.includes(img.id)));
           setSelectedImage(null);
         }}

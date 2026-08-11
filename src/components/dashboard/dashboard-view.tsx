@@ -45,7 +45,13 @@ type AssetSubTab = 'images' | 'prompts' | 'brands';
 type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'universal' | 'audio';
 type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string; displayName?: string; compatProfile?: string };
-type DashboardImage = CanvasImage & { negativePrompt?: string; _projectId?: string };
+type DashboardImage = CanvasImage & {
+  negativePrompt?: string;
+  _projectId?: string;
+  assetId?: string;
+  placementId?: string;
+  mediaAvailability?: 'ready' | 'pending-persist' | 'missing' | 'recovering' | 'unrecoverable';
+};
 
 interface ApiBalanceEntry { providerId?: string; balance?: number | string; currency?: string; remainingQuota?: number | string; error?: string; }
 interface ApiBalanceResponse { success?: boolean; error?: string; balances?: ApiBalanceEntry[]; }
@@ -689,6 +695,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     });
     return result;
   }, [allImages, imageFilter, assetSortOrder]);
+  const unavailableAssetCount = useMemo(
+    () => allImages.filter((image) => (
+      image.mediaAvailability === 'missing' || image.mediaAvailability === 'recovering' || image.mediaAvailability === 'unrecoverable'
+    )).length,
+    [allImages],
+  );
 
   // ─── Project handlers ───
   const toggleStar = useCallback((id: string, e: React.MouseEvent) => {
@@ -878,7 +890,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, [selectedAssetIds, allImages]);
 
   // Batch delete selected images
-  const handleBatchDeleteAssets = useCallback(() => {
+  const handleBatchDeleteAssets = useCallback(async () => {
     if (selectedAssetIds.size === 0) return;
     // Collect affected projects and their images to remove
     const projectRemovals: Record<string, string[]> = {};
@@ -889,7 +901,24 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         projectRemovals[img._projectId].push(id);
       }
     }
-    // Update each project to remove selected images
+    try {
+      for (const [projectId, imageIds] of Object.entries(projectRemovals)) {
+        for (const imageId of imageIds) {
+          const image = allImages.find((candidate) => candidate.id === imageId);
+          const assetId = image?.assetId;
+          const placementId = image?.placementId;
+          if (!assetId || !placementId) throw new Error('素材尚未同步到可删除的 placement');
+          const response = await fetch(`/api/assets/placements/${placementId}?projectId=${encodeURIComponent(projectId)}`, {
+            method: 'DELETE',
+          });
+          if (!response.ok) throw new Error('素材 placement 删除失败');
+        }
+      }
+    } catch (error) {
+      toast.error(errorMessage(error, '素材删除失败'));
+      return;
+    }
+    // Update the legacy projection only after every placement deletion succeeds.
     for (const [projId, imgIds] of Object.entries(projectRemovals)) {
       const proj = mgr.getProject(projId);
       if (proj) {
@@ -2439,7 +2468,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           <div className="h-full flex flex-col">
             <div className={`px-8 pt-8 pb-4 ${isDark ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
               <div className="flex items-center justify-between">
-                <h1 className={`text-2xl font-bold ${textPrimary}`}>资产库</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className={`text-2xl font-bold ${textPrimary}`}>资产库</h1>
+                  {unavailableAssetCount > 0 && <span className="text-xs text-amber-500">{unavailableAssetCount} 个媒体需要恢复</span>}
+                </div>
                 <div className="flex items-center gap-2">
                   {/* View mode toggle */}
                   <button onClick={() => setAssetViewMode(assetViewMode === 'grid' ? 'list' : 'grid')} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-200'} cursor-pointer`} title={assetViewMode === 'grid' ? '列表模式' : '大图模式'}>

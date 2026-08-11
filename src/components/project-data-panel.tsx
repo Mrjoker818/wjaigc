@@ -27,6 +27,7 @@ interface CanvasImage {
   negativePrompt?: string;
   modelName?: string;
   apiProvider?: string;
+  mediaAvailability?: 'ready' | 'pending-persist' | 'missing' | 'recovering' | 'unrecoverable';
 }
 
 type SortOrder = 'newest' | 'oldest';
@@ -37,7 +38,7 @@ interface ProjectDataPanelProps {
   projectName: string;
   projectDescription: string;
   images: CanvasImage[];
-  onDeleteImages: (ids: string[]) => void;
+  onDeleteImages: (ids: string[]) => Promise<void> | void;
   onNavigateToImage: (imageId: string) => void;
   onMakeSame?: (image: CanvasImage) => void;
   isMonochrome?: boolean;
@@ -104,6 +105,9 @@ export function ProjectDataPanel({
       const tb = b.createdAt || 0;
       return sortOrder === 'newest' ? tb - ta : ta - tb;
     });
+  const unavailableImages = images.filter((image) => (
+    image.mediaAvailability === 'missing' || image.mediaAvailability === 'recovering' || image.mediaAvailability === 'unrecoverable'
+  ));
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -122,9 +126,9 @@ export function ProjectDataPanel({
     }
   };
 
-  const handleBatchDelete = () => {
+  const handleBatchDelete = async () => {
     if (selectedIds.size === 0) return;
-    onDeleteImages(Array.from(selectedIds));
+    await onDeleteImages(Array.from(selectedIds));
     setSelectedIds(new Set());
     setIsManageMode(false);
   };
@@ -217,6 +221,9 @@ export function ProjectDataPanel({
           <FolderOpen className="h-4 w-4" style={{ color: accentColor }} />
           <span className={`text-sm font-semibold ${textColor}`}>资产库</span>
           <span className={`text-xs ${mutedText}`}>({images.length})</span>
+          {unavailableImages.length > 0 && (
+            <span className="text-[10px] text-amber-500">{unavailableImages.length} 个媒体需要恢复</span>
+          )}
         </div>
         <button
           onClick={onClose}

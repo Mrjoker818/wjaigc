@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { DEFAULT_TRASH_RETENTION_DAYS } from './media-health';
 import {
   createPostgresAssetStorage,
   type AssetStorage,
@@ -20,7 +21,8 @@ import {
 export type AssetServiceErrorCode =
   | 'ASSET_NOT_FOUND'
   | 'ASSET_IDEMPOTENCY_CONFLICT'
-  | 'ASSET_PLACEMENT_CONFLICT';
+  | 'ASSET_PLACEMENT_CONFLICT'
+  | 'ASSET_RESTORE_NOT_ALLOWED';
 
 export class AssetServiceError extends Error {
   constructor(readonly code: AssetServiceErrorCode) {
@@ -84,6 +86,7 @@ export interface PlacementCommand {
   actorUserId: string;
   projectId: string;
   placementId: string;
+  assetId?: string;
 }
 
 function notFound(): never {
@@ -96,6 +99,10 @@ function conflict(): never {
 
 function placementConflict(): never {
   throw new AssetServiceError('ASSET_PLACEMENT_CONFLICT');
+}
+
+function restoreNotAllowed(): never {
+  throw new AssetServiceError('ASSET_RESTORE_NOT_ALLOWED');
 }
 
 function isDatabaseConflict(error: unknown, constraint: string): boolean {
@@ -598,12 +605,18 @@ export class AssetService {
       return await this.storage.transaction(async (transaction) => {
         const placement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
         if (!placement) notFound();
+        if (input.assetId && placement.assetId !== input.assetId) notFound();
+        if (placement.status !== 'trashed' || !placement.deletedAt) restoreNotAllowed();
+        const retentionEndsAt = new Date(placement.deletedAt).getTime()
+          + DEFAULT_TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+        if (!Number.isFinite(retentionEndsAt) || Date.now() >= retentionEndsAt) restoreNotAllowed();
         const lockedAsset = await transaction.lockAsset(
           input.actorUserId,
           input.projectId,
           placement.assetId,
         );
         if (!lockedAsset) notFound();
+        if (lockedAsset.status !== 'trashed') restoreNotAllowed();
         const occupied = await transaction.findActivePlacement(
           input.actorUserId,
           input.projectId,
@@ -613,13 +626,13 @@ export class AssetService {
           placement.entityId,
         );
         if (occupied && occupied.id !== placement.id) placementConflict();
-        const asset = lockedAsset.status === 'active'
-          ? lockedAsset
-          : await transaction.activateAsset(input.actorUserId, input.projectId, placement.assetId);
+        const asset = await transaction.activateAsset(input.actorUserId, input.projectId, placement.assetId);
         if (!asset) notFound();
-        const restored = placement.status === 'active'
-          ? placement
-          : await transaction.restorePlacement(input.actorUserId, input.projectId, placement.id);
+        const restored = await transaction.restorePlacement(
+          input.actorUserId,
+          input.projectId,
+          placement.id,
+        );
         if (!restored) placementConflict();
         return { placement: restored, asset };
       });
