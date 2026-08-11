@@ -14,11 +14,9 @@ import { getBottomToolbarDrawerPlacement, type BottomToolbarDrawerPlacement } fr
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import {
   getCanvasMediaFilename,
-} from '@/lib/asset-core/canvas-adapter';
-import {
   getCanvasMediaRenderDecision,
   handleCanvasMediaElementFailure,
-} from '@/lib/asset-core/canvas-media-render';
+} from '@/lib/asset-core/canvas-adapter';
 import type { MediaAvailability } from '@/lib/asset-core/types';
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from 'react';

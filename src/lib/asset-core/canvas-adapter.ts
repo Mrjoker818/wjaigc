@@ -5,6 +5,7 @@ import type { AssetGraphMode, MediaAvailability } from './types';
 
 export type AssetGraphReadStrategy = 'legacy-authoritative' | 'asset-authoritative';
 export type CanvasMediaFailureAction = 'fallback-original' | 'mark-missing' | 'legacy-fallback' | 'ignore';
+export type CanvasMediaRenderDecision = 'broken-media' | 'image' | 'none';
 
 type CanvasPlacementImage = PersistedCanvasImage | CanvasViewImage;
 
@@ -37,6 +38,15 @@ export function isManagedCanvasMedia(image: CanvasPlacementImage): boolean {
   return Boolean(image.assetId || image.assetVersionId);
 }
 
+export function getCanvasMediaRenderDecision(
+  image: CanvasPlacementImage,
+): CanvasMediaRenderDecision {
+  if (image.mediaAvailability === 'missing' || image.url.length === 0) {
+    return 'broken-media';
+  }
+  return image.url ? 'image' : 'none';
+}
+
 export function shouldPersistCanvasPlacement(image: CanvasPlacementImage): boolean {
   if (image.mediaAvailability === 'missing') return true;
   return Boolean(image.url || image.videoUrl || image.svgDataUrl || image.isProcessingPlaceholder);
@@ -51,7 +61,12 @@ export function getCanvasMediaFailureAction(
   state: { failedSource: 'thumbnail' | 'original'; legacyRetryAttempted: boolean },
 ): CanvasMediaFailureAction {
   if (state.failedSource === 'thumbnail') return 'fallback-original';
-  if (isManagedCanvasMedia(image)) return 'mark-missing';
+  if (
+    isManagedCanvasMedia(image)
+    || image.mediaAvailability === 'missing'
+    || image.url.startsWith('blob:')
+    || image.url.length === 0
+  ) return 'mark-missing';
   return state.legacyRetryAttempted ? 'ignore' : 'legacy-fallback';
 }
 

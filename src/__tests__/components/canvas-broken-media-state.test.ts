@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import * as canvasAdapter from '@/lib/asset-core/canvas-adapter';
-import {
-  getCanvasMediaRenderDecision,
-  handleCanvasMediaElementFailure,
-} from '@/lib/asset-core/canvas-media-render';
 import type { CanvasImage } from '@/lib/user-types';
 
 const missingImage = (url: string): CanvasImage => ({
@@ -33,7 +29,7 @@ describe('canvas broken managed media state', () => {
         height: 240,
         mediaAvailability: 'missing',
       });
-      expect(getCanvasMediaRenderDecision(hydrated)).toBe('broken-media');
+      expect(canvasAdapter.getCanvasMediaRenderDecision(hydrated)).toBe('broken-media');
     },
   );
 
@@ -44,7 +40,7 @@ describe('canvas broken managed media state', () => {
       expect(errorCode).toBe('MEDIA_LOAD_FAILED');
     };
 
-    expect(handleCanvasMediaElementFailure({
+    expect(canvasAdapter.handleCanvasMediaElementFailure({
       image,
       element: { src: image.url, dataset: { retried: '1', canvasMediaSource: 'original' } },
       markMissing,
