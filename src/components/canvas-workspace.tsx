@@ -60,6 +60,7 @@ import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight,
 import { type Workflow, type WorkspaceAssetReference } from '@/lib/workflow-engine';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
+import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
 
 interface FavoriteItem {
   id: number;
@@ -2673,7 +2674,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // 加载图片真实尺寸
   // 添加多张图片到画布（自动排列布局）
-  const handleAddImages = useCallback(async (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType; assetReferences?: WorkspaceAssetReference[] }) => {
+  const handleAddImages = useCallback(async (imageInputs: Array<string | WorkflowCanvasInsertionItem>, sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType }) => {
     const newImages: CanvasImage[] = [];
 
     // Find source image for positioning if provided
@@ -2683,9 +2684,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const effectiveModelName = meta?.modelName || sourceImg?.modelName || '';
     const effectiveApiProvider = meta?.apiProvider || sourceImg?.apiProvider || '';
 
-    for (let i = 0; i < imageUrls.length; i++) {
-      let rawUrl = imageUrls[i];
-      const transferredReference = meta?.assetReferences?.find(reference => reference.url === rawUrl);
+    for (let i = 0; i < imageInputs.length; i++) {
+      const insertionItem = typeof imageInputs[i] === 'string'
+        ? undefined
+        : imageInputs[i] as WorkflowCanvasInsertionItem;
+      let rawUrl = insertionItem?.url || imageInputs[i] as string;
+      const transferredReference = insertionItem?.assetReference;
       if (transferredReference) rawUrl = transferredReference.url;
       // 将 blob: URL 转为 data URL（blob: 在页面刷新后失效）
       if (rawUrl.startsWith('blob:')) {
@@ -2799,7 +2803,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           className: 'bg-[#141414] border-[#2a2a2a] text-white',
         });
       }
-    } else if (imageUrls.length > 0) {
+    } else if (imageInputs.length > 0) {
       toast.info('图片已在画布中', {
         description: '所有图片已经存在于画布',
         className: 'bg-[#141414] border-[#2a2a2a] text-white',

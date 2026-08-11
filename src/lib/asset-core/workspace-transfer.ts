@@ -75,6 +75,89 @@ export async function prepareCanvasAssetForChat<TAsset extends CanvasChatAsset>(
   }
 }
 
+type WorkflowInputCanvasAsset = {
+  id: string;
+  url: string;
+  versionId?: string;
+  assetVersionId?: string;
+};
+
+export interface PendingWorkflowInputReference {
+  imageUrl: string;
+  source: 'canvas';
+  sourceImageId: string;
+  sourceVersionId?: string;
+  assetTransferPending: boolean;
+}
+
+export function createPendingWorkflowInputReference(
+  image: WorkflowInputCanvasAsset,
+): PendingWorkflowInputReference {
+  return {
+    imageUrl: image.url,
+    source: 'canvas',
+    sourceImageId: image.id,
+    ...(image.versionId ? { sourceVersionId: image.versionId } : {}),
+    assetTransferPending: Boolean(image.assetVersionId),
+  };
+}
+
+export interface WorkflowInputTransferToken {
+  nodeId: string;
+  generation: number;
+}
+
+export interface WorkflowInputTransferGuard {
+  begin: (nodeId: string) => WorkflowInputTransferToken;
+  invalidate: (nodeId: string) => void;
+  isCurrent: (token: WorkflowInputTransferToken) => boolean;
+}
+
+export function createWorkflowInputTransferGuard(): WorkflowInputTransferGuard {
+  const generations = new Map<string, number>();
+  const advance = (nodeId: string): number => {
+    const generation = (generations.get(nodeId) || 0) + 1;
+    generations.set(nodeId, generation);
+    return generation;
+  };
+  return {
+    begin: nodeId => ({ nodeId, generation: advance(nodeId) }),
+    invalidate: nodeId => { advance(nodeId); },
+    isCurrent: token => generations.get(token.nodeId) === token.generation,
+  };
+}
+
+export function shouldInvalidateWorkflowInputTransfer(
+  currentImageUrl: unknown,
+  configUpdate: Record<string, unknown> | undefined,
+): boolean {
+  return Boolean(
+    configUpdate
+    && Object.prototype.hasOwnProperty.call(configUpdate, 'imageUrl')
+    && configUpdate.imageUrl !== currentImageUrl,
+  );
+}
+
+export async function runGuardedWorkflowInputTransfer(options: {
+  guard: WorkflowInputTransferGuard;
+  token: WorkflowInputTransferToken;
+  transfer: () => Promise<WorkspaceAssetReference>;
+  onSuccess: (reference: WorkspaceAssetReference) => void | Promise<void>;
+  onFailure?: () => void | Promise<void>;
+}): Promise<'applied' | 'failed' | 'stale'> {
+  let reference: WorkspaceAssetReference;
+  try {
+    reference = await options.transfer();
+  } catch {
+    if (!options.guard.isCurrent(options.token)) return 'stale';
+    await options.onFailure?.();
+    return 'failed';
+  }
+  if (!options.guard.isCurrent(options.token)) return 'stale';
+  await options.onSuccess(reference);
+  return 'applied';
+}
+
 export interface WorkflowCanvasOutputCandidate {
   outputNodeId: string;
   url: string;
@@ -82,9 +165,14 @@ export interface WorkflowCanvasOutputCandidate {
   sourceReference?: WorkspaceAssetReference;
 }
 
+export interface WorkflowCanvasInsertionItem {
+  outputNodeId: string;
+  url: string;
+  assetReference?: WorkspaceAssetReference;
+}
+
 export interface WorkflowCanvasInsertionResult {
-  urls: string[];
-  assetReferences: WorkspaceAssetReference[];
+  items: WorkflowCanvasInsertionItem[];
   failedOutputNodeIds: string[];
 }
 
@@ -96,14 +184,16 @@ export async function prepareWorkflowCanvasInsertions(
   ) => Promise<WorkspaceAssetReference>,
 ): Promise<WorkflowCanvasInsertionResult> {
   const result: WorkflowCanvasInsertionResult = {
-    urls: [],
-    assetReferences: [],
+    items: [],
     failedOutputNodeIds: [],
   };
 
   for (const candidate of candidates) {
     if (!candidate.managed) {
-      result.urls.push(candidate.url);
+      result.items.push({
+        outputNodeId: candidate.outputNodeId,
+        url: candidate.url,
+      });
       continue;
     }
     if (!candidate.sourceReference?.assetVersionId) {
@@ -116,8 +206,11 @@ export async function prepareWorkflowCanvasInsertions(
         result.failedOutputNodeIds.push(candidate.outputNodeId);
         continue;
       }
-      result.urls.push(transferred.url);
-      result.assetReferences.push(transferred);
+      result.items.push({
+        outputNodeId: candidate.outputNodeId,
+        url: transferred.url,
+        assetReference: transferred,
+      });
     } catch {
       result.failedOutputNodeIds.push(candidate.outputNodeId);
     }

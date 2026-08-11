@@ -28,8 +28,10 @@ describe('workflow output canvas insertion', () => {
     ], transfer);
 
     expect(transfer).toHaveBeenCalledOnce();
-    expect(result.urls).toEqual(['/legacy.png']);
-    expect(result.assetReferences).toEqual([]);
+    expect(result.items).toEqual([{
+      outputNodeId: 'legacy-output',
+      url: '/legacy.png',
+    }]);
     expect(result.failedOutputNodeIds).toEqual(['managed-output']);
   });
 
@@ -52,12 +54,58 @@ describe('workflow output canvas insertion', () => {
       },
     }], transfer);
 
-    expect(result.urls).toEqual(['/canonical-canvas.png']);
-    expect(result.assetReferences).toEqual([expect.objectContaining({
-      assetVersionId: 'version-a',
-      placementId: 'canvas-placement-a',
-    })]);
+    expect(result.items).toEqual([{
+      outputNodeId: 'managed-output',
+      url: '/canonical-canvas.png',
+      assetReference: expect.objectContaining({
+        assetVersionId: 'version-a',
+        placementId: 'canvas-placement-a',
+      }),
+    }]);
     expect(result.failedOutputNodeIds).toEqual([]);
+  });
+
+  it('preserves two managed outputs with the same canonical URL as distinct canvas items', async () => {
+    const transfer = vi.fn(async (_reference, candidate) => ({
+      url: '/same-canonical.png',
+      assetId: `asset-${candidate.outputNodeId}`,
+      assetVersionId: `version-${candidate.outputNodeId}`,
+      placementId: `canvas-placement-${candidate.outputNodeId}`,
+    }));
+
+    const result = await prepareWorkflowCanvasInsertions([
+      {
+        outputNodeId: 'output-a',
+        url: '/same-canonical.png',
+        managed: true,
+        sourceReference: { url: '/same-canonical.png', assetVersionId: 'version-output-a' },
+      },
+      {
+        outputNodeId: 'output-b',
+        url: '/same-canonical.png',
+        managed: true,
+        sourceReference: { url: '/same-canonical.png', assetVersionId: 'version-output-b' },
+      },
+    ], transfer);
+
+    expect(result.items).toEqual([
+      {
+        outputNodeId: 'output-a',
+        url: '/same-canonical.png',
+        assetReference: expect.objectContaining({
+          assetVersionId: 'version-output-a',
+          placementId: 'canvas-placement-output-a',
+        }),
+      },
+      {
+        outputNodeId: 'output-b',
+        url: '/same-canonical.png',
+        assetReference: expect.objectContaining({
+          assetVersionId: 'version-output-b',
+          placementId: 'canvas-placement-output-b',
+        }),
+      },
+    ]);
   });
 });
 

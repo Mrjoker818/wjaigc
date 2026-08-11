@@ -13,8 +13,11 @@ describe('node editor asset references', () => {
     expect(editorSource).toContain('sourceVersion: image.assetVersionId');
     expect(editorSource).toContain('assetVersionId: transferred.assetVersionId');
     expect(editorSource).toContain('void onCanvasImageSelect(node.id, img)');
-    expect(editorSource).toMatch(/transferCanvasImageToWorkflow[\s\S]*assetVersionId: undefined/);
-    expect(editorSource).toMatch(/if \(!response\.ok\) \{\s*applyLegacyReference\(\)/);
+    expect(editorSource).toContain('createPendingWorkflowInputReference(image)');
+    expect(editorSource).toContain('createWorkflowInputTransferGuard()');
+    expect(editorSource).toContain('runGuardedWorkflowInputTransfer({');
+    expect(editorSource).toContain('workflowInputTransferGuardRef.current.invalidate(nodeId)');
+    expect(editorSource).toMatch(/createPendingWorkflowInputReference\(refImage\)[\s\S]*transferCanvasImageToWorkflow\(node\.id, refImage\)/);
   });
 
   it('transfers matching workflow outputs to canvas and forwards placement identity without re-uploading', () => {
@@ -23,9 +26,10 @@ describe('node editor asset references', () => {
     expect(editorSource).toContain('resolveWorkflowOutputAssetReference');
     expect(editorSource).toContain('prepareWorkflowCanvasInsertions');
     expect(editorSource).toContain('if (!response.ok) throw new Error');
-    expect(editorSource).toContain('meta.assetReferences = insertion.assetReferences');
-    expect(workspaceSource).toContain('const transferredReference = meta?.assetReferences');
+    expect(editorSource).toContain('onAddImages(insertion.items');
+    expect(editorSource).not.toContain('new Set(insertion.urls)');
+    expect(workspaceSource).toContain('const transferredReference = insertionItem?.assetReference');
     expect(workspaceSource).toContain('...(transferredReference?.assetVersionId');
-    expect(workspaceSource).not.toContain('?? meta?.assetReferences?.[i]');
+    expect(workspaceSource).not.toContain('assetReferences?.find(reference => reference.url');
   });
 });

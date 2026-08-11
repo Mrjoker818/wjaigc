@@ -28,9 +28,14 @@ import {
 } from '@/lib/node-canvas-virtualization';
 import {
   CANVAS_ASSET_DRAG_MIME,
+  createPendingWorkflowInputReference,
+  createWorkflowInputTransferGuard,
   parseCanvasAssetDragPayload,
   prepareWorkflowCanvasInsertions,
+  runGuardedWorkflowInputTransfer,
   serializeCanvasAssetDragPayload,
+  shouldInvalidateWorkflowInputTransfer,
+  type WorkflowCanvasInsertionItem,
 } from '@/lib/asset-core/workspace-transfer';
 import {
   NodeAnnotationWorkspace,
@@ -647,7 +652,7 @@ interface NodeEditorProps {
   /** 主题风格: gold(黑金) / monochrome(单色) */
   themeStyle?: 'gold' | 'monochrome';
   /** 生成图片后回调，将图片添加到项目 */
-  onAddImages?: (imageUrls: string[], meta?: { modelName?: string; apiProvider?: string; assetReferences?: WorkspaceAssetReference[] }) => void;
+  onAddImages?: (items: WorkflowCanvasInsertionItem[], meta?: { modelName?: string; apiProvider?: string }) => void;
   preferredAnnotationModelId?: string;
 }
 
@@ -896,6 +901,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const [compareImages, setCompareImages] = useState<{ before: string; after: string } | null>(null);
   const [comparePosition, setComparePosition] = useState(50);
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
+  const workflowInputTransferGuardRef = useRef(createWorkflowInputTransferGuard());
 
   const toggleNodeCollapse = useCallback((nodeId: string) => {
     setCollapsedNodes(prev => {
@@ -1666,6 +1672,7 @@ ${contextInfo}
   }, [selectedNodeIds, setWf]);
 
   const handleDeleteNode = useCallback((nodeId: string) => {
+    workflowInputTransferGuardRef.current.invalidate(nodeId);
     setWf(prev => ({
       ...prev,
       nodes: prev.nodes.filter(n => n.id !== nodeId),
@@ -1679,6 +1686,9 @@ ${contextInfo}
     nodeId: string,
     image: CanvasImageRef,
   ): Promise<void> => {
+    const guard = workflowInputTransferGuardRef.current;
+    const token = guard.begin(nodeId);
+    const pendingReference = createPendingWorkflowInputReference(image);
     const applyLegacyReference = (): void => {
       setWf(prev => ({
         ...prev,
@@ -1687,9 +1697,8 @@ ${contextInfo}
               ...node,
               config: {
                 ...node.config,
-                imageUrl: image.url,
-                source: 'canvas',
-                sourceImageId: image.id,
+                ...pendingReference,
+                assetTransferPending: false,
                 projectId: undefined,
                 assetId: undefined,
                 assetVersionId: undefined,
@@ -1699,51 +1708,69 @@ ${contextInfo}
           : node),
       }));
     };
+    setWf(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => node.id === nodeId
+        ? {
+            ...node,
+            config: {
+              ...node.config,
+              ...pendingReference,
+              projectId: undefined,
+              assetId: undefined,
+              assetVersionId: undefined,
+              placementId: undefined,
+            },
+          }
+        : node),
+    }));
     if (!projectId || !image.assetVersionId) {
-      applyLegacyReference();
+      if (guard.isCurrent(token)) applyLegacyReference();
       return;
     }
-    try {
-      const response = await fetch('/api/assets/transfer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sourceVersion: image.assetVersionId,
-          targetProject: projectId,
-          targetWorkspace: wf.id,
-          entityType: 'workflow-input',
-          entityId: nodeId,
-          idempotencyKey: `canvas-workflow:${wf.id}:${nodeId}:${image.assetVersionId}`,
-          metadata: { name: image.name, source: 'canvas', sourceImageId: image.id },
-        }),
-      });
-      if (!response.ok) {
-        applyLegacyReference();
-        return;
-      }
-      const transferred = await response.json() as WorkspaceAssetReference;
-      setWf(prev => ({
-        ...prev,
-        nodes: prev.nodes.map(node => node.id === nodeId
-          ? {
-              ...node,
-              config: {
-                ...node.config,
-                imageUrl: transferred.url,
-                source: 'canvas',
-                sourceImageId: image.id,
-                projectId,
-                assetId: transferred.assetId,
-                assetVersionId: transferred.assetVersionId,
-                placementId: transferred.placementId,
-              },
-            }
-          : node),
-      }));
-    } catch (error) {
-      console.warn('[NodeEditor] Canvas-to-workflow asset transfer failed:', error);
-      applyLegacyReference();
-    }
+    await runGuardedWorkflowInputTransfer({
+      guard,
+      token,
+      transfer: async () => {
+        const response = await fetch('/api/assets/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceVersion: image.assetVersionId,
+            targetProject: projectId,
+            targetWorkspace: wf.id,
+            entityType: 'workflow-input',
+            entityId: nodeId,
+            idempotencyKey: `canvas-workflow:${wf.id}:${nodeId}:${image.assetVersionId}`,
+            metadata: { name: image.name, source: 'canvas', sourceImageId: image.id },
+          }),
+        });
+        if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
+        return response.json() as Promise<WorkspaceAssetReference>;
+      },
+      onSuccess: transferred => {
+        setWf(prev => ({
+          ...prev,
+          nodes: prev.nodes.map(node => node.id === nodeId
+            ? {
+                ...node,
+                config: {
+                  ...node.config,
+                  imageUrl: transferred.url,
+                  source: 'canvas',
+                  sourceImageId: image.id,
+                  assetTransferPending: false,
+                  projectId,
+                  assetId: transferred.assetId,
+                  assetVersionId: transferred.assetVersionId,
+                  placementId: transferred.placementId,
+                },
+              }
+            : node),
+        }));
+      },
+      onFailure: applyLegacyReference,
+    });
   }, [projectId, setWf, wf.id]);
 
 
@@ -1779,30 +1806,26 @@ ${contextInfo}
     const nodeH = Math.max(140, Math.min(320, nodeW / ratio));
 
     const node = createWorkflowNode('input-image', cx - nodeW / 2, cy - nodeH / 2);
-    node.config = {
-      ...node.config,
-      imageUrl,
-      source: 'canvas-ref',
-      sourceImageId: refImage?.id,
-      sourceVersionId: refImage?.versionId,
-      projectId,
-      assetId: refImage?.assetId,
-      assetVersionId: refImage?.assetVersionId,
-      placementId: refImage?.placementId,
-    };
+    node.config = refImage
+      ? { ...node.config, ...createPendingWorkflowInputReference(refImage) }
+      : { ...node.config, imageUrl, source: 'canvas-ref', assetTransferPending: false };
     node.width = nodeW;
     node.height = nodeH;
     setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
     setSelectedNodeIds(new Set([node.id]));
     if (refImage) void transferCanvasImageToWorkflow(node.id, refImage);
-  }, [projectId, setWf, transferCanvasImageToWorkflow]);
+  }, [setWf, transferCanvasImageToWorkflow]);
 
   const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
+    const currentImageUrl = wf.nodes.find(node => node.id === nodeId)?.config?.imageUrl;
+    if (shouldInvalidateWorkflowInputTransfer(currentImageUrl, updates.config)) {
+      workflowInputTransferGuardRef.current.invalidate(nodeId);
+    }
     setWf(prev => ({
       ...prev,
       nodes: prev.nodes.map(n => n.id === nodeId ? mergeWorkflowNodeUpdate(n, updates) : n),
     }));
-  }, [setWf]);
+  }, [setWf, wf.nodes]);
 
   // P0: LLM优化提示词
   const handleLlmOptimize = useCallback(async (nodeId: string, _prompt: string, model: string, systemPrompt: string, instruction: string) => {
@@ -2539,12 +2562,11 @@ ${contextInfo}
                   if (!workflowApiProvider && model.includes('::')) workflowApiProvider = model.split('::')[0];
                 }
               }
-              const meta: { modelName?: string; apiProvider?: string; assetReferences?: WorkspaceAssetReference[] } = {};
+              const meta: { modelName?: string; apiProvider?: string } = {};
               if (workflowModelName) meta.modelName = workflowModelName;
               if (workflowApiProvider) meta.apiProvider = workflowApiProvider;
-              if (insertion.assetReferences.length > 0) meta.assetReferences = insertion.assetReferences;
-              if (insertion.urls.length > 0) {
-                onAddImages(Array.from(new Set(insertion.urls)), Object.keys(meta).length > 0 ? meta : undefined);
+              if (insertion.items.length > 0) {
+                onAddImages(insertion.items, Object.keys(meta).length > 0 ? meta : undefined);
               }
             }
           }
