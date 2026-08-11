@@ -51,7 +51,7 @@ describe('continuous canvas shadow synchronization', () => {
     const updateStart = migrationSource.indexOf('async function updateGraphForImage');
     const updateEnd = migrationSource.indexOf('async function trashGraphForImage', updateStart);
     const updateGraphSource = migrationSource.slice(updateStart, updateEnd);
-    const placementLock = updateGraphSource.indexOf('SELECT asset_id\n     FROM wujie_workspace_placements');
+    const placementLock = updateGraphSource.indexOf('SELECT asset_id, owner_id, project_id\n     FROM wujie_workspace_placements');
     const assetMutation = updateGraphSource.indexOf('UPDATE wujie_assets\n     SET kind =');
     const lifecycleStart = serviceSource.indexOf('async trashPlacement(input: PlacementCommand)');
     const lifecycleEnd = serviceSource.indexOf('async restorePlacement(input: PlacementCommand)', lifecycleStart);
@@ -61,9 +61,11 @@ describe('continuous canvas shadow synchronization', () => {
     expect(placementLock).toBeGreaterThan(-1);
     expect(assetMutation).toBeGreaterThan(placementLock);
     expect(updateGraphSource).toMatch(
-      /SELECT asset_id[\s\S]*WHERE id = \$1 AND owner_id = \$2 AND project_id = \$3[\s\S]*FOR UPDATE/,
+      /SELECT asset_id, owner_id, project_id[\s\S]*WHERE id = \$1[\s\S]*FOR UPDATE/,
     );
-    expect(updateGraphSource).toContain("lockedPlacement.rows[0]?.asset_id !== mapping.assetId");
+    expect(updateGraphSource).toContain('placementRow.asset_id !== mapping.assetId');
+    expect(updateGraphSource).toContain('placementRow.owner_id !== input.actorUserId');
+    expect(updateGraphSource).toContain('placementRow.project_id !== input.projectId');
     expect(lifecycleSource.indexOf('transaction.findPlacement(')).toBeLessThan(
       lifecycleSource.indexOf('transaction.lockAsset('),
     );
@@ -194,7 +196,10 @@ describe('continuous canvas shadow synchronization', () => {
         return { rows: [{ schema_version: 3, metadata: {} }], rowCount: 1 };
       }
       if (sql.includes('SELECT asset_id') && sql.includes('FROM wujie_workspace_placements')) {
-        return { rows: [{ asset_id: 'asset-a' }], rowCount: 1 };
+        return { rows: [{ asset_id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id, owner_id, project_id') && sql.includes('FROM wujie_assets')) {
+        return { rows: [{ id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
       }
       if (sql.includes('UPDATE wujie_assets') && sql.includes('SET kind =')) return { rows: [], rowCount: 1 };
       if (sql.includes('FROM wujie_asset_versions') && sql.includes('FOR UPDATE')) {
@@ -255,6 +260,72 @@ describe('continuous canvas shadow synchronization', () => {
       placementId: 'placement-a',
     });
     expect(result.mappings.retained).toEqual(state.checkpointMapping);
+  });
+
+  it('recreates only a missing placement after placement and asset locks', async () => {
+    const mapping = { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' };
+    const rawProject = project([image('retained')]);
+    const sqlOrder: string[] = [];
+    const query = vi.fn(async (sql: string) => {
+      sqlOrder.push(sql);
+      if (sql.includes('SELECT legacy.value AS legacy_project')) return { rows: [{ legacy_project: rawProject }], rowCount: 1 };
+      if (sql.includes('FROM wujie_asset_migration_checkpoints') && sql.includes('SELECT status')) {
+        return { rows: [{ status: 'completed', checkpoint: { sourceSchemaVersion: 1, legacyImageMappings: { retained: mapping } } }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT schema_version, metadata')) return { rows: [{ schema_version: 3, metadata: {} }], rowCount: 1 };
+      if (sql.includes('FROM wujie_workspace_placements') && sql.includes('FOR UPDATE')) return { rows: [], rowCount: 0 };
+      if (sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE')) {
+        return { rows: [{ id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_asset_versions') && sql.includes('FOR UPDATE')) {
+        return { rows: [{
+          file_url: '/media/retained.png', storage_key: null, checksum: null, mime_type: null,
+          byte_size: null, width: 600, height: 400, availability: 'ready', recovery_source_url: null,
+        }], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_assets') && sql.includes('SET kind =')) return { rows: [], rowCount: 1 };
+      if (sql.includes('INSERT INTO wujie_workspace_placements')) return { rows: [], rowCount: 1 };
+      if (sql.includes('UPDATE wujie_asset_migration_checkpoints')) return { rows: [], rowCount: 1 };
+      if (sql.includes('UPDATE wujie_projects SET name')) return { rows: [], rowCount: 1 };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+    const client = { query } as unknown as Parameters<typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction>[0];
+
+    const result = await legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    expect(result.mappings.retained).toEqual(mapping);
+    expect(sqlOrder.findIndex((sql) => sql.includes('FROM wujie_workspace_placements'))).toBeLessThan(
+      sqlOrder.findIndex((sql) => sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE')),
+    );
+    expect(sqlOrder.some((sql) => sql.includes('INSERT INTO wujie_assets'))).toBe(false);
+    expect(sqlOrder.some((sql) => sql.includes('INSERT INTO wujie_asset_versions'))).toBe(false);
+    expect(sqlOrder.filter((sql) => sql.includes('INSERT INTO wujie_workspace_placements'))).toHaveLength(1);
+  });
+
+  it('rejects a checkpoint placement that belongs to another asset or ownership scope', async () => {
+    const mapping = { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT legacy.value AS legacy_project')) return { rows: [{ legacy_project: project([image('retained')]) }], rowCount: 1 };
+      if (sql.includes('FROM wujie_asset_migration_checkpoints') && sql.includes('SELECT status')) {
+        return { rows: [{ status: 'completed', checkpoint: { sourceSchemaVersion: 1, legacyImageMappings: { retained: mapping } } }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT schema_version, metadata')) return { rows: [{ schema_version: 3, metadata: {} }], rowCount: 1 };
+      if (sql.includes('FROM wujie_workspace_placements') && sql.includes('FOR UPDATE')) {
+        return { rows: [{ asset_id: 'asset-other', owner_id: 'user-other', project_id: 'project-other' }], rowCount: 1 };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+    const client = { query } as unknown as Parameters<typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction>[0];
+
+    await expect(legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+    })).rejects.toMatchObject({ code: 'LEGACY_MIGRATION_INTEGRITY_CONFLICT' });
+    expect(query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO'))).toBe(false);
+    expect(query.mock.calls.some(([sql]) => String(sql).includes('UPDATE wujie_assets'))).toBe(false);
   });
 
   it('persists data URLs before opening the atomic database transaction', async () => {

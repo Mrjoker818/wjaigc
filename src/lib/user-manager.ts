@@ -9,6 +9,7 @@ import type { AssetGraphMode } from '@/lib/asset-core/types';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
+const PROJECT_CONFLICT_BACKUP_KEY = 'unbounded_ai_project_conflict_backups';
 const DEFAULT_ADMIN_NAME = 'Mr.joker';
 const PROJECT_SYNC_TIMEOUT_MS = 8_000;
 // Default admin password is no longer stored in client code for security.
@@ -81,10 +82,128 @@ export class ProjectSyncConflictError extends Error {
   readonly currentRevision: number;
 
   constructor(currentRevision: number) {
-    super('Canvas project sync conflict');
+    super('Canvas project sync conflict; refresh or retry after the latest server snapshot is loaded');
     this.name = 'ProjectSyncConflictError';
     this.currentRevision = currentRevision;
   }
+}
+
+interface ProjectConflictBackup {
+  userId: string;
+  projectId: string;
+  imageId: string;
+  localImage: CanvasImage;
+  remoteImage: CanvasImage;
+  createdAt: number;
+}
+
+function cloneProjects(projects: Project[]): Project[] {
+  return JSON.parse(JSON.stringify(projects)) as Project[];
+}
+
+function canonicalizeSnapshot(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeSnapshot);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalizeSnapshot(entry)]),
+    );
+  }
+  return value;
+}
+
+function snapshotsEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(canonicalizeSnapshot(left)) === JSON.stringify(canonicalizeSnapshot(right));
+}
+
+function projectWithoutImages(project: Project): Omit<Project, 'canvasImages'> {
+  const fields: Partial<Project> = { ...project };
+  delete fields.canvasImages;
+  return fields as Omit<Project, 'canvasImages'>;
+}
+
+function rebaseProjectSnapshots(
+  baseProjects: Project[],
+  localProjects: Project[],
+  remoteProjects: Project[],
+  backupConflict: (projectId: string, localImage: CanvasImage, remoteImage: CanvasImage) => void,
+): Project[] {
+  const baseById = new Map(baseProjects.map((project) => [project.id, project]));
+  const localById = new Map(localProjects.map((project) => [project.id, project]));
+  const remoteById = new Map(remoteProjects.map((project) => [project.id, project]));
+  const rebased: Project[] = [];
+
+  for (const remoteProject of remoteProjects) {
+    const baseProject = baseById.get(remoteProject.id);
+    const localProject = localById.get(remoteProject.id);
+    if (baseProject && !localProject) {
+      if (snapshotsEqual(projectWithoutImages(remoteProject), projectWithoutImages(baseProject))
+        && snapshotsEqual(remoteProject.canvasImages, baseProject.canvasImages)) continue;
+      rebased.push(remoteProject);
+      continue;
+    }
+    if (!localProject) {
+      rebased.push(remoteProject);
+      continue;
+    }
+
+    const baseImages = new Map((baseProject?.canvasImages ?? []).map((image) => [image.id, image]));
+    const localImages = new Map(localProject.canvasImages.map((image) => [image.id, image]));
+    const remoteImages = new Map(remoteProject.canvasImages.map((image) => [image.id, image]));
+    const canvasImages: CanvasImage[] = [];
+
+    for (const remoteImage of remoteProject.canvasImages) {
+      const baseImage = baseImages.get(remoteImage.id);
+      const localImage = localImages.get(remoteImage.id);
+      if (baseImage && !localImage) {
+        if (snapshotsEqual(remoteImage, baseImage)) continue;
+        canvasImages.push(remoteImage);
+        continue;
+      }
+      if (!localImage) {
+        canvasImages.push(remoteImage);
+        continue;
+      }
+      if (!baseImage) {
+        if (!snapshotsEqual(localImage, remoteImage)) {
+          backupConflict(remoteProject.id, localImage, remoteImage);
+        }
+        canvasImages.push(remoteImage);
+        continue;
+      }
+      const localChanged = !snapshotsEqual(localImage, baseImage);
+      const remoteChanged = !snapshotsEqual(remoteImage, baseImage);
+      if (localChanged && !remoteChanged) {
+        canvasImages.push(localImage);
+      } else if (localChanged && remoteChanged && !snapshotsEqual(localImage, remoteImage)) {
+        backupConflict(remoteProject.id, localImage, remoteImage);
+        canvasImages.push(remoteImage);
+      } else {
+        canvasImages.push(remoteImage);
+      }
+    }
+
+    for (const localImage of localProject.canvasImages) {
+      if (remoteImages.has(localImage.id)) continue;
+      if (baseImages.has(localImage.id)) continue;
+      canvasImages.push(localImage);
+    }
+
+    const baseFields = baseProject ? projectWithoutImages(baseProject) : undefined;
+    const localFields = projectWithoutImages(localProject);
+    const remoteFields = projectWithoutImages(remoteProject);
+    const fields = baseFields && !snapshotsEqual(localFields, baseFields) && snapshotsEqual(remoteFields, baseFields)
+      ? localFields
+      : remoteFields;
+    rebased.push({ ...fields, canvasImages });
+    localById.delete(remoteProject.id);
+  }
+
+  for (const localProject of localById.values()) {
+    if (!baseById.has(localProject.id) && !remoteById.has(localProject.id)) rebased.push(localProject);
+  }
+  return rebased;
 }
 
 export class UserManager {
@@ -96,7 +215,8 @@ export class UserManager {
   private _projectSyncRevision = 0;
   private _projectSyncRequestEpoch = 0;
   private _projectSyncSessionEpoch = 0;
-  private _projectSyncInFlightCount = 0;
+  private _projectSyncInFlightTokens = new Set<string>();
+  private _lastAuthoritativeProjects = new Map<string, Project[]>();
   private _onProjectsChanged: (() => void) | null = null;
   // ★ 跟踪最近删除的图片ID，防止服务器同步时将已删除的图片合并回来
   // Map: imageId → 删除时间戳(ms)，60秒后自动清理
@@ -508,14 +628,18 @@ export class UserManager {
     requestEpoch: number;
     sessionEpoch: number;
     revision: number;
+    token: string;
   } | null {
     if (!this.currentUserId) return null;
-    this._projectSyncInFlightCount += 1;
+    const requestEpoch = ++this._projectSyncRequestEpoch;
+    const token = `${this._projectSyncSessionEpoch}:${requestEpoch}`;
+    this._projectSyncInFlightTokens.add(token);
     return {
       userId: this.currentUserId,
-      requestEpoch: ++this._projectSyncRequestEpoch,
+      requestEpoch,
       sessionEpoch: this._projectSyncSessionEpoch,
       revision: this._projectSyncRevision,
+      token,
     };
   }
 
@@ -534,11 +658,32 @@ export class UserManager {
   }
 
   isProjectSyncInFlight(): boolean {
-    return this._projectSyncInFlightCount > 0;
+    const currentPrefix = `${this._projectSyncSessionEpoch}:`;
+    return [...this._projectSyncInFlightTokens].some((token) => token.startsWith(currentPrefix));
   }
 
-  private finishProjectSyncRequest(): void {
-    this._projectSyncInFlightCount = Math.max(0, this._projectSyncInFlightCount - 1);
+  private finishProjectSyncRequest(request: { token: string }): void {
+    this._projectSyncInFlightTokens.delete(request.token);
+  }
+
+  private backupProjectConflict(projectId: string, localImage: CanvasImage, remoteImage: CanvasImage): void {
+    if (!this.currentUserId || !this.canUseStorage()) return;
+    let backups: ProjectConflictBackup[] = [];
+    try {
+      const stored = localStorage.getItem(PROJECT_CONFLICT_BACKUP_KEY);
+      if (stored) backups = JSON.parse(stored) as ProjectConflictBackup[];
+    } catch {
+      backups = [];
+    }
+    backups.push({
+      userId: this.currentUserId,
+      projectId,
+      imageId: localImage.id,
+      localImage: JSON.parse(JSON.stringify(localImage)) as CanvasImage,
+      remoteImage: JSON.parse(JSON.stringify(remoteImage)) as CanvasImage,
+      createdAt: Date.now(),
+    });
+    localStorage.setItem(PROJECT_CONFLICT_BACKUP_KEY, JSON.stringify(backups.slice(-50)));
   }
 
   private scheduleServerSync(): void {
@@ -723,10 +868,16 @@ export class UserManager {
       }
       this.applyProjectIdMap(projectIdMap);
       this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
+      if (this.currentUserId && this.multiUserData?.userData[this.currentUserId]) {
+        this._lastAuthoritativeProjects.set(
+          this.currentUserId,
+          cloneProjects(this.multiUserData.userData[this.currentUserId].projects),
+        );
+      }
       this._recentlyDeletedImageIds.clear();
       return { projectIdMap };
     } finally {
-      this.finishProjectSyncRequest();
+      this.finishProjectSyncRequest(request);
     }
   }
 
@@ -738,13 +889,13 @@ export class UserManager {
     immediate: boolean = false,
     silent: boolean = false,
   ): Promise<void> {
-    let requestStarted = false;
+    let requestToken: { token: string } | null = null;
     try {
       const projectsPayload = this.buildProjectsSyncPayload(false);
       if (!projectsPayload) return;
       const request = this.beginProjectSyncRequest();
       if (!request) return;
-      requestStarted = true;
+      requestToken = request;
       const syncRes = await fetch('/api/user-data/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -770,6 +921,12 @@ export class UserManager {
           }
           this.applyProjectIdMap(data.projectIdMap || {});
           this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
+          if (this.currentUserId && this.multiUserData?.userData[this.currentUserId]) {
+            this._lastAuthoritativeProjects.set(
+              this.currentUserId,
+              cloneProjects(this.multiUserData.userData[this.currentUserId].projects),
+            );
+          }
           console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
           this._recentlyDeletedImageIds.clear();
         } else {
@@ -781,7 +938,7 @@ export class UserManager {
         console.error('[Sync] syncToServer error:', error);
       }
     } finally {
-      if (requestStarted) this.finishProjectSyncRequest();
+      if (requestToken) this.finishProjectSyncRequest(requestToken);
     }
   }
 
@@ -936,6 +1093,15 @@ export class UserManager {
         }
       }
 
+      const authoritativeBase = this._lastAuthoritativeProjects.get(currentUserId);
+      if (authoritativeBase) {
+        userData.projects = rebaseProjectSnapshots(
+          authoritativeBase,
+          localProjectsFiltered,
+          serverProjects,
+          (projectId, localImage, remoteImage) => this.backupProjectConflict(projectId, localImage, remoteImage),
+        );
+      } else {
       // 合并策略：按项目 ID 合并，保留更新时间更晚的版本
       const localHasData = localProjectsFiltered.length > 0;
       const serverHasData = serverProjects.length > 0;
@@ -1079,6 +1245,7 @@ export class UserManager {
         userData.projects = mergedProjects;
       }
       // 如果只有本地数据，不做任何修改
+      }
 
       // 规范化图片 URL：将旧格式 /uploads/xxx 转换为 /api/serve-upload/uploads/xxx
       // 确保跨环境（开发/生产）和跨浏览器图片可访问
@@ -1093,6 +1260,7 @@ export class UserManager {
       }
 
       this._serverSyncReady = true; // 标记服务器数据已加载，允许后续 syncToServer
+      this._lastAuthoritativeProjects.set(currentUserId, cloneProjects(serverProjects));
       this.commitLocalDataOnly();
       this.notifyProjectsChanged(); // 通知 UI 刷新
       // ★ 调试日志：帮助追踪数据恢复

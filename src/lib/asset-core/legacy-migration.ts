@@ -12,6 +12,7 @@ export type LegacyMigrationErrorCode =
   | 'LEGACY_PROJECT_NOT_FOUND'
   | 'LEGACY_PROJECT_QUARANTINED'
   | 'LEGACY_MEDIA_PERSIST_FAILED'
+  | 'LEGACY_MIGRATION_INTEGRITY_CONFLICT'
   | 'LEGACY_MIGRATION_FAILED';
 
 export class LegacyMigrationError extends Error {
@@ -504,14 +505,33 @@ async function updateGraphForImage(
 ): Promise<LegacyImageMapping | null> {
   const file = await fileForImage(input, image, mapping);
   const metadata = JSON.stringify({ legacyImageId: image.id, legacyImage: image });
-  const lockedPlacement = await client.query<{ asset_id: string }>(
-    `SELECT asset_id
+  const lockedPlacement = await client.query<{ asset_id: string; owner_id: string; project_id: string }>(
+    `SELECT asset_id, owner_id, project_id
      FROM wujie_workspace_placements
-     WHERE id = $1 AND owner_id = $2 AND project_id = $3
+     WHERE id = $1
      FOR UPDATE`,
-    [mapping.placementId, input.actorUserId, input.projectId],
+    [mapping.placementId],
   );
-  if (lockedPlacement.rows[0]?.asset_id !== mapping.assetId) return null;
+  const placementRow = lockedPlacement.rows[0];
+  if (placementRow && (
+    placementRow.asset_id !== mapping.assetId
+    || placementRow.owner_id !== input.actorUserId
+    || placementRow.project_id !== input.projectId
+  )) {
+    throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+  }
+  const assetLock = await client.query<{ id: string; owner_id: string; project_id: string }>(
+    `SELECT id, owner_id, project_id
+     FROM wujie_assets
+     WHERE id = $1
+     FOR UPDATE`,
+    [mapping.assetId],
+  );
+  const assetRow = assetLock.rows[0];
+  if (!assetRow) return null;
+  if (assetRow.owner_id !== input.actorUserId || assetRow.project_id !== input.projectId) {
+    throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+  }
   const asset = await client.query(
     `UPDATE wujie_assets
      SET kind = $4, status = 'active', metadata = $5::jsonb, updated_at = now()
@@ -589,7 +609,8 @@ async function updateGraphForImage(
       [mapping.assetId, input.actorUserId, input.projectId, versionPlan.mapping.versionId],
     );
   }
-  const placement = await client.query(
+  const placement = placementRow
+    ? await client.query(
     `UPDATE wujie_workspace_placements
      SET asset_version_id = $4, status = 'active', deleted_at = NULL,
          transform = $5::jsonb, metadata = $6::jsonb, updated_at = now()
@@ -601,8 +622,25 @@ async function updateGraphForImage(
       versionPlan.mapping.versionId,
       JSON.stringify(imageTransform(image)),
       metadata,
-    ],
-  );
+    ])
+    : await client.query(
+    `INSERT INTO wujie_workspace_placements(
+       id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+       entity_type, entity_id, status, deleted_at, transform, metadata, created_at, updated_at
+     ) VALUES (
+       $1, $2, $3, $4, $5, 'canvas', $3, 'canvas-image', $6, 'active', NULL,
+       $7::jsonb, $8::jsonb, now(), now()
+     )`,
+    [
+      mapping.placementId,
+      input.actorUserId,
+      input.projectId,
+      mapping.assetId,
+      versionPlan.mapping.versionId,
+      image.id,
+      JSON.stringify(imageTransform(image)),
+      metadata,
+    ]);
   if ((placement.rowCount ?? 0) !== 1) throw migrationError('LEGACY_MIGRATION_FAILED');
   return versionPlan.mapping;
 }

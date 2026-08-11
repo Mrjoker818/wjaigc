@@ -21,6 +21,12 @@ const canvasImage = (url: string) => ({
   createdAt: 1,
 });
 
+const imageWithId = (id: string, url: string, overrides: Record<string, unknown> = {}) => ({
+  ...canvasImage(url),
+  id,
+  ...overrides,
+});
+
 const project = (userId: string, url: string, id = `project-${userId.slice(-1)}`) => ({
   id,
   userId,
@@ -90,6 +96,151 @@ afterEach(() => {
 });
 
 describe('UserManager project sync response isolation', () => {
+  it('rebases a rev0 conflict through GET and later autosave without resurrecting a remote deletion', async () => {
+    const initial = {
+      ...project('user-a', '/media/deleted.png'),
+      canvasImages: [
+        imageWithId('deleted-remotely', '/media/deleted.png'),
+        imageWithId('safe-local-edit', '/media/safe.png'),
+        imageWithId('concurrent-edit', '/media/base.png'),
+      ],
+    };
+    let revision = 0;
+    let serverProjects = [structuredClone(initial)];
+    const postBodies: Array<{ projectRevision: number; value: typeof serverProjects }> = [];
+    const heldResponse = deferredResponse();
+    const heldRequestStarted = deferredValue<void>();
+    let heldBody: { projectRevision: number; value: typeof serverProjects } | null = null;
+
+    const applyCas = (body: { projectRevision: number; value: typeof serverProjects }): Response => {
+      if (body.projectRevision !== revision) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Canvas project snapshot is stale',
+          currentRevision: revision,
+        }), { status: 409 });
+      }
+      serverProjects = structuredClone(body.value);
+      revision += 1;
+      return new Response(JSON.stringify({ success: true, projectRevision: revision }), { status: 200 });
+    };
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: serverProjects,
+          assetGraphMode: 'shadow',
+          projectRevision: revision,
+        }), { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body || '{}')) as {
+        projectRevision: number;
+        value: typeof serverProjects;
+      };
+      postBodies.push(structuredClone(body));
+      if (postBodies.length === 1) {
+        heldBody = body;
+        heldRequestStarted.resolve();
+        return heldResponse.promise;
+      }
+      return applyCas(body);
+    }));
+
+    const { ProjectSyncConflictError, UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    storage.set('unbounded_ai_user_data', JSON.stringify({
+      users,
+      userData: {
+        'user-a': { user: users[0], projects: [initial], apiKeys: [], usageStats: [] },
+        'user-b': { user: users[1], projects: [project('user-b', '/media/b.png')], apiKeys: [], usageStats: [] },
+      },
+    }));
+    Reflect.set(manager, 'multiUserData', JSON.parse(storage.get('unbounded_ai_user_data')!));
+    await manager.loadProjectsFromServer(0, 'user-a');
+    manager.updateProject('project-a', {
+      canvasImages: [
+        imageWithId('deleted-remotely', '/media/deleted.png'),
+        imageWithId('safe-local-edit', '/media/safe.png', { x: 91 }),
+        imageWithId('concurrent-edit', '/media/local-draft.png'),
+        imageWithId('local-addition', '/media/local-addition.png'),
+      ],
+      updatedAt: 2,
+    });
+
+    const staleRequest = manager.flushProjectsToServer();
+    await heldRequestStarted.promise;
+    const remoteWinner = await fetch('/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        key: 'projects',
+        projectRevision: 0,
+        value: [{
+          ...initial,
+          updatedAt: 3,
+          canvasImages: [
+            imageWithId('safe-local-edit', '/media/safe.png'),
+            imageWithId('concurrent-edit', '/media/remote-winner.png'),
+          ],
+        }],
+      }),
+    });
+    expect(remoteWinner.status).toBe(200);
+    heldResponse.resolve(applyCas(heldBody!));
+
+    await expect(staleRequest).rejects.toMatchObject({
+      name: ProjectSyncConflictError.name,
+      message: expect.stringMatching(/refresh|reload|sync|重试|刷新/i),
+    });
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+
+    const rebased = manager.getProject('project-a')!;
+    expect(rebased.canvasImages.map((item) => item.id)).toEqual([
+      'safe-local-edit',
+      'concurrent-edit',
+      'local-addition',
+    ]);
+    expect(rebased.canvasImages.find((item) => item.id === 'safe-local-edit')?.x).toBe(91);
+    expect(rebased.canvasImages.find((item) => item.id === 'concurrent-edit')?.url).toBe('/media/remote-winner.png');
+    expect(storage.get('unbounded_ai_project_conflict_backups')).toContain('/media/local-draft.png');
+
+    manager.updateProject('project-a', {
+      canvasImages: rebased.canvasImages.map((item) => (
+        item.id === 'local-addition' ? { ...item, x: 144 } : item
+      )),
+      updatedAt: 4,
+    });
+    await vi.advanceTimersByTimeAsync(2_001);
+    await vi.waitFor(() => expect(manager.isProjectSyncInFlight()).toBe(false));
+
+    expect(postBodies.map((body) => body.projectRevision)).toEqual([0, 0, 1]);
+    expect(serverProjects[0].canvasImages.some((item) => item.id === 'deleted-remotely')).toBe(false);
+    expect(serverProjects[0].canvasImages.find((item) => item.id === 'local-addition')?.x).toBe(144);
+  });
+
+  it('preserves a local deletion when the authoritative placement is unchanged', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      if (String(input) !== '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({ success: true, projectRevision: 2 }), { status: 200 });
+      }
+      getCount += 1;
+      return new Response(JSON.stringify({
+        success: true,
+        value: [project('user-a', '/media/a.png')],
+        assetGraphMode: 'shadow',
+        projectRevision: getCount,
+      }), { status: 200 });
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await manager.loadProjectsFromServer(0, 'user-a');
+    manager.updateProject('project-a', { canvasImages: [], updatedAt: 2 });
+    await manager.loadProjectsFromServer(0, 'user-a');
+
+    expect(manager.getProject('project-a')?.canvasImages).toEqual([]);
+  });
   it('stops on a realistic rev0 conflict without replaying the stale snapshot at rev1', async () => {
     let revision = 0;
     let serverProjects = [project('user-a', '/media/a.png')];
@@ -347,6 +498,43 @@ describe('UserManager project sync response isolation', () => {
     expect(inFlight).toBeTypeOf('function');
     expect(whilePending).toBe(true);
     expect(inFlight?.call(manager)).toBe(false);
+  });
+
+  it('scopes in-flight request tokens to the active session and ignores an old completion', async () => {
+    const userAResponse = deferredResponse();
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: [project('user-a', '/media/a.png')],
+          assetGraphMode: 'shadow',
+          projectRevision: 0,
+        }), { status: 200 });
+      }
+      return userAResponse.promise;
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await manager.loadProjectsFromServer(0, 'user-a');
+    const oldRequest = manager.flushProjectsToServer();
+    await Promise.resolve();
+    expect(manager.isProjectSyncInFlight()).toBe(true);
+
+    manager.setCurrentUser('user-b');
+    expect(manager.isProjectSyncInFlight()).toBe(false);
+    expect(manager.getProjectSyncRevision()).toBe(0);
+
+    userAResponse.resolve(new Response(JSON.stringify({
+      success: true,
+      projectRevision: 7,
+      assetGraphUpdates: { 'project-b': { 'image-shared': graphUpdate('/media/late-a.png', 'version-late-a') } },
+    }), { status: 200 }));
+    await oldRequest;
+
+    expect(manager.isProjectSyncInFlight()).toBe(false);
+    expect(manager.getProjectSyncRevision()).toBe(0);
+    expect(manager.getProject('project-b')?.canvasImages[0]?.url).toBe('/media/b.png');
   });
 
   it('rejects a GET response when the user switches while response json is pending', async () => {
