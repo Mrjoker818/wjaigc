@@ -504,6 +504,14 @@ async function updateGraphForImage(
 ): Promise<LegacyImageMapping | null> {
   const file = await fileForImage(input, image, mapping);
   const metadata = JSON.stringify({ legacyImageId: image.id, legacyImage: image });
+  const lockedPlacement = await client.query<{ asset_id: string }>(
+    `SELECT asset_id
+     FROM wujie_workspace_placements
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3
+     FOR UPDATE`,
+    [mapping.placementId, input.actorUserId, input.projectId],
+  );
+  if (lockedPlacement.rows[0]?.asset_id !== mapping.assetId) return null;
   const asset = await client.query(
     `UPDATE wujie_assets
      SET kind = $4, status = 'active', metadata = $5::jsonb, updated_at = now()

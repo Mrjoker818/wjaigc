@@ -1436,6 +1436,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             annotationsV2: annotationRecordsRef.current,
           },
         });
+        if (mgr.isProjectSyncInFlight()) return;
         // 2. sendBeacon 异步发送到服务器，确保云部署不丢数据
         if (currentUserRef.current?.id) {
           const payload = {

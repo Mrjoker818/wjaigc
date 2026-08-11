@@ -52,6 +52,14 @@ const deferredResponse = () => {
   return { promise, resolve };
 };
 
+const deferredValue = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+};
+
 function seedUsers(): void {
   storage.set('unbounded_ai_current_user', 'user-a');
   storage.set('unbounded_ai_user_data', JSON.stringify({
@@ -82,6 +90,149 @@ afterEach(() => {
 });
 
 describe('UserManager project sync response isolation', () => {
+  it('stops on a realistic rev0 conflict without replaying the stale snapshot at rev1', async () => {
+    let revision = 0;
+    let serverProjects = [project('user-a', '/media/a.png')];
+    const postBodies: Array<{ projectRevision: number; value: ReturnType<typeof project>[] }> = [];
+    const heldResponse = deferredResponse();
+    const heldRequestStarted = deferredValue<void>();
+    let heldBody: { projectRevision: number; value: ReturnType<typeof project>[] } | null = null;
+
+    const applyCas = (body: { projectRevision: number; value: ReturnType<typeof project>[] }): Response => {
+      if (body.projectRevision !== revision) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Canvas project snapshot is stale',
+          currentRevision: revision,
+        }), { status: 409 });
+      }
+      serverProjects = structuredClone(body.value);
+      revision += 1;
+      return new Response(JSON.stringify({ success: true, projectRevision: revision }), { status: 200 });
+    };
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: serverProjects,
+          assetGraphMode: 'shadow',
+          projectRevision: revision,
+        }), { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body || '{}')) as {
+        projectRevision: number;
+        value: ReturnType<typeof project>[];
+      };
+      postBodies.push(body);
+      if (postBodies.length === 1) {
+        heldBody = body;
+        heldRequestStarted.resolve();
+        return heldResponse.promise;
+      }
+      return applyCas(body);
+    }));
+
+    const { ProjectSyncConflictError, UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+
+    const requestB = manager.flushProjectsToServer();
+    await heldRequestStarted.promise;
+
+    const requestA = await fetch('/api/user-data/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'projects',
+        projectRevision: 0,
+        value: [{ ...project('user-a', '/media/a.png'), canvasImages: [] }],
+      }),
+    });
+    expect(requestA.status).toBe(200);
+    heldResponse.resolve(applyCas(heldBody!));
+
+    await expect(requestB).rejects.toBeInstanceOf(ProjectSyncConflictError);
+    expect(postBodies.map((body) => body.projectRevision)).toEqual([0, 0]);
+    expect(revision).toBe(1);
+    expect(serverProjects[0].canvasImages).toEqual([]);
+    expect(manager.getProjectSyncRevision()).toBe(0);
+    expect(manager.getProject('project-a')?.canvasImages).toHaveLength(1);
+  });
+
+  it('stops debounced autosave on 409 without replaying its stale snapshot at rev1', async () => {
+    let revision = 0;
+    let serverProjects = [project('user-a', '/media/a.png')];
+    const postBodies: Array<{ projectRevision: number; value: ReturnType<typeof project>[] }> = [];
+    const heldResponse = deferredResponse();
+    const heldRequestStarted = deferredValue<void>();
+    let heldBody: { projectRevision: number; value: ReturnType<typeof project>[] } | null = null;
+
+    const applyCas = (body: { projectRevision: number; value: ReturnType<typeof project>[] }): Response => {
+      if (body.projectRevision !== revision) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Canvas project snapshot is stale',
+          currentRevision: revision,
+        }), { status: 409 });
+      }
+      serverProjects = structuredClone(body.value);
+      revision += 1;
+      return new Response(JSON.stringify({ success: true, projectRevision: revision }), { status: 200 });
+    };
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: serverProjects,
+          assetGraphMode: 'shadow',
+          projectRevision: revision,
+        }), { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body || '{}')) as {
+        projectRevision: number;
+        value: ReturnType<typeof project>[];
+      };
+      postBodies.push(body);
+      if (postBodies.length === 1) {
+        heldBody = body;
+        heldRequestStarted.resolve();
+        return heldResponse.promise;
+      }
+      return applyCas(body);
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await vi.advanceTimersByTimeAsync(2_001);
+    await manager.loadProjectsFromServer(0, 'user-a');
+    manager.updateProject('project-a', { updatedAt: 2 });
+    await vi.advanceTimersByTimeAsync(2_001);
+    await heldRequestStarted.promise;
+
+    const requestA = await fetch('/api/user-data/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'projects',
+        projectRevision: 0,
+        value: [{ ...project('user-a', '/media/a.png'), canvasImages: [] }],
+      }),
+    });
+    expect(requestA.status).toBe(200);
+    heldResponse.resolve(applyCas(heldBody!));
+    await vi.waitFor(() => {
+      expect(manager.isProjectSyncInFlight()).toBe(false);
+    });
+
+    expect(postBodies.map((body) => body.projectRevision)).toEqual([0, 0]);
+    expect(revision).toBe(1);
+    expect(serverProjects[0].canvasImages).toEqual([]);
+    expect(manager.getProjectSyncRevision()).toBe(0);
+    expect(manager.getProject('project-a')?.canvasImages).toHaveLength(1);
+  });
+
   it('ignores an older POST response after a newer revision converges', async () => {
     const older = deferredResponse();
     const newer = deferredResponse();
@@ -163,5 +314,102 @@ describe('UserManager project sync response isolation', () => {
     expect(manager.getCurrentUserId()).toBe('user-b');
     expect(manager.getProject('project-b')?.canvasImages[0]).toMatchObject({ url: '/media/b.png' });
     expect(manager.getProject('project-b')?.canvasImages[0]?.assetVersionId).toBeUndefined();
+  });
+
+  it('keeps project sync marked in flight until its response body is parsed', async () => {
+    const postResponse = deferredResponse();
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: [project('user-a', '/media/a.png')],
+          assetGraphMode: 'shadow',
+          projectRevision: 0,
+        }), { status: 200 });
+      }
+      return postResponse.promise;
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await manager.loadProjectsFromServer(0, 'user-a');
+    const request = manager.flushProjectsToServer();
+    await Promise.resolve();
+    const inFlight = Reflect.get(manager, 'isProjectSyncInFlight') as undefined | (() => boolean);
+    const whilePending = inFlight?.call(manager);
+
+    postResponse.resolve(new Response(JSON.stringify({
+      success: true,
+      projectRevision: 1,
+    }), { status: 200 }));
+    await request;
+
+    expect(inFlight).toBeTypeOf('function');
+    expect(whilePending).toBe(true);
+    expect(inFlight?.call(manager)).toBe(false);
+  });
+
+  it('rejects a GET response when the user switches while response json is pending', async () => {
+    const responseJson = deferredValue<{
+      success: boolean;
+      value: ReturnType<typeof project>[];
+      assetGraphMode: 'shadow';
+      projectRevision: number;
+    }>();
+    const jsonStarted = deferredValue<void>();
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: () => {
+        jsonStarted.resolve();
+        return responseJson.promise;
+      },
+    }) as Response));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    const load = manager.loadProjectsFromServer(0, 'user-a');
+    await jsonStarted.promise;
+    manager.setCurrentUser('user-b');
+    responseJson.resolve({
+      success: true,
+      value: [project('user-a', '/media/a-late.png')],
+      assetGraphMode: 'shadow',
+      projectRevision: 9,
+    });
+
+    await expect(load).resolves.toBe(false);
+    expect(manager.getCurrentUserId()).toBe('user-b');
+    expect(manager.getAssetGraphMode()).toBe('legacy');
+    expect(manager.getProjectSyncRevision()).toBe(0);
+    expect(manager.getProject('project-b')?.canvasImages[0]?.url).toBe('/media/b.png');
+  });
+
+  it('commits unchanged periodic GET state locally without scheduling a POST', async () => {
+    let postCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: [project('user-a', '/media/a.png')],
+          assetGraphMode: 'shadow',
+          projectRevision: 4,
+        }), { status: 200 });
+      }
+      postCount += 1;
+      return new Response(JSON.stringify({ success: true, projectRevision: 5 }), { status: 200 });
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await vi.advanceTimersByTimeAsync(2_001);
+    expect(postCount).toBe(0);
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(2_001);
+
+    expect(manager.getProjectSyncRevision()).toBe(4);
+    expect(postCount).toBe(0);
   });
 });

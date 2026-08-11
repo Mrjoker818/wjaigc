@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import {
   executeCanvasProjectSync,
@@ -37,6 +39,36 @@ const project = (canvasImages: CanvasImage[]): Project => ({
 });
 
 describe('continuous canvas shadow synchronization', () => {
+  it('locks the placement before the asset using the placement lifecycle owner/project contract', () => {
+    const migrationSource = readFileSync(
+      resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
+      'utf8',
+    );
+    const serviceSource = readFileSync(
+      resolve(process.cwd(), 'src/lib/asset-core/service.ts'),
+      'utf8',
+    );
+    const updateStart = migrationSource.indexOf('async function updateGraphForImage');
+    const updateEnd = migrationSource.indexOf('async function trashGraphForImage', updateStart);
+    const updateGraphSource = migrationSource.slice(updateStart, updateEnd);
+    const placementLock = updateGraphSource.indexOf('SELECT asset_id\n     FROM wujie_workspace_placements');
+    const assetMutation = updateGraphSource.indexOf('UPDATE wujie_assets\n     SET kind =');
+    const lifecycleStart = serviceSource.indexOf('async trashPlacement(input: PlacementCommand)');
+    const lifecycleEnd = serviceSource.indexOf('async restorePlacement(input: PlacementCommand)', lifecycleStart);
+    const lifecycleSource = serviceSource.slice(lifecycleStart, lifecycleEnd);
+
+    expect(updateStart).toBeGreaterThan(-1);
+    expect(placementLock).toBeGreaterThan(-1);
+    expect(assetMutation).toBeGreaterThan(placementLock);
+    expect(updateGraphSource).toMatch(
+      /SELECT asset_id[\s\S]*WHERE id = \$1 AND owner_id = \$2 AND project_id = \$3[\s\S]*FOR UPDATE/,
+    );
+    expect(updateGraphSource).toContain("lockedPlacement.rows[0]?.asset_id !== mapping.assetId");
+    expect(lifecycleSource.indexOf('transaction.findPlacement(')).toBeLessThan(
+      lifecycleSource.indexOf('transaction.lockAsset('),
+    );
+  });
+
   it('plans geometry updates, additions, and deletions after the initial checkpoint', () => {
     const previousMappings = {
       retained: { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' },
@@ -160,6 +192,9 @@ describe('continuous canvas shadow synchronization', () => {
       }
       if (sql.includes('SELECT schema_version, metadata') && sql.includes('FROM wujie_projects')) {
         return { rows: [{ schema_version: 3, metadata: {} }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT asset_id') && sql.includes('FROM wujie_workspace_placements')) {
+        return { rows: [{ asset_id: 'asset-a' }], rowCount: 1 };
       }
       if (sql.includes('UPDATE wujie_assets') && sql.includes('SET kind =')) return { rows: [], rowCount: 1 };
       if (sql.includes('FROM wujie_asset_versions') && sql.includes('FOR UPDATE')) {

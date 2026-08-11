@@ -23,4 +23,19 @@ describe('project autosave wiring', () => {
     expect(autoSaveSource).toContain('serializeCanvasWorkspacePlacements(resolvedImages)');
     expect(autoSaveSource).toContain('shouldRetainCanvasPlacementDuringMerge(img)');
   });
+
+  it('keeps the unload local draft but skips a competing remote write while sync is in flight', () => {
+    const handlerStart = autoSaveSource.indexOf('const handleBeforeUnload = () => {');
+    const handlerEnd = autoSaveSource.indexOf("window.addEventListener('beforeunload'", handlerStart);
+    const handlerSource = autoSaveSource.slice(handlerStart, handlerEnd);
+    const localCommit = handlerSource.indexOf('mgr.updateProject(proj.id');
+    const inFlightGuard = handlerSource.indexOf('if (mgr.isProjectSyncInFlight()) return;');
+    const beacon = handlerSource.indexOf("navigator.sendBeacon('/api/user-data/sync', blob)");
+
+    expect(handlerStart).toBeGreaterThan(-1);
+    expect(localCommit).toBeGreaterThan(-1);
+    expect(inFlightGuard).toBeGreaterThan(localCommit);
+    expect(beacon).toBeGreaterThan(inFlightGuard);
+    expect(handlerSource).toContain('keepalive: true');
+  });
 });
