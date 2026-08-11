@@ -279,12 +279,38 @@ export interface WorkflowNode {
   execResult?: { status: string; output?: Record<string, unknown>; error?: string };
 }
 
+const WORKFLOW_IMAGE_IDENTITY_KEYS = [
+  'projectId',
+  'assetId',
+  'assetVersionId',
+  'placementId',
+] as const;
+
+export function mergeWorkflowNodeUpdate(
+  node: WorkflowNode,
+  updates: Partial<WorkflowNode>,
+): WorkflowNode {
+  const topLevel: Partial<WorkflowNode> = { ...updates };
+  delete topLevel.config;
+  const config = { ...node.config, ...(updates.config || {}) };
+  const hasImageUrlUpdate = Object.prototype.hasOwnProperty.call(updates.config, 'imageUrl');
+  if (hasImageUrlUpdate && updates.config?.imageUrl !== node.config.imageUrl) {
+    for (const key of WORKFLOW_IMAGE_IDENTITY_KEYS) delete config[key];
+  }
+  return { ...node, ...topLevel, config };
+}
+
 export interface WorkspaceAssetReference {
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
   url: string;
   name?: string;
+}
+
+export interface WorkflowOutputAssetReference extends WorkspaceAssetReference {
+  outputNodeId: string;
+  sourceNodeId: string;
 }
 
 export interface WorkflowConnection {
@@ -1457,7 +1483,7 @@ export function getNodeInputs(
 
   // 从上游连线中获取输入 (按端口类型映射)
   const incomingConns = connections.filter(c => c.toNodeId === node.id);
-  const appendImageInputs = (output: Record<string, unknown>): void => {
+  const appendImageInputs = (output: Record<string, unknown>, sourceNodeId: string): void => {
     const candidates = [
       typeof output.imageUrl === 'string' ? output.imageUrl : undefined,
       ...(Array.isArray(output.imageUrls) ? output.imageUrls.filter((url): url is string => typeof url === 'string') : []),
@@ -1477,6 +1503,41 @@ export function getNodeInputs(
       if (typeof output.assetVersionId === 'string') inputs.assetVersionId = output.assetVersionId;
       if (typeof output.assetId === 'string') inputs.assetId = output.assetId;
       if (typeof output.placementId === 'string') inputs.placementId = output.placementId;
+    }
+
+    const upstreamReferences = Array.isArray(output.assetReferences)
+      ? output.assetReferences
+      : [];
+    const references: WorkflowOutputAssetReference[] = [];
+    for (const value of upstreamReferences) {
+      if (!value || typeof value !== 'object') continue;
+      const reference = value as Record<string, unknown>;
+      if (typeof reference.assetVersionId !== 'string' || typeof reference.url !== 'string') continue;
+      references.push({
+        outputNodeId: node.id,
+        sourceNodeId: typeof reference.sourceNodeId === 'string' ? reference.sourceNodeId : sourceNodeId,
+        ...(typeof reference.assetId === 'string' ? { assetId: reference.assetId } : {}),
+        assetVersionId: reference.assetVersionId,
+        ...(typeof reference.placementId === 'string' ? { placementId: reference.placementId } : {}),
+        url: reference.url,
+        ...(typeof reference.name === 'string' ? { name: reference.name } : {}),
+      });
+    }
+    if (references.length === 0 && typeof output.assetVersionId === 'string') {
+      references.push({
+        outputNodeId: node.id,
+        sourceNodeId,
+        ...(typeof output.assetId === 'string' ? { assetId: output.assetId } : {}),
+        assetVersionId: output.assetVersionId,
+        ...(typeof output.placementId === 'string' ? { placementId: output.placementId } : {}),
+        url: primaryCandidate,
+      });
+    }
+    if (references.length > 0) {
+      const currentReferences = Array.isArray(inputs.assetReferences)
+        ? inputs.assetReferences.filter((value): value is WorkflowOutputAssetReference => Boolean(value && typeof value === 'object'))
+        : [];
+      inputs.assetReferences = [...currentReferences, ...references];
     }
   };
   // P1: 输入引用阻断 — 获取被阻断的连接ID列表
@@ -1500,7 +1561,7 @@ export function getNodeInputs(
     switch (conn.type) {
       case 'image':
         // 图片连线: 优先传递imageUrl
-        appendImageInputs(upstreamOutput);
+        appendImageInputs(upstreamOutput, conn.fromNodeId);
         if (conn.toPortId === 'in-image') {
           const upstreamSourceVersionId = typeof upstreamOutput.annotationVersionId === 'string'
             ? upstreamOutput.annotationVersionId
@@ -1525,7 +1586,7 @@ export function getNodeInputs(
         break;
       case 'data':
         // 数据连线: 传递所有输出
-        appendImageInputs(upstreamOutput);
+        appendImageInputs(upstreamOutput, conn.fromNodeId);
         if (upstreamOutput.prompt || upstreamOutput.text) {
           inputs.prompt = inputs.prompt || upstreamOutput.prompt || upstreamOutput.text;
         }
@@ -1534,7 +1595,7 @@ export function getNodeInputs(
         break;
       default: {
         // any类型: 智能推断
-        appendImageInputs(upstreamOutput);
+        appendImageInputs(upstreamOutput, conn.fromNodeId);
         // 提示词传递: 支持prompt/text/textContent三种键名
         const defaultPrompt = upstreamOutput.prompt || upstreamOutput.text || upstreamOutput.textContent;
         if (defaultPrompt) {
@@ -1567,8 +1628,8 @@ export function getNodeInputs(
 
 export function resolveWorkflowOutputAssetReference(
   outputNodeId: string,
-  nodes: WorkflowNode[],
-  connections: WorkflowConnection[],
+  _nodes: WorkflowNode[],
+  _connections: WorkflowConnection[],
   results: Record<string, { output?: Record<string, unknown> }>,
 ): WorkspaceAssetReference | null {
   const output = results[outputNodeId]?.output;
@@ -1583,37 +1644,25 @@ export function resolveWorkflowOutputAssetReference(
     };
   }
 
-  const nodesById = new Map(nodes.map(node => [node.id, node]));
-  const queue = connections
-    .filter(connection => connection.toNodeId === outputNodeId)
-    .map(connection => connection.fromNodeId);
-  const visited = new Set<string>();
-  const matchingReferences = new Map<string, WorkspaceAssetReference>();
-  while (queue.length > 0) {
-    const nodeId = queue.shift()!;
-    if (visited.has(nodeId)) continue;
-    visited.add(nodeId);
-    const node = nodesById.get(nodeId);
-    if (!node) continue;
-    const canonicalInputUrl = results[nodeId]?.output?.imageUrl;
-    if (
-      node.type === 'input-image'
-      && canonicalInputUrl === outputUrl
-      && typeof node.config.assetVersionId === 'string'
-    ) {
-      matchingReferences.set(node.config.assetVersionId, {
-        ...(typeof node.config.assetId === 'string' ? { assetId: node.config.assetId } : {}),
-        assetVersionId: node.config.assetVersionId,
-        ...(typeof node.config.placementId === 'string' ? { placementId: node.config.placementId } : {}),
-        url: outputUrl,
-      });
-    }
-    queue.push(...connections
-      .filter(connection => connection.toNodeId === nodeId)
-      .map(connection => connection.fromNodeId));
+  const explicitReferences = Array.isArray(output?.assetReferences)
+    ? output.assetReferences
+      .filter((value): value is Record<string, unknown> => Boolean(value && typeof value === 'object'))
+      .filter(reference => reference.outputNodeId === outputNodeId && typeof reference.assetVersionId === 'string')
+    : [];
+  const uniqueReferences = new Map<string, WorkspaceAssetReference>();
+  for (const reference of explicitReferences) {
+    const url = typeof reference.url === 'string' ? reference.url : outputUrl;
+    const key = `${reference.assetVersionId}:${typeof reference.placementId === 'string' ? reference.placementId : ''}`;
+    uniqueReferences.set(key, {
+      ...(typeof reference.assetId === 'string' ? { assetId: reference.assetId } : {}),
+      assetVersionId: reference.assetVersionId as string,
+      ...(typeof reference.placementId === 'string' ? { placementId: reference.placementId } : {}),
+      url,
+      ...(typeof reference.name === 'string' ? { name: reference.name } : {}),
+    });
   }
-  return matchingReferences.size === 1
-    ? matchingReferences.values().next().value ?? null
+  return uniqueReferences.size === 1
+    ? uniqueReferences.values().next().value ?? null
     : null;
 }
 
@@ -1650,24 +1699,9 @@ export function buildNodeExecutionRequest(
   }
 
   switch (node.type) {
-    case 'input-image': {
-      const projectId = getConfigString(config, 'projectId');
-      const assetVersionId = getConfigString(config, 'assetVersionId');
-      const placementId = getConfigString(config, 'placementId');
-      if (projectId && assetVersionId) {
-        return {
-          endpoint: '/api/assets',
-          method: 'POST',
-          body: {
-            projectId,
-            assetVersionId,
-            ...(placementId ? { placementId } : {}),
-          },
-        };
-      }
-      // URL-only legacy nodes remain local no-op inputs.
+    case 'input-image':
+      // The server executor resolves managed versions directly with its authenticated actor.
       return null;
-    }
 
     case 'input-text':
       // 文本输入节点：直接输出文本，不需要调用API优化

@@ -21,7 +21,9 @@ describe('node editor asset references', () => {
     expect(editorSource).toContain("entityType: 'canvas-image'");
     expect(editorSource).toContain('sourceVersion: outputReference.assetVersionId');
     expect(editorSource).toContain('resolveWorkflowOutputAssetReference');
-    expect(editorSource).toContain('assetReferences: transferredReferences');
+    expect(editorSource).toContain('prepareWorkflowCanvasInsertions');
+    expect(editorSource).toContain('if (!response.ok) throw new Error');
+    expect(editorSource).toContain('meta.assetReferences = insertion.assetReferences');
     expect(workspaceSource).toContain('const transferredReference = meta?.assetReferences');
     expect(workspaceSource).toContain('...(transferredReference?.assetVersionId');
     expect(workspaceSource).not.toContain('?? meta?.assetReferences?.[i]');

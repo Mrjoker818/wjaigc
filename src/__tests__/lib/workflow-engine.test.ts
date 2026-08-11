@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildNodeExecutionRequest, evaluateWorkflowCondition, getNodeInputs, getNodePropertyFields, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, resolveWorkflowOutputAssetReference, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
+import { buildNodeExecutionRequest, evaluateWorkflowCondition, getNodeInputs, getNodePropertyFields, mergeWorkflowNodeUpdate, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, resolveWorkflowOutputAssetReference, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
 import type { NodeType, WorkflowNode, WorkflowConnection } from '@/lib/workflow-engine';
 
 /** 创建最小合法 WorkflowNode */
@@ -117,6 +117,12 @@ describe('workflow inputs', () => {
     )).toMatchObject({
       imageUrl: '/canonical.png',
       assetVersionId: 'version-a',
+      assetReferences: [{
+        outputNodeId: 'target',
+        sourceNodeId: 'source',
+        url: '/canonical.png',
+        assetVersionId: 'version-a',
+      }],
     });
   });
 
@@ -151,7 +157,7 @@ describe('workflow inputs', () => {
     });
   });
 
-  it('resolves a matching workflow output to the original asset version', () => {
+  it('resolves a workflow output only from its explicit output-node tuple', () => {
     const input = makeNode('input', 'input-image');
     input.config = {
       imageUrl: '/client-substituted.png',
@@ -162,7 +168,19 @@ describe('workflow inputs', () => {
     const connections = [{ ...makeConn('image', input.id, output.id), type: 'image' as const }];
     const results = {
       input: { status: 'success', output: { imageUrl: '/canonical.png' } },
-      output: { status: 'success', output: { imageUrl: '/canonical.png' } },
+      output: {
+        status: 'success',
+        output: {
+          imageUrl: '/canonical.png',
+          assetReferences: [{
+            outputNodeId: 'output',
+            sourceNodeId: 'input',
+            assetVersionId: 'version-a',
+            placementId: 'workflow-placement-a',
+            url: '/canonical.png',
+          }],
+        },
+      },
     };
 
     expect(resolveWorkflowOutputAssetReference(output.id, [input, output], connections, results)).toEqual({
@@ -172,33 +190,29 @@ describe('workflow inputs', () => {
     });
   });
 
-  it('does not guess an asset version when multiple inputs share the output URL', () => {
+  it('keeps same-URL versions associated with their explicit output node', () => {
     const inputA = makeNode('input-a', 'input-image');
     inputA.config = { assetVersionId: 'version-a' };
     const inputB = makeNode('input-b', 'input-image');
     inputB.config = { assetVersionId: 'version-b' };
-    const output = makeNode('output', 'output-image');
-    const connections = [
-      { ...makeConn('a', inputA.id, output.id), type: 'image' as const },
-      { ...makeConn('b', inputB.id, output.id), type: 'image' as const },
-    ];
+    const outputA = makeNode('output-a', 'output-image');
+    const outputB = makeNode('output-b', 'output-image');
     const results = {
       'input-a': { output: { imageUrl: '/same.png' } },
       'input-b': { output: { imageUrl: '/same.png' } },
-      output: { output: { imageUrl: '/same.png' } },
+      'output-a': { output: { imageUrl: '/same.png', assetReferences: [{ outputNodeId: 'output-a', sourceNodeId: 'input-a', assetVersionId: 'version-a', url: '/same.png' }] } },
+      'output-b': { output: { imageUrl: '/same.png', assetReferences: [{ outputNodeId: 'output-b', sourceNodeId: 'input-b', assetVersionId: 'version-b', url: '/same.png' }] } },
     };
 
-    expect(resolveWorkflowOutputAssetReference(
-      output.id,
-      [inputA, inputB, output],
-      connections,
-      results,
-    )).toBeNull();
+    expect(resolveWorkflowOutputAssetReference(outputA.id, [inputA, inputB, outputA, outputB], [], results))
+      .toMatchObject({ assetVersionId: 'version-a' });
+    expect(resolveWorkflowOutputAssetReference(outputB.id, [inputA, inputB, outputA, outputB], [], results))
+      .toMatchObject({ assetVersionId: 'version-b' });
   });
 });
 
 describe('versioned workflow image resolution', () => {
-  it('resolves versioned image nodes on the server without sending a client-substituted URL', () => {
+  it('leaves versioned image nodes for the authenticated executor resolver', () => {
     const node = makeNode('input', 'input-image');
     node.config = {
       projectId: 'project-a',
@@ -207,15 +221,7 @@ describe('versioned workflow image resolution', () => {
       imageUrl: '/client-substituted.png',
     };
 
-    expect(buildNodeExecutionRequest(node, {})).toEqual({
-      endpoint: '/api/assets',
-      method: 'POST',
-      body: {
-        projectId: 'project-a',
-        assetVersionId: 'version-a',
-        placementId: 'workflow-placement-a',
-      },
-    });
+    expect(buildNodeExecutionRequest(node, {})).toBeNull();
   });
 
   it('keeps URL-only legacy image nodes on the existing no-request path', () => {
@@ -223,6 +229,48 @@ describe('versioned workflow image resolution', () => {
     node.config = { imageUrl: '/legacy.png' };
 
     expect(buildNodeExecutionRequest(node, {})).toBeNull();
+  });
+});
+
+describe('workflow image identity edits', () => {
+  const managedInput = (): WorkflowNode => ({
+    ...makeNode('managed-input', 'input-image'),
+    config: {
+      imageUrl: '/canonical.png',
+      projectId: 'project-a',
+      assetId: 'asset-a',
+      assetVersionId: 'version-a',
+      placementId: 'placement-a',
+      label: 'Reference',
+    },
+  });
+
+  it.each(['/replacement.png', ''])(
+    'atomically clears managed identity when imageUrl changes to %j',
+    imageUrl => {
+      const updated = mergeWorkflowNodeUpdate(managedInput(), {
+        config: { imageUrl },
+      });
+
+      expect(updated.config).toMatchObject({ imageUrl, label: 'Reference' });
+      expect(updated.config).not.toHaveProperty('projectId');
+      expect(updated.config).not.toHaveProperty('assetId');
+      expect(updated.config).not.toHaveProperty('assetVersionId');
+      expect(updated.config).not.toHaveProperty('placementId');
+    },
+  );
+
+  it('preserves managed identity for unrelated config edits', () => {
+    expect(mergeWorkflowNodeUpdate(managedInput(), {
+      config: { label: 'Renamed' },
+    }).config).toMatchObject({
+      imageUrl: '/canonical.png',
+      projectId: 'project-a',
+      assetId: 'asset-a',
+      assetVersionId: 'version-a',
+      placementId: 'placement-a',
+      label: 'Renamed',
+    });
   });
 });
 

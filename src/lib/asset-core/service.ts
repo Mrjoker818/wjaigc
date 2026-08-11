@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   createPostgresAssetStorage,
   type AssetStorage,
+  type StoredTransfer,
 } from './storage';
 import {
   assertWorkspaceEntityType,
@@ -11,6 +12,7 @@ import {
   type AssetKind,
   type AssetVersion,
   type WorkspaceEntityType,
+  type WorkspaceAssetReference,
   type WorkspaceKind,
   type WorkspacePlacement,
 } from './types';
@@ -64,6 +66,13 @@ export interface TransferVersionInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface ResolveAssetReferenceInput {
+  actorUserId: string;
+  projectId: string;
+  assetVersionId: string;
+  placementId?: string;
+}
+
 export type WorkspaceTransform = Record<string, unknown>;
 
 export interface PlacementCommand {
@@ -100,6 +109,22 @@ function workspaceForEntityType(entityType: WorkspaceEntityType): WorkspaceKind 
   return 'chat';
 }
 
+function hasTransferIdempotencyConflict(
+  transfers: StoredTransfer[],
+  input: TransferVersionInput,
+): boolean {
+  const expectedWorkspace = workspaceForEntityType(input.entityType);
+  return transfers.some(candidate => (
+    candidate.requestDigest !== input.requestDigest
+    || candidate.sourceVersionId !== input.sourceVersionId
+    || candidate.placement.projectId !== input.targetProjectId
+    || candidate.placement.workspace !== expectedWorkspace
+    || candidate.placement.workspaceId !== input.targetWorkspaceId
+    || candidate.placement.entityType !== input.entityType
+    || candidate.placement.entityId !== input.entityId
+  ));
+}
+
 function createPlacement(
   ownerId: string,
   projectId: string,
@@ -133,6 +158,38 @@ function createPlacement(
 
 export class AssetService {
   constructor(private readonly storage: AssetStorage) {}
+
+  async resolveAssetReference(input: ResolveAssetReferenceInput): Promise<WorkspaceAssetReference> {
+    return this.storage.transaction(async transaction => {
+      if (!await transaction.findProject(input.actorUserId, input.projectId)) notFound();
+      const version = await transaction.findVersion(
+        input.actorUserId,
+        input.projectId,
+        input.assetVersionId,
+      );
+      if (!version) notFound();
+
+      let placement: WorkspacePlacement | null = null;
+      if (input.placementId) {
+        placement = await transaction.findPlacement(
+          input.actorUserId,
+          input.projectId,
+          input.placementId,
+        );
+        if (!placement || placement.assetVersionId !== version.id || placement.status !== 'active') notFound();
+      }
+      const name = placement?.metadata && typeof placement.metadata.name === 'string'
+        ? placement.metadata.name
+        : undefined;
+      return {
+        assetId: version.assetId,
+        assetVersionId: version.id,
+        ...(placement ? { placementId: placement.id } : {}),
+        url: version.file.url,
+        ...(name ? { name } : {}),
+      };
+    });
+  }
 
   async createAssetVersion(input: CreateAssetVersionInput): Promise<{
     asset: Asset;
@@ -267,15 +324,17 @@ export class AssetService {
       );
       if (!sourceAsset) notFound();
 
-      const existing = await transaction.findTransfer(
-        input.actorUserId, input.sourceVersionId, input.targetProjectId, workspaceForEntityType(input.entityType), input.targetWorkspaceId,
-        input.entityType, input.entityId, input.idempotencyKey,
+      await transaction.lockTransferIdempotency(input.actorUserId, input.idempotencyKey);
+      const existingTransfers = await transaction.findTransfersByIdempotency(
+        input.actorUserId,
+        input.idempotencyKey,
       );
-      if (existing) {
-        if (existing.requestDigest !== input.requestDigest) conflict();
+      if (existingTransfers.length > 0) {
+        const existing = existingTransfers[0];
+        if (hasTransferIdempotencyConflict(existingTransfers, input)) conflict();
         const targetVersion = await transaction.findVersion(
           input.actorUserId,
-          input.targetProjectId,
+          existing.placement.projectId,
           existing.placement.assetVersionId,
         );
         if (!targetVersion) notFound();
@@ -342,15 +401,16 @@ export class AssetService {
         return { version: targetVersion, placement, reused: false };
       }
 
-      const raced = await transaction.findTransfer(
-        input.actorUserId, input.sourceVersionId, input.targetProjectId, workspaceForEntityType(input.entityType), input.targetWorkspaceId,
-        input.entityType, input.entityId, input.idempotencyKey,
+      const racedTransfers = await transaction.findTransfersByIdempotency(
+        input.actorUserId,
+        input.idempotencyKey,
       );
-      if (raced) {
-        if (raced.requestDigest !== input.requestDigest) conflict();
+      if (racedTransfers.length > 0) {
+        const raced = racedTransfers[0];
+        if (hasTransferIdempotencyConflict(racedTransfers, input)) conflict();
         const racedVersion = await transaction.findVersion(
           input.actorUserId,
-          input.targetProjectId,
+          raced.placement.projectId,
           raced.placement.assetVersionId,
         );
         if (!racedVersion) notFound();

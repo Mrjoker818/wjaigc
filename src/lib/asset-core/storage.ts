@@ -21,6 +21,7 @@ export interface StoredVersion {
 export interface StoredTransfer {
   placement: WorkspacePlacement;
   requestDigest: string;
+  sourceVersionId: string;
 }
 
 export interface AssetStorageTransaction {
@@ -58,6 +59,8 @@ export interface AssetStorageTransaction {
     entityId: string,
   ): Promise<WorkspacePlacement | null>;
   insertPlacement(placement: WorkspacePlacement): Promise<boolean>;
+  lockTransferIdempotency(ownerId: string, idempotencyKey: string): Promise<void>;
+  findTransfersByIdempotency(ownerId: string, idempotencyKey: string): Promise<StoredTransfer[]>;
   findTransfer(
     ownerId: string,
     sourceVersionId: string,
@@ -397,6 +400,30 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
     return (result.rowCount ?? 0) === 1;
   }
 
+  async lockTransferIdempotency(ownerId: string, idempotencyKey: string): Promise<void> {
+    await this.client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [`asset-transfer:${ownerId}:${idempotencyKey}`],
+    );
+  }
+
+  async findTransfersByIdempotency(
+    ownerId: string,
+    idempotencyKey: string,
+  ): Promise<StoredTransfer[]> {
+    const result = await this.client.query<PlacementRow>(
+      `SELECT * FROM wujie_workspace_placements
+       WHERE owner_id = $1 AND idempotency_key = $2
+       ORDER BY created_at, id`,
+      [ownerId, idempotencyKey],
+    );
+    return result.rows.map(row => ({
+      placement: mapPlacement(row),
+      requestDigest: row.request_digest ?? '',
+      sourceVersionId: row.source_version_id ?? '',
+    }));
+  }
+
   async findTransfer(
     ownerId: string,
     sourceVersionId: string,
@@ -415,7 +442,11 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
       [ownerId, sourceVersionId, targetProjectId, workspace, workspaceId, entityType, entityId, idempotencyKey],
     );
     const row = result.rows[0];
-    return row ? { placement: mapPlacement(row), requestDigest: row.request_digest ?? '' } : null;
+    return row ? {
+      placement: mapPlacement(row),
+      requestDigest: row.request_digest ?? '',
+      sourceVersionId: row.source_version_id ?? '',
+    } : null;
   }
 
   async insertTransferPlacement(

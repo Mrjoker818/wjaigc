@@ -503,6 +503,7 @@ interface ChatPanelProps {
   onAddImages?: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
   canvasImages?: CanvasImage[];
   selectedCanvasImage?: CanvasImage | null;
+  onResolveCanvasImageForChat?: (image: CanvasImage) => Promise<CanvasImage>;
   onChatModelChange?: (info: { model: string; providerId: string; apiKey: string; baseUrl: string; providerPreset?: string } | null) => void;
   onSuggestionAction?: (action: string, data?: Record<string, string>) => void;
   /** Called when user clicks "generate image" suggestion - triggers image generation directly */
@@ -1188,7 +1189,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
@@ -1409,6 +1410,46 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   const [mentionPickerIndex, setMentionPickerIndex] = useState(0);
   const mentionTriggerRef = useRef<{ start: number; end: number } | null>(null);
 
+  const addCanvasImageToChat = useCallback(async (
+    image: CanvasImage,
+    includeMention: boolean,
+  ): Promise<void> => {
+    let resolved = image;
+    if (onResolveCanvasImageForChat) {
+      resolved = await onResolveCanvasImageForChat(image);
+    }
+    const pendingImage = {
+      id: resolved.id,
+      url: resolved.url,
+      name: resolved.prompt?.slice(0, 20) || '鐢诲竷鍥剧墖',
+      ...(resolved.assetId ? { assetId: resolved.assetId } : {}),
+      ...(resolved.assetVersionId ? { assetVersionId: resolved.assetVersionId } : {}),
+      ...(resolved.placementId ? { placementId: resolved.placementId } : {}),
+    };
+    setPendingImages(prev => {
+      const existingIndex = prev.findIndex(item => item.id === resolved.id);
+      if (existingIndex < 0) return [...prev, pendingImage];
+      return prev.map((item, index) => index === existingIndex ? pendingImage : item);
+    });
+    if (includeMention) {
+      const mention: MentionRef = {
+        type: 'canvas-image',
+        id: resolved.id,
+        label: resolved.prompt?.slice(0, 15) || '鐢诲竷鍥剧墖',
+        imageUrl: resolved.url,
+        ...(resolved.assetId ? { assetId: resolved.assetId } : {}),
+        ...(resolved.assetVersionId ? { assetVersionId: resolved.assetVersionId } : {}),
+        ...(resolved.placementId ? { placementId: resolved.placementId } : {}),
+        data: { url: resolved.url },
+      };
+      setActiveMentions(prev => {
+        const existingIndex = prev.findIndex(item => item.type === 'canvas-image' && item.id === resolved.id);
+        if (existingIndex < 0) return [...prev, mention];
+        return prev.map((item, index) => index === existingIndex ? mention : item);
+      });
+    }
+  }, [onResolveCanvasImageForChat]);
+
   // ===== / Prompt Template Trigger =====
   const [templatePopupOpen, setTemplatePopupOpen] = useState(false);
   const [templatePopupSearch, setTemplatePopupSearch] = useState('');
@@ -1431,23 +1472,13 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   // P2-2: ChatCanvas - handle image sent from canvas right-click menu
   useEffect(() => {
     if (chatInitialImage) {
-      setPendingImages(prev => {
-        if (prev.find(p => p.id === chatInitialImage.id)) return prev;
-        return [...prev, {
-          id: chatInitialImage.id,
-          url: chatInitialImage.url,
-          name: chatInitialImage.prompt?.slice(0, 20) || '画布图片',
-          assetId: chatInitialImage.assetId,
-          assetVersionId: chatInitialImage.assetVersionId,
-          placementId: chatInitialImage.placementId,
-        }];
-      });
+      void addCanvasImageToChat(chatInitialImage, false);
       setActiveTab('chat');
       setInput('请帮我修改这张图片：');
       if (onChatTabOpenChange) onChatTabOpenChange(true);
       if (onChatInitialImageConsumed) onChatInitialImageConsumed();
     }
-  }, [chatInitialImage, onChatInitialImageConsumed, onChatTabOpenChange]);
+  }, [addCanvasImageToChat, chatInitialImage, onChatInitialImageConsumed, onChatTabOpenChange]);
 
   // P1-5: Auto-enter "针对此图" mode when a canvas image is selected
   // When user selects an image on the canvas, auto-add it to pendingImages ONLY when chat tab is open
@@ -1463,25 +1494,14 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
     if (!chatTabOpen) return;
     if (document.activeElement !== textareaRef.current) return;
 
-    // Auto-add to pendingImages if not already there
-    setPendingImages(prev => {
-      if (prev.find(p => p.id === selectedCanvasImage.id)) return prev;
-      return [...prev, {
-        id: selectedCanvasImage.id,
-        url: selectedCanvasImage.url,
-        name: selectedCanvasImage.prompt?.slice(0, 20) || '画布图片',
-        assetId: selectedCanvasImage.assetId,
-        assetVersionId: selectedCanvasImage.assetVersionId,
-        placementId: selectedCanvasImage.placementId,
-      }];
-    });
+    void addCanvasImageToChat(selectedCanvasImage, false);
 
     // Show visual hint in input (don't overwrite if user is already typing)
     setInput(prev => {
       if (prev.trim() && prev !== '请帮我修改这张图片：') return prev; // Don't overwrite user's text
       return '针对这张图片，我想...';
     });
-  }, [selectedCanvasImage, chatTabOpen]);
+  }, [addCanvasImageToChat, selectedCanvasImage, chatTabOpen]);
 
   // Get mention picker items based on search
   const mentionPickerItems: MentionRef[] = useMemo(() => {
@@ -1593,22 +1613,13 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
     const before = input.slice(0, start);
     const after = input.slice(end);
     setInput(before + after);
-    setActiveMentions(prev => {
-      if (prev.some(m => m.type === item.type && m.id === item.id)) return prev;
-      return [...prev, item];
-    });
-    // Also add canvas images to pending images for sending as multimodal content
-    if (item.type === 'canvas-image' && item.imageUrl) {
-      setPendingImages(prev => {
-        if (prev.some(p => p.id === item.id)) return prev;
-        return [...prev, {
-          id: item.id!,
-          url: item.imageUrl!,
-          name: item.label,
-          assetId: item.assetId,
-          assetVersionId: item.assetVersionId,
-          placementId: item.placementId,
-        }];
+    if (item.type === 'canvas-image') {
+      const sourceImage = canvasImages.find(image => image.id === item.id);
+      if (sourceImage) void addCanvasImageToChat(sourceImage, true);
+    } else {
+      setActiveMentions(prev => {
+        if (prev.some(m => m.type === item.type && m.id === item.id)) return prev;
+        return [...prev, item];
       });
     }
     setMentionPickerOpen(false);
@@ -1617,7 +1628,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
     if (item.type === 'brand' && item.data && onInjectBrandDna) {
       onInjectBrandDna(item.data);
     }
-  }, [input, onInjectBrandDna]);
+  }, [addCanvasImageToChat, canvasImages, input, onInjectBrandDna]);
 
   // Remove a mention
   const removeMention = useCallback((index: number) => {
@@ -3580,7 +3591,14 @@ IP角色设计规范：
         role: 'user',
         content: pendingImages.length > 1 ? `请分析这${pendingImages.length}张图片并生成关键词` : '请分析这张图片并生成关键词',
         timestamp: Date.now(),
-        imageAnchors: pendingImages.map(img => ({ imageId: img.id, imageUrl: img.url, imageName: img.name })),
+        imageAnchors: pendingImages.map(img => ({
+          imageId: img.id,
+          imageUrl: img.url,
+          imageName: img.name,
+          assetId: img.assetId,
+          assetVersionId: img.assetVersionId,
+          placementId: img.placementId,
+        })),
       };
       const newMessages = [...messages, userMsg];
       setMessages(newMessages);
@@ -5296,19 +5314,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         isGold ? 'border-white/[0.04] hover:border-gold/40' : 'border-gray-200 hover:border-gray-400'
                       }`}
                       onClick={() => {
-                        // 添加为@图片引用（同时同步到pendingImages用于发送）
-                        if (!activeMentions.find(m => m.type === 'canvas-image' && m.id === img.id)) {
-                          setActiveMentions(prev => [...prev, {
-                            type: 'canvas-image',
-                            id: img.id,
-                            label: img.prompt?.slice(0, 15) || '画布图片',
-                            imageUrl: img.url,
-                            data: { url: img.url },
-                          }]);
-                        }
-                        if (!pendingImages.find(p => p.id === img.id)) {
-                          setPendingImages(prev => [...prev, { id: img.id, url: img.url, name: img.prompt?.slice(0, 20) || '画布图片' }]);
-                        }
+                        void addCanvasImageToChat(img, true);
                         if (onAddToPrompt && img.prompt) {
                           onAddToPrompt(img.prompt);
                         }
@@ -6279,17 +6285,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                               setActiveMentions(prev => prev.filter(m => !(m.type === 'canvas-image' && m.id === img.id)));
                               setPendingImages(prev => prev.filter(p => p.id !== img.id));
                             } else {
-                              setActiveMentions(prev => [...prev, {
-                                type: 'canvas-image',
-                                id: img.id,
-                                label: img.prompt?.slice(0, 15) || '画布图片',
-                                imageUrl: img.url,
-                                data: { url: img.url },
-                              }]);
-                              setPendingImages(prev => {
-                                if (prev.some(p => p.id === img.id)) return prev;
-                                return [...prev, { id: img.id, url: img.url, name: img.prompt?.slice(0, 20) || '画布图片' }];
-                              });
+                              void addCanvasImageToChat(img, true);
                             }
                           }}
                           className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'} ${isAdded ? (isGold ? 'bg-gold/10' : 'bg-blue-50') : ''}`}

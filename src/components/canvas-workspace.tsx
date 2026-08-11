@@ -90,6 +90,7 @@ import {
   shouldPersistCanvasPlacement,
   shouldRetainCanvasPlacementDuringMerge,
 } from '@/lib/asset-core/canvas-adapter';
+import { prepareCanvasAssetForChat } from '@/lib/asset-core/workspace-transfer';
 import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
 import { buildProjectWorkspaceUrl } from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
@@ -870,16 +871,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
 
-  const handleSendCanvasImageToChat = useCallback(async (image: CanvasImage) => {
-    let transferredImage = image;
-    if (currentProject?.id && image.assetVersionId) {
-      transferredImage = {
-        ...image,
-        assetId: undefined,
-        assetVersionId: undefined,
-        placementId: undefined,
-      };
-      try {
+  const resolveCanvasImageForChat = useCallback(async (image: CanvasImage): Promise<CanvasImage> => {
+    return prepareCanvasAssetForChat(image, async () => {
+      if (!currentProject?.id) throw new Error('Missing target project');
         const response = await fetch('/api/assets/transfer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -893,23 +887,16 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             metadata: { name: image.prompt?.slice(0, 80) || '画布图片', source: 'canvas' },
           }),
         });
-        if (response.ok) {
-          const transferred = await response.json() as WorkspaceAssetReference;
-          transferredImage = {
-            ...image,
-            url: transferred.url,
-            assetId: transferred.assetId ?? image.assetId,
-            assetVersionId: transferred.assetVersionId ?? image.assetVersionId,
-            placementId: transferred.placementId ?? image.placementId,
-          };
-        }
-      } catch (error) {
-        console.warn('[CanvasWorkspace] Canvas-to-chat asset transfer failed:', error);
-      }
-    }
+      if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
+      return response.json() as Promise<WorkspaceAssetReference>;
+    });
+  }, [currentProject?.id]);
+
+  const handleSendCanvasImageToChat = useCallback(async (image: CanvasImage) => {
+    const transferredImage = await resolveCanvasImageForChat(image);
     setChatInitialImage(transferredImage);
     setChatTabOpen(true);
-  }, [currentProject?.id]);
+  }, [resolveCanvasImageForChat]);
   const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);
   const shotTaskIdMapRef = useRef<Map<string, string>>(new Map());
   const groupsRef = useRef<ImageGroupData[]>([]);
@@ -5473,7 +5460,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               </div>
             </div>
             <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-              <ChatPanel themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
+              <ChatPanel themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
             </div>
 
             {/* 固定在底部的开始生成按钮 */}

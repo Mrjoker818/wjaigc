@@ -10,7 +10,7 @@ import {
   createWorkflowNode, createConnection, createEmptyWorkflow,
   getNodePropertyFields, getNodeCategory, NODE_TEMPLATES,
   canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
-  resolveWorkflowOutputAssetReference, type WorkspaceAssetReference,
+  mergeWorkflowNodeUpdate, resolveWorkflowOutputAssetReference, type WorkspaceAssetReference,
 } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { computePortPosition } from '@/lib/node-port-position';
@@ -26,6 +26,12 @@ import {
   resolveWorkflowCullingBounds,
   selectVisibleWorkflowConnections,
 } from '@/lib/node-canvas-virtualization';
+import {
+  CANVAS_ASSET_DRAG_MIME,
+  parseCanvasAssetDragPayload,
+  prepareWorkflowCanvasInsertions,
+  serializeCanvasAssetDragPayload,
+} from '@/lib/asset-core/workspace-transfer';
 import {
   NodeAnnotationWorkspace,
   type NodeAnnotationSource,
@@ -1745,7 +1751,12 @@ ${contextInfo}
   const handleCanvasImageDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    const imageUrl = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+    const structuredReference = parseCanvasAssetDragPayload(
+      e.dataTransfer.getData(CANVAS_ASSET_DRAG_MIME),
+    );
+    const imageUrl = structuredReference?.url
+      || e.dataTransfer.getData('text/uri-list')
+      || e.dataTransfer.getData('text/plain');
     if (!imageUrl) return;
     const rect = canvasContainerRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -1754,7 +1765,13 @@ ${contextInfo}
     const cy = (e.clientY - rect.top - vp.y) / vp.zoom;
 
     // 根据图片宽高比计算节点大小
-    const refImage = canvasImages?.find(img => img.url === imageUrl);
+    const refImage: CanvasImageRef | undefined = structuredReference
+      ? {
+          ...structuredReference,
+          name: structuredReference.name || '',
+          description: structuredReference.name || '',
+        }
+      : undefined;
     const imgW = refImage?.width || 1024;
     const imgH = refImage?.height || 1024;
     const ratio = imgW / imgH;
@@ -1778,18 +1795,12 @@ ${contextInfo}
     setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
     setSelectedNodeIds(new Set([node.id]));
     if (refImage) void transferCanvasImageToWorkflow(node.id, refImage);
-  }, [canvasImages, projectId, setWf, transferCanvasImageToWorkflow]);
+  }, [projectId, setWf, transferCanvasImageToWorkflow]);
 
   const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
     setWf(prev => ({
       ...prev,
-      nodes: prev.nodes.map(n => {
-        if (n.id !== nodeId) return n;
-        // 深合并config
-        const topLevel: Partial<WorkflowNode> = { ...updates };
-        delete topLevel.config;
-        return { ...n, ...topLevel, config: { ...n.config, ...(updates.config || {}) } };
-      }),
+      nodes: prev.nodes.map(n => n.id === nodeId ? mergeWorkflowNodeUpdate(n, updates) : n),
     }));
   }, [setWf]);
 
@@ -2439,64 +2450,85 @@ ${contextInfo}
           // 持久化: 将工作流生成的图片添加到项目
           if (data.status === 'completed' && onAddImages && data.results) {
             const workflowResults = data.results as Record<string, { status: string; output?: Record<string, unknown> }>;
-            const generatedUrls: string[] = [];
             // ★ 收集工作流中使用的模型信息
             let workflowModelName: string | undefined;
             let workflowApiProvider: string | undefined;
             for (const [, result] of Object.entries(workflowResults)) {
               if (result.status === 'success' && result.output) {
-                const imgUrls = result.output.imageUrls as string[] | undefined;
-                const imgUrl = result.output.imageUrl as string | undefined;
-                if (Array.isArray(imgUrls) && imgUrls.length > 0) {
-                  generatedUrls.push(...imgUrls);
-                } else if (imgUrl) {
-                  generatedUrls.push(imgUrl);
-                }
                 // 尝试从输出获取模型信息
                 if (!workflowModelName && result.output.modelName) workflowModelName = result.output.modelName as string;
                 if (!workflowApiProvider && result.output.apiProvider) workflowApiProvider = result.output.apiProvider as string;
               }
             }
-            if (generatedUrls.length > 0) {
-              const transferredReferences: WorkspaceAssetReference[] = [];
-              if (projectId) {
-                for (const outputNode of wf.nodes.filter(node => getNodeCategory(node.type) === 'output')) {
-                  const outputReference = resolveWorkflowOutputAssetReference(
-                    outputNode.id,
-                    wf.nodes,
-                    wf.connections,
-                    workflowResults,
-                  );
-                  if (!outputReference) continue;
-                  try {
-                    const response = await fetch('/api/assets/transfer', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        sourceVersion: outputReference.assetVersionId,
-                        targetProject: projectId,
-                        targetWorkspace: `canvas:${projectId}`,
-                        entityType: 'canvas-image',
-                        entityId: `${executionId}:${outputNode.id}`,
-                        idempotencyKey: `workflow-canvas:${executionId}:${outputNode.id}:${outputReference.assetVersionId}`,
-                        metadata: {
-                          name: outputNode.label,
-                          source: 'workflow',
-                          workflowId: wf.id,
-                          executionId,
-                          outputNodeId: outputNode.id,
-                        },
-                      }),
-                    });
-                    if (!response.ok) continue;
-                    const transferred = await response.json() as WorkspaceAssetReference;
-                    transferredReferences.push(transferred);
-                    const sourceUrlIndex = generatedUrls.indexOf(outputReference.url);
-                    if (sourceUrlIndex >= 0) generatedUrls[sourceUrlIndex] = transferred.url;
-                  } catch (error) {
-                    console.warn('[NodeEditor] Workflow-to-canvas asset transfer failed:', error);
-                  }
+            const outputCandidates = wf.nodes
+              .filter(node => getNodeCategory(node.type) === 'output')
+              .flatMap(outputNode => {
+                const result = workflowResults[outputNode.id];
+                if (result?.status !== 'success' || !result.output) return [];
+                const outputReference = resolveWorkflowOutputAssetReference(
+                  outputNode.id,
+                  wf.nodes,
+                  wf.connections,
+                  workflowResults,
+                );
+                if (outputReference?.assetVersionId) {
+                  return [{
+                    outputNodeId: outputNode.id,
+                    url: outputReference.url,
+                    managed: true,
+                    sourceReference: outputReference,
+                  }];
                 }
+                const hasManagedIdentity = typeof result.output.assetVersionId === 'string'
+                  || (Array.isArray(result.output.assetReferences) && result.output.assetReferences.some(value => {
+                    if (!value || typeof value !== 'object') return false;
+                    const reference = value as Record<string, unknown>;
+                    return reference.outputNodeId === outputNode.id && typeof reference.assetVersionId === 'string';
+                  }));
+                const imageUrls = Array.isArray(result.output.imageUrls)
+                  ? result.output.imageUrls.filter((url): url is string => typeof url === 'string')
+                  : (typeof result.output.imageUrl === 'string' ? [result.output.imageUrl] : []);
+                return imageUrls.map((url, index) => ({
+                  outputNodeId: imageUrls.length === 1 ? outputNode.id : `${outputNode.id}:${index}`,
+                  url,
+                  managed: hasManagedIdentity,
+                }));
+              });
+            if (outputCandidates.length > 0) {
+              const insertion = await prepareWorkflowCanvasInsertions(outputCandidates, async (outputReference, candidate) => {
+                if (!projectId) throw new Error('Missing target project');
+                const outputNodeId = candidate.outputNodeId.split(':')[0];
+                const outputNode = wf.nodes.find(node => node.id === outputNodeId);
+                const response = await fetch('/api/assets/transfer', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    sourceVersion: outputReference.assetVersionId,
+                    targetProject: projectId,
+                    targetWorkspace: `canvas:${projectId}`,
+                    entityType: 'canvas-image',
+                    entityId: `${executionId}:${candidate.outputNodeId}`,
+                    idempotencyKey: `workflow-canvas:${executionId}:${candidate.outputNodeId}:${outputReference.assetVersionId}`,
+                    metadata: {
+                      name: outputNode?.label || candidate.outputNodeId,
+                      source: 'workflow',
+                      workflowId: wf.id,
+                      executionId,
+                      outputNodeId: candidate.outputNodeId,
+                    },
+                  }),
+                });
+                if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
+                return response.json() as Promise<WorkspaceAssetReference>;
+              });
+              if (insertion.failedOutputNodeIds.length > 0) {
+                setExecLogs(prev => mergeExecutionLogs(prev, insertion.failedOutputNodeIds.map(nodeId => ({
+                  time: Date.now(),
+                  nodeId,
+                  label: wf.nodes.find(node => node.id === nodeId)?.label || nodeId,
+                  status: 'error',
+                  message: 'Asset transfer failed; retry is available',
+                }))));
               }
               // ★ 如果输出没有模型信息，从工作流节点中查找
               if (!workflowModelName && wf.nodes) {
@@ -2510,11 +2542,10 @@ ${contextInfo}
               const meta: { modelName?: string; apiProvider?: string; assetReferences?: WorkspaceAssetReference[] } = {};
               if (workflowModelName) meta.modelName = workflowModelName;
               if (workflowApiProvider) meta.apiProvider = workflowApiProvider;
-              if (transferredReferences.length > 0) meta.assetReferences = transferredReferences;
-              onAddImages(Array.from(new Set(generatedUrls)), Object.keys(meta).length > 0 ? {
-                ...meta,
-                assetReferences: transferredReferences,
-              } : undefined);
+              if (insertion.assetReferences.length > 0) meta.assetReferences = insertion.assetReferences;
+              if (insertion.urls.length > 0) {
+                onAddImages(Array.from(new Set(insertion.urls)), Object.keys(meta).length > 0 ? meta : undefined);
+              }
             }
           }
           return; // done, don't schedule next poll
@@ -3446,6 +3477,7 @@ ${contextInfo}
                 draggable
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = 'copy';
+                  event.dataTransfer.setData(CANVAS_ASSET_DRAG_MIME, serializeCanvasAssetDragPayload(img));
                   event.dataTransfer.setData('text/uri-list', img.url);
                   event.dataTransfer.setData('text/plain', img.url);
                 }}

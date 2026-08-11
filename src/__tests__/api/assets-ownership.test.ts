@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getRequestUser: vi.fn(),
   transaction: vi.fn(),
   trashPlacement: vi.fn(),
+  resolveAssetReference: vi.fn(),
 }));
 
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: mocks.getSessionUser }));
@@ -17,7 +18,10 @@ vi.mock('@/lib/asset-core/service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/asset-core/service')>();
   return {
     ...actual,
-    createAssetService: () => ({ trashPlacement: mocks.trashPlacement }),
+    createAssetService: () => ({
+      trashPlacement: mocks.trashPlacement,
+      resolveAssetReference: mocks.resolveAssetReference,
+    }),
   };
 });
 
@@ -62,6 +66,7 @@ describe('asset API ownership', () => {
 
     expect(response.status).toBe(401);
     expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.resolveAssetReference).not.toHaveBeenCalled();
   });
 
   it('returns 401 before deleting a placement when there is no session', async () => {
@@ -85,12 +90,7 @@ describe('asset API ownership', () => {
 
   it('uses the same 404 response for another users project and version', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'owner-1', role: 'user' });
-    const transaction = {
-      findProject: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true),
-      findVersion: vi.fn().mockResolvedValue(null),
-      findPlacement: vi.fn(),
-    };
-    mocks.transaction.mockImplementation(async (callback) => callback(transaction));
+    mocks.resolveAssetReference.mockRejectedValue(new AssetServiceError('ASSET_NOT_FOUND'));
 
     const foreignProject = await resolveAsset(resolveRequest({
       projectId: 'foreign-project',
@@ -105,9 +105,16 @@ describe('asset API ownership', () => {
     expect(foreignVersion.status).toBe(404);
     await expect(foreignProject.json()).resolves.toEqual({ error: 'ASSET_NOT_FOUND' });
     await expect(foreignVersion.json()).resolves.toEqual({ error: 'ASSET_NOT_FOUND' });
-    expect(transaction.findProject).toHaveBeenNthCalledWith(1, 'owner-1', 'foreign-project');
-    expect(transaction.findProject).toHaveBeenNthCalledWith(2, 'owner-1', 'project-a');
-    expect(transaction.findVersion).toHaveBeenCalledWith('owner-1', 'project-a', 'foreign-version');
+    expect(mocks.resolveAssetReference).toHaveBeenNthCalledWith(1, {
+      actorUserId: 'owner-1',
+      projectId: 'foreign-project',
+      assetVersionId: 'version-a',
+    });
+    expect(mocks.resolveAssetReference).toHaveBeenNthCalledWith(2, {
+      actorUserId: 'owner-1',
+      projectId: 'project-a',
+      assetVersionId: 'foreign-version',
+    });
   });
 
   it('injects the session owner when deleting a placement and masks foreign placement ownership', async () => {

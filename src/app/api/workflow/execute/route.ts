@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getInternalApiUrl } from '@/lib/api-helpers';
 import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
+import { resolveWorkflowInputImageForActor } from '@/lib/asset-core/workflow-resolver';
 import {
   topologicalSort,
   getNodeInputs,
@@ -320,6 +321,12 @@ export async function POST(request: NextRequest) {
         exec.retryAttempts ||= {};
         const retryAttempt = (exec.retryAttempts[nodeId] || 0) + 1;
         exec.retryAttempts[nodeId] = retryAttempt;
+        if (retryNode.type === 'input-image') {
+          const output = await resolveWorkflowInputImageForActor(auth.userId, retryNode);
+          exec.results[nodeId] = { nodeId, status: 'success', output, durationMs: 0 };
+          await persistWorkflowExecution(executionId, exec);
+          return NextResponse.json({ success: true, nodeId, output });
+        }
         const req = buildNodeExecutionRequest(retryNode, nodeInputs);
         if (!req) {
           // 纯逻辑节点：直接成功
@@ -609,6 +616,19 @@ async function executeWorkflow(
           console.log(`[workflow-execute] upstream ${c.fromNodeId} result:`, JSON.stringify(upResult?.output));
         }
       }
+      if (node.type === 'input-image') {
+        const output = await resolveWorkflowInputImageForActor(execState.userId!, node);
+        const result: ExecutionResult = {
+          nodeId: node.id,
+          status: 'success',
+          output,
+          durationMs: Date.now() - nodeStart,
+        };
+        resultMap.set(node.id, result);
+        execState.results[node.id] = result;
+        await persistWorkflowExecution(executionId, execState);
+        continue;
+      }
       const req = buildNodeExecutionRequest(node, inputs);
 
       // P1: 对请求中的提示词字段应用循环变量替换
@@ -635,10 +655,6 @@ async function executeWorkflow(
             outputData.prompt = textValue;
             outputData.text = textValue;
           }
-        }
-        // input-image 节点: 确保有 imageUrl
-        if (node.type === 'input-image' && !outputData.imageUrl && node.config.imageUrl) {
-          outputData.imageUrl = node.config.imageUrl;
         }
         if (node.type === 'group') {
           Object.assign(outputData, resolveGroupOutput(inputs));

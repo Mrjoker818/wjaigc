@@ -71,6 +71,14 @@ export interface AssetVersion {
   createdAt: string;
 }
 
+export interface WorkspaceAssetReference {
+  assetId?: string;
+  assetVersionId?: string;
+  placementId?: string;
+  url: string;
+  name?: string;
+}
+
 export type WorkspacePlacement = {
   [TWorkspace in WorkspaceKind]: WorkspacePlacementFor<TWorkspace>;
 }[WorkspaceKind];

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
-import type { AssetVersion, WorkspacePlacement } from '@/lib/asset-core/types';
+import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import { getSessionUser } from '@/lib/server-auth';
 
 const REQUEST_FIELDS = new Set(['projectId', 'assetVersionId', 'placementId']);
@@ -34,45 +33,20 @@ function notFound(): NextResponse {
   return NextResponse.json({ error: 'ASSET_NOT_FOUND' }, { status: 404 });
 }
 
-function referenceResponse(version: AssetVersion, placement?: WorkspacePlacement): NextResponse {
-  const name = placement?.metadata && typeof placement.metadata.name === 'string'
-    ? placement.metadata.name
-    : undefined;
-  return NextResponse.json({
-    assetId: version.assetId,
-    assetVersionId: version.id,
-    ...(placement ? { placementId: placement.id } : {}),
-    url: version.file.url,
-    ...(name ? { name } : {}),
-  });
-}
-
 async function resolveAssetReference(
   actorUserId: string,
   input: ResolveAssetInput,
 ): Promise<NextResponse> {
-  const storage = createPostgresAssetStorage();
-  return storage.transaction(async transaction => {
-    if (!await transaction.findProject(actorUserId, input.projectId)) return notFound();
-    const version = await transaction.findVersion(
+  try {
+    const reference = await createAssetService().resolveAssetReference({
       actorUserId,
-      input.projectId,
-      input.assetVersionId,
-    );
-    if (!version) return notFound();
-
-    let placement: WorkspacePlacement | undefined;
-    if (input.placementId) {
-      const found = await transaction.findPlacement(
-        actorUserId,
-        input.projectId,
-        input.placementId,
-      );
-      if (!found || found.assetVersionId !== version.id || found.status !== 'active') return notFound();
-      placement = found;
-    }
-    return referenceResponse(version, placement);
-  });
+      ...input,
+    });
+    return NextResponse.json(reference);
+  } catch (error) {
+    if (error instanceof AssetServiceError && error.code === 'ASSET_NOT_FOUND') return notFound();
+    throw error;
+  }
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {

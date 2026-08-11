@@ -1050,6 +1050,72 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
     });
   });
 
+  postgresIt('scopes transfer idempotency globally by actor across target semantics', async () => {
+    await withIsolatedPostgres('stage-2-transfer-actor-idempotency', async ({ databaseUrl: isolatedDatabaseUrl, query }) => {
+      migrate(isolatedDatabaseUrl);
+      const actorUserId = randomUUID();
+      const otherActorUserId = randomUUID();
+      const sourceProjectId = randomUUID();
+      const firstTargetProjectId = randomUUID();
+      const secondTargetProjectId = randomUUID();
+      const otherSourceProjectId = randomUUID();
+      const otherTargetProjectId = randomUUID();
+      await seedProject(query, actorUserId, sourceProjectId);
+      await seedProject(query, actorUserId, firstTargetProjectId);
+      await seedProject(query, actorUserId, secondTargetProjectId);
+      await seedProject(query, otherActorUserId, otherSourceProjectId);
+      await seedProject(query, otherActorUserId, otherTargetProjectId);
+      const { createAssetService } = await loadService();
+      const service = createAssetService();
+      const source = await createVersion(service, actorUserId, sourceProjectId, 'actor-global-source');
+      const otherSource = await createVersion(service, otherActorUserId, otherSourceProjectId, 'other-actor-source');
+      const transfer: TransferVersionInput = {
+        actorUserId,
+        sourceVersionId: source.version.id,
+        targetProjectId: firstTargetProjectId,
+        targetWorkspaceId: 'canvas-first',
+        entityType: 'canvas-image',
+        entityId: 'image-first',
+        idempotencyKey: 'actor-global-key',
+        requestDigest: 'same-digest',
+      };
+
+      const first = await service.sendVersionToWorkspace(transfer);
+      await expect(service.sendVersionToWorkspace({
+        ...transfer,
+        targetProjectId: secondTargetProjectId,
+      })).rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
+      await expect(service.sendVersionToWorkspace({
+        ...transfer,
+        targetWorkspaceId: 'canvas-second',
+      })).rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
+      await expect(service.sendVersionToWorkspace({
+        ...transfer,
+        entityId: 'image-second',
+      })).rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
+
+      const otherActor = await service.sendVersionToWorkspace({
+        ...transfer,
+        actorUserId: otherActorUserId,
+        sourceVersionId: otherSource.version.id,
+        targetProjectId: otherTargetProjectId,
+      });
+      expect(otherActor.placement.id).not.toBe(first.placement.id);
+      const placements = await query<{ owner_id: string; count: string }>(
+        `SELECT owner_id, count(*)::text AS count
+         FROM wujie_workspace_placements
+         WHERE idempotency_key = $1
+         GROUP BY owner_id
+         ORDER BY owner_id`,
+        [transfer.idempotencyKey],
+      );
+      expect(placements.rows).toEqual(expect.arrayContaining([
+        { owner_id: actorUserId, count: '1' },
+        { owner_id: otherActorUserId, count: '1' },
+      ]));
+    });
+  });
+
   postgresIt('serializes create and send against final-placement trash with the asset lifecycle lock', async () => {
     await withIsolatedPostgres('stage-2-placement-lifecycle-race', async ({ databaseUrl: isolatedDatabaseUrl, query }) => {
       migrate(isolatedDatabaseUrl);

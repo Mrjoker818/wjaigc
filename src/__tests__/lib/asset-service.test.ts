@@ -41,6 +41,17 @@ type PlacementCommand = {
   placementId: string;
 };
 
+type TransferVersionInput = {
+  actorUserId: string;
+  sourceVersionId: string;
+  targetProjectId: string;
+  targetWorkspaceId: string;
+  entityType: 'canvas-image' | 'workflow-input' | 'workflow-output' | 'chat-attachment';
+  entityId: string;
+  idempotencyKey: string;
+  requestDigest: string;
+};
+
 type AssetService = {
   createAssetVersion(input: CreateAssetVersionInput): Promise<{
     asset: Asset;
@@ -48,6 +59,23 @@ type AssetService = {
     reused: boolean;
   }>;
   createWorkspacePlacement(input: CreatePlacementInput): Promise<{
+    placement: WorkspacePlacement;
+    reused: boolean;
+  }>;
+  resolveAssetReference(input: {
+    actorUserId: string;
+    projectId: string;
+    assetVersionId: string;
+    placementId?: string;
+  }): Promise<{
+    assetId: string;
+    assetVersionId: string;
+    placementId?: string;
+    url: string;
+    name?: string;
+  }>;
+  sendVersionToWorkspace(input: TransferVersionInput): Promise<{
+    version: AssetVersion;
     placement: WorkspacePlacement;
     reused: boolean;
   }>;
@@ -69,6 +97,8 @@ type MemoryRecord = {
   versionMetadata: Map<string, Record<string, unknown>>;
   parents: Map<string, string[]>;
   placements: Map<string, WorkspacePlacement>;
+  transferDigests: Map<string, string>;
+  transferSources: Map<string, string>;
 };
 
 function projectKey(ownerId: string, projectId: string): string {
@@ -87,6 +117,8 @@ class MemoryStorage {
       versionMetadata: new Map(),
       parents: new Map(),
       placements: new Map(),
+      transferDigests: new Map(),
+      transferSources: new Map(),
     };
   }
 
@@ -215,6 +247,77 @@ class MemoryStorage {
     return true;
   }
 
+  async lockTransferIdempotency(): Promise<void> {
+    // In-memory tests execute serially; PostgreSQL coverage proves lock behavior.
+  }
+
+  async findTransfersByIdempotency(
+    ownerId: string,
+    idempotencyKey: string,
+  ): Promise<Array<{ placement: WorkspacePlacement; requestDigest: string; sourceVersionId: string }>> {
+    return [...this.data.placements.values()]
+      .filter(placement => placement.ownerId === ownerId && placement.metadata?.idempotencyKey === idempotencyKey)
+      .map(placement => ({
+        placement,
+        requestDigest: this.data.transferDigests.get(placement.id) ?? '',
+        sourceVersionId: this.data.transferSources.get(placement.id) ?? '',
+      }));
+  }
+
+  async findTransfer(
+    ownerId: string,
+    sourceVersionId: string,
+    targetProjectId: string,
+    workspace: WorkspaceKind,
+    workspaceId: string,
+    entityType: string,
+    entityId: string,
+    idempotencyKey: string,
+  ): Promise<{ placement: WorkspacePlacement; requestDigest: string; sourceVersionId: string } | null> {
+    for (const placement of this.data.placements.values()) {
+      if (
+        placement.ownerId === ownerId
+        && this.data.transferSources.get(placement.id) === sourceVersionId
+        && placement.projectId === targetProjectId
+        && placement.workspace === workspace
+        && placement.workspaceId === workspaceId
+        && placement.entityType === entityType
+        && placement.entityId === entityId
+        && placement.metadata?.idempotencyKey === idempotencyKey
+      ) {
+        return {
+          placement,
+          requestDigest: this.data.transferDigests.get(placement.id) ?? '',
+          sourceVersionId: this.data.transferSources.get(placement.id) ?? '',
+        };
+      }
+    }
+    return null;
+  }
+
+  async insertTransferPlacement(
+    placement: WorkspacePlacement,
+    sourceVersionId: string,
+    idempotencyKey: string,
+    requestDigest: string,
+  ): Promise<boolean> {
+    const existing = await this.findTransfer(
+      placement.ownerId,
+      sourceVersionId,
+      placement.projectId,
+      placement.workspace,
+      placement.workspaceId,
+      placement.entityType,
+      placement.entityId,
+      idempotencyKey,
+    );
+    if (existing) return false;
+    this.data.placements.set(placement.id, placement);
+    this.data.transferSources.set(placement.id, sourceVersionId);
+    this.data.transferDigests.set(placement.id, requestDigest);
+    return true;
+  }
+
   async trashPlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement> {
     if (!await this.findPlacement(ownerId, projectId, placementId)) throw new Error('missing placement');
     const placement = this.data.placements.get(placementId);
@@ -286,6 +389,72 @@ function createVersionInput(ownerId: string, projectId: string, overrides: Parti
 }
 
 describe('asset graph service', () => {
+  it('resolves a canonical actor-owned version and placement reference', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const created = await service.createAssetVersion(createVersionInput(ownerId, projectId, {
+      file: file('https://canonical.test/owned.png'),
+    }));
+    const placed = await service.createWorkspacePlacement({
+      actorUserId: ownerId,
+      projectId,
+      assetVersionId: created.version.id,
+      workspace: 'workflow',
+      workspaceId: 'workflow-a',
+      entityType: 'workflow-input',
+      entityId: 'input-a',
+      metadata: { name: 'Owned input' },
+    });
+
+    await expect(service.resolveAssetReference({
+      actorUserId: ownerId,
+      projectId,
+      assetVersionId: created.version.id,
+      placementId: placed.placement.id,
+    })).resolves.toEqual({
+      assetId: created.asset.id,
+      assetVersionId: created.version.id,
+      placementId: placed.placement.id,
+      url: 'https://canonical.test/owned.png',
+      name: 'Owned input',
+    });
+  });
+
+  it('treats a transfer idempotency key as actor-global across target semantics', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const created = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    const input: TransferVersionInput = {
+      actorUserId: ownerId,
+      sourceVersionId: created.version.id,
+      targetProjectId: projectId,
+      targetWorkspaceId: 'workflow-a',
+      entityType: 'workflow-input',
+      entityId: 'input-a',
+      idempotencyKey: 'actor-global-key',
+      requestDigest: 'digest-workflow-a',
+    };
+
+    const first = await service.sendVersionToWorkspace(input);
+    const replay = await service.sendVersionToWorkspace(input);
+
+    expect(first.reused).toBe(false);
+    expect(replay.reused).toBe(true);
+    expect(replay.placement.id).toBe(first.placement.id);
+    await expect(service.sendVersionToWorkspace({
+      ...input,
+      targetWorkspaceId: 'workflow-b',
+      entityId: 'input-b',
+      requestDigest: 'digest-workflow-b',
+    })).rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
+  });
+
   it('reuses the same version for the same idempotency key and request digest', async () => {
     const ownerId = randomUUID();
     const projectId = randomUUID();
