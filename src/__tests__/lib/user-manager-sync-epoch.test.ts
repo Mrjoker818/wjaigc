@@ -82,6 +82,76 @@ function seedUsers(): void {
   }));
 }
 
+type PendingFailureMode = 'rollback' | 'settle-remove';
+
+async function leaveUnsettledAdoptionPending(failureMode: PendingFailureMode) {
+  let revision = 1;
+  let serverProjects = [project('user-a', '/media/base.png')];
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+    success: true,
+    value: serverProjects,
+    assetGraphMode: 'shadow',
+    projectRevision: revision,
+  }), { status: 200 })));
+
+  const { UserManager } = await import('@/lib/user-manager');
+  const manager = UserManager.getInstance();
+  await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+  manager.updateProject('project-a', {
+    name: 'Local draft',
+    canvasImages: [canvasImage('/media/local-draft.png')],
+  });
+  serverProjects = [project('user-a', '/media/remote-winner.png')];
+  revision = 2;
+
+  let mainWriteCount = 0;
+  let adoptionWriteCount = 0;
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      if (key === 'unbounded_ai_user_data') {
+        mainWriteCount += 1;
+        if (failureMode === 'rollback' && mainWriteCount > 1) {
+          throw new DOMException('rollback quota', 'QuotaExceededError');
+        }
+      }
+      if (key.includes('project_adoption_commit')) {
+        adoptionWriteCount += 1;
+        if (adoptionWriteCount > 1) {
+          throw new DOMException('envelope quota', 'QuotaExceededError');
+        }
+      }
+      storage.set(key, value);
+    },
+    removeItem: (key: string) => {
+      if (failureMode === 'settle-remove' && key.includes('project_adoption_commit')) {
+        throw new DOMException('remove blocked', 'InvalidStateError');
+      }
+      storage.delete(key);
+    },
+  });
+
+  await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(false);
+  const commitKey = [...storage.keys()].find((key) => key.includes('project_adoption_commit'))!;
+  expect(JSON.parse(storage.get(commitKey)!)).toMatchObject({
+    revision: 1,
+    pending: { startedAt: expect.any(Number) },
+  });
+  expect(manager.getProject('project-a')).toEqual(expect.objectContaining({
+    name: 'Local draft',
+    canvasImages: [expect.objectContaining({ url: '/media/local-draft.png' })],
+  }));
+  return { manager, commitKey };
+}
+
+function installHealthyStorage(): void {
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+  });
+}
+
 beforeEach(() => {
   vi.resetModules();
   vi.useFakeTimers();
@@ -1310,6 +1380,77 @@ describe('UserManager project sync response isolation', () => {
     expect(reloaded.getProject('project-a')?.canvasImages[0]?.url).toBe('/media/local-draft.png');
     expect(reloaded.getProject('project-a')?.name).toBe('Mutation after failed adoption');
     expect(reloaded.getProjectSyncRevision()).toBe(1);
+  });
+
+  it.each([
+    ['updateProject', 'Updated after pending recovery'],
+    ['createProject', 'Created after pending recovery'],
+    ['deleteProject', ''],
+    ['importProjectFromWujie', 'Imported after pending recovery'],
+  ] as const)('settles a rollback-failure pending marker before %s and preserves the mutation on reload', async (
+    mutation,
+    expectedName,
+  ) => {
+    const { manager, commitKey } = await leaveUnsettledAdoptionPending('rollback');
+    installHealthyStorage();
+    let affectedProjectId = 'project-a';
+
+    if (mutation === 'updateProject') {
+      manager.updateProject('project-a', { name: expectedName });
+    } else if (mutation === 'createProject') {
+      affectedProjectId = manager.createProject(expectedName).id;
+    } else if (mutation === 'deleteProject') {
+      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
+      await expect(manager.deleteProject('project-a')).resolves.toBe(true);
+    } else {
+      affectedProjectId = manager.importProjectFromWujie(JSON.stringify({
+        format: 'wujie-project',
+        version: '1.0',
+        exportedAt: 1,
+        project: { ...project('user-a', '/media/imported.png'), name: expectedName },
+      })).id;
+    }
+
+    expect(JSON.parse(storage.get(commitKey)!)).not.toHaveProperty('pending');
+    vi.resetModules();
+    const reloadedModule = await import('@/lib/user-manager');
+    const reloaded = reloadedModule.UserManager.getInstance();
+    if (mutation === 'deleteProject') {
+      expect(reloaded.getProject(affectedProjectId)).toBeNull();
+    } else {
+      expect(reloaded.getProject(affectedProjectId)?.name).toBe(expectedName);
+    }
+  });
+
+  it.each([
+    'updateProject',
+    'createProject',
+    'deleteProject',
+    'importProjectFromWujie',
+  ] as const)('rejects %s without changing memory when a pending marker cannot settle or be removed', async (mutation) => {
+    const { manager, commitKey } = await leaveUnsettledAdoptionPending('settle-remove');
+    const projectsBefore = structuredClone(manager.getProjects());
+
+    const mutate = async () => {
+      if (mutation === 'updateProject') {
+        manager.updateProject('project-a', { name: 'Must not survive' });
+      } else if (mutation === 'createProject') {
+        manager.createProject('Must not survive');
+      } else if (mutation === 'deleteProject') {
+        await manager.deleteProject('project-a');
+      } else {
+        manager.importProjectFromWujie(JSON.stringify({
+          format: 'wujie-project',
+          version: '1.0',
+          exportedAt: 1,
+          project: { ...project('user-a', '/media/rejected-import.png'), name: 'Must not survive' },
+        }));
+      }
+    };
+
+    await expect(mutate()).rejects.toThrow('PROJECT_SYNC_PENDING_RECOVERY_FAILED');
+    expect(manager.getProjects()).toEqual(projectsBefore);
+    expect(JSON.parse(storage.get(commitKey)!)).toHaveProperty('pending');
   });
 
   it('fails remote-wins adoption when browser storage becomes unavailable', async () => {

@@ -428,6 +428,7 @@ export class UserManager {
   private _projectMutationGeneration = 0;
   private _projectSyncInFlightTokens = new Set<string>();
   private _lastAuthoritativeProjects = new Map<string, Project[]>();
+  private _projectAdoptionPendingUsers = new Set<string>();
   private _onProjectsChanged: (() => void) | null = null;
   // ★ 跟踪最近删除的图片ID，防止服务器同步时将已删除的图片合并回来
   // Map: imageId → 删除时间戳(ms)，60秒后自动清理
@@ -955,16 +956,24 @@ export class UserManager {
   }
 
   private settleProjectAdoptionCommit(envelope: ProjectAdoptionCommitEnvelope): void {
+    this._projectAdoptionPendingUsers.add(envelope.userId);
     const settled = { ...envelope, updatedAt: Date.now() };
     delete settled.pending;
     try {
       this.writeProjectAdoptionCommit(settled);
+      const verified = this.readProjectAdoptionCommit(envelope.userId);
+      if (!verified || verified.pending) throw new Error('PROJECT_SYNC_ADOPTION_SETTLE_UNVERIFIED');
+      this._projectAdoptionPendingUsers.delete(envelope.userId);
     } catch (error) {
       if (this.canUseStorage()) {
         try {
-          localStorage.removeItem(
-            this.projectSyncStorageKey(PROJECT_ADOPTION_COMMIT_KEY_PREFIX, envelope.userId),
-          );
+          const key = this.projectSyncStorageKey(PROJECT_ADOPTION_COMMIT_KEY_PREFIX, envelope.userId);
+          localStorage.removeItem(key);
+          if (localStorage.getItem(key) !== null) {
+            throw new Error('PROJECT_SYNC_ADOPTION_REMOVE_UNVERIFIED');
+          }
+          this._projectAdoptionPendingUsers.delete(envelope.userId);
+          return;
         } catch (removeError) {
           console.warn('[Sync] failed to clear unsettled project adoption commit:', removeError);
         }
@@ -1027,6 +1036,7 @@ export class UserManager {
       const envelope = this.readProjectAdoptionCommit(userId);
       if (!envelope) return;
       if (envelope.pending) {
+        this._projectAdoptionPendingUsers.add(userId);
         userData.projects = cloneProjects(envelope.adoptedDraft);
         const recovery = this.commitLocalDataOnly(true);
         if (!recovery.ok) {
@@ -1045,6 +1055,48 @@ export class UserManager {
     } catch (error) {
       console.warn('[Sync] ignored invalid project adoption commit during reload:', error);
     }
+  }
+
+  private ensureProjectAdoptionReadyForMutation(): void {
+    const userId = this.currentUserId;
+    const userData = userId ? this.multiUserData?.userData[userId] : undefined;
+    if (!userId || !userData) return;
+    if (!this.canUseStorage()) {
+      if (this._projectAdoptionPendingUsers.has(userId)) {
+        throw new Error('PROJECT_SYNC_PENDING_RECOVERY_FAILED');
+      }
+      return;
+    }
+
+    let envelope: ProjectAdoptionCommitEnvelope | undefined;
+    try {
+      envelope = this.readProjectAdoptionCommit(userId);
+    } catch (error) {
+      throw new Error('PROJECT_SYNC_PENDING_RECOVERY_FAILED', { cause: error });
+    }
+    if (!envelope?.pending) {
+      this._projectAdoptionPendingUsers.delete(userId);
+      return;
+    }
+
+    this._projectAdoptionPendingUsers.add(userId);
+    const projectsBeforeRecovery = cloneProjects(userData.projects);
+    userData.projects = cloneProjects(envelope.adoptedDraft);
+    const recovery = this.commitLocalDataOnly(true);
+    if (!recovery.ok) {
+      userData.projects = projectsBeforeRecovery;
+      throw new Error('PROJECT_SYNC_PENDING_RECOVERY_FAILED', { cause: recovery.error });
+    }
+    try {
+      this.settleProjectAdoptionCommit(envelope);
+    } catch (error) {
+      userData.projects = projectsBeforeRecovery;
+      throw new Error('PROJECT_SYNC_PENDING_RECOVERY_FAILED', { cause: error });
+    }
+
+    this._projectSyncRevision = envelope.revision;
+    this._assetGraphMode = envelope.assetGraphMode;
+    this._lastAuthoritativeProjects.set(userId, cloneProjects(envelope.authoritativeBase));
   }
 
   private hasPersistedProjectDraft(userId: string, projects: Project[]): boolean {
@@ -1110,6 +1162,7 @@ export class UserManager {
     };
 
     this.writeProjectAdoptionCommit(prepared);
+    this._projectAdoptionPendingUsers.add(input.userId);
     try {
       userData.projects = cloneProjects(input.adoptedDraft);
       let persistedDraft = cloneProjects(input.adoptedDraft);
@@ -1136,6 +1189,7 @@ export class UserManager {
         updatedAt: Date.now(),
       };
       this.writeProjectAdoptionCommit(committed, input.requiredBackups.length);
+      this._projectAdoptionPendingUsers.delete(input.userId);
 
       userData.projects = persistedDraft;
       this._projectSyncRevision = input.revision;
@@ -2124,6 +2178,7 @@ export class UserManager {
     if (!userData?.user) {
       throw new Error('No user found');
     }
+    this.ensureProjectAdoptionReadyForMutation();
 
     const project: Project = {
       id: `project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -2223,6 +2278,7 @@ export class UserManager {
   updateProject(projectId: string, updates: Partial<Project>): Project | null {
     const userData = this.getCurrentUserData();
     if (!userData) return null;
+    this.ensureProjectAdoptionReadyForMutation();
 
     const index = userData.projects.findIndex(p => p.id === projectId);
     if (index === -1) return null;
@@ -2247,6 +2303,7 @@ export class UserManager {
     const userData = this.getCurrentUserData();
     const requestedIds = [...new Set(projectIds.map(id => id.trim()).filter(Boolean))];
     if (!userData) return { deletedIds: [], skippedIds: requestedIds };
+    this.ensureProjectAdoptionReadyForMutation();
 
     const existingIds = new Set(userData.projects.map(project => project.id));
     const deletedIds = requestedIds.filter(id => existingIds.has(id));
@@ -2889,6 +2946,7 @@ export class UserManager {
   importProjectFromWujie(content: string): Project {
     const userData = this.getCurrentUserData();
     if (!userData?.user) throw new Error('No user found');
+    this.ensureProjectAdoptionReadyForMutation();
 
     let payload: WujieProjectFile;
 
