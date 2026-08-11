@@ -1,23 +1,65 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(
-  resolve(process.cwd(), 'src/components/infinite-canvas.tsx'),
-  'utf8',
-);
+import * as canvasAdapter from '@/lib/asset-core/canvas-adapter';
+import {
+  getCanvasMediaRenderDecision,
+  handleCanvasMediaElementFailure,
+} from '@/lib/asset-core/canvas-media-render';
+import type { CanvasImage } from '@/lib/user-types';
+
+const missingImage = (url: string): CanvasImage => ({
+  id: `missing-${url || 'empty'}`,
+  url,
+  x: 10,
+  y: 20,
+  width: 320,
+  height: 240,
+  originalWidth: 640,
+  originalHeight: 480,
+  rotation: 0,
+  zIndex: 1,
+  createdAt: 1,
+});
 
 describe('canvas broken managed media state', () => {
-  it('models managed-media failure without removing the canvas placement', () => {
-    expect(source).toContain("mediaAvailability?: MediaAvailability;");
-    expect(source).toContain('mediaErrorCode?: string;');
-    expect(source).toContain("mediaAvailability: 'missing'");
+  it.each(['', 'blob:expired-session-media'])(
+    'renders an unmanaged %s placement as visible broken media after hydrate',
+    (url) => {
+      const [hydrated] = canvasAdapter.hydrateCanvasPlacements([missingImage(url)]);
+
+      expect(hydrated).toMatchObject({
+        url,
+        width: 320,
+        height: 240,
+        mediaAvailability: 'missing',
+      });
+      expect(getCanvasMediaRenderDecision(hydrated)).toBe('broken-media');
+    },
+  );
+
+  it('marks a failed unmanaged blob as missing instead of exhausting a transparent fallback', () => {
+    const image = missingImage('blob:expired-session-media');
+    const markMissing = (imageId: string, errorCode: string): void => {
+      expect(imageId).toBe(image.id);
+      expect(errorCode).toBe('MEDIA_LOAD_FAILED');
+    };
+
+    expect(handleCanvasMediaElementFailure({
+      image,
+      element: { src: image.url, dataset: { retried: '1', canvasMediaSource: 'original' } },
+      markMissing,
+    })).toBe('mark-missing');
   });
 
-  it('renders a selectable fixed-size missing-media placeholder with retry and recovery actions', () => {
-    expect(source).toContain('data-canvas-missing-media');
-    expect(source).toContain('重试');
-    expect(source).toContain('恢复');
-    expect(source).toContain('retryMissingMedia(image);');
+  it('keeps broken media eligible for both retry and source recovery', () => {
+    const image = {
+      ...missingImage(''),
+      sourceUrl: 'https://recovery.test/original.png',
+      mediaAvailability: 'missing' as const,
+      mediaErrorCode: 'MEDIA_LOAD_FAILED',
+    };
+
+    expect(canvasAdapter.getCanvasMediaFilename(image)).toBe('original.png');
+    expect(canvasAdapter.shouldPersistCanvasPlacement(image)).toBe(true);
   });
 });

@@ -469,6 +469,130 @@ describe('continuous canvas shadow synchronization', () => {
     expect(query.mock.calls.some(([sql]) => String(sql).includes('UPDATE wujie_assets'))).toBe(false);
   });
 
+  it('restores a tombstoned same-ID project from its completed checkpoint without replacing graph identities', async () => {
+    const mapping = { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' };
+    const rawProject = project([image('retained')]);
+    const state = {
+      projectStatus: 'active',
+      placementStatus: 'active',
+      assetStatus: 'active',
+      versionIds: ['version-a'],
+    };
+    const sqlLog: Array<{ sql: string; params: unknown[] }> = [];
+    const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+      sqlLog.push({ sql, params });
+      if (sql.includes('UPDATE wujie_workspace_placements') && sql.includes('NOT (project_id = ANY')) {
+        state.placementStatus = 'trashed';
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_assets asset') && params.length === 1) {
+        state.assetStatus = 'trashed';
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_projects') && sql.includes('NOT (id = ANY')) {
+        state.projectStatus = 'trashed';
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT legacy.value AS legacy_project')) {
+        return { rows: [{ legacy_project: rawProject }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_asset_migration_checkpoints') && sql.includes('SELECT status')) {
+        return {
+          rows: [{
+            status: 'completed',
+            checkpoint: { sourceSchemaVersion: 1, legacyImageMappings: { retained: mapping } },
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('SELECT schema_version, metadata') && sql.includes('FROM wujie_projects')) {
+        if (sql.includes("status = 'active'") && state.projectStatus !== 'active') {
+          return { rows: [], rowCount: 0 };
+        }
+        return {
+          rows: [{ schema_version: 3, metadata: {}, status: state.projectStatus }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('SELECT asset_id') && sql.includes('FROM wujie_workspace_placements')) {
+        return {
+          rows: [{ asset_id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('SELECT id, owner_id, project_id') && sql.includes('FROM wujie_assets')) {
+        return {
+          rows: [{ id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('UPDATE wujie_assets') && sql.includes("status = 'active'")) {
+        expect(params.slice(0, 3)).toEqual(['asset-a', 'user-1', 'project-1']);
+        state.assetStatus = 'active';
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_asset_versions') && sql.includes('FOR UPDATE')) {
+        return {
+          rows: [{
+            file_url: '/media/retained.png',
+            storage_key: null,
+            checksum: null,
+            mime_type: null,
+            byte_size: null,
+            width: 600,
+            height: 400,
+            availability: 'ready',
+            recovery_source_url: null,
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('UPDATE wujie_workspace_placements') && sql.includes("status = 'active'")) {
+        expect(params.slice(0, 3)).toEqual(['placement-a', 'user-1', 'project-1']);
+        state.placementStatus = 'active';
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_asset_migration_checkpoints')) {
+        expect(params.slice(0, 3)).toEqual(['user-1', 'project-1', 'project-1']);
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_projects SET name')) {
+        expect(params.slice(0, 2)).toEqual(['user-1', 'project-1']);
+        state.projectStatus = 'active';
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+    const client = { query } as unknown as Parameters<typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction>[0];
+
+    await reconcileDeletedCanvasProjectsInTransaction(client, 'user-1', []);
+    expect(state).toMatchObject({
+      projectStatus: 'trashed',
+      placementStatus: 'trashed',
+      assetStatus: 'trashed',
+    });
+
+    const restored = await legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    expect(restored).toMatchObject({
+      migrated: false,
+      reused: true,
+      mappings: { retained: mapping },
+    });
+    expect(state).toEqual({
+      projectStatus: 'active',
+      placementStatus: 'active',
+      assetStatus: 'active',
+      versionIds: ['version-a'],
+    });
+    expect(sqlLog.some(({ sql }) => /INSERT INTO wujie_(projects|assets|workspace_placements|asset_versions)/.test(sql))).toBe(false);
+    expect(sqlLog.some(({ sql }) => /(UPDATE|DELETE FROM) wujie_asset_versions/.test(sql))).toBe(false);
+    expect(sqlLog.some(({ sql }) => /^\s*DELETE\s/i.test(sql))).toBe(false);
+  });
+
   it('persists data URLs before opening the atomic database transaction', async () => {
     let transactionStarted = false;
     let synchronizedMedia: Pick<CanvasImage, 'url' | 'sourceUrl' | 'thumbnailUrl'> | undefined;

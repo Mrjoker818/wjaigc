@@ -69,6 +69,7 @@ interface LegacyProjectRow extends QueryResultRow {
 interface ProjectRow extends QueryResultRow {
   schema_version: number;
   metadata: Record<string, unknown>;
+  status: 'active' | 'trashed';
 }
 
 interface CheckpointRow extends QueryResultRow {
@@ -367,9 +368,9 @@ async function existingCompletedMigration(
   if (!row || row.status !== 'completed') return null;
 
   const project = await client.query<ProjectRow>(
-    `SELECT schema_version, metadata
+    `SELECT schema_version, metadata, status
      FROM wujie_projects
-     WHERE owner_id = $1 AND id = $2 AND status = 'active'
+     WHERE owner_id = $1 AND id = $2
      FOR UPDATE`,
     [input.actorUserId, input.projectId],
   );
@@ -411,8 +412,8 @@ async function existingCompletedMigration(
     ],
   );
   await client.query(
-    `UPDATE wujie_projects SET name = $3, updated_at = now()
-     WHERE owner_id = $1 AND id = $2 AND status = 'active'`,
+    `UPDATE wujie_projects SET name = $3, status = 'active', updated_at = now()
+     WHERE owner_id = $1 AND id = $2`,
     [input.actorUserId, input.projectId, read.project.name ?? ''],
   );
   return {

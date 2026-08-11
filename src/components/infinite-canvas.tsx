@@ -14,9 +14,11 @@ import { getBottomToolbarDrawerPlacement, type BottomToolbarDrawerPlacement } fr
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import {
   getCanvasMediaFilename,
-  handleCanvasMediaElementFailure,
-  isManagedCanvasMedia,
 } from '@/lib/asset-core/canvas-adapter';
+import {
+  getCanvasMediaRenderDecision,
+  handleCanvasMediaElementFailure,
+} from '@/lib/asset-core/canvas-media-render';
 import type { MediaAvailability } from '@/lib/asset-core/types';
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from 'react';
@@ -10929,7 +10931,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       )}
                     </div>
                   </div>
-                ) : image.mediaAvailability === 'missing' && isManagedCanvasMedia(image) ? (
+                ) : getCanvasMediaRenderDecision(image) === 'broken-media' ? (
                   <div
                     data-canvas-missing-media
                     role="status"
