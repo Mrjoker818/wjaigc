@@ -179,7 +179,7 @@ test.describe('Stage 2 asset lifecycle', () => {
     const before = await images.evaluateAll(nodes => nodes.map(node => ({
       src: (node as HTMLImageElement).getAttribute('src'),
       style: node.parentElement?.getAttribute('style'),
-    }))); 
+    })));
     expect(before.length).toBeGreaterThan(0);
     expect(identityBefore.length).toBe(before.length);
     await page.reload({ waitUntil: 'domcontentloaded' });
