@@ -176,21 +176,27 @@ export interface SettleFailedCloudTaskResult {
   refunded: boolean;
 }
 
-let cloudTaskTablesInitialization: Promise<void> | null = null;
+let cloudTaskTablesInitialization: {
+  databaseKey: string;
+  promise: Promise<void>;
+} | null = null;
 
 const TERMINAL_STATUS_GUARD =
   "status NOT IN ('completed', 'failed', 'cancelled', 'timeout')";
 
 export function ensureCloudTaskTables(): Promise<void> {
-  if (!cloudTaskTablesInitialization) {
-    cloudTaskTablesInitialization = initializeCloudTaskTables().catch(
-      (error) => {
+  const databaseKey = process.env.DATABASE_URL || process.env.PGDATABASE_URL || '';
+  if (cloudTaskTablesInitialization?.databaseKey !== databaseKey) {
+    const promise = initializeCloudTaskTables().catch((error) => {
+      if (cloudTaskTablesInitialization?.promise === promise) {
         cloudTaskTablesInitialization = null;
-        throw error;
-      },
-    );
+      }
+      throw error;
+    });
+    cloudTaskTablesInitialization = { databaseKey, promise };
+    return promise;
   }
-  return cloudTaskTablesInitialization;
+  return cloudTaskTablesInitialization.promise;
 }
 
 async function initializeCloudTaskTables(): Promise<void> {
