@@ -1,14 +1,14 @@
 import {
   apiJson,
   canvasImageByUrl,
-  deleteCanvasPlacementFromUi,
+  cleanupNewProjectPlacements,
+  ensurePlacementRestored,
   expect,
   imageByUrl,
   loginRealUser,
   openCanvasProject,
   readProjects,
   requireStage2ProjectValue,
-  restoreProjectSnapshot,
   test,
   validateStage2ProjectIsolation,
 } from '../helpers/stage-2-e2e';
@@ -21,11 +21,21 @@ async function recordJsonResponse(response: import('@playwright/test').Response,
 }
 
 function expectTransfer(payload: Record<string, unknown>): { assetId: string; assetVersionId: string; placementId: string; url: string } {
-  expect(payload.assetId).toEqual(expect.any(String));
-  expect(payload.assetVersionId).toEqual(expect.any(String));
-  expect(payload.placementId).toEqual(expect.any(String));
-  expect(payload.url).toEqual(expect.any(String));
+  expect(typeof payload.assetId === 'string' && payload.assetId.length > 0).toBe(true);
+  expect(typeof payload.assetVersionId === 'string' && payload.assetVersionId.length > 0).toBe(true);
+  expect(typeof payload.placementId === 'string' && payload.placementId.length > 0).toBe(true);
+  expect(typeof payload.url === 'string' && payload.url.length > 0).toBe(true);
   return payload as { assetId: string; assetVersionId: string; placementId: string; url: string };
+}
+
+function captureTransferPlacements(page: import('@playwright/test').Page, placementIds: Set<string>): () => void {
+  const handler = async (response: import('@playwright/test').Response) => {
+    if (!response.url().includes('/api/assets/transfer') || response.request().method() !== 'POST') return;
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (payload && typeof payload.placementId === 'string' && payload.placementId) placementIds.add(payload.placementId);
+  };
+  page.on('response', handler);
+  return () => page.off('response', handler);
 }
 
 test.use({ trace: 'off', video: 'on' });
@@ -42,18 +52,22 @@ test.describe('Stage 2 cross-workspace flows', () => {
     await openCanvasProject(page, projectId);
     await page.getByText('AI聊天', { exact: true }).click();
     const sourceImage = await imageByUrl(page, 'img[src]', sourceUrl);
-    const addButton = sourceImage.locator('xpath=..').getByRole('button', { name: '添加到画布', exact: true });
+    const addButton = sourceImage.locator('xpath=ancestor::div[.//button[@aria-label="添加到画布"]][1]').getByRole('button', { name: '添加到画布', exact: true });
     await expect(addButton).toBeVisible({ timeout: 20_000 });
-    const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
-    await addButton.click();
-    const created = expectTransfer(await recordJsonResponse(await transfer, payload => stage2Evidence.recordPayload(payload)));
+    const placementIds = new Set<string>();
+    const stopCapture = captureTransferPlacements(page, placementIds);
     try {
+      const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
+      await addButton.click();
+      const payload = await recordJsonResponse(await transfer, value => stage2Evidence.recordPayload(value));
+      if (typeof payload.placementId === 'string') placementIds.add(payload.placementId);
+      const created = expectTransfer(payload);
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible();
     } finally {
       try {
-        await deleteCanvasPlacementFromUi(page, stage2Evidence, created.placementId, created.url);
+        stopCapture();
       } finally {
-        await restoreProjectSnapshot(page, stage2Evidence, originalProject!);
+        await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds);
       }
     }
   });
@@ -68,22 +82,26 @@ test.describe('Stage 2 cross-workspace flows', () => {
     await page.getByTitle('节点模式').first().click();
     const execute = page.getByRole('button', { name: '执行工作流', exact: true });
     await expect(execute).toBeVisible({ timeout: 20_000 });
-    const started = page.waitForResponse(response => response.url().includes('/api/workflow/execute') && response.request().method() === 'POST');
-    const outputTransfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST', { timeout: 180_000 });
-    await execute.click();
-    const startedPayload = await recordJsonResponse(await started, payload => stage2Evidence.recordPayload(payload));
-    expect(Object.entries(startedPayload).some(([key, value]) => /(?:task|execution)_?id/i.test(key) && typeof value === 'string')).toBe(true);
-    const created = expectTransfer(await recordJsonResponse(await outputTransfer, payload => stage2Evidence.recordPayload(payload)));
-    const back = page.getByRole('button', { name: '返回画布', exact: true });
-    await expect(back).toBeVisible();
-    await back.click();
+    const placementIds = new Set<string>();
+    const stopCapture = captureTransferPlacements(page, placementIds);
     try {
+      const started = page.waitForResponse(response => response.url().includes('/api/workflow/execute') && response.request().method() === 'POST');
+      const outputTransfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST', { timeout: 180_000 });
+      await execute.click();
+      const startedPayload = await recordJsonResponse(await started, payload => stage2Evidence.recordPayload(payload));
+      expect(Object.entries(startedPayload).some(([key, value]) => /(?:task|execution)_?id/i.test(key) && typeof value === 'string' && value.length > 0)).toBe(true);
+      const payload = await recordJsonResponse(await outputTransfer, value => stage2Evidence.recordPayload(value));
+      if (typeof payload.placementId === 'string') placementIds.add(payload.placementId);
+      const created = expectTransfer(payload);
+      const back = page.getByRole('button', { name: '返回画布', exact: true });
+      await expect(back).toBeVisible();
+      await back.click();
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible();
     } finally {
       try {
-        await deleteCanvasPlacementFromUi(page, stage2Evidence, created.placementId, created.url);
+        stopCapture();
       } finally {
-        await restoreProjectSnapshot(page, stage2Evidence, originalProject!);
+        await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds);
       }
     }
   });
@@ -99,19 +117,23 @@ test.describe('Stage 2 cross-workspace flows', () => {
     await page.goto(`/simple-chat?projectId=${encodeURIComponent(chatProjectId)}`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('combobox', { name: '目标画布项目' }).selectOption(targetProjectId);
     const sourceImage = await imageByUrl(page, 'main img[src]', sourceUrl);
-    const addButton = sourceImage.locator('xpath=../../..').getByTitle('添加到画布');
+    const addButton = sourceImage.locator('xpath=ancestor::div[.//button[@title="添加到画布"]][1]').getByTitle('添加到画布');
     await expect(addButton).toBeVisible({ timeout: 20_000 });
-    const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
-    await addButton.click();
-    const created = expectTransfer(await recordJsonResponse(await transfer, payload => stage2Evidence.recordPayload(payload)));
-    await openCanvasProject(page, targetProjectId);
+    const placementIds = new Set<string>();
+    const stopCapture = captureTransferPlacements(page, placementIds);
     try {
+      const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
+      await addButton.click();
+      const payload = await recordJsonResponse(await transfer, value => stage2Evidence.recordPayload(value));
+      if (typeof payload.placementId === 'string') placementIds.add(payload.placementId);
+      const created = expectTransfer(payload);
+      await openCanvasProject(page, targetProjectId);
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible({ timeout: 20_000 });
     } finally {
       try {
-        await deleteCanvasPlacementFromUi(page, stage2Evidence, created.placementId, created.url);
+        stopCapture();
       } finally {
-        await restoreProjectSnapshot(page, stage2Evidence, originalProject!);
+        await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds);
       }
     }
   });
@@ -129,25 +151,39 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const image = await canvasImageByUrl(page, String(reference.url));
     await expect(image).toBeVisible({ timeout: 20_000 });
     await image.click();
-    const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
-    const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
-    await page.getByTestId('selected-image-delete').click();
-    const deleteResponse = await deleted;
-    const deletePayload = await deleteResponse.json().catch(() => ({}));
-    stage2Evidence.recordApi('DELETE', deleteResponse.url(), deleteResponse.status(), deletePayload);
-    expect(deleteResponse.ok()).toBeTruthy();
-    const saveResponse = await saved;
-    const savePayload = await saveResponse.json().catch(() => ({}));
-    stage2Evidence.recordApi('POST', saveResponse.url(), saveResponse.status(), savePayload);
-    expect(saveResponse.ok()).toBeTruthy();
     try {
+      const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
+      const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
+      await page.getByTestId('selected-image-delete').click();
+      const deleteResponse = await deleted;
+      const deletePayload = await deleteResponse.json().catch(() => ({})) as Record<string, unknown>;
+      stage2Evidence.recordApi('DELETE', deleteResponse.url(), deleteResponse.status(), deletePayload);
+      expect(deleteResponse.ok()).toBeTruthy();
+      expect(deletePayload.placementTrashed).toBe(true);
+      const saveResponse = await saved;
+      const savePayload = await saveResponse.json().catch(() => ({}));
+      stage2Evidence.recordApi('POST', saveResponse.url(), saveResponse.status(), savePayload);
+      expect(saveResponse.ok()).toBeTruthy();
+      const missing = await page.request.get(`/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`);
+      const missingPayload = await missing.json().catch(() => ({})) as Record<string, unknown>;
+      stage2Evidence.recordApi('GET', missing.url(), missing.status(), missingPayload);
+      expect(missing.status()).toBe(404);
+      expect(missingPayload.error).toBe('ASSET_NOT_FOUND');
       await page.goto(`/simple-chat?projectId=${encodeURIComponent(chatProjectId)}`, { waitUntil: 'domcontentloaded' });
       await expect(await imageByUrl(page, 'main img[src]', String(reference.url))).toBeVisible({ timeout: 20_000 });
       await openCanvasProject(page, projectId);
       await page.getByTitle('节点模式').first().click();
       await expect(await imageByUrl(page, 'img[src]', String(reference.url))).toBeVisible({ timeout: 20_000 });
     } finally {
-      await apiJson(page, stage2Evidence, 'POST', `/api/assets/${encodeURIComponent(assetId)}/restore`, { projectId, placementId });
+      await ensurePlacementRestored(page, stage2Evidence, {
+        projectId,
+        assetId,
+        versionId,
+        placementId,
+        url: String(reference.url),
+      });
     }
+    await openCanvasProject(page, projectId);
+    await expect(await canvasImageByUrl(page, String(reference.url))).toBeVisible({ timeout: 20_000 });
   });
 });

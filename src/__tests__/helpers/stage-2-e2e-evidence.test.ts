@@ -41,6 +41,11 @@ describe('Stage 2 E2E evidence safety', () => {
       E2E_STAGE2_RUN_ID: 'run-42',
       E2E_STAGE2_UPLOAD_PROJECT_IDS: '{"chromium":"old-project"}',
     })).toThrow(/must include Stage 2 run id/);
+    expect(() => validateStage2ProjectIsolation({
+      E2E_STAGE2_RUN_ID: 'run-42',
+      E2E_STAGE2_UPLOAD_PROJECT_IDS: '{"chromium":"cross-browser-run-42"}',
+      E2E_STAGE2_WORKFLOW_PROJECT_IDS: '{"firefox":"cross-browser-run-42"}',
+    })).toThrow(/reuses controlled project/);
   });
 
   it('redacts sensitive URL parameters beyond token and key aliases', () => {

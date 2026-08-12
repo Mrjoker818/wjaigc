@@ -24,6 +24,7 @@ export interface Stage2Evidence {
   taskIds: Set<string>;
   recordPayload(payload: unknown): void;
   recordApi(method: string, url: string, status: number, payload?: unknown, requestId?: string): void;
+  startTrace(): Promise<void>;
 }
 
 const SECRET_PATTERN = /((?:api[-_]?key|access[-_]?token|refresh[-_]?token|session[-_]?token|client[-_]?secret|password|credential|secret))(["'=:\s]+)(?:"[^"]*"|'[^']*'|[^\r\n,}]+)/gi;
@@ -41,6 +42,9 @@ export function redactStage2Evidence(value: string): string {
 export function sanitizeStage2Url(rawUrl: string): string {
   try {
     const url = new URL(rawUrl);
+    if (url.username) url.username = '[REDACTED]';
+    if (url.password) url.password = '[REDACTED]';
+    if (url.hash) url.hash = '#[REDACTED]';
     for (const key of [...url.searchParams.keys()]) {
       if (/token|key|secret|password|authorization|auth|session|signature|credential|cookie/i.test(key)) {
         url.searchParams.set(key, '[REDACTED]');
@@ -117,6 +121,7 @@ function stage2EvidenceDirectory(commit: string, featureId: string, browser: str
 
 export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
   stage2Evidence: [async ({ page }, activateFixture, testInfo) => {
+    let traceStarted = false;
     const evidence: Stage2Evidence = {
       console: [],
       network: [],
@@ -127,6 +132,11 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
         evidence.network.push({ method, status, url: sanitizeStage2Url(url) });
         if (payload !== undefined) collectIds(payload, evidence);
         if (requestId) evidence.requestIds.add(requestId);
+      },
+      async startTrace() {
+        if (traceStarted) return;
+        await page.context().tracing.start({ screenshots: true, snapshots: true, sources: false });
+        traceStarted = true;
       },
     };
     page.on('console', message => {
@@ -147,7 +157,6 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
     });
 
     const rawTracePath = join(tmpdir(), `wujie-stage-2-${randomUUID()}.zip`);
-    await page.context().tracing.start({ screenshots: true, snapshots: true, sources: false });
     try {
       await activateFixture(evidence);
     } finally {
@@ -157,15 +166,58 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
         ? testInfo.status === 'skipped' ? 'blocked' : 'failed'
         : 'completed';
       const featureId = `stage-2-${testInfo.titlePath.slice(1).join('-')}`;
-      const artifactPaths = {
-        screenshot: 'screenshot.png',
-        video: 'video.webm',
-        trace: 'trace.zip',
+      const artifactPaths: EvidenceManifestInput['artifactPaths'] = {
         console: 'console.json',
         network: 'network.json',
         task: 'task.json',
       };
       const commit = gitCommit();
+      const directory = stage2EvidenceDirectory(commit, featureId, testInfo.project.name, capturedAt);
+      await mkdir(directory, { recursive: true });
+      let artifactError: unknown;
+      try {
+        const screenshot = 'screenshot.png';
+        await page.screenshot({ path: join(directory, screenshot), fullPage: true });
+        artifactPaths.screenshot = screenshot;
+      } catch (error) {
+        artifactError ??= error;
+      }
+      try {
+        if (!traceStarted) await evidence.startTrace();
+        await page.context().tracing.stop({ path: rawTracePath });
+        const trace = 'trace.zip';
+        await sanitizeAndRemovePlaywrightTrace(rawTracePath, join(directory, trace));
+        artifactPaths.trace = trace;
+      } catch (error) {
+        artifactError ??= error;
+      } finally {
+        await unlink(rawTracePath).catch(() => undefined);
+      }
+      const video = page.video();
+      await page.close().catch(error => { artifactError ??= error; });
+      if (video) {
+        try {
+          const videoName = 'video.webm';
+          await copyFile(await video.path(), join(directory, videoName));
+          artifactPaths.video = videoName;
+        } catch (error) {
+          artifactError ??= error;
+        }
+      } else {
+        artifactError ??= new Error('Stage 2 evidence video was not created');
+      }
+      for (const [name, content] of [
+        ['console.json', evidence.console],
+        ['network.json', evidence.network],
+        ['task.json', { taskIds: [...evidence.taskIds] }],
+      ] as const) {
+        try {
+          await writeFile(join(directory, name), JSON.stringify(content, null, 2));
+        } catch (error) {
+          artifactError ??= error;
+          delete artifactPaths[name.split('.')[0]];
+        }
+      }
       const manifestInput: EvidenceManifestInput = {
         commit,
         deploymentUrl: sanitizeStage2Url(String(testInfo.project.use.baseURL || process.env.E2E_BASE_URL || 'http://127.0.0.1:5000')),
@@ -175,34 +227,11 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
         featureId,
         artifactPaths,
         requestIds: [...evidence.requestIds],
-        status,
+        status: artifactError ? 'failed' : status,
       };
-      const directory = stage2EvidenceDirectory(commit, featureId, testInfo.project.name, capturedAt);
-      await mkdir(directory, { recursive: true });
-      let screenshotError: unknown;
-      try {
-        await page.screenshot({ path: join(directory, artifactPaths.screenshot), fullPage: true });
-      } catch (error) {
-        screenshotError = error;
-      }
-      try {
-        await page.context().tracing.stop({ path: rawTracePath });
-        await sanitizeAndRemovePlaywrightTrace(rawTracePath, join(directory, artifactPaths.trace));
-      } finally {
-        await unlink(rawTracePath).catch(() => undefined);
-      }
-      const video = page.video();
-      await page.close();
-      if (screenshotError) throw screenshotError;
-      if (!video) throw new Error('Stage 2 evidence video was not created');
-      await copyFile(await video.path(), join(directory, artifactPaths.video));
-      await Promise.all([
-        writeFile(join(directory, 'console.json'), JSON.stringify(evidence.console, null, 2)),
-        writeFile(join(directory, 'network.json'), JSON.stringify(evidence.network, null, 2)),
-        writeFile(join(directory, 'task.json'), JSON.stringify({ taskIds: [...evidence.taskIds] }, null, 2)),
-      ]);
       const manifest = await writeEvidenceManifest(manifestInput);
       await testInfo.attach('stage-2-evidence-manifest', { path: manifest.manifestPath, contentType: 'application/json' });
+      if (artifactError) throw artifactError;
       if (missingRequestIds) throw new Error('Stage 2 evidence did not capture any requestId');
     }
   }, { auto: true }],
@@ -244,12 +273,12 @@ export function validateStage2ProjectIsolation(environment: Record<string, strin
       continue;
     }
     if (!matrix || typeof matrix !== 'object' || Array.isArray(matrix)) continue;
-    for (const [browser, projectId] of Object.entries(matrix as Record<string, unknown>)) {
+    for (const projectId of Object.values(matrix as Record<string, unknown>)) {
       if (typeof projectId !== 'string' || !projectId.trim()) continue;
       if (!runId || !projectId.includes(runId)) {
         throw new Error(`${envName} project ${projectId} must include Stage 2 run id ${runId || '<missing>'}`);
       }
-      const key = `${browser}:${projectId.trim()}`;
+      const key = projectId.trim();
       const previous = owners.get(key);
       if (previous) {
         throw new Error(`${envName} reuses controlled project ${projectId} already assigned to ${previous}`);
@@ -275,6 +304,7 @@ export async function loginRealUser(page: Page, evidence?: Stage2Evidence): Prom
     const payload = await loginResponse.json().catch(() => ({}));
     const headers = loginResponse.headers();
     evidence.recordApi('POST', '/api/auth/login', loginResponse.status(), payload, headers['x-request-id'] || headers['request-id']);
+    await evidence.startTrace();
   }
   expect(loginResponse.ok()).toBeTruthy();
   await page.goto('/?loginMode=canvas', { waitUntil: 'domcontentloaded' });
@@ -366,6 +396,82 @@ export async function restoreProjectSnapshot(
       expect(response.ok(), `Project snapshot restore returned HTTP ${response.status()}`).toBeTruthy();
     }
   }
+}
+
+export function canvasProjectPlacements(project: Record<string, unknown> | undefined): Array<{
+  id: string;
+  placementId: string;
+  url: string;
+}> {
+  if (!project || !Array.isArray(project.canvasImages)) return [];
+  return project.canvasImages.flatMap(value => {
+    if (!value || typeof value !== 'object') return [];
+    const image = value as Record<string, unknown>;
+    const id = typeof image.id === 'string' ? image.id : '';
+    const placementId = typeof image.placementId === 'string' ? image.placementId : '';
+    const url = typeof image.url === 'string' ? image.url : '';
+    return id && placementId && url ? [{ id, placementId, url }] : [];
+  });
+}
+
+export async function cleanupNewProjectPlacements(
+  page: Page,
+  evidence: Stage2Evidence,
+  originalProject: Record<string, unknown>,
+  knownPlacementIds: Iterable<string> = [],
+): Promise<void> {
+  const projectId = String(originalProject.id || '');
+  const originalPlacementIds = new Set(canvasProjectPlacements(originalProject).map(image => image.placementId));
+  try {
+    const current = await readProjects(page, evidence);
+    const project = current.projects.find(candidate => candidate.id === projectId);
+    const created = new Set([
+      ...knownPlacementIds,
+      ...canvasProjectPlacements(project)
+        .filter(image => !originalPlacementIds.has(image.placementId))
+        .map(image => image.placementId),
+    ]);
+    for (const placementId of created) {
+      if (!placementId || originalPlacementIds.has(placementId)) continue;
+      const response = await page.request.delete(`/api/assets/placements/${encodeURIComponent(placementId)}?projectId=${encodeURIComponent(projectId)}`);
+      const payload = await response.json().catch(() => ({}));
+      const headers = response.headers();
+      evidence.recordApi('DELETE', response.url(), response.status(), payload, headers['x-request-id'] || headers['request-id']);
+      if (!response.ok() && response.status() !== 404) {
+        expect(response.ok(), `Cleanup placement ${placementId} returned HTTP ${response.status()}`).toBeTruthy();
+      }
+    }
+  } finally {
+    await restoreProjectSnapshot(page, evidence, originalProject);
+  }
+}
+
+export async function ensurePlacementRestored(
+  page: Page,
+  evidence: Stage2Evidence,
+  input: { projectId: string; assetId: string; versionId: string; placementId: string; url: string },
+): Promise<Record<string, unknown>> {
+  const resolveUrl = `/api/assets?projectId=${encodeURIComponent(input.projectId)}&assetVersionId=${encodeURIComponent(input.versionId)}&placementId=${encodeURIComponent(input.placementId)}`;
+  const current = await page.request.get(resolveUrl);
+  const currentPayload = await current.json().catch(() => ({})) as Record<string, unknown>;
+  evidence.recordApi('GET', current.url(), current.status(), currentPayload);
+  if (current.status() === 404 && currentPayload.error === 'ASSET_NOT_FOUND') {
+    const restored = await apiJson(page, evidence, 'POST', `/api/assets/${encodeURIComponent(input.assetId)}/restore`, {
+      projectId: input.projectId,
+      placementId: input.placementId,
+    });
+    const placement = restored.placement as Record<string, unknown> | undefined;
+    expect(placement?.id).toBe(input.placementId);
+    expect(placement?.assetVersionId).toBe(input.versionId);
+    expect(placement?.status).toBe('active');
+  } else {
+    expect(current.status()).toBe(200);
+  }
+  const resolved = await apiJson(page, evidence, 'GET', resolveUrl);
+  expect(resolved.assetVersionId).toBe(input.versionId);
+  expect(resolved.placementId).toBe(input.placementId);
+  expect(resolved.url).toBe(input.url);
+  return resolved;
 }
 
 export async function readProjects(page: Page, evidence?: Stage2Evidence): Promise<{ projects: Array<Record<string, unknown>>; revision: number }> {
