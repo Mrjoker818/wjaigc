@@ -33,5 +33,6 @@ export default defineConfig({
     { name: 'chromium-1080p', use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: { width: 1920, height: 1080 }, launchOptions: chromiumLaunchOptions } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+    { name: 'mobile-chromium', use: { ...devices['Pixel 7'], channel: 'chromium', launchOptions: chromiumLaunchOptions } },
   ],
 });

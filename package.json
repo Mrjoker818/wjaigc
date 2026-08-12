@@ -19,6 +19,7 @@
     "migrate": "node scripts/run-migrations.mjs",
     "test:e2e": "playwright test",
     "test:e2e:p0": "playwright test tests/e2e/p0-core.spec.ts",
+    "test:e2e:stage-2": "playwright test tests/e2e/stage-2-asset-lifecycle.spec.ts tests/e2e/stage-2-cross-workspace.spec.ts",
     "test:artifacts": "node scripts/collect-playwright-artifacts.mjs",
     "test:inventory": "node scripts/generate-function-inventory.mjs",
     "check:protected-baseline": "node scripts/check-protected-baseline.mjs",
