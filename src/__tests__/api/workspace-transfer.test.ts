@@ -46,7 +46,7 @@ function transferResult(reused = false) {
       assetId: 'asset-a',
       file: { url: '/api/serve-upload/source.png' },
     },
-    placement: { id: 'placement-a' },
+    placement: { id: 'placement-a', entityId: 'message-image-a' },
     reused,
   };
 }
@@ -109,6 +109,7 @@ describe('POST /api/assets/transfer', () => {
       assetId: 'asset-a',
       assetVersionId: 'version-a',
       placementId: 'placement-a',
+      entityId: 'message-image-a',
       url: '/api/serve-upload/source.png',
       reused: false,
     });

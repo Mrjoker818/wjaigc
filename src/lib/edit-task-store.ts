@@ -9,7 +9,7 @@ import type { ApiCompatProfile } from '@/lib/api-compatibility';
 
 export interface EditTask {
   id: string;
-  status: 'processing' | 'completed' | 'failed' | 'cancelled';
+  status: 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
   progress: number;
   stage: string;
   error?: string;
@@ -46,7 +46,10 @@ if (typeof setInterval !== 'undefined' && !(globalThis as Record<string, unknown
     const now = Date.now();
     for (const [id, task] of editTaskStore) {
       const isOld = now - task.createdAt > 30 * 60 * 1000;
-      const isTerminal = task.status === 'completed' || task.status === 'failed';
+      const isTerminal = task.status === 'completed'
+        || task.status === 'failed'
+        || task.status === 'cancelled'
+        || task.status === 'timeout';
       const isZombie = now - task.createdAt > 30 * 60 * 1000; // 30分钟僵尸（processing太久也应清理，释放apiKey）
       if ((isOld && isTerminal) || isZombie) {
         editTaskStore.delete(id);
@@ -65,7 +68,7 @@ export function deleteEditTask(taskId: string): boolean {
 
 export function setEditTask(taskId: string, task: EditTask): void {
   const existing = editTaskStore.get(taskId);
-  const terminalStatuses: EditTask['status'][] = ['completed', 'failed', 'cancelled'];
+  const terminalStatuses: EditTask['status'][] = ['completed', 'failed', 'cancelled', 'timeout'];
   if (
     existing
     && terminalStatuses.includes(existing.status)
@@ -103,14 +106,19 @@ export function updateTaskStage(
   }
 }
 
-export function failEditTask(taskId: string, error: string, networkError = false): void {
+export function failEditTask(
+  taskId: string,
+  error: string,
+  networkError = false,
+  status: 'failed' | 'timeout' = 'failed',
+): void {
   const existing = editTaskStore.get(taskId);
   if (existing && existing.status !== 'processing') return;
   editTaskStore.set(taskId, {
     id: taskId,
-    status: 'failed',
+    status,
     progress: 0,
-    stage: '失败',
+    stage: status === 'timeout' ? '已超时' : '失败',
     error,
     result: { success: false, error, networkError },
     createdAt: existing?.createdAt || Date.now(),

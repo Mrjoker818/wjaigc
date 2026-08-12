@@ -4,7 +4,6 @@ import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProv
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
-import { getSessionUser } from '@/lib/server-auth';
 import {
   calculateConfiguredCreditCost,
   consumeCredits,
@@ -42,7 +41,6 @@ import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
 import {
   createTaskEntryAudit,
   executeTaskEntryMigration,
-  resolveTaskCoreMode,
 } from '@/lib/task-core/entry-migration';
 import { createBillableTask } from '@/lib/task-core/billing-service';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
@@ -90,6 +88,27 @@ interface EditRequestBody {
   llmModelId?: string;
   llmProviderId?: string;
   referenceImages?: Array<string | { url?: string }>;
+}
+
+function sanitizeEditTaskResult(result: Record<string, unknown>): Record<string, unknown> {
+  const {
+    apiKey: _apiKey,
+    apiBaseUrl: _apiBaseUrl,
+    baseUrl: _baseUrl,
+    advancedParams: _advancedParams,
+    provider,
+    submissionPayload,
+    ...safeResult
+  } = result;
+  const isProviderUrlAlias = typeof provider === 'string' && /^https?:\/\//i.test(provider.trim());
+  const sanitizedProvider = isProviderUrlAlias ? undefined : provider;
+  return {
+    ...safeResult,
+    ...(sanitizedProvider !== undefined ? { provider: sanitizedProvider } : {}),
+    ...(submissionPayload && typeof submissionPayload === 'object' && !Array.isArray(submissionPayload)
+      ? { submissionPayload: sanitizeEditTaskResult(submissionPayload as Record<string, unknown>) }
+      : submissionPayload !== undefined ? { submissionPayload } : {}),
+  };
 }
 
 // 重新导出供 poll-task 使用（保持兼容）
@@ -325,7 +344,6 @@ export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   const taskStartedAt = Date.now();
   const requestId = getRequestId(request);
-  const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
   const annotationIdempotencyKey = request.headers.get('x-idempotency-key')?.trim() || '';
@@ -442,7 +460,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 积分检查与扣除
-    sessionUser = await getSessionUser(request);
+    sessionUser = authResult.user;
+    const editTaskCoreMode = 'core-v2';
     deductedCredits = 0; // 跟踪已扣积分，用于失败退款
     // 积分扣除移到凭证验证之后（第345行之后）
 
@@ -495,7 +514,7 @@ export async function POST(request: NextRequest) {
         )
       : 0;
     const admission = await executeTaskEntryMigration<EditAdmission>({
-      mode: taskCoreMode,
+      mode: editTaskCoreMode,
       legacy: async () => {
         let claimedTaskId: string | null = null;
         let reused = false;
@@ -624,7 +643,7 @@ export async function POST(request: NextRequest) {
 
     const taskEntryAudit = createTaskEntryAudit({
       entry: 'edit',
-      mode: taskCoreMode,
+      mode: editTaskCoreMode,
       requestId,
       requestedProviderId: extractedProviderId || providerId || undefined,
       requestedModelId: model,
@@ -650,7 +669,7 @@ export async function POST(request: NextRequest) {
     }
     setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
     // ★ 注册到统一任务中心（SSE推送 + 取消支持）
-    registerTask(taskId, 'edit', '语言修图', sessionUser?.id);
+    registerTask(taskId, 'edit', '语言修图', sessionUser?.id, annotationTaskId ? 'durable' : 'memory');
     const taskController = new AbortController();
     const taskSignal = taskController.signal;
     registerTaskAbortController(taskId, taskController);
@@ -670,6 +689,7 @@ export async function POST(request: NextRequest) {
 
       const finishTask = async (result: Record<string, unknown>): Promise<boolean> => {
         taskSignal.throwIfAborted();
+        const safeResult = sanitizeEditTaskResult(result);
         await reportEditTaskProgress(
           taskId,
           90,
@@ -684,7 +704,7 @@ export async function POST(request: NextRequest) {
               updatedAt: Date.now(),
               creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
             }),
-            ...result,
+            ...safeResult,
           });
           if (!committed) return false;
           await projectPersistedCompletedTask(taskId, authResult.userId);
@@ -695,7 +715,7 @@ export async function POST(request: NextRequest) {
           status: 'completed',
           progress: 100,
           stage: '完成',
-          result,
+          result: safeResult,
           createdAt: getEditTask(taskId)?.createdAt || Date.now(),
           completedAt: Date.now(),
         });
@@ -1383,7 +1403,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               image: images[0],
               images,
               model: pureModel,
-              provider: effectiveBaseUrl || 'unknown',
+              providerId: actualProviderId || undefined,
+              providerName: imageProvider?.name || undefined,
               llmInstruction,
               editRegions: llmEditRegions,
               autoMaskGenerated: llmEditRegions.length > 0,
@@ -1406,6 +1427,38 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               console.info(`[edit] Upgrading compatProfile from pollMode:'none' to 'path' (API returned task_id=${remoteTaskId})`);
             }
 
+            if (annotationTaskId) {
+              if (!actualProviderId) {
+                await terminateCloudTaskAndRefund(
+                  taskId,
+                  'failed',
+                  '异步编辑任务缺少可恢复的提供商标识',
+                );
+                failTask(taskId, '异步编辑任务缺少可恢复的提供商标识，请从管理员模型列表选择提供商');
+                return;
+              }
+              const checkpointed = await updateCloudTask(taskId, {
+                status: 'processing',
+                progress: 10,
+                label: '已提交',
+                remoteTaskId,
+                result: {
+                  remotePollInfo: {
+                    taskId: remoteTaskId,
+                    providerId: actualProviderId || undefined,
+                    model: apiModelName,
+                    allTaskIds: parsed.taskIds,
+                    compatProfile: effectiveCompatProfile,
+                  },
+                },
+                mergeResult: true,
+              });
+              if (!checkpointed) {
+                taskController.abort(new Error('编辑任务终态已由其他请求更新'));
+                return;
+              }
+            }
+
             setEditTask(taskId, {
               id: taskId,
               status: 'processing',
@@ -1417,7 +1470,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               remotePollInfo: {
                 taskId: remoteTaskId,
                 apiBaseUrl: effectiveBaseUrl,
-                providerId: providerId || '',
+                providerId: actualProviderId || '',
                 model: apiModelName,                prompt: effectivePrompt,
                 allTaskIds: parsed.taskIds,
                 compatProfile: effectiveCompatProfile,
@@ -1480,7 +1533,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                     image: flatImages[0],
                     images: flatImages,
                     model: pureModel,
-                    provider: effectiveBaseUrl || 'unknown',
+                    providerId: actualProviderId || undefined,
+                    providerName: imageProvider?.name || undefined,
                     llmInstruction,
                     editRegions: llmEditRegions,
                     autoMaskGenerated: llmEditRegions.length > 0,
@@ -1783,7 +1837,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       image: images[0],
       images,
       model: pureModel,
-      provider: effectiveBaseUrl || 'unknown',
+      providerId: actualProviderId || undefined,
+      providerName: imageProvider?.name || undefined,
       llmInstruction,
       editRegions: llmEditRegions,
       autoMaskGenerated: llmEditRegions.length > 0,

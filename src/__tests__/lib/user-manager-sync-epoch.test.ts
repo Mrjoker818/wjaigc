@@ -171,6 +171,30 @@ afterEach(() => {
 });
 
 describe('UserManager project sync response isolation', () => {
+  it('tracks only mutations that have not reached an accepted server revision', async () => {
+    let revision = 1;
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') revision += 1;
+      return new Response(JSON.stringify({
+        success: true,
+        value: [project('user-a', '/media/a.png')],
+        assetGraphMode: 'shadow',
+        projectRevision: revision,
+      }), { status: 200 });
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    expect(manager.hasPendingProjectChanges()).toBe(false);
+
+    manager.updateProject('project-a', { name: 'Changed' });
+    expect(manager.hasPendingProjectChanges()).toBe(true);
+
+    await expect(manager.flushProjectsToServer()).resolves.toBeTruthy();
+    expect(manager.hasPendingProjectChanges()).toBe(false);
+  });
+
   it('uses a persisted per-user authoritative base after reload and preserves twelve remote deletions', async () => {
     const images = Array.from({ length: 13 }, (_, index) => (
       imageWithId(`remote-${index}`, `/media/remote-${index}.png`)

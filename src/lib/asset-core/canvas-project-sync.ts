@@ -5,6 +5,7 @@ import type { CanvasImage, Project } from '@/lib/user-types';
 
 import {
   LegacyMigrationError,
+  adoptManagedCanvasMapping,
   adoptTaskProjectedCanvasMapping,
   mappingForLegacyImage,
   migrateLegacyProjectOnWriteInTransaction,
@@ -18,7 +19,12 @@ import type { MediaAvailability } from './types';
 
 export type AssetGraphMappings = Record<string, Record<string, LegacyImageMapping>>;
 
-export { adoptTaskProjectedCanvasMapping, planCanvasShadowReconciliation, selectCanvasImagesForAssetGraph };
+export {
+  adoptManagedCanvasMapping,
+  adoptTaskProjectedCanvasMapping,
+  planCanvasShadowReconciliation,
+  selectCanvasImagesForAssetGraph,
+};
 
 export interface CanvasProjectSyncTransaction {
   claimRevision?(expectedRevision: number): Promise<number>;
@@ -325,8 +331,10 @@ export function hydrateAssetV3Projects(
   placementsByProject: Record<string, AssetV3CanvasPlacement[]>,
 ): Project[] {
   return projects.map((project) => {
+    const graphPlacements = placementsByProject[project.id] ?? [];
+    if (graphPlacements.length === 0 && project.schemaVersion !== 3) return project;
     const legacyById = new Map(project.canvasImages.map((image) => [image.id, image]));
-    const canvasImages = (placementsByProject[project.id] ?? []).map((placement) => {
+    const canvasImages = graphPlacements.map((placement) => {
       const metadataImage = asRecord(placement.metadata.legacyImage);
       const legacyImage = legacyById.get(placement.entityId);
       const base = { ...(legacyImage ?? {}), ...metadataImage } as Partial<CanvasImage>;

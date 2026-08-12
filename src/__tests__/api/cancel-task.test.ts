@@ -267,6 +267,67 @@ describe('POST /api/cancel-task', () => {
     );
   });
 
+  it('settles a durable core-v2 edit atomically before a late completion can win', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'core-v2-edit-task',
+      userId: 'user-a',
+      type: 'edit',
+      creditCost: 8,
+      persistence: 'durable',
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'core-v2-edit-task',
+      userId: 'user-a',
+      type: 'edit',
+      status: 'processing',
+      creditCost: 8,
+      creditStatus: 'pending',
+    });
+
+    const response = await POST(request('core-v2-edit-task'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith(
+      'core-v2-edit-task',
+      'cancelled',
+      expect.stringContaining('core-v2-edit-task'),
+    );
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+  });
+
+  it('does not report a durable edit cancelled when completion already won', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'core-v2-edit-race',
+      userId: 'user-a',
+      type: 'edit',
+      persistence: 'durable',
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'core-v2-edit-race',
+      userId: 'user-a',
+      type: 'edit',
+      status: 'completed',
+      creditCost: 8,
+      creditStatus: 'charged',
+    });
+    mocks.terminateCloudTaskAndRefund.mockResolvedValue({
+      status: 'completed',
+      transitioned: false,
+      refunded: false,
+      creditCost: 0,
+    });
+
+    const response = await POST(request('core-v2-edit-race'));
+
+    expect(response.status).toBe(409);
+    expect(mocks.cancelTask).not.toHaveBeenCalled();
+    expect(mocks.cancelEditTask).not.toHaveBeenCalled();
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+  });
+
   it('settles a durable generation slot atomically so a late provider completion cannot win', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
     mocks.getTaskInfo.mockReturnValue({

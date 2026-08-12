@@ -62,6 +62,126 @@ async function waitForApplicationLockCount(
 }
 
 describe('stage 2 asset lifecycle PostgreSQL contract', () => {
+  postgresIt('atomically restores a canvas placement into the shadow snapshot and advances its revision', async () => {
+    await withIsolatedPostgres('asset_lifecycle_shadow_restore', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      await query(
+        `CREATE TABLE IF NOT EXISTS wujie_user_data (
+           user_id TEXT NOT NULL,
+           data_key TEXT NOT NULL,
+           data_value JSONB NOT NULL,
+           updated_at BIGINT NOT NULL,
+           PRIMARY KEY (user_id, data_key)
+         )`,
+      );
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const versionId = randomUUID();
+      const placementId = randomUUID();
+      const imageId = 'restored-image';
+      await query(
+        `INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Shadow restore')`,
+        [projectId, ownerId],
+      );
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ($1, $2, $3, 'image', 'trashed')`,
+        [assetId, ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, availability
+         ) VALUES ($1, $2, $3, $4, '/api/serve-upload/uploads/restored.png', 'ready')`,
+        [versionId, assetId, ownerId, projectId],
+      );
+      await query(
+        'UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1',
+        [assetId, versionId],
+      );
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status, deleted_at, transform, metadata
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', $3, 'canvas-image', $6, 'trashed', now(),
+                   $7::jsonb, $8::jsonb)`,
+        [
+          placementId,
+          ownerId,
+          projectId,
+          assetId,
+          versionId,
+          imageId,
+          JSON.stringify({ x: 41, y: 52, width: 640, height: 480, rotation: 0, zIndex: 3 }),
+          JSON.stringify({
+            legacyImage: {
+              id: imageId,
+              url: '/api/serve-upload/uploads/restored.png',
+              x: 41,
+              y: 52,
+              width: 640,
+              height: 480,
+              originalWidth: 640,
+              originalHeight: 480,
+              rotation: 0,
+              zIndex: 3,
+              createdAt: 1,
+            },
+          }),
+        ],
+      );
+      await query(
+        `INSERT INTO wujie_user_data(user_id, data_key, data_value, updated_at)
+         VALUES ($1, 'projects', $2::jsonb, 1),
+                ($1, '__asset_graph_projects_revision', '7'::jsonb, 1)`,
+        [ownerId, JSON.stringify([{
+          id: projectId,
+          userId: ownerId,
+          name: 'Shadow restore',
+          createdAt: 1,
+          updatedAt: 1,
+          canvasImages: [],
+          settings: {},
+        }])],
+      );
+
+      await closePool();
+      process.env.DATABASE_URL = databaseUrl;
+      process.env.PGDATABASE_URL = databaseUrl;
+      const { createAssetService } = await import('../../src/lib/asset-core/service');
+      await createAssetService().restorePlacement({
+        actorUserId: ownerId,
+        projectId,
+        assetId,
+        placementId,
+      });
+
+      const placement = await query<{ status: string }>(
+        'SELECT status FROM wujie_workspace_placements WHERE id = $1',
+        [placementId],
+      );
+      const snapshot = await query<{ data_key: string; data_value: unknown }>(
+        `SELECT data_key, data_value FROM wujie_user_data
+         WHERE user_id = $1 AND data_key IN ('projects', '__asset_graph_projects_revision')`,
+        [ownerId],
+      );
+      const values = Object.fromEntries(snapshot.rows.map(row => [row.data_key, row.data_value]));
+      const projects = values.projects as Array<{ canvasImages: Array<Record<string, unknown>> }>;
+      expect(placement.rows[0]?.status).toBe('active');
+      expect(values.__asset_graph_projects_revision).toBe(8);
+      expect(projects[0]?.canvasImages).toEqual([
+        expect.objectContaining({
+          id: imageId,
+          url: '/api/serve-upload/uploads/restored.png',
+          x: 41,
+          assetId,
+          assetVersionId: versionId,
+          placementId,
+        }),
+      ]);
+    });
+  }, 30_000);
+
   postgresIt('installs lifecycle audit storage so concurrent restore/trash/purge checks can share one transaction boundary', async () => {
     await withIsolatedPostgres('asset_lifecycle', async ({ databaseUrl, query }) => {
       const migration = resolve(process.cwd(), 'migrations/20260812_wj_stable_s2_asset_lifecycle.sql');

@@ -150,6 +150,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       assetId: result.version.assetId,
       assetVersionId: result.version.id,
       placementId: result.placement.id,
+      entityId: result.placement.entityId,
       url: result.version.file.url,
       ...(name ? { name } : {}),
       reused: result.reused,

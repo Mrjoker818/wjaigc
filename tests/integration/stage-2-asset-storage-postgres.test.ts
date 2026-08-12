@@ -80,10 +80,12 @@ interface AssetService {
   trashPlacement(input: { actorUserId: string; projectId: string; placementId: string }): Promise<{
     placementTrashed: boolean;
     assetTrashed: boolean;
+    projectRevision?: number;
   }>;
   restorePlacement(input: { actorUserId: string; projectId: string; placementId: string }): Promise<{
     placement: { id: string; status: string };
     asset: { id: string; status: string };
+    projectRevision?: number;
   }>;
 }
 
@@ -128,6 +130,39 @@ async function seedProject(query: QueryFn, ownerId: string, projectId: string): 
   await query(
     'INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, $3)',
     [projectId, ownerId, 'Asset storage test'],
+  );
+}
+
+async function seedCanvasProjectSnapshot(
+  query: QueryFn,
+  ownerId: string,
+  projectId: string,
+  imageIds: string[],
+): Promise<void> {
+  await query(
+    `CREATE TABLE IF NOT EXISTS wujie_user_data (
+       user_id TEXT NOT NULL,
+       data_key TEXT NOT NULL,
+       data_value JSONB NOT NULL,
+       updated_at BIGINT NOT NULL,
+       PRIMARY KEY (user_id, data_key)
+     )`,
+  );
+  await query(
+    `INSERT INTO wujie_user_data(user_id, data_key, data_value, updated_at)
+     VALUES ($1, 'projects', $2::jsonb, 1)
+     ON CONFLICT (user_id, data_key) DO UPDATE SET
+       data_value = EXCLUDED.data_value,
+       updated_at = EXCLUDED.updated_at`,
+    [ownerId, JSON.stringify([{
+      id: projectId,
+      userId: ownerId,
+      name: 'Asset storage test',
+      createdAt: 1,
+      updatedAt: 1,
+      canvasImages: imageIds.map(id => ({ id, url: `/uploads/${id}.png` })),
+      settings: {},
+    }])],
   );
 }
 
@@ -1244,6 +1279,12 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
           entityType: 'canvas-image',
           entityId: 'image-final-create-race',
         });
+        await seedCanvasProjectSnapshot(
+          query,
+          actorUserId,
+          projectId,
+          ['image-final-create-race'],
+        );
         await exerciseAssetLockBarrier({
           applicationName,
           assetId: createSource.asset.id,
@@ -1274,6 +1315,20 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
           [createSource.asset.id],
         );
         expect(createInvariant.rows).toEqual([{ status: 'active', active_count: '1' }]);
+        const createSnapshot = await query<{ canvas_images: unknown; revision: string }>(
+          `SELECT project.value->'canvasImages' AS canvas_images,
+                  revision.data_value #>> '{}' AS revision
+           FROM wujie_user_data projects
+           CROSS JOIN LATERAL jsonb_array_elements(projects.data_value) project(value)
+           JOIN wujie_user_data revision
+             ON revision.user_id = projects.user_id
+            AND revision.data_key = '__asset_graph_projects_revision'
+           WHERE projects.user_id = $1
+             AND projects.data_key = 'projects'
+             AND project.value->>'id' = $2`,
+          [actorUserId, projectId],
+        );
+        expect(createSnapshot.rows).toEqual([{ canvas_images: [], revision: '1' }]);
 
         const sendSource = await createVersion(service, actorUserId, projectId, 'send-race-source');
         const finalSendPlacement = await service.createWorkspacePlacement({
@@ -1285,6 +1340,12 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
           entityType: 'canvas-image',
           entityId: 'image-final-send-race',
         });
+        await seedCanvasProjectSnapshot(
+          query,
+          actorUserId,
+          projectId,
+          ['image-final-send-race'],
+        );
         await exerciseAssetLockBarrier({
           applicationName,
           assetId: sendSource.asset.id,
@@ -1316,6 +1377,20 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
           [sendSource.asset.id],
         );
         expect(sendInvariant.rows).toEqual([{ status: 'active', active_count: '1' }]);
+        const sendSnapshot = await query<{ canvas_images: unknown; revision: string }>(
+          `SELECT project.value->'canvasImages' AS canvas_images,
+                  revision.data_value #>> '{}' AS revision
+           FROM wujie_user_data projects
+           CROSS JOIN LATERAL jsonb_array_elements(projects.data_value) project(value)
+           JOIN wujie_user_data revision
+             ON revision.user_id = projects.user_id
+            AND revision.data_key = '__asset_graph_projects_revision'
+           WHERE projects.user_id = $1
+             AND projects.data_key = 'projects'
+             AND project.value->>'id' = $2`,
+          [actorUserId, projectId],
+        );
+        expect(sendSnapshot.rows).toEqual([{ canvas_images: [], revision: '2' }]);
       } finally {
         await bounded(lockPool.end(), 'asset-lock service pool cleanup');
       }
@@ -1328,6 +1403,7 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
       const actorUserId = randomUUID();
       const projectId = randomUUID();
       await seedProject(query, actorUserId, projectId);
+      await seedCanvasProjectSnapshot(query, actorUserId, projectId, []);
       const { createAssetService } = await loadService();
       const service = createAssetService();
 
@@ -1341,7 +1417,20 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
         entityType: 'canvas-image',
         entityId: 'image-sequential-conflict',
       });
-      await service.trashPlacement({ actorUserId, projectId, placementId: firstPlacement.placement.id });
+      const firstTrash = await service.trashPlacement({ actorUserId, projectId, placementId: firstPlacement.placement.id });
+      await query(
+        `UPDATE wujie_user_data
+         SET data_value = to_jsonb('2'::text)
+         WHERE user_id = $1 AND data_key = '__asset_graph_projects_revision'`,
+        [actorUserId],
+      );
+      const retriedTrash = await service.trashPlacement({ actorUserId, projectId, placementId: firstPlacement.placement.id });
+      expect(firstTrash.projectRevision).toBe(1);
+      expect(retriedTrash).toEqual({
+        placementTrashed: false,
+        assetTrashed: false,
+        projectRevision: 1,
+      });
       const second = await createVersion(service, actorUserId, projectId, 'restore-second');
       await service.createWorkspacePlacement({
         actorUserId,
@@ -1391,8 +1480,22 @@ describe('Stage 2 asset storage on real PostgreSQL', () => {
         service.restorePlacement({ actorUserId, projectId, placementId: thirdPlacement.placement.id }),
         service.restorePlacement({ actorUserId, projectId, placementId: fourthPlacement.placement.id }),
       ]);
-      expect(concurrent.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const concurrentSummary = concurrent.map((result) => result.status === 'fulfilled'
+        ? { status: result.status }
+        : {
+            status: result.status,
+            code: errorCode(result),
+            message: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          });
+      expect(
+        concurrent.filter((result) => result.status === 'fulfilled'),
+        `Unexpected concurrent restore results: ${JSON.stringify(concurrentSummary)}`,
+      ).toHaveLength(1);
       expect(concurrent.filter((result) => errorCode(result) === 'ASSET_PLACEMENT_CONFLICT')).toHaveLength(1);
+      const successfulRestore = concurrent.find((result) => result.status === 'fulfilled');
+      expect(successfulRestore?.status === 'fulfilled' ? successfulRestore.value : null).toEqual(
+        expect.objectContaining({ projectRevision: 5 }),
+      );
       const activeRows = await query<{ count: string }>(
         `SELECT count(*)::text AS count
          FROM wujie_workspace_placements

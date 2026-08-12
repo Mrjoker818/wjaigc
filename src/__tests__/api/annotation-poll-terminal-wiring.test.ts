@@ -32,13 +32,20 @@ describe('annotation remote poll terminal wiring', () => {
   });
 
   it('settles both remote failure variants from the persisted database state', () => {
-    const noImageFailure = source.indexOf('远程任务成功但未找到图片结果');
-    const providerFailure = source.indexOf("taskStatus === 'failed' || taskStatus === 'error'");
+    const settlementHelper = source.indexOf('const settleDurableEditFailure = async');
+    const atomicSettlement = source.indexOf('terminateCloudTaskAndRefund(taskId, status, error)', settlementHelper);
+    const noImageFailure = source.indexOf("const terminalResponse = await settleDurableEditFailure(\n                  'failed'");
+    const providerFailure = source.indexOf("taskStatus === 'failed'");
+    const providerSettlement = source.indexOf(
+      'const terminalResponse = await settleDurableEditFailure(',
+      providerFailure,
+    );
 
+    expect(settlementHelper).toBeGreaterThan(-1);
+    expect(atomicSettlement).toBeGreaterThan(settlementHelper);
     expect(noImageFailure).toBeGreaterThan(-1);
-    expect(source.indexOf('terminateCloudTaskAndRefund(', noImageFailure)).toBeGreaterThan(noImageFailure);
     expect(providerFailure).toBeGreaterThan(-1);
-    expect(source.indexOf('terminateCloudTaskAndRefund(', providerFailure)).toBeGreaterThan(providerFailure);
+    expect(providerSettlement).toBeGreaterThan(providerFailure);
   });
 
   it('actively aborts the in-flight provider poll on request cancellation or task cancellation', () => {
@@ -61,5 +68,24 @@ describe('annotation remote poll terminal wiring', () => {
     expect(registration).toBeGreaterThan(controller);
     expect(combinedSignal).toBeGreaterThan(registration);
     expect(cleanup).toBeGreaterThan(combinedSignal);
+  });
+
+  it('never swaps providers by model name while recovering a remote edit task', () => {
+    const remoteEditStart = source.indexOf("if (taskId.startsWith('edit_'))");
+    const remoteEditEnd = source.indexOf('// ★ Layer decomposition tasks', remoteEditStart);
+    const remoteEdit = source.slice(remoteEditStart, remoteEditEnd);
+
+    expect(remoteEdit).not.toContain('findProviderForModel(');
+    expect(remoteEdit).toContain('if (!remotePollInfo.providerId)');
+    expect(remoteEdit).toContain('编辑任务缺少原始供应商标识');
+  });
+
+  it('preserves cancelled and timeout as exact memory terminal states', () => {
+    expect(source).toContain("remoteTerminalStatus === 'cancelled'");
+    expect(source).toContain("remoteTerminalStatus === 'timeout'");
+    expect(source).toContain("remoteTerminalStatus === 'timeout' ? 'timeout' : 'failed'");
+    expect(source).toContain('cancelEditTask(taskId)');
+    expect(source).toContain("task.status === 'cancelled' || task.status === 'timeout'");
+    expect(source).toContain('status: task.status');
   });
 });

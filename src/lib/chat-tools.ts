@@ -344,6 +344,10 @@ interface ToolContext {
   messageId?: string;
 }
 
+function embeddedChatWorkspaceId(context: ToolContext): string | undefined {
+  return context.sessionId ? `embedded-chat:${context.sessionId}` : undefined;
+}
+
 async function executeGenerateImage(
   args: Record<string, unknown>,
   context: ToolContext
@@ -383,6 +387,9 @@ async function executeGenerateImage(
         projectId: context.projectId,
         sessionId: context.sessionId,
         messageId: context.messageId,
+        assetWorkspace: 'chat',
+        assetWorkspaceId: embeddedChatWorkspaceId(context),
+        assetSourceEntityId: context.messageId,
       }),
       signal: AbortSignal.timeout(30000),
     });
@@ -547,6 +554,9 @@ async function executeImg2Img(
         projectId: context.projectId,
         sessionId: context.sessionId,
         messageId: context.messageId,
+        assetWorkspace: 'chat',
+        assetWorkspaceId: embeddedChatWorkspaceId(context),
+        assetSourceEntityId: context.messageId,
       }),
       signal: AbortSignal.timeout(30000),
     });

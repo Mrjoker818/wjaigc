@@ -145,6 +145,14 @@ function assetFileIdentity(file: AssetFile): Record<string, unknown> {
   };
 }
 
+function assetFileMatchesSnapshot(currentFile: AssetFile, nextFile: AssetFile): boolean {
+  const currentIdentity = assetFileIdentity(currentFile);
+  const nextIdentity = assetFileIdentity(nextFile);
+  return Object.entries(nextFile).every(([key]) => (
+    currentIdentity[key] === nextIdentity[key]
+  ));
+}
+
 export function planCanvasAssetVersionUpdate(input: {
   actorUserId: string;
   projectId: string;
@@ -157,7 +165,7 @@ export function planCanvasAssetVersionUpdate(input: {
   mapping: LegacyImageMapping;
   parentVersionIds: string[];
 } {
-  if (JSON.stringify(assetFileIdentity(input.currentFile)) === JSON.stringify(assetFileIdentity(input.nextFile))) {
+  if (assetFileMatchesSnapshot(input.currentFile, input.nextFile)) {
     return { action: 'reuse', mapping: input.mapping, parentVersionIds: [] };
   }
   const versionId = deterministicUuid([
@@ -186,6 +194,72 @@ export interface CanvasShadowReconciliationPlan {
 
 export function selectCanvasImagesForAssetGraph(images: CanvasImage[]): CanvasImage[] {
   return images.filter((image) => !image.isProcessingPlaceholder);
+}
+
+export async function adoptManagedCanvasMapping(
+  client: Pick<PoolClient, 'query'>,
+  input: Pick<LegacyMigrationInput, 'actorUserId' | 'projectId'>,
+  image: CanvasImage,
+): Promise<LegacyImageMapping | null> {
+  const supplied = [image.assetId, image.assetVersionId, image.placementId];
+  if (supplied.every(value => !value)) return null;
+  if (supplied.some(value => typeof value !== 'string' || value.length === 0)) {
+    throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+  }
+  const mapping = {
+    assetId: image.assetId as string,
+    versionId: image.assetVersionId as string,
+    placementId: image.placementId as string,
+  };
+  const version = await client.query<{ asset_id: string; asset_version_id: string }>(
+    `SELECT asset_id, id AS asset_version_id
+     FROM wujie_asset_versions
+     WHERE id = $1 AND asset_id = $2 AND owner_id = $3 AND project_id = $4
+     FOR UPDATE`,
+    [mapping.versionId, mapping.assetId, input.actorUserId, input.projectId],
+  );
+  if (!version.rows[0]) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+  const placement = await client.query<{
+    asset_id: string;
+    asset_version_id: string;
+    placement_id: string;
+  }>(
+    `SELECT asset_id, asset_version_id, id AS placement_id
+     FROM wujie_workspace_placements
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3
+       AND asset_id = $4 AND asset_version_id = $5
+       AND workspace_kind = 'canvas' AND entity_type = 'canvas-image'
+       AND entity_id = $6 AND status = 'active'
+     FOR UPDATE`,
+    [
+      mapping.placementId,
+      input.actorUserId,
+      input.projectId,
+      mapping.assetId,
+      mapping.versionId,
+      image.id,
+    ],
+  );
+  if (!placement.rows[0]) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+  const metadata = JSON.stringify({
+    source: 'managed-canvas-reference',
+    legacyImageId: image.id,
+    legacyImage: image,
+  });
+  const updated = await client.query(
+    `UPDATE wujie_workspace_placements
+     SET transform = $4::jsonb, metadata = $5::jsonb, updated_at = now()
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'active'`,
+    [
+      mapping.placementId,
+      input.actorUserId,
+      input.projectId,
+      JSON.stringify(imageTransform(image)),
+      metadata,
+    ],
+  );
+  if ((updated.rowCount ?? 0) !== 1) throw migrationError('LEGACY_MIGRATION_FAILED');
+  return mapping;
 }
 
 export async function adoptTaskProjectedCanvasMapping(
@@ -468,7 +542,8 @@ async function existingCompletedMigration(
     plan.checkpointMappings[image.id] = activeMapping;
   }
   for (const { image, mapping } of plan.additions) {
-    const activeMapping = await adoptTaskProjectedCanvasMapping(client, input, image)
+    const activeMapping = await adoptManagedCanvasMapping(client, input, image)
+      ?? await adoptTaskProjectedCanvasMapping(client, input, image)
       ?? await insertGraphForImage(client, input, image, mapping);
     plan.activeMappings[image.id] = activeMapping;
     plan.checkpointMappings[image.id] = activeMapping;
@@ -823,7 +898,8 @@ export async function migrateLegacyProjectOnWriteInTransaction(
 
     const mappings: Record<string, LegacyImageMapping> = {};
     for (const image of selectCanvasImagesForAssetGraph(read.project.canvasImages)) {
-      mappings[image.id] = await adoptTaskProjectedCanvasMapping(client, input, image)
+      mappings[image.id] = await adoptManagedCanvasMapping(client, input, image)
+        ?? await adoptTaskProjectedCanvasMapping(client, input, image)
         ?? await insertGraphForImage(client, input, image);
     }
     await client.query(

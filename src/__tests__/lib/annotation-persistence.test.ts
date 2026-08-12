@@ -149,7 +149,7 @@ describe('annotation project persistence wiring', () => {
     expect(workspaceSource).toContain('initialAnnotations={initialCanvasAnnotations}');
     expect(workspaceSource).toContain('onAnnotationsChange={handleAnnotationsChange}');
     expect(workspaceSource).toContain(
-      '[annotationRevision, images, currentProject?.id, currentUser?.id, setImages]',
+      '[annotationRevision, images, currentProject?.id, currentUser?.id, serverSyncMergeRevision, setImages]',
     );
   });
 });

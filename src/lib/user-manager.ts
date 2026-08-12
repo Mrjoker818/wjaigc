@@ -426,7 +426,9 @@ export class UserManager {
   private _projectSyncRequestEpoch = 0;
   private _projectSyncSessionEpoch = 0;
   private _projectMutationGeneration = 0;
+  private _acceptedProjectMutationGeneration = 0;
   private _projectSyncInFlightTokens = new Set<string>();
+  private _projectHydration: { userId: string; promise: Promise<boolean> } | null = null;
   private _lastAuthoritativeProjects = new Map<string, Project[]>();
   private _projectAdoptionPendingUsers = new Set<string>();
   private _onProjectsChanged: (() => void) | null = null;
@@ -837,7 +839,9 @@ export class UserManager {
     this._projectSyncRequestEpoch += 1;
     this._projectSyncRevision = 0;
     this._projectMutationGeneration = 0;
+    this._acceptedProjectMutationGeneration = 0;
     this._recentlyDeletedImageIds.clear();
+    this._projectHydration = null;
   }
 
   private beginProjectSyncRequest(): {
@@ -878,9 +882,24 @@ export class UserManager {
     return this._projectSyncRevision;
   }
 
+  advanceProjectSyncRevision(revision: number): void {
+    if (!Number.isSafeInteger(revision) || revision < this._projectSyncRevision) return;
+    this._projectSyncRevision = revision;
+  }
+
   isProjectSyncInFlight(): boolean {
     const currentPrefix = `${this._projectSyncSessionEpoch}:`;
     return [...this._projectSyncInFlightTokens].some((token) => token.startsWith(currentPrefix));
+  }
+
+  hasPendingProjectChanges(): boolean {
+    return this._projectMutationGeneration > this._acceptedProjectMutationGeneration;
+  }
+
+  waitForProjectHydration(expectedUserId: string | null = this.currentUserId): Promise<boolean> {
+    if (!expectedUserId || this.currentUserId !== expectedUserId) return Promise.resolve(false);
+    if (this._projectHydration?.userId === expectedUserId) return this._projectHydration.promise;
+    return Promise.resolve(this._serverSyncReady);
   }
 
   private finishProjectSyncRequest(request: { token: string }): void {
@@ -1193,6 +1212,7 @@ export class UserManager {
 
       userData.projects = persistedDraft;
       this._projectSyncRevision = input.revision;
+      this._acceptedProjectMutationGeneration = this._projectMutationGeneration;
       this._assetGraphMode = input.assetGraphMode;
       this._lastAuthoritativeProjects.set(input.userId, cloneProjects(input.authoritativeBase));
       this._serverSyncReady = true;
@@ -1364,6 +1384,7 @@ export class UserManager {
       requiredBackups: [],
     });
     this._recentlyDeletedImageIds.clear();
+    this._acceptedProjectMutationGeneration = this._projectMutationGeneration;
     this.notifyProjectsChanged();
   }
 
@@ -1964,7 +1985,7 @@ export class UserManager {
     this._serverSyncReady = false;
     const syncUserId = nextUser.id;
     const fallbackMutationGeneration = this._projectMutationGeneration;
-    void this.loadProjectsFromServer(1, syncUserId).then(loadSuccess => {
+    const hydrationPromise = this.loadProjectsFromServer(1, syncUserId).then(loadSuccess => {
       // Do not let a delayed sync for a previous account change the next account's data.
       if (
         !loadSuccess
@@ -1978,9 +1999,13 @@ export class UserManager {
           this.notifyProjectsChanged();
         }
       }
+      return loadSuccess;
     }).catch(error => {
       console.warn('[Sync] background project sync error:', error);
+      return false;
     });
+    this._projectHydration = { userId: syncUserId, promise: hydrationPromise };
+    void hydrationPromise;
 
     this.saveData();
     return nextUser;

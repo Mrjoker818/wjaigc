@@ -88,6 +88,30 @@ describe('asset API ownership', () => {
     expect(mocks.trashPlacement).not.toHaveBeenCalled();
   });
 
+  it('returns the committed project revision for an authenticated idempotent delete retry', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'owner-1', role: 'user' });
+    mocks.trashPlacement.mockResolvedValue({
+      placementTrashed: false,
+      assetTrashed: false,
+      projectRevision: 9,
+    });
+
+    const response = await deletePlacement(
+      new NextRequest('http://localhost/api/assets/placements/placement-a?projectId=project-a', {
+        method: 'DELETE',
+      }),
+      { params: Promise.resolve({ placementId: 'placement-a' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(expect.objectContaining({ projectRevision: 9 }));
+    expect(mocks.trashPlacement).toHaveBeenCalledWith({
+      actorUserId: 'owner-1',
+      projectId: 'project-a',
+      placementId: 'placement-a',
+    });
+  });
+
   it('uses the same 404 response for another users project and version', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'owner-1', role: 'user' });
     mocks.resolveAssetReference.mockRejectedValue(new AssetServiceError('ASSET_NOT_FOUND'));

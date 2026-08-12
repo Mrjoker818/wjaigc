@@ -135,3 +135,26 @@ Governance confirmation 2026-08-11: the user intentionally updated `stable` from
 - Final PostgreSQL-enabled full Vitest passed `402/402` files and `2160/2160` tests with zero failures/skips. TypeScript, build `116/116`, ESLint `0 errors / 957 historical warnings`, protected baseline `38/38`, and `git diff --check` pass.
 - Independent final review returned `APPROVED` with no P0/P1/P2 findings. BUG-064 is closed locally but cloud pending; Checkpoint C remains NOT PASSED until the exact commit is deployed and real `shadow` generation/delete/reload/recovery evidence is captured.
 - Task 9 has not started. `asset-v3` and physical purge remain disabled. Tasks 1-8 must not be repeated.
+## 2026-08-12: Checkpoint C cloud PASS, Task 9 started
+
+- GitHub `main@1344dec33f93fc9d8a19baeaf9ed251c28176f5f`; Coze runtime `6965f28ceb57650af0f87f10d6509603949f0eff` has that commit as its direct parent and differs only in `scripts/coze-start.sh`.
+- BUG-064 cloud proof passed: `MEDIA_UNAVAILABLE` recovered to a real image, survived reload, and PostgreSQL recorded one `succeeded` attempt, one artifact, one active placement, zero GC candidates and `ready` availability.
+- Checkpoint C is **PASS**. Task 9 is now the sole in-progress Stage 2 task. Tasks 1-8 are complete and must not be repeated.
+- Task 9 scope remains exactly the written plan: two cross-workspace Playwright specs, Chromium/Firefox/WebKit plus mobile, Doctor rollout gates, full local gates, cloud shadow comparison, controlled test-only `asset-v3` switch and proven rollback to `legacy`, then reports and final review.
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only. Physical purge remains disabled.
+
+## 2026-08-13: Task 9 local acceptance complete, cloud switch pending
+
+- Coze reported `4bbe6db`; fresh GitHub `origin/main` is `1344dec`, and the Task 9 branch contains both. The next push must be main-only, fast-forward, and must not touch `stable`.
+- Browser matrix passed `50/50`: Chromium, 1920x1080 Chromium, Firefox, WebKit, and mobile Chromium each passed both Stage 2 specs (`10/10`). Fixtures are isolated per browser after a shared-user contamination was proven and removed from the execution method.
+- BUG-065 managed-transfer adoption, BUG-066 transactional Canvas snapshot restore, and BUG-067 standalone entity identity were reproduced, fixed with TDD, and covered by real-browser plus PostgreSQL evidence.
+- Full PostgreSQL-enabled Vitest passed `410` files / `2258` tests; the four remaining skips belong to separate `TEST_POSTGRES_URL` business-module suites. ESLint `0 errors / 959 warnings`, TypeScript, Doctor, 116-route production build, and `git diff --check` pass.
+- Task 9 local state is complete enough for a candidate push, but Stage 2 remains in progress. Next unique action: push the exact main-only candidate, let Coze pull it in `shadow`, then perform the controlled test-only `asset-v3` switch and rollback to `legacy`. Physical purge remains disabled.
+
+## 2026-08-13: Task 9 final review and rerun complete
+
+- Coze's reported runtime baseline is `4bbe6db`; it is an ancestor of the candidate and must not be mistaken for the final Task 9 SHA.
+- Final review closed BUG-068 standalone projection identity, BUG-069 duplicate bridge consumption, and BUG-070 transactional Canvas delete/restore revision handling. Lost-response retries now return the original delete revision, not a later global revision. Independent review is `APPROVED`.
+- Fresh browser execution used one new controlled user/project set per browser and passed `50/50`. A run made with the server accidentally in default `legacy` mode and a later shared-fixture run were rejected as test-environment failures; neither was hidden nor counted.
+- Fresh gates pass: full PostgreSQL-enabled tests, API and regression suites, TypeScript, Doctor, build `116` routes, protected baseline `38/38`, and `git diff --check`; ESLint is `0 errors / 959 warnings`. Evidence audit reports 108 recent manifests with zero missing required artifact files.
+- Next unique action remains a main-only fast-forward push. Then Coze must pull the exact SHA in `shadow`; only after cloud comparison may the isolated `asset-v3` switch and mandatory `legacy` rollback be executed. `stable` and physical purge remain untouched.

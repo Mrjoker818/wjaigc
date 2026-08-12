@@ -34,6 +34,12 @@ import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type Can
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
+import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import {
+  extractTaskAssetReferences,
+  findWorkspaceAssetReferenceByUrl,
+  mergeWorkspaceAssetReferences,
+} from '@/lib/asset-core/workspace-transfer';
 
 const CHAT_RENDER_WINDOW = 80;
 
@@ -58,6 +64,7 @@ interface Message {
   timestamp: number;
   imageUrl?: string;
   generatedImages?: string[]; // AI生成的图片URL列表
+  generatedImageRefs?: WorkspaceAssetReference[];
   isGeneratingImage?: boolean; // 是否正在生成图片
   generateModelName?: string; // 生成使用的模型名称
   generateProviderId?: string; // 生成使用的API提供商ID
@@ -501,6 +508,7 @@ interface ChatPanelProps {
 
   onAddToPrompt?: (prompt: string) => void;
   onAddImages?: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
+  onAddGeneratedImage?: (reference: WorkspaceAssetReference, meta?: { modelName?: string; apiProvider?: string; sourceImageId?: string }) => void | Promise<void>;
   canvasImages?: CanvasImage[];
   selectedCanvasImage?: CanvasImage | null;
   onResolveCanvasImageForChat?: (image: CanvasImage) => Promise<CanvasImage>;
@@ -1189,7 +1197,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, onAddGeneratedImage, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
@@ -3271,6 +3279,34 @@ IP角色设计规范：
     saveSession(nextMessages, model, systemPrompt);
   }, [model, saveSession, systemPrompt]);
 
+  const persistTaskAssetReferences = useCallback((messageId: string, pollData: unknown) => {
+    const references = extractTaskAssetReferences(pollData);
+    if (references.length === 0) return;
+    persistMessageUpdate(messageId, message => ({
+      ...message,
+      generatedImageRefs: mergeWorkspaceAssetReferences(message.generatedImageRefs, references),
+    }));
+  }, [persistMessageUpdate]);
+
+  const addGeneratedImageToCanvas = useCallback(async (
+    imageUrl: string,
+    message: Message,
+    sourceImageId?: string,
+  ) => {
+    try {
+      const meta = {
+        modelName: message.generateModelName,
+        apiProvider: providerDisplayName(message.generateProviderId),
+        sourceImageId,
+      };
+      const reference = findWorkspaceAssetReferenceByUrl(imageUrl, message.generatedImageRefs || []);
+      if (reference && onAddGeneratedImage) await onAddGeneratedImage(reference, meta);
+      else onAddImages?.([imageUrl], sourceImageId, meta);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '添加到画布失败');
+    }
+  }, [onAddGeneratedImage, onAddImages]);
+
   // Persist incremental tool output and task progress, not only the first chat reply.
   useEffect(() => {
     if (!chatSessionsLoaded || messages.length === 0) return;
@@ -3336,21 +3372,22 @@ IP角色设计规范：
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ taskId: task.taskId, model: task.model, providerId: task.providerId }),
                 });
-                const data = await response.json();
-                const videoUrl = data.videoUrl || data.result?.videoUrl;
+                const pollData = await response.json();
+                const videoUrl = pollData.videoUrl || pollData.result?.videoUrl;
                 const resultUrl = task.type === 'video' || videoUrl
                   ? videoUrl
-                  : extractTaskResultImageUrl(data);
+                  : extractTaskResultImageUrl(pollData);
 
-                if (data.status === 'completed') {
+                if (pollData.status === 'completed') {
+                  persistTaskAssetReferences(message.id, pollData);
                   if (typeof resultUrl === 'string' && resultUrl) return resultUrl;
                   throw createTerminalTaskError('生成完成但未获取到结果');
                 }
-                if (data.status === 'failed' || data.status === 'cancelled' || data.retryable === false) {
-                  throw createTerminalTaskError(data.error || '生成失败');
+                if (pollData.status === 'failed' || pollData.status === 'cancelled' || pollData.retryable === false) {
+                  throw createTerminalTaskError(pollData.error || '生成失败');
                 }
 
-                const progress = Math.min(90, Math.max(5, data.progress || Math.round(((attempt + 1) / CHAT_TASK_MAX_ATTEMPTS) * 85)));
+                const progress = Math.min(90, Math.max(5, pollData.progress || Math.round(((attempt + 1) / CHAT_TASK_MAX_ATTEMPTS) * 85)));
                 setMessages(current => current.map(item => item.id === message.id
                   ? { ...item, generateProgress: progress }
                   : item));
@@ -3382,9 +3419,15 @@ IP角色设计规范：
                 ),
               }
               : item));
-            onAddImages?.([settlement.result]);
           },
         );
+
+        const recoveredMessage = messagesRef.current.find(item => item.id === message.id) || message;
+        for (const settlement of settlements) {
+          if (settlement.result) {
+            await addGeneratedImageToCanvas(settlement.result, recoveredMessage);
+          }
+        }
 
         if (cancelled) return;
         const uniqueUrls = recoveredSlotImages.map(image => image.url);
@@ -3408,7 +3451,7 @@ IP角色设计规范：
       if (!cancelled) return resume();
     });
     return () => { cancelled = true; };
-  }, [chatSessionsLoaded, currentSessionId, model, onAddImages, projectId, saveSession, systemPrompt]);
+  }, [addGeneratedImageToCanvas, chatSessionsLoaded, currentSessionId, model, persistTaskAssetReferences, projectId, saveSession, systemPrompt]);
 
   // 新建对话
   const handleNewChat = useCallback(() => {
@@ -4421,6 +4464,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     const pollData = await pollRes.json();
 
                     if (pollData.status === 'completed') {
+                      persistTaskAssetReferences(assistantMessageId, pollData);
                       if (taskType === 'video' || pollData.videoUrl) {
                         const vUrl = pollData.videoUrl || pollData.result?.videoUrl;
                         if (vUrl) allPolledVideoUrls.push(vUrl);
@@ -4443,6 +4487,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               if (allPolledUrls.length > 0) {
                 const savedUrls: string[] = [];
                 for (const url of allPolledUrls) {
+                  const projectedMessage = messagesRef.current.find(message => message.id === assistantMessageId);
+                  const projectedReference = findWorkspaceAssetReferenceByUrl(url, projectedMessage?.generatedImageRefs || []);
+                  if (projectedReference) { savedUrls.push(url); continue; }
                   try {
                     const saveRes = await fetch('/api/save-image', {
                       method: 'POST',
@@ -4456,8 +4503,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 // 去重：只添加尚未添加到画布的图片
                 const newUrls = savedUrls.filter(u => !addedImageUrls.has(u));
                 newUrls.forEach(u => addedImageUrls.add(u));
-                if (onAddImages && newUrls.length > 0) {
-                  onAddImages(newUrls);
+                const generatedMessage = messagesRef.current.find(message => message.id === assistantMessageId);
+                if (generatedMessage) {
+                  for (const imageUrl of newUrls) {
+                    await addGeneratedImageToCanvas(imageUrl, generatedMessage);
+                  }
                 }
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
@@ -4547,6 +4597,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     projectId,
                     sessionId: taskSessionId,
                     messageId: assistantMessageId,
+                    assetWorkspace: 'chat',
+                    assetWorkspaceId: `embedded-chat:${taskSessionId}`,
+                    assetSourceEntityId: assistantMessageId,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
                   }),
                 });
@@ -4592,6 +4645,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         });
                         const pollData = await pollRes.json();
                         if (pollData.status === 'completed') {
+                          persistTaskAssetReferences(assistantMessageId, pollData);
                           const extractedUrl = extractTaskResultImageUrl(pollData);
                           return extractedUrl && typeof extractedUrl === 'string'
                             ? extractedUrl
@@ -4636,8 +4690,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100 }
                     : msg
                 ));
-                if (onAddImages) {
-                  onAddImages(uniqueResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: providerDisplayName(imageModelInfo.providerId) });
+                const generatedMessage = messagesRef.current.find(message => message.id === assistantMessageId);
+                if (generatedMessage) {
+                  for (const imageUrl of uniqueResultUrls) {
+                    await addGeneratedImageToCanvas(imageUrl, generatedMessage, imageSourceId);
+                  }
                 }
               } else {
                 setMessages(prev => prev.map(msg => 
@@ -4704,6 +4761,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     projectId,
                     sessionId: taskSessionId,
                     messageId: assistantMessageId,
+                    assetWorkspace: 'chat',
+                    assetWorkspaceId: `embedded-chat:${taskSessionId}`,
+                    assetSourceEntityId: assistantMessageId,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
                   }),
                 });
@@ -4752,6 +4812,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         });
                         const pollData = await pollRes.json();
                         if (pollData.status === 'completed') {
+                          persistTaskAssetReferences(assistantMessageId, pollData);
                           const extractedUrl = extractTaskResultImageUrl(pollData);
                           return extractedUrl && typeof extractedUrl === 'string'
                             ? extractedUrl
@@ -4803,8 +4864,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       }
                       : msg
                   ));
-                  if (onAddImages) {
-                    onAddImages(uniqueResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: providerDisplayName(imageModelInfo.providerId) });
+                  const generatedMessage = messagesRef.current.find(message => message.id === assistantMessageId);
+                  if (generatedMessage) {
+                    for (const imageUrl of uniqueResultUrls) {
+                      await addGeneratedImageToCanvas(imageUrl, generatedMessage, imageSourceId);
+                    }
                   }
                 } else {
                   setMessages(prev => prev.map(msg => 
@@ -5835,7 +5899,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                               alt={`AI生成图片${imgIdx + 1}`}
                               className="w-full cursor-pointer hover:opacity-95 transition-opacity"
                               style={{ maxHeight: '400px', objectFit: 'contain' }}
-                              onClick={() => onAddImages?.([imgUrl], undefined, { modelName: message.generateModelName, apiProvider: providerDisplayName(message.generateProviderId) })}
+                              onClick={() => {
+                                void addGeneratedImageToCanvas(imgUrl, message);
+                              }}
                               title="点击添加到画布"
                               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
@@ -5843,7 +5909,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                             <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover/chat-img:opacity-100 transition-opacity">
                               {onAddImages && (
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); onAddImages([imgUrl], undefined, { modelName: message.generateModelName, apiProvider: providerDisplayName(message.generateProviderId) }); }}
+                                  aria-label="添加到画布"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void addGeneratedImageToCanvas(imgUrl, message);
+                                  }}
                                   className="bg-black/70 backdrop-blur-sm text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 hover:bg-black/90 shadow-lg"
                                 >
                                   <Plus size={12} /> 画布

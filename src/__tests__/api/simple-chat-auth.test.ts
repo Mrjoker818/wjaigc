@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   createAssetVersion: vi.fn(),
   createWorkspacePlacement: vi.fn(),
   createVersionWithPlacement: vi.fn(),
+  projectCompletedTaskToAssets: vi.fn(),
   getInternalApiUrl: vi.fn((path: string) => `http://127.0.0.1:5000${path}`),
   getInternalRequestHeaders: vi.fn(),
 }));
@@ -51,6 +52,10 @@ vi.mock('coze-coding-dev-sdk', () => ({
   HeaderUtils: { extractForwardHeaders: vi.fn() },
 }));
 
+vi.mock('@/lib/asset-core/task-projector', () => ({
+  projectCompletedTaskToAssets: mocks.projectCompletedTaskToAssets,
+}));
+
 import { POST } from '@/app/api/simple-chat/chat/route';
 import { AssetServiceError } from '@/lib/asset-core/service';
 
@@ -67,6 +72,7 @@ function request(): NextRequest {
 
 function imageToolRequest(
   origin = 'https://attacker.example',
+  overrides: Record<string, unknown> = {},
 ): NextRequest {
   return new NextRequest(`${origin}/api/simple-chat/chat`, {
     method: 'POST',
@@ -77,6 +83,7 @@ function imageToolRequest(
       providerId: 'chat-provider',
       imageModel: 'image-model',
       imageProviderId: 'image-provider',
+      ...overrides,
     }),
   });
 }
@@ -165,6 +172,15 @@ describe('POST /api/simple-chat/chat', () => {
         placement: { id: 'chat-placement-a' },
         reused: false,
       };
+    });
+    mocks.projectCompletedTaskToAssets.mockResolvedValue({
+      versions: [{
+        id: 'version-generated',
+        assetId: 'asset-generated',
+        file: { url: '/api/serve-upload/async.png' },
+      }],
+      placements: [{ id: 'chat-placement-generated', entityId: 'assistant-message:0' }],
+      reused: false,
     });
   });
 
@@ -337,6 +353,49 @@ describe('POST /api/simple-chat/chat', () => {
       'http://127.0.0.1:5000/api/poll-task',
     ]);
     expect(secretUrls.every(url => !url.startsWith('https://attacker.example'))).toBe(true);
+  });
+
+  it('returns the complete projected placement identity for a newly generated standalone-chat image', async () => {
+    vi.useFakeTimers();
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider',
+      apiKey: 'chat-key',
+      baseUrl: 'https://chat.example/v1',
+      advancedParams: {},
+    });
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async input => {
+      const url = String(input);
+      if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
+      if (url === 'http://127.0.0.1:5000/api/generate') {
+        return jsonResponse({ success: true, taskIds: ['task-async-1'] });
+      }
+      if (url === 'http://127.0.0.1:5000/api/poll-task') {
+        return jsonResponse({ status: 'completed', imageUrl: '/api/serve-upload/async.png' });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }));
+
+    const response = await POST(imageToolRequest('http://localhost', {
+      projectId: 'chat-project',
+      taskId: 'chat-task',
+      responseMessageId: 'assistant-message',
+      assetProjectId: 'canvas-project-a',
+    }));
+    const eventsPromise = response.text();
+    await vi.runAllTimersAsync();
+    const events = await eventsPromise;
+
+    expect(mocks.projectCompletedTaskToAssets).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: 'user-1',
+      taskId: 'task-async-1',
+      targetProjectId: 'canvas-project-a',
+      workspace: 'chat',
+      sourceEntityId: 'assistant-message',
+    }));
+    expect(events).toContain('"assetId":"asset-generated"');
+    expect(events).toContain('"assetVersionId":"version-generated"');
+    expect(events).toContain('"placementId":"chat-placement-generated"');
+    expect(events).toContain('"entityId":"assistant-message:0"');
   });
 
   it('I4 derives a stable registration digest from original data content, not persisted URLs', async () => {

@@ -134,4 +134,5 @@ assets/
 /.playwright-output/
 playwright-report/
 test-results/
+/output/
 next-env.d.ts

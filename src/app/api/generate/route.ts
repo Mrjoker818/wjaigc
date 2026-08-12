@@ -160,6 +160,9 @@ export async function POST(request: NextRequest) {
       projectId,
       sessionId,
       messageId,
+      assetWorkspace,
+      assetWorkspaceId,
+      assetSourceEntityId,
       _skipCredits, // 内部标记：后台重试时跳过积分扣除（避免双重扣费）
       _skipCloudTaskPersistence,
       resolution, // GPT-Image系列分辨率档位参数（1K/2K/4K）
@@ -412,6 +415,9 @@ export async function POST(request: NextRequest) {
         projectId,
         sessionId,
         messageId,
+        assetWorkspace,
+        assetWorkspaceId,
+        assetSourceEntityId,
         // 提交者模式：'local' = 本进程 after() 后台 worker 负责向供应商提交；
         // 'recovery' = 由 poll-task 的持久化恢复路径提交（默认，进程崩溃可恢复）。
         // poll-task 据此判断内存中的 pending 任务是否已有活着的提交者，防止重复提交扣费。
@@ -1009,6 +1015,9 @@ export async function POST(request: NextRequest) {
         projectId,
         sessionId,
         messageId,
+        assetWorkspace,
+        assetWorkspaceId,
+        assetSourceEntityId,
         requestDigest,
         workerMode: 'recovery',
       };

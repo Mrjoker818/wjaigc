@@ -10,6 +10,7 @@ import {
   loadProjects, saveProjects, SimpleChatProject as Project, SimpleChatTask as Task,
   PRESET_SKILLS, PresetSkill
 } from "@/components/simple-chat/simple-chat-types";
+import { selectInitialSimpleChatProject } from "@/components/simple-chat/simple-chat-types";
 import { User } from "@/lib/user-types";
 import { fetchSessionPayload } from "@/lib/auth-session";
 
@@ -99,9 +100,11 @@ export default function SimpleChatPage() {
         loaded = serverProjects;
       }
       if (loaded.length === 0) loaded = [createDefaultProject()];
+      const requestedProjectId = new URLSearchParams(window.location.search).get('projectId');
+      const initial = selectInitialSimpleChatProject(loaded, requestedProjectId);
       setProjects(loaded);
-      setActiveProjectId(loaded[0].id);
-      setActiveTaskId(loaded[0].tasks[0]?.id ?? null);
+      setActiveProjectId(initial?.projectId ?? null);
+      setActiveTaskId(initial?.taskId ?? null);
     };
     init();
     return () => { cancelled = true; };

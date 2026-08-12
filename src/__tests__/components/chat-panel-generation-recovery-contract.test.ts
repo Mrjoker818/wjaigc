@@ -27,7 +27,8 @@ describe('chat panel generation recovery contract', () => {
 
     expect(recoverySource).toContain('upsertChatGenerationSlotImage(');
     expect(recoverySource).toContain('generatedImages: mergeRecoveredImages(');
-    expect(recoverySource).toContain('onAddImages?.([settlement.result])');
+    expect(recoverySource).toContain('await addGeneratedImageToCanvas(settlement.result, recoveredMessage)');
+    expect(recoverySource).not.toContain('onAddImages?.([settlement.result])');
     expect(recoverySource).toContain('.flatMap(settlement => settlement.error');
     expect(recoverySource).toContain('generateError: terminalError || undefined');
   });

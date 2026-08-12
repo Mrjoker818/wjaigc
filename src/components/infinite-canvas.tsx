@@ -1158,6 +1158,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const pendingDeleteIdsRef = useRef<Set<string>>(new Set());
   const [groups, setGroups] = useState<ImageGroup[]>(initialGroups || []);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [groupEditName, setGroupEditName] = useState('');
@@ -2722,8 +2723,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [images, onSelectImage, agentSelectingImage]);
 
   const requestDeleteImages = useCallback(async (imageIds: string[]) => {
-    const uniqueIds = [...new Set(imageIds)].filter(Boolean);
+    const uniqueIds = [...new Set(imageIds)]
+      .filter(Boolean)
+      .filter((id) => !pendingDeleteIdsRef.current.has(id));
     if (uniqueIds.length === 0) return;
+    uniqueIds.forEach((id) => pendingDeleteIdsRef.current.add(id));
     try {
       const deletedIds = onDeleteImages
         ? await onDeleteImages(uniqueIds)
@@ -2743,6 +2747,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '删除失败，请重试');
+    } finally {
+      uniqueIds.forEach((id) => pendingDeleteIdsRef.current.delete(id));
     }
   }, [editImageId, onDeleteImages, onForceSave, onImagesChange, selectImage, selectedImage]);
 
@@ -10332,6 +10338,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       <div
         ref={(el) => { canvasRef.current = el; canvasContainerRef.current = el; }}
         data-canvas-viewport
+        data-project-id={projectId || brandProject?.id || ''}
         style={{ touchAction: annotationMode ? 'none' : 'auto' }}
         className={`absolute inset-0 overflow-hidden select-none ${
           annotationMode

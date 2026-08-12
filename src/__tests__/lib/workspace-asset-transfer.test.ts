@@ -1,9 +1,48 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  canvasEntityIdForTransferredReference,
+  extractTaskAssetReferences,
+  mergeWorkspaceAssetReferences,
   parseCanvasAssetDragPayload,
   prepareWorkflowCanvasInsertions,
   serializeCanvasAssetDragPayload,
 } from '@/lib/asset-core/workspace-transfer';
+
+describe('managed workspace reference identity', () => {
+  it('uses the transferred placement entity identity for the canvas node id', () => {
+    expect(canvasEntityIdForTransferredReference({
+      url: '/canonical.png',
+      assetVersionId: 'version-a',
+      placementId: 'placement-a',
+      entityId: 'canvas-node-a',
+    }, 'fallback-a')).toBe('canvas-node-a');
+    expect(canvasEntityIdForTransferredReference({ url: '/legacy.png' }, 'fallback-a'))
+      .toBe('fallback-a');
+  });
+
+  it('extracts aligned immutable version references from a completed task response', () => {
+    expect(extractTaskAssetReferences({
+      imageUrls: ['/a.png', '/b.png'],
+      assetProjection: { versionIds: ['version-a', 'version-b'] },
+    })).toEqual([
+      { url: '/a.png', assetVersionId: 'version-a' },
+      { url: '/b.png', assetVersionId: 'version-b' },
+    ]);
+  });
+
+  it('merges progressive task references by immutable version identity', () => {
+    expect(mergeWorkspaceAssetReferences(
+      [{ url: '/old-a.png', assetVersionId: 'version-a' }],
+      [
+        { url: '/new-a.png', assetVersionId: 'version-a' },
+        { url: '/b.png', assetVersionId: 'version-b' },
+      ],
+    )).toEqual([
+      { url: '/new-a.png', assetVersionId: 'version-a' },
+      { url: '/b.png', assetVersionId: 'version-b' },
+    ]);
+  });
+});
 
 describe('workflow output canvas insertion', () => {
   it('keeps a managed output retryable when its transfer fails', async () => {

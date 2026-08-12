@@ -19,7 +19,12 @@ import { inferTaskErrorSource } from '@/lib/task-core/task-error';
 export const dynamic = 'force-dynamic';
 
 function requiresAtomicTerminalSettlement(task: Awaited<ReturnType<typeof getCloudTaskForUser>>): boolean {
-  if (task?.type === 'video' || task?.type === 'video-extend') return true;
+  if (
+    task?.type === 'video'
+    || task?.type === 'video-extend'
+    || task?.type === 'edit'
+    || task?.type === 'annotation-edit'
+  ) return true;
 
   const submissionPayload = task?.result?.submissionPayload;
   if (!submissionPayload || typeof submissionPayload !== 'object') return false;
@@ -115,8 +120,12 @@ export async function POST(request: NextRequest) {
 
     const persistedTask = await getCloudTaskForUser(taskId, user.id);
     const atomicTerminalTask = requiresAtomicTerminalSettlement(persistedTask);
-    const atomicCancellationReason = persistedTask?.type === 'video' || persistedTask?.type === 'video-extend'
+    const atomicCancellationReason = persistedTask?.type === 'annotation-edit'
+      ? `Annotation edit cancelled (taskId: ${taskId})`
+      : persistedTask?.type === 'video' || persistedTask?.type === 'video-extend'
       ? `视频任务已取消 (taskId: ${taskId})`
+      : persistedTask?.type === 'edit'
+        ? `编辑任务已取消 (taskId: ${taskId})`
       : `图像生成槽位已取消 (taskId: ${taskId})`;
 
     // After a restart the in-memory registry may be empty. Use the persisted

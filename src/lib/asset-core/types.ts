@@ -75,6 +75,7 @@ export interface WorkspaceAssetReference {
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
+  entityId?: string;
   url: string;
   name?: string;
 }

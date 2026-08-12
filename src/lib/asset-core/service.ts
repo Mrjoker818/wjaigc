@@ -197,6 +197,7 @@ export class AssetService {
         assetId: version.assetId,
         assetVersionId: version.id,
         ...(placement ? { placementId: placement.id } : {}),
+        ...(placement ? { entityId: placement.entityId } : {}),
         url: version.file.url,
         ...(name ? { name } : {}),
       };
@@ -587,16 +588,32 @@ export class AssetService {
   async trashPlacement(input: PlacementCommand): Promise<{
     placementTrashed: boolean;
     assetTrashed: boolean;
+    projectRevision?: number;
   }> {
     return this.storage.transaction(async (transaction) => {
       const locatedPlacement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
       if (!locatedPlacement) notFound();
+      if (locatedPlacement.workspace === 'canvas' && locatedPlacement.entityType === 'canvas-image') {
+        await transaction.lockCanvasProjectSnapshot(input.actorUserId);
+      }
       if (!await transaction.lockAsset(input.actorUserId, input.projectId, locatedPlacement.assetId)) notFound();
       const placement = await transaction.lockPlacement(input.actorUserId, input.projectId, input.placementId);
       if (!placement || placement.assetId !== locatedPlacement.assetId) notFound();
-      if (placement.status === 'trashed') return { placementTrashed: false, assetTrashed: false };
+      if (placement.status === 'trashed') {
+        const projectRevision = placement.workspace === 'canvas' && placement.entityType === 'canvas-image'
+          ? await transaction.readPlacementTrashProjectRevision(placement)
+          : undefined;
+        return {
+          placementTrashed: false,
+          assetTrashed: false,
+          ...(projectRevision === undefined ? {} : { projectRevision }),
+        };
+      }
       const trashed = await transaction.trashPlacement(input.actorUserId, input.projectId, placement.id);
       if (!trashed) return { placementTrashed: false, assetTrashed: false };
+      const projectRevision = trashed.workspace === 'canvas' && trashed.entityType === 'canvas-image'
+        ? await transaction.trashCanvasPlacementSnapshot(input.actorUserId, input.projectId, trashed)
+        : undefined;
       const assetTrashed = await transaction.countActivePlacements(
         input.actorUserId,
         input.projectId,
@@ -604,19 +621,27 @@ export class AssetService {
       ) === 0
         ? await transaction.trashAsset(input.actorUserId, input.projectId, placement.assetId)
         : false;
-      return { placementTrashed: true, assetTrashed };
+      return {
+        placementTrashed: true,
+        assetTrashed,
+        ...(projectRevision === undefined ? {} : { projectRevision }),
+      };
     });
   }
 
   async restorePlacement(input: PlacementCommand): Promise<{
     placement: WorkspacePlacement;
     asset: Asset;
+    projectRevision?: number;
   }> {
     try {
       return await this.storage.transaction(async (transaction) => {
         const locatedPlacement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
         if (!locatedPlacement) notFound();
         if (input.assetId && locatedPlacement.assetId !== input.assetId) notFound();
+        if (locatedPlacement.workspace === 'canvas' && locatedPlacement.entityType === 'canvas-image') {
+          await transaction.lockCanvasProjectSnapshot(input.actorUserId);
+        }
         const lockedAsset = await transaction.lockAsset(
           input.actorUserId,
           input.projectId,
@@ -649,7 +674,18 @@ export class AssetService {
           placement.id,
         );
         if (!restored) placementConflict();
-        return { placement: restored, asset };
+        const projectRevision = restored.workspace === 'canvas' && restored.entityType === 'canvas-image'
+          ? await transaction.restoreCanvasPlacementSnapshot(
+            input.actorUserId,
+            input.projectId,
+            restored,
+          )
+          : undefined;
+        return {
+          placement: restored,
+          asset,
+          ...(projectRevision === undefined ? {} : { projectRevision }),
+        };
       });
     } catch (error) {
       if (isDatabaseConflict(error, 'wujie_workspace_placements_active_entity_unique')) {

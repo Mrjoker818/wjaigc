@@ -10,7 +10,7 @@ import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
-import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
+import { cancelEditTask, getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
 import {
   abortTaskExecution,
   getTaskInfo,
@@ -60,6 +60,7 @@ import {
   normalizeTaskError,
 } from '@/lib/task-core/task-error';
 import { getRequestId } from '@/lib/request-id';
+import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -163,6 +164,60 @@ function isDurableGenerationSlot(taskResult: Record<string, unknown>): boolean {
   );
 }
 
+function sanitizeCompletedTaskResult(result: Record<string, unknown>): Record<string, unknown> {
+  const {
+    apiKey: _apiKey,
+    apiBaseUrl: _apiBaseUrl,
+    baseUrl: _baseUrl,
+    advancedParams: _advancedParams,
+    provider,
+    submissionPayload,
+    ...safeResult
+  } = result;
+  const isProviderUrlAlias = typeof provider === 'string' && /^https?:\/\//i.test(provider.trim());
+  const sanitizedProvider = isProviderUrlAlias ? undefined : provider;
+  return {
+    ...safeResult,
+    ...(sanitizedProvider !== undefined ? { provider: sanitizedProvider } : {}),
+    ...(submissionPayload && typeof submissionPayload === 'object' && !Array.isArray(submissionPayload)
+      ? { submissionPayload: sanitizeCompletedTaskResult(submissionPayload as Record<string, unknown>) }
+      : submissionPayload !== undefined ? { submissionPayload } : {}),
+  };
+}
+
+async function getAuthoritativeCompletedImageResult(
+  taskId: string,
+  userId: string,
+  fallback?: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  let completedTask = await getCloudTaskForUser(taskId, userId);
+  if (!completedTask || completedTask.status !== 'completed') return null;
+
+  let completedResult = {
+    ...(fallback || {}),
+    ...((completedTask.result as Record<string, unknown>) || {}),
+  };
+  const hasImageResult = typeof completedResult.imageUrl === 'string'
+    || (completedResult.image && typeof completedResult.image === 'object'
+      && typeof (completedResult.image as Record<string, unknown>).url === 'string')
+    || (Array.isArray(completedResult.images) && completedResult.images.some((image) => (
+      image && typeof image === 'object'
+      && typeof (image as Record<string, unknown>).url === 'string'
+    )));
+  if (!hasImageResult) return null;
+  const assetProjection = completedResult.assetProjection as Record<string, unknown> | undefined;
+  if (completedTask.projectId && (!assetProjection || assetProjection.status === 'projection_pending')) {
+    await projectPersistedCompletedTask(taskId, userId);
+    completedTask = await getCloudTaskForUser(taskId, userId);
+    if (!completedTask || completedTask.status !== 'completed') return null;
+    completedResult = {
+      ...completedResult,
+      ...((completedTask.result as Record<string, unknown>) || {}),
+    };
+  }
+  return sanitizeCompletedTaskResult(completedResult);
+}
+
 async function getDurableGenerationSlotResponse(
   taskId: string,
   userId: string,
@@ -172,26 +227,25 @@ async function getDurableGenerationSlotResponse(
 
   const result = (persistedTask.result as Record<string, unknown>) || {};
   if (persistedTask.status === 'completed' && typeof result.imageUrl === 'string' && result.imageUrl) {
-    const assetProjection = result.assetProjection as Record<string, unknown> | undefined;
-    if (assetProjection?.status === 'projection_pending') {
-      await projectPersistedCompletedTask(taskId, userId);
-    }
+    const completedResult = await getAuthoritativeCompletedImageResult(taskId, userId, result);
+    if (!completedResult) return null;
     const providerName = await resolveCanonicalTaskProviderName(
       persistedTask.providerId,
-      result.providerName,
+      completedResult.providerName,
     );
     return NextResponse.json(withGenerationSlotMetadata({
       success: true,
       status: 'completed',
       progress: 100,
-      imageUrl: result.imageUrl,
-      imageUrls: Array.isArray(result.imageUrls) ? result.imageUrls : [result.imageUrl],
-      maskUrl: typeof result.maskUrl === 'string' ? result.maskUrl : '',
-      maskUrls: Array.isArray(result.maskUrls) ? result.maskUrls : [],
-      modelName: typeof result.modelName === 'string' ? result.modelName : '',
+      imageUrl: completedResult.imageUrl,
+      imageUrls: Array.isArray(completedResult.imageUrls) ? completedResult.imageUrls : [completedResult.imageUrl],
+      maskUrl: typeof completedResult.maskUrl === 'string' ? completedResult.maskUrl : '',
+      maskUrls: Array.isArray(completedResult.maskUrls) ? completedResult.maskUrls : [],
+      modelName: typeof completedResult.modelName === 'string' ? completedResult.modelName : '',
       providerName,
-      generationRouteAudit: result.generationRouteAudit,
-    }, result, taskId));
+      generationRouteAudit: completedResult.generationRouteAudit,
+      assetProjection: completedResult.assetProjection,
+    }, completedResult, taskId));
   }
 
   if (['failed', 'cancelled', 'timeout'].includes(persistedTask.status)) {
@@ -283,11 +337,87 @@ export async function POST(request: NextRequest) {
 
     // 检查是否为本地语言修图任务
     if (taskId.startsWith('edit_')) {
-      const task = getEditTask(taskId);
+      let task = getEditTask(taskId);
       const persistedEditTask = sessionUser
         ? await getCloudTaskForUser(taskId, sessionUser.id)
         : null;
-      const isAnnotationEdit = persistedEditTask?.type === 'annotation-edit';
+      const hasDurableEditTask = Boolean(persistedEditTask && sessionUser);
+      if (persistedEditTask?.status === 'completed' && sessionUser) {
+        const completedResult = await getAuthoritativeCompletedImageResult(
+          taskId,
+          sessionUser.id,
+          (persistedEditTask.result as Record<string, unknown>) || {},
+        );
+        if (!completedResult) {
+          return NextResponse.json({
+            success: false,
+            status: 'error',
+            error: '编辑任务缺少权威完成结果',
+            retryable: true,
+          }, { status: 200 });
+        }
+        return NextResponse.json({
+          success: true,
+          status: 'completed',
+          stage: persistedEditTask.label || '完成',
+          result: completedResult,
+        }, { status: 200 });
+      }
+      if (
+        persistedEditTask?.status === 'failed'
+        || persistedEditTask?.status === 'cancelled'
+        || persistedEditTask?.status === 'timeout'
+      ) {
+        return NextResponse.json({
+          success: false,
+          status: persistedEditTask.status,
+          stage: persistedEditTask.label || persistedEditTask.status,
+          error: translateApiError(persistedEditTask.error || '编辑任务未完成'),
+          retryable: false,
+        }, { status: 200 });
+      }
+      if (!task && persistedEditTask) {
+        const persistedResult = sanitizeCompletedTaskResult(
+          (persistedEditTask.result as Record<string, unknown>) || {},
+        );
+        const persistedRemotePollInfo = persistedResult.remotePollInfo as Record<string, unknown> | undefined;
+        const recoveredProvider = persistedEditTask.providerId
+          ? await findProviderById(persistedEditTask.providerId)
+          : null;
+        const recoveredRemoteTaskId = typeof persistedRemotePollInfo?.taskId === 'string'
+          ? persistedRemotePollInfo.taskId
+          : persistedEditTask.remoteTaskId || '';
+        const recoveredEditTask = {
+          id: taskId,
+          status: 'processing' as const,
+          progress: persistedEditTask.progress,
+          stage: persistedEditTask.label || (persistedEditTask.status === 'completed' ? '完成' : '处理中'),
+          error: persistedEditTask.error,
+          result: persistedResult,
+          createdAt: persistedEditTask.createdAt,
+          completedAt: undefined,
+          ...(recoveredRemoteTaskId ? {
+            remotePollInfo: {
+              taskId: recoveredRemoteTaskId,
+              apiBaseUrl: recoveredProvider
+                ? normalizeApiBaseUrl(recoveredProvider.baseUrl || '')
+                : '',
+              providerId: persistedEditTask.providerId,
+              model: typeof persistedRemotePollInfo?.model === 'string'
+                ? persistedRemotePollInfo.model
+                : persistedEditTask.model || '',
+              prompt: '',
+              allTaskIds: Array.isArray(persistedRemotePollInfo?.allTaskIds)
+                ? persistedRemotePollInfo.allTaskIds.filter((value): value is string => typeof value === 'string')
+                : [recoveredRemoteTaskId],
+              compatProfile: persistedRemotePollInfo?.compatProfile as ApiCompatProfile | undefined
+                || (recoveredProvider ? resolveCompatProfile(recoveredProvider) : undefined),
+            },
+          } : {}),
+        };
+        setEditTask(taskId, recoveredEditTask);
+        task = recoveredEditTask;
+      }
       console.info(`[poll-task] edit任务查询: taskId=${taskId}, status=${task?.status}, stage=${task?.stage}, hasRemotePoll=${!!task?.remotePollInfo}`);
       if (!task) {
         return NextResponse.json({
@@ -301,12 +431,22 @@ export async function POST(request: NextRequest) {
       if (task.status === 'completed') {
         setTimeout(() => deleteEditTask(taskId), 5 * 60 * 1000);
         // ★ 过滤敏感字段
-        const { apiKey: _ak, apiBaseUrl: _abu, advancedParams: _ap, ...safeResult } = (task.result as Record<string, unknown>) || {};
+        const authoritativeResult = hasDurableEditTask && sessionUser
+          ? await getAuthoritativeCompletedImageResult(taskId, sessionUser.id, task.result as Record<string, unknown>)
+          : sanitizeCompletedTaskResult(task.result as Record<string, unknown>);
+        if (hasDurableEditTask && !authoritativeResult) {
+          return NextResponse.json({
+            success: false,
+            status: persistedEditTask?.status || 'error',
+            error: persistedEditTask?.error || '编辑任务终态已变更',
+            retryable: false,
+          }, { status: 200 });
+        }
         return NextResponse.json({
           success: true,
           status: 'completed',
           stage: task.stage,
-          result: safeResult,
+          result: authoritativeResult || {},
         }, { status: 200 });
       }
 
@@ -321,18 +461,82 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
       }
 
+      if (task.status === 'cancelled' || task.status === 'timeout') {
+        setTimeout(() => deleteEditTask(taskId), 5 * 60 * 1000);
+        return NextResponse.json({
+          success: false,
+          status: task.status,
+          stage: task.stage,
+          error: translateApiError(task.error || (task.status === 'timeout' ? '编辑任务已超时' : '编辑任务已取消')),
+          retryable: false,
+        }, { status: 200 });
+      }
+
       // ★ 远程轮询支持：当 edit 任务包含 remotePollInfo 时，查询远程 API 获取状态
       const remotePollInfo = task.remotePollInfo;
 
+      const settleDurableEditFailure = async (
+        status: 'failed' | 'cancelled' | 'timeout',
+        error: string,
+      ): Promise<NextResponse | null> => {
+        if (!hasDurableEditTask || !sessionUser) return null;
+        const settlement = await terminateCloudTaskAndRefund(taskId, status, error);
+        if (settlement.transitioned) return null;
+        const current = await getCloudTaskForUser(taskId, sessionUser.id);
+        if (current?.status === 'completed') {
+          const completedResult = await getAuthoritativeCompletedImageResult(
+            taskId,
+            sessionUser.id,
+            (current.result as Record<string, unknown>) || {},
+          );
+          if (completedResult) {
+            return NextResponse.json({
+              success: true,
+              status: 'completed',
+              stage: current.label || '完成',
+              result: completedResult,
+            }, { status: 200 });
+          }
+        }
+        return NextResponse.json({
+          success: false,
+          status: current?.status || settlement.status || 'error',
+          error: current?.error || error,
+          retryable: false,
+        }, { status: 200 });
+      };
+
       if (remotePollInfo && task.status === 'processing') {
+        if (!remotePollInfo.providerId) {
+          const providerError = '编辑任务缺少原始供应商标识，已停止恢复以避免跨供应商误轮询';
+          const terminalResponse = await settleDurableEditFailure('failed', providerError);
+          if (terminalResponse) return terminalResponse;
+          failEditTask(taskId, providerError);
+          return NextResponse.json({
+            success: false,
+            status: 'failed',
+            error: providerError,
+            retryable: false,
+          }, { status: 200 });
+        }
         const remotePollController = new AbortController();
         registerTaskAbortController(taskId, remotePollController);
         try {
           const { taskId: remoteTaskId, apiBaseUrl, model: remoteModel, compatProfile: remoteCompat } = remotePollInfo;
           // 从服务端配置查找 API Key（不再从前端传入的 remotePollInfo 获取）
-          const remoteProvider = remotePollInfo.providerId
-            ? await findProviderById(remotePollInfo.providerId)
-            : remoteModel ? await findProviderForModel(remoteModel) : null;
+          const remoteProvider = await findProviderById(remotePollInfo.providerId);
+          if (!remoteProvider) {
+            const providerError = '编辑任务的原始供应商已不存在，无法安全恢复';
+            const terminalResponse = await settleDurableEditFailure('failed', providerError);
+            if (terminalResponse) return terminalResponse;
+            failEditTask(taskId, providerError);
+            return NextResponse.json({
+              success: false,
+              status: 'failed',
+              error: providerError,
+              retryable: false,
+            }, { status: 200 });
+          }
           const pollApiKey = remoteProvider?.apiKey || '';
           
           // 使用 compatProfile 构建正确的轮询 URL（而非硬编码 /tasks/{id}）
@@ -543,21 +747,36 @@ export async function POST(request: NextRequest) {
                   image: images[0],
                   images,
                   model: remoteModel,
-                  provider: apiBaseUrl || 'unknown',
+                  providerId: remotePollInfo.providerId,
+                  providerName: remoteProvider?.name,
                   llmInstruction: remotePollInfo.prompt,
                   editRegions: [],
                   autoMaskGenerated: false,
                 };
-                if (isAnnotationEdit) {
+                let authoritativeCompletedResult: Record<string, unknown> = completedResult;
+                if (hasDurableEditTask) {
                   const committed = await completeCloudTask(taskId, completedResult);
                   if (!committed) {
                     const current = await getCloudTaskForUser(taskId, sessionUser!.id);
                     if (current?.status === 'completed') {
+                      const currentResult = await getAuthoritativeCompletedImageResult(
+                        taskId,
+                        sessionUser!.id,
+                        current.result as Record<string, unknown>,
+                      );
+                      if (!currentResult) {
+                        return NextResponse.json({
+                          success: false,
+                          status: 'error',
+                          error: '批注任务缺少权威完成结果',
+                          retryable: true,
+                        }, { status: 200 });
+                      }
                       return NextResponse.json({
                         success: true,
                         status: 'completed',
                         stage: '完成',
-                        result: current.result,
+                        result: currentResult,
                       }, { status: 200 });
                     }
                     return NextResponse.json({
@@ -568,6 +787,20 @@ export async function POST(request: NextRequest) {
                     }, { status: 200 });
                   }
                   await projectPersistedCompletedTask(taskId, sessionUser!.id);
+                  const projectedCompletedResult = await getAuthoritativeCompletedImageResult(
+                    taskId,
+                    sessionUser!.id,
+                    completedResult,
+                  );
+                  if (!projectedCompletedResult) {
+                    return NextResponse.json({
+                      success: false,
+                      status: 'error',
+                      error: '批注任务缺少权威完成结果',
+                      retryable: true,
+                    }, { status: 200 });
+                  }
+                  authoritativeCompletedResult = projectedCompletedResult;
                 }
                 updateTaskProgress(taskId, { status: 'completed', progress: 100 });
                 setEditTask(taskId, {
@@ -575,7 +808,7 @@ export async function POST(request: NextRequest) {
                   status: 'completed',
                   progress: 100,
                   stage: '完成',
-                  result: completedResult,
+                  result: authoritativeCompletedResult,
                   createdAt: task.createdAt || Date.now(),
                   completedAt: Date.now(),
                 });
@@ -583,13 +816,7 @@ export async function POST(request: NextRequest) {
                   success: true,
                   status: 'completed',
                   stage: '完成',
-                  result: {
-                    success: true,
-                    image: images[0],
-                    images,
-                    model: remoteModel,
-                    provider: apiBaseUrl || 'unknown',
-                  },
+                  result: authoritativeCompletedResult,
                 }, { status: 200 });
               }
               // 状态成功但未能提取图片 — 尝试深度搜索
@@ -606,18 +833,33 @@ export async function POST(request: NextRequest) {
                     image: { url: deepUrl },
                     images: [{ url: deepUrl }],
                     model: remotePollInfo.model || model,
-                    provider: remotePollInfo.apiBaseUrl || 'unknown',
+                    providerId: remotePollInfo.providerId,
+                    providerName: remoteProvider?.name,
                   };
-                  if (isAnnotationEdit) {
+                  let authoritativeCompletedResult: Record<string, unknown> = completedResult;
+                  if (hasDurableEditTask) {
                     const committed = await completeCloudTask(taskId, completedResult);
                     if (!committed) {
                       const current = await getCloudTaskForUser(taskId, sessionUser!.id);
                       if (current?.status === 'completed') {
+                        const currentResult = await getAuthoritativeCompletedImageResult(
+                          taskId,
+                          sessionUser!.id,
+                          current.result as Record<string, unknown>,
+                        );
+                        if (!currentResult) {
+                          return NextResponse.json({
+                            success: false,
+                            status: 'error',
+                            error: '批注任务缺少权威完成结果',
+                            retryable: true,
+                          }, { status: 200 });
+                        }
                         return NextResponse.json({
                           success: true,
                           status: 'completed',
                           stage: '完成',
-                          result: current.result,
+                          result: currentResult,
                         }, { status: 200 });
                       }
                       return NextResponse.json({
@@ -628,36 +870,42 @@ export async function POST(request: NextRequest) {
                       }, { status: 200 });
                     }
                     await projectPersistedCompletedTask(taskId, sessionUser!.id);
+                    const projectedCompletedResult = await getAuthoritativeCompletedImageResult(
+                      taskId,
+                      sessionUser!.id,
+                      completedResult,
+                    );
+                    if (!projectedCompletedResult) {
+                      return NextResponse.json({
+                        success: false,
+                        status: 'error',
+                        error: '批注任务缺少权威完成结果',
+                        retryable: true,
+                      }, { status: 200 });
+                    }
+                    authoritativeCompletedResult = projectedCompletedResult;
                   }
                   setEditTask(taskId, {
                     ...(existingTask || { id: taskId, progress: 0, createdAt: Date.now() }),
                     status: 'completed',
                     stage: '完成',
-                    result: completedResult,
+                    result: authoritativeCompletedResult,
                     completedAt: Date.now(),
                   });
                   return NextResponse.json({
                     success: true,
                     status: 'completed',
                     stage: '完成',
-                    result: {
-                      success: true,
-                      image: { url: deepUrl },
-                      images: [{ url: deepUrl }],
-                      model: remotePollInfo.model || model,
-                      provider: remotePollInfo.apiBaseUrl || 'unknown',
-                    },
+                    result: authoritativeCompletedResult,
                   }, { status: 200 });
                 }
                 // 深度搜索也没找到 — 标记失败避免无限轮询
                 console.error(`[poll-task] edit remote SUCCESS but NO image found anywhere. rawResponse=${JSON.stringify(pollData).substring(0, 500)}`);
-                if (isAnnotationEdit) {
-                  await terminateCloudTaskAndRefund(
-                    taskId,
-                    'failed',
-                    '远程任务成功但未找到图片结果',
-                  );
-                }
+                const terminalResponse = await settleDurableEditFailure(
+                  'failed',
+                  '远程任务成功但未找到图片结果',
+                );
+                if (terminalResponse) return terminalResponse;
                 failEditTask(taskId, '远程任务成功但未找到图片结果');
                 return NextResponse.json({
                   success: false,
@@ -666,22 +914,51 @@ export async function POST(request: NextRequest) {
                   retryable: false,
                 }, { status: 200 });
               }
-            } else if (taskStatus === 'failed' || taskStatus === 'error') {
+            } else if (
+              taskStatus === 'failed'
+              || taskStatus === 'error'
+              || taskStatus === 'cancelled'
+              || taskStatus === 'canceled'
+              || taskStatus === 'timeout'
+              || taskStatus === 'timed_out'
+              || taskStatus === 'expired'
+            ) {
               console.warn(`[poll-task] edit remote task FAILED: taskStatus=${taskStatus}, error=${JSON.stringify(taskData.error || taskData.error_message || taskData.message)}`);
               const taskError = (taskData.error as Record<string, unknown>) || {};
               const rawError = (typeof taskError === 'object' && taskError.message)
                 ? String(taskError.message)
                 : String(taskData.error_message || taskData.message || '远程任务失败');
+              const remoteTerminalStatus = taskStatus === 'cancelled' || taskStatus === 'canceled'
+                ? 'cancelled' as const
+                : taskStatus === 'timeout' || taskStatus === 'timed_out' || taskStatus === 'expired'
+                  ? 'timeout' as const
+                  : 'failed' as const;
               const classifiedErr = classifyApiError(rawError);
               const translatedErrMsg = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
               const isCfTimeout = isCloudflareTimeoutError(rawError);
-              if (isAnnotationEdit) {
-                await terminateCloudTaskAndRefund(taskId, 'failed', translatedErrMsg);
+              const terminalResponse = await settleDurableEditFailure(
+                remoteTerminalStatus,
+                translatedErrMsg,
+              );
+              if (terminalResponse) return terminalResponse;
+              if (remoteTerminalStatus === 'cancelled') {
+                cancelEditTask(taskId);
+              } else {
+                failEditTask(
+                  taskId,
+                  translatedErrMsg,
+                  false,
+                  remoteTerminalStatus === 'timeout' ? 'timeout' : 'failed',
+                );
               }
-              failEditTask(taskId, translatedErrMsg);
+              updateTaskProgress(taskId, {
+                status: remoteTerminalStatus,
+                progress: task.progress,
+                error: translatedErrMsg,
+              });
               return NextResponse.json({
                 success: false,
-                status: 'failed',
+                status: remoteTerminalStatus,
                 error: translatedErrMsg,
                 errorCategory: classifiedErr.category,
                 isRetryable: classifiedErr.isRetryable,
@@ -712,9 +989,8 @@ export async function POST(request: NextRequest) {
                   ? '远程编辑任务不存在或已过期'
                   : `远程编辑任务返回错误: ${errorText.substring(0, 200)}`;
               console.warn(`[poll-task] edit remote poll ${pollResp.status} -> marking failed: ${errorMsg}`);
-              if (isAnnotationEdit) {
-                await terminateCloudTaskAndRefund(taskId, 'failed', errorMsg);
-              }
+              const terminalResponse = await settleDurableEditFailure('failed', errorMsg);
+              if (terminalResponse) return terminalResponse;
               failEditTask(taskId, errorMsg);
               failedTaskCache.set(taskId, { userId, error: errorMsg, timestamp: Date.now() });
               return NextResponse.json({
@@ -820,6 +1096,14 @@ export async function POST(request: NextRequest) {
       if (sessionUser?.role !== 'admin' && cachedCompleted.userId !== userId) {
         return NextResponse.json({ success: false, status: 'error', error: '任务不存在' }, { status: 404 });
       }
+      const authoritativeResult = await getAuthoritativeCompletedImageResult(
+        taskId,
+        userId,
+        cachedCompleted.taskResult,
+      );
+      if (!authoritativeResult) {
+        completedTaskCache.delete(taskId);
+      } else {
       return NextResponse.json(withGenerationSlotMetadata({
         success: true,
         status: 'completed',
@@ -830,9 +1114,11 @@ export async function POST(request: NextRequest) {
         maskUrls: cachedCompleted.maskUrls || (cachedCompleted.maskUrl ? [cachedCompleted.maskUrl] : []),
         gridImageUrl: cachedCompleted.gridImageUrl || '',
         buttons: cachedCompleted.buttons || [],
-        modelName: cachedCompleted.modelName || '',
-        providerName: cachedCompleted.providerName || '',
-      }, cachedCompleted.taskResult, taskId), { status: 200 });
+        modelName: authoritativeResult.modelName || cachedCompleted.modelName || '',
+        providerName: authoritativeResult.providerName || cachedCompleted.providerName || '',
+        assetProjection: authoritativeResult?.assetProjection,
+      }, authoritativeResult, taskId), { status: 200 });
+      }
     }
     const cachedFailed = failedTaskCache.get(taskId);
     if (cachedFailed) {
@@ -889,24 +1175,39 @@ export async function POST(request: NextRequest) {
       const persistedTask = await getCloudTaskForUser(taskId, sessionUser.id);
       if (persistedTask) {
         if (persistedTask.status === 'completed' && persistedTask.result?.imageUrl) {
+          const completedResult = await getAuthoritativeCompletedImageResult(
+            taskId,
+            userId,
+            persistedTask.result,
+          );
+          if (!completedResult) {
+            return NextResponse.json({
+              success: false,
+              status: 'error',
+              error: '任务缺少权威完成结果',
+              retryable: true,
+            }, { status: 200 });
+          }
           const providerName = await resolveCanonicalTaskProviderName(
             persistedTask.providerId,
-            persistedTask.result.providerName,
+            completedResult.providerName,
           );
           return NextResponse.json(withGenerationSlotMetadata({
             success: true,
             status: 'completed',
             progress: 100,
-            imageUrl: persistedTask.result.imageUrl,
-            imageUrls: Array.isArray(persistedTask.result.imageUrls)
-              ? persistedTask.result.imageUrls
-              : [persistedTask.result.imageUrl],
-            maskUrl: persistedTask.result.maskUrl || '',
-            maskUrls: Array.isArray(persistedTask.result.maskUrls)
-              ? persistedTask.result.maskUrls
-              : (persistedTask.result.maskUrl ? [persistedTask.result.maskUrl] : []),
+            imageUrl: completedResult.imageUrl,
+            imageUrls: Array.isArray(completedResult.imageUrls)
+              ? completedResult.imageUrls
+              : [completedResult.imageUrl],
+            maskUrl: completedResult.maskUrl || '',
+            maskUrls: Array.isArray(completedResult.maskUrls)
+              ? completedResult.maskUrls
+              : (completedResult.maskUrl ? [completedResult.maskUrl] : []),
+            modelName: completedResult.modelName || completedResult.usedModel || persistedTask.model || '',
             providerName,
-          }, persistedTask.result, taskId), { status: 200 });
+            assetProjection: completedResult.assetProjection,
+          }, completedResult, taskId), { status: 200 });
         }
         if (persistedTask.status === 'completed' && persistedTask.result?.videoUrl) {
           return NextResponse.json({
@@ -1109,12 +1410,16 @@ export async function POST(request: NextRequest) {
               ...(Array.isArray(resumedData.directImageUrls) ? resumedData.directImageUrls : []),
             ].filter((url): url is string => typeof url === 'string' && url.length > 0);
             if (directImageUrls.length > 0) {
-              const completedResult = {
+              const completedResult = sanitizeCompletedTaskResult({
                 ...(submissionPayload as Record<string, unknown>),
                 submissionPayload,
                 imageUrl: directImageUrls[0],
                 imageUrls: directImageUrls,
-              };
+                usedModel: resumedData.model || recovery.model,
+                modelName: resumedData.modelName || resumedData.model || recovery.model,
+                providerId: resumedData.providerId || recovery.providerId,
+                providerName: resumedData.providerName,
+              });
               const committed = await completeCloudTask(
                 recovered.taskId,
                 completedResult,
@@ -1129,17 +1434,29 @@ export async function POST(request: NextRequest) {
                 return;
               }
               await projectPersistedCompletedTask(recovered.taskId, recovery.userId);
+              const authoritativeCompletedResult = await getAuthoritativeCompletedImageResult(
+                recovered.taskId,
+                recovery.userId,
+                completedResult,
+              );
+              if (!authoritativeCompletedResult) return;
 
               updateTaskProgress(recovered.taskId, {
                 status: 'completed',
                 progress: 100,
-                result: completedResult,
+                result: authoritativeCompletedResult,
               });
               completedTaskCache.set(recovered.taskId, {
                 userId: recovery.userId,
                 imageUrl: directImageUrls[0],
                 imageUrls: directImageUrls,
-                taskResult: completedResult,
+                modelName: typeof authoritativeCompletedResult.modelName === 'string'
+                  ? authoritativeCompletedResult.modelName
+                  : undefined,
+                providerName: typeof authoritativeCompletedResult.providerName === 'string'
+                  ? authoritativeCompletedResult.providerName
+                  : undefined,
+                taskResult: authoritativeCompletedResult,
                 timestamp: Date.now(),
               });
               releaseQueueSlot(recovered.taskId);
@@ -1307,7 +1624,29 @@ export async function POST(request: NextRequest) {
           console.log(`[poll-task] 从 task-registry 获取 generate-async 结果: ${taskId}`);
         }
         // ★ 过滤敏感字段，防止 apiKey/apiBaseUrl 等泄露到前端
-        const { apiKey: _ak, apiBaseUrl: _abu, advancedParams: _ap, ...safeResult } = (taskResult as Record<string, unknown>) || {};
+        if (
+          taskResult
+          && typeof (taskResult as Record<string, unknown>).imageUrl === 'string'
+          && registryTask.type !== 'video'
+        ) {
+          const authoritativeTaskResult = await getAuthoritativeCompletedImageResult(
+            taskId,
+            userId,
+            taskResult as Record<string, unknown>,
+          );
+          if (!authoritativeTaskResult) {
+            const durableTask = await getCloudTaskForUser(taskId, userId);
+            return NextResponse.json(withGenerationSlotMetadata({
+              success: false,
+              status: durableTask?.status || 'error',
+              progress: durableTask?.progress || registryTask.progress,
+              error: durableTask?.error || '任务终态已变更',
+              retryable: false,
+            }, durableTask?.result, taskId), { status: 200 });
+          }
+          taskResult = authoritativeTaskResult;
+        }
+        const safeResult = sanitizeCompletedTaskResult((taskResult as Record<string, unknown>) || {});
         const providerName = await resolveCanonicalTaskProviderName(
           safeResult?.providerId,
           safeResult?.providerName,
@@ -1332,7 +1671,8 @@ export async function POST(request: NextRequest) {
           modelName: (safeResult?.usedModel as string) || (safeResult?.modelName as string) || '',
           providerName,
           generationRouteAudit: safeResult?.generationRouteAudit,
-        }, taskResult as Record<string, unknown> | undefined, taskId), { status: 200 });
+          assetProjection: safeResult?.assetProjection,
+        }, safeResult, taskId), { status: 200 });
       }
       if (registryTask.status === 'failed') {
         // ★ 释放队列槽位
@@ -1411,7 +1751,7 @@ export async function POST(request: NextRequest) {
           const syncVideoUrl = regResult.videoUrl as string | undefined;
           if (syncVideoUrl) {
             releaseQueueSlot(taskId);
-            const safeRegistryResult = (({ apiKey: _ak, apiBaseUrl: _abu, ...rest }) => rest)(registryTask.result as Record<string, unknown>);
+            const safeRegistryResult = sanitizeCompletedTaskResult(registryTask.result as Record<string, unknown>);
             return NextResponse.json({
               success: true,
               status: 'completed',
@@ -1648,11 +1988,11 @@ export async function POST(request: NextRequest) {
                 console.warn('[poll-task] Video persist failed, using source URL:', persistErr);
               }
 
-              const completedResult = {
+              const completedResult = sanitizeCompletedTaskResult({
                 ...regResult,
                 videoUrl: persistedVideoUrl,
                 videoDuration: videoResult.duration,
-              };
+              });
               if (hasDurableVideoTask) {
                 const completed = await completeCloudTask(taskId, completedResult);
                 if (!completed) return getDurableVideoTerminalResponse();
@@ -1879,28 +2219,73 @@ export async function POST(request: NextRequest) {
         const dedupedImageUrls = Array.from(new Set(aggregatedImageUrls));
         if (dedupedImageUrls.length > 0) {
           const imageUrl = dedupedImageUrls[0];
+          const aggregateResult: Record<string, unknown> = {
+            ...(regResult.submissionPayload ? { submissionPayload: regResult.submissionPayload } : {}),
+            imageUrl,
+            imageUrls: dedupedImageUrls,
+            usedModel: firstDirectResult?.usedModel || regResult.usedModel,
+            modelName: firstDirectResult?.modelName || regResult.modelName,
+            providerName: firstDirectResult?.providerName || regResult.providerName,
+            providerId: firstDirectResult?.providerId || regResult.providerId,
+          };
+          const aggregateTerminal = await recordImageTaskTerminal(taskId, {
+            status: 'completed',
+            imageUrl,
+            imageUrls: dedupedImageUrls,
+            creditStatus: registryTask.creditCost && registryTask.creditCost > 0 ? 'charged' : 'not-applicable',
+            generationRouteAudit: (firstDirectResult?.generationRouteAudit || regResult.generationRouteAudit) as GenerationRouteAudit | undefined,
+            usedModel: typeof aggregateResult.usedModel === 'string' ? aggregateResult.usedModel : undefined,
+            modelName: typeof aggregateResult.modelName === 'string' ? aggregateResult.modelName : undefined,
+            providerId: typeof aggregateResult.providerId === 'string' ? aggregateResult.providerId : undefined,
+            providerName: typeof aggregateResult.providerName === 'string' ? aggregateResult.providerName : undefined,
+          });
+          if (!aggregateTerminal || aggregateTerminal.task.status !== 'completed') {
+            return NextResponse.json(withGenerationSlotMetadata({
+              success: false,
+              status: aggregateTerminal?.task.status || 'error',
+              progress: aggregateTerminal?.task.progress || registryTask.progress,
+              error: aggregateTerminal?.task.error || '任务终态已变更',
+              retryable: false,
+            }, aggregateTerminal?.task.result, taskId), { status: 200 });
+          }
+          const projectedAggregateResult = await getAuthoritativeCompletedImageResult(
+            taskId,
+            userId,
+            aggregateResult,
+          );
+          if (!projectedAggregateResult) {
+            return NextResponse.json({
+              success: false,
+              status: 'error',
+              error: '任务缺少权威完成结果',
+              retryable: true,
+            }, { status: 200 });
+          }
+          const authoritativeAggregateResult: Record<string, unknown> = {
+            ...aggregateResult,
+            ...projectedAggregateResult,
+          };
+          const authoritativeImageUrl = typeof authoritativeAggregateResult.imageUrl === 'string'
+            ? authoritativeAggregateResult.imageUrl
+            : imageUrl;
+          const authoritativeImageUrls = Array.isArray(authoritativeAggregateResult.imageUrls)
+            ? authoritativeAggregateResult.imageUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+            : dedupedImageUrls;
           // 将所有 direct task 的聚合结果同步到当前 async task
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
             label: `生成完成 (${dedupedImageUrls.length}张)`,
-            result: {
-              imageUrl,
-              imageUrls: dedupedImageUrls,
-              usedModel: firstDirectResult?.usedModel || regResult.usedModel,
-              modelName: firstDirectResult?.modelName || regResult.modelName,
-              providerName: firstDirectResult?.providerName || regResult.providerName,
-              providerId: firstDirectResult?.providerId || regResult.providerId,
-              apiBaseUrl: firstDirectResult?.apiBaseUrl || regResult.apiBaseUrl,
-            },
+            result: authoritativeAggregateResult,
           });
           return NextResponse.json({
             success: true,
             status: 'completed',
             progress: 100,
             label: `生成完成 (${dedupedImageUrls.length}张)`,
-            imageUrl,
-            imageUrls: dedupedImageUrls,
+            imageUrl: authoritativeImageUrl,
+            imageUrls: authoritativeImageUrls,
+            assetProjection: authoritativeAggregateResult.assetProjection,
             task: getTaskInfo(taskId),
           }, { status: 200 });
         }
@@ -2686,7 +3071,7 @@ export async function POST(request: NextRequest) {
       (pollResult as Record<string, unknown>).maskUrls = maskUrls;
       const gridImageUrl = typeof pollResult.gridImageUrl === 'string' ? pollResult.gridImageUrl : '';
       const buttons = Array.isArray(pollResult.buttons) ? pollResult.buttons : [];
-      const completedTaskResult = {
+      const completedTaskResult = sanitizeCompletedTaskResult({
         ...existingResult,
         imageUrl: imageUrls[0],
         imageUrls,
@@ -2699,7 +3084,7 @@ export async function POST(request: NextRequest) {
         providerId: finalProviderId,
         providerName: finalProviderName,
         generationRouteAudit: existingResult.generationRouteAudit,
-      };
+      });
       if (durableGenerationSlot) {
         const generationCompletion = await completeCloudTask(taskId, completedTaskResult);
         if (!generationCompletion) {
@@ -2716,17 +3101,8 @@ export async function POST(request: NextRequest) {
           await projectPersistedCompletedTask(taskId, userId);
         }
       }
-      await appendUserJsonl(userId, 'images', {
-        type: 'completed',
-        providerId: finalProviderId || providerName,
-        model: model || regUsedModel || '',
-        taskId,
-        imageUrl: imageUrls[0],
-        imageUrls,
-      });
-      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: completedTaskResult });
       if (!durableGenerationSlot) {
-        await recordImageTaskTerminal(taskId, {
+        const imageTerminal = await recordImageTaskTerminal(taskId, {
           status: 'completed',
           imageUrl: imageUrls[0],
           imageUrls,
@@ -2736,10 +3112,54 @@ export async function POST(request: NextRequest) {
           buttons,
           creditStatus: regInfo?.creditCost && regInfo.creditCost > 0 ? 'charged' : 'not-applicable',
           generationRouteAudit: existingResult.generationRouteAudit as import('@/lib/generation-route-audit').GenerationRouteAudit | undefined,
-        }).catch(error => console.warn('[poll-task] 云端任务完成记录失败:', error));
+          usedModel: typeof completedTaskResult.usedModel === 'string' ? completedTaskResult.usedModel : undefined,
+          modelName: typeof completedTaskResult.modelName === 'string' ? completedTaskResult.modelName : undefined,
+          providerId: typeof completedTaskResult.providerId === 'string' ? completedTaskResult.providerId : undefined,
+          providerName: typeof completedTaskResult.providerName === 'string' ? completedTaskResult.providerName : undefined,
+        }).catch(error => {
+          console.warn('[poll-task] image task terminal persistence failed:', error);
+          return undefined;
+        });
+        if (!imageTerminal || imageTerminal.task.status !== 'completed') {
+          return NextResponse.json(withGenerationSlotMetadata({
+            success: false,
+            status: imageTerminal?.task.status || 'error',
+            progress: imageTerminal?.task.progress || registryTask?.progress || 0,
+            error: imageTerminal?.task.error || '任务终态已变更',
+            retryable: false,
+          }, imageTerminal?.task.result, taskId), { status: 200 });
+        }
       }
 
+      await appendUserJsonl(userId, 'images', {
+        type: 'completed',
+        providerId: finalProviderId || providerName,
+        model: model || regUsedModel || '',
+        taskId,
+        imageUrl: imageUrls[0],
+        imageUrls,
+      });
+
       // ★ 将 cropInfo（蒙版修图需要）和 targetWidth/Height（扩展需要）等元数据附加到 pollResult
+      const authoritativeCompletedResult = await getAuthoritativeCompletedImageResult(
+        taskId,
+        userId,
+        completedTaskResult,
+      );
+      if (!authoritativeCompletedResult) {
+        return NextResponse.json({
+          success: false,
+          status: 'error',
+          error: '任务缺少权威完成结果',
+          retryable: true,
+        }, { status: 200 });
+      }
+
+      if (authoritativeCompletedResult.assetProjection) {
+        (pollResult as Record<string, unknown>).assetProjection = authoritativeCompletedResult.assetProjection;
+      }
+      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: authoritativeCompletedResult });
+
       if (existingResult.cropInfo) {
         (pollResult as Record<string, unknown>).cropInfo = existingResult.cropInfo;
       }
@@ -2769,9 +3189,7 @@ export async function POST(request: NextRequest) {
           modelName: finalModelName,
           providerName: finalProviderName,
           taskResult: {
-            ...existingResult,
-            imageUrl: cachedImageUrl,
-            imageUrls,
+            ...completedTaskResult,
           },
           timestamp: Date.now(),
         });

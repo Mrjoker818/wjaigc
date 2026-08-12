@@ -15,6 +15,8 @@ const workspaceSource = readFileSync(
 describe('managed canvas image deletion wiring', () => {
   it('routes keyboard, context-menu, hover-toolbar, and layer-panel deletes through one coordinator', () => {
     expect(canvasSource).toContain('onDeleteImages?: (imageIds: string[]) => Promise<string[]>');
+    expect(canvasSource).toContain('pendingDeleteIdsRef');
+    expect(canvasSource).toContain('filter((id) => !pendingDeleteIdsRef.current.has(id))');
 
     const coordinatorStart = canvasSource.indexOf('const requestDeleteImages = useCallback');
     const keyboardStart = canvasSource.indexOf("if (e.code === 'Delete' || e.code === 'Backspace')");
@@ -31,17 +33,25 @@ describe('managed canvas image deletion wiring', () => {
 
   it('deletes managed placements before removing and immediately persisting canvas images', () => {
     const coordinatorStart = workspaceSource.indexOf('const handleDeleteCanvasImages = useCallback');
-    const coordinatorEnd = workspaceSource.indexOf('\n  };', coordinatorStart);
+    const coordinatorEnd = workspaceSource.indexOf('\n  const initialCanvasAnnotations', coordinatorStart);
     const coordinator = workspaceSource.slice(coordinatorStart, coordinatorEnd);
 
     expect(coordinatorStart).toBeGreaterThan(-1);
     expect(coordinator).toContain('reconcileImageBatchDeletion(');
+    expect(workspaceSource).toContain('pendingCanvasDeleteIdsRef');
+    expect(coordinator).toContain('.filter((id) => !pendingCanvasDeleteIdsRef.current.has(id))');
     expect(coordinator).toContain("method: 'DELETE'");
     expect(coordinator.indexOf("method: 'DELETE'")).toBeLessThan(coordinator.indexOf('setImages('));
     expect(coordinator).toContain('persistCanvasImagesNow(remainingImages)');
+    expect(coordinator).not.toContain('await UserManagerCore.getInstance().flushProjectsToServer()');
     expect(coordinator).toContain("if ('error' in result)");
     expect(coordinator).toContain('toast.error(');
     expect(coordinator).toContain('return result.deletedIds');
+    expect(coordinator).toContain('let deletedIds: string[] = []');
+    expect(coordinator).toContain('deletedIds = result.deletedIds');
+    expect(coordinator).toMatch(/catch \(error\)[\s\S]*return deletedIds;/);
+    expect(coordinator).toContain('finally {');
+    expect(coordinator).toContain('uniqueImageIds.forEach((id) => pendingCanvasDeleteIdsRef.current.delete(id));');
     expect(coordinator).not.toContain('throw result.error');
     expect(workspaceSource).toContain('onDeleteImages={handleDeleteCanvasImages}');
   });

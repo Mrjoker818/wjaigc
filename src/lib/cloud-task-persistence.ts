@@ -58,6 +58,10 @@ interface ImageTaskTerminal {
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
   generationRouteAudit?: GenerationRouteAudit | null;
+  usedModel?: string;
+  modelName?: string;
+  providerId?: string;
+  providerName?: string;
   persist?: boolean;
 }
 
@@ -358,6 +362,10 @@ export async function recordImageTaskTerminal(
         ...(input.gridImageUrl ? { gridImageUrl: input.gridImageUrl } : {}),
         ...(input.buttons?.length ? { buttons: input.buttons } : {}),
         ...(input.generationRouteAudit ? { generationRouteAudit: input.generationRouteAudit } : {}),
+        ...(input.usedModel ? { usedModel: input.usedModel } : {}),
+        ...(input.modelName ? { modelName: input.modelName } : {}),
+        ...(input.providerId ? { providerId: input.providerId } : {}),
+        ...(input.providerName ? { providerName: input.providerName } : {}),
       }
     : undefined;
 

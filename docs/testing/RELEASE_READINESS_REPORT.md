@@ -717,3 +717,26 @@ Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json
 - Current-candidate PostgreSQL evidence is complete. The final repository run passed `402/402` files and `2160/2160` tests with zero failures and zero skips, including all Stage 2 lifecycle/projection and billing concurrency tests.
 - TypeScript, production build (`116/116`), ESLint (`0 errors / 957 historical warnings`), protected baseline (`38/38`), and `git diff --check` pass. Independent final review is `APPROVED` with no P0/P1/P2 findings.
 - **Checkpoint C verdict remains NOT PASSED pending cloud evidence.** Coze currently runs base `4bbe6db`; after a `main`-only push, deploy the exact candidate in `shadow` and prove generation projection, delete/reload, and media recovery. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`, `asset-v3`, and physical purge remain untouched/disabled.
+## 2026-08-12 Stage 2 Checkpoint C final decision
+
+- GitHub candidate: `main@1344dec33f93fc9d8a19baeaf9ed251c28176f5f`.
+- Coze runtime: `6965f28ceb57650af0f87f10d6509603949f0eff`, direct parent `1344dec`, with only the approved deployment adapter difference.
+- Cloud lifecycle evidence: missing media recovered to ready, survived reload, one succeeded attempt, one physical artifact, one active placement, zero GC candidates.
+- Safety controls: `shadow`, task core `legacy`, durable `/space/wujie-data`, physical purge disabled, `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` untouched.
+- **Checkpoint C verdict: PASS.** Stage 2 itself is not yet complete; Task 9 multi-browser/cross-workspace E2E, doctor gates, controlled `asset-v3` test switch and proven legacy rollback remain required.
+
+## 2026-08-13 Stage 2 Task 9 local decision
+
+- Local browser acceptance is complete for five profiles: `50/50` Stage 2 lifecycle and cross-workspace tests passed against a production server with isolated PostgreSQL and per-browser controlled fixtures.
+- Full Vitest passed `410` files / `2258` tests. Four non-Stage-2 tests remain visibly skipped behind the separate `TEST_POSTGRES_URL` variable; they are not counted as passes.
+- ESLint has `0 errors / 959 historical warnings`; TypeScript, Doctor, production build, and whitespace checks pass.
+- BUG-065, BUG-066, and BUG-067 are closed locally with permanent regression coverage. Their exact candidate still requires Coze `shadow` verification.
+- **Current verdict: CONDITIONALLY PASS FOR A MAIN-ONLY CANDIDATE PUSH; STAGE 2 NOT COMPLETE.** The final blockers are exact-SHA Coze shadow comparison, a controlled test-only `asset-v3` run, and a proven rollback to `legacy`. Physical purge remains disabled and `stable` remains read-only.
+
+## 2026-08-13 Stage 2 Task 9 final candidate decision
+
+- BUG-068 through BUG-070 are closed locally with permanent unit, API, PostgreSQL, and browser regression coverage. Independent final review is `APPROVED` with no remaining review finding.
+- Fresh production-browser evidence is `50/50` across Chromium, 1920x1080 Chromium, Firefox, WebKit, and mobile Chromium. Every browser used a separate controlled user/project fixture set; failed environment-misconfiguration and shared-fixture attempts are excluded from pass counts and remain visible in evidence.
+- Final local gates pass: full PostgreSQL-enabled test command, API suite, regression suite, TypeScript, Doctor, production build, protected baseline `38/38`, and whitespace checks. ESLint reports `0 errors / 959 historical warnings`.
+- Coze currently reports `4bbe6db`, which predates this final candidate. Therefore no cloud result can yet validate BUG-065 through BUG-070.
+- **Verdict: CONDITIONALLY PASS FOR MAIN-ONLY PUSH; STAGE 2 NOT COMPLETE.** Required remaining order is exact-SHA Coze `shadow` comparison, controlled test-only `asset-v3`, then verified rollback to `legacy`. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only and physical purge remains disabled.

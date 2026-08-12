@@ -82,7 +82,7 @@ describe('progressive generation recovery contract', () => {
     const registryImageBranches = source.slice(registryStart, videoStart);
 
     expect(registryImageBranches).toContain('withGenerationSlotMetadata({');
-    expect(registryImageBranches.match(/withGenerationSlotMetadata\(\{/g)).toHaveLength(4);
+    expect(registryImageBranches.match(/withGenerationSlotMetadata\(\{/g)).toHaveLength(5);
     expect(registryImageBranches).toContain("status: 'completed'");
     expect(registryImageBranches).toContain("status: 'failed'");
     expect(registryImageBranches).toContain("status: 'cancelled'");
@@ -142,7 +142,7 @@ describe('progressive generation recovery contract', () => {
 
   it('uses the durable provider id to correct stale provider display names before completing a slot', () => {
     const durableResponse = source.indexOf('async function getDurableGenerationSlotResponse');
-    const terminalResult = source.indexOf('const completedTaskResult = {');
+    const terminalResult = source.indexOf('const completedTaskResult = sanitizeCompletedTaskResult({');
 
     expect(source).toContain("import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';");
     expect(source.indexOf('await findProviderById', durableResponse)).toBeGreaterThan(durableResponse);

@@ -83,7 +83,19 @@ export interface AssetStorageTransaction {
   countActivePlacements(ownerId: string, projectId: string, assetId: string): Promise<number>;
   trashAsset(ownerId: string, projectId: string, assetId: string): Promise<boolean>;
   activateAsset(ownerId: string, projectId: string, assetId: string): Promise<Asset | null>;
+  lockCanvasProjectSnapshot(ownerId: string): Promise<void>;
+  readPlacementTrashProjectRevision(placement: WorkspacePlacement): Promise<number | undefined>;
+  trashCanvasPlacementSnapshot(
+    ownerId: string,
+    projectId: string,
+    placement: WorkspacePlacement,
+  ): Promise<number>;
   restorePlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null>;
+  restoreCanvasPlacementSnapshot(
+    ownerId: string,
+    projectId: string,
+    placement: WorkspacePlacement,
+  ): Promise<number>;
 }
 
 export interface AssetStorage {
@@ -530,6 +542,80 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
     return result.rows[0] ? mapAsset(result.rows[0]) : null;
   }
 
+  async lockCanvasProjectSnapshot(ownerId: string): Promise<void> {
+    await this.client.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+      [ownerId, '__asset_graph_projects_revision'],
+    );
+  }
+
+  async readPlacementTrashProjectRevision(placement: WorkspacePlacement): Promise<number | undefined> {
+    const value = placement.metadata?.canvasTrashProjectRevision;
+    return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
+  }
+
+  async trashCanvasPlacementSnapshot(
+    ownerId: string,
+    projectId: string,
+    placement: WorkspacePlacement,
+  ): Promise<number> {
+    const snapshot = await this.client.query<{ data_value: unknown }>(
+      `SELECT data_value FROM wujie_user_data
+       WHERE user_id = $1 AND data_key = 'projects'
+       FOR UPDATE`,
+      [ownerId],
+    );
+    const projects = Array.isArray(snapshot.rows[0]?.data_value)
+      ? snapshot.rows[0].data_value as Array<Record<string, unknown>>
+      : null;
+    if (!projects) throw new Error('Canvas project snapshot is unavailable');
+    const project = projects.find(candidate => candidate.id === projectId);
+    if (!project) throw new Error('Canvas project snapshot is unavailable');
+    const canvasImages = Array.isArray(project.canvasImages)
+      ? project.canvasImages as Array<Record<string, unknown>>
+      : [];
+    project.canvasImages = canvasImages.filter(candidate => candidate.id !== placement.entityId);
+    project.updatedAt = Date.now();
+    await this.client.query(
+      `UPDATE wujie_user_data
+       SET data_value = $2::jsonb, updated_at = $3
+       WHERE user_id = $1 AND data_key = 'projects'`,
+      [ownerId, JSON.stringify(projects), Date.now()],
+    );
+    const revision = await this.client.query<{ revision: string }>(
+      `INSERT INTO wujie_user_data(user_id, data_key, data_value, updated_at)
+       VALUES ($1, '__asset_graph_projects_revision', '1'::jsonb, $2)
+       ON CONFLICT (user_id, data_key) DO UPDATE SET
+         data_value = to_jsonb(COALESCE(
+           CASE
+             WHEN jsonb_typeof(wujie_user_data.data_value) = 'number'
+               THEN (wujie_user_data.data_value #>> '{}')::bigint
+             WHEN jsonb_typeof(wujie_user_data.data_value) = 'string'
+                  AND (wujie_user_data.data_value #>> '{}') ~ '^\\d+$'
+               THEN (wujie_user_data.data_value #>> '{}')::bigint
+             ELSE 0
+           END,
+           0
+         ) + 1),
+         updated_at = EXCLUDED.updated_at
+       RETURNING data_value #>> '{}' AS revision`,
+      [ownerId, Date.now()],
+    );
+    const nextRevision = Number(revision.rows[0]?.revision ?? 0);
+    await this.client.query(
+      `UPDATE wujie_workspace_placements
+       SET metadata = metadata || jsonb_build_object('canvasTrashProjectRevision', $4::bigint),
+           updated_at = now()
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'trashed'`,
+      [placement.id, ownerId, projectId, nextRevision],
+    );
+    placement.metadata = {
+      ...(placement.metadata ?? {}),
+      canvasTrashProjectRevision: nextRevision,
+    };
+    return nextRevision;
+  }
+
   async restorePlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null> {
     const result = await this.client.query<PlacementRow>(
       `UPDATE wujie_workspace_placements
@@ -538,6 +624,77 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
       [placementId, ownerId, projectId],
     );
     return result.rows[0] ? mapPlacement(result.rows[0]) : null;
+  }
+
+  async restoreCanvasPlacementSnapshot(
+    ownerId: string,
+    projectId: string,
+    placement: WorkspacePlacement,
+  ): Promise<number> {
+    const snapshot = await this.client.query<{ data_value: unknown }>(
+      `SELECT data_value FROM wujie_user_data
+       WHERE user_id = $1 AND data_key = 'projects'
+       FOR UPDATE`,
+      [ownerId],
+    );
+    const projects = Array.isArray(snapshot.rows[0]?.data_value)
+      ? snapshot.rows[0].data_value as Array<Record<string, unknown>>
+      : null;
+    if (!projects) throw new Error('Canvas project snapshot is unavailable');
+    const project = projects.find(candidate => candidate.id === projectId);
+    if (!project) throw new Error('Canvas project snapshot is unavailable');
+    const version = await this.findVersion(ownerId, projectId, placement.assetVersionId);
+    if (!version) throw new Error('Canvas asset version is unavailable');
+    const metadataImage = placement.metadata?.legacyImage;
+    const base = metadataImage && typeof metadataImage === 'object' && !Array.isArray(metadataImage)
+      ? metadataImage as Record<string, unknown>
+      : {};
+    const transform = placement.transform ?? {};
+    const image = {
+      ...base,
+      ...transform,
+      id: placement.entityId,
+      url: version.file.url,
+      sourceUrl: version.file.recoverySourceUrl ?? base.sourceUrl,
+      mediaAvailability: version.file.availability,
+      assetId: placement.assetId,
+      assetVersionId: placement.assetVersionId,
+      placementId: placement.id,
+    };
+    const canvasImages = Array.isArray(project.canvasImages)
+      ? project.canvasImages as Array<Record<string, unknown>>
+      : [];
+    const existingIndex = canvasImages.findIndex(candidate => candidate.id === placement.entityId);
+    project.canvasImages = existingIndex >= 0
+      ? canvasImages.map((candidate, index) => index === existingIndex ? image : candidate)
+      : [...canvasImages, image];
+    project.updatedAt = Date.now();
+    await this.client.query(
+      `UPDATE wujie_user_data
+       SET data_value = $2::jsonb, updated_at = $3
+       WHERE user_id = $1 AND data_key = 'projects'`,
+      [ownerId, JSON.stringify(projects), Date.now()],
+    );
+    const revision = await this.client.query<{ revision: string }>(
+      `INSERT INTO wujie_user_data(user_id, data_key, data_value, updated_at)
+       VALUES ($1, '__asset_graph_projects_revision', '1'::jsonb, $2)
+       ON CONFLICT (user_id, data_key) DO UPDATE SET
+         data_value = to_jsonb(COALESCE(
+           CASE
+             WHEN jsonb_typeof(wujie_user_data.data_value) = 'number'
+               THEN (wujie_user_data.data_value #>> '{}')::bigint
+             WHEN jsonb_typeof(wujie_user_data.data_value) = 'string'
+                  AND (wujie_user_data.data_value #>> '{}') ~ '^\\d+$'
+               THEN (wujie_user_data.data_value #>> '{}')::bigint
+             ELSE 0
+           END,
+           0
+         ) + 1),
+         updated_at = EXCLUDED.updated_at
+       RETURNING data_value #>> '{}' AS revision`,
+      [ownerId, Date.now()],
+    );
+    return Number(revision.rows[0]?.revision ?? 0);
   }
 }
 

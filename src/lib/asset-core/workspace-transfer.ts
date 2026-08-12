@@ -10,6 +10,56 @@ export interface CanvasAssetDragPayload extends WorkspaceAssetReference {
   versionId?: string;
 }
 
+export function findWorkspaceAssetReferenceByUrl(
+  url: string,
+  references: WorkspaceAssetReference[],
+): WorkspaceAssetReference | null {
+  const matches = references.filter(reference => (
+    reference.url === url
+    && Boolean(reference.assetVersionId)
+  ));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+export function canvasEntityIdForTransferredReference(
+  reference: WorkspaceAssetReference,
+  fallbackId: string,
+): string {
+  return reference.entityId || fallbackId;
+}
+
+export function extractTaskAssetReferences(payload: unknown): WorkspaceAssetReference[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const record = payload as Record<string, unknown>;
+  const urls = Array.isArray(record.imageUrls)
+    ? record.imageUrls.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : typeof record.imageUrl === 'string' && record.imageUrl
+      ? [record.imageUrl]
+      : [];
+  const projection = record.assetProjection && typeof record.assetProjection === 'object'
+    ? record.assetProjection as Record<string, unknown>
+    : null;
+  const versionIds = Array.isArray(projection?.versionIds)
+    ? projection.versionIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : [];
+  if (urls.length !== versionIds.length) return [];
+  return urls.map((url, index) => ({ url, assetVersionId: versionIds[index] }));
+}
+
+export function mergeWorkspaceAssetReferences(
+  current: WorkspaceAssetReference[] | undefined,
+  incoming: WorkspaceAssetReference[],
+): WorkspaceAssetReference[] {
+  const merged = new Map<string, WorkspaceAssetReference>();
+  for (const reference of current || []) {
+    if (reference.assetVersionId) merged.set(reference.assetVersionId, reference);
+  }
+  for (const reference of incoming) {
+    if (reference.assetVersionId) merged.set(reference.assetVersionId, reference);
+  }
+  return [...merged.values()];
+}
+
 export function serializeCanvasAssetDragPayload(payload: CanvasAssetDragPayload): string {
   return JSON.stringify(payload);
 }
@@ -28,6 +78,7 @@ export function parseCanvasAssetDragPayload(value: string): CanvasAssetDragPaylo
       ...(typeof parsed.assetId === 'string' ? { assetId: parsed.assetId } : {}),
       ...(typeof parsed.assetVersionId === 'string' ? { assetVersionId: parsed.assetVersionId } : {}),
       ...(typeof parsed.placementId === 'string' ? { placementId: parsed.placementId } : {}),
+      ...(typeof parsed.entityId === 'string' ? { entityId: parsed.entityId } : {}),
       ...(typeof parsed.versionId === 'string' ? { versionId: parsed.versionId } : {}),
       ...(typeof parsed.width === 'number' ? { width: parsed.width } : {}),
       ...(typeof parsed.height === 'number' ? { height: parsed.height } : {}),

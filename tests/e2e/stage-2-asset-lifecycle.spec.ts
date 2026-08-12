@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import {
   apiJson,
   canvasProjectPlacements,
+  canvasImageCard,
   canvasImageByUrl,
   cleanupNewProjectPlacements,
   ensurePlacementRestored,
@@ -18,24 +19,60 @@ import {
   validateStage2ProjectIsolation,
 } from '../helpers/stage-2-e2e';
 
+async function isProjectGraphSave(
+  response: import('@playwright/test').Response,
+  projectId: string,
+): Promise<boolean> {
+  if (!response.url().includes('/api/user-data/sync') || response.request().method() !== 'POST' || !response.ok()) return false;
+  const request = response.request().postDataJSON() as Record<string, unknown> | null;
+  if (request?.key !== 'projects') return false;
+  const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const updates = payload?.assetGraphUpdates as Record<string, unknown> | undefined;
+  return Boolean(updates?.[projectId]);
+}
+
+function isProjectSnapshotSaveWithoutPlacement(
+  response: import('@playwright/test').Response,
+  projectId: string,
+  placementId: string,
+): boolean {
+  if (!response.url().includes('/api/user-data/sync') || response.request().method() !== 'POST' || !response.ok()) return false;
+  try {
+    const request = response.request().postDataJSON() as Record<string, unknown> | null;
+    if (request?.key !== 'projects' || !Array.isArray(request.value)) return false;
+    const project = (request.value as Array<Record<string, unknown>>).find(candidate => candidate.id === projectId);
+    if (!project || !Array.isArray(project.canvasImages)) return false;
+    return !(project.canvasImages as Array<Record<string, unknown>>)
+      .some(image => image.placementId === placementId);
+  } catch {
+    return false;
+  }
+}
+
 test.use({ trace: 'off', video: 'on' });
 validateStage2ProjectIsolation(process.env);
 
 test.describe('Stage 2 asset lifecycle', () => {
   test('opens a seeded legacy v1 project without issuing a write', async ({ page, stage2Evidence }, testInfo) => {
     const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LEGACY_PROJECT_IDS');
-    await loginRealUser(page, stage2Evidence);
     const writes: string[] = [];
     page.on('request', request => {
-      if (request.url().includes('/api/user-data/sync') && request.method() !== 'GET') writes.push(request.method());
+      if (!request.url().includes('/api/user-data/sync') || request.method() === 'GET') return;
+      const payload = request.postDataJSON() as Record<string, unknown> | null;
+      if (payload?.key === 'projects') writes.push(request.method());
     });
-    await openCanvasProject(page, projectId);
+    await loginRealUser(page, stage2Evidence, { destination: `/?projectId=${encodeURIComponent(projectId)}` });
     await expect(page.locator('[data-canvas-viewport] img').first()).toBeVisible({ timeout: 20_000 });
     const unexpectedWrite = page.waitForRequest(
-      request => request.url().includes('/api/user-data/sync') && request.method() !== 'GET',
+      request => {
+        if (!request.url().includes('/api/user-data/sync') || request.method() === 'GET') return false;
+        const payload = request.postDataJSON() as Record<string, unknown> | null;
+        return payload?.key === 'projects';
+      },
       { timeout: 1_500 },
     ).then(() => true, () => false);
     expect(await unexpectedWrite).toBe(false);
+    await page.goto('/simple-chat', { waitUntil: 'domcontentloaded' });
     expect(writes).toEqual([]);
   });
 
@@ -55,7 +92,7 @@ test.describe('Stage 2 asset lifecycle', () => {
     const box = await image.boundingBox();
     expect(box).not.toBeNull();
     try {
-      const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
+      const saved = page.waitForResponse(response => isProjectGraphSave(response, projectId));
       await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
       await page.mouse.down();
       await page.mouse.move(box!.x + box!.width / 2 + 40, box!.y + box!.height / 2 + 30, { steps: 6 });
@@ -88,7 +125,7 @@ test.describe('Stage 2 asset lifecycle', () => {
     const beforeIds = new Set((originalProject?.canvasImages as Array<Record<string, unknown>> | undefined)?.map(image => String(image.id)) ?? []);
     const bytes = await readFile(env.E2E_STAGE2_UPLOAD_FIXTURE);
     try {
-      const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
+      const saved = page.waitForResponse(response => isProjectGraphSave(response, projectId));
       await page.getByTestId('canvas-image-upload-input').setInputFiles({ name: 'stage-2-upload.png', mimeType: 'image/png', buffer: bytes });
       await expect.poll(() => images.count(), { timeout: 30_000 }).toBeGreaterThan(before);
       const response = await saved;
@@ -115,10 +152,10 @@ test.describe('Stage 2 asset lifecycle', () => {
     expect(typeof before.url === 'string' && before.url.length > 0).toBe(true);
     await openCanvasProject(page, projectId);
     const image = await canvasImageByUrl(page, String(before.url));
-    await image.click();
+    await canvasImageCard(image).click();
     try {
       const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
-      const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
+      const saved = page.waitForResponse(response => isProjectSnapshotSaveWithoutPlacement(response, projectId, placementId));
       await page.getByTestId('selected-image-delete').click();
       const deleteResponse = await deleted;
       const deletePayload = await deleteResponse.json().catch(() => ({})) as Record<string, unknown>;

@@ -170,10 +170,18 @@ export async function requireApiAuthOrReject(request: Request | NextRequest): Pr
   authenticated: true;
   userId: string;
   userRole: string;
+  user: User;
+  source: 'cookie' | 'desktop-token' | 'internal';
 } | NextResponse> {
-  const result = await optionalApiAuth(request);
-  if (!result.authenticated) {
+  const auth = await getRequestUser(request);
+  if (!auth) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
   }
-  return result as { authenticated: true; userId: string; userRole: string };
+  return {
+    authenticated: true,
+    userId: auth.user.id,
+    userRole: auth.user.role || 'user',
+    user: auth.user,
+    source: auth.source,
+  };
 }

@@ -454,10 +454,14 @@ export async function POST(request: NextRequest) {
               });
               const version = projected.versions.find(item => item.file.url === imageUrl)
                 || projected.versions[0];
-              if (version) {
+              const versionIndex = version ? projected.versions.indexOf(version) : -1;
+              const placement = versionIndex >= 0 ? projected.placements[versionIndex] : undefined;
+              if (version && placement) {
                 imageRef = {
                   assetId: version.assetId,
                   assetVersionId: version.id,
+                  placementId: placement.id,
+                  entityId: placement.entityId,
                   url: version.file.url,
                   name: prompt.slice(0, 120) || 'Generated image',
                 };

@@ -6,6 +6,10 @@ const workspaceSource = readFileSync(resolve(process.cwd(), 'src/components/canv
 const nodeSource = readFileSync(resolve(process.cwd(), 'src/components/node-editor.tsx'), 'utf8');
 
 describe('mobile workspace panel and node controls', () => {
+  it('initially collapses the right panel on narrow viewports without changing desktop behavior', () => {
+    expect(workspaceSource).toContain('shouldInitiallyCollapseWorkspacePanel(window.innerWidth)');
+  });
+
   it('keeps the open right workspace above canvas navigation and toolbars', () => {
     expect(workspaceSource).toContain('z-[70] flex transition-all');
     expect(workspaceSource).toContain(

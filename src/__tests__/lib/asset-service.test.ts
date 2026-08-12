@@ -93,10 +93,12 @@ type AssetService = {
   trashPlacement(input: PlacementCommand): Promise<{
     placementTrashed: boolean;
     assetTrashed: boolean;
+    projectRevision?: number;
   }>;
   restorePlacement(input: PlacementCommand): Promise<{
     placement: WorkspacePlacement;
     asset: Asset;
+    projectRevision?: number;
   }>;
 };
 
@@ -123,6 +125,9 @@ function projectKey(ownerId: string, projectId: string): string {
 class MemoryStorage {
   readonly data: MemoryRecord;
   readonly lifecycleCalls: string[] = [];
+  readonly restoredCanvasSnapshots: WorkspacePlacement[] = [];
+  readonly trashedCanvasSnapshots: WorkspacePlacement[] = [];
+  canvasProjectRevision = 0;
 
   constructor(ownerId: string, projectId: string) {
     this.data = {
@@ -408,6 +413,16 @@ class MemoryStorage {
     return active;
   }
 
+  async lockCanvasProjectSnapshot(): Promise<void> {
+    this.lifecycleCalls.push('lockCanvasProjectSnapshot');
+  }
+
+  async readPlacementTrashProjectRevision(placement: WorkspacePlacement): Promise<number | undefined> {
+    this.lifecycleCalls.push('readPlacementTrashProjectRevision');
+    const value = placement.metadata?.canvasTrashProjectRevision;
+    return Number.isSafeInteger(value) ? Number(value) : undefined;
+  }
+
   async restorePlacement(
     ownerId: string,
     projectId: string,
@@ -418,6 +433,32 @@ class MemoryStorage {
     const active = { ...placement, status: 'active' as const, deletedAt: null } as WorkspacePlacement;
     this.data.placements.set(placementId, active);
     return active;
+  }
+
+  async restoreCanvasPlacementSnapshot(
+    _ownerId: string,
+    _projectId: string,
+    placement: WorkspacePlacement,
+  ): Promise<number> {
+    this.lifecycleCalls.push('restoreCanvasPlacementSnapshot');
+    this.restoredCanvasSnapshots.push(placement);
+    this.canvasProjectRevision += 1;
+    return this.canvasProjectRevision;
+  }
+
+  async trashCanvasPlacementSnapshot(
+    _ownerId: string,
+    _projectId: string,
+    placement: WorkspacePlacement,
+  ): Promise<number> {
+    this.lifecycleCalls.push('trashCanvasPlacementSnapshot');
+    this.trashedCanvasSnapshots.push(placement);
+    this.canvasProjectRevision += 1;
+    placement.metadata = {
+      ...(placement.metadata ?? {}),
+      canvasTrashProjectRevision: this.canvasProjectRevision,
+    };
+    return this.canvasProjectRevision;
   }
 }
 
@@ -616,6 +657,7 @@ describe('asset graph service', () => {
       assetId: created.asset.id,
       assetVersionId: created.version.id,
       placementId: placed.placement.id,
+      entityId: 'input-a',
       url: 'https://canonical.test/owned.png',
       name: 'Owned input',
     });
@@ -758,8 +800,37 @@ describe('asset graph service', () => {
 
     const result = await service.trashPlacement({ actorUserId: ownerId, projectId, placementId: first.placement.id });
 
-    expect(result).toEqual({ placementTrashed: true, assetTrashed: false });
+    expect(result).toEqual({ placementTrashed: true, assetTrashed: false, projectRevision: 1 });
     expect(storage.data.assets.get(version.asset.id)?.status).toBe('active');
+    expect(storage.trashedCanvasSnapshots).toEqual([
+      expect.objectContaining({ id: first.placement.id, entityId: 'image-a' }),
+    ]);
+  });
+
+  it('returns the committed canvas revision when a trashed placement is retried after a lost response', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const version = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    const placed = await service.createWorkspacePlacement({
+      actorUserId: ownerId,
+      projectId,
+      assetVersionId: version.version.id,
+      workspace: 'canvas',
+      workspaceId: 'canvas-a',
+      entityType: 'canvas-image',
+      entityId: 'image-retry',
+    });
+
+    const first = await service.trashPlacement({ actorUserId: ownerId, projectId, placementId: placed.placement.id });
+    storage.canvasProjectRevision = 2;
+    const retried = await service.trashPlacement({ actorUserId: ownerId, projectId, placementId: placed.placement.id });
+
+    expect(first.projectRevision).toBe(1);
+    expect(retried).toEqual({ placementTrashed: false, assetTrashed: false, projectRevision: 1 });
+    expect(storage.canvasProjectRevision).toBe(2);
   });
 
   it('restores a trashed placement while another placement keeps the shared asset active', async () => {
@@ -800,7 +871,16 @@ describe('asset graph service', () => {
 
       expect(restored.placement.status).toBe('active');
       expect(restored.asset.status).toBe('active');
+      expect(restored.projectRevision).toBe(2);
       expect(storage.data.assets.get(version.asset.id)?.status).toBe('active');
+      expect(storage.restoredCanvasSnapshots).toEqual([
+        expect.objectContaining({
+          id: first.placement.id,
+          workspace: 'canvas',
+          entityType: 'canvas-image',
+          status: 'active',
+        }),
+      ]);
     } finally {
       vi.useRealTimers();
     }
@@ -828,11 +908,24 @@ describe('asset graph service', () => {
 
       storage.lifecycleCalls.length = 0;
       await service.trashPlacement({ actorUserId: ownerId, projectId, placementId: placement.placement.id });
-      expect(storage.lifecycleCalls.slice(0, 3)).toEqual(['findPlacement', 'lockAsset', 'lockPlacement']);
+      expect(storage.lifecycleCalls.indexOf('lockCanvasProjectSnapshot')).toBeLessThan(
+        storage.lifecycleCalls.indexOf('lockAsset'),
+      );
+      expect(storage.lifecycleCalls.indexOf('lockAsset')).toBeLessThan(
+        storage.lifecycleCalls.indexOf('lockPlacement'),
+      );
+      expect(storage.lifecycleCalls.indexOf('lockPlacement')).toBeLessThan(
+        storage.lifecycleCalls.indexOf('trashCanvasPlacementSnapshot'),
+      );
 
       storage.lifecycleCalls.length = 0;
       await service.restorePlacement({ actorUserId: ownerId, projectId, placementId: placement.placement.id });
-      expect(storage.lifecycleCalls.slice(0, 3)).toEqual(['findPlacement', 'lockAsset', 'lockPlacement']);
+      expect(storage.lifecycleCalls.slice(0, 4)).toEqual([
+        'findPlacement',
+        'lockCanvasProjectSnapshot',
+        'lockAsset',
+        'lockPlacement',
+      ]);
     } finally {
       vi.useRealTimers();
     }
@@ -924,7 +1017,7 @@ describe('asset graph service', () => {
 
     const result = await service.trashPlacement({ actorUserId: ownerId, projectId, placementId: placement.placement.id });
 
-    expect(result).toEqual({ placementTrashed: true, assetTrashed: true });
+    expect(result).toEqual({ placementTrashed: true, assetTrashed: true, projectRevision: 1 });
     expect(storage.data.assets.get(version.asset.id)?.status).toBe('trashed');
   });
 });

@@ -43,6 +43,87 @@ const project = (canvasImages: CanvasImage[]): Project => ({
 });
 
 describe('continuous canvas shadow synchronization', () => {
+  it('adopts a complete managed canvas reference instead of creating a duplicate placement', async () => {
+    const adoptManagedCanvasMapping = (
+      legacyMigration as typeof legacyMigration & {
+        adoptManagedCanvasMapping?: (
+          client: { query: typeof query },
+          input: { actorUserId: string; projectId: string },
+          candidate: CanvasImage,
+        ) => Promise<{ assetId: string; versionId: string; placementId: string } | null>;
+      }
+    ).adoptManagedCanvasMapping;
+    const query = vi.fn(async (sql: string, params: unknown[]) => {
+      if (sql.includes('FROM wujie_asset_versions')) {
+        expect(params).toEqual(['version-transfer', 'asset-transfer', 'user-1', 'project-1']);
+        return { rows: [{ asset_id: 'asset-transfer', asset_version_id: 'version-transfer' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) {
+        expect(params).toEqual([
+          'placement-transfer', 'user-1', 'project-1', 'asset-transfer', 'version-transfer', 'chat-image',
+        ]);
+        return {
+          rows: [{
+            asset_id: 'asset-transfer',
+            asset_version_id: 'version-transfer',
+            placement_id: 'placement-transfer',
+          }],
+          rowCount: 1,
+        };
+      }
+      expect(sql).toContain('UPDATE wujie_workspace_placements');
+      return { rows: [], rowCount: 1 };
+    });
+
+    expect(adoptManagedCanvasMapping).toBeTypeOf('function');
+    if (!adoptManagedCanvasMapping) return;
+    await expect(adoptManagedCanvasMapping(
+      { query },
+      { actorUserId: 'user-1', projectId: 'project-1' },
+      image('chat-image', {
+        assetId: 'asset-transfer',
+        assetVersionId: 'version-transfer',
+        placementId: 'placement-transfer',
+      }),
+    )).resolves.toEqual({
+      assetId: 'asset-transfer',
+      versionId: 'version-transfer',
+      placementId: 'placement-transfer',
+    });
+    expect(query).toHaveBeenCalledTimes(3);
+  });
+
+  it('fails closed when a complete managed reference does not match its canvas placement', async () => {
+    const adoptManagedCanvasMapping = (
+      legacyMigration as typeof legacyMigration & {
+        adoptManagedCanvasMapping?: (
+          client: { query: typeof query },
+          input: { actorUserId: string; projectId: string },
+          candidate: CanvasImage,
+        ) => Promise<unknown>;
+      }
+    ).adoptManagedCanvasMapping;
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('FROM wujie_asset_versions')) {
+        return { rows: [{ asset_id: 'asset-transfer', asset_version_id: 'version-transfer' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) return { rows: [], rowCount: 0 };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    expect(adoptManagedCanvasMapping).toBeTypeOf('function');
+    if (!adoptManagedCanvasMapping) return;
+    await expect(adoptManagedCanvasMapping(
+      { query },
+      { actorUserId: 'user-1', projectId: 'project-1' },
+      image('chat-image', {
+        assetId: 'asset-transfer',
+        assetVersionId: 'version-transfer',
+        placementId: 'placement-transfer',
+      }),
+    )).rejects.toMatchObject({ code: 'LEGACY_MIGRATION_INTEGRITY_CONFLICT' });
+  });
+
   it('keeps processing placeholders out of the asset graph', () => {
     const placeholder = image('pending-task', {
       url: '',
@@ -410,6 +491,34 @@ describe('continuous canvas shadow synchronization', () => {
     expect(currentFile).toEqual(expect.objectContaining({
       url: '/media/original.png', availability: 'ready', width: 600,
     }));
+  });
+
+  it('reuses the current version when a canvas snapshot omits server-only file metadata', () => {
+    const mapping = { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' };
+    const currentFile: AssetFile = {
+      url: '/api/serve-upload/uploads/original.png',
+      availability: 'ready',
+      storageKey: 'uploads/original.png',
+      checksum: 'sha256:original',
+      mimeType: 'image/png',
+      byteSize: 1234,
+      width: 64,
+      height: 64,
+    };
+
+    expect(legacyMigration.planCanvasAssetVersionUpdate({
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+      imageId: 'retained',
+      mapping,
+      currentFile,
+      nextFile: {
+        url: currentFile.url,
+        availability: 'ready',
+        width: 64,
+        height: 64,
+      },
+    })).toEqual({ action: 'reuse', mapping, parentVersionIds: [] });
   });
 
   it('executes append-only reconciliation with lineage, current, placement, and checkpoint in one transaction state', async () => {
@@ -976,5 +1085,21 @@ describe('continuous canvas shadow synchronization', () => {
         mediaAvailability: 'missing',
       }),
     ]);
+  });
+
+  it('keeps an unmigrated legacy project readable until its first copy-on-write save', () => {
+    const legacy = { ...project([image('legacy')]), schemaVersion: 1 as const };
+    const [hydrated] = hydrateAssetV3Projects([legacy], {});
+
+    expect(hydrated.schemaVersion).toBe(1);
+    expect(hydrated.canvasImages).toEqual([expect.objectContaining({ id: 'legacy' })]);
+  });
+
+  it('treats an empty graph as authoritative for an already migrated v3 project', () => {
+    const migrated = { ...project([image('removed')]), schemaVersion: 3 as const };
+    const [hydrated] = hydrateAssetV3Projects([migrated], {});
+
+    expect(hydrated.schemaVersion).toBe(3);
+    expect(hydrated.canvasImages).toEqual([]);
   });
 });

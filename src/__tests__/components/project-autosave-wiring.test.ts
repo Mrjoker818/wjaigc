@@ -38,4 +38,58 @@ describe('project autosave wiring', () => {
     expect(beacon).toBeGreaterThan(inFlightGuard);
     expect(handlerSource).toContain('keepalive: true');
   });
+
+  it('preserves the project schema version in the emergency unload snapshot', () => {
+    const handlerStart = autoSaveSource.indexOf('const handleBeforeUnload = () => {');
+    const handlerEnd = autoSaveSource.indexOf("window.addEventListener('beforeunload'", handlerStart);
+    const handlerSource = autoSaveSource.slice(handlerStart, handlerEnd);
+
+    expect(handlerStart).toBeGreaterThan(-1);
+    expect(handlerSource).toContain('schemaVersion: p.schemaVersion ?? 3');
+  });
+
+  it('does not send an emergency project snapshot when the canvas has no pending mutation', () => {
+    const handlerStart = autoSaveSource.indexOf('const handleBeforeUnload = () => {');
+    const handlerEnd = autoSaveSource.indexOf("window.addEventListener('beforeunload'", handlerStart);
+    const handlerSource = autoSaveSource.slice(handlerStart, handlerEnd);
+
+    expect(handlerSource).toContain('const hasPendingCanvasSnapshot =');
+    expect(handlerSource).toContain('if (!autoSaveRef.current || !hasPendingCanvasSnapshot) return;');
+    expect(autoSaveSource).toContain('autoSaveRef.current = null;');
+  });
+
+  it('clears cancelled autosave handles and suppresses the matching immediate-save snapshot', () => {
+    expect(autoSaveSource).toContain('if (autoSaveRef.current) {');
+    expect(autoSaveSource).toContain('clearTimeout(autoSaveRef.current);');
+    expect(autoSaveSource).toContain('autoSaveRef.current = null;');
+    expect(autoSaveSource).toContain('immediateSaveGuardRef.current = createCanvasHydrationGuard(');
+    expect(autoSaveSource).toContain('consumeCanvasHydrationGuard(\n      immediateSaveGuardRef.current,');
+    expect(autoSaveSource).toContain('lastImmediateSaveSignatureRef.current = buildCanvasSaveSignature(');
+    expect(autoSaveSource).toContain('lastAutoSaveSignatureRef.current = lastImmediateSaveSignatureRef.current;');
+    expect(autoSaveSource).toContain('lastAutoSaveSignatureRef.current !== unloadSignature;');
+
+    const immediateGuardStart = autoSaveSource.indexOf('const immediateSaveGuard = consumeCanvasHydrationGuard(');
+    const immediateGuardEnd = autoSaveSource.indexOf('if (immediateSaveGuard.suppress)', immediateGuardStart);
+    const immediateGuard = autoSaveSource.slice(immediateGuardStart, immediateGuardEnd);
+    expect(immediateGuard).toContain('immediateSaveGuardRef.current = immediateSaveGuard.nextGuard;');
+  });
+
+  it('includes metadata-only edits in the unload pending-signature decision', () => {
+    const handlerStart = autoSaveSource.indexOf('const handleBeforeUnload = () => {');
+    const handlerEnd = autoSaveSource.indexOf("window.addEventListener('beforeunload'", handlerStart);
+    const handlerSource = autoSaveSource.slice(handlerStart, handlerEnd);
+
+    expect(handlerSource).toContain('const unloadSignature = buildCanvasSaveSignature(');
+    expect(handlerSource).toContain('const hasPendingCanvasSnapshot = lastImmediateSaveSignatureRef.current !== unloadSignature');
+    expect(handlerSource.indexOf('annotationsV2: annotationRecordsRef.current')).toBeLessThan(
+      handlerSource.indexOf('const unloadSignature = buildCanvasSaveSignature('),
+    );
+  });
+
+  it('re-evaluates a deferred user mutation after the server merge window closes', () => {
+    expect(autoSaveSource).toContain('const [serverSyncMergeRevision, setServerSyncMergeRevision]');
+    expect(autoSaveSource).toContain('setServerSyncMergeRevision(revision => revision + 1);');
+    expect(autoSaveSource).toMatch(/\[annotationRevision, images, currentProject\?\.id, currentUser\?\.id, serverSyncMergeRevision, setImages\]/);
+    expect(autoSaveSource).toContain('}, [currentUser?.id, currentProject?.id, setImages]);');
+  });
 });

@@ -17,7 +17,7 @@ import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
   PRESET_SKILLS, PresetSkill, alignSimpleChatMediaSlots, canTransferSimpleChatMedia,
-  parseSimpleChatCanvasBridgePayload,
+  mergeSimpleChatCanvasBridgeReferences, parseSimpleChatCanvasBridgePayload,
   sendSimpleChatMediaToCanvas, type WorkspaceAssetReference
 } from "./simple-chat-types";
 import { User } from "@/lib/user-types";
@@ -49,6 +49,7 @@ function readWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | 
     ...(typeof candidate.assetId === 'string' ? { assetId: candidate.assetId } : {}),
     ...(typeof candidate.assetVersionId === 'string' ? { assetVersionId: candidate.assetVersionId } : {}),
     ...(typeof candidate.placementId === 'string' ? { placementId: candidate.placementId } : {}),
+    ...(typeof candidate.entityId === 'string' ? { entityId: candidate.entityId } : {}),
   };
 }
 interface ChatAreaProps {
@@ -181,6 +182,7 @@ export default function ChatArea({
   const [selectedImageProviderId, setSelectedImageProviderId] = useState('');
   const [canvasProjects, setCanvasProjects] = useState<CanvasProjectOption[]>([]);
   const [selectedCanvasProjectId, setSelectedCanvasProjectId] = useState('');
+  const [canvasTransferMessageId, setCanvasTransferMessageId] = useState<string | null>(null);
 
   // Instructions draft
   const [instructionsDraft, setInstructionsDraft] = useState<ProjectInstructions>(
@@ -1190,6 +1192,8 @@ export default function ChatArea({
       setControlNotice('请先选择目标画布项目');
       return;
     }
+    if (canvasTransferMessageId === message.id) return;
+    setCanvasTransferMessageId(message.id);
     try {
       const transferResult = await sendSimpleChatMediaToCanvas({
         images: message.images || [],
@@ -1229,7 +1233,7 @@ export default function ChatArea({
             : [];
           localStorage.setItem('wujie_canvas_bridge', JSON.stringify({
             projectId: targetProjectId,
-            images: [...existingImages, ...transferredImages],
+            images: mergeSimpleChatCanvasBridgeReferences(existingImages, transferredImages),
           }));
         },
       });
@@ -1256,8 +1260,10 @@ export default function ChatArea({
       setTimeout(() => toast.remove(), 8000);
     } catch {
       setControlNotice('图片无法发送到所选画布');
+    } finally {
+      setCanvasTransferMessageId((current) => current === message.id ? null : current);
     }
-  }, [selectedCanvasProjectId, task]);
+  }, [canvasTransferMessageId, selectedCanvasProjectId, task]);
 
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
@@ -1608,7 +1614,7 @@ export default function ChatArea({
                     {msg.images && msg.images.length > 0 && (
                       <button
                         onClick={() => { void sendImagesToCanvas(msg); }}
-                        disabled={!canTransferSimpleChatMedia(msg.images, msg.imageRefs || [])}
+                        disabled={canvasTransferMessageId === msg.id || !canTransferSimpleChatMedia(msg.images, msg.imageRefs || [])}
                         className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
                         title={canTransferSimpleChatMedia(msg.images, msg.imageRefs || [])
                           ? '添加到画布'

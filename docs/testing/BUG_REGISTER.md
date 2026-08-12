@@ -1160,3 +1160,95 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Fix | Add an authorized POST admission plus GET status boundary, Next.js `after()` worker execution, PostgreSQL lease/fencing and terminal writes, exact S3/local managed reads, attempt-isolated recovery URLs, MIME/byte/checksum validation, fail-closed recovery paths, client singleflight and wall-clock polling, and explicit `unrecoverable` UI state. Physical purge remains disabled. |
 | Regression | TDD covers POST/GET auth, exact identities, duplicate admission, lease expiry, stale-worker fencing, ready probing, current-version protection, S3 exact-key reads, durable local fallback, checksum/MIME/path rejection, server-side image-tool compatibility, retry deadline, and terminal UI projection. Final PostgreSQL-enabled repository run: `402/402` files and `2160/2160` tests, zero failed and zero skipped. |
 | Status | **CLOSED LOCALLY 2026-08-12 / CLOUD PENDING.** Independent final review returned `APPROVED` with no P0/P1/P2 findings. Coze is still on base `4bbe6db`; the exact candidate must be pulled and verified in `shadow` before Checkpoint C can pass. Evidence: `docs/testing/evidence/bug-064-media-recovery-local-2026-08-12.json`. |
+## 2026-08-12 BUG-064 cloud closure
+
+BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f28ceb57650af0f87f10d6509603949f0eff` and whose direct parent is GitHub `main@1344dec33f93fc9d8a19baeaf9ed251c28176f5f`. In authenticated Chrome, asset `559c7f48-04f1-544e-8ec5-3c23ba4fb975` first rendered `MEDIA_UNAVAILABLE`; clicking Recover replaced it with the real 800 x 534 image in about 2.5 seconds. A full reload retained the image and removed the recovery controls. Read-only PostgreSQL evidence showed `missing -> ready`, one `succeeded` attempt, one 5,929,839-byte recovery artifact, one active placement and zero GC candidates. Evidence: `docs/testing/evidence/bug-064-media-recovery-cloud-2026-08-12.json`.
+
+### BUG-065: Shadow autosave duplicated a transferred managed Canvas placement
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Cross-workspace transfer / Canvas shadow synchronization |
+| Environment | Stage 2 Task 9 local production server, real Chromium, 2026-08-13 |
+| Reproduction | Transfer a managed chat or workflow image to Canvas, then let the first Canvas autosave reconcile the same image. |
+| Expected | Autosave adopts the transferred AssetVersion and placement identity. |
+| Actual | The transfer created one placement while shadow sync attempted to create or adopt a second identity. |
+| Root cause | Legacy reconciliation only adopted task-projection mappings and did not validate and adopt a complete generic managed mapping. |
+| Fix | Validate the full asset/version/placement/entity tuple, lock the exact rows, and adopt the existing managed Canvas mapping before deterministic legacy insertion. |
+| Regression | Unit adoption/conflict coverage plus all five Stage 2 browser profiles pass. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |
+
+### BUG-066: Restoring a Canvas placement did not restore the legacy project snapshot
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Asset lifecycle / Canvas refresh recovery |
+| Environment | Stage 2 Task 9 local PostgreSQL and Chromium, 2026-08-13 |
+| Reproduction | Trash a managed Canvas placement, restore it through the asset API, then reload the legacy-authoritative Canvas. |
+| Expected | Placement status and legacy project snapshot are restored atomically. |
+| Actual | The graph placement returned to active while the legacy snapshot still omitted the image. |
+| Root cause | Restore updated only asset graph rows and did not project the restored placement back into `wujie_user_data.projects`. |
+| Fix | Serialize on the project snapshot revision and restore the image plus revision in the same database transaction as placement activation. |
+| Regression | Real PostgreSQL atomic restore and concurrent collision tests pass; five-browser refresh/lifecycle E2E passes. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |
+
+### BUG-067: Standalone chat transfer dropped the placement entity identity
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Standalone chat to Canvas bridge |
+| Environment | Stage 2 Task 9 local production server, real Chromium, 2026-08-13 |
+| Reproduction | Send a managed standalone-chat result to a designated Canvas and allow shadow autosave. |
+| Expected | The bridge preserves asset, version, placement, and entity identities returned by the transfer API. |
+| Actual | The image rendered, but the parser discarded `entityId`; Canvas invented a fallback entity while retaining the original placement and the server rejected the inconsistent tuple. |
+| Fix | Preserve and verify `entityId` in canonical resolution, standalone-chat reference parsing, and Canvas handoff. |
+| Regression | Focused component/service tests pass and the standalone transfer flow passes in Chromium, 1080p Chromium, Firefox, WebKit, and mobile Chromium. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |
+
+### BUG-068: Standalone chat generated image was projected without a Canvas placement identity
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Standalone chat generation / task asset projection |
+| Environment | Stage 2 Task 9 final review and TDD, 2026-08-13 |
+| Reproduction | Complete a standalone-chat image task for a designated Canvas project, then inspect the projected result before transferring it. |
+| Expected | The completed result carries one server-owned asset, version, placement, and entity identity that Canvas can adopt without inventing a second identity. |
+| Actual | The task projector returned asset/version facts but omitted the actual placement identity, leaving the later bridge to reconstruct an incomplete tuple. |
+| Root cause | Standalone projection consumed the task result before resolving the placement created for the designated Canvas target. |
+| Fix | Resolve the authoritative placement after task projection and return its `placementId` and `entityId` with the generated image result. |
+| Regression | Projector, API, standalone component, PostgreSQL lifecycle, and all five Stage 2 browser profiles pass. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |
+
+### BUG-069: Repeated workspace bridge consumption could create duplicate transfers
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Standalone/embedded chat to Canvas bridge |
+| Environment | Stage 2 Task 9 final review and TDD, 2026-08-13 |
+| Reproduction | Re-render or re-consume the same completed bridge payload while the target Canvas is loading. |
+| Expected | The bridge is idempotent and one source result creates at most one target placement. |
+| Actual | The same bridge payload could be consumed more than once and submit duplicate transfers. |
+| Root cause | Client bridge state had no stable consumed-transfer key spanning render and navigation boundaries. |
+| Fix | Derive and retain a stable transfer identity, reject duplicate consumption, and preserve the server-returned placement tuple. |
+| Regression | RED/GREEN component and service contracts plus the five-profile cross-workspace E2E matrix pass. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |
+
+### BUG-070: Canvas managed deletion could split graph state from the project snapshot and return a stale revision on retry
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Canvas managed delete / project revision concurrency |
+| Environment | Stage 2 Task 9 PostgreSQL concurrency review, 2026-08-13 |
+| Reproduction | Delete a managed placement, lose the HTTP response, let another session advance the project revision, then retry the original DELETE. |
+| Expected | Placement trash, legacy snapshot removal, and revision advancement commit atomically; the retry returns the exact revision produced by the original delete. |
+| Actual | Earlier code split graph deletion from snapshot persistence. A first correction returned the latest global revision on retry, allowing an old client to mistake another session's revision for its own delete result. |
+| Root cause | The deletion result revision was not durably bound to the placement transition, and restore did not propagate its new project revision through storage, service, and API layers. |
+| Fix | Lock project snapshot before asset and placement, update graph and snapshot in one transaction, persist `canvasTrashProjectRevision` in placement metadata, return that exact value on retry, and propagate restore revisions end to end. |
+| Regression | Real PostgreSQL tests cover response-loss retry after an independent revision advance, string revision parsing, restore increment, lock order, and concurrent lifecycle behavior; focused unit/API tests and five-browser E2E pass. Independent final review: `APPROVED`. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |

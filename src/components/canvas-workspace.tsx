@@ -95,7 +95,10 @@ import {
   shouldPersistCanvasPlacement,
   shouldRetainCanvasPlacementDuringMerge,
 } from '@/lib/asset-core/canvas-adapter';
-import { prepareCanvasAssetForChat } from '@/lib/asset-core/workspace-transfer';
+import {
+  canvasEntityIdForTransferredReference,
+  prepareCanvasAssetForChat,
+} from '@/lib/asset-core/workspace-transfer';
 import {
   reconcileImageBatchDeletion,
   reconcileSelectedImageAfterBatchDeletion,
@@ -105,6 +108,14 @@ import { buildProjectWorkspaceUrl } from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
+import { workflowFromProjectMetadata } from '@/lib/project-workflow';
+import {
+  consumeCanvasHydrationGuard,
+  createCanvasHydrationGuard,
+  shouldConsumeCanvasHydrationGuard,
+  type CanvasHydrationGuard,
+} from '@/lib/canvas-autosave-guard';
+import { shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
 
 import { LoginPanel } from '@/components/dashboard/login-panel';
 
@@ -282,6 +293,14 @@ function loadCanvasImageSize(url: string): Promise<{ width: number; height: numb
   });
 }
 
+function buildCanvasSaveSignature(
+  projectId: string,
+  images: PersistableCanvasImage[],
+  metadata: Project['metadata'],
+): string {
+  return JSON.stringify({ projectId, images, metadata });
+}
+
 interface CanvasWorkspaceProps {
   initialUser: User;
   onLoggedOut: () => void;
@@ -424,7 +443,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
   const themeStyleRef = useRef(themeStyle);
   themeStyleRef.current = themeStyle;
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [panelCollapsed, setPanelCollapsed] = useState(() => (
+    typeof window !== 'undefined' && shouldInitiallyCollapseWorkspacePanel(window.innerWidth)
+  ));
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
   const [createMode, setCreateMode] = useState<CreateMode>('quick');
   const [quickCreateImageModels, setQuickCreateImageModels] = useState<QuickCreateModelCandidate[]>([]);
@@ -450,12 +471,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const projects = userMgr.getProjects();
       const targetProject = projects.find((p: Project) => p.id === projectId);
       if (targetProject) {
+        hydrationAutosaveGuardRef.current = createCanvasHydrationGuard(
+          targetProject.id,
+          hydrateCanvasPlacements(targetProject.canvasImages || []),
+        );
         window.history.replaceState(
           null,
           '',
           buildProjectWorkspaceUrl(window.location, targetProject.id),
         );
         setCurrentProject(targetProject);
+        setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));
         const restoredViewState = normalizeCanvasViewState(targetProject.metadata?.viewState);
         viewStateRef.current = restoredViewState;
         setViewState(restoredViewState);
@@ -688,6 +714,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           const userMgr = UserManagerCore.getInstance();
           const hydratedUser = await userMgr.upsertUserFromServer(sessionUser);
           setCurrentUser(hydratedUser);
+          await userMgr.waitForProjectHydration(hydratedUser.id);
 
           // 检查 URL 中是否有 projectId 参数（从工作台跳转过来）
           if (projectId) {
@@ -701,7 +728,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               const projects = userMgr.getProjects();
               const targetProject = projects.find((p: Project) => p.id === projectId);
               if (targetProject) {
+                hydrationAutosaveGuardRef.current = createCanvasHydrationGuard(
+                  targetProject.id,
+                  hydrateCanvasPlacements(targetProject.canvasImages || []),
+                );
                 setCurrentProject(targetProject);
+                setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));
                 if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
                 setImages(hydrateCanvasPlacements(targetProject.canvasImages).map(img => ({
                   ...img,
@@ -879,6 +911,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
+  const hydrationAutosaveGuardRef = useRef<CanvasHydrationGuard | null>(null);
+  const immediateSaveGuardRef = useRef<CanvasHydrationGuard | null>(null);
 
   const resolveCanvasImageForChat = useCallback(async (image: CanvasImage): Promise<CanvasImage> => {
     return prepareCanvasAssetForChat(image, async () => {
@@ -906,6 +940,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     setChatInitialImage(transferredImage);
     setChatTabOpen(true);
   }, [resolveCanvasImageForChat]);
+
   const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);
   const shotTaskIdMapRef = useRef<Map<string, string>>(new Map());
   const groupsRef = useRef<ImageGroupData[]>([]);
@@ -954,8 +989,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         merge: references => {
           if (cancelled) throw new Error('BRIDGE_CONSUMPTION_CANCELLED');
           const timestamp = Date.now();
-          const newImages: CanvasImage[] = references.map((reference, idx) => ({
-            id: `chat-bridge-${timestamp}-${idx}`,
+          setImages(prev => {
+            const existingPlacementIds = new Set(prev.flatMap(image => image.placementId ? [image.placementId] : []));
+            const existingEntityIds = new Set(prev.map(image => image.id));
+            const uniqueReferences = references.filter(reference => (
+              (!reference.placementId || !existingPlacementIds.has(reference.placementId))
+              && (!reference.entityId || !existingEntityIds.has(reference.entityId))
+            ));
+            const newImages: CanvasImage[] = uniqueReferences.map((reference, idx) => ({
+            id: canvasEntityIdForTransferredReference(reference, `chat-bridge-${timestamp}-${idx}`),
             url: reference.url,
             prompt: reference.name || '',
             model: '',
@@ -974,10 +1016,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             ...(reference.assetId ? { assetId: reference.assetId } : {}),
             ...(reference.assetVersionId ? { assetVersionId: reference.assetVersionId } : {}),
             ...(reference.placementId ? { placementId: reference.placementId } : {}),
-          }));
+            }));
       // ★ 修复：使用 setImages 包装器而非直接 setImagesRaw，确保 prevImagesRef 同步更新
       // 之前直接调用 setImagesRaw 导致 prevImagesRef 过期，后续 setImages 调用会使用过期的基准计算 diff
-          setImages(prev => [...prev, ...newImages]);
+            return [...prev, ...newImages];
+          });
         },
         remove: () => localStorage.removeItem(bridgeKey),
       }).catch(() => {
@@ -1010,57 +1053,91 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // 自动保存画布图片到当前项目
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAutoSaveSignatureRef = useRef<string | null>(null);
+  const lastImmediateSaveSignatureRef = useRef<string | null>(null);
   // 项目切换中标记：防止自动保存回调用旧闭包数据覆盖刚保存的新数据
   const switchingProjectRef = useRef(false);
   // 服务器同步合并中标记：防止自动保存用旧闭包数据覆盖刚从服务器合并的新数据
   const serverSyncMergeRef = useRef(false);
+  const serverSyncMergeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [serverSyncMergeRevision, setServerSyncMergeRevision] = useState(0);
   // ★ 近期删除的图片 ID 集合：防止服务器同步把刚删除的图片恢复回来
   const recentlyDeletedIdsRef = useRef<Set<string>>(new Set());
+  const pendingCanvasDeleteIdsRef = useRef<Set<string>>(new Set());
   // Keep a ref to latest images to avoid stale closure in setTimeout
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
   const persistCanvasImagesNow = useCallback((nextImages: CanvasImage[]) => {
     if (!currentProject?.id) return;
+    if (autoSaveRef.current) {
+      clearTimeout(autoSaveRef.current);
+      autoSaveRef.current = null;
+    }
+    immediateSaveGuardRef.current = createCanvasHydrationGuard(currentProject.id, nextImages);
+    const persistableCanvasImages = serializeCanvasWorkspacePlacements(nextImages);
+    const metadata = {
+      ...(currentProject.metadata || {}),
+      groups: groupsRef.current,
+      viewState: viewStateRef.current,
+      annotationsV2: annotationRecordsRef.current,
+    };
+    lastImmediateSaveSignatureRef.current = buildCanvasSaveSignature(
+      currentProject.id,
+      persistableCanvasImages,
+      metadata,
+    );
+    lastAutoSaveSignatureRef.current = lastImmediateSaveSignatureRef.current;
     const manager = UserManagerCore.getInstance();
     manager.updateProject(currentProject.id, {
-      canvasImages: serializeCanvasWorkspacePlacements(nextImages),
-      metadata: {
-        ...(currentProject.metadata || {}),
-        groups: groupsRef.current,
-        viewState: viewStateRef.current,
-        annotationsV2: annotationRecordsRef.current,
-      },
+      canvasImages: persistableCanvasImages,
+      metadata,
     });
   }, [currentProject]);
 
   const handleDeleteCanvasImages = useCallback(async (imageIds: string[]): Promise<string[]> => {
     const activeProjectId = currentProject?.id;
     if (!activeProjectId) throw new Error('当前项目不存在');
-    const selected = latestImagesRef.current
-      .filter((image) => imageIds.includes(image.id))
-      .map((image) => ({ ...image, projectId: activeProjectId }));
-    let remainingImages = latestImagesRef.current;
-    const result = await reconcileImageBatchDeletion(
-      selected,
-      async (image) => {
-        const response = await fetch(`/api/assets/placements/${image.placementId}?projectId=${encodeURIComponent(image.projectId)}`, {
-          method: 'DELETE',
-        });
-        if (!response.ok) throw new Error('素材删除失败');
-      },
-      (image) => {
-        remainingImages = remainingImages.filter((candidate) => candidate.id !== image.id);
-        setImages(remainingImages);
-      },
-    );
-    if (result.deletedIds.length > 0) {
-      persistCanvasImagesNow(remainingImages);
-      setSelectedImage((current) => reconcileSelectedImageAfterBatchDeletion(current, result.deletedIds));
+    const uniqueImageIds = [...new Set(imageIds)]
+      .filter((id) => !pendingCanvasDeleteIdsRef.current.has(id));
+    if (uniqueImageIds.length === 0) return [];
+    uniqueImageIds.forEach((id) => pendingCanvasDeleteIdsRef.current.add(id));
+    let deletedIds: string[] = [];
+    try {
+      const selected = latestImagesRef.current
+        .filter((image) => uniqueImageIds.includes(image.id))
+        .map((image) => ({ ...image, projectId: activeProjectId }));
+      let remainingImages = latestImagesRef.current;
+      const result = await reconcileImageBatchDeletion(
+        selected,
+        async (image) => {
+          const response = await fetch(`/api/assets/placements/${image.placementId}?projectId=${encodeURIComponent(image.projectId)}`, {
+            method: 'DELETE',
+          });
+          if (!response.ok) throw new Error('素材删除失败');
+          const payload = await response.json().catch(() => null) as { projectRevision?: number } | null;
+          if (Number.isSafeInteger(payload?.projectRevision)) {
+            UserManagerCore.getInstance().advanceProjectSyncRevision(Number(payload?.projectRevision));
+          }
+        },
+        (image) => {
+          remainingImages = remainingImages.filter((candidate) => candidate.id !== image.id);
+          setImages(remainingImages);
+        },
+      );
+      deletedIds = result.deletedIds;
+      if (result.deletedIds.length > 0) {
+        persistCanvasImagesNow(remainingImages);
+        setSelectedImage((current) => reconcileSelectedImageAfterBatchDeletion(current, result.deletedIds));
+      }
+      if ('error' in result) {
+        toast.error(result.error instanceof Error ? result.error.message : '素材删除失败');
+      }
+      return result.deletedIds;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '素材删除同步失败');
+      return deletedIds;
+    } finally {
+      uniqueImageIds.forEach((id) => pendingCanvasDeleteIdsRef.current.delete(id));
     }
-    if ('error' in result) {
-      toast.error(result.error instanceof Error ? result.error.message : '素材删除失败');
-    }
-    return result.deletedIds;
   }, [currentProject?.id, persistCanvasImagesNow, setImages]);
   const initialCanvasAnnotations = useMemo(() => {
     if (!currentProject) return [];
@@ -1304,9 +1381,28 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (switchingProjectRef.current) return;
     // 服务器同步合并中，跳过自动保存，避免旧闭包数据覆盖刚合并的服务器数据
     if (serverSyncMergeRef.current) return;
+    const immediateSaveGuard = consumeCanvasHydrationGuard(
+      immediateSaveGuardRef.current,
+      currentProject.id,
+      images,
+    );
+    immediateSaveGuardRef.current = immediateSaveGuard.nextGuard;
+    if (immediateSaveGuard.suppress) return;
+    if (shouldConsumeCanvasHydrationGuard(
+      hydrationAutosaveGuardRef.current,
+      currentProject.id,
+      images,
+    )) {
+      hydrationAutosaveGuardRef.current = null;
+      return;
+    }
+    if (hydrationAutosaveGuardRef.current?.projectId === currentProject.id) {
+      hydrationAutosaveGuardRef.current = null;
+    }
     // 防抖：1秒后保存
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     autoSaveRef.current = setTimeout(async () => {
+      autoSaveRef.current = null;
       // 二次检查：定时器触发时如果正在切换项目，也跳过
       if (switchingProjectRef.current) return;
       const project = currentProjectRef.current;
@@ -1457,9 +1553,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
     }, 1000);
     return () => {
-      if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+      if (autoSaveRef.current) {
+        clearTimeout(autoSaveRef.current);
+        autoSaveRef.current = null;
+      }
     };
-  }, [annotationRevision, images, currentProject?.id, currentUser?.id, setImages]);
+  }, [annotationRevision, images, currentProject?.id, currentUser?.id, serverSyncMergeRevision, setImages]);
 
   // 页面关闭/刷新前同步保存（localStorage + sendBeacon到服务器）
   // 使用 ref 避免每次 images 变化都重建 beforeunload 监听器
@@ -1522,14 +1621,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           }))
           .filter(image => shouldPersistCanvasPlacement(image) || shouldPersistProcessingPlaceholder(image)) as PersistableCanvasImage[];
         // 1. localStorage 即时写入
+        const unloadMetadata = {
+          ...(proj.metadata || {}),
+          groups: groupsRef.current,
+          viewState: viewStateRef.current,
+          annotationsV2: annotationRecordsRef.current,
+        };
+        const unloadSignature = buildCanvasSaveSignature(proj.id, persistableCanvasImages, unloadMetadata);
+        const hasPendingCanvasSnapshot = lastImmediateSaveSignatureRef.current !== unloadSignature
+          && lastAutoSaveSignatureRef.current !== unloadSignature;
+        if (!autoSaveRef.current || !hasPendingCanvasSnapshot) return;
         mgr.updateProject(proj.id, {
           canvasImages: persistableCanvasImages,
-          metadata: {
-            ...(proj.metadata || {}),
-            groups: groupsRef.current,
-            viewState: viewStateRef.current,
-            annotationsV2: annotationRecordsRef.current,
-          },
+          metadata: unloadMetadata,
         });
         if (mgr.isProjectSyncInFlight()) return;
         // 2. sendBeacon 异步发送到服务器，确保云部署不丢数据
@@ -1539,6 +1643,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             projectRevision: mgr.getProjectSyncRevision(),
             value: mgr.getProjects().map(p => ({
               id: p.id,
+              schemaVersion: p.schemaVersion ?? 3,
               name: p.name,
               description: p.description,
               canvasImages: p.id === proj.id ? persistableCanvasImages : p.canvasImages,
@@ -1739,11 +1844,25 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         setCurrentUser({ ...currentUser }); // 触发 UI 刷新
         // 延迟清除同步合并标记，确保 setImages 引起的自动保存跳过本轮
         // ★ 同时恢复历史记录（延迟更久，确保 setImages 回调链完成）
-        setTimeout(() => { serverSyncMergeRef.current = false; skipHistoryRef.current = false; }, 2000);
+        if (serverSyncMergeTimerRef.current) clearTimeout(serverSyncMergeTimerRef.current);
+        serverSyncMergeTimerRef.current = setTimeout(() => {
+          serverSyncMergeRef.current = false;
+          skipHistoryRef.current = false;
+          serverSyncMergeTimerRef.current = null;
+          setServerSyncMergeRevision(revision => revision + 1);
+        }, 2000);
       } catch { /* best effort */ serverSyncMergeRef.current = false; skipHistoryRef.current = false; }
     });
-    return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
-  }, [currentUser, currentProject?.id, setImages]);
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+      if (serverSyncMergeTimerRef.current) {
+        clearTimeout(serverSyncMergeTimerRef.current);
+        serverSyncMergeTimerRef.current = null;
+      }
+      serverSyncMergeRef.current = false;
+      skipHistoryRef.current = false;
+    };
+  }, [currentUser?.id, currentProject?.id, setImages]);
 
   // ★ 异步持久化 data:/blob: URL：页面加载后自动检测并持久化临时 URL
   // 解决刷新后图片消失的问题：data: URL 在 normalizeImageUrls 中不再被清空，
@@ -2802,7 +2921,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const { width: natW, height: natH } = await loadCanvasImageSize(rawUrl);
       const displaySize = getCanvasImageDisplaySize(natW, natH);
 
-      const tempId = `ref-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const fallbackId = insertionItem?.outputNodeId || `ref-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const tempId = transferredReference
+        ? canvasEntityIdForTransferredReference(transferredReference, fallbackId)
+        : fallbackId;
       // If source image exists, position generated images to its right
       const offsetX = sourceImg ? sourceImg.x + sourceImg.width + 30 : 0;
       const offsetY = sourceImg ? sourceImg.y + i * (displaySize.height + 20) : 0;
@@ -2829,16 +2951,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     }
 
     if (newImages.length > 0) {
-      if (sourceImg) {
-        // Direct placement next to source image
-        setImages(prev => [...prev, ...newImages]);
-      } else {
-        // 应用自动布局计算位置，然后添加到画布
-        setImages(prev => {
-          const laidOut = autoLayoutImages(prev, newImages);
-          stabilizeCanvasImages(laidOut.map(img => ({ id: img.id, url: img.url })));
-          return [...prev, ...laidOut];
-        });
+      const previousImages = latestImagesRef.current;
+      const insertedImages = sourceImg
+        ? newImages
+        : autoLayoutImages(previousImages, newImages);
+      const nextImages = [...previousImages, ...insertedImages];
+      latestImagesRef.current = nextImages;
+      setImages(nextImages);
+      if (!sourceImg) {
+        stabilizeCanvasImages(insertedImages.map(img => ({ id: img.id, url: img.url })));
       }
       // ★ 自动连线：当有源图片时，为新图片自动创建连线
       if (sourceImageId && newImages.length > 0) {
@@ -2858,6 +2979,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         content: JSON.stringify(newImages, null, 2),
         metadata: { imageCount: newImages.length },
       });
+      if (insertedImages.some(image => image.assetVersionId && image.placementId)) {
+        persistCanvasImagesNow(nextImages);
+        await UserManagerCore.getInstance().flushProjectsToServer();
+      }
       if (sourceImg && newImages.length > 1) {
         toast.success(`已生成 ${newImages.length} 张图片，已与原图连线`, {
           description: '图片组已自动排列在原图右侧',
@@ -2875,7 +3000,41 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         className: 'bg-[#141414] border-[#2a2a2a] text-white',
       });
     }
-  }, [images, currentUser?.id, setImages, autoLayoutImages, stabilizeCanvasImages]);
+  }, [images, currentUser?.id, setImages, autoLayoutImages, stabilizeCanvasImages, persistCanvasImagesNow]);
+
+  const handleAddEmbeddedChatImage = useCallback(async (
+    reference: WorkspaceAssetReference,
+    meta?: { modelName?: string; apiProvider?: string; sourceImageId?: string },
+  ) => {
+    if (!currentProject?.id || !reference.assetVersionId) {
+      await handleAddImages([reference.url], meta?.sourceImageId, meta);
+      return;
+    }
+    const requestNonce = Date.now();
+    const response = await fetch('/api/assets/transfer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sourceVersion: reference.assetVersionId,
+        targetProject: currentProject.id,
+        targetWorkspace: `canvas:${currentProject.id}`,
+        entityType: 'canvas-image',
+        entityId: `embedded-chat:${requestNonce}`,
+        idempotencyKey: `embedded-chat-canvas:${currentProject.id}:${reference.assetVersionId}:${requestNonce}`,
+        metadata: { source: 'embedded-chat' },
+      }),
+    });
+    if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
+    const transferred = await response.json() as WorkspaceAssetReference;
+    if (!transferred.assetVersionId || !transferred.placementId) {
+      throw new Error('Asset transfer returned an incomplete reference');
+    }
+    await handleAddImages([{
+      outputNodeId: `embedded-chat:${transferred.placementId}`,
+      url: transferred.url,
+      assetReference: transferred,
+    }], meta?.sourceImageId, meta);
+  }, [currentProject?.id, handleAddImages]);
 
   const handleUploadEffectReverseSource = useCallback(async (file: File): Promise<CanvasImage> => {
     if (!currentProject?.id) {
@@ -5519,7 +5678,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               </div>
             </div>
             <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-              <ChatPanel themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
+              <ChatPanel themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
             </div>
 
             {/* 固定在底部的开始生成按钮 */}
@@ -5698,6 +5857,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 method: 'DELETE',
               });
               if (!response.ok) throw new Error('素材 placement 删除失败');
+              const payload = await response.json().catch(() => null) as { projectRevision?: number } | null;
+              if (Number.isSafeInteger(payload?.projectRevision)) {
+                UserManagerCore.getInstance().advanceProjectSyncRevision(Number(payload?.projectRevision));
+              }
             },
             (image) => setImages(previous => previous.filter(candidate => candidate.id !== image.id)),
           );

@@ -53,7 +53,11 @@ class MemoryProjectionRepository implements TaskProjectionRepository {
       ),
       createProjection: async (input) => {
         const existing = this.versions.find(version => version.idempotencyKey === input.idempotencyKey);
-        if (existing) return { version: existing, reused: true };
+        if (existing) return {
+          version: existing,
+          placement: { id: `placement-${existing.id}`, entityId: input.entityId },
+          reused: true,
+        };
         this.creates.push(structuredClone(input));
         const version: AssetVersion = {
           id: `version-${this.versions.length + 1}`,
@@ -67,7 +71,11 @@ class MemoryProjectionRepository implements TaskProjectionRepository {
           createdAt: '2026-08-11T00:00:00.000Z',
         };
         this.versions.push(version);
-        return { version, reused: false };
+        return {
+          version,
+          placement: { id: `placement-${version.id}`, entityId: input.entityId },
+          reused: false,
+        };
       },
       recordLateResultAudit: async (input) => {
         this.lateAudits.push({
@@ -100,6 +108,10 @@ describe('completed task asset projection', () => {
 
     expect(result.reused).toBe(false);
     expect(result.versions).toHaveLength(1);
+    expect(result.placements).toEqual([{
+      id: 'placement-version-1',
+      entityId: 'canvas-result-1:0',
+    }]);
     expect(repository.creates[0]).toMatchObject({
       taskId: 'task-1',
       outputIndex: 0,
@@ -125,7 +137,7 @@ describe('completed task asset projection', () => {
         parentVersionIds: [],
       });
 
-      expect(result).toEqual({ versions: [], reused: false });
+      expect(result).toEqual({ versions: [], placements: [], reused: false });
       expect(repository.creates).toHaveLength(0);
       expect(repository.lateAudits).toEqual([{
         taskId: 'task-1',

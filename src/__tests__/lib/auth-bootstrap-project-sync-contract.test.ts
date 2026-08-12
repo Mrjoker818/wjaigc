@@ -87,8 +87,37 @@ describe('authentication bootstrap project sync', () => {
     const end = source.indexOf('  private getCurrentUserData()', start);
     const method = source.slice(start, end);
 
-    expect(method).toContain('void this.loadProjectsFromServer(1, syncUserId).then(');
+    expect(method).toContain('const hydrationPromise = this.loadProjectsFromServer(1, syncUserId).then(');
+    expect(method).toContain('void hydrationPromise;');
     expect(method).not.toContain('await this.loadProjectsFromServer()');
+  });
+
+  it('waits for the existing project hydration before resolving an explicit project route', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/components/canvas-workspace.tsx'), 'utf8');
+    const authInitializer = source.indexOf('const initCurrentUser = async () => {');
+    const authEffectEnd = source.indexOf('const [currentUser, setCurrentUser]', authInitializer);
+    const authEffect = source.slice(authInitializer, authEffectEnd);
+    const upsert = authEffect.indexOf('await userMgr.upsertUserFromServer(sessionUser)');
+    const waitForHydration = authEffect.indexOf('await userMgr.waitForProjectHydration(hydratedUser.id)', upsert);
+    const projectLookup = authEffect.indexOf('userMgr.getProjects()', upsert);
+
+    expect(upsert).toBeGreaterThan(-1);
+    expect(waitForHydration).toBeGreaterThan(upsert);
+    expect(projectLookup).toBeGreaterThan(waitForHydration);
+  });
+
+  it('hydrates the seeded node workflow when an explicit project route is opened', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/components/canvas-workspace.tsx'), 'utf8');
+    const authInitializer = source.indexOf('const initCurrentUser = async () => {');
+    const authEffectEnd = source.indexOf('const [currentUser, setCurrentUser]', authInitializer);
+    const authEffect = source.slice(authInitializer, authEffectEnd);
+    const projectLookup = authEffect.indexOf('const targetProject = projects.find((p: Project) => p.id === projectId);');
+    const projectBranchEnd = authEffect.indexOf('if (targetProject.canvasImages && targetProject.canvasImages.length > 0)', projectLookup);
+    const projectBranch = authEffect.slice(projectLookup, projectBranchEnd);
+
+    expect(projectLookup).toBeGreaterThan(-1);
+    expect(projectBranchEnd).toBeGreaterThan(projectLookup);
+    expect(projectBranch).toContain('setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));');
   });
 
   it('keeps the authenticated workspace out of the initial loading render', () => {

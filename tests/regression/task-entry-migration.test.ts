@@ -109,7 +109,9 @@ describe('task entry migration contract', () => {
   it.each(migratedRoutes)('%s is wired to the guarded migration mode', route => {
     const source = readFileSync(join(root, route), 'utf8');
     expect(source).toContain("@/lib/task-core/entry-migration");
-    expect(source).toContain('resolveTaskCoreMode(');
+    const resolvesConfiguredMode = source.includes('resolveTaskCoreMode(');
+    const explicitlyRequiresCoreV2 = source.includes("const editTaskCoreMode = 'core-v2'");
+    expect(resolvesConfiguredMode || explicitlyRequiresCoreV2).toBe(true);
     expect(source).toContain('createTaskEntryAudit(');
   });
 });

@@ -78,6 +78,11 @@ export interface TaskProjectionCreateInput {
   projectionMode: TaskProjectionMode;
 }
 
+export interface TaskProjectionPlacementReference {
+  id: string;
+  entityId: string;
+}
+
 export interface LateResultAuditInput {
   actorUserId: string;
   taskId: string;
@@ -96,6 +101,7 @@ export interface TaskProjectionTransaction {
   ): Promise<Array<{ id: string; assetId: string }>>;
   createProjection(input: TaskProjectionCreateInput): Promise<{
     version: AssetVersion;
+    placement: TaskProjectionPlacementReference;
     reused: boolean;
   }>;
   recordLateResultAudit(input: LateResultAuditInput): Promise<void>;
@@ -108,6 +114,7 @@ export interface TaskProjectionRepository {
 export interface TaskAssetProjector {
   projectCompletedTaskToAssets(input: ProjectCompletedTaskInput): Promise<{
     versions: AssetVersion[];
+    placements: TaskProjectionPlacementReference[];
     reused: boolean;
   }>;
 }
@@ -309,6 +316,7 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
 
   async createProjection(input: TaskProjectionCreateInput): Promise<{
     version: AssetVersion;
+    placement: TaskProjectionPlacementReference;
     reused: boolean;
   }> {
     await this.client.query(
@@ -330,11 +338,11 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
       ) {
         throw new TaskProjectionError('TASK_PROJECTION_CONFLICT');
       }
-      await this.ensurePlacement(input, existing.asset_id, existing.id);
+      const placement = await this.ensurePlacement(input, existing.asset_id, existing.id);
       const parents = Array.isArray(existing.metadata?.sourceVersionIds)
         ? existing.metadata.sourceVersionIds.filter((id): id is string => typeof id === 'string')
         : [];
-      return { version: mapVersion(existing, parents), reused: true };
+      return { version: mapVersion(existing, parents), placement, reused: true };
     }
 
     const sources = await this.findSourceVersions(
@@ -417,9 +425,10 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
        WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
       [assetId, input.actorUserId, input.projectId, versionId],
     );
-    await this.ensurePlacement(input, assetId, versionId);
+    const placement = await this.ensurePlacement(input, assetId, versionId);
     return {
       version: mapVersion(inserted.rows[0], input.parentVersionIds),
+      placement,
       reused: false,
     };
   }
@@ -446,9 +455,9 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
     input: TaskProjectionCreateInput,
     assetId: string,
     versionId: string,
-  ): Promise<void> {
-    const existing = await this.client.query<{ asset_version_id: string }>(
-      `SELECT asset_version_id FROM wujie_workspace_placements
+  ): Promise<TaskProjectionPlacementReference> {
+    const existing = await this.client.query<{ id: string; asset_version_id: string; entity_id: string }>(
+      `SELECT id, asset_version_id, entity_id FROM wujie_workspace_placements
        WHERE owner_id = $1 AND project_id = $2 AND workspace_kind = $3
          AND workspace_id = $4 AND entity_type = $5 AND entity_id = $6
          AND status = 'active'
@@ -462,9 +471,10 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
       if (existing.rows[0].asset_version_id !== versionId) {
         throw new TaskProjectionError('TASK_PROJECTION_CONFLICT');
       }
-      return;
+      return { id: existing.rows[0].id, entityId: existing.rows[0].entity_id };
     }
     const timestamp = new Date().toISOString();
+    const placementId = randomUUID();
     await this.client.query(
       `INSERT INTO wujie_workspace_placements(
         id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
@@ -475,12 +485,13 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
         $10::jsonb, $11, $11
       )`,
       [
-        randomUUID(), input.actorUserId, input.projectId, assetId, versionId,
+        placementId, input.actorUserId, input.projectId, assetId, versionId,
         input.workspace, input.workspaceId, input.entityType, input.entityId,
         JSON.stringify({ source: 'task-projection', taskId: input.taskId, outputIndex: input.outputIndex }),
         timestamp,
       ],
     );
+    return { id: placementId, entityId: input.entityId };
   }
 }
 
@@ -531,7 +542,7 @@ export function createTaskAssetProjector(
               digest: stableDigest({ terminalStatus, urls }),
             });
           }
-          return { versions: [], reused: false };
+          return { versions: [], placements: [], reused: false };
         }
         if (urls.length === 0) {
           throw new TaskProjectionError('TASK_PROJECTION_MISSING_RESULT');
@@ -557,6 +568,7 @@ export function createTaskAssetProjector(
         }
 
         const projected: AssetVersion[] = [];
+        const placements: TaskProjectionPlacementReference[] = [];
         let allReused = true;
         const targetWorkspaceId = workspaceId(input);
         const targetEntityType = entityType(input.workspace);
@@ -603,9 +615,10 @@ export function createTaskAssetProjector(
             projectionMode,
           });
           projected.push(created.version);
+          placements.push(created.placement);
           if (!created.reused) allReused = false;
         }
-        return { versions: projected, reused: allReused };
+        return { versions: projected, placements, reused: allReused };
       });
     },
   };
@@ -615,6 +628,7 @@ const defaultProjector = createTaskAssetProjector();
 
 export function projectCompletedTaskToAssets(input: ProjectCompletedTaskInput): Promise<{
   versions: AssetVersion[];
+  placements: TaskProjectionPlacementReference[];
   reused: boolean;
 }> {
   return defaultProjector.projectCompletedTaskToAssets(input);

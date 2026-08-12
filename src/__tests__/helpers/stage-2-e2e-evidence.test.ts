@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import {
   redactStage2Evidence,
@@ -9,11 +11,21 @@ import {
   stage2DatabaseConnectionString,
   stage2ProjectPresenceIsValid,
   stage2ProjectMatrixValue,
+  stage2SingleNewPlacementMatches,
+  validateStage2SessionPayload,
   validateStage2ProjectIsolation,
 } from '../../../tests/helpers/stage-2-e2e';
 import { stage2RunStatus } from '../../../tests/helpers/stage-2-reporter';
 
 describe('Stage 2 E2E evidence safety', () => {
+  it('waits for the requested project identity before interacting with the canvas', () => {
+    const canvasSource = readFileSync(resolve(process.cwd(), 'src/components/infinite-canvas.tsx'), 'utf8');
+    const helperSource = readFileSync(resolve(process.cwd(), 'tests/helpers/stage-2-e2e.ts'), 'utf8');
+
+    expect(canvasSource).toContain("data-project-id={projectId || brandProject?.id || ''}");
+    expect(helperSource).toContain("toHaveAttribute('data-project-id', projectId");
+  });
+
   it('removes bearer tokens and credential values from captured text', () => {
     const input = 'Authorization: Bearer secret.jwt.value api_key=provider-secret password="plain-secret"';
     const output = redactStage2Evidence(input);
@@ -60,6 +72,59 @@ describe('Stage 2 E2E evidence safety', () => {
     ])).toEqual(['placement-b']);
   });
 
+  it('rejects duplicate or identity-mismatched placements before cleanup', () => {
+    const expected = {
+      placementId: 'placement-b',
+      entityId: 'canvas-image-b',
+      assetVersionId: 'version-b',
+    };
+    expect(stage2SingleNewPlacementMatches(['placement-a'], [
+      { id: 'placement-a', status: 'active', entityId: 'canvas-image-a', assetVersionId: 'version-a' },
+      { id: 'placement-b', status: 'active', entityId: 'canvas-image-b', assetVersionId: 'version-b' },
+    ], expected)).toBe(true);
+    expect(stage2SingleNewPlacementMatches(['placement-a'], [
+      { id: 'placement-b', status: 'active', entityId: 'canvas-image-b', assetVersionId: 'version-b' },
+      { id: 'placement-c', status: 'active', entityId: 'canvas-image-c', assetVersionId: 'version-b' },
+    ], expected)).toBe(false);
+    expect(stage2SingleNewPlacementMatches(['placement-a'], [
+      { id: 'placement-b', status: 'active', entityId: 'wrong-entity', assetVersionId: 'version-b' },
+    ], expected)).toBe(false);
+  });
+
+  it('asserts exact transfer placement identity before destructive E2E cleanup', () => {
+    const source = readFileSync(resolve(process.cwd(), 'tests/e2e/stage-2-cross-workspace.spec.ts'), 'utf8');
+    expect(source.match(/assertSingleNewProjectPlacement\(/g)?.length).toBeGreaterThanOrEqual(3);
+    const scenarios = source.split('finally {');
+    expect(scenarios.slice(0, 3).every(scenario => scenario.includes('assertSingleNewProjectPlacement('))).toBe(true);
+  });
+
+  it('checks unique placement only after canvas visibility and durable project sync', () => {
+    const source = readFileSync(resolve(process.cwd(), 'tests/e2e/stage-2-cross-workspace.spec.ts'), 'utf8');
+    const scenarios = source.split('finally {').slice(0, 3);
+
+    expect(source).toContain('observeProjectGraphSaves');
+    for (const scenario of scenarios) {
+      const visible = scenario.lastIndexOf('canvasImageByUrl(page, created.url)).toBeVisible');
+      const saved = scenario.lastIndexOf('await saves.waitFor(created');
+      const exact = scenario.lastIndexOf('assertSingleNewProjectPlacement(');
+      expect(visible).toBeGreaterThan(-1);
+      expect(saved).toBeGreaterThan(visible);
+      expect(exact).toBeGreaterThan(saved);
+    }
+  });
+
+  it('binds the durable save observation to the transferred entity, version, and placement', () => {
+    const source = readFileSync(resolve(process.cwd(), 'tests/e2e/stage-2-cross-workspace.spec.ts'), 'utf8');
+    const observer = source.slice(
+      source.indexOf('function observeProjectGraphSaves('),
+      source.indexOf("test.use({ trace: 'off'"),
+    );
+    expect(observer).toContain('${value.entityId}:${value.assetVersionId}:${value.placementId}');
+    expect(observer).toContain('matches.has(keyOf(expected))');
+    expect(observer).toContain('update.versionId');
+    expect(observer).toContain('update.placementId');
+  });
+
   it('rejects empty controlled fixture identities before locating UI state', () => {
     expect(requireNonEmptyStage2Value(' /api/serve-upload/image.png ', 'source URL')).toBe('/api/serve-upload/image.png');
     expect(() => requireNonEmptyStage2Value('', 'source URL')).toThrow(/source URL must be non-empty/);
@@ -75,6 +140,18 @@ describe('Stage 2 E2E evidence safety', () => {
     expect(() => stage2DatabaseConnectionString({
       DATABASE_URL: 'postgresql://ambient:test@example.test/wrong',
     })).toThrow(/E2E_STAGE2_DATABASE_URL/);
+  });
+
+  it('rejects a successful login response when the page session belongs to another user', () => {
+    expect(validateStage2SessionPayload({
+      success: true,
+      user: { name: 'stage2_run_42' },
+    }, 'stage2_run_42')).toBe(true);
+    expect(validateStage2SessionPayload({
+      success: true,
+      user: { name: 'admin' },
+    }, 'stage2_run_42')).toBe(false);
+    expect(validateStage2SessionPayload({ success: true, user: null }, 'stage2_run_42')).toBe(false);
   });
 
   it('allows an unconsumed COW fixture to have no asset-graph project row', () => {

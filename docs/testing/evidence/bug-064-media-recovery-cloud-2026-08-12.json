@@ -1,0 +1,35 @@
+{
+  "recordedAt": "2026-08-12T15:09:00+08:00",
+  "environment": "Coze preview",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "githubMain": "1344dec33f93fc9d8a19baeaf9ed251c28176f5f",
+  "cozeRuntimeCommit": "6965f28ceb57650af0f87f10d6509603949f0eff",
+  "cozeRuntimeParent": "1344dec33f93fc9d8a19baeaf9ed251c28176f5f",
+  "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "modes": {
+    "assetGraph": "shadow",
+    "taskCore": "legacy",
+    "physicalPurge": "disabled",
+    "dataRoot": "/space/wujie-data"
+  },
+  "subject": {
+    "projectId": "project_1786500304299_8vix1z45f",
+    "assetId": "559c7f48-04f1-544e-8ec5-3c23ba4fb975",
+    "originalVersionId": "77c271d6-cc3d-5f86-bff3-e997ca2d3d99",
+    "recoveredVersionIdPrefix": "66621b79",
+    "placementId": "696446c1-3278-5548-9427-3290ca3ea1a5"
+  },
+  "observed": {
+    "before": "MEDIA_UNAVAILABLE with Retry and Recover controls",
+    "after": "real 800x534 image rendered with image toolbar",
+    "afterReload": "real image remained visible; no MEDIA_UNAVAILABLE or Recover control",
+    "assetAvailability": "ready",
+    "recoveryAttempts": 1,
+    "terminalAttemptStatus": "succeeded",
+    "recoveryArtifacts": 1,
+    "artifactBytes": 5929839,
+    "activePlacements": 1,
+    "gcCandidates": 0
+  },
+  "verdict": "PASS"
+}

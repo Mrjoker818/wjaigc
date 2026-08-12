@@ -122,7 +122,8 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('onForceSave?.(newImages);');
     expect(canvasWorkspaceSource).toContain('onForceSave={(nextImages) => {');
     expect(canvasWorkspaceSource).toContain('const persistCanvasImagesNow = useCallback');
-    expect(canvasWorkspaceSource).toContain('canvasImages: serializeCanvasWorkspacePlacements(nextImages)');
+    expect(canvasWorkspaceSource).toContain('const persistableCanvasImages = serializeCanvasWorkspacePlacements(nextImages)');
+    expect(canvasWorkspaceSource).toContain('canvasImages: persistableCanvasImages');
     expect(canvasWorkspaceSource).toContain('persistCanvasImagesNow(nextImages);');
     expect(canvasWorkspaceSource).not.toContain('if (currentProject?.id && images.length > 0)');
   });

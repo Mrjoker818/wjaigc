@@ -302,7 +302,18 @@ export function requireNonEmptyStage2Value(value: string, label: string): string
   return normalized;
 }
 
-export async function loginRealUser(page: Page, evidence?: Stage2Evidence): Promise<void> {
+export function validateStage2SessionPayload(payload: unknown, expectedUsername: string): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const record = payload as Record<string, unknown>;
+  if (record.success !== true || !record.user || typeof record.user !== 'object') return false;
+  return (record.user as Record<string, unknown>).name === expectedUsername;
+}
+
+export async function loginRealUser(
+  page: Page,
+  evidence?: Stage2Evidence,
+  options: { destination?: string } = {},
+): Promise<void> {
   const env = requireStage2Env('E2E_TEST_USERNAME', 'E2E_TEST_PASSWORD');
   await page.context().clearCookies();
   const loginResponse = await page.request.post('/api/auth/login', {
@@ -315,8 +326,16 @@ export async function loginRealUser(page: Page, evidence?: Stage2Evidence): Prom
     await evidence.startTrace();
   }
   expect(loginResponse.ok()).toBeTruthy();
-  await page.goto('/?loginMode=canvas', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: '我的项目', exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.goto(options.destination || '/?loginMode=canvas', { waitUntil: 'domcontentloaded' });
+  const sessionResponse = await page.request.get('/api/session');
+  const sessionPayload = await sessionResponse.json().catch(() => ({}));
+  if (evidence) {
+    const headers = sessionResponse.headers();
+    evidence.recordApi('GET', '/api/session', sessionResponse.status(), sessionPayload, headers['x-request-id'] || headers['request-id']);
+  }
+  expect(sessionResponse.ok()).toBeTruthy();
+  expect(validateStage2SessionPayload(sessionPayload, env.E2E_TEST_USERNAME), 'Page session does not belong to the controlled Stage 2 user').toBe(true);
+  await expect(page.locator('[data-canvas-viewport]')).toBeVisible({ timeout: 20_000 });
 }
 
 export async function apiJson(
@@ -342,6 +361,10 @@ export async function canvasImageByUrl(page: Page, expectedUrl: string): Promise
   return imageByUrl(page, '[data-canvas-viewport] img[src]', expectedUrl);
 }
 
+export function canvasImageCard(image: Locator): Locator {
+  return image.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " absolute ") and contains(concat(" ", normalize-space(@class), " "), " group ")][1]');
+}
+
 export async function imageByUrl(page: Page, selector: string, expectedUrl: string): Promise<Locator> {
   const controlledUrl = requireNonEmptyStage2Value(expectedUrl, 'controlled image URL');
   const images = page.locator(selector);
@@ -363,7 +386,7 @@ export async function deleteCanvasPlacementFromUi(
   url: string,
 ): Promise<void> {
   const image = await canvasImageByUrl(page, url);
-  await image.click();
+  await canvasImageCard(image).click();
   const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
   const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
   await page.getByTestId('selected-image-delete').click();
@@ -487,6 +510,8 @@ export function canvasProjectPlacements(project: Record<string, unknown> | undef
 interface Stage2PlacementRow {
   id: string;
   status: string;
+  entityId?: string;
+  assetVersionId?: string;
 }
 
 export interface Stage2PlacementBaseline {
@@ -497,6 +522,19 @@ export interface Stage2PlacementBaseline {
 export function stage2PlacementDiff(before: string[], after: Stage2PlacementRow[]): string[] {
   const baseline = new Set(before);
   return after.filter(row => row.status === 'active' && !baseline.has(row.id)).map(row => row.id);
+}
+
+export function stage2SingleNewPlacementMatches(
+  before: string[],
+  after: Stage2PlacementRow[],
+  expected: { placementId: string; entityId: string; assetVersionId: string },
+): boolean {
+  const baseline = new Set(before);
+  const created = after.filter(row => row.status === 'active' && !baseline.has(row.id));
+  return created.length === 1
+    && created[0].id === expected.placementId
+    && created[0].entityId === expected.entityId
+    && created[0].assetVersionId === expected.assetVersionId;
 }
 
 export function stage2DatabaseConnectionString(environment: Record<string, string | undefined>): string {
@@ -560,8 +598,11 @@ async function readStage2PlacementRows(
           ? 'COW cleanup found multiple asset-graph project rows'
           : 'Controlled project is missing from the deployment database or belongs to another owner',
     ).toBe(true);
-    const result = await client.query<{ id: string; status: string }>(
-      `SELECT id, status FROM wujie_workspace_placements WHERE owner_id = $1 AND project_id = $2 ORDER BY id ASC`,
+    const result = await client.query<{ id: string; status: string; entityId: string; assetVersionId: string }>(
+      `SELECT id, status, entity_id AS "entityId", asset_version_id AS "assetVersionId"
+       FROM wujie_workspace_placements
+       WHERE owner_id = $1 AND project_id = $2
+       ORDER BY id ASC`,
       [ownerId, projectId],
     );
     return result.rows;
@@ -589,6 +630,18 @@ export async function stage2PlacementBaseline(
       .filter(row => row.status === 'active')
       .map(row => row.id),
   };
+}
+
+export async function assertSingleNewProjectPlacement(
+  databaseBaseline: Stage2PlacementBaseline,
+  projectId: string,
+  expected: { placementId: string; entityId: string; assetVersionId: string },
+): Promise<void> {
+  const rows = await readStage2PlacementRows(databaseBaseline.ownerId, projectId);
+  expect(
+    stage2SingleNewPlacementMatches(databaseBaseline.placementIds, rows, expected),
+    `Expected exactly one new placement with identity ${JSON.stringify(expected)}, received ${JSON.stringify(rows)}`,
+  ).toBe(true);
 }
 
 export async function cleanupNewProjectPlacements(
@@ -687,7 +740,9 @@ export async function readProjects(page: Page, evidence?: Stage2Evidence): Promi
 
 export async function openCanvasProject(page: Page, projectId: string): Promise<void> {
   await page.goto(`/?projectId=${encodeURIComponent(projectId)}`, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('[data-canvas-viewport]')).toBeVisible({ timeout: 20_000 });
+  const canvas = page.locator('[data-canvas-viewport]');
+  await expect(canvas).toBeVisible({ timeout: 20_000 });
+  await expect(canvas).toHaveAttribute('data-project-id', projectId, { timeout: 30_000 });
 }
 
 export async function postJson(page: Page, url: string, data: unknown, evidence?: Stage2Evidence): Promise<Record<string, unknown>> {

@@ -550,3 +550,33 @@
 | BUG-064 durable media recovery | FIXED LOCALLY / CLOUD PENDING | Local worker, exact media delivery, lease/fencing, terminal status, and server-side image-tool compatibility are verified. Deploy the exact candidate and prove `recovering -> ready` or an explicit terminal failure survives reload in Coze `shadow`. |
 | Current-candidate PostgreSQL concurrency | VERIFIED LOCALLY | Isolated PostgreSQL at `127.0.0.1:55433` was supplied through all supported test URL variables; final full run passed `2160/2160` with zero skips, including Stage 2 lifecycle/projection and billing concurrency. |
 | Task 9 | PROHIBITED | Do not start three-browser E2E or `asset-v3` switching until Checkpoint C passes. |
+## 2026-08-12 after Checkpoint C
+
+| Item | Status | Required evidence |
+|---|---|---|
+| BUG-064 cloud media recovery | VERIFIED | Coze Chrome UI, reload and read-only PostgreSQL terminal evidence captured under `docs/testing/evidence/bug-064-media-recovery-cloud-2026-08-12.json`. |
+| Task 9 multi-browser and mobile E2E | IN PROGRESS | Chromium, Firefox, WebKit and one mobile viewport must cover the two Stage 2 specs with retained failure artifacts. |
+| Controlled `asset-v3 -> legacy` rollback | NOT STARTED | Allowed only after shadow comparison passes; test environment only; stable stays untouched and physical purge stays disabled. |
+
+## 2026-08-13 Task 9 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Five-profile local E2E | VERIFIED LOCALLY | `50/50` passed with per-browser isolated users/projects and retained evidence. |
+| Stage 2 PostgreSQL concurrency | VERIFIED LOCALLY | Full isolated run executed Stage 2 storage, migration, lifecycle, projection, task-state and billing tests; concurrent restore collision passed. |
+| Separate business-module PostgreSQL suites | UNVERIFIED / NON-STAGE-2 | Four tests for element board, Pear layering, and annotation still require `TEST_POSTGRES_URL`; keep them assigned to their owning module plans. |
+| Exact Task 9 Coze candidate | UNVERIFIED | Push the final main-only SHA, pull it in Coze, and independently confirm the runtime SHA and `shadow` mode. |
+| Cloud shadow comparison | UNVERIFIED | Re-run the two Task 9 specs or equivalent authenticated flows against the exact Coze candidate and compare graph/snapshot identities. |
+
+## 2026-08-13 final candidate remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| BUG-065 through BUG-070 local closure | VERIFIED LOCALLY | TDD, real PostgreSQL, five-profile production-browser matrix, and independent review all pass. |
+| Exact final candidate in Coze | UNVERIFIED | Coze currently reports `4bbe6db`. After the main-only push, pull and record the exact new SHA with `WUJIE_ASSET_GRAPH_MODE=shadow`, task core `legacy`, and physical purge disabled. |
+| Cloud three-workspace comparison | UNVERIFIED | Verify Canvas, embedded chat, standalone chat, and node workflow preserve one asset/version/placement/entity tuple; delete/restore and reload must agree between graph and project snapshot. |
+| Controlled `asset-v3` run | NOT STARTED | Only after the exact-SHA shadow comparison passes; use an isolated test environment and retain database/browser evidence. |
+| Rollback to `legacy` | NOT STARTED | After the controlled `asset-v3` run, switch only the mode, restart, and prove login, old projects, three workspaces, task/billing references, and media remain intact. |
+| Physical asset purge | PROHIBITED | Remains disabled throughout Stage 2. |
+| Controlled `asset-v3` switch | NOT STARTED / BLOCKING | Use only the isolated test environment after shadow passes; verify old projects, three workspaces, ownership, task terminal, and billing. |
+| Rollback `asset-v3 -> legacy` | NOT STARTED / BLOCKING | Switch back without deleting additive tables and prove login, old projects, generated media, chat/workflow references, and billing remain intact. |

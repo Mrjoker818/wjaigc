@@ -55,4 +55,29 @@ describe('user login server synchronization', () => {
     resolveSync?.(true);
     await Promise.resolve();
   });
+
+  it('lets an explicit project route await the login project hydration without starting another sync', async () => {
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    let resolveSync: ((value: boolean) => void) | undefined;
+    const syncSpy = vi.spyOn(manager, 'loadProjectsFromServer').mockImplementation(() => new Promise<boolean>(resolve => {
+      resolveSync = resolve;
+    }));
+
+    await manager.upsertUserFromServer({
+      id: 'project-route-user',
+      name: 'project-route-user',
+      role: 'user',
+      status: 'active',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const hydration = manager.waitForProjectHydration('project-route-user');
+    expect(syncSpy).toHaveBeenCalledOnce();
+    resolveSync?.(true);
+
+    await expect(hydration).resolves.toBe(true);
+    expect(syncSpy).toHaveBeenCalledOnce();
+  });
 });

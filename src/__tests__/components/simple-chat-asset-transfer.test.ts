@@ -26,6 +26,7 @@ type BridgeReader = (value: unknown) => Array<{
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
+  entityId?: string;
 }>;
 
 type AssetReference = {
@@ -33,6 +34,7 @@ type AssetReference = {
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
+  entityId?: string;
 };
 
 type Attachment = {
@@ -90,6 +92,53 @@ function canTransferMedia(): CanTransferMedia | undefined {
 }
 
 describe('standalone simple-chat asset transfer', () => {
+  it('deduplicates managed bridge references by placement identity while preserving order', () => {
+    const mergeReferences = (simpleChatTypes as unknown as {
+      mergeSimpleChatCanvasBridgeReferences?: (
+        existing: AssetReference[],
+        incoming: AssetReference[],
+      ) => AssetReference[];
+    }).mergeSimpleChatCanvasBridgeReferences;
+    expect(mergeReferences).toBeTypeOf('function');
+    if (!mergeReferences) return;
+    const first = {
+      url: '/first.png', assetVersionId: 'version-1', placementId: 'placement-1', entityId: 'entity-1',
+    };
+    const replacement = { ...first, url: '/canonical-first.png' };
+    const second = {
+      url: '/second.png', assetVersionId: 'version-2', placementId: 'placement-2', entityId: 'entity-2',
+    };
+
+    expect(mergeReferences([first], [replacement, second, second])).toEqual([
+      replacement,
+      second,
+    ]);
+  });
+
+  it('consumes duplicate managed bridge entries only once', async () => {
+    const duplicate = {
+      url: '/source.png', assetVersionId: 'version-1', placementId: 'placement-1', entityId: 'entity-1',
+    };
+    const resolveReference = vi.fn(async ({ placementId }: { placementId: string }) => ({
+      url: '/canonical.png', assetVersionId: 'version-1', placementId, entityId: 'entity-1',
+    }));
+    const merge = vi.fn();
+    const remove = vi.fn();
+
+    const result = await simpleChatTypes.consumeSimpleChatCanvasBridge({
+      payload: { projectId: 'canvas-a', images: [duplicate, duplicate] },
+      currentProjectId: 'canvas-a',
+      resolveReference,
+      merge,
+      remove,
+    });
+
+    expect(result.references).toHaveLength(1);
+    expect(resolveReference).toHaveBeenCalledTimes(1);
+    expect(merge).toHaveBeenCalledWith([expect.objectContaining({ placementId: 'placement-1' })]);
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -123,6 +172,26 @@ describe('standalone simple-chat asset transfer', () => {
       assetVersionId: 'version-a',
       placementId: 'canvas-placement-a',
     }]);
+  });
+
+  it('keeps the authoritative canvas entity id through both standalone-chat bridge parsers', () => {
+    const parse = bridgeReader();
+    expect(parse).toBeTypeOf('function');
+    if (!parse) return;
+
+    expect(parse({
+      projectId: 'canvas-a',
+      images: [{
+        url: '/managed.png',
+        assetId: 'asset-a',
+        assetVersionId: 'version-a',
+        placementId: 'placement-a',
+        entityId: 'simple-chat:task-a:message-a:0',
+      }],
+    })).toEqual([expect.objectContaining({
+      entityId: 'simple-chat:task-a:message-a:0',
+    })]);
+    expect(chatAreaSource).toMatch(/typeof candidate\.entityId === ['"]string['"]/);
   });
 
   it('persists imageRefs through the existing project storage round trip', () => {

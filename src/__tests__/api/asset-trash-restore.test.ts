@@ -41,6 +41,7 @@ describe('asset restore API', () => {
     mocks.restorePlacement.mockResolvedValue({
       placement: { id: 'placement-a', status: 'active' },
       asset: { id: 'asset-a', status: 'active' },
+      projectRevision: 7,
     });
     const response = await restoreAsset(
       new NextRequest('http://localhost/api/assets/asset-a/restore', {
@@ -54,5 +55,6 @@ describe('asset restore API', () => {
     expect(mocks.restorePlacement).toHaveBeenCalledWith({
       actorUserId: 'owner-a', projectId: 'project-a', placementId: 'placement-a', assetId: 'asset-a',
     });
+    expect(await response.json()).toEqual(expect.objectContaining({ projectRevision: 7 }));
   });
 });

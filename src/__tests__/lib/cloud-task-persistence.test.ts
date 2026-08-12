@@ -582,6 +582,43 @@ describe('cloud-task-persistence', () => {
     expect(updateCloudTask).not.toHaveBeenCalled();
   });
 
+  it('persists non-sensitive provider and model metadata with the completed image terminal', async () => {
+    await recordImageTaskTerminal('remote-task-metadata', {
+      status: 'completed',
+      imageUrl: '/uploads/result.png',
+      usedModel: 'provider-model-id',
+      modelName: 'Provider Model',
+      providerId: 'provider-a',
+      providerName: 'Provider A',
+      creditStatus: 'charged',
+    });
+
+    expect(transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'remote-task-metadata',
+      result: expect.objectContaining({
+        imageUrl: '/uploads/result.png',
+        usedModel: 'provider-model-id',
+        modelName: 'Provider Model',
+        providerId: 'provider-a',
+        providerName: 'Provider A',
+      }),
+    }));
+  });
+
+  it('does not persist a provider base URL with the completed image terminal', async () => {
+    const legacyTerminalInput = {
+      status: 'completed',
+      imageUrl: '/uploads/result.png',
+      providerId: 'provider-a',
+      apiBaseUrl: 'https://user:secret@provider.example/v1?token=secret',
+    } as Parameters<typeof recordImageTaskTerminal>[1] & { apiBaseUrl: string };
+    await recordImageTaskTerminal('remote-task-private-provider-url', legacyTerminalInput);
+
+    const terminalInput = transitionTask.mock.calls.at(-1)?.[0];
+    expect(JSON.stringify(terminalInput)).not.toContain('apiBaseUrl');
+    expect(JSON.stringify(terminalInput)).not.toContain('secret');
+  });
+
   it.each([
     ['video', () => recordVideoTaskTerminal('video-task-project', {
       status: 'completed',

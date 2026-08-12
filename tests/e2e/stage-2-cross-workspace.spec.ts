@@ -1,5 +1,7 @@
 import {
   apiJson,
+  assertSingleNewProjectPlacement,
+  canvasImageCard,
   canvasImageByUrl,
   cleanupNewProjectPlacements,
   ensurePlacementRestored,
@@ -21,12 +23,49 @@ async function recordJsonResponse(response: import('@playwright/test').Response,
   return payload;
 }
 
-function expectTransfer(payload: Record<string, unknown>): { assetId: string; assetVersionId: string; placementId: string; url: string } {
+function expectTransfer(payload: Record<string, unknown>): { assetId: string; assetVersionId: string; placementId: string; entityId: string; url: string } {
   expect(typeof payload.assetId === 'string' && payload.assetId.length > 0).toBe(true);
   expect(typeof payload.assetVersionId === 'string' && payload.assetVersionId.length > 0).toBe(true);
   expect(typeof payload.placementId === 'string' && payload.placementId.length > 0).toBe(true);
+  expect(typeof payload.entityId === 'string' && payload.entityId.length > 0).toBe(true);
   expect(typeof payload.url === 'string' && payload.url.length > 0).toBe(true);
-  return payload as { assetId: string; assetVersionId: string; placementId: string; url: string };
+  return payload as { assetId: string; assetVersionId: string; placementId: string; entityId: string; url: string };
+}
+
+function observeProjectGraphSaves(
+  page: import('@playwright/test').Page,
+  projectId: string,
+): {
+  waitFor(expected: { entityId: string; assetVersionId: string; placementId: string }, timeout?: number): Promise<void>;
+  dispose(): void;
+} {
+  const matches = new Set<string>();
+  const keyOf = (value: { entityId: string; assetVersionId: string; placementId: string }) => (
+    `${value.entityId}:${value.assetVersionId}:${value.placementId}`
+  );
+  const handler = (response: import('@playwright/test').Response) => {
+    void (async () => {
+      if (!response.url().includes('/api/user-data/sync') || response.request().method() !== 'POST' || !response.ok()) return;
+      const request = response.request().postDataJSON() as Record<string, unknown> | null;
+      if (request?.key !== 'projects') return;
+      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+      const updates = payload?.assetGraphUpdates as Record<string, unknown> | undefined;
+      const projectUpdates = updates?.[projectId] as Record<string, unknown> | undefined;
+      for (const [entityId, rawUpdate] of Object.entries(projectUpdates || {})) {
+        const update = rawUpdate as Record<string, unknown>;
+        if (typeof update.versionId === 'string' && typeof update.placementId === 'string') {
+          matches.add(keyOf({ entityId, assetVersionId: update.versionId, placementId: update.placementId }));
+        }
+      }
+    })();
+  };
+  page.on('response', handler);
+  return {
+    async waitFor(expected, timeout = 30_000) {
+      await expect.poll(() => matches.has(keyOf(expected)), { timeout }).toBe(true);
+    },
+    dispose() { page.off('response', handler); },
+  };
 }
 
 test.use({ trace: 'off', video: 'on' });
@@ -42,11 +81,14 @@ test.describe('Stage 2 cross-workspace flows', () => {
     expect(originalProject).toBeTruthy();
     const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, projectId);
     await openCanvasProject(page, projectId);
+    const expandPanel = page.getByRole('button', { name: '展开面板', exact: true });
+    if (await expandPanel.isVisible().catch(() => false)) await expandPanel.click();
     await page.getByText('AI聊天', { exact: true }).click();
     const sourceImage = await imageByUrl(page, 'img[src]', sourceUrl);
     const addButton = sourceImage.locator('xpath=ancestor::div[.//button[@aria-label="添加到画布"]][1]').getByRole('button', { name: '添加到画布', exact: true });
     await expect(addButton).toBeVisible({ timeout: 20_000 });
     const placementIds = new Set<string>();
+    const saves = observeProjectGraphSaves(page, projectId);
     try {
       const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
       await addButton.click();
@@ -54,7 +96,10 @@ test.describe('Stage 2 cross-workspace flows', () => {
       if (typeof payload.placementId === 'string') placementIds.add(payload.placementId);
       const created = expectTransfer(payload);
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible();
+      await saves.waitFor(created);
+      await assertSingleNewProjectPlacement(placementBaseline, projectId, created);
     } finally {
+      saves.dispose();
       await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds, placementBaseline);
     }
   });
@@ -71,6 +116,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const execute = page.getByRole('button', { name: '执行工作流', exact: true });
     await expect(execute).toBeVisible({ timeout: 20_000 });
     const placementIds = new Set<string>();
+    const saves = observeProjectGraphSaves(page, projectId);
     try {
       const started = page.waitForResponse(response => response.url().includes('/api/workflow/execute') && response.request().method() === 'POST');
       const outputTransfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST', { timeout: 180_000 });
@@ -84,7 +130,10 @@ test.describe('Stage 2 cross-workspace flows', () => {
       await expect(back).toBeVisible();
       await back.click();
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible();
+      await saves.waitFor(created, 180_000);
+      await assertSingleNewProjectPlacement(placementBaseline, projectId, created);
     } finally {
+      saves.dispose();
       await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds, placementBaseline);
     }
   });
@@ -100,10 +149,11 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, targetProjectId);
     await page.goto(`/simple-chat?projectId=${encodeURIComponent(chatProjectId)}`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('combobox', { name: '目标画布项目' }).selectOption(targetProjectId);
-    const sourceImage = await imageByUrl(page, 'main img[src]', sourceUrl);
+    const sourceImage = await imageByUrl(page, 'img[src]', sourceUrl);
     const addButton = sourceImage.locator('xpath=ancestor::div[.//button[@title="添加到画布"]][1]').getByTitle('添加到画布');
     await expect(addButton).toBeVisible({ timeout: 20_000 });
     const placementIds = new Set<string>();
+    const saves = observeProjectGraphSaves(page, targetProjectId);
     try {
       const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
       await addButton.click();
@@ -112,7 +162,10 @@ test.describe('Stage 2 cross-workspace flows', () => {
       const created = expectTransfer(payload);
       await openCanvasProject(page, targetProjectId);
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible({ timeout: 20_000 });
+      await saves.waitFor(created);
+      await assertSingleNewProjectPlacement(placementBaseline, targetProjectId, created);
     } finally {
+      saves.dispose();
       await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds, placementBaseline);
     }
   });
@@ -129,7 +182,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
     await openCanvasProject(page, projectId);
     const image = await canvasImageByUrl(page, String(reference.url));
     await expect(image).toBeVisible({ timeout: 20_000 });
-    await image.click();
+    await canvasImageCard(image).click();
     try {
       const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
       const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
@@ -150,7 +203,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
       expect(missing.status()).toBe(404);
       expect(missingPayload.error).toBe('ASSET_NOT_FOUND');
       await page.goto(`/simple-chat?projectId=${encodeURIComponent(chatProjectId)}`, { waitUntil: 'domcontentloaded' });
-      await expect(await imageByUrl(page, 'main img[src]', String(reference.url))).toBeVisible({ timeout: 20_000 });
+      await expect(await imageByUrl(page, 'img[src]', String(reference.url))).toBeVisible({ timeout: 20_000 });
       await openCanvasProject(page, projectId);
       await page.getByTitle('节点模式').first().click();
       await expect(await imageByUrl(page, 'img[src]', String(reference.url))).toBeVisible({ timeout: 20_000 });

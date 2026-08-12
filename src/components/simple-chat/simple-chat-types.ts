@@ -115,6 +115,14 @@ export interface ChatAttachment {
   summary?: string;
 }
 
+export function selectInitialSimpleChatProject<T extends { id: string; tasks: Array<{ id: string }> }>(
+  projects: T[],
+  requestedProjectId: string | null | undefined,
+): { projectId: string; taskId: string | null } | null {
+  const project = projects.find(candidate => candidate.id === requestedProjectId) || projects[0];
+  return project ? { projectId: project.id, taskId: project.tasks[0]?.id ?? null } : null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -130,6 +138,7 @@ function toWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | nu
     ...(typeof value.assetId === 'string' ? { assetId: value.assetId } : {}),
     ...(typeof value.assetVersionId === 'string' ? { assetVersionId: value.assetVersionId } : {}),
     ...(typeof value.placementId === 'string' ? { placementId: value.placementId } : {}),
+    ...(typeof value.entityId === 'string' ? { entityId: value.entityId } : {}),
   };
 }
 
@@ -142,6 +151,24 @@ export function parseSimpleChatCanvasBridgePayload(value: unknown): WorkspaceAss
   return images
     .map(toWorkspaceAssetReference)
     .filter((reference): reference is WorkspaceAssetReference => reference !== null);
+}
+
+function bridgeReferenceIdentity(reference: WorkspaceAssetReference): string {
+  if (reference.placementId) return `placement:${reference.placementId}`;
+  if (reference.entityId) return `entity:${reference.entityId}`;
+  if (reference.assetVersionId) return `version:${reference.assetVersionId}`;
+  return `url:${reference.url}`;
+}
+
+export function mergeSimpleChatCanvasBridgeReferences(
+  existing: WorkspaceAssetReference[],
+  incoming: WorkspaceAssetReference[],
+): WorkspaceAssetReference[] {
+  const merged = new Map<string, WorkspaceAssetReference>();
+  for (const reference of [...existing, ...incoming]) {
+    merged.set(bridgeReferenceIdentity(reference), reference);
+  }
+  return [...merged.values()];
 }
 
 export function hasManagedAssetIdentity(
@@ -310,7 +337,11 @@ export async function consumeSimpleChatCanvasBridge(input: {
   }
 
   const references: WorkspaceAssetReference[] = [];
-  for (const candidate of parseSimpleChatCanvasBridgePayload(input.payload)) {
+  const candidates = mergeSimpleChatCanvasBridgeReferences(
+    [],
+    parseSimpleChatCanvasBridgePayload(input.payload),
+  );
+  for (const candidate of candidates) {
     if (hasManagedAssetIdentity(candidate)) {
       try {
         const canonical = await input.resolveReference({
@@ -322,6 +353,7 @@ export async function consumeSimpleChatCanvasBridge(input: {
           !hasManagedAssetIdentity(canonical)
           || canonical.assetVersionId !== candidate.assetVersionId
           || canonical.placementId !== candidate.placementId
+          || (candidate.entityId && canonical.entityId !== candidate.entityId)
         ) {
           throw bridgeReferenceError('ASSET_REFERENCE_INVALID');
         }
@@ -336,9 +368,10 @@ export async function consumeSimpleChatCanvasBridge(input: {
     references.push({ url: candidate.url });
   }
 
-  await input.merge(references);
+  const uniqueReferences = mergeSimpleChatCanvasBridgeReferences([], references);
+  await input.merge(uniqueReferences);
   input.remove();
-  return { status: 'consumed', references };
+  return { status: 'consumed', references: uniqueReferences };
 }
 
 export interface ChatArtifact {
