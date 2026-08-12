@@ -48,7 +48,7 @@ test.describe('Stage 2 asset lifecycle', () => {
     const legacyImages = project?.canvasImages as Array<Record<string, unknown>> | undefined;
     expect(legacyImages?.length).toBeGreaterThan(0);
     expect(legacyImages?.every(item => !item.assetVersionId && !item.placementId), 'COW fixture was already consumed').toBe(true);
-    const placementBaseline = await stage2PlacementBaseline(projectId);
+    const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, projectId);
     await openCanvasProject(page, projectId);
     const image = page.locator('[data-canvas-viewport] img').first().locator('..');
     await expect(image).toBeVisible({ timeout: 20_000 });
@@ -81,7 +81,7 @@ test.describe('Stage 2 asset lifecycle', () => {
     const snapshot = await readProjects(page, stage2Evidence);
     const originalProject = snapshot.projects.find(project => project.id === projectId);
     expect(originalProject).toBeTruthy();
-    const placementBaseline = await stage2PlacementBaseline(projectId);
+    const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, projectId);
     await openCanvasProject(page, projectId);
     const images = page.locator('[data-canvas-viewport] img');
     const before = await images.count();
@@ -112,7 +112,7 @@ test.describe('Stage 2 asset lifecycle', () => {
     const placementId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LIFECYCLE_PLACEMENT_IDS');
     await loginRealUser(page, stage2Evidence);
     const before = await apiJson(page, stage2Evidence, 'GET', `/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`);
-    expect(before.url).toEqual(expect.any(String));
+    expect(typeof before.url === 'string' && before.url.length > 0).toBe(true);
     await openCanvasProject(page, projectId);
     const image = await canvasImageByUrl(page, String(before.url));
     await image.click();
@@ -152,7 +152,10 @@ test.describe('Stage 2 asset lifecycle', () => {
     const filename = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_MISSING_FILENAMES');
     await loginRealUser(page, stage2Evidence);
     await openCanvasProject(page, projectId);
-    const missingMedia = page.locator('[data-canvas-missing-media]').filter({ hasText: filename });
+    const exactFilename = new RegExp(`^${filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+    const missingMedia = page.locator('[data-canvas-missing-media]').filter({
+      has: page.locator('span').filter({ hasText: exactFilename }),
+    });
     await expect(missingMedia).toHaveCount(1);
     const recovery = missingMedia.getByRole('button', { name: '恢复', exact: true });
     const retry = missingMedia.getByRole('button', { name: '重试', exact: true });
@@ -176,8 +179,9 @@ test.describe('Stage 2 asset lifecycle', () => {
     const before = await images.evaluateAll(nodes => nodes.map(node => ({
       src: (node as HTMLImageElement).getAttribute('src'),
       style: node.parentElement?.getAttribute('style'),
-    })));
+    }))); 
     expect(before.length).toBeGreaterThan(0);
+    expect(identityBefore.length).toBe(before.length);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-canvas-viewport]')).toBeVisible({ timeout: 20_000 });
     await expect.poll(() => images.evaluateAll(nodes => nodes.map(node => ({

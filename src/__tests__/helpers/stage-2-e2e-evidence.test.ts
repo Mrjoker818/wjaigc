@@ -6,6 +6,7 @@ import {
   requireNonEmptyStage2Value,
   stage2PlacementDiff,
   sanitizeStage2Url,
+  stage2DatabaseConnectionString,
   stage2ProjectMatrixValue,
   validateStage2ProjectIsolation,
 } from '../../../tests/helpers/stage-2-e2e';
@@ -62,6 +63,17 @@ describe('Stage 2 E2E evidence safety', () => {
     expect(requireNonEmptyStage2Value(' /api/serve-upload/image.png ', 'source URL')).toBe('/api/serve-upload/image.png');
     expect(() => requireNonEmptyStage2Value('', 'source URL')).toThrow(/source URL must be non-empty/);
     expect(() => requireNonEmptyStage2Value('   ', 'missing-media filename')).toThrow(/missing-media filename must be non-empty/);
+  });
+
+  it('requires an explicit Stage 2 database connection instead of ambient app credentials', () => {
+    expect(stage2DatabaseConnectionString({
+      E2E_STAGE2_DATABASE_URL: 'postgresql://stage2:test@example.test/wujie',
+      DATABASE_URL: 'postgresql://wrong:test@example.test/wrong',
+      PGDATABASE_URL: 'postgresql://also-wrong:test@example.test/wrong',
+    })).toBe('postgresql://stage2:test@example.test/wujie');
+    expect(() => stage2DatabaseConnectionString({
+      DATABASE_URL: 'postgresql://ambient:test@example.test/wrong',
+    })).toThrow(/E2E_STAGE2_DATABASE_URL/);
   });
 
   it('redacts sensitive URL parameters beyond token and key aliases', () => {

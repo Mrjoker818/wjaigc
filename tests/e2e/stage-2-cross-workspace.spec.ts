@@ -40,7 +40,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const snapshot = await readProjects(page, stage2Evidence);
     const originalProject = snapshot.projects.find(project => project.id === projectId);
     expect(originalProject).toBeTruthy();
-    const placementBaseline = await stage2PlacementBaseline(projectId);
+    const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, projectId);
     await openCanvasProject(page, projectId);
     await page.getByText('AI聊天', { exact: true }).click();
     const sourceImage = await imageByUrl(page, 'img[src]', sourceUrl);
@@ -65,7 +65,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const snapshot = await readProjects(page, stage2Evidence);
     const originalProject = snapshot.projects.find(project => project.id === projectId);
     expect(originalProject).toBeTruthy();
-    const placementBaseline = await stage2PlacementBaseline(projectId);
+    const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, projectId);
     await openCanvasProject(page, projectId);
     await page.getByTitle('节点模式').first().click();
     const execute = page.getByRole('button', { name: '执行工作流', exact: true });
@@ -97,7 +97,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const snapshot = await readProjects(page, stage2Evidence);
     const originalProject = snapshot.projects.find(project => project.id === targetProjectId);
     expect(originalProject).toBeTruthy();
-    const placementBaseline = await stage2PlacementBaseline(targetProjectId);
+    const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, targetProjectId);
     await page.goto(`/simple-chat?projectId=${encodeURIComponent(chatProjectId)}`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('combobox', { name: '目标画布项目' }).selectOption(targetProjectId);
     const sourceImage = await imageByUrl(page, 'main img[src]', sourceUrl);
@@ -125,7 +125,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const placementId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_SHARED_PLACEMENT_IDS');
     await loginRealUser(page, stage2Evidence);
     const reference = await apiJson(page, stage2Evidence, 'GET', `/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`);
-    expect(reference.url).toEqual(expect.any(String));
+    expect(typeof reference.url === 'string' && reference.url.length > 0).toBe(true);
     await openCanvasProject(page, projectId);
     const image = await canvasImageByUrl(page, String(reference.url));
     await expect(image).toBeVisible({ timeout: 20_000 });

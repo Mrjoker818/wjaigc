@@ -411,7 +411,7 @@ export async function removeControlledProject(
   page: Page,
   evidence: Stage2Evidence,
   projectId: string,
-  databaseBaseline: string[] = [],
+  databaseBaseline: Stage2PlacementBaseline,
 ): Promise<void> {
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -432,7 +432,10 @@ export async function removeControlledProject(
       }
     }
   } finally {
-    const created = stage2PlacementDiff(databaseBaseline, await readStage2PlacementRows(projectId));
+    const created = stage2PlacementDiff(
+      databaseBaseline.placementIds,
+      await readStage2PlacementRows(databaseBaseline.ownerId, projectId),
+    );
     for (const placementId of created) {
       const response = await page.request.delete(`/api/assets/placements/${encodeURIComponent(placementId)}?projectId=${encodeURIComponent(projectId)}`);
       const payload = await response.json().catch(() => ({}));
@@ -442,7 +445,10 @@ export async function removeControlledProject(
         expect(response.ok(), `COW cleanup placement ${placementId} returned HTTP ${response.status()}`).toBeTruthy();
       }
     }
-    expect(stage2PlacementDiff(databaseBaseline, await readStage2PlacementRows(projectId))).toEqual([]);
+    expect(stage2PlacementDiff(
+      databaseBaseline.placementIds,
+      await readStage2PlacementRows(databaseBaseline.ownerId, projectId),
+    )).toEqual([]);
   }
   const after = await readProjects(page, evidence);
   expect(after.projects.some(project => project.id === projectId)).toBe(false);
@@ -471,23 +477,40 @@ interface Stage2PlacementRow {
   status: string;
 }
 
+export interface Stage2PlacementBaseline {
+  ownerId: string;
+  placementIds: string[];
+}
+
 export function stage2PlacementDiff(before: string[], after: Stage2PlacementRow[]): string[] {
   const baseline = new Set(before);
   return after.filter(row => row.status === 'active' && !baseline.has(row.id)).map(row => row.id);
 }
 
-async function readStage2PlacementRows(projectId: string): Promise<Stage2PlacementRow[]> {
-  const connectionString = process.env.PGDATABASE_URL || process.env.DATABASE_URL;
-  if (!connectionString) throw new Error('BLOCKED: PGDATABASE_URL or DATABASE_URL is required for Stage 2 placement cleanup');
+export function stage2DatabaseConnectionString(environment: Record<string, string | undefined>): string {
+  const connectionString = environment.E2E_STAGE2_DATABASE_URL?.trim();
+  if (!connectionString) {
+    throw new Error('BLOCKED: E2E_STAGE2_DATABASE_URL must target the same database as the Stage 2 E2E deployment');
+  }
+  return connectionString;
+}
+
+async function readStage2PlacementRows(ownerId: string, projectId: string): Promise<Stage2PlacementRow[]> {
+  const connectionString = stage2DatabaseConnectionString(process.env);
   const client = new Client({
     connectionString: normalizePostgresConnectionString(connectionString),
     connectionTimeoutMillis: 10_000,
   });
   await client.connect();
   try {
+    const project = await client.query<{ id: string }>(
+      `SELECT id FROM wujie_projects WHERE id = $1 AND owner_id = $2`,
+      [projectId, ownerId],
+    );
+    expect(project.rows).toEqual([{ id: projectId }]);
     const result = await client.query<{ id: string; status: string }>(
-      `SELECT id, status FROM wujie_workspace_placements WHERE project_id = $1 ORDER BY id ASC`,
-      [projectId],
+      `SELECT id, status FROM wujie_workspace_placements WHERE owner_id = $1 AND project_id = $2 ORDER BY id ASC`,
+      [ownerId, projectId],
     );
     return result.rows;
   } finally {
@@ -495,8 +518,20 @@ async function readStage2PlacementRows(projectId: string): Promise<Stage2Placeme
   }
 }
 
-export async function stage2PlacementBaseline(projectId: string): Promise<string[]> {
-  return (await readStage2PlacementRows(projectId)).filter(row => row.status === 'active').map(row => row.id);
+export async function stage2PlacementBaseline(
+  page: Page,
+  evidence: Stage2Evidence,
+  projectId: string,
+): Promise<Stage2PlacementBaseline> {
+  const session = await apiJson(page, evidence, 'GET', '/api/auth/me');
+  const user = session.user as Record<string, unknown> | undefined;
+  const ownerId = requireNonEmptyStage2Value(typeof user?.id === 'string' ? user.id : '', 'authenticated Stage 2 owner id');
+  return {
+    ownerId,
+    placementIds: (await readStage2PlacementRows(ownerId, projectId))
+      .filter(row => row.status === 'active')
+      .map(row => row.id),
+  };
 }
 
 export async function cleanupNewProjectPlacements(
@@ -504,7 +539,7 @@ export async function cleanupNewProjectPlacements(
   evidence: Stage2Evidence,
   originalProject: Record<string, unknown>,
   knownPlacementIds: Iterable<string> = [],
-  databaseBaseline: string[] = [],
+  databaseBaseline: Stage2PlacementBaseline,
 ): Promise<void> {
   const projectId = String(originalProject.id || '');
   const originalPlacementIds = new Set(canvasProjectPlacements(originalProject).map(image => image.placementId));
@@ -512,7 +547,10 @@ export async function cleanupNewProjectPlacements(
   let discoveryError: unknown;
   try {
     try {
-      for (const placementId of stage2PlacementDiff(databaseBaseline, await readStage2PlacementRows(projectId))) {
+      for (const placementId of stage2PlacementDiff(
+        databaseBaseline.placementIds,
+        await readStage2PlacementRows(databaseBaseline.ownerId, projectId),
+      )) {
         created.add(placementId);
       }
     } catch (error) {
@@ -538,7 +576,10 @@ export async function cleanupNewProjectPlacements(
       }
     }
     if (!discoveryError) {
-      expect(stage2PlacementDiff(databaseBaseline, await readStage2PlacementRows(projectId))).toEqual([]);
+      expect(stage2PlacementDiff(
+        databaseBaseline.placementIds,
+        await readStage2PlacementRows(databaseBaseline.ownerId, projectId),
+      )).toEqual([]);
     }
     if (discoveryError) throw discoveryError;
   } finally {

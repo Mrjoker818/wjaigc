@@ -35,6 +35,7 @@ Account and file inputs:
 - `E2E_BASE_URL`
 - `E2E_TEST_USERNAME`
 - `E2E_TEST_PASSWORD`
+- `E2E_STAGE2_DATABASE_URL`: the exact database used by `E2E_BASE_URL`; the suite deliberately ignores ambient application database variables.
 - `E2E_STAGE2_RUN_ID`
 - `E2E_STAGE2_UPLOAD_FIXTURE`
 
