@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import JSZip from 'jszip';
 
 import { writeEvidenceManifest, type EvidenceManifestInput } from './evidence-manifest';
@@ -15,18 +17,20 @@ interface EvidenceEntry {
   url?: string;
 }
 
-interface Stage2Evidence {
+export interface Stage2Evidence {
   console: EvidenceEntry[];
   network: EvidenceEntry[];
   requestIds: Set<string>;
   taskIds: Set<string>;
   recordPayload(payload: unknown): void;
+  recordApi(method: string, url: string, status: number, payload?: unknown, requestId?: string): void;
 }
 
-const SECRET_PATTERN = /(api[-_]?key|access[-_]?token|password)(["'=:\s]+)[^\s"'&,}]+/gi;
+const SECRET_PATTERN = /((?:api[-_]?key|access[-_]?token|refresh[-_]?token|session[-_]?token|client[-_]?secret|password|credential|secret))(["'=:\s]+)(?:"[^"]*"|'[^']*'|[^\r\n,}]+)/gi;
 
 export function redactStage2Evidence(value: string): string {
   return value
+    .replace(/("[^"]*(?:token|secret|password|credential)[^"]*"\s*:\s*")[^"]*/gi, '$1[REDACTED]')
     .replace(/("name"\s*:\s*"(?:cookie|set-cookie|authorization)"\s*,\s*"value"\s*:\s*")[^"]*/gi, '$1[REDACTED]')
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
     .replace(/(authorization)(["'=:\s]+)(?!Bearer\s)[^\s"'&,}]+/gi, '$1$2[REDACTED]')
@@ -77,6 +81,14 @@ async function sanitizePlaywrightTrace(sourcePath: string, destinationPath: stri
   await writeFile(destinationPath, await archive.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
 }
 
+async function sanitizeAndRemovePlaywrightTrace(sourcePath: string, destinationPath: string): Promise<void> {
+  try {
+    await sanitizePlaywrightTrace(sourcePath, destinationPath);
+  } finally {
+    await unlink(sourcePath).catch(() => undefined);
+  }
+}
+
 function collectIds(value: unknown, evidence: Stage2Evidence): void {
   if (!value || typeof value !== 'object') return;
   if (Array.isArray(value)) {
@@ -84,8 +96,8 @@ function collectIds(value: unknown, evidence: Stage2Evidence): void {
     return;
   }
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof item === 'string' && /requestId/i.test(key)) evidence.requestIds.add(item);
-    if (typeof item === 'string' && /taskId/i.test(key)) evidence.taskIds.add(item);
+    if (typeof item === 'string' && /request_?id/i.test(key)) evidence.requestIds.add(item);
+    if (typeof item === 'string' && /(?:task|execution)_?id/i.test(key)) evidence.taskIds.add(item);
     if (item && typeof item === 'object') collectIds(item, evidence);
   }
 }
@@ -111,6 +123,11 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
       requestIds: new Set<string>(),
       taskIds: new Set<string>(),
       recordPayload(payload) { collectIds(payload, evidence); },
+      recordApi(method, url, status, payload, requestId) {
+        evidence.network.push({ method, status, url: sanitizeStage2Url(url) });
+        if (payload !== undefined) collectIds(payload, evidence);
+        if (requestId) evidence.requestIds.add(requestId);
+      },
     };
     page.on('console', message => {
       if (message.type() === 'error' || message.type() === 'warning') {
@@ -129,13 +146,16 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
       if (requestId) evidence.requestIds.add(requestId);
     });
 
-    const rawTracePath = testInfo.outputPath('stage-2-raw-trace.zip');
+    const rawTracePath = join(tmpdir(), `wujie-stage-2-${randomUUID()}.zip`);
     await page.context().tracing.start({ screenshots: true, snapshots: true, sources: false });
     try {
       await activateFixture(evidence);
     } finally {
       const capturedAt = new Date().toISOString();
-      const status = testInfo.status === 'passed' ? 'completed' : testInfo.status === 'skipped' ? 'blocked' : 'failed';
+      const missingRequestIds = testInfo.status === 'passed' && evidence.requestIds.size === 0;
+      const status = missingRequestIds || testInfo.status !== 'passed'
+        ? testInfo.status === 'skipped' ? 'blocked' : 'failed'
+        : 'completed';
       const featureId = `stage-2-${testInfo.titlePath.slice(1).join('-')}`;
       const artifactPaths = {
         screenshot: 'screenshot.png',
@@ -148,7 +168,7 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
       const commit = gitCommit();
       const manifestInput: EvidenceManifestInput = {
         commit,
-        deploymentUrl: String(testInfo.project.use.baseURL || process.env.E2E_BASE_URL || 'http://127.0.0.1:5000'),
+        deploymentUrl: sanitizeStage2Url(String(testInfo.project.use.baseURL || process.env.E2E_BASE_URL || 'http://127.0.0.1:5000')),
         browser: testInfo.project.name,
         viewport: testInfo.project.use.viewport || { width: 1280, height: 720 },
         capturedAt,
@@ -159,12 +179,21 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
       };
       const directory = stage2EvidenceDirectory(commit, featureId, testInfo.project.name, capturedAt);
       await mkdir(directory, { recursive: true });
-      await page.screenshot({ path: join(directory, artifactPaths.screenshot), fullPage: true });
-      await page.context().tracing.stop({ path: rawTracePath });
-      await sanitizePlaywrightTrace(rawTracePath, join(directory, artifactPaths.trace));
-      await unlink(rawTracePath);
+      let screenshotError: unknown;
+      try {
+        await page.screenshot({ path: join(directory, artifactPaths.screenshot), fullPage: true });
+      } catch (error) {
+        screenshotError = error;
+      }
+      try {
+        await page.context().tracing.stop({ path: rawTracePath });
+        await sanitizeAndRemovePlaywrightTrace(rawTracePath, join(directory, artifactPaths.trace));
+      } finally {
+        await unlink(rawTracePath).catch(() => undefined);
+      }
       const video = page.video();
       await page.close();
+      if (screenshotError) throw screenshotError;
       if (!video) throw new Error('Stage 2 evidence video was not created');
       await copyFile(await video.path(), join(directory, artifactPaths.video));
       await Promise.all([
@@ -174,6 +203,7 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
       ]);
       const manifest = await writeEvidenceManifest(manifestInput);
       await testInfo.attach('stage-2-evidence-manifest', { path: manifest.manifestPath, contentType: 'application/json' });
+      if (missingRequestIds) throw new Error('Stage 2 evidence did not capture any requestId');
     }
   }, { auto: true }],
 });
@@ -202,27 +232,150 @@ export function stage2ProjectMatrixValue(raw: string | undefined, projectName: s
   }
 }
 
+export function validateStage2ProjectIsolation(environment: Record<string, string | undefined>): void {
+  const runId = environment.E2E_STAGE2_RUN_ID?.trim() ?? '';
+  const owners = new Map<string, string>();
+  for (const [envName, raw] of Object.entries(environment)) {
+    if (!envName.endsWith('_PROJECT_IDS') || !raw) continue;
+    let matrix: unknown;
+    try {
+      matrix = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!matrix || typeof matrix !== 'object' || Array.isArray(matrix)) continue;
+    for (const [browser, projectId] of Object.entries(matrix as Record<string, unknown>)) {
+      if (typeof projectId !== 'string' || !projectId.trim()) continue;
+      if (!runId || !projectId.includes(runId)) {
+        throw new Error(`${envName} project ${projectId} must include Stage 2 run id ${runId || '<missing>'}`);
+      }
+      const key = `${browser}:${projectId.trim()}`;
+      const previous = owners.get(key);
+      if (previous) {
+        throw new Error(`${envName} reuses controlled project ${projectId} already assigned to ${previous}`);
+      }
+      owners.set(key, envName);
+    }
+  }
+}
+
 export function requireStage2ProjectValue(testProjectName: string, envName: string): string {
   const value = stage2ProjectMatrixValue(process.env[envName], testProjectName);
   test.skip(!value, `BLOCKED: ${envName} must contain a unique value for ${testProjectName}`);
   return value!;
 }
 
-export async function loginRealUser(page: Page): Promise<void> {
+export async function loginRealUser(page: Page, evidence?: Stage2Evidence): Promise<void> {
   const env = requireStage2Env('E2E_TEST_USERNAME', 'E2E_TEST_PASSWORD');
   await page.context().clearCookies();
   const loginResponse = await page.request.post('/api/auth/login', {
     data: { name: env.E2E_TEST_USERNAME, password: env.E2E_TEST_PASSWORD, productType: 'canvas' },
   });
+  if (evidence) {
+    const payload = await loginResponse.json().catch(() => ({}));
+    const headers = loginResponse.headers();
+    evidence.recordApi('POST', '/api/auth/login', loginResponse.status(), payload, headers['x-request-id'] || headers['request-id']);
+  }
   expect(loginResponse.ok()).toBeTruthy();
   await page.goto('/?loginMode=canvas', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: '我的项目', exact: true })).toBeVisible({ timeout: 20_000 });
 }
 
-export async function readProjects(page: Page): Promise<{ projects: Array<Record<string, unknown>>; revision: number }> {
-  const response = await page.request.get('/api/user-data/sync?key=projects');
-  expect(response.ok()).toBeTruthy();
-  const body = await response.json() as { success?: boolean; value?: Array<Record<string, unknown>>; projectRevision?: number };
+export async function apiJson(
+  page: Page,
+  evidence: Stage2Evidence,
+  method: 'GET' | 'POST' | 'DELETE',
+  url: string,
+  data?: unknown,
+): Promise<Record<string, unknown>> {
+  const response = method === 'GET'
+    ? await page.request.get(url)
+    : method === 'DELETE'
+      ? await page.request.delete(url)
+      : await page.request.post(url, { data });
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  const headers = response.headers();
+  evidence.recordApi(method, url, response.status(), payload, headers['x-request-id'] || headers['request-id']);
+  expect(response.ok(), `${url} returned HTTP ${response.status()}`).toBeTruthy();
+  return payload;
+}
+
+export async function canvasImageByUrl(page: Page, expectedUrl: string): Promise<Locator> {
+  return imageByUrl(page, '[data-canvas-viewport] img[src]', expectedUrl);
+}
+
+export async function imageByUrl(page: Page, selector: string, expectedUrl: string): Promise<Locator> {
+  const images = page.locator(selector);
+  await expect.poll(async () => images.evaluateAll((nodes, url) => nodes.findIndex(node => {
+    const element = node as HTMLImageElement;
+    return element.getAttribute('src') === url || element.src === url || element.src.endsWith(url);
+  }), expectedUrl), { timeout: 30_000 }).toBeGreaterThanOrEqual(0);
+  const index = await images.evaluateAll((nodes, url) => nodes.findIndex(node => {
+    const element = node as HTMLImageElement;
+    return element.getAttribute('src') === url || element.src === url || element.src.endsWith(url);
+  }), expectedUrl);
+  return images.nth(index);
+}
+
+export async function deleteCanvasPlacementFromUi(
+  page: Page,
+  evidence: Stage2Evidence,
+  placementId: string,
+  url: string,
+): Promise<void> {
+  const image = await canvasImageByUrl(page, url);
+  await image.click();
+  const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
+  const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
+  await page.getByTestId('selected-image-delete').click();
+  const deleteResponse = await deleted;
+  const deletePayload = await deleteResponse.json().catch(() => ({}));
+  evidence.recordApi('DELETE', deleteResponse.url(), deleteResponse.status(), deletePayload);
+  expect(deleteResponse.ok()).toBeTruthy();
+  const saveResponse = await saved;
+  const savePayload = await saveResponse.json().catch(() => ({}));
+  evidence.recordApi('POST', saveResponse.url(), saveResponse.status(), savePayload);
+  expect(saveResponse.ok()).toBeTruthy();
+  const images = page.locator('[data-canvas-viewport] img[src]');
+  await expect.poll(() => images.evaluateAll((nodes, expectedUrl) => nodes.some(node => {
+    const element = node as HTMLImageElement;
+    return element.getAttribute('src') === expectedUrl || element.src === expectedUrl || element.src.endsWith(expectedUrl);
+  }), url)).toBe(false);
+}
+
+export async function restoreProjectSnapshot(
+  page: Page,
+  evidence: Stage2Evidence,
+  originalProject: Record<string, unknown>,
+): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const current = await readProjects(page, evidence);
+    const projectId = String(originalProject.id || '');
+    const exists = current.projects.some(project => project.id === projectId);
+    const projects = exists
+      ? current.projects.map(project => project.id === projectId ? originalProject : project)
+      : [...current.projects, originalProject];
+    const response = await page.request.post('/api/user-data/sync', {
+      data: { key: 'projects', value: projects, projectRevision: current.revision },
+    });
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const headers = response.headers();
+    evidence.recordApi('POST', '/api/user-data/sync', response.status(), payload, headers['x-request-id'] || headers['request-id']);
+    if (response.ok()) return;
+    if (response.status() !== 409 || attempt === 1) {
+      expect(response.ok(), `Project snapshot restore returned HTTP ${response.status()}`).toBeTruthy();
+    }
+  }
+}
+
+export async function readProjects(page: Page, evidence?: Stage2Evidence): Promise<{ projects: Array<Record<string, unknown>>; revision: number }> {
+  const body = evidence
+    ? await apiJson(page, evidence, 'GET', '/api/user-data/sync?key=projects') as { success?: boolean; value?: Array<Record<string, unknown>>; projectRevision?: number }
+    : await (async () => {
+      const response = await page.request.get('/api/user-data/sync?key=projects');
+      expect(response.ok()).toBeTruthy();
+      return response.json() as Promise<{ success?: boolean; value?: Array<Record<string, unknown>>; projectRevision?: number }>;
+    })();
   expect(body.success).toBe(true);
   return { projects: body.value ?? [], revision: body.projectRevision ?? 0 };
 }
@@ -232,7 +385,8 @@ export async function openCanvasProject(page: Page, projectId: string): Promise<
   await expect(page.locator('[data-canvas-viewport]')).toBeVisible({ timeout: 20_000 });
 }
 
-export async function postJson(page: Page, url: string, data: unknown): Promise<Record<string, unknown>> {
+export async function postJson(page: Page, url: string, data: unknown, evidence?: Stage2Evidence): Promise<Record<string, unknown>> {
+  if (evidence) return apiJson(page, evidence, 'POST', url, data);
   const response = await page.request.post(url, { data });
   expect(response.ok(), `${url} returned HTTP ${response.status()}`).toBeTruthy();
   return await response.json() as Record<string, unknown>;

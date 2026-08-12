@@ -5,6 +5,7 @@ import {
   redactStage2TraceText,
   sanitizeStage2Url,
   stage2ProjectMatrixValue,
+  validateStage2ProjectIsolation,
 } from '../../../tests/helpers/stage-2-e2e';
 import { stage2RunStatus } from '../../../tests/helpers/stage-2-reporter';
 
@@ -25,6 +26,23 @@ describe('Stage 2 E2E evidence safety', () => {
     expect(stage2ProjectMatrixValue('{"chromium":"shared","firefox":"shared"}', 'chromium')).toBeNull();
   });
 
+  it('rejects project IDs reused by different writable scenarios', () => {
+    expect(() => validateStage2ProjectIsolation({
+      E2E_STAGE2_RUN_ID: 'run-42',
+      E2E_STAGE2_UPLOAD_PROJECT_IDS: '{"chromium":"shared-run-42"}',
+      E2E_STAGE2_WORKFLOW_PROJECT_IDS: '{"chromium":"shared-run-42"}',
+    })).toThrow(/reuses controlled project/);
+    expect(() => validateStage2ProjectIsolation({
+      E2E_STAGE2_RUN_ID: 'run-42',
+      E2E_STAGE2_UPLOAD_PROJECT_IDS: '{"chromium":"upload-run-42"}',
+      E2E_STAGE2_WORKFLOW_PROJECT_IDS: '{"chromium":"workflow-run-42"}',
+    })).not.toThrow();
+    expect(() => validateStage2ProjectIsolation({
+      E2E_STAGE2_RUN_ID: 'run-42',
+      E2E_STAGE2_UPLOAD_PROJECT_IDS: '{"chromium":"old-project"}',
+    })).toThrow(/must include Stage 2 run id/);
+  });
+
   it('redacts sensitive URL parameters beyond token and key aliases', () => {
     const url = sanitizeStage2Url('https://example.test/api?auth=a&session=b&signature=c&safe=visible');
     expect(url).not.toContain('auth=a');
@@ -34,9 +52,11 @@ describe('Stage 2 E2E evidence safety', () => {
   });
 
   it('removes cookie headers and signed URLs from Playwright trace text', () => {
-    const trace = '{"headers":[{"name":"cookie","value":"session=secret"}],"url":"https://example.test/media?signature=abc&safe=yes"}';
+    const trace = '{"headers":[{"name":"cookie","value":"session=secret"}],"refreshToken":"refresh secret value","client_secret":"client-secret","url":"https://example.test/media?signature=abc&safe=yes"}';
     const output = redactStage2TraceText(trace);
     expect(output).not.toContain('session=secret');
+    expect(output).not.toContain('refresh secret value');
+    expect(output).not.toContain('client-secret');
     expect(output).not.toContain('signature=abc');
     expect(output).toContain('safe=yes');
   });
