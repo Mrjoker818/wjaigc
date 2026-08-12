@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { Client } from 'pg';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { getDoctorExitCode } from './doctor-status.mjs';
+import { collectAssetGraphDoctorFacts, summarizeAssetGraphDoctor } from './doctor-asset-status.mjs';
 
 // Test isolation: DOCTOR_SKIP_ENV_FILE=1 skips loading .env/.env.local so
 // production-credential checks run against a clean environment.
@@ -82,6 +83,59 @@ async function checkDatabase() {
     add('PASS', 'database', 'connection and query succeeded');
   } catch (error) {
     add('FAIL', 'database', `connection failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+async function checkAssetGraph() {
+  const connectionString = process.env.PGDATABASE_URL || process.env.DATABASE_URL;
+  const mode = ['shadow', 'asset-v3'].includes(process.env.WUJIE_ASSET_GRAPH_MODE)
+    ? process.env.WUJIE_ASSET_GRAPH_MODE
+    : 'legacy';
+  add('PASS', 'asset-mode', mode);
+  if (!connectionString) {
+    add(mode === 'asset-v3' ? 'FAIL' : 'BLOCKED', 'asset-graph', 'database is unavailable; asset graph facts cannot be verified');
+    return;
+  }
+  const client = new Client({
+    connectionString: normalizePostgresConnectionString(connectionString),
+    connectionTimeoutMillis: 5_000,
+  });
+  try {
+    await client.connect();
+    const summary = summarizeAssetGraphDoctor(await collectAssetGraphDoctorFacts(client, { mode }));
+    add(
+      summary.migrations.missing.length === 0 && summary.migrations.checksumMismatches.length === 0 ? 'PASS' : 'FAIL',
+      'asset-migrations',
+      `${summary.migrations.verified}/${summary.migrations.required} verified; missing=${summary.migrations.missing.join(',') || 'none'}; checksumMismatch=${summary.migrations.checksumMismatches.join(',') || 'none'}`,
+    );
+    add(
+      summary.shadowComparison.mismatchedProjects === 0
+        && summary.shadowComparison.unmigratedProjects === 0
+        && summary.shadowComparison.orphanGraphProjects === 0
+        && summary.shadowComparison.failedCheckpoints === 0 ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
+      'asset-shadow-comparison',
+      `legacy=${summary.shadowComparison.legacyProjects}; graph=${summary.shadowComparison.graphProjects}; matching=${summary.shadowComparison.matchingProjects}; mismatched=${summary.shadowComparison.mismatchedProjects}; unmigrated=${summary.shadowComparison.unmigratedProjects}; orphanGraph=${summary.shadowComparison.orphanGraphProjects}; failedCheckpoints=${summary.shadowComparison.failedCheckpoints}`,
+    );
+    add(
+      summary.media.pendingPersist + summary.media.missing + summary.media.recovering + summary.media.unrecoverable === 0 ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
+      'asset-media',
+      `ready=${summary.media.ready}; pendingPersist=${summary.media.pendingPersist}; missing=${summary.media.missing}; recovering=${summary.media.recovering}; unrecoverable=${summary.media.unrecoverable}`,
+    );
+    add('PASS', 'asset-trash', `active=${summary.assets.active}; trashed=${summary.assets.trashed}`);
+    add(
+      summary.gc.purged === 0 ? 'PASS' : 'FAIL',
+      'asset-gc-candidates',
+      `pending=${summary.gc.pending}; deferred=${summary.gc.deferred}; purged=${summary.gc.purged}; physicalPurge=disabled`,
+    );
+    add(
+      summary.releaseReady ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
+      'asset-v3-release-gate',
+      summary.releaseReady ? 'ready' : `blocked by ${summary.assetV3Blockers.join(', ')}`,
+    );
+  } catch (error) {
+    add(mode === 'asset-v3' ? 'FAIL' : 'BLOCKED', 'asset-graph', `verification failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     await client.end().catch(() => undefined);
   }
@@ -371,6 +425,7 @@ async function main() {
   }
   await checkDataDir();
   await checkDatabase();
+  await checkAssetGraph();
   await checkDatabaseTables();
   await checkPostgresTestDatabase();
   await checkObjectStorage();
