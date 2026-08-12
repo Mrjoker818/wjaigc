@@ -295,7 +295,7 @@ describe('stage 2 asset lifecycle PostgreSQL contract', () => {
       await lockClient.connect();
       try {
         await lockClient.query('BEGIN');
-        await lockClient.query('SELECT id FROM wujie_assets WHERE id = $1 FOR NO KEY UPDATE', [assetId]);
+        await lockClient.query('UPDATE wujie_assets SET updated_at = clock_timestamp() WHERE id = $1', [assetId]);
         const outcomePromise = recordLegacyRecoveryOutcome({
           localPath: storageKey,
           success: true,
@@ -339,6 +339,126 @@ describe('stage 2 asset lifecycle PostgreSQL contract', () => {
       } finally {
         await lockClient.query('ROLLBACK').catch(() => undefined);
         await lockClient.end();
+      }
+    });
+  }, 30_000);
+
+  postgresIt('retries before version updates when a different exact-path asset arrives during the asset lock wait', async () => {
+    await withIsolatedPostgres('asset_lifecycle_recovery_new_asset_retry', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const initialAssetId = randomUUID();
+      const arrivedAssetId = randomUUID();
+      const initialVersionId = randomUUID();
+      const arrivedVersionId = randomUUID();
+      const initialPlacementId = randomUUID();
+      const arrivedPlacementId = randomUUID();
+      const managedUrl = '/api/serve-upload/uploads/different-asset-race.png';
+      const storageKey = 'uploads/different-asset-race.png';
+      await query(
+        `INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Recovery new asset retry')`,
+        [projectId, ownerId],
+      );
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ($1, $2, $3, 'image', 'trashed')`,
+        [initialAssetId, ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, storage_key, availability
+         ) VALUES ($1, $2, $3, $4, $5, $6, 'missing')`,
+        [initialVersionId, initialAssetId, ownerId, projectId, managedUrl, storageKey],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [initialAssetId, initialVersionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status, deleted_at
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-new-asset-initial',
+                   'canvas-image', 'image-new-asset-initial', 'trashed', now())`,
+        [initialPlacementId, ownerId, projectId, initialAssetId, initialVersionId],
+      );
+
+      const applicationName = `asset-new-candidate-${randomUUID()}`;
+      const businessUrl = withApplicationName(databaseUrl, applicationName);
+      await closePool();
+      process.env.DATABASE_URL = businessUrl;
+      process.env.PGDATABASE_URL = businessUrl;
+      const { recordLegacyRecoveryOutcome } = await import('../../src/lib/asset-core/media-health');
+
+      const raceClient = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
+      await raceClient.connect();
+      try {
+        await raceClient.query('BEGIN');
+        await raceClient.query(
+          'UPDATE wujie_assets SET updated_at = clock_timestamp() WHERE id = $1',
+          [initialAssetId],
+        );
+        const outcomePromise = recordLegacyRecoveryOutcome({
+          localPath: storageKey,
+          success: true,
+          method: 's3',
+        });
+        await waitForApplicationLockCount(query, applicationName, 1);
+
+        await raceClient.query(
+          `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+           VALUES ($1, $2, $3, 'image', 'trashed')`,
+          [arrivedAssetId, ownerId, projectId],
+        );
+        await raceClient.query(
+          `INSERT INTO wujie_asset_versions(
+             id, asset_id, owner_id, project_id, file_url, storage_key, availability
+           ) VALUES ($1, $2, $3, $4, $5, $6, 'missing')`,
+          [arrivedVersionId, arrivedAssetId, ownerId, projectId, managedUrl, storageKey],
+        );
+        await raceClient.query(
+          'UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1',
+          [arrivedAssetId, arrivedVersionId],
+        );
+        await raceClient.query(
+          `INSERT INTO wujie_workspace_placements(
+             id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+             entity_type, entity_id, status, deleted_at
+           ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-new-asset-arrived',
+                     'canvas-image', 'image-new-asset-arrived', 'trashed', now())`,
+          [arrivedPlacementId, ownerId, projectId, arrivedAssetId, arrivedVersionId],
+        );
+        await raceClient.query('COMMIT');
+
+        await expect(outcomePromise).resolves.toEqual({
+          matchedVersions: 2,
+          ready: 2,
+          missing: 0,
+          unrecoverable: 0,
+        });
+        const versions = await query<{ id: string; asset_id: string; availability: string }>(
+          `SELECT id, asset_id, availability
+           FROM wujie_asset_versions
+           WHERE id = ANY($1::text[])
+           ORDER BY asset_id, id`,
+          [[initialVersionId, arrivedVersionId]],
+        );
+        expect(versions.rows).toEqual([
+          { id: initialVersionId, asset_id: initialAssetId, availability: 'ready' },
+          { id: arrivedVersionId, asset_id: arrivedAssetId, availability: 'ready' },
+        ].sort((left, right) => left.asset_id.localeCompare(right.asset_id) || left.id.localeCompare(right.id)));
+        const attempts = await query<{ asset_version_id: string; status: string }>(
+          `SELECT asset_version_id, status
+           FROM wujie_asset_media_recovery_attempts
+           WHERE asset_version_id = ANY($1::text[])
+           ORDER BY asset_version_id`,
+          [[initialVersionId, arrivedVersionId]],
+        );
+        expect(attempts.rows).toEqual([
+          { asset_version_id: initialVersionId, status: 'succeeded' },
+          { asset_version_id: arrivedVersionId, status: 'succeeded' },
+        ].sort((left, right) => left.asset_version_id.localeCompare(right.asset_version_id)));
+      } finally {
+        await raceClient.query('ROLLBACK').catch(() => undefined);
+        await raceClient.end();
       }
     });
   }, 30_000);

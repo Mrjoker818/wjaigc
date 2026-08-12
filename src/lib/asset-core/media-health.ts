@@ -660,6 +660,32 @@ function normalizeManagedLocalPath(value: string): string | null {
   return normalized;
 }
 
+const LEGACY_RECOVERY_SERIALIZATION_ATTEMPTS = 3;
+
+class LegacyRecoveryCandidatesChangedError extends Error {
+  readonly code = '40001';
+
+  constructor() {
+    super('Exact-path recovery candidates changed while acquiring asset locks');
+    this.name = 'LegacyRecoveryCandidatesChangedError';
+  }
+}
+
+function isSerializationFailure(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === '40001';
+}
+
+function sortedAssetIds(rows: Array<{ asset_id: string }>): string[] {
+  return [...new Set(rows.map(row => row.asset_id))].sort();
+}
+
+function sameAssetIds(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((assetId, index) => assetId === right[index]);
+}
+
 export async function recordLegacyRecoveryOutcome(
   input: LegacyRecoveryOutcomeInput,
 ): Promise<{ matchedVersions: number; ready: number; missing: number; unrecoverable: number }> {
@@ -667,88 +693,107 @@ export async function recordLegacyRecoveryOutcome(
   if (!normalizedPath) return { matchedVersions: 0, ready: 0, missing: 0, unrecoverable: 0 };
   const managedUrl = `/api/serve-upload/${normalizedPath}`;
 
-  return withAssetCoreTransaction(async (client) => {
-    await client.query(
-      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-      [`asset-media-recovery:${normalizedPath}`],
-    );
-    const candidates = await client.query<{ asset_id: string }>(
-      `SELECT DISTINCT version.asset_id
-       FROM wujie_asset_versions version
-       WHERE (version.file_url = $1 OR version.storage_key = $2)
-         AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
-       ORDER BY version.asset_id`,
-      [managedUrl, normalizedPath],
-    );
+  for (let attempt = 1; attempt <= LEGACY_RECOVERY_SERIALIZATION_ATTEMPTS; attempt += 1) {
+    try {
+      return await withAssetCoreTransaction(async (client) => {
+        await client.query('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+        await client.query(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          [`asset-media-recovery:${normalizedPath}`],
+        );
+        const discoverAssetIds = async (): Promise<string[]> => {
+          const candidates = await client.query<{ asset_id: string }>(
+            `SELECT DISTINCT version.asset_id
+             FROM wujie_asset_versions version
+             WHERE (version.file_url = $1 OR version.storage_key = $2)
+               AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
+             ORDER BY version.asset_id`,
+            [managedUrl, normalizedPath],
+          );
+          return sortedAssetIds(candidates.rows);
+        };
 
-    const assetIds = [...new Set(candidates.rows.map(row => row.asset_id))].sort();
-    if (assetIds.length > 0) {
-      await client.query(
-        `SELECT id FROM wujie_assets
-         WHERE id = ANY($1::text[])
-         ORDER BY id
-         FOR UPDATE`,
-        [assetIds],
-      );
+        const assetIds = await discoverAssetIds();
+        let lockedAssetIds: string[] = [];
+        if (assetIds.length > 0) {
+          const lockedAssets = await client.query<{ id: string }>(
+            `SELECT id FROM wujie_assets
+             WHERE id = ANY($1::text[])
+             ORDER BY id
+             FOR UPDATE`,
+            [assetIds],
+          );
+          lockedAssetIds = [...new Set(lockedAssets.rows.map(row => row.id))].sort();
+        }
+        const recheckedAssetIds = await discoverAssetIds();
+        if (!sameAssetIds(assetIds, lockedAssetIds) || !sameAssetIds(lockedAssetIds, recheckedAssetIds)) {
+          throw new LegacyRecoveryCandidatesChangedError();
+        }
+
+        const locked = await client.query<LegacyRecoveryVersionRow>(
+          `SELECT version.id, version.asset_id, version.owner_id, version.project_id,
+                  version.recovery_source_url, version.storage_key
+           FROM wujie_asset_versions version
+           WHERE (version.file_url = $1 OR version.storage_key = $2)
+             AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
+           ORDER BY version.asset_id, version.id
+           FOR UPDATE`,
+          [managedUrl, normalizedPath],
+        );
+        await client.query(
+          `SELECT placement.id
+           FROM wujie_workspace_placements placement
+           WHERE placement.asset_version_id = ANY($1::text[])
+           ORDER BY placement.asset_id, placement.asset_version_id, placement.id
+           FOR UPDATE`,
+          [locked.rows.map(row => row.id)],
+        );
+
+        let ready = 0;
+        let missing = 0;
+        let unrecoverable = 0;
+        for (const version of locked.rows) {
+          const provenUnrecoverable = !input.success
+            && input.method === 'none'
+            && !version.recovery_source_url
+            && !version.storage_key;
+          const availability = input.success ? 'ready' : provenUnrecoverable ? 'unrecoverable' : 'missing';
+          const attemptStatus = input.success ? 'succeeded' : provenUnrecoverable ? 'unrecoverable' : 'failed';
+          const detail = input.success
+            ? `Recovered by legacy administrator route using ${input.method}`
+            : input.error ?? `Legacy administrator recovery failed using ${input.method}`;
+          await client.query(
+            `UPDATE wujie_asset_versions
+             SET availability = $4
+             WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
+            [version.id, version.owner_id, version.project_id, availability],
+          );
+          await client.query(
+            `INSERT INTO wujie_asset_media_recovery_attempts(
+               id, asset_version_id, asset_id, owner_id, project_id, source_url, status, detail
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+              randomUUID(),
+              version.id,
+              version.asset_id,
+              version.owner_id,
+              version.project_id,
+              version.recovery_source_url,
+              attemptStatus,
+              detail,
+            ],
+          );
+          if (availability === 'ready') ready += 1;
+          else if (availability === 'unrecoverable') unrecoverable += 1;
+          else missing += 1;
+        }
+
+        return { matchedVersions: locked.rows.length, ready, missing, unrecoverable };
+      });
+    } catch (error) {
+      if (!isSerializationFailure(error) || attempt === LEGACY_RECOVERY_SERIALIZATION_ATTEMPTS) throw error;
     }
-    const locked = await client.query<LegacyRecoveryVersionRow>(
-      `SELECT version.id, version.asset_id, version.owner_id, version.project_id,
-              version.recovery_source_url, version.storage_key
-       FROM wujie_asset_versions version
-       WHERE (version.file_url = $1 OR version.storage_key = $2)
-         AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
-       ORDER BY version.asset_id, version.id
-       FOR UPDATE`,
-      [managedUrl, normalizedPath],
-    );
-    await client.query(
-      `SELECT placement.id
-       FROM wujie_workspace_placements placement
-       WHERE placement.asset_version_id = ANY($1::text[])
-       ORDER BY placement.asset_id, placement.asset_version_id, placement.id
-       FOR UPDATE`,
-      [locked.rows.map(row => row.id)],
-    );
+  }
 
-    let ready = 0;
-    let missing = 0;
-    let unrecoverable = 0;
-    for (const version of locked.rows) {
-      const provenUnrecoverable = !input.success
-        && input.method === 'none'
-        && !version.recovery_source_url
-        && !version.storage_key;
-      const availability = input.success ? 'ready' : provenUnrecoverable ? 'unrecoverable' : 'missing';
-      const attemptStatus = input.success ? 'succeeded' : provenUnrecoverable ? 'unrecoverable' : 'failed';
-      const detail = input.success
-        ? `Recovered by legacy administrator route using ${input.method}`
-        : input.error ?? `Legacy administrator recovery failed using ${input.method}`;
-      await client.query(
-        `UPDATE wujie_asset_versions
-         SET availability = $4
-         WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
-        [version.id, version.owner_id, version.project_id, availability],
-      );
-      await client.query(
-        `INSERT INTO wujie_asset_media_recovery_attempts(
-           id, asset_version_id, asset_id, owner_id, project_id, source_url, status, detail
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          randomUUID(),
-          version.id,
-          version.asset_id,
-          version.owner_id,
-          version.project_id,
-          version.recovery_source_url,
-          attemptStatus,
-          detail,
-        ],
-      );
-      if (availability === 'ready') ready += 1;
-      else if (availability === 'unrecoverable') unrecoverable += 1;
-      else missing += 1;
-    }
-
-    return { matchedVersions: locked.rows.length, ready, missing, unrecoverable };
-  });
+  throw new Error('Legacy recovery serialization retry loop exhausted');
 }

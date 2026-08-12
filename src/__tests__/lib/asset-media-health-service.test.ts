@@ -233,20 +233,128 @@ describe('asset media health transactional service', () => {
 
     expect(result).toEqual({ matchedVersions: 2, ready: 2, missing: 0, unrecoverable: 0 });
     const calls = query.mock.calls.map(([sql, params]) => ({ sql: String(sql), params }));
+    const serializableIndex = calls.findIndex(({ sql }) => sql.includes('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE'));
     const advisoryIndex = calls.findIndex(({ sql }) => sql.includes('pg_advisory_xact_lock'));
     const snapshotIndex = calls.findIndex(({ sql }) => sql.includes('SELECT DISTINCT version.asset_id'));
     const assetLockIndex = calls.findIndex(({ sql }) => sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE'));
+    const stableRecheckIndex = calls.findLastIndex(({ sql }) => sql.includes('SELECT DISTINCT version.asset_id'));
     const finalRequeryIndex = calls.findIndex(({ sql }) => (
       sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')
     ));
-    expect([advisoryIndex, snapshotIndex, assetLockIndex, finalRequeryIndex]).toEqual([0, 1, 2, 3]);
-    expect(calls[0]?.params).toEqual(['asset-media-recovery:users/a/recovery.png']);
-    expect(calls[2]?.params).toEqual([['asset-a', 'asset-z']]);
-    expect(calls[3]?.sql).not.toMatch(/version\.id\s*=\s*ANY/i);
-    expect(calls[3]?.params).toEqual([
+    expect([
+      serializableIndex,
+      advisoryIndex,
+      snapshotIndex,
+      assetLockIndex,
+      stableRecheckIndex,
+      finalRequeryIndex,
+    ]).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(calls[1]?.params).toEqual(['asset-media-recovery:users/a/recovery.png']);
+    expect(calls[3]?.params).toEqual([['asset-a', 'asset-z']]);
+    expect(calls[5]?.sql).not.toMatch(/version\.id\s*=\s*ANY/i);
+    expect(calls[5]?.params).toEqual([
       '/api/serve-upload/users/a/recovery.png',
       'users/a/recovery.png',
     ]);
+  });
+
+  it('retries before any version lock when a different exact-path asset arrives after the asset snapshot', async () => {
+    const versions = [
+      {
+        id: 'version-a',
+        asset_id: 'asset-a',
+        owner_id: 'owner-a',
+        project_id: 'project-a',
+        recovery_source_url: null,
+        storage_key: 'users/a/racing.png',
+      },
+      {
+        id: 'version-b',
+        asset_id: 'asset-b',
+        owner_id: 'owner-b',
+        project_id: 'project-b',
+        recovery_source_url: null,
+        storage_key: 'users/a/racing.png',
+      },
+    ];
+    const firstAttemptQuery = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+      void params;
+      if (sql.includes('SELECT DISTINCT version.asset_id')) {
+        const discoveryCount = firstAttemptQuery.mock.calls
+          .filter(([querySql]) => String(querySql).includes('SELECT DISTINCT version.asset_id'))
+          .length;
+        return discoveryCount === 1
+          ? { rows: [{ asset_id: 'asset-a' }], rowCount: 1 }
+          : { rows: [{ asset_id: 'asset-a' }, { asset_id: 'asset-b' }], rowCount: 2 };
+      }
+      if (sql.includes('FROM wujie_assets')) return { rows: [{ id: 'asset-a' }], rowCount: 1 };
+      if (sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')) {
+        return { rows: versions, rowCount: versions.length };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const secondAttemptQuery = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+      void params;
+      if (sql.includes('SELECT DISTINCT version.asset_id')) {
+        return { rows: [{ asset_id: 'asset-b' }, { asset_id: 'asset-a' }], rowCount: 2 };
+      }
+      if (sql.includes('FROM wujie_assets')) {
+        return { rows: [{ id: 'asset-a' }, { id: 'asset-b' }], rowCount: 2 };
+      }
+      if (sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')) {
+        return { rows: versions, rowCount: versions.length };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    });
+    const attemptQueries = [firstAttemptQuery, secondAttemptQuery];
+    mocks.withAssetCoreTransaction.mockImplementation(async (callback) => {
+      const query = attemptQueries[mocks.withAssetCoreTransaction.mock.calls.length - 1];
+      if (!query) throw new Error('unexpected recovery transaction attempt');
+      return callback({ query });
+    });
+
+    await expect(recordLegacyRecoveryOutcome({
+      localPath: 'users/a/racing.png',
+      success: true,
+      method: 's3',
+    })).resolves.toEqual({ matchedVersions: 2, ready: 2, missing: 0, unrecoverable: 0 });
+
+    expect(mocks.withAssetCoreTransaction).toHaveBeenCalledTimes(2);
+    expect(firstAttemptQuery.mock.calls[0]?.[0]).toMatch(/SET TRANSACTION ISOLATION LEVEL SERIALIZABLE/i);
+    expect(firstAttemptQuery.mock.calls.filter(([sql]) => String(sql).includes('SELECT DISTINCT version.asset_id'))).toHaveLength(2);
+    expect(firstAttemptQuery.mock.calls.some(([sql]) => (
+      String(sql).includes('FROM wujie_asset_versions version') && String(sql).includes('FOR UPDATE')
+    ))).toBe(false);
+    expect(firstAttemptQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE wujie_asset_versions'))).toBe(false);
+
+    const secondCalls = secondAttemptQuery.mock.calls.map(([sql, params]) => ({ sql: String(sql), params }));
+    expect(secondCalls[0]?.sql).toMatch(/SET TRANSACTION ISOLATION LEVEL SERIALIZABLE/i);
+    const assetLockIndex = secondCalls.findIndex(({ sql }) => sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE'));
+    const stableRecheckIndex = secondCalls.findLastIndex(({ sql }) => sql.includes('SELECT DISTINCT version.asset_id'));
+    const versionLockIndex = secondCalls.findIndex(({ sql }) => (
+      sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')
+    ));
+    const placementLockIndex = secondCalls.findIndex(({ sql }) => sql.includes('FROM wujie_workspace_placements'));
+    expect(secondCalls[assetLockIndex]?.params).toEqual([['asset-a', 'asset-b']]);
+    expect(assetLockIndex).toBeLessThan(stableRecheckIndex);
+    expect(stableRecheckIndex).toBeLessThan(versionLockIndex);
+    expect(versionLockIndex).toBeLessThan(placementLockIndex);
+  });
+
+  it('bounds PostgreSQL 40001 retries to three serializable transactions', async () => {
+    const serializationFailure = Object.assign(new Error('could not serialize access'), { code: '40001' });
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    mocks.withAssetCoreTransaction.mockRejectedValue(serializationFailure);
+
+    await expect(recordLegacyRecoveryOutcome({
+      localPath: 'users/a/retry-limit.png',
+      success: true,
+      method: 's3',
+    })).rejects.toBe(serializationFailure);
+
+    expect(mocks.withAssetCoreTransaction).toHaveBeenCalledTimes(3);
+    expect(query).not.toHaveBeenCalled();
   });
 
   it('performs the lock-time exact-path requery when the initial asset snapshot is empty', async () => {
@@ -258,17 +366,36 @@ describe('asset media health transactional service', () => {
       recovery_source_url: null,
       storage_key: 'users/a/late.png',
     };
-    const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+    const firstAttemptQuery = vi.fn(async (sql: string, params?: readonly unknown[]) => {
       void params;
-      if (sql.includes('pg_advisory_xact_lock')) return { rows: [{}], rowCount: 1 };
-      if (sql.includes('SELECT DISTINCT version.asset_id')) return { rows: [], rowCount: 0 };
+      if (sql.includes('SELECT DISTINCT version.asset_id')) {
+        const discoveryCount = firstAttemptQuery.mock.calls
+          .filter(([querySql]) => String(querySql).includes('SELECT DISTINCT version.asset_id'))
+          .length;
+        return discoveryCount === 1
+          ? { rows: [], rowCount: 0 }
+          : { rows: [{ asset_id: arrived.asset_id }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const secondAttemptQuery = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+      void params;
+      if (sql.includes('SELECT DISTINCT version.asset_id')) {
+        return { rows: [{ asset_id: arrived.asset_id }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_assets')) return { rows: [{ id: arrived.asset_id }], rowCount: 1 };
       if (sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')) {
         return { rows: [arrived], rowCount: 1 };
       }
       if (sql.includes('FROM wujie_workspace_placements')) return { rows: [], rowCount: 0 };
       return { rows: [], rowCount: 1 };
     });
-    mocks.withAssetCoreTransaction.mockImplementation(async (callback) => callback({ query }));
+    const attemptQueries = [firstAttemptQuery, secondAttemptQuery];
+    mocks.withAssetCoreTransaction.mockImplementation(async (callback) => {
+      const query = attemptQueries[mocks.withAssetCoreTransaction.mock.calls.length - 1];
+      if (!query) throw new Error('unexpected recovery transaction attempt');
+      return callback({ query });
+    });
 
     await expect(recordLegacyRecoveryOutcome({
       localPath: 'users/a/late.png',
@@ -276,7 +403,10 @@ describe('asset media health transactional service', () => {
       method: 's3',
     })).resolves.toEqual({ matchedVersions: 1, ready: 1, missing: 0, unrecoverable: 0 });
 
-    const finalRequery = query.mock.calls.find(([sql]) => (
+    expect(firstAttemptQuery.mock.calls.some(([sql]) => (
+      String(sql).includes('FROM wujie_asset_versions version') && String(sql).includes('FOR UPDATE')
+    ))).toBe(false);
+    const finalRequery = secondAttemptQuery.mock.calls.find(([sql]) => (
       String(sql).includes('FROM wujie_asset_versions version') && String(sql).includes('FOR UPDATE')
     ));
     expect(finalRequery?.[1]).toEqual([
