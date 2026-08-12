@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { expect, test as base, type Page } from '@playwright/test';
@@ -22,10 +22,13 @@ interface Stage2Evidence {
   recordPayload(payload: unknown): void;
 }
 
-const SECRET_PATTERN = /(authorization|api[-_]?key|access[-_]?token|password)(["'=:\s]+)[^\s"'&,}]+/gi;
+const SECRET_PATTERN = /(api[-_]?key|access[-_]?token|password)(["'=:\s]+)[^\s"'&,}]+/gi;
 
-function redact(value: string): string {
-  return value.replace(SECRET_PATTERN, '$1$2[REDACTED]');
+export function redactStage2Evidence(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/(authorization)(["'=:\s]+)(?!Bearer\s)[^\s"'&,}]+/gi, '$1$2[REDACTED]')
+    .replace(SECRET_PATTERN, '$1$2[REDACTED]');
 }
 
 function safeUrl(rawUrl: string): string {
@@ -36,7 +39,7 @@ function safeUrl(rawUrl: string): string {
     }
     return url.toString();
   } catch {
-    return redact(rawUrl);
+    return redactStage2Evidence(rawUrl);
   }
 }
 
@@ -62,7 +65,7 @@ function gitCommit(): string {
 }
 
 export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
-  stage2Evidence: async ({ page }, activateFixture, testInfo) => {
+  stage2Evidence: [async ({ page }, activateFixture, testInfo) => {
     const evidence: Stage2Evidence = {
       console: [],
       network: [],
@@ -72,11 +75,11 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
     };
     page.on('console', message => {
       if (message.type() === 'error' || message.type() === 'warning') {
-        evidence.console.push({ type: message.type(), text: redact(message.text()), url: safeUrl(message.location().url) });
+        evidence.console.push({ type: message.type(), text: redactStage2Evidence(message.text()), url: safeUrl(message.location().url) });
       }
     });
     page.on('requestfailed', request => {
-      evidence.network.push({ method: request.method(), url: safeUrl(request.url()), text: redact(request.failure()?.errorText ?? 'request failed') });
+      evidence.network.push({ method: request.method(), url: safeUrl(request.url()), text: redactStage2Evidence(request.failure()?.errorText ?? 'request failed') });
     });
     page.on('response', response => {
       if (response.url().includes('/api/') || response.status() >= 400) {
@@ -87,11 +90,27 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
       if (requestId) evidence.requestIds.add(requestId);
     });
 
+    const tracePath = testInfo.outputPath('stage-2-trace.zip');
+    const screenshotPath = testInfo.outputPath('stage-2-screenshot.png');
+    await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
     await activateFixture(evidence);
 
     const capturedAt = new Date().toISOString();
     const status = testInfo.status === 'passed' ? 'completed' : testInfo.status === 'skipped' ? 'blocked' : 'failed';
     const featureId = `stage-2-${testInfo.titlePath.slice(1).join('-')}`;
+    const artifactPaths = {
+      screenshot: 'screenshot.png',
+      video: 'video.webm',
+      trace: 'trace.zip',
+      console: 'console.json',
+      network: 'network.json',
+      task: 'task.json',
+    };
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await page.context().tracing.stop({ path: tracePath });
+    const video = page.video();
+    await page.close();
+    const videoPath = video ? await video.path() : null;
     const manifest = await writeEvidenceManifest({
       commit: gitCommit(),
       deploymentUrl: String(testInfo.project.use.baseURL || process.env.E2E_BASE_URL || 'http://127.0.0.1:5000'),
@@ -99,24 +118,21 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
       viewport: testInfo.project.use.viewport || { width: 1280, height: 720 },
       capturedAt,
       featureId,
-      artifactPaths: {
-        screenshot: 'screenshot.png',
-        console: 'console.json',
-        network: 'network.json',
-        task: 'task.json',
-      },
+      artifactPaths,
       requestIds: [...evidence.requestIds],
       status,
     });
     await mkdir(manifest.directory, { recursive: true });
     await Promise.all([
-      page.screenshot({ path: join(manifest.directory, 'screenshot.png'), fullPage: true }),
+      copyFile(screenshotPath, join(manifest.directory, artifactPaths.screenshot)),
+      copyFile(tracePath, join(manifest.directory, artifactPaths.trace)),
+      ...(videoPath ? [copyFile(videoPath, join(manifest.directory, artifactPaths.video))] : []),
       writeFile(join(manifest.directory, 'console.json'), JSON.stringify(evidence.console, null, 2)),
       writeFile(join(manifest.directory, 'network.json'), JSON.stringify(evidence.network, null, 2)),
       writeFile(join(manifest.directory, 'task.json'), JSON.stringify({ taskIds: [...evidence.taskIds] }, null, 2)),
     ]);
     await testInfo.attach('stage-2-evidence-manifest', { path: manifest.manifestPath, contentType: 'application/json' });
-  },
+  }, { auto: true }],
 });
 
 export { expect };
@@ -125,6 +141,24 @@ export function requireStage2Env(...names: string[]): Record<string, string> {
   const missing = names.filter(name => !process.env[name]?.trim());
   test.skip(missing.length > 0, `BLOCKED: missing controlled Stage 2 inputs: ${missing.join(', ')}`);
   return Object.fromEntries(names.map(name => [name, process.env[name]!.trim()]));
+}
+
+export function stage2ProjectMatrixValue(raw: string | undefined, projectName: string): string | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const selected = (value as Record<string, unknown>)[projectName];
+    return typeof selected === 'string' && selected.trim() ? selected.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function requireStage2ProjectValue(testProjectName: string, envName: string): string {
+  const value = stage2ProjectMatrixValue(process.env[envName], testProjectName);
+  test.skip(!value, `BLOCKED: ${envName} must contain a unique value for ${testProjectName}`);
+  return value!;
 }
 
 export async function loginRealUser(page: Page): Promise<void> {
@@ -156,6 +190,6 @@ export async function openCanvasProject(page: Page, projectId: string): Promise<
 
 export async function postJson(page: Page, url: string, data: unknown): Promise<Record<string, unknown>> {
   const response = await page.request.post(url, { data });
-  expect(response.ok(), `${url} returned ${response.status()}: ${await response.text()}`).toBeTruthy();
+  expect(response.ok(), `${url} returned HTTP ${response.status()}`).toBeTruthy();
   return await response.json() as Record<string, unknown>;
 }

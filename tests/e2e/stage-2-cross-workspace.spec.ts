@@ -2,134 +2,87 @@ import {
   expect,
   loginRealUser,
   openCanvasProject,
-  postJson,
-  requireStage2Env,
+  requireStage2ProjectValue,
   test,
 } from '../helpers/stage-2-e2e';
 
-function transferBody(input: {
-  sourceVersion: string;
-  projectId: string;
-  workspaceId: string;
-  entityType: string;
-  entityId: string;
-}) {
-  return {
-    sourceVersion: input.sourceVersion,
-    targetProject: input.projectId,
-    targetWorkspace: input.workspaceId,
-    entityType: input.entityType,
-    entityId: input.entityId,
-    idempotencyKey: `stage-2-e2e:${input.workspaceId}:${input.entityId}:${input.sourceVersion}`,
-    metadata: { source: 'stage-2-e2e' },
-  };
+async function recordJsonResponse(response: import('@playwright/test').Response, record: (payload: unknown) => void): Promise<void> {
+  expect(response.ok(), `${response.url()} returned HTTP ${response.status()}`).toBeTruthy();
+  const payload = await response.json().catch(() => ({}));
+  record(payload);
 }
 
+test.use({ trace: 'off', video: 'on' });
+
 test.describe('Stage 2 cross-workspace flows', () => {
-  test('bridges a canvas image through embedded chat back onto the canvas', async ({ page, stage2Evidence }) => {
-    const env = requireStage2Env(
-      'E2E_STAGE2_SOURCE_VERSION_ID',
-      'E2E_STAGE2_EMBEDDED_CHAT_RESULT_VERSION_ID',
-      'E2E_STAGE2_PROJECT_ID',
-    );
+  test('bridges a real embedded-chat result back onto the canvas through the UI', async ({ page, stage2Evidence }, testInfo) => {
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_EMBEDDED_CHAT_PROJECT_IDS');
     await loginRealUser(page);
-    const chat = await postJson(page, '/api/assets/transfer', transferBody({
-      sourceVersion: env.E2E_STAGE2_SOURCE_VERSION_ID,
-      projectId: env.E2E_STAGE2_PROJECT_ID,
-      workspaceId: `embedded-chat:${env.E2E_STAGE2_PROJECT_ID}`,
-      entityType: 'chat-attachment',
-      entityId: 'stage-2-embedded-chat-input',
-    }));
-    const canvas = await postJson(page, '/api/assets/transfer', transferBody({
-      sourceVersion: env.E2E_STAGE2_EMBEDDED_CHAT_RESULT_VERSION_ID,
-      projectId: env.E2E_STAGE2_PROJECT_ID,
-      workspaceId: env.E2E_STAGE2_PROJECT_ID,
-      entityType: 'canvas-image',
-      entityId: 'stage-2-embedded-chat-result',
-    }));
-    stage2Evidence.recordPayload({ chat, canvas });
-    expect(canvas.assetVersionId).toBeTruthy();
-    expect(canvas.assetVersionId).not.toBe(chat.assetVersionId);
-    await openCanvasProject(page, env.E2E_STAGE2_PROJECT_ID);
+    await openCanvasProject(page, projectId);
+    const images = page.locator('[data-canvas-viewport] img[src]');
+    const before = await images.count();
+    await page.getByText('AI聊天', { exact: true }).click();
+    const addButton = page.getByRole('button', { name: '添加到画布', exact: true }).last();
+    await expect(addButton).toBeVisible({ timeout: 20_000 });
+    const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
+    await addButton.click();
+    await recordJsonResponse(await transfer, payload => stage2Evidence.recordPayload(payload));
+    await expect.poll(() => images.count(), { timeout: 30_000 }).toBeGreaterThan(before);
+  });
+
+  test('runs a seeded workflow through the node-mode UI and returns its real output to canvas', async ({ page, stage2Evidence }, testInfo) => {
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_WORKFLOW_PROJECT_IDS');
+    await loginRealUser(page);
+    await openCanvasProject(page, projectId);
+    const before = await page.locator('[data-canvas-viewport] img[src]').count();
+    await page.getByTitle('节点模式').first().click();
+    const execute = page.getByRole('button', { name: '执行工作流', exact: true });
+    await expect(execute).toBeVisible({ timeout: 20_000 });
+    const started = page.waitForResponse(response => response.url().includes('/api/workflow/execute') && response.request().method() === 'POST');
+    const outputTransfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST', { timeout: 180_000 });
+    await execute.click();
+    await recordJsonResponse(await started, payload => stage2Evidence.recordPayload(payload));
+    await recordJsonResponse(await outputTransfer, payload => stage2Evidence.recordPayload(payload));
+    const back = page.getByRole('button', { name: '返回画布', exact: true });
+    await expect(back).toBeVisible();
+    await back.click();
+    await expect.poll(
+      () => page.locator('[data-canvas-viewport] img[src]').count(),
+      { timeout: 30_000, intervals: [500, 1_000, 2_000] },
+    ).toBeGreaterThan(before);
+  });
+
+  test('sends a real standalone-chat result into the designated canvas through the UI', async ({ page, stage2Evidence }, testInfo) => {
+    const chatProjectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_STANDALONE_CHAT_PROJECT_IDS');
+    const targetProjectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_STANDALONE_TARGET_PROJECT_IDS');
+    await loginRealUser(page);
+    await page.goto(`/simple-chat?projectId=${encodeURIComponent(chatProjectId)}`, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('combobox', { name: '目标画布项目' }).selectOption(targetProjectId);
+    const addButton = page.getByTitle('添加到画布').last();
+    await expect(addButton).toBeVisible({ timeout: 20_000 });
+    const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
+    await addButton.click();
+    await recordJsonResponse(await transfer, payload => stage2Evidence.recordPayload(payload));
+    await openCanvasProject(page, targetProjectId);
     await expect(page.locator('[data-canvas-viewport] img[src]').first()).toBeVisible({ timeout: 20_000 });
   });
 
-  test('moves a workflow input and output back to the project canvas', async ({ page, stage2Evidence }) => {
-    const env = requireStage2Env('E2E_STAGE2_SOURCE_VERSION_ID', 'E2E_STAGE2_WORKFLOW_OUTPUT_VERSION_ID', 'E2E_STAGE2_PROJECT_ID', 'E2E_STAGE2_WORKFLOW_ID');
+  test('keeps seeded chat and workflow views usable after deleting only the canvas placement', async ({ page }, testInfo) => {
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_SHARED_REFERENCE_PROJECT_IDS');
+    const chatProjectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_SHARED_CHAT_PROJECT_IDS');
     await loginRealUser(page);
-    const input = await postJson(page, '/api/assets/transfer', transferBody({
-      sourceVersion: env.E2E_STAGE2_SOURCE_VERSION_ID,
-      projectId: env.E2E_STAGE2_PROJECT_ID,
-      workspaceId: env.E2E_STAGE2_WORKFLOW_ID,
-      entityType: 'workflow-input',
-      entityId: 'stage-2-workflow-input',
-    }));
-    const output = await postJson(page, '/api/assets/transfer', transferBody({
-      sourceVersion: env.E2E_STAGE2_WORKFLOW_OUTPUT_VERSION_ID,
-      projectId: env.E2E_STAGE2_PROJECT_ID,
-      workspaceId: env.E2E_STAGE2_WORKFLOW_ID,
-      entityType: 'workflow-output',
-      entityId: 'stage-2-workflow-output',
-    }));
-    const canvas = await postJson(page, '/api/assets/transfer', transferBody({
-      sourceVersion: String(output.assetVersionId),
-      projectId: env.E2E_STAGE2_PROJECT_ID,
-      workspaceId: env.E2E_STAGE2_PROJECT_ID,
-      entityType: 'canvas-image',
-      entityId: 'stage-2-workflow-canvas-result',
-    }));
-    stage2Evidence.recordPayload({ input, output, canvas });
-    expect(input.placementId).toBeTruthy();
-    expect(canvas.url).toBe(output.url);
-  });
+    await openCanvasProject(page, projectId);
+    const image = page.locator('[data-canvas-viewport] img[src]').first();
+    await expect(image).toBeVisible({ timeout: 20_000 });
+    await image.click();
+    await page.getByTestId('selected-image-delete').click();
+    await expect(image).toHaveCount(0);
 
-  test('sends standalone chat media into the designated canvas project', async ({ page, stage2Evidence }) => {
-    const env = requireStage2Env('E2E_STAGE2_CHAT_RESULT_VERSION_ID', 'E2E_STAGE2_TARGET_PROJECT_ID');
-    await loginRealUser(page);
-    const result = await postJson(page, '/api/assets/transfer', transferBody({
-      sourceVersion: env.E2E_STAGE2_CHAT_RESULT_VERSION_ID,
-      projectId: env.E2E_STAGE2_TARGET_PROJECT_ID,
-      workspaceId: env.E2E_STAGE2_TARGET_PROJECT_ID,
-      entityType: 'canvas-image',
-      entityId: 'stage-2-standalone-chat-result',
-    }));
-    stage2Evidence.recordPayload(result);
-    expect(result.placementId).toBeTruthy();
-    await openCanvasProject(page, env.E2E_STAGE2_TARGET_PROJECT_ID);
-    await expect(page.locator('[data-canvas-viewport] img[src]').first()).toBeVisible({ timeout: 20_000 });
-  });
+    await page.goto(`/simple-chat?projectId=${encodeURIComponent(chatProjectId)}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('main img[src]').first()).toBeVisible({ timeout: 20_000 });
 
-  test('keeps chat and workflow placements usable after deleting one canvas placement', async ({ page, stage2Evidence }) => {
-    const env = requireStage2Env('E2E_STAGE2_SOURCE_VERSION_ID', 'E2E_STAGE2_PROJECT_ID', 'E2E_STAGE2_WORKFLOW_ID');
-    await loginRealUser(page);
-    const suffix = Date.now().toString(36);
-    const chat = await postJson(page, '/api/assets/transfer', transferBody({
-      sourceVersion: env.E2E_STAGE2_SOURCE_VERSION_ID,
-      projectId: env.E2E_STAGE2_PROJECT_ID,
-      workspaceId: `chat:${suffix}`,
-      entityType: 'chat-attachment',
-      entityId: `chat-${suffix}`,
-    }));
-    const workflow = await postJson(page, '/api/assets/transfer', transferBody({
-      sourceVersion: env.E2E_STAGE2_SOURCE_VERSION_ID,
-      projectId: env.E2E_STAGE2_PROJECT_ID,
-      workspaceId: env.E2E_STAGE2_WORKFLOW_ID,
-      entityType: 'workflow-input',
-      entityId: `workflow-${suffix}`,
-    }));
-    const canvas = await postJson(page, '/api/assets/transfer', transferBody({
-      sourceVersion: env.E2E_STAGE2_SOURCE_VERSION_ID,
-      projectId: env.E2E_STAGE2_PROJECT_ID,
-      workspaceId: env.E2E_STAGE2_PROJECT_ID,
-      entityType: 'canvas-image',
-      entityId: `canvas-${suffix}`,
-    }));
-    const deleted = await page.request.delete(`/api/assets/placements/${encodeURIComponent(String(canvas.placementId))}?projectId=${encodeURIComponent(env.E2E_STAGE2_PROJECT_ID)}`);
-    expect(deleted.ok()).toBeTruthy();
-    for (const placement of [chat, workflow]) {
-      const resolved = await page.request.get(`/api/assets?projectId=${encodeURIComponent(env.E2E_STAGE2_PROJECT_ID)}&assetVersionId=${encodeURIComponent(String(placement.assetVersionId))}&placementId=${encodeURIComponent(String(placement.placementId))}`);
-      expect(resolved.ok()).toBeTruthy();
-    }
-    stage2Evidence.recordPayload({ chat, workflow, canvas });
+    await openCanvasProject(page, projectId);
+    await page.getByTitle('节点模式').first().click();
+    await expect(page.getByRole('button', { name: '执行工作流', exact: true })).toBeVisible({ timeout: 20_000 });
   });
 });

@@ -7,12 +7,15 @@ import {
   postJson,
   readProjects,
   requireStage2Env,
+  requireStage2ProjectValue,
   test,
 } from '../helpers/stage-2-e2e';
 
+test.use({ trace: 'off', video: 'on' });
+
 test.describe('Stage 2 asset lifecycle', () => {
-  test('opens a seeded legacy v1 project without issuing a write', async ({ page }) => {
-    const { E2E_STAGE2_LEGACY_PROJECT_ID: projectId } = requireStage2Env('E2E_STAGE2_LEGACY_PROJECT_ID');
+  test('opens a seeded legacy v1 project without issuing a write', async ({ page }, testInfo) => {
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LEGACY_PROJECT_IDS');
     await loginRealUser(page);
     const writes: string[] = [];
     page.on('request', request => {
@@ -23,8 +26,8 @@ test.describe('Stage 2 asset lifecycle', () => {
     expect(writes).toEqual([]);
   });
 
-  test('performs the first writable save as copy-on-write', async ({ page, stage2Evidence }) => {
-    const { E2E_STAGE2_LEGACY_PROJECT_ID: projectId } = requireStage2Env('E2E_STAGE2_LEGACY_PROJECT_ID');
+  test('performs the first writable save as copy-on-write', async ({ page, stage2Evidence }, testInfo) => {
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_COPY_ON_WRITE_PROJECT_IDS');
     await loginRealUser(page);
     const snapshot = await readProjects(page);
     const project = snapshot.projects.find(item => item.id === projectId);
@@ -42,10 +45,11 @@ test.describe('Stage 2 asset lifecycle', () => {
     expect(after.projects.some(item => item.id === projectId)).toBe(true);
   });
 
-  test('uploads a real image into the canvas project', async ({ page }) => {
-    const env = requireStage2Env('E2E_STAGE2_WRITABLE_PROJECT_ID', 'E2E_STAGE2_UPLOAD_FIXTURE');
+  test('uploads a real image into the canvas project', async ({ page }, testInfo) => {
+    const env = requireStage2Env('E2E_STAGE2_UPLOAD_FIXTURE');
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_UPLOAD_PROJECT_IDS');
     await loginRealUser(page);
-    await openCanvasProject(page, env.E2E_STAGE2_WRITABLE_PROJECT_ID);
+    await openCanvasProject(page, projectId);
     const images = page.locator('[data-canvas-viewport] img');
     const before = await images.count();
     const bytes = await readFile(env.E2E_STAGE2_UPLOAD_FIXTURE);
@@ -54,25 +58,28 @@ test.describe('Stage 2 asset lifecycle', () => {
     await expect(images.last()).toHaveAttribute('src', /api\/serve-upload|https?:\/\//);
   });
 
-  test('trashes and restores a placement without losing asset identity', async ({ page, stage2Evidence }) => {
-    const env = requireStage2Env('E2E_STAGE2_PROJECT_ID', 'E2E_STAGE2_ASSET_ID', 'E2E_STAGE2_ASSET_VERSION_ID', 'E2E_STAGE2_PLACEMENT_ID');
+  test('trashes and restores a placement without losing asset identity', async ({ page, stage2Evidence }, testInfo) => {
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LIFECYCLE_PROJECT_IDS');
+    const assetId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LIFECYCLE_ASSET_IDS');
+    const versionId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LIFECYCLE_VERSION_IDS');
+    const placementId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LIFECYCLE_PLACEMENT_IDS');
     await loginRealUser(page);
-    const before = await page.request.get(`/api/assets?projectId=${encodeURIComponent(env.E2E_STAGE2_PROJECT_ID)}&assetVersionId=${encodeURIComponent(env.E2E_STAGE2_ASSET_VERSION_ID)}&placementId=${encodeURIComponent(env.E2E_STAGE2_PLACEMENT_ID)}`);
+    const before = await page.request.get(`/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`);
     expect(before.ok()).toBeTruthy();
-    const deleted = await page.request.delete(`/api/assets/placements/${encodeURIComponent(env.E2E_STAGE2_PLACEMENT_ID)}?projectId=${encodeURIComponent(env.E2E_STAGE2_PROJECT_ID)}`);
+    const deleted = await page.request.delete(`/api/assets/placements/${encodeURIComponent(placementId)}?projectId=${encodeURIComponent(projectId)}`);
     expect(deleted.ok()).toBeTruthy();
-    const restored = await postJson(page, `/api/assets/${encodeURIComponent(env.E2E_STAGE2_ASSET_ID)}/restore`, {
-      projectId: env.E2E_STAGE2_PROJECT_ID,
-      placementId: env.E2E_STAGE2_PLACEMENT_ID,
+    const restored = await postJson(page, `/api/assets/${encodeURIComponent(assetId)}/restore`, {
+      projectId,
+      placementId,
     });
     stage2Evidence.recordPayload(restored);
-    expect((restored.placement as Record<string, unknown>)?.id).toBe(env.E2E_STAGE2_PLACEMENT_ID);
-    const after = await page.request.get(`/api/assets?projectId=${encodeURIComponent(env.E2E_STAGE2_PROJECT_ID)}&assetVersionId=${encodeURIComponent(env.E2E_STAGE2_ASSET_VERSION_ID)}&placementId=${encodeURIComponent(env.E2E_STAGE2_PLACEMENT_ID)}`);
+    expect((restored.placement as Record<string, unknown>)?.id).toBe(placementId);
+    const after = await page.request.get(`/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`);
     expect(after.ok()).toBeTruthy();
   });
 
-  test('surfaces missing media and retries recovery without mocking', async ({ page, stage2Evidence }) => {
-    const { E2E_STAGE2_MISSING_PROJECT_ID: projectId } = requireStage2Env('E2E_STAGE2_MISSING_PROJECT_ID');
+  test('surfaces missing media and retries recovery without mocking', async ({ page, stage2Evidence }, testInfo) => {
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_MISSING_PROJECT_IDS');
     await loginRealUser(page);
     await openCanvasProject(page, projectId);
     const recovery = page.getByRole('button', { name: '恢复', exact: true }).first();
@@ -87,8 +94,8 @@ test.describe('Stage 2 asset lifecycle', () => {
     expect(['ready', 'recovering', 'unrecoverable', 'missing']).toContain(result.availability);
   });
 
-  test('recovers the workspace after a full page refresh', async ({ page }) => {
-    const { E2E_STAGE2_PROJECT_ID: projectId } = requireStage2Env('E2E_STAGE2_PROJECT_ID');
+  test('recovers the workspace after a full page refresh', async ({ page }, testInfo) => {
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_REFRESH_PROJECT_IDS');
     await loginRealUser(page);
     await openCanvasProject(page, projectId);
     const images = page.locator('[data-canvas-viewport] img');
