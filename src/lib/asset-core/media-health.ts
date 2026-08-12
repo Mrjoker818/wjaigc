@@ -551,6 +551,14 @@ export async function purgeEligibleAsset(input: {
       verdict.reasons.push('UNMANAGED_MEDIA');
       verdict.eligible = false;
     }
+    if (row.shared_media) {
+      verdict.reasons.push('SHARED_MEDIA');
+      verdict.eligible = false;
+    }
+    if (row.unknown_legacy_ownership) {
+      verdict.reasons.push('UNKNOWN_LEGACY_OWNERSHIP');
+      verdict.eligible = false;
+    }
     const fresh = toCandidate(row);
     if (stored.id !== fresh.candidateId) {
       verdict.reasons.push('CANDIDATE_STALE');

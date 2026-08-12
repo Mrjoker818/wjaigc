@@ -160,4 +160,34 @@ describe('recover-images authorization contract', () => {
       error: 'No S3 or sourceUrl available',
     });
   });
+
+  it('rejects out-of-root batch paths before filesystem, S3, source, or outcome access', async () => {
+    mocks.execSql.mockResolvedValue({
+      rows: [
+        { local_path: '../outside.png', user_name: 'Owner A' },
+        { local_path: '/absolute.png', user_name: 'Owner B' },
+        { local_path: 'uploads/../../outside.png', user_name: 'Owner C' },
+        { local_path: 'C:\\outside.png', user_name: 'Owner D' },
+      ],
+    });
+
+    const response = await POST(new NextRequest(
+      'http://localhost/api/recover-images?action=recover',
+      { method: 'POST' },
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      totalAttempted: 0,
+      succeeded: 0,
+      failed: 0,
+      results: [],
+    });
+    expect(mocks.existsSync).not.toHaveBeenCalled();
+    expect(mocks.downloadImageFromS3).not.toHaveBeenCalled();
+    expect(mocks.getImageSourceUrl).not.toHaveBeenCalled();
+    expect(mocks.writeFileSync).not.toHaveBeenCalled();
+    expect(mocks.uploadImageToS3).not.toHaveBeenCalled();
+    expect(mocks.recordLegacyRecoveryOutcome).not.toHaveBeenCalled();
+  });
 });

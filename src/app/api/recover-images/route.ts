@@ -38,14 +38,19 @@ interface ScanResult {
   details: MissingImage[];
 }
 
-function isSafeRecoveryPath(value: string): boolean {
+function isSafeRecoveryPath(value: string, dataRoot: string = getServerDataRoot()): boolean {
   const normalized = value.replace(/\\/g, '/');
   if (!normalized || normalized.includes('\0') || normalized.startsWith('/') || /^[a-zA-Z]:\//.test(normalized)) {
     return false;
   }
 
   const resolved = path.posix.normalize(normalized);
-  return resolved !== '.' && resolved !== '..' && !resolved.startsWith('../');
+  if (resolved === '.' || resolved === '..' || resolved.startsWith('../')) return false;
+
+  const resolvedDataRoot = path.resolve(dataRoot);
+  const resolvedPath = path.resolve(resolvedDataRoot, ...resolved.split('/'));
+  const relativePath = path.relative(resolvedDataRoot, resolvedPath);
+  return relativePath !== '..' && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath);
 }
 
 async function scanMissingImages(): Promise<ScanResult> {
@@ -79,6 +84,8 @@ async function scanMissingImages(): Promise<ScanResult> {
   let existingCount = 0;
   
   for (const [localPath, users] of pathUsers) {
+    if (!isSafeRecoveryPath(localPath, dataRoot)) continue;
+
     // Check if file exists locally
     const possibleDirs = [
       path.join(dataRoot, 'uploads'),
@@ -126,6 +133,9 @@ async function scanMissingImages(): Promise<ScanResult> {
 
 async function recoverImage(localPath: string): Promise<{ success: boolean; method: string; error?: string }> {
   const dataRoot = getServerDataRoot();
+  if (!isSafeRecoveryPath(localPath, dataRoot)) {
+    return { success: false, method: 'none', error: 'Invalid recovery path' };
+  }
   const basename = path.basename(localPath);
   const ext = path.extname(localPath).toLowerCase();
   const contentType = ext === '.png' ? 'image/png'

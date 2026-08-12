@@ -9,6 +9,8 @@ vi.mock('@/lib/asset-core/storage', () => ({
 }));
 
 import {
+  createConfirmationDigest,
+  purgeEligibleAsset,
   recordLegacyRecoveryOutcome,
   recoverAssetMedia,
   scanMediaHealth,
@@ -154,6 +156,99 @@ describe('asset media health transactional service', () => {
     expect(second.candidates[0]).toEqual(first.candidates[0]);
     expect(query).toHaveBeenCalledTimes(2);
     expect(query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO wujie_media_gc_candidates'))).toBe(false);
+  });
+
+  it.each([
+    ['shared media', { shared_media: true, unknown_legacy_ownership: false }, 'SHARED_MEDIA'],
+    ['unknown legacy ownership', { shared_media: false, unknown_legacy_ownership: true }, 'UNKNOWN_LEGACY_OWNERSHIP'],
+  ])('rejects a matching stored candidate when the final recheck finds %s', async (
+    _label,
+    ownershipFacts,
+    expectedReason,
+  ) => {
+    const updatedAt = new Date('2026-06-01T00:00:00.000Z');
+    const trashedAt = new Date('2026-06-01T00:00:00.000Z');
+    const confirmationDigest = createConfirmationDigest({
+      assetId: 'asset-a',
+      assetStatus: 'trashed',
+      assetUpdatedAt: updatedAt.toISOString(),
+      retention: {
+        days: 30,
+        trashedAt: trashedAt.toISOString(),
+        notBefore: '2026-07-01T00:00:00.000Z',
+      },
+      versions: [{
+        id: 'version-a',
+        storageKey: 'uploads/a.png',
+        fileUrl: '/api/serve-upload/uploads/a.png',
+        availability: 'ready',
+        byteSize: '64',
+      }],
+      placements: [],
+      migrationCheckpoints: [{
+        id: 'checkpoint-a',
+        legacyProjectId: 'project-a',
+        status: 'completed',
+        updatedAt: updatedAt.toISOString(),
+      }],
+      legacyReferences: [],
+      sharedPhysicalReferences: [],
+      unknownLegacyOwnership: ownershipFacts.unknown_legacy_ownership,
+    });
+    const candidateId = `gc_${confirmationDigest.slice(0, 24)}`;
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('FROM wujie_media_gc_candidates')) {
+        return {
+          rows: [{ id: candidateId, confirmation_digest: confirmationDigest, not_before: new Date('2026-07-01T00:00:00.000Z') }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('SELECT id FROM wujie_assets WHERE id = $1 FOR UPDATE')) {
+        return { rows: [{ id: 'asset-a' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_assets a')) {
+        return {
+          rows: [{
+            asset_id: 'asset-a',
+            status: 'trashed',
+            updated_at: updatedAt,
+            trashed_at: trashedAt,
+            active_placements: '0',
+            version_count: '1',
+            managed_versions: '1',
+            estimated_bytes: '64',
+            migration_confirmed: true,
+            legacy_references: false,
+            ...ownershipFacts,
+            version_facts: [{
+              id: 'version-a',
+              storageKey: 'uploads/a.png',
+              fileUrl: '/api/serve-upload/uploads/a.png',
+              availability: 'ready',
+              byteSize: '64',
+            }],
+            placement_facts: [],
+            migration_checkpoint_facts: [{
+              id: 'checkpoint-a',
+              legacyProjectId: 'project-a',
+              status: 'completed',
+              updatedAt,
+            }],
+            legacy_reference_facts: [],
+            shared_physical_reference_facts: [],
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    mocks.withAssetCoreTransaction.mockImplementation(async (callback) => callback({ query }));
+
+    await expect(purgeEligibleAsset({ assetId: 'asset-a', candidateId, confirmationDigest })).resolves.toEqual({
+      eligible: false,
+      physicalPurgeDisabled: true,
+      reasons: [expectedReason],
+    });
   });
 
   it('records legacy recovery success as ready and preserves retryable failure as missing', async () => {
