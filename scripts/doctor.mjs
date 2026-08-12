@@ -118,6 +118,9 @@ async function checkAssetGraph() {
         `expected=${migration.expectedChecksum}; recorded=${migration.recordedChecksum || 'missing'}`,
       );
     }
+    for (const queryError of summary.queryErrors) {
+      add(mode === 'asset-v3' ? 'FAIL' : 'BLOCKED', 'asset-fact-query', queryError);
+    }
     add(
       summary.shadowComparison.mismatchedProjects === 0
         && summary.shadowComparison.unmigratedProjects === 0
