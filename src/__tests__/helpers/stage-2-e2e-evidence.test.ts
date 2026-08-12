@@ -7,6 +7,7 @@ import {
   stage2PlacementDiff,
   sanitizeStage2Url,
   stage2DatabaseConnectionString,
+  stage2ProjectPresenceIsValid,
   stage2ProjectMatrixValue,
   validateStage2ProjectIsolation,
 } from '../../../tests/helpers/stage-2-e2e';
@@ -74,6 +75,12 @@ describe('Stage 2 E2E evidence safety', () => {
     expect(() => stage2DatabaseConnectionString({
       DATABASE_URL: 'postgresql://ambient:test@example.test/wrong',
     })).toThrow(/E2E_STAGE2_DATABASE_URL/);
+  });
+
+  it('allows an unconsumed COW fixture to have no asset-graph project row', () => {
+    expect(stage2ProjectPresenceIsValid([], true)).toBe(true);
+    expect(stage2ProjectPresenceIsValid([], false)).toBe(false);
+    expect(stage2ProjectPresenceIsValid([{ id: 'project-a' }], false)).toBe(true);
   });
 
   it('redacts sensitive URL parameters beyond token and key aliases', () => {

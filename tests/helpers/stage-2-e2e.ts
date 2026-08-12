@@ -414,27 +414,41 @@ export async function removeControlledProject(
   databaseBaseline: Stage2PlacementBaseline,
 ): Promise<void> {
   try {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const current = await readProjects(page, evidence);
-      const response = await page.request.post('/api/user-data/sync', {
-        data: {
-          key: 'projects',
-          value: current.projects.filter(project => project.id !== projectId),
-          projectRevision: current.revision,
-        },
-      });
-      const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-      const headers = response.headers();
-      evidence.recordApi('POST', '/api/user-data/sync', response.status(), payload, headers['x-request-id'] || headers['request-id']);
-      if (response.ok()) break;
-      if (response.status() !== 409 || attempt === 1) {
-        expect(response.ok(), `Controlled project removal returned HTTP ${response.status()}`).toBeTruthy();
+    let removed = false;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const current = await readProjects(page, evidence);
+        if (!current.projects.some(project => project.id === projectId)) {
+          removed = true;
+          break;
+        }
+        const response = await page.request.post('/api/user-data/sync', {
+          data: {
+            key: 'projects',
+            value: current.projects.filter(project => project.id !== projectId),
+            projectRevision: current.revision,
+          },
+        });
+        const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+        const headers = response.headers();
+        evidence.recordApi('POST', '/api/user-data/sync', response.status(), payload, headers['x-request-id'] || headers['request-id']);
+        if (!response.ok() && response.status() !== 409) {
+          lastError = new Error(`Controlled project removal returned HTTP ${response.status()}`);
+        }
+      } catch (error) {
+        lastError = error;
       }
     }
+    if (!removed) {
+      const current = await readProjects(page, evidence);
+      removed = !current.projects.some(project => project.id === projectId);
+    }
+    expect(removed, `Controlled COW project remained after compensated removal: ${lastError instanceof Error ? lastError.message : String(lastError || 'unknown error')}`).toBe(true);
   } finally {
     const created = stage2PlacementDiff(
       databaseBaseline.placementIds,
-      await readStage2PlacementRows(databaseBaseline.ownerId, projectId),
+      await readStage2PlacementRows(databaseBaseline.ownerId, projectId, true),
     );
     for (const placementId of created) {
       const response = await page.request.delete(`/api/assets/placements/${encodeURIComponent(placementId)}?projectId=${encodeURIComponent(projectId)}`);
@@ -447,11 +461,9 @@ export async function removeControlledProject(
     }
     expect(stage2PlacementDiff(
       databaseBaseline.placementIds,
-      await readStage2PlacementRows(databaseBaseline.ownerId, projectId),
+      await readStage2PlacementRows(databaseBaseline.ownerId, projectId, true),
     )).toEqual([]);
   }
-  const after = await readProjects(page, evidence);
-  expect(after.projects.some(project => project.id === projectId)).toBe(false);
 }
 
 export function canvasProjectPlacements(project: Record<string, unknown> | undefined): Array<{
@@ -495,7 +507,15 @@ export function stage2DatabaseConnectionString(environment: Record<string, strin
   return connectionString;
 }
 
-async function readStage2PlacementRows(ownerId: string, projectId: string): Promise<Stage2PlacementRow[]> {
+export function stage2ProjectPresenceIsValid(rows: Array<{ id: string }>, allowMissingProject: boolean): boolean {
+  return rows.length === 1 || (allowMissingProject && rows.length === 0);
+}
+
+async function readStage2PlacementRows(
+  ownerId: string,
+  projectId: string,
+  allowMissingProject = false,
+): Promise<Stage2PlacementRow[]> {
   const connectionString = stage2DatabaseConnectionString(process.env);
   const client = new Client({
     connectionString: normalizePostgresConnectionString(connectionString),
@@ -507,7 +527,12 @@ async function readStage2PlacementRows(ownerId: string, projectId: string): Prom
       `SELECT id FROM wujie_projects WHERE id = $1 AND owner_id = $2`,
       [projectId, ownerId],
     );
-    expect(project.rows).toEqual([{ id: projectId }]);
+    expect(
+      stage2ProjectPresenceIsValid(project.rows, allowMissingProject),
+      allowMissingProject
+        ? 'COW fixture has multiple asset-graph project rows'
+        : 'Controlled project is missing from the deployment database or belongs to another owner',
+    ).toBe(true);
     const result = await client.query<{ id: string; status: string }>(
       `SELECT id, status FROM wujie_workspace_placements WHERE owner_id = $1 AND project_id = $2 ORDER BY id ASC`,
       [ownerId, projectId],
@@ -522,13 +547,14 @@ export async function stage2PlacementBaseline(
   page: Page,
   evidence: Stage2Evidence,
   projectId: string,
+  options: { allowMissingProject?: boolean } = {},
 ): Promise<Stage2PlacementBaseline> {
   const session = await apiJson(page, evidence, 'GET', '/api/auth/me');
   const user = session.user as Record<string, unknown> | undefined;
   const ownerId = requireNonEmptyStage2Value(typeof user?.id === 'string' ? user.id : '', 'authenticated Stage 2 owner id');
   return {
     ownerId,
-    placementIds: (await readStage2PlacementRows(ownerId, projectId))
+    placementIds: (await readStage2PlacementRows(ownerId, projectId, options.allowMissingProject === true))
       .filter(row => row.status === 'active')
       .map(row => row.id),
   };
