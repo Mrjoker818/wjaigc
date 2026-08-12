@@ -189,6 +189,102 @@ describe('asset media health transactional service', () => {
     expect(attemptWrites[1]?.[1]).toContain('failed');
   });
 
+  it('takes an exact-path advisory lock and rechecks all current versions without snapshot version IDs', async () => {
+    const currentVersions = [
+      {
+        id: 'version-initial',
+        asset_id: 'asset-z',
+        owner_id: 'owner-a',
+        project_id: 'project-a',
+        recovery_source_url: null,
+        storage_key: 'users/a/recovery.png',
+      },
+      {
+        id: 'version-arrived',
+        asset_id: 'asset-a',
+        owner_id: 'owner-a',
+        project_id: 'project-a',
+        recovery_source_url: null,
+        storage_key: 'users/a/recovery.png',
+      },
+    ];
+    const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+      void params;
+      if (sql.includes('pg_advisory_xact_lock')) return { rows: [{}], rowCount: 1 };
+      if (sql.includes('SELECT DISTINCT version.asset_id')) {
+        return { rows: [{ asset_id: 'asset-z' }, { asset_id: 'asset-a' }], rowCount: 2 };
+      }
+      if (sql.includes('FROM wujie_assets')) {
+        return { rows: [{ id: 'asset-a' }, { id: 'asset-z' }], rowCount: 2 };
+      }
+      if (sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')) {
+        return { rows: currentVersions, rowCount: currentVersions.length };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    });
+    mocks.withAssetCoreTransaction.mockImplementation(async (callback) => callback({ query }));
+
+    const result = await recordLegacyRecoveryOutcome({
+      localPath: 'users/a/recovery.png',
+      success: true,
+      method: 's3',
+    });
+
+    expect(result).toEqual({ matchedVersions: 2, ready: 2, missing: 0, unrecoverable: 0 });
+    const calls = query.mock.calls.map(([sql, params]) => ({ sql: String(sql), params }));
+    const advisoryIndex = calls.findIndex(({ sql }) => sql.includes('pg_advisory_xact_lock'));
+    const snapshotIndex = calls.findIndex(({ sql }) => sql.includes('SELECT DISTINCT version.asset_id'));
+    const assetLockIndex = calls.findIndex(({ sql }) => sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE'));
+    const finalRequeryIndex = calls.findIndex(({ sql }) => (
+      sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')
+    ));
+    expect([advisoryIndex, snapshotIndex, assetLockIndex, finalRequeryIndex]).toEqual([0, 1, 2, 3]);
+    expect(calls[0]?.params).toEqual(['asset-media-recovery:users/a/recovery.png']);
+    expect(calls[2]?.params).toEqual([['asset-a', 'asset-z']]);
+    expect(calls[3]?.sql).not.toMatch(/version\.id\s*=\s*ANY/i);
+    expect(calls[3]?.params).toEqual([
+      '/api/serve-upload/users/a/recovery.png',
+      'users/a/recovery.png',
+    ]);
+  });
+
+  it('performs the lock-time exact-path requery when the initial asset snapshot is empty', async () => {
+    const arrived = {
+      id: 'version-arrived',
+      asset_id: 'asset-arrived',
+      owner_id: 'owner-a',
+      project_id: 'project-a',
+      recovery_source_url: null,
+      storage_key: 'users/a/late.png',
+    };
+    const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+      void params;
+      if (sql.includes('pg_advisory_xact_lock')) return { rows: [{}], rowCount: 1 };
+      if (sql.includes('SELECT DISTINCT version.asset_id')) return { rows: [], rowCount: 0 };
+      if (sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')) {
+        return { rows: [arrived], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    });
+    mocks.withAssetCoreTransaction.mockImplementation(async (callback) => callback({ query }));
+
+    await expect(recordLegacyRecoveryOutcome({
+      localPath: 'users/a/late.png',
+      success: true,
+      method: 's3',
+    })).resolves.toEqual({ matchedVersions: 1, ready: 1, missing: 0, unrecoverable: 0 });
+
+    const finalRequery = query.mock.calls.find(([sql]) => (
+      String(sql).includes('FROM wujie_asset_versions version') && String(sql).includes('FOR UPDATE')
+    ));
+    expect(finalRequery?.[1]).toEqual([
+      '/api/serve-upload/users/a/late.png',
+      'users/a/late.png',
+    ]);
+  });
+
   it('matches only the exact normalized managed path and locks asset then version then placement', async () => {
     const exact = {
       id: 'version-exact',
@@ -206,10 +302,6 @@ describe('asset media health transactional service', () => {
       recovery_source_url: null,
       storage_key: 'images/same.png',
     };
-    const rowsById = new Map([
-      [exact.id, exact],
-      [guessedAlias.id, guessedAlias],
-    ]);
     const query = vi.fn(async (sql: string, params: readonly unknown[] = []) => {
       if (sql.includes('FROM wujie_asset_versions version') && !sql.includes('FOR UPDATE')) {
         const pathInput = params[1];
@@ -218,9 +310,9 @@ describe('asset media health transactional service', () => {
       }
       if (sql.includes('FROM wujie_assets')) return { rows: [{ id: exact.asset_id }], rowCount: 1 };
       if (sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')) {
-        const ids = Array.isArray(params[0]) ? params[0] as string[] : [];
-        const rows = ids.flatMap(id => rowsById.get(id) ?? []);
-        return { rows, rowCount: rows.length };
+        const pathInput = params[1];
+        const includesGuessedAlias = Array.isArray(pathInput) && pathInput.includes('images/same.png');
+        return { rows: includesGuessedAlias ? [exact, guessedAlias] : [exact], rowCount: includesGuessedAlias ? 2 : 1 };
       }
       if (sql.includes('FROM wujie_workspace_placements')) return { rows: [], rowCount: 0 };
       return { rows: [], rowCount: 1 };
@@ -236,11 +328,7 @@ describe('asset media health transactional service', () => {
     expect(result).toEqual({ matchedVersions: 1, ready: 1, missing: 0, unrecoverable: 0 });
     const reads = query.mock.calls.filter(([sql]) => String(sql).includes('FROM wujie_asset_versions version'));
     expect(reads[0]?.[1]).toEqual(['/api/serve-upload/users/a/same.png', 'users/a/same.png']);
-    expect(reads[1]?.[1]).toEqual([
-      ['version-exact'],
-      '/api/serve-upload/users/a/same.png',
-      'users/a/same.png',
-    ]);
+    expect(reads[1]?.[1]).toEqual(['/api/serve-upload/users/a/same.png', 'users/a/same.png']);
     expect(JSON.stringify(query.mock.calls)).not.toContain('images/same.png');
     const lockOrder = query.mock.calls
       .filter(([sql]) => String(sql).includes('FOR UPDATE'))

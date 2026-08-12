@@ -246,4 +246,100 @@ describe('stage 2 asset lifecycle PostgreSQL contract', () => {
       }
     });
   }, 30_000);
+
+  postgresIt('rechecks exact-path versions added after the candidate snapshot while waiting for the asset lock', async () => {
+    await withIsolatedPostgres('asset_lifecycle_recovery_candidate_recheck', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const initialVersionId = randomUUID();
+      const arrivedVersionId = randomUUID();
+      const initialPlacementId = randomUUID();
+      const arrivedPlacementId = randomUUID();
+      const managedUrl = '/api/serve-upload/uploads/candidate-race.png';
+      const storageKey = 'uploads/candidate-race.png';
+      await query(
+        `INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Recovery candidate recheck')`,
+        [projectId, ownerId],
+      );
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ($1, $2, $3, 'image', 'trashed')`,
+        [assetId, ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, storage_key, availability
+         ) VALUES ($1, $2, $3, $4, $5, $6, 'missing')`,
+        [initialVersionId, assetId, ownerId, projectId, managedUrl, storageKey],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, initialVersionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status, deleted_at
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-candidate-initial',
+                   'canvas-image', 'image-candidate-initial', 'trashed', now())`,
+        [initialPlacementId, ownerId, projectId, assetId, initialVersionId],
+      );
+
+      const applicationName = `asset-candidate-${randomUUID()}`;
+      const businessUrl = withApplicationName(databaseUrl, applicationName);
+      await closePool();
+      process.env.DATABASE_URL = businessUrl;
+      process.env.PGDATABASE_URL = businessUrl;
+      const { recordLegacyRecoveryOutcome } = await import('../../src/lib/asset-core/media-health');
+
+      const lockClient = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
+      await lockClient.connect();
+      try {
+        await lockClient.query('BEGIN');
+        await lockClient.query('SELECT id FROM wujie_assets WHERE id = $1 FOR NO KEY UPDATE', [assetId]);
+        const outcomePromise = recordLegacyRecoveryOutcome({
+          localPath: storageKey,
+          success: true,
+          method: 's3',
+        });
+        await waitForApplicationLockCount(query, applicationName, 1);
+
+        await query(
+          `INSERT INTO wujie_asset_versions(
+             id, asset_id, owner_id, project_id, file_url, storage_key, availability
+           ) VALUES ($1, $2, $3, $4, $5, $6, 'missing')`,
+          [arrivedVersionId, assetId, ownerId, projectId, managedUrl, storageKey],
+        );
+        await query(
+          `INSERT INTO wujie_workspace_placements(
+             id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+             entity_type, entity_id, status, deleted_at
+           ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-candidate-arrived',
+                     'canvas-image', 'image-candidate-arrived', 'trashed', now())`,
+          [arrivedPlacementId, ownerId, projectId, assetId, arrivedVersionId],
+        );
+        await lockClient.query('COMMIT');
+
+        await expect(outcomePromise).resolves.toEqual({
+          matchedVersions: 2,
+          ready: 2,
+          missing: 0,
+          unrecoverable: 0,
+        });
+        const versions = await query<{ id: string; availability: string }>(
+          `SELECT id, availability
+           FROM wujie_asset_versions
+           WHERE id = ANY($1::text[])
+           ORDER BY id`,
+          [[initialVersionId, arrivedVersionId]],
+        );
+        expect(versions.rows).toEqual([
+          { id: initialVersionId, availability: 'ready' },
+          { id: arrivedVersionId, availability: 'ready' },
+        ].sort((left, right) => left.id.localeCompare(right.id)));
+      } finally {
+        await lockClient.query('ROLLBACK').catch(() => undefined);
+        await lockClient.end();
+      }
+    });
+  }, 30_000);
 });

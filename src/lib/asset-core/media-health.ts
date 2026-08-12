@@ -668,38 +668,38 @@ export async function recordLegacyRecoveryOutcome(
   const managedUrl = `/api/serve-upload/${normalizedPath}`;
 
   return withAssetCoreTransaction(async (client) => {
-    const candidates = await client.query<LegacyRecoveryVersionRow>(
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [`asset-media-recovery:${normalizedPath}`],
+    );
+    const candidates = await client.query<{ asset_id: string }>(
+      `SELECT DISTINCT version.asset_id
+       FROM wujie_asset_versions version
+       WHERE (version.file_url = $1 OR version.storage_key = $2)
+         AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
+       ORDER BY version.asset_id`,
+      [managedUrl, normalizedPath],
+    );
+
+    const assetIds = [...new Set(candidates.rows.map(row => row.asset_id))].sort();
+    if (assetIds.length > 0) {
+      await client.query(
+        `SELECT id FROM wujie_assets
+         WHERE id = ANY($1::text[])
+         ORDER BY id
+         FOR UPDATE`,
+        [assetIds],
+      );
+    }
+    const locked = await client.query<LegacyRecoveryVersionRow>(
       `SELECT version.id, version.asset_id, version.owner_id, version.project_id,
               version.recovery_source_url, version.storage_key
        FROM wujie_asset_versions version
        WHERE (version.file_url = $1 OR version.storage_key = $2)
          AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
-       ORDER BY version.asset_id, version.id`,
-      [managedUrl, normalizedPath],
-    );
-    if (candidates.rows.length === 0) {
-      return { matchedVersions: 0, ready: 0, missing: 0, unrecoverable: 0 };
-    }
-
-    const assetIds = [...new Set(candidates.rows.map(row => row.asset_id))].sort();
-    await client.query(
-      `SELECT id FROM wujie_assets
-       WHERE id = ANY($1::text[])
-       ORDER BY id
-       FOR UPDATE`,
-      [assetIds],
-    );
-    const versionIds = candidates.rows.map(row => row.id);
-    const locked = await client.query<LegacyRecoveryVersionRow>(
-      `SELECT version.id, version.asset_id, version.owner_id, version.project_id,
-              version.recovery_source_url, version.storage_key
-       FROM wujie_asset_versions version
-       WHERE version.id = ANY($1::text[])
-         AND (version.file_url = $2 OR version.storage_key = $3)
-         AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
        ORDER BY version.asset_id, version.id
        FOR UPDATE`,
-      [versionIds, managedUrl, normalizedPath],
+      [managedUrl, normalizedPath],
     );
     await client.query(
       `SELECT placement.id
