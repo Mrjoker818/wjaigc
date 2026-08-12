@@ -1086,3 +1086,47 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Fix | Classify `/api/image-to-3d` as a long-running generator, set the route idempotency header from `sourceEntityId`, and assign explicit retries `attempt:{n}` source identities. |
 | Regression | RED/GREEN security contract, workflow wiring, TypeScript, full Vitest, production build, and independent R6 review pass. |
 | Status | **CLOSED LOCALLY 2026-08-11** in `12a9026`; deployed provider retry/billing evidence remains pending. |
+
+### BUG-060: Shared asset deletion could trash reusable media before its final placement was removed
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Asset lifecycle / Canvas placement deletion and restoration |
+| Environment | Stage 2 Task 8 local TDD and review, 2026-08-12 |
+| Reproduction | Create two active placements for one AssetVersion, delete one placement, then restore the deleted placement or delete the final active placement concurrently. |
+| Expected | Deleting one shared placement leaves the asset active; only deleting the final active placement trashes it; restoration is owner/project scoped and remains possible without physical media deletion. |
+| Actual | Before Task 8, no complete placement-aware trash/restore contract or API boundary existed, so shared-media lifecycle and concurrent final-placement handling were not safely defined. |
+| Root cause | Lifecycle state was split between legacy Canvas JSON and incomplete asset-graph operations without a single asset-first transactional lock boundary. |
+| Fix | Add placement-aware soft delete/restore, asset-to-version-to-placement locking, exact 30-day retention semantics, authorized restore routes, and a physical-purge-disabled terminal result. |
+| Regression | Focused Task 8 suite: 72 passed / 5 PostgreSQL tests skipped; independent task review and final whole-branch re-review approved 0/0/0. |
+| Status | **CLOSED LOCALLY 2026-08-12** in `b969c87..90cad2e`; real PostgreSQL concurrency and Coze shadow evidence remain UNVERIFIED. |
+
+### BUG-061: Media recovery and orphan governance could act on stale or cross-matched candidates
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Media health, legacy recovery, orphan candidate governance |
+| Environment | Stage 2 Task 8 review waves R1-R4, 2026-08-12 |
+| Reproduction | Recover two same-basename media paths for different users, or insert a same-path AssetVersion/new Asset between candidate discovery and governance writes. |
+| Expected | Recovery matches only the exact controlled path, locks every current asset/version/placement in deterministic order, retries serialization changes, and never purges while a current or legacy reference exists. |
+| Actual | Intermediate implementations reused stale candidate IDs, accepted basename aliases, could miss a newly arrived asset, and did not retry PostgreSQL `40001` serialization failures. |
+| Root cause | Candidate discovery and write-time authorization were not one serializable, exact-path, rechecked governance boundary. |
+| Fix | Use exact normalized paths, fail-closed legacy reference scans, transaction advisory locks, sorted asset locks, stable-set rechecks, version/placement locks, canonical confirmation digests, and at most three `40001` retries. Physical deletion stays disabled. |
+| Regression | Review waves retained permanent unit/API/PostgreSQL test bodies, including final purge fail-closed and traversal coverage; focused final result is 72 passed / 5 environment-skipped PostgreSQL tests. |
+| Status | **CLOSED LOCALLY 2026-08-12** in `eb3c491..90cad2e`; five PostgreSQL bodies and cloud recovery remain UNVERIFIED. |
+
+### BUG-062: Partial Canvas batch deletion could leave a deleted image selected
+
+| Field | Detail |
+|---|---|
+| Severity | P2 |
+| Module | Canvas batch placement deletion |
+| Environment | Stage 2 Task 8 local regression, 2026-08-12 |
+| Reproduction | Select multiple images, let an early placement deletion succeed and a later deletion fail. |
+| Expected | Successful deletions disappear and selection is reconciled; failed items remain and the error is reported; legacy-only images remain deletable. |
+| Actual | A deleted image could remain selected after the later failure, leaving UI state inconsistent with persisted successful deletions. |
+| Fix | Reconcile `selectedImage` from the exact successful `deletedIds` before returning the partial failure while preserving legacy-only behavior. |
+| Regression | `asset-placement-batch-delete` and Canvas shadow-sync regressions are included in the 72-test Task 8 focused suite. |
+| Status | **CLOSED LOCALLY 2026-08-12**; cloud UI verification remains UNVERIFIED. |

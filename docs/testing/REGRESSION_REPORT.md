@@ -839,3 +839,11 @@ Commit `12a9026eaf35e60410f775ae59f10c5d7eabe769` implements completed-task proj
 The extended Task 7 suite passed `84` tests and skipped `4` PostgreSQL-only tests. The final 3D/workflow security set passed `23/23`; `pnpm ts-check`, full `pnpm test`, full ESLint (`0 errors / 957 historical warnings`), the `114/114` production build, and the protected baseline (`38/38`, zero warnings) all exited successfully. Independent review R6 returned `APPROVED` with no findings.
 
 The four skipped PostgreSQL tests remain **UNVERIFIED**, not passed, because `POSTGRES_TEST_DATABASE_URL` is unavailable. Coze `shadow` deployment and real completed-task projection evidence are also pending. `asset-v3` remains disabled.
+
+## 2026-08-12 Stage 2 Task 8 local closure
+
+Task 8 adds placement-aware trash/restore, media-health recovery, orphan dry-run governance, and compatibility wiring for the existing administrator recovery route. Shared assets remain active while another active placement exists; the final placement may trash the asset, but physical S3/local purge is explicitly disabled.
+
+The final focused command covered lifecycle rules, recovery governance, Canvas batch deletion, authorization, the administrator route contract, and five PostgreSQL concurrency bodies. Result: `72 passed / 5 skipped`; all five skips are caused by the missing isolated PostgreSQL URL and remain UNVERIFIED. Fresh repository gates also passed: `pnpm ts-check`, full `pnpm test` (`2074 passed / 35 environment-skipped`), full ESLint (`0 errors / 957 historical warnings`), production build, protected baseline (`38/38`, zero warnings), and `git diff --check`.
+
+Review waves reproduced and closed exact-path cross-match, stale candidate, lock-order, partial batch-delete, recovery-attempt, bounded serialization-retry, terminal purge fail-open facts, batch path traversal, and GET mutation defects. After `90cad2e`, final whole-branch re-review returned `APPROVED` with Critical/Important/Minor `0/0/0`. No code was pushed and no cloud action or physical deletion was performed because Checkpoint C requires real PostgreSQL evidence.

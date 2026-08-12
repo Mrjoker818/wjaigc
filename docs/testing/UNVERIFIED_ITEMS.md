@@ -529,4 +529,13 @@
 | Workflow 3D billing and ownership | FIXED LOCALLY / CLOUD PENDING | Deploy `12a9026` in `shadow`; submit one real 3D workflow task; prove caller ownership, one charge, persisted provider/model, and authorized polling. |
 | Workflow 3D explicit retry | FIXED LOCALLY / CLOUD PENDING | Prove ambiguous retransmission reuses one task while a deliberate retry creates a distinct attempt without duplicate charge for either attempt. |
 | Task 7 cloud projection | UNVERIFIED | In Coze `shadow`, complete representative image/edit/video/3D tasks and verify immutable versions plus placements, idempotent replay, and `projection_pending` recovery. |
-| Task 8 lifecycle governance | NOT STARTED | Implement and verify trash, restore, media-health, and orphan governance; keep physical purge disabled until the final gate. |
+| Task 8 lifecycle governance | COMPLETED LOCALLY / EXTERNAL EVIDENCE PENDING | Local implementation and focused regressions are complete; real PostgreSQL and Coze shadow evidence are listed below. Physical purge remains disabled. |
+
+## 2026-08-12 Task 8 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Five PostgreSQL lifecycle tests | UNVERIFIED / BLOCKING CHECKPOINT C | Configure an isolated `POSTGRES_TEST_DATABASE_URL`; run all five tests without skips; prove shared-placement trash/restore, exact-path recovery, concurrent asset/version/placement locking, arriving-candidate serialization retry, and no deadlock. |
+| Task 8 Coze lifecycle | UNVERIFIED | After Checkpoint C is eligible and pushed, deploy the exact SHA in `shadow`; exercise delete, restore, missing-media recovery, dry-run orphan scan, and legacy admin recovery without enabling `asset-v3`. |
+| Physical purge | DISABLED BY DESIGN | Do not execute S3/local deletion. A later explicit release gate must separately authorize and prove physical deletion and retry behavior. |
+| Task 9 E2E and rollback | NOT STARTED | Run Chromium/Firefox/WebKit cross-workspace E2E, shadow comparison, controlled `asset-v3` test-only switch, and legacy rollback only after Checkpoint C closes. |

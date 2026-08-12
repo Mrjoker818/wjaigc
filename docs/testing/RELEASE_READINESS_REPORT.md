@@ -695,3 +695,11 @@ Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json
 - Completed tasks now project idempotently to immutable versions and placements without changing task/billing terminal authority. Projection failure is recoverable and does not turn a completed generation into a failed or recharged task.
 - Workflow 3D internal authentication, ownership, provider/model binding, per-attempt idempotency, and long-submit timeout are covered by permanent regressions.
 - **Stage 2 remains NOT PASSED.** Task 8, real isolated PostgreSQL concurrency, Checkpoint C cloud `shadow` validation, and final multi-workspace E2E/rollback are still incomplete. `asset-v3` must remain disabled and `stable` remains protected.
+
+## 2026-08-12 Stage 2 Task 8 local decision
+
+- Task 8 is locally implemented at `b969c87..90cad2e`; task review and final whole-branch re-review are approved with 0/0/0 findings, and all available local gates pass.
+- Trash/restore is placement-aware, media recovery is exact-path and fail-closed, orphan scans default to deterministic dry-run, and physical purge remains disabled.
+- Five PostgreSQL lifecycle tests are explicit skips because neither `POSTGRES_TEST_DATABASE_URL` nor `PGDATABASE_URL` is configured. They are UNVERIFIED and prevent Checkpoint C from being pushed.
+- Coze has not pulled this Task 8 branch and no cloud `shadow` lifecycle proof exists.
+- **Stage 2 verdict remains NOT PASSED.** Task 9 has not started; `asset-v3` remains prohibited; GitHub `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
