@@ -535,7 +535,8 @@
 
 | Item | Status | Required evidence |
 |---|---|---|
-| Five PostgreSQL lifecycle tests | UNVERIFIED / BLOCKING CHECKPOINT C | Configure an isolated `POSTGRES_TEST_DATABASE_URL`; run all five tests without skips; prove shared-placement trash/restore, exact-path recovery, concurrent asset/version/placement locking, arriving-candidate serialization retry, and no deadlock. |
+| Five PostgreSQL lifecycle tests | VERIFIED LOCALLY | Isolated PostgreSQL 18 run passed 5/5, including shared-placement lifecycle, lock waits, exact-path rechecks, arriving-asset serialization retry, and no-deadlock recovery. |
 | Task 8 Coze lifecycle | UNVERIFIED | After Checkpoint C is eligible and pushed, deploy the exact SHA in `shadow`; exercise delete, restore, missing-media recovery, dry-run orphan scan, and legacy admin recovery without enabling `asset-v3`. |
 | Physical purge | DISABLED BY DESIGN | Do not execute S3/local deletion. A later explicit release gate must separately authorize and prove physical deletion and retry behavior. |
 | Task 9 E2E and rollback | NOT STARTED | Run Chromium/Firefox/WebKit cross-workspace E2E, shadow comparison, controlled `asset-v3` test-only switch, and legacy rollback only after Checkpoint C closes. |
+| Element board, Pear layer decomposition, annotation PostgreSQL tests | UNVERIFIED / NON-CHECKPOINT-C | Four tests remain skipped because they use `TEST_POSTGRES_URL`, not `POSTGRES_TEST_DATABASE_URL`. Keep them visible for their owning business-module stages. |

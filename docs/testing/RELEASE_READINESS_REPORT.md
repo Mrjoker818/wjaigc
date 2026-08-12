@@ -700,6 +700,6 @@ Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json
 
 - Task 8 is locally implemented at `b969c87..90cad2e`; task review and final whole-branch re-review are approved with 0/0/0 findings, and all available local gates pass.
 - Trash/restore is placement-aware, media recovery is exact-path and fail-closed, orphan scans default to deterministic dry-run, and physical purge remains disabled.
-- Five PostgreSQL lifecycle tests are explicit skips because neither `POSTGRES_TEST_DATABASE_URL` nor `PGDATABASE_URL` is configured. They are UNVERIFIED and prevent Checkpoint C from being pushed.
+- The five PostgreSQL lifecycle tests now pass in an isolated local PostgreSQL 18 database. PostgreSQL-enabled full Vitest passes `2105` tests; four unrelated suites remain skipped under their separate `TEST_POSTGRES_URL` gate.
 - Coze has not pulled this Task 8 branch and no cloud `shadow` lifecycle proof exists.
-- **Stage 2 verdict remains NOT PASSED.** Task 9 has not started; `asset-v3` remains prohibited; GitHub `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+- **Stage 2 verdict remains NOT PASSED.** Checkpoint C is technically eligible for a `main`-only push but cloud `shadow` proof and Task 9 are still pending; `asset-v3` remains prohibited; GitHub `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
