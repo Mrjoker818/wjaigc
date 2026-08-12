@@ -142,6 +142,42 @@ export async function readImageFromS3(key: string): Promise<Buffer | null> {
   }
 }
 
+/** Read one exact object with an abortable byte limit. */
+export async function readImageFromS3Bounded(
+  key: string,
+  maxBytes: number,
+  timeoutMs: number,
+): Promise<Buffer | null> {
+  const url = await getS3PresignedUrl(key, Math.max(60, Math.ceil(timeoutMs / 1000) + 30));
+  if (!url) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { redirect: 'error', signal: controller.signal });
+    if (!response.ok || !response.body) return null;
+    const declaredLength = Number(response.headers.get('content-length') || 0);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) return null;
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, total);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Check if a file exists in S3
  */

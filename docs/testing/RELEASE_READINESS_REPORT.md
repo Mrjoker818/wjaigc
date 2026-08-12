@@ -710,3 +710,10 @@ Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json
 - BUG-064 remains open: clicking media recovery can render a source image while durable availability remains `recovering`; no worker terminal transition is proven.
 - **Checkpoint C verdict: NOT PASSED. Task 9 must not start.** Deploy the exact BUG-063 candidate in `shadow` and rerun lifecycle evidence; keep `asset-v3` and physical purge disabled. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
 - Final candidate local gates passed: affected regression `51/51`, full Vitest `2083 passed / 35 environment-skipped / 0 failed`, TypeScript, ESLint (`0 errors / 957 historical warnings`), production build (`116/116` pages), and protected baseline (`38/38`, no unapproved source drift). This does not override the open BUG-064 or the missing current-candidate PostgreSQL concurrency evidence.
+
+## 2026-08-12 Checkpoint C repaired candidate decision
+
+- BUG-064 is closed locally: recovery now has an authorized durable worker, PostgreSQL lease/fencing, exact validated S3 or durable-local delivery, database-authoritative polling, and explicit retryable versus unrecoverable terminals.
+- Current-candidate PostgreSQL evidence is complete. The final repository run passed `402/402` files and `2160/2160` tests with zero failures and zero skips, including all Stage 2 lifecycle/projection and billing concurrency tests.
+- TypeScript, production build (`116/116`), ESLint (`0 errors / 957 historical warnings`), protected baseline (`38/38`), and `git diff --check` pass. Independent final review is `APPROVED` with no P0/P1/P2 findings.
+- **Checkpoint C verdict remains NOT PASSED pending cloud evidence.** Coze currently runs base `4bbe6db`; after a `main`-only push, deploy the exact candidate in `shadow` and prove generation projection, delete/reload, and media recovery. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`, `asset-v3`, and physical purge remain untouched/disabled.

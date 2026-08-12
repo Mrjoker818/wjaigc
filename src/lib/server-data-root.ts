@@ -72,6 +72,17 @@ export function getServerDataRoot(): string {
   return _dataRoot;
 }
 
+export function isServerDataRootDurable(dataRoot: string = getServerDataRoot()): boolean {
+  const resolvedRoot = path.resolve(dataRoot);
+  if (resolvedRoot === path.resolve(PERSISTENT_DIR)) return true;
+  const configuredRoot = process.env.WUJIE_DATA_DIR?.trim();
+  return Boolean(
+    configuredRoot
+    && resolvedRoot === path.resolve(configuredRoot)
+    && process.env.WUJIE_DATA_DIR_DURABLE?.trim().toLowerCase() === 'true'
+  );
+}
+
 /**
  * 如果本地 data/ 有旧数据且持久目录为空，自动迁移
  */

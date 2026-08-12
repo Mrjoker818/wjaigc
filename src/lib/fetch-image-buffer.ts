@@ -61,6 +61,12 @@ export async function fetchImageBuffer(url: string): Promise<Buffer> {
   // local path (e.g., /api/serve-upload/xxx, /uploads/xxx)
   if (url.startsWith('/')) {
     const relativePath = normalizeLocalImagePath(url);
+    if (relativePath.startsWith('recovery/')) {
+      const { readExactRecoveryMedia } = await import('@/lib/asset-core/recovery-media');
+      const recovery = await readExactRecoveryMedia(relativePath);
+      if (recovery) return recovery.buffer;
+      throw new Error('Recovered media is unavailable or failed validation');
+    }
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
     const localPath = resolveInsideDirectory(path.join(workspacePath, 'public'), relativePath);
     if (fsSync.existsSync(localPath)) return await fs.readFile(localPath);

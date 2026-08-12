@@ -32,10 +32,12 @@ describe('media health governance boundaries', () => {
     expect(mediaHealth).toContain("legacy_project.value->>'userId' = a.owner_id");
   });
 
-  it('keeps recovery deferred outside locks without fetching or changing immutable file URLs', () => {
+  it('keeps network recovery outside locks and publishes a new URL only behind the recovery lease fence', () => {
     expect(mediaHealth).not.toContain('fetch(');
-    expect(mediaHealth).not.toContain("file_url = CASE");
     expect(mediaHealth).toContain("'deferred'");
+    expect(mediaHealth).toContain("AND status = 'deferred'");
+    expect(mediaHealth).toContain("file_url = CASE WHEN $4 = 'ready' THEN coalesce($5, file_url) ELSE file_url END");
+    expect(mediaHealth.indexOf("AND status = 'deferred'")).toBeLessThan(mediaHealth.indexOf('file_url = CASE'));
   });
 
   it('waits for placement deletion requests before filtering the dashboard legacy image list', () => {

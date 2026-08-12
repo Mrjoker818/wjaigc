@@ -18,6 +18,10 @@ import {
   handleCanvasMediaElementFailure,
 } from '@/lib/asset-core/canvas-adapter';
 import type { MediaAvailability } from '@/lib/asset-core/types';
+import {
+  getCanvasMediaRecoveryIdentityState,
+  recoverCanvasMediaUntilTerminal,
+} from '@/lib/asset-core/canvas-media-recovery-client';
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
@@ -2225,30 +2229,93 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     onImagesChange(nextImages);
   }, [onImagesChange]);
 
-  const retryMissingMedia = useCallback((image: CanvasImage) => {
-    const nextImages = imagesRef.current.map((candidate) => (
-      candidate.id === image.id
-        ? { ...candidate, mediaAvailability: 'ready' as const, mediaErrorCode: undefined }
-        : candidate
-    ));
-    imagesRef.current = nextImages;
-    onImagesChange(nextImages);
-  }, [onImagesChange]);
+  const recoverMissingMedia = useCallback(async (image: CanvasImage) => {
+    const effectiveProjectId = projectId || brandProject?.id || '';
+    const identityState = getCanvasMediaRecoveryIdentityState(image);
+    if (identityState === 'legacy' && !effectiveProjectId) {
+      const nextImages = imagesRef.current.map((candidate) => (
+        candidate.id === image.id
+          ? {
+              ...candidate,
+              url: candidate.sourceUrl || candidate.url,
+              mediaAvailability: 'recovering' as const,
+              mediaErrorCode: undefined,
+            }
+          : candidate
+      ));
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
+      return;
+    }
+    if (identityState === 'legacy') {
+      const nextImages = imagesRef.current.map((candidate) => (
+        candidate.id === image.id
+          ? {
+              ...candidate,
+              url: candidate.sourceUrl || candidate.url,
+              mediaAvailability: 'recovering' as const,
+              mediaErrorCode: undefined,
+            }
+          : candidate
+      ));
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
+      return;
+    }
+    if (identityState === 'incomplete' || !effectiveProjectId) {
+      const nextImages = imagesRef.current.map((candidate) => (
+        candidate.id === image.id
+          ? { ...candidate, mediaAvailability: 'missing' as const, mediaErrorCode: 'ASSET_RECOVERY_IDENTITY_MISSING' }
+          : candidate
+      ));
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
+      toast.error('媒体恢复失败', { description: '媒体身份信息不完整，请刷新项目后重试。' });
+      return;
+    }
 
-  const recoverMissingMedia = useCallback((image: CanvasImage) => {
-    const nextImages = imagesRef.current.map((candidate) => (
+    const recoveringImages = imagesRef.current.map((candidate) => (
       candidate.id === image.id
-        ? {
-            ...candidate,
-            url: candidate.sourceUrl || candidate.url,
-            mediaAvailability: 'recovering' as const,
-            mediaErrorCode: undefined,
-          }
+        ? { ...candidate, mediaAvailability: 'recovering' as const, mediaErrorCode: undefined }
         : candidate
     ));
-    imagesRef.current = nextImages;
-    onImagesChange(nextImages);
-  }, [onImagesChange]);
+    imagesRef.current = recoveringImages;
+    onImagesChange(recoveringImages);
+
+    const toastId = toast.loading('正在恢复媒体文件...');
+    try {
+      const result = await recoverCanvasMediaUntilTerminal({ projectId: effectiveProjectId, image });
+      const nextImages = imagesRef.current.map((candidate) => (
+        candidate.id === image.id
+          ? {
+              ...candidate,
+              url: result.url || candidate.url,
+              mediaAvailability: result.availability,
+              mediaErrorCode: result.recovered || result.availability === 'recovering'
+                ? undefined
+                : result.error || 'MEDIA_RECOVERY_FAILED',
+            }
+          : candidate
+      ));
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
+      if (result.recovered) toast.success('媒体已恢复', { id: toastId });
+      else if (result.availability === 'recovering') toast.loading('媒体正在恢复中...', { id: toastId });
+      else toast.error('媒体恢复失败', { id: toastId, description: result.error });
+    } catch (error) {
+      const nextImages = imagesRef.current.map((candidate) => (
+        candidate.id === image.id
+          ? { ...candidate, mediaAvailability: 'missing' as const, mediaErrorCode: 'MEDIA_RECOVERY_FAILED' }
+          : candidate
+      ));
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
+      toast.error('媒体恢复失败', {
+        id: toastId,
+        description: error instanceof Error ? error.message : '请稍后重试',
+      });
+    }
+  }, [brandProject?.id, onImagesChange, projectId]);
 
   // 同步 genGroups ref
   useEffect(() => {
@@ -10979,13 +11046,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     <span className={`max-w-full truncate text-xs ${isMonochrome ? 'text-red-700' : 'text-red-200/75'}`}>
                       {image.mediaErrorCode || 'MEDIA_UNAVAILABLE'}
                     </span>
-                    <div className="pointer-events-auto flex items-center gap-2">
+                    {image.mediaAvailability !== 'unrecoverable' && <div className="pointer-events-auto flex items-center gap-2">
                       <button
                         type="button"
                         className={`px-3 py-1 text-xs font-medium transition-colors ${isMonochrome ? 'bg-red-700 text-white hover:bg-red-800' : 'bg-red-500 text-white hover:bg-red-400'}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          retryMissingMedia(image);
+                          void recoverMissingMedia(image);
                         }}
                       >
                         重试
@@ -10995,12 +11062,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         className={`px-3 py-1 text-xs font-medium transition-colors ${isMonochrome ? 'bg-white text-red-800 ring-1 ring-red-200 hover:bg-red-100' : 'bg-white/10 text-red-100 hover:bg-white/20'}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          recoverMissingMedia(image);
+                          void recoverMissingMedia(image);
                         }}
                       >
                         恢复
                       </button>
-                    </div>
+                    </div>}
                   </div>
                 ) : image.url ? (
                   <NextImage key={`${image.id}:${image.mediaAvailability || 'ready'}`} unoptimized width={1} height={1}                     src={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}

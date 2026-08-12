@@ -20,6 +20,17 @@ describe('public media access security contract', () => {
     expect(routeHandler).toContain("return NextResponse.json({ error: 'File not found' }, { status: 404 });");
   });
 
+  it('fails closed when an exact recovery URL cannot be verified', () => {
+    const routeHandler = serveUpload.slice(serveUpload.indexOf('export async function GET'));
+    const recoveryReadIndex = routeHandler.indexOf('readExactRecoveryMedia(filePath)');
+    const recoveryMissIndex = routeHandler.indexOf('if (isRecoveryPath)');
+    const dataRootIndex = routeHandler.indexOf('const dataRoot = getServerDataRoot()');
+
+    expect(recoveryReadIndex).toBeGreaterThanOrEqual(0);
+    expect(recoveryMissIndex).toBeGreaterThan(recoveryReadIndex);
+    expect(dataRootIndex).toBeGreaterThan(recoveryMissIndex);
+  });
+
   it('never serves stored SVG as active same-origin content', () => {
     expect(serveUpload).not.toContain("ext === '.svg' ? 'image/svg+xml'");
     expect(serveUpload).toMatch(/Content-Disposition.*attachment/);

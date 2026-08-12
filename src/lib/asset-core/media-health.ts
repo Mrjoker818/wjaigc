@@ -5,8 +5,13 @@ import {
   type AssetCoreSqlTransaction,
   withAssetCoreTransaction,
 } from './storage';
+import type {
+  AssetMediaRecoveryExecution,
+  AssetMediaRecoveryTarget,
+} from './media-recovery-worker';
 
 export const DEFAULT_TRASH_RETENTION_DAYS = 30;
+const MEDIA_RECOVERY_LEASE_MS = 5 * 60 * 1000;
 
 export interface OrphanCandidateInput {
   managed: boolean;
@@ -578,21 +583,64 @@ export async function purgeEligibleAsset(input: {
   });
 }
 
-export async function recoverAssetMedia(input: {
+interface AssetMediaRecoveryIdentity {
   actorUserId: string;
   projectId: string;
   assetVersionId: string;
   assetId: string;
   placementId: string;
-}): Promise<
+}
+
+export async function getAssetMediaRecoveryStatus(input: AssetMediaRecoveryIdentity): Promise<
+  | { recovered: true; availability: 'ready'; deferred: false; url: string }
+  | { recovered: false; availability: 'missing'; deferred: false; error: string }
   | { recovered: false; availability: 'recovering'; deferred: true }
   | { recovered: false; availability: 'unrecoverable'; deferred: false }
 > {
   return withAssetCoreTransaction(async (client) => {
-    const asset = await client.query<{ id: string }>(
+    const result = await client.query<{ file_url: string; availability: string }>(
+      `SELECT version.file_url, version.availability
+       FROM wujie_assets asset
+       JOIN wujie_asset_versions version ON version.asset_id = asset.id
+       JOIN wujie_workspace_placements placement
+         ON placement.asset_id = asset.id AND placement.asset_version_id = version.id
+       WHERE asset.id = $1 AND asset.owner_id = $2 AND asset.project_id = $3
+         AND asset.status IN ('active', 'trashed')
+         AND version.id = $4 AND version.owner_id = $2 AND version.project_id = $3
+         AND placement.id = $5 AND placement.owner_id = $2 AND placement.project_id = $3
+         AND placement.status IN ('active', 'trashed')`,
+      [input.assetId, input.actorUserId, input.projectId, input.assetVersionId, input.placementId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new MediaHealthError('ASSET_NOT_FOUND');
+    if (row.availability === 'ready') {
+      return { recovered: true, availability: 'ready', deferred: false, url: row.file_url };
+    }
+    if (row.availability === 'recovering') {
+      return { recovered: false, availability: 'recovering', deferred: true };
+    }
+    if (row.availability === 'unrecoverable') {
+      return { recovered: false, availability: 'unrecoverable', deferred: false };
+    }
+    return { recovered: false, availability: 'missing', deferred: false, error: 'Managed media recovery failed' };
+  });
+}
+
+export async function recoverAssetMedia(input: AssetMediaRecoveryIdentity, dependencies: {
+  executeRecovery?: (target: AssetMediaRecoveryTarget) => Promise<AssetMediaRecoveryExecution>;
+  scheduleRecovery?: (work: () => Promise<void>) => void;
+} = {}): Promise<
+  | { recovered: true; availability: 'ready'; deferred: false; url: string }
+  | { recovered: false; availability: 'missing'; deferred: false; error: string }
+  | { recovered: false; availability: 'recovering'; deferred: true }
+  | { recovered: false; availability: 'unrecoverable'; deferred: false }
+> {
+  const attemptId = randomUUID();
+  const recovery = await withAssetCoreTransaction(async (client) => {
+    const asset = await client.query<{ id: string; status: string }>(
       `SELECT id
        FROM wujie_assets
-       WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'trashed'
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status IN ('active', 'trashed')
        FOR UPDATE`,
       [input.assetId, input.actorUserId, input.projectId],
     );
@@ -600,28 +648,62 @@ export async function recoverAssetMedia(input: {
     const result = await client.query<{
       id: string;
       asset_id: string;
+      file_url: string;
       recovery_source_url: string | null;
       storage_key: string | null;
+      checksum: string | null;
+      mime_type: string | null;
+      byte_size: string | null;
+      availability: string;
     }>(
-      `SELECT version.id, version.asset_id, version.recovery_source_url, version.storage_key
+      `SELECT version.id, version.asset_id, version.file_url, version.recovery_source_url,
+              version.storage_key, version.checksum, version.mime_type,
+              version.byte_size::text, version.availability
        FROM wujie_asset_versions version
        WHERE version.id = $1 AND version.owner_id = $2 AND version.project_id = $3 AND version.asset_id = $4
-         AND version.availability IN ('missing', 'unrecoverable')
+         AND version.availability IN ('ready', 'missing', 'recovering', 'unrecoverable')
        FOR UPDATE`,
       [input.assetVersionId, input.actorUserId, input.projectId, input.assetId],
     );
     const version = result.rows[0];
     if (!version) throw new MediaHealthError('ASSET_NOT_FOUND');
-    const placement = await client.query<{ id: string }>(
+    const placement = await client.query<{ id: string; status: string }>(
       `SELECT id
        FROM wujie_workspace_placements
        WHERE id = $1 AND owner_id = $2 AND project_id = $3
-         AND asset_id = $4 AND asset_version_id = $5 AND status = 'trashed'
+         AND asset_id = $4 AND asset_version_id = $5 AND status IN ('active', 'trashed')
        FOR UPDATE`,
       [input.placementId, input.actorUserId, input.projectId, input.assetId, input.assetVersionId],
     );
     if (!placement.rows[0]) throw new MediaHealthError('ASSET_NOT_FOUND');
-    const recoverable = Boolean(version.recovery_source_url || version.storage_key);
+    if (version.availability === 'recovering') {
+      const activeAttempt = await client.query<{ id: string; created_at: Date }>(
+        `SELECT id, created_at
+         FROM wujie_asset_media_recovery_attempts
+         WHERE asset_version_id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'deferred'
+         ORDER BY created_at DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [input.assetVersionId, input.actorUserId, input.projectId],
+      );
+      const lease = activeAttempt.rows[0];
+      if (lease && Date.now() - new Date(lease.created_at).getTime() < MEDIA_RECOVERY_LEASE_MS) {
+        return { kind: 'deferred' as const };
+      }
+      if (lease) {
+        await client.query(
+          `UPDATE wujie_asset_media_recovery_attempts
+           SET status = 'failed', detail = 'Recovery lease expired before reaching a terminal state'
+           WHERE id = $1 AND status = 'deferred'`,
+          [lease.id],
+        );
+      }
+    }
+    const recoverable = Boolean(
+      version.recovery_source_url
+      || version.storage_key
+      || version.file_url.startsWith('/api/serve-upload/'),
+    );
     const availability = recoverable ? 'recovering' : 'unrecoverable';
     const attemptStatus = recoverable ? 'deferred' : 'unrecoverable';
     const detail = recoverable
@@ -631,19 +713,149 @@ export async function recoverAssetMedia(input: {
       `UPDATE wujie_asset_versions
        SET availability = $4
        WHERE id = $1 AND owner_id = $2 AND project_id = $3
-         AND availability IN ('missing', 'unrecoverable')`,
+         AND availability IN ('ready', 'missing', 'unrecoverable')`,
       [input.assetVersionId, input.actorUserId, input.projectId, availability],
     );
     await client.query(
       `INSERT INTO wujie_asset_media_recovery_attempts(
         id, asset_version_id, asset_id, owner_id, project_id, source_url, status, detail
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [randomUUID(), version.id, version.asset_id, input.actorUserId, input.projectId, version.recovery_source_url, attemptStatus, detail],
+      [attemptId, version.id, version.asset_id, input.actorUserId, input.projectId, version.recovery_source_url, attemptStatus, detail],
     );
-    return recoverable
-      ? { recovered: false, availability: 'recovering', deferred: true }
-      : { recovered: false, availability: 'unrecoverable', deferred: false };
+    return recoverable ? {
+      kind: 'execute' as const,
+      target: {
+        fileUrl: version.file_url,
+        recoverySourceUrl: version.recovery_source_url,
+        storageKey: version.storage_key,
+        checksum: version.checksum,
+        mimeType: version.mime_type,
+        assetVersionId: version.id,
+        attemptId,
+      },
+    } : { kind: 'unrecoverable' as const };
   });
+
+  if (recovery.kind === 'unrecoverable') {
+    return { recovered: false, availability: 'unrecoverable', deferred: false };
+  }
+  if (recovery.kind === 'deferred') {
+    return { recovered: false, availability: 'recovering', deferred: true };
+  }
+  if (!dependencies.executeRecovery) {
+    return { recovered: false, availability: 'recovering', deferred: true };
+  }
+
+  const executeAndSettle = async () => {
+    let execution: AssetMediaRecoveryExecution;
+    try {
+      execution = await dependencies.executeRecovery!(recovery.target);
+    } catch (error) {
+      execution = {
+        success: false,
+        method: 'worker',
+        error: error instanceof Error ? error.message : 'Managed media recovery worker failed',
+      };
+    }
+    const availability = execution.success ? 'ready' : execution.retryable === false ? 'unrecoverable' : 'missing';
+    const attemptStatus = execution.success ? 'succeeded' : execution.retryable === false ? 'unrecoverable' : 'failed';
+    const detail = execution.success
+      ? `Recovered by managed media worker using ${execution.method}`
+      : execution.error ?? `Managed media recovery failed using ${execution.method}`;
+
+    const applied = await withAssetCoreTransaction(async (client) => {
+    const asset = await client.query<{ id: string }>(
+      `SELECT id, current_version_id FROM wujie_assets
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status IN ('active', 'trashed')
+       FOR UPDATE`,
+      [input.assetId, input.actorUserId, input.projectId],
+    );
+    if (!asset.rows[0]) throw new MediaHealthError('ASSET_NOT_FOUND');
+    const version = await client.query<{ id: string }>(
+      `SELECT id FROM wujie_asset_versions
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND asset_id = $4
+       FOR UPDATE`,
+      [input.assetVersionId, input.actorUserId, input.projectId, input.assetId],
+    );
+    if (!version.rows[0]) throw new MediaHealthError('ASSET_NOT_FOUND');
+    const placement = await client.query<{ id: string }>(
+      `SELECT id FROM wujie_workspace_placements
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3
+         AND asset_id = $4 AND asset_version_id = $5 AND status IN ('active', 'trashed')
+       FOR UPDATE`,
+      [input.placementId, input.actorUserId, input.projectId, input.assetId, input.assetVersionId],
+    );
+    if (!placement.rows[0]) throw new MediaHealthError('ASSET_NOT_FOUND');
+    const attempt = await client.query<{ id: string }>(
+      `SELECT id FROM wujie_asset_media_recovery_attempts
+       WHERE id = $1 AND asset_version_id = $2 AND owner_id = $3 AND project_id = $4
+         AND status = 'deferred'
+       FOR UPDATE`,
+      [attemptId, input.assetVersionId, input.actorUserId, input.projectId],
+    );
+    if (!attempt.rows[0]) return false;
+    const versionUpdate = await client.query(
+      `UPDATE wujie_asset_versions
+       SET availability = $4,
+           file_url = CASE WHEN $4 = 'ready' THEN coalesce($5, file_url) ELSE file_url END,
+           storage_key = CASE WHEN $4 = 'ready' THEN coalesce($6, storage_key) ELSE storage_key END,
+           checksum = CASE WHEN $4 = 'ready' THEN coalesce($7, checksum) ELSE checksum END,
+           mime_type = CASE WHEN $4 = 'ready' THEN coalesce($8, mime_type) ELSE mime_type END,
+           byte_size = CASE WHEN $4 = 'ready' THEN coalesce($9, byte_size) ELSE byte_size END
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND availability = 'recovering'`,
+      [
+        input.assetVersionId,
+        input.actorUserId,
+        input.projectId,
+        availability,
+        execution.url ?? null,
+        execution.storageKey ?? null,
+        execution.checksum ?? null,
+        execution.mimeType ?? null,
+        execution.byteSize ?? null,
+      ],
+    );
+    if (versionUpdate.rowCount !== 1) {
+      await client.query(
+        `UPDATE wujie_asset_media_recovery_attempts
+         SET status = 'failed', detail = 'Recovery result arrived after the version left recovering state'
+         WHERE id = $1 AND status = 'deferred'`,
+        [attemptId],
+      );
+      return false;
+    }
+    await client.query(
+      `UPDATE wujie_assets
+       SET metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object(
+         'legacyImage',
+         (coalesce(metadata->'legacyImage', '{}'::jsonb) - 'mediaErrorCode')
+           || jsonb_build_object('mediaAvailability', $4::text)
+       ), updated_at = now()
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND current_version_id = $5`,
+      [input.assetId, input.actorUserId, input.projectId, availability, input.assetVersionId],
+    );
+    await client.query(
+      `UPDATE wujie_asset_media_recovery_attempts
+       SET status = $2, detail = $3
+       WHERE id = $1`,
+      [attemptId, attemptStatus, detail],
+    );
+    return true;
+    });
+
+    if (!applied) return { recovered: false, availability: 'recovering', deferred: true } as const;
+    return execution.success
+      ? { recovered: true, availability: 'ready', deferred: false, url: execution.url ?? recovery.target.fileUrl } as const
+      : execution.retryable === false
+        ? { recovered: false, availability: 'unrecoverable', deferred: false } as const
+        : { recovered: false, availability: 'missing', deferred: false, error: detail } as const;
+  };
+
+  if (dependencies.scheduleRecovery) {
+    dependencies.scheduleRecovery(async () => { await executeAndSettle(); });
+    return { recovered: false, availability: 'recovering', deferred: true };
+  }
+  return executeAndSettle();
 }
 
 export interface LegacyRecoveryOutcomeInput {

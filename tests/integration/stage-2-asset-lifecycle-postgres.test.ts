@@ -219,6 +219,13 @@ describe('stage 2 asset lifecycle PostgreSQL contract', () => {
           assetVersionId: versionId,
           assetId,
           placementId,
+        }, {
+          executeRecovery: async () => ({
+            success: true,
+            method: 'managed-storage',
+            url: '/api/serve-upload/uploads/concurrent.png',
+            storageKey: 'uploads/concurrent.png',
+          }),
         });
         const legacyPromise = recordLegacyRecoveryOutcome({
           localPath: 'uploads/concurrent.png',
@@ -244,6 +251,534 @@ describe('stage 2 asset lifecycle PostgreSQL contract', () => {
         await lockClient.query('ROLLBACK').catch(() => undefined);
         await lockClient.end();
       }
+    });
+  }, 30_000);
+
+  postgresIt('persists active canvas media recovery and its attempt as a ready terminal', async () => {
+    await withIsolatedPostgres('asset_lifecycle_active_recovery', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const versionId = randomUUID();
+      const placementId = randomUUID();
+      await query(
+        `INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Active recovery')`,
+        [projectId, ownerId],
+      );
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status, metadata)
+         VALUES ($1, $2, $3, 'image', 'active', $4::jsonb)`,
+        [assetId, ownerId, projectId, JSON.stringify({ legacyImage: { mediaAvailability: 'missing' } })],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, recovery_source_url, availability
+         ) VALUES ($1, $2, $3, $4, '/api/serve-upload/uploads/active.png',
+                   'https://source.test/active.png', 'missing')`,
+        [versionId, assetId, ownerId, projectId],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, versionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-active',
+                   'canvas-image', 'image-active', 'active')`,
+        [placementId, ownerId, projectId, assetId, versionId],
+      );
+
+      await closePool();
+      process.env.DATABASE_URL = databaseUrl;
+      process.env.PGDATABASE_URL = databaseUrl;
+      const { recoverAssetMedia } = await import('../../src/lib/asset-core/media-health');
+      await expect(recoverAssetMedia({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: versionId,
+        assetId,
+        placementId,
+      }, {
+        executeRecovery: async () => ({
+          success: true,
+          method: 'managed-storage',
+          url: '/api/serve-upload/uploads/active.png',
+          storageKey: 'images/uploads/active.png',
+        }),
+      })).resolves.toEqual({
+        recovered: true,
+        availability: 'ready',
+        deferred: false,
+        url: '/api/serve-upload/uploads/active.png',
+      });
+
+      const version = await query<{ availability: string; storage_key: string | null }>(
+        'SELECT availability, storage_key FROM wujie_asset_versions WHERE id = $1',
+        [versionId],
+      );
+      expect(version.rows[0]).toEqual({
+        availability: 'ready',
+        storage_key: 'images/uploads/active.png',
+      });
+      const asset = await query<{ availability: string }>(
+        `SELECT metadata->'legacyImage'->>'mediaAvailability' AS availability
+         FROM wujie_assets WHERE id = $1`,
+        [assetId],
+      );
+      expect(asset.rows[0]?.availability).toBe('ready');
+      const attempts = await query<{ status: string; detail: string }>(
+        `SELECT status, detail FROM wujie_asset_media_recovery_attempts
+         WHERE asset_id = $1 ORDER BY created_at`,
+        [assetId],
+      );
+      expect(attempts.rows).toHaveLength(1);
+      expect(attempts.rows[0]).toMatchObject({
+        status: 'succeeded',
+        detail: expect.stringContaining('managed-storage'),
+      });
+    });
+  }, 30_000);
+
+  postgresIt('runs only one media worker while concurrent recovery requests share the active lease', async () => {
+    await withIsolatedPostgres('asset_lifecycle_concurrent_active_recovery', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const versionId = randomUUID();
+      const placementId = randomUUID();
+      await query(`INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Concurrent recovery')`, [projectId, ownerId]);
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ($1, $2, $3, 'image', 'active')`,
+        [assetId, ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, recovery_source_url, availability
+         ) VALUES ($1, $2, $3, $4, '/api/serve-upload/uploads/concurrent-active.png',
+                   'https://source.test/concurrent-active.png', 'missing')`,
+        [versionId, assetId, ownerId, projectId],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, versionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-concurrent-active',
+                   'canvas-image', 'image-concurrent-active', 'active')`,
+        [placementId, ownerId, projectId, assetId, versionId],
+      );
+
+      await closePool();
+      process.env.DATABASE_URL = databaseUrl;
+      process.env.PGDATABASE_URL = databaseUrl;
+      const { recoverAssetMedia } = await import('../../src/lib/asset-core/media-health');
+      let releaseWorker!: () => void;
+      const workerGate = new Promise<void>((resolveWorker) => { releaseWorker = resolveWorker; });
+      let workerCalls = 0;
+      const executeRecovery = async () => {
+        workerCalls += 1;
+        await workerGate;
+        return {
+          success: true as const,
+          method: 'managed-storage',
+          url: '/api/serve-upload/uploads/concurrent-active.png',
+        };
+      };
+      const input = { actorUserId: ownerId, projectId, assetVersionId: versionId, assetId, placementId };
+      const first = recoverAssetMedia(input, { executeRecovery });
+      for (let attempt = 0; attempt < 40 && workerCalls === 0; attempt += 1) {
+        await new Promise(resolveWait => setTimeout(resolveWait, 25));
+      }
+      expect(workerCalls).toBe(1);
+      const secondPromise = recoverAssetMedia(input, { executeRecovery });
+      const second = await Promise.race([
+        secondPromise,
+        new Promise<'blocked'>(resolveWait => setTimeout(() => resolveWait('blocked'), 1_000)),
+      ]);
+      releaseWorker();
+      if (second === 'blocked') await secondPromise;
+      expect(second).toEqual({ recovered: false, availability: 'recovering', deferred: true });
+      expect(workerCalls).toBe(1);
+      await expect(first).resolves.toMatchObject({ recovered: true, availability: 'ready' });
+
+      const attempts = await query<{ status: string }>(
+        'SELECT status FROM wujie_asset_media_recovery_attempts WHERE asset_version_id = $1',
+        [versionId],
+      );
+      expect(attempts.rows).toEqual([{ status: 'succeeded' }]);
+    });
+  }, 30_000);
+
+  postgresIt('expires a stale recovery lease before a new worker owns the terminal write', async () => {
+    await withIsolatedPostgres('asset_lifecycle_expired_recovery_lease', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const versionId = randomUUID();
+      const placementId = randomUUID();
+      const staleAttemptId = randomUUID();
+      await query(`INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Expired recovery lease')`, [projectId, ownerId]);
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ($1, $2, $3, 'image', 'active')`,
+        [assetId, ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, recovery_source_url, availability
+         ) VALUES ($1, $2, $3, $4, '/api/serve-upload/uploads/expired.png',
+                   'https://source.test/expired.png', 'recovering')`,
+        [versionId, assetId, ownerId, projectId],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, versionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-expired',
+                   'canvas-image', 'image-expired', 'active')`,
+        [placementId, ownerId, projectId, assetId, versionId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_media_recovery_attempts(
+           id, asset_version_id, asset_id, owner_id, project_id, source_url, status, detail, created_at
+         ) VALUES ($1, $2, $3, $4, $5, 'https://source.test/expired.png', 'deferred', 'stale', now() - interval '10 minutes')`,
+        [staleAttemptId, versionId, assetId, ownerId, projectId],
+      );
+
+      await closePool();
+      process.env.DATABASE_URL = databaseUrl;
+      process.env.PGDATABASE_URL = databaseUrl;
+      const { recoverAssetMedia } = await import('../../src/lib/asset-core/media-health');
+      await expect(recoverAssetMedia({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: versionId,
+        assetId,
+        placementId,
+      }, {
+        executeRecovery: async () => ({
+          success: true,
+          method: 'managed-storage',
+          url: '/api/serve-upload/uploads/expired.png',
+        }),
+      })).resolves.toMatchObject({ recovered: true, availability: 'ready' });
+
+      const attempts = await query<{ id: string; status: string; detail: string }>(
+        `SELECT id, status, detail FROM wujie_asset_media_recovery_attempts
+         WHERE asset_version_id = $1 ORDER BY created_at`,
+        [versionId],
+      );
+      expect(attempts.rows).toHaveLength(2);
+      expect(attempts.rows[0]).toMatchObject({
+        id: staleAttemptId,
+        status: 'failed',
+        detail: expect.stringContaining('lease expired'),
+      });
+      expect(attempts.rows[1]?.status).toBe('succeeded');
+    });
+  }, 30_000);
+
+  postgresIt('fences a still-running expired worker after the replacement worker commits', async () => {
+    await withIsolatedPostgres('asset_lifecycle_running_expired_worker', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const versionId = randomUUID();
+      const placementId = randomUUID();
+      await query(`INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Running expired worker')`, [projectId, ownerId]);
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ($1, $2, $3, 'image', 'active')`,
+        [assetId, ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, recovery_source_url, availability
+         ) VALUES ($1, $2, $3, $4, '/api/serve-upload/uploads/running-expired.png',
+                   'https://source.test/running-expired.png', 'missing')`,
+        [versionId, assetId, ownerId, projectId],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, versionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-running-expired',
+                   'canvas-image', 'image-running-expired', 'active')`,
+        [placementId, ownerId, projectId, assetId, versionId],
+      );
+
+      await closePool();
+      process.env.DATABASE_URL = databaseUrl;
+      process.env.PGDATABASE_URL = databaseUrl;
+      const { recoverAssetMedia } = await import('../../src/lib/asset-core/media-health');
+      const input = { actorUserId: ownerId, projectId, assetVersionId: versionId, assetId, placementId };
+      let releaseOldWorker!: () => void;
+      let oldWorkerStarted!: () => void;
+      const oldStarted = new Promise<void>(resolve => { oldWorkerStarted = resolve; });
+      const oldGate = new Promise<void>(resolve => { releaseOldWorker = resolve; });
+      const oldRecovery = recoverAssetMedia(input, {
+        executeRecovery: async (target) => {
+          oldWorkerStarted();
+          await oldGate;
+          return {
+            success: true,
+            method: 'source-url',
+            url: `/api/serve-upload/recovery/${versionId}/${target.attemptId}.png`,
+            storageKey: `images/recovery/${versionId}/${target.attemptId}.png`,
+          };
+        },
+      });
+      await oldStarted;
+      const oldAttempt = await query<{ id: string }>(
+        `UPDATE wujie_asset_media_recovery_attempts
+         SET created_at = now() - interval '10 minutes'
+         WHERE asset_version_id = $1 AND status = 'deferred'
+         RETURNING id`,
+        [versionId],
+      );
+      expect(oldAttempt.rows).toHaveLength(1);
+
+      let replacementAttemptId = '';
+      const replacement = await recoverAssetMedia(input, {
+        executeRecovery: async (target) => {
+          replacementAttemptId = target.attemptId;
+          return {
+            success: true,
+            method: 'source-url',
+            url: `/api/serve-upload/recovery/${versionId}/${target.attemptId}.png`,
+            storageKey: `images/recovery/${versionId}/${target.attemptId}.png`,
+          };
+        },
+      });
+      expect(replacement).toMatchObject({ recovered: true, availability: 'ready' });
+      releaseOldWorker();
+      await expect(oldRecovery).resolves.toEqual({ recovered: false, availability: 'recovering', deferred: true });
+
+      const version = await query<{ file_url: string; storage_key: string; availability: string }>(
+        `SELECT file_url, storage_key, availability FROM wujie_asset_versions WHERE id = $1`,
+        [versionId],
+      );
+      expect(version.rows).toEqual([{
+        file_url: `/api/serve-upload/recovery/${versionId}/${replacementAttemptId}.png`,
+        storage_key: `images/recovery/${versionId}/${replacementAttemptId}.png`,
+        availability: 'ready',
+      }]);
+      const attempts = await query<{ id: string; status: string }>(
+        `SELECT id, status FROM wujie_asset_media_recovery_attempts
+         WHERE asset_version_id = $1 ORDER BY created_at, id`,
+        [versionId],
+      );
+      expect(attempts.rows).toEqual(expect.arrayContaining([
+        { id: oldAttempt.rows[0]!.id, status: 'failed' },
+        { id: replacementAttemptId, status: 'succeeded' },
+      ]));
+    });
+  }, 30_000);
+
+  postgresIt('physically probes an already-ready active version before confirming recovery', async () => {
+    await withIsolatedPostgres('asset_lifecycle_ready_recovery', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const versionId = randomUUID();
+      const placementId = randomUUID();
+      await query(`INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Ready recovery')`, [projectId, ownerId]);
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ($1, $2, $3, 'image', 'active')`,
+        [assetId, ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, storage_key, availability
+         ) VALUES ($1, $2, $3, $4, '/api/serve-upload/uploads/ready.png',
+                   'images/uploads/ready.png', 'ready')`,
+        [versionId, assetId, ownerId, projectId],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, versionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-ready',
+                   'canvas-image', 'image-ready', 'active')`,
+        [placementId, ownerId, projectId, assetId, versionId],
+      );
+
+      await closePool();
+      process.env.DATABASE_URL = databaseUrl;
+      process.env.PGDATABASE_URL = databaseUrl;
+      const { recoverAssetMedia } = await import('../../src/lib/asset-core/media-health');
+      let workerCalls = 0;
+      await expect(recoverAssetMedia({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: versionId,
+        assetId,
+        placementId,
+      }, {
+        executeRecovery: async () => {
+          workerCalls += 1;
+          return {
+            success: true,
+            method: 'managed-storage',
+            url: '/api/serve-upload/uploads/ready.png',
+            storageKey: 'images/uploads/ready.png',
+          };
+        },
+      })).resolves.toEqual({
+        recovered: true,
+        availability: 'ready',
+        deferred: false,
+        url: '/api/serve-upload/uploads/ready.png',
+      });
+      expect(workerCalls).toBe(1);
+      const attempts = await query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM wujie_asset_media_recovery_attempts WHERE asset_version_id = $1',
+        [versionId],
+      );
+      expect(attempts.rows[0]?.count).toBe('1');
+    });
+  }, 30_000);
+
+  postgresIt('does not overwrite current asset metadata when another version becomes current during recovery', async () => {
+    await withIsolatedPostgres('asset_lifecycle_current_version_fence', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const oldVersionId = randomUUID();
+      const newVersionId = randomUUID();
+      const placementId = randomUUID();
+      await query(`INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Current version fence')`, [projectId, ownerId]);
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status, metadata)
+         VALUES ($1, $2, $3, 'image', 'active', $4::jsonb)`,
+        [assetId, ownerId, projectId, JSON.stringify({ legacyImage: { mediaAvailability: 'missing' } })],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(id, asset_id, owner_id, project_id, file_url, recovery_source_url, availability)
+         VALUES ($1, $2, $3, $4, '/api/serve-upload/uploads/old.png', 'https://source.test/old.png', 'missing'),
+                ($5, $2, $3, $4, '/api/serve-upload/uploads/new.png', null, 'ready')`,
+        [oldVersionId, assetId, ownerId, projectId, newVersionId],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, oldVersionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-version-fence',
+                   'canvas-image', 'image-version-fence', 'active')`,
+        [placementId, ownerId, projectId, assetId, oldVersionId],
+      );
+
+      await closePool();
+      process.env.DATABASE_URL = databaseUrl;
+      process.env.PGDATABASE_URL = databaseUrl;
+      const { recoverAssetMedia } = await import('../../src/lib/asset-core/media-health');
+      let releaseWorker!: () => void;
+      let startedWorker!: () => void;
+      const started = new Promise<void>(resolve => { startedWorker = resolve; });
+      const gate = new Promise<void>(resolve => { releaseWorker = resolve; });
+      const recovery = recoverAssetMedia({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: oldVersionId,
+        assetId,
+        placementId,
+      }, {
+        executeRecovery: async () => {
+          startedWorker();
+          await gate;
+          return {
+            success: true,
+            method: 'source-url',
+            url: '/api/serve-upload/recovery/version-old/attempt.png',
+          };
+        },
+      });
+      await started;
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, newVersionId]);
+      releaseWorker();
+      await expect(recovery).resolves.toMatchObject({ recovered: true, availability: 'ready' });
+
+      const state = await query<{ current_version_id: string; availability: string | null }>(
+        `SELECT current_version_id, metadata->'legacyImage'->>'mediaAvailability' AS availability
+         FROM wujie_assets WHERE id = $1`,
+        [assetId],
+      );
+      expect(state.rows).toEqual([{ current_version_id: newVersionId, availability: 'missing' }]);
+    });
+  }, 30_000);
+
+  postgresIt('persists a thrown media worker error as missing instead of leaving a recovery lease', async () => {
+    await withIsolatedPostgres('asset_lifecycle_thrown_recovery', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const versionId = randomUUID();
+      const placementId = randomUUID();
+      await query(`INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Thrown recovery')`, [projectId, ownerId]);
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ($1, $2, $3, 'image', 'active')`,
+        [assetId, ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, recovery_source_url, availability
+         ) VALUES ($1, $2, $3, $4, '/api/serve-upload/uploads/thrown.png',
+                   'https://source.test/thrown.png', 'missing')`,
+        [versionId, assetId, ownerId, projectId],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, versionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-thrown',
+                   'canvas-image', 'image-thrown', 'active')`,
+        [placementId, ownerId, projectId, assetId, versionId],
+      );
+
+      await closePool();
+      process.env.DATABASE_URL = databaseUrl;
+      process.env.PGDATABASE_URL = databaseUrl;
+      const { recoverAssetMedia } = await import('../../src/lib/asset-core/media-health');
+      await expect(recoverAssetMedia({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: versionId,
+        assetId,
+        placementId,
+      }, {
+        executeRecovery: async () => { throw new Error('worker crashed'); },
+      })).resolves.toEqual({
+        recovered: false,
+        availability: 'missing',
+        deferred: false,
+        error: 'worker crashed',
+      });
+      const state = await query<{ availability: string; status: string; detail: string }>(
+        `SELECT version.availability, attempt.status, attempt.detail
+         FROM wujie_asset_versions version
+         JOIN wujie_asset_media_recovery_attempts attempt ON attempt.asset_version_id = version.id
+         WHERE version.id = $1`,
+        [versionId],
+      );
+      expect(state.rows).toEqual([{
+        availability: 'missing',
+        status: 'failed',
+        detail: 'worker crashed',
+      }]);
     });
   }, 30_000);
 

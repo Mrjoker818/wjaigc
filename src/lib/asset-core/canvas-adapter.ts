@@ -41,7 +41,11 @@ export function isManagedCanvasMedia(image: CanvasPlacementImage): boolean {
 export function getCanvasMediaRenderDecision(
   image: CanvasPlacementImage,
 ): CanvasMediaRenderDecision {
-  if (image.mediaAvailability === 'missing' || image.url.length === 0) {
+  if (
+    image.mediaAvailability === 'missing'
+    || image.mediaAvailability === 'unrecoverable'
+    || image.url.length === 0
+  ) {
     return 'broken-media';
   }
   return image.url ? 'image' : 'none';
@@ -60,6 +64,7 @@ export function getCanvasMediaFailureAction(
   image: CanvasPlacementImage,
   state: { failedSource: 'thumbnail' | 'original'; legacyRetryAttempted: boolean },
 ): CanvasMediaFailureAction {
+  if (image.mediaAvailability === 'unrecoverable') return 'ignore';
   if (state.failedSource === 'thumbnail') return 'fallback-original';
   if (
     isManagedCanvasMedia(image)

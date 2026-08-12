@@ -1,0 +1,56 @@
+{
+  "bugId": "BUG-064",
+  "recordedAt": "2026-08-12T14:51:00+08:00",
+  "baseCommit": "4bbe6db68d6e928a70c733b82efdd7efd9e6244b",
+  "branch": "codex/wj-stable-s2",
+  "environment": {
+    "os": "Windows",
+    "postgres": "postgresql://postgres@127.0.0.1:55433/postgres",
+    "assetGraphMode": "shadow",
+    "physicalPurge": false
+  },
+  "verification": {
+    "focusedRecovery": {
+      "passed": 65,
+      "failed": 0
+    },
+    "fullVitest": {
+      "testFilesPassed": 402,
+      "testFilesFailed": 0,
+      "testsPassed": 2160,
+      "testsFailed": 0,
+      "testsSkipped": 0,
+      "durationSeconds": 254.46,
+      "maxWorkers": 4
+    },
+    "postgresLifecycle": {
+      "passed": 12,
+      "failed": 0
+    },
+    "typescript": "passed",
+    "eslint": {
+      "errors": 0,
+      "historicalWarnings": 957
+    },
+    "build": {
+      "status": "passed",
+      "pages": 116
+    },
+    "protectedFeatures": {
+      "retained": 38,
+      "removed": 0
+    },
+    "independentReview": {
+      "verdict": "APPROVED",
+      "p0": 0,
+      "p1": 0,
+      "p2": 0
+    }
+  },
+  "cloudStatus": "pending exact candidate push and Coze shadow deployment",
+  "constraints": [
+    "Do not modify stable",
+    "Do not enable asset-v3 before Checkpoint C cloud acceptance",
+    "Do not enable physical purge"
+  ]
+}

@@ -3,6 +3,7 @@ import { getServerDataRoot } from '@/lib/server-data-root';
 import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, resolveS3Key } from '@/lib/s3-storage';
 import { getImageSourceUrl } from '@/lib/image-source-map';
 import { isAllowedPublicMediaExtension } from '@/lib/media-validation';
+import { readExactRecoveryMedia } from '@/lib/asset-core/recovery-media';
 import path from 'path';
 import fs from 'fs';
 
@@ -20,6 +21,19 @@ export async function GET(
     }
 
     if (!isAllowedPublicMediaPath(pathParts)) {
+      return NextResponse.json({ error: 'File not found' }, { status: 404 });
+    }
+
+    const isRecoveryPath = filePath.startsWith('recovery/');
+    const exactRecovery = await readExactRecoveryMedia(filePath);
+    if (exactRecovery) {
+      return publicMediaResponse(
+        new Uint8Array(exactRecovery.buffer),
+        exactRecovery.mimeType,
+        path.extname(filePath).toLowerCase(),
+      );
+    }
+    if (isRecoveryPath) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
     

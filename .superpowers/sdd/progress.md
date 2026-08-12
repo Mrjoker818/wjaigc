@@ -127,3 +127,11 @@ Governance confirmation 2026-08-11: the user intentionally updated `stable` from
 - Independent review initially found unmanaged delete entry points and a lock-order risk; both are now permanent regressions. Focused affected tests pass `48/48` and TypeScript passes.
 - BUG-064 remains open: cloud media recovery rendered its source but the durable version stayed `recovering`. Checkpoint C is **NOT PASSED**, Task 9 has not started, `asset-v3` and physical purge remain disabled, and stable remains untouched.
 - Final BUG-063 candidate gates: affected regression `51/51`; full Vitest `2083 passed / 35 environment-skipped / 0 failed`; TypeScript passed; ESLint `0 errors / 957 historical warnings`; production build `116/116`; protected baseline `38/38` with no unapproved source drift; `git diff --check` passed. Current-candidate PostgreSQL tests remain skipped because `POSTGRES_TEST_DATABASE_URL` is absent.
+
+## Checkpoint C BUG-064 Local Closure
+
+- Coze pull baseline is confirmed as `main@4bbe6db`; the repair candidate is isolated on `codex/wj-stable-s2`. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only and unchanged.
+- BUG-064 now uses authorized POST admission, GET status polling, Next.js `after()` execution, PostgreSQL lease/fencing, attempt-isolated exact media URLs, exact S3 or durable-local reads, raster MIME/byte/checksum validation, client singleflight/deadline, and explicit `unrecoverable` UI state.
+- Final PostgreSQL-enabled full Vitest passed `402/402` files and `2160/2160` tests with zero failures/skips. TypeScript, build `116/116`, ESLint `0 errors / 957 historical warnings`, protected baseline `38/38`, and `git diff --check` pass.
+- Independent final review returned `APPROVED` with no P0/P1/P2 findings. BUG-064 is closed locally but cloud pending; Checkpoint C remains NOT PASSED until the exact commit is deployed and real `shadow` generation/delete/reload/recovery evidence is captured.
+- Task 9 has not started. `asset-v3` and physical purge remain disabled. Tasks 1-8 must not be repeated.
