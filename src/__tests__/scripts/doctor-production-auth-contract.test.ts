@@ -4,10 +4,11 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('production doctor authentication contract', () => {
-  it('normalizes sslmode=require before creating the PostgreSQL client', () => {
+  it('uses the runtime PostgreSQL connection contract for every application database probe', () => {
     const source = readFileSync(resolve(process.cwd(), 'scripts/doctor.mjs'), 'utf8');
     expect(source).toContain("searchParams.set('uselibpqcompat', 'true')");
-    expect(source).toContain('new Client({ connectionString: normalizedConnectionString');
+    expect(source).toContain("import { connectionOptions } from './run-migrations.mjs'");
+    expect(source.match(/\.\.\.connectionOptions\(/g)).toHaveLength(3);
   });
 
   it('accepts NEXTAUTH_SECRET when WUJIE_AUTH_SECRET is absent', () => {

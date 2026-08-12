@@ -6,7 +6,8 @@ import dotenv from 'dotenv';
 import { Client } from 'pg';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { getDoctorExitCode } from './doctor-status.mjs';
-import { collectAssetGraphDoctorFacts, summarizeAssetGraphDoctor } from './doctor-asset-status.mjs';
+import { collectAssetGraphDoctorFacts, resolveDoctorDatabaseUrl, summarizeAssetGraphDoctor } from './doctor-asset-status.mjs';
+import { connectionOptions } from './run-migrations.mjs';
 
 // Test isolation: DOCTOR_SKIP_ENV_FILE=1 skips loading .env/.env.local so
 // production-credential checks run against a clean environment.
@@ -70,13 +71,13 @@ async function checkDataDir() {
 }
 
 async function checkDatabase() {
-  const connectionString = process.env.PGDATABASE_URL || process.env.DATABASE_URL;
+  const connectionString = resolveDoctorDatabaseUrl(process.env);
   if (!connectionString) {
     add(production ? 'FAIL' : 'WARN', 'database', 'PGDATABASE_URL or DATABASE_URL is not configured');
     return;
   }
   const normalizedConnectionString = normalizePostgresConnectionString(connectionString);
-  const client = new Client({ connectionString: normalizedConnectionString, connectionTimeoutMillis: 5_000 });
+  const client = new Client({ ...connectionOptions(normalizedConnectionString), connectionTimeoutMillis: 5_000 });
   try {
     await client.connect();
     await client.query('SELECT 1 AS healthcheck');
@@ -89,7 +90,7 @@ async function checkDatabase() {
 }
 
 async function checkAssetGraph() {
-  const connectionString = process.env.PGDATABASE_URL || process.env.DATABASE_URL;
+  const connectionString = resolveDoctorDatabaseUrl(process.env);
   const mode = ['shadow', 'asset-v3'].includes(process.env.WUJIE_ASSET_GRAPH_MODE)
     ? process.env.WUJIE_ASSET_GRAPH_MODE
     : 'legacy';
@@ -99,7 +100,7 @@ async function checkAssetGraph() {
     return;
   }
   const client = new Client({
-    connectionString: normalizePostgresConnectionString(connectionString),
+    ...connectionOptions(connectionString),
     connectionTimeoutMillis: 5_000,
   });
   try {
@@ -110,24 +111,37 @@ async function checkAssetGraph() {
       'asset-migrations',
       `${summary.migrations.verified}/${summary.migrations.required} verified; missing=${summary.migrations.missing.join(',') || 'none'}; checksumMismatch=${summary.migrations.checksumMismatches.join(',') || 'none'}`,
     );
+    for (const migration of summary.migrations.entries) {
+      add(
+        migration.recordedChecksum === migration.expectedChecksum ? 'PASS' : 'FAIL',
+        `asset-migration:${migration.version}`,
+        `expected=${migration.expectedChecksum}; recorded=${migration.recordedChecksum || 'missing'}`,
+      );
+    }
     add(
       summary.shadowComparison.mismatchedProjects === 0
         && summary.shadowComparison.unmigratedProjects === 0
         && summary.shadowComparison.orphanGraphProjects === 0
-        && summary.shadowComparison.failedCheckpoints === 0 ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
+        && summary.shadowComparison.failedCheckpoints === 0
+        && summary.shadowComparison.missingCheckpoints === 0
+        && summary.shadowComparison.invalidLegacyRecords === 0 ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
       'asset-shadow-comparison',
-      `legacy=${summary.shadowComparison.legacyProjects}; graph=${summary.shadowComparison.graphProjects}; matching=${summary.shadowComparison.matchingProjects}; mismatched=${summary.shadowComparison.mismatchedProjects}; unmigrated=${summary.shadowComparison.unmigratedProjects}; orphanGraph=${summary.shadowComparison.orphanGraphProjects}; failedCheckpoints=${summary.shadowComparison.failedCheckpoints}`,
+      `legacy=${summary.shadowComparison.legacyProjects}; graph=${summary.shadowComparison.graphProjects}; matching=${summary.shadowComparison.matchingProjects}; mismatched=${summary.shadowComparison.mismatchedProjects}; unmigrated=${summary.shadowComparison.unmigratedProjects}; orphanGraph=${summary.shadowComparison.orphanGraphProjects}; failedCheckpoints=${summary.shadowComparison.failedCheckpoints}; missingCheckpoints=${summary.shadowComparison.missingCheckpoints}; invalidLegacy=${summary.shadowComparison.invalidLegacyRecords}`,
     );
     add(
-      summary.media.pendingPersist + summary.media.missing + summary.media.recovering + summary.media.unrecoverable === 0 ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
+      summary.media.pendingPersist + summary.media.missing + summary.media.recovering + summary.media.unrecoverable
+        + summary.media.activeAssetsMissingCurrentVersion + summary.media.placementPendingPersist
+        + summary.media.placementMissing + summary.media.placementRecovering + summary.media.placementUnrecoverable === 0
+        ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
       'asset-media',
-      `ready=${summary.media.ready}; pendingPersist=${summary.media.pendingPersist}; missing=${summary.media.missing}; recovering=${summary.media.recovering}; unrecoverable=${summary.media.unrecoverable}`,
+      `currentReady=${summary.media.ready}; currentPendingPersist=${summary.media.pendingPersist}; currentMissing=${summary.media.missing}; currentRecovering=${summary.media.recovering}; currentUnrecoverable=${summary.media.unrecoverable}; missingCurrentVersion=${summary.media.activeAssetsMissingCurrentVersion}; placementPendingPersist=${summary.media.placementPendingPersist}; placementMissing=${summary.media.placementMissing}; placementRecovering=${summary.media.placementRecovering}; placementUnrecoverable=${summary.media.placementUnrecoverable}`,
     );
     add('PASS', 'asset-trash', `active=${summary.assets.active}; trashed=${summary.assets.trashed}`);
     add(
-      summary.gc.purged === 0 ? 'PASS' : 'FAIL',
+      summary.gc.purged + summary.gc.due + summary.gc.unregistered + summary.gc.physicalDeferred + summary.gc.physicalFailed === 0
+        ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
       'asset-gc-candidates',
-      `pending=${summary.gc.pending}; deferred=${summary.gc.deferred}; purged=${summary.gc.purged}; physicalPurge=disabled`,
+      `pending=${summary.gc.pending}; deferred=${summary.gc.deferred}; purged=${summary.gc.purged}; due=${summary.gc.due}; unregistered=${summary.gc.unregistered}; physicalDeferred=${summary.gc.physicalDeferred}; physicalFailed=${summary.gc.physicalFailed}`,
     );
     add(
       summary.releaseReady ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
@@ -388,9 +402,12 @@ async function checkPortAndAPI() {
 
 // ===== 新增: 关键数据表检查 =====
 async function checkDatabaseTables() {
-  const connectionString = process.env.PGDATABASE_URL || process.env.DATABASE_URL;
+  const connectionString = resolveDoctorDatabaseUrl(process.env);
   if (!connectionString) return;
-  const client = new Client({ connectionString: normalizePostgresConnectionString(connectionString), connectionTimeoutMillis: 5_000 });
+  const client = new Client({
+    ...connectionOptions(connectionString),
+    connectionTimeoutMillis: 5_000,
+  });
   try {
     await client.connect();
     const tables = ['wujie_users', 'wujie_api_providers', 'wujie_user_data', 'wujie_system_settings', 'wujie_audit_log', 'cloud_tasks'];

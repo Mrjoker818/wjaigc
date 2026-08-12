@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   STAGE_2_MIGRATIONS,
+  resolveDoctorDatabaseUrl,
   summarizeAssetGraphDoctor,
 } from '../../../scripts/doctor-asset-status.mjs';
 
@@ -21,8 +22,11 @@ function healthyInput(mode: 'legacy' | 'shadow' | 'asset-v3' = 'asset-v3') {
     placements: [{ ownerId: 'user-a', projectId: 'project-a', entityId: 'image-a', status: 'active' }],
     checkpoints: [{ ownerId: 'user-a', projectId: 'project-a', status: 'completed', errorCode: null }],
     currentVersionAvailability: [{ availability: 'ready', count: 1 }],
+    activeAssetsMissingCurrentVersion: 0,
+    activePlacementVersionAvailability: [{ availability: 'ready', count: 1 }],
     assetStatuses: [{ status: 'active', count: 1 }, { status: 'trashed', count: 0 }],
-    gcStatuses: [{ status: 'pending', count: 0 }, { status: 'deferred', count: 0 }, { status: 'purged', count: 0 }],
+    gcStatuses: [{ status: 'pending', physicalPurgeStatus: 'disabled', due: false, count: 0 }],
+    unregisteredGcCandidates: 0,
   } as const;
 }
 
@@ -59,6 +63,13 @@ describe('Stage 2 Doctor asset graph release gate', () => {
     expect(summary.shadowComparison).toMatchObject({ mismatchedProjects: 1, failedCheckpoints: 1 });
   });
 
+  it('blocks asset-v3 when a project checkpoint is missing', () => {
+    const input = healthyInput();
+    const summary = summarizeAssetGraphDoctor({ ...input, checkpoints: [] });
+    expect(summary.releaseReady).toBe(false);
+    expect(summary.shadowComparison.missingCheckpoints).toBe(1);
+  });
+
   it('blocks asset-v3 while an active current version is not ready', () => {
     const input = healthyInput();
     const summary = summarizeAssetGraphDoctor({
@@ -71,6 +82,46 @@ describe('Stage 2 Doctor asset graph release gate', () => {
     });
     expect(summary.releaseReady).toBe(false);
     expect(summary.media).toMatchObject({ ready: 1, missing: 2, unrecoverable: 1 });
+  });
+
+  it('blocks an active asset without a current version and an active placement bound to missing media', () => {
+    const input = healthyInput();
+    const summary = summarizeAssetGraphDoctor({
+      ...input,
+      activeAssetsMissingCurrentVersion: 1,
+      activePlacementVersionAvailability: [{ availability: 'missing', count: 1 }],
+    });
+    expect(summary.releaseReady).toBe(false);
+    expect(summary.media).toMatchObject({ activeAssetsMissingCurrentVersion: 1, placementMissing: 1 });
+  });
+
+  it('blocks malformed legacy project data instead of treating it as an empty database', () => {
+    const input = healthyInput();
+    const summary = summarizeAssetGraphDoctor({
+      ...input,
+      legacyProjectRows: [{ userId: 'user-a', projects: { id: 'not-an-array' } }],
+      graphProjects: [],
+      placements: [],
+      checkpoints: [],
+    });
+    expect(summary.releaseReady).toBe(false);
+    expect(summary.shadowComparison.invalidLegacyRecords).toBeGreaterThan(0);
+  });
+
+  it('reports unregistered, due and non-disabled physical purge candidates', () => {
+    const input = healthyInput();
+    const summary = summarizeAssetGraphDoctor({
+      ...input,
+      gcStatuses: [{ status: 'deferred', physicalPurgeStatus: 'failed', due: true, count: 2 }],
+      unregisteredGcCandidates: 1,
+    });
+    expect(summary.releaseReady).toBe(false);
+    expect(summary.gc).toMatchObject({ deferred: 2, due: 2, physicalFailed: 2, unregistered: 1 });
+  });
+
+  it('uses the same database precedence as the application runtime', () => {
+    expect(resolveDoctorDatabaseUrl({ DATABASE_URL: 'database-url', PGDATABASE_URL: 'pgdatabase-url' })).toBe('database-url');
+    expect(resolveDoctorDatabaseUrl({ PGDATABASE_URL: 'pgdatabase-url' })).toBe('pgdatabase-url');
   });
 
   it('reports shadow drift without treating shadow mode as an asset-v3 release', () => {

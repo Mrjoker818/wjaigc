@@ -21,22 +21,39 @@ function projectKey(ownerId, projectId) {
 
 function comparableLegacyProjects(rows) {
   const projects = new Map();
+  let invalidLegacyRecords = 0;
   for (const row of rows) {
-    if (!Array.isArray(row.projects)) continue;
+    if (!Array.isArray(row.projects)) {
+      invalidLegacyRecords += 1;
+      continue;
+    }
     for (const project of row.projects) {
-      if (!project || typeof project !== 'object' || !project.id) continue;
+      if (!project || typeof project !== 'object' || !project.id || !Array.isArray(project.canvasImages)) {
+        invalidLegacyRecords += 1;
+        continue;
+      }
       const ownerId = String(project.userId || row.userId || '');
-      if (!ownerId || ownerId !== String(row.userId || '')) continue;
-      const imageIds = Array.isArray(project.canvasImages)
-        ? project.canvasImages
-          .filter(image => image && typeof image === 'object' && image.id && image.isProcessingPlaceholder !== true)
-          .map(image => String(image.id))
-          .sort()
-        : [];
+      if (!ownerId || ownerId !== String(row.userId || '')) {
+        invalidLegacyRecords += 1;
+        continue;
+      }
+      const imageIds = [];
+      for (const image of project.canvasImages) {
+        if (!image || typeof image !== 'object' || !image.id) {
+          invalidLegacyRecords += 1;
+          continue;
+        }
+        if (image.isProcessingPlaceholder !== true) imageIds.push(String(image.id));
+      }
+      imageIds.sort();
       projects.set(projectKey(ownerId, String(project.id)), { ownerId, projectId: String(project.id), imageIds });
     }
   }
-  return projects;
+  return { projects, invalidLegacyRecords };
+}
+
+export function resolveDoctorDatabaseUrl(environment) {
+  return environment.DATABASE_URL || environment.PGDATABASE_URL || '';
 }
 
 export function summarizeAssetGraphDoctor(input) {
@@ -47,7 +64,8 @@ export function summarizeAssetGraphDoctor(input) {
     return Boolean(row?.recordedChecksum && row.expectedChecksum !== row.recordedChecksum);
   });
 
-  const legacyProjects = comparableLegacyProjects(input.legacyProjectRows);
+  const legacyFacts = comparableLegacyProjects(input.legacyProjectRows);
+  const legacyProjects = legacyFacts.projects;
   const activeGraphProjects = new Set(input.graphProjects
     .filter(row => row.status === 'active')
     .map(row => projectKey(row.ownerId, row.projectId)));
@@ -71,7 +89,11 @@ export function summarizeAssetGraphDoctor(input) {
     if (JSON.stringify(placementIds) === JSON.stringify(project.imageIds)) matchingProjects += 1;
     else mismatchedProjects += 1;
   }
+  const checkpointKeys = new Set(input.checkpoints
+    .filter(row => row.status === 'completed' && !row.errorCode)
+    .map(row => projectKey(row.ownerId, row.projectId)));
   const failedCheckpoints = input.checkpoints.filter(row => row.status !== 'completed' || row.errorCode).length;
+  const missingCheckpoints = [...legacyProjects.keys()].filter(key => activeGraphProjects.has(key) && !checkpointKeys.has(key)).length;
   const orphanGraphProjects = [...activeGraphProjects].filter(key => !legacyProjects.has(key)).length;
 
   const media = {
@@ -80,6 +102,11 @@ export function summarizeAssetGraphDoctor(input) {
     missing: countRows(input.currentVersionAvailability, 'availability', 'missing'),
     recovering: countRows(input.currentVersionAvailability, 'availability', 'recovering'),
     unrecoverable: countRows(input.currentVersionAvailability, 'availability', 'unrecoverable'),
+    activeAssetsMissingCurrentVersion: Number(input.activeAssetsMissingCurrentVersion || 0),
+    placementPendingPersist: countRows(input.activePlacementVersionAvailability || [], 'availability', 'pending-persist'),
+    placementMissing: countRows(input.activePlacementVersionAvailability || [], 'availability', 'missing'),
+    placementRecovering: countRows(input.activePlacementVersionAvailability || [], 'availability', 'recovering'),
+    placementUnrecoverable: countRows(input.activePlacementVersionAvailability || [], 'availability', 'unrecoverable'),
   };
   const assets = {
     active: countRows(input.assetStatuses, 'status', 'active'),
@@ -89,15 +116,26 @@ export function summarizeAssetGraphDoctor(input) {
     pending: countRows(input.gcStatuses, 'status', 'pending'),
     deferred: countRows(input.gcStatuses, 'status', 'deferred'),
     purged: countRows(input.gcStatuses, 'status', 'purged'),
+    due: input.gcStatuses.filter(row => row.due).reduce((total, row) => total + Number(row.count || 0), 0),
+    physicalDeferred: countRows(input.gcStatuses, 'physicalPurgeStatus', 'deferred'),
+    physicalFailed: countRows(input.gcStatuses, 'physicalPurgeStatus', 'failed'),
+    unregistered: Number(input.unregisteredGcCandidates || 0),
   };
 
   const assetV3Blockers = [];
   if (missing.length > 0) assetV3Blockers.push('missing-migrations');
   if (checksumMismatches.length > 0) assetV3Blockers.push('migration-checksum-mismatch');
   if (unmigratedProjects > 0) assetV3Blockers.push('unmigrated-projects');
-  if (mismatchedProjects > 0 || orphanGraphProjects > 0 || failedCheckpoints > 0) assetV3Blockers.push('shadow-projection-drift');
-  if (media.pendingPersist > 0 || media.missing > 0 || media.recovering > 0 || media.unrecoverable > 0) {
+  if (mismatchedProjects > 0 || orphanGraphProjects > 0 || failedCheckpoints > 0 || missingCheckpoints > 0 || legacyFacts.invalidLegacyRecords > 0) assetV3Blockers.push('shadow-projection-drift');
+  if (
+    media.pendingPersist > 0 || media.missing > 0 || media.recovering > 0 || media.unrecoverable > 0
+    || media.activeAssetsMissingCurrentVersion > 0 || media.placementPendingPersist > 0
+    || media.placementMissing > 0 || media.placementRecovering > 0 || media.placementUnrecoverable > 0
+  ) {
     assetV3Blockers.push('non-ready-current-media');
+  }
+  if (gc.purged > 0 || gc.due > 0 || gc.physicalDeferred > 0 || gc.physicalFailed > 0 || gc.unregistered > 0) {
+    assetV3Blockers.push('gc-governance-not-closed');
   }
 
   return {
@@ -117,6 +155,8 @@ export function summarizeAssetGraphDoctor(input) {
       unmigratedProjects,
       orphanGraphProjects,
       failedCheckpoints,
+      missingCheckpoints,
+      invalidLegacyRecords: legacyFacts.invalidLegacyRecords,
     },
     media,
     assets,
@@ -127,15 +167,10 @@ export function summarizeAssetGraphDoctor(input) {
 }
 
 async function migrationFacts(client, migrationsDirectory) {
-  let ledgerRows = [];
-  try {
-    ledgerRows = (await client.query(
-      `SELECT version, checksum FROM wujie_schema_migrations WHERE version = ANY($1::text[])`,
-      [STAGE_2_MIGRATIONS],
-    )).rows;
-  } catch {
-    ledgerRows = [];
-  }
+  const ledgerRows = (await client.query(
+    `SELECT version, checksum FROM wujie_schema_migrations WHERE version = ANY($1::text[])`,
+    [STAGE_2_MIGRATIONS],
+  )).rows;
   const ledger = new Map(ledgerRows.map(row => [row.version, row.checksum]));
   return Promise.all(STAGE_2_MIGRATIONS.map(async version => {
     const bytes = await readFile(resolve(migrationsDirectory, version));
@@ -156,8 +191,11 @@ export async function collectAssetGraphDoctorFacts(client, options = {}) {
     placements,
     checkpoints,
     currentVersionAvailability,
+    activeAssetsMissingCurrentVersion,
+    activePlacementVersionAvailability,
     assetStatuses,
     gcStatuses,
+    unregisteredGcCandidates,
   ] = await Promise.all([
     migrationFacts(client, migrationsDirectory),
     client.query(`SELECT user_id AS "userId", data_value AS projects FROM wujie_user_data WHERE data_key = 'projects'`),
@@ -176,8 +214,36 @@ export async function collectAssetGraphDoctorFacts(client, options = {}) {
                    AND version.project_id = asset.project_id
                   WHERE asset.status = 'active'
                   GROUP BY version.availability`),
+    client.query(`SELECT COUNT(*)::int AS count FROM wujie_assets WHERE status = 'active' AND current_version_id IS NULL`),
+    client.query(`SELECT version.availability, COUNT(*)::int AS count
+                  FROM wujie_workspace_placements placement
+                  JOIN wujie_asset_versions version
+                    ON version.id = placement.asset_version_id
+                   AND version.asset_id = placement.asset_id
+                   AND version.owner_id = placement.owner_id
+                   AND version.project_id = placement.project_id
+                  WHERE placement.status = 'active'
+                  GROUP BY version.availability`),
     client.query(`SELECT status, COUNT(*)::int AS count FROM wujie_assets GROUP BY status`),
-    client.query(`SELECT status, COUNT(*)::int AS count FROM wujie_media_gc_candidates GROUP BY status`),
+    client.query(`SELECT status, physical_purge_status AS "physicalPurgeStatus", (not_before <= now()) AS due, COUNT(*)::int AS count
+                  FROM wujie_media_gc_candidates
+                  GROUP BY status, physical_purge_status, (not_before <= now())`),
+    client.query(`SELECT COUNT(*)::int AS count
+                  FROM wujie_assets asset
+                  WHERE asset.status = 'trashed'
+                    AND NOT EXISTS (
+                      SELECT 1 FROM wujie_workspace_placements placement
+                      WHERE placement.asset_id = asset.id
+                        AND placement.owner_id = asset.owner_id
+                        AND placement.project_id = asset.project_id
+                        AND placement.status = 'active'
+                    )
+                    AND NOT EXISTS (
+                      SELECT 1 FROM wujie_media_gc_candidates candidate
+                      WHERE candidate.asset_id = asset.id
+                        AND candidate.owner_id = asset.owner_id
+                        AND candidate.project_id = asset.project_id
+                    )`),
   ]);
   return {
     mode: options.mode ?? 'legacy',
@@ -187,7 +253,10 @@ export async function collectAssetGraphDoctorFacts(client, options = {}) {
     placements: placements.rows,
     checkpoints: checkpoints.rows,
     currentVersionAvailability: currentVersionAvailability.rows,
+    activeAssetsMissingCurrentVersion: Number(activeAssetsMissingCurrentVersion.rows[0]?.count || 0),
+    activePlacementVersionAvailability: activePlacementVersionAvailability.rows,
     assetStatuses: assetStatuses.rows,
     gcStatuses: gcStatuses.rows,
+    unregisteredGcCandidates: Number(unregisteredGcCandidates.rows[0]?.count || 0),
   };
 }
