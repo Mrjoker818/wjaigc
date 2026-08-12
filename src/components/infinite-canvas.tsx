@@ -129,6 +129,10 @@ const EffectReverseEngineeringPanel = lazy(() => import('@/components/effect-rev
 const LayerPanel = lazy(() => import('@/components/layer-panel').then(m => ({ default: m.LayerPanel })));
 const VersionHistoryPanel = lazy(() => import('@/components/version-history-panel').then(m => ({ default: m.VersionHistoryPanel })));
 
+function canvasGenerationEntityId(taskId: string, outputIndex: number): string {
+  return `${taskId}:${outputIndex}`;
+}
+
 export interface ImageGroup {
   id: string;
   name: string;
@@ -213,6 +217,7 @@ export interface CanvasImage {
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
+  generationTaskId?: string;
   isProcessingPlaceholder?: boolean;
   groupId?: string;
   processing?: {
@@ -389,6 +394,8 @@ interface InfiniteCanvasProps {
   altRefMarkerIds?: string[];
   /** Force save canvas data to localStorage + server */
   onForceSave?: (images: CanvasImage[]) => void;
+  /** Delete managed placements before removing their canvas images. */
+  onDeleteImages?: (imageIds: string[]) => Promise<string[]>;
   /** Persist a file as an owned project image before using it as reverse-engineering source. */
   onUploadEffectReverseSource?: (file: File) => Promise<CanvasImage>;
   /** 用户绘制的连线 */
@@ -595,7 +602,7 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
   // Stable refs for callbacks used in effects (avoid stale closures)
@@ -2647,6 +2654,31 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
   }, [images, onSelectImage, agentSelectingImage]);
 
+  const requestDeleteImages = useCallback(async (imageIds: string[]) => {
+    const uniqueIds = [...new Set(imageIds)].filter(Boolean);
+    if (uniqueIds.length === 0) return;
+    try {
+      const deletedIds = onDeleteImages
+        ? await onDeleteImages(uniqueIds)
+        : uniqueIds;
+      if (!onDeleteImages) {
+        const deletedSet = new Set(deletedIds);
+        const nextImages = imagesRef.current.filter((image) => !deletedSet.has(image.id));
+        onImagesChange(nextImages);
+        onForceSave?.(nextImages);
+      }
+      const deletedSet = new Set(deletedIds);
+      setSelectedIds((current) => new Set([...current].filter((id) => !deletedSet.has(id))));
+      if (selectedImage && deletedSet.has(selectedImage.id)) selectImage(null);
+      if (editImageId && deletedSet.has(editImageId)) {
+        setEditImageId(null);
+        setEditMode('none');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除失败，请重试');
+    }
+  }, [editImageId, onDeleteImages, onForceSave, onImagesChange, selectImage, selectedImage]);
+
   // Create a group from selected images
   const handleCreateGroup = useCallback(() => {
     if (selectedIds.size < 2) return;
@@ -3013,11 +3045,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         // Prevent browser Backspace navigation
         e.preventDefault();
         if (selectedIds.size > 0 && editMode === 'none') {
-          const deletingIds = selectedIds;
-          onImagesChange(images.filter(img => !deletingIds.has(img.id)));
-          setSelectedIds(new Set());
-          selectImage(null);
-          if (editImageId && deletingIds.has(editImageId)) { setEditImageId(null); }
+          void requestDeleteImages([...selectedIds]);
         }
       }
       // Track Alt key for reverse drawing in erase/mask modes
@@ -3134,7 +3162,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, toggleAnnotationV2Mode, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode]);
+  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, toggleAnnotationV2Mode, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages]);
 
   // Click outside to close menus
   useEffect(() => {
@@ -6739,6 +6767,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const selectedProviderName = canvasGenModels.find(
         candidate => candidate.providerId === canvasGenProviderId && candidate.id === canvasGenPureModel,
       )?.providerName;
+      const effectiveProjectId = projectId || brandProject?.id;
       const canvasGenController = new AbortController();
       const canvasGenTimeout = setTimeout(() => canvasGenController.abort(), 600000);
 
@@ -6759,6 +6788,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             outputCount: canvasGenCount,
             generationChannel: 'canvas-direct',
             submitOnly: true,
+            projectId: effectiveProjectId,
             referenceImages: canvasGenRefImages.length > 0 ? canvasGenRefImages : undefined,
           }),
           signal: canvasGenController.signal,
@@ -6800,13 +6830,24 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
       if (directUrls.length > 0) {
         const savedUrls = await Promise.all(directUrls.map(persistGeneratedUrl));
+        const directTaskIds = Array.isArray(data.taskIds)
+          ? data.taskIds.filter((taskId: unknown): taskId is string => (
+              typeof taskId === 'string' && taskId.startsWith('direct-')
+            ))
+          : typeof data.taskId === 'string' && data.taskId.startsWith('direct-')
+            ? [data.taskId]
+            : [];
         const container = canvasRef.current?.getBoundingClientRect();
         const centerX = container ? (container.width / 2 - viewOffset.x) / zoom : 100;
         const centerY = container ? (container.height / 2 - viewOffset.y) / zoom : 100;
         const startX = centerX - ((savedUrls.length * canvasGenFrameWidth) + ((savedUrls.length - 1) * 20)) / 2;
         const createdAt = Date.now();
-        const directImages: CanvasImage[] = savedUrls.map((url, index) => ({
-          id: `canvas-gen-${createdAt}-${index}`,
+        const directImages: CanvasImage[] = savedUrls.map((url, index) => {
+          const directTaskId = directTaskIds[index];
+          return {
+          id: directTaskId
+            ? canvasGenerationEntityId(directTaskId, 0)
+            : `canvas-gen-${createdAt}-${index}`,
           url,
           x: startX + index * (canvasGenFrameWidth + 20),
           y: centerY - canvasGenFrameHeight / 2,
@@ -6820,8 +6861,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           apiProvider: actualProviderName,
           apiProviderId: pollProviderId,
           generationRouteAudit: data.generationRouteAudit,
+          ...(directTaskId ? { generationTaskId: directTaskId } : {}),
           createdAt,
-        }));
+        };
+        });
         const nextImages = [...imagesRef.current, ...directImages];
         imagesRef.current = nextImages;
         onImagesChange(nextImages);
@@ -6857,7 +6900,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const startX = centerX - ((submittedSlots.length * canvasGenFrameWidth) + ((submittedSlots.length - 1) * 20)) / 2;
       const startedAt = Date.now();
       const placeholders: CanvasImage[] = submittedSlots.map((slot, index) => {
-        const frameId = `gen-frame-${startedAt}-${slot.slotIndex}`;
+        const frameId = canvasGenerationEntityId(slot.taskId, 0);
         canvasGenerationSlots.push({ taskId: slot.taskId, frameId, slotIndex: slot.slotIndex });
         return {
           id: frameId,
@@ -6867,6 +6910,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           width: canvasGenFrameWidth,
           height: canvasGenFrameHeight,
           isProcessingPlaceholder: true,
+          generationTaskId: slot.taskId,
           processing: {
             label: `生成中 ${index + 1}/${submittedSlots.length}`,
             status: 'processing',
@@ -6985,7 +7029,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     } finally {
       setCanvasGenGenerating(false);
     }
-  }, [canvasGenPrompt, canvasGenGenerating, canvasGenModel, canvasGenModels, canvasGenNegativePrompt, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages, viewOffset.x, viewOffset.y, zoom, onImagesChange, completeProcessingFrame, updateProcessingFrame]);
+  }, [canvasGenPrompt, canvasGenGenerating, canvasGenModel, canvasGenModels, canvasGenNegativePrompt, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages, viewOffset.x, viewOffset.y, zoom, onImagesChange, completeProcessingFrame, updateProcessingFrame, projectId, brandProject?.id]);
 
   // Update frame position when images change
   useEffect(() => {
@@ -9943,14 +9987,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   };
 
   const deleteSelectedImages = () => {
-    const deletingIds = new Set(selectedIds);
-    applyImageChanges(images.filter(i => !deletingIds.has(i.id)));
-    setSelectedIds(new Set());
-    selectImage(null);
-    if (editImageId && deletingIds.has(editImageId)) {
-      setEditImageId(null);
-      setEditMode('none');
-    }
+    void requestDeleteImages([...selectedIds]);
   };
 
   const imageContextMenuItems = selectedIds.size > 1 ? [
@@ -10150,7 +10187,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       { label: '提取帧', action: () => { const t = prompt('输入提取时间点（秒）', '0'); if (t !== null) handleVideoTool('extract-frame', selectedImageData, parseFloat(t)); } },
       { label: '视频压缩', action: () => { handleVideoTool('compress', selectedImageData); } },
     ] : []),
-    { label: '删除', shortcut: 'Delete', action: () => { const deletingIds = selectedIds; onImagesChange(images.filter(i => !deletingIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); if (editImageId && deletingIds.has(editImageId)) { setEditImageId(null); setEditMode('none'); } } },
+    { label: '删除', shortcut: 'Delete', action: () => { void requestDeleteImages([...selectedIds]); } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '元素拆解', action: handleOpenDisplayDecompose },
@@ -11284,7 +11321,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     </button>
                     <button
                       className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-red-50 text-red-500 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-red-900/30 text-white/80 hover:text-red-400 border border-white/10'}`}
-                      onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter(i => i.id !== image.id)); hideHoverToolbar(); }}
+                      onClick={(e) => { e.stopPropagation(); void requestDeleteImages([image.id]); hideHoverToolbar(); }}
                       onMouseDown={(e) => e.stopPropagation()}
                       title="删除"
                     >
@@ -17799,8 +17836,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               ));
             }}
             onDelete={(id) => {
-              onImagesChange(images.filter(img => img.id !== id));
-              setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+              void requestDeleteImages([id]);
             }}
             onClose={() => setShowLayerPanel(false)}
           />

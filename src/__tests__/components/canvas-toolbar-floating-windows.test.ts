@@ -112,8 +112,8 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain("className={`absolute group z-10 ${isSelected ? 'z-[60]' : ''}");
     expect(canvasSource).toContain("hoverToolbarImageId === image.id && editMode === 'none' && !isSelected &&");
     expect(canvasSource).toContain('data-testid="selected-image-delete"');
-    expect(canvasSource).toContain('const deletingIds = new Set(selectedIds);');
-    expect(canvasSource).toContain('applyImageChanges(images.filter(i => !deletingIds.has(i.id)));');
+    expect(canvasSource).toContain('const requestDeleteImages = useCallback');
+    expect(canvasSource).toContain('void requestDeleteImages([...selectedIds]);');
     expect(canvasSource).toContain('title="删除"');
   });
 
@@ -121,7 +121,9 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('onForceSave?: (images: CanvasImage[]) => void;');
     expect(canvasSource).toContain('onForceSave?.(newImages);');
     expect(canvasWorkspaceSource).toContain('onForceSave={(nextImages) => {');
-    expect(canvasWorkspaceSource).toContain('const persistable = serializeCanvasWorkspacePlacements(nextImages);');
+    expect(canvasWorkspaceSource).toContain('const persistCanvasImagesNow = useCallback');
+    expect(canvasWorkspaceSource).toContain('canvasImages: serializeCanvasWorkspacePlacements(nextImages)');
+    expect(canvasWorkspaceSource).toContain('persistCanvasImagesNow(nextImages);');
     expect(canvasWorkspaceSource).not.toContain('if (currentProject?.id && images.length > 0)');
   });
 

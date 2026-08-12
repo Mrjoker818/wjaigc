@@ -4,8 +4,10 @@ import { resolve } from 'node:path';
 
 import {
   executeCanvasProjectSync,
+  adoptTaskProjectedCanvasMapping,
   hydrateAssetV3Projects,
   planCanvasShadowReconciliation,
+  selectCanvasImagesForAssetGraph,
   reconcileDeletedCanvasProjectsInTransaction,
   type CanvasProjectSyncTransaction,
   type CanvasProjectSyncStorage,
@@ -41,6 +43,120 @@ const project = (canvasImages: CanvasImage[]): Project => ({
 });
 
 describe('continuous canvas shadow synchronization', () => {
+  it('keeps processing placeholders out of the asset graph', () => {
+    const placeholder = image('pending-task', {
+      url: '',
+      isProcessingPlaceholder: true,
+      processing: {
+        label: 'Generating',
+        status: 'processing',
+        progress: 10,
+        taskId: 'task-1',
+      },
+    });
+    const completed = image('completed-image');
+
+    expect(selectCanvasImagesForAssetGraph([placeholder, completed])).toEqual([completed]);
+
+    const plan = planCanvasShadowReconciliation({
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+      previousMappings: {},
+      images: [placeholder, completed],
+    });
+
+    expect(plan.additions.map(({ image: candidate }) => candidate.id)).toEqual(['completed-image']);
+    expect(plan.activeMappings).not.toHaveProperty('pending-task');
+    expect(plan.checkpointMappings).not.toHaveProperty('pending-task');
+  });
+
+  it('adopts an existing task projection instead of creating a duplicate legacy asset', async () => {
+    const query = vi.fn(async (sql: string, params: unknown[]) => {
+      if (sql.includes('FROM wujie_asset_versions')) {
+        expect(params).toEqual(['user-1', 'project-1', 'task-1', 0]);
+        return {
+          rows: [{ asset_id: 'asset-task', asset_version_id: 'version-task' }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('FROM wujie_workspace_placements placement')) {
+        expect(params).toEqual(['user-1', 'project-1', 'task-1:0', 'asset-task', 'version-task']);
+        return {
+          rows: [{
+            asset_id: 'asset-task',
+            asset_version_id: 'version-task',
+            placement_id: 'placement-task',
+          }],
+          rowCount: 1,
+        };
+      }
+      expect(sql).toContain('UPDATE wujie_workspace_placements');
+      expect(params[0]).toBe('placement-task');
+      expect(params[1]).toBe('user-1');
+      expect(params[2]).toBe('project-1');
+      return { rows: [], rowCount: 1 };
+    });
+
+    const mapping = await adoptTaskProjectedCanvasMapping(
+      { query } as never,
+      { actorUserId: 'user-1', projectId: 'project-1' },
+      image('task-1:0', { generationTaskId: 'task-1' }),
+    );
+
+    expect(mapping).toEqual({
+      assetId: 'asset-task',
+      versionId: 'version-task',
+      placementId: 'placement-task',
+    });
+    expect(query).toHaveBeenCalledTimes(3);
+  });
+
+  it('adopts the exact output index when one task projects multiple versions', async () => {
+    const query = vi.fn(async (sql: string, params: unknown[]) => {
+      if (sql.includes('FROM wujie_asset_versions')) {
+        expect(sql).toContain("metadata->>'outputIndex'");
+        expect(params).toEqual(['user-1', 'project-1', 'task-multi', 2]);
+        return { rows: [], rowCount: 0 };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    await expect(adoptTaskProjectedCanvasMapping(
+      { query } as never,
+      { actorUserId: 'user-1', projectId: 'project-1' },
+      image('task-multi:2', { generationTaskId: 'task-multi' }),
+    )).resolves.toBeNull();
+  });
+
+  it('rejects malformed task projection entity ids before querying the graph', async () => {
+    const query = vi.fn();
+
+    await expect(adoptTaskProjectedCanvasMapping(
+      { query } as never,
+      { actorUserId: 'user-1', projectId: 'project-1' },
+      image('task-multi:2-extra', { generationTaskId: 'task-multi' }),
+    )).resolves.toBeNull();
+
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('locks a projected task version before its placement during adoption', () => {
+    const migrationSource = readFileSync(
+      resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
+      'utf8',
+    );
+    const adoptionStart = migrationSource.indexOf('export async function adoptTaskProjectedCanvasMapping');
+    const adoptionEnd = migrationSource.indexOf('\nexport ', adoptionStart + 1);
+    const adoptionSource = migrationSource.slice(adoptionStart, adoptionEnd);
+    const versionLock = adoptionSource.indexOf('FROM wujie_asset_versions');
+    const placementLock = adoptionSource.indexOf('FROM wujie_workspace_placements');
+
+    expect(adoptionStart).toBeGreaterThan(-1);
+    expect(versionLock).toBeGreaterThan(-1);
+    expect(placementLock).toBeGreaterThan(-1);
+    expect(versionLock).toBeLessThan(placementLock);
+  });
+
   it('retains unmanaged blob and missing broken-media placements during autosave', () => {
     const serialized = serializeCanvasWorkspacePlacements([
       image('blob-media', { url: 'blob:expired-session-media' }),
@@ -183,7 +299,7 @@ describe('continuous canvas shadow synchronization', () => {
     ]);
   });
 
-  it('uses the shared asset-first lifecycle lock before locking and re-reading a placement', () => {
+  it('uses asset-version-placement lock order shared with task projection', () => {
     const migrationSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
       'utf8',
@@ -195,13 +311,15 @@ describe('continuous canvas shadow synchronization', () => {
     const updateStart = migrationSource.indexOf('async function updateGraphForImage');
     const updateEnd = migrationSource.indexOf('async function trashGraphForImage', updateStart);
     const updateGraphSource = migrationSource.slice(updateStart, updateEnd);
-    const placementLock = updateGraphSource.indexOf('SELECT asset_id, owner_id, project_id\n     FROM wujie_workspace_placements');
+    const versionLock = updateGraphSource.indexOf('FROM wujie_asset_versions');
+    const placementLock = updateGraphSource.indexOf('FROM wujie_workspace_placements');
     const assetMutation = updateGraphSource.indexOf('UPDATE wujie_assets\n     SET kind =');
     const lifecycleStart = serviceSource.indexOf('async trashPlacement(input: PlacementCommand)');
     const lifecycleEnd = serviceSource.indexOf('async restorePlacement(input: PlacementCommand)', lifecycleStart);
     const lifecycleSource = serviceSource.slice(lifecycleStart, lifecycleEnd);
 
     expect(updateStart).toBeGreaterThan(-1);
+    expect(versionLock).toBeGreaterThan(-1);
     expect(placementLock).toBeGreaterThan(-1);
     expect(assetMutation).toBeGreaterThan(placementLock);
     expect(updateGraphSource).toMatch(
@@ -214,6 +332,7 @@ describe('continuous canvas shadow synchronization', () => {
       lifecycleSource.indexOf('transaction.lockPlacement('),
     );
     expect(updateGraphSource.indexOf('FROM wujie_assets')).toBeLessThan(placementLock);
+    expect(versionLock).toBeLessThan(placementLock);
   });
 
   it('plans geometry updates, additions, and deletions after the initial checkpoint', () => {
@@ -460,6 +579,12 @@ describe('continuous canvas shadow synchronization', () => {
       if (sql.includes('SELECT schema_version, metadata')) return { rows: [{ schema_version: 3, metadata: {} }], rowCount: 1 };
       if (sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE')) {
         return { rows: [{ id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_asset_versions') && sql.includes('FOR UPDATE')) {
+        return { rows: [{
+          file_url: '/media/retained.png', storage_key: null, checksum: null, mime_type: null,
+          byte_size: null, width: 600, height: 400, availability: 'ready', recovery_source_url: null,
+        }], rowCount: 1 };
       }
       if (sql.includes('FROM wujie_workspace_placements') && sql.includes('FOR UPDATE')) {
         return { rows: [{ asset_id: 'asset-other', owner_id: 'user-other', project_id: 'project-other' }], rowCount: 1 };

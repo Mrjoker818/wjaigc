@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-12T11:00:00+08:00",
+  "environment": {
+    "deployment": "Coze preview",
+    "assetGraphMode": "shadow",
+    "gitCommit": "f8bb57cbf8f53bd181946a149b97262922defc2e",
+    "projectId": "project_1786500304299_8vix1z45f",
+    "browser": "Chrome"
+  },
+  "generation": {
+    "provider": "Pear",
+    "model": "gpt-image-2-4k",
+    "resultUrl": "https://cdn.pearapi.ai/apiservers/cache/images/2026-08-12/99a91a29-fd30-49ba-a404-ab16ed1b725e.png",
+    "persistedStorageKey": "images/gen-1786500692305-v3ehex_2f2d8b6f.png",
+    "resultRendered": true
+  },
+  "observations": {
+    "projectCloudTaskCount": 0,
+    "trashedAssetCount": 2,
+    "assetVersionCount": 3,
+    "trashedPlacementCount": 2,
+    "taskProjectedProviderModelMissing": true,
+    "deletePersistedAcrossReload": true,
+    "physicalPurgeDisabled": true,
+    "recoveryAvailabilityAfterUserAction": "recovering"
+  },
+  "rootCauses": [
+    "Canvas direct generation omitted projectId, so the durable task could not project to the selected project.",
+    "Transient processing placeholders were included in shadow graph reconciliation.",
+    "The completed Canvas image did not retain the task projection entity identity.",
+    "The Canvas recovery control changed local render state without completing a durable recovery transition."
+  ],
+  "verdict": "CHECKPOINT_C_NOT_PASSED"
+}

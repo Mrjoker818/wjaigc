@@ -24,6 +24,15 @@ describe('canvas embedded image generator durable slot contract', () => {
     expect(body).toContain('outputCount: canvasGenCount');
   });
 
+  it('binds durable canvas generation tasks to the currently saved project', () => {
+    const generator = canvasSource.indexOf('const handleCanvasGenerate = useCallback');
+    const request = canvasSource.indexOf("fetch('/api/generate'", generator);
+    const body = canvasSource.slice(request, canvasSource.indexOf('signal: canvasGenController.signal', request));
+
+    expect(generator).toBeGreaterThan(-1);
+    expect(body).toContain('projectId: effectiveProjectId');
+  });
+
   it('does not route canvas-direct multi-output requests through the legacy outer-task wrapper', () => {
     const legacyWrapper = generateSource.indexOf(
       'process.env.WUJIE_ENABLE_LEGACY_SUBMIT_ONLY_WRAPPER',
@@ -41,11 +50,27 @@ describe('canvas embedded image generator durable slot contract', () => {
     const placeholderCreation = canvasSource.indexOf('const placeholders: CanvasImage[] = submittedSlots.map', slotCreation);
     const processingFlag = canvasSource.indexOf('isProcessingPlaceholder: true', placeholderCreation);
     const taskBinding = canvasSource.indexOf('taskId: slot.taskId', processingFlag);
+    const stableEntityId = canvasSource.indexOf('canvasGenerationEntityId(slot.taskId, 0)', placeholderCreation);
+    const projectionTaskBinding = canvasSource.indexOf('generationTaskId: slot.taskId', placeholderCreation);
 
     expect(slotCreation).toBeGreaterThan(generator);
     expect(placeholderCreation).toBeGreaterThan(slotCreation);
     expect(processingFlag).toBeGreaterThan(placeholderCreation);
     expect(taskBinding).toBeGreaterThan(processingFlag);
+    expect(stableEntityId).toBeGreaterThan(placeholderCreation);
+    expect(projectionTaskBinding).toBeGreaterThan(processingFlag);
+  });
+
+  it('binds direct provider results to their durable task projection identities', () => {
+    const generator = canvasSource.indexOf('const handleCanvasGenerate = useCallback');
+    const directBranch = canvasSource.indexOf('if (directUrls.length > 0)', generator);
+    const asyncBranch = canvasSource.indexOf('const taskIds: string[]', directBranch);
+    const body = canvasSource.slice(directBranch, asyncBranch);
+
+    expect(directBranch).toBeGreaterThan(generator);
+    expect(body).toContain("taskId.startsWith('direct-')");
+    expect(body).toContain('canvasGenerationEntityId(directTaskId, 0)');
+    expect(body).toContain('generationTaskId: directTaskId');
   });
 
   it('persists the provider route id separately from the display name for every direct slot', () => {

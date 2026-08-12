@@ -1019,6 +1019,49 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // Keep a ref to latest images to avoid stale closure in setTimeout
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
+  const persistCanvasImagesNow = useCallback((nextImages: CanvasImage[]) => {
+    if (!currentProject?.id) return;
+    const manager = UserManagerCore.getInstance();
+    manager.updateProject(currentProject.id, {
+      canvasImages: serializeCanvasWorkspacePlacements(nextImages),
+      metadata: {
+        ...(currentProject.metadata || {}),
+        groups: groupsRef.current,
+        viewState: viewStateRef.current,
+        annotationsV2: annotationRecordsRef.current,
+      },
+    });
+  }, [currentProject]);
+
+  const handleDeleteCanvasImages = useCallback(async (imageIds: string[]): Promise<string[]> => {
+    const activeProjectId = currentProject?.id;
+    if (!activeProjectId) throw new Error('当前项目不存在');
+    const selected = latestImagesRef.current
+      .filter((image) => imageIds.includes(image.id))
+      .map((image) => ({ ...image, projectId: activeProjectId }));
+    let remainingImages = latestImagesRef.current;
+    const result = await reconcileImageBatchDeletion(
+      selected,
+      async (image) => {
+        const response = await fetch(`/api/assets/placements/${image.placementId}?projectId=${encodeURIComponent(image.projectId)}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) throw new Error('素材删除失败');
+      },
+      (image) => {
+        remainingImages = remainingImages.filter((candidate) => candidate.id !== image.id);
+        setImages(remainingImages);
+      },
+    );
+    if (result.deletedIds.length > 0) {
+      persistCanvasImagesNow(remainingImages);
+      setSelectedImage((current) => reconcileSelectedImageAfterBatchDeletion(current, result.deletedIds));
+    }
+    if ('error' in result) {
+      toast.error(result.error instanceof Error ? result.error.message : '素材删除失败');
+    }
+    return result.deletedIds;
+  }, [currentProject?.id, persistCanvasImagesNow, setImages]);
   const initialCanvasAnnotations = useMemo(() => {
     if (!currentProject) return [];
     const sources = currentProject.canvasImages
@@ -5184,6 +5227,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           key={currentProject?.id || 'canvas-local'}
           images={images}
           onImagesChange={setImages}
+          onDeleteImages={handleDeleteCanvasImages}
           onUndo={handleUndo}
           onRedo={handleRedo}
 
@@ -5257,19 +5301,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           }}
           onForceSave={(nextImages) => {
             try {
-              if (currentProject?.id) {
-                const mgr = UserManagerCore.getInstance();
-                const persistable = serializeCanvasWorkspacePlacements(nextImages);
-                mgr.updateProject(currentProject.id, {
-                  canvasImages: persistable,
-                  metadata: {
-                    ...(currentProject.metadata || {}),
-                    groups: groupsRef.current,
-                    viewState: viewStateRef.current,
-                    annotationsV2: annotationRecordsRef.current,
-                  },
-                });
-              }
+              persistCanvasImagesNow(nextImages);
             } catch {}
           }}
           onEditImage={handleEditImage}

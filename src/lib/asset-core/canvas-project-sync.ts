@@ -5,9 +5,11 @@ import type { CanvasImage, Project } from '@/lib/user-types';
 
 import {
   LegacyMigrationError,
+  adoptTaskProjectedCanvasMapping,
   mappingForLegacyImage,
   migrateLegacyProjectOnWriteInTransaction,
   planCanvasShadowReconciliation,
+  selectCanvasImagesForAssetGraph,
   type LegacyImageMapping,
   type LegacyMigrationInput,
   type MigrationResult,
@@ -16,7 +18,7 @@ import type { MediaAvailability } from './types';
 
 export type AssetGraphMappings = Record<string, Record<string, LegacyImageMapping>>;
 
-export { planCanvasShadowReconciliation };
+export { adoptTaskProjectedCanvasMapping, planCanvasShadowReconciliation, selectCanvasImagesForAssetGraph };
 
 export interface CanvasProjectSyncTransaction {
   claimRevision?(expectedRevision: number): Promise<number>;

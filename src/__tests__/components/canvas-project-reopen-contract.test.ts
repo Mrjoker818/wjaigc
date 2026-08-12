@@ -16,11 +16,15 @@ describe('canvas project reopen contract', () => {
   });
 
   it('persists the viewport state in immediate image-change saves', () => {
+    const persistenceStart = workspace.indexOf('const persistCanvasImagesNow = useCallback');
+    const persistenceEnd = workspace.indexOf('const handleDeleteCanvasImages', persistenceStart);
+    const persistence = workspace.slice(persistenceStart, persistenceEnd);
     const forceSaveStart = workspace.indexOf('onForceSave={(nextImages) => {');
     const forceSaveEnd = workspace.indexOf('onEditImage={handleEditImage}', forceSaveStart);
     const forceSave = workspace.slice(forceSaveStart, forceSaveEnd);
 
-    expect(forceSave).toContain('viewState: viewStateRef.current');
+    expect(persistence).toContain('viewState: viewStateRef.current');
+    expect(forceSave).toContain('persistCanvasImagesNow(nextImages)');
   });
 
   it('uses content fitting rather than resetting every populated project to the origin', () => {

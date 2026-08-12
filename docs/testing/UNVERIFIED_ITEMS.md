@@ -540,3 +540,13 @@
 | Physical purge | DISABLED BY DESIGN | Do not execute S3/local deletion. A later explicit release gate must separately authorize and prove physical deletion and retry behavior. |
 | Task 9 E2E and rollback | NOT STARTED | Run Chromium/Firefox/WebKit cross-workspace E2E, shadow comparison, controlled `asset-v3` test-only switch, and legacy rollback only after Checkpoint C closes. |
 | Element board, Pear layer decomposition, annotation PostgreSQL tests | UNVERIFIED / NON-CHECKPOINT-C | Four tests remain skipped because they use `TEST_POSTGRES_URL`, not `POSTGRES_TEST_DATABASE_URL`. Keep them visible for their owning business-module stages. |
+
+## 2026-08-12 Checkpoint C remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| BUG-063 cloud acceptance | FIXED LOCALLY / CLOUD PENDING | Deploy the exact candidate in Coze `shadow`; generate one real image and prove the selected project owns one cloud task, one task-projected AssetVersion, one active Canvas placement, no placeholder asset, and no duplicate after autosave/reload. |
+| Canvas managed deletion | FIXED LOCALLY / CLOUD PENDING | Exercise keyboard, context-menu, hover-toolbar, and layer-panel deletion for managed images; each must delete its placement before UI removal and remain deleted after reload. |
+| BUG-064 durable media recovery | OPEN P1 | Recovery must invoke a managed worker/persistence boundary and settle the AssetVersion to `ready` or an explicit terminal failure; local rendering alone is not acceptance. |
+| Current-candidate PostgreSQL concurrency | BLOCKED / SKIPPED | Full Vitest completed with `2083 passed / 35 skipped / 0 failed`, but the current-candidate Stage 2 projection/lifecycle and billing concurrency bodies were skipped because `POSTGRES_TEST_DATABASE_URL` is not configured. Historical Task 8 evidence remains valid but does not replace candidate-specific evidence. |
+| Task 9 | PROHIBITED | Do not start three-browser E2E or `asset-v3` switching until Checkpoint C passes. |

@@ -703,3 +703,10 @@ Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json
 - The five PostgreSQL lifecycle tests now pass in an isolated local PostgreSQL 18 database. PostgreSQL-enabled full Vitest passes `2105` tests; four unrelated suites remain skipped under their separate `TEST_POSTGRES_URL` gate.
 - Coze has not pulled this Task 8 branch and no cloud `shadow` lifecycle proof exists.
 - **Stage 2 verdict remains NOT PASSED.** Checkpoint C is technically eligible for a `main`-only push but cloud `shadow` proof and Task 9 are still pending; `asset-v3` remains prohibited; GitHub `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+
+## 2026-08-12 Checkpoint C cloud decision
+
+- Real Coze `shadow` testing found BUG-063: Canvas generation was not project-bound and shadow reconciliation duplicated placeholder/result identities. The local candidate repairs the request, identity, adoption, deletion, and lock boundaries with focused `48/48` regression and passing TypeScript.
+- BUG-064 remains open: clicking media recovery can render a source image while durable availability remains `recovering`; no worker terminal transition is proven.
+- **Checkpoint C verdict: NOT PASSED. Task 9 must not start.** Deploy the exact BUG-063 candidate in `shadow` and rerun lifecycle evidence; keep `asset-v3` and physical purge disabled. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+- Final candidate local gates passed: affected regression `51/51`, full Vitest `2083 passed / 35 environment-skipped / 0 failed`, TypeScript, ESLint (`0 errors / 957 historical warnings`), production build (`116/116` pages), and protected baseline (`38/38`, no unapproved source drift). This does not override the open BUG-064 or the missing current-candidate PostgreSQL concurrency evidence.

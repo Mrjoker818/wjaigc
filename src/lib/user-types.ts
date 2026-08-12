@@ -115,6 +115,7 @@ export interface CanvasImage {
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
+  generationTaskId?: string;
   // AI 模型与提供商信息
   modelName?: string;
   /** Stable provider identity used for task polling and routing. */

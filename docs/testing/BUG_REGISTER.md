@@ -1130,3 +1130,31 @@ The runtime behavior matches `7baa4f9`, but the Coze project UI did not expose t
 | Fix | Reconcile `selectedImage` from the exact successful `deletedIds` before returning the partial failure while preserving legacy-only behavior. |
 | Regression | `asset-placement-batch-delete` and Canvas shadow-sync regressions are included in the 72-test Task 8 focused suite. |
 | Status | **CLOSED LOCALLY 2026-08-12**; cloud UI verification remains UNVERIFIED. |
+
+### BUG-063: Canvas generation omitted project scope and duplicated task-projected assets
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Canvas direct generation / task projection / shadow synchronization |
+| Environment | Coze preview `shadow`, Chrome, GitHub `main@f8bb57c`, 2026-08-12 |
+| Reproduction | Generate one real Pear `gpt-image-2-4k` image in project `project_1786500304299_8vix1z45f`, wait for completion, inspect `cloud_tasks`, Assets, AssetVersions, and Canvas placements, then delete and reload. |
+| Expected | The task is bound to the selected project; its processing placeholder is not an Asset; completion creates one authoritative task-projected AssetVersion and one Canvas placement; every Canvas delete entry deletes the managed placement first. |
+| Actual | The generation request omitted `projectId`, no project task could be found, the placeholder and completed result were shadow-migrated as separate legacy assets, and several Canvas delete entry points only filtered local state. |
+| Root cause | The embedded Canvas request did not transmit the effective project, transient placeholders entered graph reconciliation, completed image IDs were unrelated to projector entity IDs, and internal delete actions bypassed the existing placement coordinator. |
+| Fix | Send the effective project, use durable `${taskId}:${outputIndex}` Canvas identities, retain `generationTaskId`, exclude placeholders from the graph, adopt matching task projection instead of creating legacy graph rows, route all four delete entry points through one placement-first coordinator, and standardize version-before-placement locks. |
+| Regression | RED/GREEN contracts cover project binding, placeholder exclusion, direct/async identity adoption, all Canvas delete entry points, immediate persistence, and lock order. Focused affected suite passes `48/48`; TypeScript passes. Full repository gates are recorded in the regression report. |
+| Status | **CLOSED LOCALLY 2026-08-12 / CLOUD PENDING.** Checkpoint C remains open until the exact candidate is deployed in `shadow` and one real generation proves one task, one version, one placement, delete/reload persistence, and no duplicate legacy asset. |
+
+### BUG-064: Canvas media recovery changes local display but never reaches a durable terminal state
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Missing-media recovery / Canvas / AssetVersion availability |
+| Environment | Coze preview `shadow`, Chrome, GitHub `main@f8bb57c`, 2026-08-12 |
+| Reproduction | Open the Checkpoint C generated result after its managed URL returns 504, click `恢复`, observe the source image render, then inspect the AssetVersion and reload. |
+| Expected | Recovery invokes the authorized recovery boundary, persists controlled media, and reaches `ready` or a clear terminal failure. |
+| Actual | The UI renders the recovery source, but the AssetVersion remains `recovering`; no completed worker/persistence transition was proven. |
+| Root cause | The Canvas recovery action primarily mutates local image state; the current server recovery path can defer work without a demonstrated managed worker that completes the durable transition. |
+| Status | **OPEN.** This is a Checkpoint C blocker and is not represented as fixed by BUG-063. Physical purge remains disabled. |
