@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { expect, test as base, type Page } from '@playwright/test';
+import JSZip from 'jszip';
 
-import { writeEvidenceManifest } from './evidence-manifest';
+import { writeEvidenceManifest, type EvidenceManifestInput } from './evidence-manifest';
 
 interface EvidenceEntry {
   method?: string;
@@ -26,21 +27,54 @@ const SECRET_PATTERN = /(api[-_]?key|access[-_]?token|password)(["'=:\s]+)[^\s"'
 
 export function redactStage2Evidence(value: string): string {
   return value
+    .replace(/("name"\s*:\s*"(?:cookie|set-cookie|authorization)"\s*,\s*"value"\s*:\s*")[^"]*/gi, '$1[REDACTED]')
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
     .replace(/(authorization)(["'=:\s]+)(?!Bearer\s)[^\s"'&,}]+/gi, '$1$2[REDACTED]')
+    .replace(/(cookie|set-cookie)(["'=:\s]+)(?:"[^"]*"|'[^']*'|[^\r\n,}]+)/gi, '$1$2[REDACTED]')
     .replace(SECRET_PATTERN, '$1$2[REDACTED]');
 }
 
-function safeUrl(rawUrl: string): string {
+export function sanitizeStage2Url(rawUrl: string): string {
   try {
     const url = new URL(rawUrl);
     for (const key of [...url.searchParams.keys()]) {
-      if (/token|key|secret|password|authorization/i.test(key)) url.searchParams.set(key, '[REDACTED]');
+      if (/token|key|secret|password|authorization|auth|session|signature|credential|cookie/i.test(key)) {
+        url.searchParams.set(key, '[REDACTED]');
+      }
     }
     return url.toString();
   } catch {
     return redactStage2Evidence(rawUrl);
   }
+}
+
+export function redactStage2TraceText(value: string): string {
+  return redactStage2Evidence(value).replace(/https?:\/\/[^\s"'<>]+/gi, rawUrl => {
+    const suffix = /[),.;]$/.exec(rawUrl)?.[0] ?? '';
+    const url = suffix ? rawUrl.slice(0, -1) : rawUrl;
+    return `${sanitizeStage2Url(url)}${suffix}`;
+  });
+}
+
+function isTraceText(bytes: Buffer): boolean {
+  if (bytes.length === 0) return true;
+  const sample = bytes.subarray(0, Math.min(bytes.length, 4096));
+  let controls = 0;
+  for (const byte of sample) {
+    if (byte === 0) return false;
+    if (byte < 9 || (byte > 13 && byte < 32)) controls += 1;
+  }
+  return controls / sample.length < 0.02;
+}
+
+async function sanitizePlaywrightTrace(sourcePath: string, destinationPath: string): Promise<void> {
+  const archive = await JSZip.loadAsync(await readFile(sourcePath));
+  await Promise.all(Object.values(archive.files).map(async entry => {
+    if (entry.dir) return;
+    const bytes = await entry.async('nodebuffer');
+    if (isTraceText(bytes)) archive.file(entry.name, redactStage2TraceText(bytes.toString('utf8')));
+  }));
+  await writeFile(destinationPath, await archive.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
 }
 
 function collectIds(value: unknown, evidence: Stage2Evidence): void {
@@ -64,6 +98,11 @@ function gitCommit(): string {
   }
 }
 
+function stage2EvidenceDirectory(commit: string, featureId: string, browser: string, capturedAt: string): string {
+  const safe = (value: string) => value.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return join(process.cwd(), 'test-results', 'evidence', safe(commit), safe(featureId), safe(browser), safe(capturedAt));
+}
+
 export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
   stage2Evidence: [async ({ page }, activateFixture, testInfo) => {
     const evidence: Stage2Evidence = {
@@ -75,63 +114,67 @@ export const test = base.extend<{ stage2Evidence: Stage2Evidence }>({
     };
     page.on('console', message => {
       if (message.type() === 'error' || message.type() === 'warning') {
-        evidence.console.push({ type: message.type(), text: redactStage2Evidence(message.text()), url: safeUrl(message.location().url) });
+        evidence.console.push({ type: message.type(), text: redactStage2Evidence(message.text()), url: sanitizeStage2Url(message.location().url) });
       }
     });
     page.on('requestfailed', request => {
-      evidence.network.push({ method: request.method(), url: safeUrl(request.url()), text: redactStage2Evidence(request.failure()?.errorText ?? 'request failed') });
+      evidence.network.push({ method: request.method(), url: sanitizeStage2Url(request.url()), text: redactStage2Evidence(request.failure()?.errorText ?? 'request failed') });
     });
     page.on('response', response => {
       if (response.url().includes('/api/') || response.status() >= 400) {
-        evidence.network.push({ method: response.request().method(), status: response.status(), url: safeUrl(response.url()) });
+        evidence.network.push({ method: response.request().method(), status: response.status(), url: sanitizeStage2Url(response.url()) });
       }
       const headers = response.headers();
       const requestId = headers['x-request-id'] || headers['request-id'];
       if (requestId) evidence.requestIds.add(requestId);
     });
 
-    const tracePath = testInfo.outputPath('stage-2-trace.zip');
-    const screenshotPath = testInfo.outputPath('stage-2-screenshot.png');
-    await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
-    await activateFixture(evidence);
-
-    const capturedAt = new Date().toISOString();
-    const status = testInfo.status === 'passed' ? 'completed' : testInfo.status === 'skipped' ? 'blocked' : 'failed';
-    const featureId = `stage-2-${testInfo.titlePath.slice(1).join('-')}`;
-    const artifactPaths = {
-      screenshot: 'screenshot.png',
-      video: 'video.webm',
-      trace: 'trace.zip',
-      console: 'console.json',
-      network: 'network.json',
-      task: 'task.json',
-    };
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-    await page.context().tracing.stop({ path: tracePath });
-    const video = page.video();
-    await page.close();
-    const videoPath = video ? await video.path() : null;
-    const manifest = await writeEvidenceManifest({
-      commit: gitCommit(),
-      deploymentUrl: String(testInfo.project.use.baseURL || process.env.E2E_BASE_URL || 'http://127.0.0.1:5000'),
-      browser: testInfo.project.name,
-      viewport: testInfo.project.use.viewport || { width: 1280, height: 720 },
-      capturedAt,
-      featureId,
-      artifactPaths,
-      requestIds: [...evidence.requestIds],
-      status,
-    });
-    await mkdir(manifest.directory, { recursive: true });
-    await Promise.all([
-      copyFile(screenshotPath, join(manifest.directory, artifactPaths.screenshot)),
-      copyFile(tracePath, join(manifest.directory, artifactPaths.trace)),
-      ...(videoPath ? [copyFile(videoPath, join(manifest.directory, artifactPaths.video))] : []),
-      writeFile(join(manifest.directory, 'console.json'), JSON.stringify(evidence.console, null, 2)),
-      writeFile(join(manifest.directory, 'network.json'), JSON.stringify(evidence.network, null, 2)),
-      writeFile(join(manifest.directory, 'task.json'), JSON.stringify({ taskIds: [...evidence.taskIds] }, null, 2)),
-    ]);
-    await testInfo.attach('stage-2-evidence-manifest', { path: manifest.manifestPath, contentType: 'application/json' });
+    const rawTracePath = testInfo.outputPath('stage-2-raw-trace.zip');
+    await page.context().tracing.start({ screenshots: true, snapshots: true, sources: false });
+    try {
+      await activateFixture(evidence);
+    } finally {
+      const capturedAt = new Date().toISOString();
+      const status = testInfo.status === 'passed' ? 'completed' : testInfo.status === 'skipped' ? 'blocked' : 'failed';
+      const featureId = `stage-2-${testInfo.titlePath.slice(1).join('-')}`;
+      const artifactPaths = {
+        screenshot: 'screenshot.png',
+        video: 'video.webm',
+        trace: 'trace.zip',
+        console: 'console.json',
+        network: 'network.json',
+        task: 'task.json',
+      };
+      const commit = gitCommit();
+      const manifestInput: EvidenceManifestInput = {
+        commit,
+        deploymentUrl: String(testInfo.project.use.baseURL || process.env.E2E_BASE_URL || 'http://127.0.0.1:5000'),
+        browser: testInfo.project.name,
+        viewport: testInfo.project.use.viewport || { width: 1280, height: 720 },
+        capturedAt,
+        featureId,
+        artifactPaths,
+        requestIds: [...evidence.requestIds],
+        status,
+      };
+      const directory = stage2EvidenceDirectory(commit, featureId, testInfo.project.name, capturedAt);
+      await mkdir(directory, { recursive: true });
+      await page.screenshot({ path: join(directory, artifactPaths.screenshot), fullPage: true });
+      await page.context().tracing.stop({ path: rawTracePath });
+      await sanitizePlaywrightTrace(rawTracePath, join(directory, artifactPaths.trace));
+      await unlink(rawTracePath);
+      const video = page.video();
+      await page.close();
+      if (!video) throw new Error('Stage 2 evidence video was not created');
+      await copyFile(await video.path(), join(directory, artifactPaths.video));
+      await Promise.all([
+        writeFile(join(directory, 'console.json'), JSON.stringify(evidence.console, null, 2)),
+        writeFile(join(directory, 'network.json'), JSON.stringify(evidence.network, null, 2)),
+        writeFile(join(directory, 'task.json'), JSON.stringify({ taskIds: [...evidence.taskIds] }, null, 2)),
+      ]);
+      const manifest = await writeEvidenceManifest(manifestInput);
+      await testInfo.attach('stage-2-evidence-manifest', { path: manifest.manifestPath, contentType: 'application/json' });
+    }
   }, { auto: true }],
 });
 
@@ -148,6 +191,10 @@ export function stage2ProjectMatrixValue(raw: string | undefined, projectName: s
   try {
     const value = JSON.parse(raw) as unknown;
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const entries = Object.values(value as Record<string, unknown>)
+      .filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
+      .map(entry => entry.trim());
+    if (new Set(entries).size !== entries.length) return null;
     const selected = (value as Record<string, unknown>)[projectName];
     return typeof selected === 'string' && selected.trim() ? selected.trim() : null;
   } catch {
@@ -164,14 +211,11 @@ export function requireStage2ProjectValue(testProjectName: string, envName: stri
 export async function loginRealUser(page: Page): Promise<void> {
   const env = requireStage2Env('E2E_TEST_USERNAME', 'E2E_TEST_PASSWORD');
   await page.context().clearCookies();
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
-  const entry = page.getByRole('button', { name: /无限画布/ }).first();
-  if (await entry.isVisible().catch(() => false)) await entry.click();
-  await page.getByPlaceholder('请输入用户名').fill(env.E2E_TEST_USERNAME);
-  await page.getByPlaceholder('请输入密码').fill(env.E2E_TEST_PASSWORD);
-  const loginResponse = page.waitForResponse(response => response.url().includes('/api/auth/login') && response.request().method() === 'POST');
-  await page.getByRole('button', { name: '登录', exact: true }).click();
-  expect((await loginResponse).ok()).toBeTruthy();
+  const loginResponse = await page.request.post('/api/auth/login', {
+    data: { name: env.E2E_TEST_USERNAME, password: env.E2E_TEST_PASSWORD, productType: 'canvas' },
+  });
+  expect(loginResponse.ok()).toBeTruthy();
+  await page.goto('/?loginMode=canvas', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: '我的项目', exact: true })).toBeVisible({ timeout: 20_000 });
 }
 

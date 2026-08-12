@@ -29,15 +29,23 @@ test.describe('Stage 2 asset lifecycle', () => {
   test('performs the first writable save as copy-on-write', async ({ page, stage2Evidence }, testInfo) => {
     const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_COPY_ON_WRITE_PROJECT_IDS');
     await loginRealUser(page);
+    await openCanvasProject(page, projectId);
+    const image = page.locator('[data-canvas-viewport] img').first().locator('..');
+    await expect(image).toBeVisible({ timeout: 20_000 });
+    const box = await image.boundingBox();
+    expect(box).not.toBeNull();
+    const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width / 2 + 40, box!.y + box!.height / 2 + 30, { steps: 6 });
+    await page.mouse.up();
+    const saveResponse = await saved;
+    expect(saveResponse.ok()).toBeTruthy();
+    const result = await saveResponse.json() as Record<string, unknown>;
+    stage2Evidence.recordPayload(result);
     const snapshot = await readProjects(page);
     const project = snapshot.projects.find(item => item.id === projectId);
     expect(project, 'Controlled legacy project was not returned by the server').toBeTruthy();
-    const result = await postJson(page, '/api/user-data/sync', {
-      key: 'projects',
-      value: snapshot.projects,
-      projectRevision: snapshot.revision,
-    });
-    stage2Evidence.recordPayload(result);
     const updates = result.assetGraphUpdates as Record<string, Record<string, unknown>> | undefined;
     expect(result.success).toBe(true);
     expect(updates?.[projectId], 'First save did not return asset graph mappings').toBeTruthy();
@@ -66,8 +74,12 @@ test.describe('Stage 2 asset lifecycle', () => {
     await loginRealUser(page);
     const before = await page.request.get(`/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`);
     expect(before.ok()).toBeTruthy();
-    const deleted = await page.request.delete(`/api/assets/placements/${encodeURIComponent(placementId)}?projectId=${encodeURIComponent(projectId)}`);
-    expect(deleted.ok()).toBeTruthy();
+    await openCanvasProject(page, projectId);
+    const image = page.locator('[data-canvas-viewport] img[src]').first();
+    await image.click();
+    const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
+    await page.getByTestId('selected-image-delete').click();
+    expect((await deleted).ok()).toBeTruthy();
     const restored = await postJson(page, `/api/assets/${encodeURIComponent(assetId)}/restore`, {
       projectId,
       placementId,
@@ -76,6 +88,8 @@ test.describe('Stage 2 asset lifecycle', () => {
     expect((restored.placement as Record<string, unknown>)?.id).toBe(placementId);
     const after = await page.request.get(`/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`);
     expect(after.ok()).toBeTruthy();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('[data-canvas-viewport] img[src]').first()).toBeVisible({ timeout: 20_000 });
   });
 
   test('surfaces missing media and retries recovery without mocking', async ({ page, stage2Evidence }, testInfo) => {
