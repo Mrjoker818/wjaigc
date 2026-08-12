@@ -573,7 +573,7 @@
 | Item | Status | Required evidence |
 |---|---|---|
 | BUG-065 through BUG-070 local closure | VERIFIED LOCALLY | TDD, real PostgreSQL, five-profile production-browser matrix, and independent review all pass. |
-| Exact final candidate in Coze | UNVERIFIED | Coze currently reports `4bbe6db`. After the main-only push, pull and record the exact new SHA with `WUJIE_ASSET_GRAPH_MODE=shadow`, task core `legacy`, and physical purge disabled. |
+| Exact final candidate in Coze | UNVERIFIED | The verified implementation entered `main@644a0809658d500d9e3815c14771dd10581f0998`; Coze still reports `4bbe6db`. Pull the current main tip and record the exact runtime SHA with `WUJIE_ASSET_GRAPH_MODE=shadow`, task core `legacy`, and physical purge disabled. |
 | Cloud three-workspace comparison | UNVERIFIED | Verify Canvas, embedded chat, standalone chat, and node workflow preserve one asset/version/placement/entity tuple; delete/restore and reload must agree between graph and project snapshot. |
 | Controlled `asset-v3` run | NOT STARTED | Only after the exact-SHA shadow comparison passes; use an isolated test environment and retain database/browser evidence. |
 | Rollback to `legacy` | NOT STARTED | After the controlled `asset-v3` run, switch only the mode, restart, and prove login, old projects, three workspaces, task/billing references, and media remain intact. |

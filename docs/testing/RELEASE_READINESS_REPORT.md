@@ -740,3 +740,5 @@ Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json
 - Final local gates pass: full PostgreSQL-enabled test command, API suite, regression suite, TypeScript, Doctor, production build, protected baseline `38/38`, and whitespace checks. ESLint reports `0 errors / 959 historical warnings`.
 - Coze currently reports `4bbe6db`, which predates this final candidate. Therefore no cloud result can yet validate BUG-065 through BUG-070.
 - **Verdict: CONDITIONALLY PASS FOR MAIN-ONLY PUSH; STAGE 2 NOT COMPLETE.** Required remaining order is exact-SHA Coze `shadow` comparison, controlled test-only `asset-v3`, then verified rollback to `legacy`. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only and physical purge remains disabled.
+
+Post-decision update: the implementation candidate was fast-forward pushed to `main@644a0809658d500d9e3815c14771dd10581f0998`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged. Release status is still conditional because Coze has not yet pulled and validated this candidate in `shadow`.

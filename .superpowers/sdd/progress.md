@@ -158,3 +158,9 @@ Governance confirmation 2026-08-11: the user intentionally updated `stable` from
 - Fresh browser execution used one new controlled user/project set per browser and passed `50/50`. A run made with the server accidentally in default `legacy` mode and a later shared-fixture run were rejected as test-environment failures; neither was hidden nor counted.
 - Fresh gates pass: full PostgreSQL-enabled tests, API and regression suites, TypeScript, Doctor, build `116` routes, protected baseline `38/38`, and `git diff --check`; ESLint is `0 errors / 959 warnings`. Evidence audit reports 108 recent manifests with zero missing required artifact files.
 - Next unique action remains a main-only fast-forward push. Then Coze must pull the exact SHA in `shadow`; only after cloud comparison may the isolated `asset-v3` switch and mandatory `legacy` rollback be executed. `stable` and physical purge remain untouched.
+
+## 2026-08-13: Task 9 candidate pushed to main
+
+- The verified implementation was fast-forward pushed from `origin/main@1344dec33f93fc9d8a19baeaf9ed251c28176f5f` to `main@644a0809658d500d9e3815c14771dd10581f0998`; no force operation was used.
+- Post-push verification confirmed `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is byte-for-byte unchanged.
+- Coze still reports the older runtime baseline `4bbe6db`. The next unique action is for Coze to pull the new main tip and prove the exact runtime SHA in `shadow`; do not start `asset-v3` until that comparison passes.
