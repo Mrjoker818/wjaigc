@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { posix } from 'node:path';
 
 import {
   type AssetCoreSqlTransaction,
@@ -580,6 +581,14 @@ export async function recoverAssetMedia(input: {
   | { recovered: false; availability: 'unrecoverable'; deferred: false }
 > {
   return withAssetCoreTransaction(async (client) => {
+    const asset = await client.query<{ id: string }>(
+      `SELECT id
+       FROM wujie_assets
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'trashed'
+       FOR UPDATE`,
+      [input.assetId, input.actorUserId, input.projectId],
+    );
+    if (!asset.rows[0]) throw new MediaHealthError('ASSET_NOT_FOUND');
     const result = await client.query<{
       id: string;
       asset_id: string;
@@ -588,16 +597,22 @@ export async function recoverAssetMedia(input: {
     }>(
       `SELECT version.id, version.asset_id, version.recovery_source_url, version.storage_key
        FROM wujie_asset_versions version
-       JOIN wujie_assets asset ON asset.id = version.asset_id AND asset.owner_id = version.owner_id AND asset.project_id = version.project_id
-       JOIN wujie_workspace_placements placement ON placement.id = $5 AND placement.asset_version_id = version.id AND placement.asset_id = version.asset_id
        WHERE version.id = $1 AND version.owner_id = $2 AND version.project_id = $3 AND version.asset_id = $4
          AND version.availability IN ('missing', 'unrecoverable')
-         AND asset.status = 'trashed' AND placement.status = 'trashed'
-       FOR UPDATE OF version, asset, placement`,
-      [input.assetVersionId, input.actorUserId, input.projectId, input.assetId, input.placementId],
+       FOR UPDATE`,
+      [input.assetVersionId, input.actorUserId, input.projectId, input.assetId],
     );
     const version = result.rows[0];
     if (!version) throw new MediaHealthError('ASSET_NOT_FOUND');
+    const placement = await client.query<{ id: string }>(
+      `SELECT id
+       FROM wujie_workspace_placements
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3
+         AND asset_id = $4 AND asset_version_id = $5 AND status = 'trashed'
+       FOR UPDATE`,
+      [input.placementId, input.actorUserId, input.projectId, input.assetId, input.assetVersionId],
+    );
+    if (!placement.rows[0]) throw new MediaHealthError('ASSET_NOT_FOUND');
     const recoverable = Boolean(version.recovery_source_url || version.storage_key);
     const availability = recoverable ? 'recovering' : 'unrecoverable';
     const attemptStatus = recoverable ? 'deferred' : 'unrecoverable';
@@ -639,23 +654,28 @@ interface LegacyRecoveryVersionRow {
   storage_key: string | null;
 }
 
+function normalizeManagedLocalPath(value: string): string | null {
+  const normalized = posix.normalize(value.trim().replaceAll('\\', '/').replace(/^\/+/, ''));
+  if (!normalized || normalized === '.' || normalized === '..' || normalized.startsWith('../')) return null;
+  return normalized;
+}
+
 export async function recordLegacyRecoveryOutcome(
   input: LegacyRecoveryOutcomeInput,
 ): Promise<{ matchedVersions: number; ready: number; missing: number; unrecoverable: number }> {
-  const normalizedPath = input.localPath.replaceAll('\\', '/').replace(/^\/+/, '');
-  const basename = normalizedPath.split('/').at(-1) ?? normalizedPath;
+  const normalizedPath = normalizeManagedLocalPath(input.localPath);
+  if (!normalizedPath) return { matchedVersions: 0, ready: 0, missing: 0, unrecoverable: 0 };
   const managedUrl = `/api/serve-upload/${normalizedPath}`;
-  const storageKeys = [...new Set([normalizedPath, basename, `images/${basename}`])];
 
   return withAssetCoreTransaction(async (client) => {
     const candidates = await client.query<LegacyRecoveryVersionRow>(
       `SELECT version.id, version.asset_id, version.owner_id, version.project_id,
               version.recovery_source_url, version.storage_key
        FROM wujie_asset_versions version
-       WHERE (version.file_url = $1 OR version.storage_key = ANY($2::text[]))
+       WHERE (version.file_url = $1 OR version.storage_key = $2)
          AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
        ORDER BY version.asset_id, version.id`,
-      [managedUrl, storageKeys],
+      [managedUrl, normalizedPath],
     );
     if (candidates.rows.length === 0) {
       return { matchedVersions: 0, ready: 0, missing: 0, unrecoverable: 0 };
@@ -675,9 +695,19 @@ export async function recordLegacyRecoveryOutcome(
               version.recovery_source_url, version.storage_key
        FROM wujie_asset_versions version
        WHERE version.id = ANY($1::text[])
+         AND (version.file_url = $2 OR version.storage_key = $3)
+         AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
        ORDER BY version.asset_id, version.id
        FOR UPDATE`,
-      [versionIds],
+      [versionIds, managedUrl, normalizedPath],
+    );
+    await client.query(
+      `SELECT placement.id
+       FROM wujie_workspace_placements placement
+       WHERE placement.asset_version_id = ANY($1::text[])
+       ORDER BY placement.asset_id, placement.asset_version_id, placement.id
+       FOR UPDATE`,
+      [locked.rows.map(row => row.id)],
     );
 
     let ready = 0;

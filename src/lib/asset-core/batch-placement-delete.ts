@@ -14,6 +14,13 @@ export type BatchDeleteResult =
   | { deletedIds: string[] }
   | { deletedIds: string[]; failedId: string; error: unknown };
 
+export function reconcileSelectedImageAfterBatchDeletion<T extends { id: string }>(
+  selectedImage: T | null,
+  deletedIds: readonly string[],
+): T | null {
+  return selectedImage && deletedIds.includes(selectedImage.id) ? null : selectedImage;
+}
+
 export async function reconcileImageBatchDeletion<T extends BatchDeleteImageIdentity>(
   items: readonly T[],
   deletePlacement: (item: T & ManagedBatchDeleteImageIdentity) => Promise<void>,

@@ -96,7 +96,10 @@ import {
   shouldRetainCanvasPlacementDuringMerge,
 } from '@/lib/asset-core/canvas-adapter';
 import { prepareCanvasAssetForChat } from '@/lib/asset-core/workspace-transfer';
-import { reconcileImageBatchDeletion } from '@/lib/asset-core/batch-placement-delete';
+import {
+  reconcileImageBatchDeletion,
+  reconcileSelectedImageAfterBatchDeletion,
+} from '@/lib/asset-core/batch-placement-delete';
 import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
 import { buildProjectWorkspaceUrl } from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
@@ -5666,6 +5669,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             },
             (image) => setImages(previous => previous.filter(candidate => candidate.id !== image.id)),
           );
+          if (result.deletedIds.length > 0) {
+            setSelectedImage(previous => reconcileSelectedImageAfterBatchDeletion(previous, result.deletedIds));
+          }
           if ('error' in result) {
             toast.error(result.error instanceof Error ? result.error.message : '素材删除失败');
             return;

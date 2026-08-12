@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   downloadImageFromS3: vi.fn(),
+  execSql: vi.fn(),
   getImageSourceUrl: vi.fn(),
   recordLegacyRecoveryOutcome: vi.fn(),
   requireApiAuthOrReject: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock('@/lib/api-auth', () => ({ requireApiAuthOrReject: mocks.requireApiAuthO
 vi.mock('@/lib/asset-core/media-health', () => ({
   recordLegacyRecoveryOutcome: mocks.recordLegacyRecoveryOutcome,
 }));
-vi.mock('@/lib/db-client', () => ({ execSql: vi.fn() }));
+vi.mock('@/lib/db-client', () => ({ execSql: mocks.execSql }));
 vi.mock('@/lib/image-source-map', () => ({ getImageSourceUrl: mocks.getImageSourceUrl }));
 vi.mock('@/lib/s3-storage', () => ({
   downloadImageFromS3: mocks.downloadImageFromS3,
@@ -109,6 +110,51 @@ describe('recover-images authorization contract', () => {
     });
     expect(mocks.recordLegacyRecoveryOutcome).toHaveBeenCalledWith({
       localPath: 'uploads/missing.png',
+      success: false,
+      method: 'none',
+      error: 'No S3 or sourceUrl available',
+    });
+  });
+
+  it('attempts every missing batch entry through S3 before recording its outcome', async () => {
+    mocks.execSql.mockResolvedValue({
+      rows: [
+        { local_path: 'uploads/s3-only.png', user_name: 'Owner A' },
+        { local_path: 'nested/unknown.png', user_name: 'Owner B' },
+      ],
+    });
+    mocks.getImageSourceUrl.mockResolvedValue(null);
+    mocks.downloadImageFromS3.mockImplementation(async (localPath: string) => (
+      localPath === 'uploads/s3-only.png' ? Buffer.from('restored') : null
+    ));
+
+    const response = await POST(new NextRequest(
+      'http://localhost/api/recover-images?action=recover',
+      { method: 'POST' },
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      totalAttempted: 2,
+      succeeded: 1,
+      failed: 1,
+      unrecoverable: 1,
+      results: [
+        expect.objectContaining({ localPath: 'uploads/s3-only.png', success: true, method: 's3' }),
+        expect.objectContaining({ localPath: 'nested/unknown.png', success: false, method: 'none' }),
+      ],
+    });
+    expect(mocks.downloadImageFromS3.mock.calls.map(([localPath]) => localPath)).toEqual([
+      'uploads/s3-only.png',
+      'nested/unknown.png',
+    ]);
+    expect(mocks.recordLegacyRecoveryOutcome).toHaveBeenNthCalledWith(1, {
+      localPath: 'uploads/s3-only.png',
+      success: true,
+      method: 's3',
+    });
+    expect(mocks.recordLegacyRecoveryOutcome).toHaveBeenNthCalledWith(2, {
+      localPath: 'nested/unknown.png',
       success: false,
       method: 'none',
       error: 'No S3 or sourceUrl available',

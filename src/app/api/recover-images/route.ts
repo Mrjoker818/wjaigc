@@ -307,10 +307,7 @@ export async function POST(request: NextRequest) {
       const scanResult = await scanMissingImages();
       const results: Array<{ filename: string; localPath: string; success: boolean; method: string; error?: string }> = [];
       
-      // Only try to recover images that have a sourceUrl
-      const recoverable = scanResult.details.filter(m => m.hasSourceUrl);
-      
-      for (const img of recoverable) {
+      for (const img of scanResult.details) {
         const result = await recoverImage(img.localPath);
         await recordLegacyRecoveryOutcome({ localPath: img.localPath, ...result });
         results.push({ filename: img.filename, localPath: img.localPath, ...result });
@@ -318,23 +315,16 @@ export async function POST(request: NextRequest) {
         // Small delay between recoveries to avoid overwhelming external APIs
         await new Promise(resolve => setTimeout(resolve, 200));
       }
-      for (const img of scanResult.details.filter(missing => !missing.hasSourceUrl)) {
-        await recordLegacyRecoveryOutcome({
-          localPath: img.localPath,
-          success: false,
-          method: 'none',
-          error: 'No S3 or sourceUrl available',
-        });
-      }
       
       const succeeded = results.filter(r => r.success).length;
       const failed = results.filter(r => !r.success).length;
+      const unrecoverable = results.filter(r => !r.success && r.method === 'none').length;
       
       return NextResponse.json({
-        totalAttempted: recoverable.length,
+        totalAttempted: scanResult.details.length,
         succeeded,
         failed,
-        unrecoverable: scanResult.unrecoverable,
+        unrecoverable,
         results,
       });
     }

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { reconcileImageBatchDeletion } from '@/lib/asset-core/batch-placement-delete';
+import {
+  reconcileImageBatchDeletion,
+  reconcileSelectedImageAfterBatchDeletion,
+} from '@/lib/asset-core/batch-placement-delete';
 
 describe('asset placement batch deletion', () => {
   it('reconciles each successful deletion before returning a later managed failure', async () => {
@@ -46,5 +49,12 @@ describe('asset placement batch deletion', () => {
     });
     expect(deletePlacement).not.toHaveBeenCalled();
     expect(onDeleted.mock.calls.map(([item]) => item.id)).toEqual(['legacy-a', 'legacy-b']);
+  });
+
+  it('clears a selected image that was removed before a later batch failure', () => {
+    const selected = { id: 'managed-a', url: '/managed-a.png' };
+
+    expect(reconcileSelectedImageAfterBatchDeletion(selected, ['legacy-a', 'managed-a'])).toBeNull();
+    expect(reconcileSelectedImageAfterBatchDeletion(selected, ['legacy-a'])).toBe(selected);
   });
 });

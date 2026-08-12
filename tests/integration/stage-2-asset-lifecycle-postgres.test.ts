@@ -43,6 +43,24 @@ async function waitForPurgeLock(query: QueryFn, applicationName: string): Promis
   throw new Error('purge did not wait on the asset lifecycle row lock');
 }
 
+async function waitForApplicationLockCount(
+  query: QueryFn,
+  applicationName: string,
+  expected: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const activity = await query<{ waiting: string }>(
+      `SELECT count(*)::text AS waiting
+       FROM pg_stat_activity
+       WHERE application_name = $1 AND wait_event_type = 'Lock'`,
+      [applicationName],
+    );
+    if (Number(activity.rows[0]?.waiting ?? 0) >= expected) return;
+    await new Promise(resolveWait => setTimeout(resolveWait, 25));
+  }
+  throw new Error(`expected ${expected} governed recovery lock waiters`);
+}
+
 describe('stage 2 asset lifecycle PostgreSQL contract', () => {
   postgresIt('installs lifecycle audit storage so concurrent restore/trash/purge checks can share one transaction boundary', async () => {
     await withIsolatedPostgres('asset_lifecycle', async ({ databaseUrl, query }) => {
@@ -142,6 +160,86 @@ describe('stage 2 asset lifecycle PostgreSQL contract', () => {
         expect(purge.eligible).toBe(false);
         expect(purge.physicalPurgeDisabled).toBe(true);
         expect(purge.reasons).toContain('CONFIRMATION_DIGEST_STALE');
+      } finally {
+        await lockClient.query('ROLLBACK').catch(() => undefined);
+        await lockClient.end();
+      }
+    });
+  }, 30_000);
+
+  postgresIt('serializes both governed recovery paths in asset-version-placement order without deadlock', async () => {
+    await withIsolatedPostgres('asset_lifecycle_recovery_lock_order', async ({ databaseUrl, query }) => {
+      migrate(databaseUrl);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const assetId = randomUUID();
+      const versionId = randomUUID();
+      const placementId = randomUUID();
+      await query(
+        `INSERT INTO wujie_projects(id, owner_id, name) VALUES ($1, $2, 'Recovery locks')`,
+        [projectId, ownerId],
+      );
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ($1, $2, $3, 'image', 'trashed')`,
+        [assetId, ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, storage_key, availability
+         ) VALUES ($1, $2, $3, $4, '/api/serve-upload/uploads/concurrent.png',
+                   'uploads/concurrent.png', 'missing')`,
+        [versionId, assetId, ownerId, projectId],
+      );
+      await query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, versionId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind, workspace_id,
+           entity_type, entity_id, status, deleted_at
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-recovery',
+                   'canvas-image', 'image-recovery', 'trashed', now())`,
+        [placementId, ownerId, projectId, assetId, versionId],
+      );
+
+      const applicationName = `asset-recovery-${randomUUID()}`;
+      const businessUrl = withApplicationName(databaseUrl, applicationName);
+      await closePool();
+      process.env.DATABASE_URL = businessUrl;
+      process.env.PGDATABASE_URL = businessUrl;
+      const { recordLegacyRecoveryOutcome, recoverAssetMedia } = await import('../../src/lib/asset-core/media-health');
+
+      const lockClient = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
+      await lockClient.connect();
+      try {
+        await lockClient.query('BEGIN');
+        await lockClient.query('SELECT id FROM wujie_assets WHERE id = $1 FOR UPDATE', [assetId]);
+        const recoveryPromise = recoverAssetMedia({
+          actorUserId: ownerId,
+          projectId,
+          assetVersionId: versionId,
+          assetId,
+          placementId,
+        });
+        const legacyPromise = recordLegacyRecoveryOutcome({
+          localPath: 'uploads/concurrent.png',
+          success: true,
+          method: 's3',
+        });
+        await waitForApplicationLockCount(query, applicationName, 2);
+        await lockClient.query('COMMIT');
+
+        const settled = await Promise.allSettled([recoveryPromise, legacyPromise]);
+        expect(settled[1]).toMatchObject({ status: 'fulfilled' });
+        for (const result of settled) {
+          if (result.status !== 'rejected') continue;
+          expect((result.reason as { code?: string }).code).not.toBe('40P01');
+          expect(String(result.reason)).not.toMatch(/deadlock/i);
+        }
+        const version = await query<{ availability: string }>(
+          'SELECT availability FROM wujie_asset_versions WHERE id = $1',
+          [versionId],
+        );
+        expect(version.rows[0]?.availability).toBe('ready');
       } finally {
         await lockClient.query('ROLLBACK').catch(() => undefined);
         await lockClient.end();

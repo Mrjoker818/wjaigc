@@ -22,6 +22,9 @@ describe('asset media health transactional service', () => {
   it('persists unrecoverable availability and attempt atomically when no source or storage key exists', async () => {
     const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
       void params;
+      if (sql.includes('FROM wujie_assets')) {
+        return { rows: [{ id: 'asset-a' }], rowCount: 1 };
+      }
       if (sql.includes('SELECT version.id')) {
         return {
           rows: [{
@@ -32,6 +35,9 @@ describe('asset media health transactional service', () => {
           }],
           rowCount: 1,
         };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) {
+        return { rows: [{ id: 'placement-a' }], rowCount: 1 };
       }
       return { rows: [], rowCount: 1 };
     });
@@ -50,6 +56,47 @@ describe('asset media health transactional service', () => {
     expect(availabilityWrite?.[1]).toContain('unrecoverable');
     expect(attemptWrite?.[1]).toContain('unrecoverable');
     expect(mocks.withAssetCoreTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('locks asset then version then placement before deciding recovery state', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('FROM wujie_assets')) {
+        return { rows: [{ id: 'asset-a' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_asset_versions version')) {
+        return {
+          rows: [{
+            id: 'version-a',
+            asset_id: 'asset-a',
+            recovery_source_url: 'https://source.test/a.png',
+            storage_key: 'uploads/a.png',
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) {
+        return { rows: [{ id: 'placement-a' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    mocks.withAssetCoreTransaction.mockImplementation(async (callback) => callback({ query }));
+
+    await expect(recoverAssetMedia({
+      actorUserId: 'owner-a',
+      projectId: 'project-a',
+      assetVersionId: 'version-a',
+      assetId: 'asset-a',
+      placementId: 'placement-a',
+    })).resolves.toEqual({ recovered: false, availability: 'recovering', deferred: true });
+
+    const lockOrder = query.mock.calls
+      .filter(([sql]) => String(sql).includes('FOR UPDATE'))
+      .map(([sql]) => String(sql).includes('FROM wujie_assets')
+        ? 'asset'
+        : String(sql).includes('FROM wujie_asset_versions')
+          ? 'version'
+          : 'placement');
+    expect(lockOrder).toEqual(['asset', 'version', 'placement']);
   });
 
   it('returns deterministic candidate identity during dry-run without writing the candidate table', async () => {
@@ -140,5 +187,68 @@ describe('asset media health transactional service', () => {
     expect(attemptWrites[0]?.[1]).toContain('succeeded');
     expect(availabilityWrites[1]?.[1]).toContain('missing');
     expect(attemptWrites[1]?.[1]).toContain('failed');
+  });
+
+  it('matches only the exact normalized managed path and locks asset then version then placement', async () => {
+    const exact = {
+      id: 'version-exact',
+      asset_id: 'asset-exact',
+      owner_id: 'owner-a',
+      project_id: 'project-a',
+      recovery_source_url: null,
+      storage_key: 'users/a/same.png',
+    };
+    const guessedAlias = {
+      id: 'version-alias',
+      asset_id: 'asset-alias',
+      owner_id: 'owner-b',
+      project_id: 'project-b',
+      recovery_source_url: null,
+      storage_key: 'images/same.png',
+    };
+    const rowsById = new Map([
+      [exact.id, exact],
+      [guessedAlias.id, guessedAlias],
+    ]);
+    const query = vi.fn(async (sql: string, params: readonly unknown[] = []) => {
+      if (sql.includes('FROM wujie_asset_versions version') && !sql.includes('FOR UPDATE')) {
+        const pathInput = params[1];
+        const includesGuessedAlias = Array.isArray(pathInput) && pathInput.includes('images/same.png');
+        return { rows: includesGuessedAlias ? [exact, guessedAlias] : [exact], rowCount: includesGuessedAlias ? 2 : 1 };
+      }
+      if (sql.includes('FROM wujie_assets')) return { rows: [{ id: exact.asset_id }], rowCount: 1 };
+      if (sql.includes('FROM wujie_asset_versions version') && sql.includes('FOR UPDATE')) {
+        const ids = Array.isArray(params[0]) ? params[0] as string[] : [];
+        const rows = ids.flatMap(id => rowsById.get(id) ?? []);
+        return { rows, rowCount: rows.length };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    });
+    mocks.withAssetCoreTransaction.mockImplementation(async (callback) => callback({ query }));
+
+    const result = await recordLegacyRecoveryOutcome({
+      localPath: 'users\\a\\same.png',
+      success: true,
+      method: 's3',
+    });
+
+    expect(result).toEqual({ matchedVersions: 1, ready: 1, missing: 0, unrecoverable: 0 });
+    const reads = query.mock.calls.filter(([sql]) => String(sql).includes('FROM wujie_asset_versions version'));
+    expect(reads[0]?.[1]).toEqual(['/api/serve-upload/users/a/same.png', 'users/a/same.png']);
+    expect(reads[1]?.[1]).toEqual([
+      ['version-exact'],
+      '/api/serve-upload/users/a/same.png',
+      'users/a/same.png',
+    ]);
+    expect(JSON.stringify(query.mock.calls)).not.toContain('images/same.png');
+    const lockOrder = query.mock.calls
+      .filter(([sql]) => String(sql).includes('FOR UPDATE'))
+      .map(([sql]) => String(sql).includes('FROM wujie_assets')
+        ? 'asset'
+        : String(sql).includes('FROM wujie_asset_versions')
+          ? 'version'
+          : 'placement');
+    expect(lockOrder).toEqual(['asset', 'version', 'placement']);
   });
 });
