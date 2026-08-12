@@ -51,6 +51,7 @@ export interface AssetStorageTransaction {
     versionId: string,
   ): Promise<Asset>;
   findPlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null>;
+  lockPlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null>;
   findActivePlacement(
     ownerId: string,
     projectId: string,
@@ -366,6 +367,15 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
   }
 
   async findPlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null> {
+    const result = await this.client.query<PlacementRow>(
+      `SELECT * FROM wujie_workspace_placements
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
+      [placementId, ownerId, projectId],
+    );
+    return result.rows[0] ? mapPlacement(result.rows[0]) : null;
+  }
+
+  async lockPlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null> {
     const result = await this.client.query<PlacementRow>(
       `SELECT * FROM wujie_workspace_placements
        WHERE id = $1 AND owner_id = $2 AND project_id = $3 FOR UPDATE`,

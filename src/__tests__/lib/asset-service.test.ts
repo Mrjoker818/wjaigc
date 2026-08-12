@@ -94,6 +94,10 @@ type AssetService = {
     placementTrashed: boolean;
     assetTrashed: boolean;
   }>;
+  restorePlacement(input: PlacementCommand): Promise<{
+    placement: WorkspacePlacement;
+    asset: Asset;
+  }>;
 };
 
 type AssetServiceModule = {
@@ -118,6 +122,7 @@ function projectKey(ownerId: string, projectId: string): string {
 
 class MemoryStorage {
   readonly data: MemoryRecord;
+  readonly lifecycleCalls: string[] = [];
 
   constructor(ownerId: string, projectId: string) {
     this.data = {
@@ -171,6 +176,7 @@ class MemoryStorage {
   }
 
   async lockAsset(ownerId: string, projectId: string, assetId: string): Promise<Asset | null> {
+    this.lifecycleCalls.push('lockAsset');
     return this.findAsset(ownerId, projectId, assetId);
   }
 
@@ -242,6 +248,17 @@ class MemoryStorage {
     projectId: string,
     placementId: string,
   ): Promise<WorkspacePlacement | null> {
+    this.lifecycleCalls.push('findPlacement');
+    const placement = this.data.placements.get(placementId);
+    return placement?.ownerId === ownerId && placement.projectId === projectId ? placement : null;
+  }
+
+  async lockPlacement(
+    ownerId: string,
+    projectId: string,
+    placementId: string,
+  ): Promise<WorkspacePlacement | null> {
+    this.lifecycleCalls.push('lockPlacement');
     const placement = this.data.placements.get(placementId);
     return placement?.ownerId === ownerId && placement.projectId === projectId ? placement : null;
   }
@@ -269,6 +286,7 @@ class MemoryStorage {
   }
 
   async insertPlacement(placement: WorkspacePlacement): Promise<boolean> {
+    this.lifecycleCalls.push('insertPlacement');
     const existing = await this.findActivePlacement(
       placement.ownerId,
       placement.projectId,
@@ -459,6 +477,65 @@ describe('asset graph service', () => {
     expect(resolveFile).toHaveBeenCalledTimes(1);
     expect(storage.data.versions.size).toBe(1);
     expect(storage.data.placements.size).toBe(1);
+  });
+
+  it('locks a reused asset before creating a placement with a new version', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const existing = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    storage.lifecycleCalls.length = 0;
+
+    await service.createVersionWithPlacement({
+      actorUserId: ownerId,
+      projectId,
+      assetId: existing.asset.id,
+      kind: 'image',
+      resolveFile: async () => file('https://canonical.test/reused-asset.png'),
+      idempotencyKey: 'reused-asset-placement',
+      requestDigest: 'reused-asset-placement-digest',
+      placement: {
+        workspace: 'canvas',
+        workspaceId: 'canvas-reused',
+        entityType: 'canvas-image',
+        entityId: 'image-reused',
+      },
+    });
+
+    expect(storage.lifecycleCalls.indexOf('lockAsset')).toBeGreaterThanOrEqual(0);
+    expect(storage.lifecycleCalls.indexOf('lockAsset')).toBeLessThan(storage.lifecycleCalls.indexOf('insertPlacement'));
+  });
+
+  it('locks the asset before repairing a missing idempotent placement', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const input: CreateVersionWithPlacementInput = {
+      actorUserId: ownerId,
+      projectId,
+      kind: 'image',
+      resolveFile: async () => file('https://canonical.test/idempotent-repair.png'),
+      idempotencyKey: 'idempotent-placement-repair',
+      requestDigest: 'idempotent-placement-repair-digest',
+      placement: {
+        workspace: 'canvas',
+        workspaceId: 'canvas-repair',
+        entityType: 'canvas-image',
+        entityId: 'image-repair',
+      },
+    };
+    const created = await service.createVersionWithPlacement(input);
+    storage.data.placements.delete(created.placement.id);
+    storage.lifecycleCalls.length = 0;
+
+    await service.createVersionWithPlacement(input);
+
+    expect(storage.lifecycleCalls.indexOf('lockAsset')).toBeGreaterThanOrEqual(0);
+    expect(storage.lifecycleCalls.indexOf('lockAsset')).toBeLessThan(storage.lifecycleCalls.indexOf('insertPlacement'));
   });
 
   it('I4 rolls back a newly created version when its required placement cannot be inserted', async () => {
@@ -683,6 +760,149 @@ describe('asset graph service', () => {
 
     expect(result).toEqual({ placementTrashed: true, assetTrashed: false });
     expect(storage.data.assets.get(version.asset.id)?.status).toBe('active');
+  });
+
+  it('restores a trashed placement while another placement keeps the shared asset active', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-12T00:00:00.000Z'));
+    try {
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const storage = new MemoryStorage(ownerId, projectId);
+      const { createAssetService } = await loadService();
+      const service = createAssetService(storage);
+      const version = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+      const first = await service.createWorkspacePlacement({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: version.version.id,
+        workspace: 'canvas',
+        workspaceId: 'canvas-a',
+        entityType: 'canvas-image',
+        entityId: 'image-a',
+      });
+      await service.createWorkspacePlacement({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: version.version.id,
+        workspace: 'canvas',
+        workspaceId: 'canvas-b',
+        entityType: 'canvas-image',
+        entityId: 'image-b',
+      });
+      await service.trashPlacement({ actorUserId: ownerId, projectId, placementId: first.placement.id });
+
+      const restored = await service.restorePlacement({
+        actorUserId: ownerId,
+        projectId,
+        placementId: first.placement.id,
+      });
+
+      expect(restored.placement.status).toBe('active');
+      expect(restored.asset.status).toBe('active');
+      expect(storage.data.assets.get(version.asset.id)?.status).toBe('active');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('locks the asset before re-reading the placement for trash and restore decisions', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-12T00:00:00.000Z'));
+    try {
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const storage = new MemoryStorage(ownerId, projectId);
+      const { createAssetService } = await loadService();
+      const service = createAssetService(storage);
+      const version = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+      const placement = await service.createWorkspacePlacement({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: version.version.id,
+        workspace: 'canvas',
+        workspaceId: 'canvas-a',
+        entityType: 'canvas-image',
+        entityId: 'image-a',
+      });
+
+      storage.lifecycleCalls.length = 0;
+      await service.trashPlacement({ actorUserId: ownerId, projectId, placementId: placement.placement.id });
+      expect(storage.lifecycleCalls.slice(0, 3)).toEqual(['findPlacement', 'lockAsset', 'lockPlacement']);
+
+      storage.lifecycleCalls.length = 0;
+      await service.restorePlacement({ actorUserId: ownerId, projectId, placementId: placement.placement.id });
+      expect(storage.lifecycleCalls.slice(0, 3)).toEqual(['findPlacement', 'lockAsset', 'lockPlacement']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-evaluates retention after the asset lock at the exact 30 day boundary', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-12T00:00:00.000Z'));
+    try {
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const storage = new MemoryStorage(ownerId, projectId);
+      const { createAssetService } = await loadService();
+      const service = createAssetService(storage);
+      const version = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+      const placement = await service.createWorkspacePlacement({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: version.version.id,
+        workspace: 'canvas',
+        workspaceId: 'canvas-a',
+        entityType: 'canvas-image',
+        entityId: 'image-a',
+      });
+      await service.trashPlacement({ actorUserId: ownerId, projectId, placementId: placement.placement.id });
+      vi.setSystemTime(new Date('2026-09-09T23:59:59.999Z'));
+      const lockAsset = storage.lockAsset.bind(storage);
+      storage.lockAsset = async (...args: Parameters<MemoryStorage['lockAsset']>) => {
+        vi.setSystemTime(new Date('2026-09-10T00:00:00.000Z'));
+        return lockAsset(...args);
+      };
+
+      await expect(service.restorePlacement({
+        actorUserId: ownerId,
+        projectId,
+        placementId: placement.placement.id,
+      })).rejects.toMatchObject({ code: 'ASSET_RESTORE_NOT_ALLOWED' });
+      expect(storage.data.placements.get(placement.placement.id)?.status).toBe('trashed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fails closed for foreign ownership and active placement restore requests', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const version = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    const placement = await service.createWorkspacePlacement({
+      actorUserId: ownerId,
+      projectId,
+      assetVersionId: version.version.id,
+      workspace: 'canvas',
+      workspaceId: 'canvas-a',
+      entityType: 'canvas-image',
+      entityId: 'image-a',
+    });
+
+    await expect(service.restorePlacement({
+      actorUserId: randomUUID(),
+      projectId,
+      placementId: placement.placement.id,
+    })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+    await expect(service.restorePlacement({
+      actorUserId: ownerId,
+      projectId,
+      placementId: placement.placement.id,
+    })).rejects.toMatchObject({ code: 'ASSET_RESTORE_NOT_ALLOWED' });
   });
 
   it('trashes the asset after its final active placement is trashed', async () => {

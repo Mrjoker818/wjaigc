@@ -296,11 +296,15 @@ export class AssetService {
       );
       if (existing) {
         if (existing.requestDigest !== input.requestDigest) conflict();
-        const asset = await transaction.findAsset(
+        const lockedAsset = await transaction.lockAsset(
           input.actorUserId,
           input.projectId,
           existing.version.assetId,
         );
+        if (!lockedAsset) notFound();
+        const asset = lockedAsset.status === 'trashed'
+          ? await transaction.activateAsset(input.actorUserId, input.projectId, lockedAsset.id)
+          : lockedAsset;
         if (!asset) notFound();
         const existingPlacement = await transaction.findActivePlacement(
           input.actorUserId,
@@ -339,6 +343,20 @@ export class AssetService {
         };
       }
 
+      let asset: Asset | null = null;
+      if (input.assetId) {
+        const lockedAsset = await transaction.lockAsset(
+          input.actorUserId,
+          input.projectId,
+          input.assetId,
+        );
+        if (!lockedAsset) notFound();
+        asset = lockedAsset.status === 'trashed'
+          ? await transaction.activateAsset(input.actorUserId, input.projectId, lockedAsset.id)
+          : lockedAsset;
+        if (!asset) notFound();
+      }
+
       const occupiedPlacement = await transaction.findActivePlacement(
         input.actorUserId,
         input.projectId,
@@ -350,16 +368,7 @@ export class AssetService {
       if (occupiedPlacement) placementConflict();
 
       const file = await input.resolveFile();
-      let asset: Asset;
-      if (input.assetId) {
-        const existingAsset = await transaction.findAsset(
-          input.actorUserId,
-          input.projectId,
-          input.assetId,
-        );
-        if (!existingAsset) notFound();
-        asset = existingAsset;
-      } else {
+      if (!asset) {
         const timestamp = now();
         asset = {
           id: randomUUID(),
@@ -580,9 +589,11 @@ export class AssetService {
     assetTrashed: boolean;
   }> {
     return this.storage.transaction(async (transaction) => {
-      const placement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
-      if (!placement) notFound();
-      if (!await transaction.lockAsset(input.actorUserId, input.projectId, placement.assetId)) notFound();
+      const locatedPlacement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
+      if (!locatedPlacement) notFound();
+      if (!await transaction.lockAsset(input.actorUserId, input.projectId, locatedPlacement.assetId)) notFound();
+      const placement = await transaction.lockPlacement(input.actorUserId, input.projectId, input.placementId);
+      if (!placement || placement.assetId !== locatedPlacement.assetId) notFound();
       if (placement.status === 'trashed') return { placementTrashed: false, assetTrashed: false };
       const trashed = await transaction.trashPlacement(input.actorUserId, input.projectId, placement.id);
       if (!trashed) return { placementTrashed: false, assetTrashed: false };
@@ -603,20 +614,22 @@ export class AssetService {
   }> {
     try {
       return await this.storage.transaction(async (transaction) => {
-        const placement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
-        if (!placement) notFound();
+        const locatedPlacement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
+        if (!locatedPlacement) notFound();
+        if (input.assetId && locatedPlacement.assetId !== input.assetId) notFound();
+        const lockedAsset = await transaction.lockAsset(
+          input.actorUserId,
+          input.projectId,
+          locatedPlacement.assetId,
+        );
+        if (!lockedAsset) notFound();
+        const placement = await transaction.lockPlacement(input.actorUserId, input.projectId, input.placementId);
+        if (!placement || placement.assetId !== locatedPlacement.assetId) notFound();
         if (input.assetId && placement.assetId !== input.assetId) notFound();
         if (placement.status !== 'trashed' || !placement.deletedAt) restoreNotAllowed();
         const retentionEndsAt = new Date(placement.deletedAt).getTime()
           + DEFAULT_TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
         if (!Number.isFinite(retentionEndsAt) || Date.now() >= retentionEndsAt) restoreNotAllowed();
-        const lockedAsset = await transaction.lockAsset(
-          input.actorUserId,
-          input.projectId,
-          placement.assetId,
-        );
-        if (!lockedAsset) notFound();
-        if (lockedAsset.status !== 'trashed') restoreNotAllowed();
         const occupied = await transaction.findActivePlacement(
           input.actorUserId,
           input.projectId,
@@ -626,7 +639,9 @@ export class AssetService {
           placement.entityId,
         );
         if (occupied && occupied.id !== placement.id) placementConflict();
-        const asset = await transaction.activateAsset(input.actorUserId, input.projectId, placement.assetId);
+        const asset = lockedAsset.status === 'trashed'
+          ? await transaction.activateAsset(input.actorUserId, input.projectId, placement.assetId)
+          : lockedAsset;
         if (!asset) notFound();
         const restored = await transaction.restorePlacement(
           input.actorUserId,

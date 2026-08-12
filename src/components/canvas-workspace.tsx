@@ -96,6 +96,7 @@ import {
   shouldRetainCanvasPlacementDuringMerge,
 } from '@/lib/asset-core/canvas-adapter';
 import { prepareCanvasAssetForChat } from '@/lib/asset-core/workspace-transfer';
+import { reconcileImageBatchDeletion } from '@/lib/asset-core/batch-placement-delete';
 import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
 import { buildProjectWorkspaceUrl } from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
@@ -5651,22 +5652,24 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           mediaAvailability: img.mediaAvailability,
         }))}
         onDeleteImages={async (ids) => {
-          const selected = images.filter((image) => ids.includes(image.id));
-          try {
-            for (const image of selected) {
-              if (!image.assetId || !image.placementId || !currentProject?.id) {
-                throw new Error('素材尚未同步到可删除的 placement');
-              }
-              const response = await fetch(`/api/assets/placements/${image.placementId}?projectId=${encodeURIComponent(currentProject.id)}`, {
+          const selected = images
+            .filter((image) => ids.includes(image.id))
+            .map(image => ({ ...image, projectId: currentProject?.id ?? '' }));
+          const result = await reconcileImageBatchDeletion(
+            selected,
+            async (image) => {
+              if (!image.projectId) throw new Error('当前项目不存在');
+              const response = await fetch(`/api/assets/placements/${image.placementId}?projectId=${encodeURIComponent(image.projectId)}`, {
                 method: 'DELETE',
               });
               if (!response.ok) throw new Error('素材 placement 删除失败');
-            }
-          } catch (error) {
-            toast.error(error instanceof Error ? error.message : '素材删除失败');
+            },
+            (image) => setImages(previous => previous.filter(candidate => candidate.id !== image.id)),
+          );
+          if ('error' in result) {
+            toast.error(result.error instanceof Error ? result.error.message : '素材删除失败');
             return;
           }
-          setImages(prev => prev.filter(img => !ids.includes(img.id)));
           setSelectedImage(null);
         }}
         onNavigateToImage={(imageId) => {

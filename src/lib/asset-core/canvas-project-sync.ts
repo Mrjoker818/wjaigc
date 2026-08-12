@@ -151,6 +151,13 @@ export async function reconcileDeletedCanvasProjectsInTransaction(
   activeProjectIds: string[],
 ): Promise<void> {
   await client.query(
+    `SELECT id FROM wujie_assets
+     WHERE owner_id = $1 AND NOT (project_id = ANY($2::text[]))
+     ORDER BY id
+     FOR UPDATE`,
+    [actorUserId, activeProjectIds],
+  );
+  await client.query(
     `UPDATE wujie_workspace_placements
      SET status = 'trashed', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
      WHERE owner_id = $1 AND status = 'active'

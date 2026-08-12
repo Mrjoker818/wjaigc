@@ -30,8 +30,8 @@ export interface PurgeEligibilityInput {
 
 export interface MediaHealthCandidate {
   assetId: string;
-  candidateId?: string;
-  confirmationDigest?: string;
+  candidateId: string;
+  confirmationDigest: string;
   estimatedBytes: number;
 }
 
@@ -39,6 +39,51 @@ export interface MediaHealthProtection {
   assetId: string;
   reasons: string[];
   estimatedBytes: number;
+}
+
+export interface ConfirmationDigestFacts {
+  assetId: string;
+  assetStatus: 'active' | 'trashed';
+  assetUpdatedAt: string;
+  retention: {
+    days: number;
+    trashedAt: string | null;
+    notBefore: string | null;
+  };
+  versions: Array<{
+    id: string;
+    storageKey: string | null;
+    fileUrl: string;
+    availability: string;
+    byteSize: string | null;
+  }>;
+  placements: Array<{
+    id: string;
+    status: 'active' | 'trashed';
+    deletedAt: string | null;
+  }>;
+  migrationCheckpoints: Array<{
+    id: string;
+    legacyProjectId: string;
+    status: string;
+    updatedAt: string;
+  }>;
+  legacyReferences: Array<{
+    userId: string;
+    dataKey: string;
+    versionId: string;
+    fileUrl: string;
+  }>;
+  sharedPhysicalReferences: Array<{
+    versionId: string;
+    peerAssetId: string;
+    peerVersionId: string;
+    storageKey: string | null;
+    fileUrl: string;
+    peerStorageKey?: string | null;
+    peerFileUrl?: string;
+  }>;
+  unknownLegacyOwnership: boolean;
 }
 
 export class MediaHealthError extends Error {
@@ -86,21 +131,62 @@ export function evaluatePurgeEligibility(
   return { eligible: reasons.length === 0, reasons };
 }
 
-function digestCandidate(row: HealthRow): string {
-  return createHash('sha256').update(JSON.stringify({
-    activePlacements: row.active_placements,
-    assetId: row.asset_id,
-    byteSize: row.estimated_bytes,
-    legacyReferences: row.legacy_references,
-    managedVersions: row.managed_versions,
-    migrationConfirmed: row.migration_confirmed,
-    sharedMedia: row.shared_media,
-    status: row.status,
-    trashedAt: row.trashed_at?.toISOString() ?? null,
-    unknownLegacyOwnership: row.unknown_legacy_ownership,
-    updatedAt: row.updated_at.toISOString(),
-    versionCount: row.version_count,
-  })).digest('hex');
+function compareFacts(left: object, right: object): number {
+  return JSON.stringify(left).localeCompare(JSON.stringify(right));
+}
+
+export function createConfirmationDigest(input: ConfirmationDigestFacts): string {
+  const canonical = {
+    assetId: input.assetId,
+    assetStatus: input.assetStatus,
+    assetUpdatedAt: input.assetUpdatedAt,
+    legacyReferences: input.legacyReferences
+      .map(fact => ({
+        dataKey: fact.dataKey,
+        fileUrl: fact.fileUrl,
+        userId: fact.userId,
+        versionId: fact.versionId,
+      }))
+      .sort(compareFacts),
+    migrationCheckpoints: input.migrationCheckpoints
+      .map(fact => ({
+        id: fact.id,
+        legacyProjectId: fact.legacyProjectId,
+        status: fact.status,
+        updatedAt: fact.updatedAt,
+      }))
+      .sort(compareFacts),
+    placements: input.placements
+      .map(fact => ({ deletedAt: fact.deletedAt, id: fact.id, status: fact.status }))
+      .sort(compareFacts),
+    retention: {
+      days: input.retention.days,
+      notBefore: input.retention.notBefore,
+      trashedAt: input.retention.trashedAt,
+    },
+    sharedPhysicalReferences: input.sharedPhysicalReferences
+      .map(fact => ({
+        fileUrl: fact.fileUrl,
+        peerAssetId: fact.peerAssetId,
+        peerFileUrl: fact.peerFileUrl ?? null,
+        peerStorageKey: fact.peerStorageKey ?? null,
+        peerVersionId: fact.peerVersionId,
+        storageKey: fact.storageKey,
+        versionId: fact.versionId,
+      }))
+      .sort(compareFacts),
+    unknownLegacyOwnership: input.unknownLegacyOwnership,
+    versions: input.versions
+      .map(fact => ({
+        availability: fact.availability,
+        byteSize: fact.byteSize,
+        fileUrl: fact.fileUrl,
+        id: fact.id,
+        storageKey: fact.storageKey,
+      }))
+      .sort(compareFacts),
+  };
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
 function legacyReferenceExpression(): string {
@@ -110,8 +196,7 @@ function legacyReferenceExpression(): string {
       ON legacy_version.asset_id = a.id
      AND legacy_version.owner_id = a.owner_id
      AND legacy_version.project_id = a.project_id
-    WHERE legacy_data.user_id = a.owner_id
-      AND legacy_data.data_key IN ('projects', 'workflows', 'workflow', 'chat', 'chat-history', 'simple-chat')
+    WHERE legacy_data.data_key IN ('projects', 'workflows', 'workflow', 'chat', 'chat-history', 'simple-chat')
       AND legacy_data.data_value::text LIKE '%' || legacy_version.file_url || '%'
   )`;
 }
@@ -129,6 +214,43 @@ interface HealthRow {
   legacy_references: boolean;
   shared_media: boolean;
   unknown_legacy_ownership: boolean;
+  version_facts: ConfirmationDigestFacts['versions'];
+  placement_facts: ConfirmationDigestFacts['placements'];
+  migration_checkpoint_facts: ConfirmationDigestFacts['migrationCheckpoints'];
+  legacy_reference_facts: ConfirmationDigestFacts['legacyReferences'];
+  shared_physical_reference_facts: ConfirmationDigestFacts['sharedPhysicalReferences'];
+}
+
+function toIso(value: Date | string | null): string | null {
+  if (value === null) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function digestCandidate(row: HealthRow): string {
+  const trashedAt = toIso(row.trashed_at);
+  const retentionTime = trashedAt
+    ? new Date(trashedAt).getTime() + DEFAULT_TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000
+    : Number.NaN;
+  return createConfirmationDigest({
+    assetId: row.asset_id,
+    assetStatus: row.status,
+    assetUpdatedAt: toIso(row.updated_at) ?? '',
+    retention: {
+      days: DEFAULT_TRASH_RETENTION_DAYS,
+      trashedAt,
+      notBefore: Number.isFinite(retentionTime) ? new Date(retentionTime).toISOString() : null,
+    },
+    versions: row.version_facts,
+    placements: row.placement_facts.map(fact => ({ ...fact, deletedAt: toIso(fact.deletedAt) })),
+    migrationCheckpoints: row.migration_checkpoint_facts.map(fact => ({
+      ...fact,
+      updatedAt: toIso(fact.updatedAt) ?? '',
+    })),
+    legacyReferences: row.legacy_reference_facts,
+    sharedPhysicalReferences: row.shared_physical_reference_facts,
+    unknownLegacyOwnership: row.unknown_legacy_ownership,
+  });
 }
 
 async function listHealthRows(transaction: AssetCoreSqlTransaction, assetId?: string): Promise<HealthRow[]> {
@@ -137,6 +259,99 @@ async function listHealthRows(transaction: AssetCoreSqlTransaction, assetId?: st
        a.id AS asset_id,
        a.status,
        a.updated_at,
+       coalesce((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'id', version_fact.id,
+             'storageKey', version_fact.storage_key,
+             'fileUrl', version_fact.file_url,
+             'availability', version_fact.availability,
+             'byteSize', version_fact.byte_size::text
+           ) ORDER BY version_fact.id
+         )
+         FROM wujie_asset_versions version_fact
+         WHERE version_fact.asset_id = a.id
+           AND version_fact.owner_id = a.owner_id
+           AND version_fact.project_id = a.project_id
+       ), '[]'::jsonb) AS version_facts,
+       coalesce((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'id', placement_fact.id,
+             'status', placement_fact.status,
+             'deletedAt', placement_fact.deleted_at
+           ) ORDER BY placement_fact.id
+         )
+         FROM wujie_workspace_placements placement_fact
+         WHERE placement_fact.asset_id = a.id
+           AND placement_fact.owner_id = a.owner_id
+           AND placement_fact.project_id = a.project_id
+       ), '[]'::jsonb) AS placement_facts,
+       coalesce((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'id', checkpoint_fact.id,
+             'legacyProjectId', checkpoint_fact.legacy_project_id,
+             'status', checkpoint_fact.status,
+             'updatedAt', checkpoint_fact.updated_at
+           ) ORDER BY checkpoint_fact.id
+         )
+         FROM wujie_asset_migration_checkpoints checkpoint_fact
+         WHERE checkpoint_fact.owner_id = a.owner_id
+           AND checkpoint_fact.project_id = a.project_id
+           AND checkpoint_fact.legacy_project_id = a.project_id
+       ), '[]'::jsonb) AS migration_checkpoint_facts,
+       coalesce((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'userId', legacy_data.user_id,
+             'dataKey', legacy_data.data_key,
+             'versionId', legacy_version.id,
+             'fileUrl', legacy_version.file_url
+           ) ORDER BY legacy_data.user_id, legacy_data.data_key, legacy_version.id
+         )
+         FROM wujie_user_data legacy_data
+         JOIN wujie_asset_versions legacy_version
+           ON legacy_version.asset_id = a.id
+          AND legacy_version.owner_id = a.owner_id
+          AND legacy_version.project_id = a.project_id
+         WHERE legacy_data.data_key IN ('projects', 'workflows', 'workflow', 'chat', 'chat-history', 'simple-chat')
+           AND legacy_data.data_value::text LIKE '%' || legacy_version.file_url || '%'
+       ), '[]'::jsonb) AS legacy_reference_facts,
+       coalesce((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'versionId', shared_fact.version_id,
+             'peerAssetId', shared_fact.peer_asset_id,
+             'peerVersionId', shared_fact.peer_version_id,
+             'storageKey', shared_fact.storage_key,
+             'fileUrl', shared_fact.file_url,
+             'peerStorageKey', shared_fact.peer_storage_key,
+             'peerFileUrl', shared_fact.peer_file_url
+           ) ORDER BY shared_fact.version_id, shared_fact.peer_asset_id, shared_fact.peer_version_id
+         )
+         FROM (
+           SELECT DISTINCT
+             current_version.id AS version_id,
+             peer.asset_id AS peer_asset_id,
+             peer.id AS peer_version_id,
+             current_version.storage_key,
+             current_version.file_url,
+             peer.storage_key AS peer_storage_key,
+             peer.file_url AS peer_file_url
+           FROM wujie_asset_versions current_version
+           JOIN wujie_asset_versions peer
+             ON (
+               (current_version.storage_key IS NOT NULL AND peer.storage_key = current_version.storage_key)
+               OR peer.file_url = current_version.file_url
+             )
+           WHERE current_version.asset_id = a.id
+             AND current_version.owner_id = a.owner_id
+             AND current_version.project_id = a.project_id
+             AND (peer.asset_id, peer.owner_id, peer.project_id) <>
+               (current_version.asset_id, current_version.owner_id, current_version.project_id)
+         ) shared_fact
+       ), '[]'::jsonb) AS shared_physical_reference_facts,
        max(placement.deleted_at) AS trashed_at,
        count(DISTINCT placement.id) FILTER (WHERE placement.status = 'active')::text AS active_placements,
        count(DISTINCT version.id)::text AS version_count,
@@ -167,13 +382,26 @@ async function listHealthRows(transaction: AssetCoreSqlTransaction, assetId?: st
            ON current_version.asset_id = a.id
           AND current_version.owner_id = a.owner_id
           AND current_version.project_id = a.project_id
-         WHERE peer.id <> current_version.id
+         WHERE (peer.asset_id, peer.owner_id, peer.project_id) <>
+             (current_version.asset_id, current_version.owner_id, current_version.project_id)
            AND ((current_version.storage_key IS NOT NULL AND peer.storage_key = current_version.storage_key)
              OR peer.file_url = current_version.file_url)
        ) AS shared_media,
        NOT EXISTS (
          SELECT 1 FROM wujie_user_data ownership
-         WHERE ownership.user_id = a.owner_id AND ownership.data_key = 'projects'
+         CROSS JOIN LATERAL jsonb_array_elements(
+           CASE
+             WHEN jsonb_typeof(ownership.data_value) = 'array' THEN ownership.data_value
+             ELSE '[]'::jsonb
+           END
+         ) legacy_project(value)
+         WHERE ownership.user_id = a.owner_id
+           AND ownership.data_key = 'projects'
+           AND legacy_project.value->>'id' = a.project_id
+           AND (
+             NOT legacy_project.value ? 'userId'
+             OR legacy_project.value->>'userId' = a.owner_id
+           )
        ) AS unknown_legacy_ownership
      FROM wujie_assets a
      JOIN wujie_projects project ON project.id = a.project_id AND project.owner_id = a.owner_id
@@ -234,7 +462,8 @@ export async function scanMediaHealth(input: { dryRun?: boolean } = {}): Promise
     }
     candidates.push({
       assetId: row.asset_id,
-      ...(dryRun ? {} : { candidateId: candidate.candidateId, confirmationDigest: candidate.confirmationDigest }),
+      candidateId: candidate.candidateId,
+      confirmationDigest: candidate.confirmationDigest,
       estimatedBytes: verdict.estimatedBytes,
     });
   }
@@ -346,7 +575,10 @@ export async function recoverAssetMedia(input: {
   assetVersionId: string;
   assetId: string;
   placementId: string;
-}): Promise<{ recovered: false; availability: 'recovering'; deferred: true }> {
+}): Promise<
+  | { recovered: false; availability: 'recovering'; deferred: true }
+  | { recovered: false; availability: 'unrecoverable'; deferred: false }
+> {
   return withAssetCoreTransaction(async (client) => {
     const result = await client.query<{
       id: string;
@@ -366,19 +598,127 @@ export async function recoverAssetMedia(input: {
     );
     const version = result.rows[0];
     if (!version) throw new MediaHealthError('ASSET_NOT_FOUND');
+    const recoverable = Boolean(version.recovery_source_url || version.storage_key);
+    const availability = recoverable ? 'recovering' : 'unrecoverable';
+    const attemptStatus = recoverable ? 'deferred' : 'unrecoverable';
+    const detail = recoverable
+      ? 'Recovery is deferred to a managed persistence worker'
+      : 'No recovery source or managed storage key is available';
     await client.query(
       `UPDATE wujie_asset_versions
-       SET availability = 'recovering'
+       SET availability = $4
        WHERE id = $1 AND owner_id = $2 AND project_id = $3
          AND availability IN ('missing', 'unrecoverable')`,
-      [input.assetVersionId, input.actorUserId, input.projectId],
+      [input.assetVersionId, input.actorUserId, input.projectId, availability],
     );
     await client.query(
       `INSERT INTO wujie_asset_media_recovery_attempts(
         id, asset_version_id, asset_id, owner_id, project_id, source_url, status, detail
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [randomUUID(), version.id, version.asset_id, input.actorUserId, input.projectId, version.recovery_source_url, 'deferred', 'Recovery is deferred to a managed persistence worker'],
+      [randomUUID(), version.id, version.asset_id, input.actorUserId, input.projectId, version.recovery_source_url, attemptStatus, detail],
     );
-    return { recovered: false, availability: 'recovering', deferred: true };
+    return recoverable
+      ? { recovered: false, availability: 'recovering', deferred: true }
+      : { recovered: false, availability: 'unrecoverable', deferred: false };
+  });
+}
+
+export interface LegacyRecoveryOutcomeInput {
+  localPath: string;
+  success: boolean;
+  method: string;
+  error?: string;
+}
+
+interface LegacyRecoveryVersionRow {
+  id: string;
+  asset_id: string;
+  owner_id: string;
+  project_id: string;
+  recovery_source_url: string | null;
+  storage_key: string | null;
+}
+
+export async function recordLegacyRecoveryOutcome(
+  input: LegacyRecoveryOutcomeInput,
+): Promise<{ matchedVersions: number; ready: number; missing: number; unrecoverable: number }> {
+  const normalizedPath = input.localPath.replaceAll('\\', '/').replace(/^\/+/, '');
+  const basename = normalizedPath.split('/').at(-1) ?? normalizedPath;
+  const managedUrl = `/api/serve-upload/${normalizedPath}`;
+  const storageKeys = [...new Set([normalizedPath, basename, `images/${basename}`])];
+
+  return withAssetCoreTransaction(async (client) => {
+    const candidates = await client.query<LegacyRecoveryVersionRow>(
+      `SELECT version.id, version.asset_id, version.owner_id, version.project_id,
+              version.recovery_source_url, version.storage_key
+       FROM wujie_asset_versions version
+       WHERE (version.file_url = $1 OR version.storage_key = ANY($2::text[]))
+         AND (version.storage_key IS NOT NULL OR version.file_url LIKE '/api/serve-upload/%')
+       ORDER BY version.asset_id, version.id`,
+      [managedUrl, storageKeys],
+    );
+    if (candidates.rows.length === 0) {
+      return { matchedVersions: 0, ready: 0, missing: 0, unrecoverable: 0 };
+    }
+
+    const assetIds = [...new Set(candidates.rows.map(row => row.asset_id))].sort();
+    await client.query(
+      `SELECT id FROM wujie_assets
+       WHERE id = ANY($1::text[])
+       ORDER BY id
+       FOR UPDATE`,
+      [assetIds],
+    );
+    const versionIds = candidates.rows.map(row => row.id);
+    const locked = await client.query<LegacyRecoveryVersionRow>(
+      `SELECT version.id, version.asset_id, version.owner_id, version.project_id,
+              version.recovery_source_url, version.storage_key
+       FROM wujie_asset_versions version
+       WHERE version.id = ANY($1::text[])
+       ORDER BY version.asset_id, version.id
+       FOR UPDATE`,
+      [versionIds],
+    );
+
+    let ready = 0;
+    let missing = 0;
+    let unrecoverable = 0;
+    for (const version of locked.rows) {
+      const provenUnrecoverable = !input.success
+        && input.method === 'none'
+        && !version.recovery_source_url
+        && !version.storage_key;
+      const availability = input.success ? 'ready' : provenUnrecoverable ? 'unrecoverable' : 'missing';
+      const attemptStatus = input.success ? 'succeeded' : provenUnrecoverable ? 'unrecoverable' : 'failed';
+      const detail = input.success
+        ? `Recovered by legacy administrator route using ${input.method}`
+        : input.error ?? `Legacy administrator recovery failed using ${input.method}`;
+      await client.query(
+        `UPDATE wujie_asset_versions
+         SET availability = $4
+         WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
+        [version.id, version.owner_id, version.project_id, availability],
+      );
+      await client.query(
+        `INSERT INTO wujie_asset_media_recovery_attempts(
+           id, asset_version_id, asset_id, owner_id, project_id, source_url, status, detail
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          randomUUID(),
+          version.id,
+          version.asset_id,
+          version.owner_id,
+          version.project_id,
+          version.recovery_source_url,
+          attemptStatus,
+          detail,
+        ],
+      );
+      if (availability === 'ready') ready += 1;
+      else if (availability === 'unrecoverable') unrecoverable += 1;
+      else missing += 1;
+    }
+
+    return { matchedVersions: locked.rows.length, ready, missing, unrecoverable };
   });
 }

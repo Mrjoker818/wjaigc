@@ -18,6 +18,7 @@ import { execSql } from '@/lib/db-client';
 import path from 'path';
 import fs from 'fs';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { recordLegacyRecoveryOutcome } from '@/lib/asset-core/media-health';
 
 interface MissingImage {
   filename: string;
@@ -298,6 +299,7 @@ export async function POST(request: NextRequest) {
         }
         // Recover specific file
         const result = await recoverImage(targetFilename);
+        await recordLegacyRecoveryOutcome({ localPath: targetFilename, ...result });
         return NextResponse.json({ filename: targetFilename, ...result });
       }
       
@@ -310,10 +312,19 @@ export async function POST(request: NextRequest) {
       
       for (const img of recoverable) {
         const result = await recoverImage(img.localPath);
+        await recordLegacyRecoveryOutcome({ localPath: img.localPath, ...result });
         results.push({ filename: img.filename, localPath: img.localPath, ...result });
         
         // Small delay between recoveries to avoid overwhelming external APIs
         await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      for (const img of scanResult.details.filter(missing => !missing.hasSourceUrl)) {
+        await recordLegacyRecoveryOutcome({
+          localPath: img.localPath,
+          success: false,
+          method: 'none',
+          error: 'No S3 or sourceUrl available',
+        });
       }
       
       const succeeded = results.filter(r => r.success).length;

@@ -506,6 +506,18 @@ async function updateGraphForImage(
 ): Promise<LegacyImageMapping | null> {
   const file = await fileForImage(input, image, mapping);
   const metadata = JSON.stringify({ legacyImageId: image.id, legacyImage: image });
+  const assetLock = await client.query<{ id: string; owner_id: string; project_id: string }>(
+    `SELECT id, owner_id, project_id
+     FROM wujie_assets
+     WHERE id = $1
+     FOR UPDATE`,
+    [mapping.assetId],
+  );
+  const assetRow = assetLock.rows[0];
+  if (!assetRow) return null;
+  if (assetRow.owner_id !== input.actorUserId || assetRow.project_id !== input.projectId) {
+    throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+  }
   const lockedPlacement = await client.query<{ asset_id: string; owner_id: string; project_id: string }>(
     `SELECT asset_id, owner_id, project_id
      FROM wujie_workspace_placements
@@ -519,18 +531,6 @@ async function updateGraphForImage(
     || placementRow.owner_id !== input.actorUserId
     || placementRow.project_id !== input.projectId
   )) {
-    throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
-  }
-  const assetLock = await client.query<{ id: string; owner_id: string; project_id: string }>(
-    `SELECT id, owner_id, project_id
-     FROM wujie_assets
-     WHERE id = $1
-     FOR UPDATE`,
-    [mapping.assetId],
-  );
-  const assetRow = assetLock.rows[0];
-  if (!assetRow) return null;
-  if (assetRow.owner_id !== input.actorUserId || assetRow.project_id !== input.projectId) {
     throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
   }
   const asset = await client.query(
@@ -651,6 +651,22 @@ async function trashGraphForImage(
   input: LegacyMigrationInput,
   mapping: LegacyImageMapping,
 ): Promise<void> {
+  const assetLock = await client.query<{ id: string }>(
+    `SELECT id FROM wujie_assets
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3
+     FOR UPDATE`,
+    [mapping.assetId, input.actorUserId, input.projectId],
+  );
+  if (!assetLock.rows[0]) return;
+  const placementLock = await client.query<{ asset_id: string }>(
+    `SELECT asset_id FROM wujie_workspace_placements
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3
+     FOR UPDATE`,
+    [mapping.placementId, input.actorUserId, input.projectId],
+  );
+  if (placementLock.rows[0] && placementLock.rows[0].asset_id !== mapping.assetId) {
+    throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+  }
   await client.query(
     `UPDATE wujie_workspace_placements
      SET status = 'trashed', deleted_at = COALESCE(deleted_at, now()), updated_at = now()

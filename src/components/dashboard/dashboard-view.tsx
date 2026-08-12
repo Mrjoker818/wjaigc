@@ -37,6 +37,7 @@ import {
 } from '@/lib/model-type-classification';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { loadProjects as loadSimpleChatProjects } from '@/components/simple-chat/simple-chat-types';
+import { reconcileImageBatchDeletion } from '@/lib/asset-core/batch-placement-delete';
 import JSZip from 'jszip';
 
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin' | 'groups' | 'chat';
@@ -892,42 +893,36 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   // Batch delete selected images
   const handleBatchDeleteAssets = useCallback(async () => {
     if (selectedAssetIds.size === 0) return;
-    // Collect affected projects and their images to remove
-    const projectRemovals: Record<string, string[]> = {};
-    for (const id of selectedAssetIds) {
-      const img = allImages.find(i => i.id === id);
-      if (img?._projectId) {
-        if (!projectRemovals[img._projectId]) projectRemovals[img._projectId] = [];
-        projectRemovals[img._projectId].push(id);
-      }
+    const selected = [...selectedAssetIds].flatMap((id): Array<DashboardImage & { projectId: string }> => {
+      const image = allImages.find(candidate => candidate.id === id);
+      if (!image?._projectId) return [];
+      return [{ ...image, projectId: image._projectId }];
+    });
+    const result = await reconcileImageBatchDeletion(
+      selected,
+      async (image) => {
+        const response = await fetch(`/api/assets/placements/${image.placementId}?projectId=${encodeURIComponent(image.projectId)}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) throw new Error('素材 placement 删除失败');
+      },
+      (image) => {
+        const project = mgr.getProject(image.projectId);
+        if (!project) return;
+        mgr.updateProject(image.projectId, {
+          canvasImages: (project.canvasImages || []).filter(candidate => candidate.id !== image.id),
+        });
+      },
+    );
+    if (result.deletedIds.length > 0) {
+      const deleted = new Set(result.deletedIds);
+      setSelectedAssetIds(previous => new Set([...previous].filter(id => !deleted.has(id))));
+      setProjectRevision(revision => revision + 1);
     }
-    try {
-      for (const [projectId, imageIds] of Object.entries(projectRemovals)) {
-        for (const imageId of imageIds) {
-          const image = allImages.find((candidate) => candidate.id === imageId);
-          const assetId = image?.assetId;
-          const placementId = image?.placementId;
-          if (!assetId || !placementId) throw new Error('素材尚未同步到可删除的 placement');
-          const response = await fetch(`/api/assets/placements/${placementId}?projectId=${encodeURIComponent(projectId)}`, {
-            method: 'DELETE',
-          });
-          if (!response.ok) throw new Error('素材 placement 删除失败');
-        }
-      }
-    } catch (error) {
-      toast.error(errorMessage(error, '素材删除失败'));
+    if ('error' in result) {
+      toast.error(errorMessage(result.error, '素材删除失败'));
       return;
     }
-    // Update the legacy projection only after every placement deletion succeeds.
-    for (const [projId, imgIds] of Object.entries(projectRemovals)) {
-      const proj = mgr.getProject(projId);
-      if (proj) {
-        const removeSet = new Set(imgIds);
-        const newImages = (proj.canvasImages || []).filter(i => !removeSet.has(i.id));
-        mgr.updateProject(projId, { canvasImages: newImages });
-      }
-    }
-    setSelectedAssetIds(new Set());
     setAssetManageMode(false);
   }, [selectedAssetIds, allImages, mgr]);
 

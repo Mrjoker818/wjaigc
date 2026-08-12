@@ -90,6 +90,9 @@ describe('continuous canvas shadow synchronization', () => {
     const query = vi.fn(async (sql: string, params: unknown[] = []) => {
       const ownerId = String(params[0]);
       const activeIds = new Set((params[1] as string[] | undefined) ?? []);
+      if (sql.includes('SELECT id FROM wujie_assets') && sql.includes('FOR UPDATE')) {
+        return { rows: state.assets.filter(asset => asset.ownerId === ownerId), rowCount: 2 };
+      }
       if (sql.includes('UPDATE wujie_workspace_placements')) {
         for (const placement of state.placements) {
           if (placement.ownerId === ownerId && !activeIds.has(placement.projectId) && placement.status === 'active') {
@@ -180,7 +183,7 @@ describe('continuous canvas shadow synchronization', () => {
     ]);
   });
 
-  it('locks the placement before the asset using the placement lifecycle owner/project contract', () => {
+  it('uses the shared asset-first lifecycle lock before locking and re-reading a placement', () => {
     const migrationSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
       'utf8',
@@ -207,9 +210,10 @@ describe('continuous canvas shadow synchronization', () => {
     expect(updateGraphSource).toContain('placementRow.asset_id !== mapping.assetId');
     expect(updateGraphSource).toContain('placementRow.owner_id !== input.actorUserId');
     expect(updateGraphSource).toContain('placementRow.project_id !== input.projectId');
-    expect(lifecycleSource.indexOf('transaction.findPlacement(')).toBeLessThan(
-      lifecycleSource.indexOf('transaction.lockAsset('),
+    expect(lifecycleSource.indexOf('transaction.lockAsset(')).toBeLessThan(
+      lifecycleSource.indexOf('transaction.lockPlacement('),
     );
+    expect(updateGraphSource.indexOf('FROM wujie_assets')).toBeLessThan(placementLock);
   });
 
   it('plans geometry updates, additions, and deletions after the initial checkpoint', () => {
@@ -438,8 +442,8 @@ describe('continuous canvas shadow synchronization', () => {
     });
 
     expect(result.mappings.retained).toEqual(mapping);
-    expect(sqlOrder.findIndex((sql) => sql.includes('FROM wujie_workspace_placements'))).toBeLessThan(
-      sqlOrder.findIndex((sql) => sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE')),
+    expect(sqlOrder.findIndex((sql) => sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE'))).toBeLessThan(
+      sqlOrder.findIndex((sql) => sql.includes('FROM wujie_workspace_placements')),
     );
     expect(sqlOrder.some((sql) => sql.includes('INSERT INTO wujie_assets'))).toBe(false);
     expect(sqlOrder.some((sql) => sql.includes('INSERT INTO wujie_asset_versions'))).toBe(false);
@@ -454,6 +458,9 @@ describe('continuous canvas shadow synchronization', () => {
         return { rows: [{ status: 'completed', checkpoint: { sourceSchemaVersion: 1, legacyImageMappings: { retained: mapping } } }], rowCount: 1 };
       }
       if (sql.includes('SELECT schema_version, metadata')) return { rows: [{ schema_version: 3, metadata: {} }], rowCount: 1 };
+      if (sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE')) {
+        return { rows: [{ id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
+      }
       if (sql.includes('FROM wujie_workspace_placements') && sql.includes('FOR UPDATE')) {
         return { rows: [{ asset_id: 'asset-other', owner_id: 'user-other', project_id: 'project-other' }], rowCount: 1 };
       }
@@ -481,6 +488,9 @@ describe('continuous canvas shadow synchronization', () => {
     const sqlLog: Array<{ sql: string; params: unknown[] }> = [];
     const query = vi.fn(async (sql: string, params: unknown[] = []) => {
       sqlLog.push({ sql, params });
+      if (sql.includes('SELECT id FROM wujie_assets') && sql.includes('FOR UPDATE')) {
+        return { rows: [{ id: 'asset-a' }], rowCount: 1 };
+      }
       if (sql.includes('UPDATE wujie_workspace_placements') && sql.includes('NOT (project_id = ANY')) {
         state.placementStatus = 'trashed';
         return { rows: [], rowCount: 1 };

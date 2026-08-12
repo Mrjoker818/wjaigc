@@ -9,6 +9,10 @@ const migration = readFileSync(
   resolve(process.cwd(), 'migrations/20260812_wj_stable_s2_asset_lifecycle.sql'),
   'utf8',
 );
+const postgresLifecycle = readFileSync(
+  resolve(process.cwd(), 'tests/integration/stage-2-asset-lifecycle-postgres.test.ts'),
+  'utf8',
+);
 
 describe('media health governance boundaries', () => {
   it('uses the asset-core transaction boundary and treats only exact completed migration checkpoints as confirmed', () => {
@@ -18,6 +22,16 @@ describe('media health governance boundaries', () => {
     expect(mediaHealth).not.toContain("schema_version >= 3 AS migration_confirmed");
   });
 
+  it('checks legacy references across every user and requires project-specific legacy ownership', () => {
+    expect(mediaHealth).not.toContain('legacy_data.user_id = a.owner_id');
+    expect(mediaHealth).toContain(
+      "legacy_data.data_key IN ('projects', 'workflows', 'workflow', 'chat', 'chat-history', 'simple-chat')",
+    );
+    expect(mediaHealth).toContain('jsonb_array_elements');
+    expect(mediaHealth).toContain("legacy_project.value->>'id' = a.project_id");
+    expect(mediaHealth).toContain("legacy_project.value->>'userId' = a.owner_id");
+  });
+
   it('keeps recovery deferred outside locks without fetching or changing immutable file URLs', () => {
     expect(mediaHealth).not.toContain('fetch(');
     expect(mediaHealth).not.toContain("file_url = CASE");
@@ -25,7 +39,8 @@ describe('media health governance boundaries', () => {
   });
 
   it('waits for placement deletion requests before filtering the dashboard legacy image list', () => {
-    expect(dashboard).toContain("await fetch(`/api/assets/placements/\${placementId}?");
+    expect(dashboard).toContain('await reconcileImageBatchDeletion(');
+    expect(dashboard).toContain("await fetch(`/api/assets/placements/\${image.placementId}?");
     expect(dashboard).toContain('if (!response.ok) throw new Error');
   });
 
@@ -33,5 +48,14 @@ describe('media health governance boundaries', () => {
     expect(migration.indexOf('CREATE TABLE IF NOT EXISTS wujie_asset_media_recovery_attempts')).toBeLessThan(
       migration.indexOf('ALTER TABLE wujie_asset_media_recovery_attempts'),
     );
+  });
+
+  it('keeps physical purge disabled and requires a real PostgreSQL lock/recheck test', () => {
+    expect(mediaHealth).not.toMatch(/deleteImageFromS3|deleteFileFromS3|unlinkSync|rmSync|RemoveObject|DeleteObjectCommand/);
+    expect(postgresLifecycle).toContain('purgeEligibleAsset');
+    expect(postgresLifecycle).toContain('pg_stat_activity');
+    expect(postgresLifecycle).toContain("wait_event_type = 'Lock'");
+    expect(postgresLifecycle).toContain('CONFIRMATION_DIGEST_STALE');
+    expect(postgresLifecycle).toContain('physicalPurgeDisabled');
   });
 });
