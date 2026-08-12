@@ -125,11 +125,12 @@ async function checkAssetGraph() {
       summary.shadowComparison.mismatchedProjects === 0
         && summary.shadowComparison.unmigratedProjects === 0
         && summary.shadowComparison.orphanGraphProjects === 0
+        && summary.shadowComparison.nonV3GraphProjects === 0
         && summary.shadowComparison.failedCheckpoints === 0
         && summary.shadowComparison.missingCheckpoints === 0
         && summary.shadowComparison.invalidLegacyRecords === 0 ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
       'asset-shadow-comparison',
-      `legacy=${summary.shadowComparison.legacyProjects}; graph=${summary.shadowComparison.graphProjects}; matching=${summary.shadowComparison.matchingProjects}; mismatched=${summary.shadowComparison.mismatchedProjects}; unmigrated=${summary.shadowComparison.unmigratedProjects}; orphanGraph=${summary.shadowComparison.orphanGraphProjects}; failedCheckpoints=${summary.shadowComparison.failedCheckpoints}; missingCheckpoints=${summary.shadowComparison.missingCheckpoints}; invalidLegacy=${summary.shadowComparison.invalidLegacyRecords}`,
+      `legacy=${summary.shadowComparison.legacyProjects}; graph=${summary.shadowComparison.graphProjects}; matching=${summary.shadowComparison.matchingProjects}; mismatched=${summary.shadowComparison.mismatchedProjects}; unmigrated=${summary.shadowComparison.unmigratedProjects}; orphanGraph=${summary.shadowComparison.orphanGraphProjects}; nonV3Graph=${summary.shadowComparison.nonV3GraphProjects}; failedCheckpoints=${summary.shadowComparison.failedCheckpoints}; missingCheckpoints=${summary.shadowComparison.missingCheckpoints}; invalidLegacy=${summary.shadowComparison.invalidLegacyRecords}`,
     );
     add(
       summary.media.pendingPersist + summary.media.missing + summary.media.recovering + summary.media.unrecoverable
@@ -141,7 +142,7 @@ async function checkAssetGraph() {
     );
     add('PASS', 'asset-trash', `active=${summary.assets.active}; trashed=${summary.assets.trashed}`);
     add(
-      summary.gc.purged + summary.gc.due + summary.gc.unregistered + summary.gc.physicalDeferred + summary.gc.physicalFailed === 0
+      summary.gc.purged + summary.gc.unregistered + summary.gc.physicalFailed === 0
         ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
       'asset-gc-candidates',
       `pending=${summary.gc.pending}; deferred=${summary.gc.deferred}; purged=${summary.gc.purged}; due=${summary.gc.due}; unregistered=${summary.gc.unregistered}; physicalDeferred=${summary.gc.physicalDeferred}; physicalFailed=${summary.gc.physicalFailed}`,

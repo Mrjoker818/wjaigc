@@ -11,6 +11,12 @@ describe('production doctor authentication contract', () => {
     expect(source.match(/\.\.\.connectionOptions\(/g)).toHaveLength(3);
   });
 
+  it('does not fail the GC output for normal due or physically deferred candidates', () => {
+    const source = readFileSync(resolve(process.cwd(), 'scripts/doctor.mjs'), 'utf8');
+    expect(source).not.toContain('summary.gc.purged + summary.gc.due');
+    expect(source).toContain('summary.gc.purged + summary.gc.unregistered + summary.gc.physicalFailed');
+  });
+
   it('accepts NEXTAUTH_SECRET when WUJIE_AUTH_SECRET is absent', () => {
     const environment: NodeJS.ProcessEnv = {
       ...process.env,

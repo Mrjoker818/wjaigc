@@ -59,7 +59,7 @@ function comparableLegacyProjects(rows) {
         invalidLegacyRecords += 1;
         continue;
       }
-      const ownerId = String(project.userId || row.userId || '');
+      const ownerId = String(Object.hasOwn(project, 'userId') ? project.userId : row.userId || '');
       if (!ownerId || ownerId !== String(row.userId || '')) {
         invalidLegacyRecords += 1;
         continue;
@@ -113,6 +113,9 @@ export function summarizeAssetGraphDoctor(input) {
   const activeGraphProjects = new Set(input.graphProjects
     .filter(row => row.status === 'active' && Number(row.schemaVersion) === 3)
     .map(row => projectKey(row.ownerId, row.projectId)));
+  const nonV3GraphProjects = input.graphProjects
+    .filter(row => row.status === 'active' && Number(row.schemaVersion) !== 3)
+    .length;
   const placementsByProject = new Map();
   for (const row of input.placements.filter(row => row.status === 'active')) {
     const key = projectKey(row.ownerId, row.projectId);
@@ -195,7 +198,7 @@ export function summarizeAssetGraphDoctor(input) {
   if (missing.length > 0) assetV3Blockers.push('missing-migrations');
   if (checksumMismatches.length > 0) assetV3Blockers.push('migration-checksum-mismatch');
   if (unmigratedProjects > 0) assetV3Blockers.push('unmigrated-projects');
-  if (mismatchedProjects > 0 || orphanGraphProjects > 0 || failedCheckpoints > 0 || missingCheckpoints > 0 || legacyFacts.invalidLegacyRecords > 0) assetV3Blockers.push('shadow-projection-drift');
+  if (mismatchedProjects > 0 || orphanGraphProjects > 0 || nonV3GraphProjects > 0 || failedCheckpoints > 0 || missingCheckpoints > 0 || legacyFacts.invalidLegacyRecords > 0) assetV3Blockers.push('shadow-projection-drift');
   if (
     media.pendingPersist > 0 || media.missing > 0 || media.recovering > 0 || media.unrecoverable > 0
     || media.activeAssetsMissingCurrentVersion > 0 || media.placementPendingPersist > 0
@@ -224,6 +227,7 @@ export function summarizeAssetGraphDoctor(input) {
       mismatchedProjects,
       unmigratedProjects,
       orphanGraphProjects,
+      nonV3GraphProjects,
       failedCheckpoints,
       missingCheckpoints,
       invalidLegacyRecords: legacyFacts.invalidLegacyRecords,
@@ -362,6 +366,10 @@ export async function collectAssetGraphDoctorFacts(client, options = {}) {
                       WHERE ownership.user_id = asset.owner_id
                         AND ownership.data_key = 'projects'
                         AND legacy_project.value->>'id' = asset.project_id
+                        AND (
+                          NOT legacy_project.value ? 'userId'
+                          OR legacy_project.value->>'userId' = asset.owner_id
+                        )
                     )
                     AND NOT EXISTS (
                       SELECT 1 FROM wujie_asset_versions version

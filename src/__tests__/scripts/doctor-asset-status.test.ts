@@ -160,6 +160,33 @@ describe('Stage 2 Doctor asset graph release gate', () => {
     }).releaseReady).toBe(false);
   });
 
+  it('blocks every active non-v3 graph project even when no legacy project remains', () => {
+    const input = healthyInput();
+    const summary = summarizeAssetGraphDoctor({
+      ...input,
+      legacyProjectRows: [],
+      graphProjects: [{ ...input.graphProjects[0], schemaVersion: 2 }],
+      placements: [],
+      checkpoints: [],
+      currentVersionAvailability: [],
+      activePlacementVersionAvailability: [],
+      assetStatuses: [],
+    });
+    expect(summary.releaseReady).toBe(false);
+    expect(summary.shadowComparison.nonV3GraphProjects).toBe(1);
+  });
+
+  it('rejects an explicitly empty legacy project owner instead of falling back to the row owner', () => {
+    const input = healthyInput();
+    const project = { ...input.legacyProjectRows[0].projects[0], userId: '' };
+    const summary = summarizeAssetGraphDoctor({
+      ...input,
+      legacyProjectRows: [{ userId: 'user-a', projects: [project] }],
+    });
+    expect(summary.releaseReady).toBe(false);
+    expect(summary.shadowComparison.invalidLegacyRecords).toBeGreaterThan(0);
+  });
+
   it('compares checkpoint mappings, placement identity, media URL and transform rather than entity IDs alone', () => {
     const input = healthyInput();
     for (const placement of [

@@ -17,6 +17,7 @@ function migrate(databaseUrl: string): void {
     cwd: process.cwd(),
     encoding: 'utf8',
     env: { ...process.env, DATABASE_URL: databaseUrl, PGDATABASE_URL: databaseUrl },
+    timeout: 20_000,
   });
   expect(result.status, result.stderr || result.stdout).toBe(0);
 }
@@ -127,7 +128,19 @@ describe('Stage 2 Doctor PostgreSQL projection audit', () => {
         [ownerId, JSON.stringify({ referencedImage: fileUrl })],
       );
       const protectedGc = await collectAssetGraphDoctorFacts(client, { mode: 'asset-v3' });
+      expect(protectedGc.queryErrors).toEqual([]);
       expect(protectedGc.unregisteredGcCandidates).toBe(0);
+
+      await query("DELETE FROM wujie_user_data WHERE user_id = $1 AND data_key = 'workflow'", [ownerId]);
+      await query(
+        `UPDATE wujie_user_data
+         SET data_value = $2::jsonb
+         WHERE user_id = $1 AND data_key = 'projects'`,
+        [ownerId, JSON.stringify([{ ...legacyProject, userId: 'different-owner' }])],
+      );
+      const conflictingOwner = await collectAssetGraphDoctorFacts(client, { mode: 'asset-v3' });
+      expect(conflictingOwner.queryErrors).toEqual([]);
+      expect(conflictingOwner.unregisteredGcCandidates).toBe(0);
     });
   }, 30_000);
 });
