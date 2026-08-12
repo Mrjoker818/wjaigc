@@ -48,7 +48,7 @@ test.describe('Stage 2 asset lifecycle', () => {
     const legacyImages = project?.canvasImages as Array<Record<string, unknown>> | undefined;
     expect(legacyImages?.length).toBeGreaterThan(0);
     expect(legacyImages?.every(item => !item.assetVersionId && !item.placementId), 'COW fixture was already consumed').toBe(true);
-    const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, projectId, { allowMissingProject: true });
+    const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, projectId, { requireMissingProject: true });
     await openCanvasProject(page, projectId);
     const image = page.locator('[data-canvas-viewport] img').first().locator('..');
     await expect(image).toBeVisible({ timeout: 20_000 });

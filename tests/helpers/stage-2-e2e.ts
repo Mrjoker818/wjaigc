@@ -448,7 +448,7 @@ export async function removeControlledProject(
   } finally {
     const created = stage2PlacementDiff(
       databaseBaseline.placementIds,
-      await readStage2PlacementRows(databaseBaseline.ownerId, projectId, true),
+      await readStage2PlacementRows(databaseBaseline.ownerId, projectId, 'optional'),
     );
     for (const placementId of created) {
       const response = await page.request.delete(`/api/assets/placements/${encodeURIComponent(placementId)}?projectId=${encodeURIComponent(projectId)}`);
@@ -461,7 +461,7 @@ export async function removeControlledProject(
     }
     expect(stage2PlacementDiff(
       databaseBaseline.placementIds,
-      await readStage2PlacementRows(databaseBaseline.ownerId, projectId, true),
+      await readStage2PlacementRows(databaseBaseline.ownerId, projectId, 'optional'),
     )).toEqual([]);
   }
 }
@@ -507,14 +507,21 @@ export function stage2DatabaseConnectionString(environment: Record<string, strin
   return connectionString;
 }
 
-export function stage2ProjectPresenceIsValid(rows: Array<{ id: string }>, allowMissingProject: boolean): boolean {
-  return rows.length === 1 || (allowMissingProject && rows.length === 0);
+type Stage2ProjectPresence = false | 'must-be-missing' | 'optional';
+
+export function stage2ProjectPresenceIsValid(
+  rows: Array<{ id: string }>,
+  expected: Stage2ProjectPresence,
+): boolean {
+  if (expected === 'must-be-missing') return rows.length === 0;
+  if (expected === 'optional') return rows.length <= 1;
+  return rows.length === 1;
 }
 
 async function readStage2PlacementRows(
   ownerId: string,
   projectId: string,
-  allowMissingProject = false,
+  expectedProjectPresence: Stage2ProjectPresence = false,
 ): Promise<Stage2PlacementRow[]> {
   const connectionString = stage2DatabaseConnectionString(process.env);
   const client = new Client({
@@ -523,15 +530,35 @@ async function readStage2PlacementRows(
   });
   await client.connect();
   try {
+    if (expectedProjectPresence === 'must-be-missing') {
+      const legacyProject = await client.query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count
+         FROM wujie_user_data user_data
+         CROSS JOIN LATERAL jsonb_array_elements(
+           CASE WHEN jsonb_typeof(user_data.data_value) = 'array' THEN user_data.data_value ELSE '[]'::jsonb END
+         ) legacy(value)
+         WHERE user_data.user_id = $1
+           AND user_data.data_key = 'projects'
+           AND legacy.value->>'id' = $2
+           AND (NOT legacy.value ? 'userId' OR legacy.value->>'userId' = $1)`,
+        [ownerId, projectId],
+      );
+      expect(
+        legacyProject.rows[0]?.count,
+        'COW legacy project is not uniquely present for the authenticated owner in the deployment database',
+      ).toBe(1);
+    }
     const project = await client.query<{ id: string }>(
       `SELECT id FROM wujie_projects WHERE id = $1 AND owner_id = $2`,
       [projectId, ownerId],
     );
     expect(
-      stage2ProjectPresenceIsValid(project.rows, allowMissingProject),
-      allowMissingProject
-        ? 'COW fixture has multiple asset-graph project rows'
-        : 'Controlled project is missing from the deployment database or belongs to another owner',
+      stage2ProjectPresenceIsValid(project.rows, expectedProjectPresence),
+      expectedProjectPresence === 'must-be-missing'
+        ? 'COW fixture was already consumed because its asset-graph project row already exists'
+        : expectedProjectPresence === 'optional'
+          ? 'COW cleanup found multiple asset-graph project rows'
+          : 'Controlled project is missing from the deployment database or belongs to another owner',
     ).toBe(true);
     const result = await client.query<{ id: string; status: string }>(
       `SELECT id, status FROM wujie_workspace_placements WHERE owner_id = $1 AND project_id = $2 ORDER BY id ASC`,
@@ -547,14 +574,18 @@ export async function stage2PlacementBaseline(
   page: Page,
   evidence: Stage2Evidence,
   projectId: string,
-  options: { allowMissingProject?: boolean } = {},
+  options: { requireMissingProject?: boolean } = {},
 ): Promise<Stage2PlacementBaseline> {
   const session = await apiJson(page, evidence, 'GET', '/api/auth/me');
   const user = session.user as Record<string, unknown> | undefined;
   const ownerId = requireNonEmptyStage2Value(typeof user?.id === 'string' ? user.id : '', 'authenticated Stage 2 owner id');
   return {
     ownerId,
-    placementIds: (await readStage2PlacementRows(ownerId, projectId, options.allowMissingProject === true))
+    placementIds: (await readStage2PlacementRows(
+      ownerId,
+      projectId,
+      options.requireMissingProject === true ? 'must-be-missing' : false,
+    ))
       .filter(row => row.status === 'active')
       .map(row => row.id),
   };

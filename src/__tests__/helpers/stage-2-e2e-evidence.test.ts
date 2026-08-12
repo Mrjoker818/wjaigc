@@ -78,9 +78,12 @@ describe('Stage 2 E2E evidence safety', () => {
   });
 
   it('allows an unconsumed COW fixture to have no asset-graph project row', () => {
-    expect(stage2ProjectPresenceIsValid([], true)).toBe(true);
+    expect(stage2ProjectPresenceIsValid([], 'must-be-missing')).toBe(true);
+    expect(stage2ProjectPresenceIsValid([{ id: 'project-a' }], 'must-be-missing')).toBe(false);
     expect(stage2ProjectPresenceIsValid([], false)).toBe(false);
     expect(stage2ProjectPresenceIsValid([{ id: 'project-a' }], false)).toBe(true);
+    expect(stage2ProjectPresenceIsValid([], 'optional')).toBe(true);
+    expect(stage2ProjectPresenceIsValid([{ id: 'project-a' }], 'optional')).toBe(true);
   });
 
   it('redacts sensitive URL parameters beyond token and key aliases', () => {
