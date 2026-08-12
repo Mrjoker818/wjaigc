@@ -6,8 +6,10 @@ import { join } from 'node:path';
 
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import JSZip from 'jszip';
+import { Client } from 'pg';
 
 import { writeEvidenceManifest, type EvidenceManifestInput } from './evidence-manifest';
+import { normalizePostgresConnectionString } from '../../src/lib/db-client';
 
 interface EvidenceEntry {
   method?: string;
@@ -294,6 +296,12 @@ export function requireStage2ProjectValue(testProjectName: string, envName: stri
   return value!;
 }
 
+export function requireNonEmptyStage2Value(value: string, label: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`${label} must be non-empty`);
+  return normalized;
+}
+
 export async function loginRealUser(page: Page, evidence?: Stage2Evidence): Promise<void> {
   const env = requireStage2Env('E2E_TEST_USERNAME', 'E2E_TEST_PASSWORD');
   await page.context().clearCookies();
@@ -335,15 +343,16 @@ export async function canvasImageByUrl(page: Page, expectedUrl: string): Promise
 }
 
 export async function imageByUrl(page: Page, selector: string, expectedUrl: string): Promise<Locator> {
+  const controlledUrl = requireNonEmptyStage2Value(expectedUrl, 'controlled image URL');
   const images = page.locator(selector);
   await expect.poll(async () => images.evaluateAll((nodes, url) => nodes.findIndex(node => {
     const element = node as HTMLImageElement;
     return element.getAttribute('src') === url || element.src === url || element.src.endsWith(url);
-  }), expectedUrl), { timeout: 30_000 }).toBeGreaterThanOrEqual(0);
+  }), controlledUrl), { timeout: 30_000 }).toBeGreaterThanOrEqual(0);
   const index = await images.evaluateAll((nodes, url) => nodes.findIndex(node => {
     const element = node as HTMLImageElement;
     return element.getAttribute('src') === url || element.src === url || element.src.endsWith(url);
-  }), expectedUrl);
+  }), controlledUrl);
   return images.nth(index);
 }
 
@@ -398,9 +407,51 @@ export async function restoreProjectSnapshot(
   }
 }
 
+export async function removeControlledProject(
+  page: Page,
+  evidence: Stage2Evidence,
+  projectId: string,
+  databaseBaseline: string[] = [],
+): Promise<void> {
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const current = await readProjects(page, evidence);
+      const response = await page.request.post('/api/user-data/sync', {
+        data: {
+          key: 'projects',
+          value: current.projects.filter(project => project.id !== projectId),
+          projectRevision: current.revision,
+        },
+      });
+      const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+      const headers = response.headers();
+      evidence.recordApi('POST', '/api/user-data/sync', response.status(), payload, headers['x-request-id'] || headers['request-id']);
+      if (response.ok()) break;
+      if (response.status() !== 409 || attempt === 1) {
+        expect(response.ok(), `Controlled project removal returned HTTP ${response.status()}`).toBeTruthy();
+      }
+    }
+  } finally {
+    const created = stage2PlacementDiff(databaseBaseline, await readStage2PlacementRows(projectId));
+    for (const placementId of created) {
+      const response = await page.request.delete(`/api/assets/placements/${encodeURIComponent(placementId)}?projectId=${encodeURIComponent(projectId)}`);
+      const payload = await response.json().catch(() => ({}));
+      const headers = response.headers();
+      evidence.recordApi('DELETE', response.url(), response.status(), payload, headers['x-request-id'] || headers['request-id']);
+      if (!response.ok() && response.status() !== 404) {
+        expect(response.ok(), `COW cleanup placement ${placementId} returned HTTP ${response.status()}`).toBeTruthy();
+      }
+    }
+    expect(stage2PlacementDiff(databaseBaseline, await readStage2PlacementRows(projectId))).toEqual([]);
+  }
+  const after = await readProjects(page, evidence);
+  expect(after.projects.some(project => project.id === projectId)).toBe(false);
+}
+
 export function canvasProjectPlacements(project: Record<string, unknown> | undefined): Array<{
   id: string;
   placementId: string;
+  assetVersionId: string;
   url: string;
 }> {
   if (!project || !Array.isArray(project.canvasImages)) return [];
@@ -409,9 +460,43 @@ export function canvasProjectPlacements(project: Record<string, unknown> | undef
     const image = value as Record<string, unknown>;
     const id = typeof image.id === 'string' ? image.id : '';
     const placementId = typeof image.placementId === 'string' ? image.placementId : '';
+    const assetVersionId = typeof image.assetVersionId === 'string' ? image.assetVersionId : '';
     const url = typeof image.url === 'string' ? image.url : '';
-    return id && placementId && url ? [{ id, placementId, url }] : [];
+    return id && placementId && assetVersionId && url ? [{ id, placementId, assetVersionId, url }] : [];
   });
+}
+
+interface Stage2PlacementRow {
+  id: string;
+  status: string;
+}
+
+export function stage2PlacementDiff(before: string[], after: Stage2PlacementRow[]): string[] {
+  const baseline = new Set(before);
+  return after.filter(row => row.status === 'active' && !baseline.has(row.id)).map(row => row.id);
+}
+
+async function readStage2PlacementRows(projectId: string): Promise<Stage2PlacementRow[]> {
+  const connectionString = process.env.PGDATABASE_URL || process.env.DATABASE_URL;
+  if (!connectionString) throw new Error('BLOCKED: PGDATABASE_URL or DATABASE_URL is required for Stage 2 placement cleanup');
+  const client = new Client({
+    connectionString: normalizePostgresConnectionString(connectionString),
+    connectionTimeoutMillis: 10_000,
+  });
+  await client.connect();
+  try {
+    const result = await client.query<{ id: string; status: string }>(
+      `SELECT id, status FROM wujie_workspace_placements WHERE project_id = $1 ORDER BY id ASC`,
+      [projectId],
+    );
+    return result.rows;
+  } finally {
+    await client.end();
+  }
+}
+
+export async function stage2PlacementBaseline(projectId: string): Promise<string[]> {
+  return (await readStage2PlacementRows(projectId)).filter(row => row.status === 'active').map(row => row.id);
 }
 
 export async function cleanupNewProjectPlacements(
@@ -419,18 +504,29 @@ export async function cleanupNewProjectPlacements(
   evidence: Stage2Evidence,
   originalProject: Record<string, unknown>,
   knownPlacementIds: Iterable<string> = [],
+  databaseBaseline: string[] = [],
 ): Promise<void> {
   const projectId = String(originalProject.id || '');
   const originalPlacementIds = new Set(canvasProjectPlacements(originalProject).map(image => image.placementId));
+  const created = new Set(knownPlacementIds);
+  let discoveryError: unknown;
   try {
-    const current = await readProjects(page, evidence);
-    const project = current.projects.find(candidate => candidate.id === projectId);
-    const created = new Set([
-      ...knownPlacementIds,
-      ...canvasProjectPlacements(project)
-        .filter(image => !originalPlacementIds.has(image.placementId))
-        .map(image => image.placementId),
-    ]);
+    try {
+      for (const placementId of stage2PlacementDiff(databaseBaseline, await readStage2PlacementRows(projectId))) {
+        created.add(placementId);
+      }
+    } catch (error) {
+      discoveryError = error;
+    }
+    try {
+      const current = await readProjects(page, evidence);
+      const project = current.projects.find(candidate => candidate.id === projectId);
+      for (const image of canvasProjectPlacements(project)) {
+        if (!originalPlacementIds.has(image.placementId)) created.add(image.placementId);
+      }
+    } catch (error) {
+      discoveryError ??= error;
+    }
     for (const placementId of created) {
       if (!placementId || originalPlacementIds.has(placementId)) continue;
       const response = await page.request.delete(`/api/assets/placements/${encodeURIComponent(placementId)}?projectId=${encodeURIComponent(projectId)}`);
@@ -441,6 +537,10 @@ export async function cleanupNewProjectPlacements(
         expect(response.ok(), `Cleanup placement ${placementId} returned HTTP ${response.status()}`).toBeTruthy();
       }
     }
+    if (!discoveryError) {
+      expect(stage2PlacementDiff(databaseBaseline, await readStage2PlacementRows(projectId))).toEqual([]);
+    }
+    if (discoveryError) throw discoveryError;
   } finally {
     await restoreProjectSnapshot(page, evidence, originalProject);
   }
@@ -468,6 +568,7 @@ export async function ensurePlacementRestored(
     expect(current.status()).toBe(200);
   }
   const resolved = await apiJson(page, evidence, 'GET', resolveUrl);
+  expect(resolved.assetId).toBe(input.assetId);
   expect(resolved.assetVersionId).toBe(input.versionId);
   expect(resolved.placementId).toBe(input.placementId);
   expect(resolved.url).toBe(input.url);

@@ -41,10 +41,11 @@ Account and file inputs:
 Lifecycle project matrices:
 
 - `E2E_STAGE2_LEGACY_PROJECT_IDS`: legacy v1, read-only open.
-- `E2E_STAGE2_COPY_ON_WRITE_PROJECT_IDS`: fresh legacy-only projects. These are single-use because the test proves the first COW transition.
+- `E2E_STAGE2_COPY_ON_WRITE_PROJECT_IDS`: fresh legacy-only projects. These are single-use because the test proves the first COW transition; the suite removes them after the scenario.
 - `E2E_STAGE2_UPLOAD_PROJECT_IDS`: empty controlled canvas projects.
 - `E2E_STAGE2_LIFECYCLE_PROJECT_IDS`, `E2E_STAGE2_LIFECYCLE_ASSET_IDS`, `E2E_STAGE2_LIFECYCLE_VERSION_IDS`, `E2E_STAGE2_LIFECYCLE_PLACEMENT_IDS`: matching owner-scoped rows.
 - `E2E_STAGE2_MISSING_PROJECT_IDS`: projects with a visible recoverable missing-media card.
+- `E2E_STAGE2_MISSING_FILENAMES`: exact filenames displayed by those controlled missing-media cards.
 - `E2E_STAGE2_REFRESH_PROJECT_IDS`: stable projects with at least one persisted placement.
 
 Cross-workspace matrices:
@@ -61,7 +62,7 @@ All values above use the same JSON matrix shape. Asset, version, placement, proj
 - Upload, embedded-chat, workflow, and standalone-chat scenarios delete the placement created by that scenario and restore the original project JSON snapshot.
 - Lifecycle and shared-reference scenarios restore the deleted placement in `finally`.
 - Transfer idempotency and lineage rows remain as audit evidence; each new run uses a new run ID and new seeded projects.
-- COW fixtures are not reusable. A consumed fixture fails before the first UI write and must be replaced with a newly seeded run-specific fixture.
+- COW fixtures are not reusable. Each run seeds a new run-specific project; the suite removes that controlled project and its active placements after the scenario. It never writes the old JSON back and calls that a v1 rollback.
 - No scenario may target a production user project or a project used by another browser/scenario.
 
 ## Evidence contract

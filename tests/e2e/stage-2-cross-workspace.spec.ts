@@ -9,6 +9,7 @@ import {
   openCanvasProject,
   readProjects,
   requireStage2ProjectValue,
+  stage2PlacementBaseline,
   test,
   validateStage2ProjectIsolation,
 } from '../helpers/stage-2-e2e';
@@ -28,16 +29,6 @@ function expectTransfer(payload: Record<string, unknown>): { assetId: string; as
   return payload as { assetId: string; assetVersionId: string; placementId: string; url: string };
 }
 
-function captureTransferPlacements(page: import('@playwright/test').Page, placementIds: Set<string>): () => void {
-  const handler = async (response: import('@playwright/test').Response) => {
-    if (!response.url().includes('/api/assets/transfer') || response.request().method() !== 'POST') return;
-    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-    if (payload && typeof payload.placementId === 'string' && payload.placementId) placementIds.add(payload.placementId);
-  };
-  page.on('response', handler);
-  return () => page.off('response', handler);
-}
-
 test.use({ trace: 'off', video: 'on' });
 validateStage2ProjectIsolation(process.env);
 
@@ -49,13 +40,13 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const snapshot = await readProjects(page, stage2Evidence);
     const originalProject = snapshot.projects.find(project => project.id === projectId);
     expect(originalProject).toBeTruthy();
+    const placementBaseline = await stage2PlacementBaseline(projectId);
     await openCanvasProject(page, projectId);
     await page.getByText('AI聊天', { exact: true }).click();
     const sourceImage = await imageByUrl(page, 'img[src]', sourceUrl);
     const addButton = sourceImage.locator('xpath=ancestor::div[.//button[@aria-label="添加到画布"]][1]').getByRole('button', { name: '添加到画布', exact: true });
     await expect(addButton).toBeVisible({ timeout: 20_000 });
     const placementIds = new Set<string>();
-    const stopCapture = captureTransferPlacements(page, placementIds);
     try {
       const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
       await addButton.click();
@@ -64,11 +55,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
       const created = expectTransfer(payload);
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible();
     } finally {
-      try {
-        stopCapture();
-      } finally {
-        await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds);
-      }
+      await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds, placementBaseline);
     }
   });
 
@@ -78,12 +65,12 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const snapshot = await readProjects(page, stage2Evidence);
     const originalProject = snapshot.projects.find(project => project.id === projectId);
     expect(originalProject).toBeTruthy();
+    const placementBaseline = await stage2PlacementBaseline(projectId);
     await openCanvasProject(page, projectId);
     await page.getByTitle('节点模式').first().click();
     const execute = page.getByRole('button', { name: '执行工作流', exact: true });
     await expect(execute).toBeVisible({ timeout: 20_000 });
     const placementIds = new Set<string>();
-    const stopCapture = captureTransferPlacements(page, placementIds);
     try {
       const started = page.waitForResponse(response => response.url().includes('/api/workflow/execute') && response.request().method() === 'POST');
       const outputTransfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST', { timeout: 180_000 });
@@ -98,11 +85,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
       await back.click();
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible();
     } finally {
-      try {
-        stopCapture();
-      } finally {
-        await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds);
-      }
+      await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds, placementBaseline);
     }
   });
 
@@ -114,13 +97,13 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const snapshot = await readProjects(page, stage2Evidence);
     const originalProject = snapshot.projects.find(project => project.id === targetProjectId);
     expect(originalProject).toBeTruthy();
+    const placementBaseline = await stage2PlacementBaseline(targetProjectId);
     await page.goto(`/simple-chat?projectId=${encodeURIComponent(chatProjectId)}`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('combobox', { name: '目标画布项目' }).selectOption(targetProjectId);
     const sourceImage = await imageByUrl(page, 'main img[src]', sourceUrl);
     const addButton = sourceImage.locator('xpath=ancestor::div[.//button[@title="添加到画布"]][1]').getByTitle('添加到画布');
     await expect(addButton).toBeVisible({ timeout: 20_000 });
     const placementIds = new Set<string>();
-    const stopCapture = captureTransferPlacements(page, placementIds);
     try {
       const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
       await addButton.click();
@@ -130,11 +113,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
       await openCanvasProject(page, targetProjectId);
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible({ timeout: 20_000 });
     } finally {
-      try {
-        stopCapture();
-      } finally {
-        await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds);
-      }
+      await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds, placementBaseline);
     }
   });
 
@@ -160,6 +139,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
       stage2Evidence.recordApi('DELETE', deleteResponse.url(), deleteResponse.status(), deletePayload);
       expect(deleteResponse.ok()).toBeTruthy();
       expect(deletePayload.placementTrashed).toBe(true);
+      expect(deletePayload.assetTrashed).toBe(false);
       const saveResponse = await saved;
       const savePayload = await saveResponse.json().catch(() => ({}));
       stage2Evidence.recordApi('POST', saveResponse.url(), saveResponse.status(), savePayload);

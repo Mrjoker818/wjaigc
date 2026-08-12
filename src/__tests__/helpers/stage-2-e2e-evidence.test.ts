@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   redactStage2Evidence,
   redactStage2TraceText,
+  requireNonEmptyStage2Value,
+  stage2PlacementDiff,
   sanitizeStage2Url,
   stage2ProjectMatrixValue,
   validateStage2ProjectIsolation,
@@ -46,6 +48,20 @@ describe('Stage 2 E2E evidence safety', () => {
       E2E_STAGE2_UPLOAD_PROJECT_IDS: '{"chromium":"cross-browser-run-42"}',
       E2E_STAGE2_WORKFLOW_PROJECT_IDS: '{"firefox":"cross-browser-run-42"}',
     })).toThrow(/reuses controlled project/);
+  });
+
+  it('finds only active placements added after a database baseline', () => {
+    expect(stage2PlacementDiff(['placement-a'], [
+      { id: 'placement-a', status: 'active' },
+      { id: 'placement-b', status: 'active' },
+      { id: 'placement-c', status: 'trashed' },
+    ])).toEqual(['placement-b']);
+  });
+
+  it('rejects empty controlled fixture identities before locating UI state', () => {
+    expect(requireNonEmptyStage2Value(' /api/serve-upload/image.png ', 'source URL')).toBe('/api/serve-upload/image.png');
+    expect(() => requireNonEmptyStage2Value('', 'source URL')).toThrow(/source URL must be non-empty/);
+    expect(() => requireNonEmptyStage2Value('   ', 'missing-media filename')).toThrow(/missing-media filename must be non-empty/);
   });
 
   it('redacts sensitive URL parameters beyond token and key aliases', () => {
