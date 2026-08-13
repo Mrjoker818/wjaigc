@@ -622,4 +622,15 @@
 | Cloud exact-SHA task projection | UNVERIFIED | After authorized push, deploy the exact candidate and prove provider completion, Canvas projection, refresh recovery and rollback without duplicate placement or status regression. |
 | Provider billing/refund behavior | NOT CHANGED / NOT REVERIFIED IN TASK 6 | Task 6 intentionally leaves supplier submission and accounting untouched; retain Stage 1/2 evidence and rerun exact-SHA cloud billing gates before release. |
 | Protected-baseline source drift | BLOCKED BY ORDERED PLAN | `38/38` feature identities remain, but `27` accumulated Stage 3 source files are not approved in baseline metadata. Update only in the later planned baseline task. |
-| Task 7 persistence scheduler | NOT STARTED | Do not infer persistence hot-path completion from Task 6 reload evidence. Begin only after this Task 6 commit and ledger closure. |
+| Task 7 persistence scheduler | VERIFIED LOCALLY | Focused `35/35`, PostgreSQL-enabled full Vitest exit `0`, and production Chromium save/refresh `2/2`; 300-node longest save task `0ms` and refresh state preserved. |
+
+## 2026-08-13 Stage 3 Task 7 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Full 300-node pan/input gate | OPEN P1 | Rerun the complete fixed Stage 3 performance scenario and reduce S3-BUG-004 to `<=50ms`; the Task 7 save-only `21.8ms` sample cannot replace it. |
+| External browser matrix | UNVERIFIED | Run Task 7 save/refresh in Chromium 1920x1080, Firefox, WebKit and mobile Chromium with retained artifacts. |
+| Cloud exact-SHA and rollback | UNVERIFIED | After an authorized main-only push, deploy the exact candidate, verify project save/refresh and pending-media recovery, then prove `canvas-v2 -> legacy` rollback. |
+| Pending data/blob close recovery | UNVERIFIED IN REAL BROWSER | Close during unresolved media persistence and prove the small recovery marker is consumed without duplicate placement or data loss. |
+| Protected-baseline source drift | BLOCKED BY ORDERED PLAN | `38/38` identities remain, but `29` accumulated Stage 3 source files await the later approved baseline task. |
+| Task 8 tool sessions | NOT STARTED | Task 7 evidence does not authorize tool-registry work in this task. |

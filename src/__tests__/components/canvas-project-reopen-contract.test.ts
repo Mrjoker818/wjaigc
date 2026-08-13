@@ -16,6 +16,9 @@ describe('canvas project reopen contract', () => {
   });
 
   it('persists the viewport state in immediate image-change saves', () => {
+    const snapshotStart = workspace.indexOf('const buildCanvasPersistenceSnapshot = useCallback');
+    const snapshotEnd = workspace.indexOf('if (!canvasPersistenceSchedulerRef.current)', snapshotStart);
+    const snapshotBuilder = workspace.slice(snapshotStart, snapshotEnd);
     const persistenceStart = workspace.indexOf('const persistCanvasImagesNow = useCallback');
     const persistenceEnd = workspace.indexOf('const handleDeleteCanvasImages', persistenceStart);
     const persistence = workspace.slice(persistenceStart, persistenceEnd);
@@ -23,7 +26,8 @@ describe('canvas project reopen contract', () => {
     const forceSaveEnd = workspace.indexOf('onEditImage={handleEditImage}', forceSaveStart);
     const forceSave = workspace.slice(forceSaveStart, forceSaveEnd);
 
-    expect(persistence).toContain('viewState: viewStateRef.current');
+    expect(snapshotBuilder).toContain('viewState: viewStateRef.current');
+    expect(persistence).toContain('buildCanvasPersistenceSnapshot(nextImages, project)');
     expect(forceSave).toContain('persistCanvasImagesNow(nextImages)');
   });
 

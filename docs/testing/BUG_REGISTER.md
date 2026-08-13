@@ -1341,3 +1341,18 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Route task events through `projectCanvasTaskEvent`; suppress duplicate legacy completion writes; merge local completed terminal metadata over stale server placeholders; preserve local identified task-slot order during reconciliation. |
 | Regression | Focused Task 6 suite `48/48`; production Chromium `n=4` scenario `1/1`, provider completion order `3,1,4,2`, stable slot order `1,2,3,4`, and four persisted PNG results after reload. |
 | Status | **CLOSED LOCALLY 2026-08-13 / EXTERNAL BROWSER AND CLOUD EXACT-SHA PENDING.** |
+
+### S3-BUG-008: Canvas autosave serialized and wrote project snapshots on interaction-sensitive paths
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Canvas persistence / autosave / unload recovery |
+| Environment | Stage 3 Task 7 unit, source-contract and local production Chromium, 2026-08-13 |
+| Reproduction | Move a node in a 300-node project, force an immediate command save, wait for `/api/user-data/sync`, then refresh and compare the selected node's durable state. |
+| Expected | The input handler only publishes a structural snapshot; preparation and writing occur after yielding, with one writer, latest revision, project isolation and save blocking `<=100ms`. |
+| Actual | The legacy path normalized every placement, serialized the project and called `UserManager.updateProject` from immediate/autosave paths; `beforeunload` rebuilt and serialized the full project again. |
+| Root cause | Persistence scheduling, snapshot preparation, media resolution and unload fallback were coupled directly to React interaction effects and command callbacks. |
+| Fix | Added `CanvasPersistenceScheduler`; moved normalization/serialization into idle preparation; made immediate flush yield one task; retained asynchronous media persistence with a higher revision; limited unload handling to prepared payloads or a pending-media recovery marker. |
+| Regression | Initial RED was `9 failed / 4 passed`; focused GREEN is `35/35`. Production Chromium save/refresh is `2/2`; the 300-node sample records `21.8ms` input P95, `90ms` longest task, `0ms` longest save task, zero disappearance/click loss, and refresh-stable geometry/z-order/task state. |
+| Status | **CLOSED LOCALLY 2026-08-13 / EXTERNAL BROWSER AND CLOUD EXACT-SHA PENDING.** S3-BUG-004 remains independently open. |

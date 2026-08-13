@@ -45,7 +45,7 @@ describe('managed canvas image deletion wiring', () => {
     expect(coordinator).toContain('.filter((id) => !pendingCanvasDeleteIdsRef.current.has(id))');
     expect(coordinator).toContain("method: 'DELETE'");
     expect(coordinator.indexOf("method: 'DELETE'")).toBeLessThan(coordinator.indexOf('setImages('));
-    expect(coordinator).toContain('persistCanvasImagesNow(remainingImages)');
+    expect(coordinator).toContain('persistCanvasImagesNow(remainingImages, commandResult.persistence)');
     expect(coordinator).not.toContain('await UserManagerCore.getInstance().flushProjectsToServer()');
     expect(coordinator).toContain("if ('error' in result)");
     expect(coordinator).toContain('toast.error(');

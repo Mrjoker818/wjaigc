@@ -939,3 +939,11 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Fresh full Vitest: `430` files total, `418` passed and `12` environment-skipped; `2351` tests passed and `44` skipped, with zero failures. TypeScript, ESLint and `git diff --check` exit 0; production build generates `116/116` routes.
 - After reseeding all 15 controlled projects, the complete Stage 3 Chromium suite is `7/8`; the only failure is S3-BUG-004 at 300 nodes, input P95 `87.8ms` versus `<=50ms`. The threshold and assertions remain unchanged. A preceding reused-fixture run is retained but excluded from product status.
 - Protected-feature evidence remains `38/38`, but the gate blocks `27` accumulated Stage 3 source drifts pending the later ordered baseline task. **Task 6 passes locally for its functional scope; Stage 3 remains incomplete. Task 7 has not started.**
+
+## 2026-08-13 Stage 3 Task 7 persistence regression
+
+- TDD added a persistence scheduler and permanent contracts for latest-wins batching, single-flight writes, project cancellation epochs, signature deduplication, retry, pending media, immediate-task yielding and prepared-only unload handling. Focused regression passes `35/35`.
+- PostgreSQL-enabled full Vitest exits `0`. TypeScript, error-only ESLint, full ESLint (`0 errors / 966 historical warnings`), whitespace checks and the production build (`116/116`) pass.
+- Fresh production Chromium runs the save/refresh grep `2/2`. The 300-node case records average `56.79 FPS`, input P95 `21.8ms`, longest task `90ms`, longest save task `0ms`, zero disappeared frames and zero unclickable time. Durable coordinates, dimensions, z-order and processing state match after refresh.
+- The protection gate retains `38/38` protected feature identities, paths and contracts. It intentionally blocks `29` accumulated Stage 3 source drifts pending the ordered approval task.
+- **Task 7 verdict: PASS LOCALLY FOR ITS FUNCTIONAL SCOPE. Stage 3 verdict: NOT COMPLETE.** S3-BUG-004's full 300-node pan/input gate, external browser matrix, cloud exact-SHA and rollback remain open; Task 8 has not started.

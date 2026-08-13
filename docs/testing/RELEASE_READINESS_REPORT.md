@@ -776,3 +776,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Release gates remain open: after a clean 15-project reseed, the full Stage 3 Chromium run is `7/8` because 300-node input P95 is `87.8ms` versus `<=50ms`; four external browser profiles and cloud exact-SHA/rollback are unverified.
 - All `38/38` protected feature identities and required evidence contracts remain present. The protected baseline still blocks `27` accumulated Stage 3 source drifts until its ordered approval task.
 - **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `7/11`, approximately `64%`. Task 7 persistence scheduling has not started. Nothing is pushed or deployed, and `stable` remains untouched.
+
+## 2026-08-13 Stage 3 Task 7 readiness decision
+
+- Non-blocking project persistence is locally closed for Task 7: focused regression `35/35`, PostgreSQL-enabled full Vitest exit `0`, TypeScript, ESLint and the `116/116` production build pass.
+- Production Chromium save/refresh is `2/2`. The 300-node save sample meets the fixed save budget with `0ms` longest save task and preserves coordinates, size, z-order and processing state after refresh; no disappeared or unclickable frame was recorded.
+- This save-specific sample does not close S3-BUG-004's full 300-node pan/input P95 gate. External browsers, cloud exact-SHA and rollback remain unverified.
+- All `38/38` protected identities, paths and evidence contracts remain, while the gate correctly blocks `29` accumulated Stage 3 source drifts until its ordered approval task.
+- **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `8/11`, approximately `73%`. Task 8 is next and has not started. Nothing is pushed or deployed, and `stable` remains untouched.

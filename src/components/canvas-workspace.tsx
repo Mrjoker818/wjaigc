@@ -46,6 +46,11 @@ import {
   replayQueuedCanvasSnapshotChange,
 } from '@/lib/canvas-kernel/commands';
 import {
+  CanvasPersistenceScheduler,
+  prepareCanvasPersistenceSnapshot,
+  type CanvasPersistenceSnapshot,
+} from '@/lib/canvas-kernel/persistence';
+import {
   isCanvasHistoryTransitionCurrent,
   type CanvasHistoryTransitionToken,
 } from '@/lib/canvas-kernel/history';
@@ -131,6 +136,7 @@ import { workflowFromProjectMetadata } from '@/lib/project-workflow';
 import {
   consumeCanvasHydrationGuard,
   createCanvasHydrationGuard,
+  persistPreparedCanvasUnloadSnapshot,
   shouldConsumeCanvasHydrationGuard,
   type CanvasHydrationGuard,
 } from '@/lib/canvas-autosave-guard';
@@ -312,12 +318,51 @@ function loadCanvasImageSize(url: string): Promise<{ width: number; height: numb
   });
 }
 
-function buildCanvasSaveSignature(
-  projectId: string,
-  images: PersistableCanvasImage[],
-  metadata: Project['metadata'],
-): string {
-  return JSON.stringify({ projectId, images, metadata });
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('Blob 读取失败'));
+    reader.onloadend = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function persistCanvasSnapshotMedia(
+  images: ReadonlyArray<PersistableCanvasImage>,
+  userId: string,
+): Promise<{ urlMapping: Record<string, string>; failedUrls: string[] }> {
+  const pendingUrls = [...new Set(images
+    .map(image => image.url)
+    .filter(url => url.startsWith('data:') || url.startsWith('blob:')))];
+  const results = await Promise.allSettled(pendingUrls.map(async (sourceUrl) => {
+    let imageUrl = sourceUrl;
+    if (sourceUrl.startsWith('blob:')) {
+      const response = await fetch(sourceUrl);
+      if (!response.ok) throw new Error(`Blob 读取失败: ${response.status}`);
+      imageUrl = await blobToDataUrl(await response.blob());
+    }
+    const response = await fetch('/api/save-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl, userId, sourceUrl }),
+    });
+    const payload = await response.json().catch(() => null) as { success?: boolean; url?: string; error?: string } | null;
+    if (!response.ok || !payload?.success || !payload.url) {
+      throw new Error(payload?.error || `图片持久化失败: ${response.status}`);
+    }
+    return { sourceUrl, persistedUrl: payload.url };
+  }));
+
+  const urlMapping: Record<string, string> = {};
+  const failedUrls: string[] = [];
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      urlMapping[result.value.sourceUrl] = result.value.persistedUrl;
+    } else {
+      failedUrls.push(pendingUrls[index]);
+    }
+  });
+  return { urlMapping, failedUrls };
 }
 
 interface CanvasWorkspaceProps {
@@ -1230,9 +1275,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, [themeStyle]);
 
   // 自动保存画布图片到当前项目
-  const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastAutoSaveSignatureRef = useRef<string | null>(null);
-  const lastImmediateSaveSignatureRef = useRef<string | null>(null);
+  const canvasPersistenceRevisionRef = useRef(0);
+  const canvasPersistenceProjectRef = useRef<string | null>(null);
+  const canvasPersistenceSchedulerRef = useRef<CanvasPersistenceScheduler | null>(null);
   // 项目切换中标记：防止自动保存回调用旧闭包数据覆盖刚保存的新数据
   const switchingProjectRef = useRef(false);
   // 服务器同步合并中标记：防止自动保存用旧闭包数据覆盖刚从服务器合并的新数据
@@ -1241,32 +1286,125 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [serverSyncMergeRevision, setServerSyncMergeRevision] = useState(0);
   // ★ 近期删除的图片 ID 集合：防止服务器同步把刚删除的图片恢复回来
   const pendingCanvasDeleteIdsRef = useRef<Set<string>>(new Set());
-  const persistCanvasImagesNow = useCallback((nextImages: CanvasImage[]) => {
-    if (!currentProject?.id) return;
-    if (autoSaveRef.current) {
-      clearTimeout(autoSaveRef.current);
-      autoSaveRef.current = null;
-    }
-    immediateSaveGuardRef.current = createCanvasHydrationGuard(currentProject.id, nextImages);
-    const persistableCanvasImages = serializeCanvasWorkspacePlacements(nextImages);
-    const metadata = {
-      ...(currentProject.metadata || {}),
+  const nextCanvasPersistenceRevision = useCallback(() => {
+    canvasPersistenceRevisionRef.current += 1;
+    return canvasPersistenceRevisionRef.current;
+  }, []);
+  const buildCanvasPersistenceSnapshot = useCallback((
+    nextImages: CanvasImage[],
+    project: Project,
+  ): CanvasPersistenceSnapshot => ({
+    projectId: project.id,
+    revision: nextCanvasPersistenceRevision(),
+    // CanvasImage is normalized to the durable placement contract during the
+    // scheduler's idle prepare phase; this cast keeps the interaction commit
+    // structurally shared and free of an O(n) serialization pass.
+    images: nextImages as unknown as ReadonlyArray<PersistableCanvasImage>,
+    metadata: {
+      ...(project.metadata || {}),
       groups: groupsRef.current,
       viewState: viewStateRef.current,
       annotationsV2: annotationRecordsRef.current,
-    };
-    lastImmediateSaveSignatureRef.current = buildCanvasSaveSignature(
-      currentProject.id,
-      persistableCanvasImages,
-      metadata,
-    );
-    lastAutoSaveSignatureRef.current = lastImmediateSaveSignatureRef.current;
-    const manager = UserManagerCore.getInstance();
-    manager.updateProject(currentProject.id, {
-      canvasImages: persistableCanvasImages,
-      metadata,
+    },
+  }), [nextCanvasPersistenceRevision]);
+
+  if (!canvasPersistenceSchedulerRef.current) {
+    canvasPersistenceSchedulerRef.current = new CanvasPersistenceScheduler({
+      prepare: (snapshot) => {
+        const normalizedSnapshot: CanvasPersistenceSnapshot = {
+          ...snapshot,
+          images: serializeCanvasWorkspacePlacements(
+            snapshot.images as unknown as CanvasImage[],
+          ),
+        };
+        const prepared = prepareCanvasPersistenceSnapshot(normalizedSnapshot);
+        const manager = UserManagerCore.getInstance();
+        const userId = currentUserRef.current?.id;
+        if (!userId) return prepared;
+        const beaconPayload = JSON.stringify({
+          key: 'projects',
+          projectRevision: manager.getProjectSyncRevision(),
+          value: manager.getProjects().map(project => ({
+            id: project.id,
+            schemaVersion: project.schemaVersion ?? 3,
+            name: project.name,
+            description: project.description,
+            canvasImages: project.id === normalizedSnapshot.projectId
+              ? normalizedSnapshot.images
+              : project.canvasImages,
+            metadata: project.id === normalizedSnapshot.projectId
+              ? normalizedSnapshot.metadata
+              : project.metadata,
+            settings: project.settings,
+            createdAt: project.createdAt,
+            updatedAt: project.id === normalizedSnapshot.projectId ? Date.now() : project.updatedAt,
+            userId,
+          })),
+        });
+        return {
+          ...prepared,
+          beaconPayload,
+          beaconByteLength: new TextEncoder().encode(beaconPayload).byteLength,
+        };
+      },
+      writer: async (snapshot) => {
+        const scheduler = canvasPersistenceSchedulerRef.current;
+        if (!scheduler) return;
+        const userId = currentUserRef.current?.id;
+        if (!userId) throw new Error('当前用户不存在，无法保存画布');
+
+        if (snapshot.hasPendingMedia) {
+          const { urlMapping, failedUrls } = await persistCanvasSnapshotMedia(snapshot.images, userId);
+          if (!scheduler.isSnapshotActive(snapshot.projectId, snapshot.revision)) return;
+          if (Object.keys(urlMapping).length === 0) {
+            throw new Error(`未持久化媒体保存失败: ${failedUrls.length}`);
+          }
+          if (currentProjectRef.current?.id !== snapshot.projectId) return;
+          const resolvedImages = latestImagesRef.current.map(image => (
+            urlMapping[image.url]
+              ? { ...image, url: urlMapping[image.url], sourceUrl: image.sourceUrl || image.url }
+              : image
+          ));
+          setImages(resolvedImages, { history: 'skip' });
+          scheduler.schedule(buildCanvasPersistenceSnapshot(
+            resolvedImages,
+            currentProjectRef.current,
+          ));
+          return;
+        }
+
+        const manager = UserManagerCore.getInstance();
+        manager.updateProject(snapshot.projectId, {
+          canvasImages: [...snapshot.images],
+          metadata: snapshot.metadata,
+        });
+        recordUserData({
+          userId,
+          area: 'projects',
+          type: 'autosave',
+          filename: `${snapshot.projectId}.json`,
+          content: snapshot.serialized,
+          metadata: { projectId: snapshot.projectId, imageCount: snapshot.images.length },
+        });
+      },
     });
-  }, [currentProject]);
+  }
+  const canvasPersistenceScheduler = canvasPersistenceSchedulerRef.current;
+
+  const persistCanvasImagesNow = useCallback((
+    nextImages: CanvasImage[],
+    persistenceHint: 'schedule' | 'immediate' | 'skip' = 'immediate',
+  ) => {
+    if (persistenceHint === 'skip') return;
+    const project = currentProjectRef.current;
+    if (!project) return;
+    immediateSaveGuardRef.current = createCanvasHydrationGuard(project.id, nextImages);
+    const snapshot = buildCanvasPersistenceSnapshot(nextImages, project);
+    canvasPersistenceScheduler.schedule(snapshot);
+    if (persistenceHint === 'immediate') {
+      void canvasPersistenceScheduler.flush('immediate').catch(() => undefined);
+    }
+  }, [buildCanvasPersistenceSnapshot, canvasPersistenceScheduler]);
 
   const handleDeleteCanvasImages = useCallback(async (imageIds: string[]): Promise<string[]> => {
     if (historyLifecyclePendingRef.current) return [];
@@ -1307,7 +1445,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         );
         const remainingImages = canvasSnapshotToNodes(commandResult.next) as CanvasImage[];
         setImages(remainingImages);
-        persistCanvasImagesNow(remainingImages);
+        persistCanvasImagesNow(remainingImages, commandResult.persistence);
         setSelectedImage((current) => reconcileSelectedImageAfterBatchDeletion(current, result.deletedIds));
       }
       if ('error' in result) {
@@ -1592,6 +1730,16 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     }
     prevImageIdsRef2.current = currentIds;
   }, [images]);
+
+  useEffect(() => {
+    const previousProjectId = canvasPersistenceProjectRef.current;
+    const nextProjectId = currentProject?.id ?? null;
+    if (previousProjectId && previousProjectId !== nextProjectId) {
+      canvasPersistenceScheduler.cancel(previousProjectId);
+    }
+    canvasPersistenceProjectRef.current = nextProjectId;
+  }, [canvasPersistenceScheduler, currentProject?.id]);
+
   useEffect(() => {
     if (!currentProject?.id) return;
     // 项目切换进行中时，跳过自动保存，避免旧闭包数据覆盖
@@ -1616,166 +1764,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (hydrationAutosaveGuardRef.current?.projectId === currentProject.id) {
       hydrationAutosaveGuardRef.current = null;
     }
-    // 防抖：1秒后保存
-    if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
-    autoSaveRef.current = setTimeout(async () => {
-      autoSaveRef.current = null;
-      // 二次检查：定时器触发时如果正在切换项目，也跳过
-      if (switchingProjectRef.current) return;
-      const project = currentProjectRef.current;
-      if (!project) return;
-      // 验证用户一致性：使用 ref 获取最新 userId 避免闭包过期
-      const userId = currentUserRef.current?.id;
-      if (!userId) return;
-      try {
-        // 先将 data:/blob: URL 持久化到服务器
-        const urlMapping: Record<string, string> = {};
-        const sourceUrlMapping: Record<string, string> = {};
-        const nonPersistentUrls = latestImagesRef.current.filter(img =>
-          img.url.startsWith('data:') || img.url.startsWith('blob:')
-        );
-        if (nonPersistentUrls.length > 0) {
-          const saveResults = await Promise.allSettled(
-            nonPersistentUrls.map(async (img) => {
-              // blob: 先转 data:
-              let urlToSave = img.url;
-              if (urlToSave.startsWith('blob:')) {
-                try {
-                  const resp = await fetch(urlToSave);
-                  const blob = await resp.blob();
-                  urlToSave = await new Promise<string>((resolve) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result as string);
-                    reader.readAsDataURL(blob);
-                  });
-                } catch { return null; }
-              }
-                const saveResp = await fetch('/api/save-image', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: urlToSave, userId, sourceUrl: img.url }),
-              });
-              const saveData = await saveResp.json();
-              if (saveData.success && saveData.url) {
-                return { original: img.url, persisted: saveData.url };
-              }
-              return null;
-            })
-          );
-          for (const result of saveResults) {
-            if (result.status === 'fulfilled' && result.value) {
-              urlMapping[result.value.original] = result.value.persisted;
-              sourceUrlMapping[result.value.original] = result.value.original;
-            }
-          }
-          // 更新 images 状态中的非持久化 URL
-          if (Object.keys(urlMapping).length > 0) {
-            setImages(prev => prev.map(img =>
-              urlMapping[img.url] ? { ...img, url: urlMapping[img.url], sourceUrl: img.sourceUrl || sourceUrlMapping[img.url] || img.url } : img
-            ), { history: 'skip' });
-          }
-        }
-
-        // 合并 URL 映射后的图片列表（使用 urlMapping 覆盖，避免 stale closure）
-        const resolvedImages = latestImagesRef.current.map(img => ({
-          ...img,
-          url: urlMapping[img.url] || img.url,
-        }));
-        const persistableCanvasImages = serializeCanvasWorkspacePlacements(resolvedImages)
-          .map(img => ({
-            ...img,
-            id: img.id,
-            url: img.url,
-            x: img.x,
-            y: img.y,
-            width: img.width,
-            height: img.height,
-            originalWidth: img.originalWidth || img.width * 2,
-            originalHeight: img.originalHeight || img.height * 2,
-            rotation: img.rotation ?? 0,
-            zIndex: img.zIndex ?? 0,
-            createdAt: img.createdAt || Date.now(),
-            prompt: img.prompt || '',
-            modifyPrompt: img.modifyPrompt || '',
-            model: img.model || '',
-            quality: img.quality || '',
-            aspectRatio: img.aspectRatio || '',
-            stylePreset: img.stylePreset || '',
-            category: img.category || '',
-            size: img.size || '',
-            groupId: img.groupId || '',
-            threeDModelUrl: img.threeDModelUrl || '',
-            threeDModelUrls: img.threeDModelUrls || undefined,
-            modelName: img.modelName || '',
-            apiProviderId: img.apiProviderId || '',
-            apiProvider: img.apiProvider || '',
-            apiBaseUrl: img.apiBaseUrl || '',
-            generationRouteAudit: img.generationRouteAudit || undefined,
-            sourceUrl: img.sourceUrl || '',
-            generatedFromImageId: img.generatedFromImageId || '',
-            annotationVersionId: img.annotationVersionId || '',
-            annotationSourceImageId: img.annotationSourceImageId || '',
-            annotationSourceVersionId: img.annotationSourceVersionId || '',
-            annotationBundleId: img.annotationBundleId || '',
-            annotationIds: img.annotationIds || undefined,
-            svgDataUrl: img.svgDataUrl || '',
-            svgUrl: img.svgUrl || '',
-            mediaType: img.mediaType || undefined,
-            videoUrl: img.videoUrl || '',
-            videoDuration: img.videoDuration || undefined,
-            videoThumbnailUrl: img.videoThumbnailUrl || '',
-            isProcessingPlaceholder: img.isProcessingPlaceholder || false,
-            processing: img.processing,
-          }))
-          .filter(image => shouldPersistCanvasPlacement(image) || shouldPersistProcessingPlaceholder(image)) as PersistableCanvasImage[];
-        const updatedMeta = {
-          ...(project.metadata || {}),
-          groups: groupsRef.current,
-          viewState: viewStateRef.current,
-          annotationsV2: annotationRecordsRef.current,
-        };
-        const saveSignature = JSON.stringify({
-          projectId: project.id,
-          images: persistableCanvasImages,
-          metadata: updatedMeta,
-        });
-        if (lastAutoSaveSignatureRef.current === saveSignature) return;
-
-        const autoSaveMgr = UserManagerCore.getInstance();
-        autoSaveMgr.updateProject(project.id, {
-          canvasImages: persistableCanvasImages,
-          metadata: updatedMeta,
-        });
-        lastAutoSaveSignatureRef.current = saveSignature;
-        recordUserData({
-          userId,
-          area: 'projects',
-          type: 'autosave',
-          filename: `${project.id}.json`,
-          content: JSON.stringify({
-            projectId: project.id,
-            canvasImages: persistableCanvasImages,
-          metadata: {
-            ...(project.metadata || {}),
-            groups: groupsRef.current,
-            viewState: viewStateRef.current,
-            annotationsV2: annotationRecordsRef.current,
-            },
-            savedAt: Date.now(),
-          }, null, 2),
-          metadata: { projectId: currentProject.id, imageCount: persistableCanvasImages.length },
-        });
-      } catch {
-        // 静默失败，不影响用户体验
-      }
-    }, 1000);
-    return () => {
-      if (autoSaveRef.current) {
-        clearTimeout(autoSaveRef.current);
-        autoSaveRef.current = null;
-      }
-    };
-  }, [annotationRevision, images, currentProject?.id, currentUser?.id, serverSyncMergeRevision, setImages]);
+    const snapshot = buildCanvasPersistenceSnapshot(images, currentProject);
+    canvasPersistenceScheduler.schedule(snapshot);
+  }, [
+    annotationRevision,
+    images,
+    currentProject,
+    currentUser?.id,
+    serverSyncMergeRevision,
+    buildCanvasPersistenceSnapshot,
+    canvasPersistenceScheduler,
+  ]);
 
   // 页面关闭/刷新前同步保存（localStorage + sendBeacon到服务器）
   // 使用 ref 避免每次 images 变化都重建 beforeunload 监听器
@@ -1786,116 +1785,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const proj = currentProjectRef2.current;
       if (!proj) return;
       try {
-        const mgr = UserManagerCore.getInstance();
-        // 验证用户一致性：确保只保存当前登录用户的数据
         if (!currentUserRef.current?.id) return;
-        // 保留所有图片URL，包括 data: URL（避免异步持久化未完成时丢失图片）
-        const persistableCanvasImages = serializeCanvasWorkspacePlacements(latestImagesRef.current)
-          .map(img => ({
-            ...img,
-            id: img.id,
-            url: img.url,
-            x: img.x,
-            y: img.y,
-            width: img.width,
-            height: img.height,
-            originalWidth: img.originalWidth || img.width * 2,
-            originalHeight: img.originalHeight || img.height * 2,
-            rotation: img.rotation ?? 0,
-            zIndex: img.zIndex ?? 0,
-            createdAt: img.createdAt || Date.now(),
-            prompt: img.prompt || '',
-            modifyPrompt: img.modifyPrompt || '',
-            model: img.model || '',
-            quality: img.quality || '',
-            aspectRatio: img.aspectRatio || '',
-            stylePreset: img.stylePreset || '',
-            category: img.category || '',
-            size: img.size || '',
-            groupId: img.groupId || '',
-            threeDModelUrl: img.threeDModelUrl || '',
-            threeDModelUrls: img.threeDModelUrls || undefined,
-            modelName: img.modelName || '',
-            apiProviderId: img.apiProviderId || '',
-            apiProvider: img.apiProvider || '',
-            apiBaseUrl: img.apiBaseUrl || '',
-            generationRouteAudit: img.generationRouteAudit || undefined,
-            sourceUrl: img.sourceUrl || '',
-            generatedFromImageId: img.generatedFromImageId || '',
-            annotationVersionId: img.annotationVersionId || '',
-            annotationSourceImageId: img.annotationSourceImageId || '',
-            annotationSourceVersionId: img.annotationSourceVersionId || '',
-            annotationBundleId: img.annotationBundleId || '',
-            annotationIds: img.annotationIds || undefined,
-            svgDataUrl: img.svgDataUrl || '',
-            svgUrl: img.svgUrl || '',
-            mediaType: img.mediaType || undefined,
-            videoUrl: img.videoUrl || '',
-            videoDuration: img.videoDuration || undefined,
-            videoThumbnailUrl: img.videoThumbnailUrl || '',
-            isProcessingPlaceholder: img.isProcessingPlaceholder || false,
-            processing: img.processing,
-          }))
-          .filter(image => shouldPersistCanvasPlacement(image) || shouldPersistProcessingPlaceholder(image)) as PersistableCanvasImage[];
-        // 1. localStorage 即时写入
-        const unloadMetadata = {
-          ...(proj.metadata || {}),
-          groups: groupsRef.current,
-          viewState: viewStateRef.current,
-          annotationsV2: annotationRecordsRef.current,
-        };
-        const unloadSignature = buildCanvasSaveSignature(proj.id, persistableCanvasImages, unloadMetadata);
-        const hasPendingCanvasSnapshot = lastImmediateSaveSignatureRef.current !== unloadSignature
-          && lastAutoSaveSignatureRef.current !== unloadSignature;
-        if (!autoSaveRef.current || !hasPendingCanvasSnapshot) return;
-        mgr.updateProject(proj.id, {
-          canvasImages: persistableCanvasImages,
-          metadata: unloadMetadata,
+        if (!canvasPersistenceScheduler.hasPendingSnapshot(proj.id)) return;
+        const prepared = canvasPersistenceScheduler.getPreparedSnapshot(proj.id);
+        if (!prepared) return;
+        persistPreparedCanvasUnloadSnapshot(prepared, {
+          storage: localStorage,
+          sendBeacon: navigator.sendBeacon.bind(navigator),
         });
-        if (mgr.isProjectSyncInFlight()) return;
-        // 2. sendBeacon 异步发送到服务器，确保云部署不丢数据
-        if (currentUserRef.current?.id) {
-          const payload = {
-            key: 'projects',
-            projectRevision: mgr.getProjectSyncRevision(),
-            value: mgr.getProjects().map(p => ({
-              id: p.id,
-              schemaVersion: p.schemaVersion ?? 3,
-              name: p.name,
-              description: p.description,
-              canvasImages: p.id === proj.id ? persistableCanvasImages : p.canvasImages,
-              metadata: p.id === proj.id ? {
-                ...(proj.metadata || {}),
-                groups: groupsRef.current,
-                annotationsV2: annotationRecordsRef.current,
-              } : p.metadata,
-              settings: p.settings,
-              createdAt: p.createdAt,
-              updatedAt: p.id === proj.id ? Date.now() : p.updatedAt,
-              userId: currentUserRef.current?.id,
-            })),
-          };
-          const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-          // sendBeacon 限制约 64KB，超出则跳过（依赖定期同步兜底）
-          if (blob.size <= 65536) {
-            navigator.sendBeacon('/api/user-data/sync', blob);
-          } else {
-            // sendBeacon 超出64KB限制，使用 fetch keepalive 作为 fallback
-            try {
-              fetch('/api/user-data/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                keepalive: true,
-              }).catch(() => {});
-            } catch { /* best effort */ }
-          }
-        }
       } catch { /* best effort */ }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, []); // 使用 ref 获取最新值，避免每次 images 变化都重建监听器
+  }, [canvasPersistenceScheduler]);
 
   // 定期从服务器同步项目数据（跨设备/跨浏览器数据同步）
   useEffect(() => {

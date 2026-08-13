@@ -112,3 +112,12 @@ Successful and failed runs write under `test-results/stage-3-baseline/`:
 - redacted `console.json`, `network.json` and performance JSON
 
 The existing `pnpm perf:check` string microbenchmark is auxiliary only and is not accepted as real DOM or browser performance evidence.
+
+## Task 7 Non-Blocking Persistence Evidence
+
+- Canvas interaction commits now schedule structural snapshots; placement normalization, JSON serialization and project writes run after yielding through the persistence scheduler. Immediate command saves no longer prepare the snapshot in the originating input task.
+- The scheduler is single-flight, keeps the newest pending revision, isolates project epochs, deduplicates equal signatures, retries bounded failures and prepares a reusable unload snapshot. Pending `data:`/`blob:` media stays asynchronous and schedules a higher revision after URL resolution.
+- `beforeunload` performs no placement traversal, image encoding or fresh JSON serialization. It uses an already prepared payload within the beacon limit, or writes a small recovery marker when media is unresolved.
+- Focused unit/source contracts pass `35/35`; PostgreSQL-enabled full Vitest exits `0`; TypeScript, ESLint (`0 errors / 966 historical warnings`), whitespace checks and the `116/116` production build pass.
+- Fresh production Chromium save/refresh passes `2/2`. The 300-node sample records `56.79 FPS`, input P95 `21.8ms`, longest task `90ms`, longest save task `0ms`, disappeared frames `0` and unclickable time `0ms`; refreshed geometry, z-order and processing state match the saved project.
+- S3-BUG-004 remains open because the full pan scenario has not been rerun by this save-specific grep. External browser profiles, cloud exact-SHA, rollback and pending-media close recovery remain unverified.

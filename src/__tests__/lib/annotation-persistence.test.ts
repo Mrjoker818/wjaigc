@@ -148,8 +148,11 @@ describe('annotation project persistence wiring', () => {
     expect(workspaceSource).toContain('annotationsV2: annotationRecordsRef.current');
     expect(workspaceSource).toContain('initialAnnotations={initialCanvasAnnotations}');
     expect(workspaceSource).toContain('onAnnotationsChange={handleAnnotationsChange}');
-    expect(workspaceSource).toContain(
-      '[annotationRevision, images, currentProject?.id, currentUser?.id, serverSyncMergeRevision, setImages]',
-    );
+    const autosaveStart = workspaceSource.indexOf('const immediateSaveGuard = consumeCanvasHydrationGuard(');
+    const autosaveEnd = workspaceSource.indexOf('// 页面关闭/刷新前同步保存', autosaveStart);
+    const autosaveSource = workspaceSource.slice(autosaveStart, autosaveEnd);
+    expect(autosaveSource).toContain('buildCanvasPersistenceSnapshot(images, currentProject)');
+    expect(autosaveSource).toContain('annotationRevision,');
+    expect(autosaveSource).toContain('serverSyncMergeRevision,');
   });
 });

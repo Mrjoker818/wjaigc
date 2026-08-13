@@ -89,11 +89,12 @@ async function stableCardBox(locator: Locator) {
 async function hittableCardCenter(page: Page, locator: Locator) {
   const box = await stableCardBox(locator);
   const point = center(box);
-  const hittable = await page.evaluate(({ x, y }) => {
+  const expectedId = await locator.getAttribute('data-canvas-image-id');
+  const hittable = await page.evaluate(({ x, y, expectedId }) => {
     const target = document.elementFromPoint(x, y);
-    return Boolean(target?.closest('[data-canvas-image-id]'))
+    return target?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId === expectedId
       && !target?.closest('[data-toolbar], [data-floating-panel], [data-popup], [data-modal]');
-  }, point);
+  }, { ...point, expectedId });
   expect(hittable, 'canvas card center must not be covered by floating UI').toBe(true);
   return { box, point };
 }
@@ -231,7 +232,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     expect(projectImage(afterProjects, projectId, nodeId)).toMatchObject(beforePosition);
   });
 
-  test('preserves image drag coordinates, zoom anchor, reset and reload state', async ({ page, stage3Evidence }, testInfo) => {
+  test('saves image drag coordinates, zoom anchor and reset state across refresh', async ({ page, stage3Evidence }, testInfo) => {
     const projectId = stage3ProjectId(testInfo.project.name, 1);
     await loginStage3User(page);
     const initialProjects = await readStage3Projects(page);
@@ -502,4 +503,71 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       await assertCanvasNodeContinuity(page, monitoredNodeIds);
     });
   }
+
+  test('saves and refreshes a 300 nodes project within the main-thread budget', async ({ page, stage3Evidence }, testInfo) => {
+    const projectId = stage3ProjectId(testInfo.project.name, 300);
+    await loginStage3User(page);
+    const projects = await readStage3Projects(page);
+    const project = projects.find(candidate => candidate.id === projectId);
+    expect(project).toBeTruthy();
+    const images = project?.canvasImages as Array<Record<string, unknown>>;
+    expect(images).toHaveLength(300);
+    const target = images[images.length - 1];
+    const nodeId = String(target.id);
+    const initialPosition = {
+      x: Number(target.x),
+      y: Number(target.y),
+      zIndex: Number(target.zIndex),
+    };
+
+    await openStage3Project(page, projectId);
+    await page.getByTitle('重置视图').click();
+    await waitForStage3Node(page, nodeId);
+    const card = stage3CanvasCard(page, nodeId);
+    const { point: dragStart } = await hittableCardCenter(page, card);
+    const savedAfterDrag = page.waitForResponse(
+      response => isProjectSave(response, projectId, nodeId, initialPosition),
+      { timeout: 30_000 },
+    );
+    const saveSample = await measureCanvasInteraction(page, async () => {
+      await dragPointerAcrossFrames(
+        page,
+        dragStart,
+        { x: dragStart.x + 72, y: dragStart.y + 48 },
+        45,
+      );
+      await savedAfterDrag;
+    }, { monitoredNodeIds: [nodeId] });
+    await writeStage3Metrics(stage3Evidence, testInfo, '300-node-save-performance', saveSample);
+
+    expect(saveSample.disappearedFrames).toBe(0);
+    expect(saveSample.unclickableDurationMs).toBe(0);
+    expect(saveSample.longestSaveTaskMs).toBeLessThanOrEqual(100);
+    const savedProjects = await readStage3Projects(page);
+    const savedImage = projectImage(savedProjects, projectId, nodeId);
+    expect(savedImage).toMatchObject({
+      width: target.width,
+      height: target.height,
+      zIndex: target.zIndex,
+    });
+    expect(savedImage?.processing ?? null).toEqual(target.processing ?? null);
+    expect({ x: savedImage?.x, y: savedImage?.y }).not.toEqual({
+      x: initialPosition.x,
+      y: initialPosition.y,
+    });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForStage3Node(page, nodeId);
+    const reloadedProjects = await readStage3Projects(page);
+    expect(projectImage(reloadedProjects, projectId, nodeId)).toMatchObject({
+      x: savedImage?.x,
+      y: savedImage?.y,
+      width: savedImage?.width,
+      height: savedImage?.height,
+      zIndex: savedImage?.zIndex,
+    });
+    expect(projectImage(reloadedProjects, projectId, nodeId)?.processing ?? null)
+      .toEqual(savedImage?.processing ?? null);
+    await assertCanvasNodeContinuity(page, [nodeId]);
+  });
 });
