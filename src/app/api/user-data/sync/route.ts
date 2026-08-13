@@ -15,6 +15,7 @@ import {
 import type { Project } from '@/lib/user-types';
 import type { AssetGraphMode } from '@/lib/asset-core/types';
 import type { LegacyMediaPersistenceInput, LegacyMediaPersistenceResult } from '@/lib/asset-core/legacy-migration';
+import { resolveCanvasKernelMode } from '@/lib/canvas-kernel/mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -155,6 +156,7 @@ export async function GET(request: NextRequest) {
     }
 
     let assetGraphMode: AssetGraphMode | undefined;
+    const canvasKernelMode = resolveCanvasKernelMode(process.env.WUJIE_CANVAS_KERNEL_MODE);
     // Read the revision first: a concurrent commit between these reads yields
     // an older revision with newer data, which CAS rejects safely on write.
     const projectRevision = key === 'projects'
@@ -191,6 +193,7 @@ export async function GET(request: NextRequest) {
       success: true,
       key,
       value,
+      canvasKernelMode,
       ...(assetGraphMode ? { assetGraphMode } : {}),
       ...(projectRevision === undefined ? {} : { projectRevision }),
     });

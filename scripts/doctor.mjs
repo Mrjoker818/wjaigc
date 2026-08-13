@@ -337,6 +337,19 @@ function checkNodeVersion() {
   add(major >= 18 ? 'PASS' : 'FAIL', 'node-version', `${process.version} (require >= 18)`);
 }
 
+function checkCanvasKernelMode() {
+  const raw = process.env.WUJIE_CANVAS_KERNEL_MODE?.trim();
+  if (!raw) {
+    add('PASS', 'canvas-kernel-mode', 'legacy (default)');
+    return;
+  }
+  if (raw === 'legacy' || raw === 'shadow' || raw === 'canvas-v2') {
+    add('PASS', 'canvas-kernel-mode', raw);
+    return;
+  }
+  add('WARN', 'canvas-kernel-mode', 'unsupported value; runtime falls back to legacy');
+}
+
 // ===== 新增: 构建产物检查 =====
 async function checkBuildArtifacts() {
   const nextDir = path.resolve('.next');
@@ -433,6 +446,7 @@ async function checkDatabaseTables() {
 async function main() {
   checkNodeVersion();
   add('PASS', 'runtime', `Node ${process.version}; mode=${production ? 'production' : 'development'}`);
+  checkCanvasKernelMode();
   const strictCredentials = production && !startup;
   secretCheckAny('authentication-secret', ['WUJIE_AUTH_SECRET', 'NEXTAUTH_SECRET'], strictCredentials);
   secretCheck('INTERNAL_API_SECRET', strictCredentials);

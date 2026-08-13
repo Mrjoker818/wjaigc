@@ -384,11 +384,11 @@ describe('continuous canvas shadow synchronization', () => {
     const migrationSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
       'utf8',
-    );
+    ).replace(/\r\n/g, '\n');
     const serviceSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/service.ts'),
       'utf8',
-    );
+    ).replace(/\r\n/g, '\n');
     const updateStart = migrationSource.indexOf('async function updateGraphForImage');
     const updateEnd = migrationSource.indexOf('async function trashGraphForImage', updateStart);
     const updateGraphSource = migrationSource.slice(updateStart, updateEnd);

@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 const autoSaveSource = readFileSync(
   resolve(process.cwd(), 'src/components/canvas-workspace.tsx'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 
 describe('project autosave wiring', () => {
   it('does not reschedule itself by writing currentProject from the autosave callback', () => {

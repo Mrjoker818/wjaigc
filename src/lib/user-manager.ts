@@ -7,6 +7,7 @@ import {
 } from '@/lib/asset-core/canvas-adapter';
 import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
 import type { AssetGraphMode } from '@/lib/asset-core/types';
+import { resolveCanvasKernelMode, type CanvasKernelMode } from '@/lib/canvas-kernel/mode';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
@@ -79,6 +80,7 @@ interface ProjectSyncResponse {
     originalHeight: number;
   }>>;
   assetGraphMode?: AssetGraphMode;
+  canvasKernelMode?: CanvasKernelMode;
 }
 
 export interface ProjectSyncResult {
@@ -128,6 +130,7 @@ interface ProjectAdoptionCommitEnvelope {
   userId: string;
   revision: number;
   assetGraphMode: AssetGraphMode;
+  canvasKernelMode: CanvasKernelMode;
   authoritativeBase: Project[];
   adoptedDraft: Project[];
   conflictBackups: ProjectConflictBackup[];
@@ -422,6 +425,7 @@ export class UserManager {
   private currentUserId: string | null = null;
   private _serverSyncReady = false; // 在 loadProjectsFromServer 成功前阻止 syncToServer 上传空数据
   private _assetGraphMode: AssetGraphMode = 'legacy';
+  private _canvasKernelMode: CanvasKernelMode = 'legacy';
   private _projectSyncRevision = 0;
   private _projectSyncRequestEpoch = 0;
   private _projectSyncSessionEpoch = 0;
@@ -846,6 +850,7 @@ export class UserManager {
     this._projectSyncRevision = 0;
     this._projectMutationGeneration = 0;
     this._acceptedProjectMutationGeneration = 0;
+    this._canvasKernelMode = 'legacy';
     this._recentlyDeletedImageIds.clear();
     this._projectHydration = null;
   }
@@ -948,7 +953,12 @@ export class UserManager {
     ) {
       throw new Error('PROJECT_SYNC_ADOPTION_COMMIT_INVALID');
     }
-    return parsed as unknown as ProjectAdoptionCommitEnvelope;
+    return {
+      ...parsed,
+      canvasKernelMode: resolveCanvasKernelMode(
+        typeof parsed.canvasKernelMode === 'string' ? parsed.canvasKernelMode : undefined,
+      ),
+    } as unknown as ProjectAdoptionCommitEnvelope;
   }
 
   private serializeProjectAdoptionCommit(
@@ -1140,6 +1150,7 @@ export class UserManager {
     userId: string;
     revision: number;
     assetGraphMode: AssetGraphMode;
+    canvasKernelMode: CanvasKernelMode;
     authoritativeBase: Project[];
     adoptedDraft: Project[];
     requiredBackups: ProjectConflictBackup[];
@@ -1179,6 +1190,7 @@ export class UserManager {
       userId: input.userId,
       revision: acceptedRevision,
       assetGraphMode: existing?.assetGraphMode ?? this._assetGraphMode,
+      canvasKernelMode: existing?.canvasKernelMode ?? this._canvasKernelMode,
       authoritativeBase: previousBase,
       adoptedDraft: previousProjects,
       conflictBackups: previousBackups,
@@ -1208,6 +1220,7 @@ export class UserManager {
         userId: input.userId,
         revision: input.revision,
         assetGraphMode: input.assetGraphMode,
+        canvasKernelMode: input.canvasKernelMode,
         authoritativeBase: cloneProjects(input.authoritativeBase),
         adoptedDraft: persistedDraft,
         conflictBackups,
@@ -1220,6 +1233,7 @@ export class UserManager {
       this._projectSyncRevision = input.revision;
       this._acceptedProjectMutationGeneration = this._projectMutationGeneration;
       this._assetGraphMode = input.assetGraphMode;
+      this._canvasKernelMode = input.canvasKernelMode;
       this._lastAuthoritativeProjects.set(input.userId, cloneProjects(input.authoritativeBase));
       this._serverSyncReady = true;
     } catch (error) {
@@ -1318,6 +1332,10 @@ export class UserManager {
     return this._assetGraphMode;
   }
 
+  getCanvasKernelMode(): CanvasKernelMode {
+    return this._canvasKernelMode;
+  }
+
   private applyAssetGraphMappings(
     assetGraphMappings: NonNullable<ProjectSyncResponse['assetGraphMappings']>,
     assetGraphUpdates: NonNullable<ProjectSyncResponse['assetGraphUpdates']>,
@@ -1385,6 +1403,7 @@ export class UserManager {
       userId,
       revision: nextRevision,
       assetGraphMode: this._assetGraphMode,
+      canvasKernelMode: this._canvasKernelMode,
       authoritativeBase: candidateProjects,
       adoptedDraft: candidateProjects,
       requiredBackups: [],
@@ -1588,6 +1607,7 @@ export class UserManager {
         success: boolean;
         value?: unknown;
         assetGraphMode?: AssetGraphMode;
+        canvasKernelMode?: CanvasKernelMode;
         projectRevision?: number;
       };
       if (!this.isCurrentProjectSyncRequest(request)) return false;
@@ -1602,6 +1622,7 @@ export class UserManager {
       const nextAssetGraphMode = data.assetGraphMode === 'shadow' || data.assetGraphMode === 'asset-v3'
         ? data.assetGraphMode
         : 'legacy';
+      const nextCanvasKernelMode = resolveCanvasKernelMode(data.canvasKernelMode);
       const nextProjectSyncRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
         ? Number(data.projectRevision)
         : 0;
@@ -1623,6 +1644,7 @@ export class UserManager {
           userId: expectedUserId,
           revision: nextProjectSyncRevision,
           assetGraphMode: nextAssetGraphMode,
+          canvasKernelMode: nextCanvasKernelMode,
           authoritativeBase: [],
           adoptedDraft: userData.projects,
           requiredBackups: [],
@@ -1640,6 +1662,7 @@ export class UserManager {
           userId: expectedUserId,
           revision: nextProjectSyncRevision,
           assetGraphMode: nextAssetGraphMode,
+          canvasKernelMode: nextCanvasKernelMode,
           authoritativeBase: [],
           adoptedDraft: [],
           requiredBackups: [],
@@ -1899,6 +1922,7 @@ export class UserManager {
         userId: currentUserId,
         revision: nextProjectSyncRevision,
         assetGraphMode: nextAssetGraphMode,
+        canvasKernelMode: nextCanvasKernelMode,
         authoritativeBase: serverProjects,
         adoptedDraft: userData.projects,
         requiredBackups,

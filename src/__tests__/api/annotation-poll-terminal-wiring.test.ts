@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(
   path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 
 describe('annotation remote poll terminal wiring', () => {
   it('commits remote edit success through the database before memory state', () => {

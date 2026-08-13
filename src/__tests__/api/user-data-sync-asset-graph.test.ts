@@ -49,6 +49,7 @@ const projects = [{
 
 describe('user-data asset graph sync route', () => {
   const originalMode = process.env.WUJIE_ASSET_GRAPH_MODE;
+  const originalCanvasKernelMode = process.env.WUJIE_CANVAS_KERNEL_MODE;
 
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => {
@@ -65,6 +66,8 @@ describe('user-data asset graph sync route', () => {
   afterEach(() => {
     if (originalMode === undefined) delete process.env.WUJIE_ASSET_GRAPH_MODE;
     else process.env.WUJIE_ASSET_GRAPH_MODE = originalMode;
+    if (originalCanvasKernelMode === undefined) delete process.env.WUJIE_CANVAS_KERNEL_MODE;
+    else process.env.WUJIE_CANVAS_KERNEL_MODE = originalCanvasKernelMode;
   });
 
   it('returns failure and does not fall back to a legacy-only write when atomic shadow sync fails', async () => {
@@ -131,6 +134,31 @@ describe('user-data asset graph sync route', () => {
     expect(mocks.readAssetV3Projects).toHaveBeenCalledWith('user-1', projects);
     expect(body.value).toEqual(projected);
     expect(body.assetGraphMode).toBe('asset-v3');
+  });
+
+  it('returns the server canvas mode and ignores a client-supplied mode on POST', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'legacy';
+    process.env.WUJIE_CANVAS_KERNEL_MODE = 'shadow';
+    mocks.dbGetUserData.mockResolvedValue(projects);
+
+    const postResponse = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        key: 'projects',
+        value: projects,
+        canvasKernelMode: 'canvas-v2',
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const postBody = await postResponse.json();
+    expect(postResponse.status).toBe(200);
+    expect(postBody).not.toHaveProperty('canvasKernelMode');
+
+    const getResponse = await GET(new NextRequest('http://localhost/api/user-data/sync?key=projects'));
+    expect(await getResponse.json()).toMatchObject({
+      success: true,
+      canvasKernelMode: 'shadow',
+    });
   });
 
   it('injects the established data URL persistence boundary into atomic shadow sync', async () => {

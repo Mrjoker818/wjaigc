@@ -181,3 +181,24 @@ Governance confirmation 2026-08-11: the user intentionally updated `stable` from
 - Exact-candidate `shadow` comparison passed: 5 legacy projects, one image in the controlled project, one active placement for each Canvas/chat/workflow entity type, zero owner/project mismatch, zero active placement with a non-ready version, and zero GC candidates.
 - Mandatory rollback passed twice. Final runtime is `WUJIE_ASSET_GRAPH_MODE=legacy`, `WUJIE_TASK_CORE_MODE=legacy`, physical purge disabled; HTTP `/` and `/api/auth/me` are 200, login remains usable, and the controlled image remains visible.
 - **Stage 2 is complete.** Tasks 1-9 must not be repeated. The next unique objective is Stage 3 Canvas kernel work under the existing no-feature-loss and `stable` read-only constraints.
+
+## WJ-STABLE-001 Stage 3 Progress
+
+Baseline: `origin/main@18346aa3c48f455ed8d01c3093eea2474e41a166`
+Branch: `codex/wj-stable-s3`
+Plan: `docs/superpowers/plans/2026-08-13-wujie-stable-canvas-kernel-stage-3.md`
+Protected stable branch: read-only and untouched
+
+| Task | Status | RED evidence | GREEN evidence | Commit | Cloud SHA | Unverified |
+|---|---|---|---|---|---|---|
+| 0 Baseline, three-state mode and ledger | completed locally | Focused RED: 5 expected failures for missing mode module, sync envelope, doctor output, and authenticated client adoption | Focused Task 0 suite passed; cross-platform source-wiring regressions 41/41; TypeScript passed; ESLint 0 errors / 959 historical warnings; full Vitest 902/902 suites, 2236 passed, 0 failed, 44 environment-pending; Doctor 22 pass / 13 warning / 0 fail / 2 blocked; production build 116/116; protected baseline 38/38 with 0 warnings | this Task 0 commit | `UNVERIFIED` | PostgreSQL, cloud exact-SHA, real-browser and performance evidence remain `UNVERIFIED` |
+| 1 Real canvas performance and functional evidence baseline | pending | pending | pending | pending | pending | 1/100/300-node browser fixtures not started |
+
+### Task 0 Scope And Safety
+
+- Added the fail-closed `legacy | shadow | canvas-v2` Canvas kernel mode contract. Unknown or absent values resolve to `legacy`; `shadow` remains legacy-authoritative for writes.
+- The authenticated `/api/user-data/sync` GET response is the runtime authority. Client POST fields and tampered browser cache cannot elevate the mode; old cache envelopes remain readable as `legacy`.
+- Doctor reports the effective mode without exposing the raw invalid environment value.
+- Three existing source-wiring tests now normalize CRLF to LF before multiline assertions. This is test portability only; annotation settlement, autosave, and asset lock business code were not changed.
+- Direct Doctor execution is environment-limited: missing local secrets/database/storage produced 13 warnings and 2 blocked checks. These are retained as unverified prerequisites, not counted as passes.
+- The 44 pending full-suite tests are environment-gated and are not counted as passed. Task 1 and all later Stage 3 tasks have not started.

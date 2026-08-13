@@ -171,6 +171,33 @@ afterEach(() => {
 });
 
 describe('UserManager project sync response isolation', () => {
+  it('adopts the authenticated canvas mode while treating the cached copy as untrusted', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      value: [project('user-a', '/media/a.png')],
+      assetGraphMode: 'legacy',
+      canvasKernelMode: 'shadow',
+      projectRevision: 1,
+    }), { status: 200 })));
+
+    const firstModule = await import('@/lib/user-manager');
+    const firstManager = firstModule.UserManager.getInstance();
+    await expect(firstManager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    expect(firstManager.getCanvasKernelMode()).toBe('shadow');
+
+    const commitKey = [...storage.keys()].find((key) => key.includes('project_adoption_commit'));
+    expect(commitKey).toBeTruthy();
+    const cachedCommit = JSON.parse(storage.get(commitKey!)!);
+    expect(cachedCommit.canvasKernelMode).toBe('shadow');
+
+    cachedCommit.canvasKernelMode = 'canvas-v2';
+    storage.set(commitKey!, JSON.stringify(cachedCommit));
+    vi.resetModules();
+    const reloadedModule = await import('@/lib/user-manager');
+    const reloadedManager = reloadedModule.UserManager.getInstance();
+    expect(reloadedManager.getCanvasKernelMode()).toBe('legacy');
+  });
+
   it('tracks only mutations that have not reached an accepted server revision', async () => {
     let revision = 1;
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
