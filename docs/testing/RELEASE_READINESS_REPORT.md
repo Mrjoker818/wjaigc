@@ -746,3 +746,9 @@ Post-decision update: the implementation candidate was fast-forward pushed to `m
 ## 2026-08-13 BUG-071 release decision
 
 The controlled cloud `asset-v3` run exposed a P1 delete/undo persistence defect, so Stage 2 was correctly kept open and Coze was returned to `legacy`. The local candidate now synchronizes placement lifecycle and the authoritative project snapshot, compensates partial failure, and passes the five-profile production-browser reload matrix. The current verdict remains **CONDITIONAL**: push to `main` only, have Coze pull the exact new SHA, verify the same controlled `asset-v3` sequence, then prove rollback to `legacy`. `stable` remains read-only and physical purge remains disabled.
+
+## 2026-08-13 Stage 2 final release decision
+
+Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in authenticated Chrome. BUG-071's delete/undo/redo/undo/reload sequence passed in controlled `asset-v3`; PostgreSQL preserved one authoritative Canvas placement plus the intended chat and workflow references on the same ready version. Exact-candidate `shadow` comparison reported no owner/project drift, no non-ready active reference, and no GC candidate. Both controlled modes were rolled back successfully.
+
+**Stage 2 verdict: PASS / COMPLETE.** The deployed test environment finishes in `WUJIE_ASSET_GRAPH_MODE=legacy`, `WUJIE_TASK_CORE_MODE=legacy`, with physical purge disabled. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains untouched. The whole-program verdict remains **CONDITIONAL / NOT FINAL** because Stages 3 and later, along with the separately registered business-module and payment gates, are outside this Stage 2 closure.

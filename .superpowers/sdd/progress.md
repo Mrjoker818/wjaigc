@@ -172,3 +172,12 @@ Governance confirmation 2026-08-11: the user intentionally updated `stable` from
 - The verified implementation was fast-forward pushed from `origin/main@1344dec33f93fc9d8a19baeaf9ed251c28176f5f` to `main@644a0809658d500d9e3815c14771dd10581f0998`; no force operation was used.
 - Post-push verification confirmed `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is byte-for-byte unchanged.
 - Coze still reports the older runtime baseline `4bbe6db`. The next unique action is for Coze to pull the new main tip and prove the exact runtime SHA in `shadow`; do not start `asset-v3` until that comparison passes.
+
+## 2026-08-13: Task 9 cloud closure, Stage 2 complete
+
+- GitHub `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` contains the verified BUG-071 repair. Coze's deployment lineage contains that exact source commit plus deployment-only change cards; no business-source delta was introduced and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged.
+- Authenticated Chrome on the isolated Coze preview passed the controlled `asset-v3` sequence: delete -> Ctrl+Z restore -> Ctrl+Shift+Z trash -> Ctrl+Z restore -> reload. The same 800x534 Pear image remained visible after reload.
+- PostgreSQL confirmed asset `559c7f48-04f1-544e-8ec5-3c23ba4fb975`, ready version `66621b79-77c2-561f-966f-0c9870ba168a`, and the unique active Canvas placement `696446c1-3278-5548-9427-3290ca3ea1a5`. The chat attachment and workflow input references remained active and pointed to the same asset/version.
+- Exact-candidate `shadow` comparison passed: 5 legacy projects, one image in the controlled project, one active placement for each Canvas/chat/workflow entity type, zero owner/project mismatch, zero active placement with a non-ready version, and zero GC candidates.
+- Mandatory rollback passed twice. Final runtime is `WUJIE_ASSET_GRAPH_MODE=legacy`, `WUJIE_TASK_CORE_MODE=legacy`, physical purge disabled; HTTP `/` and `/api/auth/me` are 200, login remains usable, and the controlled image remains visible.
+- **Stage 2 is complete.** Tasks 1-9 must not be repeated. The next unique objective is Stage 3 Canvas kernel work under the existing no-feature-loss and `stable` read-only constraints.

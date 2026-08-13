@@ -1191,8 +1191,8 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Actual | History changed React state only. The graph stayed trashed, or a delayed deletion snapshot could trash the restored placement again. |
 | Root cause | Undo/redo did not reconcile managed placement lifecycle and did not commit the matching authoritative project snapshot before accepting the UI transition. Recently-deleted suppression also retained restored IDs. |
 | Fix | Reconcile restore/trash before UI commit, advance the authoritative revision, commit the exact post-history snapshot, clear restored-ID suppression, serialize concurrent history actions, and compensate completed lifecycle changes if a later operation fails. |
-| Regression | RED was `4 failed / 5 passed`; focused GREEN is `11/11`. Real production-browser evidence is `5/5` across Chromium, 1920x1080 Chromium, Firefox, WebKit, and mobile Chromium. The initial login-fixture 503 and Firefox reload failure remain retained as failed evidence. |
-| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD EXACT-SHA REVALIDATION PENDING.** |
+| Regression | RED was `4 failed / 5 passed`; focused GREEN is `11/11`. Real production-browser evidence is `5/5` across Chromium, 1920x1080 Chromium, Firefox, WebKit, and mobile Chromium. On Coze source `main@81fe303e`, authenticated Chrome passed delete, undo, redo, second undo, and reload; PostgreSQL confirmed the Canvas placement active on ready version `66621b79-77c2-561f-966f-0c9870ba168a`, while chat/workflow references remained active. The initial login-fixture 503 and Firefox reload failure remain retained as failed evidence. |
+| Status | **CLOSED LOCALLY AND IN CONTROLLED CLOUD 2026-08-13. Final runtime rolled back to `legacy`; physical purge remains disabled.** |
 
 ### BUG-066: Restoring a Canvas placement did not restore the legacy project snapshot
 

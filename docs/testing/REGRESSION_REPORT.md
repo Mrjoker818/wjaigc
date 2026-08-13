@@ -901,3 +901,12 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - The first local browser attempt failed at login with HTTP 503 because the isolated production server omitted `WUJIE_ADMIN_PASSWORD`; this was a fixture configuration failure and remains retained.
 - The first five-profile run passed four profiles but failed Firefox after reload. Network evidence proved restore and identity GET succeeded before a stale snapshot removed the placement. Binding the post-history snapshot to the lifecycle transition closed that race.
 - Final focused tests pass `11/11`; Chromium, Chromium 1080p, Firefox, WebKit, and mobile Chromium pass `5/5`. The final PostgreSQL-enabled full regression passes `413/413` files and `2273/2273` tests with zero failures or skips. Production build generates `116/116` routes.
+
+## 2026-08-13 Stage 2 Task 9 cloud closure
+
+- Source candidate: GitHub `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231`. Coze retained only its deployment adapter/change-card lineage; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` was not changed.
+- Authenticated Chrome passed the controlled `asset-v3` lifecycle on project `project_1786500304299_8vix1z45f`: delete removed the image, Ctrl+Z restored it, Ctrl+Shift+Z removed it again, a second Ctrl+Z restored it, and reload preserved the 800x534 Pear image.
+- PostgreSQL identity after reload: asset `559c7f48-04f1-544e-8ec5-3c23ba4fb975`, ready version `66621b79-77c2-561f-966f-0c9870ba168a`, Canvas placement `696446c1-3278-5548-9427-3290ca3ea1a5` active. One chat-attachment and one workflow-input placement remained active on the same asset/version.
+- Exact-candidate `shadow` comparison matched the compatibility projection: 5 legacy projects, one Canvas image in the controlled project, three active cross-workspace placements, zero owner/project mismatch, zero non-ready active reference, and zero GC candidates.
+- Rollback was proven after both controlled modes. Final Coze runtime is `legacy` asset mode, `legacy` task core, physical purge disabled; `/` and `/api/auth/me` return 200 and the project image remains visible without a new login prompt.
+- **Stage 2 Task 9: PASS. Stage 2: COMPLETE.** This conclusion is limited to the Stage 2 asset/version graph and does not mark later Canvas, node/Agent, business-tool, administrator, user, payment, or whole-platform work complete.

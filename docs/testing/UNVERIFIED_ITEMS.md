@@ -584,8 +584,8 @@
 | Item | Status | Required evidence |
 |---|---|---|
 | BUG-071 local lifecycle and reload | VERIFIED LOCALLY | Focused `11/11` and five production-browser profiles `5/5`, including Firefox and mobile. |
-| Exact BUG-071 Coze candidate | UNVERIFIED | Push the new main-only commit and confirm Coze pulled that exact SHA. |
-| Controlled cloud asset-v3 history | UNVERIFIED / BLOCKING | Delete, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Z, identity GET, reload, and cross-workspace reference checks on the isolated Coze project. |
-| Mandatory legacy rollback | UNVERIFIED / BLOCKING | Return asset mode to `legacy`, task core to `legacy`, keep purge disabled, restart, and prove login plus existing projects remain usable. |
-| Controlled `asset-v3` switch | NOT STARTED / BLOCKING | Use only the isolated test environment after shadow passes; verify old projects, three workspaces, ownership, task terminal, and billing. |
-| Rollback `asset-v3 -> legacy` | NOT STARTED / BLOCKING | Switch back without deleting additive tables and prove login, old projects, generated media, chat/workflow references, and billing remain intact. |
+| Exact BUG-071 Coze candidate | VERIFIED | Coze source lineage contains GitHub `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231`; deployment-only change cards did not alter business source. |
+| Controlled cloud asset-v3 history | VERIFIED | Authenticated Chrome passed delete, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Z and reload; PostgreSQL confirmed the restored Canvas placement and unchanged chat/workflow references. |
+| Mandatory legacy rollback | VERIFIED | Final runtime returned to asset `legacy`, task core `legacy`, purge disabled; HTTP health, login session, project and image passed. |
+| Exact-candidate shadow comparison | VERIFIED | 5 legacy projects, one controlled Canvas image, one active placement per Canvas/chat/workflow type, zero ownership drift, zero non-ready active reference, zero GC candidate. |
+| Physical asset purge | PROHIBITED / NOT EXECUTED | This is intentional Stage 2 safety scope, not missing validation. Purge remains disabled for the next stage. |
