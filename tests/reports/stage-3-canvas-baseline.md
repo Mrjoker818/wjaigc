@@ -1,6 +1,6 @@
 # Stage 3 Canvas Functional And Performance Baseline
 
-Status: controlled Chromium baseline plus Task 2 viewport and Task 3 render-projection reruns executed; current Canvas does not yet pass all Stage 3 thresholds because the one-node persisted drag P1 remains open.
+Status: controlled Chromium baseline plus Tasks 2-4 reruns executed. Task 4 closes the one-node persisted drag and selection-gesture defects locally, but the Canvas still misses the fixed 300-node input-delay threshold.
 
 ## Scope
 
@@ -34,6 +34,10 @@ Credential-bearing environment output must remain outside the repository. Cleanu
 | Task 2 implementation commit | Chromium | 1280x720 | 300 | 57.27 | 17.10ms | 87ms | 0ms | 0 | 0ms | **PASS** |
 | Task 3 candidate | Chromium | 1280x720 | 100 | 58.30 | 17.10ms | 105ms | 0ms | 0 | 0ms | **PASS** |
 | Task 3 candidate | Chromium | 1280x720 | 300 | 56.50 | 17.10ms | 122ms | 0ms | 0 | 0ms | **PASS** |
+| Task 4 candidate | Chromium | 1280x720 | reverse box / 100 fixture | 57.76 | 14.70ms | 78ms | 0ms | 0 | 0ms | **PASS** |
+| Task 4 candidate | Chromium | 1280x720 | 1 | 58.30 | 25.40ms | 78ms | 0ms | 0 | 0ms | **PASS**: drag coordinates persist and survive reload |
+| Task 4 candidate | Chromium | 1280x720 | 100 | 58.50 | 35.60ms | 78ms | 0ms | 0 | 0ms | **PASS** |
+| Task 4 candidate | Chromium | 1280x720 | 300 | 57.18 | 50.20ms | 85ms | 0ms | 0 | 0ms | **FAIL**: input P95 exceeds 50ms; preceding runs were 56.80ms and 62.80ms |
 
 Execution environment: Windows, Playwright 1.60.0, local PostgreSQL 18 isolated cluster, local production Next.js server, `WUJIE_CANVAS_KERNEL_MODE=legacy`, `WUJIE_ASSET_GRAPH_MODE=legacy`, `WUJIE_TASK_CORE_MODE=legacy`.
 
@@ -43,12 +47,13 @@ The first environment attempt returned HTTP 503 because a brand-new database req
 
 ### S3-BL-001: Image drag does not persist coordinates
 
-- Severity for Stage 3: P1 baseline failure.
+- Status: closed locally by Task 4; exact-SHA cloud and four-browser matrix remain unverified.
+- Original severity for Stage 3: P1 baseline failure.
 - Reproduction: open the isolated one-node project, drag the visible image 96px right and 64px down across 45 animation frames, wait for the project save response, then read the authenticated project snapshot.
 - Expected: persisted x/y differs from `80/80` and survives reload.
-- Actual: persisted x/y remains `80/80`.
+- Original actual: persisted x/y remained `80/80`.
 - Evidence: one-node screenshot, video, Trace, console/network logs and `one-node-drag-performance.json` under the evidence directory described below.
-- Repair is intentionally deferred to the ordered viewport/gesture work; Task 1 does not change Canvas business behavior.
+- Task 4 now retains the latest drag offset in refs, commits one image snapshot on pointerup, synchronously updates `imagesRef`, and publishes that same snapshot to `onImagesChange` and `onForceSave`. Local production-browser evidence proves changed coordinates, reload persistence and pointercancel rollback.
 
 ### S3-BL-002: 300-node pan loses hit-test continuity
 
@@ -81,11 +86,20 @@ The first environment attempt returned HTTP 503 because a brand-new database req
 - The plan's literal grep (`100 nodes|300 nodes|continuity`) matched no current test title; the equivalent existing titles (`100-node|300-node|preserves drag`) were executed. The one-node flow still failed only at the previously registered persisted-coordinate assertion (`80/80`).
 - Fresh repository gates: TypeScript passed; full ESLint returned `0 errors / 959 historical warnings`; full Vitest returned `918/918` suites, `2268` passed, `0` failed and `44` environment-pending; production build generated `116/116` pages; protected features remained `38/38` with 0 warnings.
 
+## Task 4 Selection And Gesture Evidence
+
+- A pure controller now owns committed selection, primary selection, z-order hits, reverse box geometry, thresholds and cancellation. The React adapter stores frame-level box previews in refs and publishes only committed business state.
+- Real Chromium diagnosis proved that blank mouse pointerdown activated two competing controllers: immediate box selection and delayed long-press pan. In a dense fixture the pan timer could fire before the first delivered move, changing the Canvas transform and moving every target by the drag delta. Mouse and pen now use box selection; touch retains long-press pan. Hand tool, Space and middle button continue to provide mouse panning.
+- Independent review exposed and closed touch jitter, group `pointercancel`, and Ctrl/Meta selection-versus-fusion boundaries. The re-review returned `APPROVED` with no remaining finding.
+- Task 4's exact grep passed `3/3`; focused unit/wiring/contract regression passed `34/34`. Real Ctrl add/remove selection and reverse box selection selected exactly the intended nodes at `14.70ms` input P95, and `pointercancel` restored the preview without saving coordinates.
+- After reseeding all 15 controlled projects, the complete Chromium Stage 3 run passed `5/6`. The 100-node run passed at `58.50 FPS`, `35.60ms` P95, zero disappeared frames and zero unclickable time. The 300-node run retained zero disappearance and click loss at `57.18 FPS`, but failed the fixed input P95 gate at `50.20ms`; preceding runs were `56.80ms` and `62.80ms`. The threshold remains unchanged.
+- TypeScript, production build (`116/116`), full Vitest (`411` files / `2288` passed / `44` skipped) and `git diff --check` pass. ESLint reports `0 errors / 966 historical warnings`. The `12` skipped files remain PostgreSQL-gated. The protected-feature gate confirms all `38/38` feature identities and paths are present but blocks Stage 3 production-source drift until the plan's later baseline-update task.
+
 ## Not Yet Verified
 
 - Chromium 1920x1080, Firefox, WebKit and mobile Chromium were not executed in Task 1; their 12 isolated projects are prepared for the later matrix gate.
 - Cloud exact-SHA and `canvas-v2 -> legacy` rollback remain `UNVERIFIED`.
-- The current baseline is not a release pass. S3-BL-001 remains enabled and failing until the ordered gesture/command task repairs it.
+- The current baseline is not a release pass. S3-BL-001 is closed locally, while the 300-node input P95 performance gate and the external browser/cloud matrix remain open.
 
 ## Evidence
 

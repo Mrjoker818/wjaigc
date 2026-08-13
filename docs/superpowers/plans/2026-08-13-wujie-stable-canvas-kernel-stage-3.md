@@ -331,7 +331,7 @@ Commit: `perf: stabilize canvas render projection`
 - Produces: `selectHit`、`toggleHit`、`beginBoxSelection`、`updateBoxSelection`、`commitBoxSelection`、`clearSelection`。
 - Consumes: Task 3 的空间索引和渲染保活集合。
 
-- [ ] **Step 1: 写选择不变量 RED**
+- [x] **Step 1: 写选择不变量 RED**
 
 ```ts
 expect(selectHit(state, 'top', 'replace').ids).toEqual(['top']);
@@ -342,12 +342,12 @@ expect(clearSelection(state)).toEqual({ ids: [], primaryId: null, gesture: null 
 
 覆盖重叠节点最上层优先、Ctrl/Meta 多选、空白点击、框选方向反转、拖动阈值、pointercancel、面板事件隔离和编辑模式优先级。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/canvas-selection.test.ts src/__tests__/components/canvas-selection-wiring.test.ts`
 Expected: FAIL，新控制器尚不存在。
 
-- [ ] **Step 3: 实现纯选择控制器与 React 适配器**
+- [x] **Step 3: 实现纯选择控制器与 React 适配器**
 
 ```ts
 export function selectHit(
@@ -359,11 +359,11 @@ export function selectHit(
 
 适配器只发布已提交选择；框选预览保存在控制器 ref/rAF 中。`data-modal`、`data-popup`、`data-floating-panel`、`data-toolbar` 和 dialog 继续阻断画布手势。
 
-- [ ] **Step 4: 迁移入口而不改变语义**
+- [x] **Step 4: 迁移入口而不改变语义**
 
 逐一接入鼠标、触控笔、触摸、右键、空格平移、中键平移、图片拖动、组拖动和批注优先级；每迁移一种手势先跑对应聚焦测试。
 
-- [ ] **Step 5: GREEN 与真实多选回归**
+- [x] **Step 5: GREEN 与真实多选回归**
 
 Run: `pnpm exec vitest run src/__tests__/lib/canvas-selection.test.ts src/__tests__/components/canvas-selection-wiring.test.ts src/__tests__/components/canvas-group-gesture-contract.test.ts src/__tests__/components/canvas-image-drag-contract.test.ts`
 Expected: 全部通过。
@@ -371,7 +371,7 @@ Expected: 全部通过。
 Run: `pnpm test:e2e:stage-3 --project=chromium --grep "select|drag|box|pointer cancel"`
 Expected: 坐标和选择集合精确匹配，输入 P95 不高于 50ms。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 Commit: `refactor: isolate canvas selection gestures`
 

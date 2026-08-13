@@ -589,3 +589,16 @@
 | Mandatory legacy rollback | VERIFIED | Final runtime returned to asset `legacy`, task core `legacy`, purge disabled; HTTP health, login session, project and image passed. |
 | Exact-candidate shadow comparison | VERIFIED | 5 legacy projects, one controlled Canvas image, one active placement per Canvas/chat/workflow type, zero ownership drift, zero non-ready active reference, zero GC candidate. |
 | Physical asset purge | PROHIBITED / NOT EXECUTED | This is intentional Stage 2 safety scope, not missing validation. Purge remains disabled for the next stage. |
+
+## 2026-08-13 Stage 3 Task 4 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| 300-node input P95 | OPEN P1 | Isolate and repair the clean-fixture `50.2ms` measurement plus preceding `56.8ms` / `62.8ms` runs without changing the fixed `<=50ms` threshold; rerun the complete production Chromium spec. |
+| Chromium 1920x1080 | UNVERIFIED | Run the Task 4 selection, pointercancel, drag persistence and 100/300-node performance flows against an isolated fixture. |
+| Firefox | UNVERIFIED | Run the same selection/gesture contract with retained screenshot, video, trace, Console and network evidence. |
+| WebKit | UNVERIFIED | Run the same selection/gesture contract with retained evidence. |
+| Mobile Chromium | UNVERIFIED | Prove touch long-press pan remains usable while touch selection/edit priorities remain correct. |
+| PostgreSQL-gated full suites | UNVERIFIED | Configure the required isolated PostgreSQL URL variables and rerun all `12` skipped files / `44` skipped tests; skipped tests are not passes. |
+| Protected-baseline production drift | BLOCKED BY ORDERED PLAN | Task 4 confirms all `38/38` protected identities remain. Update the allowlist/metadata only in the later approved Stage 3 baseline task, then rerun the gate. |
+| Exact-SHA Coze candidate and rollback | UNVERIFIED | After the ordered local tasks and main-only candidate are ready, pull the exact SHA, validate in the isolated Coze environment, and prove `canvas-v2 -> legacy` rollback. `stable` remains read-only. |

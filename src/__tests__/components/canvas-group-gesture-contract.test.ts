@@ -11,7 +11,9 @@ describe('canvas group gesture contract', () => {
   it('creates reference and fusion groups from the pointer-down modifier gesture before image dragging starts', () => {
     expect(source).toContain('addReferenceImageToGenGroupRef');
     expect(source).toContain('addFusionImageToGenGroupRef');
-    expect(source).toContain('modifierImage && (e.altKey || e.ctrlKey || e.metaKey)');
+    expect(source).toContain("pointerIntent === 'reference-group'");
+    expect(source).toContain("pointerIntent === 'fusion-group'");
+    expect(source).toContain('fusionMode: showRefFusion');
     expect(source).toContain('addReferenceImageToGenGroupRef.current(modifierImage);');
     expect(source).toContain('addFusionImageToGenGroupRef.current(modifierImage);');
   });

@@ -910,3 +910,13 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Exact-candidate `shadow` comparison matched the compatibility projection: 5 legacy projects, one Canvas image in the controlled project, three active cross-workspace placements, zero owner/project mismatch, zero non-ready active reference, and zero GC candidates.
 - Rollback was proven after both controlled modes. Final Coze runtime is `legacy` asset mode, `legacy` task core, physical purge disabled; `/` and `/api/auth/me` return 200 and the project image remains visible without a new login prompt.
 - **Stage 2 Task 9: PASS. Stage 2: COMPLETE.** This conclusion is limited to the Stage 2 asset/version graph and does not mark later Canvas, node/Agent, business-tool, administrator, user, payment, or whole-platform work complete.
+
+## 2026-08-13 Stage 3 Task 4 selection and gesture regression
+
+- TDD introduced a pure Canvas selection controller plus React adapter. Focused selection, wiring, group-gesture and image-drag contracts pass `34/34` after independent review closed touch jitter, group-cancel and Ctrl/Meta routing regressions.
+- The fresh whole-repository rerun passes `411/411` executed test files and `2291/2291` executed tests. Twelve PostgreSQL-gated files containing 44 tests remain explicitly skipped because `POSTGRES_TEST_DATABASE_URL` is not configured. ESLint reports `0 errors / 966 historical warnings`.
+- Local production Chromium Task 4 acceptance passes `3/3`: exact single/reverse-box selection, pointercancel rollback without persistence, and image drag with zoom/reset/reload persistence.
+- After a clean 15-project reseed, the complete Stage 3 Chromium spec passes `5/6`. One-node persistence, delete/undo/redo and 100-node pan pass. The 300-node run fails only the fixed input P95 gate: `50.2ms` versus `<=50ms` (preceding runs `56.8ms` and `62.8ms`); FPS is `57.18`, disappeared frames `0`, unclickable time `0`.
+- Fresh supporting gates: TypeScript exit `0`; full Vitest `411` files / `2288` passed / `44` skipped; ESLint `0 errors / 966 historical warnings`; production build `116/116`; `git diff --check` exit `0`. The `12` skipped files are PostgreSQL-gated and are not counted as passes.
+- The protected-feature gate confirms `38/38` feature identities, source paths and evidence contracts are present. It still blocks Stage 3 production-source drift because the current allowlist/baseline update is scheduled later in the approved plan; this is not represented as a clean release gate.
+- **Task 4 verdict: PASS LOCALLY FOR ITS FUNCTIONAL SCOPE. Stage 3 verdict: NOT COMPLETE.** Task 5 is next and not started; S3-BUG-004, external browser profiles, exact-SHA cloud validation and rollback remain open.

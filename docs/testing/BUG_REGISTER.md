@@ -1267,3 +1267,32 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Lock project snapshot before asset and placement, update graph and snapshot in one transaction, persist `canvasTrashProjectRevision` in placement metadata, return that exact value on retry, and propagate restore revisions end to end. |
 | Regression | Real PostgreSQL tests cover response-loss retry after an independent revision advance, string revision parsing, restore increment, lock order, and concurrent lifecycle behavior; focused unit/API tests and five-browser E2E pass. Independent final review: `APPROVED`. |
 | Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |
+
+### S3-BUG-003: Mouse box selection raced with long-press Canvas pan
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite Canvas selection and gesture routing |
+| Environment | Stage 3 Task 4, local production Chromium, 100-node isolated project, 2026-08-13 |
+| Reproduction | Start a reverse-direction drag from blank space around two visible nodes in the dense fixture. |
+| Expected | The exact intersecting pair becomes selected and node coordinates remain unchanged. |
+| Actual | The Canvas transform moved by the drag delta and only one node remained selected. |
+| Root cause | Mouse blank pointerdown started both box selection and the 250ms long-press pan timer. Under load the timer could become authoritative before the first pointermove was delivered. |
+| Fix | Use explicit pointer-device gesture policy: mouse/pen blank drag is box selection, touch retains long-press pan, and mouse pan remains available through the hand tool, Space and middle button. Selection preview is ref/rAF-backed and pointer cancellation rolls it back. |
+| Regression | Focused selection/wiring/drag/group suite `34/34`; production Chromium Task 4 grep `3/3`, including real Ctrl add/remove multi-selection, exact reverse box selection and pointercancel rollback. Independent re-review: `APPROVED`. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD AND FOUR-BROWSER MATRIX PENDING.** |
+
+### S3-BUG-004: 300-node Canvas input delay exceeds the fixed Stage 3 gate
+
+| Field | Detail |
+|---|---|
+| Severity | P1 performance |
+| Module | Infinite Canvas high-density interaction |
+| Environment | Stage 3 Task 4 full Chromium regression, local production server, 2026-08-13 |
+| Reproduction | Open the isolated 300-node project and execute the fixed 75-frame Space-pan scenario. |
+| Expected | Input delay P95 is `<=50ms`, average FPS is `>=45`, with zero disappeared frames and zero unclickable time. |
+| Actual | Clean-fixture P95 was `50.2ms`; preceding runs were `56.8ms` and `62.8ms`. The latest run measured `57.18 FPS`, zero disappeared frames and zero unclickable time. |
+| Root cause | Not yet isolated. The failure remains assigned to the Stage 3 performance track; Task 4 does not guess at a fix or relax the threshold. |
+| Regression | The full Chromium spec remains enabled and reports `5/6` while this assertion fails. |
+| Status | **OPEN P1.** |
