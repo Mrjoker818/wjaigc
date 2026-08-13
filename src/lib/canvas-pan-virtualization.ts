@@ -45,6 +45,7 @@ export function resolveCanvasCullingBounds(
   viewportHeight: number,
   isPanning: boolean,
   isMiddlePanning: boolean,
+  occupiedRight = 0,
 ): CanvasCullingBounds {
   const activeOffset = resolveCanvasCullingOffset(
     committedOffset,
@@ -56,12 +57,13 @@ export function resolveCanvasCullingBounds(
   const committedY = -committedOffset.y / zoom;
   const activeX = -activeOffset.x / zoom;
   const activeY = -activeOffset.y / zoom;
+  const usableViewportWidth = Math.max(1, viewportWidth - Math.max(0, occupiedRight));
   const normalizeZero = (value: number): number => Object.is(value, -0) ? 0 : value;
 
   return {
     minX: normalizeZero(Math.min(committedX, activeX)),
     minY: normalizeZero(Math.min(committedY, activeY)),
-    maxX: Math.max(committedX + viewportWidth / zoom, activeX + viewportWidth / zoom),
+    maxX: Math.max(committedX + usableViewportWidth / zoom, activeX + usableViewportWidth / zoom),
     maxY: Math.max(committedY + viewportHeight / zoom, activeY + viewportHeight / zoom),
   };
 }

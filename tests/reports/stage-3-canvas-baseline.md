@@ -1,6 +1,6 @@
 # Stage 3 Canvas Functional And Performance Baseline
 
-Status: controlled Chromium baseline executed; current Canvas does not yet pass all Stage 3 thresholds.
+Status: controlled Chromium baseline and Task 2 viewport rerun executed; current Canvas does not yet pass all Stage 3 thresholds because the one-node persisted drag P1 remains open.
 
 ## Scope
 
@@ -30,6 +30,8 @@ Credential-bearing environment output must remain outside the repository. Cleanu
 | `143bbc579b2fcb8293022e54df2b5e53ce07461e` | Chromium | 1280x720 | 1 | 57.60 | 13.70ms | 94ms | 0ms | 0 | 0ms | **FAIL**: drag did not change the persisted x/y coordinates |
 | `143bbc579b2fcb8293022e54df2b5e53ce07461e` | Chromium | 1280x720 | 100 | 58.20 | 14.10ms | 99ms | 0ms | 0 | 0ms | **PASS** |
 | `143bbc579b2fcb8293022e54df2b5e53ce07461e` | Chromium | 1280x720 | 300 | 57.76 | 24.90ms | 95ms | 0ms | 0 | 1583.20ms | **FAIL**: hit-test continuity threshold is 0ms |
+| Task 2 implementation commit | Chromium | 1280x720 | 100 | 58.78 | 16.60ms | 87ms | 0ms | 0 | 0ms | **PASS** |
+| Task 2 implementation commit | Chromium | 1280x720 | 300 | 57.27 | 17.10ms | 87ms | 0ms | 0 | 0ms | **PASS** |
 
 Execution environment: Windows, Playwright 1.60.0, local PostgreSQL 18 isolated cluster, local production Next.js server, `WUJIE_CANVAS_KERNEL_MODE=legacy`, `WUJIE_ASSET_GRAPH_MODE=legacy`, `WUJIE_TASK_CORE_MODE=legacy`.
 
@@ -48,18 +50,30 @@ The first environment attempt returned HTTP 503 because a brand-new database req
 
 ### S3-BL-002: 300-node pan loses hit-test continuity
 
-- Severity for Stage 3: P1 performance/interaction baseline failure.
+- Status: closed locally by Task 2; exact-SHA cloud and four-browser matrix remain unverified.
+- Original severity for Stage 3: P1 performance/interaction baseline failure.
 - Reproduction: reset the controlled 300-node project, verify four center nodes are loaded and hittable, then Space-pan 120x72px across 75 animation frames.
 - Expected: `unclickableDurationMs = 0`.
 - Actual: `1583.20ms`; FPS, input P95 and disappeared-frame gates still pass.
-- The same test passes at 100 nodes with `unclickableDurationMs = 0`, so this is node-count sensitive rather than a universal instrumentation failure.
-- Repair is intentionally deferred to the ordered viewport/render work.
+- Root cause: reset and culling treated the fixed 480px right workspace panel as usable Canvas viewport, while the continuity sampler also treated legitimate fixed toolbar/panel overlays as Canvas hit targets. At 300 nodes this created sustained false interaction loss near the occupied edge and could fit content behind the panel.
+- Task 2 now derives a usable viewport excluding the fixed right panel, applies it to fit/reset and culling, and marks the viewport/panel boundaries explicitly. The continuity sampler still checks image disappearance and hit testing throughout the actual interactive Canvas, but no longer treats fixed tool surfaces as Canvas.
+- Local Chromium rerun passes at both 100 and 300 nodes with zero disappearing frames and `unclickableDurationMs = 0`. The 300-node result remains above the fixed FPS and input-delay thresholds.
+
+## Task 2 Viewport Controller Evidence
+
+- Added a pure viewport state machine for pan preview/commit/cancel, anchored zoom, coordinate conversion and fit-to-content.
+- Added a React adapter with explicit `legacy`, `shadow` and `canvas-v2` paths. `shadow` computes and records differences without becoming authoritative; `legacy` remains the default.
+- High-frequency pan preview remains `requestAnimationFrame`-driven and uses direct transform updates. React state is committed at controlled boundaries.
+- Focused viewport and wiring regression: 5 files, 23 tests passed.
+- Full Vitest exited 0. Seven PostgreSQL suites were explicitly blocked because `POSTGRES_TEST_DATABASE_URL` was absent and are not counted as verified.
+- TypeScript passed; full-repository error-only ESLint exited 0; production build generated 116/116 pages; `git diff --check` passed.
+- S3-BL-001 remains open. Task 2 does not claim to repair image drag command persistence, which belongs to the ordered gesture/command work.
 
 ## Not Yet Verified
 
 - Chromium 1920x1080, Firefox, WebKit and mobile Chromium were not executed in Task 1; their 12 isolated projects are prepared for the later matrix gate.
 - Cloud exact-SHA and `canvas-v2 -> legacy` rollback remain `UNVERIFIED`.
-- The current baseline is not a release pass. Its two failing assertions must remain enabled until repaired.
+- The current baseline is not a release pass. S3-BL-001 remains enabled and failing until the ordered gesture/command task repairs it.
 
 ## Evidence
 

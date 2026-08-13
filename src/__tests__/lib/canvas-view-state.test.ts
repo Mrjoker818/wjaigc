@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fitCanvasContent,
   normalizeCanvasViewState,
+  resolveCanvasUsableViewportSize,
   type CanvasViewRect,
 } from '@/lib/canvas-view-state';
 
@@ -34,6 +35,18 @@ describe('canvas view state', () => {
       offsetY: 0,
       zoom: 1,
     });
+  });
+
+  it('excludes fixed workspace chrome from the usable canvas viewport', () => {
+    expect(resolveCanvasUsableViewportSize(
+      { width: 1280, height: 720 },
+      { left: 24, right: 480, top: 16, bottom: 32 },
+    )).toEqual({ width: 776, height: 672 });
+
+    expect(resolveCanvasUsableViewportSize(
+      { width: 320, height: 240 },
+      { right: 480 },
+    )).toEqual({ width: 1, height: 240 });
   });
 
   it('accepts only finite, bounded persisted view state', () => {

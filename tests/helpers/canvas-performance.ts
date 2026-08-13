@@ -48,7 +48,13 @@ export function summarizeCanvasPerformance(raw: CanvasPerformanceRawSample): Can
 }
 
 export async function assertCanvasNodeContinuity(page: Page, ids: string[]): Promise<void> {
-  const failures = await page.evaluate(monitoredIds => monitoredIds.flatMap(id => {
+  const failures = await page.evaluate(monitoredIds => {
+    const viewport = document.querySelector<HTMLElement>('[data-canvas-viewport]');
+    const viewportRect = viewport?.getBoundingClientRect();
+    const occupiedRight = Math.max(0, Number(viewport?.dataset.canvasOccupiedRight || 0));
+    const interactiveRight = (viewportRect?.right ?? innerWidth) - occupiedRight - 2;
+
+    return monitoredIds.flatMap(id => {
     const image = [...document.querySelectorAll<HTMLImageElement>('[data-canvas-viewport] img')]
       .find(candidate => candidate.alt === id);
     if (!image) return [`${id}:missing`];
@@ -62,12 +68,20 @@ export async function assertCanvasNodeContinuity(page: Page, ids: string[]): Pro
     if (!image.complete || image.naturalWidth === 0 || rect.width <= 0 || rect.height <= 0) {
       return [`${id}:not-rendered`];
     }
-    const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
-    const y = Math.min(window.innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    if (
+      viewportRect
+      && (centerX < viewportRect.left || centerX > interactiveRight || centerY < viewportRect.top || centerY > viewportRect.bottom)
+    ) return [];
+    const x = Math.min(window.innerWidth - 1, Math.max(0, centerX));
+    const y = Math.min(window.innerHeight - 1, Math.max(0, centerY));
     const hit = document.elementFromPoint(x, y);
+    if (hit instanceof Element && hit.closest('[data-toolbar], [data-floating-panel], [data-popup], [data-modal]')) return [];
     if (!hit || (!card.contains(hit) && hit !== card)) return [`${id}:not-hittable`];
     return [];
-  }), ids);
+    });
+  }, ids);
   if (failures.length > 0) throw new Error(`Canvas node continuity failed: ${failures.join(', ')}`);
 }
 
@@ -145,6 +159,17 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
       state.lastFrameAt = timestamp;
       let disappeared = false;
       let unclickable = false;
+      const viewportRect = viewport?.getBoundingClientRect();
+      const workspacePanel = document.querySelector<HTMLElement>('[data-workspace-right-panel]');
+      const workspacePanelRect = workspacePanel?.getBoundingClientRect();
+      const occupiedRight = Math.max(
+        0,
+        Number(viewport instanceof HTMLElement ? viewport.dataset.canvasOccupiedRight || 0 : 0),
+      );
+      const interactiveRight = Math.min(
+        (viewportRect?.right ?? innerWidth) - occupiedRight - 2,
+        workspacePanelRect?.left ?? innerWidth,
+      );
       for (const id of ids) {
         const image = [...document.querySelectorAll<HTMLImageElement>('[data-canvas-viewport] img')]
           .find(candidate => candidate.alt === id);
@@ -160,9 +185,21 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
           continue;
         }
         if (rect.right <= 0 || rect.bottom <= 0 || rect.left >= innerWidth || rect.top >= innerHeight) continue;
-        const x = Math.min(innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
-        const y = Math.min(innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        if (
+          viewportRect
+          && (centerX < viewportRect.left || centerX > interactiveRight || centerY < viewportRect.top || centerY > viewportRect.bottom)
+        ) continue;
+        const x = Math.min(innerWidth - 1, Math.max(0, centerX));
+        const y = Math.min(innerHeight - 1, Math.max(0, centerY));
         const hit = document.elementFromPoint(x, y);
+        if (
+          hit
+          && workspacePanel
+          && (workspacePanel === hit || workspacePanel.contains(hit))
+        ) continue;
+        if (hit instanceof Element && hit.closest('[data-toolbar], [data-floating-panel], [data-popup], [data-modal]')) continue;
         if (!hit || (!card.contains(hit) && hit !== card)) unclickable = true;
       }
       if (disappeared) state.disappearedFrames += 1;

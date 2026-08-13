@@ -66,4 +66,17 @@ describe('canvas pan virtualization', () => {
       false,
     )).toEqual({ minX: 0, minY: 0, maxX: 2000, maxY: 1200 });
   });
+
+  it('does not treat the fixed right workspace panel as interactive canvas width', () => {
+    expect(resolveCanvasCullingBounds(
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+      1,
+      1280,
+      720,
+      false,
+      false,
+      480,
+    )).toEqual({ minX: 0, minY: 0, maxX: 800, maxY: 720 });
+  });
 });

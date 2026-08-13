@@ -16,11 +16,32 @@ export interface CanvasViewportSize {
   height: number;
 }
 
+export interface CanvasViewportInsets {
+  left?: number;
+  right?: number;
+  top?: number;
+  bottom?: number;
+}
+
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 5;
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function normalizeInset(value: number | undefined): number {
+  return isFiniteNumber(value) ? Math.max(0, value) : 0;
+}
+
+export function resolveCanvasUsableViewportSize(
+  viewport: CanvasViewportSize,
+  insets: CanvasViewportInsets = {},
+): CanvasViewportSize {
+  return {
+    width: Math.max(1, viewport.width - normalizeInset(insets.left) - normalizeInset(insets.right)),
+    height: Math.max(1, viewport.height - normalizeInset(insets.top) - normalizeInset(insets.bottom)),
+  };
 }
 
 export function normalizeCanvasViewState(value: unknown): CanvasViewState | null {

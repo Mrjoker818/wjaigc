@@ -28,8 +28,11 @@ describe('canvas project reopen contract', () => {
   });
 
   it('uses content fitting rather than resetting every populated project to the origin', () => {
-    expect(canvas).toContain("import { fitCanvasContent, normalizeCanvasViewState } from '@/lib/canvas-view-state';");
+    expect(canvas).toContain("import { normalizeCanvasViewState, resolveCanvasUsableViewportSize } from '@/lib/canvas-view-state';");
+    expect(canvas).toContain("import { useCanvasViewport } from '@/components/canvas/use-canvas-viewport';");
+    expect(canvas).toContain('fitContent: fitViewportContent');
     expect(canvas).toContain('const resetViewToContent = useCallback');
+    expect(canvas).toContain('fitViewportContent(');
     expect(canvas).toContain('imagesRef.current.filter((image) => !image.isProcessingPlaceholder)');
     expect(canvas).toContain('onClick={resetViewToContent}');
     expect(canvas).not.toContain('onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}');

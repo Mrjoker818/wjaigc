@@ -193,6 +193,7 @@ Protected stable branch: read-only and untouched
 |---|---|---|---|---|---|---|
 | 0 Baseline, three-state mode and ledger | completed locally | Focused RED: 5 expected failures for missing mode module, sync envelope, doctor output, and authenticated client adoption | Focused Task 0 suite passed; cross-platform source-wiring regressions 41/41; TypeScript passed; ESLint 0 errors / 959 historical warnings; full Vitest 902/902 suites, 2236 passed, 0 failed, 44 environment-pending; Doctor 22 pass / 13 warning / 0 fail / 2 blocked; production build 116/116; protected baseline 38/38 with 0 warnings | this Task 0 commit | `UNVERIFIED` | PostgreSQL, cloud exact-SHA, real-browser and performance evidence remain `UNVERIFIED` |
 | 1 Real canvas performance and functional evidence baseline | baseline established; acceptance failing | Missing fixture module; invalid `wujie_projects.project_id` cleanup scope; Stage 3 output initially escaped its dedicated artifact directory | Fixture tests 7/7; TypeScript; full Vitest exit 0; ESLint 0 errors / 959 warnings; build 116/116; protected baseline 38/38 / 0 warnings; real Chromium: 100-node pass, 1-node persisted drag fail, 300-node hit-test continuity fail | this Task 1 commit | `UNVERIFIED` | PostgreSQL integration tests remain environment-gated; Chromium 1920x1080, Firefox, WebKit, mobile Chromium, cloud exact-SHA and rollback remain `UNVERIFIED` |
+| 2 Viewport controller and pan/zoom continuity | completed locally; Stage 3 still in progress | Missing viewport state machine and React adapter produced the expected focused failures; occupied-right viewport tests then reproduced fit/culling behind the fixed workspace panel | Focused viewport/wiring suite 23/23; TypeScript; full Vitest exit 0; full-repository error-only ESLint exit 0; build 116/116; real Chromium 100/300-node pan both pass with zero disappeared frames and zero unclickable time | this Task 2 commit | `UNVERIFIED` | One-node persisted drag P1 remains open; PostgreSQL integration tests are environment-gated; Chromium 1920x1080, Firefox, WebKit, mobile Chromium, cloud exact-SHA and rollback remain `UNVERIFIED` |
 
 ### Task 0 Scope And Safety
 
@@ -201,7 +202,7 @@ Protected stable branch: read-only and untouched
 - Doctor reports the effective mode without exposing the raw invalid environment value.
 - Three existing source-wiring tests now normalize CRLF to LF before multiline assertions. This is test portability only; annotation settlement, autosave, and asset lock business code were not changed.
 - Direct Doctor execution is environment-limited: missing local secrets/database/storage produced 13 warnings and 2 blocked checks. These are retained as unverified prerequisites, not counted as passes.
-- The 44 pending full-suite tests are environment-gated and are not counted as passed. This was the Task 0 checkpoint; Task 1 is now recorded separately below, while Task 2 and later work have not started.
+- The 44 pending full-suite tests are environment-gated and are not counted as passed. This was the Task 0 checkpoint; later task records supersede the old next-task wording below.
 
 ### Task 1 Real-Browser Baseline
 
@@ -210,5 +211,16 @@ Protected stable branch: read-only and untouched
 - Accepted Chromium evidence used an isolated PostgreSQL 18 database and local production server in `legacy` mode. The 100-node pan passed at `58.20 FPS`, `14.10ms` input P95, `99ms` longest task, zero disappearing frames and zero unclickable time.
 - The one-node functional flow failed because dragging did not change the persisted coordinates from `80/80`. The 300-node pan reached `57.76 FPS` and `24.90ms` input P95 but accumulated `1583.20ms` of failed hit-test continuity. Both failures remain enabled and are the evidence targets for Task 2 and later ordered gesture/render work.
 - Browser artifacts are written under ignored `test-results/stage-3-baseline/`; the tracked summary is `tests/reports/stage-3-canvas-baseline.md`. An initial HTTP 503 run caused by missing bootstrap configuration was rejected as environment setup evidence and was not counted as Canvas behavior.
-- Task 1 establishes evidence only and does not alter Canvas business behavior. Task 2 has not started; cloud exact-SHA, four additional browser profiles and rollback remain `UNVERIFIED`.
+- Task 1 establishes evidence only and does not alter Canvas business behavior. Task 2 is recorded separately below; cloud exact-SHA, four additional browser profiles and rollback remain `UNVERIFIED`.
 - Fresh final gates: fixture tests `7/7`, TypeScript exit 0, full Vitest exit 0 with PostgreSQL integration tests still environment-gated, ESLint `0 errors / 959 warnings`, production build `116/116`, protected feature gate `38/38 / 0 warnings`, and `git diff --check` exit 0.
+
+### Task 2 Viewport Controller
+
+- Added a pure viewport state machine and `useCanvasViewport` adapter for pan begin/preview/commit/cancel, anchored zoom, reset/fit and screen/Canvas coordinate conversion.
+- The three migration modes remain explicit: `legacy` is authoritative by default; `shadow` computes and records desensitized differences without writing business state; `canvas-v2` can become authoritative only through the existing authenticated mode envelope.
+- Pan preview remains requestAnimationFrame-driven with direct transform updates. React state is committed at controlled boundaries; existing toolbar callbacks and Canvas DOM/tool signatures remain available.
+- Fit/reset and culling now use the actual usable Canvas width after excluding the fixed right workspace panel. The browser continuity helper samples the interactive Canvas rather than treating legitimate fixed tool overlays as Canvas hit targets.
+- Accepted local Chromium results: 100 nodes at `58.78 FPS`, input P95 `16.60ms`, longest task `87ms`, zero disappeared frames and zero unclickable time; 300 nodes at `57.27 FPS`, input P95 `17.10ms`, longest task `87ms`, zero disappeared frames and zero unclickable time.
+- TDD retained the original missing-module/wiring RED and the occupied-right fit/culling RED. Fresh focused regression is `23/23`; TypeScript and `git diff --check` pass; full Vitest exits 0; full-repository error-only ESLint exits 0; production build is `116/116`.
+- Seven PostgreSQL suites reported `BLOCKED` without `POSTGRES_TEST_DATABASE_URL` and are not counted as verified. The one-node persisted drag P1 remains open and enabled; Task 2 does not move it into history or conceal it.
+- Task 2 completes the third of eleven Stage 3 tasks (`3/11`, approximately `27%`). The next unique task is Task 3 render projection and tiered media loading. Do not start it before the Task 2 commit and evidence ledger are closed.

@@ -3,7 +3,7 @@ import NextImage from 'next/image';
 import { toast } from 'sonner';
 import { } from '@/lib/canvas-mode-handlers';
 import { findClosestStandardRatio, STANDARD_RATIOS, type StandardRatio } from '@/lib/canvas-utils';
-import { fitCanvasContent, normalizeCanvasViewState } from '@/lib/canvas-view-state';
+import { normalizeCanvasViewState, resolveCanvasUsableViewportSize } from '@/lib/canvas-view-state';
 import { buildFailedProcessingFrame, extractImageEditErrorMessage } from '@/lib/image-processing-state';
 import {
   isTerminalProcessingFailure,
@@ -68,8 +68,9 @@ import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
 import { translateApiError } from '@/lib/api-error-translator';
 import { getGroupGenerationFailureMessage } from '@/lib/group-generation-error';
 import { } from '@/config/app-meta';
-import { getCanvasViewportMarginFactor, PAN_VIEWPORT_SYNC_INTERVAL_MS, resolveCanvasCullingBounds, resolveCanvasRenderOffset } from '@/lib/canvas-pan-virtualization';
 import { CanvasSpatialIndex } from '@/lib/canvas-spatial-index';
+import { UserManager } from '@/lib/user-manager';
+import { useCanvasViewport } from '@/components/canvas/use-canvas-viewport';
 import { resolveActiveCanvasImage } from '@/lib/canvas-active-image';
 import {
   THREE_D_POLL_INTERVAL_MS,
@@ -701,18 +702,34 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Version history panel state (P1: 树状版本历史)
   const [showVersionHistory, setShowVersionHistory] = useState(false);
 
-  // View state
+  // View state. Legacy remains authoritative until the authenticated mode enables canvas-v2.
   const normalizedInitialViewState = normalizeCanvasViewState(initialViewState);
-  const [viewOffset, setViewOffset] = useState({
-    x: normalizedInitialViewState?.offsetX ?? 0,
-    y: normalizedInitialViewState?.offsetY ?? 0,
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  const canvasTransformRef = useRef<HTMLDivElement | null>(null);
+  const canvasKernelMode = UserManager.getInstance().getCanvasKernelMode();
+  const {
+    viewOffset,
+    zoom,
+    setViewOffset,
+    setZoom,
+    applyViewState,
+    beginPan: beginViewportPan,
+    previewPan: previewViewportPan,
+    commitPan: commitViewportPan,
+    cancelPan: cancelViewportPan,
+    zoomAtPoint: zoomViewportAtPoint,
+    fitContent: fitViewportContent,
+    screenToCanvas: viewportScreenToCanvas,
+    resolveCullingBounds: resolveViewportCullingBounds,
+    resolveRenderOffset: resolveViewportRenderOffset,
+    getViewportMarginFactor,
+  } = useCanvasViewport({
+    mode: canvasKernelMode,
+    initialViewState: normalizedInitialViewState,
+    transformRef: canvasTransformRef,
   });
-  const [zoom, setZoom] = useState(normalizedInitialViewState?.zoom ?? 1);
-  const zoomRef = useRef(zoom);
-  zoomRef.current = zoom;
   const [isPanning, setIsPanning] = useState(false);
   const [isMiddlePanning, setIsMiddlePanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
   // Persist view state changes (debounced)
@@ -727,12 +744,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [viewOffset, zoom, onViewStateChange]);
 
   // Virtualization: viewport culling — only render images in the visible area
-  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
-  const canvasTransformRef = useRef<HTMLDivElement | null>(null);
-  const panRafRef = useRef<number | null>(null);
-  const panPreviewOffsetRef = useRef(viewOffset);
-  const panViewportSyncAtRef = useRef(0);
-  const [panViewportOffset, setPanViewportOffset] = useState(viewOffset);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
     const el = canvasContainerRef.current;
@@ -761,22 +772,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     return index;
   }, [images]);
   const imageById = useMemo(() => new Map(images.map((image, index) => [image.id, { image, index }])), [images]);
-  const cullingBounds = useMemo(() => resolveCanvasCullingBounds(
-    viewOffset,
-    panViewportOffset,
-    zoom,
+  const canvasOccupiedRight = isPanelCollapsed ? 20 : 480;
+  const cullingBounds = useMemo(() => resolveViewportCullingBounds(
     canvasSize.width,
     canvasSize.height,
     isPanning,
     isMiddlePanning,
-  ), [viewOffset, panViewportOffset, zoom, canvasSize, isPanning, isMiddlePanning]);
-  const viewportMarginFactor = getCanvasViewportMarginFactor(isPanning, isMiddlePanning);
-  const canvasRenderOffset = resolveCanvasRenderOffset(
-    viewOffset,
-    panViewportOffset,
-    isPanning,
-    isMiddlePanning,
-  );
+    canvasOccupiedRight,
+  ), [canvasOccupiedRight, canvasSize, isPanning, isMiddlePanning, resolveViewportCullingBounds]);
+  const viewportMarginFactor = getViewportMarginFactor(isPanning, isMiddlePanning);
+  const canvasRenderOffset = resolveViewportRenderOffset(isPanning, isMiddlePanning);
 
   const visibleImages = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return images;
@@ -806,64 +811,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     });
   }, [images, spatialIndex, imageById, cullingBounds, canvasSize, viewportMarginFactor]);
 
-  useLayoutEffect(() => {
-    if (!isPanning && !isMiddlePanning) return;
-    const el = canvasTransformRef.current;
-    const offset = panPreviewOffsetRef.current;
-    if (el) el.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`;
-  }, [isPanning, isMiddlePanning, panViewportOffset, zoom]);
-
-  useEffect(() => () => {
-    if (panRafRef.current !== null) cancelAnimationFrame(panRafRef.current);
-  }, []);
-
-  const updatePanPreview = useCallback((offset: { x: number; y: number }) => {
-    panPreviewOffsetRef.current = offset;
-    if (panRafRef.current === null) {
-      panRafRef.current = requestAnimationFrame(() => {
-        panRafRef.current = null;
-        const el = canvasTransformRef.current;
-        const preview = panPreviewOffsetRef.current;
-        if (el) el.style.transform = `translate(${preview.x}px, ${preview.y}px) scale(${zoomRef.current})`;
-      });
-    }
-    const now = performance.now();
-    if (now - panViewportSyncAtRef.current >= PAN_VIEWPORT_SYNC_INTERVAL_MS) {
-      panViewportSyncAtRef.current = now;
-      setPanViewportOffset(offset);
-    }
-  }, []);
-
-  const commitPanPreview = useCallback(() => {
-    if (panRafRef.current !== null) {
-      cancelAnimationFrame(panRafRef.current);
-      panRafRef.current = null;
-    }
-    const offset = panPreviewOffsetRef.current;
-    setPanViewportOffset(offset);
-    setViewOffset(offset);
-  }, []);
-
-  const applyViewState = useCallback((nextView: { offsetX: number; offsetY: number; zoom: number }) => {
-    const nextOffset = { x: nextView.offsetX, y: nextView.offsetY };
-    panPreviewOffsetRef.current = nextOffset;
-    setPanViewportOffset(nextOffset);
-    setViewOffset(nextOffset);
-    setZoom(nextView.zoom);
-  }, []);
-
   const resetViewToContent = useCallback(() => {
     const viewport = canvasContainerRef.current?.getBoundingClientRect();
-    const nextView = fitCanvasContent(
+    const usableViewport = resolveCanvasUsableViewportSize({
+      width: viewport?.width || canvasSize.width || window.innerWidth,
+      height: viewport?.height || canvasSize.height || window.innerHeight,
+    }, { right: canvasOccupiedRight });
+    fitViewportContent(
       imagesRef.current.filter((image) => !image.isProcessingPlaceholder),
-      {
-        width: viewport?.width || canvasSize.width || window.innerWidth,
-        height: viewport?.height || canvasSize.height || window.innerHeight,
-      },
+      usableViewport,
     );
-
-    applyViewState(nextView);
-  }, [applyViewState, canvasSize.height, canvasSize.width]);
+  }, [canvasOccupiedRight, canvasSize.height, canvasSize.width, fitViewportContent]);
 
   const restoredViewProjectIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1109,7 +1067,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     onSelectImageRef.current(targetImg);
     // Notify parent that navigation is complete
     onNavigateToImageCompleteRef.current?.();
-  }, [images, navigateToImageId]);
+  }, [images, navigateToImageId, setViewOffset, setZoom]);
 
   // Auto-center view on newly added images (upload / generate / paste)
   const prevImageCountRef = useRef(images.length);
@@ -1154,7 +1112,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     prevImageIdsRef.current = currentIds;
     prevImageCountRef.current = images.length;
-  }, [images, zoom]);
+  }, [images, setViewOffset, setZoom, zoom]);
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1213,7 +1171,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [boxSelectEnd, setBoxSelectEnd] = useState<{ x: number; y: number } | null>(null);
 
   // Middle button pan state
-  const middlePanStartRef = useRef({ x: 0, y: 0 });
   const middlePanMovedRef = useRef(false); // 中键拖动是否移动过（防止拖动后误触发 auxclick 缩放重置）
 
   // Kept for existing pointer cleanup paths.
@@ -1247,13 +1204,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       canvasLongPressTimerRef.current = null;
       setBoxSelectStart(null);
       setBoxSelectEnd(null);
-      updatePanPreview(viewOffset);
-      panViewportSyncAtRef.current = 0;
+      beginViewportPan({ pointerId, clientX, clientY });
       setIsPanning(true);
-      setPanStart({ x: clientX - viewOffset.x, y: clientY - viewOffset.y });
       setIsLongPressing(true);
     }, 250);
-  }, [clearBlankCanvasLongPress, updatePanPreview, viewOffset]);
+  }, [beginViewportPan, clearBlankCanvasLongPress]);
 
   // Ctrl key tracking for reference selection hint
   const [ctrlKeyHeld, setCtrlKeyHeld] = useState(false);
@@ -2867,14 +2822,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         const newZoom = Math.min(5, zoom * 1.15);
         if (canvasRef.current) {
           const rect = canvasRef.current.getBoundingClientRect();
-          const cx = rect.width / 2;
-          const cy = rect.height / 2;
-          setViewOffset({
-            x: cx - (cx - viewOffset.x) * (newZoom / zoom),
-            y: cy - (cy - viewOffset.y) * (newZoom / zoom),
-          });
+          zoomViewportAtPoint({ x: rect.width / 2, y: rect.height / 2 }, newZoom);
         }
-        setZoom(newZoom);
         return;
       }
       // Ctrl + Minus: Zoom out
@@ -2883,14 +2832,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         const newZoom = Math.max(0.1, zoom / 1.15);
         if (canvasRef.current) {
           const rect = canvasRef.current.getBoundingClientRect();
-          const cx = rect.width / 2;
-          const cy = rect.height / 2;
-          setViewOffset({
-            x: cx - (cx - viewOffset.x) * (newZoom / zoom),
-            y: cy - (cy - viewOffset.y) * (newZoom / zoom),
-          });
+          zoomViewportAtPoint({ x: rect.width / 2, y: rect.height / 2 }, newZoom);
         }
-        setZoom(newZoom);
         return;
       }
       // Ctrl + A: Select all images on canvas
@@ -3235,7 +3178,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, toggleAnnotationV2Mode, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages]);
+  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, toggleAnnotationV2Mode, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint]);
 
   // Click outside to close menus
   useEffect(() => {
@@ -3267,11 +3210,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const screenToCanvas = useCallback((screenX: number, screenY: number) => {
     if (!canvasRef.current) return { x: 0, y: 0 };
     const rect = canvasRef.current.getBoundingClientRect();
-    return {
-      x: (screenX - rect.left - viewOffset.x) / zoom,
-      y: (screenY - rect.top - viewOffset.y) / zoom,
-    };
-  }, [viewOffset, zoom]);
+    return viewportScreenToCanvas({ x: screenX - rect.left, y: screenY - rect.top });
+  }, [viewportScreenToCanvas]);
 
   // Hit test — ★ Uses spatial index for O(log n) when available
   const hitTestImage = useCallback((canvasX: number, canvasY: number): string | null => {
@@ -3726,20 +3666,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     // Middle button: pan canvas
     if (e.button === 1) {
       e.preventDefault();
-      updatePanPreview(viewOffset);
-      panViewportSyncAtRef.current = 0;
+      beginViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
       setIsMiddlePanning(true);
-      middlePanStartRef.current = { x: e.clientX - viewOffset.x, y: e.clientY - viewOffset.y };
       middlePanMovedRef.current = false; // 重置移动标记
       return;
     }
 
     // Space + left click: pan canvas
     if (isSpacePressed) {
-      updatePanPreview(viewOffset);
-      panViewportSyncAtRef.current = 0;
+      beginViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
       setIsPanning(true);
-      setPanStart({ x: e.clientX - viewOffset.x, y: e.clientY - viewOffset.y });
       return;
     }
 
@@ -3810,7 +3746,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       e.currentTarget.setPointerCapture(e.pointerId);
       startBlankCanvasLongPress(e.pointerId, e.clientX, e.clientY);
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, updatePanPreview, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, startBlankCanvasLongPress]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, startBlankCanvasLongPress]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (
@@ -3914,17 +3850,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     // Middle button panning
     if (isMiddlePanning) {
       middlePanMovedRef.current = true; // 标记已移动，防止 auxclick 误触发缩放重置
-      const mx = e.clientX - middlePanStartRef.current.x;
-      const my = e.clientY - middlePanStartRef.current.y;
-      updatePanPreview({ x: mx, y: my });
+      previewViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
       return;
     }
 
     if (isPanning) {
       // 使用 rAF + 直接 DOM 操作，避免每帧触发 React 重渲染
-      const newX = e.clientX - panStart.x;
-      const newY = e.clientY - panStart.y;
-      updatePanPreview({ x: newX, y: newY });
+      previewViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
       return;
     }
 
@@ -4075,7 +4007,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         });
       }
     }
-  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, boxSelectStart, resizingImage, resizeCorner, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, panStart.x, panStart.y, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, dragStart.x, dragStart.y, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, updatePanPreview, annotationV2State.annotations, annotationV2State.gesture.kind, updateAnnotationV2Gesture, moveAnnotationV2Text, clearBlankCanvasLongPress]);
+  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, boxSelectStart, resizingImage, resizeCorner, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, dragStart.x, dragStart.y, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, previewViewportPan, annotationV2State.annotations, annotationV2State.gesture.kind, updateAnnotationV2Gesture, moveAnnotationV2Text, clearBlankCanvasLongPress]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     clearBlankCanvasLongPress(e.pointerId);
@@ -4222,13 +4154,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     // Middle button up: stop middle panning
     if (isMiddlePanning && e.button === 1) {
-      commitPanPreview();
+      commitViewportPan({ pointerId: e.pointerId });
       setIsMiddlePanning(false);
       return;
     }
 
     if (isPanning) {
-      commitPanPreview();
+      commitViewportPan({ pointerId: e.pointerId });
       setIsPanning(false);
       setIsLongPressing(false);
       return;
@@ -4465,10 +4397,15 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, zoom, viewOffset.x, viewOffset.y, commitPanPreview, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, clearBlankCanvasLongPress]);
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, zoom, viewOffset.x, viewOffset.y, commitViewportPan, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, clearBlankCanvasLongPress]);
 
   const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     clearBlankCanvasLongPress(e.pointerId);
+    if (isPanning || isMiddlePanning) {
+      cancelViewportPan({ pointerId: e.pointerId });
+      setIsPanning(false);
+      setIsMiddlePanning(false);
+    }
     if (annotationPointerIdRef.current === e.pointerId) {
       movingTextAnnotationIdRef.current = null;
       annotationPointerIdRef.current = null;
@@ -4479,7 +4416,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-  }, [annotationV2State.gesture.kind, clearBlankCanvasLongPress, escapeAnnotationV2]);
+  }, [annotationV2State.gesture.kind, cancelViewportPan, clearBlankCanvasLongPress, escapeAnnotationV2, isMiddlePanning, isPanning]);
 
   const handlePointerLeave = useCallback(() => {
     if (annotationPointerIdRef.current !== null) return;
@@ -4488,7 +4425,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       handleEditMouseUp();
       return;
     }
-    if (isPanning || isMiddlePanning) commitPanPreview();
+    if (isPanning || isMiddlePanning) commitViewportPan();
     setIsPanning(false);
     setIsMiddlePanning(false);
     setIsLongPressing(false);
@@ -4516,7 +4453,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       clearTimeout(groupDragTimerRef.current);
       groupDragTimerRef.current = null;
     }
-  }, [dragTarget, editMode, groupDragTarget, handleEditMouseUp, isMiddlePanning, isPanning, commitPanPreview, clearBlankCanvasLongPress]);
+  }, [dragTarget, editMode, groupDragTarget, handleEditMouseUp, isMiddlePanning, isPanning, commitViewportPan, clearBlankCanvasLongPress]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     // Prevent scroll from affecting canvas when cursor is over a modal/overlay/popup
@@ -4544,10 +4481,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const rect = canvasRef.current.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
-      const newOffsetX = mouseX - (mouseX - viewOffset.x) * (newZoom / zoom);
-      const newOffsetY = mouseY - (mouseY - viewOffset.y) * (newZoom / zoom);
-      setZoom(newZoom);
-      setViewOffset({ x: newOffsetX, y: newOffsetY });
+      zoomViewportAtPoint({ x: mouseX, y: mouseY }, newZoom);
     } else {
       // Scroll without Ctrl: vertical scroll canvas
       setViewOffset(prev => ({
@@ -4555,7 +4489,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         y: prev.y - e.deltaY,
       }));
     }
-  }, [zoom, viewOffset, editMode]);
+  }, [zoom, editMode, setViewOffset, zoomViewportAtPoint]);
 
   // Double-click middle button: reset view to 100% centered on mouse
   const handleAuxClick = useCallback((e: React.MouseEvent) => {
@@ -4568,13 +4502,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
       // Reset to 100% zoom, centered on mouse position
-      setZoom(1);
-      setViewOffset({
-        x: mouseX - (mouseX - viewOffset.x) * (1 / zoom),
-        y: mouseY - (mouseY - viewOffset.y) * (1 / zoom),
-      });
+      zoomViewportAtPoint({ x: mouseX, y: mouseY }, 1);
     }
-  }, [zoom, viewOffset]);
+  }, [zoomViewportAtPoint]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -5593,7 +5523,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: `生成失败: ${error instanceof Error ? error.message : String(error)}` } };
       }));
     }
-  }, [images, modelProviderMap, onImagesChange, zoom]);
+  }, [images, modelProviderMap, onImagesChange, setViewOffset, setZoom, zoom]);
 
   // handleGenGroupGenerate: 通过groupId查找组并调用handleGroupGenerate
   const handleGenGroupGenerate = useCallback((groupId: string) => {
@@ -10338,6 +10268,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       <div
         ref={(el) => { canvasRef.current = el; canvasContainerRef.current = el; }}
         data-canvas-viewport
+        data-canvas-occupied-right={canvasOccupiedRight}
         data-project-id={projectId || brandProject?.id || ''}
         style={{ touchAction: annotationMode ? 'none' : 'auto' }}
         className={`absolute inset-0 overflow-hidden select-none ${
