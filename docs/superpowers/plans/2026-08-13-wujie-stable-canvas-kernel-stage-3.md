@@ -392,7 +392,7 @@ Commit: `refactor: isolate canvas selection gestures`
 - Produces: `CanvasCommand` 联合类型：`add`、`move`、`resize`、`delete`、`duplicate`、`reorder`、`assign-group`、`task-result`。
 - Produces: `CanvasHistoryController.begin(id)`、`record(result)`、`commit(id)`、`rollback(id)`、`undo()`、`redo()`。
 
-- [ ] **Step 1: 写命令和 50 步历史 RED**
+- [x] **Step 1: 写命令和 50 步历史 RED**
 
 ```ts
 const moved = executeCanvasCommand(snapshot, { type: 'move', ids: ['a'], delta: { x: 40, y: 30 } });
@@ -406,12 +406,12 @@ expect(runRedo(history, 50).byId.a).toMatchObject({ x: 49, y: 49 });
 
 覆盖单次拖动只产生一步、删除/恢复、复制、调整尺寸、组移动、项目切换清栈、服务器水合不入栈、失败 placement 副作用回滚。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/canvas-commands.test.ts src/__tests__/lib/canvas-history-controller.test.ts src/__tests__/components/canvas-command-wiring.test.ts`
 Expected: FAIL，新命令和控制器尚不存在。
 
-- [ ] **Step 3: 实现不可变命令结果**
+- [x] **Step 3: 实现不可变命令结果**
 
 ```ts
 export interface CanvasCommandResult {
@@ -425,11 +425,11 @@ export interface CanvasCommandResult {
 
 命令层不 fetch、不 toast、不读 DOM。Stage 2 placement 删除/恢复由 `canvas-workspace` 协调器在命令提交前后执行，失败时应用 inverse，保证内存、项目快照和 placement 一致。
 
-- [ ] **Step 4: 用显式事务替换 500ms 猜测分组**
+- [x] **Step 4: 用显式事务替换 500ms 猜测分组**
 
 pointerdown `begin('drag:<pointerId>')`，pointermove 只预览，pointerup 只提交最终 diff，pointercancel rollback。离散按钮命令立即提交；任务进度和水合标记 `history: 'skip'`。
 
-- [ ] **Step 5: GREEN、Stage 2 生命周期与 E2E 回归**
+- [x] **Step 5: GREEN、Stage 2 生命周期与 E2E 回归**
 
 Run: `pnpm exec vitest run src/__tests__/lib/canvas-commands.test.ts src/__tests__/lib/canvas-history-controller.test.ts src/__tests__/components/canvas-command-wiring.test.ts src/__tests__/components/canvas-managed-delete-contract.test.ts src/__tests__/lib/canvas-incremental-history.test.ts`
 Expected: 全部通过。
@@ -437,7 +437,7 @@ Expected: 全部通过。
 Run: `pnpm test:e2e:stage-3 --project=chromium --grep "undo|redo|delete|move|resize"`
 Expected: 每个手势一步历史，刷新后最终状态一致。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 Commit: `refactor: route canvas edits through commands`
 

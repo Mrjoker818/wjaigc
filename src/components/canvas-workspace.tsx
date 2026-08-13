@@ -31,6 +31,18 @@ import {
 import { buildAnnotationSourceVersionId } from '@/features/annotations/annotation-source-version';
 import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
+import {
+  canvasSnapshotToNodes,
+  createCanvasDocumentSnapshot,
+  executeCanvasCommand,
+  isCanvasTaskProjectionChange,
+  rebaseCanvasSnapshotChanges,
+  replayQueuedCanvasSnapshotChange,
+} from '@/lib/canvas-kernel/commands';
+import {
+  isCanvasHistoryTransitionCurrent,
+  type CanvasHistoryTransitionToken,
+} from '@/lib/canvas-kernel/history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
 import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
 import type { GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
@@ -307,6 +319,24 @@ interface CanvasWorkspaceProps {
   onLoggedOut: () => void;
 }
 
+type CanvasHistoryIntent = 'record' | 'skip';
+
+interface CanvasImageChangeOptions {
+  history?: CanvasHistoryIntent;
+}
+
+function rebaseCanvasImages(
+  target: CanvasImage[],
+  before: CanvasImage[],
+  latest: CanvasImage[],
+): CanvasImage[] {
+  return canvasSnapshotToNodes(rebaseCanvasSnapshotChanges(
+    createCanvasDocumentSnapshot(target),
+    createCanvasDocumentSnapshot(before),
+    createCanvasDocumentSnapshot(latest),
+  )) as CanvasImage[];
+}
+
 export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspaceProps) {
   const [images, setImagesRaw] = useState<CanvasImage[]>([]);
   const [selectedImage, setSelectedImage] = useState<CanvasImage | null>(null);
@@ -314,9 +344,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // ====== Incremental Diff Undo (Ctrl+Z) / Redo (Ctrl+Shift+Z) History ======
   // Uses IncrementalHistoryManager for O(changes) memory instead of O(n) full snapshots.
   // Dragging one image records only {x, y} change, not the entire image array.
-  const incrementalHistoryRef = useRef<IncrementalHistoryManager<CanvasImage>>(new IncrementalHistoryManager<CanvasImage>(100));
+  const incrementalHistoryRef = useRef<IncrementalHistoryManager<CanvasImage>>(new IncrementalHistoryManager<CanvasImage>(50));
   const recentlyDeletedIdsRef = useRef<Set<string>>(new Set());
   const historyLifecyclePendingRef = useRef(false);
+  const [historyTransitionPending, setHistoryTransitionPending] = useState(false);
+  const historyTransitionEpochRef = useRef(0);
+  const activeHistoryTransitionRef = useRef<CanvasHistoryTransitionToken | null>(null);
+  const queuedCanvasHistoryChangeRef = useRef<{
+    projectId: string | null;
+    before: CanvasImage[];
+    after: CanvasImage[];
+  } | null>(null);
   const historyProjectIdRef = useRef<string | null>(null);
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
@@ -325,11 +363,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // ★ 跳过历史记录标记：项目加载/服务器同步等非用户操作不记录 undo diff
   // 防止 Ctrl+Z 撤销到项目加载前的空画布状态
   const skipHistoryRef = useRef(false);
-  // ★ 自动 mark 定时器：图片变更后经过一段空闲期自动创建撤销检查点
-  // 解决 mark() 从未被调用导致所有变更累积在同一个 pendingDiff 中、
-  // Ctrl+Z 只能撤回 1 步的问题。拖拽等连续操作期间定时器不断重置，
-  // 操作结束后 500ms 自动 flush 为一个独立撤销步骤。
-  const markTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ====== Tree History (Version History Panel) ======
   // 树状版本历史，支持分支和任意节点回溯
@@ -345,36 +378,29 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       isMountedRef.current = false;
       quickCreateCompileControllerRef.current?.abort();
       quickCreateCompileControllerRef.current = null;
-      if (markTimerRef.current) {
-        clearTimeout(markTimerRef.current);
-        markTimerRef.current = null;
-      }
     };
   }, []);
 
-  // ★ 自动创建撤销检查点：每次 images 变化后启动 500ms 定时器，
-  // 若期间无新变更则调用 mark() 将累积的 pendingDiff flush 为一个独立撤销步骤。
-  // 拖拽等高频操作期间定时器不断重置，操作结束后才创建检查点 → 一个拖拽 = 一步撤销。
-  // 离散操作（生成/删除/编辑）之间自然有 >500ms 间隔 → 各自成为独立撤销步骤。
-  useEffect(() => {
-    if (markTimerRef.current) clearTimeout(markTimerRef.current);
-    markTimerRef.current = setTimeout(() => {
-      incrementalHistoryRef.current.mark();
-      markTimerRef.current = null;
-    }, 500);
-    return () => {
-      if (markTimerRef.current) {
-        clearTimeout(markTimerRef.current);
-        markTimerRef.current = null;
+  // Apply changes against the latest ref synchronously so pointerup can commit
+  // the same explicit history transaction in the current event boundary.
+  const setImages = useCallback((
+    action: React.SetStateAction<CanvasImage[]>,
+    options: CanvasImageChangeOptions = {},
+  ) => {
+      const prev = latestImagesRef.current;
+      const queued = queuedCanvasHistoryChangeRef.current;
+      const projectId = historyProjectIdRef.current;
+      const actionBase = historyLifecyclePendingRef.current && queued?.projectId === projectId
+        ? queued.after
+        : prev;
+      const next = typeof action === 'function' ? action(actionBase) : action;
+      const historyIntent = options.history ?? (isCanvasTaskProjectionChange(actionBase, next) ? 'skip' : 'record');
+      if (historyLifecyclePendingRef.current && historyIntent === 'record') {
+        queuedCanvasHistoryChangeRef.current = queued?.projectId === projectId
+          ? { ...queued, after: next }
+          : { projectId, before: prev, after: next };
+        return;
       }
-    };
-  }, [images]);
-
-  // Wrap setImages to record incremental diff before each change
-  const setImages = useCallback((action: React.SetStateAction<CanvasImage[]>) => {
-    setImagesRaw(prev => {
-      // Apply the change first
-      const next = typeof action === 'function' ? action(prev) : action;
 
       // ★ 检测被删除的图片ID，注册到 UserManagerCore 防止服务器同步恢复
       // 仅在非服务器同步期间检测，避免误将服务器端删除注册为本地删除
@@ -394,7 +420,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       // 导致 recordChange([], allImages) 被记录，Ctrl+Z 时所有图片被移除。
       // 现在始终使用 prev（真实 React 状态）作为基准，确保 diff 计算正确。
       // ★ 跳过非用户操作（项目加载/服务器同步）的 diff 记录，防止 Ctrl+Z 撤销到空画布
-      if (!skipHistoryRef.current) {
+      if (historyIntent === 'skip') {
+        // Hydration, server reconciliation and transient task progress do not
+        // represent user-editable commands.
+      } else if (!skipHistoryRef.current) {
         // 安全防护：如果 prev 为空但 next 包含多张图片，可能是项目加载未被 skipHistory 拦截
         // 这种情况下跳过 diff 记录，避免记录"从空到全部图片"的错误 diff
         const isBulkLoad = prev.length === 0 && next.length > 1;
@@ -404,8 +433,51 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
 
       prevImagesRef.current = next;
-      return next;
-    });
+      latestImagesRef.current = next;
+      setImagesRaw(next);
+  }, []);
+
+  const flushQueuedCanvasHistoryChange = useCallback(() => {
+    const queued = queuedCanvasHistoryChangeRef.current;
+    queuedCanvasHistoryChangeRef.current = null;
+    if (!queued) return;
+    const replayed = replayQueuedCanvasSnapshotChange(
+      historyProjectIdRef.current,
+      createCanvasDocumentSnapshot(latestImagesRef.current),
+      {
+        projectId: queued.projectId,
+        before: createCanvasDocumentSnapshot(queued.before),
+        after: createCanvasDocumentSnapshot(queued.after),
+      },
+    );
+    if (replayed) setImages(canvasSnapshotToNodes(replayed) as CanvasImage[]);
+  }, [setImages]);
+
+  const isActiveCanvasHistoryTransition = useCallback((transition: CanvasHistoryTransitionToken): boolean => (
+    activeHistoryTransitionRef.current === transition
+      && isCanvasHistoryTransitionCurrent(
+        transition,
+        historyProjectIdRef.current,
+        historyTransitionEpochRef.current,
+      )
+  ), []);
+
+  const beginCanvasHistoryTransaction = useCallback((id: string) => {
+    incrementalHistoryRef.current.beginTransaction(id);
+  }, []);
+
+  const commitCanvasHistoryTransaction = useCallback((id: string) => {
+    incrementalHistoryRef.current.commitTransaction(id);
+  }, []);
+
+  const rollbackCanvasHistoryTransaction = useCallback((id: string) => {
+    const current = latestImagesRef.current;
+    const rolledBack = incrementalHistoryRef.current.rollbackTransaction(id, current);
+    if (rolledBack !== current) {
+      prevImagesRef.current = rolledBack;
+      latestImagesRef.current = rolledBack;
+      setImagesRaw(rolledBack);
+    }
   }, []);
 
   const syncAssetV3HistoryTransition = useCallback(async (
@@ -455,11 +527,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, []);
 
   const handleUndo = useCallback(async () => {
-    // ★ 清除待处理的 mark 定时器，避免 undo 后 stale mark 干扰
-    if (markTimerRef.current) {
-      clearTimeout(markTimerRef.current);
-      markTimerRef.current = null;
-    }
     if (!incrementalHistoryRef.current.canUndo() || historyLifecyclePendingRef.current) return;
     const previous = latestImagesRef.current;
     const result = incrementalHistoryRef.current.undo(previous);
@@ -470,46 +537,69 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       return;
     }
     historyLifecyclePendingRef.current = true;
+    const transition: CanvasHistoryTransitionToken = {
+      projectId: historyProjectIdRef.current,
+      epoch: historyTransitionEpochRef.current,
+    };
+    activeHistoryTransitionRef.current = transition;
+    setHistoryTransitionPending(true);
     try {
       if (UserManagerCore.getInstance().getAssetGraphMode() === 'asset-v3') {
         await syncAssetV3HistoryTransition(previous, result);
       }
-      prevImagesRef.current = result;
-      latestImagesRef.current = result;
-      setImagesRaw(result);
+      if (!isActiveCanvasHistoryTransition(transition)) return;
+      const committed = rebaseCanvasImages(result, previous, latestImagesRef.current);
+      prevImagesRef.current = committed;
+      latestImagesRef.current = committed;
+      setImagesRaw(committed);
     } catch (error) {
+      if (!isActiveCanvasHistoryTransition(transition)) return;
       incrementalHistoryRef.current.redo(result);
       toast.error(error instanceof Error ? error.message : '撤销失败');
     } finally {
-      historyLifecyclePendingRef.current = false;
+      if (isActiveCanvasHistoryTransition(transition)) {
+        activeHistoryTransitionRef.current = null;
+        historyLifecyclePendingRef.current = false;
+        setHistoryTransitionPending(false);
+        flushQueuedCanvasHistoryChange();
+      }
     }
-  }, [syncAssetV3HistoryTransition]);
+  }, [flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition, syncAssetV3HistoryTransition]);
 
   const handleRedo = useCallback(async () => {
-    // ★ 清除待处理的 mark 定时器，避免 redo 后 stale mark 干扰
-    if (markTimerRef.current) {
-      clearTimeout(markTimerRef.current);
-      markTimerRef.current = null;
-    }
     if (!incrementalHistoryRef.current.canRedo() || historyLifecyclePendingRef.current) return;
     const previous = latestImagesRef.current;
     const result = incrementalHistoryRef.current.redo(previous);
     if (result === previous) return;
     historyLifecyclePendingRef.current = true;
+    const transition: CanvasHistoryTransitionToken = {
+      projectId: historyProjectIdRef.current,
+      epoch: historyTransitionEpochRef.current,
+    };
+    activeHistoryTransitionRef.current = transition;
+    setHistoryTransitionPending(true);
     try {
       if (UserManagerCore.getInstance().getAssetGraphMode() === 'asset-v3') {
         await syncAssetV3HistoryTransition(previous, result);
       }
-      prevImagesRef.current = result;
-      latestImagesRef.current = result;
-      setImagesRaw(result);
+      if (!isActiveCanvasHistoryTransition(transition)) return;
+      const committed = rebaseCanvasImages(result, previous, latestImagesRef.current);
+      prevImagesRef.current = committed;
+      latestImagesRef.current = committed;
+      setImagesRaw(committed);
     } catch (error) {
+      if (!isActiveCanvasHistoryTransition(transition)) return;
       incrementalHistoryRef.current.undo(result);
       toast.error(error instanceof Error ? error.message : '重做失败');
     } finally {
-      historyLifecyclePendingRef.current = false;
+      if (isActiveCanvasHistoryTransition(transition)) {
+        activeHistoryTransitionRef.current = null;
+        historyLifecyclePendingRef.current = false;
+        setHistoryTransitionPending(false);
+        flushQueuedCanvasHistoryChange();
+      }
     }
-  }, [syncAssetV3HistoryTransition]);
+  }, [flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition, syncAssetV3HistoryTransition]);
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
@@ -533,6 +623,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     try {
       // ★ 加载项目前：清空 undo 历史 + 跳过 diff 记录，防止 Ctrl+Z 撤销到空画布
       skipHistoryRef.current = true;
+      historyTransitionEpochRef.current += 1;
+      activeHistoryTransitionRef.current = null;
+      historyLifecyclePendingRef.current = false;
+      setHistoryTransitionPending(false);
+      queuedCanvasHistoryChangeRef.current = null;
+      historyProjectIdRef.current = projectId;
       incrementalHistoryRef.current.clear();
       prevImagesRef.current = [];
       quickCreateCompileControllerRef.current?.abort();
@@ -597,9 +693,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             relationType: img.relationType || undefined,
             isProcessingPlaceholder: img.isProcessingPlaceholder || false,
             processing: img.processing ? { ...img.processing, isResumed: true } : undefined,
-          })) as CanvasImage[]);
+          })) as CanvasImage[], { history: 'skip' });
         } else {
-          setImages([]);
+          setImages([], { history: 'skip' });
         }
         if (targetProject.metadata?.groups) {
           groupsRef.current = targetProject.metadata.groups as ImageGroupData[];
@@ -1042,7 +1138,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       setImages(prev => prev.map(img => {
         const newUrl = updates.get(img.id);
         return newUrl ? { ...img, url: newUrl } : img;
-      }));
+      }), { history: 'skip' });
     });
   }, [setImages]);
 
@@ -1163,6 +1259,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, [currentProject]);
 
   const handleDeleteCanvasImages = useCallback(async (imageIds: string[]): Promise<string[]> => {
+    if (historyLifecyclePendingRef.current) return [];
     const activeProjectId = currentProject?.id;
     if (!activeProjectId) throw new Error('当前项目不存在');
     const uniqueImageIds = [...new Set(imageIds)]
@@ -1174,7 +1271,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const selected = latestImagesRef.current
         .filter((image) => uniqueImageIds.includes(image.id))
         .map((image) => ({ ...image, projectId: activeProjectId }));
-      let remainingImages = latestImagesRef.current;
       const result = await reconcileImageBatchDeletion(
         selected,
         async (image) => {
@@ -1187,13 +1283,20 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             UserManagerCore.getInstance().advanceProjectSyncRevision(Number(payload?.projectRevision));
           }
         },
-        (image) => {
-          remainingImages = remainingImages.filter((candidate) => candidate.id !== image.id);
-          setImages(remainingImages);
-        },
+        () => undefined,
       );
       deletedIds = result.deletedIds;
       if (result.deletedIds.length > 0) {
+        const currentImages = latestImagesRef.current;
+        const currentIds = new Set(currentImages.map((image) => image.id));
+        const commandIds = result.deletedIds.filter((id) => currentIds.has(id));
+        if (commandIds.length === 0) return result.deletedIds;
+        const commandResult = executeCanvasCommand(
+          createCanvasDocumentSnapshot(currentImages),
+          { type: 'delete', ids: commandIds },
+        );
+        const remainingImages = canvasSnapshotToNodes(commandResult.next) as CanvasImage[];
+        setImages(remainingImages);
         persistCanvasImagesNow(remainingImages);
         setSelectedImage((current) => reconcileSelectedImageAfterBatchDeletion(current, result.deletedIds));
       }
@@ -1339,7 +1442,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               label: match.label || '已恢复，等待生成',
             },
           };
-        }));
+        }), { history: 'skip' });
       } catch {
         const retryAt = getLegacyRecoveryRetryAt({ requestFailed: true });
         keys.forEach((key) => scheduleRetry(key, retryAt));
@@ -1524,7 +1627,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           if (Object.keys(urlMapping).length > 0) {
             setImages(prev => prev.map(img =>
               urlMapping[img.url] ? { ...img, url: urlMapping[img.url], sourceUrl: img.sourceUrl || sourceUrlMapping[img.url] || img.url } : img
-            ));
+            ), { history: 'skip' });
           }
         }
 
@@ -1902,7 +2005,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 userMgr.getAssetGraphMode(),
                 hydrateCanvasPlacements(latest.canvasImages, 'asset-v3'),
                 () => legacyMergedImages,
-              ));
+              ), { history: 'skip' });
               // ★ 调试日志：追踪图片恢复
               console.log('[page] onProjectsChanged: setImages total=', enrichedImages.length + localOnlyImages.length + uniquePlaceholders.length,
                 'enriched=', enrichedImages.length, 'localOnly=', localOnlyImages.length, 'placeholders=', uniquePlaceholders.length);
@@ -1987,7 +2090,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       if (Object.keys(urlMapping).length > 0) {
         setImages(prev => prev.map(img =>
           urlMapping[img.id] ? { ...img, url: urlMapping[img.id] } : img
-        ));
+        ), { history: 'skip' });
       }
     };
 
@@ -5455,6 +5558,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           key={currentProject?.id || 'canvas-local'}
           images={images}
           onImagesChange={setImages}
+          onHistoryTransactionBegin={beginCanvasHistoryTransaction}
+          onHistoryTransactionCommit={commitCanvasHistoryTransaction}
+          onHistoryTransactionRollback={rollbackCanvasHistoryTransaction}
+          isHistoryTransitionPending={historyTransitionPending}
           onDeleteImages={handleDeleteCanvasImages}
           onUndo={handleUndo}
           onRedo={handleRedo}
@@ -5915,32 +6022,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           mediaAvailability: img.mediaAvailability,
         }))}
         onDeleteImages={async (ids) => {
-          const selected = images
-            .filter((image) => ids.includes(image.id))
-            .map(image => ({ ...image, projectId: currentProject?.id ?? '' }));
-          const result = await reconcileImageBatchDeletion(
-            selected,
-            async (image) => {
-              if (!image.projectId) throw new Error('当前项目不存在');
-              const response = await fetch(`/api/assets/placements/${image.placementId}?projectId=${encodeURIComponent(image.projectId)}`, {
-                method: 'DELETE',
-              });
-              if (!response.ok) throw new Error('素材 placement 删除失败');
-              const payload = await response.json().catch(() => null) as { projectRevision?: number } | null;
-              if (Number.isSafeInteger(payload?.projectRevision)) {
-                UserManagerCore.getInstance().advanceProjectSyncRevision(Number(payload?.projectRevision));
-              }
-            },
-            (image) => setImages(previous => previous.filter(candidate => candidate.id !== image.id)),
-          );
-          if (result.deletedIds.length > 0) {
-            setSelectedImage(previous => reconcileSelectedImageAfterBatchDeletion(previous, result.deletedIds));
-          }
-          if ('error' in result) {
-            toast.error(result.error instanceof Error ? result.error.message : '素材删除失败');
-            return;
-          }
-          setSelectedImage(null);
+          const deletedIds = await handleDeleteCanvasImages(ids);
+          if (deletedIds.length === ids.length) setSelectedImage(null);
         }}
         onNavigateToImage={(imageId) => {
           setNavigateToImageId(imageId);

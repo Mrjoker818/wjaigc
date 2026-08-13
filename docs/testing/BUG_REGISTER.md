@@ -1292,7 +1292,37 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Environment | Stage 3 Task 4 full Chromium regression, local production server, 2026-08-13 |
 | Reproduction | Open the isolated 300-node project and execute the fixed 75-frame Space-pan scenario. |
 | Expected | Input delay P95 is `<=50ms`, average FPS is `>=45`, with zero disappeared frames and zero unclickable time. |
-| Actual | Clean-fixture P95 was `50.2ms`; preceding runs were `56.8ms` and `62.8ms`. The latest run measured `57.18 FPS`, zero disappeared frames and zero unclickable time. |
+| Actual | Task 4 clean-fixture P95 was `50.2ms` after preceding `56.8ms` and `62.8ms`; Task 5 runs measured `72.5ms` and then `52.3ms` on the final build. The latest run still recorded zero disappeared frames and zero unclickable time. |
 | Root cause | Not yet isolated. The failure remains assigned to the Stage 3 performance track; Task 4 does not guess at a fix or relax the threshold. |
-| Regression | The full Chromium spec remains enabled and reports `5/6` while this assertion fails. |
+| Regression | The full Chromium spec remains enabled; after Task 5 coverage expansion it reports `7/8`, with this assertion as the sole failure. |
 | Status | **OPEN P1.** |
+
+### S3-BUG-005: Queued or late history transitions could overwrite the wrong Canvas state
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Canvas commands / async undo and redo |
+| Environment | Stage 3 Task 5 local unit, source-contract and production Chromium, 2026-08-13 |
+| Reproduction | Start a managed undo/redo, queue a move/resize/reorder while placement synchronization is pending, or switch projects before the old transition finishes. |
+| Expected | Queued user fields win over the historical target, concurrent task progress remains current, and an old project can never modify the new project. |
+| Actual | The first implementation reused a history-target-wins rebase and had no project identity. Later review found that clearing the queue still allowed an already-running old transition to commit into a new project with a matching node ID. |
+| Root cause | System-update rebase semantics were reused for later user commands, and async history work lacked a project/lifecycle token. |
+| Fix | Replay queued snapshots with queued-user precedence; bind queue and transition to `projectId`; invalidate transitions with a lifecycle epoch on project load; guard success, catch and finally paths with the active token. |
+| Regression | RED/GREEN covers move, resize, reorder, concurrent task progress, project mismatch and epoch invalidation. Task 5 focused suite `56/56`; independent fifth review found no P0/P1. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD AND COMPONENT-LEVEL ASYNC SWITCH E2E PENDING.** |
+
+### S3-BUG-006: A generation group could miss its first whole-group movement
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Canvas reference/fusion generation groups |
+| Environment | Stage 3 Task 5 focused regression and review, 2026-08-13 |
+| Reproduction | Create a new reference/fusion group and drag all source images before any reconciliation pass. |
+| Expected | Group chrome and result placeholder move by the same delta; moving only one source does not move the group. |
+| Actual | Newly created or extended groups had no source anchors, so the first reconciliation treated moved coordinates as the baseline and left the group frame behind. |
+| Root cause | `sourcePositions` was initialized lazily instead of at every membership entry point. |
+| Fix | Capture anchors on creation, drag-in, Alt reference add and Ctrl fusion add; remove the anchor when a source leaves; reconcile only identical all-member deltas as whole-group movement. |
+| Regression | Pure movement tests plus source-wiring contracts cover creation, all append paths and removal. Independent final review confirmed the boundary. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |

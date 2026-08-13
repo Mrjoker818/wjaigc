@@ -343,6 +343,121 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await restoredSave;
   });
 
+  test('restores a batch delete with one undo and preserves layer order', async ({ page }, testInfo) => {
+    const projectId = stage3ProjectId(testInfo.project.name, 100);
+    await loginStage3User(page);
+    const projects = await readStage3Projects(page);
+    const project = projects.find(candidate => candidate.id === projectId);
+    expect(project).toBeTruthy();
+    const originalImages = project?.canvasImages as Array<Record<string, unknown>>;
+    const originalOrder = originalImages.map(image => String(image.id));
+    const targetIds = originalOrder.slice(58, 60);
+
+    await openStage3Project(page, projectId);
+    await page.getByTitle('重置视图').click();
+    for (const nodeId of targetIds) await waitForStage3Node(page, nodeId);
+
+    await stage3CanvasCard(page, targetIds[0]).click();
+    await stage3CanvasCard(page, targetIds[1]).click({ modifiers: ['Control'] });
+    await page.keyboard.press('Delete');
+    for (const nodeId of targetIds) {
+      await expect(page.getByAltText(nodeId, { exact: true })).toHaveCount(0);
+    }
+
+    const restoredSave = page.waitForResponse(
+      response => isProjectSave(response, projectId, targetIds[0]),
+      { timeout: 30_000 },
+    );
+    await page.keyboard.press('Control+KeyZ');
+    for (const nodeId of targetIds) await waitForStage3Node(page, nodeId);
+    await restoredSave;
+
+    await expect.poll(async () => {
+      const currentProjects = await readStage3Projects(page);
+      const currentProject = currentProjects.find(candidate => candidate.id === projectId);
+      const currentImages = currentProject?.canvasImages as Array<Record<string, unknown>> | undefined;
+      return currentImages?.map(image => String(image.id)) ?? [];
+    }, { timeout: 30_000 }).toEqual(originalOrder);
+  });
+
+  test('commits move and resize as one undo step each', async ({ page }, testInfo) => {
+    const projectId = stage3ProjectId(testInfo.project.name, 1);
+    await loginStage3User(page);
+    const projects = await readStage3Projects(page);
+    const project = projects.find(candidate => candidate.id === projectId);
+    expect(project).toBeTruthy();
+    const nodeId = String((project?.canvasImages as Array<Record<string, unknown>>)[0]?.id);
+
+    await openStage3Project(page, projectId);
+    await waitForStage3Node(page, nodeId);
+    const card = stage3CanvasCard(page, nodeId);
+    const original = await stableCardBox(card);
+    const start = center(original);
+    await dragPointerAcrossFrames(page, start, { x: start.x + 84, y: start.y + 52 }, 18);
+    const moved = await stableCardBox(card);
+    expect(Math.abs(moved.x - original.x)).toBeGreaterThan(20);
+    expect(Math.abs(moved.y - original.y)).toBeGreaterThan(20);
+
+    await page.keyboard.press('Control+KeyZ');
+    await expect.poll(async () => {
+      const box = await card.boundingBox();
+      return box ? Math.abs(box.x - original.x) + Math.abs(box.y - original.y) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(2);
+    await page.keyboard.press('Control+Shift+KeyZ');
+    await expect.poll(async () => {
+      const box = await card.boundingBox();
+      return box ? Math.abs(box.x - moved.x) + Math.abs(box.y - moved.y) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(2);
+
+    await card.click();
+    const resizeHandle = card.locator('.cursor-nwse-resize').first();
+    await expect(resizeHandle).toBeVisible();
+    const resizeStart = {
+      x: moved.x + 2,
+      y: moved.y + 2,
+    };
+    const resizeTargetId = await page.evaluate(({ x, y }) => (
+      document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null
+    ), resizeStart);
+    expect(resizeTargetId).toBe(nodeId);
+    await dragPointerAcrossFrames(
+      page,
+      resizeStart,
+      { x: resizeStart.x - 64, y: resizeStart.y - 40 },
+      14,
+    );
+    const resized = await stableCardBox(card);
+    expect(resized.width).toBeGreaterThan(moved.width + 20);
+    expect(resized.height).toBeGreaterThan(moved.height + 10);
+
+    await page.keyboard.press('Control+KeyZ');
+    await expect.poll(async () => {
+      const box = await card.boundingBox();
+      return box ? Math.abs(box.width - moved.width) + Math.abs(box.height - moved.height) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(2);
+    await expect.poll(async () => {
+      const box = await card.boundingBox();
+      return box ? Math.abs(box.x - moved.x) + Math.abs(box.y - moved.y) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(2);
+
+    await page.keyboard.press('Control+KeyZ');
+    await expect.poll(async () => {
+      const box = await card.boundingBox();
+      return box ? Math.abs(box.x - original.x) + Math.abs(box.y - original.y) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(2);
+
+    await page.keyboard.press('Control+Shift+KeyZ');
+    await page.keyboard.press('Control+Shift+KeyZ');
+    await expect.poll(async () => {
+      const box = await card.boundingBox();
+      if (!box) return Number.POSITIVE_INFINITY;
+      return Math.abs(box.x - resized.x)
+        + Math.abs(box.y - resized.y)
+        + Math.abs(box.width - resized.width)
+        + Math.abs(box.height - resized.height);
+    }).toBeLessThanOrEqual(4);
+  });
+
   for (const nodeCount of [100, 300] as const) {
     test(`measures ${nodeCount}-node pan performance without disappearing or unclickable frames`, async ({ page, stage3Evidence }, testInfo) => {
       const projectId = stage3ProjectId(testInfo.project.name, nodeCount);

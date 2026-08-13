@@ -19,8 +19,10 @@ export interface FieldChanges {
 export interface CanvasImageDiff {
   /** 新增的图片（完整数据，用于 redo 恢复） */
   added: Map<string, Record<string, unknown>>;
+  addedIndices: Map<string, number>;
   /** 删除的图片（完整数据，用于 undo 恢复） */
   removed: Map<string, Record<string, unknown>>;
+  removedIndices: Map<string, number>;
   /** 更新的图片 id → 变化的字段 */
   updated: Map<string, FieldChanges>;
 }
@@ -37,9 +39,11 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
   private undoStack: HistoryEntry[] = [];
   private redoStack: HistoryEntry[] = [];
   private pendingDiff: CanvasImageDiff | null = null;
+  private activeTransactionId: string | null = null;
+  private transactionRedoStack: HistoryEntry[] | null = null;
   private maxSteps: number;
 
-  constructor(maxSteps = 100) {
+  constructor(maxSteps = 50) {
     this.maxSteps = maxSteps;
   }
 
@@ -49,20 +53,24 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
     const afterMap = new Map(after.map(img => [img.id, img]));
 
     const added = new Map<string, Record<string, unknown>>();
+    const addedIndices = new Map<string, number>();
     const removed = new Map<string, Record<string, unknown>>();
+    const removedIndices = new Map<string, number>();
     const updated = new Map<string, FieldChanges>();
 
     // 新增的图片
-    for (const img of after) {
+    for (const [index, img] of after.entries()) {
       if (!beforeMap.has(img.id)) {
         added.set(img.id, { ...img });
+        addedIndices.set(img.id, index);
       }
     }
 
     // 删除的图片
-    for (const img of before) {
+    for (const [index, img] of before.entries()) {
       if (!afterMap.has(img.id)) {
         removed.set(img.id, { ...img });
+        removedIndices.set(img.id, index);
       }
     }
 
@@ -100,7 +108,7 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
       }
     }
 
-    return { added, removed, updated };
+    return { added, addedIndices, removed, removedIndices, updated };
   }
 
   /** 记录一次变更（自动计算 diff 并存入 pending） */
@@ -117,6 +125,38 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
 
     // 新变更清除 redo 栈
     this.redoStack = [];
+
+    // 离散操作立即形成一步；连续手势仅在显式事务提交时形成一步。
+    if (!this.activeTransactionId) this.flushPending();
+  }
+
+  beginTransaction(id: string): void {
+    if (!id) throw new Error('History transaction ID is required');
+    if (this.activeTransactionId) {
+      throw new Error(`History transaction ${this.activeTransactionId} is already active`);
+    }
+    this.flushPending();
+    this.activeTransactionId = id;
+    this.transactionRedoStack = [...this.redoStack];
+  }
+
+  commitTransaction(id: string): void {
+    this.assertActiveTransaction(id);
+    this.flushPending();
+    this.activeTransactionId = null;
+    this.transactionRedoStack = null;
+  }
+
+  rollbackTransaction(id: string, currentImages: T[]): T[] {
+    this.assertActiveTransaction(id);
+    const result = this.pendingDiff
+      ? this.applyReverseDiff(currentImages, this.pendingDiff)
+      : currentImages;
+    this.pendingDiff = null;
+    this.activeTransactionId = null;
+    if (this.transactionRedoStack) this.redoStack = this.transactionRedoStack;
+    this.transactionRedoStack = null;
+    return result;
   }
 
   /** 标记当前 pending diff 为一个撤销点 */
@@ -215,8 +255,12 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
     result = result.filter(img => !addedIds.has(img.id));
 
     // 2. 恢复删除的图片
-    for (const [, data] of diff.removed) {
-      result.push(data as T);
+    for (const [id, data] of [...diff.removed.entries()].sort((left, right) => (
+      (diff.removedIndices.get(left[0]) ?? Number.MAX_SAFE_INTEGER)
+      - (diff.removedIndices.get(right[0]) ?? Number.MAX_SAFE_INTEGER)
+    ))) {
+      const index = Math.max(0, Math.min(diff.removedIndices.get(id) ?? result.length, result.length));
+      result.splice(index, 0, data as T);
     }
 
     // 3. 恢复更新的字段（用旧值替换新值）
@@ -234,8 +278,12 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
     let result = [...images];
 
     // 1. 恢复新增的图片
-    for (const [, data] of diff.added) {
-      result.push(data as T);
+    for (const [id, data] of [...diff.added.entries()].sort((left, right) => (
+      (diff.addedIndices.get(left[0]) ?? Number.MAX_SAFE_INTEGER)
+      - (diff.addedIndices.get(right[0]) ?? Number.MAX_SAFE_INTEGER)
+    ))) {
+      const index = Math.max(0, Math.min(diff.addedIndices.get(id) ?? result.length, result.length));
+      result.splice(index, 0, data as T);
     }
 
     // 2. 移除删除的图片
@@ -272,6 +320,15 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
     this.undoStack = [];
     this.redoStack = [];
     this.pendingDiff = null;
+    this.activeTransactionId = null;
+    this.transactionRedoStack = null;
+  }
+
+  private assertActiveTransaction(id: string): void {
+    if (!this.activeTransactionId) throw new Error('There is no active history transaction');
+    if (this.activeTransactionId !== id) {
+      throw new Error(`History transaction ${id} does not match active transaction ${this.activeTransactionId}`);
+    }
   }
 
   /** 获取内存占用估算（字节） */
@@ -304,7 +361,7 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
   }
 
   private createEmptyDiff(): CanvasImageDiff {
-    return { added: new Map(), removed: new Map(), updated: new Map() };
+    return { added: new Map(), addedIndices: new Map(), removed: new Map(), removedIndices: new Map(), updated: new Map() };
   }
 
   /** 合并 diff2 到 diff1（就地修改 diff1） */
@@ -312,6 +369,8 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
     // 新增：diff2 新增的也加入 diff1
     for (const [id, data] of diff2.added) {
       diff1.added.set(id, data);
+      const index = diff2.addedIndices.get(id);
+      if (index !== undefined) diff1.addedIndices.set(id, index);
     }
 
     // 删除：diff2 删除的
@@ -319,15 +378,20 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
       if (diff1.added.has(id)) {
         // 新增后删除 = 抵消，移除 added 条目
         diff1.added.delete(id);
+        diff1.addedIndices.delete(id);
         // 同时检查是否有 updated 记录
         diff1.updated.delete(id);
       } else if (diff1.updated.has(id)) {
         // 更新后删除 = 合并为 removed，保留最原始的字段
         const existingChanges = diff1.updated.get(id)!;
         diff1.removed.set(id, { ...existingChanges.oldValues, ...data });
+        const index = diff2.removedIndices.get(id);
+        if (index !== undefined) diff1.removedIndices.set(id, index);
         diff1.updated.delete(id);
       } else {
         diff1.removed.set(id, data);
+        const index = diff2.removedIndices.get(id);
+        if (index !== undefined) diff1.removedIndices.set(id, index);
       }
     }
 

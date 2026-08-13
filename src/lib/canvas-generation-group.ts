@@ -177,6 +177,7 @@ export interface CanvasGenGroup {
 
   // 来源图片ID列表（用于快速查找）
   sourceImageIds: string[];
+  sourcePositions?: Record<string, { x: number; y: number }>;
 
   // 结果框占位符
   resultPlaceholder: ResultPlaceholder;
@@ -584,9 +585,81 @@ export const SHARED_ASPECT_RATIOS = [
     { label: '9:4 (竖向)', value: '9:4' },
 ];
 
+export function captureGenerationGroupSourcePositions<T extends { id: string; x: number; y: number }>(
+  sourceImageIds: readonly string[],
+  sources: readonly T[],
+): Record<string, { x: number; y: number }> {
+  const sourceById = new Map(sources.map((source) => [source.id, source]));
+  return Object.fromEntries(sourceImageIds.flatMap((id) => {
+    const source = sourceById.get(id);
+    return source ? [[id, { x: source.x, y: source.y }]] : [];
+  }));
+}
+
 /** 判断模型的参数类型 */
 function is302Provider(providerHint = ''): boolean {
     return /(?:^|\s|\.)302(?:\.ai)?(?:\s|$)|api\.302\.ai/i.test(providerHint);
+}
+
+export function reconcileGenerationGroupPositions<T extends { id: string; x: number; y: number; width: number; height: number }>(
+  groups: readonly CanvasGenGroup[],
+  sources: readonly T[],
+): CanvasGenGroup[] {
+  const sourceById = new Map(sources.map((source) => [source.id, source]));
+  let changed = false;
+  const next = groups.map((group) => {
+    const members = group.sourceImageIds.map((id) => sourceById.get(id)).filter((source): source is T => Boolean(source));
+    if (members.length === 0) return group;
+    const sourcePositions = captureGenerationGroupSourcePositions(group.sourceImageIds, members);
+    const centerX = members.reduce((sum, source) => sum + source.x + source.width / 2, 0) / members.length;
+    const centerY = members.reduce((sum, source) => sum + source.y + source.height / 2, 0) / members.length;
+    if (!group.sourcePositions
+      || members.length !== group.sourceImageIds.length
+      || members.some((source) => !group.sourcePositions?.[source.id])) {
+      changed = true;
+      return {
+        ...group,
+        sourcePositions,
+        position: { ...group.position, sourceCenterX: centerX, sourceCenterY: centerY },
+      };
+    }
+    const deltas = members.map((source) => ({
+      x: source.x - group.sourcePositions![source.id].x,
+      y: source.y - group.sourcePositions![source.id].y,
+    }));
+    const dx = deltas[0]?.x ?? 0;
+    const dy = deltas[0]?.y ?? 0;
+    const movesTogether = deltas.every((delta) => delta.x === dx && delta.y === dy);
+    const anchorsChanged = deltas.some((delta) => delta.x !== 0 || delta.y !== 0);
+    if (!anchorsChanged) return group;
+    changed = true;
+    if (!movesTogether) {
+      return {
+        ...group,
+        sourcePositions,
+        position: { ...group.position, sourceCenterX: centerX, sourceCenterY: centerY },
+      };
+    }
+    return {
+      ...group,
+      sourcePositions,
+      position: {
+        ...group.position,
+        x: group.position.x + dx,
+        y: group.position.y + dy,
+        sourceCenterX: centerX,
+        sourceCenterY: centerY,
+        resultX: (group.position.resultX ?? group.resultPlaceholder.x) + dx,
+        resultY: (group.position.resultY ?? group.resultPlaceholder.y) + dy,
+      },
+      resultPlaceholder: {
+        ...group.resultPlaceholder,
+        x: group.resultPlaceholder.x + dx,
+        y: group.resultPlaceholder.y + dy,
+      },
+    };
+  });
+  return changed ? next : groups as CanvasGenGroup[];
 }
 
 function is302GptImage(modelId: string, providerHint = ''): boolean {

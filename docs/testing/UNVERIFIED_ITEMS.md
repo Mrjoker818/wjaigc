@@ -601,4 +601,14 @@
 | Mobile Chromium | UNVERIFIED | Prove touch long-press pan remains usable while touch selection/edit priorities remain correct. |
 | PostgreSQL-gated full suites | UNVERIFIED | Configure the required isolated PostgreSQL URL variables and rerun all `12` skipped files / `44` skipped tests; skipped tests are not passes. |
 | Protected-baseline production drift | BLOCKED BY ORDERED PLAN | Task 4 confirms all `38/38` protected identities remain. Update the allowlist/metadata only in the later approved Stage 3 baseline task, then rerun the gate. |
+
+## 2026-08-13 Stage 3 Task 5 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| 300-node input latency | OPEN P1 | Reduce the final-build fixed pan scenario P95 from `52.3ms` to `<=50ms` without reducing assertions; keep the earlier `72.5ms` run as variance evidence. |
+| Async undo/redo project switch | UNVERIFIED P2 EVIDENCE | Add a component-level or Playwright test that holds the placement Promise, switches projects, starts a new transition and proves the old success/catch/finally cannot alter the new project. |
+| External browser matrix | UNVERIFIED | Run Chromium 1920x1080, Firefox, WebKit and mobile Chromium on the exact Task 5 candidate. |
+| Protected-baseline source drift | BLOCKED BY ORDERED PLAN | `38/38` identities remain, but `24` accumulated Stage 3 source files are not yet in the approved baseline metadata. Update only in the later planned task. |
+| Cloud exact SHA and rollback | UNVERIFIED | Push only after authorized, deploy the exact candidate in the isolated Coze project, execute the Canvas history regression, then prove rollback. |
 | Exact-SHA Coze candidate and rollback | UNVERIFIED | After the ordered local tasks and main-only candidate are ready, pull the exact SHA, validate in the isolated Coze environment, and prove `canvas-v2 -> legacy` rollback. `stable` remains read-only. |

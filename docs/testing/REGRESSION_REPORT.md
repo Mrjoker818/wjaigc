@@ -920,3 +920,13 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Fresh supporting gates: TypeScript exit `0`; full Vitest `411` files / `2288` passed / `44` skipped; ESLint `0 errors / 966 historical warnings`; production build `116/116`; `git diff --check` exit `0`. The `12` skipped files are PostgreSQL-gated and are not counted as passes.
 - The protected-feature gate confirms `38/38` feature identities, source paths and evidence contracts are present. It still blocks Stage 3 production-source drift because the current allowlist/baseline update is scheduled later in the approved plan; this is not represented as a clean release gate.
 - **Task 4 verdict: PASS LOCALLY FOR ITS FUNCTIONAL SCOPE. Stage 3 verdict: NOT COMPLETE.** Task 5 is next and not started; S3-BUG-004, external browser profiles, exact-SHA cloud validation and rollback remain open.
+
+## 2026-08-13 Stage 3 Task 5 command and history regression
+
+- TDD introduced immutable Canvas commands, a 50-step controller, explicit pointer transactions, history-skip task projection, placement-aware delete/restore, and exact reorder/group inverses.
+- Five independent review waves reproduced and closed queue conflict loss, concurrent membership rebase, processing-node geometry filtering, first generation-group drag drift, cross-project queued edits and late in-flight undo/redo contamination.
+- Focused final regression: `9` files, `56/56` tests. TypeScript passes. PostgreSQL-enabled full Vitest: `428/428` files and `2374/2374` tests, zero failures and zero skips.
+- Fresh production Chromium Task 5 E2E passes `3/3`: delete/undo/redo, batch delete as one step with layer-order restoration, and move/resize as one step each.
+- Final-build full Chromium remains `7/8`. The only failure is S3-BUG-004: 300-node input P95 `52.3ms` versus the fixed `<=50ms` gate after an earlier `72.5ms` run; disappeared frames `0`, unclickable duration `0`. No threshold was changed.
+- Protected features remain `38/38`, but the release gate intentionally blocks `24` accumulated Stage 3 source drifts until the later approved baseline task.
+- **Task 5 verdict: PASS LOCALLY FOR ITS FUNCTIONAL SCOPE. Stage 3 verdict: NOT COMPLETE.** Task 6 has not started.

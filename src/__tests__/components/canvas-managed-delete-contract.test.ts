@@ -38,6 +38,9 @@ describe('managed canvas image deletion wiring', () => {
 
     expect(coordinatorStart).toBeGreaterThan(-1);
     expect(coordinator).toContain('reconcileImageBatchDeletion(');
+    expect(coordinator).toContain("type: 'delete'");
+    expect(coordinator).toContain('executeCanvasCommand(');
+    expect(coordinator.indexOf('deletedIds = result.deletedIds')).toBeLessThan(coordinator.indexOf('setImages(remainingImages)'));
     expect(workspaceSource).toContain('pendingCanvasDeleteIdsRef');
     expect(coordinator).toContain('.filter((id) => !pendingCanvasDeleteIdsRef.current.has(id))');
     expect(coordinator).toContain("method: 'DELETE'");
@@ -70,10 +73,10 @@ describe('managed canvas image deletion wiring', () => {
     expect(lifecycle).toContain('clearRecentlyDeletedImageIds(restoredIds)');
     expect(undo).toContain("getAssetGraphMode() === 'asset-v3'");
     expect(undo).toContain('await syncAssetV3HistoryTransition(previous, result)');
-    expect(undo.indexOf('await syncAssetV3HistoryTransition(previous, result)')).toBeLessThan(undo.indexOf('setImagesRaw(result)'));
+    expect(undo.indexOf('await syncAssetV3HistoryTransition(previous, result)')).toBeLessThan(undo.indexOf('setImagesRaw(committed)'));
 
     expect(redo).toContain("getAssetGraphMode() === 'asset-v3'");
     expect(redo).toContain('await syncAssetV3HistoryTransition(previous, result)');
-    expect(redo.indexOf('await syncAssetV3HistoryTransition(previous, result)')).toBeLessThan(redo.indexOf('setImagesRaw(result)'));
+    expect(redo.indexOf('await syncAssetV3HistoryTransition(previous, result)')).toBeLessThan(redo.indexOf('setImagesRaw(committed)'));
   });
 });

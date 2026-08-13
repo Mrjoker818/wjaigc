@@ -761,3 +761,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - TypeScript, full Vitest (`411` files / `2288` passed / `44` skipped), the `116/116` production build and whitespace checks pass. ESLint is `0 errors / 966 historical warnings`. The `12` PostgreSQL-gated files and four non-default browser profiles remain unverified in this task.
 - All `38/38` protected features remain present, but the release gate correctly blocks production-source drift until the later Stage 3 protected-baseline task updates the approved allowlist/metadata.
 - **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `5/11` tasks, approximately `45%`. Task 5 command/history transactions has not started. No Task 4 change is authorized for `stable`, and no cloud deployment claim is made.
+
+## 2026-08-13 Stage 3 Task 5 readiness decision
+
+- Task 5 code and focused browser scope pass locally. Final review found no P0/P1, focused tests are `56/56`, production Chromium Task 5 E2E is `3/3`, and PostgreSQL-enabled full Vitest is `2374/2374` with no skips.
+- The final-build full Chromium Stage 3 scenario is still `7/8`. S3-BUG-004 remains open P1 because 300-node input P95 is `52.3ms` against the non-negotiable `<=50ms` gate after an earlier `72.5ms` run, despite zero disappeared frames and zero unclickable time.
+- All `38/38` protected feature identities remain present. The gate still blocks `24` expected Stage 3 source drifts until the plan-authorized baseline update; this is not a release pass.
+- **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `6/11`, approximately `55%`. Task 6 has not started. Nothing is pushed or deployed, `stable` remains untouched, and no cloud claim is made.

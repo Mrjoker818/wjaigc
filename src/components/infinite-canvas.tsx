@@ -53,7 +53,7 @@ import {
   useAnnotationController,
 } from '@/features/annotations/use-annotation-controller';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
-import { buildGroupReferenceRequestControls, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, QUALITY_DISPLAY_NAMES, getProviderAspectRatios, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
+import { buildGroupReferenceRequestControls, calculateActualPixels, captureGenerationGroupSourcePositions, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, QUALITY_DISPLAY_NAMES, getProviderAspectRatios, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, reconcileGenerationGroupPositions } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
@@ -91,6 +91,12 @@ import {
   resolveImagePointerIntent,
   resolveTopmostHit,
 } from '@/lib/canvas-kernel/selection';
+import {
+  canvasSnapshotToNodes,
+  createCanvasDocumentSnapshot,
+  executeCanvasCommand,
+  type CanvasCommand,
+} from '@/lib/canvas-kernel/commands';
 import { resolveActiveCanvasImage } from '@/lib/canvas-active-image';
 import {
   THREE_D_POLL_INTERVAL_MS,
@@ -298,6 +304,11 @@ export interface CanvasImage {
   zIndex?: number;
 }
 
+function applyCanvasCommand(images: CanvasImage[], command: CanvasCommand): CanvasImage[] {
+  const result = executeCanvasCommand(createCanvasDocumentSnapshot(images), command);
+  return canvasSnapshotToNodes(result.next) as unknown as CanvasImage[];
+}
+
 type JsonRecord = Record<string, unknown>;
 
 interface GroupGenerationResponse {
@@ -374,7 +385,7 @@ function parseImageEditResponse(value: unknown): ImageEditResponse {
 
 interface InfiniteCanvasProps {
   images: CanvasImage[];
-  onImagesChange: (images: CanvasImage[]) => void;
+  onImagesChange: (images: CanvasImage[], options?: { history?: 'record' | 'skip' }) => void;
   selectedImage: CanvasImage | null;
   onSelectImage: (image: CanvasImage | null) => void;
   onPreviewImage: (image: CanvasImage) => void;
@@ -409,6 +420,10 @@ interface InfiniteCanvasProps {
   isPanelCollapsed?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  onHistoryTransactionBegin?: (id: string) => void;
+  onHistoryTransactionCommit?: (id: string) => void;
+  onHistoryTransactionRollback?: (id: string) => void;
+  isHistoryTransitionPending?: boolean;
   navigateToImageId?: string | null;
   onNavigateToImageComplete?: () => void;
   onGroupsChange?: (groups: ImageGroup[]) => void;
@@ -627,7 +642,7 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
   // Stable refs for callbacks used in effects (avoid stale closures)
@@ -1128,10 +1143,37 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const dragTargetRef = useRef<string | null>(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const imageDragPointerIdRef = useRef<number | null>(null);
+  const historyTransactionRef = useRef<{ pointerId: number; id: string } | null>(null);
   const suppressSelectionClickRef = useRef(false);
   const dragRafRef = useRef<number | null>(null);
   const snapGuidesRef = useRef<SnapGuide[]>([]);
   const hoveredGenGroupIdRef = useRef<string | null>(null);
+
+  const beginHistoryTransaction = useCallback((kind: string, pointerId: number) => {
+    const id = `${kind}:${pointerId}`;
+    const active = historyTransactionRef.current;
+    if (active?.pointerId === pointerId && active.id === id) return;
+    if (active) onHistoryTransactionRollback?.(active.id);
+    onHistoryTransactionBegin?.(id);
+    historyTransactionRef.current = { pointerId, id };
+  }, [onHistoryTransactionBegin, onHistoryTransactionRollback]);
+
+  const commitHistoryTransaction = useCallback((pointerId: number) => {
+    const active = historyTransactionRef.current;
+    if (!active || active.pointerId !== pointerId) return;
+    onHistoryTransactionCommit?.(active.id);
+    historyTransactionRef.current = null;
+  }, [onHistoryTransactionCommit]);
+
+  const rollbackHistoryTransaction = useCallback((pointerId: number) => {
+    const active = historyTransactionRef.current;
+    if (!active || active.pointerId !== pointerId) return;
+    try {
+      onHistoryTransactionRollback?.(active.id);
+    } finally {
+      historyTransactionRef.current = null;
+    }
+  }, [onHistoryTransactionRollback]);
 
   const cancelImageDragPreview = useCallback(() => {
     if (dragRafRef.current !== null) {
@@ -2328,6 +2370,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     genGroupsRef.current = genGroups;
   }, [genGroups]);
 
+  useEffect(() => {
+    setGenGroups((current) => reconcileGenerationGroupPositions(current, images));
+  }, [images]);
+
   /** Get current image model from localStorage (independent of component state) */
   const getCurrentModel = useCallback((): { model: string; providerId?: string; apiDisplayName?: string; providerName?: string } => {
     try {
@@ -2728,6 +2774,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [images, onSelectImage, agentSelectingImage]);
 
   const requestDeleteImages = useCallback(async (imageIds: string[]) => {
+    if (isHistoryTransitionPending) return [];
     const uniqueIds = [...new Set(imageIds)]
       .filter(Boolean)
       .filter((id) => !pendingDeleteIdsRef.current.has(id));
@@ -2755,7 +2802,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     } finally {
       uniqueIds.forEach((id) => pendingDeleteIdsRef.current.delete(id));
     }
-  }, [editImageId, onDeleteImages, onForceSave, onImagesChange, selectImage, selectedImage]);
+  }, [editImageId, isHistoryTransitionPending, onDeleteImages, onForceSave, onImagesChange, selectImage, selectedImage]);
 
   // Create a group from selected images
   const handleCreateGroup = useCallback(() => {
@@ -2784,11 +2831,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     };
 
     // Offset images into group-relative coordinates
-    const updatedImages = images.map(img => {
-      if (selectedIds.has(img.id)) {
-        return { ...img, groupId };
-      }
-      return img;
+    const updatedImages = applyCanvasCommand(images, {
+      type: 'assign-group',
+      ids: [...selectedIds],
+      groupId,
     });
 
     onImagesChange(updatedImages);
@@ -2800,9 +2846,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // Delete a group (un-group, doesn't delete images)
   const handleDeleteGroup = useCallback((groupId: string) => {
-    const updatedImages = images.map(img =>
-      img.groupId === groupId ? { ...img, groupId: undefined } : img
-    );
+    const updatedImages = applyCanvasCommand(images, {
+      type: 'assign-group',
+      ids: images.filter((image) => image.groupId === groupId).map((image) => image.id),
+      groupId: undefined,
+    });
     onImagesChange(updatedImages);
     setGroups(prev => prev.filter(g => g.id !== groupId));
   }, [images, onImagesChange]);
@@ -2847,6 +2895,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if event originates from dialog/modal/overlay
       if (isEventFromOverlay(e)) return;
+      if (isHistoryTransitionPending) return;
       // Skip if user is typing in an input field (unified check)
       const inputFocused = isInputFocused(e);
 
@@ -2915,7 +2964,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               y: img.y + offset,
             }));
           if (dupImages.length > 0) {
-            onImagesChange([...imagesRef.current, ...dupImages]);
+            onImagesChange(applyCanvasCommand(imagesRef.current, {
+              type: 'duplicate',
+              nodes: dupImages,
+            }));
             setSelectedIds(new Set(dupImages.map(d => d.id)));
             selectImage(dupImages[0].id);
           }
@@ -3228,7 +3280,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, toggleAnnotationV2Mode, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint]);
+  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, toggleAnnotationV2Mode, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending]);
 
   // Click outside to close menus
   useEffect(() => {
@@ -3490,6 +3542,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Unified pointer handlers keep annotation gestures active for mouse, pen, and touch.
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (isEventFromOverlay(e.nativeEvent)) return;
+    if (isHistoryTransitionPending) return;
     const gesturePriority = resolveCanvasGesturePriority({
       overlay: false,
       editMode: editMode !== 'none',
@@ -3743,6 +3796,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             setResizingImage(selId);
             setResizeCorner(corner.name);
             setResizeStart({ x: canvasPos.x, y: canvasPos.y, w: selImg.width, h: selImg.height, imgX: selImg.x, imgY: selImg.y });
+            beginHistoryTransaction('resize', e.pointerId);
             return;
           }
         }
@@ -3801,6 +3855,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       dragStartRef.current = canvasPos;
       setDragOffset({ x: 0, y: 0 });
       dragOffsetRef.current = { x: 0, y: 0 };
+      beginHistoryTransaction('drag', e.pointerId);
       e.currentTarget.setPointerCapture(e.pointerId);
     } else {
       mouseDownOnImageRef.current = false;
@@ -3818,7 +3873,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         startBlankCanvasLongPress(e.pointerId, e.clientX, e.clientY);
       }
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, startBlankCanvasLongPress, beginImageSelectionGesture, beginSelectionBox, isEventFromOverlay, selectSelectionHit, showRefFusion]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, startBlankCanvasLongPress, beginImageSelectionGesture, beginSelectionBox, isEventFromOverlay, selectSelectionHit, showRefFusion, beginHistoryTransaction, isHistoryTransitionPending]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (
@@ -4310,9 +4365,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     // Apply resize preview to images (single history entry instead of one per mousemove)
     if (resizingImage && resizePreview) {
-      onImagesChange(images.map(i =>
-        i.id === resizingImage ? { ...i, x: resizePreview.x, y: resizePreview.y, width: resizePreview.width, height: resizePreview.height } : i
-      ));
+      onImagesChange(applyCanvasCommand(images, {
+        type: 'resize',
+        id: resizingImage,
+        bounds: resizePreview,
+      }));
     }
     setResizePreview(null);
 
@@ -4325,11 +4382,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (imageDragReadyRef.current && (finalDragOffset.x !== 0 || finalDragOffset.y !== 0)) {
         const committedIds = new Set(getSelectionState().ids);
         const currentImages = imagesRef.current;
-        const updatedImages = currentImages.map(img => {
-          if (committedIds.has(img.id)) {
-            return { ...img, x: img.x + finalDragOffset.x, y: img.y + finalDragOffset.y };
-          }
-          return img;
+        const updatedImages = applyCanvasCommand(currentImages, {
+          type: 'move',
+          ids: [...committedIds],
+          delta: finalDragOffset,
         });
         imagesRef.current = updatedImages;
         onImagesChange(updatedImages);
@@ -4371,6 +4427,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   return {
                     ...g,
                     sourceImageIds: [...g.sourceImageIds, imgId],
+                    sourcePositions: {
+                      ...g.sourcePositions,
+                      [imgId]: { x: draggedImg.x, y: draggedImg.y },
+                    },
                     refImages: [...g.refImages, {
                       imageId: imgId,
                       url: draggedImg.url,
@@ -4402,11 +4462,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const groupOffset = groupDragOffsetRef.current;
       if (groupDragReadyRef.current && (groupOffset.x !== 0 || groupOffset.y !== 0)) {
         // Move all images in the group by the drag offset
-        onImagesChange(images.map(img => {
-          if (img.groupId === groupDragTarget) {
-            return { ...img, x: img.x + groupOffset.x, y: img.y + groupOffset.y };
-          }
-          return img;
+        onImagesChange(applyCanvasCommand(images, {
+          type: 'move',
+          ids: images.filter((image) => image.groupId === groupDragTarget).map((image) => image.id),
+          delta: groupOffset,
         }));
       }
       if (groupDragRafRef.current !== null) {
@@ -4430,35 +4489,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         const dx = genGroupOffset.x;
         const dy = genGroupOffset.y;
         // Move all reference images in the gen group
-        const updatedImages = images.map(img => {
-          const ref = genGroupsRef.current.find(g => g.id === genGroupDragTarget)?.sourceImageIds.includes(img.id);
-          if (ref) return { ...img, x: img.x + dx, y: img.y + dy };
-          return img;
+        const updatedImages = applyCanvasCommand(images, {
+          type: 'move',
+          ids: genGroupsRef.current.find((group) => group.id === genGroupDragTarget)?.sourceImageIds ?? [],
+          delta: { x: dx, y: dy },
         });
         onImagesChange(updatedImages);
-        // Move the gen group's resultPlaceholder position
-        setGenGroups(prev => prev.map(g => {
-          if (g.id === genGroupDragTarget) {
-            return {
-              ...g,
-              position: {
-                ...g.position,
-                x: g.position.x + dx,
-                y: g.position.y + dy,
-                sourceCenterX: (g.position.sourceCenterX ?? 0) + dx,
-                sourceCenterY: (g.position.sourceCenterY ?? 0) + dy,
-                resultX: (g.position.resultX ?? g.resultPlaceholder.x) + dx,
-                resultY: (g.position.resultY ?? g.resultPlaceholder.y) + dy,
-              },
-              resultPlaceholder: {
-                ...g.resultPlaceholder,
-                x: g.resultPlaceholder.x + dx,
-                y: g.resultPlaceholder.y + dy,
-              },
-            };
-          }
-          return g;
-        }));
       }
       if (genGroupDragRafRef.current !== null) {
         cancelAnimationFrame(genGroupDragRafRef.current);
@@ -4499,8 +4535,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       hexCubeDragTimerRef.current = null;
     }
 
+    commitHistoryTransaction(e.pointerId);
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, zoom, viewOffset.x, viewOffset.y, commitViewportPan, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, clearBlankCanvasLongPress, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage]);
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, zoom, viewOffset.x, viewOffset.y, commitViewportPan, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, clearBlankCanvasLongPress, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage, commitHistoryTransaction]);
 
   const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     clearBlankCanvasLongPress(e.pointerId);
@@ -4509,6 +4546,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       cancelImageDragPreview();
     }
     cancelGroupDragPreviews();
+    rollbackHistoryTransaction(e.pointerId);
     finishCanvasPointerGesture(e.pointerId, true);
     if (isPanning || isMiddlePanning) {
       cancelViewportPan({ pointerId: e.pointerId });
@@ -4525,7 +4563,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-  }, [annotationV2State.gesture.kind, cancelViewportPan, clearBlankCanvasLongPress, escapeAnnotationV2, isMiddlePanning, isPanning, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture, finishCanvasPointerGesture]);
+  }, [annotationV2State.gesture.kind, cancelViewportPan, clearBlankCanvasLongPress, escapeAnnotationV2, isMiddlePanning, isPanning, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture, finishCanvasPointerGesture, rollbackHistoryTransaction]);
 
   const handlePointerLeave = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (annotationPointerIdRef.current !== null) return;
@@ -4536,6 +4574,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       handleEditMouseUp();
       return;
     }
+    rollbackHistoryTransaction(e.pointerId);
     if (isPanning || isMiddlePanning) commitViewportPan();
     setIsPanning(false);
     setIsMiddlePanning(false);
@@ -4548,7 +4587,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       cancelImageDragPreview();
     }
     cancelGroupDragPreviews();
-  }, [editMode, handleEditMouseUp, isMiddlePanning, isPanning, commitViewportPan, clearBlankCanvasLongPress, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture]);
+  }, [editMode, handleEditMouseUp, isMiddlePanning, isPanning, commitViewportPan, clearBlankCanvasLongPress, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture, rollbackHistoryTransaction]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     // Prevent scroll from affecting canvas when cursor is over a modal/overlay/popup
@@ -4798,6 +4837,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       status: 'idle',
       refImages: [refImg],
       sourceImageIds: [firstImage.id],
+      sourcePositions: captureGenerationGroupSourcePositions([firstImage.id], [firstImage]),
       resultPlaceholder: {
         x: resultPos.x,
         y: resultPos.y,
@@ -4867,6 +4907,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             ...g,
             refImages: allRefs,
             sourceImageIds: [...g.sourceImageIds, image.id],
+            sourcePositions: { ...g.sourcePositions, [image.id]: { x: image.x, y: image.y } },
             sourceCategories: { ...g.sourceCategories, [image.id]: [...REFERENCE_CATEGORIES] },
             sourceStrengths: { ...g.sourceStrengths, [image.id]: Object.fromEntries(REFERENCE_CATEGORIES.map(category => [category, 70])) },
             position: { ...g.position, sourceCenterX: avgX, sourceCenterY: avgY },
@@ -4907,6 +4948,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             ...g,
             refImages: allRefs,
             sourceImageIds: [...g.sourceImageIds, image.id],
+            sourcePositions: { ...g.sourcePositions, [image.id]: { x: image.x, y: image.y } },
             position: { ...g.position, sourceCenterX: avgX, sourceCenterY: avgY },
           };
         });
@@ -4935,11 +4977,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         // 重新编号
         const reindexed = newRefs.map((r, i) => ({ ...r, number: i + 1 }));
         const newSourceIds = g.sourceImageIds.filter(id => id !== imageId);
+        const newSourcePositions = { ...g.sourcePositions };
+        delete newSourcePositions[imageId];
         const newCategories = { ...g.sourceCategories };
         const newStrengths = { ...g.sourceStrengths };
         delete newCategories[imageId];
         delete newStrengths[imageId];
-        return { ...g, refImages: reindexed, sourceImageIds: newSourceIds, sourceCategories: newCategories, sourceStrengths: newStrengths };
+        return { ...g, refImages: reindexed, sourceImageIds: newSourceIds, sourcePositions: newSourcePositions, sourceCategories: newCategories, sourceStrengths: newStrengths };
       }).filter(g => g.refImages.length > 0);
     });
   }, []);
@@ -10871,6 +10915,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     const canvasPos = screenToCanvas(e.clientX, e.clientY);
                     setGroupDragStart(canvasPos);
                     setGroupDragOffset({ x: 0, y: 0 });
+                    beginHistoryTransaction('group-drag', e.pointerId);
                     groupDragTimerRef.current = setTimeout(() => {
                       groupDragReadyRef.current = true;
                     }, 200);
@@ -12050,6 +12095,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       const canvasPos = screenToCanvas(e.clientX, e.clientY);
                       setGenGroupDragStart(canvasPos);
                       setGenGroupDragOffset({ x: 0, y: 0 });
+                      beginHistoryTransaction('group-drag', e.pointerId);
                       genGroupDragReadyRef.current = false;
                       genGroupDragTimerRef.current = setTimeout(() => {
                         genGroupDragReadyRef.current = true;
@@ -17992,7 +18038,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             selectedIds={Array.from(selectedIds)}
             isMonochrome={isMonochrome}
             onSelect={(ids) => setSelectedIds(new Set(ids))}
-            onReorder={(newImages) => onImagesChange(newImages)}
+            onReorder={(newImages) => onImagesChange(applyCanvasCommand(images, {
+              type: 'reorder',
+              order: newImages.map((image) => image.id),
+              zIndexes: Object.fromEntries(newImages.map((image) => [image.id, image.zIndex])),
+            }))}
             onToggleVisibility={(id) => {
               onImagesChange(images.map(img =>
                 img.id === id ? { ...img, visible: !img.visible } : img
