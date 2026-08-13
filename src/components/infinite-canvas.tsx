@@ -58,6 +58,14 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
+import {
+  applyCanvasTaskEventToProcessingPlaceholders,
+  shouldPreserveProjectedCanvasCompletion,
+} from '@/lib/canvas-task-placeholders';
+import {
+  createCanvasTaskEventError,
+  type CanvasTaskEvent,
+} from '@/lib/canvas-kernel/task-projection';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { normalizeGenerationSubmitSlots } from '@/lib/task-core/generation-batch';
 import { } from '@/lib/canvas-annotation-visibility';
@@ -249,6 +257,15 @@ export interface CanvasImage {
   assetVersionId?: string;
   placementId?: string;
   generationTaskId?: string;
+  taskProjection?: {
+    taskId: string;
+    outputIndex: number;
+    status: string;
+    progress: number;
+    revision?: number;
+    source?: string;
+    errorCode?: string;
+  };
   isProcessingPlaceholder?: boolean;
   groupId?: string;
   processing?: {
@@ -256,10 +273,17 @@ export interface CanvasImage {
     status: string;
     progress: number;
     taskId?: string;
+    batchId?: string;
+    slotId?: string;
+    slotIndex?: number;
+    outputIndex?: number;
+    revision?: number;
     /** True only after a processing placeholder was restored from persisted project data. */
     isResumed?: boolean;
     sourceUrl?: string;
     error?: string;
+    errorCode?: string;
+    requestId?: string;
     startTime?: number; // 生图开始时间戳(ms)，用于显示已用时间
     retryable?: boolean;
     retryPayload?: VideoRetryPayload;
@@ -5734,6 +5758,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     onImagesChange(nextImages);
   }, [onImagesChange]);
 
+  const projectProcessingFrameEvent = useCallback((event: CanvasTaskEvent) => {
+    const current = imagesRef.current;
+    const next = applyCanvasTaskEventToProcessingPlaceholders(current, event);
+    if (next === current) return;
+    imagesRef.current = next;
+    onImagesChange(next);
+  }, [onImagesChange]);
+
   const completeProcessingFrame = useCallback((
     id: string,
     newUrl: string,
@@ -5743,8 +5775,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     relationType?: 'variant' | 'edit' | 'img2img' | 'upscale' | 'removebg' | 'trace' | 'reference'
   ): CanvasImage | null => {
     let completedImage: CanvasImage | null = null;
+    let didMutateFrame = false;
     const nextImages = imagesRef.current.map(image => {
       if (image.id !== id) return image;
+      if (shouldPreserveProjectedCanvasCompletion(image, newUrl)) {
+        completedImage = image;
+        return image;
+      }
+      didMutateFrame = true;
       completedImage = {
         ...image,
         url: newUrl,
@@ -5762,8 +5800,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
       return completedImage;
     });
-    imagesRef.current = nextImages;
-    onImagesChange(nextImages);
+    if (didMutateFrame) {
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
+    }
 
     // ★ 异步验证修正：始终从图片真实像素尺寸修正 originalWidth/Height 和 width/height
     // 因为 API 可能忽略 size 参数返回不同尺寸的图片（特别是 /images/edits 端点）
@@ -5950,6 +5990,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
 
       canvasGenerationAbortControllersRef.current.get(taskId)?.abort();
+      projectProcessingFrameEvent({
+        taskId,
+        outputIndex: image.processing?.outputIndex ?? 0,
+        status: 'cancelled',
+        progress: image.processing?.progress || 0,
+        source: 'cancel',
+        error: createCanvasTaskEventError(cancellation.message, {
+          code: 'TASK_CANCELLED',
+          message: cancellation.message || '任务已取消',
+          source: 'client',
+          retryable: false,
+        }),
+      });
       removeProcessingFrame(image.id);
       console.info('[Canvas] cancelled processing frame removed', {
         taskId,
@@ -5958,7 +6011,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     } finally {
       cancellingTaskIdsRef.current.delete(taskId);
     }
-  }, [removeProcessingFrame, updateProcessingFrame]);
+  }, [projectProcessingFrameEvent, removeProcessingFrame, updateProcessingFrame]);
 
   // Get selected image data
   const getSelectedImageData = (): CanvasImage | null => {
@@ -7058,6 +7111,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             status: 'processing',
             progress: 5,
             taskId: slot.taskId,
+            slotIndex: slot.slotIndex,
+            outputIndex: 0,
             startTime: startedAt,
           },
           prompt: canvasGenPrompt,
@@ -7108,6 +7163,36 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             const failedStatus = ['failed', 'error'].includes(normalizedStatus);
             if (completedStatus && typeof resultUrl === 'string' && resultUrl) {
               const savedUrl = await persistGeneratedUrl(resultUrl);
+              projectProcessingFrameEvent({
+                taskId: slot.taskId,
+                slotIndex: slot.slotIndex,
+                outputIndex: 0,
+                status: 'completed',
+                progress: 100,
+                revision: typeof pollData.revision === 'number' ? pollData.revision : undefined,
+                source: 'poll',
+                providerId: typeof pollData.providerId === 'string' && pollData.providerId.trim()
+                  ? pollData.providerId
+                  : pollProviderId,
+                providerName: typeof pollData.providerName === 'string' && pollData.providerName.trim()
+                  ? pollData.providerName
+                  : actualProviderName,
+                modelId: actualGenModel,
+                modelName: typeof pollData.modelName === 'string' ? pollData.modelName : actualGenModel,
+                result: {
+                  url: savedUrl,
+                  sourceUrl: resultUrl,
+                  assetVersionId: pollData.assetVersionId || pollData.result?.assetVersionId,
+                  placementId: pollData.placementId || pollData.result?.placementId,
+                  metadata: {
+                    prompt: canvasGenPrompt,
+                    quality: canvasGenQuality,
+                    aspectRatio: canvasGenAspectRatio,
+                    generationRouteAudit: pollData.generationRouteAudit || data.generationRouteAudit,
+                    createdAt: Date.now(),
+                  },
+                },
+              });
               completeProcessingFrame(slot.frameId, savedUrl, canvasGenFrameWidth, canvasGenFrameHeight, {
                 prompt: canvasGenPrompt,
                 model: actualGenModel,
@@ -7125,20 +7210,39 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               return savedUrl;
             }
             if (failedStatus || cancelledStatus) {
-              updateProcessingFrame(slot.frameId, {
-                label: cancelledStatus ? '已取消' : (pollData.error || '生成失败'),
+              projectProcessingFrameEvent({
+                taskId: slot.taskId,
+                slotIndex: slot.slotIndex,
+                outputIndex: 0,
                 status: cancelledStatus ? 'cancelled' : 'failed',
-                progress: 0,
+                progress: typeof pollData.progress === 'number' ? pollData.progress : 0,
+                revision: typeof pollData.revision === 'number' ? pollData.revision : undefined,
+                source: 'poll',
+                error: createCanvasTaskEventError(pollData.error, {
+                  code: cancelledStatus ? 'TASK_CANCELLED' : (pollData.code || 'GENERATION_FAILED'),
+                  message: typeof pollData.error === 'string'
+                    ? pollData.error
+                    : (cancelledStatus ? '任务已取消' : '生成失败'),
+                  source: 'provider',
+                  retryable: pollData.retryable === true,
+                }),
               });
               return null;
             }
             const progress = typeof pollData.progress === 'number'
               ? pollData.progress
               : Math.min(90, 8 + Math.round((attempt / maxAttempts) * 82));
-            updateProcessingFrame(slot.frameId, {
-              label: `生成中 ${slot.slotIndex + 1}/${submittedSlots.length}`,
-              status: 'processing',
+            projectProcessingFrameEvent({
+              taskId: slot.taskId,
+              slotIndex: slot.slotIndex,
+              outputIndex: 0,
+              status: normalizedStatus === 'queued' || normalizedStatus === 'uploading' || normalizedStatus === 'submitting'
+                ? normalizedStatus
+                : 'processing',
               progress,
+              revision: typeof pollData.revision === 'number' ? pollData.revision : undefined,
+              label: `生成中 ${slot.slotIndex + 1}/${submittedSlots.length}`,
+              source: 'poll',
             });
             setCanvasGenProgress(progress);
           } catch {
@@ -7146,7 +7250,20 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             // Keep the slot visible and let the next polling iteration recover transient failures.
           }
         }
-        updateProcessingFrame(slot.frameId, { label: '生成超时', status: 'failed', progress: 0 });
+        projectProcessingFrameEvent({
+          taskId: slot.taskId,
+          slotIndex: slot.slotIndex,
+          outputIndex: 0,
+          status: 'timeout',
+          progress: 0,
+          source: 'poll',
+          error: createCanvasTaskEventError('生成超时', {
+            code: 'GENERATION_POLL_TIMEOUT',
+            message: '生成超时',
+            source: 'network',
+            retryable: true,
+          }),
+        });
         return null;
         } finally {
           if (canvasGenerationAbortControllersRef.current.get(slot.taskId) === abortController) {
@@ -7171,7 +7288,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     } finally {
       setCanvasGenGenerating(false);
     }
-  }, [canvasGenPrompt, canvasGenGenerating, canvasGenModel, canvasGenModels, canvasGenNegativePrompt, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages, viewOffset.x, viewOffset.y, zoom, onImagesChange, completeProcessingFrame, updateProcessingFrame, projectId, brandProject?.id]);
+  }, [canvasGenPrompt, canvasGenGenerating, canvasGenModel, canvasGenModels, canvasGenNegativePrompt, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages, viewOffset.x, viewOffset.y, zoom, onImagesChange, completeProcessingFrame, projectProcessingFrameEvent, updateProcessingFrame, projectId, brandProject?.id]);
 
   // Update frame position when images change
   useEffect(() => {

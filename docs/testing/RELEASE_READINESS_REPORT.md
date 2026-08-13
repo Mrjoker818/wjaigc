@@ -768,3 +768,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The final-build full Chromium Stage 3 scenario is still `7/8`. S3-BUG-004 remains open P1 because 300-node input P95 is `52.3ms` against the non-negotiable `<=50ms` gate after an earlier `72.5ms` run, despite zero disappeared frames and zero unclickable time.
 - All `38/38` protected feature identities remain present. The gate still blocks `24` expected Stage 3 source drifts until the plan-authorized baseline update; this is not a release pass.
 - **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `6/11`, approximately `55%`. Task 6 has not started. Nothing is pushed or deployed, `stable` remains untouched, and no cloud claim is made.
+
+## 2026-08-13 Stage 3 Task 6 readiness decision
+
+- Task projection is locally closed: focused `48/48` and the production Chromium progressive-slot scenario `1/1` pass, including out-of-order `n=4` completion, stable slot identity/order, project sync and reload persistence.
+- Fresh full Vitest has zero failures (`2351` passed, `44` environment-skipped). TypeScript, ESLint and whitespace checks pass. Production build generates `116/116` routes.
+- Release gates remain open: after a clean 15-project reseed, the full Stage 3 Chromium run is `7/8` because 300-node input P95 is `87.8ms` versus `<=50ms`; four external browser profiles and cloud exact-SHA/rollback are unverified.
+- All `38/38` protected feature identities and required evidence contracts remain present. The protected baseline still blocks `27` accumulated Stage 3 source drifts until its ordered approval task.
+- **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `7/11`, approximately `64%`. Task 7 persistence scheduling has not started. Nothing is pushed or deployed, and `stable` remains untouched.

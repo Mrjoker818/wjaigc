@@ -612,3 +612,14 @@
 | Protected-baseline source drift | BLOCKED BY ORDERED PLAN | `38/38` identities remain, but `24` accumulated Stage 3 source files are not yet in the approved baseline metadata. Update only in the later planned task. |
 | Cloud exact SHA and rollback | UNVERIFIED | Push only after authorized, deploy the exact candidate in the isolated Coze project, execute the Canvas history regression, then prove rollback. |
 | Exact-SHA Coze candidate and rollback | UNVERIFIED | After the ordered local tasks and main-only candidate are ready, pull the exact SHA, validate in the isolated Coze environment, and prove `canvas-v2 -> legacy` rollback. `stable` remains read-only. |
+
+## 2026-08-13 Stage 3 Task 6 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| 300-node input latency | OPEN P1 | Reduce the latest clean-fixture fixed-scenario P95 from `87.8ms` to `<=50ms` without weakening the assertion; retain prior `50.2ms`, `52.3ms`, `56.8ms`, `62.8ms`, `71.8ms`, `72.5ms` and `79.6ms` variance evidence. |
+| External browser matrix | UNVERIFIED | Run the Task 6 n=4 projection, completion, reload and failure/cancel paths in Chromium 1920x1080, Firefox, WebKit and mobile Chromium with retained artifacts. |
+| Cloud exact-SHA task projection | UNVERIFIED | After authorized push, deploy the exact candidate and prove provider completion, Canvas projection, refresh recovery and rollback without duplicate placement or status regression. |
+| Provider billing/refund behavior | NOT CHANGED / NOT REVERIFIED IN TASK 6 | Task 6 intentionally leaves supplier submission and accounting untouched; retain Stage 1/2 evidence and rerun exact-SHA cloud billing gates before release. |
+| Protected-baseline source drift | BLOCKED BY ORDERED PLAN | `38/38` feature identities remain, but `27` accumulated Stage 3 source files are not approved in baseline metadata. Update only in the later planned baseline task. |
+| Task 7 persistence scheduler | NOT STARTED | Do not infer persistence hot-path completion from Task 6 reload evidence. Begin only after this Task 6 commit and ledger closure. |

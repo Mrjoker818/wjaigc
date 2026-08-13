@@ -289,7 +289,6 @@ test.describe('durable progressive generation slots', () => {
     await generateResponse;
     allowInitialCompletion = true;
     await expect.poll(() => completionOrder).toEqual([3]);
-    await expect(canvas.locator(`img[src$="${RESULT_PATHS[2]}"]`)).toHaveCount(1);
     await expect(processingSlots).toHaveCount(3);
 
     await expect.poll(
@@ -297,13 +296,19 @@ test.describe('durable progressive generation slots', () => {
         const syncedProjects = syncedUserData.get('projects');
         if (!Array.isArray(syncedProjects)) return false;
         return syncedProjects.some((project) => {
-        if (!project || typeof project !== 'object') return false;
-        const canvasImages = (project as { canvasImages?: unknown[] }).canvasImages;
-        return Array.isArray(canvasImages) && canvasImages.length === 4;
+          if (!project || typeof project !== 'object') return false;
+          const canvasImages = (project as { canvasImages?: Array<Record<string, unknown>> }).canvasImages;
+          if (!Array.isArray(canvasImages) || canvasImages.length !== 4) return false;
+          const completedSlot = canvasImages.find((image) => image.url === RESULT_PATHS[2]);
+          return completedSlot?.isProcessingPlaceholder === false
+            && (completedSlot.taskProjection as { status?: string } | undefined)?.status === 'completed'
+            && canvasImages.filter((image) => image.isProcessingPlaceholder === true).length === 3;
         });
       },
       { timeout: 15_000, intervals: [500, 1_000] },
     ).toBe(true);
+    await page.getByTitle('重置视图').click();
+    await expect(canvas.locator(`img[src$="${RESULT_PATHS[2]}"]`)).toHaveCount(1);
     const syncedProjects = syncedUserData.get('projects') as unknown[];
     const projectId = String((syncedProjects[0] as { id?: string } | undefined)?.id || '');
     expect(projectId).not.toBe('');
@@ -312,6 +317,7 @@ test.describe('durable progressive generation slots', () => {
     allowPostReloadCompletion = true;
     await page.goto(`/?projectId=${encodeURIComponent(projectId)}`, { waitUntil: 'domcontentloaded' });
     await expect(canvas).toBeVisible();
+    await page.getByTitle('重置视图').click();
     await expect(canvas.locator(`img[src$="${RESULT_PATHS[2]}"]`)).toHaveCount(1);
 
     await expect.poll(() => completionOrder, {
@@ -319,6 +325,7 @@ test.describe('durable progressive generation slots', () => {
       intervals: [250, 500],
     }).toEqual([3, 1, 4, 2]);
     await expect(processingSlots).toHaveCount(0);
+    await page.getByTitle('重置视图').click();
 
     const resultSources = await canvas.locator('img').evaluateAll(
       (images, expectedPaths) => images
@@ -335,6 +342,7 @@ test.describe('durable progressive generation slots', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(canvas).toBeVisible();
     await expect(processingSlots).toHaveCount(0);
+    await page.getByTitle('重置视图').click();
     await expect.poll(async () => canvas.locator('img').evaluateAll(
       (images, expectedPaths) => images.filter((image) => {
         const src = image.getAttribute('src') || '';

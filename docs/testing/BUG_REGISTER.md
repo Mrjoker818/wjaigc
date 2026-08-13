@@ -1292,9 +1292,9 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Environment | Stage 3 Task 4 full Chromium regression, local production server, 2026-08-13 |
 | Reproduction | Open the isolated 300-node project and execute the fixed 75-frame Space-pan scenario. |
 | Expected | Input delay P95 is `<=50ms`, average FPS is `>=45`, with zero disappeared frames and zero unclickable time. |
-| Actual | Task 4 clean-fixture P95 was `50.2ms` after preceding `56.8ms` and `62.8ms`; Task 5 runs measured `72.5ms` and then `52.3ms` on the final build. The latest run still recorded zero disappeared frames and zero unclickable time. |
+| Actual | Task 4 clean-fixture P95 was `50.2ms` after preceding `56.8ms` and `62.8ms`; Task 5 runs measured `72.5ms` and `52.3ms`; the final clean-fixture Task 6 run measured `87.8ms`. The latest run still recorded zero disappeared frames and zero unclickable time. |
 | Root cause | Not yet isolated. The failure remains assigned to the Stage 3 performance track; Task 4 does not guess at a fix or relax the threshold. |
-| Regression | The full Chromium spec remains enabled; after Task 5 coverage expansion it reports `7/8`, with this assertion as the sole failure. |
+| Regression | The full Chromium spec remains enabled; the Task 6 final run reports `7/8`, with this assertion as the sole failure. |
 | Status | **OPEN P1.** |
 
 ### S3-BUG-005: Queued or late history transitions could overwrite the wrong Canvas state
@@ -1326,3 +1326,18 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Capture anchors on creation, drag-in, Alt reference add and Ctrl fusion add; remove the anchor when a source leaves; reconcile only identical all-member deltas as whole-group movement. |
 | Regression | Pure movement tests plus source-wiring contracts cover creation, all append paths and removal. Independent final review confirmed the boundary. |
 | Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |
+
+### S3-BUG-007: Competing task completion writers could regress or reorder completed Canvas slots
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Canvas task projection / project synchronization |
+| Environment | Stage 3 Task 6 unit, source-contract and local production Chromium, 2026-08-13 |
+| Reproduction | Complete an `n=4` task out of order, allow workspace and infinite-Canvas completion handlers plus server synchronization to run, then reload the project. |
+| Expected | Each slot reaches one monotonic terminal state, preserves `taskId:outputIndex`, remains in creation order, and reloads the same completed media. |
+| Actual | Legacy completion writers could update the same slot twice; stale server placeholders could retain `processing` and `missing` metadata over a local completed URL; server merge could reorder slots to provider completion order. |
+| Root cause | SSE/poll/recovery and legacy completion paths projected terminal state independently, while project merge copied media fields without reconciling task projection authority or local slot order. |
+| Fix | Route task events through `projectCanvasTaskEvent`; suppress duplicate legacy completion writes; merge local completed terminal metadata over stale server placeholders; preserve local identified task-slot order during reconciliation. |
+| Regression | Focused Task 6 suite `48/48`; production Chromium `n=4` scenario `1/1`, provider completion order `3,1,4,2`, stable slot order `1,2,3,4`, and four persisted PNG results after reload. |
+| Status | **CLOSED LOCALLY 2026-08-13 / EXTERNAL BROWSER AND CLOUD EXACT-SHA PENDING.** |

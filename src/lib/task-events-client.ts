@@ -3,7 +3,7 @@ import { fetchSessionPayload } from './auth-session';
 
 export interface TaskEvent {
   taskId: string;
-  type: 'created' | 'updated' | 'completed' | 'failed' | 'cancelled' | 'progress' | 'queued';
+  type: 'created' | 'updated' | 'completed' | 'failed' | 'cancelled' | 'timeout' | 'progress' | 'queued';
   task: TaskInfo;
 }
 

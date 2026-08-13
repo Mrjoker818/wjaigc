@@ -9,9 +9,43 @@ export interface CanvasCommandNode {
   zIndex?: number;
   groupId?: string;
   url?: string;
+  videoUrl?: string;
+  videoThumbnailUrl?: string;
+  mediaType?: string;
   sourceId?: string;
   processing?: unknown;
   isProcessingPlaceholder?: boolean;
+  generationTaskId?: string;
+  prompt?: string;
+  quality?: string;
+  aspectRatio?: string;
+  stylePreset?: string;
+  category?: string;
+  size?: string;
+  model?: string;
+  modelName?: string;
+  apiProvider?: string;
+  apiProviderId?: string;
+  apiBaseUrl?: string;
+  generationRouteAudit?: unknown;
+  createdAt?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  assetId?: string;
+  assetVersionId?: string;
+  placementId?: string;
+  sourceUrl?: string;
+  mediaAvailability?: string;
+  mediaErrorCode?: string;
+  taskProjection?: {
+    taskId: string;
+    outputIndex: number;
+    status: string;
+    progress: number;
+    revision?: number;
+    source?: string;
+    errorCode?: string;
+  };
 }
 
 export interface CanvasDocumentSnapshot {
@@ -38,7 +72,14 @@ export type CanvasCommand =
   | ({ type: 'duplicate' } & IndexedNodes)
   | { type: 'reorder'; order: string[]; zIndexes?: Record<string, number | undefined> }
   | { type: 'assign-group'; ids: string[]; groupId?: string; assignments?: Record<string, string | undefined> }
-  | { type: 'task-result'; id: string; patch: Partial<CanvasCommandNode>; terminal: boolean };
+  | {
+      type: 'task-result';
+      id: string;
+      taskId?: string;
+      outputIndex?: number;
+      patch: Partial<CanvasCommandNode>;
+      terminal: boolean;
+    };
 
 export interface CanvasCommandResult {
   next: CanvasDocumentSnapshot;
@@ -215,6 +256,16 @@ const CANVAS_TASK_PROJECTION_FIELDS = new Set([
   'assetId',
   'assetVersionId',
   'placementId',
+  'generationTaskId',
+  'taskProjection',
+  'prompt',
+  'quality',
+  'aspectRatio',
+  'stylePreset',
+  'category',
+  'size',
+  'apiBaseUrl',
+  'createdAt',
 ]);
 
 export function isCanvasTaskProjectionChange<T extends { id: string; processing?: unknown; isProcessingPlaceholder?: boolean }>(

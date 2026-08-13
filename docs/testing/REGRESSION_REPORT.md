@@ -930,3 +930,12 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Final-build full Chromium remains `7/8`. The only failure is S3-BUG-004: 300-node input P95 `52.3ms` versus the fixed `<=50ms` gate after an earlier `72.5ms` run; disappeared frames `0`, unclickable duration `0`. No threshold was changed.
 - Protected features remain `38/38`, but the release gate intentionally blocks `24` accumulated Stage 3 source drifts until the later approved baseline task.
 - **Task 5 verdict: PASS LOCALLY FOR ITS FUNCTIONAL SCOPE. Stage 3 verdict: NOT COMPLETE.** Task 6 has not started.
+
+## 2026-08-13 Stage 3 Task 6 task projection regression
+
+- A single pure projector now maps task events to Canvas commands. Workspace SSE/poll/recovery and infinite-Canvas completion no longer retain separate state-writing authority; provider submission and billing paths were not changed.
+- Focused regression passes `48/48`, covering n=1/2/3/4, resumed terminal events without revision, duplicate/late events, stale server placeholders, ordinary-image isolation, media readiness and stable task-slot order.
+- The production Chromium `n=4` scenario passes `1/1`: completion arrives `3,1,4,2`, visible slot order remains `1,2,3,4`, no status-card duplicate remains, and project sync plus reload preserves four real PNG results.
+- Fresh full Vitest: `430` files total, `418` passed and `12` environment-skipped; `2351` tests passed and `44` skipped, with zero failures. TypeScript, ESLint and `git diff --check` exit 0; production build generates `116/116` routes.
+- After reseeding all 15 controlled projects, the complete Stage 3 Chromium suite is `7/8`; the only failure is S3-BUG-004 at 300 nodes, input P95 `87.8ms` versus `<=50ms`. The threshold and assertions remain unchanged. A preceding reused-fixture run is retained but excluded from product status.
+- Protected-feature evidence remains `38/38`, but the gate blocks `27` accumulated Stage 3 source drifts pending the later ordered baseline task. **Task 6 passes locally for its functional scope; Stage 3 remains incomplete. Task 7 has not started.**

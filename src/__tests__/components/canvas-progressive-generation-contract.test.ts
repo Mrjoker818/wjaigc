@@ -20,20 +20,18 @@ describe('canvas progressive generation contract', () => {
   it('replaces the completed slot immediately using canonical server slot metadata', () => {
     const completion = source.indexOf("if (pollData.status === 'completed' && completedImageUrls.length > 0)");
     const canonicalSlot = source.indexOf('resolveGenerationSlotIndex(', completion);
-    const slotPlaceholder = source.indexOf('const phId = placeholderIds[completedSlotIndex];', completion);
-    const immediateCanvasUpdate = source.indexOf('setImages(prev => prev.map(img =>', slotPlaceholder);
+    const immediateProjection = source.indexOf('projectWorkspaceTaskEvent({', canonicalSlot);
 
     expect(completion).toBeGreaterThan(-1);
     expect(canonicalSlot).toBeGreaterThan(completion);
-    expect(slotPlaceholder).toBeGreaterThan(canonicalSlot);
-    expect(immediateCanvasUpdate).toBeGreaterThan(slotPlaceholder);
+    expect(immediateProjection).toBeGreaterThan(canonicalSlot);
     expect(source).toContain('slotIndex: completedSlotIndex');
   });
 
   it('replaces slots already completed in the submit response before polling siblings', () => {
-    const submitCompletedStart = source.indexOf('submittedSlots.forEach((submittedSlot) => {');
-    const immediateSubmitReplacement = source.indexOf(
-      'replaceCompletedSubmitSlotPlaceholder(',
+    const submitCompletedStart = source.indexOf('submittedSlots.forEach((slot) => {');
+    const immediateSubmitProjection = source.indexOf(
+      "source: 'submit'",
       submitCompletedStart,
     );
     const activePollingStart = source.indexOf(
@@ -42,8 +40,8 @@ describe('canvas progressive generation contract', () => {
     );
 
     expect(submitCompletedStart).toBeGreaterThan(-1);
-    expect(immediateSubmitReplacement).toBeGreaterThan(submitCompletedStart);
-    expect(activePollingStart).toBeGreaterThan(immediateSubmitReplacement);
+    expect(immediateSubmitProjection).toBeGreaterThan(submitCompletedStart);
+    expect(activePollingStart).toBeGreaterThan(immediateSubmitProjection);
   });
 
   it('does not append a second image after the matching slot was already replaced', () => {
@@ -52,8 +50,9 @@ describe('canvas progressive generation contract', () => {
       source.indexOf('toast.success(`', source.indexOf('const completedCanvasImages = completedImages.map')),
     );
 
-    expect(batchReconciliation).toContain('reconcileCompletedGenerationSlot');
-    expect(batchReconciliation).toContain('fallbackPosition: placeholderPositions.get(phId)');
+    expect(batchReconciliation).toContain("existing.taskProjection?.status !== 'completed'");
+    expect(batchReconciliation).not.toContain('reconcileCompletedGenerationSlot');
+    expect(batchReconciliation).not.toContain('updated.push(');
   });
 
   it('retains the explicit provider id when polling omits a display name', () => {

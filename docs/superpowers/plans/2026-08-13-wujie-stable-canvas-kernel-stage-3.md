@@ -457,7 +457,7 @@ Commit: `refactor: route canvas edits through commands`
 - Consumes: Stage 1 权威任务终态和 Stage 2 `taskId:outputIndex` 素材身份。
 - Produces: 每槽独立 `submitting -> queued -> processing -> uploading -> completed|failed|cancelled|timeout` 画布投影。
 
-- [ ] **Step 1: 写终态和迟到结果 RED**
+- [x] **Step 1: 写终态和迟到结果 RED**
 
 ```ts
 expect(projectCanvasTaskEvent(snapshot, completedSlot)).toEqual([
@@ -469,12 +469,12 @@ expect(projectCanvasTaskEvent(completedSnapshot, duplicateCompleted)).toEqual([]
 
 覆盖 n=1/2/3/4、逐张回填、部分失败、取消、超时、刷新恢复、重复事件、乱序事件、旧请求迟到和 provider/model 身份保持。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/canvas-task-projection.test.ts src/__tests__/components/canvas-task-projection-wiring.test.ts`
 Expected: FAIL，新投影模块尚不存在。
 
-- [ ] **Step 3: 实现纯任务投影**
+- [x] **Step 3: 实现纯任务投影**
 
 ```ts
 export interface CanvasTaskEvent {
@@ -490,16 +490,16 @@ export interface CanvasTaskEvent {
 
 投影只生成命令；完成结果通过 Task 5 命令更新现有占位框，不新增第二个 legacy 身份。终态不可回退，失败原因保留统一错误码和用户提示。
 
-- [ ] **Step 4: 接入现有 SSE/轮询/恢复入口**
+- [x] **Step 4: 接入现有 SSE/轮询/恢复入口**
 
 所有事件进入同一投影函数；SSE 与轮询同时到达时按任务/槽版本去重。保留旧恢复读取器，不改变供应商请求和账务结算。
 
-- [ ] **Step 5: GREEN 与跨阶段保护**
+- [x] **Step 5: GREEN 与跨阶段保护**
 
 Run: `pnpm exec vitest run src/__tests__/lib/canvas-task-projection.test.ts src/__tests__/components/canvas-task-projection-wiring.test.ts src/__tests__/api/task-result-asset-projection.test.ts src/__tests__/components/canvas-progressive-generation-contract.test.ts src/__tests__/components/canvas-sync-completed-image-state.test.ts`
 Expected: 全部通过。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 Commit: `refactor: unify canvas task projection`
 

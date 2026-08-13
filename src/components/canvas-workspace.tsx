@@ -9,15 +9,21 @@ import {
   createVideoRetryPayload,
 } from '@/lib/video-processing-state';
 import {
+  applyCanvasTaskEventToProcessingPlaceholders,
   applyGenerationSlotsToProcessingPlaceholders,
   applyTaskIdsToProcessingPlaceholders,
+  mergeLocalCompletedTaskProjection,
+  preserveLocalCanvasTaskSlotOrder,
   shouldPersistProcessingPlaceholder,
 } from '@/lib/canvas-task-placeholders';
+import {
+  createCanvasTaskEventError,
+  type CanvasTaskEvent,
+} from '@/lib/canvas-kernel/task-projection';
 import {
   normalizeGenerationSubmitSlots,
   resolveGenerationSlotIndex,
 } from '@/lib/task-core/generation-batch';
-import { reconcileCompletedGenerationSlot } from '@/lib/canvas-generation-reconciliation';
 import {
   findUniqueLegacyTaskMatch,
   getLegacyRecoveryRetryAt,
@@ -436,6 +442,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       latestImagesRef.current = next;
       setImagesRaw(next);
   }, []);
+
+  const projectWorkspaceTaskEvent = useCallback((event: CanvasTaskEvent) => {
+    setImages((current) => applyCanvasTaskEventToProcessingPlaceholders(current, event));
+  }, [setImages]);
 
   const flushQueuedCanvasHistoryChange = useCallback(() => {
     const queued = queuedCanvasHistoryChangeRef.current;
@@ -1490,27 +1500,52 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             const videoUrl = data.videoUrl || data.result?.videoUrl;
             const imageUrl = data.imageUrl || data.result?.imageUrl;
             if (data.status === 'completed' && (videoUrl || imageUrl)) {
-              setImages((current) => current.map((item) => item.id === image.id ? {
-                ...item,
-                url: videoUrl || imageUrl,
-                videoUrl: videoUrl || undefined,
-                mediaType: videoUrl ? 'video' as const : item.mediaType,
-                isProcessingPlaceholder: false,
-                processing: undefined,
-              } : item));
+              projectWorkspaceTaskEvent({
+                taskId,
+                outputIndex: image.processing?.outputIndex ?? 0,
+                status: 'completed',
+                progress: 100,
+                source: 'recovery',
+                providerId: image.apiProviderId,
+                modelId: image.model || image.modelName,
+                providerName: data.providerName,
+                modelName: data.modelName,
+                result: {
+                  url: videoUrl || imageUrl,
+                  metadata: {
+                    videoUrl: videoUrl || undefined,
+                    mediaType: videoUrl ? 'video' : image.mediaType,
+                  },
+                },
+              });
               return;
             }
             if (data.status === 'failed' || data.status === 'cancelled') {
-              setImages((current) => current.map((item) => item.id === image.id ? {
-                ...item,
-                processing: { ...item.processing!, status: 'failed', label: data.error || '生成失败' },
-              } : item));
+              projectWorkspaceTaskEvent({
+                taskId,
+                outputIndex: image.processing?.outputIndex ?? 0,
+                status: data.status,
+                progress: data.progress || image.processing?.progress || 0,
+                source: 'recovery',
+                error: createCanvasTaskEventError(data.error, {
+                  code: data.status === 'cancelled' ? 'TASK_CANCELLED' : 'TASK_FAILED',
+                  message: data.error || (data.status === 'cancelled' ? '任务已取消' : '生成失败'),
+                  source: 'provider',
+                  retryable: false,
+                }),
+              });
               return;
             }
-            setImages((current) => current.map((item) => item.id === image.id ? {
-              ...item,
-              processing: { ...item.processing!, status: 'processing', progress: Math.max(item.processing?.progress || 0, data.progress || 0), label: data.label || item.processing?.label || '生成中' },
-            } : item));
+            projectWorkspaceTaskEvent({
+              taskId,
+              outputIndex: image.processing?.outputIndex ?? 0,
+              status: data.status === 'queued' || data.status === 'uploading' || data.status === 'submitting'
+                ? data.status
+                : 'processing',
+              progress: Math.max(image.processing?.progress || 0, data.progress || 0),
+              label: data.label || image.processing?.label || '生成中',
+              source: 'recovery',
+            });
           } catch { /* transient polling errors are retried */ }
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
@@ -1518,15 +1553,25 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         if (pollingGeneration === resumedTaskPollingGenerationRef.current) {
           const outcome = getResumedTaskPollingOutcome(RESUMED_TASK_MAX_POLL_ATTEMPTS, true);
           if (outcome) {
-            setImages((current) => current.map((item) => item.id === image.id ? {
-              ...item,
-              processing: { ...item.processing!, status: outcome.status, label: outcome.label },
-            } : item));
+            projectWorkspaceTaskEvent({
+              taskId,
+              outputIndex: image.processing?.outputIndex ?? 0,
+              status: 'timeout',
+              progress: image.processing?.progress || 0,
+              label: outcome.label,
+              source: 'recovery',
+              error: createCanvasTaskEventError(outcome.label, {
+                code: 'TASK_POLL_TIMEOUT',
+                message: outcome.label,
+                source: 'network',
+                retryable: true,
+              }),
+            });
           }
         }
       })();
     }
-  }, [images, setImages]);
+  }, [images, projectWorkspaceTaskEvent]);
 
   // ★ 追踪图片删除：当 images 减少时，记录被删除的 ID，5 秒后自动清除
   const prevImageIdsRef2 = useRef<Set<string>>(new Set());
@@ -1918,7 +1963,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               );
               const enrichedImages = afterDeletedFilter.map((img) => {
                 const localImg = localImgMap.get(img.id);
-                const enriched = { ...img };
+                const enriched = mergeLocalCompletedTaskProjection({ ...img }, localImg);
                 // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
                 if ((!enriched.modelName || enriched.modelName === '') && enriched.model) {
                   enriched.modelName = enriched.model;
@@ -1936,12 +1981,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 // ★ 关键修复：保留本地的位置信息（x, y, width, height）
                 // 用户可能在本地拖动了图片，但服务器还没同步到最新位置
                 // 优先使用本地的位置数据，避免图片"回位"
-                // A project sync can arrive after the local task has completed.
-                // The stale server placeholder must never put the completed image back into processing.
-                if (localImg && !localImg.isProcessingPlaceholder && localImg.url) {
-                  enriched.isProcessingPlaceholder = false;
-                  enriched.processing = undefined;
-                }
                 if (localImg) {
                   if (localImg.x !== undefined) enriched.x = localImg.x;
                   if (localImg.y !== undefined) enriched.y = localImg.y;
@@ -1996,11 +2035,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 }
                 return enriched;
               });
-              const legacyMergedImages = [
+              const legacyMergedImages = preserveLocalCanvasTaskSlotOrder([
                 ...(enrichedImages as CanvasImage[]),
                 ...(localOnlyImages as CanvasImage[]),
                 ...uniquePlaceholders,
-              ];
+              ], latestImagesRef.current);
               setImages(selectCanvasPlacementSnapshot(
                 userMgr.getAssetGraphMode(),
                 hydrateCanvasPlacements(latest.canvasImages, 'asset-v3'),
@@ -2106,6 +2145,52 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     return () => { taskEventsClient.disconnect(); };
   }, []);
 
+  useEffect(() => taskEventsClient.onTaskEvent((event) => {
+    const status = event.task.status === 'pending' ? 'submitting' : event.task.status;
+    const resultRecord = event.task.result && typeof event.task.result === 'object'
+      ? event.task.result as Record<string, unknown>
+      : {};
+    const nestedResult = resultRecord.result && typeof resultRecord.result === 'object'
+      ? resultRecord.result as Record<string, unknown>
+      : {};
+    const resultUrl = extractGeneratedImageUrls(resultRecord)[0];
+    projectWorkspaceTaskEvent({
+      taskId: event.taskId,
+      outputIndex: 0,
+      status,
+      progress: event.task.progress,
+      label: event.task.label,
+      source: 'sse',
+      ...(status === 'completed' && resultUrl ? {
+        result: {
+          url: resultUrl,
+          sourceUrl: resultUrl,
+          assetId: typeof resultRecord.assetId === 'string'
+            ? resultRecord.assetId
+            : typeof nestedResult.assetId === 'string' ? nestedResult.assetId : undefined,
+          assetVersionId: typeof resultRecord.assetVersionId === 'string'
+            ? resultRecord.assetVersionId
+            : typeof nestedResult.assetVersionId === 'string' ? nestedResult.assetVersionId : undefined,
+          placementId: typeof resultRecord.placementId === 'string'
+            ? resultRecord.placementId
+            : typeof nestedResult.placementId === 'string' ? nestedResult.placementId : undefined,
+        },
+      } : {}),
+      ...((status === 'failed' || status === 'cancelled' || status === 'timeout') ? {
+        error: createCanvasTaskEventError(event.task.error, {
+          code: status === 'timeout'
+            ? 'TASK_TIMEOUT'
+            : status === 'cancelled' ? 'TASK_CANCELLED' : 'TASK_FAILED',
+          message: event.task.error || (status === 'timeout'
+            ? '任务超时'
+            : status === 'cancelled' ? '任务已取消' : '任务执行失败'),
+          source: 'wujie',
+          retryable: status !== 'cancelled',
+        }),
+      } : {}),
+    });
+  }), [projectWorkspaceTaskEvent]);
+
   const handleGenerate = useCallback(async (params: GenerationParams) => {
     // 增加活跃任务计数
     setActiveGenerationCount(prev => prev + 1);
@@ -2121,7 +2206,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const phHeight = arRatio >= 1 ? Math.round(placeholderBaseSize / arRatio) : placeholderBaseSize;
 
     const placeholderIds: string[] = [];
-    const placeholderPositions = new Map<string, { x: number; y: number }>();
     // 计算视口中心位置用于放置占位框
     const canvasEl = document.querySelector('[data-canvas-viewport]') as HTMLElement | null;
     const viewportWidth = canvasEl ? canvasEl.clientWidth : 1200;
@@ -2143,7 +2227,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       placeholderIds.push(phId);
       const offsetX = i * (phWidth + 20);
       const placeholderPosition = { x: phStartX + offsetX, y: phStartY };
-      placeholderPositions.set(phId, placeholderPosition);
       setImages(prev => [...prev, {
         id: phId,
         url: '',
@@ -2346,11 +2429,60 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         const taskIds = submittedSlots.map(slot => slot.taskId);
 
         // Persist task IDs before the first poll so an autosave/reload can resume them.
-        setImages((previous) => (
-          submittedSlots.length > 0
+        setImages((previous) => {
+          let next = submittedSlots.length > 0
             ? applyGenerationSlotsToProcessingPlaceholders(previous, submittedSlots, placeholderIds)
-            : applyTaskIdsToProcessingPlaceholders(previous, placeholderIds, taskIds)
-        ));
+            : applyTaskIdsToProcessingPlaceholders(previous, placeholderIds, taskIds);
+          submittedSlots.forEach((slot) => {
+            const submittedUrl = extractGeneratedImageUrls(slot.result || {})[0];
+            next = applyCanvasTaskEventToProcessingPlaceholders(next, {
+              taskId: slot.taskId,
+              batchId: slot.batchId,
+              slotId: slot.slotId,
+              slotIndex: slot.slotIndex,
+              outputIndex: 0,
+              status: slot.status,
+              progress: slot.status === 'completed' ? 100 : 10,
+              source: 'submit',
+              providerId: params.providerId,
+              providerName: pollingProviderName,
+              modelId: params.model,
+              modelName: pollingModelName,
+              ...(submittedUrl ? {
+                result: {
+                  url: submittedUrl,
+                  sourceUrl: submittedUrl,
+                  assetId: typeof slot.result?.assetId === 'string' ? slot.result.assetId : undefined,
+                  assetVersionId: typeof slot.result?.assetVersionId === 'string'
+                    ? slot.result.assetVersionId
+                    : undefined,
+                  placementId: typeof slot.result?.placementId === 'string'
+                    ? slot.result.placementId
+                    : undefined,
+                  metadata: {
+                    prompt: enhancedPrompt || params.prompt,
+                    quality: params.quality,
+                    aspectRatio: params.aspectRatio,
+                    stylePreset: params.stylePreset,
+                    size: params.size,
+                    apiBaseUrl: pollingApiBaseUrl || '',
+                    generationRouteAudit: data.generationRouteAudit,
+                    createdAt: Date.now(),
+                  },
+                },
+              } : {}),
+              ...(slot.error ? {
+                error: createCanvasTaskEventError(slot.error, {
+                  code: 'GENERATION_SUBMIT_FAILED',
+                  message: '图像生成任务提交失败',
+                  source: 'provider',
+                  retryable: false,
+                }),
+              } : {}),
+            });
+          });
+          return next;
+        });
 
         // 自适应轮询间隔策略（优化版）
         // 前期更快探测，后期适度延长避免浪费请求
@@ -2391,43 +2523,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         const terminalStatuses = new Set(['completed', 'failed', 'cancelled', 'timeout']);
         const activeSubmittedSlots = submittedSlots.filter(slot => !terminalStatuses.has(slot.status));
         let terminalTaskCount = submittedSlots.length - activeSubmittedSlots.length;
-        const replaceCompletedSubmitSlotPlaceholder = (
-          completedImage: (typeof completedImages)[number],
-        ): void => {
-          const phId = placeholderIds[completedImage.slotIndex];
-          if (!phId) return;
-          setImages(prev => prev.map(img => (
-            img.id === phId && img.isProcessingPlaceholder
-              ? {
-                ...img,
-                id: completedImage.id,
-                url: completedImage.url,
-                prompt: completedImage.prompt,
-                model: completedImage.model,
-                quality: completedImage.quality,
-                aspectRatio: completedImage.aspectRatio,
-                stylePreset: completedImage.stylePreset,
-                category: completedImage.category,
-                size: completedImage.size,
-                sourceUrl: completedImage.sourceUrl,
-                modelName: completedImage.modelName || pollingModelName || completedImage.model,
-                apiProvider: completedImage.apiProvider || pollingProviderName || params.providerId || '',
-                apiBaseUrl: pollingApiBaseUrl || '',
-                generationRouteAudit: completedImage.generationRouteAudit,
-                isProcessingPlaceholder: false,
-                processing: undefined,
-              }
-              : img
-          )));
-        };
-
         submittedSlots.forEach((submittedSlot) => {
           if (submittedSlot.status !== 'completed') return;
           const completedImageUrls = extractGeneratedImageUrls(submittedSlot.result || {});
-          let firstCompletedImage: (typeof completedImages)[number] | undefined;
           completedImageUrls.forEach((rawImageUrl, imageIdx) => {
             const completedImage = {
-              id: `${Date.now()}-${submittedSlot.slotIndex}-${imageIdx}`,
+              id: placeholderIds[submittedSlot.slotIndex]
+                || `${Date.now()}-${submittedSlot.slotIndex}-${imageIdx}`,
               slotIndex: submittedSlot.slotIndex,
               url: rawImageUrl,
               prompt: enhancedPrompt || params.prompt,
@@ -2446,9 +2548,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               apiProvider: pollingProviderName || params.providerId || undefined,
             };
             completedImages.push(completedImage);
-            firstCompletedImage ||= completedImage;
           });
-          if (firstCompletedImage) replaceCompletedSubmitSlotPlaceholder(firstCompletedImage);
         });
 
         const updateBatchProgress = (): void => {
@@ -2462,6 +2562,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             if (!img.isProcessingPlaceholder || !img.processing || !placeholderIds.includes(img.id)) {
               return img;
             }
+            if (terminalStatuses.has(img.processing.status)) return img;
             return {
               ...img,
               processing: {
@@ -2488,6 +2589,22 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             // 检查是否超时：单任务超时 或 全局超时
             if (taskElapsed > perTaskMaxPollTime || globalElapsed > globalMaxPollTime) {
               console.warn(`[生成轮询] 超时退出 taskId=${currentTaskId}, 任务耗时=${Math.round(taskElapsed / 1000)}s, 全局耗时=${Math.round(globalElapsed / 1000)}s, perTaskMax=${perTaskMaxPollTime / 1000}s, globalMax=${globalMaxPollTime / 1000}s`);
+              projectWorkspaceTaskEvent({
+                taskId: currentTaskId,
+                batchId: submittedSlot.batchId,
+                slotId: submittedSlot.slotId,
+                slotIndex: submittedSlot.slotIndex,
+                outputIndex: 0,
+                status: 'timeout',
+                progress: 0,
+                source: 'poll',
+                error: createCanvasTaskEventError('生成任务轮询超时', {
+                  code: 'GENERATION_POLL_TIMEOUT',
+                  message: '生成时间过长，请稍后重试或降低分辨率',
+                  source: 'network',
+                  retryable: true,
+                }),
+              });
               terminalTaskCount++;
               updateBatchProgress();
               toast.error('生成超时', {
@@ -2520,6 +2637,23 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               if (!pollData.success && !pollData.retryable) {
                 // 不可重试的错误
                 console.error(`[poll] taskId=${currentTaskId} NON-RETRYABLE error after ${Math.round((Date.now()-taskStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
+                projectWorkspaceTaskEvent({
+                  taskId: currentTaskId,
+                  batchId: submittedSlot.batchId,
+                  slotId: submittedSlot.slotId,
+                  slotIndex: submittedSlot.slotIndex,
+                  outputIndex: 0,
+                  status: 'failed',
+                  progress: pollData.progress || 0,
+                  revision: typeof pollData.revision === 'number' ? pollData.revision : undefined,
+                  source: 'poll',
+                  error: createCanvasTaskEventError(pollData.error, {
+                    code: pollData.code || 'GENERATION_FAILED',
+                    message: typeof pollData.error === 'string' ? pollData.error : '任务执行失败',
+                    source: 'provider',
+                    retryable: false,
+                  }),
+                });
                 terminalTaskCount++;
                 updateBatchProgress();
                 toast.error('生成失败', {
@@ -2534,6 +2668,25 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               // 根据单任务最大轮询时间动态计算最大重试次数（间隔按3s估算），确保不会过早放弃
               if (!pollData.success && pollData.retryable && pollCount > Math.floor(perTaskMaxPollTime / 3000)) {
                 console.warn(`[生成] 可重试错误已达 ${pollCount} 次 (上限 ${Math.floor(perTaskMaxPollTime / 3000)})，最后错误: ${pollData.error}`);
+                projectWorkspaceTaskEvent({
+                  taskId: currentTaskId,
+                  batchId: submittedSlot.batchId,
+                  slotId: submittedSlot.slotId,
+                  slotIndex: submittedSlot.slotIndex,
+                  outputIndex: 0,
+                  status: 'failed',
+                  progress: pollData.progress || 0,
+                  revision: typeof pollData.revision === 'number' ? pollData.revision : undefined,
+                  source: 'poll',
+                  error: createCanvasTaskEventError(pollData.error, {
+                    code: pollData.code || 'GENERATION_RETRY_EXHAUSTED',
+                    message: typeof pollData.error === 'string'
+                      ? pollData.error
+                      : '多次重试后仍未生成图像，建议稍后重试',
+                    source: 'provider',
+                    retryable: true,
+                  }),
+                });
                 terminalTaskCount++;
                 updateBatchProgress();
                 toast.error('生成失败', {
@@ -2557,7 +2710,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 );
                 completedImageUrls.forEach((rawImageUrl, imageIdx) => {
                   completedImages.push({
-                    id: `${Date.now()}-${completedSlotIndex}-${imageIdx}`,
+                    id: placeholderIds[completedSlotIndex]
+                      || `${Date.now()}-${completedSlotIndex}-${imageIdx}`,
                     slotIndex: completedSlotIndex,
                     url: rawImageUrl,
                     prompt: enhancedPrompt || params.prompt,
@@ -2574,31 +2728,39 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   });
                 });
                 const completedSlotImage = completedImages.find(image => image.slotIndex === completedSlotIndex);
-                const phId = placeholderIds[completedSlotIndex];
-                if (completedSlotImage && phId) {
-                  setImages(prev => prev.map(img => (
-                    img.id === phId && img.isProcessingPlaceholder
-                      ? {
-                        ...img,
-                        id: completedSlotImage.id,
-                        url: completedSlotImage.url,
+                if (completedSlotImage) {
+                  projectWorkspaceTaskEvent({
+                    taskId: currentTaskId,
+                    batchId: submittedSlot.batchId,
+                    slotId: submittedSlot.slotId,
+                    slotIndex: completedSlotIndex,
+                    outputIndex: 0,
+                    status: 'completed',
+                    progress: 100,
+                    revision: typeof pollData.revision === 'number' ? pollData.revision : undefined,
+                    source: 'poll',
+                    providerId: pollData.providerId || params.providerId,
+                    providerName: pollData.providerName || pollingProviderName,
+                    modelId: pollData.usedModel || params.model,
+                    modelName: pollData.modelName || pollingModelName,
+                    result: {
+                      url: completedSlotImage.url,
+                      sourceUrl: completedSlotImage.sourceUrl,
+                      assetVersionId: pollData.assetVersionId || pollData.result?.assetVersionId,
+                      placementId: pollData.placementId || pollData.result?.placementId,
+                      metadata: {
                         prompt: completedSlotImage.prompt,
-                        model: completedSlotImage.model,
                         quality: completedSlotImage.quality,
                         aspectRatio: completedSlotImage.aspectRatio,
                         stylePreset: completedSlotImage.stylePreset,
                         category: completedSlotImage.category,
                         size: completedSlotImage.size,
-                        sourceUrl: completedSlotImage.sourceUrl,
-                        modelName: completedSlotImage.modelName || pollingModelName || completedSlotImage.model,
-                        apiProvider: completedSlotImage.apiProvider || pollingProviderName || params.providerId || '',
                         apiBaseUrl: pollingApiBaseUrl || '',
                         generationRouteAudit: completedSlotImage.generationRouteAudit,
-                        isProcessingPlaceholder: false,
-                        processing: undefined,
-                      }
-                      : img
-                  )));
+                        createdAt: Date.now(),
+                      },
+                    },
+                  });
                 }
                 taskCompleted = true;
                 consecutiveErrors = 0;
@@ -2607,6 +2769,23 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
               } else if (pollData.status === 'failed') {
                 console.warn(`[poll] taskId=${currentTaskId} FAILED after ${Math.round((Date.now()-taskStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
+                projectWorkspaceTaskEvent({
+                  taskId: currentTaskId,
+                  batchId: submittedSlot.batchId,
+                  slotId: submittedSlot.slotId,
+                  slotIndex: submittedSlot.slotIndex,
+                  outputIndex: 0,
+                  status: 'failed',
+                  progress: pollData.progress || 0,
+                  revision: typeof pollData.revision === 'number' ? pollData.revision : undefined,
+                  source: 'poll',
+                  error: createCanvasTaskEventError(pollData.error, {
+                    code: pollData.code || 'GENERATION_FAILED',
+                    message: typeof pollData.error === 'string' ? pollData.error : '图像生成任务失败',
+                    source: 'provider',
+                    retryable: pollData.retryable === true,
+                  }),
+                });
                 terminalTaskCount++;
                 updateBatchProgress();
                 toast.error('生成失败', {
@@ -2616,6 +2795,23 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 taskCompleted = true;
 
               } else if (pollData.status === 'cancelled') {
+                projectWorkspaceTaskEvent({
+                  taskId: currentTaskId,
+                  batchId: submittedSlot.batchId,
+                  slotId: submittedSlot.slotId,
+                  slotIndex: submittedSlot.slotIndex,
+                  outputIndex: 0,
+                  status: 'cancelled',
+                  progress: pollData.progress || 0,
+                  revision: typeof pollData.revision === 'number' ? pollData.revision : undefined,
+                  source: 'poll',
+                  error: createCanvasTaskEventError(pollData.error, {
+                    code: 'TASK_CANCELLED',
+                    message: typeof pollData.error === 'string' ? pollData.error : '图像生成任务被取消',
+                    source: 'provider',
+                    retryable: false,
+                  }),
+                });
                 terminalTaskCount++;
                 updateBatchProgress();
                 toast.error('任务已取消', {
@@ -2626,6 +2822,20 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
               } else {
                 // pending / processing - 更新进度（根据API返回的estimatedTime动态调整）
+                projectWorkspaceTaskEvent({
+                  taskId: currentTaskId,
+                  batchId: submittedSlot.batchId,
+                  slotId: submittedSlot.slotId,
+                  slotIndex: submittedSlot.slotIndex,
+                  outputIndex: 0,
+                  status: pollData.status === 'queued' || pollData.status === 'uploading' || pollData.status === 'submitting'
+                    ? pollData.status
+                    : 'processing',
+                  progress: typeof pollData.progress === 'number' ? pollData.progress : Math.min(95, pollCount * 2),
+                  revision: typeof pollData.revision === 'number' ? pollData.revision : undefined,
+                  label: pollData.label,
+                  source: 'poll',
+                });
                 if (pollData.estimatedTime && pollCount === 1) {
                   console.log(`Task ${currentTaskId} estimated time: ${pollData.estimatedTime}s`);
                 }
@@ -2637,6 +2847,22 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               console.error(`Poll error (consecutive: ${consecutiveErrors}):`, pollError);
 
               if (consecutiveErrors >= 5) {
+                projectWorkspaceTaskEvent({
+                  taskId: currentTaskId,
+                  batchId: submittedSlot.batchId,
+                  slotId: submittedSlot.slotId,
+                  slotIndex: submittedSlot.slotIndex,
+                  outputIndex: 0,
+                  status: 'failed',
+                  progress: 0,
+                  source: 'poll',
+                  error: createCanvasTaskEventError(pollError, {
+                    code: 'TASK_POLL_NETWORK_FAILURE',
+                    message: '连续多次查询失败，请检查网络连接',
+                    source: 'network',
+                    retryable: true,
+                  }),
+                });
                 terminalTaskCount++;
                 updateBatchProgress();
                 toast.error('轮询失败', {
@@ -2726,37 +2952,30 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             };
           });
 
-          // 替换尚未被逐个替换的占位框为实际图片
+          // Terminal identity is owned by projectWorkspaceTaskEvent. This pass
+          // only enriches already-completed slots with the decoded pixel size.
           setImages(prev => {
-            let updated: CanvasImage[] = [...prev];
-            for (const { slotIndex, image } of completedCanvasImages) {
-              const phId = placeholderIds[slotIndex];
-              if (phId) {
-                const phIdx = updated.findIndex(img => img.id === phId);
-                if (phIdx >= 0) {
-                  const existing = updated[phIdx];
-                  if (existing.isProcessingPlaceholder) {
-                    // 尚未被逐个替换的占位框，现在替换
-                    updated[phIdx] = {
-                      ...image,
-                      x: existing.x,
-                      y: existing.y,
-                    };
-                  }
-                  // 已被逐个替换的，保留（可能URL已持久化，尺寸更准确）
-                } else {
-                  updated = reconcileCompletedGenerationSlot(updated, {
-                    placeholderId: phId,
-                    result: image,
-                    fallbackPosition: placeholderPositions.get(phId),
-                  });
-                }
-              } else {
-                updated.push(image);
-              }
-            }
-            // 移除多余的占位框（如轮询失败或超时残留的）
-            updated = updated.filter(img => !img.isProcessingPlaceholder || !placeholderIds.includes(img.id));
+            const dimensionsByPlaceholderId = new Map(
+              completedCanvasImages.flatMap(({ slotIndex, image }) => {
+                const placeholderId = placeholderIds[slotIndex];
+                return placeholderId ? [[placeholderId, image] as const] : [];
+              }),
+            );
+            const updated = prev.map((existing) => {
+              const completed = dimensionsByPlaceholderId.get(existing.id);
+              if (!completed || existing.taskProjection?.status !== 'completed') return existing;
+              const displayHeight = existing.height;
+              const displayWidth = completed.originalHeight > 0
+                ? Math.round(displayHeight * completed.originalWidth / completed.originalHeight)
+                : existing.width;
+              return {
+                ...existing,
+                width: displayWidth,
+                height: displayHeight,
+                originalWidth: completed.originalWidth,
+                originalHeight: completed.originalHeight,
+              };
+            });
             stabilizeCanvasImages(updated.map(img => ({ id: img.id, url: img.url })));
             return updated;
           });
@@ -2905,7 +3124,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     } finally {
       setActiveGenerationCount(prev => Math.max(0, prev - 1));
     }
-  }, [setImages, stabilizeCanvasImages, themeStyle]);
+  }, [projectWorkspaceTaskEvent, setImages, stabilizeCanvasImages, themeStyle]);
 
   // 添加参考图到画布
   const handleAddToCanvas = useCallback(async (imageUrl: string) => {
