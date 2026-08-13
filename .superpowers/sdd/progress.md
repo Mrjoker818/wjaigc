@@ -192,7 +192,7 @@ Protected stable branch: read-only and untouched
 | Task | Status | RED evidence | GREEN evidence | Commit | Cloud SHA | Unverified |
 |---|---|---|---|---|---|---|
 | 0 Baseline, three-state mode and ledger | completed locally | Focused RED: 5 expected failures for missing mode module, sync envelope, doctor output, and authenticated client adoption | Focused Task 0 suite passed; cross-platform source-wiring regressions 41/41; TypeScript passed; ESLint 0 errors / 959 historical warnings; full Vitest 902/902 suites, 2236 passed, 0 failed, 44 environment-pending; Doctor 22 pass / 13 warning / 0 fail / 2 blocked; production build 116/116; protected baseline 38/38 with 0 warnings | this Task 0 commit | `UNVERIFIED` | PostgreSQL, cloud exact-SHA, real-browser and performance evidence remain `UNVERIFIED` |
-| 1 Real canvas performance and functional evidence baseline | pending | pending | pending | pending | pending | 1/100/300-node browser fixtures not started |
+| 1 Real canvas performance and functional evidence baseline | baseline established; acceptance failing | Missing fixture module; invalid `wujie_projects.project_id` cleanup scope; Stage 3 output initially escaped its dedicated artifact directory | Fixture tests 7/7; TypeScript; full Vitest exit 0; ESLint 0 errors / 959 warnings; build 116/116; protected baseline 38/38 / 0 warnings; real Chromium: 100-node pass, 1-node persisted drag fail, 300-node hit-test continuity fail | this Task 1 commit | `UNVERIFIED` | PostgreSQL integration tests remain environment-gated; Chromium 1920x1080, Firefox, WebKit, mobile Chromium, cloud exact-SHA and rollback remain `UNVERIFIED` |
 
 ### Task 0 Scope And Safety
 
@@ -201,4 +201,14 @@ Protected stable branch: read-only and untouched
 - Doctor reports the effective mode without exposing the raw invalid environment value.
 - Three existing source-wiring tests now normalize CRLF to LF before multiline assertions. This is test portability only; annotation settlement, autosave, and asset lock business code were not changed.
 - Direct Doctor execution is environment-limited: missing local secrets/database/storage produced 13 warnings and 2 blocked checks. These are retained as unverified prerequisites, not counted as passes.
-- The 44 pending full-suite tests are environment-gated and are not counted as passed. Task 1 and all later Stage 3 tasks have not started.
+- The 44 pending full-suite tests are environment-gated and are not counted as passed. This was the Task 0 checkpoint; Task 1 is now recorded separately below, while Task 2 and later work have not started.
+
+### Task 1 Real-Browser Baseline
+
+- A guarded fixture seeder now creates 15 isolated projects: five browser profiles multiplied by 1, 100 and 300 controlled image nodes. It requires an exact database guard token, writes credentials outside the repository and restricts cleanup by owner, run ID and exact project IDs.
+- RED/GREEN evidence was retained for the missing fixture module, the invalid cleanup column used for `wujie_projects`, and Playwright Stage 3 output routing. The focused infrastructure suite is `7/7`.
+- Accepted Chromium evidence used an isolated PostgreSQL 18 database and local production server in `legacy` mode. The 100-node pan passed at `58.20 FPS`, `14.10ms` input P95, `99ms` longest task, zero disappearing frames and zero unclickable time.
+- The one-node functional flow failed because dragging did not change the persisted coordinates from `80/80`. The 300-node pan reached `57.76 FPS` and `24.90ms` input P95 but accumulated `1583.20ms` of failed hit-test continuity. Both failures remain enabled and are the evidence targets for Task 2 and later ordered gesture/render work.
+- Browser artifacts are written under ignored `test-results/stage-3-baseline/`; the tracked summary is `tests/reports/stage-3-canvas-baseline.md`. An initial HTTP 503 run caused by missing bootstrap configuration was rejected as environment setup evidence and was not counted as Canvas behavior.
+- Task 1 establishes evidence only and does not alter Canvas business behavior. Task 2 has not started; cloud exact-SHA, four additional browser profiles and rollback remain `UNVERIFIED`.
+- Fresh final gates: fixture tests `7/7`, TypeScript exit 0, full Vitest exit 0 with PostgreSQL integration tests still environment-gated, ESLint `0 errors / 959 warnings`, production build `116/116`, protected feature gate `38/38 / 0 warnings`, and `git diff --check` exit 0.

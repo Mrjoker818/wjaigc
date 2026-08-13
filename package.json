@@ -21,6 +21,8 @@
     "test:e2e:p0": "playwright test tests/e2e/p0-core.spec.ts",
     "test:e2e:stage-2": "playwright test tests/e2e/stage-2-asset-lifecycle.spec.ts tests/e2e/stage-2-cross-workspace.spec.ts --reporter=line,./tests/helpers/stage-2-reporter.ts",
     "seed:e2e:stage-2": "node scripts/stage-2-e2e-fixtures.mjs",
+    "test:e2e:stage-3": "playwright test tests/e2e/stage-3-canvas-kernel.spec.ts",
+    "seed:e2e:stage-3": "node scripts/stage-3-e2e-fixtures.mjs",
     "test:artifacts": "node scripts/collect-playwright-artifacts.mjs",
     "test:inventory": "node scripts/generate-function-inventory.mjs",
     "check:protected-baseline": "node scripts/check-protected-baseline.mjs",
