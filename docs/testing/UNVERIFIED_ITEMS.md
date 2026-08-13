@@ -646,3 +646,15 @@
 | Cloud exact-SHA and rollback | UNVERIFIED | After an authorized main-only push, deploy the exact candidate, rerun representative toolbar/context/shortcut sessions, then prove `canvas-v2 -> legacy` rollback. |
 | Protected-baseline source drift | BLOCKED BY ORDERED PLAN | `38/38` identities remain. The default gate blocks `32` accumulated Stage 3 source paths; only the exact reviewed scope gate passes. Baseline approval belongs to the ordered later task. |
 | Task 9 component consolidation | NOT STARTED | Task 8 evidence does not authorize component-boundary cleanup in this task. |
+
+## 2026-08-14 Stage 3 Task 9 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Task 9 component boundaries | VERIFIED LOCALLY | Boundary contracts and focused Canvas regression pass `58/58`; full Vitest passes `2376/2376` executed tests and PostgreSQL suites pass separately. |
+| Full 300-node pan/input gate | OPEN P1 | In Task 10, rerun the complete fixed scenario and meet `<=50ms` P95 without weakening assertions or discarding prior variance evidence. |
+| Full five-browser Stage 3 matrix | UNVERIFIED | Run the complete functional/performance suite, not only Task 8's tool-session flow, in Chromium, Chromium 1920x1080, Firefox, WebKit and mobile Chromium. |
+| Firefox Stage 3 fixture media | UNVERIFIED / FIXTURE LIMITATION | Replace or formally validate the historical 155-byte PNG fixture and prove decoded media dimensions in Firefox. |
+| Protected-baseline source drift | BLOCKED BY ORDERED PLAN | Keep the default gate blocking accumulated Stage 3 source paths until Task 10 reviews and explicitly approves the exact candidate scope. |
+| Cloud exact-SHA and rollback | UNVERIFIED | After authorized push, deploy the exact candidate in the isolated Coze project, run representative Canvas flows and prove `canvas-v2 -> legacy` rollback. |
+| Task 10 release gates | NOT STARTED | Task 9 evidence does not authorize a Stage 3 completion or release claim. |

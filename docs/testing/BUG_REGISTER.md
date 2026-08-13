@@ -1371,3 +1371,18 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Add the typed Canvas tool registry, one `CanvasToolSession`, `CanvasToolHost`, explicit interaction boundaries and shared activation/close/reconciliation paths while retaining existing business panels. |
 | Regression | Focused `32/32`; production browser flow `5/5` across Chromium, Chromium 1920x1080, Firefox, WebKit and mobile Chromium; protected capability mapping covers every action of all 11 Canvas feature groups. |
 | Status | **CLOSED LOCALLY 2026-08-13 / CLOUD EXACT-SHA PENDING.** |
+
+### S3-BUG-010: InfiniteCanvas retained remote polling and transient lifecycle ownership
+
+| Field | Detail |
+|---|---|
+| Severity | P2 architecture / lifecycle reliability |
+| Module | Infinite Canvas component boundaries and teardown |
+| Environment | Stage 3 Task 9 source contracts and local regression, 2026-08-14 |
+| Reproduction | Inspect the Canvas facade while generation/edit polling is active, mount and unmount the erase/mask editor repeatedly, then unmount the Canvas with timers, animation frames or pointer capture active. |
+| Expected | Workspace owns remote effects; render and tool-host components remain pure within their declared boundaries; every transient listener/request/timer/frame/pointer is released on replacement or unmount. |
+| Actual | `InfiniteCanvas` directly called `/api/poll-task`; the erase/mask editor attached an anonymous non-passive wheel listener that could not be removed; top-level teardown did not explicitly release several tracked transient resources. |
+| Root cause | Remote transport and lifecycle cleanup accumulated inside the compatibility facade while the workspace/surface/tool-host split was introduced incrementally. |
+| Fix | Inject task polling from `CanvasWorkspace`; retain response semantics in the facade; use a stable wheel handler with explicit detach; abort tracked requests, clear timers/intervals, cancel RAFs and release pointer capture during teardown. |
+| Regression | Initial boundary RED `3 failed / 2 passed`; lifecycle RED reproduced the anonymous listener; focused GREEN `58/58`; full Vitest `2376/2376` executed tests, PostgreSQL suites `46/46` plus `4/4`, TypeScript/build/ESLint/diff checks pass. |
+| Status | **CLOSED LOCALLY 2026-08-14 / TASK 10 CROSS-BROWSER AND CLOUD EXACT-SHA PENDING.** |

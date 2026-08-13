@@ -389,6 +389,15 @@ function rebaseCanvasImages(
 }
 
 export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspaceProps) {
+  const requestCanvasTaskPoll = useCallback(
+    (payload: Record<string, unknown>, options?: { signal?: AbortSignal }) => fetch('/api/poll-task', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: options?.signal,
+    }),
+    [],
+  );
   const [images, setImagesRaw] = useState<CanvasImage[]>([]);
   const [selectedImage, setSelectedImage] = useState<CanvasImage | null>(null);
 
@@ -5734,6 +5743,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           projectId={currentProject?.id}
           initialAnnotations={initialCanvasAnnotations}
           onAnnotationsChange={handleAnnotationsChange}
+          onRequestTaskPoll={requestCanvasTaskPoll}
           onSwitchToNodeMode={() => safeSwitchMode('node')}
           onSwitchToWorkflowHub={() => safeSwitchMode('workflow-hub')}
           onSwitchToDashboard={() => safeSwitchMode('dashboard')}

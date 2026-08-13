@@ -792,3 +792,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Protected feature identity remains `38/38`. The default baseline gate correctly blocks `32` accumulated Stage 3 source drifts; an explicit reviewed 32-path scope gate passes. This is not a production-baseline approval.
 - The five-profile evidence proves only the Task 8 mutual-exclusion flow. It does not replace the full Task 0-7 cross-browser matrix, S3-BUG-004's 300-node input gate, cloud exact-SHA verification or `canvas-v2 -> legacy` rollback.
 - **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `9/11`, approximately `82%`. Task 9 is next and has not started. Nothing is pushed or deployed, and `stable` remains untouched.
+
+## 2026-08-14 Stage 3 Task 9 readiness decision
+
+- Component boundaries are locally closed for Task 9: workspace owns task polling, `CanvasSurface` remains render/controller-only, `CanvasToolHost` remains session/panel-only, and protected tool panels remain reachable through the compatibility facade.
+- Focused regression is `58/58`; fresh full Vitest is `422` passed files / `2376` passed tests with environment-gated tests separately verified against PostgreSQL (`46/46` plus `4/4`). TypeScript, production build and whitespace checks pass; ESLint is `0 errors / 965 historical warnings`.
+- Task 9 does not supply the complete Stage 3 browser/performance/release evidence. S3-BUG-004's fixed 300-node input P95 gate, full five-browser matrix, exact-SHA Coze verification and `canvas-v2 -> legacy` rollback remain open.
+- Protected features remain governed by the unchanged baseline. The accumulated Stage 3 source drift must continue to block the default release gate until the ordered Task 10 approval step; this Task does not silently rewrite that baseline.
+- **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `10/11`, approximately `91%`. Task 10 is next and has not started. Nothing is pushed or deployed, and `stable` remains untouched.

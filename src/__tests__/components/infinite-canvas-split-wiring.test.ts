@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const componentsDir = path.join(process.cwd(), 'src', 'components');
 const canvasSource = fs.readFileSync(path.join(componentsDir, 'infinite-canvas.tsx'), 'utf8');
+const workspaceSource = fs.readFileSync(path.join(componentsDir, 'canvas-workspace.tsx'), 'utf8');
 const previewPath = path.join(componentsDir, 'canvas', 'MultiAngleSpherePreview.tsx');
 
 describe('infinite canvas component boundaries', () => {
@@ -12,5 +13,12 @@ describe('infinite canvas component boundaries', () => {
     expect(canvasSource).not.toContain('function MultiAngleSpherePreview');
     expect(fs.existsSync(previewPath)).toBe(true);
     expect(fs.readFileSync(previewPath, 'utf8')).toContain('export function MultiAngleSpherePreview');
+  });
+
+  it('delegates task polling side effects to CanvasWorkspace', () => {
+    expect(workspaceSource).toContain('requestCanvasTaskPoll');
+    expect(workspaceSource).toContain('onRequestTaskPoll={requestCanvasTaskPoll}');
+    expect(canvasSource).toContain('onRequestTaskPoll');
+    expect(canvasSource).not.toContain("fetch('/api/poll-task'");
   });
 });

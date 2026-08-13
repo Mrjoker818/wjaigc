@@ -131,3 +131,11 @@ The existing `pnpm perf:check` string microbenchmark is auxiliary only and is no
 - Firefox did not decode the legacy 155-byte fixture PNG in this run. The card remained visible and the tool-session behavior passed, but media decode is explicitly not claimed by this Task 8 evidence.
 - Repository gates pass: PostgreSQL-enabled full Vitest exit `0`; API `477/477` plus separate PostgreSQL concurrency `3/3`; component/lib `1759/1759`; TypeScript; ESLint `0 errors / 966 historical warnings`; Doctor `43 passed / 11 warnings / 0 failed / 0 blocked`; production build `116/116`; `git diff --check`.
 - Protected identities remain `38/38`. The default release gate blocks 32 accumulated Stage 3 paths until the ordered baseline task; the exact 32-path scope gate passes with one historical baseline-commit warning.
+
+## Task 9 Canvas Kernel Boundary Evidence
+
+- `CanvasWorkspace` owns the shared task-poll transport and injects it into the compatibility facade. Nine existing Canvas poll paths preserve payload, cancellation and response behavior without a direct `/api/poll-task` call in `InfiniteCanvas`.
+- Permanent source contracts keep history and remote effects out of `InfiniteCanvas`, API/user ownership out of `CanvasSurface` and `CanvasToolHost`, and verify that every protected business panel remains reachable.
+- The erase/mask editor's wheel listener now detaches by stable identity. Top-level teardown aborts tracked requests, clears timers/intervals, cancels RAFs and releases pointer capture.
+- RED evidence: boundary suite `3 failed / 2 passed`, followed by a lifecycle RED for the anonymous listener. GREEN evidence: focused Canvas regression `58/58`; full Vitest `422` files / `2376` executed tests; PostgreSQL suites `46/46` plus `4/4`; TypeScript, build, whitespace and ESLint `0 errors / 965 warnings` pass.
+- This is local structural/regression evidence only. The fixed 300-node performance gate, complete five-browser Stage 3 matrix, exact-SHA Coze validation, protected-baseline approval and `canvas-v2 -> legacy` rollback remain for Task 10.

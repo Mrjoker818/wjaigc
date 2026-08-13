@@ -956,3 +956,12 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - PostgreSQL-enabled full Vitest exits `0`. API regression is `477/477`; its three separately keyed element-board/Pear PostgreSQL concurrency tests pass `3/3`; component/lib regression is `1759/1759`. TypeScript, `git diff --check` and the `116/116` production build pass; ESLint reports `0 errors / 966 historical warnings`; Doctor reports `43/11/0/0`.
 - All `38/38` protected feature identities remain. The default gate intentionally blocks `32` accumulated Stage 3 source drifts; the exact reviewed 32-path scope gate passes with one historical commit warning. No baseline was silently rewritten.
 - **Task 8 verdict: PASS LOCALLY FOR ITS FUNCTIONAL SCOPE. Stage 3 verdict: NOT COMPLETE.** Progress is `9/11`, approximately `82%`. Task 9 has not started; S3-BUG-004, the full Stage 3 external-browser matrix, cloud exact-SHA and rollback remain open.
+
+## 2026-08-14 Stage 3 Task 9 component-boundary regression
+
+- TDD added source contracts for workspace effect ownership, render-only `CanvasSurface`, session-only `CanvasToolHost`, protected-panel reachability and Canvas lifecycle teardown. Initial RED was `3 failed / 2 passed`; a second RED captured the anonymous wheel-listener leak.
+- `CanvasWorkspace` now injects the shared task-poll transport. Nine existing poll paths retain their request payload, response parsing, cancellation signal and terminal behavior while `InfiniteCanvas` no longer directly calls `/api/poll-task`.
+- The erase/mask editor wheel listener now has stable attach/detach identity. Unmount aborts tracked annotation/generation requests, clears intervals/timers, cancels RAFs and releases pointer capture.
+- Focused boundary plus Canvas command/session/selection/viewport/cancellation regression passes `58/58`. Fresh full Vitest passes `422` files and `2376` executed tests with `12` files / `44` tests explicitly environment-skipped; separately enabled PostgreSQL suites pass `46/46` plus `4/4`.
+- TypeScript and production build pass. Full ESLint reports `0 errors / 965 historical warnings`, one fewer warning than Task 8, and `git diff --check` passes.
+- **Task 9 verdict: PASS LOCALLY FOR ITS FUNCTIONAL SCOPE. Stage 3 verdict: NOT COMPLETE.** Progress is `10/11`, approximately `91%`. Task 10 has not started; S3-BUG-004, full five-browser Stage 3 coverage, cloud exact-SHA and rollback remain open.

@@ -507,6 +507,11 @@ interface InfiniteCanvasProps {
   projectId?: string;
   initialAnnotations?: CanvasAnnotationV2[];
   onAnnotationsChange?: (annotations: CanvasAnnotationV2[]) => void;
+  /** Execute shared remote task polling at the workspace side-effect boundary. */
+  onRequestTaskPoll: (
+    payload: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ) => Promise<Response>;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'colorAdjust' | 'panorama';
@@ -675,12 +680,14 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, onRequestTaskPoll }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
   // Stable refs for callbacks used in effects (avoid stale closures)
   const onSelectImageRef = useRef(onSelectImage);
   onSelectImageRef.current = onSelectImage;
+  const onRequestTaskPollRef = useRef(onRequestTaskPoll);
+  onRequestTaskPollRef.current = onRequestTaskPoll;
   const onNavigateToImageCompleteRef = useRef(onNavigateToImageComplete);
   onNavigateToImageCompleteRef.current = onNavigateToImageComplete;
   // Ref for connections to avoid stale closure in completeProcessingFrame
@@ -2332,6 +2339,23 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Floating window canvas zoom/pan
   const [editCanvasZoom, setEditCanvasZoom] = useState(1);
   const [editCanvasPan, setEditCanvasPan] = useState({ x: 0, y: 0 });
+  const editCanvasWheelElementRef = useRef<HTMLDivElement | null>(null);
+  const editCanvasWheelHandler = useCallback((event: WheelEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const delta = event.deltaY > 0 ? 0.9 : 1.1;
+    setEditCanvasZoom(current => Math.max(0.25, Math.min(5, current * delta)));
+  }, []);
+  const bindEditCanvasWheelElement = useCallback((element: HTMLDivElement | null) => {
+    if (editCanvasWheelElementRef.current === element) return;
+    editCanvasWheelElementRef.current?.removeEventListener('wheel', editCanvasWheelHandler);
+    editCanvasWheelElementRef.current = element;
+    editCanvasWheelElementRef.current?.addEventListener('wheel', editCanvasWheelHandler, { passive: false });
+  }, [editCanvasWheelHandler]);
+  useEffect(() => () => {
+    editCanvasWheelElementRef.current?.removeEventListener('wheel', editCanvasWheelHandler);
+    editCanvasWheelElementRef.current = null;
+  }, [editCanvasWheelHandler]);
   // Use refs for frequently-changing mouse state to avoid stale closures in event handlers
   const isDrawingRef = useRef(false);
   const isAltErasingRef = useRef(false);
@@ -2355,14 +2379,53 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   useEffect(() => {
     isMountedRef.current = true;
     const set = activeIntervalsRef.current;
+    const canvasGenerationAbortControllers = canvasGenerationAbortControllersRef.current;
     return () => {
       isMountedRef.current = false;
+      annotationTaskAbortRef.current?.abort();
+      annotationTaskAbortRef.current = null;
       // ★ 组件卸载时中止所有正在进行的轮询
       pollingAbortRef.current?.abort();
-      canvasGenerationAbortControllersRef.current.forEach(c => c.abort());
-      canvasGenerationAbortControllersRef.current.clear();
+      canvasGenerationAbortControllers.forEach(c => c.abort());
+      canvasGenerationAbortControllers.clear();
       set.forEach((id) => clearInterval(id));
       set.clear();
+
+      if (canvasLongPressTimerRef.current) clearTimeout(canvasLongPressTimerRef.current);
+      canvasLongPressTimerRef.current = null;
+      if (hoverToolbarTimerRef.current) clearTimeout(hoverToolbarTimerRef.current);
+      hoverToolbarTimerRef.current = null;
+      if (viewStateTimerRef.current) clearTimeout(viewStateTimerRef.current);
+      viewStateTimerRef.current = null;
+      if (groupDragTimerRef.current) clearTimeout(groupDragTimerRef.current);
+      groupDragTimerRef.current = null;
+      if (genGroupDragTimerRef.current) clearTimeout(genGroupDragTimerRef.current);
+      genGroupDragTimerRef.current = null;
+      if (hexCubeDragTimerRef.current) clearTimeout(hexCubeDragTimerRef.current);
+      hexCubeDragTimerRef.current = null;
+
+      for (const rafRef of [
+        thumbnailRafRef,
+        dragRafRef,
+        brushRafRef,
+        groupDragRafRef,
+        genGroupDragRafRef,
+        hexCubeDragRafRef,
+      ]) {
+        if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+
+      const surface = canvasRef.current;
+      for (const pointerId of [
+        annotationPointerIdRef.current,
+        imageDragPointerIdRef.current,
+        blankCanvasPointerRef.current,
+      ]) {
+        if (pointerId !== null && surface?.hasPointerCapture(pointerId)) {
+          surface.releasePointerCapture(pointerId);
+        }
+      }
     };
   }, []);
 
@@ -5728,11 +5791,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             // ★ 并行轮询所有未完成的任务
             const pollPromises = pendingTaskIds.map(async (tid) => {
               try {
-                const pollRes = await fetch('/api/poll-task', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ taskId: tid, model, providerId, quickPoll: true }),
-                });
+                const pollRes = await onRequestTaskPollRef.current({ taskId: tid, model, providerId, quickPoll: true });
                 // ★ 修复：即使 pollRes 不 ok 也解析响应，以便识别错误类型
                 const pollData = await pollRes.json().catch(() => ({})) as Record<string, unknown>;
                 if (!pollRes.ok) {
@@ -6987,12 +7046,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         })
       ]);
       try {
-        const res = await fetch('/api/poll-task', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId, model: pollModel, providerId: cachedProviderId, engine }),
-          signal: abortController.signal,
-        });
+        const res = await onRequestTaskPollRef.current(
+          { taskId, model: pollModel, providerId: cachedProviderId, engine },
+          { signal: abortController.signal },
+        );
         if (!res.ok) throw new Error(`Poll HTTP ${res.status}`);
         const data = await res.json();
         consecutiveErrors = 0;
@@ -7304,12 +7361,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           await new Promise(resolve => setTimeout(resolve, delay));
           if (abortController.signal.aborted) return null;
           try {
-            const pollRes = await fetch('/api/poll-task', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId: slot.taskId, model: actualGenModel, providerId: pollProviderId }),
-              signal: abortController.signal,
-            });
+            const pollRes = await onRequestTaskPollRef.current(
+              { taskId: slot.taskId, model: actualGenModel, providerId: pollProviderId },
+              { signal: abortController.signal },
+            );
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
             const resultUrl = pollData.imageUrl
@@ -7665,10 +7720,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         if (!isMountedRef.current) break;
         await new Promise(r => setTimeout(r, 2000));
         try {
-          const pollResp = await fetch('/api/poll-task', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId, model: effectiveModel, providerId: currentProviderId || undefined }),
+          const pollResp = await onRequestTaskPollRef.current({
+            taskId,
+            model: effectiveModel,
+            providerId: currentProviderId || undefined,
           });
           if (!pollResp.ok) {
             console.error('Poll refine error:', pollResp.status);
@@ -7905,10 +7960,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           if (!isMountedRef.current) break;
           pollAttempts++;
           await new Promise(r => setTimeout(r, 2000));
-          const pollRes = await fetch('/api/poll-task', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId: data.taskId, model: modelInfo.model, providerId: modelInfo.providerId || undefined }),
+          const pollRes = await onRequestTaskPollRef.current({
+            taskId: data.taskId,
+            model: modelInfo.model,
+            providerId: modelInfo.providerId || undefined,
           });
           if (!pollRes.ok) { completed = true; break; }
           const pollData = await pollRes.json();
@@ -8328,10 +8383,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               }
             });
             try {
-              const res = await fetch('/api/poll-task', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId, model: modelInfo.model, providerId: cachedProviderId, engine: data.engine }),
+              const res = await onRequestTaskPollRef.current({
+                taskId,
+                model: modelInfo.model,
+                providerId: cachedProviderId,
+                engine: data.engine,
               });
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const pollData = await res.json();
@@ -13540,18 +13596,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     className={`relative overflow-hidden ${isMonochrome ? 'bg-gray-200' : 'bg-[#0d0d0d]'}`}
                     style={{ width: canvasAreaW, cursor: 'default' }}
                     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    ref={(el) => {
-                      // Register non-passive wheel handler for proper preventDefault
-                      if (el && !el.dataset.wheelBound) {
-                        el.dataset.wheelBound = '1';
-                        el.addEventListener('wheel', (e: WheelEvent) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          const delta = e.deltaY > 0 ? 0.9 : 1.1;
-                          setEditCanvasZoom(z => Math.max(0.25, Math.min(5, z * delta)));
-                        }, { passive: false });
-                      }
-                    }}
+                    ref={bindEditCanvasWheelElement}
                   >
                     {/* Checkered background for image */}
                     <div
@@ -16390,10 +16435,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     videoEditPollCount++;
                     if (videoEditPollCount >= 100) { clearInterval(pollInterval); activeIntervalsRef.current.delete(pollInterval); toast.error('视频编辑超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
-                      const pollRes = await fetch('/api/poll-task', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ taskId: data.taskId, model: videoModel, providerId: videoProviderId }),
+                      const pollRes = await onRequestTaskPollRef.current({
+                        taskId: data.taskId,
+                        model: videoModel,
+                        providerId: videoProviderId,
                       });
                       const pollData = await pollRes.json();
                       const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
@@ -16500,10 +16545,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     videoExtendPollCount++;
                     if (videoExtendPollCount >= 100) { clearInterval(pollInterval); activeIntervalsRef.current.delete(pollInterval); toast.error('视频延长超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
-                      const pollRes = await fetch('/api/poll-task', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ taskId: data.taskId, model: videoModel, providerId: videoProviderId }),
+                      const pollRes = await onRequestTaskPollRef.current({
+                        taskId: data.taskId,
+                        model: videoModel,
+                        providerId: videoProviderId,
                       });
                       const pollData = await pollRes.json();
                       const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
@@ -17460,10 +17505,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                   if (attempts >= maxAttempts) return;
                                   attempts++;
                                   try {
-                                    const pollRes = await fetch('/api/poll-task', {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ taskId, model: hcg.toolbar.model, providerId: hcg.toolbar.providerId }),
+                                    const pollRes = await onRequestTaskPollRef.current({
+                                      taskId,
+                                      model: hcg.toolbar.model,
+                                      providerId: hcg.toolbar.providerId,
                                     });
                                     const pollData = await pollRes.json();
                                     const resultUrls = Array.isArray(pollData.result?.imageUrls)
