@@ -634,3 +634,15 @@
 | Pending data/blob close recovery | UNVERIFIED IN REAL BROWSER | Close during unresolved media persistence and prove the small recovery marker is consumed without duplicate placement or data loss. |
 | Protected-baseline source drift | BLOCKED BY ORDERED PLAN | `38/38` identities remain, but `29` accumulated Stage 3 source files await the later approved baseline task. |
 | Task 8 tool sessions | NOT STARTED | Task 7 evidence does not authorize tool-registry work in this task. |
+
+## 2026-08-13 Stage 3 Task 8 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Task 8 mutual-exclusion browser flow | VERIFIED LOCALLY | Production Chromium, Chromium 1920x1080, Firefox, WebKit and mobile Chromium pass `5/5` with retained videos. |
+| Full 300-node pan/input gate | OPEN P1 | Reduce S3-BUG-004 to the fixed `<=50ms` P95 threshold in the complete performance scenario; Task 8 does not alter or relax this gate. |
+| Full cross-browser Stage 3 matrix | UNVERIFIED | The Task 8 flow is not a substitute for selection, gesture, history, task projection, persistence and 1/100/300-node performance in every profile. |
+| Firefox Stage 3 fixture media | UNVERIFIED / FIXTURE LIMITATION | Replace or formally validate the historical 155-byte PNG fixture, then prove Firefox `naturalWidth > 0`; Task 8 only proves the stable Canvas card and tool-session behavior. |
+| Cloud exact-SHA and rollback | UNVERIFIED | After an authorized main-only push, deploy the exact candidate, rerun representative toolbar/context/shortcut sessions, then prove `canvas-v2 -> legacy` rollback. |
+| Protected-baseline source drift | BLOCKED BY ORDERED PLAN | `38/38` identities remain. The default gate blocks `32` accumulated Stage 3 source paths; only the exact reviewed scope gate passes. Baseline approval belongs to the ordered later task. |
+| Task 9 component consolidation | NOT STARTED | Task 8 evidence does not authorize component-boundary cleanup in this task. |

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { getBottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
+import {
+  getBottomToolbarDrawerPlacement,
+  getCanvasToolHostPlacementClassName,
+} from '@/lib/canvas-toolbar-layout';
 
 describe('bottom toolbar drawer placement', () => {
   it('opens toward the upper-left when the right workspace panel occupies space', () => {
@@ -57,5 +60,14 @@ describe('bottom toolbar drawer placement', () => {
     expect(placement.left).toBeGreaterThanOrEqual(8);
     expect(placement.left + placement.width).toBeLessThanOrEqual(382);
     expect(placement.top + placement.height).toBeLessThanOrEqual(836);
+  });
+});
+
+describe('canvas tool host placement', () => {
+  it('keeps floating tools in the overlay layer without centering bottom drawers', () => {
+    expect(getCanvasToolHostPlacementClassName('floating')).toContain('fixed');
+    expect(getCanvasToolHostPlacementClassName('bottom-drawer')).toContain('contents');
+    expect(getCanvasToolHostPlacementClassName('canvas-overlay')).toContain('absolute');
+    expect(getCanvasToolHostPlacementClassName('none')).toContain('contents');
   });
 });

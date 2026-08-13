@@ -121,3 +121,13 @@ The existing `pnpm perf:check` string microbenchmark is auxiliary only and is no
 - Focused unit/source contracts pass `35/35`; PostgreSQL-enabled full Vitest exits `0`; TypeScript, ESLint (`0 errors / 966 historical warnings`), whitespace checks and the `116/116` production build pass.
 - Fresh production Chromium save/refresh passes `2/2`. The 300-node sample records `56.79 FPS`, input P95 `21.8ms`, longest task `90ms`, longest save task `0ms`, disappeared frames `0` and unclickable time `0ms`; refreshed geometry, z-order and processing state match the saved project.
 - S3-BUG-004 remains open because the full pan scenario has not been rerun by this save-specific grep. External browser profiles, cloud exact-SHA, rollback and pending-media close recovery remain unverified.
+
+## Task 8 Tool Registry And Session Evidence
+
+- A typed registry maps all actions in the 11 protected Canvas feature groups and the existing auxiliary tools to explicit entry points, selection policy, session kind and panel placement.
+- One source-locked session is authoritative. Escape, external pointer, project change and source deletion close the session; opening another tool closes prior tool UI.
+- Focused unit/source regression passes `32/32`.
+- The production-browser mutual-exclusion flow passes `5/5` in Chromium, Chromium 1920x1080, Firefox, WebKit and mobile Chromium. The accepted flow covers shortcut Agent, replacement by brand ecommerce, Escape cleanup, selected-image erase, ChatCanvas prompt interaction and final Escape cleanup.
+- Firefox did not decode the legacy 155-byte fixture PNG in this run. The card remained visible and the tool-session behavior passed, but media decode is explicitly not claimed by this Task 8 evidence.
+- Repository gates pass: PostgreSQL-enabled full Vitest exit `0`; API `477/477` plus separate PostgreSQL concurrency `3/3`; component/lib `1759/1759`; TypeScript; ESLint `0 errors / 966 historical warnings`; Doctor `43 passed / 11 warnings / 0 failed / 0 blocked`; production build `116/116`; `git diff --check`.
+- Protected identities remain `38/38`. The default release gate blocks 32 accumulated Stage 3 paths until the ordered baseline task; the exact 32-path scope gate passes with one historical baseline-commit warning.

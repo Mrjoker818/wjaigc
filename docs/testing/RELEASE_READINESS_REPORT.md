@@ -784,3 +784,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - This save-specific sample does not close S3-BUG-004's full 300-node pan/input P95 gate. External browsers, cloud exact-SHA and rollback remain unverified.
 - All `38/38` protected identities, paths and evidence contracts remain, while the gate correctly blocks `29` accumulated Stage 3 source drifts until its ordered approval task.
 - **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `8/11`, approximately `73%`. Task 8 is next and has not started. Nothing is pushed or deployed, and `stable` remains untouched.
+
+## 2026-08-13 Stage 3 Task 8 readiness decision
+
+- Tool registration and session exclusivity are locally closed for the Task 8 scope: focused `32/32` and production-browser `5/5` pass across the configured desktop/mobile profiles.
+- Full local gates pass with real PostgreSQL enabled: full Vitest exit `0`, API `477/477` plus PostgreSQL concurrency `3/3`, component/lib `1759/1759`, TypeScript, Doctor `43/11/0/0`, and production build `116/116`. ESLint is `0 errors / 966 historical warnings`.
+- Protected feature identity remains `38/38`. The default baseline gate correctly blocks `32` accumulated Stage 3 source drifts; an explicit reviewed 32-path scope gate passes. This is not a production-baseline approval.
+- The five-profile evidence proves only the Task 8 mutual-exclusion flow. It does not replace the full Task 0-7 cross-browser matrix, S3-BUG-004's 300-node input gate, cloud exact-SHA verification or `canvas-v2 -> legacy` rollback.
+- **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `9/11`, approximately `82%`. Task 9 is next and has not started. Nothing is pushed or deployed, and `stable` remains untouched.

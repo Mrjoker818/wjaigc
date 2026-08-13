@@ -174,7 +174,7 @@
     "name": "无限画布核心交互",
     "entrances": ["入口选择页无限画布", "项目仪表盘项目"],
     "routes": ["/"],
-    "components": ["src/components/canvas-workspace.tsx", "src/components/infinite-canvas.tsx"],
+    "components": ["src/components/canvas-workspace.tsx", "src/components/infinite-canvas.tsx", "src/components/canvas/CanvasToolHost.tsx", "src/lib/canvas-kernel/tool-registry.ts"],
     "actions": ["选择", "多选", "移动", "缩放", "平移", "删除", "复制", "撤销", "重做", "重置视图"],
     "resultKinds": ["canvas-state", "media-node"],
     "preservesOriginal": true,

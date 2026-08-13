@@ -87,6 +87,15 @@ import { useCanvasViewport } from '@/components/canvas/use-canvas-viewport';
 import { useCanvasSelection } from '@/components/canvas/use-canvas-selection';
 import { CanvasMediaNode } from '@/components/canvas/CanvasMediaNode';
 import { CanvasSurface } from '@/components/canvas/CanvasSurface';
+import { CanvasToolHost } from '@/components/canvas/CanvasToolHost';
+import {
+  CLOSED_CANVAS_TOOL_SESSION,
+  closeCanvasToolSession,
+  openCanvasToolSession,
+  reconcileCanvasToolSession,
+  type CanvasToolEntryPoint,
+  type CanvasToolSession,
+} from '@/lib/canvas-kernel/tool-registry';
 import {
   buildCanvasRenderProjection,
   getMountedCanvasRenderItems,
@@ -1530,6 +1539,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // Active tool panel
   const [activeTool, setActiveTool] = useState<ActiveTool>('none');
+  const [canvasToolSession, setCanvasToolSession] = useState<CanvasToolSession>(
+    CLOSED_CANVAS_TOOL_SESSION,
+  );
 
   // ChatCanvas 批注模式
   const [annotationMode, setAnnotationMode] = useState(false);
@@ -1618,9 +1630,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       setEditMode('none');
     }
   }, [setAnnotationV2State]);
-  const toggleAnnotationV2Mode = useCallback(() => {
-    setAnnotationV2Mode(!annotationMode);
-  }, [annotationMode, setAnnotationV2Mode]);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
 
   // Snap guides state - alignment assist lines during drag
@@ -2124,6 +2133,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [showHelpModal, setShowHelpModal] = useState<'instructions' | 'changelog' | null>(null);
 
   const closeCanvasToolPanels = useCallback(() => {
+    setCanvasToolSession(current => closeCanvasToolSession(current));
     setShowAgentEditor(false);
     setShowBrandEcommerce(false);
     setShowSvgTracePanel(false);
@@ -2139,6 +2149,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setShowBrandPackaging(false);
     setShowDisplay3D(false);
     setShowEffectReverse(false);
+    setShowDisplayDecomposePanel(false);
+    setShowAspectRecomposePanel(false);
+    setShowCompareDialog(false);
+    setShowDownloadPopup(false);
     setEffectReverseSource(null);
     setShowCanvasGenerator(false);
     setShowVideoExtractPanel(false);
@@ -2150,13 +2164,155 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setShowVideoDubPanel(false);
     setShowLayerPanel(false);
     setShowVersionHistory(false);
+    setBottomToolbarDrawerOpen(false);
+    setAnnotationV2Mode(false);
+    setEditMode('none');
+    setActiveTool('none');
     window.dispatchEvent(new Event('wujie:canvas-tool-opened'));
-  }, []);
+  }, [setAnnotationV2Mode]);
+
+  const activateCanvasToolSession = useCallback((
+    toolId: string,
+    entryPoint: CanvasToolEntryPoint,
+    sourceImageIds?: readonly string[],
+  ): boolean => {
+    const lockedSourceIds = sourceImageIds
+      ?? (selectedIds.size > 0
+        ? [...selectedIds]
+        : selectedImage?.id
+          ? [selectedImage.id]
+          : []);
+    try {
+      const nextSession = openCanvasToolSession(CLOSED_CANVAS_TOOL_SESSION, toolId, {
+        projectId: projectId || brandProject?.id || null,
+        sourceImageIds: lockedSourceIds,
+        entryPoint,
+      });
+      closeCanvasToolPanels();
+      setCanvasToolSession(nextSession);
+      return true;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('CANVAS_TOOL_SELECTION_REQUIRED')) {
+        toast.error('请先选择图片');
+        return false;
+      }
+      console.error('[CanvasToolSession] Failed to activate tool', { toolId, error });
+      toast.error('工具暂时无法打开');
+      return false;
+    }
+  }, [brandProject?.id, closeCanvasToolPanels, projectId, selectedIds, selectedImage?.id]);
+
+  const handleToggleCanvasAnnotation = useCallback((
+    entryPoint: Extract<CanvasToolEntryPoint, 'bottom-toolbar' | 'shortcut'> = 'bottom-toolbar',
+  ) => {
+    if (annotationMode) {
+      closeCanvasToolPanels();
+      return;
+    }
+    if (activateCanvasToolSession('chatcanvas', entryPoint, [])) {
+      setAnnotationV2Mode(true);
+    }
+  }, [activateCanvasToolSession, annotationMode, closeCanvasToolPanels, setAnnotationV2Mode]);
 
   useEffect(() => {
     window.addEventListener('wujie:close-canvas-tool-panels', closeCanvasToolPanels);
     return () => window.removeEventListener('wujie:close-canvas-tool-panels', closeCanvasToolPanels);
   }, [closeCanvasToolPanels]);
+
+  const activeCanvasToolProjectId = projectId || brandProject?.id || null;
+  useEffect(() => {
+    const projectSession = reconcileCanvasToolSession(canvasToolSession, {
+      type: 'project-change',
+      projectId: activeCanvasToolProjectId,
+    });
+    if (projectSession.status === 'closed' && canvasToolSession.status === 'open') {
+      closeCanvasToolPanels();
+    }
+  }, [activeCanvasToolProjectId, canvasToolSession, closeCanvasToolPanels]);
+
+  useEffect(() => {
+    if (canvasToolSession.status !== 'open' || canvasToolSession.sourceImageIds.length === 0) return;
+    const imageSession = reconcileCanvasToolSession(canvasToolSession, {
+      type: 'images-change',
+      imageIds: images.map(image => image.id),
+    });
+    if (imageSession.status === 'closed') {
+      closeCanvasToolPanels();
+    }
+  }, [canvasToolSession, closeCanvasToolPanels, images]);
+
+  const canvasToolPanelVisibility = useMemo<Record<string, boolean>>(() => ({
+    'canvas-generator': showCanvasGenerator,
+    chatcanvas: annotationMode,
+    upscale: editMode === 'upscale',
+    'remove-bg': showRemoveBgPicker,
+    'svg-trace': showSvgTracePanel,
+    'element-decompose': showDisplayDecomposePanel,
+    erase: editMode === 'erase',
+    mask: editMode === 'mask',
+    'color-adjust': editMode === 'colorAdjust',
+    'edit-elements': showPsdEditor,
+    'multi-angle': activeTool === 'multiAngle',
+    expand: editMode === 'expand',
+    crop: editMode === 'crop',
+    download: showDownloadPopup,
+    'three-d-single': show3DModal || show3DViewer,
+    'product-refine': showRefineEngine,
+    'human-refine': showHumanRepair,
+    agent: showAgentEditor,
+    'brand-ecommerce': showBrandEcommerce,
+    'brand-factory': showBrandFactory,
+    'brand-ip': showBrandIp,
+    'logo-pro': showLogoSkill,
+    'packaging-pro': showBrandPackaging,
+    'display-pro': showDisplay3D,
+    'effect-reverse': showEffectReverse,
+    'font-design': showFontDesign,
+    'ai-psd': showAiPsd,
+    'sticker-assistant': showStickerAssistant,
+    'scene-studio': showSceneStudio,
+    'aspect-recompose': showAspectRecomposePanel,
+    'image-compare': showCompareDialog,
+    'layer-order': showLayerPanel,
+    'version-history': showVersionHistory,
+  }), [
+    activeTool,
+    annotationMode,
+    editMode,
+    show3DModal,
+    show3DViewer,
+    showAgentEditor,
+    showAiPsd,
+    showAspectRecomposePanel,
+    showBrandEcommerce,
+    showBrandFactory,
+    showBrandIp,
+    showBrandPackaging,
+    showCanvasGenerator,
+    showCompareDialog,
+    showDisplay3D,
+    showDisplayDecomposePanel,
+    showEffectReverse,
+    showFontDesign,
+    showHumanRepair,
+    showLayerPanel,
+    showLogoSkill,
+    showPsdEditor,
+    showRefineEngine,
+    showRemoveBgPicker,
+    showSceneStudio,
+    showStickerAssistant,
+    showSvgTracePanel,
+    showVersionHistory,
+    showDownloadPopup,
+  ]);
+
+  useEffect(() => {
+    if (canvasToolSession.status !== 'open' || !canvasToolSession.toolId) return;
+    if (canvasToolPanelVisibility[canvasToolSession.toolId] === false) {
+      setCanvasToolSession(current => closeCanvasToolSession(current));
+    }
+  }, [canvasToolPanelVisibility, canvasToolSession]);
 
   // Edit mode drawing - strokes stored in canvas coordinates
   const [editStrokes, setEditStrokes] = useState<{ x: number; y: number; reverse: boolean }[][]>([]);
@@ -3070,7 +3226,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (inputFocused) return;
         e.preventDefault();
-        toggleAnnotationV2Mode();
+        handleToggleCanvasAnnotation('shortcut');
         return;
       }
       // B key to toggle brush tool in annotation mode
@@ -3091,7 +3247,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         switch (e.code) {
           case 'Digit1':
             e.preventDefault();
-            setShow3DModal(true);
+            if (activateCanvasToolSession('three-d-single', 'shortcut', selectedImageData ? [selectedImageData.id] : [])) setShow3DModal(true);
             return;
           case 'Digit2':
             e.preventDefault();
@@ -3099,6 +3255,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             return;
           case 'Digit3':
             e.preventDefault();
+            if (!activateCanvasToolSession('agent', 'shortcut', [])) return;
             setAgentEditImage(null);
             setShowAgentEditor(true);
             return;
@@ -3111,29 +3268,31 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             return;
           case 'Digit5':
             e.preventDefault();
-            setShowBrandEcommerce(true);
+            if (activateCanvasToolSession('brand-ecommerce', 'shortcut', [])) setShowBrandEcommerce(true);
             return;
           case 'Digit6':
             e.preventDefault();
+            if (!activateCanvasToolSession('product-refine', 'shortcut', [])) return;
             setRefineEngineImageUrl('');
             setShowRefineEngine(true);
             return;
           case 'Digit7':
             e.preventDefault();
+            if (!activateCanvasToolSession('human-refine', 'shortcut', selectedImageData ? [selectedImageData.id] : selectedImage?.id ? [selectedImage.id] : [])) return;
             setHumanRepairImageUrl(selectedImageData?.url || selectedImage?.url || '');
             setShowHumanRepair(true);
             return;
           case 'Digit8':
             e.preventDefault();
-            setShowFontDesign(true);
+            if (activateCanvasToolSession('font-design', 'shortcut', [])) setShowFontDesign(true);
             return;
           case 'Digit9':
             e.preventDefault();
-            setShowBrandFactory(true);
+            if (activateCanvasToolSession('brand-factory', 'shortcut', [])) setShowBrandFactory(true);
             return;
           case 'Digit0':
             e.preventDefault();
-            setShowBrandIp(true);
+            if (activateCanvasToolSession('brand-ip', 'shortcut', [])) setShowBrandIp(true);
             return;
         }
       }
@@ -3304,7 +3463,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, toggleAnnotationV2Mode, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending]);
+  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoPanel]);
 
   // Click outside to close menus
   useEffect(() => {
@@ -6041,6 +6200,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       toast.error('效果图反向拆图仅支持已完成的普通图片');
       return;
     }
+    if (!activateCanvasToolSession('effect-reverse', 'image-toolbar', [source.id])) return;
 
     const sourceVersionId = source.annotationVersionId || buildAnnotationSourceVersionId(
       source.id,
@@ -6062,7 +6222,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       originalHeight: source.originalHeight,
     });
     setShowEffectReverse(true);
-  }, [brandProject?.id, getActiveImageData, projectId]);
+  }, [activateCanvasToolSession, brandProject?.id, getActiveImageData, projectId]);
 
   const handleUploadEffectReverseSource = useCallback(async (file: File) => {
     if (!onUploadEffectReverseSource) {
@@ -6924,9 +7084,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         onImagesChange(imagesRef.current.filter(img => img.id !== canvasGenFrameId));
         setCanvasGenFrameId(null);
       }
-      setShowCanvasGenerator(false);
+      closeCanvasToolPanels();
       return;
     }
+    if (!activateCanvasToolSession('canvas-generator', 'bottom-toolbar', [])) return;
     setCanvasGenPanelPos(getCenteredFloatingPanelPosition({
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
@@ -6942,7 +7103,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (!canvasGenModel && canvasGenModels.length > 0) {
       setCanvasGenModel(`${canvasGenModels[0].providerId}::${canvasGenModels[0].id}`);
     }
-  }, [showCanvasGenerator, canvasGenFrameId, onImagesChange, canvasGenModel, canvasGenModels]);
+  }, [activateCanvasToolSession, showCanvasGenerator, canvasGenFrameId, closeCanvasToolPanels, onImagesChange, canvasGenModel, canvasGenModels]);
 
   const handleCanvasGenerate = useCallback(async () => {
     if (!canvasGenPrompt.trim() || canvasGenGenerating) return;
@@ -8032,6 +8193,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     triggerWithEngine('upscale', () => {
     const img = getActiveImageData();
     if (!img) return;
+    if (!activateCanvasToolSession('upscale', 'image-toolbar', [img.id])) return;
     setEditImageId(img.id);
     setEditMode('upscale');
     // Load actual pixel dimensions from the image element
@@ -8061,7 +8223,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     };
     imgEl.src = img.url;
     });
-  }, [getActiveImageData, triggerWithEngine]);
+  }, [activateCanvasToolSession, getActiveImageData, triggerWithEngine]);
 
   // 2. REMOVE BACKGROUND - auto, result to the right
   const handleRemoveBackground = useCallback(async () => {
@@ -8251,12 +8413,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       (editImageId ? imagesRef.current.find(i => i.id === editImageId) : null) ||
       (selectedIds.size === 1 ? selectedImageData : null);
     if (!img) return;
+    if (!activateCanvasToolSession('element-decompose', 'image-toolbar', [img.id])) return;
     contextMenuTargetRef.current = null; // 使用后清空，避免影响下次工具栏触发
     setEditImageId(img.id);
     setElementDecomposeTask(null);
     setShowDisplayDecomposePanel(true);
     setShowToolbarCustomize(false);
-  }, [editImageId, selectedIds, selectedImageData]);
+  }, [activateCanvasToolSession, editImageId, selectedIds, selectedImageData]);
 
   const handleDisplayDecomposeLegacy = useCallback(async () => {
     const img = getActiveImageData();
@@ -8604,9 +8767,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const handleOpenSvgTrace = useCallback(() => {
     const img = getActiveImageData();
     if (!img) return;
+    if (!activateCanvasToolSession('svg-trace', 'image-toolbar', [img.id])) return;
     setEditImageId(img.id);
     setShowSvgTracePanel(true);
-  }, [getActiveImageData]);
+  }, [activateCanvasToolSession, getActiveImageData]);
 
   const handleSvgTraceConfirm = useCallback(async () => {
     const img = getActiveImageData();
@@ -8863,12 +9027,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Multi-angle - Lovart-style subject/camera mode, result to the right
   const handleOpenMultiAngle = useCallback(() => {
     if (!selectedImageData) return;
+    if (!activateCanvasToolSession('multi-angle', 'image-toolbar', [selectedImageData.id])) return;
     setMultiAngleMode('image');
     setMultiAngleRotation(0);
     setMultiAngleTilt(0);
     setMultiAngleZoom(1);
     setActiveTool('multiAngle');
-  }, [selectedImageData]);
+  }, [activateCanvasToolSession, selectedImageData]);
 
   const handleMultiAngleConfirm = useCallback(async () => {
     const img = getActiveImageData();
@@ -8959,13 +9124,20 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const handleEditElements = useCallback(async () => {
     const img = getActiveImageData();
     if (!img) return;
+    if (!activateCanvasToolSession('edit-elements', 'image-toolbar', [img.id])) return;
     // Directly open the PSD layer editor with AI semantic analysis
     setPsdEditorImageUrl(img.url);
     setPsdEditorMode('studio');
     setShowPsdEditor(true);
-  }, [getActiveImageData]);
+  }, [activateCanvasToolSession, getActiveImageData]);
 
   const handleOpen3D = useCallback((fromToolbar?: boolean) => {
+    const sourceImageIds = selectedImageData ? [selectedImageData.id] : [];
+    if (!activateCanvasToolSession(
+      'three-d-single',
+      fromToolbar ? 'bottom-toolbar' : 'image-toolbar',
+      sourceImageIds,
+    )) return;
     const providers = getThreeDProviders();
     if (!threeDProviderId && providers[0]) {
       setThreeDProviderId(providers[0].id);
@@ -8988,7 +9160,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setShow3DModal(true);
     setActiveTool('to3d');
     setThreeDProgress(null);
-  }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDMode, threeDMultiImages]);
+  }, [activateCanvasToolSession, selectedImageData, getThreeDProviders, threeDProviderId, threeDMode, threeDMultiImages]);
 
   const handle3DConfirm = useCallback(async () => {
     const img = getActiveImageData();
@@ -9272,6 +9444,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const handleOpenErase = useCallback(() => {
     const img = getActiveImageData();
     if (!img) return;
+    if (!activateCanvasToolSession('erase', 'image-toolbar', [img.id])) return;
     setEditImageId(img.id);
     setEditMode('erase');
     setEditStrokes([]);
@@ -9281,13 +9454,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setEditCanvasZoom(1);
     setEditCanvasPan({ x: 0, y: 0 });
     setMaskKeyword('');
-  }, [getActiveImageData]);
+  }, [activateCanvasToolSession, getActiveImageData]);
 
   // 参数调色处理
   const colorAdjustingRef = useRef(false);
   const handleOpenColorAdjust = useCallback(() => {
     const img = getActiveImageData();
     if (!img) return;
+    if (!activateCanvasToolSession('color-adjust', 'image-toolbar', [img.id])) return;
     setEditImageId(img.id);
     setEditMode('colorAdjust');
     setColorBrightness(0);
@@ -9295,7 +9469,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setColorSaturation(0);
     setColorTemperature(0);
     setColorHue(0);
-  }, [getActiveImageData]);
+  }, [activateCanvasToolSession, getActiveImageData]);
 
   const applyColorAdjust = useCallback(async () => {
     if (colorAdjustingRef.current) return;
@@ -9436,6 +9610,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const handleOpenMask = useCallback(() => {
     const img = getActiveImageData();
     if (!img) return;
+    if (!activateCanvasToolSession('mask', 'image-toolbar', [img.id])) return;
     setEditImageId(img.id);
     setEditMode('mask');
     setEditStrokes([]);
@@ -9445,19 +9620,20 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setEditCanvasZoom(1);
     setEditCanvasPan({ x: 0, y: 0 });
     setMaskKeyword('');
-  }, [getActiveImageData]);
+  }, [activateCanvasToolSession, getActiveImageData]);
 
   // 6. EXPAND - 即梦风格方向性扩展
   const handleOpenExpand = useCallback(() => {
     const img = getActiveImageData();
     if (!img) return;
+    if (!activateCanvasToolSession('expand', 'image-toolbar', [img.id])) return;
     setEditMode('expand');
     setEditImageId(img.id);
     setExpandRatio('1:1');
     // 重置方向性扩展 padding
     setExpandPadding({ top: 0, right: 0, bottom: 0, left: 0 });
     expandPaddingRef.current = { top: 0, right: 0, bottom: 0, left: 0 };
-  }, [getActiveImageData]);
+  }, [activateCanvasToolSession, getActiveImageData]);
 
   // 即梦风格扩展：拖拽控制点事件处理
   useCallback((handle: string, e: React.MouseEvent) => {
@@ -9558,6 +9734,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const handleOpenCrop = useCallback(() => {
     const img = getActiveImageData();
     if (!img) return;
+    if (!activateCanvasToolSession('crop', 'image-toolbar', [img.id])) return;
     setEditMode('crop');
     setEditImageId(img.id);
     setCropRatio('free');
@@ -9569,14 +9746,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setCropTop(0);
     setCropWidth(img.originalWidth || Math.round(img.width));
     setCropHeight(img.originalHeight || Math.round(img.height));
-  }, [getActiveImageData]);
+  }, [activateCanvasToolSession, getActiveImageData]);
 
   // 8. DOWNLOAD - popup with PNG/SVG/PSD
   const handleOpenDownload = useCallback(() => {
-    setDownloadFormat(getActiveImageData()?.mediaType === 'video' ? 'video' : 'png');
+    const img = getActiveImageData();
+    if (!img || !activateCanvasToolSession('download', 'image-toolbar', [img.id])) return;
+    setDownloadFormat(img.mediaType === 'video' ? 'video' : 'png');
     setShowDownloadPopup(true);
     setActiveTool('download');
-  }, [getActiveImageData]);
+  }, [activateCanvasToolSession, getActiveImageData]);
 
   // Edit mode handlers
   const exitEditMode = useCallback(() => {
@@ -10171,10 +10350,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     testId?: string;
   }> = [
     { icon: <ZoomIn size={14} className={isMonochrome ? monoColors['放大'] : ''} />, label: '放大', desc: '智能补细节放大，变大变高清，不改内容', action: handleOpenUpscale },
-    { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => { setRemoveBgTargetImage(getActiveImageData()); setShowRemoveBgPicker(true); } },
+    { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => { const image = getActiveImageData(); if (!image || !activateCanvasToolSession('remove-bg', 'image-toolbar', [image.id])) return; setRemoveBgTargetImage(image); setShowRemoveBgPicker(true); } },
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
     { icon: <LayoutGrid size={14} className={isMonochrome ? monoColors['元素拆解'] : ''} />, label: '元素拆解', desc: '拆出美陈物料与设计元素，生成平面陈列板', action: handleOpenDisplayDecompose },
-    { icon: <LayoutDashboard size={14} className={isMonochrome ? monoColors['横竖重组'] : ''} />, label: '横竖重组', desc: '一键转换图片横竖比例', action: () => { if (selectedImage) { setAspectRecomposeRatio('1:1'); setShowAspectRecomposePanel(true); } } },
+    { icon: <LayoutDashboard size={14} className={isMonochrome ? monoColors['横竖重组'] : ''} />, label: '横竖重组', desc: '一键转换图片横竖比例', action: () => { const image = getActiveImageData(); if (image && activateCanvasToolSession('aspect-recompose', 'image-toolbar', [image.id])) { setAspectRecomposeRatio('1:1'); setShowAspectRecomposePanel(true); } } },
     { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase, testId: 'canvas-erase' },
     { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask, testId: 'canvas-mask-edit' },
     { icon: <Palette size={14} className={isMonochrome ? '' : 'text-pink-500'} />, label: '调色', desc: '亮度/对比度/饱和度/色温/色相参数调节', action: handleOpenColorAdjust, testId: 'canvas-color-adjust' },
@@ -10183,10 +10362,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['图转3D工厂'] : ''} />, label: '图转3D工厂', desc: '生成3D模型预览', action: handleOpen3D },
     { icon: <Expand size={14} className={isMonochrome ? monoColors['扩展'] : ''} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} className={isMonochrome ? monoColors['裁切'] : ''} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
-    { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: () => { setRefineEngineImageUrl(resolveRefineEngineInitialImageUrl(selectedImageData, selectedImage)); setShowRefineEngine(true); } },
-    { icon: <UserRoundCheck size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '人物精修大师', desc: '人物、人脸、手部局部智能修复', action: () => { const image = selectedImageData || selectedImage; setHumanRepairImageUrl(image?.url || ''); setShowHumanRepair(true); } },
+    { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: () => { const image = selectedImageData || selectedImage; if (!activateCanvasToolSession('product-refine', 'image-toolbar', image ? [image.id] : [])) return; setRefineEngineImageUrl(resolveRefineEngineInitialImageUrl(selectedImageData, selectedImage)); setShowRefineEngine(true); } },
+    { icon: <UserRoundCheck size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '人物精修大师', desc: '人物、人脸、手部局部智能修复', action: () => { const image = selectedImageData || selectedImage; if (!activateCanvasToolSession('human-refine', 'image-toolbar', image ? [image.id] : [])) return; setHumanRepairImageUrl(image?.url || ''); setShowHumanRepair(true); } },
     { icon: <Pencil size={14} className={isMonochrome ? monoColors['语言修图'] : ''} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
-    { icon: <Bot size={14} className={isMonochrome ? monoColors['Agent编排'] : ''} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
+    { icon: <Bot size={14} className={isMonochrome ? monoColors['Agent编排'] : ''} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (!activateCanvasToolSession('agent', 'image-toolbar', img ? [img.id] : [])) return; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
     { icon: <Globe size={14} className={isMonochrome ? 'text-emerald-500' : 'text-emerald-400'} />, label: '全景生成', desc: '生成720°全景图', action: () => handleGeneratePanorama() },
     { icon: <Film size={14} className={isMonochrome ? 'text-purple-500' : 'text-purple-400'} />, label: '视频抽帧', desc: '从视频中提取帧图片', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') { setEditImageId(img.id); setVideoExtractFrameCount(12); setVideoExtractProcessing(false); setShowVideoExtractPanel(true); } else { toast.error('请先选中视频文件'); } } },
     { icon: <Volume2 size={14} className={isMonochrome ? 'text-orange-500' : 'text-orange-400'} />, label: 'AI配音', desc: '为视频添加AI配音', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') { setVideoDubTarget(img); setShowVideoDubPanel(true); } else toast.error('请先选中视频文件'); } },
@@ -10451,8 +10630,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '元素拆解', action: handleOpenDisplayDecompose },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
-    { label: '人物精修大师', action: () => { const img = selectedImageData; setHumanRepairImageUrl(img?.url || ''); setShowHumanRepair(true); } },
-    { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
+    { label: '人物精修大师', action: () => { const img = selectedImageData; if (!activateCanvasToolSession('human-refine', 'context-menu', img ? [img.id] : [])) return; setHumanRepairImageUrl(img?.url || ''); setShowHumanRepair(true); } },
+    { label: 'Agent编排', action: () => { const img = selectedImageData; if (img && activateCanvasToolSession('agent', 'context-menu', [img.id])) { setAgentEditImage(img); setShowAgentEditor(true); } } },
     ...(selectedImageData?.mediaType !== 'video' ? [{ label: '生成720全景图', action: () => { handleGeneratePanorama(selectedImageData ?? undefined); } }] : []),
     { label: '发送到聊天修改', action: () => { const img = selectedImageData; if (img && onSendToChat) onSendToChat(img); } },
     { label: '图片对比', action: () => { const img = selectedImageData; if (img) { setCompareImages({ left: img, right: null }); setCompareSelecting(true); } } },
@@ -10581,11 +10760,21 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   };
 
   return (
-    <div className="w-full h-full relative">
+    <div
+      className="w-full h-full relative"
+      data-canvas-tool-host-state={canvasToolSession.status}
+    >
+      <CanvasToolHost
+        session={canvasToolSession}
+        onRequestClose={closeCanvasToolPanels}
+      >
+        <span className="hidden" data-canvas-tool-session-boundary />
+      </CanvasToolHost>
       {/* Canvas Area */}
       <div
         ref={(el) => { canvasRef.current = el; canvasContainerRef.current = el; }}
         data-canvas-viewport
+        data-canvas-active-tool={canvasToolSession.toolId || ''}
         data-canvas-occupied-right={canvasOccupiedRight}
         data-project-id={projectId || brandProject?.id || ''}
         style={{ touchAction: annotationMode ? 'none' : 'auto' }}
@@ -13080,6 +13269,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           const pos = svgTraceFixedPosRef.current;
           return (
             <div
+              data-floating-panel="svg-trace"
               style={{
                 position: 'fixed',
                 left: pos.left,
@@ -13312,6 +13502,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           return (
             <div
+              data-floating-panel={isErase ? 'erase' : 'mask'}
               className="fixed inset-0 z-[200] flex items-center justify-center"
               style={{ cursor: 'default' }}
               onMouseDown={(e) => e.stopPropagation()}
@@ -13752,6 +13943,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           const isProcessing = colorAdjustProcessing;
           return (
             <div
+              data-floating-panel="color-adjust"
               className="fixed bg-[#1a1a1a] text-white rounded-2xl shadow-2xl overflow-hidden z-[180] border border-[#333] flex flex-col"
               style={{ top: '120px', right: 'max(24px, env(safe-area-inset-right))', width: '360px' }}
               onMouseDown={(e) => e.stopPropagation()}
@@ -13867,7 +14059,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             { id: 'birefnet-massive', label: 'BiRefNet Massive', description: '复杂主体优先，CPU 处理时间更长', size: '约 1GB+' },
           ];
           return (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center" onMouseDown={(e) => e.stopPropagation()}>
+            <div data-floating-panel="remove-bg" className="fixed inset-0 z-[200] flex items-center justify-center" onMouseDown={(e) => e.stopPropagation()}>
               <div className="absolute inset-0 bg-black/40" onClick={() => setShowRemoveBgPicker(false)} />
               <div className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#444]'}`} style={{ width: 420, maxHeight: '80vh' }}>
                 {/* Title */}
@@ -14279,6 +14471,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           return (
             <div
+              data-floating-panel="multi-angle"
               className="absolute z-50 pointer-events-auto"
               data-toolbar="edit-mode"
               style={{ left: panelX, top: panelY, transform: 'translate(-50%, -100%)' }}
@@ -15909,6 +16102,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* ====== 3D MODEL VIEWER MODAL ====== */}
         {show3DViewer && viewer3DModelUrl && (
+          <div className="contents" data-modal="3d-model-viewer">
           <ModelViewer3D
             modelUrl={viewer3DModelUrl}
             modelUrls={viewer3DModelUrls}
@@ -15963,6 +16157,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             }}
             onClose={() => { setShow3DViewer(false); setViewer3DModelUrl(''); setViewer3DPreviewUrl(''); setViewer3DModelUrls({}); setViewer3DThumbnailUrls({}); setViewer3DTextureUrls([]); setViewer3DModelInfo({}); }}
           />
+          </div>
         )}
 
         {/* ====== VIDEO PLAYER MODAL ====== */}
@@ -18375,7 +18570,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           {/* Agent Edit */}
           <button
             aria-label="Agent编排"
-            onClick={() => { setAgentEditImage(null); setShowAgentEditor(true); }}
+            onClick={() => { if (!activateCanvasToolSession('agent', 'bottom-toolbar', [])) return; setAgentEditImage(null); setShowAgentEditor(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="Agent编排"
           >
@@ -18409,7 +18604,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           {/* Brand E-commerce */}
           <button
             aria-label="品牌电商"
-            onClick={() => setShowBrandEcommerce(true)}
+            onClick={() => { if (activateCanvasToolSession('brand-ecommerce', 'bottom-toolbar', [])) setShowBrandEcommerce(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="品牌电商"
           >
@@ -18420,7 +18615,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           {/* Refine Engine */}
           <button
             aria-label="精修引擎"
-            onClick={() => { setRefineEngineImageUrl(''); setShowRefineEngine(true); }}
+            onClick={() => { if (!activateCanvasToolSession('product-refine', 'bottom-toolbar', [])) return; setRefineEngineImageUrl(''); setShowRefineEngine(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="精修引擎"
           >
@@ -18430,7 +18625,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           <button
             aria-label="人物精修大师"
-            onClick={() => { setHumanRepairImageUrl(selectedImageData?.url || selectedImage?.url || ''); setShowHumanRepair(true); }}
+            onClick={() => { const image = selectedImageData || selectedImage; if (!activateCanvasToolSession('human-refine', 'bottom-toolbar', image ? [image.id] : [])) return; setHumanRepairImageUrl(image?.url || ''); setShowHumanRepair(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-emerald-600 hover:text-emerald-500 hover:bg-emerald-50' : 'text-emerald-300 hover:text-emerald-200 hover:bg-emerald-400/10'}`}
             title="人物精修大师"
           >
@@ -18441,7 +18636,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           {/* Font Design */}
           <button
             aria-label="字境大师"
-            onClick={() => setShowFontDesign(true)}
+            onClick={() => { if (activateCanvasToolSession('font-design', 'bottom-toolbar', [])) setShowFontDesign(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-amber-600 hover:text-amber-500 hover:bg-amber-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
             title="字境大师"
           >
@@ -18451,7 +18646,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           {/* Brand Factory */}
           <button
-            onClick={() => setShowBrandFactory(true)}
+            onClick={() => { if (activateCanvasToolSession('brand-factory', 'bottom-toolbar', [])) setShowBrandFactory(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="品牌工厂"
           >
@@ -18461,7 +18656,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           {/* Brand IP Design Studio */}
           <button
-            onClick={() => setShowBrandIp(true)}
+            onClick={() => { if (activateCanvasToolSession('brand-ip', 'bottom-toolbar', [])) setShowBrandIp(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-rose-600 hover:text-rose-500 hover:bg-rose-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
             title="品牌IP设计工场"
           >
@@ -18471,7 +18666,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           {/* Logo Generator Pro */}
           <button
-            onClick={() => setShowLogoSkill(true)}
+            onClick={() => { if (activateCanvasToolSession('logo-pro', 'bottom-toolbar', [])) setShowLogoSkill(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-violet-600 hover:text-violet-500 hover:bg-violet-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
             title="Logo生成器 Pro"
           >
@@ -18487,7 +18682,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           {/* 3D构图画布 Pro */}
           <button
-            onClick={() => setShowSceneStudio(true)}
+            onClick={() => { if (activateCanvasToolSession('scene-studio', 'bottom-toolbar', [])) setShowSceneStudio(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="3D构图画布 Pro"
           >
@@ -18497,7 +18692,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           {/* 品牌包装系统 Pro */}
           <button
-            onClick={() => setShowBrandPackaging(true)}
+            onClick={() => { if (activateCanvasToolSession('packaging-pro', 'bottom-toolbar', [])) setShowBrandPackaging(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="品牌包装系统 Pro"
           >
@@ -18507,7 +18702,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           {/* 3D展陈系统 Pro */}
           <button
-            onClick={() => setShowDisplay3D(true)}
+            onClick={() => { if (activateCanvasToolSession('display-pro', 'bottom-toolbar', [])) setShowDisplay3D(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="3D展陈系统 Pro"
           >
@@ -18527,7 +18722,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           {/* AI PSD Generator */}
           <button
-            onClick={() => setShowAiPsd(true)}
+            onClick={() => { if (activateCanvasToolSession('ai-psd', 'bottom-toolbar', [])) setShowAiPsd(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="AI PSD生成器"
           >
@@ -18537,7 +18732,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           {/* Sticker Assistant */}
           <button
-            onClick={() => setShowStickerAssistant(true)}
+            onClick={() => { if (activateCanvasToolSession('sticker-assistant', 'bottom-toolbar', [])) setShowStickerAssistant(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="表情助手"
           >
@@ -18574,7 +18769,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           {/* ChatCanvas 批注 — 折叠区末尾 */}
           <button
             data-toolbar="bottom-annotation-entry"
-            onClick={toggleAnnotationV2Mode}
+            onClick={() => handleToggleCanvasAnnotation('bottom-toolbar')}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${annotationMode ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
             title="ChatCanvas 批注 (C)"
           >
@@ -18649,11 +18844,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         {/* 图层面板按钮 */}
         <button
           onClick={() => {
-            setShowLayerPanel(prev => {
-              const next = !prev;
-              if (next) setShowVersionHistory(false);
-              return next;
-            });
+            if (showLayerPanel) {
+              closeCanvasToolPanels();
+              return;
+            }
+            if (!activateCanvasToolSession('layer-order', 'bottom-toolbar', [])) return;
+            setShowLayerPanel(true);
+            setShowVersionHistory(false);
           }}
           className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showLayerPanel ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
           title={showLayerPanel ? '关闭图层' : '打开图层'}
@@ -18665,11 +18862,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         {/* 版本历史按钮 */}
         <button
           onClick={() => {
-            setShowVersionHistory(prev => {
-              const next = !prev;
-              if (next) setShowLayerPanel(false);
-              return next;
-            });
+            if (showVersionHistory) {
+              closeCanvasToolPanels();
+              return;
+            }
+            if (!activateCanvasToolSession('version-history', 'bottom-toolbar', [])) return;
+            setShowVersionHistory(true);
+            setShowLayerPanel(false);
           }}
           className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showVersionHistory ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
           title={showVersionHistory ? '关闭版本历史' : '版本历史'}

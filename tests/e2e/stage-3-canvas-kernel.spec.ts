@@ -99,7 +99,78 @@ async function hittableCardCenter(page: Page, locator: Locator) {
   return { box, point };
 }
 
+async function clickCanvasBlankSpace(page: Page) {
+  const point = await page.locator('[data-canvas-viewport]').evaluate(viewport => {
+    const rect = viewport.getBoundingClientRect();
+    const blockedSelector = [
+      '[data-canvas-image-id]',
+      '[data-toolbar]',
+      '[data-floating-panel]',
+      '[data-popup]',
+      '[data-modal]',
+      '[data-workspace-right-panel]',
+      '[role="dialog"]',
+    ].join(',');
+    for (let y = rect.top + 48; y < rect.bottom - 48; y += 40) {
+      for (let x = rect.left + 48; x < rect.right - 48; x += 40) {
+        const target = document.elementFromPoint(x, y);
+        if (target?.closest('[data-canvas-viewport]') && !target.closest(blockedSelector)) {
+          return { x, y };
+        }
+      }
+    }
+    throw new Error('No unobstructed Canvas point is available for keyboard focus');
+  });
+  await page.mouse.click(point.x, point.y);
+}
+
 test.describe('Stage 3 Canvas kernel baseline', () => {
+  test('keeps canvas tool sessions mutually exclusive across toolbar and shortcut entry points', async ({ page }, testInfo) => {
+    const projectId = stage3ProjectId(testInfo.project.name, 1);
+    await loginStage3User(page);
+    const projects = await readStage3Projects(page);
+    const project = projects.find(candidate => candidate.id === projectId);
+    expect(project).toBeTruthy();
+    const image = (project?.canvasImages as Array<Record<string, unknown>>)[0];
+    const nodeId = String(image.id);
+
+    await openStage3Project(page, projectId);
+    const card = stage3CanvasCard(page, nodeId);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    const viewport = page.locator('[data-canvas-viewport]');
+    await page.getByTitle('重置视图').click();
+    await clickCanvasBlankSpace(page);
+
+    await page.keyboard.press('Shift+Digit3');
+    await expect(viewport).toHaveAttribute('data-canvas-active-tool', 'agent');
+    await expect(page.locator('[data-popup="agent-editor"]')).toBeVisible();
+
+    await page.keyboard.press('Shift+Digit5');
+    await expect(viewport).toHaveAttribute('data-canvas-active-tool', 'brand-ecommerce');
+    await expect(page.locator('[data-popup="agent-editor"]')).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(viewport).toHaveAttribute('data-canvas-active-tool', '');
+
+    await page.getByTitle('重置视图').click();
+    await hittableCardCenter(page, card);
+    await card.click();
+    await page.getByTestId('canvas-erase').click();
+    await expect(viewport).toHaveAttribute('data-canvas-active-tool', 'erase');
+    await expect(page.locator('[data-floating-panel="erase"]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(viewport).toHaveAttribute('data-canvas-active-tool', '');
+
+    await clickCanvasBlankSpace(page);
+    await page.keyboard.press('c');
+    await expect(viewport).toHaveAttribute('data-canvas-active-tool', 'chatcanvas');
+    await expect(page.getByTestId('annotation-composer')).toBeVisible();
+    await page.getByTestId('annotation-prompt').click();
+    await expect(viewport).toHaveAttribute('data-canvas-active-tool', 'chatcanvas');
+    await page.keyboard.press('Escape');
+    await expect(viewport).toHaveAttribute('data-canvas-active-tool', '');
+  });
+
   test('selects one node and reverse-box selects the exact visible pair', async ({ page, stage3Evidence }, testInfo) => {
     const projectId = stage3ProjectId(testInfo.project.name, 100);
     await loginStage3User(page);

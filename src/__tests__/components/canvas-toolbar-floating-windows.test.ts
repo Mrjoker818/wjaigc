@@ -138,6 +138,10 @@ describe('canvas toolbar floating windows', () => {
   });
 
   it('opens one bottom-toolbar tool at a time and allows Escape to close external editors', () => {
+    expect(canvasSource).toContain('canvasToolSession');
+    expect(canvasSource).toContain('activateCanvasToolSession');
+    expect(canvasSource).toContain('reconcileCanvasToolSession');
+    expect(canvasSource).toContain('data-canvas-tool-host');
     expect(canvasSource).toContain('const closeCanvasToolPanels = useCallback');
     expect(canvasSource).not.toContain('onClickCapture={closeCanvasToolPanels}');
     expect(canvasSource).not.toContain('onPointerDownCapture={closeCanvasToolPanels}');

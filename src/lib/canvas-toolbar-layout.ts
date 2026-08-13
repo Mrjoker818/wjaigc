@@ -19,6 +19,22 @@ export interface BottomToolbarDrawerPlacement {
   side: 'above-center' | 'above-left' | 'above-right' | 'below-center' | 'below-left' | 'below-right';
 }
 
+export type CanvasToolHostPlacement = 'none' | 'floating' | 'bottom-drawer' | 'canvas-overlay';
+
+export function getCanvasToolHostPlacementClassName(
+  placement: CanvasToolHostPlacement,
+): string {
+  switch (placement) {
+    case 'floating':
+      return 'fixed inset-0 z-[205] pointer-events-none';
+    case 'canvas-overlay':
+      return 'absolute inset-0 z-[205] pointer-events-none';
+    case 'bottom-drawer':
+    case 'none':
+      return 'contents';
+  }
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max));
 
 function horizontalAnchor(left: number, width: number, triggerCenter: number): 'left' | 'center' | 'right' {

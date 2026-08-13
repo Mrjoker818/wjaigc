@@ -1356,3 +1356,18 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Added `CanvasPersistenceScheduler`; moved normalization/serialization into idle preparation; made immediate flush yield one task; retained asynchronous media persistence with a higher revision; limited unload handling to prepared payloads or a pending-media recovery marker. |
 | Regression | Initial RED was `9 failed / 4 passed`; focused GREEN is `35/35`. Production Chromium save/refresh is `2/2`; the 300-node sample records `21.8ms` input P95, `90ms` longest task, `0ms` longest save task, zero disappearance/click loss, and refresh-stable geometry/z-order/task state. |
 | Status | **CLOSED LOCALLY 2026-08-13 / EXTERNAL BROWSER AND CLOUD EXACT-SHA PENDING.** S3-BUG-004 remains independently open. |
+
+### S3-BUG-009: Canvas tools lacked one authoritative, source-locked session
+
+| Field | Detail |
+|---|---|
+| Severity | P2 reliability / interaction isolation |
+| Module | Infinite Canvas tool entry points and floating panels |
+| Environment | Stage 3 Task 8 unit, source-contract and local production browser matrix, 2026-08-13 |
+| Reproduction | Open Agent by shortcut, switch to a bottom-toolbar specialist, close it, select an image and open erase, then enter ChatCanvas and interact with its prompt. Also change projects or delete a locked source while a tool is active. |
+| Expected | Exactly one tool session owns the active panel; project/source identity is frozen; panel interaction does not leak to Canvas gestures; Escape, project change and source deletion close safely. |
+| Actual | Before Task 8, entry points toggled independent booleans and custom close events without a typed registry or inspectable authoritative session. Selection-dependent tools could not prove that their original source remained valid throughout the session. |
+| Root cause | Tool metadata, entry-point policy, source locking, placement and close rules were distributed across `infinite-canvas.tsx`. |
+| Fix | Add the typed Canvas tool registry, one `CanvasToolSession`, `CanvasToolHost`, explicit interaction boundaries and shared activation/close/reconciliation paths while retaining existing business panels. |
+| Regression | Focused `32/32`; production browser flow `5/5` across Chromium, Chromium 1920x1080, Firefox, WebKit and mobile Chromium; protected capability mapping covers every action of all 11 Canvas feature groups. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD EXACT-SHA PENDING.** |
