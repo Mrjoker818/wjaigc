@@ -1179,6 +1179,21 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Regression | Unit adoption/conflict coverage plus all five Stage 2 browser profiles pass. |
 | Status | **CLOSED LOCALLY 2026-08-13 / CLOUD PENDING.** |
 
+### BUG-071: asset-v3 Canvas undo restored only client state and could be deleted again on reload
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite Canvas / asset-v3 history lifecycle |
+| Environment | Coze controlled asset-v3 run and local production browser matrix, 2026-08-13, base `3bd2850000eaed1f19341c134bac0dab17f6c21c` |
+| Reproduction | Delete a managed Canvas image, press Ctrl+Z, reload; the first cloud run kept the image absent. A local Firefox run later reproduced a stale deletion snapshot removing the restored placement after reload. |
+| Expected | Undo restores the same asset/version/placement, redo trashes it, a second undo restores it, and reload preserves it. |
+| Actual | History changed React state only. The graph stayed trashed, or a delayed deletion snapshot could trash the restored placement again. |
+| Root cause | Undo/redo did not reconcile managed placement lifecycle and did not commit the matching authoritative project snapshot before accepting the UI transition. Recently-deleted suppression also retained restored IDs. |
+| Fix | Reconcile restore/trash before UI commit, advance the authoritative revision, commit the exact post-history snapshot, clear restored-ID suppression, serialize concurrent history actions, and compensate completed lifecycle changes if a later operation fails. |
+| Regression | RED was `4 failed / 5 passed`; focused GREEN is `11/11`. Real production-browser evidence is `5/5` across Chromium, 1920x1080 Chromium, Firefox, WebKit, and mobile Chromium. The initial login-fixture 503 and Firefox reload failure remain retained as failed evidence. |
+| Status | **CLOSED LOCALLY 2026-08-13 / CLOUD EXACT-SHA REVALIDATION PENDING.** |
+
 ### BUG-066: Restoring a Canvas placement did not restore the legacy project snapshot
 
 | Field | Detail |

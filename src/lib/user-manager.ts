@@ -453,6 +453,12 @@ export class UserManager {
     this.cleanupDeletedImageIds();
   }
 
+  clearRecentlyDeletedImageIds(imageIds: readonly string[]): void {
+    for (const id of imageIds) {
+      this._recentlyDeletedImageIds.delete(id);
+    }
+  }
+
   /** 检查图片ID是否在最近删除列表中 */
   isRecentlyDeletedImage(imageId: string): boolean {
     const deleteTime = this._recentlyDeletedImageIds.get(imageId);

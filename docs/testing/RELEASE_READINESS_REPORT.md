@@ -742,3 +742,7 @@ Evidence: `docs/testing/evidence/stage-1-core-v2-legacy-rollback-2026-08-10.json
 - **Verdict: CONDITIONALLY PASS FOR MAIN-ONLY PUSH; STAGE 2 NOT COMPLETE.** Required remaining order is exact-SHA Coze `shadow` comparison, controlled test-only `asset-v3`, then verified rollback to `legacy`. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only and physical purge remains disabled.
 
 Post-decision update: the implementation candidate was fast-forward pushed to `main@644a0809658d500d9e3815c14771dd10581f0998`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged. Release status is still conditional because Coze has not yet pulled and validated this candidate in `shadow`.
+
+## 2026-08-13 BUG-071 release decision
+
+The controlled cloud `asset-v3` run exposed a P1 delete/undo persistence defect, so Stage 2 was correctly kept open and Coze was returned to `legacy`. The local candidate now synchronizes placement lifecycle and the authoritative project snapshot, compensates partial failure, and passes the five-profile production-browser reload matrix. The current verdict remains **CONDITIONAL**: push to `main` only, have Coze pull the exact new SHA, verify the same controlled `asset-v3` sequence, then prove rollback to `legacy`. `stable` remains read-only and physical purge remains disabled.

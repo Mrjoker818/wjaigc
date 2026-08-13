@@ -893,3 +893,11 @@ Coze pulled GitHub `main@1344dec33f93fc9d8a19baeaf9ed251c28176f5f`; runtime comm
 - Verdict remains **CONDITIONAL**: this candidate may be pushed to `main` only. Coze must pull the exact new SHA in `shadow`, complete the cloud comparison, then perform the controlled test-only `asset-v3` switch and prove rollback to `legacy`. `stable` and physical purge remain untouched.
 
 The verified implementation was subsequently fast-forward pushed to `main@644a0809658d500d9e3815c14771dd10581f0998` from `1344dec33f93fc9d8a19baeaf9ed251c28176f5f`. Remote `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged. This push does not close the cloud gates; Coze must now pull the current main tip and provide exact-SHA `shadow` evidence.
+
+## 2026-08-13 BUG-071 asset-v3 history lifecycle regression
+
+- Coze on base `3bd2850` proved managed delete succeeded but Ctrl+Z did not restore the image. The environment was rolled back to `legacy` without changing the original identity tuple.
+- TDD added lifecycle compensation, snapshot commitment, restored-ID suppression cleanup, and a real browser scenario covering delete, undo, redo, second undo, identity lookup, and reload.
+- The first local browser attempt failed at login with HTTP 503 because the isolated production server omitted `WUJIE_ADMIN_PASSWORD`; this was a fixture configuration failure and remains retained.
+- The first five-profile run passed four profiles but failed Firefox after reload. Network evidence proved restore and identity GET succeeded before a stale snapshot removed the placement. Binding the post-history snapshot to the lifecycle transition closed that race.
+- Final focused tests pass `11/11`; Chromium, Chromium 1080p, Firefox, WebKit, and mobile Chromium pass `5/5`. The final PostgreSQL-enabled full regression passes `413/413` files and `2273/2273` tests with zero failures or skips. Production build generates `116/116` routes.

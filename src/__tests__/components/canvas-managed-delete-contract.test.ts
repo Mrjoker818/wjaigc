@@ -55,4 +55,25 @@ describe('managed canvas image deletion wiring', () => {
     expect(coordinator).not.toContain('throw result.error');
     expect(workspaceSource).toContain('onDeleteImages={handleDeleteCanvasImages}');
   });
+
+  it('reconciles managed placement lifecycle before committing asset-v3 undo and redo', () => {
+    const lifecycleStart = workspaceSource.indexOf('const syncAssetV3HistoryTransition = useCallback');
+    const undoStart = workspaceSource.indexOf('const handleUndo = useCallback');
+    const redoStart = workspaceSource.indexOf('const handleRedo = useCallback');
+    const lifecycle = workspaceSource.slice(lifecycleStart, undoStart);
+    const undo = workspaceSource.slice(undoStart, redoStart);
+    const redo = workspaceSource.slice(redoStart, workspaceSource.indexOf('const [activeGenerationCount', redoStart));
+
+    expect(lifecycle).toContain('await reconcileManagedPlacementHistoryTransition(');
+    expect(lifecycle).toContain('canvasImages: serializeCanvasWorkspacePlacements([...items])');
+    expect(lifecycle).toContain('commitSnapshot,');
+    expect(lifecycle).toContain('clearRecentlyDeletedImageIds(restoredIds)');
+    expect(undo).toContain("getAssetGraphMode() === 'asset-v3'");
+    expect(undo).toContain('await syncAssetV3HistoryTransition(previous, result)');
+    expect(undo.indexOf('await syncAssetV3HistoryTransition(previous, result)')).toBeLessThan(undo.indexOf('setImagesRaw(result)'));
+
+    expect(redo).toContain("getAssetGraphMode() === 'asset-v3'");
+    expect(redo).toContain('await syncAssetV3HistoryTransition(previous, result)');
+    expect(redo.indexOf('await syncAssetV3HistoryTransition(previous, result)')).toBeLessThan(redo.indexOf('setImagesRaw(result)'));
+  });
 });

@@ -101,6 +101,7 @@ import {
 } from '@/lib/asset-core/workspace-transfer';
 import {
   reconcileImageBatchDeletion,
+  reconcileManagedPlacementHistoryTransition,
   reconcileSelectedImageAfterBatchDeletion,
 } from '@/lib/asset-core/batch-placement-delete';
 import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
@@ -314,6 +315,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // Uses IncrementalHistoryManager for O(changes) memory instead of O(n) full snapshots.
   // Dragging one image records only {x, y} change, not the entire image array.
   const incrementalHistoryRef = useRef<IncrementalHistoryManager<CanvasImage>>(new IncrementalHistoryManager<CanvasImage>(100));
+  const recentlyDeletedIdsRef = useRef<Set<string>>(new Set());
+  const historyLifecyclePendingRef = useRef(false);
+  const historyProjectIdRef = useRef<string | null>(null);
+  const latestImagesRef = useRef(images);
+  latestImagesRef.current = images;
   const isMountedRef = useRef(true);
   const prevImagesRef = useRef<CanvasImage[]>([]);
   // ★ 跳过历史记录标记：项目加载/服务器同步等非用户操作不记录 undo diff
@@ -402,42 +408,108 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     });
   }, []);
 
-  const handleUndo = useCallback(() => {
+  const syncAssetV3HistoryTransition = useCallback(async (
+    before: CanvasImage[],
+    after: CanvasImage[],
+  ): Promise<void> => {
+    const manager = UserManagerCore.getInstance();
+    if (manager.getAssetGraphMode() !== 'asset-v3') return;
+    const projectId = historyProjectIdRef.current;
+    if (!projectId) throw new Error('当前项目不存在');
+    const readRevision = async (response: Response): Promise<void> => {
+      const payload = await response.json().catch(() => null) as { projectRevision?: number; error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error || '素材图谱历史同步失败');
+      if (Number.isSafeInteger(payload?.projectRevision)) {
+        manager.advanceProjectSyncRevision(Number(payload?.projectRevision));
+      }
+    };
+    const restorePlacement = async (image: CanvasImage & { assetId: string; placementId: string }): Promise<void> => {
+      const response = await fetch(`/api/assets/${encodeURIComponent(image.assetId)}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, placementId: image.placementId }),
+      });
+      await readRevision(response);
+    };
+    const trashPlacement = async (image: CanvasImage & { assetId: string; placementId: string }): Promise<void> => {
+      const response = await fetch(`/api/assets/placements/${encodeURIComponent(image.placementId)}?projectId=${encodeURIComponent(projectId)}`, {
+        method: 'DELETE',
+      });
+      await readRevision(response);
+    };
+    const commitSnapshot = (items: readonly CanvasImage[]): void => {
+      manager.updateProject(projectId, {
+        canvasImages: serializeCanvasWorkspacePlacements([...items]),
+      });
+    };
+
+    await reconcileManagedPlacementHistoryTransition(before, after, {
+      restorePlacement,
+      trashPlacement,
+      commitSnapshot,
+    });
+    const beforeIds = new Set(before.map((image) => image.id));
+    const restoredIds = after.filter((image) => !beforeIds.has(image.id)).map((image) => image.id);
+    restoredIds.forEach((id) => recentlyDeletedIdsRef.current.delete(id));
+    manager.clearRecentlyDeletedImageIds(restoredIds);
+  }, []);
+
+  const handleUndo = useCallback(async () => {
     // ★ 清除待处理的 mark 定时器，避免 undo 后 stale mark 干扰
     if (markTimerRef.current) {
       clearTimeout(markTimerRef.current);
       markTimerRef.current = null;
     }
-    if (!incrementalHistoryRef.current.canUndo()) return;
-    setImagesRaw(prev => {
-      const result = incrementalHistoryRef.current.undo(prev);
-      if (result === prev) return prev;
-      // ★ 安全防护：如果 undo 会导致多张图片被清空（result 为空但 prev 有多张图片），
-      // 说明 undo 栈中可能存在错误的"从空到全部图片"bulk-load diff，跳过此 undo 操作。
-      // 注意：prev.length > 1 而非 > 0，允许用户撤销在空画布上添加的第一张图片。
-      if (result.length === 0 && prev.length > 1) {
-        console.warn('[Undo] 阻止了清空所有图片的撤销操作, prev count:', prev.length);
-        return prev;
+    if (!incrementalHistoryRef.current.canUndo() || historyLifecyclePendingRef.current) return;
+    const previous = latestImagesRef.current;
+    const result = incrementalHistoryRef.current.undo(previous);
+    if (result === previous) return;
+    if (result.length === 0 && previous.length > 1) {
+      incrementalHistoryRef.current.redo(result);
+      console.warn('[Undo] 阻止了清空所有图片的撤销操作, prev count:', previous.length);
+      return;
+    }
+    historyLifecyclePendingRef.current = true;
+    try {
+      if (UserManagerCore.getInstance().getAssetGraphMode() === 'asset-v3') {
+        await syncAssetV3HistoryTransition(previous, result);
       }
       prevImagesRef.current = result;
-      return result;
-    });
-  }, []);
+      latestImagesRef.current = result;
+      setImagesRaw(result);
+    } catch (error) {
+      incrementalHistoryRef.current.redo(result);
+      toast.error(error instanceof Error ? error.message : '撤销失败');
+    } finally {
+      historyLifecyclePendingRef.current = false;
+    }
+  }, [syncAssetV3HistoryTransition]);
 
-  const handleRedo = useCallback(() => {
+  const handleRedo = useCallback(async () => {
     // ★ 清除待处理的 mark 定时器，避免 redo 后 stale mark 干扰
     if (markTimerRef.current) {
       clearTimeout(markTimerRef.current);
       markTimerRef.current = null;
     }
-    if (!incrementalHistoryRef.current.canRedo()) return;
-    setImagesRaw(prev => {
-      const result = incrementalHistoryRef.current.redo(prev);
-      if (result === prev) return prev;
+    if (!incrementalHistoryRef.current.canRedo() || historyLifecyclePendingRef.current) return;
+    const previous = latestImagesRef.current;
+    const result = incrementalHistoryRef.current.redo(previous);
+    if (result === previous) return;
+    historyLifecyclePendingRef.current = true;
+    try {
+      if (UserManagerCore.getInstance().getAssetGraphMode() === 'asset-v3') {
+        await syncAssetV3HistoryTransition(previous, result);
+      }
       prevImagesRef.current = result;
-      return result;
-    });
-  }, []);
+      latestImagesRef.current = result;
+      setImagesRaw(result);
+    } catch (error) {
+      incrementalHistoryRef.current.undo(result);
+      toast.error(error instanceof Error ? error.message : '重做失败');
+    } finally {
+      historyLifecyclePendingRef.current = false;
+    }
+  }, [syncAssetV3HistoryTransition]);
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
@@ -909,6 +981,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  historyProjectIdRef.current = currentProject?.id ?? null;
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
   const hydrationAutosaveGuardRef = useRef<CanvasHydrationGuard | null>(null);
@@ -1061,11 +1134,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const serverSyncMergeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [serverSyncMergeRevision, setServerSyncMergeRevision] = useState(0);
   // ★ 近期删除的图片 ID 集合：防止服务器同步把刚删除的图片恢复回来
-  const recentlyDeletedIdsRef = useRef<Set<string>>(new Set());
   const pendingCanvasDeleteIdsRef = useRef<Set<string>>(new Set());
-  // Keep a ref to latest images to avoid stale closure in setTimeout
-  const latestImagesRef = useRef(images);
-  latestImagesRef.current = images;
   const persistCanvasImagesNow = useCallback((nextImages: CanvasImage[]) => {
     if (!currentProject?.id) return;
     if (autoSaveRef.current) {

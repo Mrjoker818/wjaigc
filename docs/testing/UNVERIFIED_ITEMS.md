@@ -578,5 +578,14 @@
 | Controlled `asset-v3` run | NOT STARTED | Only after the exact-SHA shadow comparison passes; use an isolated test environment and retain database/browser evidence. |
 | Rollback to `legacy` | NOT STARTED | After the controlled `asset-v3` run, switch only the mode, restart, and prove login, old projects, three workspaces, task/billing references, and media remain intact. |
 | Physical asset purge | PROHIBITED | Remains disabled throughout Stage 2. |
+
+## 2026-08-13 BUG-071 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| BUG-071 local lifecycle and reload | VERIFIED LOCALLY | Focused `11/11` and five production-browser profiles `5/5`, including Firefox and mobile. |
+| Exact BUG-071 Coze candidate | UNVERIFIED | Push the new main-only commit and confirm Coze pulled that exact SHA. |
+| Controlled cloud asset-v3 history | UNVERIFIED / BLOCKING | Delete, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Z, identity GET, reload, and cross-workspace reference checks on the isolated Coze project. |
+| Mandatory legacy rollback | UNVERIFIED / BLOCKING | Return asset mode to `legacy`, task core to `legacy`, keep purge disabled, restart, and prove login plus existing projects remain usable. |
 | Controlled `asset-v3` switch | NOT STARTED / BLOCKING | Use only the isolated test environment after shadow passes; verify old projects, three workspaces, ownership, task terminal, and billing. |
 | Rollback `asset-v3 -> legacy` | NOT STARTED / BLOCKING | Switch back without deleting additive tables and prove login, old projects, generated media, chat/workflow references, and billing remain intact. |

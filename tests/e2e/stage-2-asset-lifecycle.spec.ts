@@ -184,6 +184,55 @@ test.describe('Stage 2 asset lifecycle', () => {
     await expect(await canvasImageByUrl(page, String(before.url))).toBeVisible({ timeout: 20_000 });
   });
 
+  test('keeps asset-v3 delete undo and redo synchronized with the managed placement', async ({ page, stage2Evidence }, testInfo) => {
+    test.skip(process.env.WUJIE_ASSET_GRAPH_MODE !== 'asset-v3', 'asset-v3 rollout gate only');
+    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LIFECYCLE_PROJECT_IDS');
+    const assetId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LIFECYCLE_ASSET_IDS');
+    const versionId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LIFECYCLE_VERSION_IDS');
+    const placementId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_LIFECYCLE_PLACEMENT_IDS');
+    await loginRealUser(page, stage2Evidence);
+    const before = await apiJson(page, stage2Evidence, 'GET', `/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`);
+    const imageUrl = String(before.url);
+    await openCanvasProject(page, projectId);
+    const image = await canvasImageByUrl(page, imageUrl);
+    await canvasImageCard(image).click();
+
+    try {
+      const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
+      await page.getByTestId('selected-image-delete').click();
+      expect((await deleted).ok()).toBe(true);
+      await expect(image).toHaveCount(0);
+
+      const restored = page.waitForResponse(response => response.url().includes(`/api/assets/${assetId}/restore`) && response.request().method() === 'POST');
+      await page.keyboard.press('Control+z');
+      expect((await restored).ok()).toBe(true);
+      await expect(await canvasImageByUrl(page, imageUrl)).toBeVisible({ timeout: 20_000 });
+
+      const redone = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
+      await page.keyboard.press('Control+Shift+z');
+      expect((await redone).ok()).toBe(true);
+      await expect(image).toHaveCount(0);
+
+      const restoredAgain = page.waitForResponse(response => response.url().includes(`/api/assets/${assetId}/restore`) && response.request().method() === 'POST');
+      await page.keyboard.press('Control+z');
+      expect((await restoredAgain).ok()).toBe(true);
+      await expect(await canvasImageByUrl(page, imageUrl)).toBeVisible({ timeout: 20_000 });
+
+      const identity = await apiJson(page, stage2Evidence, 'GET', `/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`);
+      expect(identity).toMatchObject({ assetId, assetVersionId: versionId, placementId, url: imageUrl });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(await canvasImageByUrl(page, imageUrl)).toBeVisible({ timeout: 20_000 });
+    } finally {
+      await ensurePlacementRestored(page, stage2Evidence, {
+        projectId,
+        assetId,
+        versionId,
+        placementId,
+        url: imageUrl,
+      });
+    }
+  });
+
   test('surfaces missing media and retries recovery without mocking', async ({ page, stage2Evidence }, testInfo) => {
     const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_MISSING_PROJECT_IDS');
     const filename = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_MISSING_FILENAMES');

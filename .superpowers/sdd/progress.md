@@ -159,6 +159,14 @@ Governance confirmation 2026-08-11: the user intentionally updated `stable` from
 - Fresh gates pass: full PostgreSQL-enabled tests, API and regression suites, TypeScript, Doctor, build `116` routes, protected baseline `38/38`, and `git diff --check`; ESLint is `0 errors / 959 warnings`. Evidence audit reports 108 recent manifests with zero missing required artifact files.
 - Next unique action remains a main-only fast-forward push. Then Coze must pull the exact SHA in `shadow`; only after cloud comparison may the isolated `asset-v3` switch and mandatory `legacy` rollback be executed. `stable` and physical purge remain untouched.
 
+## 2026-08-13: Task 9 BUG-071 local closure, cloud revalidation pending
+
+- Controlled Coze `asset-v3` testing on base `3bd2850` found BUG-071: managed delete succeeded but Canvas undo did not durably restore the placement. Coze was returned to `legacy`; the original asset/version/placement tuple remained intact.
+- Local TDD now reconciles managed restore/trash, project revision, the exact post-history snapshot, restored-ID suppression, concurrent undo/redo, and compensation on partial failure.
+- The first local production-browser run retained a fixture 503 failure. The first matrix then exposed a real Firefox reload race; after binding snapshot commitment to lifecycle completion, Firefox passed and the full five-profile scenario passed `5/5`.
+- Focused tests pass `11/11`; the final PostgreSQL-enabled full regression passes `413/413` files and `2273/2273` tests with zero failures or skips. TypeScript, Doctor, protected baseline `38/38`, build `116/116`, and whitespace checks pass.
+- Stage 2 remains in progress. Next unique action after final gates is a main-only push, exact-SHA Coze pull, controlled `asset-v3` revalidation, and mandatory rollback to `legacy`. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` and physical purge remain untouched.
+
 ## 2026-08-13: Task 9 candidate pushed to main
 
 - The verified implementation was fast-forward pushed from `origin/main@1344dec33f93fc9d8a19baeaf9ed251c28176f5f` to `main@644a0809658d500d9e3815c14771dd10581f0998`; no force operation was used.
