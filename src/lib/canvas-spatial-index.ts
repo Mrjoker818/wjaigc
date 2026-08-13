@@ -29,6 +29,10 @@ export interface CanvasImageLike {
   height: number;
 }
 
+export type CanvasSpatialIndexChange =
+  | { type: 'upsert'; image: CanvasImageLike }
+  | { type: 'remove'; id: string };
+
 const MAX_ITEMS = 16; // RBush 节点最大条目数
 
 /**
@@ -43,6 +47,9 @@ const MAX_ITEMS = 16; // RBush 节点最大条目数
  */
 export class CanvasSpatialIndex {
   private tree: RBush<SpatialItem>;
+  private itemsById = new Map<string, SpatialItem>();
+  private rebuilds = 0;
+  private incrementalUpdates = 0;
 
   constructor() {
     this.tree = new RBush<SpatialItem>(MAX_ITEMS);
@@ -52,17 +59,24 @@ export class CanvasSpatialIndex {
   rebuild(images: CanvasImageLike[]): void {
     const items: SpatialItem[] = [];
     for (const img of images) {
-      // processing frame 也加入索引，保证命中测试一致
-      items.push({
-        minX: img.x,
-        minY: img.y,
-        maxX: img.x + img.width,
-        maxY: img.y + img.height,
-        id: img.id,
-      });
+      const item = this.toSpatialItem(img);
+      if (item) items.push(item);
     }
     this.tree.clear();
     this.tree.load(items);
+    this.itemsById = new Map(items.map(item => [item.id, item]));
+    this.rebuilds += 1;
+  }
+
+  private toSpatialItem(img: CanvasImageLike): SpatialItem | null {
+    if (![img.x, img.y, img.width, img.height].every(Number.isFinite)) return null;
+    return {
+      minX: Math.min(img.x, img.x + img.width),
+      minY: Math.min(img.y, img.y + img.height),
+      maxX: Math.max(img.x, img.x + img.width),
+      maxY: Math.max(img.y, img.y + img.height),
+      id: img.id,
+    };
   }
 
   /** 命中测试：给定画布坐标，返回命中的图片 ID（最上层优先） */
@@ -122,35 +136,88 @@ export class CanvasSpatialIndex {
 
   /** 增量更新：移动/缩放单张图片（不重建整棵树） */
   updateItem(img: CanvasImageLike): void {
-    // RBush 不支持原地更新，先删后插
-    this.removeItem(img.id);
-    this.tree.insert({
-      minX: img.x,
-      minY: img.y,
-      maxX: img.x + img.width,
-      maxY: img.y + img.height,
-      id: img.id,
-    });
+    const previous = this.itemsById.get(img.id);
+    if (previous) this.tree.remove(previous, (a, b) => a.id === b.id);
+    const next = this.toSpatialItem(img);
+    if (next) {
+      this.tree.insert(next);
+      this.itemsById.set(img.id, next);
+    } else {
+      this.itemsById.delete(img.id);
+    }
+    this.incrementalUpdates += 1;
   }
 
   /** 删除单张图片 */
   removeItem(id: string): void {
-    // RBush remove 需要传入同一个对象引用或使用自定义 equals
-    // 遍历搜索结果找到对应 id 然后删除
-    const all = this.tree.all();
-    const target = all.find(item => item.id === id);
+    const target = this.itemsById.get(id);
     if (target) {
       this.tree.remove(target, (a, b) => a.id === b.id);
+      this.itemsById.delete(id);
+    }
+    this.incrementalUpdates += 1;
+  }
+
+  applyChanges(changes: readonly CanvasSpatialIndexChange[]): void {
+    for (const change of changes) {
+      if (change.type === 'remove') this.removeItem(change.id);
+      else this.updateItem(change.image);
     }
   }
 
   /** 获取索引中的总条目数 */
   get size(): number {
-    return this.tree.all().length;
+    return this.itemsById.size;
+  }
+
+  get rebuildCount(): number {
+    return this.rebuilds;
+  }
+
+  get incrementalUpdateCount(): number {
+    return this.incrementalUpdates;
   }
 
   /** 清空索引 */
   clear(): void {
     this.tree.clear();
+    this.itemsById.clear();
   }
+}
+
+export function buildCanvasSpatialIndexChanges(
+  previous: ReadonlyMap<string, CanvasImageLike>,
+  nextImages: readonly CanvasImageLike[],
+): CanvasSpatialIndexChange[] {
+  const changes: CanvasSpatialIndexChange[] = [];
+  const nextIds = new Set(nextImages.map(image => image.id));
+
+  for (const id of previous.keys()) {
+    if (!nextIds.has(id)) changes.push({ type: 'remove', id });
+  }
+  for (const image of nextImages) {
+    const prior = previous.get(image.id);
+    if (
+      !prior
+      || prior.x !== image.x
+      || prior.y !== image.y
+      || prior.width !== image.width
+      || prior.height !== image.height
+    ) {
+      changes.push({ type: 'upsert', image });
+    }
+  }
+  return changes;
+}
+
+export function snapshotCanvasSpatialImages(
+  images: readonly CanvasImageLike[],
+): Map<string, CanvasImageLike> {
+  return new Map(images.map(image => [image.id, {
+    id: image.id,
+    x: image.x,
+    y: image.y,
+    width: image.width,
+    height: image.height,
+  }]));
 }

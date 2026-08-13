@@ -68,9 +68,21 @@ import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
 import { translateApiError } from '@/lib/api-error-translator';
 import { getGroupGenerationFailureMessage } from '@/lib/group-generation-error';
 import { } from '@/config/app-meta';
-import { CanvasSpatialIndex } from '@/lib/canvas-spatial-index';
+import {
+  buildCanvasSpatialIndexChanges,
+  CanvasSpatialIndex,
+  snapshotCanvasSpatialImages,
+  type CanvasImageLike,
+} from '@/lib/canvas-spatial-index';
 import { UserManager } from '@/lib/user-manager';
 import { useCanvasViewport } from '@/components/canvas/use-canvas-viewport';
+import { CanvasMediaNode } from '@/components/canvas/CanvasMediaNode';
+import { CanvasSurface } from '@/components/canvas/CanvasSurface';
+import {
+  buildCanvasRenderProjection,
+  getMountedCanvasRenderItems,
+  type CanvasRenderPriority,
+} from '@/lib/canvas-kernel/render-policy';
 import { resolveActiveCanvasImage } from '@/lib/canvas-active-image';
 import {
   THREE_D_POLL_INTERVAL_MS,
@@ -765,13 +777,21 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // ★ Spatial Index: RBush R-tree for O(log n) hit testing and viewport culling
   const spatialIndexRef = useRef<CanvasSpatialIndex | null>(null);
+  const spatialIndexSnapshotRef = useRef<Map<string, CanvasImageLike>>(new Map());
+  const spatialIndexProjectKeyRef = useRef<string | null>(null);
+  const spatialIndexProjectKey = projectId || brandProject?.id || '__canvas_without_project__';
   const spatialIndex = useMemo(() => {
-    const index = new CanvasSpatialIndex();
-    index.rebuild(images);
+    const index = spatialIndexRef.current || new CanvasSpatialIndex();
+    if (spatialIndexProjectKeyRef.current !== spatialIndexProjectKey) {
+      index.rebuild(images);
+      spatialIndexProjectKeyRef.current = spatialIndexProjectKey;
+    } else {
+      index.applyChanges(buildCanvasSpatialIndexChanges(spatialIndexSnapshotRef.current, images));
+    }
+    spatialIndexSnapshotRef.current = snapshotCanvasSpatialImages(images);
     spatialIndexRef.current = index;
     return index;
-  }, [images]);
-  const imageById = useMemo(() => new Map(images.map((image, index) => [image.id, { image, index }])), [images]);
+  }, [images, spatialIndexProjectKey]);
   const canvasOccupiedRight = isPanelCollapsed ? 20 : 480;
   const cullingBounds = useMemo(() => resolveViewportCullingBounds(
     canvasSize.width,
@@ -782,34 +802,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   ), [canvasOccupiedRight, canvasSize, isPanning, isMiddlePanning, resolveViewportCullingBounds]);
   const viewportMarginFactor = getViewportMarginFactor(isPanning, isMiddlePanning);
   const canvasRenderOffset = resolveViewportRenderOffset(isPanning, isMiddlePanning);
-
-  const visibleImages = useMemo(() => {
-    if (canvasSize.width === 0 || canvasSize.height === 0) return images;
-    // Visible area in canvas coordinates
-    const { minX, minY, maxX, maxY } = cullingBounds;
-
-    // ★ Use spatial index for viewport culling when image count is large enough to benefit
-    if (images.length > 20) {
-      return spatialIndex
-        .viewportQuery(minX, minY, maxX, maxY, viewportMarginFactor)
-        .map((id) => imageById.get(id))
-        .filter((entry): entry is { image: CanvasImage; index: number } => entry !== undefined)
-        .sort((a, b) => a.index - b.index)
-        .map((entry) => entry.image);
-    }
-
-    // Fallback: linear scan for small image sets
-    const marginW = (maxX - minX) * viewportMarginFactor;
-    const marginH = (maxY - minY) * viewportMarginFactor;
-    return images.filter(img => {
-      if (img.isProcessingPlaceholder) return true;
-      const ix1 = img.x;
-      const iy1 = img.y;
-      const ix2 = img.x + img.width;
-      const iy2 = img.y + img.height;
-      return ix2 >= minX - marginW && ix1 <= maxX + marginW && iy2 >= minY - marginH && iy1 <= maxY + marginH;
-    });
-  }, [images, spatialIndex, imageById, cullingBounds, canvasSize, viewportMarginFactor]);
 
   const resetViewToContent = useCallback(() => {
     const viewport = canvasContainerRef.current?.getBoundingClientRect();
@@ -840,9 +832,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
   }, [applyViewState, images.length, initialViewState, projectId, resetViewToContent]);
 
-  // ★ Keep spatial index in sync with images
-  // Track total vs visible for debugging
-  useMemo(() => ({ total: images.length, visible: visibleImages.length }), [images.length, visibleImages.length]);
+  // Keep the stable index observable without rebuilding it for render-only image changes.
+  useMemo(() => ({ total: images.length, indexed: spatialIndex.size }), [images.length, spatialIndex]);
 
   // ★ 缩略图生成：为大图（>1024px）生成客户端缩略图，减少4K图片解码开销
   const thumbnailCacheRef = useRef<Map<string, string>>(new Map()); // imageUrl → thumbnailDataUrl
@@ -916,18 +907,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     return () => { cancelled = true; };
   }, [images]);
-
-  // 为 visibleImages 附加 thumbnailUrl
-  const visibleImagesWithThumbnails = useMemo(() => {
-    // thumbnailVersion 作为依赖确保缓存更新后重新计算
-    void thumbnailVersion;
-    return visibleImages.map(img => {
-      if (img.thumbnailUrl) return img;
-      const cached = thumbnailCacheRef.current.get(img.url);
-      if (cached) return { ...img, thumbnailUrl: cached };
-      return img;
-    });
-  }, [visibleImages, thumbnailVersion]);
 
   // ★ 清理已移除图片的缩略图缓存，避免内存泄漏
   useEffect(() => {
@@ -10236,6 +10215,68 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     return () => observer.disconnect();
   }, [selectedImageData?.id, displayedActions.length, toolbarExpanded]);
 
+  const previousNaturalRenderIdsRef = useRef<Set<string>>(new Set());
+  const activeRenderKeepAliveIds = useMemo(() => {
+    const ids = new Set<string>(selectedIds);
+    if (dragTarget) ids.add(dragTarget);
+    if (resizingImage) ids.add(resizingImage);
+    if (editImageId) ids.add(editImageId);
+    if (hoverToolbarImageId) ids.add(hoverToolbarImageId);
+    if (visionHoverImage?.id) ids.add(visionHoverImage.id);
+    if (compareImages.left?.id) ids.add(compareImages.left.id);
+    if (compareImages.right?.id) ids.add(compareImages.right.id);
+    if (annotationV2State.sourceLock?.imageId) ids.add(annotationV2State.sourceLock.imageId);
+    if (annotationV2State.gesture.kind !== 'idle') ids.add(annotationV2State.gesture.source.imageId);
+    for (const annotation of annotationV2State.annotations) ids.add(annotation.sourceImageId);
+    for (const annotation of annotations) {
+      if (annotation.targetImageId) ids.add(annotation.targetImageId);
+    }
+    return ids;
+  }, [
+    annotationV2State.annotations,
+    annotationV2State.gesture,
+    annotationV2State.sourceLock?.imageId,
+    annotations,
+    compareImages.left?.id,
+    compareImages.right?.id,
+    dragTarget,
+    editImageId,
+    hoverToolbarImageId,
+    resizingImage,
+    selectedIds,
+    visionHoverImage?.id,
+  ]);
+  const canvasRenderProjection = useMemo(() => {
+    const keepAliveIds = new Set([
+      ...activeRenderKeepAliveIds,
+      ...previousNaturalRenderIdsRef.current,
+    ]);
+    if (canvasSize.width === 0 || canvasSize.height === 0) {
+      for (const image of images) keepAliveIds.add(image.id);
+    }
+    const projection = buildCanvasRenderProjection(images, {
+      ...cullingBounds,
+      overscanFactor: viewportMarginFactor,
+    }, keepAliveIds);
+    previousNaturalRenderIdsRef.current = new Set(
+      projection
+        .filter(item => item.priority === 'visible' || item.priority === 'overscan')
+        .map(item => item.id),
+    );
+    return projection;
+  }, [activeRenderKeepAliveIds, canvasSize.height, canvasSize.width, cullingBounds, images, viewportMarginFactor]);
+  const renderItemsWithThumbnails = useMemo(() => {
+    void thumbnailVersion;
+    return getMountedCanvasRenderItems(canvasRenderProjection).map(item => {
+      const image = item.image;
+      if (image.thumbnailUrl) return item;
+      const cached = thumbnailCacheRef.current.get(image.url);
+      return cached
+        ? { ...item, image: { ...image, thumbnailUrl: cached } }
+        : item;
+    });
+  }, [canvasRenderProjection, thumbnailVersion]);
+
   // Keep the selected-image toolbar inside the actual canvas viewport.
   const getToolbarPosition = () => {
     const img = selectedImageData;
@@ -10657,7 +10698,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         )}
 
         {/* Canvas images */}
-        <div ref={canvasTransformRef} style={{ transform: `translate(${canvasRenderOffset.x}px, ${canvasRenderOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
+        <CanvasSurface ref={canvasTransformRef} offset={canvasRenderOffset} zoom={zoom}>
           {/* Image Groups */}
           {groups.map(group => {
             const groupImages = images.filter(img => img.groupId === group.id);
@@ -10776,7 +10817,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               </div>
             );
           })}
-          {visibleImagesWithThumbnails.map(image => {
+          {renderItemsWithThumbnails.map(({ image, priority }: { image: CanvasImage; priority: CanvasRenderPriority }) => {
             const isSelected = selectedIds.has(image.id);
             const isDragging = dragTarget && selectedIds.has(image.id);
             // Hide images belonging to collapsed groups
@@ -10791,6 +10832,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             // Apply genGroup drag offset to images belonging to the dragged gen group
             const draggedGenGroup = genGroupDragTarget ? genGroups.find(g => g.id === genGroupDragTarget) : null;
             const isInDraggedGenGroup = !!draggedGenGroup && (draggedGenGroup.refImages.some(r => r.imageId === image.id) || (draggedGenGroup.resultImageIds && draggedGenGroup.resultImageIds.includes(image.id)));
+            const useOriginalMedia = zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) || !image.thumbnailUrl;
+            const mediaSource = useOriginalMedia ? image.url : (image.thumbnailUrl || image.url);
+            const mediaSourceKind = useOriginalMedia ? 'original' : 'thumbnail';
             return (
               <div
                 key={image.id}
@@ -11008,13 +11052,15 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     </div>}
                   </div>
                 ) : image.url ? (
-                  <NextImage key={`${image.id}:${image.mediaAvailability || 'ready'}`} unoptimized width={1} height={1}                     src={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}
+                  <CanvasMediaNode key={`${image.id}:${image.mediaAvailability || 'ready'}`}
+                    imageId={image.id}
+                    source={mediaSource}
+                    sourceKind={mediaSourceKind}
                     alt={image.prompt ? image.prompt.replace(/^\[画布上下文[：:][^\]]*\]\s*/, '').substring(0, 60) : 'canvas image'}
+                    width={image.width}
+                    height={image.height}
+                    priority={priority}
                     className="w-full h-full object-cover pointer-events-none overflow-hidden"
-                    draggable={false}
-                    loading="lazy"
-                    decoding="async"
-                    data-canvas-media-source={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) || !image.thumbnailUrl ? 'original' : 'thumbnail'}
                     style={{ contain: 'paint', imageRendering: zoom > 1 ? 'auto' : undefined }}
                     onError={(e) => {
                       const img = e.currentTarget;
@@ -12430,7 +12476,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               </div>
             );
           })}
-        </div>
+        </CanvasSurface>
 
 
         {/* HexCube 六面体浮动面板 - 移到 canvas transform group 外部 */}

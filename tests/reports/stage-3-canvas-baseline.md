@@ -1,6 +1,6 @@
 # Stage 3 Canvas Functional And Performance Baseline
 
-Status: controlled Chromium baseline and Task 2 viewport rerun executed; current Canvas does not yet pass all Stage 3 thresholds because the one-node persisted drag P1 remains open.
+Status: controlled Chromium baseline plus Task 2 viewport and Task 3 render-projection reruns executed; current Canvas does not yet pass all Stage 3 thresholds because the one-node persisted drag P1 remains open.
 
 ## Scope
 
@@ -32,6 +32,8 @@ Credential-bearing environment output must remain outside the repository. Cleanu
 | `143bbc579b2fcb8293022e54df2b5e53ce07461e` | Chromium | 1280x720 | 300 | 57.76 | 24.90ms | 95ms | 0ms | 0 | 1583.20ms | **FAIL**: hit-test continuity threshold is 0ms |
 | Task 2 implementation commit | Chromium | 1280x720 | 100 | 58.78 | 16.60ms | 87ms | 0ms | 0 | 0ms | **PASS** |
 | Task 2 implementation commit | Chromium | 1280x720 | 300 | 57.27 | 17.10ms | 87ms | 0ms | 0 | 0ms | **PASS** |
+| Task 3 candidate | Chromium | 1280x720 | 100 | 58.30 | 17.10ms | 105ms | 0ms | 0 | 0ms | **PASS** |
+| Task 3 candidate | Chromium | 1280x720 | 300 | 56.50 | 17.10ms | 122ms | 0ms | 0 | 0ms | **PASS** |
 
 Execution environment: Windows, Playwright 1.60.0, local PostgreSQL 18 isolated cluster, local production Next.js server, `WUJIE_CANVAS_KERNEL_MODE=legacy`, `WUJIE_ASSET_GRAPH_MODE=legacy`, `WUJIE_TASK_CORE_MODE=legacy`.
 
@@ -68,6 +70,16 @@ The first environment attempt returned HTTP 503 because a brand-new database req
 - Full Vitest exited 0. Seven PostgreSQL suites were explicitly blocked because `POSTGRES_TEST_DATABASE_URL` was absent and are not counted as verified.
 - TypeScript passed; full-repository error-only ESLint exited 0; production build generated 116/116 pages; `git diff --check` passed.
 - S3-BL-001 remains open. Task 2 does not claim to repair image drag command persistence, which belongs to the ordered gesture/command work.
+
+## Task 3 Render Projection Evidence
+
+- Replaced per-image-change R-tree rebuilds with project-hydration rebuilds plus incremental upsert/remove changes. Geometry-only changes no longer rebuild the complete index.
+- Added explicit `critical`, `visible`, `overscan` and `deferred` priorities. Selected, dragged, resized, processing, annotation and active-tool source nodes remain mounted outside the viewport; naturally visible nodes receive a one-render continuity grace period.
+- Added a stable Canvas transform surface and media node. New image sources are decoded before replacing the last usable pixels, dimensions remain stable, missing media keeps the existing recovery state, and priority controls eager/lazy loading and fetch priority.
+- RED evidence covered missing render policy/media components and absent `applyChanges`; an additional RED reproduced relative URL versus absolute browser `currentSrc` mismatch. Final focused regression: 5 files, 32 tests passed.
+- Chromium pressure rerun passed: 100 nodes at `58.30 FPS`, input P95 `17.10ms`, zero disappeared frames and zero unclickable time; 300 nodes at `56.50 FPS`, input P95 `17.10ms`, zero disappeared frames and zero unclickable time.
+- The plan's literal grep (`100 nodes|300 nodes|continuity`) matched no current test title; the equivalent existing titles (`100-node|300-node|preserves drag`) were executed. The one-node flow still failed only at the previously registered persisted-coordinate assertion (`80/80`).
+- Fresh repository gates: TypeScript passed; full ESLint returned `0 errors / 959 historical warnings`; full Vitest returned `918/918` suites, `2268` passed, `0` failed and `44` environment-pending; production build generated `116/116` pages; protected features remained `38/38` with 0 warnings.
 
 ## Not Yet Verified
 
