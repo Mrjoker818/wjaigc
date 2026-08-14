@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - stable
       - "codex/**"
   pull_request:
   workflow_dispatch:
@@ -25,7 +26,21 @@ permissions:
   contents: read
 
 jobs:
+  stable-integrity:
+    if: github.ref == 'refs/heads/stable'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject changes to the immutable stable baseline
+        shell: bash
+        run: |
+          expected="52f7c601ed150769e15d06fb435c6e360e28c9e7"
+          if [[ "${{ github.sha }}" != "$expected" ]]; then
+            echo "::error title=Stable integrity violation::stable must remain at $expected; observed ${{ github.sha }}"
+            exit 1
+          fi
+
   protected-baseline:
+    if: github.ref != 'refs/heads/stable'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -61,16 +76,24 @@ jobs:
       - name: Check protected baseline
         shell: bash
         run: |
-          mapfile -t paths < <(jq -r '.paths[], .infrastructurePaths[]' docs/testing/baselines/stage-1-source-allowlist.json)
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            protected_base="${{ github.event.pull_request.base.sha }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            protected_base="${{ github.event.before }}"
+            if [[ -z "$protected_base" || "$protected_base" =~ ^0+$ ]]; then
+              protected_base="$(git merge-base HEAD origin/main)"
+            fi
+          else
+            protected_base="$(git rev-parse HEAD^)"
+          fi
+          git cat-file -e "$protected_base^{commit}"
+          git show "$protected_base:docs/testing/baselines/stage-1-source-allowlist.json" > /tmp/trusted-stage-source-allowlist.json
+          mapfile -t paths < <(jq -r '.paths[], .infrastructurePaths[]' /tmp/trusted-stage-source-allowlist.json)
           args=()
           for path in "${paths[@]}"; do
             args+=(--allow-path "$path")
           done
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            pnpm check:protected-baseline -- --base "${{ github.event.pull_request.base.sha }}" --candidate HEAD "${args[@]}"
-          else
-            pnpm check:protected-baseline -- --base origin/main --candidate HEAD "${args[@]}"
-          fi
+          pnpm check:protected-baseline -- --base "$protected_base" --candidate HEAD "${args[@]}"
 
       - name: Upload Stage 0 inventory contracts
         if: always()
@@ -90,6 +113,7 @@ jobs:
           echo "payment callbacks, cloud storage, or authenticated cloud E2E passed."
 
   stage-1-local-gates:
+    if: github.ref != 'refs/heads/stable'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -118,12 +142,24 @@ jobs:
       - name: Check reviewed Stage 1 source drift
         shell: bash
         run: |
-          mapfile -t paths < <(jq -r '.paths[], .infrastructurePaths[]' docs/testing/baselines/stage-1-source-allowlist.json)
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            protected_base="${{ github.event.pull_request.base.sha }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            protected_base="${{ github.event.before }}"
+            if [[ -z "$protected_base" || "$protected_base" =~ ^0+$ ]]; then
+              protected_base="$(git merge-base HEAD origin/main)"
+            fi
+          else
+            protected_base="$(git rev-parse HEAD^)"
+          fi
+          git cat-file -e "$protected_base^{commit}"
+          git show "$protected_base:docs/testing/baselines/stage-1-source-allowlist.json" > /tmp/trusted-stage-source-allowlist.json
+          mapfile -t paths < <(jq -r '.paths[], .infrastructurePaths[]' /tmp/trusted-stage-source-allowlist.json)
           args=()
           for path in "${paths[@]}"; do
             args+=(--allow-path "$path")
           done
-          pnpm check:protected-baseline -- --base origin/main --candidate HEAD "${args[@]}"
+          pnpm check:protected-baseline -- --base "$protected_base" --candidate HEAD "${args[@]}"
 
       - name: TypeScript
         run: pnpm ts-check
