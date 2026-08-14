@@ -83,3 +83,10 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 ## Current Verdict
 
 **CONDITIONAL / STAGE 3 NOT COMPLETE.** Local functional, performance and three-mode browser gates pass. Cloud exact-SHA, real-provider P0, billing/refund evidence and the controlled `canvas-v2 -> legacy` rollback are mandatory remaining gates.
+
+## CI Gate Follow-Up
+
+- GitHub's Stage 3 browser job did not invalidate the local Canvas measurements; it failed before browser launch because a clean database was seeded before the production core schema existed.
+- The candidate now starts the canonical production schema before seeding. A brand-new isolated database passed two real Chromium representative scenarios after creating 15 controlled projects.
+- Production dependency audit is zero after compatible updates and a narrowly tested unused-edge removal. These infrastructure repairs do not constitute new Canvas performance evidence.
+- Stage 3 remains conditional until immutable GitHub Actions and Coze exact-SHA `shadow -> canvas-v2 -> legacy` evidence complete.

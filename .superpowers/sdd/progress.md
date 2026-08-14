@@ -323,3 +323,11 @@ Protected stable branch: read-only and untouched
 - The first exact-build run retained an environment-only login 503 caused by a short test secret. The next run exposed S3-TEST-003: waiting for video before context closure deadlocked fixture teardown. Contract RED was `1/10`; GREEN is `10/10`; the focused Stage 3 set is `100/100`.
 - Clean `main@afa65eb` production evidence passes Chromium/WebKit representatives `4/4` in 35.1 seconds. Each result has screenshot, video, trace, Console and Network artifacts under the exact SHA evidence path.
 - Next unique scope is GitHub Actions plus Coze exact-SHA `shadow -> canvas-v2 -> legacy`, including real provider and billing evidence. Stage 3 is not complete and Stage 4/5 remain prohibited.
+
+### Task 10 CI Gate Repair Candidate
+
+- GitHub Actions for `afa65eb` exposed two independent release-infrastructure defects: the Stage 3 job seeded `wujie_users` before the production app created core tables, and the production dependency audit reported `6 moderate / 15 high` advisories.
+- S3-TEST-004 is closed locally by ordering the production build/start before controlled fixture seeding. A brand-new isolated PostgreSQL database then created the core schema, seeded one controlled user and 15 projects, and passed the retained Chromium merge-window and move/resize scenarios `2/2`.
+- Production dependencies were updated within compatible ranges. A precise pnpm package hook removes only `pptxgenjs@4.0.1`'s unused `image-size` edge; a regression creates a real PPTX ZIP so the pruning cannot silently break exports. Production audit is now `0 low / 0 moderate / 0 high / 0 critical`.
+- Sharp 0.35 changed exported TypeScript namespaces; two type-only imports were adjusted without changing image processing behavior. Fresh gates pass: TypeScript, error-only ESLint, API `110 files / 480 tests`, full Vitest exit 0, production build `116/116`, dependency contracts, YAML and whitespace.
+- This is still a local candidate until the two-step trusted-parent allowlist push and GitHub Actions rerun complete. The real-P0 workflow also remains externally blocked by missing repository secrets; it must not be bypassed or mocked. Coze `shadow -> canvas-v2 -> legacy` and real provider/billing evidence remain required; Stage 4/5 stay prohibited.

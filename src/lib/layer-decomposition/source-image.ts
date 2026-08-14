@@ -2,7 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import JSZip, { type JSZipObject } from 'jszip';
-import sharp from 'sharp';
+import sharp, { type Metadata } from 'sharp';
 
 import {
   downloadPublicImage,
@@ -341,7 +341,7 @@ async function validateRaster(
   buffer: Buffer,
   declaredMimeType?: string,
 ): Promise<ResolvedLayerSourceImage> {
-  let metadata: sharp.Metadata;
+  let metadata: Metadata;
   try {
     metadata = await sharp(buffer, {
       failOn: 'error',

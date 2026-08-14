@@ -171,12 +171,6 @@ jobs:
           await client.query('INSERT INTO wujie_stage3_e2e_guard(guard_token) VALUES ($1) ON CONFLICT DO NOTHING', [process.env.E2E_STAGE3_DATABASE_GUARD]);
           await client.end();
           NODE
-      - name: Seed controlled Canvas fixtures
-        shell: bash
-        run: |
-          pnpm seed:e2e:stage-3
-          echo "E2E_TEST_USERNAME=$(jq -r .E2E_TEST_USERNAME "$E2E_STAGE3_ENV_OUTPUT")" >> "$GITHUB_ENV"
-          echo "E2E_STAGE3_PROJECT_IDS=$(jq -r .E2E_STAGE3_PROJECT_IDS "$E2E_STAGE3_ENV_OUTPUT")" >> "$GITHUB_ENV"
       - name: Build production application
         run: pnpm build
       - name: Start production application
@@ -192,6 +186,12 @@ jobs:
           done
           cat /tmp/wujie-stage3-server.log
           exit 1
+      - name: Seed controlled Canvas fixtures
+        shell: bash
+        run: |
+          pnpm seed:e2e:stage-3
+          echo "E2E_TEST_USERNAME=$(jq -r .E2E_TEST_USERNAME "$E2E_STAGE3_ENV_OUTPUT")" >> "$GITHUB_ENV"
+          echo "E2E_STAGE3_PROJECT_IDS=$(jq -r .E2E_STAGE3_PROJECT_IDS "$E2E_STAGE3_ENV_OUTPUT")" >> "$GITHUB_ENV"
       - name: Run five-browser Canvas matrix
         run: pnpm test:e2e:stage-3
       - name: Upload Stage 3 browser evidence

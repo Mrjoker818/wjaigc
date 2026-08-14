@@ -825,3 +825,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - S3-TEST-003 was found after publication: the evidence fixture waited for video before context closure and deadlocked teardown. Contract RED was `1/10`; GREEN is `10/10`, and the focused regression is `100/100`.
 - A production build from the exact commit passes Chromium/WebKit merge-window deletion and move/resize/undo/redo/immediate reload `4/4`. Every test has screenshot, video, trace, Console and Network evidence; Console errors/page errors and non-benign network failures are zero.
 - **Release verdict remains CONDITIONAL / STAGE 3 NOT COMPLETE.** Local and main evidence is closed; GitHub Actions, Coze exact-SHA `shadow -> canvas-v2 -> legacy`, real provider generation and real charge/refund evidence remain required.
+
+## 2026-08-14 Stage 3 CI repair readiness decision
+
+- The current GitHub candidate is not yet releasable: the prior run proved PostgreSQL concurrency but exposed clean-schema seed order and production dependency-audit blockers. The real-P0 browser workflow also lacks its required repository secrets.
+- The local repair candidate closes the first two blockers without changing Canvas, provider or billing behavior. A clean isolated PostgreSQL bootstrap plus Chromium `2/2` passes, and the production audit changes from `6 moderate / 15 high` to zero vulnerabilities.
+- Fresh static/API/full-test/build evidence exits 0. The Sharp changes are type-only compatibility imports required by the patched dependency and are covered by layer/upscale regression.
+- **Release verdict remains CONDITIONAL / STAGE 3 NOT COMPLETE.** Publication requires the trusted-parent governance sequence and a green immutable CI rerun. Paid P0 must remain blocked until real secrets are configured; Coze `shadow -> canvas-v2 -> legacy` and real charge/refund evidence are still mandatory.

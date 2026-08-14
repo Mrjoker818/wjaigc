@@ -1543,3 +1543,33 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Stop tracing, close the browser context, then read and copy the finalized video. A context-close failure records an artifact error and does not wait indefinitely. |
 | Regression | Contract RED was `1 failed / 9 passed`; GREEN is `10/10`. Dirty-worktree browser proof passed `4/4`; immutable `main@afa65eb103bd8fa08d669d4680d068d2c565d341` Chromium/WebKit proof passed `4/4` in 35.1 seconds with screenshot, video, trace, Console and Network files for every test. |
 | Status | **CLOSED LOCALLY AND ON MAIN 2026-08-14 / GITHUB ACTIONS EXECUTION PENDING.** |
+
+### S3-TEST-004: Stage 3 CI seeded application fixtures before core schema initialization
+
+| Field | Detail |
+|---|---|
+| Severity | P1 release-infrastructure integrity |
+| Module | GitHub Actions Stage 3 Canvas matrix / clean PostgreSQL bootstrap |
+| Environment | GitHub Actions for `main@afa65eb103bd8fa08d669d4680d068d2c565d341`, 2026-08-14 |
+| Reproduction | Run the Stage 3 job against its newly created PostgreSQL database. Migrations create asset-graph tables, then `pnpm seed:e2e:stage-3` attempts to write `wujie_users`. |
+| Expected | The canonical application core schema exists before controlled users, settings and projects are seeded. |
+| Actual | Seeding failed with `relation "wujie_users" does not exist`; no browser matrix ran. |
+| Root cause | The workflow treated asset migrations as the complete application bootstrap. Core tables are canonically initialized by production startup through `ensureCoreTables()`. |
+| Fix | Build and start the production application first, wait for the public readiness route, then seed controlled Stage 3 fixtures. |
+| Regression | The workflow contract first failed on the old seed/start order and now passes `11/11`. A brand-new isolated database created core tables, seeded one user plus 15 projects, and passed two real Chromium scenarios. |
+| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN PENDING.** |
+
+### S3-SEC-001: Production dependency gate contained 21 moderate/high advisories
+
+| Field | Detail |
+|---|---|
+| Severity | P1 release-security gate |
+| Module | Production dependency graph |
+| Environment | `pnpm audit --prod`, `main@afa65eb103bd8fa08d669d4680d068d2c565d341`, 2026-08-14 |
+| Reproduction | Install with the committed lockfile and run the production audit. |
+| Expected | No low, moderate, high or critical production advisory is accepted silently. |
+| Actual | Audit reported `6 moderate / 15 high`, including old Next, Sharp, SVGO, PostCSS, NanoID and brace-expansion versions plus `pptxgenjs -> image-size`. |
+| Root cause | Patch releases and transitive overrides lagged current advisories. `pptxgenjs@4.0.1` also publishes an unused dependency on unpatched `image-size`. |
+| Fix | Update compatible direct/transitive versions and use a precise pnpm hook that removes only the unused `pptxgenjs@4.0.1 -> image-size` edge. No global package suppression is used. |
+| Regression | Dependency contract validates exact versions and hook scope, then creates a real PPTX buffer. Frozen install, TypeScript, build and full tests pass; production audit reports zero vulnerabilities. |
+| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN PENDING.** |

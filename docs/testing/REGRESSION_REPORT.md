@@ -999,3 +999,12 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Immutable evidence is under `test-results/stage-3-baseline/evidence/afa65eb103bd8fa08d669d4680d068d2c565d341/legacy/task10-e61bded-20260814/afa65eb-immutable-representative/`. Every test contains `final.png`, `video.webm`, `trace.zip`, `console.json` and `network.json`; geometry tests also contain both metrics JSON files.
 - There are zero Console errors/page errors and zero non-benign network failures. Each test records one existing data-isolation cleanup warning; network files contain only permitted page-close aborts for `/api/task-events` and, in one Chromium case, `/api/activity`. These observations are retained instead of being reported as empty logs.
 - **Local immutable-main verdict: PASS. Stage 3 verdict: NOT COMPLETE.** GitHub Actions, Coze exact-SHA `shadow`, isolated `canvas-v2`, real provider/billing checks and mandatory return to `legacy` remain unverified.
+
+## 2026-08-14 Stage 3 CI gate repair regression
+
+- The first GitHub run for `afa65eb` supplied useful RED evidence: PostgreSQL concurrency passed, while the Stage 3 browser job stopped at `wujie_users` before browser startup and the static job stopped on `6 moderate / 15 high` production advisories. The real-P0 browser job separately reported missing required secrets and remains an external blocker.
+- S3-TEST-004 locks the workflow order as build -> start canonical production schema -> seed. A new isolated PostgreSQL database then seeded one user and 15 mode/profile projects and passed the two representative Chromium cases `2/2`.
+- The production dependency contract passes `4/4` and verifies both patched versions and the narrow `pptxgenjs@4.0.1` hook. A generated presentation has a valid ZIP signature and non-empty payload. `pnpm audit --prod` now returns zero at every severity.
+- Sharp 0.35 required type-only `Metadata` and `OverlayOptions` imports. Focused layer/upscale regression passes `18/18`; the production build remains `116/116` routes.
+- Fresh candidate gates: TypeScript exit 0; ESLint exit 0; API `110/110` files and `480/480` tests; full Vitest exit 0; frozen install, YAML and whitespace checks pass.
+- **Verdict: PASS LOCALLY FOR THE CI REPAIR CANDIDATE / STAGE 3 NOT COMPLETE.** A trusted-parent allowlist bootstrap, immutable GitHub Actions rerun, repository secret configuration and Coze three-mode/provider/billing evidence remain required.

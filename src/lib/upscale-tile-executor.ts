@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp, { type OverlayOptions } from 'sharp';
 import { buildOverlapTiles, calculateFeatherWeight, type UpscaleTile } from '@/lib/upscale-tiling';
 
 export interface UpscaleTileProcessInput {
@@ -110,7 +110,7 @@ export async function executeOverlapTileUpscale(
   await Promise.all(Array.from({ length: Math.min(concurrency, tiles.length) }, () => worker()));
   await throwIfCancelled(options.isCancelled);
 
-  const composites: sharp.OverlayOptions[] = [];
+  const composites: OverlayOptions[] = [];
   for (const item of processed) {
     const overlapX = Math.max(1, Math.round(overlap * scaleX));
     const overlapY = Math.max(1, Math.round(overlap * scaleY));

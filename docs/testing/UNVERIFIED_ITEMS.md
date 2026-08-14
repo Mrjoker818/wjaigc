@@ -682,3 +682,10 @@
 - Coze has not proved the exact SHA in `shadow`, isolated `canvas-v2`, or the mandatory final `legacy` rollback.
 - Real provider generation, one-charge/one-refund settlement and cloud PostgreSQL terminal-state evidence remain unverified; the isolated local fixture has no provider configuration.
 - Every immutable representative emitted one `[DataIsolation] loadData` cleanup warning for historical cross-user project rows. Guards removed the rows and isolation assertions passed, but the origin of those historical rows remains a separate P2 audit item.
+
+### 2026-08-14 CI repair remaining scope
+
+- Clean-schema seeding and production dependency audit are fixed and verified only in the local candidate. They remain `UNVERIFIED ON IMMUTABLE CI` until the trusted-parent push and GitHub Actions rerun finish.
+- The `real-p0-browser` workflow is `BLOCKED BY MISSING GITHUB SECRETS`; paid generation, Pear layering and billing/refund must not be mocked or skipped to obtain a green badge.
+- Coze still must identify the exact candidate SHA, pass `shadow`, pass isolated `canvas-v2`, and prove the mandatory final `legacy` rollback.
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only; Stage 4/5 remain prohibited while these items are open.

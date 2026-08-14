@@ -20,12 +20,17 @@ describe('Stage 3 release gate contract', () => {
       'src/components/canvas/use-canvas-viewport.ts',
       'src/lib/canvas-kernel/commands.ts',
       'src/lib/canvas-kernel/viewport.ts',
+      'src/lib/layer-decomposition/source-image.ts',
+      'src/lib/upscale-tile-executor.ts',
       'src/lib/user-data-record-client.ts',
     ]));
     expect(allowlist.paths).not.toContain('src/');
     expect(allowlist.paths?.every(path => path.startsWith('src/') && !path.endsWith('/'))).toBe(true);
     expect(allowlist.infrastructurePaths).toEqual(expect.arrayContaining([
+      '.pnpmfile.cjs',
       '.github/workflows/quality.yml',
+      'package.json',
+      'pnpm-lock.yaml',
       'scripts/stage-3-e2e-fixtures.mjs',
       'tests/helpers/stage-3-source-state.ts',
     ]));
@@ -41,6 +46,20 @@ describe('Stage 3 release gate contract', () => {
     expect(workflow).toContain('canvas-mode: [legacy, shadow, canvas-v2]');
     expect(workflow).toContain('WUJIE_CANVAS_KERNEL_MODE: ${{ matrix.canvas-mode }}');
     expect(workflow).toContain('E2E_STAGE3_EXPECTED_CANVAS_MODE: ${{ matrix.canvas-mode }}');
+  });
+
+  it('boots the production schema before seeding Stage 3 fixtures', () => {
+    const stage3Job = workflow.slice(
+      workflow.indexOf('  stage-3-canvas-kernel:'),
+      workflow.indexOf('  real-p0-browser:'),
+    );
+    const build = stage3Job.indexOf('- name: Build production application');
+    const start = stage3Job.indexOf('- name: Start production application');
+    const seed = stage3Job.indexOf('- name: Seed controlled Canvas fixtures');
+
+    expect(build).toBeGreaterThan(-1);
+    expect(start).toBeGreaterThan(build);
+    expect(seed).toBeGreaterThan(start);
   });
 
   it('waits for a public route instead of treating the protected auth probe as startup health', () => {
