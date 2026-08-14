@@ -1553,10 +1553,25 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Environment | GitHub Actions for `main@afa65eb103bd8fa08d669d4680d068d2c565d341`, 2026-08-14 |
 | Reproduction | Run the Stage 3 job against its newly created PostgreSQL database. Migrations create asset-graph tables, then `pnpm seed:e2e:stage-3` attempts to write `wujie_users`. |
 | Expected | The canonical application core schema exists before controlled users, settings and projects are seeded. |
-| Actual | Seeding failed with `relation "wujie_users" does not exist`; no browser matrix ran. |
-| Root cause | The workflow treated asset migrations as the complete application bootstrap. Core tables are canonically initialized by production startup through `ensureCoreTables()`. |
-| Fix | Build and start the production application first, wait for the public readiness route, then seed controlled Stage 3 fixtures. |
-| Regression | The workflow contract first failed on the old seed/start order and now passes `11/11`. A brand-new isolated database created core tables, seeded one user plus 15 projects, and passed two real Chromium scenarios. |
+| Actual | The first run failed with `relation "wujie_users" does not exist`. After ordering startup before seed, immutable `0ac9068` legacy CI reached the table but failed with `column "product_type" ... does not exist`. |
+| Root cause | The workflow treated asset migrations as the complete application bootstrap, then treated HTTP readiness as schema readiness. Production intentionally starts `ensureCoreTables()` in the background, so the base table can appear before its additive columns. |
+| Fix | Build and start the production application, then make the guarded fixture seeder poll `information_schema` for every column it actually uses. The wait is condition-based, bounded to 60 seconds and reports exact missing columns. |
+| Regression | RED was `3 failed / 14 passed`; GREEN is `17/17`, with the combined release contracts at `29/29`. A real PostgreSQL probe withheld `product_type` for 500ms; the seeder waited 566ms and continued only after the column existed. |
+| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN PENDING.** |
+
+### S3-TEST-005: Stage 3 CI authentication secret was shorter than the production minimum
+
+| Field | Detail |
+|---|---|
+| Severity | P1 release-infrastructure integrity |
+| Module | Stage 3 five-browser authentication bootstrap |
+| Environment | GitHub Actions `0ac9068`, shadow and canvas-v2 jobs, 2026-08-14 |
+| Reproduction | Render `stage3-ci-auth-${{ github.run_id }}-${{ github.run_attempt }}` for run `31791301981`; the result is 28 characters. Start production auth and submit the controlled user login. |
+| Expected | CI supplies the same minimum 32-character authentication secret required by production. |
+| Actual | Every browser case failed before Canvas assertions with `Stage 3 login returned HTTP 503`; shadow and canvas-v2 each reported 60 login failures. |
+| Root cause | The workflow-generated `WUJIE_AUTH_SECRET` did not satisfy `server-auth.ts`'s production minimum, so the seeded password hash and runtime auth configuration could not establish a session. |
+| Fix | Use a CI-only static prefix that remains at least 32 characters even when `run_id` and `run_attempt` are one digit. |
+| Regression | The source contract first passed incorrectly by reading the top-level secret, was corrected to isolate the Stage 3 job, then retained RED `expected 18 >= 32`; GREEN is included in the combined `29/29` fixture/release set. |
 | Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN PENDING.** |
 
 ### S3-SEC-001: Production dependency gate contained 21 moderate/high advisories
@@ -1572,4 +1587,4 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Root cause | Patch releases and transitive overrides lagged current advisories. `pptxgenjs@4.0.1` also publishes an unused dependency on unpatched `image-size`. |
 | Fix | Update compatible direct/transitive versions and use a precise pnpm hook that removes only the unused `pptxgenjs@4.0.1 -> image-size` edge. No global package suppression is used. |
 | Regression | Dependency contract validates exact versions and hook scope, then creates a real PPTX buffer. Frozen install, TypeScript, build and full tests pass; production audit reports zero vulnerabilities. |
-| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN PENDING.** |
+| Status | **CLOSED ON MAIN 2026-08-14.** GitHub `static-and-tests` for `0ac9068` passed install, Doctor, TypeScript, ESLint, unit/integration, API, production dependency audit and production build. |

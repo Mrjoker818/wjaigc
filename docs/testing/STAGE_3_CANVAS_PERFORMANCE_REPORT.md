@@ -90,3 +90,9 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 - The candidate now starts the canonical production schema before seeding. A brand-new isolated database passed two real Chromium representative scenarios after creating 15 controlled projects.
 - Production dependency audit is zero after compatible updates and a narrowly tested unused-edge removal. These infrastructure repairs do not constitute new Canvas performance evidence.
 - Stage 3 remains conditional until immutable GitHub Actions and Coze exact-SHA `shadow -> canvas-v2 -> legacy` evidence complete.
+
+### Immutable CI follow-up
+
+- `0ac9068` did not produce valid Canvas performance samples: legacy stopped at an additive-column seed race, while shadow and canvas-v2 stopped at login HTTP 503 caused by a short CI secret.
+- The failures occurred before Canvas assertions, so they neither pass nor invalidate the retained local measurements.
+- Condition-based schema readiness and a production-valid CI auth secret now have permanent tests; a new immutable run is required before this report can add GitHub performance evidence.

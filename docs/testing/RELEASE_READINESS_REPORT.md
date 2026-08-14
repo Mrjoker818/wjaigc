@@ -832,3 +832,9 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The local repair candidate closes the first two blockers without changing Canvas, provider or billing behavior. A clean isolated PostgreSQL bootstrap plus Chromium `2/2` passes, and the production audit changes from `6 moderate / 15 high` to zero vulnerabilities.
 - Fresh static/API/full-test/build evidence exits 0. The Sharp changes are type-only compatibility imports required by the patched dependency and are covered by layer/upscale regression.
 - **Release verdict remains CONDITIONAL / STAGE 3 NOT COMPLETE.** Publication requires the trusted-parent governance sequence and a green immutable CI rerun. Paid P0 must remain blocked until real secrets are configured; Coze `shadow -> canvas-v2 -> legacy` and real charge/refund evidence are still mandatory.
+
+### Immutable CI follow-up
+
+- `0ac9068` proves the dependency, static, API, full-test, production-build and PostgreSQL-concurrency gates on GitHub. The overall workflow remains red for evidence-infrastructure reasons, not a passing release.
+- The next repair waits for additive core columns and supplies a production-valid CI auth secret. Both have retained RED/GREEN and do not change Canvas, provider, billing or application auth policy.
+- **Verdict remains CONDITIONAL / STAGE 3 NOT COMPLETE.** A new immutable CI run must execute all three Canvas matrices; the separately missing real-P0 Secrets and all Coze gates remain blocking.

@@ -689,3 +689,10 @@
 - The `real-p0-browser` workflow is `BLOCKED BY MISSING GITHUB SECRETS`; paid generation, Pear layering and billing/refund must not be mocked or skipped to obtain a green badge.
 - Coze still must identify the exact candidate SHA, pass `shadow`, pass isolated `canvas-v2`, and prove the mandatory final `legacy` rollback.
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only; Stage 4/5 remain prohibited while these items are open.
+
+#### Immutable `0ac9068` result
+
+- `VERIFIED`: protected baseline, Stage 1 local gates, PostgreSQL concurrency, Doctor, TypeScript, ESLint, unit/integration, API, production dependency audit and production build.
+- `NOT EXECUTED`: all Canvas assertions in legacy because guarded seed raced `product_type`; all Canvas assertions in shadow/canvas-v2 because login returned 503 before project entry.
+- `LOCALLY REPAIRED / CI RERUN REQUIRED`: condition-based core-column readiness and minimum 32-character Stage 3 auth secret.
+- `EXTERNALLY BLOCKED`: real P0 browser configuration still lacks required GitHub Secrets. It must remain red rather than be skipped or mocked.

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import * as stage3Fixtures from '../../../scripts/stage-3-e2e-fixtures.mjs';
 import {
   assertStage3DatabaseGuard,
   assertStage3OutputOutsideRepository,
@@ -125,6 +126,53 @@ describe('Stage 3 performance evidence contract', () => {
 });
 
 describe('Stage 3 E2E fixture isolation', () => {
+  it('waits for every seed-required core column instead of racing asynchronous startup migrations', async () => {
+    const waitForStage3CoreSchema = (stage3Fixtures as unknown as {
+      waitForStage3CoreSchema?: (
+        query: (sql: string) => Promise<{ rows: Array<{ table_name: string; column_name: string }> }>,
+        options: { timeoutMs: number; now: () => number; delay: (ms: number) => Promise<void> },
+      ) => Promise<void>;
+    }).waitForStage3CoreSchema;
+    expect(waitForStage3CoreSchema).toBeTypeOf('function');
+
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{ table_name: 'wujie_users', column_name: 'product_type' }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const delay = vi.fn().mockResolvedValue(undefined);
+    let now = 0;
+
+    await waitForStage3CoreSchema!(query, {
+      timeoutMs: 1_000,
+      now: () => (now += 25),
+      delay,
+    });
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(delay).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0]?.[0]).toContain("('wujie_users', 'product_type')");
+  });
+
+  it('fails closed with the missing core columns after the bounded readiness window', async () => {
+    const waitForStage3CoreSchema = (stage3Fixtures as unknown as {
+      waitForStage3CoreSchema?: (
+        query: (sql: string) => Promise<{ rows: Array<{ table_name: string; column_name: string }> }>,
+        options: { timeoutMs: number; now: () => number; delay: (ms: number) => Promise<void> },
+      ) => Promise<void>;
+    }).waitForStage3CoreSchema;
+    expect(waitForStage3CoreSchema).toBeTypeOf('function');
+
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ table_name: 'wujie_users', column_name: 'product_type' }],
+    });
+    let now = 0;
+
+    await expect(waitForStage3CoreSchema!(query, {
+      timeoutMs: 50,
+      now: () => (now += 50),
+      delay: vi.fn().mockResolvedValue(undefined),
+    })).rejects.toThrow('wujie_users.product_type');
+  });
+
   it('creates isolated 1, 100 and 300 node projects for every browser profile', () => {
     const plan = buildStage3FixturePlan('run-20260813');
 
@@ -198,6 +246,14 @@ describe('Stage 3 E2E fixture isolation', () => {
     expect(source).toContain('`./test-results/stage-3-baseline/${stage3EvidenceScope}/playwright-output`');
     expect(source).toContain('`test-results/stage-3-baseline/${stage3EvidenceScope}/playwright-report`');
     expect(source).toContain('`test-results/stage-3-baseline/${stage3EvidenceScope}/junit.xml`');
+  });
+
+  it('waits for the core schema before beginning fixture mutation', () => {
+    const wait = stage3FixtureSource.indexOf('await waitForStage3CoreSchema');
+    const begin = stage3FixtureSource.indexOf("await client.query('BEGIN')");
+
+    expect(wait).toBeGreaterThan(-1);
+    expect(begin).toBeGreaterThan(wait);
   });
 });
 

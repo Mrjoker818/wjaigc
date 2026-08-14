@@ -1008,3 +1008,11 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Sharp 0.35 required type-only `Metadata` and `OverlayOptions` imports. Focused layer/upscale regression passes `18/18`; the production build remains `116/116` routes.
 - Fresh candidate gates: TypeScript exit 0; ESLint exit 0; API `110/110` files and `480/480` tests; full Vitest exit 0; frozen install, YAML and whitespace checks pass.
 - **Verdict: PASS LOCALLY FOR THE CI REPAIR CANDIDATE / STAGE 3 NOT COMPLETE.** A trusted-parent allowlist bootstrap, immutable GitHub Actions rerun, repository secret configuration and Coze three-mode/provider/billing evidence remain required.
+
+## 2026-08-14 Stage 3 immutable CI follow-up
+
+- On `main@0ac9068`, protected baseline, Stage 1, PostgreSQL concurrency and the complete static/tests/API/production-audit/build path pass. This closes S3-SEC-001 on immutable main.
+- Legacy failed during seed because the table existed before background migration added `product_type`. Shadow and canvas-v2 seeded but each failed all 60 cases at login HTTP 503 because the generated auth secret was 28 characters. No Canvas behavior assertion executed in those failures.
+- S3-TEST-004 now waits for exact seed-required columns instead of HTTP timing. Unit RED/GREEN is `3 failed / 14 passed -> 17/17`; real PostgreSQL delayed-column evidence waited 566ms.
+- S3-TEST-005 permanently renders the Stage 3 job's minimum secret and requires at least 32 characters. Correctly scoped RED was `expected 18 >= 32`; combined fixture/release GREEN is `29/29` and YAML parses.
+- **Verdict: LOCAL REPAIR PASS / IMMUTABLE CI RERUN REQUIRED.** Real P0 remains externally blocked by repository Secrets; Coze three-mode and billing evidence remain open.

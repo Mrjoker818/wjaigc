@@ -331,3 +331,11 @@ Protected stable branch: read-only and untouched
 - Production dependencies were updated within compatible ranges. A precise pnpm package hook removes only `pptxgenjs@4.0.1`'s unused `image-size` edge; a regression creates a real PPTX ZIP so the pruning cannot silently break exports. Production audit is now `0 low / 0 moderate / 0 high / 0 critical`.
 - Sharp 0.35 changed exported TypeScript namespaces; two type-only imports were adjusted without changing image processing behavior. Fresh gates pass: TypeScript, error-only ESLint, API `110 files / 480 tests`, full Vitest exit 0, production build `116/116`, dependency contracts, YAML and whitespace.
 - This is still a local candidate until the two-step trusted-parent allowlist push and GitHub Actions rerun complete. The real-P0 workflow also remains externally blocked by missing repository secrets; it must not be bypassed or mocked. Coze `shadow -> canvas-v2 -> legacy` and real provider/billing evidence remain required; Stage 4/5 stay prohibited.
+
+### Task 10 Immutable CI Follow-Up
+
+- `main@0ac9068` passed protected baseline, Stage 1 local gates, PostgreSQL concurrency and the complete static/tests/API/audit/build job. Production dependency security is therefore closed on immutable main, not only locally.
+- The three Canvas jobs supplied two fixture REDs before any Canvas assertion: legacy raced the asynchronous `product_type` migration; shadow and canvas-v2 seeded successfully but all logins returned 503 because the generated auth secret was 28 characters.
+- S3-TEST-004 now waits on the exact seed-required `information_schema` columns with a 60-second bound and exact missing-column error. Real PostgreSQL delayed-column proof waited 566ms. S3-TEST-005 length-checks the Stage 3 job's rendered secret against the production 32-character minimum.
+- Focused RED/GREEN is retained and the combined fixture/release set passes `29/29`; YAML parses. The correction remains uncommitted until fresh static/full gates and the protected-path check pass.
+- Real P0 remains intentionally blocked by missing GitHub Secrets, and Coze three-mode/provider/billing evidence remains unverified. Stage 3 is not complete; Stage 4/5 and `stable` remain prohibited.

@@ -52,6 +52,64 @@ export async function assertStage3DatabaseGuard(query, expectedToken) {
   }
 }
 
+const STAGE3_REQUIRED_CORE_COLUMNS = [
+  ['wujie_users', 'id'],
+  ['wujie_users', 'name'],
+  ['wujie_users', 'password_hash'],
+  ['wujie_users', 'role'],
+  ['wujie_users', 'status'],
+  ['wujie_users', 'product_type'],
+  ['wujie_users', 'api_permissions'],
+  ['wujie_users', 'storage_folder'],
+  ['wujie_users', 'created_at'],
+  ['wujie_users', 'updated_at'],
+  ['wujie_system_settings', 'key'],
+  ['wujie_system_settings', 'value'],
+  ['wujie_system_settings', 'updated_at'],
+  ['wujie_user_data', 'user_id'],
+  ['wujie_user_data', 'data_key'],
+  ['wujie_user_data', 'data_value'],
+  ['wujie_user_data', 'updated_at'],
+];
+
+const STAGE3_CORE_SCHEMA_QUERY = `
+  WITH required(table_name, column_name) AS (
+    VALUES
+      ${STAGE3_REQUIRED_CORE_COLUMNS.map(([table, column]) => `('${table}', '${column}')`).join(',\n      ')}
+  )
+  SELECT required.table_name, required.column_name
+  FROM required
+  LEFT JOIN information_schema.columns AS present
+    ON present.table_schema = ANY(current_schemas(false))
+   AND present.table_name = required.table_name
+   AND present.column_name = required.column_name
+  WHERE present.column_name IS NULL
+  ORDER BY required.table_name, required.column_name
+`;
+
+function wait(delayMs) {
+  return new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
+export async function waitForStage3CoreSchema(query, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const pollIntervalMs = options.pollIntervalMs ?? 100;
+  const now = options.now ?? Date.now;
+  const delay = options.delay ?? wait;
+  const startedAt = now();
+
+  while (true) {
+    const result = await query(STAGE3_CORE_SCHEMA_QUERY);
+    const missing = Array.isArray(result?.rows) ? result.rows : [];
+    if (missing.length === 0) return;
+    if (now() - startedAt >= timeoutMs) {
+      const columns = missing.map(row => `${row.table_name}.${row.column_name}`).join(', ');
+      throw new Error(`Stage 3 core schema was not ready within ${timeoutMs}ms; missing: ${columns}`);
+    }
+    await delay(pollIntervalMs);
+  }
+}
+
 function buildImages(runId, browser, nodeCount, url) {
   const columns = nodeCount === 1 ? 1 : 20;
   return Array.from({ length: nodeCount }, (_, index) => {
@@ -151,6 +209,7 @@ async function seedDatabase(plan, options) {
   await client.connect();
   try {
     await assertStage3DatabaseGuard(client.query.bind(client), options.databaseGuard);
+    await waitForStage3CoreSchema(client.query.bind(client));
     await client.query('BEGIN');
     await cleanupGraph(client, plan, options.userId);
     const now = Date.now();

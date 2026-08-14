@@ -137,7 +137,7 @@ jobs:
       E2E_BASE_URL: http://127.0.0.1:5000
       E2E_TEST_USERNAME: stage3-ci
       E2E_TEST_PASSWORD: Stage3-CI-${{ github.run_id }}!
-      WUJIE_AUTH_SECRET: stage3-ci-auth-${{ github.run_id }}-${{ github.run_attempt }}
+      WUJIE_AUTH_SECRET: stage3-ci-auth-secret-minimum-32-bytes-${{ github.run_id }}-${{ github.run_attempt }}
       INTERNAL_API_SECRET: stage3-ci-internal-${{ github.run_id }}-${{ github.run_attempt }}
       WUJIE_ADMIN_PASSWORD: Stage3-Admin-${{ github.run_id }}!
       WUJIE_DATA_DIR: /tmp/wujie-stage3-data

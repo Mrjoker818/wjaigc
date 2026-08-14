@@ -107,6 +107,19 @@ describe('Stage 3 release gate contract', () => {
     expect(stage3Job).not.toContain('WUJIE_INTERNAL_API_SECRET:');
   });
 
+  it('renders a production-valid Stage 3 authentication secret for the smallest run identifiers', () => {
+    const stage3Job = workflow.slice(
+      workflow.indexOf('  stage-3-canvas-kernel:'),
+      workflow.indexOf('  real-p0-browser:'),
+    );
+    const template = stage3Job.match(/^\s*WUJIE_AUTH_SECRET:\s*(.+)$/m)?.[1]?.trim() || '';
+    const minimumRenderedSecret = template
+      .replace(/\$\{\{\s*github\.run_id\s*\}\}/g, '1')
+      .replace(/\$\{\{\s*github\.run_attempt\s*\}\}/g, '1');
+
+    expect(minimumRenderedSecret.length).toBeGreaterThanOrEqual(32);
+  });
+
   it('compares push candidates with the pre-push SHA and reads allowlist data from that trusted base', () => {
     expect(stage0Workflow).toContain('${{ github.event.before }}');
     expect(stage0Workflow).not.toContain('--base origin/main --candidate HEAD');
