@@ -1016,3 +1016,20 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - S3-TEST-004 now waits for exact seed-required columns instead of HTTP timing. Unit RED/GREEN is `3 failed / 14 passed -> 17/17`; real PostgreSQL delayed-column evidence waited 566ms.
 - S3-TEST-005 permanently renders the Stage 3 job's minimum secret and requires at least 32 characters. Correctly scoped RED was `expected 18 >= 32`; combined fixture/release GREEN is `29/29` and YAML parses.
 - **Verdict: LOCAL REPAIR PASS / IMMUTABLE CI RERUN REQUIRED.** Real P0 remains externally blocked by repository Secrets; Coze three-mode and billing evidence remain open.
+
+## 2026-08-14 Stage 3 `c381d50` immutable matrix result
+
+- `main@c381d5066359edc66531bf830a9c71a124a660fc` passed protected baseline, Stage 1, PostgreSQL concurrency, Doctor, TypeScript, ESLint, full unit/integration, API, production dependency audit and production build.
+- S3-TEST-004 and S3-TEST-005 are closed on immutable main: legacy, shadow and canvas-v2 all completed clean-schema seeding, authenticated, and entered the five-browser Canvas matrix.
+- The three mode jobs executed `180` browser cases: legacy `53/60`, shadow `53/60`, canvas-v2 `54/60`; combined `160 passed / 20 failed`. This is real RED evidence and does not qualify Stage 3 as complete.
+- Failures consolidate into S3-TEST-006 merge-window observability, S3-BUG-017 hosted Chromium performance, and one S3-BUG-018 shadow WebKit immediate-reload geometry rollback. Thresholds remain unchanged.
+
+## 2026-08-14 Stage 3 post-`c381d50` failure classification
+
+- S3-TEST-006 reproduced locally and is closed by waiting for the exact asynchronous projects-sync GET after virtual-time advancement. No product merge code changed. The corrected scenario passes all five browser profiles `5/5`.
+- The hosted performance failure remains open. The probe no longer rescans the full Canvas DOM for every monitored node on every frame; local Chromium and Chromium 1080p still pass all six fixed 100/300-node pan and save gates, with 56.85-58.88 FPS and zero continuity failures. Only a new immutable hosted run can validate the observer-cost hypothesis.
+- Shadow WebKit immediate-reload rollback did not reproduce on the correctly configured local shadow production server: the exact scenario passes once plus five consecutive repeats (`6/6`). No speculative product persistence change was made.
+- TypeScript passes after the test-harness changes. Generated Playwright output remains ignored and is not included in the candidate.
+- **Verdict remains NOT COMPLETE.** The immutable three-mode matrix, real-P0 Secrets, Coze exact-SHA modes and rollback remain required.
+- `real-p0-browser` still fails closed at configuration because required repository Secrets are absent. Paid providers and billing/refund were not executed and are not marked passed.
+- **Verdict: NOT READY / ROOT-CAUSE TRIAGE IN PROGRESS.** Coze validation and Stage 4/5 remain prohibited.

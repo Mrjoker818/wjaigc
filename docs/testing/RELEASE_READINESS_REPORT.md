@@ -838,3 +838,17 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - `0ac9068` proves the dependency, static, API, full-test, production-build and PostgreSQL-concurrency gates on GitHub. The overall workflow remains red for evidence-infrastructure reasons, not a passing release.
 - The next repair waits for additive core columns and supplies a production-valid CI auth secret. Both have retained RED/GREEN and do not change Canvas, provider, billing or application auth policy.
 - **Verdict remains CONDITIONAL / STAGE 3 NOT COMPLETE.** A new immutable CI run must execute all three Canvas matrices; the separately missing real-P0 Secrets and all Coze gates remain blocking.
+
+### `c381d50` immutable matrix decision
+
+- All three mode jobs now reach Canvas assertions, closing the schema/auth infrastructure blockers. Static, API, audit, build, PostgreSQL and Stage 0/1 jobs pass.
+- The Canvas matrix is red: `160/180` passed. Open blockers are hosted Chromium performance, an unobserved periodic-sync boundary in the merge-window test, and one shadow WebKit immediate-reload geometry rollback.
+- The 55/45 FPS and 100ms save thresholds are not weakened. Coze deployment is deferred until these failures are classified and repaired with retained RED/GREEN evidence.
+- **Release verdict: NOT READY.** Real-P0 Secrets, real provider/billing evidence, Coze `shadow -> canvas-v2 -> legacy`, and the open matrix failures remain blocking.
+
+### Post-`c381d50` local classification
+
+- Merge-window synchronization now has an explicit request boundary and passes all five local browser profiles. This closes the local evidence defect without modifying Canvas merge behavior.
+- Hosted performance thresholds remain exactly 55/45 FPS and 100ms. The candidate removes full-DOM rescans from the measurement observer; six local desktop Chromium performance cases pass, but immutable hosted evidence is still mandatory.
+- Shadow WebKit immediate reload passes the exact scenario six consecutive local runs. Because the immutable run failed once, this remains a rerun-required item rather than a claimed closure.
+- **Readiness remains NOT READY.** A new immutable matrix must confirm these classifications; real-P0 configuration and Coze `shadow -> canvas-v2 -> legacy` remain blocking.

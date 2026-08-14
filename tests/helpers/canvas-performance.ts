@@ -126,6 +126,23 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
     };
     state.inputHandler = inputHandler;
     const viewport = document.querySelector('[data-canvas-viewport]');
+    const monitoredNodes = new Map<string, { image: HTMLImageElement; card: HTMLElement }>();
+    const resolveMonitoredNode = (id: string) => {
+      const cached = monitoredNodes.get(id);
+      if (cached?.image.isConnected && cached.card.isConnected && cached.card.contains(cached.image)) {
+        return cached;
+      }
+      const card = document.querySelector<HTMLElement>(`[data-canvas-image-id="${CSS.escape(id)}"]`);
+      const image = card?.querySelector<HTMLImageElement>('img') ?? null;
+      if (!card || !image) {
+        monitoredNodes.delete(id);
+        return null;
+      }
+      const resolved = { image, card };
+      monitoredNodes.set(id, resolved);
+      return resolved;
+    };
+    for (const id of ids) resolveMonitoredNode(id);
     for (const type of ['pointerdown', 'pointermove', 'pointerup', 'wheel']) {
       viewport?.addEventListener(type, inputHandler, { capture: true, passive: true });
     }
@@ -185,10 +202,10 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
         workspacePanelRect?.left ?? innerWidth,
       );
       for (const id of ids) {
-        const image = [...document.querySelectorAll<HTMLImageElement>('[data-canvas-viewport] img')]
-          .find(candidate => candidate.alt === id);
-        const card = image?.closest<HTMLElement>('div.absolute.group') ?? null;
-        if (!image || !card || !image.complete || image.naturalWidth === 0) {
+        const node = resolveMonitoredNode(id);
+        const image = node?.image ?? null;
+        const card = node?.card ?? null;
+        if (!image || !card || image.alt !== id || !image.complete || image.naturalWidth === 0) {
           disappeared = true;
           continue;
         }

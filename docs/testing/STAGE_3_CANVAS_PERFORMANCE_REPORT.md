@@ -96,3 +96,16 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 - `0ac9068` did not produce valid Canvas performance samples: legacy stopped at an additive-column seed race, while shadow and canvas-v2 stopped at login HTTP 503 caused by a short CI secret.
 - The failures occurred before Canvas assertions, so they neither pass nor invalidate the retained local measurements.
 - Condition-based schema readiness and a production-valid CI auth secret now have permanent tests; a new immutable run is required before this report can add GitHub performance evidence.
+
+### `c381d50` GitHub performance evidence
+
+- All `180` mode/profile cases executed. Functional totals were legacy `53/60`, shadow `53/60`, and canvas-v2 `54/60`.
+- Hosted desktop Chromium missed the unchanged thresholds: 100-node FPS was `39.27-51.76` against `55`; 300-node FPS was `28.71-41.99` against `45`. Canvas-v2 produced one `187ms` 300-node save long task against `100ms`.
+- The run did not report a disappeared-frame or unclickable-time assertion as the primary failure. Cross-browser functional flows largely passed, but performance remains a release blocker.
+- No threshold is relaxed. The next step is to separate runner/recording overhead from Canvas render and persistence cost using the retained metric and request boundaries.
+
+### Post-`c381d50` observer-cost candidate
+
+- The performance observer previously executed a full Canvas image query once per monitored node on every animation frame. It now caches the exact image/card pair and only re-resolves after DOM disconnection; all decode, visibility, hit-test and continuity checks remain active.
+- Fresh local production Chromium results with unchanged thresholds: Chromium 100/300 pan `58.88/57.07` FPS; Chromium 1080p `58.58/57.69` FPS. The two 300-node save samples are `57.23/56.85` FPS with longest save task `0ms`. All six cases pass with zero disappeared frames and zero unclickable time.
+- These local values do not close S3-BUG-017. A new immutable GitHub Actions run must prove the low-core hosted result before release.

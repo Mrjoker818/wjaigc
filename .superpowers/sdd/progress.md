@@ -339,3 +339,17 @@ Protected stable branch: read-only and untouched
 - S3-TEST-004 now waits on the exact seed-required `information_schema` columns with a 60-second bound and exact missing-column error. Real PostgreSQL delayed-column proof waited 566ms. S3-TEST-005 length-checks the Stage 3 job's rendered secret against the production 32-character minimum.
 - Focused RED/GREEN is retained and the combined fixture/release set passes `29/29`; YAML parses. The correction remains uncommitted until fresh static/full gates and the protected-path check pass.
 - Real P0 remains intentionally blocked by missing GitHub Secrets, and Coze three-mode/provider/billing evidence remains unverified. Stage 3 is not complete; Stage 4/5 and `stable` remain prohibited.
+
+### Task 10 `c381d50` Immutable Matrix
+
+- The schema and authentication repairs are proven on main: every Stage 3 mode seeded and entered Canvas assertions.
+- Immutable totals are `160 passed / 20 failed` across 180 cases. Failures are tracked as S3-TEST-006, S3-BUG-017 and S3-BUG-018; no threshold or test was removed.
+- Static, API, audit, build, PostgreSQL and Stage 0/1 gates pass. Real P0 remains blocked by missing Secrets.
+- Next unique action: instrument the periodic sync response, reproduce the WebKit persistence rollback, and profile hosted Chromium performance. Coze and Stage 4/5 remain blocked; `stable` remains read-only.
+
+### Task 10 Post-`c381d50` Failure Classification
+
+- S3-TEST-006 is closed locally without product changes: the merge-window scenario waits for the exact successful projects-sync GET after virtual-time advancement and passes all five profiles `5/5`.
+- S3-BUG-017 remains open for immutable CI. The performance observer now caches monitored DOM nodes instead of rescanning every Canvas image per node per frame; all continuity assertions and fixed thresholds remain. Six local desktop Chromium performance gates pass at 56.85-58.88 FPS with zero disappeared or unclickable frames.
+- S3-BUG-018 is not reproducible on the correctly configured local shadow production environment. The exact WebKit move/resize/history/immediate-reload flow passes `6/6`; no speculative product persistence code changed.
+- Next unique action is fresh lint/protection checks, main-only candidate push, and immutable three-mode observation. Real P0 and Coze remain blocked; Stage 4/5 remain prohibited and `stable` remains read-only.

@@ -371,7 +371,16 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
         intervals: [250, 500, 1_000],
       }).toEqual({ marker: markerId, remoteDeleted: undefined });
 
+      const periodicSyncResponse = page.waitForResponse(response => {
+        if (response.request().method() !== 'GET') return false;
+        const url = new URL(response.url());
+        return url.pathname === '/api/user-data/sync' && url.searchParams.get('key') === 'projects';
+      }, { timeout: 20_000 });
       await page.clock.fastForward(30_100);
+      const periodicResponse = await periodicSyncResponse;
+      expect(periodicResponse.ok()).toBe(true);
+      const periodicBody = await periodicResponse.json() as { projectRevision?: number };
+      expect(Number.isSafeInteger(periodicBody.projectRevision)).toBe(true);
       await waitForStage3Node(page, markerId, 20_000);
       await expect(page.getByAltText(remoteDeletedNodeId, { exact: true })).toHaveCount(0);
       await page.getByTitle('重置视图').click();

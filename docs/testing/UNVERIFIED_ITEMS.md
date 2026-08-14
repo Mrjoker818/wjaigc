@@ -696,3 +696,17 @@
 - `NOT EXECUTED`: all Canvas assertions in legacy because guarded seed raced `product_type`; all Canvas assertions in shadow/canvas-v2 because login returned 503 before project entry.
 - `LOCALLY REPAIRED / CI RERUN REQUIRED`: condition-based core-column readiness and minimum 32-character Stage 3 auth secret.
 - `EXTERNALLY BLOCKED`: real P0 browser configuration still lacks required GitHub Secrets. It must remain red rather than be skipped or mocked.
+
+#### Immutable `c381d50` result
+
+- `VERIFIED`: all three Stage 3 modes create schema, seed, authenticate and execute the five-browser suite; protected/static/API/audit/build/PostgreSQL gates pass.
+- `FAILED`: 20 of 180 Canvas cases, comprising merge-window marker observation, hosted Chromium FPS/save budgets and one shadow WebKit immediate-reload geometry rollback.
+- `UNVERIFIED`: whether the failed Chromium merge-window cases issued and completed the periodic sync request; whether the WebKit geometry failure is deterministic; real provider/billing/refund and Coze exact-SHA mode rollout.
+- Stage 3 remains incomplete and Stage 4/5 remain prohibited.
+
+#### Post-`c381d50` local candidate
+
+- `LOCALLY VERIFIED`: the merge-window test now observes the exact periodic projects-sync response and passes five browser profiles `5/5`.
+- `HOSTED RERUN REQUIRED`: cached continuity-probe lookups retain all assertions and pass six local desktop Chromium performance gates, but S3-BUG-017 remains open until immutable GitHub Actions meets the unchanged thresholds.
+- `NOT REPRODUCED LOCALLY / HOSTED RERUN REQUIRED`: shadow WebKit move/resize/undo/redo/immediate reload passes `6/6`; the single immutable rollback remains recorded.
+- `EXTERNALLY BLOCKED`: real P0 still lacks GitHub Secrets; Coze exact-SHA shadow, isolated canvas-v2 and mandatory legacy rollback remain unverified.

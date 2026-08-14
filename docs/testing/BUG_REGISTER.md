@@ -1557,7 +1557,7 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Root cause | The workflow treated asset migrations as the complete application bootstrap, then treated HTTP readiness as schema readiness. Production intentionally starts `ensureCoreTables()` in the background, so the base table can appear before its additive columns. |
 | Fix | Build and start the production application, then make the guarded fixture seeder poll `information_schema` for every column it actually uses. The wait is condition-based, bounded to 60 seconds and reports exact missing columns. |
 | Regression | RED was `3 failed / 14 passed`; GREEN is `17/17`, with the combined release contracts at `29/29`. A real PostgreSQL probe withheld `product_type` for 500ms; the seeder waited 566ms and continued only after the column existed. |
-| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN PENDING.** |
+| Status | **CLOSED ON MAIN 2026-08-14.** `c381d50` completed schema readiness and seeded all three Stage 3 matrix jobs. |
 
 ### S3-TEST-005: Stage 3 CI authentication secret was shorter than the production minimum
 
@@ -1572,7 +1572,7 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Root cause | The workflow-generated `WUJIE_AUTH_SECRET` did not satisfy `server-auth.ts`'s production minimum, so the seeded password hash and runtime auth configuration could not establish a session. |
 | Fix | Use a CI-only static prefix that remains at least 32 characters even when `run_id` and `run_attempt` are one digit. |
 | Regression | The source contract first passed incorrectly by reading the top-level secret, was corrected to isolate the Stage 3 job, then retained RED `expected 18 >= 32`; GREEN is included in the combined `29/29` fixture/release set. |
-| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN PENDING.** |
+| Status | **CLOSED ON MAIN 2026-08-14.** `c381d50` authenticated all three Stage 3 matrix jobs and entered Canvas assertions. |
 
 ### S3-SEC-001: Production dependency gate contained 21 moderate/high advisories
 
@@ -1588,3 +1588,46 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Update compatible direct/transitive versions and use a precise pnpm hook that removes only the unused `pptxgenjs@4.0.1 -> image-size` edge. No global package suppression is used. |
 | Regression | Dependency contract validates exact versions and hook scope, then creates a real PPTX buffer. Frozen install, TypeScript, build and full tests pass; production audit reports zero vulnerabilities. |
 | Status | **CLOSED ON MAIN 2026-08-14.** GitHub `static-and-tests` for `0ac9068` passed install, Doctor, TypeScript, ESLint, unit/integration, API, production dependency audit and production build. |
+
+### S3-TEST-006: Merge-window E2E advanced virtual time without proving the periodic sync response
+
+| Field | Detail |
+|---|---|
+| Severity | P2 release-evidence integrity |
+| Module | Stage 3 merge-window Playwright scenario |
+| Environment | GitHub Actions `c381d50`, run `31792799720`, all three Canvas modes |
+| Reproduction | Mutate the project through the API, advance the page clock by 30.1 seconds, then wait only for the remote marker DOM node. |
+| Expected | The test proves the periodic `GET /api/user-data/sync?key=projects` completed before judging the merge result. |
+| Actual | Chromium-family profiles intermittently timed out on the marker while Firefox/WebKit passed; the retained assertion does not identify whether the request was absent, pending, rejected, or merged incorrectly. |
+| Root cause | `page.clock.fastForward()` runs the interval callback but does not make the test's following DOM assertion wait for the callback's asynchronous fetch and merge work. The server snapshot was valid; an exploratory revision-increase predicate also proved invalid because this legacy fixture correctly retained revision `0`. |
+| Fix | Arm an exact projects-sync GET response waiter before advancing virtual time, require the response to be successful and structurally include an integer revision, then assert the remote marker and deletion. Product merge code is unchanged. |
+| Regression | The original controlled Chromium case reproduced RED. The corrected boundary passes Chromium once and then the complete Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium set `5/5`. |
+| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN REQUIRED.** |
+
+### S3-BUG-017: Hosted Chromium Canvas performance missed the unchanged commercial thresholds
+
+| Field | Detail |
+|---|---|
+| Severity | P1 release-performance gate |
+| Module | Infinite Canvas 100/300-node pan and 300-node save |
+| Environment | GitHub Actions `c381d50`, legacy/shadow/canvas-v2, Chromium and Chromium 1080p |
+| Reproduction | Execute the five-browser Stage 3 matrix with one worker and the existing fixed thresholds. |
+| Expected | 100 nodes >=55 FPS, 300 nodes >=45 FPS, input P95 <=50ms, save longest task <=100ms, with zero disappeared frames and zero unclickable time. |
+| Actual | Desktop Chromium FPS ranged from 39.27-51.76 at 100 nodes and 28.71-41.99 at 300 nodes. Canvas-v2 also recorded one 187ms 300-node save task. Functional continuity assertions otherwise continued to execute. |
+| Root cause candidate | The continuity probe rescanned every Canvas image once per monitored node on every animation frame. This observer cost scales with node count and competes with the application on a low-core hosted runner. Local production Canvas itself remains above the unchanged thresholds. |
+| Fix candidate | Cache each monitored image/card pair and re-resolve it only after DOM disconnection. Visibility, decode, hit-test, disappeared-frame and unclickable-time assertions remain unchanged. |
+| Regression | Both desktop Chromium profiles pass all six local 100/300-node pan and 300-node save gates after the candidate. FPS remains 56.85-58.88, input P95 13.3-23.5ms, longest save task 0ms, disappearance 0 and unclickable time 0. |
+| Status | **OPEN / IMMUTABLE HOSTED-RUNNER RERUN REQUIRED.** Thresholds have not been lowered and the prior failure is not waived. |
+
+### S3-BUG-018: Shadow WebKit immediate reload restored pre-resize geometry
+
+| Field | Detail |
+|---|---|
+| Severity | P1 Canvas persistence |
+| Module | Shadow Canvas move/resize history and immediate reload |
+| Environment | GitHub Actions `c381d50`, WebKit, shadow mode |
+| Reproduction | Move a node, resize it, undo/redo both commands, then reload immediately. |
+| Expected | Reloaded inline geometry matches the final 160x160 node at left 168px/top 40px. |
+| Actual | The only failing run restored 96x96 at left 232px/top 104px, matching an earlier geometry. Legacy and canvas-v2 WebKit passed the same flow. |
+| Follow-up | A correctly configured isolated shadow production server passed the exact WebKit flow once, then passed five consecutive repetitions. Earlier local setup failures were separately identified as mismatched auth secret and empty media root and are excluded from product evidence. |
+| Status | **OPEN / NOT LOCALLY REPRODUCED IN 6 RUNS / IMMUTABLE CI RERUN REQUIRED.** No speculative persistence change has been made. |
