@@ -76,8 +76,9 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 ## Remaining Release Evidence
 
 - The isolated local database contains zero configured API providers. Real paid image generation, task billing, cancellation and refund consistency cannot be honestly validated locally and remain `UNVERIFIED`.
-- The candidate must be committed and pushed to `main`, then Coze must run the exact SHA in `shadow`, switch the isolated preview to `canvas-v2`, rerun the same gates, and finally prove the mandatory return to `legacy`.
-- GitHub Actions has not executed the new three-mode job until the candidate is pushed.
+- The candidate and evidence-teardown fix are pushed through `main@afa65eb103bd8fa08d669d4680d068d2c565d341`. A clean build from that SHA passes the Chromium/WebKit merge-window and move/resize/undo/redo/immediate-reload representative set `4/4` with all mandatory artifacts.
+- Coze must run the exact SHA in `shadow`, switch the isolated preview to `canvas-v2`, rerun the same gates, and finally prove the mandatory return to `legacy`.
+- GitHub Actions has not yet supplied the new three-mode job result for this SHA.
 
 ## Current Verdict
 

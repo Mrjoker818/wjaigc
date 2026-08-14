@@ -673,5 +673,12 @@
 | Small audit beacon application receipt | OPEN P2 | Add server-persisted idempotency plus a delivery receipt/retry path; verify 401/500, disk failure, reload and logout. `sendBeacon(true)` currently proves queue acceptance only. |
 | Cross-session model authorization refresh | OPEN P2 | Push or poll a session/catalog authorization revision so grant/revoke changes refresh the open Canvas without page reload; backend authorization already remains authoritative. |
 | Browser storage quota double failure | UNVERIFIED CHAOS EDGE | Unit/source contracts prove storage failure still attempts beacon and a double failure blocks leaving. A real browser quota/private-mode run with retained video/trace remains required. |
-| Final committed-source browser evidence | PENDING COMMIT | Current evidence is content-fingerprinted dirty-worktree evidence. After commit, rerun the release representative browser gates so artifacts identify the exact immutable SHA. |
+| Final committed-source browser evidence | VERIFIED LOCALLY | Clean `main@afa65eb103bd8fa08d669d4680d068d2c565d341` production evidence passes Chromium/WebKit representatives `4/4` with screenshot, video, trace, Console and Network artifacts under the exact SHA path. |
 | `stable` GitHub ruleset enforcement | EXTERNAL GOVERNANCE BLOCKED | Repository permissions do not permit adding/verifying a server-side ruleset. Workflow detection remains secondary; do not claim branch protection enforcement. |
+
+### 2026-08-14 immutable-main remaining scope
+
+- GitHub Actions has not yet supplied a Stage 3 run for `afa65eb103bd8fa08d669d4680d068d2c565d341`.
+- Coze has not proved the exact SHA in `shadow`, isolated `canvas-v2`, or the mandatory final `legacy` rollback.
+- Real provider generation, one-charge/one-refund settlement and cloud PostgreSQL terminal-state evidence remain unverified; the isolated local fixture has no provider configuration.
+- Every immutable representative emitted one `[DataIsolation] loadData` cleanup warning for historical cross-user project rows. Guards removed the rows and isolation assertions passed, but the origin of those historical rows remains a separate P2 audit item.

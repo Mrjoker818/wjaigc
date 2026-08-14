@@ -818,3 +818,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The first governance bootstrap push must exclude `.github/workflows/quality.yml`; only files authorized by the old trusted baseline may enter the bootstrap commit. The complete candidate may be pushed only after the new allowlist exists in the trusted parent commit.
 - The first whole-repository rerun exposed S3-TEST-002, a stale source contract for explicit-project workflow hydration. The runtime behavior was intact; the contract now protects the recovery-aware ordering and passes `11/11`, followed by a clean full rerun.
 - **Release verdict remains CONDITIONAL / NOT READY FOR STAGE 3 COMPLETION.** Local P0/P1 count is zero, but committed-source browser evidence, main publication, GitHub Actions, Coze exact-SHA provider/billing evidence, isolated canvas-v2 and mandatory legacy rollback remain open. Remote `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is unchanged and must remain untouched.
+
+## 2026-08-14 Stage 3 main and immutable browser evidence
+
+- Governance bootstrap `d9fde3a` and the complete candidate were pushed as non-force fast-forwards. The verified code/test candidate is `main@afa65eb103bd8fa08d669d4680d068d2c565d341`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is unchanged.
+- S3-TEST-003 was found after publication: the evidence fixture waited for video before context closure and deadlocked teardown. Contract RED was `1/10`; GREEN is `10/10`, and the focused regression is `100/100`.
+- A production build from the exact commit passes Chromium/WebKit merge-window deletion and move/resize/undo/redo/immediate reload `4/4`. Every test has screenshot, video, trace, Console and Network evidence; Console errors/page errors and non-benign network failures are zero.
+- **Release verdict remains CONDITIONAL / STAGE 3 NOT COMPLETE.** Local and main evidence is closed; GitHub Actions, Coze exact-SHA `shadow -> canvas-v2 -> legacy`, real provider generation and real charge/refund evidence remain required.

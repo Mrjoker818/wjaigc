@@ -316,3 +316,10 @@ Protected stable branch: read-only and untouched
 - The first post-review full gate retained S3-TEST-002 RED because a source contract still expected the pre-recovery direct `targetProject` declaration. Runtime workflow hydration remained present. The corrected ordering contract passes `11/11`, and the same PostgreSQL-enabled full command exits `0` on rerun.
 - Fresh gates: Doctor `43/11/0/0`; TypeScript; ESLint `0/965`; API `480/480`; component/lib regression exit `0`; production build `116/116`; YAML, exact 38-feature allowlist and whitespace checks pass. Remote `stable` remains `52f7c601ed150769e15d06fb435c6e360e28c9e7`.
 - Stage 3 remains incomplete. Exact committed-source browser evidence, governance bootstrap/main push, GitHub Actions, Coze real provider/billing, isolated canvas-v2 and mandatory legacy rollback remain the only next scope; Stage 4/5 remain prohibited.
+
+### Task 10 Governance Push And Immutable Evidence
+
+- Two-step governance completed without force: bootstrap `d9fde3a0f36b7ca8532591e8b098e4dfb1ac40f6`, complete candidate `e61bdedb9443d8b2ee164539ed21ed48bf0b4b90`, then evidence finalization `afa65eb103bd8fa08d669d4680d068d2c565d341`. Remote stable remains the immutable `52f7c601ed150769e15d06fb435c6e360e28c9e7`.
+- The first exact-build run retained an environment-only login 503 caused by a short test secret. The next run exposed S3-TEST-003: waiting for video before context closure deadlocked fixture teardown. Contract RED was `1/10`; GREEN is `10/10`; the focused Stage 3 set is `100/100`.
+- Clean `main@afa65eb` production evidence passes Chromium/WebKit representatives `4/4` in 35.1 seconds. Each result has screenshot, video, trace, Console and Network artifacts under the exact SHA evidence path.
+- Next unique scope is GitHub Actions plus Coze exact-SHA `shadow -> canvas-v2 -> legacy`, including real provider and billing evidence. Stage 3 is not complete and Stage 4/5 remain prohibited.

@@ -1528,3 +1528,18 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Anchor the contract at `storedProject`, assert recovery-aware `targetProject` resolution follows, and assert workflow hydration occurs before the target project's image branch. |
 | Regression | Retained RED was `1 failed / 10 passed`; focused rerun is `11/11`; final PostgreSQL-enabled full Vitest exits `0`. |
 | Status | **CLOSED LOCALLY 2026-08-14.** |
+
+### S3-TEST-003: Stage 3 video evidence teardown deadlocked before the browser context closed
+
+| Field | Detail |
+|---|---|
+| Severity | P1 release-infrastructure integrity |
+| Module | Playwright Stage 3 evidence fixture |
+| Environment | Local production build from `main@e61bdedb9443d8b2ee164539ed21ed48bf0b4b90`, Chromium and WebKit, 2026-08-14 |
+| Reproduction | Run the merge-window and move/resize representative tests with mandatory video evidence. All four pages finish and Playwright creates raw videos, but the runner remains alive until the outer 300-second command limit terminates it. |
+| Expected | The fixture closes the browser context, finalizes video, copies all mandatory artifacts and exits normally. |
+| Actual | The fixture closed only the page and then awaited `video.path()` while the context fixture was waiting for the evidence fixture to return. The custom evidence directory was never completed. |
+| Root cause | Playwright finalizes video when the browser context closes. Waiting for the video from an auto fixture before allowing context teardown formed a circular wait. |
+| Fix | Stop tracing, close the browser context, then read and copy the finalized video. A context-close failure records an artifact error and does not wait indefinitely. |
+| Regression | Contract RED was `1 failed / 9 passed`; GREEN is `10/10`. Dirty-worktree browser proof passed `4/4`; immutable `main@afa65eb103bd8fa08d669d4680d068d2c565d341` Chromium/WebKit proof passed `4/4` in 35.1 seconds with screenshot, video, trace, Console and Network files for every test. |
+| Status | **CLOSED LOCALLY AND ON MAIN 2026-08-14 / GITHUB ACTIONS EXECUTION PENDING.** |
