@@ -70,6 +70,15 @@ describe('Stage 3 release gate contract', () => {
     expect(evidenceHelper).toContain("artifactErrors.push('video: Stage 3 evidence video was not created')");
   });
 
+  it('closes the browser context before waiting for the recorded video', () => {
+    const contextClose = evidenceHelper.indexOf('await page.context().close()');
+    const videoPath = evidenceHelper.indexOf('await video.path()');
+
+    expect(contextClose).toBeGreaterThan(-1);
+    expect(videoPath).toBeGreaterThan(contextClose);
+    expect(evidenceHelper).not.toContain('await page.close()');
+  });
+
   it('uses the internal API secret name read by the application', () => {
     const stage3Job = workflow.slice(
       workflow.indexOf('  stage-3-canvas-kernel:'),

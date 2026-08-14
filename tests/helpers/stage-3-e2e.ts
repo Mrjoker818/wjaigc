@@ -142,15 +142,21 @@ export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({
         artifactErrors.push(`trace: ${error instanceof Error ? error.message : String(error)}`);
       }
       const video = page.video();
-      await page.close().catch(error => {
-        artifactErrors.push(`video: page close failed: ${error instanceof Error ? error.message : String(error)}`);
-      });
-      if (video) {
+      let contextClosed = false;
+      try {
+        await page.context().close();
+        contextClosed = true;
+      } catch (error) {
+        artifactErrors.push(`video: context close failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (video && contextClosed) {
         try {
           await copyFile(await video.path(), join(directory, 'video.webm'));
         } catch (error) {
           artifactErrors.push(`video: ${error instanceof Error ? error.message : String(error)}`);
         }
+      } else if (video) {
+        artifactErrors.push('video: browser context did not close, so the recording could not be finalized');
       } else {
         artifactErrors.push('video: Stage 3 evidence video was not created');
       }
