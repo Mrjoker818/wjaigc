@@ -353,3 +353,20 @@ Protected stable branch: read-only and untouched
 - S3-BUG-017 remains open for immutable CI. The performance observer now caches monitored DOM nodes instead of rescanning every Canvas image per node per frame; all continuity assertions and fixed thresholds remain. Six local desktop Chromium performance gates pass at 56.85-58.88 FPS with zero disappeared or unclickable frames.
 - S3-BUG-018 is not reproducible on the correctly configured local shadow production environment. The exact WebKit move/resize/history/immediate-reload flow passes `6/6`; no speculative product persistence code changed.
 - Next unique action is fresh lint/protection checks, main-only candidate push, and immutable three-mode observation. Real P0 and Coze remain blocked; Stage 4/5 remain prohibited and `stable` remains read-only.
+
+## 2026-08-14 Task 10 Batch Undo And Final Local Matrix
+
+- Still in Stage 3 Task 10 on `codex/wj-stable-s3`, based on `main@820b33d669e529e90f61837314b164b3a2119675`; not yet committed or pushed, and `stable` remains untouched.
+- GitHub Actions `31797149839`, attempt 2 remains RED: shadow `54/60`, legacy `56/60`, canvas-v2 `53/60`; real P0 still fails closed without Secrets.
+- The first local 60-case matrix had four cascading failures. Firefox/mobile undo briefly restored 100 nodes after a batch delete, then project sync returned to 98 and polluted the next performance scenario.
+- Root cause: the history commit did not supersede a queued 98-node persistence snapshot, while restored deletion tombstones were only cleared for `asset-v3`. Undo/redo now supersede the queue and clear restored tombstones in every Canvas mode before committing.
+- TDD evidence: source RED `1/21`; browser RED `4/4` after the first partial fix; final focused Firefox/mobile `4/4`; clean five-profile matrix `60/60`.
+- Local gates: TypeScript, ESLint, full Vitest and production build `116/116` exit `0`; PostgreSQL layering/annotation/element-board concurrency passes `4/4`.
+- Task 10 and Stage 3 remain incomplete. Next unique action: protected gate, independent diff review, main-only commit/push, immutable CI and Coze exact-SHA `shadow -> canvas-v2 -> legacy`; real provider/billing evidence cannot be mocked.
+
+## 2026-08-14 Task 10 Independent Review Durability Barrier
+
+- Independent read-only review found one P1: an immediate persistence request could be signature-deduplicated after an idle save without crossing `flushProjectsToServer()`.
+- TDD retained `2 failed / 9 passed` RED cases for both completed and in-flight idle writes. Separate server-flushed signature tracking closes the gap; focused persistence/Canvas/evidence contracts pass `50/50`.
+- The production server was rebuilt and all 15 controlled projects reseeded. The final five-profile execution `final-local-matrix-p1-barrier-20260814` passes `60/60` with unchanged thresholds and mandatory artifacts.
+- Stage 3 remains incomplete. Next unique action is final static/PostgreSQL/protected gates, main-only commit/push, immutable CI and Coze exact-SHA rollout/rollback. `stable` remains untouched and Stage 4/5 remain prohibited.

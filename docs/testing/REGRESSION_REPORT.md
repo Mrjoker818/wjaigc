@@ -1033,3 +1033,20 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - **Verdict remains NOT COMPLETE.** The immutable three-mode matrix, real-P0 Secrets, Coze exact-SHA modes and rollback remain required.
 - `real-p0-browser` still fails closed at configuration because required repository Secrets are absent. Paid providers and billing/refund were not executed and are not marked passed.
 - **Verdict: NOT READY / ROOT-CAUSE TRIAGE IN PROGRESS.** Coze validation and Stage 4/5 remain prohibited.
+
+## 2026-08-14 Stage 3 post-CI Canvas history and evidence closure
+
+- GitHub Actions run `31797149839`, attempt 2 remains immutable RED: shadow `54/60`, legacy `56/60`, canvas-v2 `53/60`. Real P0 still fails closed because required repository Secrets are absent.
+- The merge-window scenario now waits for its exact project-sync response. Evidence uses one narrowly tested lifecycle-abort classifier, and the performance probe caches monitored DOM pairs without weakening continuity assertions.
+- A fresh local `canvas-v2` matrix initially produced four cascading failures: Firefox and mobile Chromium restored a two-node batch delete only briefly, then the next project projection returned to 98 nodes; the following 100-node cases inherited that state.
+- Trace/network evidence separated two causes: the committed undo did not supersede a queued 98-node snapshot, and restored IDs retained deletion tombstones outside `asset-v3`. Both boundaries are now corrected.
+- TDD retained source RED `1/21` and browser RED `4/4` after the first partial fix. Final focused Firefox/mobile passes `4/4`; a clean reseed followed by all five profiles passes `60/60` in 454.9 seconds.
+- Fresh gates: TypeScript, ESLint and full Vitest exit `0`; PostgreSQL layer/annotation/element-board concurrency passes `4/4`; production build passes `116/116`.
+- **Verdict: LOCAL CANDIDATE PASS / STAGE 3 NOT COMPLETE.** Immutable CI, real-P0 Secrets, Coze exact-SHA `shadow -> canvas-v2 -> legacy`, paid providers and authoritative billing/refund evidence remain required.
+
+## 2026-08-14 Stage 3 independent-review persistence barrier
+
+- Independent read-only review found one P1: an immediate flush for a signature already saved by idle persistence could be deduplicated before the server durability barrier.
+- Permanent TDD covers both completed-idle and in-flight-idle promotion. RED was `2 failed / 9 passed`; the focused persistence/Canvas/evidence set passes `50/50` after tracking server-flushed signatures separately.
+- The rebuilt production matrix `final-local-matrix-p1-barrier-20260814` passes all five profiles `60/60` with unchanged functional, continuity and performance gates. A stricter teardown-only abort-filter experiment failed the evidence gate while business assertions completed; it was rejected because task-event/activity lifecycle cancellation also occurs during normal page operation.
+- **Local verdict remains PASS; Stage 3 remains NOT COMPLETE.** Immutable CI, Coze exact-SHA rollout/rollback and real provider billing/refund evidence are still mandatory.

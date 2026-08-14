@@ -141,6 +141,17 @@ describe('canvas command and explicit history wiring', () => {
     expect(serverSync).not.toContain('skipHistoryRef.current = false');
   });
 
+  it('finishes initial project hydration without a timer window that drops user history', () => {
+    const projectResolution = workspace.indexOf('const projectId = initialProjectIdRef.current');
+    const hydrationStart = workspace.indexOf('if (projectId) {', projectResolution);
+    const hydrationEnd = workspace.indexOf('setAuthChecked(true);', hydrationStart);
+    const hydration = workspace.slice(hydrationStart, hydrationEnd);
+
+    expect(hydration).toContain("as CanvasImage[], { history: 'skip' });");
+    expect(hydration).not.toContain('skipHistoryRef.current');
+    expect(workspace).not.toContain('const skipHistoryRef = useRef(false)');
+  });
+
   it('records user deletions during a server merge while excluding the snapshot itself', () => {
     expect(workspace).toContain("next.length < prev.length && historyIntent !== 'skip'");
     expect(workspace).not.toContain('next.length < prev.length && !serverSyncMergeRef.current');
@@ -170,6 +181,46 @@ describe('canvas command and explicit history wiring', () => {
     const redo = workspace.slice(redoStart, redoEnd);
     expect(undo.match(/isActiveCanvasHistoryTransition\(transition\)/g)?.length).toBeGreaterThanOrEqual(3);
     expect(redo.match(/isActiveCanvasHistoryTransition\(transition\)/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('commits undo and redo snapshots to the local project before rendering them', () => {
+    const undoStart = workspace.indexOf('const handleUndo');
+    const redoStart = workspace.indexOf('const handleRedo', undoStart);
+    const undo = workspace.slice(undoStart, redoStart);
+    const redoEnd = workspace.indexOf('const [activeGenerationCount', redoStart);
+    const redo = workspace.slice(redoStart, redoEnd);
+
+    for (const transition of [undo, redo]) {
+      const localCommit = transition.indexOf('commitCanvasHistorySnapshot(committed)');
+      const renderCommit = transition.indexOf('setImagesRaw(committed)');
+      expect(localCommit).toBeGreaterThan(-1);
+      expect(renderCommit).toBeGreaterThan(localCommit);
+    }
+  });
+
+  it('supersedes queued persistence with the committed undo or redo snapshot', () => {
+    const commitStart = workspace.indexOf('const commitCanvasHistorySnapshot');
+    const undoStart = workspace.indexOf('const handleUndo', commitStart);
+    const commit = workspace.slice(commitStart, undoStart);
+
+    expect(commit).toContain('persistCanvasHistorySnapshotRef.current(nextImages)');
+    expect(workspace).toContain('persistCanvasHistorySnapshotRef.current = persistCanvasImagesNow');
+  });
+
+  it('clears restored image tombstones before committing history snapshots in every canvas mode', () => {
+    const undoStart = workspace.indexOf('const handleUndo');
+    const redoStart = workspace.indexOf('const handleRedo', undoStart);
+    const undo = workspace.slice(undoStart, redoStart);
+    const redoEnd = workspace.indexOf('const [activeGenerationCount', redoStart);
+    const redo = workspace.slice(redoStart, redoEnd);
+
+    expect(workspace).toContain('const clearRestoredCanvasImageTombstones');
+    for (const transition of [undo, redo]) {
+      const clearTombstones = transition.indexOf('clearRestoredCanvasImageTombstones(previous, committed)');
+      const localCommit = transition.indexOf('commitCanvasHistorySnapshot(committed)');
+      expect(clearTombstones).toBeGreaterThan(-1);
+      expect(localCommit).toBeGreaterThan(clearTombstones);
+    }
   });
 
   it('adds explicit transaction support to the incremental compatibility layer', () => {

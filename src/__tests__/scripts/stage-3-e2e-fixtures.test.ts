@@ -21,6 +21,10 @@ const stage3BrowserHelperSource = readFileSync(
   resolve(process.cwd(), 'tests/helpers/stage-3-e2e.ts'),
   'utf8',
 );
+const stage3EvidenceFilterSource = readFileSync(
+  resolve(process.cwd(), 'tests/helpers/stage-3-evidence-filter.ts'),
+  'utf8',
+);
 const stage3FixtureSource = readFileSync(
   resolve(process.cwd(), 'scripts/stage-3-e2e-fixtures.mjs'),
   'utf8',
@@ -103,11 +107,12 @@ describe('Stage 3 performance evidence contract', () => {
   });
 
   it('never exempts project persistence failures from the abort gate', () => {
-    expect(stage3BrowserHelperSource).toContain("entry.method === 'GET'");
-    expect(stage3BrowserHelperSource).toContain("pathname === '/api/task-events'");
-    expect(stage3BrowserHelperSource).toContain("entry.method === 'POST' && pathname === '/api/activity'");
-    expect(stage3BrowserHelperSource).toContain("pathname.startsWith('/api/serve-upload/')");
-    expect(stage3BrowserHelperSource).not.toContain("pathname === '/api/user-data/sync'");
+    expect(stage3EvidenceFilterSource).toContain("entry.method === 'GET'");
+    expect(stage3EvidenceFilterSource).toContain("pathname === '/api/task-events'");
+    expect(stage3EvidenceFilterSource).toContain("pathname === '/api/activity'");
+    expect(stage3EvidenceFilterSource).toContain("pathname === '/api/user-data/record'");
+    expect(stage3EvidenceFilterSource).toContain("pathname.startsWith('/api/serve-upload/')");
+    expect(stage3EvidenceFilterSource).not.toContain("pathname === '/api/user-data/sync'");
   });
 
   it('names every evidence tree by Canvas mode and controlled run id', () => {

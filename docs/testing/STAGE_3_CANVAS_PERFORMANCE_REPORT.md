@@ -109,3 +109,14 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 - The performance observer previously executed a full Canvas image query once per monitored node on every animation frame. It now caches the exact image/card pair and only re-resolves after DOM disconnection; all decode, visibility, hit-test and continuity checks remain active.
 - Fresh local production Chromium results with unchanged thresholds: Chromium 100/300 pan `58.88/57.07` FPS; Chromium 1080p `58.58/57.69` FPS. The two 300-node save samples are `57.23/56.85` FPS with longest save task `0ms`. All six cases pass with zero disappeared frames and zero unclickable time.
 - These local values do not close S3-BUG-017. A new immutable GitHub Actions run must prove the low-core hosted result before release.
+
+## 2026-08-14 Final local `canvas-v2` matrix after hosted-failure triage
+
+- Controlled run: `local-perf-820b-20260814`; execution: `final-local-matrix-p1-barrier-20260814`.
+- Chromium, Chromium 1920x1080, Firefox, WebKit and mobile Chromium each pass `12/12`, for `60/60` after a clean reseed.
+- Thresholds and all continuity assertions remain unchanged. This local result does not waive immutable hosted failures under S3-BUG-017.
+- A prior local run failed four cases because batch-delete undo was later projected back to 98 nodes. Trace evidence proved a queued stale snapshot plus deletion tombstones, not a frame-rate threshold failure. The corrected focused order passes Firefox/mobile `4/4`.
+- Evidence root: `test-results/stage-3-baseline/canvas-v2/local-perf-820b-20260814/final-local-matrix-p1-barrier-20260814/`; attempt evidence retains screenshot, video, trace, Console, network and metrics.
+- Independent review found one P1 durability gap after an idle-equivalent save. TDD RED was `2 failed / 9 passed`; the immediate-barrier correction passes focused persistence/Canvas/evidence contracts `50/50` and the rebuilt production matrix remains `60/60`.
+- Companion gates before the final documentation-only update: full Vitest exit `0`, PostgreSQL concurrency `4/4`, TypeScript and ESLint exit `0`, production build `116/116`.
+- **Status: local performance/behavior candidate pass; immutable hosted matrix still required.**

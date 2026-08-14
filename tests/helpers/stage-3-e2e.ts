@@ -3,14 +3,7 @@ import { join } from 'node:path';
 
 import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
 import { stage3SourceIdentity } from './stage-3-source-state';
-
-interface Stage3EvidenceEntry {
-  method?: string;
-  status?: number;
-  text?: string;
-  type?: string;
-  url?: string;
-}
+import { isBenignStage3RequestAbort, type Stage3EvidenceEntry } from './stage-3-evidence-filter';
 
 export interface Stage3Evidence {
   directory: string;
@@ -63,30 +56,6 @@ function evidenceDirectory(testInfo: TestInfo): string {
     `retry-${testInfo.retry}`,
     `repeat-${testInfo.repeatEachIndex}`,
   );
-}
-
-function isBenignStage3RequestAbort(entry: Stage3EvidenceEntry): boolean {
-  const aborted = !entry.status
-    && /ERR_ABORTED|NS_ERROR_ABORT|NS_BINDING_ABORTED|Load request cancelled/i.test(entry.text ?? '');
-  if (!aborted || !entry.method || !entry.url) {
-    return false;
-  }
-
-  let pathname: string;
-  try {
-    pathname = new URL(entry.url).pathname;
-  } catch {
-    return false;
-  }
-
-  return (
-    entry.method === 'GET'
-    && (
-      pathname === '/api/task-events'
-      || pathname === '/api/models'
-      || pathname.startsWith('/api/serve-upload/')
-    )
-  ) || (entry.method === 'POST' && pathname === '/api/activity');
 }
 
 export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({

@@ -371,10 +371,13 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
         intervals: [250, 500, 1_000],
       }).toEqual({ marker: markerId, remoteDeleted: undefined });
 
-      const periodicSyncResponse = page.waitForResponse(response => {
+      const periodicSyncResponse = page.waitForResponse(async response => {
         if (response.request().method() !== 'GET') return false;
         const url = new URL(response.url());
-        return url.pathname === '/api/user-data/sync' && url.searchParams.get('key') === 'projects';
+        if (url.pathname !== '/api/user-data/sync' || url.searchParams.get('key') !== 'projects') return false;
+        if (!response.ok()) return false;
+        const body = await response.json().catch(() => null) as { value?: Array<Record<string, unknown>> } | null;
+        return projectImage(body?.value ?? [], projectId, markerId)?.id === markerId;
       }, { timeout: 20_000 });
       await page.clock.fastForward(30_100);
       const periodicResponse = await periodicSyncResponse;

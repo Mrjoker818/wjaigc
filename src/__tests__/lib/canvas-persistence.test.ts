@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CanvasPersistenceScheduler,
+  type CanvasPreparedPersistenceSnapshot,
   type CanvasPersistenceSnapshot,
   type CanvasPersistencePhase,
 } from '@/lib/canvas-kernel/persistence';
@@ -67,6 +68,7 @@ describe('CanvasPersistenceScheduler', () => {
     expect(writer).not.toHaveBeenCalled();
     await flush;
     expect(writer).toHaveBeenCalledTimes(1);
+    expect(writer).toHaveBeenCalledWith(expect.any(Object), 'immediate');
   });
 
   it('writes only the latest snapshot scheduled before an idle flush', async () => {
@@ -84,7 +86,7 @@ describe('CanvasPersistenceScheduler', () => {
     await scheduler.flush('idle');
 
     expect(writer).toHaveBeenCalledTimes(1);
-    expect(writer).toHaveBeenCalledWith(expect.objectContaining({ revision: 2 }));
+    expect(writer).toHaveBeenCalledWith(expect.objectContaining({ revision: 2 }), 'idle');
     expect(idle.requestedTimeout).toBe(1000);
     expect(scheduler.metrics.longestMainThreadTaskMs).toBeLessThanOrEqual(100);
   });
@@ -191,6 +193,48 @@ describe('CanvasPersistenceScheduler', () => {
     await scheduler.flush('immediate');
 
     expect(writer).toHaveBeenCalledTimes(1);
+  });
+
+  it('upgrades an idle-saved signature to an immediate durability barrier', async () => {
+    const writer = vi.fn(async (
+      _snapshot: CanvasPreparedPersistenceSnapshot,
+      _reason: string,
+    ): Promise<void> => undefined);
+    const scheduler = new CanvasPersistenceScheduler({ writer });
+    const unchanged = snapshot(1);
+
+    scheduler.schedule(unchanged);
+    await scheduler.flush('idle');
+    scheduler.schedule({ ...unchanged, revision: 2 });
+    await scheduler.flush('immediate');
+
+    expect(writer.mock.calls.map(([, reason]) => reason)).toEqual(['idle', 'immediate']);
+  });
+
+  it('upgrades an in-flight idle write when an equivalent immediate snapshot is queued', async () => {
+    let releaseIdle!: () => void;
+    const idleWrite = new Promise<void>((resolve) => { releaseIdle = resolve; });
+    const writer = vi.fn(async (
+      _snapshot: CanvasPreparedPersistenceSnapshot,
+      _reason: string,
+    ): Promise<void> => undefined)
+      .mockImplementationOnce(() => idleWrite)
+      .mockResolvedValue(undefined);
+    const scheduler = new CanvasPersistenceScheduler({
+      writer,
+      deferWork: async () => undefined,
+    });
+    const unchanged = snapshot(1);
+
+    scheduler.schedule(unchanged);
+    const idleFlush = scheduler.flush('idle');
+    await vi.waitFor(() => expect(writer).toHaveBeenCalledTimes(1));
+    scheduler.schedule({ ...unchanged, revision: 2 });
+    const immediateFlush = scheduler.flush('immediate');
+    releaseIdle();
+    await Promise.all([idleFlush, immediateFlush]);
+
+    expect(writer.mock.calls.map(([, reason]) => reason)).toEqual(['idle', 'immediate']);
   });
 
   it('marks data and blob media in the prepared unload snapshot', async () => {

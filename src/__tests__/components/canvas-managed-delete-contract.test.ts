@@ -59,10 +59,12 @@ describe('managed canvas image deletion wiring', () => {
     expect(workspaceSource).toContain('onDeleteImages={handleDeleteCanvasImages}');
   });
 
-  it('reconciles managed placement lifecycle before committing asset-v3 undo and redo', () => {
+  it('reconciles managed placement lifecycle and clears restored tombstones before undo and redo commits', () => {
+    const tombstoneStart = workspaceSource.indexOf('const clearRestoredCanvasImageTombstones = useCallback');
     const lifecycleStart = workspaceSource.indexOf('const syncAssetV3HistoryTransition = useCallback');
     const undoStart = workspaceSource.indexOf('const handleUndo = useCallback');
     const redoStart = workspaceSource.indexOf('const handleRedo = useCallback');
+    const tombstones = workspaceSource.slice(tombstoneStart, lifecycleStart);
     const lifecycle = workspaceSource.slice(lifecycleStart, undoStart);
     const undo = workspaceSource.slice(undoStart, redoStart);
     const redo = workspaceSource.slice(redoStart, workspaceSource.indexOf('const [activeGenerationCount', redoStart));
@@ -70,13 +72,18 @@ describe('managed canvas image deletion wiring', () => {
     expect(lifecycle).toContain('await reconcileManagedPlacementHistoryTransition(');
     expect(lifecycle).toContain('canvasImages: serializeCanvasWorkspacePlacements([...items])');
     expect(lifecycle).toContain('commitSnapshot,');
-    expect(lifecycle).toContain('clearRecentlyDeletedImageIds(restoredIds)');
+    expect(tombstones).toContain('recentlyDeletedIdsRef.current.delete(id)');
+    expect(tombstones).toContain('clearRecentlyDeletedImageIds(restoredIds)');
     expect(undo).toContain("getAssetGraphMode() === 'asset-v3'");
     expect(undo).toContain('await syncAssetV3HistoryTransition(previous, result)');
+    expect(undo).toContain('clearRestoredCanvasImageTombstones(previous, committed)');
     expect(undo.indexOf('await syncAssetV3HistoryTransition(previous, result)')).toBeLessThan(undo.indexOf('setImagesRaw(committed)'));
+    expect(undo.indexOf('clearRestoredCanvasImageTombstones(previous, committed)')).toBeLessThan(undo.indexOf('commitCanvasHistorySnapshot(committed)'));
 
     expect(redo).toContain("getAssetGraphMode() === 'asset-v3'");
     expect(redo).toContain('await syncAssetV3HistoryTransition(previous, result)');
+    expect(redo).toContain('clearRestoredCanvasImageTombstones(previous, committed)');
     expect(redo.indexOf('await syncAssetV3HistoryTransition(previous, result)')).toBeLessThan(redo.indexOf('setImagesRaw(committed)'));
+    expect(redo.indexOf('clearRestoredCanvasImageTombstones(previous, committed)')).toBeLessThan(redo.indexOf('commitCanvasHistorySnapshot(committed)'));
   });
 });

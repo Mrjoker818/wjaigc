@@ -35,9 +35,9 @@ import type {
 } from '@/lib/canvas-kernel/types';
 import {
   getCanvasViewportMarginFactor,
-  PAN_VIEWPORT_SYNC_INTERVAL_MS,
   resolveCanvasCullingBounds,
   resolveCanvasRenderOffset,
+  shouldSyncCanvasPanViewport,
 } from '@/lib/canvas-pan-virtualization';
 
 interface UseCanvasViewportOptions {
@@ -133,6 +133,7 @@ export function useCanvasViewport({
   ));
   const panRafRef = useRef<number | null>(null);
   const panViewportSyncAtRef = useRef(0);
+  const panViewportSyncOffsetRef = useRef({ ...panViewportOffset });
 
   const activeState = mode === 'canvas-v2' ? kernelState : legacyState;
   const activeRef = useCallback(() => (
@@ -197,12 +198,14 @@ export function useCanvasViewport({
   }, [activeRef, publish]);
 
   const beginPan = useCallback((pointer: CanvasPointerSample) => {
+    const active = activeRef();
     publish(
       legacyBeginPan(legacyRef.current, pointer),
       beginKernelPan(kernelRef.current, pointer),
     );
     panViewportSyncAtRef.current = 0;
-  }, [publish]);
+    panViewportSyncOffsetRef.current = { ...active.committed };
+  }, [activeRef, publish]);
 
   const previewPan = useCallback((pointer: CanvasPointerSample) => {
     const legacy = legacyPreviewPan(legacyRef.current, pointer);
@@ -219,8 +222,13 @@ export function useCanvasViewport({
       if (element) {
         element.style.transform = `translate(${active.preview.x}px, ${active.preview.y}px) scale(${active.zoom})`;
       }
-      if (now - panViewportSyncAtRef.current >= PAN_VIEWPORT_SYNC_INTERVAL_MS) {
+      if (shouldSyncCanvasPanViewport(
+        panViewportSyncOffsetRef.current,
+        active.preview,
+        now - panViewportSyncAtRef.current,
+      )) {
         panViewportSyncAtRef.current = now;
+        panViewportSyncOffsetRef.current = { ...active.preview };
         setPanViewportOffset(active.preview);
         if (mode !== 'canvas-v2') setLegacyState(legacyRef.current);
         if (mode !== 'legacy') setKernelState(kernelRef.current);
@@ -241,7 +249,9 @@ export function useCanvasViewport({
       ? cancelKernelPan(kernelRef.current, pointer)
       : commitKernelPan(kernelRef.current, pointer);
     publish(legacy, kernel);
-  }, [publish]);
+    const active = mode === 'canvas-v2' ? kernel : legacy;
+    panViewportSyncOffsetRef.current = { ...active.preview };
+  }, [mode, publish]);
 
   const commitPan = useCallback((pointer?: Pick<CanvasPointerSample, 'pointerId'>) => {
     finishPan(pointer, false);

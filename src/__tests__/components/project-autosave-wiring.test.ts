@@ -25,6 +25,16 @@ describe('project autosave wiring', () => {
     expect(workspaceSource).toContain("persistenceHint === 'skip'");
   });
 
+  it('keeps an immediate Canvas snapshot pending until the server accepts it', () => {
+    const writerStart = workspaceSource.indexOf('writer: async (snapshot');
+    const writerEnd = workspaceSource.indexOf('const canvasPersistenceScheduler =', writerStart);
+    const writerSource = workspaceSource.slice(writerStart, writerEnd);
+
+    expect(writerStart).toBeGreaterThan(-1);
+    expect(writerSource).toContain("reason === 'immediate'");
+    expect(writerSource).toContain('await manager.flushProjectsToServer()');
+  });
+
   it('does not debounce or serialize the whole project on the interaction path', () => {
     expect(workspaceSource).not.toContain('const autoSaveRef = useRef');
     expect(workspaceSource).not.toContain('lastAutoSaveSignatureRef');

@@ -852,3 +852,12 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Hosted performance thresholds remain exactly 55/45 FPS and 100ms. The candidate removes full-DOM rescans from the measurement observer; six local desktop Chromium performance cases pass, but immutable hosted evidence is still mandatory.
 - Shadow WebKit immediate reload passes the exact scenario six consecutive local runs. Because the immutable run failed once, this remains a rerun-required item rather than a claimed closure.
 - **Readiness remains NOT READY.** A new immutable matrix must confirm these classifications; real-P0 configuration and Coze `shadow -> canvas-v2 -> legacy` remain blocking.
+
+## 2026-08-14 Stage 3 latest local candidate readiness
+
+- Candidate base is `main@820b33d669e529e90f61837314b164b3a2119675` on `codex/wj-stable-s3`; `origin/main` matched that base before this uncommitted candidate. `stable` was not checked out or modified.
+- Local production `canvas-v2` five-profile matrix passes `60/60` after a clean 15-project reseed. The Firefox/mobile batch-delete undo followed by 100-node continuity passes `4/4` in focused order.
+- Production build passes `116/116`; TypeScript, ESLint, full Vitest and three PostgreSQL concurrency files (`4/4`) exit `0`.
+- S3-BUG-019, S3-BUG-020 and S3-TEST-007 are locally closed with retained RED/GREEN evidence. The post-review execution `final-local-matrix-p1-barrier-20260814` passes `60/60`. S3-BUG-017 and S3-BUG-018 still require a new immutable hosted run.
+- GitHub Actions run `31797149839`, attempt 2 remains RED. The real-P0 job is blocked by missing required Secrets; no mock or skip is accepted as closure.
+- **Conclusion: CONDITIONAL / NOT READY.** Do not enter Stage 4/5. Commit/push only the reviewed `main` candidate, then require immutable CI and Coze exact-SHA `shadow -> canvas-v2 -> legacy`, including real provider and billing/refund evidence.

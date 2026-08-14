@@ -710,3 +710,11 @@
 - `HOSTED RERUN REQUIRED`: cached continuity-probe lookups retain all assertions and pass six local desktop Chromium performance gates, but S3-BUG-017 remains open until immutable GitHub Actions meets the unchanged thresholds.
 - `NOT REPRODUCED LOCALLY / HOSTED RERUN REQUIRED`: shadow WebKit move/resize/undo/redo/immediate reload passes `6/6`; the single immutable rollback remains recorded.
 - `EXTERNALLY BLOCKED`: real P0 still lacks GitHub Secrets; Coze exact-SHA shadow, isolated canvas-v2 and mandatory legacy rollback remain unverified.
+
+### 2026-08-14 latest candidate remaining scope
+
+- `LOCALLY VERIFIED`: production `canvas-v2` matrix `60/60` in `final-local-matrix-p1-barrier-20260814`, including Firefox/mobile batch-delete undo followed by 100-node continuity and the independent-review immediate-persistence barrier; mandatory artifacts are retained.
+- `LOCALLY VERIFIED`: TypeScript, ESLint, full Vitest, production build and layer/annotation/element-board PostgreSQL concurrency (`4/4`).
+- `IMMUTABLE CI REQUIRED`: run `31797149839`, attempt 2 remains RED and predates the local history/tombstone closure. A new commit and hosted rerun must meet unchanged thresholds and reproduce no WebKit immediate-reload rollback.
+- `EXTERNALLY BLOCKED`: real-P0 GitHub Secrets, paid provider generation, authoritative charge/cancel/refund rows, Coze exact-SHA shadow, isolated canvas-v2 and final legacy rollback.
+- `NOT AUTHORIZED`: Stage 4/5 and any write to `stable` remain prohibited until all required Stage 3 external gates close.

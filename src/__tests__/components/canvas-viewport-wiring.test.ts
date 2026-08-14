@@ -25,7 +25,7 @@ describe('infinite canvas viewport controller wiring', () => {
 
     expect(canvasSource).not.toContain('const panRafRef = useRef<number | null>(null)');
     expect(hookSource).toContain('requestAnimationFrame');
-    expect(hookSource).toContain('PAN_VIEWPORT_SYNC_INTERVAL_MS');
+    expect(hookSource).toContain('shouldSyncCanvasPanViewport');
     expect(hookSource).toContain('resolveCanvasCullingBounds');
   });
 

@@ -40,7 +40,7 @@ export interface CanvasPersistenceMetrics {
 type IdleHandle = ReturnType<typeof setTimeout> | number | object;
 
 interface CanvasPersistenceSchedulerOptions {
-  writer: (snapshot: CanvasPreparedPersistenceSnapshot) => Promise<void> | void;
+  writer: (snapshot: CanvasPreparedPersistenceSnapshot, reason: string) => Promise<void> | void;
   prepare?: (
     snapshot: CanvasPersistenceSnapshot,
   ) => Promise<CanvasPreparedPersistenceSnapshot> | CanvasPreparedPersistenceSnapshot;
@@ -145,12 +145,14 @@ export class CanvasPersistenceScheduler {
   private readonly projectEpochs = new Map<string, number>();
   private readonly preparedSnapshots = new Map<string, CanvasPreparedPersistenceSnapshot>();
   private readonly savedSignatures = new Map<string, string>();
+  private readonly serverFlushedSignatures = new Map<string, string>();
   private pendingSnapshot: CanvasPersistenceSnapshot | null = null;
   private idleHandle: IdleHandle | null = null;
   private drainPromise: Promise<void> | null = null;
   private deferredFlushPromise: Promise<void> | null = null;
   private activeSnapshot: { projectId: string; revision: number; epoch: number } | null = null;
   private activeSourceSnapshot: CanvasPersistenceSnapshot | null = null;
+  private requestedFlushReason: string | null = null;
   private currentPhase: CanvasPersistencePhase = 'idle';
 
   constructor(options: CanvasPersistenceSchedulerOptions) {
@@ -186,6 +188,7 @@ export class CanvasPersistenceScheduler {
   }
 
   flush(reason: string): Promise<void> {
+    this.requestFlushReason(reason);
     this.clearIdleHandle();
     if (this.drainPromise) return this.drainPromise;
     if (this.deferredFlushPromise) return this.deferredFlushPromise;
@@ -240,9 +243,9 @@ export class CanvasPersistenceScheduler {
   }
 
   private drain(reason: string): Promise<void> {
-    void reason;
     if (this.drainPromise) return this.drainPromise;
-    this.drainPromise = this.runDrain().finally(() => {
+    this.requestFlushReason(reason);
+    this.drainPromise = this.runDrain(reason).finally(() => {
       this.drainPromise = null;
       if (this.pendingSnapshot && this.currentPhase !== 'failed') {
         this.setPhase('scheduled');
@@ -253,13 +256,14 @@ export class CanvasPersistenceScheduler {
           }, this.maxWaitMs);
         }
       } else if (!this.pendingSnapshot && this.currentPhase !== 'failed') {
+        this.requestedFlushReason = null;
         this.setPhase('idle');
       }
     });
     return this.drainPromise;
   }
 
-  private async runDrain(): Promise<void> {
+  private async runDrain(defaultReason: string): Promise<void> {
     while (this.pendingSnapshot) {
       const snapshot = this.pendingSnapshot;
       this.pendingSnapshot = null;
@@ -273,7 +277,12 @@ export class CanvasPersistenceScheduler {
       }
 
       this.preparedSnapshots.set(snapshot.projectId, prepared);
-      if (this.savedSignatures.get(snapshot.projectId) === prepared.signature) {
+      const writeReason = this.requestedFlushReason ?? defaultReason;
+      this.requestedFlushReason = null;
+      const signatureAlreadySaved = this.savedSignatures.get(snapshot.projectId) === prepared.signature;
+      const needsImmediateBarrier = writeReason === 'immediate'
+        && this.serverFlushedSignatures.get(snapshot.projectId) !== prepared.signature;
+      if (signatureAlreadySaved && !needsImmediateBarrier) {
         this.metrics.deduplicatedSnapshots += 1;
         this.clearActiveSnapshot(snapshot);
         continue;
@@ -285,11 +294,14 @@ export class CanvasPersistenceScheduler {
           try {
             this.setPhase('writing');
             const startedAt = this.now();
-            const writeResult = this.writer(prepared);
+            const writeResult = this.writer(prepared, writeReason);
             this.recordMainThreadTask(startedAt);
             await writeResult;
             if (this.isProjectEpochCurrent(snapshot.projectId, epoch)) {
               this.savedSignatures.set(snapshot.projectId, prepared.signature);
+              if (writeReason === 'immediate') {
+                this.serverFlushedSignatures.set(snapshot.projectId, prepared.signature);
+              }
               this.metrics.writtenSnapshots += 1;
             }
             break;
@@ -309,6 +321,12 @@ export class CanvasPersistenceScheduler {
       } finally {
         this.clearActiveSnapshot(snapshot);
       }
+    }
+  }
+
+  private requestFlushReason(reason: string): void {
+    if (!this.requestedFlushReason || reason === 'immediate') {
+      this.requestedFlushReason = reason;
     }
   }
 

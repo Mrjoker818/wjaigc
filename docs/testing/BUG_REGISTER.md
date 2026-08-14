@@ -1631,3 +1631,48 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Actual | The only failing run restored 96x96 at left 232px/top 104px, matching an earlier geometry. Legacy and canvas-v2 WebKit passed the same flow. |
 | Follow-up | A correctly configured isolated shadow production server passed the exact WebKit flow once, then passed five consecutive repetitions. Earlier local setup failures were separately identified as mismatched auth secret and empty media root and are excluded from product evidence. |
 | Status | **OPEN / NOT LOCALLY REPRODUCED IN 6 RUNS / IMMUTABLE CI RERUN REQUIRED.** No speculative persistence change has been made. |
+
+### S3-BUG-019: Batch-delete undo was overwritten by deletion tombstones and a queued stale snapshot
+
+| Field | Detail |
+|---|---|
+| Severity | P1 Canvas data/persistence integrity |
+| Module | Canvas history, project synchronization and persistence scheduler |
+| Environment | Local production `canvas-v2`, Firefox and mobile Chromium, controlled PostgreSQL run `local-perf-820b-20260814` |
+| Reproduction | Open the seeded 100-node project, delete two selected nodes, press Ctrl/Cmd+Z once and allow the next project synchronization to complete. |
+| Expected | The two nodes, their layer order and all 100 placements remain restored and persist through the following sync and performance scenario. |
+| Actual | Undo briefly restored 100 nodes, then `onProjectsChanged` projected 98 again. The following performance test also observed 98, producing four cascading failures in the 60-case matrix. |
+| Root cause | A queued 98-node persistence snapshot was not superseded by the committed undo snapshot. Restored IDs were also removed from deletion tombstones only inside the `asset-v3` path, so `legacy`/`canvas-v2` sync filtered the restored nodes again. |
+| Fix | A committed undo/redo snapshot now supersedes queued persistence. Restored IDs are cleared from both workspace and `UserManager` tombstones before history commits in every Canvas mode; remote asset lifecycle reconciliation remains conditional on `asset-v3`. |
+| Regression | Source-contract RED: `1 failed / 20 passed`; the first focused browser rerun after only the queue fix remained RED `4/4`. Final Firefox/mobile rerun passes `4/4`; a fresh five-profile production matrix passes `60/60`. Focused history/persistence tests pass `35/35`; final full Vitest exits `0`. |
+| Evidence | `test-results/stage-3-baseline/canvas-v2/local-perf-820b-20260814/final-local-matrix-p1-barrier-20260814/` plus attempt-specific screenshot, video, trace, Console and network artifacts. |
+| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN REQUIRED.** |
+
+### S3-TEST-007: Browser evidence treated expected lifecycle aborts as product failures
+
+| Field | Detail |
+|---|---|
+| Severity | P2 release-evidence integrity |
+| Module | Stage 3 Playwright evidence collection |
+| Environment | Local five-profile production matrix and GitHub Actions run `31797149839`, attempt 2 |
+| Reproduction | Finish a passing browser case while task-event/activity requests are still owned by page teardown. Context closure can report an aborted request after asserted work completes. |
+| Expected | Benign teardown aborts are classified narrowly; pre-teardown aborts, HTTP failures, Console errors and page errors still fail the test. |
+| Actual | Abort classification was duplicated in the fixture and could manufacture failures or hide request-type differences. |
+| Fix | Centralize the lifecycle-abort predicate using the exact HTTP method/path, abort text and absence of an HTTP status, with permanent unit contracts. All other network and runtime failures remain fatal. |
+| Regression | Dedicated filter and fixture contracts pass in final full Vitest; the five-profile Canvas matrix passes `60/60` with mandatory evidence retained. |
+| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN REQUIRED.** |
+
+### S3-BUG-020: Immediate history persistence could miss the server durability barrier
+
+| Field | Detail |
+|---|---|
+| Severity | P1 Canvas persistence durability |
+| Module | Canvas persistence scheduler and undo/redo commits |
+| Environment | Independent read-only review of the local Stage 3 candidate based on `main@820b33d669e529e90f61837314b164b3a2119675` |
+| Reproduction | Let an idle write finish for a snapshot signature, then request an immediate flush for the same signature; repeat while the equivalent idle write is still in flight. |
+| Expected | The immediate request crosses the server durability barrier even when the snapshot content is already saved locally or an equivalent idle write is active. |
+| Actual | Signature deduplication could return before the immediate writer path called `flushProjectsToServer()`, leaving a navigation-sensitive history commit without a confirmed server flush. |
+| Root cause | Deduplication tracked only the saved content signature and did not distinguish an idle save from an immediate server-flushed signature. |
+| Fix | Track server-flushed signatures separately, promote a queued or completed equivalent idle save to one immediate writer pass, and preserve immediate-over-idle reason priority. |
+| Regression | TDD RED was `2 failed / 9 passed`; focused persistence/Canvas/evidence contracts pass `50/50`. The rebuilt production five-profile Canvas matrix passes `60/60` in execution `final-local-matrix-p1-barrier-20260814`. |
+| Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN REQUIRED.** |

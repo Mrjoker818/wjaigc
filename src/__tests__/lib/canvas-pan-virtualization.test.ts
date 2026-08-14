@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   getCanvasViewportMarginFactor,
+  PAN_VIEWPORT_SYNC_DISTANCE_PX,
   PAN_VIEWPORT_SYNC_INTERVAL_MS,
   resolveCanvasCullingBounds,
   resolveCanvasCullingOffset,
   resolveCanvasRenderOffset,
   shouldSuspendCanvasVirtualization,
+  shouldSyncCanvasPanViewport,
 } from '@/lib/canvas-pan-virtualization';
 
 describe('canvas pan virtualization', () => {
@@ -31,6 +33,26 @@ describe('canvas pan virtualization', () => {
 
     expect(PAN_VIEWPORT_SYNC_INTERVAL_MS).toBeLessThanOrEqual(100);
     expect(PAN_VIEWPORT_SYNC_INTERVAL_MS).toBeGreaterThanOrEqual(16);
+  });
+
+  it('recomputes React culling only after both the time and distance boundaries are crossed', () => {
+    const lastSynced = { x: 100, y: 80 };
+
+    expect(shouldSyncCanvasPanViewport(
+      lastSynced,
+      { x: 100 + PAN_VIEWPORT_SYNC_DISTANCE_PX - 1, y: 80 },
+      PAN_VIEWPORT_SYNC_INTERVAL_MS,
+    )).toBe(false);
+    expect(shouldSyncCanvasPanViewport(
+      lastSynced,
+      { x: 100 + PAN_VIEWPORT_SYNC_DISTANCE_PX, y: 80 },
+      PAN_VIEWPORT_SYNC_INTERVAL_MS - 1,
+    )).toBe(false);
+    expect(shouldSyncCanvasPanViewport(
+      lastSynced,
+      { x: 100 + PAN_VIEWPORT_SYNC_DISTANCE_PX, y: 80 },
+      PAN_VIEWPORT_SYNC_INTERVAL_MS,
+    )).toBe(true);
   });
 
   it('keeps the render transform aligned with the sampled pan offset during an active pan', () => {
