@@ -1,9 +1,10 @@
 # Stage 3 Canvas Performance And Reliability Report
 
-Date: 2026-08-14  
-Baseline: `origin/main@18346aa3c48f455ed8d01c3093eea2474e41a166`  
-Local candidate: `ea2ce0828d87a39271b93304b26f158821d124c0` plus the reviewed Task 10 working tree  
-Branch: `codex/wj-stable-s3`  
+Date: 2026-08-14
+Pre-bootstrap baseline: `origin/main@18346aa3c48f455ed8d01c3093eea2474e41a166`
+Governance bootstrap: `d9fde3a0f36b7ca8532591e8b098e4dfb1ac40f6`
+Reviewed code candidate before this report-only cleanup: `73443d06ab0943e24c9942fdfcdfac6aeaf9f23c`
+Branch: `codex/wj-stable-s3`
 Protected branch: `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`, read-only and unchanged
 
 ## Scope And Evidence
