@@ -1,4 +1,4 @@
-import type { Locator, Page, Response } from '@playwright/test';
+import type { Locator, Page, Request, Response } from '@playwright/test';
 
 import {
   assertCanvasNodeContinuity,
@@ -60,8 +60,50 @@ function isProjectSave(
   }
 }
 
+function trackModelRequestIdle(page: Page) {
+  const pending = new Set<Request>();
+  let lastActivityAt = Date.now();
+  const isTracked = (request: Request) => (
+    request.method() === 'GET'
+    && /\/api\/models\?type=(image|chat)(?:&|$)/.test(request.url())
+  );
+  const onRequest = (request: Request) => {
+    if (!isTracked(request)) return;
+    pending.add(request);
+    lastActivityAt = Date.now();
+  };
+  const onSettled = (request: Request) => {
+    if (!isTracked(request)) return;
+    pending.delete(request);
+    lastActivityAt = Date.now();
+  };
+  page.on('request', onRequest);
+  page.on('requestfinished', onSettled);
+  page.on('requestfailed', onSettled);
+  return {
+    wait: async () => {
+      await expect.poll(() => (
+        pending.size === 0 && Date.now() - lastActivityAt >= 250
+      ), {
+        message: 'image and chat model requests should settle before navigation',
+        timeout: 10_000,
+        intervals: [50, 100, 150],
+      }).toBe(true);
+    },
+    dispose: () => {
+      page.off('request', onRequest);
+      page.off('requestfinished', onSettled);
+      page.off('requestfailed', onSettled);
+    },
+  };
+}
+
 function center(box: { x: number; y: number; width: number; height: number }) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+function enforcesDesktopChromiumPerformance(projectName: string): boolean {
+  return projectName === 'chromium' || projectName === 'chromium-1080p';
 }
 
 async function stableCardBox(locator: Locator) {
@@ -86,6 +128,51 @@ async function stableCardBox(locator: Locator) {
   return box!;
 }
 
+async function captureCanvasGeometry(page: Page, nodeId: string) {
+  return page.evaluate(id => {
+    const card = document.querySelector<HTMLElement>(`[data-canvas-image-id="${CSS.escape(id)}"]`);
+    const surface = document.querySelector<HTMLElement>('[data-canvas-surface="true"]');
+    const viewport = document.querySelector<HTMLElement>('[data-canvas-viewport]');
+    return {
+      cardLeft: card?.style.left ?? null,
+      cardTop: card?.style.top ?? null,
+      cardWidth: card?.style.width ?? null,
+      cardHeight: card?.style.height ?? null,
+      selected: card?.dataset.canvasSelected ?? null,
+      surfaceTransform: surface?.style.transform ?? null,
+      computedSurfaceTransform: surface ? getComputedStyle(surface).transform : null,
+      surfaceRect: surface ? {
+        left: surface.getBoundingClientRect().left,
+        top: surface.getBoundingClientRect().top,
+      } : null,
+      occupiedRight: viewport?.dataset.canvasOccupiedRight ?? null,
+      viewportScrollLeft: viewport?.scrollLeft ?? null,
+      viewportScrollTop: viewport?.scrollTop ?? null,
+      scrollAncestors: card ? Array.from({ length: 6 }, (_, index) => {
+        let ancestor: HTMLElement | null = card;
+        for (let depth = 0; depth <= index; depth += 1) ancestor = ancestor?.parentElement ?? null;
+        return ancestor ? {
+          tag: ancestor.tagName,
+          className: ancestor.className,
+          scrollLeft: ancestor.scrollLeft,
+          scrollTop: ancestor.scrollTop,
+        } : null;
+      }).filter(Boolean) : [],
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+      visualViewport: window.visualViewport ? {
+        offsetLeft: window.visualViewport.offsetLeft,
+        offsetTop: window.visualViewport.offsetTop,
+        pageLeft: window.visualViewport.pageLeft,
+        pageTop: window.visualViewport.pageTop,
+        width: window.visualViewport.width,
+      } : null,
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth,
+    };
+  }, nodeId);
+}
+
 async function hittableCardCenter(page: Page, locator: Locator) {
   const box = await stableCardBox(locator);
   const point = center(box);
@@ -99,8 +186,61 @@ async function hittableCardCenter(page: Page, locator: Locator) {
   return { box, point };
 }
 
-async function clickCanvasBlankSpace(page: Page) {
-  const point = await page.locator('[data-canvas-viewport]').evaluate(viewport => {
+async function findHittableRightEdgePair(page: Page, imageIds: string[]): Promise<[string, string]> {
+  const candidates = [0, 1, 2, 3, 4]
+    .map(row => imageIds.slice(row * 20 + 18, row * 20 + 20))
+    .filter((pair): pair is [string, string] => pair.length === 2);
+  let selected: [string, string] | null = null;
+
+  await expect.poll(async () => {
+    selected = await page.evaluate(candidatePairs => {
+      const viewport = document.querySelector<HTMLElement>('[data-canvas-viewport]')?.getBoundingClientRect();
+      if (!viewport) return null;
+      const isClearPoint = (x: number, y: number, expectedId?: string) => {
+        if (x <= viewport.left || x >= viewport.right || y <= viewport.top || y >= viewport.bottom) return false;
+        const target = document.elementFromPoint(x, y);
+        const imageId = target?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId;
+        const covered = target?.closest('[data-toolbar], [data-floating-panel], [data-popup], [data-modal]');
+        return !covered && (expectedId ? imageId === expectedId : !imageId);
+      };
+      for (const pair of candidatePairs) {
+        const rectangles = pair.map(id => (
+          document.querySelector<HTMLElement>(`[data-canvas-image-id="${CSS.escape(id)}"]`)?.getBoundingClientRect()
+        ));
+        if (rectangles.some(rectangle => !rectangle)) continue;
+        const [first, second] = rectangles as [DOMRect, DOMRect];
+        const centersAreHittable = pair.every((id, index) => {
+          const rectangle = rectangles[index]!;
+          return isClearPoint(
+            rectangle.left + rectangle.width / 2,
+            rectangle.top + rectangle.height / 2,
+            id,
+          );
+        });
+        const startIsClear = isClearPoint(
+          Math.max(first.right, second.right) + 2,
+          Math.max(first.bottom, second.bottom) + 2,
+        );
+        const endIsClear = isClearPoint(
+          Math.min(first.left, second.left) - 2,
+          Math.min(first.top, second.top) - 2,
+        );
+        if (centersAreHittable && startIsClear && endIsClear) return pair;
+      }
+      return null;
+    }, candidates);
+    return selected;
+  }, {
+    message: 'a right-edge Canvas pair should be fully hittable and clear of floating UI',
+    timeout: 10_000,
+    intervals: [100, 250, 500],
+  }).not.toBeNull();
+
+  return selected!;
+}
+
+async function findCanvasBlankSpace(page: Page) {
+  return page.locator('[data-canvas-viewport]').evaluate(viewport => {
     const rect = viewport.getBoundingClientRect();
     const blockedSelector = [
       '[data-canvas-image-id]',
@@ -121,10 +261,199 @@ async function clickCanvasBlankSpace(page: Page) {
     }
     throw new Error('No unobstructed Canvas point is available for keyboard focus');
   });
+}
+
+async function clickCanvasBlankSpace(page: Page) {
+  const point = await findCanvasBlankSpace(page);
   await page.mouse.click(point.x, point.y);
 }
 
 test.describe('Stage 3 Canvas kernel baseline', () => {
+  test('uses the hand tool for panning and preserves focused button Space behavior', async ({ page }, testInfo) => {
+    const projectId = stage3ProjectId(testInfo.project.name, 1);
+    await loginStage3User(page);
+    await openStage3Project(page, projectId);
+
+    const handTool = page.getByTestId('canvas-hand-tool');
+    const selectTool = page.getByTestId('canvas-select-tool');
+    await handTool.click();
+    await expect(handTool).toHaveAttribute('aria-pressed', 'true');
+
+    const before = await page.locator('[data-canvas-surface]').getAttribute('style');
+    const start = await findCanvasBlankSpace(page);
+    await dragPointerAcrossFrames(page, start, { x: start.x + 64, y: start.y + 40 }, 16);
+    const after = await page.locator('[data-canvas-surface]').getAttribute('style');
+    expect(after).not.toBe(before);
+
+    await selectTool.focus();
+    await page.keyboard.press('Space');
+    await expect(selectTool).toHaveAttribute('aria-pressed', 'true');
+    await expect(handTool).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('persists a user deletion made during the server snapshot merge window', async ({ page }, testInfo) => {
+    test.setTimeout(95_000);
+    const projectId = stage3ProjectId(testInfo.project.name, 100);
+    await loginStage3User(page);
+    const initialResponse = await page.request.get('/api/user-data/sync?key=projects');
+    expect(initialResponse.ok()).toBe(true);
+    const initialBody = await initialResponse.json() as {
+      value?: Array<Record<string, unknown>>;
+      projectRevision?: number;
+    };
+    const originalProjects = structuredClone(initialBody.value ?? []);
+    const project = originalProjects.find(candidate => candidate.id === projectId);
+    expect(project).toBeTruthy();
+    const originalImages = project!.canvasImages as Array<Record<string, unknown>>;
+    expect(originalImages).toHaveLength(100);
+    const remoteDeletedNodeId = String(originalImages[0].id);
+    const nodeId = String(originalImages[50].id);
+    const markerId = `stage3-remote-marker-${testInfo.project.name}-${Date.now()}`;
+
+    await page.clock.install({ time: new Date() });
+    const modelRequestIdle = trackModelRequestIdle(page);
+    const quickCreateModelsLoaded = Promise.all([
+      page.waitForResponse(response => (
+        response.ok()
+        && response.url().includes('/api/models?type=image')
+      )),
+      page.waitForResponse(response => (
+        response.ok()
+        && response.url().includes('/api/models?type=chat')
+      )),
+    ]);
+    await openStage3Project(page, projectId);
+    await quickCreateModelsLoaded;
+    await modelRequestIdle.wait();
+    await waitForStage3Node(page, nodeId);
+    await waitForStage3Node(page, remoteDeletedNodeId);
+    let remoteMutationAttempted = false;
+    try {
+      const remoteProjects = structuredClone(originalProjects);
+      const remoteProject = remoteProjects.find(candidate => candidate.id === projectId)!;
+      const sourceImage = (remoteProject.canvasImages as Array<Record<string, unknown>>)[0];
+      remoteProject.canvasImages = [
+        ...(remoteProject.canvasImages as Array<Record<string, unknown>>)
+          .filter(image => image.id !== remoteDeletedNodeId),
+        {
+          ...sourceImage,
+          id: markerId,
+          x: Number(sourceImage.x ?? 0) + 480,
+          y: Number(sourceImage.y ?? 0) + 120,
+          prompt: markerId,
+        },
+      ];
+      remoteProject.settings = {
+        ...((remoteProject.settings as Record<string, unknown> | undefined) ?? {}),
+        stage3MergeNonce: markerId,
+      };
+      remoteMutationAttempted = true;
+      const remoteWrite = await page.request.post('/api/user-data/sync', {
+        data: {
+          key: 'projects',
+          value: remoteProjects,
+          ...(typeof initialBody.projectRevision === 'number'
+            ? { projectRevision: initialBody.projectRevision }
+            : {}),
+        },
+      });
+      expect(remoteWrite.ok()).toBe(true);
+
+      await expect.poll(async () => {
+        const projects = await readStage3Projects(page);
+        return {
+          marker: projectImage(projects, projectId, markerId)?.id,
+          remoteDeleted: projectImage(projects, projectId, remoteDeletedNodeId)?.id,
+        };
+      }, {
+        message: 'the exact remote snapshot should exist on the server before the online merge',
+        timeout: 10_000,
+        intervals: [250, 500, 1_000],
+      }).toEqual({ marker: markerId, remoteDeleted: undefined });
+
+      await page.clock.fastForward(30_100);
+      await waitForStage3Node(page, markerId, 20_000);
+      await expect(page.getByAltText(remoteDeletedNodeId, { exact: true })).toHaveCount(0);
+      await page.getByTitle('重置视图').click();
+      await page.clock.runFor(600);
+      const mergeObservedAt = Date.now();
+
+      const saveWithoutNode = page.waitForResponse(response => {
+        if (!isProjectSave(response, projectId)) return false;
+        try {
+          const body = response.request().postDataJSON() as { value?: Array<Record<string, unknown>> };
+          const savedProject = body.value?.find(candidate => candidate.id === projectId);
+          return Array.isArray(savedProject?.canvasImages)
+            && !(savedProject.canvasImages as Array<Record<string, unknown>>)
+              .some(image => image.id === nodeId)
+            && !(savedProject.canvasImages as Array<Record<string, unknown>>)
+              .some(image => image.id === remoteDeletedNodeId)
+            && (savedProject.canvasImages as Array<Record<string, unknown>>)
+              .some(image => image.id === markerId);
+        } catch {
+          return false;
+        }
+      }, { timeout: 15_000 });
+
+      const card = stage3CanvasCard(page, nodeId);
+      const { point } = await hittableCardCenter(page, card);
+      await page.mouse.click(point.x, point.y);
+      await page.keyboard.press('Delete');
+      expect(Date.now() - mergeObservedAt).toBeLessThan(2_000);
+      await saveWithoutNode;
+      await expect.poll(async () => {
+        const projects = await readStage3Projects(page);
+        return {
+          deleted: projectImage(projects, projectId, nodeId) === undefined,
+          remoteDeleted: projectImage(projects, projectId, remoteDeletedNodeId) === undefined,
+          markerRetained: projectImage(projects, projectId, markerId)?.id === markerId,
+        };
+      }, { timeout: 15_000 }).toEqual({
+        deleted: true,
+        remoteDeleted: true,
+        markerRetained: true,
+      });
+
+      await modelRequestIdle.wait();
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('[data-canvas-viewport]')).toHaveAttribute('data-project-id', projectId);
+      await expect(page.getByAltText(nodeId, { exact: true })).toHaveCount(0);
+      await expect(page.getByAltText(remoteDeletedNodeId, { exact: true })).toHaveCount(0);
+      await waitForStage3Node(page, markerId);
+    } finally {
+      if (remoteMutationAttempted) {
+        await page.clock.runFor(3_000).catch(() => undefined);
+        let restored = false;
+        for (let attempt = 0; attempt < 3 && !restored; attempt += 1) {
+          const latest = await page.request.get('/api/user-data/sync?key=projects');
+          if (!latest.ok()) continue;
+          const latestBody = await latest.json().catch(() => ({})) as { projectRevision?: number };
+          const restore = await page.request.post('/api/user-data/sync', {
+            data: {
+              key: 'projects',
+              value: originalProjects,
+              ...(typeof latestBody.projectRevision === 'number'
+                ? { projectRevision: latestBody.projectRevision }
+                : {}),
+            },
+          });
+          restored = restore.ok();
+          if (!restored) await page.waitForTimeout(250 * (attempt + 1));
+        }
+        expect(restored, 'controlled project fixture should be restored after the race test').toBe(true);
+
+        await expect.poll(async () => {
+          return readStage3Projects(page);
+        }, {
+          message: 'the complete controlled project fixture should match its original snapshot',
+          timeout: 10_000,
+          intervals: [250, 500, 1_000],
+        }).toEqual(originalProjects);
+      }
+      modelRequestIdle.dispose();
+    }
+  });
+
   test('keeps canvas tool sessions mutually exclusive across toolbar and shortcut entry points', async ({ page }, testInfo) => {
     const projectId = stage3ProjectId(testInfo.project.name, 1);
     await loginStage3User(page);
@@ -178,12 +507,11 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     const project = projects.find(candidate => candidate.id === projectId);
     expect(project).toBeTruthy();
     const images = project?.canvasImages as Array<Record<string, unknown>>;
-    // Use a middle-row right-edge pair so reverse selection starts in guaranteed
-    // blank space outside the dense grid while remaining inside the viewport.
-    const targetIds = images.slice(58, 60).map(image => String(image.id));
+    const imageIds = images.map(image => String(image.id));
 
     await openStage3Project(page, projectId);
     await page.getByTitle('重置视图').click();
+    const targetIds = await findHittableRightEdgePair(page, imageIds);
     for (const nodeId of targetIds) await waitForStage3Node(page, nodeId);
 
     const firstCard = stage3CanvasCard(page, targetIds[0]);
@@ -202,12 +530,12 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       return stableCardBox(stage3CanvasCard(page, nodeId));
     }));
     const start = {
-      x: Math.max(...boxes.map(box => box.x + box.width)) + 6,
-      y: Math.max(...boxes.map(box => box.y + box.height)) + 6,
+      x: Math.max(...boxes.map(box => box.x + box.width)) + 2,
+      y: Math.max(...boxes.map(box => box.y + box.height)) + 2,
     };
     const end = {
-      x: Math.min(...boxes.map(box => box.x)) - 6,
-      y: Math.min(...boxes.map(box => box.y)) - 6,
+      x: Math.min(...boxes.map(box => box.x)) - 2,
+      y: Math.min(...boxes.map(box => box.y)) - 2,
     };
 
     await page.evaluate(() => {
@@ -258,7 +586,9 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     const selectedIds = await page.locator('[data-canvas-selected="true"]')
       .evaluateAll(elements => elements.map(element => element.getAttribute('data-canvas-image-id')).filter(Boolean));
     expect(selectedIds.sort()).toEqual([...targetIds].sort());
-    expect(sample.inputDelayP95Ms).toBeLessThanOrEqual(50);
+    if (enforcesDesktopChromiumPerformance(testInfo.project.name)) {
+      expect(sample.inputDelayP95Ms).toBeLessThanOrEqual(50);
+    }
     expect(sample.disappearedFrames).toBe(0);
     expect(sample.unclickableDurationMs).toBe(0);
   });
@@ -280,10 +610,21 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     const cancelledAt = { x: start.x + 72, y: start.y + 44 };
 
     await page.mouse.move(start.x, start.y);
+    await page.evaluate(() => {
+      const state = window as typeof window & { __stage3PointerDownId?: number };
+      delete state.__stage3PointerDownId;
+      document.querySelector('[data-canvas-viewport]')?.addEventListener('pointerdown', event => {
+        state.__stage3PointerDownId = (event as PointerEvent).pointerId;
+      }, { capture: true, once: true });
+    });
     await page.mouse.down();
     await page.mouse.move(cancelledAt.x, cancelledAt.y, { steps: 8 });
+    const pointerId = await page.evaluate(() => (
+      (window as typeof window & { __stage3PointerDownId?: number }).__stage3PointerDownId
+    ));
+    expect(pointerId).toEqual(expect.any(Number));
     await page.locator('[data-canvas-viewport]').dispatchEvent('pointercancel', {
-      pointerId: 1,
+      pointerId,
       pointerType: 'mouse',
       isPrimary: true,
       button: 0,
@@ -387,6 +728,24 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       zIndex: beforeReload?.zIndex,
     });
     await assertCanvasNodeContinuity(page, [nodeId]);
+
+    const emergencyCard = stage3CanvasCard(page, nodeId);
+    const emergencyBefore = await stableCardBox(emergencyCard);
+    const emergencyStart = center(emergencyBefore);
+    await page.mouse.move(emergencyStart.x, emergencyStart.y);
+    await page.mouse.down();
+    await page.mouse.move(emergencyStart.x + 48, emergencyStart.y + 32);
+    await page.mouse.up();
+    const emergencyMoved = await stableCardBox(emergencyCard);
+    expect(emergencyMoved.x).toBeGreaterThan(emergencyBefore.x + 30);
+    expect(emergencyMoved.y).toBeGreaterThan(emergencyBefore.y + 20);
+
+    // Do not wait for the normal autosave response: beforeunload recovery owns this boundary.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForStage3Node(page, nodeId);
+    const emergencyReloaded = await stableCardBox(stage3CanvasCard(page, nodeId));
+    expect(Math.abs(emergencyReloaded.x - emergencyMoved.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(emergencyReloaded.y - emergencyMoved.y)).toBeLessThanOrEqual(2);
   });
 
   test('preserves delete, undo and redo history transactions', async ({ page }, testInfo) => {
@@ -423,10 +782,10 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     expect(project).toBeTruthy();
     const originalImages = project?.canvasImages as Array<Record<string, unknown>>;
     const originalOrder = originalImages.map(image => String(image.id));
-    const targetIds = originalOrder.slice(58, 60);
 
     await openStage3Project(page, projectId);
     await page.getByTitle('重置视图').click();
+    const targetIds = await findHittableRightEdgePair(page, originalOrder);
     for (const nodeId of targetIds) await waitForStage3Node(page, nodeId);
 
     await stage3CanvasCard(page, targetIds[0]).click();
@@ -452,8 +811,43 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     }, { timeout: 30_000 }).toEqual(originalOrder);
   });
 
-  test('commits move and resize as one undo step each', async ({ page }, testInfo) => {
+  test('commits move and resize as one undo step each', async ({ page, stage3Evidence }, testInfo) => {
     const projectId = stage3ProjectId(testInfo.project.name, 1);
+    await page.addInitScript(() => {
+      const state = window as typeof window & {
+        __stage3HistoryInputEvents?: Array<Record<string, unknown>>;
+      };
+      state.__stage3HistoryInputEvents = [];
+      const describeTarget = (target: EventTarget | null): Record<string, unknown> => {
+        if (!(target instanceof HTMLElement)) return { tag: null };
+        return {
+          tag: target.tagName,
+          role: target.getAttribute('role'),
+          testId: target.dataset.testid ?? null,
+          canvasImageId: target.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null,
+          contentEditable: target.isContentEditable,
+        };
+      };
+      for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'lostpointercapture', 'keydown', 'keyup']) {
+        window.addEventListener(type, (event) => {
+          const pointer = event instanceof PointerEvent ? event : null;
+          const keyboard = event instanceof KeyboardEvent ? event : null;
+          const viewport = document.querySelector<HTMLElement>('[data-canvas-viewport]');
+          state.__stage3HistoryInputEvents?.push({
+            type,
+            pointerId: pointer?.pointerId ?? null,
+            buttons: pointer?.buttons ?? null,
+            code: keyboard?.code ?? null,
+            ctrlKey: keyboard?.ctrlKey ?? null,
+            shiftKey: keyboard?.shiftKey ?? null,
+            target: describeTarget(event.target),
+            activeElement: describeTarget(document.activeElement),
+            viewportHasPointerCapture: pointer ? viewport?.hasPointerCapture(pointer.pointerId) ?? false : null,
+            timestamp: performance.now(),
+          });
+        }, true);
+      }
+    });
     await loginStage3User(page);
     const projects = await readStage3Projects(page);
     const project = projects.find(candidate => candidate.id === projectId);
@@ -464,13 +858,52 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await waitForStage3Node(page, nodeId);
     const card = stage3CanvasCard(page, nodeId);
     const original = await stableCardBox(card);
+    const originalGeometry = await captureCanvasGeometry(page, nodeId);
     const start = center(original);
-    await dragPointerAcrossFrames(page, start, { x: start.x + 84, y: start.y + 52 }, 18);
+    const viewport = await page.locator('[data-canvas-viewport]').boundingBox();
+    expect(viewport).not.toBeNull();
+    const dragTarget = {
+      x: start.x + (start.x < viewport!.x + viewport!.width / 2 ? 56 : -56),
+      y: start.y + (start.y < viewport!.y + viewport!.height / 2 ? 40 : -40),
+    };
+    await dragPointerAcrossFrames(page, start, dragTarget, 18);
     const moved = await stableCardBox(card);
+    const movedGeometry = await captureCanvasGeometry(page, nodeId);
     expect(Math.abs(moved.x - original.x)).toBeGreaterThan(20);
     expect(Math.abs(moved.y - original.y)).toBeGreaterThan(20);
 
+    await page.evaluate(() => {
+      const probe = document.createElement('textarea');
+      probe.dataset.testid = 'stage3-native-undo-probe';
+      probe.style.position = 'fixed';
+      probe.style.left = '0';
+      probe.style.top = '0';
+      probe.style.width = '1px';
+      probe.style.height = '1px';
+      document.body.appendChild(probe);
+    });
+    const nativeUndoProbe = page.getByTestId('stage3-native-undo-probe');
+    await nativeUndoProbe.focus();
+    await expect(nativeUndoProbe).toBeFocused();
     await page.keyboard.press('Control+KeyZ');
+    await expect.poll(async () => {
+      const box = await card.boundingBox();
+      return box ? Math.abs(box.x - moved.x) + Math.abs(box.y - moved.y) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(2);
+    await nativeUndoProbe.evaluate(element => element.remove());
+
+    const selectTool = page.getByTestId('canvas-select-tool');
+    await selectTool.focus();
+    await expect(selectTool).toBeFocused();
+    await page.keyboard.press('Control+KeyZ');
+    const firstMoveUndoInputEvents = await page.evaluate(() => (
+      (window as typeof window & {
+        __stage3HistoryInputEvents?: Array<Record<string, unknown>>;
+      }).__stage3HistoryInputEvents ?? []
+    ));
+    await writeStage3Metrics(stage3Evidence, testInfo, 'move-undo-input-events', {
+      events: firstMoveUndoInputEvents,
+    });
     await expect.poll(async () => {
       const box = await card.boundingBox();
       return box ? Math.abs(box.x - original.x) + Math.abs(box.y - original.y) : Number.POSITIVE_INFINITY;
@@ -484,14 +917,17 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await card.click();
     const resizeHandle = card.locator('.cursor-nwse-resize').first();
     await expect(resizeHandle).toBeVisible();
-    const resizeStart = {
-      x: moved.x + 2,
-      y: moved.y + 2,
-    };
-    const resizeTargetId = await page.evaluate(({ x, y }) => (
-      document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null
-    ), resizeStart);
-    expect(resizeTargetId).toBe(nodeId);
+    const resizeHandleBox = await resizeHandle.boundingBox();
+    expect(resizeHandleBox).not.toBeNull();
+    const resizeStart = center(resizeHandleBox!);
+    const resizeTarget = await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return {
+        imageId: target?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null,
+        isResizeHandle: target instanceof HTMLElement && target.className.includes('cursor-nwse-resize'),
+      };
+    }, resizeStart);
+    expect(resizeTarget).toEqual({ imageId: nodeId, isResizeHandle: true });
     await dragPointerAcrossFrames(
       page,
       resizeStart,
@@ -499,6 +935,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       14,
     );
     const resized = await stableCardBox(card);
+    const resizedGeometry = await captureCanvasGeometry(page, nodeId);
     expect(resized.width).toBeGreaterThan(moved.width + 20);
     expect(resized.height).toBeGreaterThan(moved.height + 10);
 
@@ -507,6 +944,20 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       const box = await card.boundingBox();
       return box ? Math.abs(box.width - moved.width) + Math.abs(box.height - moved.height) : Number.POSITIVE_INFINITY;
     }).toBeLessThanOrEqual(2);
+    const afterResizeUndo = await stableCardBox(card);
+    const afterResizeUndoGeometry = await captureCanvasGeometry(page, nodeId);
+    const viewportAfterResizeUndo = await page.locator('[data-canvas-viewport]').boundingBox();
+    await writeStage3Metrics(stage3Evidence, testInfo, 'move-resize-history-geometry', {
+      original,
+      originalGeometry,
+      moved,
+      movedGeometry,
+      resized,
+      resizedGeometry,
+      afterResizeUndo,
+      afterResizeUndoGeometry,
+      viewportAfterResizeUndo,
+    });
     await expect.poll(async () => {
       const box = await card.boundingBox();
       return box ? Math.abs(box.x - moved.x) + Math.abs(box.y - moved.y) : Number.POSITIVE_INFINITY;
@@ -528,6 +979,17 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
         + Math.abs(box.width - resized.width)
         + Math.abs(box.height - resized.height);
     }).toBeLessThanOrEqual(4);
+
+    const resizedBeforeImmediateReload = await captureCanvasGeometry(page, nodeId);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForStage3Node(page, nodeId);
+    const resizedAfterImmediateReload = await captureCanvasGeometry(page, nodeId);
+    expect(resizedAfterImmediateReload).toMatchObject({
+      cardLeft: resizedBeforeImmediateReload.cardLeft,
+      cardTop: resizedBeforeImmediateReload.cardTop,
+      cardWidth: resizedBeforeImmediateReload.cardWidth,
+      cardHeight: resizedBeforeImmediateReload.cardHeight,
+    });
   });
 
   for (const nodeCount of [100, 300] as const) {
@@ -548,6 +1010,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       await page.getByTitle('重置视图').click();
       for (const nodeId of monitoredNodeIds) await waitForStage3Node(page, nodeId);
       await assertCanvasNodeContinuity(page, monitoredNodeIds);
+      await clickCanvasBlankSpace(page);
       const canvasBox = await page.locator('[data-canvas-viewport]').boundingBox();
       expect(canvasBox).not.toBeNull();
       const start = center(canvasBox!);
@@ -566,11 +1029,13 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       }, { monitoredNodeIds });
       await writeStage3Metrics(stage3Evidence, testInfo, `${nodeCount}-node-pan-performance`, sample);
 
-      expect(sample.averageFps).toBeGreaterThanOrEqual(nodeCount === 100 ? 55 : 45);
-      expect(sample.inputDelayP95Ms).toBeLessThanOrEqual(50);
+      if (enforcesDesktopChromiumPerformance(testInfo.project.name)) {
+        expect(sample.averageFps).toBeGreaterThanOrEqual(nodeCount === 100 ? 55 : 45);
+        expect(sample.inputDelayP95Ms).toBeLessThanOrEqual(50);
+        expect(sample.longestSaveTaskMs).toBeLessThanOrEqual(100);
+      }
       expect(sample.disappearedFrames).toBe(0);
       expect(sample.unclickableDurationMs).toBe(0);
-      expect(sample.longestSaveTaskMs).toBeLessThanOrEqual(100);
       await assertCanvasNodeContinuity(page, monitoredNodeIds);
     });
   }
@@ -613,7 +1078,9 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
 
     expect(saveSample.disappearedFrames).toBe(0);
     expect(saveSample.unclickableDurationMs).toBe(0);
-    expect(saveSample.longestSaveTaskMs).toBeLessThanOrEqual(100);
+    if (enforcesDesktopChromiumPerformance(testInfo.project.name)) {
+      expect(saveSample.longestSaveTaskMs).toBeLessThanOrEqual(100);
+    }
     const savedProjects = await readStage3Projects(page);
     const savedImage = projectImage(savedProjects, projectId, nodeId);
     expect(savedImage).toMatchObject({

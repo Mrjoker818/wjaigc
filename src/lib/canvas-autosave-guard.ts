@@ -1,3 +1,5 @@
+import type { CanvasPersistenceSnapshot } from '@/lib/canvas-kernel/persistence';
+
 type CanvasHydrationImage = {
   id: string;
   url: string;
@@ -28,23 +30,154 @@ interface CanvasUnloadPersistenceTarget {
   sendBeacon: (url: string, data: string) => boolean;
 }
 
+interface CanvasUnloadRecoveryStorage {
+  getItem: (key: string) => string | null;
+  removeItem: (key: string) => void;
+}
+
+interface CanvasUnloadCleanupStorage {
+  removeItem: (key: string) => void;
+}
+
+interface StoredCanvasUnloadSnapshot {
+  version: 3;
+  ownerId: string;
+  baseProjectRevision: number;
+  snapshot: CanvasPersistenceSnapshot;
+}
+
+function isStoredCanvasUnloadSnapshot(value: unknown): value is StoredCanvasUnloadSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<StoredCanvasUnloadSnapshot>;
+  const snapshot = candidate.snapshot as Partial<CanvasPersistenceSnapshot> | undefined;
+  return candidate.version === 3
+    && typeof candidate.ownerId === 'string'
+    && Number.isSafeInteger(candidate.baseProjectRevision)
+    && typeof snapshot?.projectId === 'string'
+    && snapshot.ownerId === candidate.ownerId
+    && snapshot.baseProjectRevision === candidate.baseProjectRevision
+    && Number.isSafeInteger(snapshot.revision)
+    && Array.isArray(snapshot.images)
+    && Boolean(snapshot.metadata && typeof snapshot.metadata === 'object');
+}
+
+export function consumePreparedCanvasUnloadSnapshot(
+  projectId: string,
+  projectRevision: number,
+  storage: CanvasUnloadRecoveryStorage,
+  ownerId: string,
+): CanvasPersistenceSnapshot | null {
+  const serialized = storage.getItem(CANVAS_PREPARED_SNAPSHOT_KEY);
+  if (!serialized) return null;
+  let stored: unknown;
+  try {
+    stored = JSON.parse(serialized);
+  } catch {
+    storage.removeItem(CANVAS_PREPARED_SNAPSHOT_KEY);
+    return null;
+  }
+  if (!isStoredCanvasUnloadSnapshot(stored)) {
+    storage.removeItem(CANVAS_PREPARED_SNAPSHOT_KEY);
+    return null;
+  }
+  if (stored.ownerId !== ownerId) {
+    storage.removeItem(CANVAS_PREPARED_SNAPSHOT_KEY);
+    return null;
+  }
+  if (stored.snapshot.projectId !== projectId) return null;
+  if (stored.baseProjectRevision !== projectRevision) {
+    storage.removeItem(CANVAS_PREPARED_SNAPSHOT_KEY);
+    return null;
+  }
+  storage.removeItem(CANVAS_PREPARED_SNAPSHOT_KEY);
+  return stored.snapshot;
+}
+
+export function consumeCanvasPendingMediaRecovery(
+  projectId: string,
+  storage: CanvasUnloadRecoveryStorage,
+  ownerId: string,
+): boolean {
+  const serialized = storage.getItem(CANVAS_PENDING_MEDIA_RECOVERY_KEY);
+  if (!serialized) return false;
+  let marker: unknown;
+  try {
+    marker = JSON.parse(serialized);
+  } catch {
+    storage.removeItem(CANVAS_PENDING_MEDIA_RECOVERY_KEY);
+    return false;
+  }
+  if (!marker || typeof marker !== 'object') {
+    storage.removeItem(CANVAS_PENDING_MEDIA_RECOVERY_KEY);
+    return false;
+  }
+  const candidate = marker as Record<string, unknown>;
+  if (candidate.version !== 2 || candidate.ownerId !== ownerId) {
+    storage.removeItem(CANVAS_PENDING_MEDIA_RECOVERY_KEY);
+    return false;
+  }
+  if (candidate.projectId !== projectId || candidate.hasPendingMedia !== true) return false;
+  storage.removeItem(CANVAS_PENDING_MEDIA_RECOVERY_KEY);
+  return true;
+}
+
+export function reconcileRecoveredCanvasImages<T extends { id: string; url: string }>(
+  recoveredImages: ReadonlyArray<T>,
+  savedImages: ReadonlyArray<T>,
+): { images: T[]; discardedBlobIds: string[] } {
+  const savedById = new Map(savedImages.map(image => [image.id, image]));
+  const images: T[] = [];
+  const discardedBlobIds: string[] = [];
+  for (const image of recoveredImages) {
+    if (!image.url.startsWith('blob:')) {
+      images.push(image);
+      continue;
+    }
+    const saved = savedById.get(image.id);
+    if (saved && !saved.url.startsWith('blob:')) {
+      images.push({ ...saved, ...image, url: saved.url });
+    } else {
+      discardedBlobIds.push(image.id);
+    }
+  }
+  return { images, discardedBlobIds };
+}
+
+export function clearCanvasUnloadRecovery(storage: CanvasUnloadCleanupStorage): void {
+  storage.removeItem(CANVAS_PREPARED_SNAPSHOT_KEY);
+  storage.removeItem(CANVAS_PENDING_MEDIA_RECOVERY_KEY);
+}
+
 export function persistPreparedCanvasUnloadSnapshot(
   prepared: PreparedCanvasUnloadSnapshot,
   target: CanvasUnloadPersistenceTarget,
 ): void {
   if (prepared.hasPendingMedia) {
+    target.storage.setItem(CANVAS_PREPARED_SNAPSHOT_KEY, prepared.serialized);
     target.storage.setItem(CANVAS_PENDING_MEDIA_RECOVERY_KEY, prepared.recoveryMarker);
     return;
   }
 
-  target.storage.setItem(CANVAS_PREPARED_SNAPSHOT_KEY, prepared.serialized);
-  target.storage.removeItem(CANVAS_PENDING_MEDIA_RECOVERY_KEY);
+  let storageError: unknown;
+  try {
+    target.storage.setItem(CANVAS_PREPARED_SNAPSHOT_KEY, prepared.serialized);
+    target.storage.removeItem(CANVAS_PENDING_MEDIA_RECOVERY_KEY);
+  } catch (error) {
+    storageError = error;
+  }
+
+  let beaconAccepted = false;
   if (
     prepared.beaconPayload
     && (prepared.beaconByteLength ?? prepared.beaconPayload.length) <= 65536
   ) {
-    target.sendBeacon('/api/user-data/sync', prepared.beaconPayload);
+    try {
+      beaconAccepted = target.sendBeacon('/api/user-data/sync', prepared.beaconPayload);
+    } catch {
+      beaconAccepted = false;
+    }
   }
+  if (storageError && !beaconAccepted) throw storageError;
 }
 
 export interface CanvasHydrationGuard {

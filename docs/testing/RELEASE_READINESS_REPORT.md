@@ -800,3 +800,21 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Task 9 does not supply the complete Stage 3 browser/performance/release evidence. S3-BUG-004's fixed 300-node input P95 gate, full five-browser matrix, exact-SHA Coze verification and `canvas-v2 -> legacy` rollback remain open.
 - Protected features remain governed by the unchanged baseline. The accumulated Stage 3 source drift must continue to block the default release gate until the ordered Task 10 approval step; this Task does not silently rewrite that baseline.
 - **Release verdict remains NOT READY / Stage 3 in progress.** Progress is `10/11`, approximately `91%`. Task 10 is next and has not started. Nothing is pushed or deployed, and `stable` remains untouched.
+
+## 2026-08-14 Stage 3 Task 10 local readiness decision
+
+- The complete local legacy browser matrix is `60/60`; representative shadow and canvas-v2 matrices are `15/15` each. Desktop Chromium meets the unchanged 100/300-node FPS and P95 thresholds with zero disappearing frames and zero unclickable time.
+- S3-BUG-004, S3-BUG-011, S3-BUG-012, S3-BUG-013 and S3-TEST-001 are closed locally with retained RED/GREEN evidence and permanent contracts. All `38/38` protected capabilities remain present.
+- Local static, test, PostgreSQL, API, regression and build gates exit 0. ESLint retains `965` historical warnings and adds no error; the build emits `116/116` routes.
+- The isolated database has no real API provider configuration. Consequently, paid image generation, task billing, cancellation/refund consistency and provider-returned media are not locally verified. This is an explicit external evidence gap, not a mock pass.
+- **Release verdict: CONDITIONAL / NOT READY FOR STAGE 3 COMPLETION.** The candidate still requires main-only publication, GitHub Actions execution, Coze exact-SHA shadow evidence, isolated canvas-v2 verification and mandatory rollback to legacy. `stable` remains read-only and unchanged.
+
+## 2026-08-14 Stage 3 Task 10 post-review readiness decision
+
+- Independent review found no remaining P0 after owner/revision-bound recovery was added. All review P1 findings are now closed locally: resize immediate save, blob geometry recovery, WebKit model-request churn, local-storage/beacon channel isolation, and double-failure leave confirmation.
+- Fresh production-browser evidence after these repairs includes five profiles `5/5` for move, resize, one-step undo/redo and immediate reload; WebKit merge-window `1/1`; Chromium final immediate-reload `1/1`. Evidence gates found no unexpected Console or network errors in the passing attempts.
+- Focused hardening regression passes `88/88`. The post-review whole-repository rerun now passes with PostgreSQL enabled; API is `480/480`, component/lib regression exits `0`, TypeScript passes, ESLint is `0 errors / 965 historical warnings`, Doctor is `43/11/0/0`, and the production build generates `116/116` pages.
+- Two non-P0/P1 limitations remain explicit: small beacon audit records lack an application-level receipt, and external administrator authorization changes require a refresh signal or page reload. Backend authorization remains authoritative.
+- The first governance bootstrap push must exclude `.github/workflows/quality.yml`; only files authorized by the old trusted baseline may enter the bootstrap commit. The complete candidate may be pushed only after the new allowlist exists in the trusted parent commit.
+- The first whole-repository rerun exposed S3-TEST-002, a stale source contract for explicit-project workflow hydration. The runtime behavior was intact; the contract now protects the recovery-aware ordering and passes `11/11`, followed by a clean full rerun.
+- **Release verdict remains CONDITIONAL / NOT READY FOR STAGE 3 COMPLETION.** Local P0/P1 count is zero, but committed-source browser evidence, main publication, GitHub Actions, Coze exact-SHA provider/billing evidence, isolated canvas-v2 and mandatory legacy rollback remain open. Remote `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is unchanged and must remain untouched.

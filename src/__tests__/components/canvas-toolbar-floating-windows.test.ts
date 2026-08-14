@@ -109,6 +109,7 @@ describe('canvas toolbar floating windows', () => {
 
   it('keeps the selected-image delete action reachable without colliding with hover actions', () => {
     expect(canvasSource).toContain('absolute -top-9 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-0.5');
+    expect(canvasSource).toContain('data-toolbar="image-hover-toolbar"');
     expect(canvasSource).toContain("className={`absolute group z-10 ${isSelected ? 'z-[60]' : ''}");
     expect(canvasSource).toContain("hoverToolbarImageId === image.id && editMode === 'none' && !isSelected &&");
     expect(canvasSource).toContain('data-testid="selected-image-delete"');

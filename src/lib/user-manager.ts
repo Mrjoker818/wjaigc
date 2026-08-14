@@ -8,6 +8,7 @@ import {
 import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
 import type { AssetGraphMode } from '@/lib/asset-core/types';
 import { resolveCanvasKernelMode, type CanvasKernelMode } from '@/lib/canvas-kernel/mode';
+import { clearCanvasUnloadRecovery } from '@/lib/canvas-autosave-guard';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
@@ -2711,6 +2712,7 @@ export class UserManager {
     this.resetProjectSyncSession();
     this.currentUserId = null;
     if (this.canUseStorage()) {
+      clearCanvasUnloadRecovery(localStorage);
       localStorage.removeItem(CURRENT_USER_KEY);
     }
     if (typeof window !== 'undefined') {

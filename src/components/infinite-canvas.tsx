@@ -806,6 +806,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [isPanning, setIsPanning] = useState(false);
   const [isMiddlePanning, setIsMiddlePanning] = useState(false);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const isSpacePressedRef = useRef(false);
+  const [activePointerTool, setActivePointerTool] = useState<'select' | 'hand'>('select');
+  const activePointerToolRef = useRef<'select' | 'hand'>('select');
 
   // Persist view state changes (debounced)
   const viewStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2897,14 +2900,30 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // Helper: check if keyboard event target is an input field (should not trigger canvas shortcuts)
   const isInputFocused = useCallback((e: KeyboardEvent): boolean => {
-    const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-    return tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable === true;
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return false;
+    return target.isContentEditable || !!target.closest(
+      'input, textarea, select, button, a[href], [contenteditable="true"], [role="button"], [role="menuitem"], [role="option"]',
+    );
+  }, []);
+
+  const isTextEditingTarget = useCallback((e: KeyboardEvent): boolean => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return false;
+    return target.isContentEditable || !!target.closest(
+      'input:not([type]), input[type="text"], input[type="search"], input[type="email"], input[type="url"], input[type="tel"], input[type="password"], input[type="number"], textarea, [contenteditable="true"]',
+    );
   }, []);
 
   // Helper: check if a native event originates from a dialog/modal/overlay/panel (should be ignored by canvas)
   const isEventFromOverlay = useCallback((e: Event): boolean => {
     const target = e.target as HTMLElement;
     return !!target?.closest?.('[data-floating-panel], [data-popup], [data-modal], [data-toolbar], [data-compare-dialog], [role="dialog"], [role="tabpanel"]');
+  }, []);
+
+  const isKeyboardEventFromOverlay = useCallback((e: KeyboardEvent): boolean => {
+    const target = e.target as HTMLElement;
+    return !!target?.closest?.('[data-floating-panel], [data-popup], [data-modal], [data-compare-dialog], [role="dialog"], [role="tabpanel"]');
   }, []);
 
   // Sync selectedImage prop
@@ -3137,27 +3156,30 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if event originates from dialog/modal/overlay
-      if (isEventFromOverlay(e)) return;
-      if (isHistoryTransitionPending) return;
+      if (isKeyboardEventFromOverlay(e)) return;
       // Skip if user is typing in an input field (unified check)
       const inputFocused = isInputFocused(e);
+      const textEditingTarget = isTextEditingTarget(e);
 
       // Ctrl+Z / Cmd+Z: Undo
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !e.shiftKey) {
-        if (inputFocused) return;
+        if (textEditingTarget) return;
         e.preventDefault();
         onUndo?.();
         return;
       }
       // Ctrl+Shift+Z / Cmd+Shift+Z: Redo
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && e.shiftKey) {
-        if (inputFocused) return;
+        if (textEditingTarget) return;
         e.preventDefault();
         if (onRedo) {
           onRedo();
         }
         return;
       }
+      // Workspace history uses a synchronous ref as the authoritative lock.
+      // Keep other shortcuts blocked while its rendered pending state catches up.
+      if (isHistoryTransitionPending) return;
       // Ctrl + Plus: Zoom in
       if ((e.ctrlKey || e.metaKey) && (e.code === 'Equal' || e.code === 'NumpadAdd')) {
         e.preventDefault();
@@ -3362,6 +3384,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (e.code === 'Space' && !e.repeat) {
         if (inputFocused) return;
         e.preventDefault();
+        isSpacePressedRef.current = true;
         setIsSpacePressed(true);
       }
       if (e.code === 'Escape') {
@@ -3429,6 +3452,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
+        isSpacePressedRef.current = false;
         setIsSpacePressed(false);
       }
       if (!e.altKey) {
@@ -3526,7 +3550,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoPanel]);
+  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isKeyboardEventFromOverlay, isInputFocused, isTextEditingTarget, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoPanel]);
 
   // Click outside to close menus
   useEffect(() => {
@@ -4018,7 +4042,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     // Space + left click: pan canvas
-    if (isSpacePressed) {
+    if (activePointerToolRef.current === 'hand' || isSpacePressedRef.current) {
       beginViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
       setIsPanning(true);
       return;
@@ -4042,6 +4066,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             setResizingImage(selId);
             setResizeCorner(corner.name);
             setResizeStart({ x: canvasPos.x, y: canvasPos.y, w: selImg.width, h: selImg.height, imgX: selImg.x, imgY: selImg.y });
+            e.currentTarget.setPointerCapture(e.pointerId);
             beginHistoryTransaction('resize', e.pointerId);
             return;
           }
@@ -4535,6 +4560,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (isMiddlePanning && e.button === 1) {
       commitViewportPan({ pointerId: e.pointerId });
       setIsMiddlePanning(false);
+      suppressSelectionClickRef.current = true;
+      window.setTimeout(() => {
+        suppressSelectionClickRef.current = false;
+      }, 0);
       return;
     }
 
@@ -4542,6 +4571,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       commitViewportPan({ pointerId: e.pointerId });
       setIsPanning(false);
       setIsLongPressing(false);
+      suppressSelectionClickRef.current = true;
+      window.setTimeout(() => {
+        suppressSelectionClickRef.current = false;
+      }, 0);
       return;
     }
 
@@ -4611,11 +4644,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     // Apply resize preview to images (single history entry instead of one per mousemove)
     if (resizingImage && resizePreview) {
-      onImagesChange(applyCanvasCommand(images, {
+      const resizedImages = applyCanvasCommand(images, {
         type: 'resize',
         id: resizingImage,
         bounds: resizePreview,
-      }));
+      });
+      onImagesChange(resizedImages);
+      onForceSave?.(resizedImages);
     }
     setResizePreview(null);
 
@@ -4813,6 +4848,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   const handlePointerLeave = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (annotationPointerIdRef.current !== null) return;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) return;
     const activeImagePointerId = imageDragPointerIdRef.current;
     if (activeImagePointerId !== null && e.currentTarget.hasPointerCapture(activeImagePointerId)) return;
     clearBlankCanvasLongPress();
@@ -4844,7 +4880,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (isInsideFloatingUI) return;
     const isInsideCanvas = canvasRef.current?.contains(target);
     if (!isInsideCanvas) return;
-    e.preventDefault();
 
     // In erase/mask mode, scroll adjusts brush size (like IOPaint/Photoshop)
     if ((editMode === 'erase' || editMode === 'mask') && !e.ctrlKey && !e.metaKey) {
@@ -10830,18 +10865,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       <div
         ref={(el) => { canvasRef.current = el; canvasContainerRef.current = el; }}
         data-canvas-viewport
+        data-canvas-kernel-mode={canvasKernelMode}
         data-canvas-active-tool={canvasToolSession.toolId || ''}
         data-canvas-occupied-right={canvasOccupiedRight}
         data-project-id={projectId || brandProject?.id || ''}
         style={{ touchAction: annotationMode ? 'none' : 'auto' }}
-        className={`absolute inset-0 overflow-hidden select-none ${
+        className={`absolute inset-0 overflow-clip select-none ${
           annotationMode
             ? 'cursor-crosshair'
             : altKeyHeld && editMode === 'none'
             ? 'cursor-copy'
             : ctrlKeyHeld && editMode === 'none'
             ? 'cursor-pointer'
-            : isPanning || isSpacePressed
+            : isPanning || isSpacePressed || activePointerTool === 'hand'
             ? 'cursor-grab active:cursor-grabbing'
             : boxSelectStart
             ? 'cursor-crosshair'
@@ -11870,6 +11906,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {/* Hover toolbar - quick actions on image hover */}
                 {hoverToolbarImageId === image.id && editMode === 'none' && !isSelected && !dragTarget && !resizingImage && !compareSelecting && (
                   <div
+                    data-toolbar="image-hover-toolbar"
                     className="absolute -top-9 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-0.5 px-1 py-0.5 rounded-lg shadow-lg"
                     style={{ fontSize: `${Math.max(10, 12 / zoom)}px` }}
                     onMouseEnter={() => keepHoverToolbar(image.id)}
@@ -18466,11 +18503,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           aria-label="选择工具"
           onClick={() => {
             // 退出抓手/平移模式，回到默认选择模式
-            setIsSpacePressed(false);
+            activePointerToolRef.current = 'select';
+            setActivePointerTool('select');
             setIsPanning(false);
           }}
+          data-testid="canvas-select-tool"
+          aria-pressed={activePointerTool === 'select'}
           className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 ${
-            !isPanning && !isSpacePressed
+            !isPanning && !isSpacePressed && activePointerTool === 'select'
               ? (isMonochrome ? 'text-blue-600 bg-blue-50 ring-1 ring-blue-500/30' : 'text-text-bright bg-white/15 ring-1 ring-gold/30')
               : (isMonochrome ? `${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10')
           }`}
@@ -18482,20 +18522,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         <button
           aria-label="抓手工具"
+          data-testid="canvas-hand-tool"
+          aria-pressed={activePointerTool === 'hand'}
           className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 ${
-            isPanning || isSpacePressed
+            isPanning || isSpacePressed || activePointerTool === 'hand'
               ? (isMonochrome ? 'text-blue-600 bg-blue-50 ring-1 ring-blue-500/30' : 'text-text-bright bg-white/15 ring-1 ring-gold/30')
               : (isMonochrome ? `text-gray-500 hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10')
           }`}
           title="抓手工具"
           onClick={() => {
-            setIsSpacePressed(true);
-            const handleUp = (e: MouseEvent) => {
-              if (isEventFromOverlay(e)) return;
-              setIsSpacePressed(false);
-              window.removeEventListener('mouseup', handleUp);
-            };
-            window.addEventListener('mouseup', handleUp);
+            activePointerToolRef.current = 'hand';
+            setActivePointerTool('hand');
           }}
         >
           <Hand className={`h-4 w-4 ${mIcon.hand}`} />

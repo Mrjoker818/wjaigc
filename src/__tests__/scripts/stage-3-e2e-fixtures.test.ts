@@ -12,6 +12,118 @@ import {
 } from '../../../scripts/stage-3-e2e-fixtures.mjs';
 import { summarizeCanvasPerformance } from '../../../tests/helpers/canvas-performance';
 
+const canvasPerformanceSource = readFileSync(
+  resolve(process.cwd(), 'tests/helpers/canvas-performance.ts'),
+  'utf8',
+);
+const stage3BrowserHelperSource = readFileSync(
+  resolve(process.cwd(), 'tests/helpers/stage-3-e2e.ts'),
+  'utf8',
+);
+const stage3FixtureSource = readFileSync(
+  resolve(process.cwd(), 'scripts/stage-3-e2e-fixtures.mjs'),
+  'utf8',
+);
+const infiniteCanvasSource = readFileSync(
+  resolve(process.cwd(), 'src/components/infinite-canvas.tsx'),
+  'utf8',
+);
+const playwrightConfigSource = readFileSync(
+  resolve(process.cwd(), 'playwright.config.ts'),
+  'utf8',
+);
+
+function crc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function validatePngChunks(bytes: Buffer): string[] {
+  const chunkTypes: string[] = [];
+  let offset = 8;
+  while (offset < bytes.length) {
+    expect(offset + 12).toBeLessThanOrEqual(bytes.length);
+    const length = bytes.readUInt32BE(offset);
+    const chunkEnd = offset + 12 + length;
+    expect(chunkEnd).toBeLessThanOrEqual(bytes.length);
+    const type = bytes.subarray(offset + 4, offset + 8).toString('ascii');
+    const payload = bytes.subarray(offset + 4, offset + 8 + length);
+    expect(bytes.readUInt32BE(offset + 8 + length), `${type} CRC`).toBe(crc32(payload));
+    chunkTypes.push(type);
+    offset = chunkEnd;
+  }
+  expect(offset).toBe(bytes.length);
+  return chunkTypes;
+}
+
+describe('Stage 3 performance evidence contract', () => {
+  it('does not hide a foreign toolbar that blocks a Canvas node hit target', () => {
+    const hitChecks = [...canvasPerformanceSource.matchAll(/const hit = document\.elementFromPoint/g)]
+      .map(match => canvasPerformanceSource.slice(
+        match.index,
+        canvasPerformanceSource.indexOf('if (!hit ||', match.index),
+      ));
+
+    expect(hitChecks).toHaveLength(2);
+    for (const hitCheck of hitChecks) {
+      expect(hitCheck).not.toContain('[data-toolbar]');
+      expect(hitCheck).toContain('[data-floating-panel], [data-popup], [data-modal]');
+    }
+  });
+
+  it('measures input delay only for events created inside the active sample window', () => {
+    expect(canvasPerformanceSource).not.toContain("buffered: true");
+    expect(canvasPerformanceSource).toContain('timing.startTime >= state.startedAt');
+  });
+
+  it('proves the API-selected Canvas mode reaches the rendered viewport', () => {
+    expect(stage3FixtureSource).toContain('E2E_STAGE3_EXPECTED_CANVAS_MODE');
+    expect(stage3BrowserHelperSource).toContain("'E2E_STAGE3_EXPECTED_CANVAS_MODE'");
+    expect(stage3BrowserHelperSource).toContain('syncBody.canvasKernelMode');
+    expect(stage3BrowserHelperSource).toContain('environment.expectedCanvasMode');
+    expect(stage3BrowserHelperSource).toContain("data-canvas-kernel-mode");
+    expect(infiniteCanvasSource).toContain('data-canvas-kernel-mode={canvasKernelMode}');
+  });
+
+  it('fails closed on missing fixtures and browser runtime errors', () => {
+    expect(stage3BrowserHelperSource).not.toContain('test.skip(missing.length > 0');
+    expect(stage3BrowserHelperSource).not.toContain('test.skip(!projectId');
+    expect(stage3BrowserHelperSource).toContain('Stage 3 runtime evidence failed');
+    expect(stage3BrowserHelperSource).toContain("entry.type === 'error'");
+    expect(stage3BrowserHelperSource).toContain("entry.type === 'pageerror'");
+    expect(stage3BrowserHelperSource).toContain("page.on('pageerror'");
+    expect(stage3BrowserHelperSource).toContain('isBenignStage3RequestAbort');
+  });
+
+  it('never exempts project persistence failures from the abort gate', () => {
+    expect(stage3BrowserHelperSource).toContain("entry.method === 'GET'");
+    expect(stage3BrowserHelperSource).toContain("pathname === '/api/task-events'");
+    expect(stage3BrowserHelperSource).toContain("entry.method === 'POST' && pathname === '/api/activity'");
+    expect(stage3BrowserHelperSource).toContain("pathname.startsWith('/api/serve-upload/')");
+    expect(stage3BrowserHelperSource).not.toContain("pathname === '/api/user-data/sync'");
+  });
+
+  it('names every evidence tree by Canvas mode and controlled run id', () => {
+    expect(stage3BrowserHelperSource).toContain('E2E_STAGE3_EXPECTED_CANVAS_MODE');
+    expect(stage3BrowserHelperSource).toContain('E2E_STAGE3_RUN_ID');
+    expect(playwrightConfigSource).toContain('stage3EvidenceScope');
+    expect(playwrightConfigSource).toContain('Boolean(process.env.E2E_STAGE3_RUN_ID)');
+    expect(playwrightConfigSource).toContain('E2E_STAGE3_EXPECTED_CANVAS_MODE');
+    expect(playwrightConfigSource).toContain('E2E_STAGE3_RUN_ID');
+  });
+
+  it('keeps retries and repeated runs in distinct evidence directories', () => {
+    expect(stage3BrowserHelperSource).toContain('`retry-${testInfo.retry}`');
+    expect(stage3BrowserHelperSource).toContain('`repeat-${testInfo.repeatEachIndex}`');
+  });
+});
+
 describe('Stage 3 E2E fixture isolation', () => {
   it('creates isolated 1, 100 and 300 node projects for every browser profile', () => {
     const plan = buildStage3FixturePlan('run-20260813');
@@ -77,12 +189,15 @@ describe('Stage 3 E2E fixture isolation', () => {
     expect(bytes.subarray(1, 4).toString('ascii')).toBe('PNG');
     expect(bytes.readUInt32BE(16)).toBe(64);
     expect(bytes.readUInt32BE(20)).toBe(64);
+    expect(validatePngChunks(bytes)).toEqual(['IHDR', 'IDAT', 'IEND']);
   });
 
   it('routes pnpm Stage 3 video and trace output into the immutable baseline directory', () => {
     const source = readFileSync(resolve(process.cwd(), 'playwright.config.ts'), 'utf8');
     expect(source).toContain("process.env.npm_lifecycle_event === 'test:e2e:stage-3'");
-    expect(source).toContain("'./test-results/stage-3-baseline/playwright-output'");
+    expect(source).toContain('`./test-results/stage-3-baseline/${stage3EvidenceScope}/playwright-output`');
+    expect(source).toContain('`test-results/stage-3-baseline/${stage3EvidenceScope}/playwright-report`');
+    expect(source).toContain('`test-results/stage-3-baseline/${stage3EvidenceScope}/junit.xml`');
   });
 });
 
@@ -97,6 +212,7 @@ describe('Stage 3 performance sample summarization', () => {
       saveTasksMs: [18, 91],
       disappearedFrames: 2,
       unclickableDurationMs: 48,
+      unclickableSamples: [{ id: 'node-a', hitTag: 'DIV', hitClass: 'overlay' }],
     });
 
     expect(sample.averageFps).toBe(6);
@@ -105,5 +221,6 @@ describe('Stage 3 performance sample summarization', () => {
     expect(sample.longestSaveTaskMs).toBe(91);
     expect(sample.disappearedFrames).toBe(2);
     expect(sample.unclickableDurationMs).toBe(48);
+    expect(sample.unclickableSamples).toEqual([{ id: 'node-a', hitTag: 'DIV', hitClass: 'overlay' }]);
   });
 });

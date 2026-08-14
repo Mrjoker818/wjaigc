@@ -111,12 +111,14 @@ describe('authentication bootstrap project sync', () => {
     const authInitializer = source.indexOf('const initCurrentUser = async () => {');
     const authEffectEnd = source.indexOf('const [currentUser, setCurrentUser]', authInitializer);
     const authEffect = source.slice(authInitializer, authEffectEnd);
-    const projectLookup = authEffect.indexOf('const targetProject = projects.find((p: Project) => p.id === projectId);');
-    const projectBranchEnd = authEffect.indexOf('if (targetProject.canvasImages && targetProject.canvasImages.length > 0)', projectLookup);
+    const projectLookup = authEffect.indexOf('const storedProject = projects.find((p: Project) => p.id === projectId);');
+    const targetProjectResolution = authEffect.indexOf('const targetProject = recoveredCanvasSnapshot', projectLookup);
+    const projectBranchEnd = authEffect.indexOf('if (targetProject.canvasImages && targetProject.canvasImages.length > 0)', targetProjectResolution);
     const projectBranch = authEffect.slice(projectLookup, projectBranchEnd);
 
     expect(projectLookup).toBeGreaterThan(-1);
-    expect(projectBranchEnd).toBeGreaterThan(projectLookup);
+    expect(targetProjectResolution).toBeGreaterThan(projectLookup);
+    expect(projectBranchEnd).toBeGreaterThan(targetProjectResolution);
     expect(projectBranch).toContain('setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));');
   });
 

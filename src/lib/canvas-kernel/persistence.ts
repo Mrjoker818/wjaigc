@@ -3,7 +3,9 @@ import type { CanvasImage as PersistableCanvasImage, Project } from '@/lib/user-
 export type ProjectMetadata = NonNullable<Project['metadata']>;
 
 export interface CanvasPersistenceSnapshot {
+  ownerId: string;
   projectId: string;
+  baseProjectRevision: number;
   revision: number;
   images: ReadonlyArray<PersistableCanvasImage>;
   metadata: ProjectMetadata;
@@ -42,6 +44,9 @@ interface CanvasPersistenceSchedulerOptions {
   prepare?: (
     snapshot: CanvasPersistenceSnapshot,
   ) => Promise<CanvasPreparedPersistenceSnapshot> | CanvasPreparedPersistenceSnapshot;
+  prepareForUnload?: (
+    snapshot: CanvasPersistenceSnapshot,
+  ) => CanvasPreparedPersistenceSnapshot;
   scheduleIdle?: (callback: () => void, timeoutMs: number) => IdleHandle;
   cancelIdle?: (handle: IdleHandle) => void;
   onPhaseChange?: (phase: CanvasPersistencePhase) => void;
@@ -60,7 +65,9 @@ export function prepareCanvasPersistenceSnapshot(
   snapshot: CanvasPersistenceSnapshot,
 ): CanvasPreparedPersistenceSnapshot {
   const signature = JSON.stringify({
+    ownerId: snapshot.ownerId,
     projectId: snapshot.projectId,
+    baseProjectRevision: snapshot.baseProjectRevision,
     images: snapshot.images,
     metadata: snapshot.metadata,
   });
@@ -68,10 +75,17 @@ export function prepareCanvasPersistenceSnapshot(
   return {
     ...snapshot,
     signature,
-    serialized: JSON.stringify({ version: 1, snapshot }),
+    serialized: JSON.stringify({
+      version: 3,
+      ownerId: snapshot.ownerId,
+      baseProjectRevision: snapshot.baseProjectRevision,
+      snapshot,
+    }),
     recoveryMarker: JSON.stringify({
-      version: 1,
+      version: 2,
+      ownerId: snapshot.ownerId,
       projectId: snapshot.projectId,
+      baseProjectRevision: snapshot.baseProjectRevision,
       revision: snapshot.revision,
       signature,
       hasPendingMedia,
@@ -119,6 +133,7 @@ export class CanvasPersistenceScheduler {
 
   private readonly writer: CanvasPersistenceSchedulerOptions['writer'];
   private readonly prepareSnapshot: NonNullable<CanvasPersistenceSchedulerOptions['prepare']>;
+  private readonly prepareUnloadSnapshot: NonNullable<CanvasPersistenceSchedulerOptions['prepareForUnload']>;
   private readonly scheduleIdleCallback: NonNullable<CanvasPersistenceSchedulerOptions['scheduleIdle']>;
   private readonly cancelIdleCallback: NonNullable<CanvasPersistenceSchedulerOptions['cancelIdle']>;
   private readonly onPhaseChange?: CanvasPersistenceSchedulerOptions['onPhaseChange'];
@@ -135,11 +150,13 @@ export class CanvasPersistenceScheduler {
   private drainPromise: Promise<void> | null = null;
   private deferredFlushPromise: Promise<void> | null = null;
   private activeSnapshot: { projectId: string; revision: number; epoch: number } | null = null;
+  private activeSourceSnapshot: CanvasPersistenceSnapshot | null = null;
   private currentPhase: CanvasPersistencePhase = 'idle';
 
   constructor(options: CanvasPersistenceSchedulerOptions) {
     this.writer = options.writer;
     this.prepareSnapshot = options.prepare ?? prepareCanvasPersistenceSnapshot;
+    this.prepareUnloadSnapshot = options.prepareForUnload ?? prepareCanvasPersistenceSnapshot;
     this.scheduleIdleCallback = options.scheduleIdle ?? defaultScheduleIdle;
     this.cancelIdleCallback = options.cancelIdle ?? defaultCancelIdle;
     this.onPhaseChange = options.onPhaseChange;
@@ -196,6 +213,19 @@ export class CanvasPersistenceScheduler {
     return this.preparedSnapshots.get(projectId) ?? null;
   }
 
+  preparePendingSnapshotForUnload(projectId: string): CanvasPreparedPersistenceSnapshot | null {
+    const prepared = this.preparedSnapshots.get(projectId) ?? null;
+    const candidates = [this.pendingSnapshot, this.activeSourceSnapshot]
+      .filter((candidate): candidate is CanvasPersistenceSnapshot => candidate?.projectId === projectId);
+    const latest = candidates.reduce<CanvasPersistenceSnapshot | null>((current, candidate) => (
+      !current || candidate.revision > current.revision ? candidate : current
+    ), null);
+    if (!latest || (prepared && prepared.revision >= latest.revision)) return prepared;
+    const emergencyPrepared = this.prepareUnloadSnapshot(latest);
+    this.preparedSnapshots.set(projectId, emergencyPrepared);
+    return emergencyPrepared;
+  }
+
   hasPendingSnapshot(projectId: string): boolean {
     const prepared = this.preparedSnapshots.get(projectId);
     return this.pendingSnapshot?.projectId === projectId
@@ -235,6 +265,7 @@ export class CanvasPersistenceScheduler {
       this.pendingSnapshot = null;
       const epoch = this.getProjectEpoch(snapshot.projectId);
       this.activeSnapshot = { projectId: snapshot.projectId, revision: snapshot.revision, epoch };
+      this.activeSourceSnapshot = snapshot;
       const prepared = await this.prepare(snapshot);
       if (!this.isProjectEpochCurrent(snapshot.projectId, epoch)) {
         this.clearActiveSnapshot(snapshot);
@@ -303,6 +334,7 @@ export class CanvasPersistenceScheduler {
       && this.activeSnapshot.revision === snapshot.revision
     ) {
       this.activeSnapshot = null;
+      this.activeSourceSnapshot = null;
     }
   }
 

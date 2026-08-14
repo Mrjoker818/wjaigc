@@ -42,4 +42,26 @@ describe('infinite canvas viewport controller wiring', () => {
     expect(canvasSource).toContain('data-canvas-occupied-right={canvasOccupiedRight}');
     expect(workspaceSource).toContain('data-workspace-right-panel');
   });
+
+  it('clips the viewport without creating an auto-scrollable overflow container', () => {
+    const viewportStart = canvasSource.indexOf('data-canvas-viewport');
+    const viewportEnd = canvasSource.indexOf('onPointerDown={handlePointerDown}', viewportStart);
+    const viewport = canvasSource.slice(viewportStart, viewportEnd);
+
+    expect(viewport).toContain('overflow-clip');
+    expect(viewport).not.toContain('overflow-hidden');
+  });
+
+  it('clips the workspace shell without allowing mobile edge resize to scroll it', () => {
+    expect(workspaceSource).toContain('h-screen w-screen relative overflow-clip');
+    expect(workspaceSource).not.toContain('h-screen w-screen relative overflow-hidden');
+  });
+
+  it('does not call preventDefault from React passive wheel dispatch', () => {
+    const wheelHandlerStart = canvasSource.indexOf('const handleWheel = useCallback');
+    const wheelHandlerEnd = canvasSource.indexOf('const handleContextMenu = useCallback', wheelHandlerStart);
+    const wheelHandler = canvasSource.slice(wheelHandlerStart, wheelHandlerEnd);
+
+    expect(wheelHandler).not.toContain('preventDefault');
+  });
 });

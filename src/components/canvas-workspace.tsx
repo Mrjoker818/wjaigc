@@ -134,13 +134,17 @@ import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
 import { workflowFromProjectMetadata } from '@/lib/project-workflow';
 import {
+  consumeCanvasPendingMediaRecovery,
+  consumePreparedCanvasUnloadSnapshot,
   consumeCanvasHydrationGuard,
   createCanvasHydrationGuard,
   persistPreparedCanvasUnloadSnapshot,
+  reconcileRecoveredCanvasImages,
   shouldConsumeCanvasHydrationGuard,
   type CanvasHydrationGuard,
 } from '@/lib/canvas-autosave-guard';
 import { shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
+import { sendUserDataRecord } from '@/lib/user-data-record-client';
 
 import { LoginPanel } from '@/components/dashboard/login-panel';
 
@@ -200,6 +204,9 @@ const EMPTY_QUICK_CREATE_COMPILE_STATE: QuickCreateCompileViewState = {
   error: '',
   isCompiling: false,
 };
+
+const USER_DATA_RECORD_KEEPALIVE_BYTES = 60 * 1024;
+let recordUserDataQueue: Promise<void> = Promise.resolve();
 
 function getInitialProjectId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -290,11 +297,22 @@ function recordUserData(input: {
   payload?: unknown;
 }) {
   if (!input.userId) return;
-  void fetch('/api/user-data/record', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  }).catch(() => undefined);
+  const requestBody = JSON.stringify(input);
+  const keepAliveAcrossNavigation = new Blob([requestBody]).size <= USER_DATA_RECORD_KEEPALIVE_BYTES;
+  if (keepAliveAcrossNavigation) {
+    void sendUserDataRecord({ requestBody, keepalive: keepAliveAcrossNavigation })
+      .catch((error: unknown) => {
+        console.warn('[activity] user-data record failed', error instanceof Error ? error.message : 'unknown error');
+      });
+    return;
+  }
+  recordUserDataQueue = recordUserDataQueue
+    .catch(() => undefined)
+    .then(() => sendUserDataRecord({ requestBody, keepalive: keepAliveAcrossNavigation }))
+    .catch((error: unknown) => {
+      console.warn('[activity] user-data record failed', error instanceof Error ? error.message : 'unknown error');
+    })
+    .finally(() => undefined);
 }
 
 function getCanvasImageDisplaySize(naturalWidth: number, naturalHeight: number) {
@@ -464,7 +482,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
       // ★ 检测被删除的图片ID，注册到 UserManagerCore 防止服务器同步恢复
       // 仅在非服务器同步期间检测，避免误将服务器端删除注册为本地删除
-      if (next.length < prev.length && !serverSyncMergeRef.current) {
+      if (next.length < prev.length && historyIntent !== 'skip') {
         const nextIdSet = new Set(next.map(img => img.id));
         const deletedIds = prev.filter(img => !nextIdSet.has(img.id)).map(img => img.id).filter(Boolean);
         if (deletedIds.length > 0) {
@@ -701,8 +719,43 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
       const userMgr = UserManagerCore.getInstance();
       const projects = userMgr.getProjects();
-      const targetProject = projects.find((p: Project) => p.id === projectId);
-      if (targetProject) {
+      const storedProject = projects.find((p: Project) => p.id === projectId);
+      if (storedProject) {
+        const recoveryOwnerId = userMgr.getUser()?.id ?? '';
+        const recoveredCanvasSnapshot = consumePreparedCanvasUnloadSnapshot(
+          storedProject.id,
+          userMgr.getProjectSyncRevision(),
+          localStorage,
+          recoveryOwnerId,
+        );
+        const pendingMediaMarker = consumeCanvasPendingMediaRecovery(
+          storedProject.id,
+          localStorage,
+          recoveryOwnerId,
+        );
+        const hadPendingMedia = Boolean(recoveredCanvasSnapshot && pendingMediaMarker);
+        const recoveredMedia = recoveredCanvasSnapshot
+          ? reconcileRecoveredCanvasImages(recoveredCanvasSnapshot.images, storedProject.canvasImages)
+          : null;
+        const targetProject = recoveredCanvasSnapshot
+          ? {
+              ...storedProject,
+              canvasImages: [...(recoveredMedia?.images ?? recoveredCanvasSnapshot.images)],
+              metadata: recoveredCanvasSnapshot.metadata,
+              updatedAt: Date.now(),
+            }
+          : storedProject;
+        if (recoveredCanvasSnapshot) {
+          userMgr.updateProject(targetProject.id, {
+            canvasImages: targetProject.canvasImages,
+            metadata: targetProject.metadata,
+          });
+        }
+        if (hadPendingMedia) {
+          toast.warning(recoveredMedia?.discardedBlobIds.length
+            ? '部分临时图片在页面关闭前未完成上传，请重新上传缺失图片。'
+            : '临时图片已从本地恢复，正在继续保存。');
+        }
         hydrationAutosaveGuardRef.current = createCanvasHydrationGuard(
           targetProject.id,
           hydrateCanvasPlacements(targetProject.canvasImages || []),
@@ -958,8 +1011,42 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             // 从工作台跳转过来，加载指定项目
             try {
               const projects = userMgr.getProjects();
-              const targetProject = projects.find((p: Project) => p.id === projectId);
-              if (targetProject) {
+              const storedProject = projects.find((p: Project) => p.id === projectId);
+              if (storedProject) {
+                const recoveredCanvasSnapshot = consumePreparedCanvasUnloadSnapshot(
+                  storedProject.id,
+                  userMgr.getProjectSyncRevision(),
+                  localStorage,
+                  hydratedUser.id,
+                );
+                const pendingMediaMarker = consumeCanvasPendingMediaRecovery(
+                  storedProject.id,
+                  localStorage,
+                  hydratedUser.id,
+                );
+                const hadPendingMedia = Boolean(recoveredCanvasSnapshot && pendingMediaMarker);
+                const recoveredMedia = recoveredCanvasSnapshot
+                  ? reconcileRecoveredCanvasImages(recoveredCanvasSnapshot.images, storedProject.canvasImages)
+                  : null;
+                const targetProject = recoveredCanvasSnapshot
+                  ? {
+                      ...storedProject,
+                      canvasImages: [...(recoveredMedia?.images ?? recoveredCanvasSnapshot.images)],
+                      metadata: recoveredCanvasSnapshot.metadata,
+                      updatedAt: Date.now(),
+                    }
+                  : storedProject;
+                if (recoveredCanvasSnapshot) {
+                  userMgr.updateProject(targetProject.id, {
+                    canvasImages: targetProject.canvasImages,
+                    metadata: targetProject.metadata,
+                  });
+                }
+                if (hadPendingMedia) {
+                  toast.warning(recoveredMedia?.discardedBlobIds.length
+                    ? '部分临时图片在页面关闭前未完成上传，请重新上传缺失图片。'
+                    : '临时图片已从本地恢复，正在继续保存。');
+                }
                 hydrationAutosaveGuardRef.current = createCanvasHydrationGuard(
                   targetProject.id,
                   hydrateCanvasPlacements(targetProject.canvasImages || []),
@@ -1081,8 +1168,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     };
   }, [authChecked, currentUser]);
 
+  const quickCreateUserId = currentUser?.id;
+  const quickCreateModelAccessSignature = useMemo(() => JSON.stringify({
+    id: currentUser?.id ?? '',
+    role: currentUser?.role ?? 'user',
+    groupId: currentUser?.groupId ?? '',
+    chatModels: [...(currentUser?.chatModels ?? [])].sort(),
+    imageModels: [...(currentUser?.imageModels ?? [])].sort(),
+    apiPermissions: Object.entries(currentUser?.apiPermissions ?? {}).sort(([left], [right]) => (
+      left.localeCompare(right)
+    )),
+  }), [currentUser]);
   useEffect(() => {
-    if (!authChecked || !currentUser) {
+    if (!authChecked || !quickCreateUserId) {
       setQuickCreateImageModels([]);
       setQuickCreateChatModels([]);
       setQuickCreateImagePolicy(EMPTY_QUICK_CREATE_MODEL_POLICY);
@@ -1137,7 +1235,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       cancelled = true;
       controller.abort();
     };
-  }, [authChecked, currentUser]);
+  }, [authChecked, quickCreateUserId, quickCreateModelAccessSignature]);
 
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
@@ -1303,7 +1401,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     nextImages: CanvasImage[],
     project: Project,
   ): CanvasPersistenceSnapshot => ({
+    ownerId: project.userId,
     projectId: project.id,
+    baseProjectRevision: UserManagerCore.getInstance().getProjectSyncRevision(),
     revision: nextCanvasPersistenceRevision(),
     // CanvasImage is normalized to the durable placement contract during the
     // scheduler's idle prepare phase; this cast keeps the interaction commit
@@ -1318,44 +1418,46 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }), [nextCanvasPersistenceRevision]);
 
   if (!canvasPersistenceSchedulerRef.current) {
+    const prepareCanvasWorkspaceSnapshot = (snapshot: CanvasPersistenceSnapshot) => {
+      const normalizedSnapshot: CanvasPersistenceSnapshot = {
+        ...snapshot,
+        images: serializeCanvasWorkspacePlacements(
+          snapshot.images as unknown as CanvasImage[],
+        ),
+      };
+      const prepared = prepareCanvasPersistenceSnapshot(normalizedSnapshot);
+      const manager = UserManagerCore.getInstance();
+      const userId = currentUserRef.current?.id;
+      if (!userId) return prepared;
+      const beaconPayload = JSON.stringify({
+        key: 'projects',
+        projectRevision: manager.getProjectSyncRevision(),
+        value: manager.getProjects().map(project => ({
+          id: project.id,
+          schemaVersion: project.schemaVersion ?? 3,
+          name: project.name,
+          description: project.description,
+          canvasImages: project.id === normalizedSnapshot.projectId
+            ? normalizedSnapshot.images
+            : project.canvasImages,
+          metadata: project.id === normalizedSnapshot.projectId
+            ? normalizedSnapshot.metadata
+            : project.metadata,
+          settings: project.settings,
+          createdAt: project.createdAt,
+          updatedAt: project.id === normalizedSnapshot.projectId ? Date.now() : project.updatedAt,
+          userId,
+        })),
+      });
+      return {
+        ...prepared,
+        beaconPayload,
+        beaconByteLength: new TextEncoder().encode(beaconPayload).byteLength,
+      };
+    };
     canvasPersistenceSchedulerRef.current = new CanvasPersistenceScheduler({
-      prepare: (snapshot) => {
-        const normalizedSnapshot: CanvasPersistenceSnapshot = {
-          ...snapshot,
-          images: serializeCanvasWorkspacePlacements(
-            snapshot.images as unknown as CanvasImage[],
-          ),
-        };
-        const prepared = prepareCanvasPersistenceSnapshot(normalizedSnapshot);
-        const manager = UserManagerCore.getInstance();
-        const userId = currentUserRef.current?.id;
-        if (!userId) return prepared;
-        const beaconPayload = JSON.stringify({
-          key: 'projects',
-          projectRevision: manager.getProjectSyncRevision(),
-          value: manager.getProjects().map(project => ({
-            id: project.id,
-            schemaVersion: project.schemaVersion ?? 3,
-            name: project.name,
-            description: project.description,
-            canvasImages: project.id === normalizedSnapshot.projectId
-              ? normalizedSnapshot.images
-              : project.canvasImages,
-            metadata: project.id === normalizedSnapshot.projectId
-              ? normalizedSnapshot.metadata
-              : project.metadata,
-            settings: project.settings,
-            createdAt: project.createdAt,
-            updatedAt: project.id === normalizedSnapshot.projectId ? Date.now() : project.updatedAt,
-            userId,
-          })),
-        });
-        return {
-          ...prepared,
-          beaconPayload,
-          beaconByteLength: new TextEncoder().encode(beaconPayload).byteLength,
-        };
-      },
+      prepare: prepareCanvasWorkspaceSnapshot,
+      prepareForUnload: prepareCanvasWorkspaceSnapshot,
       writer: async (snapshot) => {
         const scheduler = canvasPersistenceSchedulerRef.current;
         if (!scheduler) return;
@@ -1790,19 +1892,27 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const currentProjectRef2 = useRef(currentProject);
   currentProjectRef2.current = currentProject;
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       const proj = currentProjectRef2.current;
       if (!proj) return;
       try {
         if (!currentUserRef.current?.id) return;
         if (!canvasPersistenceScheduler.hasPendingSnapshot(proj.id)) return;
-        const prepared = canvasPersistenceScheduler.getPreparedSnapshot(proj.id);
+        const prepared = canvasPersistenceScheduler.preparePendingSnapshotForUnload(proj.id);
         if (!prepared) return;
+        if (prepared.hasPendingMedia) {
+          event.preventDefault();
+          event.returnValue = '';
+        }
         persistPreparedCanvasUnloadSnapshot(prepared, {
           storage: localStorage,
           sendBeacon: navigator.sendBeacon.bind(navigator),
         });
-      } catch { /* best effort */ }
+      } catch (error) {
+        event.preventDefault();
+        event.returnValue = '';
+        console.warn('[canvas] unload recovery snapshot failed', error instanceof Error ? error.message : 'unknown error');
+      }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
@@ -1831,8 +1941,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         if (!currentUserId || currentUserId !== currentUserRef.current?.id) return;
         // 标记服务器同步合并中，防止自动保存用旧闭包数据覆盖
         serverSyncMergeRef.current = true;
-        // ★ 跳过历史记录，防止服务器同步合并被记入 undo 历史
-        skipHistoryRef.current = true;
         const projects = userMgr.getProjects();
         const curProjectId = currentProjectRef.current?.id;
         if (curProjectId) {
@@ -1859,6 +1967,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               );
               // ★ 数据隔离：仅从过滤后的服务器图片 ID 集合查找本地补充数据
               const serverImgIdSet = new Set(afterDeletedFilter.map(img => img.id));
+              const previousProjectImageIds = new Set(
+                (currentProjectRef.current?.canvasImages ?? []).map(img => img.id),
+              );
               const localImgMap = new Map<string, CanvasImage>();
               for (const li of latestImagesRef.current) {
                 // 仅纳入服务器也有的图片 ID，排除不属于当前项目的图片
@@ -1868,6 +1979,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               // 如果本地有图片但服务器没有（syncToServer 还没跑），不要丢失这些图片
               const localOnlyImages = latestImagesRef.current.filter(
                 li => li.id && !serverImgIdSet.has(li.id)
+                  && !previousProjectImageIds.has(li.id)
                   && !recentlyDeletedIdsRef.current.has(li.id)
                   && !li.isProcessingPlaceholder
                   && shouldRetainCanvasPlacementDuringMerge(li)
@@ -1964,16 +2076,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }
         // 项目列表可能变化（如其他设备新建了项目）
         setCurrentUser({ ...currentUser }); // 触发 UI 刷新
-        // 延迟清除同步合并标记，确保 setImages 引起的自动保存跳过本轮
-        // ★ 同时恢复历史记录（延迟更久，确保 setImages 回调链完成）
+        // 延迟清除同步合并标记，确保 setImages 引起的自动保存跳过本轮。
+        // 历史隔离由上方的 { history: 'skip' } 精确控制，不得全局屏蔽用户操作。
         if (serverSyncMergeTimerRef.current) clearTimeout(serverSyncMergeTimerRef.current);
         serverSyncMergeTimerRef.current = setTimeout(() => {
           serverSyncMergeRef.current = false;
-          skipHistoryRef.current = false;
           serverSyncMergeTimerRef.current = null;
           setServerSyncMergeRevision(revision => revision + 1);
         }, 2000);
-      } catch { /* best effort */ serverSyncMergeRef.current = false; skipHistoryRef.current = false; }
+      } catch { /* best effort */ serverSyncMergeRef.current = false; }
     });
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();
@@ -1982,7 +2093,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         serverSyncMergeTimerRef.current = null;
       }
       serverSyncMergeRef.current = false;
-      skipHistoryRef.current = false;
     };
   }, [currentUser?.id, currentProject?.id, setImages]);
 
@@ -2044,9 +2154,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
     };
 
-    // 延迟 2 秒执行，等待页面渲染和服务器数据加载完成
-    const timer = setTimeout(persistDataUrls, 2000);
-    return () => clearTimeout(timer);
+    // Start persistence immediately so temporary media spends the shortest possible time in memory only.
+    void persistDataUrls();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [images]);
 
@@ -5550,7 +5659,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }
 
   return (
-    <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}>
+    <div className={`h-screen w-screen relative overflow-clip ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}>
       {/* System Announcement - Banner mode (top bar) */}
       {announcement && showAnnouncement && announcement.displayMode !== 'popup' && announcement.displayMode !== 'sidebar' && (
         <div className={`fixed top-0 left-0 right-0 z-[400] flex items-center justify-center gap-2 px-4 py-2 text-sm ${

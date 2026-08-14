@@ -106,6 +106,104 @@ jobs:
           src/__tests__/lib/annotation-postgres-concurrency.test.ts
           --pool=forks --poolOptions.forks.singleFork=true
 
+  stage-3-canvas-kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        canvas-mode: [legacy, shadow, canvas-v2]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wujie_stage3
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wujie_stage3"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGDATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage3
+      E2E_STAGE3_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage3
+      E2E_STAGE3_DATABASE_GUARD: stage3-ci-guard
+      E2E_STAGE3_ALLOW_SEED: '1'
+      E2E_STAGE3_RUN_ID: ci-${{ matrix.canvas-mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+      E2E_STAGE3_ENV_OUTPUT: /tmp/wujie-stage3-environment.json
+      E2E_BASE_URL: http://127.0.0.1:5000
+      E2E_TEST_USERNAME: stage3-ci
+      E2E_TEST_PASSWORD: Stage3-CI-${{ github.run_id }}!
+      WUJIE_AUTH_SECRET: stage3-ci-auth-${{ github.run_id }}-${{ github.run_attempt }}
+      INTERNAL_API_SECRET: stage3-ci-internal-${{ github.run_id }}-${{ github.run_attempt }}
+      WUJIE_ADMIN_PASSWORD: Stage3-Admin-${{ github.run_id }}!
+      WUJIE_DATA_DIR: /tmp/wujie-stage3-data
+      WUJIE_CANVAS_KERNEL_MODE: ${{ matrix.canvas-mode }}
+      E2E_STAGE3_EXPECTED_CANVAS_MODE: ${{ matrix.canvas-mode }}
+      WUJIE_ASSET_GRAPH_MODE: legacy
+      WUJIE_TASK_CORE_MODE: legacy
+      PLAYWRIGHT_WORKERS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Prepare isolated database
+        shell: bash
+        run: |
+          pnpm migrate
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const client = new pg.Client({ connectionString: process.env.PGDATABASE_URL });
+          await client.connect();
+          await client.query('CREATE TABLE IF NOT EXISTS wujie_stage3_e2e_guard (guard_token text PRIMARY KEY)');
+          await client.query('INSERT INTO wujie_stage3_e2e_guard(guard_token) VALUES ($1) ON CONFLICT DO NOTHING', [process.env.E2E_STAGE3_DATABASE_GUARD]);
+          await client.end();
+          NODE
+      - name: Seed controlled Canvas fixtures
+        shell: bash
+        run: |
+          pnpm seed:e2e:stage-3
+          echo "E2E_TEST_USERNAME=$(jq -r .E2E_TEST_USERNAME "$E2E_STAGE3_ENV_OUTPUT")" >> "$GITHUB_ENV"
+          echo "E2E_STAGE3_PROJECT_IDS=$(jq -r .E2E_STAGE3_PROJECT_IDS "$E2E_STAGE3_ENV_OUTPUT")" >> "$GITHUB_ENV"
+      - name: Build production application
+        run: pnpm build
+      - name: Start production application
+        shell: bash
+        run: |
+          pnpm start > /tmp/wujie-stage3-server.log 2>&1 &
+          echo $! > /tmp/wujie-stage3-server.pid
+          for attempt in {1..90}; do
+            if curl --fail --silent "$E2E_BASE_URL/" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wujie-stage3-server.log
+          exit 1
+      - name: Run five-browser Canvas matrix
+        run: pnpm test:e2e:stage-3
+      - name: Upload Stage 3 browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-3-canvas-evidence-${{ matrix.canvas-mode }}-${{ github.sha }}
+          path: |
+            test-results/stage-3-baseline/
+            /tmp/wujie-stage3-server.log
+          if-no-files-found: error
+
   real-p0-browser:
     if: >-
       github.event_name != 'pull_request' ||

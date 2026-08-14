@@ -113,6 +113,15 @@ Successful and failed runs write under `test-results/stage-3-baseline/`:
 
 The existing `pnpm perf:check` string microbenchmark is auxiliary only and is not accepted as real DOM or browser performance evidence.
 
+## Task 10 Full Matrix Closure
+
+- Corrected Event Timing collection excludes buffered entries before the active measurement window. This closes the former S3-BUG-004 false-positive instrumentation path without relaxing the fixed Chromium threshold.
+- Fresh legacy production matrix: `60/60` across Chromium, Chromium 1920x1080, Firefox, WebKit and mobile Chromium. Representative `shadow` and `canvas-v2` matrices each pass `15/15`.
+- Desktop Chromium 300-node measurements pass at `54.62 FPS / 34.3ms P95` and `55.31 FPS / 21.6ms P95`; both record zero disappeared frames and zero unclickable time.
+- Browser behavior gates verify resize pointer capture, exact move/resize undo, native textarea isolation, button-focused Canvas undo, selection, pan/zoom/reset, delete/redo and save/reload recovery.
+- Evidence paths now include Canvas mode, run, retry and repeat indices, so an intermittent failure cannot be overwritten by a later success.
+- Local real-provider P0 remains unavailable because the isolated database contains no providers. Exact-SHA Coze shadow, canvas-v2 and mandatory legacy rollback remain required before Stage 3 completion.
+
 ## Task 7 Non-Blocking Persistence Evidence
 
 - Canvas interaction commits now schedule structural snapshots; placement normalization, JSON serialization and project writes run after yielding through the persistence scheduler. Immediate command saves no longer prepare the snapshot in the originating input task.
@@ -139,3 +148,13 @@ The existing `pnpm perf:check` string microbenchmark is auxiliary only and is no
 - The erase/mask editor's wheel listener now detaches by stable identity. Top-level teardown aborts tracked requests, clears timers/intervals, cancels RAFs and releases pointer capture.
 - RED evidence: boundary suite `3 failed / 2 passed`, followed by a lifecycle RED for the anonymous listener. GREEN evidence: focused Canvas regression `58/58`; full Vitest `422` files / `2376` executed tests; PostgreSQL suites `46/46` plus `4/4`; TypeScript, build, whitespace and ESLint `0 errors / 965 warnings` pass.
 - This is local structural/regression evidence only. The fixed 300-node performance gate, complete five-browser Stage 3 matrix, exact-SHA Coze validation, protected-baseline approval and `canvas-v2 -> legacy` rollback remain for Task 10.
+
+## Task 10 Independent Review Hardening
+
+- Emergency recovery now requires the exact owner, project and server project revision. Logout clears recovery state, and durable URL fallback preserves the newest recovered coordinates and dimensions.
+- Resize commits force immediate persistence. Local storage and snapshot beacon are independent unload channels; pending media and a double-channel failure both invoke the leave guard before silent loss is possible.
+- A stable user authorization signature prevents same-state React hydration from aborting model requests while still refreshing on local role/group/model/permission changes.
+- Dirty-worktree evidence identity hashes tracked, staged and untracked file contents. Per-test screenshot, trace and video are mandatory.
+- Focused hardening contracts pass `88/88`. The five-profile move/resize/undo/redo/immediate-reload flow passes `5/5`; final WebKit merge-window and Chromium immediate-reload checks pass `1/1` each.
+- The first post-review full test run retained S3-TEST-002 RED for a stale explicit-project hydration source anchor. The runtime workflow restore remained present; the recovery-aware ordering contract now passes `11/11`, followed by a clean PostgreSQL-enabled full rerun.
+- Exact immutable-SHA browser evidence, cloud providers/billing, GitHub Actions and `shadow -> canvas-v2 -> legacy` remain open. Beacon audit receipts and cross-session authorization push are recorded P2 limitations.

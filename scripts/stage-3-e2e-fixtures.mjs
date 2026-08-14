@@ -9,7 +9,7 @@ import { Client } from 'pg';
 const BROWSERS = ['chromium', 'chromium-1080p', 'firefox', 'webkit', 'mobile-chromium'];
 const NODE_COUNTS = [1, 100, 300];
 const PNG_BYTES = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAUElEQVR42u3PQQkAAAgEsAtjSMMaxgi+hcEKLNXzWgQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQErsAC6YuBWqb8nNIAAAAASUVORK5CYII=',
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAZUlEQVR42u3QQREAAAQAMK3EVkYfcjh7rMCiK+ezECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAu5b/K2ShtUTicYAAAAASUVORK5CYII=',
   'base64',
 );
 
@@ -236,6 +236,9 @@ async function main() {
     E2E_TEST_PASSWORD: password,
     E2E_STAGE3_RUN_ID: plan.runId,
     E2E_STAGE3_PROJECT_IDS: JSON.stringify(plan.projectMatrix),
+    E2E_STAGE3_EXPECTED_CANVAS_MODE: process.env.E2E_STAGE3_EXPECTED_CANVAS_MODE
+      || process.env.WUJIE_CANVAS_KERNEL_MODE
+      || 'legacy',
     WUJIE_DATA_DIR: dataRoot,
   };
   await mkdir(dirname(output), { recursive: true });

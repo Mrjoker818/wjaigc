@@ -1292,10 +1292,10 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Environment | Stage 3 Task 4 full Chromium regression, local production server, 2026-08-13 |
 | Reproduction | Open the isolated 300-node project and execute the fixed 75-frame Space-pan scenario. |
 | Expected | Input delay P95 is `<=50ms`, average FPS is `>=45`, with zero disappeared frames and zero unclickable time. |
-| Actual | Task 4 clean-fixture P95 was `50.2ms` after preceding `56.8ms` and `62.8ms`; Task 5 runs measured `72.5ms` and `52.3ms`; the final clean-fixture Task 6 run measured `87.8ms`. The latest run still recorded zero disappeared frames and zero unclickable time. |
-| Root cause | Not yet isolated. The failure remains assigned to the Stage 3 performance track; Task 4 does not guess at a fix or relax the threshold. |
-| Regression | The full Chromium spec remains enabled; the Task 6 final run reports `7/8`, with this assertion as the sole failure. |
-| Status | **OPEN P1.** |
+| Actual | Task 4 clean-fixture P95 was `50.2ms` after preceding `56.8ms` and `62.8ms`; Task 5 runs measured `72.5ms` and `52.3ms`; the final clean-fixture Task 6 run measured `87.8ms`. All runs still recorded zero disappeared frames and zero unclickable time. |
+| Root cause | The Event Timing observer used `buffered: true` and did not reject entries preceding the measurement start, so earlier login/load/tool events contaminated the fixed pan scenario's P95. This was a measurement defect, not permission to weaken the product threshold. |
+| Regression | The corrected fresh legacy matrix passes `60/60`. Desktop Chromium 300-node samples are `54.62 FPS / 34.3ms P95` and `55.31 FPS / 21.6ms P95`, with zero disappeared frames and zero unclickable time. The fixed `>=45 FPS` and `<=50ms` gates remain unchanged. |
+| Status | **CLOSED LOCALLY 2026-08-14 / CLOUD EXACT-SHA PENDING.** |
 
 ### S3-BUG-005: Queued or late history transitions could overwrite the wrong Canvas state
 
@@ -1386,3 +1386,145 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Inject task polling from `CanvasWorkspace`; retain response semantics in the facade; use a stable wheel handler with explicit detach; abort tracked requests, clear timers/intervals, cancel RAFs and release pointer capture during teardown. |
 | Regression | Initial boundary RED `3 failed / 2 passed`; lifecycle RED reproduced the anonymous listener; focused GREEN `58/58`; full Vitest `2376/2376` executed tests, PostgreSQL suites `46/46` plus `4/4`, TypeScript/build/ESLint/diff checks pass. |
 | Status | **CLOSED LOCALLY 2026-08-14 / TASK 10 CROSS-BROWSER AND CLOUD EXACT-SHA PENDING.** |
+
+### S3-BUG-011: Resize could lose pointer ownership before the history transaction committed
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite Canvas resize / command history |
+| Environment | Stage 3 Task 10, local production Chromium and WebKit, 2026-08-14 |
+| Reproduction | Resize an image from a corner handle, cross the handle boundary during the drag, then press Ctrl/Cmd+Z. |
+| Expected | The resize remains owned by the initiating pointer, commits once on pointerup, and one undo restores the exact pre-resize geometry. |
+| Actual | The Canvas did not capture the resize pointer. Leaving the handle could terminate or divert the gesture before the transaction had a reliable commit boundary. |
+| Root cause | The resize branch started a history transaction but did not call `setPointerCapture`, while pointer-leave cleanup treated the gesture like an uncaptured pointer. |
+| Fix | Capture the initiating pointer on resize, preserve a captured pointer through pointer-leave, and release it through the existing terminal gesture paths. |
+| Regression | Focused source/command contracts pass; the five-profile production-browser matrix verifies move, resize, exact undo geometry and reload recovery. |
+| Status | **CLOSED LOCALLY 2026-08-14 / CLOUD EXACT-SHA PENDING.** |
+
+### S3-BUG-012: Focused toolbar controls and rendered pending state could suppress Canvas undo
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Infinite Canvas keyboard history routing |
+| Environment | Stage 3 Task 10, stable WebKit reproduction and local five-profile matrix, 2026-08-14 |
+| Reproduction | Move an image, focus the Select toolbar button, then press Ctrl/Cmd+Z; separately issue undo before React has rendered the asynchronous history-pending flag. |
+| Expected | A focused non-text toolbar button does not own native text history, so Canvas undo runs; an actual text editor retains native undo. The synchronous history guard decides whether a transition may start. |
+| Actual | The broad input-focus helper classified buttons and links as text editing targets, leaving the exact 96px movement in place. The rendered pending flag could also block a valid keyboard intent before the authoritative ref was consulted. |
+| Root cause | One focus predicate was reused for both general shortcut suppression and native text-editing ownership, and undo/redo was ordered after a lagging render-state guard. |
+| Fix | Retain the broad predicate for Space and general shortcuts, add a text-only editing predicate for undo/redo, and route undo/redo before the rendered pending-state guard while the workspace synchronous ref remains authoritative. |
+| Regression | The RED WebKit scenario retained the 96px move. Focused contracts pass `39/39`; WebKit repeat passes `10/10`; complete legacy matrix passes `60/60`; a real textarea probe confirms native text undo remains isolated. |
+| Status | **CLOSED LOCALLY 2026-08-14 / CLOUD EXACT-SHA PENDING.** |
+
+### S3-BUG-013: Oversized activity records used navigation keepalive beyond the browser limit
+
+| Field | Detail |
+|---|---|
+| Severity | P2 reliability |
+| Module | Canvas workspace activity/audit recording |
+| Environment | Stage 3 Task 10 production-browser evidence, 2026-08-14 |
+| Reproduction | Record a user-data activity whose serialized payload exceeds the browser keepalive request budget while navigating or closing the page. |
+| Expected | Small records may survive navigation; large records are sent normally and do not produce avoidable cancellation/noise. |
+| Actual | Every record used `keepalive`, including payloads over the practical 64 KiB browser limit, causing request cancellation and misleading network evidence. |
+| Root cause | Request size was not measured before enabling `keepalive`. |
+| Fix | Serialize once, measure UTF-8/blob bytes, and enable keepalive only at or below 60 KiB. |
+| Regression | Component wiring contracts cover request-body reuse and the keepalive threshold; the complete browser matrix records no unexpected console or network failures. |
+| Status | **CLOSED LOCALLY 2026-08-14 / CLOUD EXACT-SHA PENDING.** |
+
+### S3-TEST-001: Stage 3 evidence and CI startup checks could hide or manufacture failures
+
+| Field | Detail |
+|---|---|
+| Severity | P1 release-infrastructure integrity |
+| Module | Playwright evidence / performance sampler / GitHub Actions |
+| Environment | Stage 3 Task 10 local matrix and workflow contract, 2026-08-14 |
+| Reproduction | Repeat or retry the same browser test; observe evidence paths collide. Start a healthy app and probe unauthenticated `/api/auth/me` with `curl --fail`; observe the expected 401 treated as startup failure. Collect Event Timing with `buffered: true`; observe pre-window events included in the current P95. |
+| Expected | Every attempt retains immutable evidence, startup checks use a public health surface, and performance metrics include only the active measurement window. |
+| Actual | Later attempts could overwrite earlier failure evidence; a healthy protected auth endpoint failed the startup loop; stale buffered event entries inflated S3-BUG-004. |
+| Root cause | Evidence paths omitted mode/run/retry/repeat identities, CI conflated authentication with liveness, and the sampler accepted buffered entries without a start-time boundary. |
+| Fix | Scope evidence by mode, run, browser, test, retry and repeat; probe `/`; reject Event Timing entries preceding measurement; retain console, pageerror, network, screenshot, video and trace evidence in `finally`. |
+| Regression | Workflow/release contracts pass `15/15`; YAML parses; corrected legacy matrix passes `60/60`, shadow `15/15`, canvas-v2 `15/15`. Prior RED evidence remains retained. |
+| Status | **CLOSED LOCALLY 2026-08-14 / GITHUB ACTIONS EXECUTION PENDING PUSH.** |
+
+### S3-BUG-014: Unload recovery could cross user/revision boundaries or restore stale blob geometry
+
+| Field | Detail |
+|---|---|
+| Severity | P0 ownership boundary plus P1 data recovery |
+| Module | Canvas unload snapshot / authentication boundary / media recovery |
+| Environment | Stage 3 Task 10 independent review and focused TDD, 2026-08-14 |
+| Reproduction | Leave a prepared snapshot in local storage, change users or advance the server project revision, then reopen the project. Separately move/resize an image whose latest recovery URL is `blob:` while the server still has an older durable URL. |
+| Expected | Recovery is accepted only for the same owner, project and exact server revision; a durable URL fallback keeps the recovered layout. |
+| Actual | Earlier snapshots lacked an owner/server-revision binding. The first blob fallback reused the whole older server object and discarded the latest coordinates and dimensions. |
+| Root cause | Emergency recovery was treated as a project-local cache instead of an authenticated, revision-bound record; URL recovery and layout recovery were coupled. |
+| Fix | Snapshot v3 binds `ownerId + projectId + baseProjectRevision`; logout clears both recovery keys; blob fallback merges durable media identity with the recovered geometry; stale/foreign data is rejected. |
+| Regression | `canvas-autosave-guard` covers foreign owner, stale revision, exact revision, logout cleanup, data/blob recovery and different server/recovered geometry. |
+| Status | **CLOSED LOCALLY 2026-08-14 / CLOUD EXACT-SHA PENDING.** |
+
+### S3-BUG-015: Authentication hydration restarted the model catalog and WebKit reported aborted requests
+
+| Field | Detail |
+|---|---|
+| Severity | P2 reliability |
+| Module | Canvas quick-create model catalog |
+| Environment | Local production WebKit, retained RED run `task10-persistence-webkit-20260814d-r2` |
+| Reproduction | Login, open a 100-node project and let background user hydration replace the current user object while image/chat model requests are active. |
+| Expected | Rehydrating the same authorization state does not restart the catalog; a real authorization change does. |
+| Actual | The effect depended on the complete user object, aborted both requests and produced two WebKit page errors. Depending on only the user ID would instead hide same-user authorization changes. |
+| Root cause | Request lifetime was coupled to object identity rather than a stable authorization identity. |
+| Fix | Depend on user ID plus a sorted authorization signature containing role, group, chat/image models and API permissions. |
+| Regression | WebKit merge-window rerun passes `1/1` with zero Console/Network gate failures; source contract prevents the whole-user dependency regression. |
+| Status | **CLOSED LOCALLY 2026-08-14 / CROSS-SESSION ADMIN AUTHORIZATION PUSH REMAINS P2.** |
+
+### S3-BUG-016: Unload persistence failures could silently discard recent Canvas changes
+
+| Field | Detail |
+|---|---|
+| Severity | P1 |
+| Module | Canvas autosave / beforeunload |
+| Environment | Stage 3 Task 10 independent review and TDD, 2026-08-14 |
+| Reproduction | Move or resize an image, immediately refresh, force `localStorage.setItem` to fail, and make `sendBeacon` fail or reject the body. |
+| Expected | Local recovery and beacon are independent channels; if both fail, the browser asks before leaving. |
+| Actual | A storage exception skipped beacon. After isolating the channels, the caller still caught the double failure and allowed navigation. |
+| Root cause | The two persistence channels and the user-facing leave guard shared one best-effort exception boundary. |
+| Fix | Always attempt beacon after local storage failure; accept either successful channel; throw only on double failure; pending media and double failure both execute `preventDefault` and set `returnValue`. |
+| Regression | Unit tests cover storage failure/beacon success and double failure; component wiring locks confirmation before storage and inside the double-failure catch. |
+| Status | **CLOSED LOCALLY 2026-08-14 / REAL QUOTA-FAILURE BROWSER CHAOS TEST PENDING CLOUD.** |
+
+### S3-LIMIT-001: Beacon audit delivery has no application-level receipt
+
+| Field | Detail |
+|---|---|
+| Severity | P2 reliability limitation |
+| Module | User activity audit transport |
+| Actual | `sendBeacon(true)` proves browser queue acceptance, not a server 2xx/business write. It prevents navigation-aborted audit requests but cannot report a later 401/500 or storage failure. |
+| Current control | Bodies above 60 KiB use bounded response-aware fetch; small records start immediately and beacon rejection falls back to an 8-second response-aware fetch. Server authorization remains session-bound. |
+| Required closure | Add a server-persisted idempotent record ID and receipt/retry protocol, then verify audit delivery across reload, logout, 401/500 and storage failure. |
+| Status | **OPEN P2 / DOCUMENTED, NOT A STAGE 3 P0/P1 BLOCKER.** |
+
+### S3-LIMIT-002: External same-session authorization changes need a refresh signal
+
+| Field | Detail |
+|---|---|
+| Severity | P2 freshness limitation |
+| Module | Quick-create model authorization catalog |
+| Actual | The stable authorization signature refreshes when local user authorization changes, but an administrator changing the user in another session does not push a new user payload to the open Canvas page. |
+| Safety | Backend authorization remains authoritative, so a stale visible model cannot bypass permission checks. Reload refreshes the catalog. |
+| Required closure | Add an authorization/catalog revision to session sync or a server event, invalidate the model catalog on revision change, and test grant/revoke without page reload. |
+| Status | **OPEN P2 / DOCUMENTED, NOT A SECURITY BYPASS.** |
+
+### S3-TEST-002: Authentication bootstrap source contract assumed the pre-recovery project variable shape
+
+| Field | Detail |
+|---|---|
+| Severity | P2 test-integrity regression |
+| Module | Authentication bootstrap / explicit project hydration contract |
+| Environment | Final PostgreSQL-enabled full Vitest gate, 2026-08-14 |
+| Reproduction | Run `pnpm test` after introducing owner/revision-bound unload recovery. `auth-bootstrap-project-sync-contract.test.ts` searches for the old direct `targetProject = projects.find(...)` declaration and fails before checking workflow hydration. |
+| Expected | The contract proves that the stored project is resolved, the recovery-aware target project is constructed, and node workflow metadata is restored before Canvas images hydrate. |
+| Actual | Runtime still called `setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata))`, but the source contract returned `-1` because the implementation now uses `storedProject -> targetProject`. |
+| Root cause | A brittle string contract encoded a local variable declaration instead of the behavior/order invariant it intended to protect. |
+| Fix | Anchor the contract at `storedProject`, assert recovery-aware `targetProject` resolution follows, and assert workflow hydration occurs before the target project's image branch. |
+| Regression | Retained RED was `1 failed / 10 passed`; focused rerun is `11/11`; final PostgreSQL-enabled full Vitest exits `0`. |
+| Status | **CLOSED LOCALLY 2026-08-14.** |

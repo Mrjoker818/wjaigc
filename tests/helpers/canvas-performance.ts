@@ -1,5 +1,15 @@
 import type { Page } from '@playwright/test';
 
+export interface CanvasUnclickableSample {
+  id: string;
+  hitTag: string | null;
+  hitClass: string | null;
+  hitImageId?: string | null;
+  center?: { x: number; y: number };
+  cardRect?: { left: number; top: number; right: number; bottom: number };
+  hitStack?: Array<{ tag: string; className: string | null; imageId: string | null }>;
+}
+
 export interface CanvasPerformanceRawSample {
   startedAt: number;
   endedAt: number;
@@ -9,6 +19,7 @@ export interface CanvasPerformanceRawSample {
   saveTasksMs: number[];
   disappearedFrames: number;
   unclickableDurationMs: number;
+  unclickableSamples?: CanvasUnclickableSample[];
 }
 
 export interface CanvasPerformanceSample {
@@ -19,6 +30,7 @@ export interface CanvasPerformanceSample {
   longestSaveTaskMs: number;
   disappearedFrames: number;
   unclickableDurationMs: number;
+  unclickableSamples: CanvasUnclickableSample[];
 }
 
 interface CanvasPerformanceOptions {
@@ -44,6 +56,7 @@ export function summarizeCanvasPerformance(raw: CanvasPerformanceRawSample): Can
     longestSaveTaskMs: Number(Math.max(0, ...raw.saveTasksMs).toFixed(2)),
     disappearedFrames: raw.disappearedFrames,
     unclickableDurationMs: Number(raw.unclickableDurationMs.toFixed(2)),
+    unclickableSamples: raw.unclickableSamples ?? [],
   };
 }
 
@@ -77,7 +90,7 @@ export async function assertCanvasNodeContinuity(page: Page, ids: string[]): Pro
     const x = Math.min(window.innerWidth - 1, Math.max(0, centerX));
     const y = Math.min(window.innerHeight - 1, Math.max(0, centerY));
     const hit = document.elementFromPoint(x, y);
-    if (hit instanceof Element && hit.closest('[data-toolbar], [data-floating-panel], [data-popup], [data-modal]')) return [];
+    if (hit instanceof Element && hit.closest('[data-floating-panel], [data-popup], [data-modal]')) return [];
     if (!hit || (!card.contains(hit) && hit !== card)) return [`${id}:not-hittable`];
     return [];
     });
@@ -97,6 +110,7 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
       saveTasksMs: [] as number[],
       disappearedFrames: 0,
       unclickableDurationMs: 0,
+      unclickableSamples: [] as CanvasUnclickableSample[],
       lastFrameAt: performance.now(),
       saveInFlight: 0,
       active: true,
@@ -131,12 +145,12 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
       const eventObserver = new PerformanceObserver(list => {
         for (const entry of list.getEntries()) {
           const timing = entry as PerformanceEntry & { processingStart?: number };
-          if (typeof timing.processingStart === 'number') {
+          if (typeof timing.processingStart === 'number' && timing.startTime >= state.startedAt) {
             state.inputDelaysMs.push(Math.max(0, timing.processingStart - timing.startTime));
           }
         }
       });
-      eventObserver.observe({ type: 'event', buffered: true, durationThreshold: 0 } as PerformanceObserverInit);
+      eventObserver.observe({ type: 'event', durationThreshold: 0 } as PerformanceObserverInit);
       state.observers.push(eventObserver);
     } catch {}
 
@@ -199,8 +213,32 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
           && workspacePanel
           && (workspacePanel === hit || workspacePanel.contains(hit))
         ) continue;
-        if (hit instanceof Element && hit.closest('[data-toolbar], [data-floating-panel], [data-popup], [data-modal]')) continue;
-        if (!hit || (!card.contains(hit) && hit !== card)) unclickable = true;
+        if (hit instanceof Element && hit.closest('[data-floating-panel], [data-popup], [data-modal]')) continue;
+        if (!hit || (!card.contains(hit) && hit !== card)) {
+          unclickable = true;
+          if (state.unclickableSamples.length < 20) {
+            state.unclickableSamples.push({
+              id,
+              hitTag: hit?.tagName ?? null,
+              hitClass: hit instanceof HTMLElement ? hit.className || null : null,
+              hitImageId: hit instanceof Element
+                ? hit.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null
+                : null,
+              center: { x, y },
+              cardRect: {
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+              },
+              hitStack: document.elementsFromPoint(x, y).slice(0, 6).map(element => ({
+                tag: element.tagName,
+                className: element instanceof HTMLElement ? element.className || null : null,
+                imageId: element.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null,
+              })),
+            });
+          }
+        }
       }
       if (disappeared) state.disappearedFrames += 1;
       if (unclickable) state.unclickableDurationMs += delta;
@@ -228,6 +266,7 @@ async function stopMeasurement(page: Page): Promise<CanvasPerformanceRawSample> 
       saveTasksMs: number[];
       disappearedFrames: number;
       unclickableDurationMs: number;
+      unclickableSamples: CanvasUnclickableSample[];
       active: boolean;
       rafId: number;
       observers: PerformanceObserver[];
@@ -255,6 +294,7 @@ async function stopMeasurement(page: Page): Promise<CanvasPerformanceRawSample> 
       saveTasksMs: state.saveTasksMs,
       disappearedFrames: state.disappearedFrames,
       unclickableDurationMs: state.unclickableDurationMs,
+      unclickableSamples: state.unclickableSamples,
     };
   });
 }

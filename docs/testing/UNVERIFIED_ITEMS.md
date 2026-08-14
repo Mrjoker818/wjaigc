@@ -658,3 +658,20 @@
 | Protected-baseline source drift | BLOCKED BY ORDERED PLAN | Keep the default gate blocking accumulated Stage 3 source paths until Task 10 reviews and explicitly approves the exact candidate scope. |
 | Cloud exact-SHA and rollback | UNVERIFIED | After authorized push, deploy the exact candidate in the isolated Coze project, run representative Canvas flows and prove `canvas-v2 -> legacy` rollback. |
 | Task 10 release gates | NOT STARTED | Task 9 evidence does not authorize a Stage 3 completion or release claim. |
+
+## 2026-08-14 Stage 3 Task 10 remaining evidence
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Real paid P0 generation | UNVERIFIED / LOCAL PROVIDER ABSENT | The isolated local database has zero API providers. Deploy the exact candidate SHA to Coze and prove one authorized real generation reaches a terminal Canvas result without duplicate task or charge. |
+| Billing, cancellation and refund consistency | UNVERIFIED / CLOUD REQUIRED | Use the authenticated cloud account and PostgreSQL records to prove one task/one charge, terminal-state monotonicity, one cancellation and at-most-once refund. |
+| GitHub Actions Stage 3 matrix | PENDING PUSH | Push the reviewed candidate to `main` and require all legacy/shadow/canvas-v2 jobs plus artifact uploads to finish successfully. |
+| Coze exact-SHA shadow comparison | UNVERIFIED | Coze must report the exact pushed commit and run 1/100/300-node, tools, task projection, save/reload and auth protection in shadow with zero unexpected differences. |
+| Isolated canvas-v2 activation | UNVERIFIED | Only after shadow passes, switch the isolated preview to canvas-v2 and rerun the same functional/performance matrix. Do not switch the stable production domain in Stage 3. |
+| Mandatory legacy rollback | UNVERIFIED | Return the isolated runtime to legacy and prove login, old projects, images, three workspaces, tools, tasks, credits and save behavior remain unchanged. |
+| Historical ESLint warnings | ACCEPTED DEBT | `965` warnings remain historical; current release gate requires zero errors and no newly introduced warning. |
+| Small audit beacon application receipt | OPEN P2 | Add server-persisted idempotency plus a delivery receipt/retry path; verify 401/500, disk failure, reload and logout. `sendBeacon(true)` currently proves queue acceptance only. |
+| Cross-session model authorization refresh | OPEN P2 | Push or poll a session/catalog authorization revision so grant/revoke changes refresh the open Canvas without page reload; backend authorization already remains authoritative. |
+| Browser storage quota double failure | UNVERIFIED CHAOS EDGE | Unit/source contracts prove storage failure still attempts beacon and a double failure blocks leaving. A real browser quota/private-mode run with retained video/trace remains required. |
+| Final committed-source browser evidence | PENDING COMMIT | Current evidence is content-fingerprinted dirty-worktree evidence. After commit, rerun the release representative browser gates so artifacts identify the exact immutable SHA. |
+| `stable` GitHub ruleset enforcement | EXTERNAL GOVERNANCE BLOCKED | Repository permissions do not permit adding/verifying a server-side ruleset. Workflow detection remains secondary; do not claim branch protection enforcement. |

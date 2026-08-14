@@ -32,8 +32,9 @@ describe('quality workflow contract', () => {
   });
 
   it('fails clearly before browser installation when real P0 credentials are absent', () => {
-    const validation = workflow.indexOf('name: Validate real P0 E2E configuration');
-    const browserInstall = workflow.indexOf('pnpm exec playwright install');
+    const realP0Job = workflow.slice(workflow.indexOf('  real-p0-browser:'));
+    const validation = realP0Job.indexOf('name: Validate real P0 E2E configuration');
+    const browserInstall = realP0Job.indexOf('pnpm exec playwright install');
 
     expect(validation).toBeGreaterThan(-1);
     expect(browserInstall).toBeGreaterThan(validation);

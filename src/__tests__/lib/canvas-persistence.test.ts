@@ -11,7 +11,9 @@ function snapshot(
   overrides: Partial<CanvasPersistenceSnapshot> = {},
 ): CanvasPersistenceSnapshot {
   return {
+    ownerId: 'user-a',
     projectId: 'project-a',
+    baseProjectRevision: 7,
     revision,
     images: [{
       id: 'image-1',
@@ -206,5 +208,28 @@ describe('CanvasPersistenceScheduler', () => {
       hasPendingMedia: true,
       recoveryMarker: expect.stringContaining('project-a'),
     }));
+  });
+
+  it('prepares the latest pending snapshot synchronously for emergency unload', () => {
+    const idle = controlledIdle();
+    const scheduler = new CanvasPersistenceScheduler({
+      writer: async () => undefined,
+      scheduleIdle: idle.scheduleIdle,
+      cancelIdle: idle.cancelIdle,
+      prepareForUnload: value => ({
+        ...value,
+        signature: `signature-${value.revision}`,
+        serialized: JSON.stringify({ version: 2, preparedAt: 200, snapshot: value }),
+        recoveryMarker: JSON.stringify({ projectId: value.projectId, revision: value.revision }),
+        hasPendingMedia: false,
+      }),
+    });
+
+    scheduler.schedule(snapshot(1));
+    scheduler.schedule(snapshot(2));
+
+    expect(scheduler.preparePendingSnapshotForUnload('project-a')).toEqual(
+      expect.objectContaining({ revision: 2, signature: 'signature-2' }),
+    );
   });
 });

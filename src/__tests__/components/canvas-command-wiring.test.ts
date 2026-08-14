@@ -29,6 +29,93 @@ describe('canvas command and explicit history wiring', () => {
     expect(canvas.indexOf('rollbackHistoryTransaction(e.pointerId)')).toBeLessThan(canvas.indexOf('finishCanvasPointerGesture(e.pointerId, true)'));
   });
 
+  it('keeps resize pointer ownership until the history transaction commits', () => {
+    const resizeStart = canvas.indexOf('// Check resize handle');
+    const resizeEnd = canvas.indexOf('// Pointer-down routing must follow', resizeStart);
+    const resizeBranch = canvas.slice(resizeStart, resizeEnd);
+    expect(resizeBranch).toContain('e.currentTarget.setPointerCapture(e.pointerId)');
+
+    const pointerLeaveStart = canvas.indexOf('const handlePointerLeave');
+    const pointerLeaveEnd = canvas.indexOf('const handleWheel', pointerLeaveStart);
+    const pointerLeave = canvas.slice(pointerLeaveStart, pointerLeaveEnd);
+    expect(pointerLeave).toContain('if (e.currentTarget.hasPointerCapture(e.pointerId)) return;');
+  });
+
+  it('routes keyboard Space and the hand tool through pan before React state commits', () => {
+    expect(canvas).toContain('const isSpacePressedRef = useRef(false)');
+    expect(canvas).toContain("const activePointerToolRef = useRef<'select' | 'hand'>('select')");
+    expect(canvas).toContain('isSpacePressedRef.current = true;');
+    expect(canvas).toContain('isSpacePressedRef.current = false;');
+
+    const pointerDownStart = canvas.indexOf('const handlePointerDown');
+    const pointerMoveStart = canvas.indexOf('const handlePointerMove', pointerDownStart);
+    const pointerDown = canvas.slice(pointerDownStart, pointerMoveStart);
+    expect(pointerDown).toContain("if (activePointerToolRef.current === 'hand' || isSpacePressedRef.current)");
+    expect(pointerDown.indexOf("if (activePointerToolRef.current === 'hand' || isSpacePressedRef.current)")).toBeLessThan(pointerDown.indexOf('// Check resize handle'));
+  });
+
+  it('does not hijack Space from focused toolbar controls', () => {
+    const inputHelperStart = canvas.indexOf('const isInputFocused');
+    const inputHelperEnd = canvas.indexOf('// Helper: check if a native event originates', inputHelperStart);
+    const inputHelper = canvas.slice(inputHelperStart, inputHelperEnd);
+    expect(inputHelper).toContain('button');
+    expect(inputHelper).toContain('select');
+
+    const helperStart = canvas.indexOf('const isKeyboardEventFromOverlay');
+    const helperEnd = canvas.indexOf('// Sync selectedImage prop', helperStart);
+    const keyboardOverlayHelper = canvas.slice(helperStart, helperEnd);
+    expect(helperStart).toBeGreaterThan(-1);
+    expect(keyboardOverlayHelper).not.toContain('[data-toolbar]');
+
+    const keyboardEffectStart = canvas.indexOf('// Keyboard events');
+    const keyboardEffectEnd = canvas.indexOf('// Click outside to close menus', keyboardEffectStart);
+    const keyboardEffect = canvas.slice(keyboardEffectStart, keyboardEffectEnd);
+    expect(keyboardEffect).toContain('if (isKeyboardEventFromOverlay(e)) return;');
+  });
+
+  it('routes undo and redo through the authoritative workspace lock before the render-state guard', () => {
+    const keyboardEffectStart = canvas.indexOf('// Keyboard events');
+    const keyboardEffectEnd = canvas.indexOf('// Click outside to close menus', keyboardEffectStart);
+    const keyboardEffect = canvas.slice(keyboardEffectStart, keyboardEffectEnd);
+    const undoShortcut = keyboardEffect.indexOf("e.code === 'KeyZ' && !e.shiftKey");
+    const redoShortcut = keyboardEffect.indexOf("e.code === 'KeyZ' && e.shiftKey");
+    const renderStateGuard = keyboardEffect.indexOf('if (isHistoryTransitionPending) return;');
+
+    expect(undoShortcut).toBeGreaterThan(-1);
+    expect(redoShortcut).toBeGreaterThan(undoShortcut);
+    expect(renderStateGuard).toBeGreaterThan(redoShortcut);
+  });
+
+  it('reserves native undo for text editors without blocking focused canvas controls', () => {
+    const textEditingHelperStart = canvas.indexOf('const isTextEditingTarget');
+    const textEditingHelperEnd = canvas.indexOf('// Helper: check if a native event originates', textEditingHelperStart);
+    const textEditingHelper = canvas.slice(textEditingHelperStart, textEditingHelperEnd);
+    expect(textEditingHelperStart).toBeGreaterThan(-1);
+    expect(textEditingHelper).toContain('input');
+    expect(textEditingHelper).toContain('textarea');
+    expect(textEditingHelper).toContain('contenteditable');
+    expect(textEditingHelper).not.toContain('button');
+
+    const keyboardEffectStart = canvas.indexOf('// Keyboard events');
+    const keyboardEffectEnd = canvas.indexOf('// Click outside to close menus', keyboardEffectStart);
+    const keyboardEffect = canvas.slice(keyboardEffectStart, keyboardEffectEnd);
+    expect(keyboardEffect).toContain('const textEditingTarget = isTextEditingTarget(e);');
+    expect(keyboardEffect).toMatch(/e\.code === 'KeyZ' && !e\.shiftKey\)[\s\S]{0,120}if \(textEditingTarget\) return;/);
+  });
+
+  it('suppresses the synthetic image click emitted after a viewport pan', () => {
+    const pointerUpStart = canvas.indexOf('const handlePointerUp');
+    const pointerCancelStart = canvas.indexOf('const handlePointerCancel', pointerUpStart);
+    const pointerUp = canvas.slice(pointerUpStart, pointerCancelStart);
+    const panStart = pointerUp.indexOf('if (isPanning)');
+    const panEnd = pointerUp.indexOf('const activeBoxPreview', panStart);
+    const panFinish = pointerUp.slice(panStart, panEnd);
+
+    expect(panFinish).toContain('suppressSelectionClickRef.current = true');
+    expect(panFinish).toContain('suppressSelectionClickRef.current = false');
+    expect(panFinish).toContain('window.setTimeout');
+  });
+
   it('rolls back an unfinished history transaction when the pointer leaves without capture', () => {
     const leaveStart = canvas.indexOf('const handlePointerLeave');
     const wheelStart = canvas.indexOf('const handleWheel', leaveStart);
@@ -42,6 +129,21 @@ describe('canvas command and explicit history wiring', () => {
     expect(workspace).toContain("historyIntent === 'skip'");
     expect(workspace).toContain("{ history: 'skip' }");
     expect(workspace).toContain('incrementalHistoryRef.current.clear()');
+  });
+
+  it('does not disable user history while applying a server snapshot', () => {
+    const syncStart = workspace.indexOf('const unsubscribe = userMgr.onProjectsChanged');
+    const syncEnd = workspace.indexOf('// ★ 异步持久化 data:/blob: URL', syncStart);
+    const serverSync = workspace.slice(syncStart, syncEnd);
+
+    expect(serverSync).toContain("{ history: 'skip' }");
+    expect(serverSync).not.toContain('skipHistoryRef.current = true');
+    expect(serverSync).not.toContain('skipHistoryRef.current = false');
+  });
+
+  it('records user deletions during a server merge while excluding the snapshot itself', () => {
+    expect(workspace).toContain("next.length < prev.length && historyIntent !== 'skip'");
+    expect(workspace).not.toContain('next.length < prev.length && !serverSyncMergeRef.current');
   });
 
   it('locks user gestures while placement history is synchronizing', () => {
