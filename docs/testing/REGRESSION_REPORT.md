@@ -1058,7 +1058,7 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - S3-TEST-008 closes an evidence loophole: sync abort recovery now requires a later successful request with the same canonical SHA-256 body digest; timestamps and digests are retained. A 409 is accepted only when a later project sync succeeds.
 - Fresh production `canvas-v2` execution `local-final-candidate-r5-20260815` is retained as RED `58/60`. The first Chromium delete/undo case lost Ctrl+Z after the deleted DOM committed; the next move/resize case cascaded because that shared project remained empty. The other four browser profiles passed `48/48`, and all mandatory artifacts remain in the execution directory.
 - The preceding exact-candidate `r3` run retained one mobile failure (`59/60`). Three reproductions and pointer diagnostics proved its geometric card center was covered by the right-panel collapse button (`pointerdown` target button, no Canvas image ID), while the image remained partly off-screen. The regression now selects a visible, unobstructed image pixel and a hittable resize handle; a clean three-repeat mobile check passes `3/3`, followed by the full `r4` matrix `60/60`. No Canvas production behavior or threshold was changed for this test-harness correction.
-- S3-BUG-022 explains the r5-only loss: the window keyboard listener was destroyed and passively reinstalled whenever images or selection changed. A user key arriving after DOM commit but before passive effects had no listener. TDD retains RED `1/21`; changing only the keyboard listener to `useLayoutEffect` passes `22/22`. Three clean pre-fix Chromium repeats pass `36/36`, which confirms the race is narrow but does not waive the r5 failure. A new exact-source five-profile matrix is required before push.
+- Historical checkpoint: S3-BUG-022 was first narrowed to dependency-driven listener replacement and a `useLayoutEffect` candidate passed `22/22`. Exact legacy reproduction on `74268eb` later proved listener turnover still existed; the final stable-listener RED/GREEN evidence is recorded in the latest section below.
 
 ## 2026-08-15 Immutable `a372e9e` Actions classification
 
@@ -1094,3 +1094,12 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Repository GREEN: ESLint error gate, TypeScript, full Vitest `2458` passed, production build `116/116`, and `git diff --check`.
 - Explicitly not verified locally: `44` PostgreSQL-gated tests, the immutable three-mode browser rerun, real provider/accounting P0, and Coze rollout/rollback.
 - Verdict remains **NOT READY** until the new exact commit passes immutable browser evidence.
+
+## 2026-08-15 stable Canvas shortcut listener regression
+
+- Immutable run `31875413077` is retained as RED: canvas-v2 `56/60`, shadow `56/60`, legacy `53/60`. No retry or local pass replaces that evidence.
+- Exact unmodified legacy reproduction passed `10/12`; delete/undo failed and polluted the following move/resize fixture. Trace and database state confirmed the delete persisted while the immediate Ctrl+Z never entered Canvas history.
+- The first queued-command candidate was rejected and reverted after it moved the loss to the final undo. The final minimal fix keeps one DOM listener attached for the component lifetime and updates only a ref containing current handlers.
+- TDD: stable-listener contract RED `1/23`, GREEN `23/23`; command plus selection contracts `35/35`. Fresh production legacy Chromium passes `12/12`; mobile history/continuity passes `4/4`.
+- Full repository gate: `428` test files / `2461` tests passed, `44` PostgreSQL-gated tests explicitly skipped, ESLint and TypeScript exited 0, build completed `116/116`, protected features remained `38/38`.
+- **Regression verdict: local fix passes; Stage 3 remains NOT READY.** A new immutable three-mode run, Coze exact-SHA `shadow -> canvas-v2 -> legacy`, and real provider billing/cancel/refund evidence are still required.

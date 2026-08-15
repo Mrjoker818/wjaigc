@@ -866,7 +866,7 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 
 - S3-BUG-021 and S3-TEST-008 are closed locally with permanent regression coverage. Project sync is serialized, legacy writes use database revision CAS, autosave performs one bounded conflict rebase/retry, and evidence no longer treats an unrelated later request as recovery.
 - The rebuilt production `canvas-v2` five-profile matrix `local-final-candidate-r5-20260815` is RED `58/60`, not `60/60`. One Chromium delete/undo failed and one later case cascaded. The other four profiles passed `48/48`; the failure remains retained with Trace, video, Console and network evidence.
-- S3-BUG-022 closes the identified listener lifecycle gap by moving only the global Canvas keyboard listener from passive `useEffect` to commit-phase `useLayoutEffect`. TDD is RED `1/21`, GREEN `22/22`; three independently reseeded pre-fix Chromium runs passed `36/36`, so a new exact-source five-profile run remains mandatory instead of treating retries as closure.
+- Historical checkpoint: moving the listener to commit-phase `useLayoutEffect` narrowed the input gap and passed its source contract, but exact legacy reproduction on `74268eb` later disproved it as a complete fix. The latest readiness section records the component-lifetime stable-listener candidate and its fresh RED/GREEN evidence.
 - The retained `r3` mobile RED was classified from pointer evidence as a covered geometric test point, not waived as flakiness. The unobstructed-point regression passes three consecutive mobile executions before the full `r4` matrix; no business threshold was relaxed.
 - This result is local candidate evidence based on `main@f6f40ccbd23e8ee4855717a24e3dca4885475f51` plus the documented worktree patch. It is not yet an immutable GitHub commit or Coze deployment result.
 - **Release decision: NOT READY / Stage 3 remains in Task 10.** Required next gates are a main-only fast-forward, immutable GitHub Actions three-mode matrix, Coze exact-SHA `shadow -> canvas-v2 -> legacy` rollout/rollback, and real provider billing/cancel/refund proof. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
@@ -900,3 +900,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The second repair candidate has permanent RED/GREEN coverage and passes local lint, TypeScript, `2458` Vitest tests and the `116/116` route production build. No threshold, continuity assertion or protected product feature was removed.
 - PostgreSQL browser concurrency is not available on this workstation and remains an explicit external gate. The real-P0 job still fails closed because required repository Secrets are absent.
 - **Decision: NOT READY / remain in Stage 3 Task 10.** Publish only to `main`, keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged, and require a new immutable three-mode matrix before any Coze rollout or Stage 4/5 work.
+
+## 2026-08-15 readiness after immutable run `31875413077`
+
+- `main@74268ebaa14c6843cfdd91e08e32e478ad5347a8` is not releasable: canvas-v2 and shadow each passed `56/60`; legacy passed `53/60`.
+- Exact local legacy reproduction separated S3-BUG-022 from hosted performance noise. A dependency-driven DOM keyboard listener was replaced during delete/restore commits and could drop rapid Ctrl+Z input.
+- The final candidate keeps one stable DOM proxy listener and updates its current behavior through a ref. Fresh legacy Chromium passes `12/12`, mobile focused regression passes `4/4`, and the unchanged local performance budgets pass.
+- Repository gates pass locally, but `44` PostgreSQL tests remain environment-skipped in the generic run. Real-P0 still lacks required Secrets, and no cloud charge/refund proof has been produced.
+- **Decision: NOT READY / Stage 3 Task 10 remains active.** Push only a reviewed fast-forward to `main`; do not modify `stable`, do not start Stage 4/5, and require a new immutable three-mode matrix before Coze rollout.

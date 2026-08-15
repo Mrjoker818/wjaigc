@@ -730,7 +730,7 @@
 | Real paid provider and billing | BLOCKED EXTERNALLY | Use authorized provider credentials to prove task creation, one charge, cancellation, terminal failure/timeout and at most one refund. No mock result may close this item. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; no Stage 3 candidate may be pushed to it. |
 
-The local PostgreSQL gap is closed by `14 files / 54 tests`. Exact execution `local-final-candidate-r5-20260815` is retained as RED `58/60`; S3-BUG-022 has source RED/GREEN coverage, but a new exact-source five-profile matrix is still required. Stage 3 cannot be marked complete, and Stage 4/5 must not start until the local matrix, cloud, rollback and real-accounting rows above have immutable evidence.
+Historical checkpoint: the isolated PostgreSQL suite passed `14 files / 54 tests`, while `local-final-candidate-r5-20260815` remained RED `58/60`. The later stable-listener candidate now has exact local legacy Chromium `12/12` and mobile `4/4`; immutable three-mode CI, cloud rollout/rollback and real accounting remain required. Stage 3 is not complete and Stage 4/5 must not start.
 
 ## 2026-08-15 remaining scope after `a372e9e` Actions attempt 2
 
@@ -742,6 +742,19 @@ The local PostgreSQL gap is closed by `14 files / 54 tests`. Exact execution `lo
 | Real paid P0 and accounting | BLOCKED EXTERNALLY | Configure the required GitHub/Coze provider credentials and prove real generation, one charge, cancellation, terminal-state monotonicity and at-most-once refund. Mock data cannot close this item. |
 | Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
+
+## 2026-08-15 queue after immutable run `31875413077`
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Stable keyboard-listener candidate | LOCALLY VERIFIED | Exact legacy Chromium `12/12`, mobile focused `4/4`, focused contracts `35/35`; reproduce from the committed SHA in immutable CI. |
+| Hosted three-mode Canvas matrix | REQUIRED | Legacy, shadow and canvas-v2 must all pass unchanged 55/45 FPS, 50ms input P95, 100ms save-task, history, persistence and continuity gates. |
+| PostgreSQL-gated generic tests | BLOCKED LOCALLY | `POSTGRES_TEST_DATABASE_URL` is absent; `12 files / 44 tests` are explicitly skipped. The immutable PostgreSQL job remains authoritative. |
+| Real paid P0 | BLOCKED BY SECRETS | Configure real provider/account/database/storage Secrets and prove generation, cancellation, one charge and at-most-once refund. |
+| Coze exact-SHA sequence | WAITING FOR CI | After immutable CI passes, run and retain `shadow -> canvas-v2 -> legacy` evidence on the same commit. |
+| Stable branch | PROTECTED | Do not modify `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`. |
+
+Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 ## 2026-08-15 queue after immutable run `31873152403`
 

@@ -3151,7 +3151,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     return () => window.removeEventListener('mouseup', handleWindowMouseUp);
   }, [isEventFromOverlay]);
 
-  // Keyboard events
+  const canvasKeyboardHandlersRef = useRef<{
+    keydown: (event: KeyboardEvent) => void;
+    keyup: (event: KeyboardEvent) => void;
+    paste: (event: ClipboardEvent) => void;
+  }>({
+    keydown: () => undefined,
+    keyup: () => undefined,
+    paste: () => undefined,
+  });
+
+  // Keyboard events: keep the latest behavior available without replacing DOM listeners.
   useLayoutEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if event originates from dialog/modal/overlay
@@ -3541,15 +3551,28 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('paste', handlePaste);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('paste', handlePaste);
+    canvasKeyboardHandlersRef.current = {
+      keydown: handleKeyDown,
+      keyup: handleKeyUp,
+      paste: handlePaste,
     };
   }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isKeyboardEventFromOverlay, isInputFocused, isTextEditingTarget, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoPanel]);
+
+  // Stable Canvas keyboard listeners remain attached for the component lifetime. React commits only
+  // refresh the ref above, so delete/restore renders cannot create an input gap.
+  useLayoutEffect(() => {
+    const stableHandleKeyDown = (event: KeyboardEvent) => canvasKeyboardHandlersRef.current.keydown(event);
+    const stableHandleKeyUp = (event: KeyboardEvent) => canvasKeyboardHandlersRef.current.keyup(event);
+    const stableHandlePaste = (event: ClipboardEvent) => canvasKeyboardHandlersRef.current.paste(event);
+    window.addEventListener('keydown', stableHandleKeyDown);
+    window.addEventListener('keyup', stableHandleKeyUp);
+    window.addEventListener('paste', stableHandlePaste);
+    return () => {
+      window.removeEventListener('keydown', stableHandleKeyDown);
+      window.removeEventListener('keyup', stableHandleKeyUp);
+      window.removeEventListener('paste', stableHandlePaste);
+    };
+  }, []);
 
   // Click outside to close menus
   useEffect(() => {

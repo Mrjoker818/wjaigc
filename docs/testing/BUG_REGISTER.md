@@ -1701,15 +1701,15 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 |---|---|
 | Severity | P1 Canvas history reliability |
 | Module | Infinite Canvas global keyboard shortcuts and delete/undo flow |
-| Environment | Exact local commit `26acb785dc579bec2e0ac14a2dcd82f45797f4a7`, production `canvas-v2`, Chromium execution `local-final-candidate-r5-20260815` |
+| Environment | Immutable Actions run `31875413077` on `main@74268ebaa14c6843cfdd91e08e32e478ad5347a8`; exact local legacy production reproduction `local-legacy-chromium-repro-3` |
 | Reproduction | Delete the selected one-node image and send Ctrl+Z immediately after the DOM confirms the image is gone. Under the failing r5 timing, the node does not return within 30 seconds. |
 | Expected | Once deletion is visible, Ctrl+Z is accepted immediately and restores the same node as one history transaction. |
 | Actual | The delete committed, then Ctrl+Z produced no Canvas history action. The shared project remained empty and caused the next move/resize case to fail with node ID `undefined`. |
-| Root cause | The window keyboard listener used passive `useEffect` and depended on `images`, `selectedIds` and other changing values. React could remove the old listener, commit the deleted DOM, and wait until passive effects to attach the new listener. A key event in that interval was lost without an exception. |
-| Fix | Attach the same keyboard handler with `useLayoutEffect`, so cleanup and reattachment finish in the commit phase before the browser can deliver the next user input. No undo algorithm, persistence rule, shortcut meaning or performance threshold changed. |
-| Regression | Source TDD is RED `1 failed / 21 passed` and GREEN `22/22`. The original r5 matrix remains RED `58/60`. Three independently reseeded pre-fix full Chromium runs pass `36/36`, proving the race is intermittent and why retries alone cannot close it. A new exact-source five-profile matrix is required. |
-| Evidence | Retained failure under `test-results/stage-3-baseline/canvas-v2/local-ci-repro-20260815/local-final-candidate-r5-20260815/`; clean diagnostic runs `r5-history-repro-1..3`, `r5-history-sequence-repro`, `r5-first-seven-repro`, and `r5-chromium-clean-repeat-1..3`. |
-| Status | **FIXED LOCALLY 2026-08-15 / EXACT FIVE-PROFILE MATRIX REQUIRED BEFORE PUSH.** |
+| Root cause | The window keyboard listener depended on `images`, `selectedIds` and other changing values, so every delete/restore render removed and re-added the real DOM listener. Moving that dependency-heavy effect from passive `useEffect` to `useLayoutEffect` shortened the gap but did not eliminate listener turnover; exact legacy reproduction still lost rapid undo/redo input. |
+| Fix | Bind one stable `keydown`/`keyup`/`paste` proxy for the component lifetime and keep the latest behavior in a ref updated by the existing dependency-aware layout effect. Delete/restore renders can no longer create a DOM-listener gap. No history algorithm, shortcut meaning, persistence rule or performance threshold changed. |
+| Regression | The stable-listener source contract was RED `1 failed / 22 passed` and GREEN `23/23`; focused command/selection contracts pass `35/35`. Exact pre-fix legacy Chromium was RED `10/12`; after a fresh build and reseed the original-order Chromium suite passes `12/12`, and focused mobile history/continuity passes `4/4`. Full Vitest passes `428 files / 2461 tests`; `44` PostgreSQL-gated tests remain explicitly skipped in the generic run. |
+| Evidence | Retained RED and GREEN evidence under `test-results/stage-3-baseline/evidence/74268ebaa14c6843cfdd91e08e32e478ad5347a8/legacy/local-legacy-74268eb/`, including `local-legacy-chromium-repro-3`, `local-legacy-stable-listener-full-1` and `local-legacy-mobile-history-regression-1`. |
+| Status | **FIXED LOCALLY 2026-08-15 / NEW IMMUTABLE THREE-MODE CI REQUIRED.** |
 
 ### S3-TEST-008: Aborted or conflicting sync evidence could be accepted without proving semantic recovery
 

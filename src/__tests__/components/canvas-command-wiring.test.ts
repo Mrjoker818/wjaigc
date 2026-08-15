@@ -96,6 +96,14 @@ describe('canvas command and explicit history wiring', () => {
     expect(keyboardEffect).not.toMatch(/useEffect\(\(\) => \{/);
   });
 
+  it('keeps one stable DOM keyboard listener while rendering the latest shortcut handlers', () => {
+    expect(canvas).toContain('const canvasKeyboardHandlersRef = useRef');
+    expect(canvas).toContain('canvasKeyboardHandlersRef.current = {');
+    expect(canvas).toContain('const stableHandleKeyDown = (event: KeyboardEvent) =>');
+    expect(canvas).toContain("window.addEventListener('keydown', stableHandleKeyDown)");
+    expect(canvas).toContain("window.removeEventListener('keydown', stableHandleKeyDown)");
+  });
+
   it('reserves native undo for text editors without blocking focused canvas controls', () => {
     const textEditingHelperStart = canvas.indexOf('const isTextEditingTarget');
     const textEditingHelperEnd = canvas.indexOf('// Helper: check if a native event originates', textEditingHelperStart);
