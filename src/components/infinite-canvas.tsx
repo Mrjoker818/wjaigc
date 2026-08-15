@@ -3153,7 +3153,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [isEventFromOverlay]);
 
   // Keyboard events
-  useEffect(() => {
+  useLayoutEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if event originates from dialog/modal/overlay
       if (isKeyboardEventFromOverlay(e)) return;

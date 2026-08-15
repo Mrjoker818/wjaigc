@@ -291,6 +291,24 @@ export async function executeCanvasProjectSync(
   });
 }
 
+export async function executeLegacyCanvasProjectSync(
+  input: CanvasProjectSyncInput,
+  storage: CanvasProjectSyncStorage = new PostgresCanvasProjectSyncStorage(input.actorUserId),
+): Promise<CanvasProjectSyncResult> {
+  const persistedProjects = await persistCanvasProjectMedia(input);
+  return storage.transaction(async (transaction) => {
+    if (input.expectedRevision === undefined) {
+      throw new Error('Canvas project revision is required');
+    }
+    if (!transaction.claimRevision) {
+      throw new Error('Canvas project sync storage does not support revision checks');
+    }
+    const revision = await transaction.claimRevision(input.expectedRevision);
+    await transaction.writeProjects(persistedProjects);
+    return { projects: persistedProjects, mappings: {}, revision };
+  });
+}
+
 export interface AssetV3CanvasPlacement {
   entityId: string;
   assetId: string;

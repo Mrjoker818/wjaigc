@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 
 import {
   executeCanvasProjectSync,
+  executeLegacyCanvasProjectSync,
   adoptTaskProjectedCanvasMapping,
   hydrateAssetV3Projects,
   planCanvasShadowReconciliation,
@@ -970,6 +971,33 @@ describe('continuous canvas shadow synchronization', () => {
     expect(state.revision).toBe(1);
     expect(state.projects[0]?.canvasImages).toEqual([]);
     expect(state.activeImageIds).toEqual([]);
+  });
+
+  it('claims a revision and writes a legacy snapshot without touching asset graph records', async () => {
+    const writeProjects = vi.fn(async () => undefined);
+    const syncProject = vi.fn();
+    const reconcileDeletedProjects = vi.fn();
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        return callback({
+          claimRevision: async expectedRevision => expectedRevision + 1,
+          writeProjects,
+          syncProject,
+          reconcileDeletedProjects,
+        });
+      },
+    };
+
+    const result = await executeLegacyCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [project([image('legacy')])],
+      expectedRevision: 8,
+    }, storage);
+
+    expect(result).toMatchObject({ revision: 9, mappings: {} });
+    expect(writeProjects).toHaveBeenCalledOnce();
+    expect(syncProject).not.toHaveBeenCalled();
+    expect(reconcileDeletedProjects).not.toHaveBeenCalled();
   });
 
   it('returns persistence failure without beginning or partially writing a database transaction', async () => {

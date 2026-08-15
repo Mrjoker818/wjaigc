@@ -433,6 +433,7 @@ export class UserManager {
   private _projectMutationGeneration = 0;
   private _acceptedProjectMutationGeneration = 0;
   private _projectSyncInFlightTokens = new Set<string>();
+  private _projectSyncQueue: Promise<void> = Promise.resolve();
   private _projectHydration: { userId: string; promise: Promise<boolean> } | null = null;
   private _lastAuthoritativeProjects = new Map<string, Project[]>();
   private _projectAdoptionPendingUsers = new Set<string>();
@@ -886,8 +887,7 @@ export class UserManager {
   }): boolean {
     return this.currentUserId === request.userId
       && this._projectSyncSessionEpoch === request.sessionEpoch
-      && this._projectSyncRequestEpoch === request.requestEpoch
-      && this._projectMutationGeneration === request.mutationGeneration;
+      && this._projectSyncRequestEpoch === request.requestEpoch;
   }
 
   getProjectSyncRevision(): number {
@@ -916,6 +916,12 @@ export class UserManager {
 
   private finishProjectSyncRequest(request: { token: string }): void {
     this._projectSyncInFlightTokens.delete(request.token);
+  }
+
+  private enqueueProjectSync<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this._projectSyncQueue.then(operation, operation);
+    this._projectSyncQueue = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 
   private projectSyncStorageKey(prefix: string, userId: string): string {
@@ -1386,35 +1392,72 @@ export class UserManager {
   }
 
   /** 强制将当前项目快照提交到数据库；任何失败都会抛错并阻断依赖该快照的操作。 */
-  private acceptProjectSyncSuccess(data: ProjectSyncResponse, nextRevision: number): void {
+  private applyProjectSyncResponseToProjects(
+    projects: Project[],
+    data: ProjectSyncResponse,
+    userData: UserData,
+    includeAssetGraphUpdates: boolean = true,
+  ): Project[] {
+    const projectsBeforePatch = userData.projects;
+    try {
+      userData.projects = cloneProjects(projects);
+      this.applyProjectIdMap(data.projectIdMap || {});
+      if (includeAssetGraphUpdates) {
+        this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
+      }
+      return cloneProjects(userData.projects);
+    } finally {
+      userData.projects = projectsBeforePatch;
+    }
+  }
+
+  private acceptProjectSyncSuccess(
+    data: ProjectSyncResponse,
+    nextRevision: number,
+    requestMutationGeneration: number,
+    acceptedProjects: Project[],
+  ): void {
     const userId = this.currentUserId;
     const userData = userId ? this.multiUserData?.userData[userId] : undefined;
     if (!userId || !userData) throw new Error('PROJECT_SYNC_SESSION_CHANGED');
-    const projectsBeforeResponse = userData.projects;
-    let candidateProjects: Project[];
-    try {
-      userData.projects = cloneProjects(projectsBeforeResponse);
-      this.applyProjectIdMap(data.projectIdMap || {});
-      this.applyAssetGraphMappings(data.assetGraphMappings || {}, data.assetGraphUpdates || {});
-      candidateProjects = cloneProjects(userData.projects);
-    } finally {
-      userData.projects = projectsBeforeResponse;
-    }
+    const hasNewerLocalMutation = this._projectMutationGeneration !== requestMutationGeneration;
+    const adoptedDraft = hasNewerLocalMutation
+      ? this.applyProjectSyncResponseToProjects(userData.projects, data, userData, false)
+      : this.applyProjectSyncResponseToProjects(userData.projects, data, userData);
+    const authoritativeBase = this.applyProjectSyncResponseToProjects(acceptedProjects, data, userData);
     this.commitProjectAdoption({
       userId,
       revision: nextRevision,
       assetGraphMode: this._assetGraphMode,
       canvasKernelMode: this._canvasKernelMode,
-      authoritativeBase: candidateProjects,
-      adoptedDraft: candidateProjects,
+      authoritativeBase,
+      adoptedDraft,
       requiredBackups: [],
     });
-    this._recentlyDeletedImageIds.clear();
-    this._acceptedProjectMutationGeneration = this._projectMutationGeneration;
+    if (this._projectMutationGeneration === requestMutationGeneration) {
+      this._recentlyDeletedImageIds.clear();
+    }
+    this._acceptedProjectMutationGeneration = Math.max(
+      this._acceptedProjectMutationGeneration,
+      requestMutationGeneration,
+    );
     this.notifyProjectsChanged();
   }
 
   async flushProjectsToServer(): Promise<ProjectSyncResult> {
+    const expectedUserId = this.currentUserId;
+    const expectedSessionEpoch = this._projectSyncSessionEpoch;
+    if (!expectedUserId) throw new Error('登录状态已失效，请重新登录');
+    return this.enqueueProjectSync(async () => {
+      if (this.currentUserId !== expectedUserId
+        || this._projectSyncSessionEpoch !== expectedSessionEpoch) {
+        return { projectIdMap: {} };
+      }
+      return this.performProjectFlush();
+    });
+  }
+
+  private async performProjectFlush(): Promise<ProjectSyncResult> {
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
       this.serverSyncTimer = null;
@@ -1458,7 +1501,12 @@ export class UserManager {
       const nextRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
         ? Number(data.projectRevision)
         : this._projectSyncRevision;
-      this.acceptProjectSyncSuccess(data, nextRevision);
+      this.acceptProjectSyncSuccess(
+        data,
+        nextRevision,
+        request.mutationGeneration,
+        projectsPayload,
+      );
       return { projectIdMap };
     } finally {
       this.finishProjectSyncRequest(request);
@@ -1472,6 +1520,21 @@ export class UserManager {
   private async syncToServer(
     immediate: boolean = false,
     silent: boolean = false,
+  ): Promise<void> {
+    const expectedUserId = this.currentUserId;
+    const expectedSessionEpoch = this._projectSyncSessionEpoch;
+    return this.enqueueProjectSync(async () => {
+      if (!expectedUserId
+        || this.currentUserId !== expectedUserId
+        || this._projectSyncSessionEpoch !== expectedSessionEpoch) return;
+      await this.performServerSync(immediate, silent);
+    });
+  }
+
+  private async performServerSync(
+    immediate: boolean,
+    silent: boolean,
+    conflictRetries: number = 1,
   ): Promise<void> {
     let requestToken: { token: string } | null = null;
     try {
@@ -1493,7 +1556,16 @@ export class UserManager {
       const data = await syncRes.json().catch(() => null) as ProjectSyncResponse | null;
       if (!this.isCurrentProjectSyncRequest(request)) return;
       if (syncRes.status === 409) {
-        console.warn('[Sync] syncToServer: conflict; local draft retained for explicit resolution');
+        if (conflictRetries > 0) {
+          const rebased = await this.loadProjectsFromServer(0, request.userId);
+          if (rebased
+            && this.currentUserId === request.userId
+            && this._projectSyncSessionEpoch === request.sessionEpoch) {
+            await this.performServerSync(immediate, silent, conflictRetries - 1);
+            return;
+          }
+        }
+        console.warn('[Sync] syncToServer: conflict recovery exhausted; local draft retained');
         return;
       }
       if (!syncRes.ok) {
@@ -1503,7 +1575,12 @@ export class UserManager {
           const nextRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
             ? Number(data.projectRevision)
             : this._projectSyncRevision;
-          this.acceptProjectSyncSuccess(data, nextRevision);
+          this.acceptProjectSyncSuccess(
+            data,
+            nextRevision,
+            request.mutationGeneration,
+            projectsPayload,
+          );
           console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
         } else {
           console.warn('[Sync] syncToServer: invalid success response');

@@ -3,7 +3,13 @@ import { join } from 'node:path';
 
 import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
 import { stage3SourceIdentity } from './stage-3-source-state';
-import { isBenignStage3RequestAbort, type Stage3EvidenceEntry } from './stage-3-evidence-filter';
+import {
+  isBenignStage3RequestAbort,
+  isRecoveredStage3RequestAbort,
+  isRecoveredStage3SyncConflict,
+  stage3RequestFingerprint,
+  type Stage3EvidenceEntry,
+} from './stage-3-evidence-filter';
 
 export interface Stage3Evidence {
   directory: string;
@@ -82,14 +88,23 @@ export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({
     page.on('requestfailed', request => {
       evidence.network.push({
         method: request.method(),
+        occurredAt: Date.now(),
+        requestDigest: stage3RequestFingerprint(request.postData()),
         url: sanitizeUrl(request.url()),
         text: redact(request.failure()?.errorText ?? 'request failed'),
       });
     });
     page.on('response', response => {
-      if (response.status() >= 400) {
+      const request = response.request();
+      const isSuccessfulProjectSync = response.status() >= 200
+        && response.status() < 300
+        && request.method() === 'POST'
+        && new URL(response.url()).pathname === '/api/user-data/sync';
+      if (response.status() >= 400 || isSuccessfulProjectSync) {
         evidence.network.push({
-          method: response.request().method(),
+          method: request.method(),
+          occurredAt: Date.now(),
+          requestDigest: stage3RequestFingerprint(request.postData()),
           status: response.status(),
           url: sanitizeUrl(response.url()),
         });
@@ -140,12 +155,22 @@ export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({
         contentType: 'application/json',
       });
 
+      const hasRecoveredSyncConflict = evidence.network.some(entry => (
+        isRecoveredStage3SyncConflict(entry, evidence.network)
+      ));
       const consoleErrors = evidence.console.filter(entry => (
-        entry.type === 'error' || entry.type === 'pageerror'
+        (entry.type === 'error' || entry.type === 'pageerror')
+        && !(hasRecoveredSyncConflict
+          && /Failed to load resource: the server responded with a status of 409/i.test(entry.text ?? '')
+          && new URL(entry.url ?? 'http://invalid.local').pathname === '/api/user-data/sync')
       ));
       const networkErrors = evidence.network.filter(entry => (
-        (typeof entry.status === 'number' && entry.status >= 400)
-        || (!entry.status && !isBenignStage3RequestAbort(entry))
+        (typeof entry.status === 'number'
+          && entry.status >= 400
+          && !isRecoveredStage3SyncConflict(entry, evidence.network))
+        || (!entry.status
+          && !isBenignStage3RequestAbort(entry)
+          && !isRecoveredStage3RequestAbort(entry, evidence.network))
       ));
       if (
         testInfo.status === 'passed'

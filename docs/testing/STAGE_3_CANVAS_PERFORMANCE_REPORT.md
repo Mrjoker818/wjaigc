@@ -120,3 +120,14 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 - Independent review found one P1 durability gap after an idle-equivalent save. TDD RED was `2 failed / 9 passed`; the immediate-barrier correction passes focused persistence/Canvas/evidence contracts `50/50` and the rebuilt production matrix remains `60/60`.
 - Companion gates before the final documentation-only update: full Vitest exit `0`, PostgreSQL concurrency `4/4`, TypeScript and ESLint exit `0`, production build `116/116`.
 - **Status: local performance/behavior candidate pass; immutable hosted matrix still required.**
+
+## 2026-08-15 Final local matrix after CAS conflict recovery
+
+- Controlled environment: `local-ci-repro-20260815`; execution: `local-final-candidate-r5-20260815`; production Next.js server with PostgreSQL 18 and freshly seeded isolated projects.
+- The exact r5 run is RED `58/60`. Chromium lost the immediate Ctrl+Z after a delete; the following move/resize case was a cascade because the shared one-node project remained empty. Chromium 1920x1080, Firefox, WebKit and mobile Chromium each passed `12/12`.
+- The matrix adds an authoritative server snapshot assertion after immediate move/resize reload. WebKit geometry uses numeric tolerance only for browser decimal serialization; no functional threshold was relaxed.
+- The preceding mobile batch-delete/undo failure was a real project-revision conflict bug, not test flakiness. S3-BUG-021 serializes sync, rebases one autosave conflict and retries once; the final clean matrix passes in original order.
+- The retained `r3` run was `59/60`: the mobile move test used a geometric card center covered by the right-panel collapse control. Pointer diagnostics proved the wrong `pointerdown` target. The harness now chooses an unobstructed pixel within the card/interactive-viewport intersection and a hittable resize handle; targeted mobile repeat is `3/3` and the clean `r4` matrix is `60/60` without changing performance thresholds.
+- r5 root cause is S3-BUG-022: the global Canvas keyboard listener depended on image/selection state and used passive `useEffect`, so React could commit the deleted DOM before reinstalling Ctrl+Z handling. Source RED is `1 failed / 21 passed`; the commit-phase `useLayoutEffect` correction passes `22/22`. Three independently reseeded pre-fix Chromium runs passed `36/36`, demonstrating why the original race was intermittent; those passes do not erase the retained RED.
+- HTML report: `test-results/stage-3-baseline/canvas-v2/local-ci-repro-20260815/local-final-candidate-r5-20260815/playwright-report/index.html`. JUnit and attempt-level screenshot, video, trace, Console and network evidence are retained beside it.
+- **Status: local gate is pending a new exact-source five-profile run after S3-BUG-022. Immutable GitHub Actions and Coze three-mode rollout/rollback remain required.**

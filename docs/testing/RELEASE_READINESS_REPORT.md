@@ -861,3 +861,12 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - S3-BUG-019, S3-BUG-020 and S3-TEST-007 are locally closed with retained RED/GREEN evidence. The post-review execution `final-local-matrix-p1-barrier-20260814` passes `60/60`. S3-BUG-017 and S3-BUG-018 still require a new immutable hosted run.
 - GitHub Actions run `31797149839`, attempt 2 remains RED. The real-P0 job is blocked by missing required Secrets; no mock or skip is accepted as closure.
 - **Conclusion: CONDITIONAL / NOT READY.** Do not enter Stage 4/5. Commit/push only the reviewed `main` candidate, then require immutable CI and Coze exact-SHA `shadow -> canvas-v2 -> legacy`, including real provider and billing/refund evidence.
+
+## 2026-08-15 Stage 3 CI RED closure readiness
+
+- S3-BUG-021 and S3-TEST-008 are closed locally with permanent regression coverage. Project sync is serialized, legacy writes use database revision CAS, autosave performs one bounded conflict rebase/retry, and evidence no longer treats an unrelated later request as recovery.
+- The rebuilt production `canvas-v2` five-profile matrix `local-final-candidate-r5-20260815` is RED `58/60`, not `60/60`. One Chromium delete/undo failed and one later case cascaded. The other four profiles passed `48/48`; the failure remains retained with Trace, video, Console and network evidence.
+- S3-BUG-022 closes the identified listener lifecycle gap by moving only the global Canvas keyboard listener from passive `useEffect` to commit-phase `useLayoutEffect`. TDD is RED `1/21`, GREEN `22/22`; three independently reseeded pre-fix Chromium runs passed `36/36`, so a new exact-source five-profile run remains mandatory instead of treating retries as closure.
+- The retained `r3` mobile RED was classified from pointer evidence as a covered geometric test point, not waived as flakiness. The unobstructed-point regression passes three consecutive mobile executions before the full `r4` matrix; no business threshold was relaxed.
+- This result is local candidate evidence based on `main@f6f40ccbd23e8ee4855717a24e3dca4885475f51` plus the documented worktree patch. It is not yet an immutable GitHub commit or Coze deployment result.
+- **Release decision: NOT READY / Stage 3 remains in Task 10.** Required next gates are a main-only fast-forward, immutable GitHub Actions three-mode matrix, Coze exact-SHA `shadow -> canvas-v2 -> legacy` rollout/rollback, and real provider billing/cancel/refund proof. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.

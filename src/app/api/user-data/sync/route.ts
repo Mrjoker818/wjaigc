@@ -8,6 +8,7 @@ import { getAssetGraphReadStrategy, shouldWriteAssetShadow } from '@/lib/asset-c
 import {
   CanvasProjectSyncConflictError,
   executeCanvasProjectSync,
+  executeLegacyCanvasProjectSync,
   readCanvasProjectRevision,
   readAssetV3Projects,
   type AssetGraphMappings,
@@ -273,7 +274,7 @@ export async function POST(request: NextRequest) {
     }
 
     const assetGraphMode = resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE);
-    if (key === 'projects' && Array.isArray(value) && shouldWriteAssetShadow(assetGraphMode)) {
+    if (key === 'projects' && Array.isArray(value)) {
       if (!Number.isSafeInteger(body.projectRevision) || Number(body.projectRevision) < 0) {
         return NextResponse.json({
           success: false,
@@ -281,15 +282,20 @@ export async function POST(request: NextRequest) {
           currentRevision: await readCanvasProjectRevision(sessionUser.id),
         }, { status: 409 });
       }
-      const result = await executeCanvasProjectSync({
+      const syncProjectSnapshot = shouldWriteAssetShadow(assetGraphMode)
+        ? executeCanvasProjectSync
+        : executeLegacyCanvasProjectSync;
+      const result = await syncProjectSnapshot({
         actorUserId: sessionUser.id,
         projects: value as Project[],
         expectedRevision: Number(body.projectRevision),
         persistMedia: persistCanvasDataUrl,
       });
       value = result.projects;
-      assetGraphMappings = result.mappings;
-      assetGraphUpdates = buildAssetGraphUpdates(result.projects, result.mappings);
+      if (shouldWriteAssetShadow(assetGraphMode)) {
+        assetGraphMappings = result.mappings;
+        assetGraphUpdates = buildAssetGraphUpdates(result.projects, result.mappings);
+      }
       projectRevision = result.revision;
     } else if (!await dbSetUserData(sessionUser.id, key, value)) {
       throw new Error('Failed to write user data');

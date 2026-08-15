@@ -175,15 +175,54 @@ async function captureCanvasGeometry(page: Page, nodeId: string) {
 
 async function hittableCardCenter(page: Page, locator: Locator) {
   const box = await stableCardBox(locator);
-  const point = center(box);
   const expectedId = await locator.getAttribute('data-canvas-image-id');
-  const hittable = await page.evaluate(({ x, y, expectedId }) => {
-    const target = document.elementFromPoint(x, y);
-    return target?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId === expectedId
-      && !target?.closest('[data-toolbar], [data-floating-panel], [data-popup], [data-modal]');
-  }, { ...point, expectedId });
-  expect(hittable, 'canvas card center must not be covered by floating UI').toBe(true);
+  const point = await page.evaluate(({ box, expectedId }) => {
+    const viewport = document.querySelector<HTMLElement>('[data-canvas-viewport]')?.getBoundingClientRect();
+    if (!viewport) return null;
+    const occupiedRight = Number(
+      document.querySelector<HTMLElement>('[data-canvas-viewport]')?.dataset.canvasOccupiedRight || 0,
+    );
+    const left = Math.max(box.x, viewport.left) + 2;
+    const right = Math.min(box.x + box.width, viewport.right - occupiedRight) - 2;
+    const top = Math.max(box.y, viewport.top) + 2;
+    const bottom = Math.min(box.y + box.height, viewport.bottom) - 2;
+    if (left >= right || top >= bottom) return null;
+    const candidates = [
+      { x: (left + right) / 2, y: (top + bottom) / 2 },
+      { x: left + (right - left) * 0.25, y: top + (bottom - top) * 0.5 },
+      { x: left + (right - left) * 0.75, y: top + (bottom - top) * 0.5 },
+      { x: left + (right - left) * 0.5, y: top + (bottom - top) * 0.25 },
+      { x: left + (right - left) * 0.5, y: top + (bottom - top) * 0.75 },
+    ];
+    return candidates.find(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return target?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId === expectedId
+        && !target?.closest('[data-toolbar], [data-floating-panel], [data-popup], [data-modal]');
+    }) ?? null;
+  }, { box, expectedId });
+  expect(point, 'canvas card must expose a point that is not covered by floating UI').not.toBeNull();
+  if (!point) throw new Error('Canvas card has no unobstructed interactive point');
   return { box, point };
+}
+
+async function hittableResizeHandle(page: Page, card: Locator) {
+  const imageId = await card.getAttribute('data-canvas-image-id');
+  const handles = card.locator('.cursor-nwse-resize, .cursor-nesw-resize');
+  const count = await handles.count();
+  for (let index = 0; index < count; index += 1) {
+    const handle = handles.nth(index);
+    const box = await handle.boundingBox();
+    if (!box) continue;
+    const point = center(box);
+    const hittable = await page.evaluate(({ x, y, imageId }) => {
+      const target = document.elementFromPoint(x, y);
+      return target?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId === imageId
+        && target instanceof HTMLElement
+        && (target.className.includes('cursor-nwse-resize') || target.className.includes('cursor-nesw-resize'));
+    }, { ...point, imageId });
+    if (hittable) return { box, point };
+  }
+  throw new Error('Selected canvas card does not expose a hittable resize handle');
 }
 
 async function findHittableRightEdgePair(page: Page, imageIds: string[]): Promise<[string, string]> {
@@ -869,9 +908,8 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await openStage3Project(page, projectId);
     await waitForStage3Node(page, nodeId);
     const card = stage3CanvasCard(page, nodeId);
-    const original = await stableCardBox(card);
+    const { box: original, point: start } = await hittableCardCenter(page, card);
     const originalGeometry = await captureCanvasGeometry(page, nodeId);
-    const start = center(original);
     const viewport = await page.locator('[data-canvas-viewport]').boundingBox();
     expect(viewport).not.toBeNull();
     const dragTarget = {
@@ -881,6 +919,30 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await dragPointerAcrossFrames(page, start, dragTarget, 18);
     const moved = await stableCardBox(card);
     const movedGeometry = await captureCanvasGeometry(page, nodeId);
+    const moveInputEvents = await page.evaluate(() => (
+      (window as typeof window & {
+        __stage3HistoryInputEvents?: Array<Record<string, unknown>>;
+      }).__stage3HistoryInputEvents ?? []
+    ));
+    const moveStartTarget = await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return {
+        tag: target?.tagName ?? null,
+        className: target instanceof HTMLElement ? target.className : null,
+        imageId: target?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null,
+        toolbar: target?.closest<HTMLElement>('[data-toolbar]')?.dataset.toolbar ?? null,
+      };
+    }, start);
+    await writeStage3Metrics(stage3Evidence, testInfo, 'move-input-diagnostics', {
+      original,
+      originalGeometry,
+      moved,
+      movedGeometry,
+      start,
+      dragTarget,
+      moveStartTarget,
+      events: moveInputEvents,
+    });
     expect(Math.abs(moved.x - original.x)).toBeGreaterThan(20);
     expect(Math.abs(moved.y - original.y)).toBeGreaterThan(20);
 
@@ -927,11 +989,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     }).toBeLessThanOrEqual(2);
 
     await card.click();
-    const resizeHandle = card.locator('.cursor-nwse-resize').first();
-    await expect(resizeHandle).toBeVisible();
-    const resizeHandleBox = await resizeHandle.boundingBox();
-    expect(resizeHandleBox).not.toBeNull();
-    const resizeStart = center(resizeHandleBox!);
+    const { point: resizeStart } = await hittableResizeHandle(page, card);
     const resizeTarget = await page.evaluate(({ x, y }) => {
       const target = document.elementFromPoint(x, y);
       return {
@@ -943,7 +1001,10 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await dragPointerAcrossFrames(
       page,
       resizeStart,
-      { x: resizeStart.x - 64, y: resizeStart.y - 40 },
+      {
+        x: resizeStart.x < moved.x + moved.width / 2 ? resizeStart.x - 64 : resizeStart.x + 64,
+        y: resizeStart.y,
+      },
       14,
     );
     const resized = await stableCardBox(card);
@@ -1002,6 +1063,24 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       cardWidth: resizedBeforeImmediateReload.cardWidth,
       cardHeight: resizedBeforeImmediateReload.cardHeight,
     });
+    const authoritativeProjectsAfterReload = await readStage3Projects(page);
+    const authoritativeImageAfterReload = projectImage(authoritativeProjectsAfterReload, projectId, nodeId);
+    expect(Number(authoritativeImageAfterReload?.x)).toBeCloseTo(
+      Number.parseFloat(String(resizedBeforeImmediateReload.cardLeft)),
+      5,
+    );
+    expect(Number(authoritativeImageAfterReload?.y)).toBeCloseTo(
+      Number.parseFloat(String(resizedBeforeImmediateReload.cardTop)),
+      5,
+    );
+    expect(Number(authoritativeImageAfterReload?.width)).toBeCloseTo(
+      Number.parseFloat(String(resizedBeforeImmediateReload.cardWidth)),
+      5,
+    );
+    expect(Number(authoritativeImageAfterReload?.height)).toBeCloseTo(
+      Number.parseFloat(String(resizedBeforeImmediateReload.cardHeight)),
+      5,
+    );
   });
 
   for (const nodeCount of [100, 300] as const) {

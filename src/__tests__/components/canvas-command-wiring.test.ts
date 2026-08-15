@@ -86,6 +86,16 @@ describe('canvas command and explicit history wiring', () => {
     expect(renderStateGuard).toBeGreaterThan(redoShortcut);
   });
 
+  it('reattaches Canvas keyboard shortcuts during commit so history input has no passive-effect gap', () => {
+    const keyboardEffectStart = canvas.indexOf('// Keyboard events');
+    const keyboardEffectEnd = canvas.indexOf('// Click outside to close menus', keyboardEffectStart);
+    const keyboardEffect = canvas.slice(keyboardEffectStart, keyboardEffectEnd);
+
+    expect(keyboardEffectStart).toBeGreaterThan(-1);
+    expect(keyboardEffect).toMatch(/useLayoutEffect\(\(\) => \{/);
+    expect(keyboardEffect).not.toMatch(/useEffect\(\(\) => \{/);
+  });
+
   it('reserves native undo for text editors without blocking focused canvas controls', () => {
     const textEditingHelperStart = canvas.indexOf('const isTextEditingTarget');
     const textEditingHelperEnd = canvas.indexOf('// Helper: check if a native event originates', textEditingHelperStart);

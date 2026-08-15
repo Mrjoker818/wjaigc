@@ -718,3 +718,16 @@
 - `IMMUTABLE CI REQUIRED`: run `31797149839`, attempt 2 remains RED and predates the local history/tombstone closure. A new commit and hosted rerun must meet unchanged thresholds and reproduce no WebKit immediate-reload rollback.
 - `EXTERNALLY BLOCKED`: real-P0 GitHub Secrets, paid provider generation, authoritative charge/cancel/refund rows, Coze exact-SHA shadow, isolated canvas-v2 and final legacy rollback.
 - `NOT AUTHORIZED`: Stage 4/5 and any write to `stable` remain prohibited until all required Stage 3 external gates close.
+
+## 2026-08-15 Stage 3 Task 10 remaining evidence after CI RED closure
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Immutable GitHub Actions rerun | UNVERIFIED | Run the exact new `main` SHA through legacy, shadow and canvas-v2 jobs with unchanged performance and network-evidence gates. Local `60/60` cannot replace hosted-runner evidence. |
+| Coze exact-SHA shadow | UNVERIFIED | Deploy the exact commit with `WUJIE_CANVAS_KERNEL_MODE=shadow`; verify login, 1/100/300 nodes, tools, save/reload and zero shadow divergence. |
+| Coze isolated canvas-v2 | UNVERIFIED | Switch only the isolated preview to `canvas-v2` and repeat the same browser matrix, including CAS conflict recovery and authoritative server geometry after immediate reload. |
+| Mandatory legacy rollback | UNVERIFIED | Return the same deployment to `legacy` and prove login, old projects, three workspaces, images, tools, tasks, credits and saves remain intact. |
+| Real paid provider and billing | BLOCKED EXTERNALLY | Use authorized provider credentials to prove task creation, one charge, cancellation, terminal failure/timeout and at most one refund. No mock result may close this item. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; no Stage 3 candidate may be pushed to it. |
+
+The local PostgreSQL gap is closed by `14 files / 54 tests`. Exact execution `local-final-candidate-r5-20260815` is retained as RED `58/60`; S3-BUG-022 has source RED/GREEN coverage, but a new exact-source five-profile matrix is still required. Stage 3 cannot be marked complete, and Stage 4/5 must not start until the local matrix, cloud, rollback and real-accounting rows above have immutable evidence.

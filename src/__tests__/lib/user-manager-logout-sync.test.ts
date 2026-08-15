@@ -69,7 +69,7 @@ describe('UserManager logout persistence', () => {
         createdAt: 2,
       }],
     });
-    manager.logout();
+    await manager.logout();
 
     const projectSyncCalls = fetchMock.mock.calls.filter(([url, init]) =>
       String(url) === '/api/user-data/sync' && (init as RequestInit | undefined)?.method === 'POST'

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   execSql: vi.fn(),
   getPool: vi.fn(),
   executeCanvasProjectSync: vi.fn(),
+  executeLegacyCanvasProjectSync: vi.fn(),
   readCanvasProjectRevision: vi.fn(),
   readAssetV3Projects: vi.fn(),
   persistResultImage: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('@/lib/db-client', () => ({ execSql: mocks.execSql, getPool: mocks.getPo
 vi.mock('@/lib/asset-core/canvas-project-sync', () => ({
   CanvasProjectSyncConflictError: mocks.CanvasProjectSyncConflictError,
   executeCanvasProjectSync: mocks.executeCanvasProjectSync,
+  executeLegacyCanvasProjectSync: mocks.executeLegacyCanvasProjectSync,
   readCanvasProjectRevision: mocks.readCanvasProjectRevision,
   readAssetV3Projects: mocks.readAssetV3Projects,
 }));
@@ -107,18 +109,59 @@ describe('user-data asset graph sync route', () => {
     expect(mocks.dbSetUserData).not.toHaveBeenCalled();
   });
 
-  it('treats a failed legacy database write as a failed request', async () => {
+  it('uses revision CAS for legacy canvas writes without migrating the asset graph', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'legacy';
+    mocks.executeLegacyCanvasProjectSync.mockResolvedValue({ projects, mappings: {}, revision: 1 });
+
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'projects', value: projects, projectRevision: 0 }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ projectRevision: 1 });
+    expect(mocks.executeLegacyCanvasProjectSync).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: 'user-1',
+      projects,
+      expectedRevision: 0,
+    }));
+    expect(mocks.executeCanvasProjectSync).not.toHaveBeenCalled();
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('returns the current revision when legacy CAS rejects a stale canvas snapshot', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'legacy';
+    mocks.executeLegacyCanvasProjectSync.mockRejectedValue(new mocks.CanvasProjectSyncConflictError(4));
+
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'projects', value: projects, projectRevision: 3 }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Canvas project snapshot is stale',
+      currentRevision: 4,
+    });
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('treats a failed legacy non-project database write as a failed request', async () => {
     process.env.WUJIE_ASSET_GRAPH_MODE = 'legacy';
     mocks.dbSetUserData.mockResolvedValue(false);
 
     const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
       method: 'POST',
-      body: JSON.stringify({ key: 'projects', value: projects }),
+      body: JSON.stringify({ key: 'settings_profile', value: { density: 'compact' } }),
       headers: { 'content-type': 'application/json' },
     }));
 
     expect(response.status).toBe(500);
     expect(mocks.executeCanvasProjectSync).not.toHaveBeenCalled();
+    expect(mocks.executeLegacyCanvasProjectSync).not.toHaveBeenCalled();
   });
 
   it('uses asset graph placements for production GET hydration only in asset-v3 mode', async () => {
@@ -140,12 +183,14 @@ describe('user-data asset graph sync route', () => {
     process.env.WUJIE_ASSET_GRAPH_MODE = 'legacy';
     process.env.WUJIE_CANVAS_KERNEL_MODE = 'shadow';
     mocks.dbGetUserData.mockResolvedValue(projects);
+    mocks.executeLegacyCanvasProjectSync.mockResolvedValue({ projects, mappings: {}, revision: 1 });
 
     const postResponse = await POST(new NextRequest('http://localhost/api/user-data/sync', {
       method: 'POST',
       body: JSON.stringify({
         key: 'projects',
         value: projects,
+        projectRevision: 0,
         canvasKernelMode: 'canvas-v2',
       }),
       headers: { 'content-type': 'application/json' },

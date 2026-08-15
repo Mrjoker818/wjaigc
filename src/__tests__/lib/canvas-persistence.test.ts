@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CanvasPersistenceScheduler,
+  prepareCanvasPersistenceSnapshot,
   type CanvasPreparedPersistenceSnapshot,
   type CanvasPersistenceSnapshot,
   type CanvasPersistencePhase,
@@ -275,5 +276,29 @@ describe('CanvasPersistenceScheduler', () => {
     expect(scheduler.preparePendingSnapshotForUnload('project-a')).toEqual(
       expect.objectContaining({ revision: 2, signature: 'signature-2' }),
     );
+  });
+
+  it('adds the unload-only beacon payload after a normal snapshot has already been written', async () => {
+    const prepareForUnload = vi.fn(value => ({
+      ...prepareCanvasPersistenceSnapshot(value),
+      beaconPayload: `beacon-${value.revision}`,
+      beaconByteLength: 8,
+    }));
+    const scheduler = new CanvasPersistenceScheduler({
+      writer: async () => undefined,
+      prepare: prepareCanvasPersistenceSnapshot,
+      prepareForUnload,
+      deferWork: async () => undefined,
+    });
+
+    scheduler.schedule(snapshot(4));
+    await scheduler.flush('immediate');
+    expect(scheduler.getPreparedSnapshot('project-a')).not.toHaveProperty('beaconPayload');
+
+    expect(scheduler.preparePendingSnapshotForUnload('project-a')).toEqual(expect.objectContaining({
+      revision: 4,
+      beaconPayload: 'beacon-4',
+    }));
+    expect(prepareForUnload).toHaveBeenCalledOnce();
   });
 });

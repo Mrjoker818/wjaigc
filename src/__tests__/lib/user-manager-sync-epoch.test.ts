@@ -377,6 +377,7 @@ describe('UserManager project sync response isolation', () => {
     const manager = UserManager.getInstance();
     await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
     const request = manager.flushProjectsToServer();
+    await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2));
     manager.updateProject('project-a', {
       canvasImages: [canvasImage('/media/newer-local.png')],
       name: 'Newer local name',
@@ -384,17 +385,19 @@ describe('UserManager project sync response isolation', () => {
     response.resolve(new Response(JSON.stringify({
       success: true,
       projectRevision: 1,
+      projectIdMap: { 'project-a': 'project-canonical' },
       assetGraphUpdates: {
         'project-a': { 'image-shared': graphUpdate('/media/stale-canonical.png', 'version-stale') },
       },
     }), { status: 200 }));
     await request;
 
-    expect(manager.getProject('project-a')).toMatchObject({
+    expect(manager.getProject('project-a')).toBeNull();
+    expect(manager.getProject('project-canonical')).toMatchObject({
       name: 'Newer local name',
       canvasImages: [expect.objectContaining({ url: '/media/newer-local.png' })],
     });
-    expect(manager.getProjectSyncRevision()).toBe(0);
+    expect(manager.getProjectSyncRevision()).toBe(1);
   });
 
   it('rolls back a POST canonical patch when the persistent authoritative base cannot be written', async () => {
@@ -747,7 +750,7 @@ describe('UserManager project sync response isolation', () => {
     expect(manager.getProject('project-a')?.canvasImages).toHaveLength(1);
   });
 
-  it('stops debounced autosave on 409 without replaying its stale snapshot at rev1', async () => {
+  it('rebases debounced autosave once after 409 without resurrecting the remote deletion', async () => {
     let revision = 0;
     let serverProjects = [project('user-a', '/media/a.png')];
     const postBodies: Array<{ projectRevision: number; value: ReturnType<typeof project>[] }> = [];
@@ -813,18 +816,20 @@ describe('UserManager project sync response isolation', () => {
       expect(manager.isProjectSyncInFlight()).toBe(false);
     });
 
-    expect(postBodies.map((body) => body.projectRevision)).toEqual([0, 0]);
-    expect(revision).toBe(1);
+    expect(postBodies.map((body) => body.projectRevision)).toEqual([0, 0, 1]);
+    expect(revision).toBe(2);
     expect(serverProjects[0].canvasImages).toEqual([]);
-    expect(manager.getProjectSyncRevision()).toBe(0);
-    expect(manager.getProject('project-a')?.canvasImages).toHaveLength(1);
+    expect(manager.getProjectSyncRevision()).toBe(2);
+    expect(manager.getProject('project-a')?.canvasImages).toEqual([]);
   });
 
-  it('ignores an older POST response after a newer revision converges', async () => {
-    const older = deferredResponse();
-    const newer = deferredResponse();
+  it('serializes rapid project flushes and submits the latest draft at the accepted revision', async () => {
+    const first = deferredResponse();
+    const second = deferredResponse();
     const postBodies: Array<Record<string, unknown>> = [];
     let postCount = 0;
+    let activePosts = 0;
+    let maxActivePosts = 0;
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
       if (String(input) === '/api/user-data/sync?key=projects') {
         return new Response(JSON.stringify({
@@ -836,39 +841,48 @@ describe('UserManager project sync response isolation', () => {
       }
       postBodies.push(JSON.parse(String(init?.body || '{}')) as Record<string, unknown>);
       postCount += 1;
-      return postCount === 1 ? older.promise : newer.promise;
+      activePosts += 1;
+      maxActivePosts = Math.max(maxActivePosts, activePosts);
+      const response = await (postCount === 1 ? first.promise : second.promise);
+      activePosts -= 1;
+      return response;
     }));
 
     const { UserManager } = await import('@/lib/user-manager');
     const manager = UserManager.getInstance();
     await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
 
-    const olderRequest = manager.flushProjectsToServer();
+    const firstRequest = manager.flushProjectsToServer();
     manager.updateProject('project-a', { canvasImages: [canvasImage('/media/local-new.png')] });
-    const newerRequest = manager.flushProjectsToServer();
+    const secondRequest = manager.flushProjectsToServer();
 
-    newer.resolve(new Response(JSON.stringify({
+    await vi.waitFor(() => expect(postBodies).toHaveLength(1));
+    expect(postBodies[0]?.projectRevision).toBe(0);
+
+    first.resolve(new Response(JSON.stringify({
       success: true,
       projectRevision: 1,
-      assetGraphUpdates: { 'project-a': { 'image-shared': graphUpdate('/media/canonical-new.png', 'version-new') } },
     }), { status: 200 }));
-    await newerRequest;
-    manager.recordDeletedImageIds(['image-shared']);
+    await firstRequest;
+    await vi.waitFor(() => expect(postBodies).toHaveLength(2));
+    expect(postBodies[1]?.projectRevision).toBe(1);
+    expect(postBodies[1]?.value).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'project-a',
+        canvasImages: [expect.objectContaining({ url: '/media/local-new.png' })],
+      }),
+    ]));
 
-    older.resolve(new Response(JSON.stringify({
+    second.resolve(new Response(JSON.stringify({
       success: true,
-      projectRevision: 1,
-      assetGraphUpdates: { 'project-a': { 'image-shared': graphUpdate('/media/canonical-old.png', 'version-old') } },
+      projectRevision: 2,
     }), { status: 200 }));
-    await olderRequest;
+    await secondRequest;
 
     expect(postBodies).toHaveLength(2);
-    expect(postBodies.map((body) => body.projectRevision)).toEqual([0, 0]);
-    expect(manager.getProject('project-a')?.canvasImages[0]).toMatchObject({
-      url: '/media/canonical-new.png',
-      assetVersionId: 'version-new',
-    });
-    expect(manager.isRecentlyDeletedImage('image-shared')).toBe(true);
+    expect(maxActivePosts).toBe(1);
+    expect(manager.getProjectSyncRevision()).toBe(2);
+    expect(manager.getProject('project-a')?.canvasImages[0]?.url).toBe('/media/local-new.png');
   });
 
   it('does not apply a user A response after the local session switches to user B', async () => {

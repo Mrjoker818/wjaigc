@@ -770,6 +770,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             canvasImages: targetProject.canvasImages,
             metadata: targetProject.metadata,
           });
+          recoveredCanvasPersistenceRef.current = {
+            projectId: targetProject.id,
+            images: hydrateCanvasPlacements(targetProject.canvasImages || []) as CanvasImage[],
+          };
         }
         if (hadPendingMedia) {
           toast.warning(recoveredMedia?.discardedBlobIds.length
@@ -1057,6 +1061,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     canvasImages: targetProject.canvasImages,
                     metadata: targetProject.metadata,
                   });
+                  recoveredCanvasPersistenceRef.current = {
+                    projectId: targetProject.id,
+                    images: hydrateCanvasPlacements(targetProject.canvasImages || []) as CanvasImage[],
+                  };
                 }
                 if (hadPendingMedia) {
                   toast.warning(recoveredMedia?.discardedBlobIds.length
@@ -1258,6 +1266,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   currentProjectRef.current = currentProject;
   const hydrationAutosaveGuardRef = useRef<CanvasHydrationGuard | null>(null);
   const immediateSaveGuardRef = useRef<CanvasHydrationGuard | null>(null);
+  const recoveredCanvasPersistenceRef = useRef<{
+    projectId: string;
+    images: CanvasImage[];
+  } | null>(null);
 
   const resolveCanvasImageForChat = useCallback(async (image: CanvasImage): Promise<CanvasImage> => {
     return prepareCanvasAssetForChat(image, async () => {
@@ -1439,7 +1451,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           snapshot.images as unknown as CanvasImage[],
         ),
       };
-      const prepared = prepareCanvasPersistenceSnapshot(normalizedSnapshot);
+      return prepareCanvasPersistenceSnapshot(normalizedSnapshot);
+    };
+    const prepareCanvasWorkspaceUnloadSnapshot = (snapshot: CanvasPersistenceSnapshot) => {
+      const prepared = prepareCanvasWorkspaceSnapshot(snapshot);
       const manager = UserManagerCore.getInstance();
       const userId = currentUserRef.current?.id;
       if (!userId) return prepared;
@@ -1451,15 +1466,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           schemaVersion: project.schemaVersion ?? 3,
           name: project.name,
           description: project.description,
-          canvasImages: project.id === normalizedSnapshot.projectId
-            ? normalizedSnapshot.images
+          canvasImages: project.id === prepared.projectId
+            ? prepared.images
             : project.canvasImages,
-          metadata: project.id === normalizedSnapshot.projectId
-            ? normalizedSnapshot.metadata
+          metadata: project.id === prepared.projectId
+            ? prepared.metadata
             : project.metadata,
           settings: project.settings,
           createdAt: project.createdAt,
-          updatedAt: project.id === normalizedSnapshot.projectId ? Date.now() : project.updatedAt,
+          updatedAt: project.id === prepared.projectId ? Date.now() : project.updatedAt,
           userId,
         })),
       });
@@ -1471,7 +1486,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     };
     canvasPersistenceSchedulerRef.current = new CanvasPersistenceScheduler({
       prepare: prepareCanvasWorkspaceSnapshot,
-      prepareForUnload: prepareCanvasWorkspaceSnapshot,
+      prepareForUnload: prepareCanvasWorkspaceUnloadSnapshot,
       writer: async (snapshot, reason) => {
         const scheduler = canvasPersistenceSchedulerRef.current;
         if (!scheduler) return;
@@ -1534,6 +1549,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     }
   }, [buildCanvasPersistenceSnapshot, canvasPersistenceScheduler]);
   persistCanvasHistorySnapshotRef.current = persistCanvasImagesNow;
+
+  useEffect(() => {
+    const recovered = recoveredCanvasPersistenceRef.current;
+    if (!recovered || currentProject?.id !== recovered.projectId) return;
+    recoveredCanvasPersistenceRef.current = null;
+    persistCanvasImagesNow(recovered.images, 'immediate');
+  }, [currentProject?.id, persistCanvasImagesNow]);
 
   const handleDeleteCanvasImages = useCallback(async (imageIds: string[]): Promise<string[]> => {
     if (historyLifecyclePendingRef.current) return [];

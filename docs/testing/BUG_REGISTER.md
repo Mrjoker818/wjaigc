@@ -1676,3 +1676,49 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Track server-flushed signatures separately, promote a queued or completed equivalent idle save to one immediate writer pass, and preserve immediate-over-idle reason priority. |
 | Regression | TDD RED was `2 failed / 9 passed`; focused persistence/Canvas/evidence contracts pass `50/50`. The rebuilt production five-profile Canvas matrix passes `60/60` in execution `final-local-matrix-p1-barrier-20260814`. |
 | Status | **CLOSED LOCALLY 2026-08-14 / IMMUTABLE CI RERUN REQUIRED.** |
+
+### S3-BUG-021: Autosave conflict recovery could replay stale Canvas state or stop after one 409
+
+| Field | Detail |
+|---|---|
+| Severity | P1 Canvas data/persistence integrity |
+| Module | UserManager project synchronization, legacy Canvas persistence and reload recovery |
+| Environment | Local production `canvas-v2`, PostgreSQL 18, five-profile run `local-ci-repro-20260815/local-final-candidate-r5-20260815` |
+| Reproduction | Allow a periodic project sync and an immediate batch-delete/undo save to overlap so both start from the same project revision. The second write receives 409 while a newer local mutation is already present. |
+| Expected | Project writes are serialized per authenticated session; an autosave 409 fetches the authoritative snapshot, performs the existing three-way rebase and retries exactly once without restoring remotely deleted nodes or overwriting newer local work. Forced flush keeps an explicit conflict error. |
+| Actual | Project sync requests could overlap. A successful older response could adopt current mutable local state as its authoritative base, while a debounced 409 only logged a warning and stopped. This allowed later synchronization to replay stale geometry or deleted placements. |
+| Root cause | The client lacked one project-sync queue, response adoption was not bound to the request-time payload, and automatic autosave had no bounded conflict-rebase retry. Legacy mode also bypassed the database project revision compare-and-swap path. |
+| Fix | Serialize all project sync/flush requests per client session; bind accepted authoritative state to the request payload; preserve newer local mutations as draft while still applying the server's canonical project-ID mapping; skip stale Asset Graph/media projection from older responses; route legacy writes through transactional revision claiming; on one autosave 409 load the latest server snapshot, three-way rebase and retry once. |
+| Regression | TDD retained the missing retry as RED (`[0,0]` versus `[0,0,1]`). UserManager synchronization suites pass `51/51`; PostgreSQL integration passes `14 files / 54 tests`. Execution r5 is retained as RED `58/60` because of the separate S3-BUG-022 keyboard-listener race; the four non-Chromium profiles pass `48/48`. |
+| Evidence | `test-results/stage-3-baseline/canvas-v2/local-ci-repro-20260815/local-final-candidate-r5-20260815/` with the retained JUnit failure and HTML, screenshot, video, trace, Console and network artifacts. |
+| Status | **CLOSED LOCALLY 2026-08-15 / IMMUTABLE CI AND COZE EXACT-SHA RERUN REQUIRED.** |
+
+### S3-BUG-022: Canvas shortcut listener had a post-commit gap after image deletion
+
+| Field | Detail |
+|---|---|
+| Severity | P1 Canvas history reliability |
+| Module | Infinite Canvas global keyboard shortcuts and delete/undo flow |
+| Environment | Exact local commit `26acb785dc579bec2e0ac14a2dcd82f45797f4a7`, production `canvas-v2`, Chromium execution `local-final-candidate-r5-20260815` |
+| Reproduction | Delete the selected one-node image and send Ctrl+Z immediately after the DOM confirms the image is gone. Under the failing r5 timing, the node does not return within 30 seconds. |
+| Expected | Once deletion is visible, Ctrl+Z is accepted immediately and restores the same node as one history transaction. |
+| Actual | The delete committed, then Ctrl+Z produced no Canvas history action. The shared project remained empty and caused the next move/resize case to fail with node ID `undefined`. |
+| Root cause | The window keyboard listener used passive `useEffect` and depended on `images`, `selectedIds` and other changing values. React could remove the old listener, commit the deleted DOM, and wait until passive effects to attach the new listener. A key event in that interval was lost without an exception. |
+| Fix | Attach the same keyboard handler with `useLayoutEffect`, so cleanup and reattachment finish in the commit phase before the browser can deliver the next user input. No undo algorithm, persistence rule, shortcut meaning or performance threshold changed. |
+| Regression | Source TDD is RED `1 failed / 21 passed` and GREEN `22/22`. The original r5 matrix remains RED `58/60`. Three independently reseeded pre-fix full Chromium runs pass `36/36`, proving the race is intermittent and why retries alone cannot close it. A new exact-source five-profile matrix is required. |
+| Evidence | Retained failure under `test-results/stage-3-baseline/canvas-v2/local-ci-repro-20260815/local-final-candidate-r5-20260815/`; clean diagnostic runs `r5-history-repro-1..3`, `r5-history-sequence-repro`, `r5-first-seven-repro`, and `r5-chromium-clean-repeat-1..3`. |
+| Status | **FIXED LOCALLY 2026-08-15 / EXACT FIVE-PROFILE MATRIX REQUIRED BEFORE PUSH.** |
+
+### S3-TEST-008: Aborted or conflicting sync evidence could be accepted without proving semantic recovery
+
+| Field | Detail |
+|---|---|
+| Severity | P1 release-evidence integrity |
+| Module | Stage 3 Playwright network evidence |
+| Environment | Local CI reproduction against `main@f6f40ccbd23e8ee4855717a24e3dca4885475f51`, 2026-08-15 |
+| Reproduction | Record an aborted or 409 `POST /api/user-data/sync`, followed by an unrelated successful sync request. |
+| Expected | An abort is benign only when the same semantic request later succeeds; a 409 is recovered only after a later successful project sync. Request timestamps and identities must make ordering reviewable. |
+| Actual | The earlier filter classified lifecycle aborts by URL/method and could not prove that the lost request itself was recovered. A later unrelated success could make the run look healthy. |
+| Fix | Canonicalize the sync body while excluding revision/timestamp noise, compute a SHA-256 request digest, retain occurrence time, and require a later 2xx with the same digest for aborted sync recovery. Keep 409 recovery as an explicit later-sync condition. |
+| Regression | Evidence-filter contracts and the final full Vitest gate pass; all `60/60` browser attempts retain request timestamps/digests and fail on unrecovered network evidence. |
+| Status | **CLOSED LOCALLY 2026-08-15 / IMMUTABLE CI RERUN REQUIRED.** |

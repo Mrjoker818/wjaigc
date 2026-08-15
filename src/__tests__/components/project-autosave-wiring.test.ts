@@ -94,6 +94,11 @@ describe('project autosave wiring', () => {
     expect(workspaceSource).toContain('Boolean(recoveredCanvasSnapshot && pendingMediaMarker)');
   });
 
+  it('forces a recovered emergency snapshot through the immediate server barrier', () => {
+    expect(workspaceSource).toContain('recoveredCanvasPersistenceRef.current = {');
+    expect(workspaceSource).toContain("persistCanvasImagesNow(recovered.images, 'immediate')");
+  });
+
   it('forces the committed resize snapshot into the immediate persistence path', () => {
     const resizeStart = infiniteCanvasSource.indexOf('// Apply resize preview to images');
     const resizeEnd = infiniteCanvasSource.indexOf('setResizePreview(null)', resizeStart);

@@ -143,6 +143,7 @@ export class CanvasPersistenceScheduler {
   private readonly now: () => number;
   private readonly deferWork: NonNullable<CanvasPersistenceSchedulerOptions['deferWork']>;
   private readonly projectEpochs = new Map<string, number>();
+  private readonly latestSourceSnapshots = new Map<string, CanvasPersistenceSnapshot>();
   private readonly preparedSnapshots = new Map<string, CanvasPreparedPersistenceSnapshot>();
   private readonly savedSignatures = new Map<string, string>();
   private readonly serverFlushedSignatures = new Map<string, string>();
@@ -176,6 +177,10 @@ export class CanvasPersistenceScheduler {
   schedule(snapshot: CanvasPersistenceSnapshot): void {
     const pending = this.pendingSnapshot;
     if (pending?.projectId === snapshot.projectId && pending.revision > snapshot.revision) return;
+    const latest = this.latestSourceSnapshots.get(snapshot.projectId);
+    if (!latest || snapshot.revision >= latest.revision) {
+      this.latestSourceSnapshots.set(snapshot.projectId, snapshot);
+    }
     this.pendingSnapshot = snapshot;
     this.metrics.scheduledSnapshots += 1;
     this.setPhase('scheduled');
@@ -207,6 +212,7 @@ export class CanvasPersistenceScheduler {
   cancel(projectId: string): void {
     this.projectEpochs.set(projectId, this.getProjectEpoch(projectId) + 1);
     if (this.pendingSnapshot?.projectId === projectId) this.pendingSnapshot = null;
+    this.latestSourceSnapshots.delete(projectId);
     this.preparedSnapshots.delete(projectId);
     if (!this.pendingSnapshot) this.clearIdleHandle();
     this.setPhase('cancelled');
@@ -218,12 +224,17 @@ export class CanvasPersistenceScheduler {
 
   preparePendingSnapshotForUnload(projectId: string): CanvasPreparedPersistenceSnapshot | null {
     const prepared = this.preparedSnapshots.get(projectId) ?? null;
-    const candidates = [this.pendingSnapshot, this.activeSourceSnapshot]
+    const candidates = [
+      this.pendingSnapshot,
+      this.activeSourceSnapshot,
+      this.latestSourceSnapshots.get(projectId),
+    ]
       .filter((candidate): candidate is CanvasPersistenceSnapshot => candidate?.projectId === projectId);
     const latest = candidates.reduce<CanvasPersistenceSnapshot | null>((current, candidate) => (
       !current || candidate.revision > current.revision ? candidate : current
     ), null);
-    if (!latest || (prepared && prepared.revision >= latest.revision)) return prepared;
+    if (!latest) return prepared;
+    if (prepared && prepared.revision >= latest.revision && prepared.beaconPayload) return prepared;
     const emergencyPrepared = this.prepareUnloadSnapshot(latest);
     this.preparedSnapshots.set(projectId, emergencyPrepared);
     return emergencyPrepared;
