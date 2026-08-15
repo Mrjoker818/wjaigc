@@ -276,7 +276,7 @@ describe('Stage 3 performance sample summarization', () => {
       unclickableSamples: [{ id: 'node-a', hitTag: 'DIV', hitClass: 'overlay' }],
     });
 
-    expect(sample.averageFps).toBe(6);
+    expect(sample.averageFps).toBe(62.5);
     expect(sample.inputDelayP95Ms).toBe(32);
     expect(sample.longestTaskMs).toBe(72);
     expect(sample.longestSaveTaskMs).toBe(91);

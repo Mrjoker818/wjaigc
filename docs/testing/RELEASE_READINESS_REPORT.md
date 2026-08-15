@@ -878,3 +878,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - S3-BUG-018 no longer blocks after the immutable rerun passed the immediate-reload flow and isolated local shadow Chromium 1080p passed `10/10`. S3-BUG-017 remains OPEN P1 because two hosted attempts missed unchanged commercial thresholds even though exact-source local repeated samples pass.
 - S3-TEST-009 and S3-TEST-010 are locally closed with narrow regression tests; neither changes Canvas business behavior or performance thresholds. A new immutable run is required for the evidence-filter commit.
 - **Release decision remains NOT READY.** Stage 3 Task 10 stays active; Stage 4/5 remain prohibited. Required closure is hosted performance isolation/fix, new immutable Actions, Coze exact-SHA `shadow -> canvas-v2 -> legacy`, and real provider charge/cancel/refund evidence. `stable` remains untouched.
+
+## 2026-08-15 corrected performance-window decision
+
+- S3-TEST-011 is locally closed: FPS now uses the same first-to-last RAF observation window as its frame count instead of the broader Playwright action duration. Fixed commercial thresholds were not changed.
+- Fresh production shadow evidence passes the complete five-profile Canvas matrix `60/60`; both desktop Chromium profiles meet 100/300-node FPS, input P95 and 300-node save budgets with zero disappeared frames and zero unclickable duration.
+- This is still an uncommitted local candidate. It does not retroactively turn runs `31866500220` or `31869145512` green and does not satisfy the missing real-P0 credentials, Coze exact-SHA rollout/rollback or real billing/cancel/refund evidence.
+- **Release decision: NOT READY.** Next ordered gate is full repository verification, main-only non-force push, then a new immutable three-mode Actions run. `stable` and Stage 4/5 remain prohibited.

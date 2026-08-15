@@ -48,9 +48,12 @@ function percentile95(values: number[]): number {
 export function summarizeCanvasPerformance(raw: CanvasPerformanceRawSample): CanvasPerformanceSample {
   const durationMs = Math.max(0, raw.endedAt - raw.startedAt);
   const frameIntervals = Math.max(0, raw.frameTimestamps.length - 1);
+  const frameSpanMs = frameIntervals > 0
+    ? Math.max(0, raw.frameTimestamps.at(-1)! - raw.frameTimestamps[0])
+    : 0;
   return {
     durationMs,
-    averageFps: durationMs > 0 ? Number(((frameIntervals * 1000) / durationMs).toFixed(2)) : 0,
+    averageFps: frameSpanMs > 0 ? Number(((frameIntervals * 1000) / frameSpanMs).toFixed(2)) : 0,
     inputDelayP95Ms: Number(percentile95(raw.inputDelaysMs).toFixed(2)),
     longestTaskMs: Number(Math.max(0, ...raw.longTasksMs).toFixed(2)),
     longestSaveTaskMs: Number(Math.max(0, ...raw.saveTasksMs).toFixed(2)),

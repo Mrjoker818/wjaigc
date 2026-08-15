@@ -1614,11 +1614,11 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Reproduction | Execute the five-browser Stage 3 matrix with one worker and the existing fixed thresholds. |
 | Expected | 100 nodes >=55 FPS, 300 nodes >=45 FPS, input P95 <=50ms, save longest task <=100ms, with zero disappeared frames and zero unclickable time. |
 | Actual | Desktop Chromium FPS ranged from 39.27-51.76 at 100 nodes and 28.71-41.99 at 300 nodes. Canvas-v2 also recorded one 187ms 300-node save task. Functional continuity assertions otherwise continued to execute. |
-| Root cause candidate | The continuity probe rescanned every Canvas image once per monitored node on every animation frame. This observer cost scales with node count and competes with the application on a low-core hosted runner. Local production Canvas itself remains above the unchanged thresholds. |
-| Fix candidate | Cache each monitored image/card pair and re-resolve it only after DOM disconnection. Visibility, decode, hit-test, disappeared-frame and unclickable-time assertions remain unchanged. |
-| Regression | Both desktop Chromium profiles pass all six local 100/300-node pan and 300-node save gates after the candidate. FPS remains 56.85-58.88, input P95 13.3-23.5ms, longest save task 0ms, disappearance 0 and unclickable time 0. |
+| Root cause | Two evidence costs were mixed into the hosted result. The continuity probe rescanned every Canvas image once per monitored node per animation frame. More importantly, FPS counted only intervals between captured RAF timestamps but divided them by the entire action duration, including setup, Playwright input dispatch and teardown after the last frame. The numerator and denominator therefore described different windows. |
+| Fix | Cache each monitored image/card pair and re-resolve it only after DOM disconnection. Compute FPS from `lastFrameTimestamp - firstFrameTimestamp`, while retaining total action duration as a separate metric. Visibility, decode, hit-test, input P95, long-task, disappeared-frame and unclickable-time assertions remain unchanged. |
+| Regression | TDD reproduced the arithmetic defect as `6 FPS` for six 16ms intervals spread inside a 1000ms action and now reports the correct `62.5 FPS`. A fresh production shadow matrix passes all five profiles and all `60/60` cases. Desktop Chromium 100-node FPS is `58.61-58.64`, 300-node FPS is `55.30-56.78`, input P95 is `16.4-24.1ms`, longest save task is `0-51ms`, disappearance is `0` and unclickable time is `0`. |
 | Hosted rerun | GitHub Actions run `31866500220`, attempt 2, executed all `180` Canvas cases. Functional continuity remained intact, but performance gates were RED: shadow `55/60`, canvas-v2 `57/60`, legacy `55/60`. Representative failures were 100-node FPS `54.02`, `54.44`, `52.78`; 1080p 300-node FPS `38.29`, `41.67`, `39.3`; shadow/legacy 300-node input P95 `50.6ms` / `72.1ms`; and legacy/shadow longest save tasks `124ms` / `139ms`. |
-| Status | **OPEN P1 / REPRODUCED ON TWO IMMUTABLE HOSTED ATTEMPTS.** Thresholds remain unchanged. Local repeated performance evidence passes, so the next action is to isolate hosted measurement/application cost rather than waive or lower the gate. |
+| Status | **OPEN P1 / LOCAL ROOT CAUSE VERIFIED / NEW IMMUTABLE CI REQUIRED.** The two historical hosted failures remain retained. Thresholds remain unchanged; closure requires all three hosted modes to pass with the corrected same-window measurement. |
 
 ### S3-BUG-018: Shadow WebKit immediate reload restored pre-resize geometry
 
@@ -1754,3 +1754,18 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Normalize the loaded Canvas source from CRLF to LF before structural assertions. No production source was changed. |
 | Regression | The previously failing contract passes `12/12`; the focused set passes `15/15`; fresh full Vitest passes `426 files / 2448 tests`, with the PostgreSQL-gated `44` tests still explicitly skipped in the generic run. |
 | Status | **CLOSED LOCALLY 2026-08-15.** |
+
+### S3-TEST-011: Canvas FPS mixed RAF intervals with the wider automation action duration
+
+| Field | Detail |
+|---|---|
+| Severity | P1 release-evidence integrity |
+| Module | Stage 3 Canvas performance sampler |
+| Environment | Local production shadow mode, Chromium/Firefox/WebKit/mobile matrix, 2026-08-15 |
+| Reproduction | Summarize frame timestamps `[0,16,32,48,64,80,96]` inside an action whose `startedAt=0` and `endedAt=1000`. |
+| Expected | Six observed frame intervals over the observed 96ms RAF span report `62.5 FPS`; the surrounding 1000ms action remains available as `durationMs`. |
+| Actual | The sampler divided six frame intervals by the full 1000ms action and reported `6 FPS`, counting non-frame setup/input/teardown time as dropped rendering frames. |
+| Root cause | FPS numerator and denominator used different observation windows. |
+| Fix | Derive FPS only from the first and last captured RAF timestamps. Keep total action duration, input delay, long tasks, save tasks, disappeared frames and unclickable duration as independent unchanged metrics. |
+| Regression | Unit RED `1 failed / 16 passed`, GREEN `17/17`. Fresh production shadow desktop performance subset passes `6/6`; the complete Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium suite passes `60/60` with screenshot/video/trace/Console/network evidence under execution `local-frame-span-full-20260815`. |
+| Status | **CLOSED LOCALLY 2026-08-15 / IMMUTABLE CI REQUIRED.** |

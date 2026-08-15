@@ -742,3 +742,13 @@ The local PostgreSQL gap is closed by `14 files / 54 tests`. Exact execution `lo
 | Real paid P0 and accounting | BLOCKED EXTERNALLY | Configure the required GitHub/Coze provider credentials and prove real generation, one charge, cancellation, terminal-state monotonicity and at-most-once refund. Mock data cannot close this item. |
 | Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
+
+## 2026-08-15 remaining scope after local FPS-window correction
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Corrected FPS sampler | LOCALLY VERIFIED | Unit regression `17/17`, desktop subset `6/6` and full shadow five-profile matrix `60/60` pass without threshold changes. Commit and reproduce in immutable CI. |
+| Hosted three-mode Canvas matrix | UNVERIFIED / REQUIRED | Run legacy, shadow and canvas-v2 from the new exact SHA. All functional and performance assertions must pass and upload immutable artifacts. |
+| Real paid P0 and accounting | BLOCKED EXTERNALLY | Supply authorized provider credentials and prove generation, one charge, cancellation, monotonic terminal state and at-most-once refund. |
+| Coze exact-SHA sequence | UNVERIFIED | After immutable CI, execute `shadow -> canvas-v2 -> legacy` with retained login, project, Canvas, tool, save/reload and rollback evidence. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |

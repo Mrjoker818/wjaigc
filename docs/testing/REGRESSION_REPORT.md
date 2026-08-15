@@ -1069,3 +1069,11 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - S3-TEST-010 closes Windows-only CRLF source-contract failures. The Canvas selection contract passes `12/12`, focused tests pass `15/15`, and fresh full Vitest passes `426 files / 2448 tests` with `44` environment-gated PostgreSQL tests explicitly skipped in that generic command.
 - Fresh code gates pass: TypeScript; ESLint `0 errors / 969 historical warnings`; full Vitest `426 files / 2447 tests` with `12 files / 44 tests` environment-skipped; production build; and isolated PostgreSQL `14 files / 54 tests` for terminal races, projection, idempotency, charge/refund, annotation, layer decomposition and element board concurrency.
 - **Local candidate verdict: PASS FOR THIS CLOSURE. Stage 3 verdict: NOT COMPLETE.** A new immutable GitHub Actions matrix, Coze exact-SHA `shadow -> canvas-v2 -> legacy`, real paid provider execution and one-time billing/cancel/refund evidence remain mandatory.
+
+## 2026-08-15 S3-TEST-011 local five-browser closure
+
+- TDD proved the FPS sampler mixed six RAF intervals with the wider automation action duration: the controlled sample was RED at `6 FPS` and GREEN at the mathematically consistent `62.5 FPS` after using the first-to-last RAF span.
+- No product Canvas code, threshold or assertion category changed. Total action duration, input P95, generic/save long tasks, image decode/visibility, hit testing, disappeared frames and unclickable duration remain independently collected and enforced.
+- A fresh production shadow performance subset passed `6/6`. The full Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium matrix then passed `60/60` in `local-frame-span-full-20260815`.
+- Desktop Chromium evidence: 100-node FPS `58.61-58.64`; 300-node FPS `55.30-56.78`; input P95 `16.4-24.1ms`; longest save task `0-51ms`; disappeared frames `0`; unclickable time `0`.
+- **Local verdict: PASS. Immutable verdict: PENDING.** The historical GitHub RED remains valid for its old sampler; S3-BUG-017 closes only after a new committed SHA passes legacy, shadow and canvas-v2 hosted jobs.
