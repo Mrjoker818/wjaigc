@@ -276,6 +276,15 @@ describe('canvas command and explicit history wiring', () => {
     expect(workspace).not.toContain("if (historyLifecyclePendingRef.current && historyIntent === 'record') return;");
   });
 
+  it('suppresses image hover state churn while a viewport pan is active', () => {
+    const imageNodeStart = canvas.indexOf('data-canvas-image-id={image.id}');
+    const imageNodeEnd = canvas.indexOf('onClick={(e) => {', imageNodeStart);
+    const hoverHandlers = canvas.slice(imageNodeStart, imageNodeEnd);
+
+    expect(hoverHandlers.match(/viewportPanPointerIdRef\.current !== null/g)?.length)
+      .toBeGreaterThanOrEqual(2);
+  });
+
   it('invalidates in-flight undo and redo work when the project changes', () => {
     expect(workspace).toContain('historyTransitionEpochRef.current += 1');
     expect(workspace).toContain('activeHistoryTransitionRef.current = null');

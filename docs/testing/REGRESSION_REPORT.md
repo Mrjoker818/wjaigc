@@ -1154,3 +1154,13 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Fresh full gates pass: Vitest `438 files / 2514 tests`, separately gated PostgreSQL concurrency `3 files / 4 tests`, TypeScript, ESLint `0 errors / 973 historical warnings`, and production build `116/116`.
 - A final post-correction production run passes pointer ownership `5/5` and desktop performance `4/4`; FPS is `57.66-58.73`, input P95 `17.3-19.5ms`, and save/disappeared/unclickable metrics are zero.
 - **Verdict: LOCAL CANDIDATE, NOT A RELEASE PASS.** The cold input outlier is retained and immutable legacy/shadow/canvas-v2 evidence decides whether the candidate closes the hosted regression.
+
+## 2026-08-16 immutable `2509fcf` result and hover-hot-path candidate
+
+- Immutable Stage 0/1 run `31895277670` passed. Quality run `31895277650` passed its static, full-test, API, dependency-audit, build and PostgreSQL jobs; real-P0 failed closed on the same ten missing authorized Secrets/paid controls.
+- The three Canvas modes remained RED: canvas-v2 `56/60`, shadow `57/60`, legacy `57/60`. Exact hosted FPS misses were canvas-v2 Chromium/100 `53.47`, Chromium 1080p/100 `51.85`, Chromium 1080p/300 `43.98`; shadow `54.61/52.14/39.66`; legacy `54.15/53.15/41.89`. Fixed `55/45 FPS`, `50ms` input and `100ms` save limits were unchanged.
+- Canvas-v2 WebKit also timed out once while waiting for the retained merge marker after reload. The exact production WebKit flow passed once plus three consecutive repeats (`4/4` total), so no timeout or business persistence change was made without stable reproduction.
+- TDD then isolated per-image hover state churn during pan. A first implementation that disabled media hit testing was rejected because it produced `3133.3-5650ms` unclickable evidence, despite strong FPS. The corrected implementation leaves `pointer-events:auto`, marks only the pan lifecycle and suppresses hover React publications while that pointer owns the viewport.
+- Focused runtime/source contracts pass `33/33`; five-browser behavior passes `5/5`. Canvas-v2 desktop performance passed `4/4` plus a repeated `12/12`, with combined FPS `57.81-59.08`, input P95 `10.8-33.4ms`, save `0ms`, disappeared `0`, unclickable `0`. Shadow passes `4/4` at `57.82-58.76 FPS`. Legacy retained one `57.7ms` P95 outlier, then the exact Chromium/300 case passed `3/3` at `18.4-29.2ms`.
+- Fresh repository gates pass: PostgreSQL-enabled Vitest `441/441 files, 2520/2520 tests`, TypeScript, ESLint `0 errors / 973 warnings`, production build `116/116`, and whitespace validation.
+- **Verdict: LOCAL REGRESSION PASS / IMMUTABLE VERDICT PENDING.** Stage 3 remains Task 10; Coze mode switching and Stage 4/5 are not authorized.

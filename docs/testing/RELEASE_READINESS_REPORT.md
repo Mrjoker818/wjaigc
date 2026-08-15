@@ -948,3 +948,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - One cold Chromium/300 sample still measured input P95 `54.5ms` against the fixed `50ms` gate. It is not suppressed, retried away or reclassified as passing.
 - Full Vitest, isolated PostgreSQL concurrency, TypeScript, zero-error ESLint and production build gates pass locally; these permit an immutable candidate rerun but do not replace it.
 - **Decision: NOT READY.** Push is permitted only as a narrow `main` candidate after full local gates. Stage 3 Task 10 remains `10/11`; immutable three-mode CI, real-P0 provider/accounting evidence and the Coze rollout/rollback sequence remain mandatory. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` stays untouched.
+
+## 2026-08-16 readiness after immutable `2509fcf`
+
+- `main@2509fcf8b46f5458fcc13dd9b86af606163b161b` is not releasable: hosted canvas-v2 passed `56/60`, shadow `57/60`, legacy `57/60`; real-P0 is still fail-closed on missing authorized Secrets/paid controls.
+- The local hover-hot-path candidate preserves media hit testing and all fixed commercial thresholds. The broader pointer-events candidate was rejected after producing measurable unclickable time and is not present.
+- Local evidence passes focused `33/33`, five-browser pan behavior `5/5`, canvas-v2 repeated performance `16/16`, shadow `4/4`, and the legacy outlier's exact repeat `3/3`. PostgreSQL-enabled Vitest is `2520/2520`; TypeScript, zero-error ESLint and `116/116` production build pass.
+- One legacy local input P95 outlier of `57.7ms` and the prior immutable WebKit timeout remain explicitly recorded; neither was hidden by retries or larger thresholds.
+- **Decision: NOT READY / Stage 3 Task 10 remains `10/11`.** Only a normal fast-forward candidate push to `main` is permitted. `stable` remains read-only. The new exact SHA must pass immutable legacy/shadow/canvas-v2 before any Coze `shadow -> canvas-v2 -> legacy` sequence; real provider charge/cancel/at-most-once refund evidence remains mandatory. Stage 4/5 stay prohibited.

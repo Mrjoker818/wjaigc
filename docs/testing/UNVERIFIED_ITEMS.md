@@ -743,6 +743,19 @@ Historical checkpoint: the isolated PostgreSQL suite passed `14 files / 54 tests
 | Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
 
+## 2026-08-16 queue after immutable `2509fcf`
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Hover-hot-path candidate | LOCALLY VERIFIED | Focused `33/33`, browser lifecycle `5/5`, canvas-v2 repeated performance `16/16`, shadow `4/4`, legacy exact outlier repeat `3/3`, and PostgreSQL-enabled full Vitest `2520/2520` pass. Reproduce from the committed SHA. |
+| Hosted three-mode Canvas | REQUIRED | The next exact `main` SHA must pass legacy, shadow and canvas-v2 under unchanged 55/45 FPS, 50ms input, 100ms save, continuity, history and persistence gates. |
+| Canvas-v2 WebKit merge-window timeout | NOT STABLY REPRODUCED | Immutable run timed out once; exact local production WebKit passed `4/4`. Retain the test and diagnose only if the new immutable run reproduces it. |
+| Real paid P0 and accounting | BLOCKED BY SECRETS | Configure all ten authorized URL/account/model/paid controls and prove real generation, cancellation, one charge and at-most-once refund. Mock evidence cannot close this item. |
+| Coze exact-SHA sequence | WAITING FOR IMMUTABLE CI | Only after all hosted modes pass, retain `shadow -> canvas-v2 -> legacy` login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
+| Stable branch and later stages | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. Stage 4/5 remain prohibited. |
+
+Stage 3 remains in Task 10 (`10/11`, about `91%`).
+
 ## 2026-08-15 queue for the pointer-ownership candidate
 
 | Item | Status | Required evidence |

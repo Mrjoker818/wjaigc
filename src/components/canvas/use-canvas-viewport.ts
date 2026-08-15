@@ -138,6 +138,15 @@ function stateFromPersisted(view: CanvasPersistedViewport): CanvasViewportState 
   return createCanvasViewportState(view);
 }
 
+function setCanvasSurfacePanActive(element: HTMLDivElement | null, active: boolean): void {
+  if (!element) return;
+  if (active) {
+    element.dataset.canvasPanActive = 'true';
+    return;
+  }
+  delete element.dataset.canvasPanActive;
+}
+
 export function useCanvasViewport({
   mode,
   initialViewState,
@@ -192,7 +201,8 @@ export function useCanvasViewport({
 
   useEffect(() => () => {
     if (panRafRef.current !== null) cancelAnimationFrame(panRafRef.current);
-  }, []);
+    setCanvasSurfacePanActive(transformRef.current, false);
+  }, [transformRef]);
 
   const applyViewState = useCallback((view: CanvasPersistedViewport) => {
     const nextLegacy = stateFromPersisted(view);
@@ -230,8 +240,9 @@ export function useCanvasViewport({
     compareShadow(legacy, kernel, 'pan-begin');
     panViewportSyncAtRef.current = 0;
     panViewportSyncOffsetRef.current = { ...active.committed };
+    setCanvasSurfacePanActive(transformRef.current, true);
     return true;
-  }, [activeRef, compareShadow]);
+  }, [activeRef, compareShadow, transformRef]);
 
   const previewPan = useCallback((pointer: CanvasPointerSample) => {
     const { legacy, kernel } = resolveCanvasPanPreview(
@@ -287,6 +298,7 @@ export function useCanvasViewport({
     if (element) {
       element.style.transform = `translate(${active.preview.x}px, ${active.preview.y}px) scale(${active.zoom})`;
     }
+    setCanvasSurfacePanActive(element, active.interaction.kind === 'pan');
     startTransition(() => {
       if (mode !== 'canvas-v2') setLegacyState(legacy);
       if (mode !== 'legacy') setKernelState(kernel);

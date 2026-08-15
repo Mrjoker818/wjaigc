@@ -1843,6 +1843,30 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Regression | TDD began RED on the missing direct-pan and save-order contracts. The first independent review rejected the candidate because `beginPan` still published React state and a second pointer could replace/terminate the active owner. The corrected implementation keeps begin ref-only, rejects competing pointers and allows only the authoritative owner to move or finish; follow-up independent review returned `APPROVED`. Fresh focused Canvas/persistence contracts pass `8 files / 78 tests`. Production build emits `116/116` routes. Execution `local-owner-safe-legacy-full-20260815` passes the complete legacy five-profile matrix `60/60`. Chromium/1080p 100-node pan is `57.42/57.42 FPS`, 300-node pan is `54.82/54.26 FPS`, input P95 is at most `40.1ms`, save long task is `0ms`, and disappeared/unclickable evidence is zero. PostgreSQL-enabled full Vitest passes `441 files / 2512 tests` with zero skips. |
 | Status | **FIXED LOCALLY / NEW IMMUTABLE THREE-MODE CI REQUIRED.** |
 
+### S3-BUG-030: dense Canvas pan kept publishing per-image hover state
+
+| Field | Detail |
+|---|---|
+| Severity | P1 hosted Canvas interaction performance |
+| Module | Infinite Canvas media hover routing and viewport pan lifecycle |
+| Environment | Immutable `main@2509fcf8b46f5458fcc13dd9b86af606163b161b` remained hosted-performance RED; isolated local production legacy/shadow/canvas-v2, 2026-08-16 |
+| Reproduction | Pan a 100/300-node Canvas while the transformed media tree moves beneath a stationary captured pointer. |
+| Expected | Pan remains compositor-driven, media nodes stay hit-testable, and hover affordances do not publish React state until the pan owner releases. |
+| Actual | Image `mouseenter`/`mouseleave` handlers could update vision and hover-toolbar React state as dense descendants crossed the pointer. |
+| Rejected candidate | Disabling pointer events on the complete media surface raised local FPS to `56.33-59.09`, but correctly failed the continuity gate with `3133.3-5650ms` of unclickable time. That implementation was removed before commit. |
+| Fix | Mark the surface for the exact pan lifetime without changing hit testing, and short-circuit image hover state handlers while `viewportPanPointerIdRef` owns a pointer. Commit, cancel and unmount remove the lifecycle marker. |
+| TDD | The corrected contract began RED in both runtime and source wiring (`2 failed / 31 passed`) and is GREEN at `33/33`. The browser contract proves `pointer-events:auto` throughout the captured gesture and lifecycle-marker cleanup afterwards. |
+| Browser regression | The pan lifecycle contract passes all five profiles `5/5`. Canvas-v2 desktop performance passed `4/4`, then `12/12` repeated samples; combined local samples were `57.81-59.08 FPS`, input P95 `10.8-33.4ms`, save `0ms`, disappeared `0`, unclickable `0`. Shadow passed `4/4` at `57.82-58.76 FPS`. Legacy passed `3/4` once because Chromium/300 input P95 reached `57.7ms`; the exact case then passed `3/3` at `18.4-29.2ms`, and the outlier remains recorded. |
+| Repository gates | PostgreSQL-enabled full Vitest passes `441 files / 2520 tests` with zero skips. TypeScript exits 0; ESLint exits 0 with `0 errors / 973 warnings`; production build emits `116/116` routes. |
+| Status | **FIXED LOCALLY / IMMUTABLE THREE-MODE CI REQUIRED.** Stage 3 Task 10 remains active. |
+
+#### Immutable follow-up for `main@2509fcf`
+
+- Stage 0/1 run `31895277670` passed. Quality run `31895277650` passed static/test/API/audit/build and PostgreSQL concurrency jobs.
+- Hosted Canvas remained RED without threshold changes: canvas-v2 `56/60`, shadow `57/60`, legacy `57/60`. Desktop misses included Chromium/100 `53.47-54.61 FPS`, Chromium 1080p/100 `51.85-53.15 FPS`, and Chromium 1080p/300 `39.66-43.98 FPS`.
+- Canvas-v2 WebKit had one independent deletion/merge-window node-visibility timeout. The exact production WebKit scenario subsequently passed once and then `3/3`; no timeout increase or speculative persistence change was made.
+- Real-P0 failed closed because the ten authorized URL/account/model/paid controls remain absent. This is not counted as a business pass.
+
 ### S3-BUG-029: direct pan did not own the active pointer
 
 | Field | Detail |

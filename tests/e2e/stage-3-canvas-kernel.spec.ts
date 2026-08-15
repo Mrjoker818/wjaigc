@@ -336,6 +336,8 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
         : false;
     });
     expect(capturedPointer).toBe(true);
+    await expect(page.locator('[data-canvas-surface]')).toHaveCSS('pointer-events', 'auto');
+    await expect(page.locator('[data-canvas-surface]')).toHaveAttribute('data-canvas-pan-active', 'true');
     for (let index = 1; index <= 16; index += 1) {
       const progress = index / 16;
       await page.mouse.move(start.x + 64 * progress, start.y + 40 * progress);
@@ -350,6 +352,8 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
         : false;
     });
     expect(retainedCapture).toBe(false);
+    await expect(page.locator('[data-canvas-surface]')).toHaveCSS('pointer-events', 'auto');
+    await expect(page.locator('[data-canvas-surface]')).not.toHaveAttribute('data-canvas-pan-active', 'true');
     const after = await page.locator('[data-canvas-surface]').getAttribute('style');
     expect(after).not.toBe(before);
 

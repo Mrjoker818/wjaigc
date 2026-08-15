@@ -43,7 +43,10 @@ describe('canvas viewport runtime behavior', () => {
   });
 
   function useViewportHarness(onPanViewportSync = vi.fn()) {
-    const transform = { style: { transform: '' } };
+    const transform = {
+      dataset: {} as Record<string, string>,
+      style: { transform: '', pointerEvents: '' },
+    };
     const viewport = useCanvasViewport({
       mode: 'legacy',
       transformRef: { current: transform } as unknown as React.RefObject<HTMLDivElement>,
@@ -68,6 +71,24 @@ describe('canvas viewport runtime behavior', () => {
     viewport.previewPan({ pointerId: 7, clientX: 30, clientY: 45 });
     flushAnimationFrame(10);
     expect(transform.style.transform).toBe('translate(20px, 25px) scale(1)');
+  });
+
+  it('marks the pan lifetime without disabling media hit testing', () => {
+    const { transform, viewport } = useViewportHarness();
+
+    expect(viewport.beginPan({ pointerId: 7, clientX: 10, clientY: 20 })).toBe(true);
+    expect(transform.dataset.canvasPanActive).toBe('true');
+    expect(transform.style.pointerEvents).toBe('');
+
+    viewport.commitPan({ pointerId: 7 });
+    expect(transform.dataset.canvasPanActive).toBeUndefined();
+    expect(transform.style.pointerEvents).toBe('');
+
+    expect(viewport.beginPan({ pointerId: 8, clientX: 30, clientY: 40 })).toBe(true);
+    expect(transform.style.pointerEvents).toBe('');
+    viewport.cancelPan({ pointerId: 8 });
+    expect(transform.dataset.canvasPanActive).toBeUndefined();
+    expect(transform.style.pointerEvents).toBe('');
   });
 
   it('keeps the first pointer as owner when a second pointer tries to begin', () => {

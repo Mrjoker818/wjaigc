@@ -11464,6 +11464,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   containIntrinsicSize: `${image.width}px ${image.height}px`,
                 }}
                 onMouseEnter={() => {
+                  if (viewportPanPointerIdRef.current !== null) return;
                   if (visionPromptEnabled && editMode === 'none') {
                     setVisionHoverImage(image);
                   }
@@ -11472,6 +11473,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   }
                 }}
                 onMouseLeave={() => {
+                  if (viewportPanPointerIdRef.current !== null) return;
                   setVisionHoverImage(null);
                   hideHoverToolbar();
                 }}
