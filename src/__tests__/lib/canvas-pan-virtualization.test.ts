@@ -1,11 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  beginCanvasSpacePan,
   getCanvasViewportMarginFactor,
   PAN_VIEWPORT_SYNC_DISTANCE_PX,
   PAN_VIEWPORT_SYNC_INTERVAL_MS,
   resolveCanvasCullingBounds,
   resolveCanvasCullingOffset,
   resolveCanvasRenderOffset,
+  resetCanvasSpacePan,
+  setCanvasSpacePanActive,
   shouldSuspendCanvasVirtualization,
   shouldSyncCanvasPanViewport,
 } from '@/lib/canvas-pan-virtualization';
@@ -61,6 +64,55 @@ describe('canvas pan virtualization', () => {
       { x: 120, y: 72 },
       PAN_VIEWPORT_SYNC_INTERVAL_MS * 4,
     )).toBe(false);
+  });
+
+  it('updates the temporary Space-pan cursor without publishing React state', () => {
+    const element = {
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn(),
+    };
+
+    setCanvasSpacePanActive(element, true);
+    expect(element.setAttribute).toHaveBeenCalledWith('data-space-pan', 'true');
+    expect(element.removeAttribute).not.toHaveBeenCalled();
+
+    setCanvasSpacePanActive(element, false);
+    expect(element.removeAttribute).toHaveBeenCalledWith('data-space-pan');
+  });
+
+  it('prevents repeated Space defaults without republishing the active cursor', () => {
+    const state = { current: false };
+    const element = {
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn(),
+    };
+    const first = { code: 'Space', repeat: false, preventDefault: vi.fn() };
+    const repeated = { code: 'Space', repeat: true, preventDefault: vi.fn() };
+
+    expect(beginCanvasSpacePan(first, false, state, element)).toBe(true);
+    expect(state.current).toBe(true);
+    expect(first.preventDefault).toHaveBeenCalledOnce();
+    expect(element.setAttribute).toHaveBeenCalledOnce();
+
+    expect(beginCanvasSpacePan(repeated, false, state, element)).toBe(true);
+    expect(repeated.preventDefault).toHaveBeenCalledOnce();
+    expect(element.setAttribute).toHaveBeenCalledOnce();
+  });
+
+  it('resets Space-pan state on lost focus and safely accepts a missing element', () => {
+    const state = { current: true };
+    const element = {
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn(),
+    };
+
+    resetCanvasSpacePan(state, element);
+    expect(state.current).toBe(false);
+    expect(element.removeAttribute).toHaveBeenCalledWith('data-space-pan');
+
+    state.current = true;
+    resetCanvasSpacePan(state, null);
+    expect(state.current).toBe(false);
   });
 
   it('keeps the render transform aligned with the sampled pan offset during an active pan', () => {

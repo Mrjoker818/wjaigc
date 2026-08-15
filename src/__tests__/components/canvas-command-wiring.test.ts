@@ -44,8 +44,8 @@ describe('canvas command and explicit history wiring', () => {
   it('routes keyboard Space and the hand tool through pan before React state commits', () => {
     expect(canvas).toContain('const isSpacePressedRef = useRef(false)');
     expect(canvas).toContain("const activePointerToolRef = useRef<'select' | 'hand'>('select')");
-    expect(canvas).toContain('isSpacePressedRef.current = true;');
-    expect(canvas).toContain('isSpacePressedRef.current = false;');
+    expect(canvas).toContain('beginCanvasSpacePan(e, inputFocused, isSpacePressedRef, canvasContainerRef.current)');
+    expect(canvas).toContain('resetCanvasSpacePan(isSpacePressedRef, canvasContainerRef.current)');
 
     const pointerDownStart = canvas.indexOf('const handlePointerDown');
     const pointerMoveStart = canvas.indexOf('const handlePointerMove', pointerDownStart);
@@ -99,6 +99,38 @@ describe('canvas command and explicit history wiring', () => {
     expect(pointerUp).toContain('viewportPanPointerIdRef.current === e.pointerId');
     expect(pointerUp).toContain('&& (isPanning || directPanPointerIdRef.current === e.pointerId)');
     expect(pointerUp).toContain('directPanPointerIdRef.current = null');
+  });
+
+  it('keeps temporary Space-pan feedback out of parent React state', () => {
+    const keyDown = canvas.slice(
+      canvas.indexOf('beginCanvasSpacePan(e, inputFocused'),
+      canvas.indexOf("if (e.code === 'Escape')"),
+    );
+    const keyUp = canvas.slice(
+      canvas.indexOf('const handleKeyUp'),
+      canvas.indexOf('// Paste event:', canvas.indexOf('const handleKeyUp')),
+    );
+
+    expect(canvas).not.toContain('const [isSpacePressed, setIsSpacePressed]');
+    expect(keyDown).toContain('beginCanvasSpacePan(e, inputFocused, isSpacePressedRef, canvasContainerRef.current)');
+    expect(keyUp).toContain('resetCanvasSpacePan(isSpacePressedRef, canvasContainerRef.current)');
+    expect(keyDown).not.toContain('setIsSpacePressed');
+    expect(keyUp).not.toContain('setIsSpacePressed');
+    expect(canvas).toContain('data-[space-pan=true]:!cursor-grab');
+  });
+
+  it('clears temporary Space-pan state on blur, page hiding and component cleanup', () => {
+    const stableListenersStart = canvas.indexOf('// Stable Canvas keyboard listeners');
+    const stableListenersEnd = canvas.indexOf('// Click outside to close menus', stableListenersStart);
+    const stableListeners = canvas.slice(stableListenersStart, stableListenersEnd);
+
+    expect(canvas).toContain('beginCanvasSpacePan(e, inputFocused, isSpacePressedRef, canvasContainerRef.current)');
+    expect(canvas).toContain('resetCanvasSpacePan(isSpacePressedRef, canvasContainerRef.current)');
+    expect(stableListeners).toContain("window.addEventListener('blur', stableResetSpacePan)");
+    expect(stableListeners).toContain("document.addEventListener('visibilitychange', stableHandleVisibilityChange)");
+    expect(stableListeners).toContain("window.removeEventListener('blur', stableResetSpacePan)");
+    expect(stableListeners).toContain("document.removeEventListener('visibilitychange', stableHandleVisibilityChange)");
+    expect(stableListeners).toMatch(/return \(\) => \{[\s\S]*stableResetSpacePan\(\);/);
   });
 
   it('does not hijack Space from focused toolbar controls', () => {

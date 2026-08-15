@@ -83,6 +83,7 @@ import {
   type CanvasImageLike,
 } from '@/lib/canvas-spatial-index';
 import { UserManager } from '@/lib/user-manager';
+import { beginCanvasSpacePan, resetCanvasSpacePan } from '@/lib/canvas-pan-virtualization';
 import { useCanvasViewport } from '@/components/canvas/use-canvas-viewport';
 import { useCanvasSelection } from '@/components/canvas/use-canvas-selection';
 import { CanvasMediaNode } from '@/components/canvas/CanvasMediaNode';
@@ -784,7 +785,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const canvasKernelMode = UserManager.getInstance().getCanvasKernelMode();
   const [isPanning, setIsPanning] = useState(false);
   const [isMiddlePanning, setIsMiddlePanning] = useState(false);
-  const [isSpacePressed, setIsSpacePressed] = useState(false);
   const isSpacePressedRef = useRef(false);
   const [activePointerTool, setActivePointerTool] = useState<'select' | 'hand'>('select');
   const activePointerToolRef = useRef<'select' | 'hand'>('select');
@@ -3397,12 +3397,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             return;
         }
       }
-      if (e.code === 'Space' && !e.repeat) {
-        if (inputFocused) return;
-        e.preventDefault();
-        isSpacePressedRef.current = true;
-        setIsSpacePressed(true);
-      }
+      beginCanvasSpacePan(e, inputFocused, isSpacePressedRef, canvasContainerRef.current);
       if (e.code === 'Escape') {
         // 退出批注模式
         if (annotationMode) {
@@ -3468,8 +3463,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
-        isSpacePressedRef.current = false;
-        setIsSpacePressed(false);
+        resetCanvasSpacePan(isSpacePressedRef, canvasContainerRef.current);
       }
       if (!e.altKey) {
         isAltErasingRef.current = false;
@@ -3571,13 +3565,22 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const stableHandleKeyDown = (event: KeyboardEvent) => canvasKeyboardHandlersRef.current.keydown(event);
     const stableHandleKeyUp = (event: KeyboardEvent) => canvasKeyboardHandlersRef.current.keyup(event);
     const stableHandlePaste = (event: ClipboardEvent) => canvasKeyboardHandlersRef.current.paste(event);
+    const stableResetSpacePan = () => resetCanvasSpacePan(isSpacePressedRef, canvasContainerRef.current);
+    const stableHandleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') stableResetSpacePan();
+    };
     window.addEventListener('keydown', stableHandleKeyDown);
     window.addEventListener('keyup', stableHandleKeyUp);
+    window.addEventListener('blur', stableResetSpacePan);
+    document.addEventListener('visibilitychange', stableHandleVisibilityChange);
     window.addEventListener('paste', stableHandlePaste);
     return () => {
       window.removeEventListener('keydown', stableHandleKeyDown);
       window.removeEventListener('keyup', stableHandleKeyUp);
+      window.removeEventListener('blur', stableResetSpacePan);
+      document.removeEventListener('visibilitychange', stableHandleVisibilityChange);
       window.removeEventListener('paste', stableHandlePaste);
+      stableResetSpacePan();
     };
   }, []);
 
@@ -4177,7 +4180,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         startBlankCanvasLongPress(e.pointerId, e.clientX, e.clientY);
       }
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, startBlankCanvasLongPress, beginImageSelectionGesture, beginSelectionBox, isEventFromOverlay, selectSelectionHit, showRefFusion, beginHistoryTransaction, isHistoryTransitionPending]);
+  }, [viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, startBlankCanvasLongPress, beginImageSelectionGesture, beginSelectionBox, isEventFromOverlay, selectSelectionHit, showRefFusion, beginHistoryTransaction, isHistoryTransitionPending]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (
@@ -10921,21 +10924,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         data-canvas-occupied-right={canvasOccupiedRight}
         data-project-id={projectId || brandProject?.id || ''}
         style={{ touchAction: annotationMode ? 'none' : 'auto' }}
-        className={`absolute inset-0 overflow-clip select-none ${
+        className={`absolute inset-0 overflow-clip select-none data-[space-pan=true]:!cursor-grab data-[space-pan=true]:active:!cursor-grabbing ${
           annotationMode
             ? 'cursor-crosshair'
             : altKeyHeld && editMode === 'none'
             ? 'cursor-copy'
             : ctrlKeyHeld && editMode === 'none'
             ? 'cursor-pointer'
-            : isPanning || isSpacePressed || activePointerTool === 'hand'
+            : isPanning || activePointerTool === 'hand'
             ? 'cursor-grab active:cursor-grabbing'
             : (editMode === 'erase' || editMode === 'mask')
             ? 'cursor-default'  // 擦除/蒙版使用浮动窗口，主画布保持默认光标
             : editMode !== 'none'
             ? 'cursor-crosshair'
-            : isSpacePressed
-            ? 'cursor-grab'
             : isPanning || isMiddlePanning
             ? 'cursor-grabbing'
             : 'cursor-default'
@@ -18558,7 +18559,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           data-testid="canvas-select-tool"
           aria-pressed={activePointerTool === 'select'}
           className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 ${
-            !isPanning && !isSpacePressed && activePointerTool === 'select'
+            !isPanning && activePointerTool === 'select'
               ? (isMonochrome ? 'text-blue-600 bg-blue-50 ring-1 ring-blue-500/30' : 'text-text-bright bg-white/15 ring-1 ring-gold/30')
               : (isMonochrome ? `${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10')
           }`}
@@ -18573,7 +18574,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           data-testid="canvas-hand-tool"
           aria-pressed={activePointerTool === 'hand'}
           className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 ${
-            isPanning || isSpacePressed || activePointerTool === 'hand'
+            isPanning || activePointerTool === 'hand'
               ? (isMonochrome ? 'text-blue-600 bg-blue-50 ring-1 ring-blue-500/30' : 'text-text-bright bg-white/15 ring-1 ring-gold/30')
               : (isMonochrome ? `text-gray-500 hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10')
           }`}

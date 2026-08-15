@@ -14,6 +14,56 @@ export interface CanvasCullingBounds {
 export const PAN_VIEWPORT_SYNC_INTERVAL_MS = 80;
 export const PAN_VIEWPORT_SYNC_DISTANCE_PX = 256;
 
+interface CanvasSpacePanElement {
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+}
+
+interface CanvasSpacePanState {
+  current: boolean;
+}
+
+interface CanvasSpaceKeyEvent {
+  code: string;
+  repeat: boolean;
+  preventDefault(): void;
+}
+
+export function setCanvasSpacePanActive(
+  element: CanvasSpacePanElement | null,
+  active: boolean,
+): void {
+  if (!element) return;
+  if (active) {
+    element.setAttribute('data-space-pan', 'true');
+    return;
+  }
+  element.removeAttribute('data-space-pan');
+}
+
+export function beginCanvasSpacePan(
+  event: CanvasSpaceKeyEvent,
+  inputFocused: boolean,
+  state: CanvasSpacePanState,
+  element: CanvasSpacePanElement | null,
+): boolean {
+  if (event.code !== 'Space' || inputFocused) return false;
+  event.preventDefault();
+  if (!event.repeat) {
+    state.current = true;
+    setCanvasSpacePanActive(element, true);
+  }
+  return true;
+}
+
+export function resetCanvasSpacePan(
+  state: CanvasSpacePanState,
+  element: CanvasSpacePanElement | null,
+): void {
+  state.current = false;
+  setCanvasSpacePanActive(element, false);
+}
+
 export function shouldSyncCanvasPanViewport(
   lastSyncedOffset: CanvasViewportOffset,
   nextOffset: CanvasViewportOffset,

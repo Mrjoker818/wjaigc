@@ -743,6 +743,18 @@ Historical checkpoint: the isolated PostgreSQL suite passed `14 files / 54 tests
 | Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
 
+## 2026-08-15 open evidence after Space-pan local repair
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Space-pan hot path | LOCALLY VERIFIED | Focused `49/49`, desktop production performance `4/4`, deterministic functional reruns `2/2`, independent review `APPROVED`; reproduce from the new committed SHA in immutable CI. |
+| Hosted three-mode Canvas matrix | UNVERIFIED / REQUIRED | Legacy, shadow and canvas-v2 must each pass the complete fixed-threshold matrix and upload screenshot, video, trace, Console and network evidence. |
+| GitHub real-P0 browser | BLOCKED EXTERNALLY | Configure the authorized repository Secrets. Mock credentials or a skipped job cannot satisfy this gate. |
+| Local full matrix asset reliability | OPEN P2 | Preserve the intermittent Next static CSS/JS 500 evidence and verify clean-server static assets during the next exact-SHA run; do not hide it with long waits. |
+| Coze exact-SHA sequence | UNVERIFIED | Only after immutable Canvas CI passes, execute `shadow -> canvas-v2 -> legacy` against the same SHA and retain rollback evidence. |
+| Real provider and accounting | UNVERIFIED / REQUIRED | Prove real generation, one charge, cancellation, monotonic terminal state and at-most-once refund in PostgreSQL-backed Coze. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; Stage 4/5 remain prohibited. |
+
 ## 2026-08-15 queue after immutable run `31875413077`
 
 | Item | Status | Required evidence |
