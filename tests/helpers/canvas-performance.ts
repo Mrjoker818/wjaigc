@@ -267,8 +267,8 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
     const tick = (timestamp: number) => {
       if (!state.active) return;
       state.frameTimestamps.push(timestamp);
-      sampleContinuity(timestamp);
       state.rafId = requestAnimationFrame(tick);
+      sampleContinuity(timestamp);
     };
     state.rafId = requestAnimationFrame(tick);
     windowWithState.__wujieStage3Performance = state as unknown as Record<string, unknown>;

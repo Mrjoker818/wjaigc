@@ -885,3 +885,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Fresh production shadow evidence passes the complete five-profile Canvas matrix `60/60`; both desktop Chromium profiles meet 100/300-node FPS, input P95 and 300-node save budgets with zero disappeared frames and zero unclickable duration.
 - This is still an uncommitted local candidate. It does not retroactively turn runs `31866500220` or `31869145512` green and does not satisfy the missing real-P0 credentials, Coze exact-SHA rollout/rollback or real billing/cancel/refund evidence.
 - **Release decision: NOT READY.** Next ordered gate is full repository verification, main-only non-force push, then a new immutable three-mode Actions run. `stable` and Stage 4/5 remain prohibited.
+
+## 2026-08-15 post-`c4c02a9` repair readiness
+
+- `c4c02a9` is not a passing immutable candidate. Actions run `31870799781` preserved three-mode RED evidence and exposed one legacy WebKit durability race plus hosted performance margin failures.
+- S3-BUG-023 and the S3-BUG-017 hot-path follow-up are locally repaired under TDD. No business feature, Canvas threshold, shadow comparison or continuity assertion was removed.
+- Available local gates pass: focused `47/47`, full Vitest `2454` passed, TypeScript, ESLint, production build `116/116`, exact source allowlist and `38/38` protected features. PostgreSQL-gated local tests remain explicitly unverified in this generic environment.
+- **Release decision remains NOT READY.** The next commit must be pushed only to `main` and must pass the immutable legacy/shadow/canvas-v2 matrix. Real-P0 Secrets, Coze exact-SHA `shadow -> canvas-v2 -> legacy`, provider generation and authoritative charge/cancel/refund evidence remain blocking. `stable` and Stage 4/5 remain prohibited.

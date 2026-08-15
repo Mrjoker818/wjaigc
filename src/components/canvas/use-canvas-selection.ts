@@ -16,7 +16,6 @@ import {
   clearSelection as clearKernelSelection,
   commitBoxSelection,
   createCanvasSelectionState,
-  getBoxSelectionBounds,
   selectHit,
   updateBoxSelection,
   type CanvasSelectionMode,
@@ -28,6 +27,7 @@ interface UseCanvasSelectionOptions {
   initialIds?: Iterable<string>;
   initialPrimaryId?: string | null;
   onSelectionCommit?: (state: CanvasSelectionState) => void;
+  getViewportRect?: () => { left: number; top: number } | null;
 }
 
 interface BeginImageSelectionGestureInput {
@@ -51,20 +51,36 @@ interface UseCanvasSelectionResult {
   cancelSelectionGesture: (pointerId?: number) => void;
   beginImageSelectionGesture: (input: BeginImageSelectionGestureInput) => CanvasSelectionState;
   finishCanvasPointerGesture: (pointerId: number, cancelled?: boolean) => void;
-  boxPreview: { start: CanvasPoint; end: CanvasPoint; active: boolean } | null;
+  boxSelectionActive: boolean;
+  setBoxOverlayElement: (element: HTMLDivElement | null) => void;
+}
+
+export function resolveBoxSelectionOverlayLayout(
+  start: CanvasPoint,
+  end: CanvasPoint,
+  viewport: { left: number; top: number },
+): { x: number; y: number; width: number; height: number } {
+  return {
+    x: Math.min(start.x, end.x) - viewport.left,
+    y: Math.min(start.y, end.y) - viewport.top,
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
 }
 
 export function useCanvasSelection({
   initialIds = [],
   initialPrimaryId,
   onSelectionCommit,
+  getViewportRect,
 }: UseCanvasSelectionOptions = {}): UseCanvasSelectionResult {
   const [state, setState] = useState(() => (
     createCanvasSelectionState(initialIds, initialPrimaryId)
   ));
   const stateRef = useRef(state);
   const boxPreviewRef = useRef<CanvasSelectionState | null>(null);
-  const [boxPreview, setBoxPreview] = useState<UseCanvasSelectionResult['boxPreview']>(null);
+  const boxOverlayRef = useRef<HTMLDivElement | null>(null);
+  const [boxSelectionActive, setBoxSelectionActive] = useState(false);
   const boxRafRef = useRef<number | null>(null);
   const activeImagePointerRef = useRef<{ pointerId: number; point: CanvasPoint } | null>(null);
   const onSelectionCommitRef = useRef(onSelectionCommit);
@@ -73,9 +89,19 @@ export function useCanvasSelection({
     onSelectionCommitRef.current = onSelectionCommit;
   }, [onSelectionCommit]);
 
+  const hideBoxOverlay = useCallback(() => {
+    const overlay = boxOverlayRef.current;
+    if (overlay) overlay.style.display = 'none';
+  }, []);
+
+  const setBoxOverlayElement = useCallback((element: HTMLDivElement | null) => {
+    boxOverlayRef.current = element;
+  }, []);
+
   useEffect(() => () => {
     if (boxRafRef.current !== null) cancelAnimationFrame(boxRafRef.current);
-  }, []);
+    hideBoxOverlay();
+  }, [hideBoxOverlay]);
 
   const publishCommitted = useCallback((next: CanvasSelectionState) => {
     const committed = { ...next, gesture: null } satisfies CanvasSelectionState;
@@ -90,15 +116,24 @@ export function useCanvasSelection({
     boxRafRef.current = requestAnimationFrame(() => {
       boxRafRef.current = null;
       const previewState = boxPreviewRef.current;
-      const bounds = previewState ? getBoxSelectionBounds(previewState) : null;
       const gesture = previewState?.gesture;
-      setBoxPreview(bounds && gesture?.kind === 'box' ? {
-        start: { ...gesture.start },
-        end: { ...gesture.current },
-        active: gesture.active,
-      } : null);
+      const overlay = boxOverlayRef.current;
+      const viewport = getViewportRect?.();
+      if (!overlay || !viewport || gesture?.kind !== 'box' || !gesture.active) {
+        hideBoxOverlay();
+        return;
+      }
+      const layout = resolveBoxSelectionOverlayLayout(
+        gesture.start,
+        gesture.current,
+        viewport,
+      );
+      overlay.style.display = 'block';
+      overlay.style.transform = `translate3d(${layout.x}px, ${layout.y}px, 0)`;
+      overlay.style.width = `${layout.width}px`;
+      overlay.style.height = `${layout.height}px`;
     });
-  }, []);
+  }, [getViewportRect, hideBoxOverlay]);
 
   const setSelectedIds = useCallback<Dispatch<SetStateAction<Set<string>>>>((action) => {
     const current = new Set(stateRef.current.ids);
@@ -116,6 +151,7 @@ export function useCanvasSelection({
 
   const beginSelectionBox = useCallback((input: { pointerId: number; point: CanvasPoint; additive: boolean }) => {
     boxPreviewRef.current = beginBoxSelection(stateRef.current, input);
+    setBoxSelectionActive(true);
     scheduleBoxPreview();
   }, [scheduleBoxPreview]);
 
@@ -134,9 +170,10 @@ export function useCanvasSelection({
       boxRafRef.current = null;
     }
     boxPreviewRef.current = null;
-    setBoxPreview(null);
+    setBoxSelectionActive(false);
+    hideBoxOverlay();
     return publishCommitted(commitBoxSelection(preview, hitIdsInZOrder));
-  }, [publishCommitted]);
+  }, [hideBoxOverlay, publishCommitted]);
 
   const cancelSelectionGesture = useCallback((pointerId?: number) => {
     const preview = boxPreviewRef.current;
@@ -149,8 +186,9 @@ export function useCanvasSelection({
       boxRafRef.current = null;
     }
     boxPreviewRef.current = null;
-    setBoxPreview(null);
-  }, []);
+    setBoxSelectionActive(false);
+    hideBoxOverlay();
+  }, [hideBoxOverlay]);
 
   const beginImageSelectionGesture = useCallback((input: BeginImageSelectionGestureInput) => {
     activeImagePointerRef.current = { pointerId: input.pointerId, point: { ...input.point } };
@@ -191,6 +229,7 @@ export function useCanvasSelection({
     cancelSelectionGesture,
     beginImageSelectionGesture,
     finishCanvasPointerGesture,
-    boxPreview,
+    boxSelectionActive,
+    setBoxOverlayElement,
   };
 }

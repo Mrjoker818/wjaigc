@@ -183,7 +183,7 @@ describe('CanvasPersistenceScheduler', () => {
     expect(scheduler.phase).toBe('idle');
   });
 
-  it('does not write a later revision with an unchanged prepared signature', async () => {
+  it('does not write a later idle revision with an unchanged prepared signature', async () => {
     const writer = vi.fn(async () => undefined);
     const scheduler = new CanvasPersistenceScheduler({ writer });
     const unchanged = snapshot(1);
@@ -191,9 +191,29 @@ describe('CanvasPersistenceScheduler', () => {
     scheduler.schedule(unchanged);
     await scheduler.flush('immediate');
     scheduler.schedule({ ...unchanged, revision: 2 });
-    await scheduler.flush('immediate');
+    await scheduler.flush('idle');
 
     expect(writer).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes a later immediate revision when content cycles back to a server-flushed signature', async () => {
+    const writer = vi.fn(async (
+      _snapshot: CanvasPreparedPersistenceSnapshot,
+      _reason: string,
+    ): Promise<void> => undefined);
+    const scheduler = new CanvasPersistenceScheduler({ writer });
+    const original = snapshot(1);
+
+    scheduler.schedule(original);
+    await scheduler.flush('immediate');
+    scheduler.schedule(snapshot(2));
+    scheduler.schedule({ ...original, revision: 3 });
+    await scheduler.flush('immediate');
+
+    expect(writer.mock.calls.map(([value, reason]) => [value.revision, reason])).toEqual([
+      [1, 'immediate'],
+      [3, 'immediate'],
+    ]);
   });
 
   it('upgrades an idle-saved signature to an immediate durability barrier', async () => {

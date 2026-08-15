@@ -743,6 +743,17 @@ The local PostgreSQL gap is closed by `14 files / 54 tests`. Exact execution `lo
 | Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
 
+## 2026-08-15 post-`c4c02a9` verification queue
+
+| Item | State | Required proof |
+|---|---|---|
+| S3-BUG-023 legacy WebKit durability | IMMUTABLE RERUN REQUIRED | The delete/undo/redo/final-undo case must restore the node and observe its matching project-save POST; the following move/resize case must start from an intact one-node project. |
+| S3-BUG-017 hosted performance | IMMUTABLE RERUN REQUIRED | Legacy, shadow and canvas-v2 desktop Chromium must meet unchanged 55/45 FPS, 50ms input P95 and 100ms save-task limits with zero disappeared and unclickable evidence. |
+| Local PostgreSQL browser reproduction | BLOCKED LOCALLY | No isolated PostgreSQL service is configured on this workstation. Generic Vitest explicitly skips 12 files / 44 tests; GitHub's PostgreSQL job is the authoritative next execution. |
+| Real P0 browser | BLOCKED BY SECRETS | Configure the required repository provider/account/database/storage secrets. Mock credentials are not accepted. |
+| Coze exact-SHA sequence | NOT STARTED FOR NEXT SHA | Pull the exact new main SHA, prove shadow, then isolated canvas-v2, then mandatory legacy rollback. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
+
 ## 2026-08-15 remaining scope after local FPS-window correction
 
 | Item | Status | Required evidence |

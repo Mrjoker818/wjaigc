@@ -147,6 +147,7 @@ export class CanvasPersistenceScheduler {
   private readonly preparedSnapshots = new Map<string, CanvasPreparedPersistenceSnapshot>();
   private readonly savedSignatures = new Map<string, string>();
   private readonly serverFlushedSignatures = new Map<string, string>();
+  private readonly serverFlushedRevisions = new Map<string, number>();
   private pendingSnapshot: CanvasPersistenceSnapshot | null = null;
   private idleHandle: IdleHandle | null = null;
   private drainPromise: Promise<void> | null = null;
@@ -292,7 +293,10 @@ export class CanvasPersistenceScheduler {
       this.requestedFlushReason = null;
       const signatureAlreadySaved = this.savedSignatures.get(snapshot.projectId) === prepared.signature;
       const needsImmediateBarrier = writeReason === 'immediate'
-        && this.serverFlushedSignatures.get(snapshot.projectId) !== prepared.signature;
+        && (
+          this.serverFlushedSignatures.get(snapshot.projectId) !== prepared.signature
+          || (this.serverFlushedRevisions.get(snapshot.projectId) ?? -1) < snapshot.revision
+        );
       if (signatureAlreadySaved && !needsImmediateBarrier) {
         this.metrics.deduplicatedSnapshots += 1;
         this.clearActiveSnapshot(snapshot);
@@ -312,6 +316,7 @@ export class CanvasPersistenceScheduler {
               this.savedSignatures.set(snapshot.projectId, prepared.signature);
               if (writeReason === 'immediate') {
                 this.serverFlushedSignatures.set(snapshot.projectId, prepared.signature);
+                this.serverFlushedRevisions.set(snapshot.projectId, snapshot.revision);
               }
               this.metrics.writtenSnapshots += 1;
             }

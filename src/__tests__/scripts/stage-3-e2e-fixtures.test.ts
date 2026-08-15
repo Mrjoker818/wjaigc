@@ -87,6 +87,20 @@ describe('Stage 3 performance evidence contract', () => {
     expect(canvasPerformanceSource).toContain('timing.startTime >= state.startedAt');
   });
 
+  it('schedules the next animation frame before running continuity probes', () => {
+    const tickStart = canvasPerformanceSource.indexOf('const tick = (timestamp: number) => {');
+    const tickEnd = canvasPerformanceSource.indexOf(
+      'windowWithState.__wujieStage3Performance',
+      tickStart,
+    );
+    const tickBody = canvasPerformanceSource.slice(tickStart, tickEnd);
+
+    expect(tickStart).toBeGreaterThan(-1);
+    expect(tickBody.indexOf('state.rafId = requestAnimationFrame(tick);')).toBeGreaterThan(-1);
+    expect(tickBody.indexOf('state.rafId = requestAnimationFrame(tick);'))
+      .toBeLessThan(tickBody.indexOf('sampleContinuity(timestamp);'));
+  });
+
   it('proves the API-selected Canvas mode reaches the rendered viewport', () => {
     expect(stage3FixtureSource).toContain('E2E_STAGE3_EXPECTED_CANVAS_MODE');
     expect(stage3BrowserHelperSource).toContain("'E2E_STAGE3_EXPECTED_CANVAS_MODE'");

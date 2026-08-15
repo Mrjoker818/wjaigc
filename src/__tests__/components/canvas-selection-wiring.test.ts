@@ -43,8 +43,11 @@ describe('canvas selection gesture wiring', () => {
     const hookSource = readFileSync(hookPath, 'utf8');
     expect(hookSource).toContain('boxPreviewRef');
     expect(hookSource).toContain('requestAnimationFrame');
+    expect(hookSource).toContain('boxOverlayRef.current');
+    expect(hookSource).not.toContain('setBoxPreview(');
     expect(hookSource).toContain('commitBoxSelection');
     expect(hookSource).toContain('onSelectionCommit');
+    expect(canvasSource).toContain('data-canvas-box-selection');
   });
 
   it('does not collapse a committed multi-selection when the primary image prop syncs', () => {

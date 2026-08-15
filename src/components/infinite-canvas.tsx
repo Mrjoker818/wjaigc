@@ -1172,8 +1172,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     cancelSelectionGesture,
     beginImageSelectionGesture,
     finishCanvasPointerGesture,
-    boxPreview,
-  } = useCanvasSelection({ initialIds: [] });
+    boxSelectionActive,
+    setBoxOverlayElement,
+  } = useCanvasSelection({
+    initialIds: [],
+    getViewportRect: () => canvasContainerRef.current?.getBoundingClientRect() ?? null,
+  });
   const pendingDeleteIdsRef = useRef<Set<string>>(new Set());
   const [groups, setGroups] = useState<ImageGroup[]>(initialGroups || []);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -1268,10 +1272,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [resizingImage, setResizingImage] = useState<string | null>(null);
   const [resizeCorner, setResizeCorner] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0, imgX: 0, imgY: 0 });
-
-  // Box selection preview is kept by the controller and published at most once per frame.
-  const boxSelectStart = boxPreview?.start ?? null;
-  const boxSelectEnd = boxPreview?.end ?? null;
 
   // Middle button pan state
   const middlePanMovedRef = useRef(false); // 中键拖动是否移动过（防止拖动后误触发 auxclick 缩放重置）
@@ -10879,7 +10879,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             ? 'cursor-pointer'
             : isPanning || isSpacePressed || activePointerTool === 'hand'
             ? 'cursor-grab active:cursor-grabbing'
-            : boxSelectStart
+            : boxSelectionActive
             ? 'cursor-crosshair'
             : (editMode === 'erase' || editMode === 'mask')
             ? 'cursor-default'  // 擦除/蒙版使用浮动窗口，主画布保持默认光标
@@ -13048,17 +13048,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* HexCube 六面体浮动面板 - 移到 canvas transform group 外部 */}
 
-        {boxSelectStart && boxSelectEnd && (
-          <div
-            className="absolute border border-gold/50 bg-gold/10 z-30 pointer-events-none"
-            style={{
-              left: Math.min(boxSelectStart.x, boxSelectEnd.x) - (canvasRef.current?.getBoundingClientRect().left || 0),
-              top: Math.min(boxSelectStart.y, boxSelectEnd.y) - (canvasRef.current?.getBoundingClientRect().top || 0),
-              width: Math.abs(boxSelectEnd.x - boxSelectStart.x),
-              height: Math.abs(boxSelectEnd.y - boxSelectStart.y),
-            }}
-          />
-        )}
+        <div
+          ref={setBoxOverlayElement}
+          data-canvas-box-selection
+          className="absolute left-0 top-0 hidden border border-gold/50 bg-gold/10 z-30 pointer-events-none will-change-transform"
+        />
 
         {/* Snap guides overlay - alignment guides when dragging images */}
         {activeSnapGuides.length > 0 && (

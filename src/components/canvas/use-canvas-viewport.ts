@@ -98,6 +98,24 @@ function legacyPreviewPan(state: CanvasViewportState, pointer: CanvasPointerSamp
   };
 }
 
+export function resolveCanvasPanPreview(
+  mode: CanvasKernelMode,
+  legacy: CanvasViewportState,
+  kernel: CanvasViewportState,
+  pointer: CanvasPointerSample,
+): { legacy: CanvasViewportState; kernel: CanvasViewportState } {
+  if (mode === 'legacy') {
+    return { legacy: legacyPreviewPan(legacy, pointer), kernel };
+  }
+  if (mode === 'canvas-v2') {
+    return { legacy, kernel: previewKernelPan(kernel, pointer) };
+  }
+  return {
+    legacy: legacyPreviewPan(legacy, pointer),
+    kernel: previewKernelPan(kernel, pointer),
+  };
+}
+
 function legacyCommitPan(
   state: CanvasViewportState,
   pointer?: Pick<CanvasPointerSample, 'pointerId'>,
@@ -208,8 +226,12 @@ export function useCanvasViewport({
   }, [activeRef, publish]);
 
   const previewPan = useCallback((pointer: CanvasPointerSample) => {
-    const legacy = legacyPreviewPan(legacyRef.current, pointer);
-    const kernel = previewKernelPan(kernelRef.current, pointer);
+    const { legacy, kernel } = resolveCanvasPanPreview(
+      mode,
+      legacyRef.current,
+      kernelRef.current,
+      pointer,
+    );
     legacyRef.current = legacy;
     kernelRef.current = kernel;
     compareShadow(legacy, kernel, 'pan-preview');

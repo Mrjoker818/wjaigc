@@ -1077,3 +1077,11 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - A fresh production shadow performance subset passed `6/6`. The full Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium matrix then passed `60/60` in `local-frame-span-full-20260815`.
 - Desktop Chromium evidence: 100-node FPS `58.61-58.64`; 300-node FPS `55.30-56.78`; input P95 `16.4-24.1ms`; longest save task `0-51ms`; disappeared frames `0`; unclickable time `0`.
 - **Local verdict: PASS. Immutable verdict: PENDING.** The historical GitHub RED remains valid for its old sampler; S3-BUG-017 closes only after a new committed SHA passes legacy, shadow and canvas-v2 hosted jobs.
+
+## 2026-08-15 `c4c02a9` immutable RED and local repair candidate
+
+- GitHub Actions run `31870799781` is retained as RED: legacy `57/60`, shadow `59/60`, canvas-v2 `56/60`. Static/tests and PostgreSQL concurrency passed; real P0 failed closed because required repository Secrets are absent.
+- Legacy WebKit restored the final undo in the DOM but emitted no matching save POST. TDD proved the scheduler deduplicated a later immediate revision when its content cycled back to an older server-flushed signature. Revision-aware immediate durability is now `13/13` GREEN while idle content deduplication remains intact.
+- Hosted performance analysis did not lower thresholds. Non-shadow pan now computes only its active engine; shadow still computes and compares both. Reverse-box preview no longer rerenders the full Canvas on every move, and the evidence sampler schedules the next RAF before executing the same continuity probes.
+- Fresh local gates after the repairs: focused `47/47`; full Vitest `428 files / 2454 passed`, `12 files / 44 PostgreSQL-gated skipped`; TypeScript exit 0; ESLint exit 0; build `116/116`; exact trusted protected-source gate `38/38` with no unapproved drift.
+- The local machine has no isolated PostgreSQL service, so the exact legacy WebKit database flow cannot be represented honestly here. **Verdict: LOCAL CODE GATES PASS / IMMUTABLE BROWSER VERDICT PENDING.**

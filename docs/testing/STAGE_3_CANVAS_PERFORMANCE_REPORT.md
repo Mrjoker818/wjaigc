@@ -131,3 +131,9 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 - r5 root cause is S3-BUG-022: the global Canvas keyboard listener depended on image/selection state and used passive `useEffect`, so React could commit the deleted DOM before reinstalling Ctrl+Z handling. Source RED is `1 failed / 21 passed`; the commit-phase `useLayoutEffect` correction passes `22/22`. Three independently reseeded pre-fix Chromium runs passed `36/36`, demonstrating why the original race was intermittent; those passes do not erase the retained RED.
 - HTML report: `test-results/stage-3-baseline/canvas-v2/local-ci-repro-20260815/local-final-candidate-r5-20260815/playwright-report/index.html`. JUnit and attempt-level screenshot, video, trace, Console and network evidence are retained beside it.
 - **Status: local gate is pending a new exact-source five-profile run after S3-BUG-022. Immutable GitHub Actions and Coze three-mode rollout/rollback remain required.**
+
+## 2026-08-15 `c4c02a9` immutable follow-up
+
+- Actions run `31870799781` remained RED after the frame-window correction: legacy `57/60`, shadow `59/60`, canvas-v2 `56/60`.
+- The next local candidate removes inactive-engine work from non-shadow pan, moves reverse-box visual updates out of parent React state, and registers the next measurement RAF before unchanged continuity probes.
+- Fixed gates remain 55 FPS for 100 nodes, 45 FPS for 300 nodes, 50ms input P95 and 100ms longest save task. A new immutable run is required; this report does not project a pass from local static evidence.

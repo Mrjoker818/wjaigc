@@ -1769,3 +1769,32 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Derive FPS only from the first and last captured RAF timestamps. Keep total action duration, input delay, long tasks, save tasks, disappeared frames and unclickable duration as independent unchanged metrics. |
 | Regression | Unit RED `1 failed / 16 passed`, GREEN `17/17`. Fresh production shadow desktop performance subset passes `6/6`; the complete Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium suite passes `60/60` with screenshot/video/trace/Console/network evidence under execution `local-frame-span-full-20260815`. |
 | Status | **CLOSED LOCALLY 2026-08-15 / IMMUTABLE CI REQUIRED.** |
+
+### S3-BUG-023: A later immediate Canvas revision could be deduplicated after content cycled back to an older signature
+
+| Field | Detail |
+|---|---|
+| Severity | P1 Canvas persistence durability |
+| Module | Canvas persistence scheduler, delete/undo/redo |
+| Environment | GitHub Actions run `31870799781`, `main@c4c02a9f4d3bab51511c768b1552a17bfe248d5c`, legacy WebKit |
+| Reproduction | Persist state A immediately, queue state B, return to A at a later revision, then request an immediate flush. |
+| Expected | The later revision crosses the server durability barrier even when its content signature equals an older server-flushed state. |
+| Actual | The DOM restored the image, but no matching project-save POST arrived within 30 seconds. The following shared-fixture case inherited an empty one-node project. |
+| Root cause | The scheduler bound server durability only to a content signature. It did not bind that signature to the revision that had crossed the immediate writer barrier. |
+| Fix | Track the last server-flushed revision with its signature. Idle writes still deduplicate unchanged content; a later immediate revision must execute the writer. |
+| Regression | TDD RED: `1 failed / 12 passed`; GREEN: `13/13`. Focused Stage 3 set: `47/47`; full Vitest: `428 files / 2454 tests passed`, with `44` PostgreSQL-gated tests explicitly skipped in the generic local run. |
+| Status | **FIXED LOCALLY 2026-08-15 / LEGACY WEBKIT IMMUTABLE CI REQUIRED.** |
+
+### S3-BUG-017 follow-up: hosted pan and reverse-box hot paths retained insufficient margin
+
+| Field | Detail |
+|---|---|
+| Severity | P1 commercial Canvas performance |
+| Module | Viewport controller, box-selection preview and Stage 3 continuity sampler |
+| Environment | GitHub Actions run `31870799781`, all three Canvas modes |
+| Immutable RED | Legacy `57/60`, shadow `59/60`, canvas-v2 `56/60`. Failures include FPS `40.21-54.35`, input P95 `50.1-53.8ms`, plus the separate S3-BUG-023 WebKit cascade. |
+| Root cause | Non-shadow pointer moves still allocated both viewport-engine previews. Box selection published coordinates through parent React state every frame and performed a render-time viewport geometry read. The continuity sampler registered its next RAF only after synchronous visibility/hit probes. |
+| Fix | Compute only the active viewport engine outside shadow; keep independent dual calculation in shadow. Move box preview geometry to an RAF-driven isolated overlay so React updates only at gesture boundaries. Register the next sampler RAF before running the unchanged continuity probes. |
+| Safeguards | No FPS, input, save, disappearance or clickability threshold changed. No continuity probe or shadow comparison was removed. Reverse geometry has a direct unit contract. |
+| Regression | RED: controller `3/3`, overlay `2/2`, RAF-order contract `1/18`. GREEN focused set `47/47`; TypeScript, ESLint, build `116/116`, protected features `38/38`, and full Vitest pass locally. |
+| Status | **OPEN UNTIL A NEW IMMUTABLE THREE-MODE MATRIX PASSES.** |
