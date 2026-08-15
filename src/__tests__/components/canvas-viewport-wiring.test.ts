@@ -25,8 +25,24 @@ describe('infinite canvas viewport controller wiring', () => {
 
     expect(canvasSource).not.toContain('const panRafRef = useRef<number | null>(null)');
     expect(hookSource).toContain('requestAnimationFrame');
+    expect(hookSource).toContain('onPanViewportSync?.(active.preview)');
+    expect(canvasSource).toContain('onPanViewportSync: handlePanViewportSync');
     expect(hookSource).toContain('shouldSyncCanvasPanViewport');
     expect(hookSource).toContain('resolveCanvasCullingBounds');
+  });
+
+  it('begins panning without publishing React viewport state', () => {
+    const hookSource = readFileSync(hookPath, 'utf8').replace(/\r\n/g, '\n');
+    const beginStart = hookSource.indexOf('const beginPan = useCallback');
+    const beginEnd = hookSource.indexOf('const previewPan = useCallback', beginStart);
+    const beginSource = hookSource.slice(beginStart, beginEnd);
+
+    expect(beginStart).toBeGreaterThan(-1);
+    expect(beginSource).toContain('return true');
+    expect(beginSource).not.toContain('publish(');
+    expect(beginSource).not.toContain('setPanViewportOffset(');
+    expect(beginSource).not.toContain('setLegacyState(');
+    expect(beginSource).not.toContain('setKernelState(');
   });
 
   it('keeps legacy authoritative, compares shadow, and gates canvas-v2', () => {

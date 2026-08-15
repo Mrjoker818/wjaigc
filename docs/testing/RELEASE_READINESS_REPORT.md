@@ -908,3 +908,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The final candidate keeps one stable DOM proxy listener and updates its current behavior through a ref. Fresh legacy Chromium passes `12/12`, mobile focused regression passes `4/4`, and the unchanged local performance budgets pass.
 - Repository gates pass locally, but `44` PostgreSQL tests remain environment-skipped in the generic run. Real-P0 still lacks required Secrets, and no cloud charge/refund proof has been produced.
 - **Decision: NOT READY / Stage 3 Task 10 remains active.** Push only a reviewed fast-forward to `main`; do not modify `stable`, do not start Stage 4/5, and require a new immutable three-mode matrix before Coze rollout.
+
+## 2026-08-15 readiness after immutable run `31878749102`
+
+- `main@9d8e7bf73c694d8220472c19e4bad85607da63db` is not releasable: legacy, shadow and canvas-v2 each passed `57/60`; real-P0 remains fail-closed because repository Secrets are absent.
+- The local candidate removes one proven full-Canvas React render from standard direct pan and sequences the unchanged immediate-save audit after the authoritative sync. No protected tool, workspace, threshold, continuity assertion, provider route or accounting rule was removed.
+- The first independent review rejected the local candidate on two pointer-state ownership issues. Both were converted into runtime/source regressions and corrected; the follow-up independent review returned `APPROVED`.
+- Fresh legacy execution `local-owner-safe-legacy-full-20260815` is `60/60`; focused tests are `8 files / 78 tests`; PostgreSQL-enabled full Vitest is `441 files / 2512 tests` with zero skips; TypeScript, ESLint `0 errors / 973 historical warnings`, exact protected-source gate `38/38`, whitespace and production build `116/116` pass.
+- **Decision: NOT READY / Stage 3 Task 10 remains active.** Push only a reviewed fast-forward to `main`, keep `stable` read-only, and require the new exact SHA to pass immutable legacy/shadow/canvas-v2. After that, Coze must execute `shadow -> canvas-v2 -> legacy`, followed by real provider charge/cancel/refund proof. Stage 4/5 remain prohibited.

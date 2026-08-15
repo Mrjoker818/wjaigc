@@ -1523,7 +1523,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         } else {
           manager.updateProject(snapshot.projectId, projectUpdates);
         }
-        recordUserData({
+        const recordAutosave = () => recordUserData({
           userId,
           area: 'projects',
           type: 'autosave',
@@ -1532,7 +1532,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           metadata: { projectId: snapshot.projectId, imageCount: snapshot.images.length },
         });
         if (reason === 'immediate') {
-          await manager.flushProjectsToServer();
+          try {
+            await manager.flushProjectsToServer();
+          } finally {
+            recordAutosave();
+          }
+        } else {
+          recordAutosave();
         }
       },
     });

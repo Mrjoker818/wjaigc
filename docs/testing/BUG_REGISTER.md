@@ -1828,3 +1828,17 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Added an explicit `updateProjectInMemory()` mutation boundary. Immediate Canvas writes and the history pre-commit use it; idle persistence keeps `updateProject()` and its existing local durability behavior. Server acceptance still performs the established authoritative adoption/persistence transaction. |
 | Regression | Memory-only update was RED because the method did not exist; GREEN proves the draft changes, mutation generation advances and localStorage receives no write. Project autosave wiring and sync isolation remain covered. |
 | Status | **FIXED LOCALLY / IMMUTABLE SAVE-BUDGET RERUN REQUIRED.** |
+
+### S3-BUG-026: Standard direct pan forced a full Canvas React render before compositor movement
+
+| Field | Detail |
+|---|---|
+| Severity | P1 hosted Canvas performance |
+| Module | Infinite Canvas pointer routing and viewport virtualization |
+| Environment | Immutable Actions run `31878749102` on `main@9d8e7bf73c694d8220472c19e4bad85607da63db`, followed by isolated local production Chromium/WebKit matrix, 2026-08-15 |
+| Immutable RED | Legacy, shadow and canvas-v2 each passed `57/60`. Hosted misses remained in desktop 100/300-node FPS and one legacy 300-node save long task of `156ms`; fixed thresholds were not changed. |
+| Root cause | A normal Space/hand-tool pointerdown immediately called `setIsPanning(true)`. The standard `120x72` gesture is inside the existing overscan corridor and did not need React culling synchronization, yet the state transition rerendered the complete 100/300-node Canvas before compositor movement. The immediate-save path also started the full project audit upload before the authoritative sync, allowing two large requests to overlap. |
+| Fix | Track direct pan ownership in a pointer ref. Short movement remains DOM-transform/compositor driven; only the existing 256px/80ms culling synchronization callback enters React panning state. Long, middle-button and long-press pan behavior remains bounded. Immediate save now awaits the authoritative project flush before starting the unchanged audit record. |
+| Rejected hypotheses | `translate3d` produced no measurable benefit. Removing per-node `content-visibility` caused a real 1080p/300-node input P95 regression to `60.2ms`; both experiments were fully reverted. |
+| Regression | TDD began RED on the missing direct-pan and save-order contracts. The first independent review rejected the candidate because `beginPan` still published React state and a second pointer could replace/terminate the active owner. The corrected implementation keeps begin ref-only, rejects competing pointers and allows only the authoritative owner to move or finish; follow-up independent review returned `APPROVED`. Fresh focused Canvas/persistence contracts pass `8 files / 78 tests`. Production build emits `116/116` routes. Execution `local-owner-safe-legacy-full-20260815` passes the complete legacy five-profile matrix `60/60`. Chromium/1080p 100-node pan is `57.42/57.42 FPS`, 300-node pan is `54.82/54.26 FPS`, input P95 is at most `40.1ms`, save long task is `0ms`, and disappeared/unclickable evidence is zero. PostgreSQL-enabled full Vitest passes `441 files / 2512 tests` with zero skips. |
+| Status | **FIXED LOCALLY / NEW IMMUTABLE THREE-MODE CI REQUIRED.** |

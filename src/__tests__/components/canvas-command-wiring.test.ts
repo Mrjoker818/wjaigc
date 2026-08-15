@@ -54,6 +54,53 @@ describe('canvas command and explicit history wiring', () => {
     expect(pointerDown.indexOf("if (activePointerToolRef.current === 'hand' || isSpacePressedRef.current)")).toBeLessThan(pointerDown.indexOf('// Check resize handle'));
   });
 
+  it('routes active viewport pan before canvas coordinate conversion', () => {
+    const pointerMoveStart = canvas.indexOf('const handlePointerMove');
+    const pointerUpStart = canvas.indexOf('const handlePointerUp', pointerMoveStart);
+    const pointerMove = canvas.slice(pointerMoveStart, pointerUpStart);
+    const editModeBranch = pointerMove.indexOf("if (editMode !== 'none')");
+    const coordinateConversion = pointerMove.indexOf('const canvasPos = screenToCanvas', editModeBranch);
+    const middlePan = pointerMove.indexOf(
+      'isMiddlePanning && viewportPanPointerIdRef.current === e.pointerId',
+      editModeBranch,
+    );
+    const viewportPan = pointerMove.indexOf(
+      '&& (isPanning || directPanPointerIdRef.current === e.pointerId)',
+      middlePan,
+    );
+
+    expect(pointerMoveStart).toBeGreaterThan(-1);
+    expect(editModeBranch).toBeGreaterThan(-1);
+    expect(coordinateConversion).toBeGreaterThan(-1);
+    expect(middlePan).toBeGreaterThan(-1);
+    expect(viewportPan).toBeGreaterThan(-1);
+    expect(middlePan).toBeLessThan(coordinateConversion);
+    expect(viewportPan).toBeLessThan(coordinateConversion);
+  });
+
+  it('keeps a standard Space or hand-tool pan off React state until culling must synchronize', () => {
+    const pointerDownStart = canvas.indexOf('const handlePointerDown');
+    const pointerMoveStart = canvas.indexOf('const handlePointerMove', pointerDownStart);
+    const pointerDown = canvas.slice(pointerDownStart, pointerMoveStart);
+    const directPanStart = pointerDown.indexOf("if (activePointerToolRef.current === 'hand' || isSpacePressedRef.current)");
+    const directPanEnd = pointerDown.indexOf('// Check resize handle', directPanStart);
+    const directPan = pointerDown.slice(directPanStart, directPanEnd);
+    const pointerMoveEnd = canvas.indexOf('const handlePointerUp', pointerMoveStart);
+    const pointerMove = canvas.slice(pointerMoveStart, pointerMoveEnd);
+    const pointerUpEnd = canvas.indexOf('const handlePointerCancel', pointerMoveEnd);
+    const pointerUp = canvas.slice(pointerMoveEnd, pointerUpEnd);
+
+    expect(directPanStart).toBeGreaterThan(-1);
+    expect(directPan).toContain('if (beginViewportPan(');
+    expect(directPan).toContain('directPanPointerIdRef.current = e.pointerId');
+    expect(directPan).not.toContain('setIsPanning(true)');
+    expect(pointerMove).toContain('directPanPointerIdRef.current === e.pointerId');
+    expect(pointerUp).not.toContain('if (isPanning || directPanPointerIdRef.current === e.pointerId)');
+    expect(pointerUp).toContain('viewportPanPointerIdRef.current === e.pointerId');
+    expect(pointerUp).toContain('&& (isPanning || directPanPointerIdRef.current === e.pointerId)');
+    expect(pointerUp).toContain('directPanPointerIdRef.current = null');
+  });
+
   it('does not hijack Space from focused toolbar controls', () => {
     const inputHelperStart = canvas.indexOf('const isInputFocused');
     const inputHelperEnd = canvas.indexOf('// Helper: check if a native event originates', inputHelperStart);
@@ -125,7 +172,9 @@ describe('canvas command and explicit history wiring', () => {
     const pointerUpStart = canvas.indexOf('const handlePointerUp');
     const pointerCancelStart = canvas.indexOf('const handlePointerCancel', pointerUpStart);
     const pointerUp = canvas.slice(pointerUpStart, pointerCancelStart);
-    const panStart = pointerUp.indexOf('if (isPanning)');
+    const panStart = pointerUp.indexOf(
+      '&& (isPanning || directPanPointerIdRef.current === e.pointerId)',
+    );
     const panEnd = pointerUp.indexOf('const activeBoxPreview', panStart);
     const panFinish = pointerUp.slice(panStart, panEnd);
 

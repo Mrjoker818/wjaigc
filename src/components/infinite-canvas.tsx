@@ -782,6 +782,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const canvasTransformRef = useRef<HTMLDivElement | null>(null);
   const canvasKernelMode = UserManager.getInstance().getCanvasKernelMode();
+  const [isPanning, setIsPanning] = useState(false);
+  const [isMiddlePanning, setIsMiddlePanning] = useState(false);
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const isSpacePressedRef = useRef(false);
+  const [activePointerTool, setActivePointerTool] = useState<'select' | 'hand'>('select');
+  const activePointerToolRef = useRef<'select' | 'hand'>('select');
+  const viewportPanPointerIdRef = useRef<number | null>(null);
+  const directPanPointerIdRef = useRef<number | null>(null);
+  const handlePanViewportSync = useCallback(() => {
+    if (directPanPointerIdRef.current !== null) setIsPanning(true);
+  }, []);
   const {
     viewOffset,
     zoom,
@@ -802,13 +813,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     mode: canvasKernelMode,
     initialViewState: normalizedInitialViewState,
     transformRef: canvasTransformRef,
+    onPanViewportSync: handlePanViewportSync,
   });
-  const [isPanning, setIsPanning] = useState(false);
-  const [isMiddlePanning, setIsMiddlePanning] = useState(false);
-  const [isSpacePressed, setIsSpacePressed] = useState(false);
-  const isSpacePressedRef = useRef(false);
-  const [activePointerTool, setActivePointerTool] = useState<'select' | 'hand'>('select');
-  const activePointerToolRef = useRef<'select' | 'hand'>('select');
 
   // Persist view state changes (debounced)
   const viewStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1309,7 +1315,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
       canvasLongPressTimerRef.current = null;
       cancelSelectionGesture(pointerId);
-      beginViewportPan({ pointerId, clientX, clientY });
+      if (!beginViewportPan({ pointerId, clientX, clientY })) return;
+      viewportPanPointerIdRef.current = pointerId;
       setIsPanning(true);
       setIsLongPressing(true);
     }, 250);
@@ -4051,24 +4058,28 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     if (e.button === 2) return;
 
-    const canvasPos = screenToCanvas(e.clientX, e.clientY);
-    mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
-
     // Middle button: pan canvas
     if (e.button === 1) {
       e.preventDefault();
-      beginViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
-      setIsMiddlePanning(true);
-      middlePanMovedRef.current = false; // 重置移动标记
+      if (beginViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY })) {
+        viewportPanPointerIdRef.current = e.pointerId;
+        setIsMiddlePanning(true);
+        middlePanMovedRef.current = false; // 重置移动标记
+      }
       return;
     }
 
     // Space + left click: pan canvas
     if (activePointerToolRef.current === 'hand' || isSpacePressedRef.current) {
-      beginViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
-      setIsPanning(true);
+      if (beginViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY })) {
+        viewportPanPointerIdRef.current = e.pointerId;
+        directPanPointerIdRef.current = e.pointerId;
+      }
       return;
     }
+
+    const canvasPos = screenToCanvas(e.clientX, e.clientY);
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
 
     // Check resize handle
     if (selectedIds.size === 1) {
@@ -4256,6 +4267,21 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       handleEditMouseMove(e);
       return;
     }
+
+    if (isMiddlePanning && viewportPanPointerIdRef.current === e.pointerId) {
+      middlePanMovedRef.current = true;
+      previewViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
+      return;
+    }
+
+    if (
+      viewportPanPointerIdRef.current === e.pointerId
+      && (isPanning || directPanPointerIdRef.current === e.pointerId)
+    ) {
+      previewViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
+      return;
+    }
+
     const canvasPos = screenToCanvas(e.clientX, e.clientY);
     if (blankCanvasPointerRef.current === e.pointerId) {
       const movedDistance = Math.hypot(
@@ -4265,19 +4291,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (movedDistance > 6) {
         clearBlankCanvasLongPress(e.pointerId);
       }
-    }
-
-    // Middle button panning
-    if (isMiddlePanning) {
-      middlePanMovedRef.current = true; // 标记已移动，防止 auxclick 误触发缩放重置
-      previewViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
-      return;
-    }
-
-    if (isPanning) {
-      // 使用 rAF + 直接 DOM 操作，避免每帧触发 React 重渲染
-      previewViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
-      return;
     }
 
     // Box select (left-click drag on blank area)
@@ -4579,8 +4592,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     // Middle button up: stop middle panning
-    if (isMiddlePanning && e.button === 1) {
+    if (
+      isMiddlePanning
+      && e.button === 1
+      && viewportPanPointerIdRef.current === e.pointerId
+    ) {
       commitViewportPan({ pointerId: e.pointerId });
+      viewportPanPointerIdRef.current = null;
       setIsMiddlePanning(false);
       suppressSelectionClickRef.current = true;
       window.setTimeout(() => {
@@ -4589,8 +4607,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       return;
     }
 
-    if (isPanning) {
+    if (
+      viewportPanPointerIdRef.current === e.pointerId
+      && (isPanning || directPanPointerIdRef.current === e.pointerId)
+    ) {
       commitViewportPan({ pointerId: e.pointerId });
+      viewportPanPointerIdRef.current = null;
+      directPanPointerIdRef.current = null;
       setIsPanning(false);
       setIsLongPressing(false);
       suppressSelectionClickRef.current = true;
@@ -4851,8 +4874,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     cancelGroupDragPreviews();
     rollbackHistoryTransaction(e.pointerId);
     finishCanvasPointerGesture(e.pointerId, true);
-    if (isPanning || isMiddlePanning) {
+    if (viewportPanPointerIdRef.current === e.pointerId) {
       cancelViewportPan({ pointerId: e.pointerId });
+      viewportPanPointerIdRef.current = null;
+      if (directPanPointerIdRef.current === e.pointerId) directPanPointerIdRef.current = null;
       setIsPanning(false);
       setIsMiddlePanning(false);
     }
@@ -4879,9 +4904,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       return;
     }
     rollbackHistoryTransaction(e.pointerId);
-    if (isPanning || isMiddlePanning) commitViewportPan();
-    setIsPanning(false);
-    setIsMiddlePanning(false);
+    if (viewportPanPointerIdRef.current === e.pointerId) {
+      commitViewportPan({ pointerId: e.pointerId });
+      viewportPanPointerIdRef.current = null;
+      directPanPointerIdRef.current = null;
+      setIsPanning(false);
+      setIsMiddlePanning(false);
+    }
     setIsLongPressing(false);
     cancelSelectionGesture();
     setResizingImage(null);
@@ -18517,6 +18546,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           aria-label="选择工具"
           onClick={() => {
             // 退出抓手/平移模式，回到默认选择模式
+            if (viewportPanPointerIdRef.current !== null) {
+              cancelViewportPan({ pointerId: viewportPanPointerIdRef.current });
+            }
+            viewportPanPointerIdRef.current = null;
+            directPanPointerIdRef.current = null;
             activePointerToolRef.current = 'select';
             setActivePointerTool('select');
             setIsPanning(false);

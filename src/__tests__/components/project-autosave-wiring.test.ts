@@ -38,6 +38,20 @@ describe('project autosave wiring', () => {
       .toBeLessThan(writerSource.indexOf('await manager.flushProjectsToServer()'));
   });
 
+  it('sends the full autosave audit after the immediate project sync settles', () => {
+    const writerStart = workspaceSource.indexOf('writer: async (snapshot');
+    const writerEnd = workspaceSource.indexOf('const canvasPersistenceScheduler =', writerStart);
+    const writerSource = workspaceSource.slice(writerStart, writerEnd);
+    const flush = writerSource.indexOf('await manager.flushProjectsToServer()');
+    const settledAudit = writerSource.indexOf('recordAutosave();', flush);
+
+    expect(writerStart).toBeGreaterThan(-1);
+    expect(writerSource).toContain('const recordAutosave = () => recordUserData({');
+    expect(writerSource).toContain('finally');
+    expect(flush).toBeGreaterThan(-1);
+    expect(settledAudit).toBeGreaterThan(flush);
+  });
+
   it('does not debounce or serialize the whole project on the interaction path', () => {
     expect(workspaceSource).not.toContain('const autoSaveRef = useRef');
     expect(workspaceSource).not.toContain('lastAutoSaveSignatureRef');

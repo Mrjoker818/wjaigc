@@ -756,6 +756,19 @@ Historical checkpoint: the isolated PostgreSQL suite passed `14 files / 54 tests
 
 Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
+## 2026-08-15 queue after immutable run `31878749102`
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Direct-pan and immediate-save candidate | LOCALLY VERIFIED | First independent review rejected two pointer-state ownership issues; both gained regressions, were corrected, and follow-up review returned `APPROVED`. Focused `8 files / 78 tests`, production legacy five-profile `60/60`, PostgreSQL-enabled full Vitest `441 files / 2512 tests`, TypeScript, ESLint `0 errors / 973 historical warnings`, protected-source `38/38` and build `116/116` pass. Reproduce from the committed SHA. |
+| Hosted three-mode Canvas matrix | REQUIRED | Legacy, shadow and canvas-v2 must each pass the unchanged 55/45 FPS, 50ms input P95, 100ms save-task, history, persistence and continuity gates. Run `31878749102` remains RED at `57/60` per mode. |
+| Local PostgreSQL gate | VERIFIED | Isolated PostgreSQL 18 full run completed `441 files / 2512 tests` with zero skips; retain immutable PostgreSQL CI as an independent gate. |
+| Real paid P0 | BLOCKED BY SECRETS | Configure authorized provider/account/storage credentials and prove generation, cancellation, one charge and at-most-once refund. Mock data cannot close this item. |
+| Coze exact-SHA sequence | WAITING FOR IMMUTABLE CI | After the new SHA passes all three modes, retain `shadow -> canvas-v2 -> legacy` login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
+| Stable branch | PROTECTED | Do not modify `stable`; verify its remote SHA before and after the main-only push. |
+
+Stage 3 remains in Task 10. Stage 4/5 are not authorized.
+
 ## 2026-08-15 queue after immutable run `31873152403`
 
 | Item | Status | Required evidence |
