@@ -121,6 +121,7 @@ describe('infinite canvas render projection wiring', () => {
     expect(source).toMatch(/\b\w+\.applyChanges\(/);
     expect(source).toContain('<CanvasMediaNode');
     expect(source).toContain('<CanvasSurface');
+    expect(source).not.toContain("contentVisibility: 'auto'");
     expect(source).not.toContain('const index = new CanvasSpatialIndex();\n    index.rebuild(images);');
   });
 });

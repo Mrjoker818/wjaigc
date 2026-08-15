@@ -1843,6 +1843,22 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Regression | TDD began RED on the missing direct-pan and save-order contracts. The first independent review rejected the candidate because `beginPan` still published React state and a second pointer could replace/terminate the active owner. The corrected implementation keeps begin ref-only, rejects competing pointers and allows only the authoritative owner to move or finish; follow-up independent review returned `APPROVED`. Fresh focused Canvas/persistence contracts pass `8 files / 78 tests`. Production build emits `116/116` routes. Execution `local-owner-safe-legacy-full-20260815` passes the complete legacy five-profile matrix `60/60`. Chromium/1080p 100-node pan is `57.42/57.42 FPS`, 300-node pan is `54.82/54.26 FPS`, input P95 is at most `40.1ms`, save long task is `0ms`, and disappeared/unclickable evidence is zero. PostgreSQL-enabled full Vitest passes `441 files / 2512 tests` with zero skips. |
 | Status | **FIXED LOCALLY / NEW IMMUTABLE THREE-MODE CI REQUIRED.** |
 
+### S3-BUG-031: mounted Canvas cards duplicated viewport visibility work
+
+| Field | Detail |
+|---|---|
+| Severity | P1 hosted Canvas performance |
+| Module | Infinite Canvas media rendering and spatial projection |
+| Environment | Immutable Quality run `31898199267` on `main@b4ad78684a515e31526d62134ac5995a749db698`, followed by isolated production legacy/shadow/canvas-v2 checks, 2026-08-16 |
+| Immutable RED | Static/tests/build and PostgreSQL concurrency passed, but canvas-v2 and legacy were `57/60`; shadow was `54/60`. Failures were limited to hosted desktop Chromium FPS/input samples plus one non-reproduced WebKit merge-window assertion. Fixed thresholds were unchanged. |
+| Root cause hypothesis | RBush-backed render projection already decides which media cards mount. Each mounted card also requested browser `content-visibility:auto`, duplicating visibility bookkeeping while the complete transformed surface moved. This is a narrow performance hypothesis, not yet an immutable closure. |
+| Fix | Remove only the redundant per-card `contentVisibility` declaration. Projection culling, intrinsic dimensions, hit testing, selection, drag, delete, history and persistence remain unchanged. |
+| TDD | The source contract began RED (`1 failed / 7 passed`) and is GREEN after the one-line runtime change. The focused Canvas set passes `3 files / 41 tests`. |
+| Local browser regression | The exact production build passes canvas-v2 `16/16`, shadow `4/4` and legacy `4/4`. Across those 24 desktop samples FPS is `57.21-59.06`, input P95 is at most `30.6ms`, and save/disappeared/unclickable metrics are zero. The two immutable functional fluctuations were also repeated directly: Chromium reverse-box `3/3` and WebKit merge-window deletion `3/3`. |
+| Full local gates | PostgreSQL-enabled Vitest passes `441 files / 2520 tests`; TypeScript passes; ESLint exits 0 with `0 errors / 973 historical warnings`; production build emits `116/116` routes. Independent subagent review was unavailable in this environment, so the two-file diff received a manual line-by-line review only. |
+| Prior contradictory evidence | Removing the same declaration on an older pre-pan/hover baseline once produced a local `60.2ms` input P95 regression and was reverted. That result remains recorded; the new candidate must pass immutable CI before this issue can close. |
+| Status | **LOCAL CANDIDATE ONLY / NEW IMMUTABLE THREE-MODE CI REQUIRED.** |
+
 ### S3-BUG-030: dense Canvas pan kept publishing per-image hover state
 
 | Field | Detail |

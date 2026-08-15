@@ -956,3 +956,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Local evidence passes focused `33/33`, five-browser pan behavior `5/5`, canvas-v2 repeated performance `16/16`, shadow `4/4`, and the legacy outlier's exact repeat `3/3`. PostgreSQL-enabled Vitest is `2520/2520`; TypeScript, zero-error ESLint and `116/116` production build pass.
 - One legacy local input P95 outlier of `57.7ms` and the prior immutable WebKit timeout remain explicitly recorded; neither was hidden by retries or larger thresholds.
 - **Decision: NOT READY / Stage 3 Task 10 remains `10/11`.** Only a normal fast-forward candidate push to `main` is permitted. `stable` remains read-only. The new exact SHA must pass immutable legacy/shadow/canvas-v2 before any Coze `shadow -> canvas-v2 -> legacy` sequence; real provider charge/cancel/at-most-once refund evidence remains mandatory. Stage 4/5 stay prohibited.
+
+## 2026-08-16 readiness after immutable `b4ad786`
+
+- `main@b4ad78684a515e31526d62134ac5995a749db698` remains not releasable. Stage 0/1 and non-browser Quality jobs passed, but hosted canvas-v2/legacy were `57/60`, shadow was `54/60`, and real-P0 failed closed on missing authorized controls.
+- The projection-only visibility candidate is deliberately narrow: one runtime CSS declaration removed plus one permanent source regression. Local production evidence is green across 24 desktop performance samples and six exact functional repeats; full tests, TypeScript, zero-error ESLint and build also pass.
+- Historical contrary evidence from an older baseline is retained, and no performance threshold, retry count or failure assertion was relaxed. The next immutable exact-SHA run is authoritative.
+- **Decision: NOT READY / Stage 3 Task 10 remains `10/11`.** A reviewed normal fast-forward to `main` may be used to obtain immutable evidence. Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. Do not start Coze mode switching or Stage 4/5 before all hosted modes and real-P0 accounting evidence pass.

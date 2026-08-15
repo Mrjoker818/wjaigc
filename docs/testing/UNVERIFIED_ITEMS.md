@@ -743,6 +743,19 @@ Historical checkpoint: the isolated PostgreSQL suite passed `14 files / 54 tests
 | Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
 
+## 2026-08-16 queue after immutable `b4ad786`
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Projection-only visibility candidate | LOCALLY VERIFIED | Focused `41/41`; production canvas-v2 `16/16`, shadow `4/4`, legacy `4/4`; Chromium reverse-box `3/3`; WebKit merge-window deletion `3/3`; PostgreSQL-enabled full Vitest `2520/2520`. Reproduce from the exact committed SHA. |
+| Hosted three-mode Canvas | REQUIRED | Legacy, shadow and canvas-v2 must all pass unchanged `55/45 FPS`, `50ms` input P95, `100ms` save and all continuity/history/persistence assertions. |
+| Real paid P0 and accounting | BLOCKED BY SECRETS | Configure all ten authorized controls and prove real generation, cancellation, one charge and at-most-once refund. A fail-closed job is correct but not a release pass. |
+| Coze exact-SHA sequence | WAITING FOR IMMUTABLE CI | Only after the exact SHA passes all hosted modes, retain `shadow -> canvas-v2 -> legacy` login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
+| Independent review | UNAVAILABLE LOCALLY | The Windows Codex executable could not be launched for a separate reviewer. Manual diff review found no feature/persistence/accounting changes; immutable CI remains the independent technical gate. |
+| Stable branch and later stages | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. Stage 4/5 remain prohibited while Stage 3 Task 10 is active. |
+
+Stage 3 remains `10/11` (about `91%`).
+
 ## 2026-08-16 queue after immutable `2509fcf`
 
 | Item | Status | Required evidence |

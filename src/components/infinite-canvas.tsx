@@ -11460,7 +11460,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   width: resizingImage === image.id && resizePreview ? resizePreview.width : image.width,
                   height: resizingImage === image.id && resizePreview ? resizePreview.height : image.height,
                   display: (isGroupCollapsed || isInCollapsedGenGroup || isGenGroupResultImage) ? 'none' : undefined,
-                  contentVisibility: 'auto',
                   containIntrinsicSize: `${image.width}px ${image.height}px`,
                 }}
                 onMouseEnter={() => {

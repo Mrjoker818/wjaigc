@@ -1164,3 +1164,13 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Focused runtime/source contracts pass `33/33`; five-browser behavior passes `5/5`. Canvas-v2 desktop performance passed `4/4` plus a repeated `12/12`, with combined FPS `57.81-59.08`, input P95 `10.8-33.4ms`, save `0ms`, disappeared `0`, unclickable `0`. Shadow passes `4/4` at `57.82-58.76 FPS`. Legacy retained one `57.7ms` P95 outlier, then the exact Chromium/300 case passed `3/3` at `18.4-29.2ms`.
 - Fresh repository gates pass: PostgreSQL-enabled Vitest `441/441 files, 2520/2520 tests`, TypeScript, ESLint `0 errors / 973 warnings`, production build `116/116`, and whitespace validation.
 - **Verdict: LOCAL REGRESSION PASS / IMMUTABLE VERDICT PENDING.** Stage 3 remains Task 10; Coze mode switching and Stage 4/5 are not authorized.
+
+## 2026-08-16 immutable `b4ad786` result and projection-only visibility candidate
+
+- Stage 0/1 run `31898199259` passed. Quality run `31898199267` passed static/tests/build and PostgreSQL concurrency. Real-P0 failed closed on the same ten missing authorized URL/account/model/paid controls.
+- Hosted canvas-v2 and legacy each passed `57/60`; shadow passed `54/60`. The missed desktop thresholds were not changed. Shadow also retained one Chromium reverse-box input outlier and one WebKit merge-window deletion fluctuation.
+- The new TDD candidate removes the redundant per-card `content-visibility:auto` while retaining RBush render projection as the visibility authority. No pointer events, feature routes, task states, persistence or accounting code changed.
+- The current production build passes canvas-v2 `16/16`, shadow `4/4` and legacy `4/4`; FPS is `57.21-59.06`, input P95 at most `30.6ms`, and save/disappeared/unclickable evidence is zero. Exact functional repeats pass Chromium reverse-box `3/3` and WebKit merge-window deletion `3/3`.
+- Full local gates pass: PostgreSQL-enabled Vitest `441 files / 2520 tests`, TypeScript, ESLint `0 errors / 973 warnings`, production build `116/116` and the focused Canvas set `41/41`.
+- An older baseline had rejected this same CSS removal after a `60.2ms` local input sample. That evidence remains valid historical risk; this candidate is not accepted until the new immutable three-mode matrix passes.
+- **Verdict: LOCAL CANDIDATE, NOT RELEASE-READY.** Stage 3 remains Task 10 (`10/11`); Stage 4/5 and Coze mode switching remain blocked.
