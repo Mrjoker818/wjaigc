@@ -731,3 +731,14 @@
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; no Stage 3 candidate may be pushed to it. |
 
 The local PostgreSQL gap is closed by `14 files / 54 tests`. Exact execution `local-final-candidate-r5-20260815` is retained as RED `58/60`; S3-BUG-022 has source RED/GREEN coverage, but a new exact-source five-profile matrix is still required. Stage 3 cannot be marked complete, and Stage 4/5 must not start until the local matrix, cloud, rollback and real-accounting rows above have immutable evidence.
+
+## 2026-08-15 remaining scope after `a372e9e` Actions attempt 2
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Hosted desktop Chromium performance | OPEN P1 | Keep `100 nodes >=55 FPS`, `300 nodes >=45 FPS`, input P95 `<=50ms` and longest save task `<=100ms`. Isolate video/trace/automation observer cost from application work, implement only a proven root-cause fix, then pass all three immutable modes. |
+| Evidence duplicate-abort classifier | LOCALLY VERIFIED | Push the narrow exact-digest fix and require a new immutable Firefox/shadow run. Different payloads, missing status and HTTP failures must remain blocking. |
+| Shadow immediate-reload geometry | CLOSED / RECURRENCE WATCH | Attempt 2 passed all five profiles and isolated shadow Chromium 1080p passed `10/10`. Retain the original artifact and reopen on any recurrence. |
+| Real paid P0 and accounting | BLOCKED EXTERNALLY | Configure the required GitHub/Coze provider credentials and prove real generation, one charge, cancellation, terminal-state monotonicity and at-most-once refund. Mock data cannot close this item. |
+| Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |

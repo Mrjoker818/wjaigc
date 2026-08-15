@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const canvasSource = readFileSync(
   resolve(process.cwd(), 'src/components/infinite-canvas.tsx'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 const hookPath = resolve(process.cwd(), 'src/components/canvas/use-canvas-selection.ts');
 
 describe('canvas selection gesture wiring', () => {

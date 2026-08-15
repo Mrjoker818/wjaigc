@@ -49,7 +49,7 @@ describe('Stage 3 browser evidence request filtering', () => {
     }])).toBe(false);
   });
 
-  it('accepts an interrupted project sync only after the same durable snapshot succeeds', () => {
+  it('accepts an interrupted duplicate only when the same durable snapshot has succeeded', () => {
     const first = JSON.stringify({
       key: 'projects',
       projectRevision: 2,
@@ -93,6 +93,6 @@ describe('Stage 3 browser evidence request filtering', () => {
       url: failedEntry.url,
       requestDigest: stage3RequestFingerprint(recovered),
       occurredAt: 5,
-    }])).toBe(false);
+    }])).toBe(true);
   });
 });

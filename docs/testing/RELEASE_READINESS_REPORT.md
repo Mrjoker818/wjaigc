@@ -870,3 +870,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The retained `r3` mobile RED was classified from pointer evidence as a covered geometric test point, not waived as flakiness. The unobstructed-point regression passes three consecutive mobile executions before the full `r4` matrix; no business threshold was relaxed.
 - This result is local candidate evidence based on `main@f6f40ccbd23e8ee4855717a24e3dca4885475f51` plus the documented worktree patch. It is not yet an immutable GitHub commit or Coze deployment result.
 - **Release decision: NOT READY / Stage 3 remains in Task 10.** Required next gates are a main-only fast-forward, immutable GitHub Actions three-mode matrix, Coze exact-SHA `shadow -> canvas-v2 -> legacy` rollout/rollback, and real provider billing/cancel/refund proof. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+
+## 2026-08-15 `a372e9e` immutable run decision
+
+- GitHub Actions run `31866500220`, attempt 2, proves schema setup, authentication and all `180` Canvas cases executed. Static/tests and PostgreSQL concurrency passed. The real-P0 job correctly failed closed because required repository Secrets are absent.
+- The three Canvas jobs remain RED solely on `13` desktop-Chromium performance assertions: shadow `55/60`, canvas-v2 `57/60`, legacy `55/60`. No disappeared frame or unclickable-duration regression was reported, but FPS, input P95 and longest-save-task budgets are release gates and cannot be waived.
+- S3-BUG-018 no longer blocks after the immutable rerun passed the immediate-reload flow and isolated local shadow Chromium 1080p passed `10/10`. S3-BUG-017 remains OPEN P1 because two hosted attempts missed unchanged commercial thresholds even though exact-source local repeated samples pass.
+- S3-TEST-009 and S3-TEST-010 are locally closed with narrow regression tests; neither changes Canvas business behavior or performance thresholds. A new immutable run is required for the evidence-filter commit.
+- **Release decision remains NOT READY.** Stage 3 Task 10 stays active; Stage 4/5 remain prohibited. Required closure is hosted performance isolation/fix, new immutable Actions, Coze exact-SHA `shadow -> canvas-v2 -> legacy`, and real provider charge/cancel/refund evidence. `stable` remains untouched.

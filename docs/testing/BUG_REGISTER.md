@@ -1617,7 +1617,8 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Root cause candidate | The continuity probe rescanned every Canvas image once per monitored node on every animation frame. This observer cost scales with node count and competes with the application on a low-core hosted runner. Local production Canvas itself remains above the unchanged thresholds. |
 | Fix candidate | Cache each monitored image/card pair and re-resolve it only after DOM disconnection. Visibility, decode, hit-test, disappeared-frame and unclickable-time assertions remain unchanged. |
 | Regression | Both desktop Chromium profiles pass all six local 100/300-node pan and 300-node save gates after the candidate. FPS remains 56.85-58.88, input P95 13.3-23.5ms, longest save task 0ms, disappearance 0 and unclickable time 0. |
-| Status | **OPEN / IMMUTABLE HOSTED-RUNNER RERUN REQUIRED.** Thresholds have not been lowered and the prior failure is not waived. |
+| Hosted rerun | GitHub Actions run `31866500220`, attempt 2, executed all `180` Canvas cases. Functional continuity remained intact, but performance gates were RED: shadow `55/60`, canvas-v2 `57/60`, legacy `55/60`. Representative failures were 100-node FPS `54.02`, `54.44`, `52.78`; 1080p 300-node FPS `38.29`, `41.67`, `39.3`; shadow/legacy 300-node input P95 `50.6ms` / `72.1ms`; and legacy/shadow longest save tasks `124ms` / `139ms`. |
+| Status | **OPEN P1 / REPRODUCED ON TWO IMMUTABLE HOSTED ATTEMPTS.** Thresholds remain unchanged. Local repeated performance evidence passes, so the next action is to isolate hosted measurement/application cost rather than waive or lower the gate. |
 
 ### S3-BUG-018: Shadow WebKit immediate reload restored pre-resize geometry
 
@@ -1630,7 +1631,8 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Expected | Reloaded inline geometry matches the final 160x160 node at left 168px/top 40px. |
 | Actual | The only failing run restored 96x96 at left 232px/top 104px, matching an earlier geometry. Legacy and canvas-v2 WebKit passed the same flow. |
 | Follow-up | A correctly configured isolated shadow production server passed the exact WebKit flow once, then passed five consecutive repetitions. Earlier local setup failures were separately identified as mismatched auth secret and empty media root and are excluded from product evidence. |
-| Status | **OPEN / NOT LOCALLY REPRODUCED IN 6 RUNS / IMMUTABLE CI RERUN REQUIRED.** No speculative persistence change has been made. |
+| Hosted rerun | GitHub Actions run `31866500220`, attempt 2, passed the move/resize/undo/redo/immediate-reload flow in all five browser profiles for shadow mode. A fresh isolated local shadow Chromium 1080p repetition passed `10/10`. |
+| Status | **CLOSED AS NOT REPRODUCIBLE 2026-08-15.** The original immutable RED remains retained. No speculative persistence change was made; recurrence reopens the defect. |
 
 ### S3-BUG-019: Batch-delete undo was overwritten by deletion tombstones and a queued stale snapshot
 
@@ -1722,3 +1724,33 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Canonicalize the sync body while excluding revision/timestamp noise, compute a SHA-256 request digest, retain occurrence time, and require a later 2xx with the same digest for aborted sync recovery. Keep 409 recovery as an explicit later-sync condition. |
 | Regression | Evidence-filter contracts and the final full Vitest gate pass; all `60/60` browser attempts retain request timestamps/digests and fail on unrecovered network evidence. |
 | Status | **CLOSED LOCALLY 2026-08-15 / IMMUTABLE CI RERUN REQUIRED.** |
+
+### S3-TEST-009: A duplicate durable project sync abort was rejected when its identical snapshot had already succeeded
+
+| Field | Detail |
+|---|---|
+| Severity | P2 release-evidence integrity |
+| Module | Stage 3 Playwright network evidence |
+| Environment | GitHub Actions run `31866500220`, attempt 1, shadow Firefox artifact `9242310262` |
+| Reproduction | Persist a project snapshot successfully, then let an identical duplicate `POST /api/user-data/sync` be aborted during page lifecycle teardown. Both requests have the same canonical SHA-256 body digest. |
+| Expected | The abort is accepted only when a 2xx request with the exact same method, path and canonical request digest proves that durable content already reached the server. Different content and HTTP failures remain fatal. |
+| Actual | The evidence filter required the successful request timestamp to be later than the aborted duplicate. It rejected a semantically safe `200 -> duplicate abort` ordering even though the exact snapshot was already durable. |
+| Root cause | Recovery semantics were modeled as request ordering instead of content durability. Duplicate writes can complete and abort in either order while representing the same idempotent snapshot. |
+| Fix | Keep the strict POST/path/no-status/abort checks and exact canonical digest match, but accept a matching 2xx on either side of the duplicate abort. No URL-only or unrelated success can recover it. |
+| Regression | TDD changed the identical-success-before-abort case from RED to GREEN while different payload and 4xx/5xx cases remain RED. Focused evidence tests pass `3/3`; a real shadow Firefox move/resize flow passes `1/1`; full Vitest passes `426 files / 2448 tests`. |
+| Status | **CLOSED LOCALLY 2026-08-15 / NEW IMMUTABLE CI REQUIRED.** |
+
+### S3-TEST-010: Canvas source-contract assertions were platform line-ending dependent
+
+| Field | Detail |
+|---|---|
+| Severity | P2 test portability |
+| Module | Canvas selection source contract |
+| Environment | Windows worktree, full Vitest, 2026-08-15 |
+| Reproduction | Run `pnpm test` after Git checks out `src/components/infinite-canvas.tsx` with CRLF line endings. |
+| Expected | Source contracts assert Canvas control-flow structure identically on Windows and Linux. |
+| Actual | Two assertions embedded LF-only multiline strings and failed solely because the source contained CRLF; `425` files passed and one contract file failed. |
+| Root cause | This test omitted the line-ending normalization already used by adjacent source-contract suites. |
+| Fix | Normalize the loaded Canvas source from CRLF to LF before structural assertions. No production source was changed. |
+| Regression | The previously failing contract passes `12/12`; the focused set passes `15/15`; fresh full Vitest passes `426 files / 2448 tests`, with the PostgreSQL-gated `44` tests still explicitly skipped in the generic run. |
+| Status | **CLOSED LOCALLY 2026-08-15.** |

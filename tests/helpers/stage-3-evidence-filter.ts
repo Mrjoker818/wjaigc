@@ -83,7 +83,6 @@ export function isRecoveredStage3RequestAbort(
     && candidate.status >= 200
     && candidate.status < 300
     && candidate.requestDigest === entry.requestDigest
-    && (candidate.occurredAt ?? 0) >= (entry.occurredAt ?? Number.POSITIVE_INFINITY)
   ));
 }
 
