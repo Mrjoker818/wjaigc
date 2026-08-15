@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reactMocks = vi.hoisted(() => ({
   setters: [] as Array<ReturnType<typeof vi.fn>>,
+  transitions: [] as Array<() => void>,
 }));
 
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>();
   return {
     ...actual,
+    startTransition: (callback: () => void) => {
+      reactMocks.transitions.push(callback);
+    },
     useCallback: <T extends (...args: never[]) => unknown>(callback: T) => callback,
     useEffect: vi.fn(),
     useRef: <T>(value: T) => ({ current: value }),
@@ -29,6 +33,7 @@ describe('canvas viewport runtime behavior', () => {
 
   beforeEach(() => {
     reactMocks.setters.length = 0;
+    reactMocks.transitions.length = 0;
     animationFrame = null;
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
       animationFrame = callback;
@@ -93,6 +98,23 @@ describe('canvas viewport runtime behavior', () => {
     flushAnimationFrame(100);
     expect(onPanViewportSync).toHaveBeenCalledTimes(1);
     expect(onPanViewportSync).toHaveBeenCalledWith({ x: 300, y: 10 });
+    expect(reactMocks.setters.some((setter) => setter.mock.calls.length > 0)).toBe(true);
+  });
+
+  it('commits the compositor transform before deferring React viewport publication', () => {
+    const { transform, viewport } = useViewportHarness();
+    expect(viewport.beginPan({ pointerId: 9, clientX: 0, clientY: 0 })).toBe(true);
+    viewport.previewPan({ pointerId: 9, clientX: 120, clientY: 72 });
+    flushAnimationFrame(10);
+    expect(transform.style.transform).toBe('translate(120px, 72px) scale(1)');
+
+    viewport.commitPan({ pointerId: 9 });
+
+    expect(transform.style.transform).toBe('translate(120px, 72px) scale(1)');
+    expect(reactMocks.transitions).toHaveLength(1);
+    expect(reactMocks.setters.every((setter) => setter.mock.calls.length === 0)).toBe(true);
+
+    reactMocks.transitions[0]();
     expect(reactMocks.setters.some((setter) => setter.mock.calls.length > 0)).toBe(true);
   });
 });

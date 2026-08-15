@@ -1121,3 +1121,19 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - The first full five-profile run ended `58/60`. One desktop history test was blocked by an open workspace panel and one mobile case inherited a dirty shared fixture. After deterministic database reseeding, the exact failed cases passed `2/2`; no business-code workaround was added. An intermittent local Next static-asset 500 was retained as deployment evidence; after a clean server restart, all `60/60` probed static assets returned 200.
 - Final local gates pass: PostgreSQL-enabled Vitest `441/441 files, 2517/2517 tests`; TypeScript; ESLint `0 errors / 973 historical warnings`; production build `116/116`; exact protected feature/source gate `38/38`; whitespace check; and independent review.
 - **Verdict: LOCAL REGRESSION PASS / IMMUTABLE VERDICT PENDING.** Stage 3 Task 10 remains active until the new exact SHA passes all three hosted modes and the real-P0, Coze sequence and provider/accounting evidence are closed.
+
+## 2026-08-15 immutable result for `main@3e46150`
+
+- Stage 0/1 run `31887634672` passed completely. Quality run `31887632360` passed PostgreSQL concurrency/settlement and the complete static/test/audit/build job.
+- Three-mode functional coverage remained intact, but performance stayed RED: legacy `59/60`, shadow `58/60`, canvas-v2 `56/60`. Exact misses were legacy 1080p/100 `53.89 FPS`; shadow 1080p 100/300 `51.03/41.92 FPS`; canvas-v2 Chromium/100 `45.36 FPS`, Chromium/300 input P95 `60.9ms`, and 1080p 100/300 `48.78/40.74 FPS`.
+- No functional, continuity, history, persistence, save-budget, disappeared-image or unclickable-frame assertion failed. This narrows the next diagnosis to hosted desktop pan rendering/input cost rather than a broad Canvas regression.
+- Real-P0 failed closed on missing repository Secrets and paid-test controls before installing browsers. It remains an external release blocker and cannot be replaced by local or Mock evidence.
+- **Verdict: IMMUTABLE RED / STAGE 3 TASK 10 REMAINS ACTIVE.** Do not enter Coze mode switching or Stage 4/5.
+
+## 2026-08-15 local candidate after pointer-up root-cause isolation
+
+- A production diagnostic isolated the remaining cost to pointer-up reconciliation: move frames stayed near `57-60 FPS`, while the 300-node commit produced a `131-136ms` long task. The diagnostic file was removed after evidence collection and is not part of the candidate.
+- TDD added a permanent runtime contract and changed only the viewport publication boundary. Refs, shadow comparison, compositor transform and cancel snapback remain immediate; React viewport publication is marked as a transition.
+- With a clean PostgreSQL reset before every mode, legacy, shadow and canvas-v2 each pass `60/60` across five browser profiles (`180/180`). Lowest FPS is `56.89`, highest input P95 is `20ms`, and all continuity, selection, history, persistence, save and 100/300-node assertions pass without threshold changes.
+- Fresh gates: focused Canvas `55/55`; full Vitest `438 passed / 3 skipped files`, `2514 passed / 4 skipped tests`; TypeScript; ESLint `0 errors / 973 warnings`; production build `116/116`; whitespace check.
+- **Verdict: LOCAL REGRESSION PASS / IMMUTABLE VERDICT PENDING.** Stage 3 Task 10 remains active; this evidence does not authorize Coze mode switching or Stage 4/5.

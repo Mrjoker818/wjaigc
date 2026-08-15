@@ -743,6 +743,16 @@ Historical checkpoint: the isolated PostgreSQL suite passed `14 files / 54 tests
 | Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
 
+## 2026-08-15 remaining gaps for the pointer-up candidate
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Pointer-up reconciliation fix | LOCALLY VERIFIED | Immutable legacy/shadow/canvas-v2 must reproduce the local `180/180` result on the exact pushed SHA. |
+| Hosted performance | UNVERIFIED / REQUIRED | Preserve `55/45 FPS`, `50ms` input P95, `100ms` save and zero continuity failures in all hosted profiles. |
+| Real paid P0 | BLOCKED EXTERNALLY | Configure authorized URL/account/model/paid controls and prove one charge, cancellation, monotonic terminal state and at-most-once refund without Mocking. |
+| Coze sequence | NOT STARTED | Start only after immutable three-mode CI is green; execute `shadow -> canvas-v2 -> legacy` on the exact SHA and retain evidence. |
+| Stage 4/5 | PROHIBITED | Stage 3 Task 10 remains `10/11`; do not enter later stages. |
+
 ## 2026-08-15 open evidence after Space-pan local repair
 
 | Item | Status | Required evidence |
@@ -754,6 +764,16 @@ Historical checkpoint: the isolated PostgreSQL suite passed `14 files / 54 tests
 | Coze exact-SHA sequence | UNVERIFIED | Only after immutable Canvas CI passes, execute `shadow -> canvas-v2 -> legacy` against the same SHA and retain rollback evidence. |
 | Real provider and accounting | UNVERIFIED / REQUIRED | Prove real generation, one charge, cancellation, monotonic terminal state and at-most-once refund in PostgreSQL-backed Coze. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; Stage 4/5 remain prohibited. |
+
+## 2026-08-15 immutable gaps after `3e46150`
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Hosted legacy Canvas | FAILED `59/60` | Raise Chromium 1080p/100-node pan from `53.89` to at least `55 FPS` without threshold changes. |
+| Hosted shadow Canvas | FAILED `58/60` | Raise Chromium 1080p 100/300-node pan from `51.03/41.92` to `55/45 FPS`; retain dual-engine comparison. |
+| Hosted canvas-v2 Canvas | FAILED `56/60` | Resolve Chromium/1080p FPS `45.36/48.78/40.74` and Chromium/300 input P95 `60.9ms`; retain kernel-authoritative behavior. |
+| Canvas functional matrix | VERIFIED ON IMMUTABLE SHA | All non-performance cases passed in all three modes; preserve this coverage during the next fix. |
+| Real-P0 Secrets | BLOCKED EXTERNALLY | Configure all ten required URL/account/model/paid controls and rerun without Mocking or skips. |
 
 ## 2026-08-15 queue after immutable run `31875413077`
 

@@ -1843,6 +1843,29 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Regression | TDD began RED on the missing direct-pan and save-order contracts. The first independent review rejected the candidate because `beginPan` still published React state and a second pointer could replace/terminate the active owner. The corrected implementation keeps begin ref-only, rejects competing pointers and allows only the authoritative owner to move or finish; follow-up independent review returned `APPROVED`. Fresh focused Canvas/persistence contracts pass `8 files / 78 tests`. Production build emits `116/116` routes. Execution `local-owner-safe-legacy-full-20260815` passes the complete legacy five-profile matrix `60/60`. Chromium/1080p 100-node pan is `57.42/57.42 FPS`, 300-node pan is `54.82/54.26 FPS`, input P95 is at most `40.1ms`, save long task is `0ms`, and disappeared/unclickable evidence is zero. PostgreSQL-enabled full Vitest passes `441 files / 2512 tests` with zero skips. |
 | Status | **FIXED LOCALLY / NEW IMMUTABLE THREE-MODE CI REQUIRED.** |
 
+### S3-BUG-028: pan commit synchronously reconciled the full Canvas tree
+
+| Field | Detail |
+|---|---|
+| Reproduction | A controlled production diagnostic separated the compositor move frames from pointer-up. The 75-frame move stayed near `57-60 FPS`, while a 300-node pointer-up produced a `131-136ms` long task and about `408ms` of commit-stage work. |
+| Root cause | `finishPan()` published legacy/kernel viewport state synchronously. The DOM transform was already current, but pointer-up still forced React to reconcile the full Infinite Canvas before the input task could yield. |
+| TDD | The new runtime contract first failed `1/4`: the transform had to remain immediate while React viewport publication was queued. After the minimal implementation, the focused Canvas set passed `5 files / 55 tests`. |
+| Fix | Commit both engine refs and the compositor transform immediately, preserve synchronous shadow comparison and cancel snapback, then publish React viewport state inside `startTransition`. No history, persistence, selection, provider, billing or threshold behavior changed. |
+| Local browser regression | Clean PostgreSQL fixtures were restored before each mode. Legacy, shadow and canvas-v2 each passed `60/60` across Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium (`180/180` total). Minimum observed FPS was `56.89`; maximum input P95 was `20ms`; disappeared/unclickable evidence remained zero. |
+| Full local gates | Vitest exited 0 with `438` files passed and `3` explicitly skipped (`2514` tests passed, `4` skipped); TypeScript exited 0; ESLint exited 0 with `0 errors / 973 historical warnings`; production build emitted `116/116` routes. |
+| Status | **FIXED LOCALLY / IMMUTABLE THREE-MODE CI REQUIRED.** Stage 3 Task 10 remains active. |
+
+### S3-BUG-027 follow-up: `3e46150` immutable matrix retains desktop Chromium pan misses
+
+| Field | Detail |
+|---|---|
+| Environment | GitHub Actions Quality run `31887632360`, exact `main@3e461507c8c7d4284d77b038d43ba9dfd47d523f` |
+| Passed gates | Stage 0/1 run `31887634672`, protected baseline, PostgreSQL concurrency/settlement, Doctor, TypeScript, ESLint, unit/integration/API tests, production dependency audit and production build all passed. |
+| Immutable RED | Legacy `59/60`: Chromium 1080p/100 nodes `53.89 FPS`. Shadow `58/60`: Chromium 1080p 100/300 nodes `51.03/41.92 FPS`. Canvas-v2 `56/60`: Chromium/100 nodes `45.36 FPS`, Chromium/300 nodes input P95 `60.9ms`, Chromium 1080p 100/300 nodes `48.78/40.74 FPS`. |
+| Scope classification | All non-performance Canvas assertions passed in all three modes. No disappeared frame, unclickable duration, save-budget, history, refresh recovery or functional failure was reported. The fixed `55/45 FPS`, `50ms` input P95 and `100ms` save thresholds remain unchanged. |
+| External blocker | The real-P0 job failed closed before browser installation because ten required repository Secrets/paid-test controls were absent. This is tracked separately and is not counted as a Canvas product pass or failure. |
+| Status | **OPEN. STAGE 3 TASK 10 REMAINS ACTIVE; COZE MODE SWITCHING IS NOT AUTHORIZED.** |
+
 ### S3-BUG-027: Space-key pan state caused a parent Canvas render before every measured drag
 
 | Field | Detail |

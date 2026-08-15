@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  startTransition,
   useCallback,
   useEffect,
   useRef,
@@ -278,10 +279,21 @@ export function useCanvasViewport({
     const kernel = cancel
       ? cancelKernelPan(kernelRef.current, pointer)
       : commitKernelPan(kernelRef.current, pointer);
-    publish(legacy, kernel);
     const active = mode === 'canvas-v2' ? kernel : legacy;
+    legacyRef.current = legacy;
+    kernelRef.current = kernel;
+    compareShadow(legacy, kernel, cancel ? 'pan-cancel' : 'pan-commit');
+    const element = transformRef.current;
+    if (element) {
+      element.style.transform = `translate(${active.preview.x}px, ${active.preview.y}px) scale(${active.zoom})`;
+    }
+    startTransition(() => {
+      if (mode !== 'canvas-v2') setLegacyState(legacy);
+      if (mode !== 'legacy') setKernelState(kernel);
+      setPanViewportOffset(active.preview);
+    });
     panViewportSyncOffsetRef.current = { ...active.preview };
-  }, [mode, publish]);
+  }, [compareShadow, mode, transformRef]);
 
   const commitPan = useCallback((pointer?: Pick<CanvasPointerSample, 'pointerId'>) => {
     finishPan(pointer, false);

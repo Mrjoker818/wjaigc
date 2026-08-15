@@ -923,3 +923,16 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The local candidate removes the remaining Space-key parent React transition from standard pan and adds explicit blur/visibility/unmount reset. It does not change Canvas feature behavior, persistence, provider routing, accounting, protected features or fixed performance thresholds.
 - Local evidence passes: focused `49/49`; production performance `4/4`; exact previously failed functional cases `2/2` after deterministic reseed; PostgreSQL-enabled full Vitest `2517/2517`; TypeScript; ESLint `0 errors / 973 warnings`; build `116/116`; protected feature/source gate `38/38`; whitespace; independent review `APPROVED`.
 - **Decision: NOT READY / Stage 3 Task 10 remains active.** Only a normal fast-forward to `main` is allowed. The new exact SHA must pass immutable legacy/shadow/canvas-v2 before Coze `shadow -> canvas-v2 -> legacy`; real provider charge, cancel and at-most-once refund proof remains mandatory. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` and Stage 4/5 remain untouched.
+
+## 2026-08-15 readiness after `3e46150` immutable CI
+
+- Stage 0/1, PostgreSQL and static/test/audit/build gates are green, but the immutable Canvas matrix is legacy `59/60`, shadow `58/60`, canvas-v2 `56/60`.
+- Failures are restricted to hosted desktop Chromium FPS and one canvas-v2 input P95 sample. All functional and continuity checks passed.
+- Real-P0 remains fail-closed because the authorized repository Secrets and paid controls are absent.
+- **Decision: NOT READY.** Stage 3 Task 10 remains `10/11`; Coze mode switching, Stage 4/5 and any stable-branch change remain prohibited.
+
+## 2026-08-15 readiness of the pointer-up reconciliation candidate
+
+- The remaining local pointer-up bottleneck has a stable reproduction, a RED/GREEN runtime contract and a minimal implementation boundary. The complete local production matrix is `180/180` with fixed thresholds and zero disappeared/unclickable evidence.
+- Full local unit/integration/API, TypeScript, zero-error ESLint and production build gates exit 0. These are candidate results, not immutable release evidence.
+- **Decision: NOT READY.** A new exact `main` SHA must pass immutable legacy, shadow and canvas-v2. Real-P0 remains blocked by missing authorized Secrets; Coze `shadow -> canvas-v2 -> legacy`, real provider charging, cancellation and at-most-once refund remain mandatory. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` stays untouched.
