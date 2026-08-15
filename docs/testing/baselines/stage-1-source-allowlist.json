@@ -52,6 +52,7 @@
     "src/lib/302-upscale-models.ts",
     "src/lib/agent-task-persistence.ts",
     "src/lib/api-compatibility.ts",
+    "src/lib/asset-core/canvas-project-sync.ts",
     "src/lib/canvas-autosave-guard.ts",
     "src/lib/canvas-generation-group.ts",
     "src/lib/canvas-incremental-history.ts",
