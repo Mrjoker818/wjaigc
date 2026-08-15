@@ -1085,3 +1085,12 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Hosted performance analysis did not lower thresholds. Non-shadow pan now computes only its active engine; shadow still computes and compares both. Reverse-box preview no longer rerenders the full Canvas on every move, and the evidence sampler schedules the next RAF before executing the same continuity probes.
 - Fresh local gates after the repairs: focused `47/47`; full Vitest `428 files / 2454 passed`, `12 files / 44 PostgreSQL-gated skipped`; TypeScript exit 0; ESLint exit 0; build `116/116`; exact trusted protected-source gate `38/38` with no unapproved drift.
 - The local machine has no isolated PostgreSQL service, so the exact legacy WebKit database flow cannot be represented honestly here. **Verdict: LOCAL CODE GATES PASS / IMMUTABLE BROWSER VERDICT PENDING.**
+
+## 2026-08-15 Stage 3 follow-up after immutable run `31873152403`
+
+- Immutable source: `main@30fdedc793cf66d45863b01725186f85d681fd0a`.
+- Retained RED: canvas-v2 `54/60`, legacy `56/60`, shadow `54/60`; hosted performance budgets and WebKit immediate-reload durability failed.
+- New TDD GREEN: Canvas autosave recovery, pan virtualization, direct box-selection visuals, selection wiring, immediate autosave wiring, UserManager synchronization, persistence scheduler and Canvas command suites pass `132/132`.
+- Repository GREEN: ESLint error gate, TypeScript, full Vitest `2458` passed, production build `116/116`, and `git diff --check`.
+- Explicitly not verified locally: `44` PostgreSQL-gated tests, the immutable three-mode browser rerun, real provider/accounting P0, and Coze rollout/rollback.
+- Verdict remains **NOT READY** until the new exact commit passes immutable browser evidence.

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveBoxSelectionOverlayLayout } from '@/components/canvas/use-canvas-selection';
+import {
+  applyBoxSelectionVisualState,
+  resolveBoxSelectionOverlayLayout,
+} from '@/components/canvas/use-canvas-selection';
 
 describe('canvas box selection overlay layout', () => {
   it('normalizes a reverse drag relative to the viewport', () => {
@@ -14,5 +17,18 @@ describe('canvas box selection overlay layout', () => {
       width: 300,
       height: 220,
     });
+  });
+
+  it('updates the overlay and viewport cursor without publishing React state', () => {
+    const overlay = { style: { display: '' } } as unknown as HTMLElement;
+    const viewport = { style: { cursor: '' } } as unknown as HTMLElement;
+
+    applyBoxSelectionVisualState(overlay, viewport, true);
+    expect(overlay.style.display).toBe('block');
+    expect(viewport.style.cursor).toBe('crosshair');
+
+    applyBoxSelectionVisualState(overlay, viewport, false);
+    expect(overlay.style.display).toBe('none');
+    expect(viewport.style.cursor).toBe('');
   });
 });

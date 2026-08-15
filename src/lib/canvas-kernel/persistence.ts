@@ -76,9 +76,10 @@ export function prepareCanvasPersistenceSnapshot(
     ...snapshot,
     signature,
     serialized: JSON.stringify({
-      version: 3,
+      version: 4,
       ownerId: snapshot.ownerId,
       baseProjectRevision: snapshot.baseProjectRevision,
+      maxRecoverableProjectRevision: snapshot.baseProjectRevision + 1,
       snapshot,
     }),
     recoveryMarker: JSON.stringify({

@@ -619,7 +619,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const commitCanvasHistorySnapshot = useCallback((nextImages: CanvasImage[]): void => {
     const projectId = historyProjectIdRef.current;
     if (!projectId) return;
-    UserManagerCore.getInstance().updateProject(projectId, {
+    UserManagerCore.getInstance().updateProjectInMemory(projectId, {
       canvasImages: serializeCanvasWorkspacePlacements(nextImages),
     });
     persistCanvasHistorySnapshotRef.current(nextImages);
@@ -1514,10 +1514,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }
 
         const manager = UserManagerCore.getInstance();
-        manager.updateProject(snapshot.projectId, {
+        const projectUpdates = {
           canvasImages: [...snapshot.images],
           metadata: snapshot.metadata,
-        });
+        };
+        if (reason === 'immediate') {
+          manager.updateProjectInMemory(snapshot.projectId, projectUpdates);
+        } else {
+          manager.updateProject(snapshot.projectId, projectUpdates);
+        }
         recordUserData({
           userId,
           area: 'projects',

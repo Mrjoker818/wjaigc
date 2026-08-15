@@ -743,6 +743,18 @@ The local PostgreSQL gap is closed by `14 files / 54 tests`. Exact execution `lo
 | Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
 
+## 2026-08-15 queue after immutable run `31873152403`
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Three-mode Canvas rerun | REQUIRED | The next exact `main` SHA must pass legacy, shadow and canvas-v2 with unchanged 55/45 FPS, 50ms input P95, 100ms save-task and continuity gates. |
+| WebKit v4 unload recovery | REQUIRED | Immediate move/resize reload must retain final geometry after the bounded one-revision race; the following case must start from the intact node. |
+| Immediate-save performance | REQUIRED | Hosted 300-node save scenarios must remain at or below 100ms without synchronous whole-user localStorage serialization. |
+| Local PostgreSQL suite | BLOCKED LOCALLY | `POSTGRES_TEST_DATABASE_URL` is absent; 12 files / 44 tests remain explicitly skipped here. GitHub PostgreSQL concurrency is authoritative. |
+| Real paid P0 | BLOCKED BY SECRETS | Configure real authorized provider/account/database/storage Secrets and prove generation, cancellation, one charge and at-most-once refund. |
+| Coze exact-SHA sequence | WAITING FOR CI | After immutable CI passes, execute and retain `shadow -> canvas-v2 -> legacy` evidence on the same SHA. |
+| Stable branch | PROTECTED | Do not modify `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`. |
+
 ## 2026-08-15 post-`c4c02a9` verification queue
 
 | Item | State | Required proof |

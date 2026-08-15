@@ -48,6 +48,8 @@ describe('canvas selection gesture wiring', () => {
     expect(hookSource).toContain('commitBoxSelection');
     expect(hookSource).toContain('onSelectionCommit');
     expect(canvasSource).toContain('data-canvas-box-selection');
+    expect(hookSource).toContain('getViewportElement');
+    expect(hookSource).not.toContain('setBoxSelectionActive');
   });
 
   it('does not collapse a committed multi-selection when the primary image prop syncs', () => {

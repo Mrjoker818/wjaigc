@@ -892,3 +892,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - S3-BUG-023 and the S3-BUG-017 hot-path follow-up are locally repaired under TDD. No business feature, Canvas threshold, shadow comparison or continuity assertion was removed.
 - Available local gates pass: focused `47/47`, full Vitest `2454` passed, TypeScript, ESLint, production build `116/116`, exact source allowlist and `38/38` protected features. PostgreSQL-gated local tests remain explicitly unverified in this generic environment.
 - **Release decision remains NOT READY.** The next commit must be pushed only to `main` and must pass the immutable legacy/shadow/canvas-v2 matrix. Real-P0 Secrets, Coze exact-SHA `shadow -> canvas-v2 -> legacy`, provider generation and authoritative charge/cancel/refund evidence remain blocking. `stable` and Stage 4/5 remain prohibited.
+
+## 2026-08-15 readiness after immutable run `31873152403`
+
+- `main@30fdedc793cf66d45863b01725186f85d681fd0a` is not releasable: canvas-v2 and shadow each passed `54/60`; legacy passed `56/60`.
+- The run confirmed three independent blockers rather than one generic flake: hosted desktop performance margin, synchronous immediate-save cost, and a WebKit one-revision unload recovery race.
+- The second repair candidate has permanent RED/GREEN coverage and passes local lint, TypeScript, `2458` Vitest tests and the `116/116` route production build. No threshold, continuity assertion or protected product feature was removed.
+- PostgreSQL browser concurrency is not available on this workstation and remains an explicit external gate. The real-P0 job still fails closed because required repository Secrets are absent.
+- **Decision: NOT READY / remain in Stage 3 Task 10.** Publish only to `main`, keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged, and require a new immutable three-mode matrix before any Coze rollout or Stage 4/5 work.

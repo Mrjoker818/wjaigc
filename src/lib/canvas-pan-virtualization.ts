@@ -12,7 +12,7 @@ export interface CanvasCullingBounds {
 
 // Keep culling responsive without asking React to render on every pointer event.
 export const PAN_VIEWPORT_SYNC_INTERVAL_MS = 80;
-export const PAN_VIEWPORT_SYNC_DISTANCE_PX = 128;
+export const PAN_VIEWPORT_SYNC_DISTANCE_PX = 256;
 
 export function shouldSyncCanvasPanViewport(
   lastSyncedOffset: CanvasViewportOffset,

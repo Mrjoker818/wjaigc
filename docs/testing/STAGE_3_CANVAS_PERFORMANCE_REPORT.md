@@ -137,3 +137,12 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 - Actions run `31870799781` remained RED after the frame-window correction: legacy `57/60`, shadow `59/60`, canvas-v2 `56/60`.
 - The next local candidate removes inactive-engine work from non-shadow pan, moves reverse-box visual updates out of parent React state, and registers the next measurement RAF before unchanged continuity probes.
 - Fixed gates remain 55 FPS for 100 nodes, 45 FPS for 300 nodes, 50ms input P95 and 100ms longest save task. A new immutable run is required; this report does not project a pass from local static evidence.
+
+## 2026-08-15 `30fdedc` immutable matrix and second repair candidate
+
+- GitHub Actions run `31873152403` executed all three Canvas modes but remained RED: canvas-v2 `54/60`, legacy `56/60`, shadow `54/60`.
+- Desktop Chromium retained the unchanged gates. Recorded misses included 100-node FPS `49.26-54.66` versus `55`, 300-node FPS `37.10-43.47` versus `45`, one 300-node input P95 of `58.6ms` versus `50ms`, and save tasks of `102-153ms` versus `100ms`.
+- Canvas-v2 WebKit reproduced a real durability defect: final resize geometry rolled back after immediate reload. Shadow WebKit then began from a missing node and cascaded into an undefined move/resize target. These failures are retained and are not classified as retries or runner noise.
+- The new local candidate keeps the standard `120x72` pan wholly compositor-driven within the existing overscan corridor, removes box-selection active state from the parent React render path, adds bounded v4 unload recovery for the one known revision race, and removes whole-user localStorage serialization from immediate Canvas writes.
+- TDD and related regressions pass `8 files / 132 tests`; full Vitest passes `428` files and `2458` tests, with `44` PostgreSQL-gated tests explicitly skipped because this workstation has no isolated test database. TypeScript, ESLint, `git diff --check` and production build `116/116` pass.
+- **Status: NOT READY / Stage 3 Task 10 remains active.** A new immutable legacy/shadow/canvas-v2 run must prove the fixed FPS, input, save and WebKit recovery gates. Real-P0 Secrets and Coze exact-SHA `shadow -> canvas-v2 -> legacy` remain separate blockers.

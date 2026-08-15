@@ -260,6 +260,57 @@ describe('canvas autosave hydration guard', () => {
     }));
   });
 
+  it('recovers a version 4 unload snapshot after the known one-revision save race', () => {
+    const storage = {
+      getItem: vi.fn(() => JSON.stringify({
+        version: 4,
+        ownerId: 'user-a',
+        baseProjectRevision: 7,
+        maxRecoverableProjectRevision: 8,
+        snapshot: {
+          ownerId: 'user-a',
+          projectId: 'project-1',
+          baseProjectRevision: 7,
+          revision: 9,
+          images: [image({ x: 240, width: 384 })],
+          metadata: {},
+        },
+      })),
+      removeItem: vi.fn(),
+    };
+
+    expect(consumePreparedCanvasUnloadSnapshot('project-1', 8, storage, 'user-a')).toEqual(
+      expect.objectContaining({
+        projectId: 'project-1',
+        images: [expect.objectContaining({ x: 240, width: 384 })],
+      }),
+    );
+    expect(storage.removeItem).toHaveBeenCalledWith(CANVAS_PREPARED_SNAPSHOT_KEY);
+  });
+
+  it('rejects a version 4 unload snapshot beyond its explicit revision window', () => {
+    const storage = {
+      getItem: vi.fn(() => JSON.stringify({
+        version: 4,
+        ownerId: 'user-a',
+        baseProjectRevision: 7,
+        maxRecoverableProjectRevision: 8,
+        snapshot: {
+          ownerId: 'user-a',
+          projectId: 'project-1',
+          baseProjectRevision: 7,
+          revision: 9,
+          images: [image({ x: 240 })],
+          metadata: {},
+        },
+      })),
+      removeItem: vi.fn(),
+    };
+
+    expect(consumePreparedCanvasUnloadSnapshot('project-1', 9, storage, 'user-a')).toBeNull();
+    expect(storage.removeItem).toHaveBeenCalledWith(CANVAS_PREPARED_SNAPSHOT_KEY);
+  });
+
   it('consumes a newer prepared unload snapshot for the matching project', () => {
     const storage = {
       getItem: vi.fn(() => JSON.stringify({

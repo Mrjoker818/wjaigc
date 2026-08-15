@@ -1172,11 +1172,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     cancelSelectionGesture,
     beginImageSelectionGesture,
     finishCanvasPointerGesture,
-    boxSelectionActive,
     setBoxOverlayElement,
   } = useCanvasSelection({
     initialIds: [],
-    getViewportRect: () => canvasContainerRef.current?.getBoundingClientRect() ?? null,
+    getViewportElement: () => canvasContainerRef.current,
   });
   const pendingDeleteIdsRef = useRef<Set<string>>(new Set());
   const [groups, setGroups] = useState<ImageGroup[]>(initialGroups || []);
@@ -10879,8 +10878,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             ? 'cursor-pointer'
             : isPanning || isSpacePressed || activePointerTool === 'hand'
             ? 'cursor-grab active:cursor-grabbing'
-            : boxSelectionActive
-            ? 'cursor-crosshair'
             : (editMode === 'erase' || editMode === 'mask')
             ? 'cursor-default'  // 擦除/蒙版使用浮动窗口，主画布保持默认光标
             : editMode !== 'none'

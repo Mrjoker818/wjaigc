@@ -40,9 +40,10 @@ interface CanvasUnloadCleanupStorage {
 }
 
 interface StoredCanvasUnloadSnapshot {
-  version: 3;
+  version: 3 | 4;
   ownerId: string;
   baseProjectRevision: number;
+  maxRecoverableProjectRevision?: number;
   snapshot: CanvasPersistenceSnapshot;
 }
 
@@ -50,7 +51,13 @@ function isStoredCanvasUnloadSnapshot(value: unknown): value is StoredCanvasUnlo
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<StoredCanvasUnloadSnapshot>;
   const snapshot = candidate.snapshot as Partial<CanvasPersistenceSnapshot> | undefined;
-  return candidate.version === 3
+  const revisionWindowIsValid = candidate.version === 3
+    || (
+      candidate.version === 4
+      && Number.isSafeInteger(candidate.maxRecoverableProjectRevision)
+      && (candidate.maxRecoverableProjectRevision ?? -1) >= (candidate.baseProjectRevision ?? 0)
+    );
+  return revisionWindowIsValid
     && typeof candidate.ownerId === 'string'
     && Number.isSafeInteger(candidate.baseProjectRevision)
     && typeof snapshot?.projectId === 'string'
@@ -85,7 +92,13 @@ export function consumePreparedCanvasUnloadSnapshot(
     return null;
   }
   if (stored.snapshot.projectId !== projectId) return null;
-  if (stored.baseProjectRevision !== projectRevision) {
+  const maxRecoverableRevision = stored.version === 4
+    ? stored.maxRecoverableProjectRevision ?? stored.baseProjectRevision
+    : stored.baseProjectRevision;
+  if (
+    projectRevision < stored.baseProjectRevision
+    || projectRevision > maxRecoverableRevision
+  ) {
     storage.removeItem(CANVAS_PREPARED_SNAPSHOT_KEY);
     return null;
   }

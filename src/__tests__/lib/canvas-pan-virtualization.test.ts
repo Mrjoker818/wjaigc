@@ -55,6 +55,14 @@ describe('canvas pan virtualization', () => {
     )).toBe(true);
   });
 
+  it('keeps a standard 120 by 72 pixel pan entirely on the compositor path', () => {
+    expect(shouldSyncCanvasPanViewport(
+      { x: 0, y: 0 },
+      { x: 120, y: 72 },
+      PAN_VIEWPORT_SYNC_INTERVAL_MS * 4,
+    )).toBe(false);
+  });
+
   it('keeps the render transform aligned with the sampled pan offset during an active pan', () => {
     expect(resolveCanvasRenderOffset(
       { x: 100, y: 80 },

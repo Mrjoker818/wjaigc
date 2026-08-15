@@ -171,6 +171,25 @@ afterEach(() => {
 });
 
 describe('UserManager project sync response isolation', () => {
+  it('updates an immediate canvas snapshot in memory without serializing local storage', async () => {
+    const setItem = vi.fn((key: string, value: string) => storage.set(key, value));
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem,
+      removeItem: (key: string) => storage.delete(key),
+    });
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    setItem.mockClear();
+
+    const updated = manager.updateProjectInMemory('project-a', { name: 'Immediate canvas draft' });
+
+    expect(updated?.name).toBe('Immediate canvas draft');
+    expect(manager.hasPendingProjectChanges()).toBe(true);
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
   it('adopts the authenticated canvas mode while treating the cached copy as untrusted', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       success: true,

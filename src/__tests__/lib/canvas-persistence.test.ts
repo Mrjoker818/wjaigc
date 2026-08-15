@@ -59,6 +59,15 @@ function controlledIdle() {
 }
 
 describe('CanvasPersistenceScheduler', () => {
+  it('prepares a bounded version 4 unload recovery window', () => {
+    const prepared = prepareCanvasPersistenceSnapshot(snapshot(9));
+    expect(JSON.parse(prepared.serialized)).toEqual(expect.objectContaining({
+      version: 4,
+      baseProjectRevision: 7,
+      maxRecoverableProjectRevision: 8,
+    }));
+  });
+
   it('defers an immediate flush until the current input task has yielded', async () => {
     const writer = vi.fn(async () => undefined);
     const scheduler = new CanvasPersistenceScheduler({ writer });

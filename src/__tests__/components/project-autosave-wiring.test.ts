@@ -32,7 +32,10 @@ describe('project autosave wiring', () => {
 
     expect(writerStart).toBeGreaterThan(-1);
     expect(writerSource).toContain("reason === 'immediate'");
+    expect(writerSource).toContain('manager.updateProjectInMemory(');
     expect(writerSource).toContain('await manager.flushProjectsToServer()');
+    expect(writerSource.indexOf('manager.updateProjectInMemory('))
+      .toBeLessThan(writerSource.indexOf('await manager.flushProjectsToServer()'));
   });
 
   it('does not debounce or serialize the whole project on the interaction path', () => {

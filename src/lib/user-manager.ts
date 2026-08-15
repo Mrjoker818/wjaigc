@@ -2408,7 +2408,7 @@ export class UserManager {
     return userData?.projects.find(p => p.id === projectId) || null;
   }
 
-  updateProject(projectId: string, updates: Partial<Project>): Project | null {
+  updateProjectInMemory(projectId: string, updates: Partial<Project>): Project | null {
     const userData = this.getCurrentUserData();
     if (!userData) return null;
     this.ensureProjectAdoptionReadyForMutation();
@@ -2423,8 +2423,14 @@ export class UserManager {
     };
 
     this.markProjectMutation();
-    this.saveData();
     return userData.projects[index];
+  }
+
+  updateProject(projectId: string, updates: Partial<Project>): Project | null {
+    const updated = this.updateProjectInMemory(projectId, updates);
+    if (!updated) return null;
+    this.saveData();
+    return updated;
   }
 
   async deleteProject(projectId: string): Promise<boolean> {

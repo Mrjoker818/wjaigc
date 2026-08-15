@@ -1798,3 +1798,33 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Safeguards | No FPS, input, save, disappearance or clickability threshold changed. No continuity probe or shadow comparison was removed. Reverse geometry has a direct unit contract. |
 | Regression | RED: controller `3/3`, overlay `2/2`, RAF-order contract `1/18`. GREEN focused set `47/47`; TypeScript, ESLint, build `116/116`, protected features `38/38`, and full Vitest pass locally. |
 | Status | **OPEN UNTIL A NEW IMMUTABLE THREE-MODE MATRIX PASSES.** |
+
+### S3-BUG-024: Unload recovery discarded the final resize after one expected revision race
+
+| Field | Detail |
+|---|---|
+| Severity | P1 Canvas save/reload durability |
+| Module | Prepared unload snapshot recovery and project revision CAS |
+| Environment | Immutable Actions run `31873152403`, `main@30fdedc793cf66d45863b01725186f85d681fd0a`, canvas-v2 WebKit |
+| Reproduction | Move and resize the one-node fixture, immediately reload while the ordinary save and unload beacon share the same base revision, then reopen the project. |
+| Expected | The final geometry survives when the server advanced by the one revision already accounted for by the in-flight ordinary save. |
+| Actual | Before reload geometry was `216/152/160/160`; after reload it became `280/216/96/96`. The v3 recovery record was deleted because the server revision was `base + 1`. |
+| Root cause | Recovery accepted only an exact base revision. It could not distinguish the bounded ordinary-save/beacon race from a genuinely stale snapshot. |
+| Fix | Prepared records now use version 4 with an explicit inclusive `maxRecoverableProjectRevision = base + 1`. Version 3 retains exact-match behavior; revisions outside the bounded window are still rejected and removed. |
+| Regression | The version-4 one-revision recovery test was RED (`null`) and is GREEN; the legacy v3 stale-snapshot rejection remains GREEN. |
+| Status | **FIXED LOCALLY / IMMUTABLE WEBKIT RERUN REQUIRED.** |
+
+### S3-BUG-025: Immediate Canvas save synchronously serialized the complete local user store
+
+| Field | Detail |
+|---|---|
+| Severity | P1 hosted Canvas performance and interaction latency |
+| Module | Canvas persistence writer and `UserManager` project mutation boundary |
+| Environment | Immutable Actions run `31873152403`, 300-node Chromium save scenarios |
+| Reproduction | Commit drag/resize or history changes in the controlled 300-node project while the fixture user owns the complete 15-project matrix. |
+| Expected | The immediate path updates the authoritative in-memory draft and crosses the server barrier without synchronously serializing all local users/projects. |
+| Actual | Hosted runs recorded longest save tasks of `102ms`, `103ms` and `153ms` against the unchanged `100ms` limit. |
+| Root cause | `manager.updateProject()` called `saveData()` before the immediate server flush. That serialized the whole multi-user local store and wrote localStorage on the interaction/save task; history commits could perform the same write twice. |
+| Fix | Added an explicit `updateProjectInMemory()` mutation boundary. Immediate Canvas writes and the history pre-commit use it; idle persistence keeps `updateProject()` and its existing local durability behavior. Server acceptance still performs the established authoritative adoption/persistence transaction. |
+| Regression | Memory-only update was RED because the method did not exist; GREEN proves the draft changes, mutation generation advances and localStorage receives no write. Project autosave wiring and sync isolation remain covered. |
+| Status | **FIXED LOCALLY / IMMUTABLE SAVE-BUDGET RERUN REQUIRED.** |
