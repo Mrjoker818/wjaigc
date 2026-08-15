@@ -4077,6 +4077,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (beginViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY })) {
         viewportPanPointerIdRef.current = e.pointerId;
         directPanPointerIdRef.current = e.pointerId;
+        e.currentTarget.setPointerCapture(e.pointerId);
       }
       return;
     }
@@ -4615,6 +4616,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       && (isPanning || directPanPointerIdRef.current === e.pointerId)
     ) {
       commitViewportPan({ pointerId: e.pointerId });
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
       viewportPanPointerIdRef.current = null;
       directPanPointerIdRef.current = null;
       setIsPanning(false);

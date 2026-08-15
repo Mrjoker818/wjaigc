@@ -1843,6 +1843,23 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Regression | TDD began RED on the missing direct-pan and save-order contracts. The first independent review rejected the candidate because `beginPan` still published React state and a second pointer could replace/terminate the active owner. The corrected implementation keeps begin ref-only, rejects competing pointers and allows only the authoritative owner to move or finish; follow-up independent review returned `APPROVED`. Fresh focused Canvas/persistence contracts pass `8 files / 78 tests`. Production build emits `116/116` routes. Execution `local-owner-safe-legacy-full-20260815` passes the complete legacy five-profile matrix `60/60`. Chromium/1080p 100-node pan is `57.42/57.42 FPS`, 300-node pan is `54.82/54.26 FPS`, input P95 is at most `40.1ms`, save long task is `0ms`, and disappeared/unclickable evidence is zero. PostgreSQL-enabled full Vitest passes `441 files / 2512 tests` with zero skips. |
 | Status | **FIXED LOCALLY / NEW IMMUTABLE THREE-MODE CI REQUIRED.** |
 
+### S3-BUG-029: direct pan did not own the active pointer
+
+| Field | Detail |
+|---|---|
+| Severity | P1 hosted Canvas interaction performance |
+| Module | Infinite Canvas direct Space/hand-tool pan routing |
+| Environment | Local production legacy mode after immutable `main@3535268` remained performance RED, 2026-08-15 |
+| Reproduction | Begin a direct pan over a dense 100/300-node Canvas and inspect pointer ownership while the pointer crosses descendant media nodes. |
+| Expected | The Canvas viewport owns the active pointer for the gesture and releases it at pointer-up, keeping move routing on one stable target. |
+| Actual | The direct-pan branch tracked the pointer in refs but did not call `setPointerCapture`; dense descendants remained eligible for pointer retargeting/hover routing during movement. |
+| TDD | Source contract first failed `1/27`; after the minimal production change the focused Canvas set passed `5 files / 55 tests`. A permanent real-browser assertion then proved capture during the gesture and release afterwards in Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium (`5/5`). |
+| Fix | Capture the authoritative direct-pan pointer on the Canvas viewport and release it only when that same owner commits the pan. No viewport math, culling, persistence, history, provider, billing or threshold behavior changed. |
+| Local performance | The fixed desktop subset passed `3/4` on its first short-ID run: Chromium/300 input P95 was `54.5ms` while FPS was `55.70` and continuity stayed zero. Three immediate independent repeats then passed `3/3` with input P95 `28.7/24.8/24.1ms`, FPS `57.50/56.71/56.23`, and zero disappeared/unclickable evidence. The cold outlier remains recorded. |
+| Full local gates | Full Vitest passed `438 files / 2514 tests`; its four explicitly gated PostgreSQL cases then passed separately against the isolated database (`3 files / 4 tests`). TypeScript exited 0; ESLint exited 0 with `0 errors / 973 historical warnings`; production build emitted `116/116` routes. |
+| Final corrected browser run | After the source contract was tightened to the exact direct-pan pointer-up branch, the corrected production build passed pointer ownership `5/5` and desktop performance `4/4`. FPS was `57.66-58.73`, input P95 `17.3-19.5ms`, and save/disappeared/unclickable metrics were zero. |
+| Status | **CANDIDATE ONLY / IMMUTABLE THREE-MODE CI REQUIRED.** The mixed cold local sample prevents a completion claim. |
+
 ### S3-BUG-028: pan commit synchronously reconciled the full Canvas tree
 
 | Field | Detail |
@@ -1854,6 +1871,13 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Local browser regression | Clean PostgreSQL fixtures were restored before each mode. Legacy, shadow and canvas-v2 each passed `60/60` across Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium (`180/180` total). Minimum observed FPS was `56.89`; maximum input P95 was `20ms`; disappeared/unclickable evidence remained zero. |
 | Full local gates | Vitest exited 0 with `438` files passed and `3` explicitly skipped (`2514` tests passed, `4` skipped); TypeScript exited 0; ESLint exited 0 with `0 errors / 973 historical warnings`; production build emitted `116/116` routes. |
 | Status | **FIXED LOCALLY / IMMUTABLE THREE-MODE CI REQUIRED.** Stage 3 Task 10 remains active. |
+
+#### Immutable follow-up for `main@3535268`
+
+- Stage 0/1 run `31891554685`, PostgreSQL concurrency/settlement and the complete static/test/API/audit/build job passed.
+- Hosted Canvas remained RED: canvas-v2 `56/60` (FPS `54.45`, `49.58`, `41.08`; Chromium/300 input P95 `76.5ms`), legacy `57/60` (Chromium/300 input P95 `51.9ms`; 1080p FPS `49.69`, `37.65`), shadow `57/60` (FPS `54.88`, `53.24`, `44.76`).
+- Every non-performance Canvas case passed in all modes. The transition boundary is retained as a locally verified improvement, but S3-BUG-028 is **not immutable-closed** and Task 10 remains active.
+- Real-P0 again failed closed on the same ten absent authorized Secrets/paid controls.
 
 ### S3-BUG-027 follow-up: `3e46150` immutable matrix retains desktop Chromium pan misses
 

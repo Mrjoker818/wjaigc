@@ -1137,3 +1137,20 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - With a clean PostgreSQL reset before every mode, legacy, shadow and canvas-v2 each pass `60/60` across five browser profiles (`180/180`). Lowest FPS is `56.89`, highest input P95 is `20ms`, and all continuity, selection, history, persistence, save and 100/300-node assertions pass without threshold changes.
 - Fresh gates: focused Canvas `55/55`; full Vitest `438 passed / 3 skipped files`, `2514 passed / 4 skipped tests`; TypeScript; ESLint `0 errors / 973 warnings`; production build `116/116`; whitespace check.
 - **Verdict: LOCAL REGRESSION PASS / IMMUTABLE VERDICT PENDING.** Stage 3 Task 10 remains active; this evidence does not authorize Coze mode switching or Stage 4/5.
+
+## 2026-08-15 immutable result for `main@3535268`
+
+- Stage 0/1 `31891554685` passed. Quality `31891554677` passed PostgreSQL concurrency/settlement and all static, test, API, dependency-audit and production-build gates.
+- Canvas remained performance RED: canvas-v2 `56/60`, legacy `57/60`, shadow `57/60`. The lowest observed desktop FPS was `37.65`; the highest input P95 was `76.5ms`. All functional, continuity, history, persistence, save, disappeared-image and unclickable-frame checks passed.
+- This disproves the hypothesis that deferring pointer-up React publication alone is sufficient on Hosted runners. The next diagnosis is restricted to work shared by pointer-move/compositing across all three modes.
+- **Verdict: IMMUTABLE RED / STAGE 3 TASK 10 REMAINS ACTIVE.** Real-P0 Secrets, Coze sequence and provider/accounting remain blocked; Stage 4/5 stay prohibited.
+
+## 2026-08-15 direct-pan pointer-ownership candidate
+
+- TDD proved the missing pointer-capture contract RED before production code changed, then GREEN in the focused `55/55` Canvas set.
+- A production browser assertion passes all five profiles (`5/5`): the viewport owns the pointer during direct pan and releases it at pointer-up; existing Space/focused-button behavior and compositor transform movement remain intact.
+- The first short-ID desktop performance run passed `3/4`; Chromium/300 missed only input P95 at `54.5ms` while FPS was `55.70` and continuity failures were zero. Three exact repeats passed `3/3` with P95 at most `28.7ms` and FPS at least `56.23`.
+- An earlier long temporary run ID caused a locator-only failure because Canvas alt text is intentionally truncated to 60 characters. Reseeding with the established short-ID fixture contract removed that test-fixture collision; no product code was changed for it.
+- Fresh full gates pass: Vitest `438 files / 2514 tests`, separately gated PostgreSQL concurrency `3 files / 4 tests`, TypeScript, ESLint `0 errors / 973 historical warnings`, and production build `116/116`.
+- A final post-correction production run passes pointer ownership `5/5` and desktop performance `4/4`; FPS is `57.66-58.73`, input P95 `17.3-19.5ms`, and save/disappeared/unclickable metrics are zero.
+- **Verdict: LOCAL CANDIDATE, NOT A RELEASE PASS.** The cold input outlier is retained and immutable legacy/shadow/canvas-v2 evidence decides whether the candidate closes the hosted regression.

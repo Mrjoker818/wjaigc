@@ -89,16 +89,24 @@ describe('canvas command and explicit history wiring', () => {
     const pointerMove = canvas.slice(pointerMoveStart, pointerMoveEnd);
     const pointerUpEnd = canvas.indexOf('const handlePointerCancel', pointerMoveEnd);
     const pointerUp = canvas.slice(pointerMoveEnd, pointerUpEnd);
+    const directPanUpStart = pointerUp.indexOf(
+      '&& (isPanning || directPanPointerIdRef.current === e.pointerId)',
+    );
+    const directPanUpEnd = pointerUp.indexOf('const activeBoxPreview', directPanUpStart);
+    const directPanUp = pointerUp.slice(directPanUpStart, directPanUpEnd);
 
     expect(directPanStart).toBeGreaterThan(-1);
     expect(directPan).toContain('if (beginViewportPan(');
     expect(directPan).toContain('directPanPointerIdRef.current = e.pointerId');
+    expect(directPan).toContain('e.currentTarget.setPointerCapture(e.pointerId)');
     expect(directPan).not.toContain('setIsPanning(true)');
     expect(pointerMove).toContain('directPanPointerIdRef.current === e.pointerId');
     expect(pointerUp).not.toContain('if (isPanning || directPanPointerIdRef.current === e.pointerId)');
     expect(pointerUp).toContain('viewportPanPointerIdRef.current === e.pointerId');
     expect(pointerUp).toContain('&& (isPanning || directPanPointerIdRef.current === e.pointerId)');
-    expect(pointerUp).toContain('directPanPointerIdRef.current = null');
+    expect(directPanUpStart).toBeGreaterThan(-1);
+    expect(directPanUp).toContain('e.currentTarget.releasePointerCapture(e.pointerId)');
+    expect(directPanUp).toContain('directPanPointerIdRef.current = null');
   });
 
   it('keeps temporary Space-pan feedback out of parent React state', () => {

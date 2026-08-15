@@ -320,7 +320,36 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
 
     const before = await page.locator('[data-canvas-surface]').getAttribute('style');
     const start = await findCanvasBlankSpace(page);
-    await dragPointerAcrossFrames(page, start, { x: start.x + 64, y: start.y + 40 }, 16);
+    await page.evaluate(() => {
+      const state = window as typeof window & { __stage3PanPointerId?: number };
+      document.querySelector('[data-canvas-viewport]')?.addEventListener('pointerdown', event => {
+        state.__stage3PanPointerId = (event as PointerEvent).pointerId;
+      }, { once: true });
+    });
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    const capturedPointer = await page.evaluate(() => {
+      const state = window as typeof window & { __stage3PanPointerId?: number };
+      const viewport = document.querySelector('[data-canvas-viewport]');
+      return typeof state.__stage3PanPointerId === 'number'
+        ? viewport?.hasPointerCapture(state.__stage3PanPointerId) ?? false
+        : false;
+    });
+    expect(capturedPointer).toBe(true);
+    for (let index = 1; index <= 16; index += 1) {
+      const progress = index / 16;
+      await page.mouse.move(start.x + 64 * progress, start.y + 40 * progress);
+      await nextAnimationFrame(page);
+    }
+    await page.mouse.up();
+    const retainedCapture = await page.evaluate(() => {
+      const state = window as typeof window & { __stage3PanPointerId?: number };
+      const viewport = document.querySelector('[data-canvas-viewport]');
+      return typeof state.__stage3PanPointerId === 'number'
+        ? viewport?.hasPointerCapture(state.__stage3PanPointerId) ?? false
+        : false;
+    });
+    expect(retainedCapture).toBe(false);
     const after = await page.locator('[data-canvas-surface]').getAttribute('style');
     expect(after).not.toBe(before);
 

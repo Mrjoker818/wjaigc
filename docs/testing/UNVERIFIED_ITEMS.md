@@ -743,6 +743,17 @@ Historical checkpoint: the isolated PostgreSQL suite passed `14 files / 54 tests
 | Coze exact-SHA mode sequence | UNVERIFIED | After immutable CI passes, execute `shadow -> canvas-v2 -> legacy` on the exact commit and retain login, old-project, 1/100/300-node, tool, save/reload and rollback evidence. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
 
+## 2026-08-15 queue for the pointer-ownership candidate
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Direct-pan pointer ownership | LOCALLY VERIFIED | Preserve the five-profile capture/release assertion and existing Space/focused-control behavior on the exact committed SHA. |
+| Hosted cold performance | OPEN P1 | Immutable legacy, shadow and canvas-v2 must pass unchanged 55/45 FPS, 50ms input P95 and 100ms save limits. The retained local `54.5ms` cold sample cannot be ignored. |
+| Functional matrix | MUST NOT REGRESS | Retain all history, persistence, selection, continuity, save/reload, disappeared-image and clickability assertions already green on `main@3535268`. |
+| Real paid P0 | BLOCKED BY SECRETS | Supply the authorized provider/account/storage controls and prove generation, one charge, cancellation, monotonic terminal state and at-most-once refund without mocks. |
+| Coze sequence | WAITING FOR IMMUTABLE CI | Only after the exact SHA passes hosted Canvas gates, execute and retain `shadow -> canvas-v2 -> legacy` evidence. |
+| Stable branch and later stages | PROTECTED | Do not write `stable`; Stage 4/5 remain prohibited while Stage 3 Task 10 is active. |
+
 ## 2026-08-15 remaining gaps for the pointer-up candidate
 
 | Item | Status | Required evidence |
@@ -752,6 +763,15 @@ Historical checkpoint: the isolated PostgreSQL suite passed `14 files / 54 tests
 | Real paid P0 | BLOCKED EXTERNALLY | Configure authorized URL/account/model/paid controls and prove one charge, cancellation, monotonic terminal state and at-most-once refund without Mocking. |
 | Coze sequence | NOT STARTED | Start only after immutable three-mode CI is green; execute `shadow -> canvas-v2 -> legacy` on the exact SHA and retain evidence. |
 | Stage 4/5 | PROHIBITED | Stage 3 Task 10 remains `10/11`; do not enter later stages. |
+
+### Immutable gaps after `main@3535268`
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Hosted canvas-v2 | FAILED `56/60` | Close four desktop performance failures, including `76.5ms` input P95, without threshold changes. |
+| Hosted legacy | FAILED `57/60` | Close Chromium/300 input P95 and 1080p 100/300 FPS failures. |
+| Hosted shadow | FAILED `57/60` | Close Chromium/100 and 1080p 100/300 FPS failures while retaining dual-engine comparison. |
+| Functional matrix | VERIFIED ON EXACT SHA | Preserve all non-performance passes while changing only the shared pan/compositing path. |
 
 ## 2026-08-15 open evidence after Space-pan local repair
 

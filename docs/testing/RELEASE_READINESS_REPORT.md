@@ -936,3 +936,15 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The remaining local pointer-up bottleneck has a stable reproduction, a RED/GREEN runtime contract and a minimal implementation boundary. The complete local production matrix is `180/180` with fixed thresholds and zero disappeared/unclickable evidence.
 - Full local unit/integration/API, TypeScript, zero-error ESLint and production build gates exit 0. These are candidate results, not immutable release evidence.
 - **Decision: NOT READY.** A new exact `main` SHA must pass immutable legacy, shadow and canvas-v2. Real-P0 remains blocked by missing authorized Secrets; Coze `shadow -> canvas-v2 -> legacy`, real provider charging, cancellation and at-most-once refund remain mandatory. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` stays untouched.
+
+### Immutable decision for `main@3535268`
+
+- Stage 0/1 and all non-browser Quality jobs are green, but the hosted Canvas modes are canvas-v2 `56/60`, legacy `57/60`, shadow `57/60`.
+- **Decision: NOT READY.** The local `180/180` result is not release evidence because the exact hosted SHA failed fixed FPS/input thresholds. Coze and later stages remain blocked.
+
+## 2026-08-15 readiness of the direct-pan pointer-ownership candidate
+
+- Pointer ownership is functionally verified in all five local browser profiles, and three repeated Chromium/300 performance samples meet the unchanged limits.
+- One cold Chromium/300 sample still measured input P95 `54.5ms` against the fixed `50ms` gate. It is not suppressed, retried away or reclassified as passing.
+- Full Vitest, isolated PostgreSQL concurrency, TypeScript, zero-error ESLint and production build gates pass locally; these permit an immutable candidate rerun but do not replace it.
+- **Decision: NOT READY.** Push is permitted only as a narrow `main` candidate after full local gates. Stage 3 Task 10 remains `10/11`; immutable three-mode CI, real-P0 provider/accounting evidence and the Coze rollout/rollback sequence remain mandatory. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` stays untouched.
