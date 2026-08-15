@@ -4,6 +4,8 @@ import { OperationAuditClient } from '@/components/operation-audit-client';
 import { GlobalErrorMonitor } from '@/components/global-error-monitor';
 import { AppErrorBoundary } from '@/components/app-error-boundary';
 
+export const dynamic = 'force-dynamic';
+
 export const viewport: Viewport = {
   themeColor: '#0d1117',
 };

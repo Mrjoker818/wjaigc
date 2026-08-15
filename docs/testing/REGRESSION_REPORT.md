@@ -1113,6 +1113,14 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Full verification passes: focused `8 files / 78 tests`; `441/441` test files and `2512/2512` tests against an isolated PostgreSQL database with no skips; TypeScript; ESLint `0 errors / 973 historical warnings`; production build `116/116`; reviewed protected-feature/source gate `38/38`; and `git diff --check`.
 - **Verdict: LOCAL REGRESSION PASS / IMMUTABLE VERDICT PENDING.** This does not close S3-BUG-017 or authorize Stage 4/5. The exact committed SHA must pass all three hosted modes before Coze rollout.
 
+## 2026-08-16 Coze stale app-shell chunk regression
+
+- Exact Coze source `main@fc190b1214f7ec5a1c3588b2be31a87db29f2337` built and started, but authenticated Google Chrome reached the global error boundary with `Loading chunk 5504 failed`.
+- The missing hashed chunk returned HTTP 500 while `/` returned HTTP 200 with a one-year `s-maxage` and `X-Nextjs-Cache: HIT`. This preserves the real deployment failure and rejects the false inference that a root 200 means the UI is healthy.
+- A RED/GREEN source contract now requires the authenticated root layout to render dynamically. The production build reports both `/` and `/simple-chat` as dynamic, and a real local production request returns `no-store, private, max-age=0` instead of long-lived shared caching.
+- Full local gates pass against isolated PostgreSQL 18: `441/441` files, `2521/2521` tests, zero skipped; TypeScript passes; ESLint is `0 errors / 973 warnings`; production build and the `38/38` protected-feature gate pass.
+- **Verdict: LOCAL REGRESSION PASS / COZE EXACT-SHA PENDING.** The candidate has not yet been committed or deployed. Stage 3 Task 10 remains active, and this deployment repair does not authorize Stage 4/5 or any change to `stable`.
+
 ## 2026-08-15 Space-pan hot-path candidate after immutable run `31884790226`
 
 - Stage 0/1 run `31884789686` passed. Quality run `31884790226` retained a real RED result: static and PostgreSQL jobs passed, real-P0 failed closed on missing repository Secrets, and desktop performance left legacy at `57/60`, shadow at `58/60` and canvas-v2 at `57/60`. No threshold or evidence assertion was relaxed.

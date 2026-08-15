@@ -1943,3 +1943,19 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | TDD and review | Initial RED was `2 failed / 33 passed`; first GREEN was `46/46`. Independent review found the blur-stuck risk, producing a second RED of `3 failed / 35 passed`. The hardened helper and lifecycle wiring pass `49/49`; the final independent review returned `APPROVED` with no Critical or Important findings. |
 | Regression | Fresh production desktop performance passes `4/4`: Chromium 100/300 nodes `58.34/58.33 FPS`, Chromium 1080p 100/300 nodes `59.01/57.51 FPS`, input P95 at most `27.5ms`, save long task `0ms`, disappeared `0`, unclickable `0`. A prior full matrix was `58/60`; both failures passed `2/2` after deterministic fixture restoration, proving shared-fixture pollution rather than a product change. PostgreSQL-enabled full Vitest passes `441 files / 2517 tests`; TypeScript, ESLint `0 errors / 973 warnings`, build `116/116`, exact protected gate `38/38` and whitespace pass. |
 | Status | **FIXED LOCALLY / NEW IMMUTABLE THREE-MODE CI REQUIRED.** |
+
+### S3-BUG-032: Coze CDN served a stale app shell that referenced a removed Next.js chunk
+
+| Field | Detail |
+|---|---|
+| Severity | P1 deployment reliability |
+| Module | Next.js app shell rendering and Coze preview CDN cache |
+| Environment | Coze isolated preview on `main@fc190b1214f7ec5a1c3588b2be31a87db29f2337`, authenticated Google Chrome, 2026-08-16 |
+| Reproduction | Open `https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/` after Coze replaces the build with exact `fc190b1`. |
+| Expected | The current app shell loads current hashed assets and reaches the login/workspace UI. |
+| Actual | The global error boundary displays `Loading chunk 5504 failed`; the referenced `/_next/static/chunks/5504.45a77f7f149633a6.js` returns HTTP 500. The HTML response is a stale prerender cache hit with `s-maxage=31536000`, so an HTTP 200 root response does not prove a usable deployment. |
+| Root cause | The authenticated application shell inherited static prerendering from the root layout. Coze/CDN retained that HTML across build replacement while the old hashed chunk was no longer present. |
+| TDD | The deployment cache contract began RED (`1 failed / 1 passed`) because the root layout lacked a dynamic-rendering boundary. After the minimal change it passes `2/2`. |
+| Fix | Declare `export const dynamic = 'force-dynamic'` in the root server layout. No authentication, Canvas, model, provider, task, billing or database code changes. |
+| Local regression | Production build marks `/` and `/simple-chat` as dynamic. A real local production request returns `Cache-Control: no-store, must-revalidate, no-cache, max-age=0, private`. PostgreSQL-enabled full Vitest passes `441 files / 2521 tests` with zero skips; TypeScript passes; ESLint exits 0 with `0 errors / 973 historical warnings`; build and protected-feature gate `38/38` pass. |
+| Status | **FIXED LOCALLY / EXACT-SHA COZE DEPLOYMENT REQUIRED.** The existing `fc190b1` cloud failure remains valid evidence until the new committed SHA is deployed and Chrome proves the shell and current chunks load without Console errors. |

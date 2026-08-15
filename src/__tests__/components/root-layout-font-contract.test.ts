@@ -10,3 +10,10 @@ describe('root layout font loading', () => {
     expect(layoutSource).toContain('className="antialiased"');
   });
 });
+
+describe('root layout deployment cache contract', () => {
+  it('renders the authenticated app shell dynamically to avoid stale chunk references', () => {
+    expect(layoutSource).toContain("export const dynamic = 'force-dynamic';");
+    expect(layoutSource).not.toContain("export const dynamic = 'force-static';");
+  });
+});

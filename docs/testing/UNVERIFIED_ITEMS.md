@@ -811,6 +811,16 @@ Stage 3 remains in Task 10 (`10/11`, about `91%`).
 | Real provider and accounting | UNVERIFIED / REQUIRED | Prove real generation, one charge, cancellation, monotonic terminal state and at-most-once refund in PostgreSQL-backed Coze. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; Stage 4/5 remain prohibited. |
 
+## 2026-08-16 deployment shell verification queue
+
+| Item | Status | Required evidence |
+|---|---|---|
+| Dynamic app-shell candidate | LOCALLY VERIFIED | Production routes `/` and `/simple-chat` are dynamic; root HTML returns private `no-store`; full PostgreSQL-enabled `2521/2521`, TypeScript, zero-error ESLint, build and protected feature gates pass. |
+| Coze stale chunk closure | UNVERIFIED / P1 | Deploy the new exact `main` SHA to isolated Coze, open it in Google Chrome, and prove the HTML references only present chunks with zero `ChunkLoadError`, zero global error boundary and clean Console/network evidence. |
+| GitHub immutable workflows | BLOCKED EXTERNALLY | Actions runs on `fc190b1` never received a runner because of account payment/spending-limit status. Restore billing and run the exact new SHA; local evidence cannot replace this gate. |
+| Stage 3 hosted Canvas and real-P0 | STILL REQUIRED | Preserve unchanged three-mode performance/continuity thresholds and prove real provider generation, charge, cancel and at-most-once refund. The deployment fix does not close these gates. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; do not enter Stage 4/5. |
+
 ## 2026-08-15 immutable gaps after `3e46150`
 
 | Item | Status | Required evidence |
