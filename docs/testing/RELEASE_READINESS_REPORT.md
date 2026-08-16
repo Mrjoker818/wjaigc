@@ -988,5 +988,5 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 
 - The exact Coze source now passes the real paid cancellation path in Google Chrome: the browser reaches `/api/cancel-task`, the durable task remains `cancelled`, no late provider result enters Canvas, and the user receives a clear cancellation result.
 - Accounting evidence is exact: one `-120` consume, one `+120` refund and restored balance `138`. Repeating cancel through the authenticated API returns the same cancelled task and does not add another refund.
-- S3-BUG-033 is therefore closed on the deployed candidate. The current release verdict remains **NOT READY** because the immutable legacy/shadow/canvas-v2 Actions matrix did not run under the billing restriction, and this workspace still skips `12 files / 44 tests` without `POSTGRES_TEST_DATABASE_URL`.
+- S3-BUG-033 is therefore closed on the deployed candidate. The exact candidate also passes a fresh isolated PostgreSQL 18 run with `441/441` files and `2523/2523` tests, zero skipped. The current release verdict remains **NOT READY** because the immutable legacy/shadow/canvas-v2 Actions matrix did not run under the billing restriction.
 - Continue Stage 3 Task 10 only. Do not modify `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` or start Stage 4/5.

@@ -398,4 +398,5 @@ Protected stable branch: read-only and untouched
 
 - Coze deployed exact `main@9e6cfb066bfe05a64fbd210873a3758cf2b3225d`. Google Chrome sent the cancellation request from the visible processing card, removed the frame, reached terminal `cancelled` and rejected the late provider result for at least 50 seconds.
 - Task `async-1786874691821-0-gqs5y2` produced one `-120` consume and one `+120` refund. Repeating authenticated cancellation returned HTTP 200 with the same task; the credits API still contained exactly one refund and balance remained `138`.
-- S3-BUG-033 is cloud-closed. Stage remains Task 10 `10/11` because immutable three-mode Actions are billing-unexecuted and this local workspace still skips 44 PostgreSQL-only tests. `stable` and Stage 4/5 remain untouched.
+- A fresh isolated PostgreSQL 18 cluster supplied both supported test URLs. Full Vitest executed `441/441` files and `2523/2523` tests with zero skips, including billing, refund, terminal race, projection, annotation, element-board and layer-decomposition concurrency.
+- S3-BUG-033 is cloud-closed and the local PostgreSQL evidence gap is closed. Stage remains Task 10 `10/11` because immutable three-mode Actions are billing-unexecuted. `stable` and Stage 4/5 remain untouched.
