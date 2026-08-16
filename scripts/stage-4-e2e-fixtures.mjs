@@ -238,11 +238,20 @@ export function assertStage4FixtureDatabaseEnvironment(environment = process.env
   const runId = environment.E2E_STAGE4_RUN_ID?.trim();
   const fixtureTarget = stage4DatabaseTarget(fixtureUrl, runId);
 
-  const applicationUrl = environment.DATABASE_URL || environment.PGDATABASE_URL;
+  const databaseUrl = environment.DATABASE_URL;
+  const pgDatabaseUrl = environment.PGDATABASE_URL;
+  const applicationUrl = databaseUrl || pgDatabaseUrl;
   if (!applicationUrl || !String(applicationUrl).trim()) {
     throw new Error('BLOCKED: application database URL (PGDATABASE_URL or DATABASE_URL) is required for Stage 4 fixture isolation');
   }
   const applicationTarget = stage4DatabaseTarget(applicationUrl, runId);
+  if (databaseUrl && pgDatabaseUrl) {
+    const databaseTarget = stage4DatabaseTarget(databaseUrl, runId);
+    const pgDatabaseTarget = stage4DatabaseTarget(pgDatabaseUrl, runId);
+    if (JSON.stringify(databaseTarget) !== JSON.stringify(pgDatabaseTarget)) {
+      throw new Error('BLOCKED: configured database targets must match exactly for Stage 4 fixture isolation');
+    }
+  }
   if (JSON.stringify(fixtureTarget) !== JSON.stringify(applicationTarget)) {
     throw new Error('BLOCKED: application database target must exactly match E2E_STAGE4_DATABASE_URL for Stage 4 fixture isolation');
   }

@@ -48,7 +48,7 @@ describe('Stage 4 fixture isolation', () => {
     )).toThrow(/database name must exactly match wujie_stage4_review_42/i);
   });
 
-  it('uses DATABASE_URL precedence and blocks an isolated PG fallback when DATABASE_URL is shared', () => {
+  it('blocks when either configured application database variable is shared or production', () => {
     const isolated = 'postgresql://stage4_runner@127.0.0.1:5544/wujie_stage4_review_42?sslmode=require';
 
     expect(() => assertStage4FixtureDatabaseEnvironment({
@@ -57,6 +57,12 @@ describe('Stage 4 fixture isolation', () => {
       DATABASE_URL: 'postgresql://app@production-db.example.com:5432/wujie_production',
       PGDATABASE_URL: isolated,
     })).toThrow(/production-looking database host|database name must exactly match/i);
+    expect(() => assertStage4FixtureDatabaseEnvironment({
+      E2E_STAGE4_DATABASE_URL: isolated,
+      E2E_STAGE4_RUN_ID: 'review-42',
+      DATABASE_URL: isolated,
+      PGDATABASE_URL: 'postgresql://app@shared-db.example.com:5432/wujie_production',
+    })).toThrow(/production-looking database host|database name must exactly match|configured database targets must match/i);
     expect(() => assertStage4FixtureDatabaseEnvironment({
       E2E_STAGE4_DATABASE_URL: isolated,
       E2E_STAGE4_RUN_ID: 'review-42',
@@ -86,16 +92,31 @@ describe('Stage 4 fixture isolation', () => {
       })).toThrow(/must exactly match E2E_STAGE4_DATABASE_URL|database name must exactly match/i);
     }
 
+  });
+
+  it('accepts both configured variables only when their normalized identities exactly match', () => {
+    const fixtureUrl = 'postgres://stage4_runner@LOCALHOST/wujie_stage4_review_42?sslmode=REQUIRE';
+
     expect(() => assertStage4FixtureDatabaseEnvironment({
-      ...baseEnvironment,
-      DATABASE_URL: isolated,
-      PGDATABASE_URL: 'postgresql://app@production-db.example.com:5432/wujie_production',
-    })).not.toThrow();
-    expect(() => assertStage4FixtureDatabaseEnvironment({
-      ...baseEnvironment,
-      PGDATABASE_URL: isolated,
+      E2E_STAGE4_DATABASE_URL: fixtureUrl,
+      E2E_STAGE4_RUN_ID: 'review-42',
+      DATABASE_URL: 'postgresql://stage4_runner@localhost:5432/wujie_stage4_review_42?sslmode=require',
+      PGDATABASE_URL: 'postgres://stage4_runner@LOCALHOST/wujie_stage4_review_42?sslmode=REQUIRE',
     })).not.toThrow();
   });
+
+  it.each(['DATABASE_URL', 'PGDATABASE_URL'] as const)(
+    'accepts an exact isolated match when only %s is configured',
+    variableName => {
+      const isolated = 'postgresql://stage4_runner@127.0.0.1:5544/wujie_stage4_review_42?sslmode=require';
+
+      expect(() => assertStage4FixtureDatabaseEnvironment({
+        E2E_STAGE4_DATABASE_URL: isolated,
+        E2E_STAGE4_RUN_ID: 'review-42',
+        [variableName]: isolated,
+      })).not.toThrow();
+    },
+  );
 });
 
 describe('Stage 4 workflow performance samples', () => {
