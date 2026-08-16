@@ -1200,3 +1200,11 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Code inspection shows the visible cancel buttons allowed `pointerdown` to reach the Canvas drag handler, which captured the pointer before `click`. A RED/GREEN regression now requires both buttons to stop pointer propagation; cancellation/API/client focused tests pass `23/23`.
 - Fresh local gates pass: Vitest `429 files / 2479 tests`, with `12 files / 44 PostgreSQL-only tests` explicitly skipped; TypeScript exit 0; ESLint exit 0 with `0 errors / 973 historical warnings`; production build `113/113`; protected features `38/38`; whitespace check clean.
 - **Verdict: P0 REMAINS OPEN / SECOND LOCAL CANDIDATE.** GitHub Actions billing is bypassed only for execution flow; it is not treated as passing evidence. A new Coze exact-SHA paid cancellation/refund run is still required.
+
+## 2026-08-16 Coze cancellation closure on `main@9e6cfb0`
+
+- Coze synchronized exact `main@9e6cfb066bfe05a64fbd210873a3758cf2b3225d`. Authenticated Google Chrome submitted a real Pear `gpt-image-2` Quick Create task and displayed its processing-card cancel control.
+- Clicking cancel produced the expected client boundary logs from processing-card intent through `/api/cancel-task`, removed the card immediately, returned terminal `cancelled`, and displayed `任务已被取消`. After 50 seconds, no late green-star test image entered Canvas.
+- The authenticated cancellation API was then called again for the exact task `async-1786874691821-0-gqs5y2`. It returned HTTP 200 and the same durable `cancelled` task instead of creating a new task or terminal transition.
+- The credits API proves one `-120` consume and exactly one `+120` refund; balance returned `18 -> 138`. After the repeated cancel, the refund-row count for the task remained one. UI evidence is retained at `docs/testing/evidence/s3-bug-033-repeat-cancel-refund-idempotency.png`.
+- **Verdict: S3-BUG-033 CLOUD REGRESSION PASS.** This closes the reproduced cancellation/accounting P0. It does not convert the 44 explicitly skipped PostgreSQL-only tests or billing-blocked GitHub Actions runs into passes, and Stage 3 remains Task 10 (`10/11`).

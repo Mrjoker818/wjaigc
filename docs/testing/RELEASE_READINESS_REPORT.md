@@ -983,3 +983,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The Quick Create fallback path works in Coze, but the P0 cancellation gate failed: the browser sent no `/api/cancel-task`, the task completed, one 120-credit charge remained, and no refund was recorded.
 - The second candidate changes only the two processing-card cancel controls so pointer-down cannot be captured by Canvas dragging. Focused regression is `23/23`; full Vitest is `2479 passed / 44 PostgreSQL-only skipped`; TypeScript, zero-error ESLint, `113/113` build and protected features `38/38` pass. Cloud accounting evidence is not yet available.
 - **Decision: NOT READY.** Continue local verification despite unavailable Actions runners, then push only `main`, deploy the exact SHA and repeat cancellation plus repeated-cancel/refund checks. Keep `stable` unchanged and do not enter Stage 4/5.
+
+## 2026-08-16 readiness after `9e6cfb0` paid cancellation closure
+
+- The exact Coze source now passes the real paid cancellation path in Google Chrome: the browser reaches `/api/cancel-task`, the durable task remains `cancelled`, no late provider result enters Canvas, and the user receives a clear cancellation result.
+- Accounting evidence is exact: one `-120` consume, one `+120` refund and restored balance `138`. Repeating cancel through the authenticated API returns the same cancelled task and does not add another refund.
+- S3-BUG-033 is therefore closed on the deployed candidate. The current release verdict remains **NOT READY** because the immutable legacy/shadow/canvas-v2 Actions matrix did not run under the billing restriction, and this workspace still skips `12 files / 44 tests` without `POSTGRES_TEST_DATABASE_URL`.
+- Continue Stage 3 Task 10 only. Do not modify `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` or start Stage 4/5.
