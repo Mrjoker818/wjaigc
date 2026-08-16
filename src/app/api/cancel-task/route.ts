@@ -18,7 +18,26 @@ import { inferTaskErrorSource } from '@/lib/task-core/task-error';
 
 export const dynamic = 'force-dynamic';
 
-function requiresAtomicTerminalSettlement(task: Awaited<ReturnType<typeof getCloudTaskForUser>>): boolean {
+interface AtomicTerminalTaskCandidate {
+  type?: string;
+  result?: unknown;
+}
+
+function hasDurableGenerationSlotIdentity(
+  task: AtomicTerminalTaskCandidate | null | undefined,
+): boolean {
+  const result = task?.result;
+  if (!result || typeof result !== 'object') return false;
+  const submissionPayload = (result as Record<string, unknown>).submissionPayload;
+  if (!submissionPayload || typeof submissionPayload !== 'object') return false;
+
+  const payload = submissionPayload as Record<string, unknown>;
+  return typeof payload.batchId === 'string'
+    && typeof payload.slotId === 'string'
+    && typeof payload.slotIndex === 'number';
+}
+
+function requiresAtomicTerminalSettlement(task: AtomicTerminalTaskCandidate | null | undefined): boolean {
   if (
     task?.type === 'video'
     || task?.type === 'video-extend'
@@ -26,13 +45,7 @@ function requiresAtomicTerminalSettlement(task: Awaited<ReturnType<typeof getClo
     || task?.type === 'annotation-edit'
   ) return true;
 
-  const submissionPayload = task?.result?.submissionPayload;
-  if (!submissionPayload || typeof submissionPayload !== 'object') return false;
-
-  const payload = submissionPayload as Record<string, unknown>;
-  return typeof payload.batchId === 'string'
-    && typeof payload.slotId === 'string'
-    && typeof payload.slotIndex === 'number';
+  return hasDurableGenerationSlotIdentity(task);
 }
 
 /**
@@ -66,7 +79,12 @@ export async function POST(request: NextRequest) {
 
     // 检查任务是否存在于注册中心
     const taskInfo = getTaskInfo(taskId);
-    if (taskInfo && taskInfo.persistence !== 'durable') {
+    const registryRequiresAtomicSettlement = hasDurableGenerationSlotIdentity(taskInfo);
+    if (
+      taskInfo
+      && taskInfo.persistence !== 'durable'
+      && !registryRequiresAtomicSettlement
+    ) {
       if (
         taskInfo.userId
         && taskInfo.userId !== 'anonymous'
@@ -119,7 +137,8 @@ export async function POST(request: NextRequest) {
     }
 
     const persistedTask = await getCloudTaskForUser(taskId, user.id);
-    const atomicTerminalTask = requiresAtomicTerminalSettlement(persistedTask);
+    const atomicTerminalTask = registryRequiresAtomicSettlement
+      || requiresAtomicTerminalSettlement(persistedTask);
     const atomicCancellationReason = persistedTask?.type === 'annotation-edit'
       ? `Annotation edit cancelled (taskId: ${taskId})`
       : persistedTask?.type === 'video' || persistedTask?.type === 'video-extend'

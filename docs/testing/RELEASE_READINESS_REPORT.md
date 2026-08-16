@@ -964,6 +964,13 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Historical contrary evidence from an older baseline is retained, and no performance threshold, retry count or failure assertion was relaxed. The next immutable exact-SHA run is authoritative.
 - **Decision: NOT READY / Stage 3 Task 10 remains `10/11`.** A reviewed normal fast-forward to `main` may be used to obtain immutable evidence. Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. Do not start Coze mode switching or Stage 4/5 before all hosted modes and real-P0 accounting evidence pass.
 
+## 2026-08-16 readiness after real provider cancellation reproduction
+
+- Real Pear generation on `e9efd5d` proves one successful image and one exact 60-credit charge, but the immediate-cancel scenario proves a P0 release blocker: the late result entered Canvas and the charge was not refunded.
+- The narrow local fix and permanent tests pass, as do full Vitest, TypeScript, zero-error ESLint, production build and the `38/38` protected-source gate. PostgreSQL-specific cases remain explicitly skipped because no isolated `POSTGRES_TEST_DATABASE_URL` is present in this workspace.
+- The quick-create proxy 404 fallback is also fixed locally without converting terminal business failures into fallback submissions.
+- **Decision: NOT READY.** A normal fast-forward candidate to `main` is permitted, but release remains blocked until Coze exact-SHA Chrome evidence proves cancellation terminality, late-result isolation and exactly-once refund. Immutable three-mode CI remains unexecuted due GitHub billing, Stage 4/5 remain prohibited, and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+
 ## 2026-08-16 readiness after Coze stale-shell reproduction
 
 - Coze exact source `main@fc190b1214f7ec5a1c3588b2be31a87db29f2337` is not a usable cloud deployment despite root HTTP 200: the cached static HTML references a removed chunk and Chrome reaches the global error boundary.

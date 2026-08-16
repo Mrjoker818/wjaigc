@@ -238,7 +238,7 @@ export function shouldFallbackQuickCreateCompile(
   if (message.includes('sse')) return true;
 
   return error instanceof TypeError
-    || /network error|网络错误|failed to fetch|load failed|未返回可读取的流/.test(message);
+    || /network error|网络错误|failed to fetch|load failed|未返回可读取的流|http\s+404/.test(message);
 }
 
 const VISION_MODEL_PATTERNS = [

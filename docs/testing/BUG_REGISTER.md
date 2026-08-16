@@ -1960,3 +1960,34 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Local regression | Production build marks `/` and `/simple-chat` as dynamic. A real local production request returns `Cache-Control: no-store, must-revalidate, no-cache, max-age=0, private`. PostgreSQL-enabled full Vitest passes `441 files / 2521 tests` with zero skips; TypeScript passes; ESLint exits 0 with `0 errors / 973 historical warnings`; build and protected-feature gate `38/38` pass. |
 | Cloud regression | Coze synchronized exact `main@9a6363f021f7197b3aa5a9cf834c0c1c0419cb67`; build reports `/` and `/simple-chat` as dynamic. Fresh authenticated Chrome tabs loaded the dashboard and independent chat with no global error boundary or `Loading chunk` text. The external root now returns `Cache-Control: no-store, must-revalidate, no-cache, max-age=0, private`; all 11 current HTML static assets return HTTP 200 and the old `5504.45a77f7f149633a6.js` is absent from the HTML. `/api/auth/me` remains 200. |
 | Status | **CLOSED ON COZE `9a6363f`.** The initial stale edge response remained visible immediately after restart, then a cache-busting request reached the dynamic origin; subsequent clean root requests and fresh Chrome tabs received the current no-store shell. This closure does not close the separately visible historical blank project thumbnail or Stage 3 Canvas/real-P0 gates. |
+
+### S3-BUG-033: cancelled durable generation slot accepted a late result and was not refunded
+
+| Field | Detail |
+|---|---|
+| Severity | P0 accounting and terminal-state consistency |
+| Module | `/api/cancel-task`, durable generation slots, credits settlement |
+| Environment | Coze preview on source `e9efd5d8dee8ab06f91ab6d5eb81c6c815391284`, authenticated Google Chrome, Pear `gpt-image-2`, 2026-08-16 |
+| Reproduction | Start one real image generation, click cancel immediately after submission, then observe the Canvas, task status and credit balance until the provider finishes. |
+| Expected | The durable slot enters `cancelled`, any late provider completion is rejected, and the single 60-credit charge is refunded exactly once. |
+| Actual | The UI continued processing after cancel, accepted the completed image about 40 seconds later, and retained the charge. Balance changed `78 -> 18`; cumulative usage changed `3182 -> 3242`. |
+| Root cause | `/api/cancel-task` trusted the registry's temporary `persistence: memory` marker before inspecting the durable slot identity. A task that already carried `batchId + slotId + slotIndex` could therefore bypass the database atomic terminal transition and use the legacy in-memory path. |
+| TDD | A new durable-slot/memory-marker regression failed before the change (`1 failed / 14 passed`) and passes after the minimal fix (`15/15`). The broader task/cancellation/state/projection contract passes `190 passed / 1 PostgreSQL-gated skipped`. |
+| Fix | Treat structural durable generation-slot identity as authoritative even when the registry marker is temporarily `memory`; route cancellation through `terminateCloudTaskAndRefund` instead of the legacy refund path. Registry-only non-durable edit tasks retain compatibility behavior. |
+| Evidence | `test-results/screenshots/stage3-cancel-late-result-failure-e9efd5d.png` plus the recorded balance and cumulative-usage deltas above. |
+| Status | **FIXED LOCALLY / COZE REAL CANCELLATION, LATE-RESULT REJECTION AND EXACTLY-ONCE REFUND PENDING.** Do not close until the deployed exact SHA proves all three. |
+
+### S3-BUG-034: quick-create compile proxy 404 did not use the existing raw-generation fallback
+
+| Field | Detail |
+|---|---|
+| Severity | P1 core creation availability |
+| Module | Quick Create compile transport |
+| Environment | Coze preview and local TDD, 2026-08-16 |
+| Reproduction | Let the Coze proxy return HTTP 404 before `/api/quick-create/compile` reaches the application route. |
+| Expected | A route-level transport 404 falls back to the existing raw image-generation submission, while terminal business errors remain fail-closed. |
+| Actual | The client surfaced `快速创作编译失败（HTTP 404）` and stopped before the existing fallback. |
+| Root cause | `shouldFallbackQuickCreateCompile()` recognized network exceptions, failed fetches, unreadable streams and malformed SSE, but not a proxy-level HTTP 404. The application route exists in the production route table, so this is a transport boundary rather than missing source. |
+| TDD | The new 404 case failed before the fix (`1 failed / 1 passed`). The focused quick-create contracts now pass `36/36`, including a terminal `UNAUTHORIZED` case that must not fall back. |
+| Fix | Add only `HTTP 404` to the transport fallback classifier; any parsed terminal business code still takes precedence and remains non-fallback. |
+| Status | **FIXED LOCALLY / COZE PROXY-FALLBACK REGRESSION PENDING.** |

@@ -126,6 +126,55 @@ describe('POST /api/cancel-task', () => {
     );
   });
 
+  it('uses authoritative atomic settlement when a durable generation slot is temporarily marked memory-only', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId: 'generation-slot-memory-marker',
+      userId: 'user-a',
+      type: 'generate-async',
+      status: 'processing',
+      creditCost: 60,
+      persistence: 'memory',
+      result: {
+        submissionPayload: {
+          batchId: 'batch-memory-marker',
+          slotId: 'batch-memory-marker:0',
+          slotIndex: 0,
+        },
+      },
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'generation-slot-memory-marker',
+      userId: 'user-a',
+      type: 'generate-async',
+      status: 'processing',
+      creditCost: 60,
+      creditStatus: 'pending',
+      result: {
+        submissionPayload: {
+          batchId: 'batch-memory-marker',
+          slotId: 'batch-memory-marker:0',
+          slotIndex: 0,
+        },
+      },
+    });
+
+    const response = await POST(request('generation-slot-memory-marker'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getCloudTaskForUser).toHaveBeenCalledWith(
+      'generation-slot-memory-marker',
+      'user-a',
+    );
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith(
+      'generation-slot-memory-marker',
+      'cancelled',
+      '图像生成槽位已取消 (taskId: generation-slot-memory-marker)',
+    );
+    expect(mocks.refundCredits).not.toHaveBeenCalled();
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+  });
+
   it('does not project cancelled when authoritative persistence fails', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
     mocks.getTaskInfo.mockReturnValue({
