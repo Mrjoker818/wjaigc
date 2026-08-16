@@ -8,6 +8,9 @@ import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { getDoctorExitCode } from './doctor-status.mjs';
 import { collectAssetGraphDoctorFacts, resolveDoctorDatabaseUrl, summarizeAssetGraphDoctor } from './doctor-asset-status.mjs';
 import { connectionOptions } from './run-migrations.mjs';
+import { migrationChecksum } from './run-migrations.mjs';
+
+const AGENT_EVENT_MIGRATION = '20260816_wj_stable_s4_agent_events.sql';
 
 // Test isolation: DOCTOR_SKIP_ENV_FILE=1 skips loading .env/.env.local so
 // production-credential checks run against a clean environment.
@@ -337,6 +340,84 @@ function checkNodeVersion() {
   add(major >= 18 ? 'PASS' : 'FAIL', 'node-version', `${process.version} (require >= 18)`);
 }
 
+async function checkAgentEventStorage() {
+  const connectionString = resolveDoctorDatabaseUrl(process.env);
+  if (!connectionString) {
+    add('BLOCKED', 'agent-event-storage', 'database is unavailable; Agent event storage cannot be verified');
+    return;
+  }
+
+  const client = new Client({
+    ...connectionOptions(connectionString),
+    connectionTimeoutMillis: 5_000,
+  });
+  try {
+    const migrationBytes = await fs.readFile(
+      path.resolve('migrations', AGENT_EVENT_MIGRATION),
+    );
+    const expectedChecksum = migrationChecksum(migrationBytes);
+    await client.connect();
+    const [ledger, columns, constraints] = await Promise.all([
+      client.query(
+        'SELECT checksum FROM wujie_schema_migrations WHERE version = $1',
+        [AGENT_EVENT_MIGRATION],
+      ),
+      client.query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'wujie_agent_events'`,
+      ),
+      client.query(
+        `SELECT constraint_name
+         FROM information_schema.table_constraints
+         WHERE table_schema = current_schema()
+           AND table_name = 'wujie_agent_events'
+           AND constraint_name = 'wujie_agent_events_task_sequence_unique'
+           AND constraint_type = 'UNIQUE'`,
+      ),
+    ]);
+    const requiredColumns = new Set([
+      'event_id',
+      'task_id',
+      'owner_id',
+      'project_id',
+      'workspace',
+      'sequence',
+      'event_type',
+      'request_digest',
+      'payload',
+      'created_at',
+    ]);
+    for (const row of columns.rows) requiredColumns.delete(row.column_name);
+    const checksumMatches = ledger.rows[0]?.checksum === expectedChecksum;
+    const storageContractMatches = requiredColumns.size === 0
+      && constraints.rows.length === 1;
+
+    if (checksumMatches && storageContractMatches) {
+      add(
+        'PASS',
+        `agent-event-migration:${AGENT_EVENT_MIGRATION}`,
+        'checksum and table contract verified',
+      );
+      return;
+    }
+    add(
+      'FAIL',
+      `agent-event-migration:${AGENT_EVENT_MIGRATION}`,
+      `checksum=${checksumMatches ? 'verified' : 'missing-or-mismatched'}; tableContract=${storageContractMatches ? 'verified' : 'missing-or-invalid'}`,
+    );
+  } catch {
+    add(
+      production ? 'FAIL' : 'BLOCKED',
+      `agent-event-migration:${AGENT_EVENT_MIGRATION}`,
+      'verification failed',
+    );
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
 function checkCanvasKernelMode() {
   const raw = process.env.WUJIE_CANVAS_KERNEL_MODE?.trim();
   if (!raw) {
@@ -451,7 +532,7 @@ async function checkDatabaseTables() {
   });
   try {
     await client.connect();
-    const tables = ['wujie_users', 'wujie_api_providers', 'wujie_user_data', 'wujie_system_settings', 'wujie_audit_log', 'cloud_tasks'];
+    const tables = ['wujie_users', 'wujie_api_providers', 'wujie_user_data', 'wujie_system_settings', 'wujie_audit_log', 'cloud_tasks', 'wujie_agent_events'];
     for (const table of tables) {
       try {
         await client.query(`SELECT 1 FROM ${table} LIMIT 1`);
@@ -486,6 +567,7 @@ async function main() {
   await checkDataDir();
   await checkDatabase();
   await checkAssetGraph();
+  await checkAgentEventStorage();
   await checkDatabaseTables();
   await checkPostgresTestDatabase();
   await checkObjectStorage();

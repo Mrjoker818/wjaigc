@@ -43,7 +43,7 @@ const baselineFeatures: Feature[] = [
 ];
 
 describe('protected baseline release gate', () => {
-  it('pins the Stage 4 gate to main@7fdc010 and permits only its own evidence report', async () => {
+  it('pins the Stage 4 gate and permits only the declared Stage 4 task surfaces', async () => {
     const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
@@ -51,6 +51,11 @@ describe('protected baseline release gate', () => {
 
     expect(command).toContain('--base 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b');
     expect(command).toContain('--allow-path .superpowers/sdd/task-0-report.md');
+    expect(command).toContain('--allow-path .superpowers/sdd/task-1-report.md');
+    expect(command).toContain('--allow-path migrations/20260816_wj_stable_s4_agent_events.sql');
+    expect(command).toContain('--allow-path scripts/run-migrations.mjs');
+    expect(command).toContain('--allow-path src/app/api/agent-runs/');
+    expect(command).not.toMatch(/--allow-path src\/app\/api\/(?:\s|$)/);
   });
 
   it('passes an identical candidate and allows documentation-only changes', async () => {

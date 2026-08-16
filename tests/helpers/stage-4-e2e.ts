@@ -90,8 +90,8 @@ function stage4RunId(): string {
 }
 
 async function buildStage4Plan(runId: string) {
-  const module = await import('../../scripts/stage-4-e2e-fixtures.mjs');
-  return module.buildStage4FixturePlan(runId) as {
+  const fixtureModule = await import('../../scripts/stage-4-e2e-fixtures.mjs');
+  return fixtureModule.buildStage4FixturePlan(runId) as {
     users: Stage4FixtureUser[];
     workflows: Array<{
       browserProfile: string;
@@ -104,8 +104,8 @@ async function buildStage4Plan(runId: string) {
 }
 
 async function assertStage4IsolationDatabaseConfigured(): Promise<void> {
-  const module = await import('../../scripts/stage-4-e2e-fixtures.mjs');
-  module.assertStage4FixtureDatabaseEnvironment(process.env);
+  const fixtureModule = await import('../../scripts/stage-4-e2e-fixtures.mjs');
+  fixtureModule.assertStage4FixtureDatabaseEnvironment(process.env);
 }
 
 function evidenceDirectory(testInfo: TestInfo): string {

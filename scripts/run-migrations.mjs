@@ -42,7 +42,7 @@ export function connectionOptions(connectionString) {
   };
 }
 
-async function migrationFiles() {
+export async function listMigrationFiles() {
   const entries = await readdir(migrationsDirectory, { withFileTypes: true });
   return entries
     .filter((entry) => entry.isFile() && /^\d+_.+\.sql$/.test(entry.name))
@@ -50,7 +50,7 @@ async function migrationFiles() {
     .sort();
 }
 
-function checksum(contents) {
+export function migrationChecksum(contents) {
   return createHash('sha256').update(contents).digest('hex');
 }
 
@@ -78,9 +78,9 @@ export async function applyMigrations() {
       );
       await ensureLedger(client);
 
-      for (const version of await migrationFiles()) {
+      for (const version of await listMigrationFiles()) {
         const contents = await readFile(resolve(migrationsDirectory, version));
-        const digest = checksum(contents);
+        const digest = migrationChecksum(contents);
         const recorded = await client.query(
           'SELECT checksum FROM wujie_schema_migrations WHERE version = $1',
           [version],
