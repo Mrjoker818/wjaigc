@@ -1,5 +1,10 @@
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+
+const requireFromStage4Fixture = createRequire(import.meta.url);
+const requireFromPg = createRequire(requireFromStage4Fixture.resolve('pg/lib/connection-parameters'));
+const parsePgConnectionString = requireFromPg('pg-connection-string').parse;
 
 const BROWSER_PROFILES = [
   'chromium',
@@ -185,7 +190,32 @@ function stage4DatabaseTarget(rawUrl, rawRunId) {
     throw new Error('Stage 4 fixture database URL must use postgres or postgresql');
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  const allowedQueryKeys = new Set(['sslmode']);
+  const allowedSslModes = new Set(['disable', 'prefer', 'require', 'verify-ca', 'verify-full', 'no-verify']);
+  const queryEntries = [...parsed.searchParams.entries()];
+  if (
+    queryEntries.some(([key]) => key !== key.toLowerCase() || !allowedQueryKeys.has(key))
+    || queryEntries.filter(([key]) => key === 'sslmode').length > 1
+  ) {
+    throw new Error('BLOCKED: Stage 4 fixture database URL must not use connection query parameters other than sslmode');
+  }
+  const sslMode = parsed.searchParams.get('sslmode') || '';
+  if (sslMode && (!allowedSslModes.has(sslMode) || sslMode !== sslMode.toLowerCase())) {
+    throw new Error('BLOCKED: Stage 4 fixture database URL sslmode is not allowed');
+  }
+
+  const parserUrl = new URL(parsed);
+  if (sslMode === 'require') {
+    parserUrl.searchParams.set('uselibpqcompat', 'true');
+  }
+  let connectionConfig;
+  try {
+    connectionConfig = parsePgConnectionString(parserUrl.toString());
+  } catch {
+    throw new Error('Stage 4 fixture database URL could not be parsed safely');
+  }
+
+  const hostname = String(connectionConfig.host || '').toLowerCase();
   if (!hostname) {
     throw new Error('Stage 4 fixture database host is required');
   }
@@ -193,19 +223,8 @@ function stage4DatabaseTarget(rawUrl, rawRunId) {
     throw new Error('BLOCKED: Stage 4 fixture database must not use a production-looking database host');
   }
 
-  const forbiddenQueryKeys = new Set(['database', 'dbname', 'schema', 'currentschema', 'options']);
-  if ([...parsed.searchParams.keys()].some(key => forbiddenQueryKeys.has(key.toLowerCase()))) {
-    throw new Error('BLOCKED: Stage 4 fixture database URL must not use database identity query parameters');
-  }
-
-  let databaseName;
-  let username;
-  try {
-    databaseName = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
-    username = decodeURIComponent(parsed.username);
-  } catch {
-    throw new Error('Stage 4 fixture database URL contains invalid encoding');
-  }
+  const databaseName = String(connectionConfig.database || '');
+  const username = String(connectionConfig.user || '');
   const expectedDatabaseName = `wujie_stage4_${normalizedRunId}`;
   if (databaseName !== expectedDatabaseName) {
     throw new Error(`BLOCKED: Stage 4 fixture database name must exactly match ${expectedDatabaseName}`);
@@ -217,14 +236,14 @@ function stage4DatabaseTarget(rawUrl, rawRunId) {
   return {
     protocol: 'postgresql:',
     hostname,
-    port: parsed.port || '5432',
+    port: String(connectionConfig.port || '5432'),
     databaseName,
     username,
-    sslMode: (parsed.searchParams.get('sslmode') || '').toLowerCase(),
-    ssl: parsed.searchParams.get('ssl') || '',
-    sslCert: parsed.searchParams.get('sslcert') || '',
-    sslKey: parsed.searchParams.get('sslkey') || '',
-    sslRootCert: parsed.searchParams.get('sslrootcert') || '',
+    sslMode,
+    sslEnabled: connectionConfig.ssl === false ? false : Boolean(connectionConfig.ssl),
+    sslRejectUnauthorized: connectionConfig.ssl && typeof connectionConfig.ssl === 'object'
+      ? connectionConfig.ssl.rejectUnauthorized !== false
+      : null,
   };
 }
 

@@ -37,15 +37,56 @@ describe('Stage 4 fixture isolation', () => {
     expect(() => assertStage4FixtureDatabase(
       'postgresql://stage4_runner@127.0.0.1:5544/wujie?schema=wujie_stage4_review_42',
       'review-42',
-    )).toThrow(/must not use database identity query parameters/i);
+    )).toThrow(/must not use connection query parameters/i);
     expect(() => assertStage4FixtureDatabase(
       'postgresql://stage4_runner@production-stage4.example.com:5544/wujie_stage4_review_42',
       'review-42',
     )).toThrow(/production-looking database host/i);
     expect(() => assertStage4FixtureDatabase(
-      'postgresql://stage4_runner@127.0.0.1:5544/wujie_production?application_name=stage4',
+      'postgresql://stage4_runner@127.0.0.1:5544/wujie_production',
       'review-42',
     )).toThrow(/database name must exactly match wujie_stage4_review_42/i);
+  });
+
+  it.each([
+    ['host', 'prod.example'],
+    ['hostaddr', '10.0.0.8'],
+    ['port', '5432'],
+    ['user', 'admin'],
+    ['database', 'production'],
+    ['dbname', 'production'],
+    ['service', 'prod'],
+    ['options', '-c search_path=public'],
+  ])('blocks PostgreSQL query override %s before it can alter fixture routing', (key, value) => {
+    const isolatedLookingUrl = new URL(
+      'postgresql://stage4_runner@127.0.0.1:5544/wujie_stage4_review_42',
+    );
+    isolatedLookingUrl.searchParams.set(key, value);
+
+    expect(() => assertStage4FixtureDatabase(isolatedLookingUrl.toString(), 'review-42'))
+      .toThrow(/must not use connection query parameter/i);
+  });
+
+  it('accepts only the allowed SSL metadata on an exact isolated target', () => {
+    expect(() => assertStage4FixtureDatabase(
+      'postgresql://stage4_runner@127.0.0.1:5544/wujie_stage4_review_42?sslmode=require',
+      'review-42',
+    )).not.toThrow();
+  });
+
+  it('does not expose credentials or the full connection string when blocking an override', () => {
+    const credential = 'stage4-password-do-not-report';
+    const rawUrl = `postgresql://stage4_runner:${credential}@127.0.0.1:5544/wujie_stage4_review_42?host=prod.example`;
+
+    try {
+      assertStage4FixtureDatabase(rawUrl, 'review-42');
+      throw new Error('expected Stage 4 database isolation to block');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).toMatch(/must not use connection query parameters/i);
+      expect(message).not.toContain(credential);
+      expect(message).not.toContain(rawUrl);
+    }
   });
 
   it('blocks when either configured application database variable is shared or production', () => {
@@ -94,14 +135,14 @@ describe('Stage 4 fixture isolation', () => {
 
   });
 
-  it('accepts both configured variables only when their normalized identities exactly match', () => {
-    const fixtureUrl = 'postgres://stage4_runner@LOCALHOST/wujie_stage4_review_42?sslmode=REQUIRE';
+  it('accepts syntactically different URLs only when their final parsed identities match', () => {
+    const fixtureUrl = 'postgres://stage4_runner@LOCALHOST/wujie_stage4_review_42?sslmode=require';
 
     expect(() => assertStage4FixtureDatabaseEnvironment({
       E2E_STAGE4_DATABASE_URL: fixtureUrl,
       E2E_STAGE4_RUN_ID: 'review-42',
       DATABASE_URL: 'postgresql://stage4_runner@localhost:5432/wujie_stage4_review_42?sslmode=require',
-      PGDATABASE_URL: 'postgres://stage4_runner@LOCALHOST/wujie_stage4_review_42?sslmode=REQUIRE',
+      PGDATABASE_URL: 'postgres://stage4_runner@LOCALHOST/wujie_stage4_review_42?sslmode=require',
     })).not.toThrow();
   });
 
