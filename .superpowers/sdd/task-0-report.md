@@ -5,7 +5,7 @@
 - Branch: `codex/wj-stable-s4`
 - Task base commit: `7c668f0`
 - Worktree: `J:\无界本地版\projects\_upstream-wjaigc-restore\.worktrees\wj-stable-s3`
-- Status: SUPERSEDED_BY_REJECTION_FIX_EVIDENCE (see the appended 2026-08-17 entry)
+- Status: SECOND_REVIEW_FIX_EVIDENCE_RECORDED (earlier evidence sections are superseded where noted)
 
 ## Implementation Summary
 
@@ -331,6 +331,8 @@ Intentionally excluded from commit:
 
 ## Rejection Fix Evidence (2026-08-17)
 
+> SUPERSEDED for fixture identity, 100-node coverage, and doctor-output claims by the Second Independent Review Fix Evidence below. It remains a historical record of the first rejection-fix attempt.
+
 ### Exact Tested Code Commit
 
 - Tested code commit: `6c2ead55c6c8277085a97149df45a11037483753` (`test: pin stage four protected baseline gate`)
@@ -382,3 +384,108 @@ Intentionally excluded from commit:
 ### Remaining Concern
 
 - No isolated Stage 4 database was available, so authenticated seeding and real 100-node performance values remain blocked. The older `7c668f0` browser evidence did not test this rejection fix and is superseded for fixture-isolation claims.
+
+## Second Independent Review Fix Evidence (2026-08-17)
+
+### Exact Tested Code Commit
+
+- Tested code commit: `615d60d7a3fa768fee42a23bbd99b1d21d1f5ee9` (`test: require exact stage four fixture identities`).
+- The following documentation commit is bookkeeping only and references this exact prior code/test SHA.
+- The earlier `6c2ead55c6c8277085a97149df45a11037483753` evidence did not test these second-review fixes and is superseded for the affected claims.
+
+### RED Evidence
+
+1. Command: `pnpm exec vitest run src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts`
+   - Result: exit 1; 1 file failed, 1 passed; 8 tests failed, 6 passed.
+   - Expected failures proved the fixture plan lacked `expectedNodeIds`, `DATABASE_URL` precedence was wrong, substring/query identities were accepted, and node coverage did not compare exact IDs.
+2. Command: `pnpm exec vitest run src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`
+   - Result: exit 1; 1 test failed, 9 passed.
+   - Expected failure proved a whitespace-only `DATABASE_URL` incorrectly fell through to an isolated `PGDATABASE_URL`, unlike application precedence.
+
+### GREEN And Gate Evidence
+
+1. Command: `pnpm exec vitest run src/__tests__/lib/stage-4-modes.test.ts src/__tests__/scripts/stage-4-inventory.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts`
+   - Result: exit 0; 5 files passed, 23 tests passed.
+2. Command: `pnpm ts-check`
+   - Result: exit 0; Next route types generated and TypeScript completed without errors.
+3. Command: `pnpm test:inventory:stage-4`
+   - Result: exit 0; routes=200, workspaces=3, nodeTypes=51, portTypes=10.
+4. Command: `pnpm check:protected-baseline`
+   - Result: exit 0; fixed base `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`, 38/38 feature IDs present, 0 warnings.
+5. Commands: `git diff --check 08c2596150b7eea11b880e1f584dc407c8f3a054..615d60d` and `git diff --check 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b..615d60d`
+   - Result: both exit 0 with empty, pristine output.
+6. Command: `pnpm exec playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --project=chromium`
+   - Result: exit 1, intentionally BLOCKED before authentication or persisted writes: `E2E_STAGE4_DATABASE_URL is required for Stage 4 fixture isolation`.
+   - Verified evidence directory: `test-results/stage-4-baseline/evidence/615d60d7a3fa768fee42a23bbd99b1d21d1f5ee9-worktree-3683a4b89198/stage4-2026-08-16T16-27-32/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/`.
+   - Verified files: `final.png`, `video.webm`, `console.json`, `network.json`, and `trace.zip`.
+
+### Doctor Evidence
+
+1. PowerShell command: `pnpm doctor` (no redirection)
+   - Exit 0; stdout empty; stderr empty. This invokes pnpm's built-in doctor command, not the package script.
+2. PowerShell command: `node scripts/doctor.mjs` (no redirection)
+   - Exit 0; stderr empty; stdout ended with `Summary: 25 passed, 12 warnings, 0 failed, 2 blocked`.
+3. PowerShell command: `pnpm run doctor` (no redirection)
+   - Exit 0; stderr empty; stdout included the package-script banner and the same `Summary: 25 passed, 12 warnings, 0 failed, 2 blocked`.
+
+Exact direct-script stdout:
+
+```text
+[PASS] node-version: v25.2.1 (require >= 18)
+[PASS] runtime: Node v25.2.1; mode=development
+[PASS] canvas-kernel-mode: legacy (default)
+[PASS] agent-runtime-mode: legacy (default)
+[PASS] workflow-renderer-mode: legacy (default)
+[WARN] authentication-secret: not configured for this runtime
+[WARN] INTERNAL_API_SECRET: not configured for this runtime
+[WARN] PAYMENT_TOKEN_SECRET: not configured for this runtime
+[WARN] WUJIE_ADMIN_PASSWORD: missing, weak, or placeholder value
+[WARN] MANDATORY_API_AUTH: must be true for a release environment
+[WARN] APIMART_API_KEY: not configured in local environment
+[WARN] GEMINI_API_KEY: not configured in local environment
+[PASS] data-directory: J:\无界本地版\projects\_upstream-wjaigc-restore\.worktrees\wj-stable-s3\data
+[WARN] database: PGDATABASE_URL or DATABASE_URL is not configured
+[PASS] asset-mode: legacy
+[BLOCKED] asset-graph: database is unavailable; asset graph facts cannot be verified
+[BLOCKED] postgres-test-database: POSTGRES_TEST_DATABASE_URL is not configured; Stage 1 release verification is blocked
+[WARN] object-storage: COZE_BUCKET_ENDPOINT_URL / COZE_BUCKET_NAME not configured; local storage fallback must be verified
+[PASS] build-artifacts: .next directory exists
+[PASS] build-manifest: exists
+[PASS] dir:src/app: exists
+[PASS] dir:src/components: exists
+[PASS] dir:src/lib: exists
+[PASS] dir:public: exists
+[PASS] public-writable: writable
+[PASS] node_modules: installed
+[PASS] dep:next: installed
+[PASS] dep:react: installed
+[PASS] dep:react-dom: installed
+[PASS] dep:pg: installed
+[PASS] dep:jose: installed
+[PASS] dep:sharp: installed
+[PASS] config:.coze: exists
+[PASS] config:package.json: exists
+[PASS] config:tsconfig.json: exists
+[PASS] port-config: port=5000
+[WARN] api:session: unreachable (service may not be running)
+[WARN] api:models: unreachable (service may not be running)
+[WARN] deployment-url: not supplied; use pnpm doctor -- --url=https://deployment.example
+
+Summary: 25 passed, 12 warnings, 0 failed, 2 blocked
+```
+
+### Files Changed By Second Review Fix
+
+- `scripts/stage-4-e2e-fixtures.mjs`
+- `src/__tests__/helpers/stage-4-e2e.test.ts`
+- `src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`
+- `tests/e2e/stage-4-node-chat-agent.spec.ts`
+- `tests/helpers/stage-4-e2e.ts`
+- `tests/helpers/workflow-performance.ts`
+
+### Self-Review And Concern
+
+- Effective application DB selection now exactly follows `DATABASE_URL || PGDATABASE_URL`; a shared/production `DATABASE_URL` cannot be masked by an isolated PG fallback.
+- Both URLs must independently match `wujie_stage4_<sanitized E2E_STAGE4_RUN_ID>` and then match protocol, host, effective port, database, user, and SSL target. Database/schema query tricks are rejected and credentials never enter errors or reports.
+- The fixture retains its exact 100 expected node IDs. DOM IDs are not deduplicated; duplicates, missing IDs, unexpected IDs, and 100 wrong IDs block before measurement. The browser sampler receives only the fixture's expected IDs.
+- Concern: no isolated Stage 4 database was available, so authenticated seeding and real 100-node performance values remain BLOCKED rather than passed.
