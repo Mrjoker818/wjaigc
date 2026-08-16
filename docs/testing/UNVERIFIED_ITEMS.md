@@ -897,3 +897,11 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - **Quick Create proxy fallback:** the Coze fallback path has been observed continuing into a real Pear task. Exact HTTP-404 attribution and terminal authorization/model fail-closed behavior remain unverified in cloud evidence.
 - **Immutable three-mode matrix:** GitHub runs `31916152862` and `31916152867` received no runner and executed no steps because of the account billing/spending limit. Rerun the exact SHA when infrastructure is restored; do not replace it with a local claim.
 - **Release order:** Google Chrome on the isolated Coze preview first, then the stable deployment domain. Stage 4/5 and any `stable` branch change remain unauthorized.
+
+## 2026-08-16 verification delta for `0a34c73`
+
+- **Local three-mode Canvas matrix: VERIFIED.** Exact-SHA canvas-v2, legacy and shadow each pass `60/60` across Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium (`180/180`).
+- **Native media continuity: VERIFIED LOCALLY.** All 30 pressure-pan samples report zero monitored native loads/src rewrites, zero disappeared frames and zero unclickable duration.
+- **Hosted immutable matrix: STILL UNVERIFIED.** GitHub Actions billing prevented runner allocation and no workflow steps executed. Local evidence does not replace this release gate.
+- **Coze exact-SHA Canvas regression: UNVERIFIED.** After `main` receives the candidate, Coze must pull the exact SHA and repeat the required Chrome deployment smoke/regression sequence.
+- **Stage status:** Task 10 remains `10/11`; do not begin Stage 4/5 and do not modify `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`.

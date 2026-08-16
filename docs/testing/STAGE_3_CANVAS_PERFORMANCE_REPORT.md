@@ -167,3 +167,11 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 - Fresh production evidence execution `local-owner-safe-legacy-full-20260815` passes the complete five-profile legacy matrix `60/60`. Desktop metrics: Chromium/1080p 100 nodes `57.42/57.42 FPS`, 300 nodes `54.82/54.26 FPS`, input P95 at most `40.1ms`, save longest task `0ms`, disappeared frames `0`, unclickable time `0`.
 - Repository gates pass: focused contracts `8 files / 78 tests`; PostgreSQL-enabled full Vitest `441 files / 2512 tests` with zero skips; TypeScript; ESLint `0 errors / 973 historical warnings`; exact reviewed protected-source gate `38/38`; production build `116/116`; whitespace check.
 - **Verdict: LOCAL CANDIDATE PASS / STAGE 3 TASK 10 REMAINS ACTIVE.** Commit and fast-forward only `main`, then require a new immutable legacy/shadow/canvas-v2 matrix. Coze `shadow -> canvas-v2 -> legacy`, real provider execution and authoritative charge/cancel/refund evidence remain mandatory.
+
+## 2026-08-16 media stability candidate `0a34c73`
+
+- Browser tracing on the previous render path recorded about `900` image load events during one 3.6-second 100-node pan, despite the same 100 image elements and unchanged sources. This explained the visible blanking and temporary loss of clickability under load.
+- The media subtree is now value-memoized, replacement images decode before commit, and the source state machine explicitly handles pending replacement, rollback and stale DOM load events. The E2E sampler records native image loads and source mutations instead of inferring them only from React state.
+- Exact-SHA matrices pass canvas-v2 `60/60`, legacy `60/60` and shadow `60/60`, for `180/180` cases total. Desktop Chromium results across modes range from `55.62` to `58.60 FPS`; input P95 is at most `43.9ms`. All 30 pressure samples have zero disappeared frames, zero unclickable duration and zero monitored media load/src events.
+- Full local verification passes `2527/2527` tests with PostgreSQL enabled, TypeScript, build, zero-error ESLint, protected features and whitespace checks.
+- **Verdict: EXACT-SHA LOCAL THREE-MODE PASS / HOSTED IMMUTABLE EVIDENCE PENDING.** GitHub Billing prevented runner allocation; the failure is infrastructure, not a product test result. Task 10 remains active and fixed thresholds remain unchanged.

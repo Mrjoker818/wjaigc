@@ -990,3 +990,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Accounting evidence is exact: one `-120` consume, one `+120` refund and restored balance `138`. Repeating cancel through the authenticated API returns the same cancelled task and does not add another refund.
 - S3-BUG-033 is therefore closed on the deployed candidate. The exact candidate also passes a fresh isolated PostgreSQL 18 run with `441/441` files and `2523/2523` tests, zero skipped. The current release verdict remains **NOT READY** because the immutable legacy/shadow/canvas-v2 Actions matrix did not run under the billing restriction.
 - Continue Stage 3 Task 10 only. Do not modify `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` or start Stage 4/5.
+
+## 2026-08-16 readiness after exact-SHA local three-mode Canvas closure
+
+- `0a34c73479d46e8dff85e3c033a9200765291454` passes the complete local Stage 3 matrix in canvas-v2, legacy and shadow modes: `180/180` real Playwright cases across five browser profiles.
+- The new regression gate directly proves that preloaded monitored images do not emit native reloads or `src` rewrites during 100/300-node pan. All modes retain zero disappeared frames and zero unclickable time.
+- Repository gates pass with PostgreSQL enabled: `2527/2527` tests, TypeScript, production build, protected feature gate and zero ESLint errors. Independent review reports no Critical or Important findings.
+- **Decision: CONDITIONALLY READY FOR `main` CANDIDATE PUSH, NOT RELEASE READY.** Hosted immutable Actions remain unexecuted because GitHub did not allocate runners under the billing limit. Coze exact-SHA regression is still required after `main` is updated. `stable` remains untouched and Stage 4/5 remain blocked.

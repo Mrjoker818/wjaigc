@@ -158,3 +158,11 @@ The existing `pnpm perf:check` string microbenchmark is auxiliary only and is no
 - Focused hardening contracts pass `88/88`. The five-profile move/resize/undo/redo/immediate-reload flow passes `5/5`; final WebKit merge-window and Chromium immediate-reload checks pass `1/1` each.
 - The first post-review full test run retained S3-TEST-002 RED for a stale explicit-project hydration source anchor. The runtime workflow restore remained present; the recovery-aware ordering contract now passes `11/11`, followed by a clean PostgreSQL-enabled full rerun.
 - Exact immutable-SHA browser evidence, cloud providers/billing, GitHub Actions and `shadow -> canvas-v2 -> legacy` remain open. Beacon audit receipts and cross-session authorization push are recorded P2 limitations.
+
+## Task 10 Local Billing-Bypass Evidence
+
+- Exact source: `0a34c73479d46e8dff85e3c033a9200765291454` with a clean tracked worktree. Evidence is stored under the exact SHA, Canvas mode, run ID, browser, retry and repeat path.
+- Complete local matrix: canvas-v2 `60/60`, legacy `60/60`, shadow `60/60`; Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium; `180/180` total.
+- Desktop minimum FPS is `55.62` and maximum input P95 is `43.9ms`. All 30 100/300-node pan samples report zero disappeared frames, zero unclickable duration and zero native load/src events for preloaded monitored images.
+- Repository gates: PostgreSQL-enabled Vitest `441/441` files and `2527/2527` tests, TypeScript, ESLint `0 errors / 973 warnings`, production build `113/113`, protected features `38/38`, Doctor and whitespace pass.
+- This local execution bypasses the unavailable Actions runner only as a development continuity measure. It does not satisfy the immutable hosted gate, which remains unexecuted because of GitHub billing.

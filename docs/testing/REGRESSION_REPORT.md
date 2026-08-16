@@ -1209,3 +1209,12 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - The credits API proves one `-120` consume and exactly one `+120` refund; balance returned `18 -> 138`. After the repeated cancel, the refund-row count for the task remained one. UI evidence is retained at `docs/testing/evidence/s3-bug-033-repeat-cancel-refund-idempotency.png`.
 - A fresh isolated PostgreSQL 18 cluster then supplied both `POSTGRES_TEST_DATABASE_URL` and `TEST_POSTGRES_URL`. Full Vitest executed `441/441` files and `2523/2523` tests with zero skips. The run includes atomic task billing, terminal-state races, rollback, task projection, annotation, element-board and Pear layer-decomposition concurrency. Machine-readable evidence: `docs/testing/evidence/s3-bug-033-local-postgres-2026-08-16.json`.
 - **Verdict: S3-BUG-033 CLOUD AND LOCAL POSTGRESQL REGRESSION PASS.** This closes the reproduced cancellation/accounting P0. Billing-blocked GitHub Actions remain unexecuted rather than passed, and Stage 3 remains Task 10 (`10/11`).
+
+## 2026-08-16 exact-SHA Canvas media stability regression
+
+- Candidate `0a34c73479d46e8dff85e3c033a9200765291454` stabilizes unchanged image rendering and closes the source rollback race without changing Canvas coordinates, selection, history, persistence, providers or billing.
+- The permanent sampler now listens to native image `load` events and `src` mutations for nodes known to be complete before measurement. Desktop Chromium fails if any monitored node reloads or rewrites its source during pan.
+- Fresh isolated PostgreSQL matrices pass canvas-v2 `60/60`, legacy `60/60` and shadow `60/60` across Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium (`180/180`). All 30 pan samples report zero disappeared frames, zero unclickable time and zero monitored media events.
+- Desktop Chromium metrics across all modes: minimum `55.62 FPS`, maximum input P95 `43.9ms`; fixed gates remain `55/45 FPS`, `50ms` input P95 and `100ms` save overlap.
+- Full local gates pass: `441/441` Vitest files, `2527/2527` tests, TypeScript, production build `113/113`, ESLint `0 errors / 973 historical warnings`, protected features `38/38` and whitespace.
+- **Verdict: EXACT-SHA LOCAL THREE-MODE REGRESSION PASS.** GitHub Actions executed zero steps because of account billing, so immutable hosted evidence remains unverified and Stage 3 stays at Task 10 (`10/11`).

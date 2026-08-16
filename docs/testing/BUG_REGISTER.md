@@ -1997,3 +1997,17 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Add only `HTTP 404` to the transport fallback classifier; any parsed terminal business code still takes precedence and remains non-fallback. |
 | Cloud regression | On deployed `main@2cefe59`, professional Quick Create displayed `已按原始需求提交` and continued into a real Pear generation instead of stopping at compile transport failure. This proves the fallback path activates in Coze; it does not by itself identify the exact upstream HTTP status. |
 | Status | **CLOUD FALLBACK PATH VERIFIED / TERMINAL BUSINESS-ERROR FAIL-CLOSED CASE STILL REQUIRES CLOUD EVIDENCE.** |
+
+### S3-BUG-035: Canvas pan repeatedly reloaded unchanged media nodes
+
+| Field | Detail |
+|---|---|
+| Severity | P1 core Canvas availability and performance |
+| Module | Canvas media rendering and Stage 3 performance evidence |
+| Environment | Local production build on exact `0a34c73479d46e8dff85e3c033a9200765291454`, PostgreSQL 18, Chromium/Firefox/WebKit/mobile Chromium, 2026-08-16 |
+| Reproduction | In the 100-node controlled project, Space-pan the Canvas for about 3.6 seconds while recording native image traffic and DOM mutations. Before the fix, the same 100 image elements produced about 900 load events during the pan and about 1,000 same-source mutations; cards temporarily disappeared and became unclickable under load. |
+| Root cause | Viewport renders recreated media props and handlers, so the image subtree was not stable even when the source was unchanged. The replacement-source state machine also allowed an old DOM load to commit a pending source and had an `A -> B -> A` race that could remain in `loading`. |
+| TDD | Added RED coverage for same-value render props, idempotent load completion, `A -> B -> A` rollback, old-DOM-load source ownership, native load/src evidence collection and the zero-reload desktop gate. Final focused set passes `30/30`. |
+| Fix | Memoize the rendered Next image by value, keep event handlers stable, preload replacement sources through a two-phase pending/commit state machine, bind DOM load events to the displayed committed source and clear retained state on every terminal path. Performance evidence now records native `load`, `src` and media-state mutations for preloaded monitored nodes. |
+| Regression | Exact-SHA local matrices pass `180/180`: canvas-v2 `60/60`, legacy `60/60`, shadow `60/60`. Across 30 pan samples, disappeared frames, unclickable duration and monitored media load/src events are all zero. Desktop minimum FPS is `55.62`; maximum input P95 is `43.9ms`. PostgreSQL-enabled Vitest passes `441/441` files and `2527/2527` tests; TypeScript, build, whitespace, protected features `38/38` and ESLint `0 errors / 973 historical warnings` pass. |
+| Status | **FIXED LOCALLY ON EXACT SHA / HOSTED IMMUTABLE ACTIONS STILL UNEXECUTED DUE BILLING.** Stage 3 Task 10 remains active. |
