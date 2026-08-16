@@ -400,3 +400,12 @@ Protected stable branch: read-only and untouched
 - Task `async-1786874691821-0-gqs5y2` produced one `-120` consume and one `+120` refund. Repeating authenticated cancellation returned HTTP 200 with the same task; the credits API still contained exactly one refund and balance remained `138`.
 - A fresh isolated PostgreSQL 18 cluster supplied both supported test URLs. Full Vitest executed `441/441` files and `2523/2523` tests with zero skips, including billing, refund, terminal race, projection, annotation, element-board and layer-decomposition concurrency.
 - S3-BUG-033 is cloud-closed and the local PostgreSQL evidence gap is closed. Stage remains Task 10 `10/11` because immutable three-mode Actions are billing-unexecuted. `stable` and Stage 4/5 remain untouched.
+
+## 2026-08-17 Stage 4 Task 0 baseline and isolation gate
+
+- Task 0 is complete on `codex/wj-stable-s4` for commits `7c668f0..ac6553d`; implementation baseline remains `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b` and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+- Added structured Stage 4 inventory, Agent/workflow mode parsers, isolated fixture planning, exact 100-node monitoring contracts, Playwright evidence capture and baseline reporting without changing Agent, chat, workflow, Canvas, provider, billing or UI behavior.
+- Four independent review waves closed unsafe real-user fixture fallback, database variable precedence conflicts, substring/query identity bypasses, incomplete node monitoring and inaccurate evidence metadata. Final independent review approved with Critical/Important/Minor findings all zero.
+- Focused Stage 4 suite passes `36/36`; TypeScript, inventory generation, protected baseline `38/38` and committed-range whitespace checks pass. Application doctor reports `25 passed / 12 warnings / 0 failed / 2 blocked`.
+- Authenticated fixture seeding and real 100-node performance values remain explicitly BLOCKED because no strict run-scoped isolated Stage 4 database is configured. Chromium evidence proves the guard stops before authentication and persisted writes; this is not classified as a browser pass.
+- Next unique action is Stage 4 Task 1: shared Agent domain contracts and ordered event storage. Stage 3 immutable Actions/Coze release gates remain external and incomplete; Stage 4 is not release-ready and Stage 5 remains prohibited.
