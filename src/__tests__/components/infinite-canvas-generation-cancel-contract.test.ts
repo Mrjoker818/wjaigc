@@ -37,6 +37,15 @@ describe('infinite canvas generation cancellation contract', () => {
     expect(genericButtons).toHaveLength(2);
   });
 
+  it('keeps processing-card cancel pointer gestures out of the canvas drag handler', () => {
+    const cancelButtons = source.match(
+      /<button[\s\S]*?onPointerDown=\{\(e\) => e\.stopPropagation\(\)\}[\s\S]*?void handleCancelProcessingFrame\(image\);[\s\S]*?<\/button>/g,
+    ) || [];
+
+    expect(cancelButtons).toHaveLength(2);
+    expect(cancelButtons.every(button => button.includes('type="button"'))).toBe(true);
+  });
+
   it('uses a per-task abort controller for direct-generation slots instead of cancelling an unrelated global poller', () => {
     const generator = source.indexOf('const handleCanvasGenerate = useCallback');
     const directPoller = source.indexOf('const pollForSlot = async', generator);

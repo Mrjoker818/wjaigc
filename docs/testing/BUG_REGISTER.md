@@ -1975,7 +1975,10 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | TDD | A new durable-slot/memory-marker regression failed before the change (`1 failed / 14 passed`) and passes after the minimal fix (`15/15`). The broader task/cancellation/state/projection contract passes `190 passed / 1 PostgreSQL-gated skipped`. |
 | Fix | Treat structural durable generation-slot identity as authoritative even when the registry marker is temporarily `memory`; route cancellation through `terminateCloudTaskAndRefund` instead of the legacy refund path. Registry-only non-durable edit tasks retain compatibility behavior. |
 | Evidence | `test-results/screenshots/stage3-cancel-late-result-failure-e9efd5d.png` plus the recorded balance and cumulative-usage deltas above. |
-| Status | **FIXED LOCALLY / COZE REAL CANCELLATION, LATE-RESULT REJECTION AND EXACTLY-ONCE REFUND PENDING.** Do not close until the deployed exact SHA proves all three. |
+| Cloud retest | On deployed `main@2cefe59a440b51da710cc73b2f1a60c63c88c526`, task `async-1786873074765-0-9um5aa` completed after `39.16s`, entered Canvas and retained one `-120` charge (`138 -> 18`). PostgreSQL recorded `status=completed`, `credit_status=charged`, no refund transaction, and no `/api/cancel-task` audit record. |
+| Second root cause | The visible processing-card button stopped only `click`. Its earlier `pointerdown` bubbled to the Canvas handler, which treated the processing card as a draggable image and captured the pointer. The button click therefore did not reliably fire, so the server cancellation route was never reached. |
+| Second TDD/fix | Added a RED contract requiring both visible cancel buttons to isolate pointer gestures, then added `type="button"` and `onPointerDown={e => e.stopPropagation()}` to both buttons. Cancellation/API/client focused regression passes `23/23`. |
+| Status | **SECOND LOCAL FIX READY / COZE CANCELLATION, LATE-RESULT REJECTION, REPEATED-CANCEL IDEMPOTENCY AND EXACTLY-ONCE REFUND PENDING.** The first cloud regression disproved closure; do not close until the new deployed SHA proves all four. |
 
 ### S3-BUG-034: quick-create compile proxy 404 did not use the existing raw-generation fallback
 
@@ -1990,4 +1993,5 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Root cause | `shouldFallbackQuickCreateCompile()` recognized network exceptions, failed fetches, unreadable streams and malformed SSE, but not a proxy-level HTTP 404. The application route exists in the production route table, so this is a transport boundary rather than missing source. |
 | TDD | The new 404 case failed before the fix (`1 failed / 1 passed`). The focused quick-create contracts now pass `36/36`, including a terminal `UNAUTHORIZED` case that must not fall back. |
 | Fix | Add only `HTTP 404` to the transport fallback classifier; any parsed terminal business code still takes precedence and remains non-fallback. |
-| Status | **FIXED LOCALLY / COZE PROXY-FALLBACK REGRESSION PENDING.** |
+| Cloud regression | On deployed `main@2cefe59`, professional Quick Create displayed `已按原始需求提交` and continued into a real Pear generation instead of stopping at compile transport failure. This proves the fallback path activates in Coze; it does not by itself identify the exact upstream HTTP status. |
+| Status | **CLOUD FALLBACK PATH VERIFIED / TERMINAL BUSINESS-ERROR FAIL-CLOSED CASE STILL REQUIRES CLOUD EVIDENCE.** |

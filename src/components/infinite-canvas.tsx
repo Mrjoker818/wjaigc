@@ -11589,7 +11589,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                           </div>
                           {/* ★ 取消按钮 */}
                           <button
+                            type="button"
                             className="pointer-events-auto mt-0.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
+                            onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
                               void handleCancelProcessingFrame(image);
@@ -11626,7 +11628,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                           </div>
                           {/* ★ 取消按钮 */}
                           <button
+                            type="button"
                             className="pointer-events-auto mt-0.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
+                            onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
                               void handleCancelProcessingFrame(image);

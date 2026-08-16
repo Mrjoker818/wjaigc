@@ -386,3 +386,10 @@ Protected stable branch: read-only and untouched
 - Quick Create proxy HTTP 404 now uses the existing transport fallback only when no terminal business code exists; focused contracts pass `36/36`.
 - Full local Vitest, TypeScript, zero-error ESLint, build and protected-source `38/38` pass. The allowlist authorization is isolated in docs-only `e699b39`.
 - Stage remains Task 10 `10/11`. Next unique action: commit/push the candidate to `main`, Coze exact-SHA pull, then Chrome cancellation/refund and quick-create fallback regression. GitHub billing, PostgreSQL concurrency and immutable three-mode evidence remain unverified; `stable` and Stage 4/5 remain untouched.
+
+## 2026-08-16 Stage 3 Task 10 Coze cancellation retest
+
+- Coze pulled `main@2cefe59`. Quick Create correctly activated the raw-prompt fallback and created a real Pear `gpt-image-2` task.
+- The cancellation gate remained RED. Task `async-1786873074765-0-9um5aa` completed after `39.16s`, entered Canvas and retained one 120-credit charge. PostgreSQL showed no refund and the audit log showed no `/api/cancel-task` request.
+- The first backend durable-slot fix was therefore not reached in this browser run. The newly isolated frontend cause is pointer capture: cancel-button `pointerdown` bubbled into the Canvas image-drag handler before `click`.
+- RED/GREEN now locks both cancel buttons to stop pointer propagation; focused cancellation/API/client tests pass `23/23`. Fresh local gates pass: Vitest `2479 passed / 44 PostgreSQL-only skipped`, TypeScript, ESLint `0 errors / 973 historical warnings`, production build `113/113`, protected features `38/38` and whitespace check. Stage remains Task 10 `10/11`; next unique action is a main-only push, exact-SHA Coze deployment and paid cancellation/refund/idempotency retest. Actions billing remains bypassed, never reclassified as pass; `stable` stays untouched.

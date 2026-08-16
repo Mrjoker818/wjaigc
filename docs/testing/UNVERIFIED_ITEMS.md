@@ -892,8 +892,8 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 ## 2026-08-16 pending verification after cancellation and quick-create fixes
 
-- **P0 cloud cancellation/accounting:** deploy the exact candidate, start one real Pear generation, cancel immediately, and prove the durable slot remains `cancelled`, no late image enters Canvas, one 60-credit charge is refunded once, and repeated cancel cannot create another refund.
+- **P0 cloud cancellation/accounting:** the first `2cefe59` retest failed before the API boundary: no `/api/cancel-task` request was logged, task `async-1786873074765-0-9um5aa` completed, and one 120-credit charge was retained. Deploy the second pointer-event candidate, then prove the durable slot remains `cancelled`, no late image enters Canvas, the configured charge is refunded once, and repeated cancel cannot create another refund.
 - **PostgreSQL concurrency:** run the skipped task settlement, refund race and durable persistence tests against an isolated `POSTGRES_TEST_DATABASE_URL`; the local no-database skips cannot be promoted to pass.
-- **Quick Create proxy fallback:** reproduce the Coze route-level HTTP 404 and prove the raw generation fallback continues through the existing provider/task/accounting path; also prove terminal authorization/model errors do not fall back.
+- **Quick Create proxy fallback:** the Coze fallback path has been observed continuing into a real Pear task. Exact HTTP-404 attribution and terminal authorization/model fail-closed behavior remain unverified in cloud evidence.
 - **Immutable three-mode matrix:** GitHub runs `31916152862` and `31916152867` received no runner and executed no steps because of the account billing/spending limit. Rerun the exact SHA when infrastructure is restored; do not replace it with a local claim.
 - **Release order:** Google Chrome on the isolated Coze preview first, then the stable deployment domain. Stage 4/5 and any `stable` branch change remain unauthorized.

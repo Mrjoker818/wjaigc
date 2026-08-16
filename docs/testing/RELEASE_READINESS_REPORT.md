@@ -977,3 +977,9 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The local candidate changes only the root rendering cache boundary and adds a permanent regression. Local production proves `/` and `/simple-chat` are dynamic and return private `no-store` HTML; full PostgreSQL-enabled tests, TypeScript, zero-error ESLint, production build and `38/38` protected features pass.
 - Coze exact `main@9a6363f021f7197b3aa5a9cf834c0c1c0419cb67` now passes the targeted cloud acceptance: authenticated Chrome loads the dashboard and `/simple-chat`, current assets are `11/11` HTTP 200, the obsolete `5504` chunk is absent, root HTML is private `no-store`, and `/api/auth/me` remains 200.
 - **Decision: NOT READY / Stage 3 Task 10 remains `10/11`.** S3-BUG-032 is closed, but the visible historical blank thumbnail remains open, GitHub Actions billing still prevents immutable runner execution, real-P0 accounting evidence remains absent, and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only. Stage 4/5 stay prohibited.
+
+## 2026-08-16 readiness after `2cefe59` paid cancellation retest
+
+- The Quick Create fallback path works in Coze, but the P0 cancellation gate failed: the browser sent no `/api/cancel-task`, the task completed, one 120-credit charge remained, and no refund was recorded.
+- The second candidate changes only the two processing-card cancel controls so pointer-down cannot be captured by Canvas dragging. Focused regression is `23/23`; full Vitest is `2479 passed / 44 PostgreSQL-only skipped`; TypeScript, zero-error ESLint, `113/113` build and protected features `38/38` pass. Cloud accounting evidence is not yet available.
+- **Decision: NOT READY.** Continue local verification despite unavailable Actions runners, then push only `main`, deploy the exact SHA and repeat cancellation plus repeated-cancel/refund checks. Keep `stable` unchanged and do not enter Stage 4/5.
