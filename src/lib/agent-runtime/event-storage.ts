@@ -42,6 +42,11 @@ export interface AppendAgentEventInput {
   payload: Record<string, unknown>;
 }
 
+export interface ValidatedAgentEventInput extends AppendAgentEventInput {
+  requestDigest: string;
+  serializedPayload: string;
+}
+
 export interface ListAgentEventsInput {
   actorUserId: string;
   projectId: string;
@@ -125,6 +130,36 @@ export function createAgentEventRequestDigest(input: {
     .digest('hex');
 }
 
+export function validateAgentEventAppendInput(
+  rawInput: AppendAgentEventInput,
+): ValidatedAgentEventInput {
+  const input = {
+    ...rawInput,
+    actorUserId: validateIdentifier('actorUserId', rawInput.actorUserId),
+    projectId: validateIdentifier('projectId', rawInput.projectId),
+    runId: validateIdentifier('runId', rawInput.runId),
+    eventId: validateIdentifier('eventId', rawInput.eventId),
+  };
+  if (!AGENT_WORKSPACES.has(input.workspace)) {
+    throw new TypeError('Unsupported Agent workspace');
+  }
+  if (!AGENT_EVENT_TYPES.has(input.type)) {
+    throw new TypeError('Unsupported Agent event type');
+  }
+  assertAgentEventPayloadSafe(input.payload);
+  const serializedPayload = JSON.stringify(input.payload);
+  if (Buffer.byteLength(serializedPayload, 'utf8') > MAX_PAYLOAD_BYTES) {
+    throw new RangeError(`Agent event payload must not exceed ${MAX_PAYLOAD_BYTES} bytes`);
+  }
+  const payload = JSON.parse(serializedPayload) as Record<string, unknown>;
+  const validated = { ...input, payload };
+  return {
+    ...validated,
+    requestDigest: createAgentEventRequestDigest(validated),
+    serializedPayload,
+  };
+}
+
 function mapEvent(row: AgentEventRow): AgentEvent {
   return {
     eventId: row.event_id,
@@ -165,29 +200,12 @@ async function findExistingEvent(
 export async function appendAgentEvent(
   rawInput: AppendAgentEventInput,
 ): Promise<AgentEvent> {
-  const input = {
-    ...rawInput,
-    actorUserId: validateIdentifier('actorUserId', rawInput.actorUserId),
-    projectId: validateIdentifier('projectId', rawInput.projectId),
-    runId: validateIdentifier('runId', rawInput.runId),
-    eventId: validateIdentifier('eventId', rawInput.eventId),
-  };
-  if (!AGENT_WORKSPACES.has(input.workspace)) {
-    throw new TypeError('Unsupported Agent workspace');
-  }
-  if (!AGENT_EVENT_TYPES.has(input.type)) {
-    throw new TypeError('Unsupported Agent event type');
-  }
-  assertAgentEventPayloadSafe(input.payload);
-  const serializedPayload = JSON.stringify(input.payload);
-  if (Buffer.byteLength(serializedPayload, 'utf8') > MAX_PAYLOAD_BYTES) {
-    throw new RangeError(`Agent event payload must not exceed ${MAX_PAYLOAD_BYTES} bytes`);
-  }
-  const requestDigest = createAgentEventRequestDigest(input);
   const client = await getPool().connect();
 
   try {
     await client.query('BEGIN');
+    const input = validateAgentEventAppendInput(rawInput);
+    const { requestDigest, serializedPayload } = input;
     const task = await client.query<{
       id: string;
       status: string;

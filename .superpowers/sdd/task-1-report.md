@@ -7,7 +7,8 @@ DONE LOCALLY / INDEPENDENT REVIEW FINDINGS REMEDIATED
 - Task 1 base: `255a8b6fe20924ae30ab8fd99a98393f2bcd1a52`
 - Initial Task 1 commit: `0c5c1adfe3e09eab87a81900a09f33bf789f7881`
 - First review-fix commit: `ae8d46082f2f77e815eafb4ca94d02ab4bce098f`
-- Second review-fix commit: pending at report update time
+- Second review-fix commit: `53b5f3d739da495c3ecd434ffb3b04f2554041dc`
+- Final review-fix commit: pending at report update time
 - Immutable baseline: `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`
 
 ## Delivered
@@ -35,6 +36,12 @@ DONE LOCALLY / INDEPENDENT REVIEW FINDINGS REMEDIATED
 - Initialization failure settlement now uses the pre-append revision. A committed `run.created`
   whose response is lost advances the revision, prevents refund and is reconciled by the exact
   deterministic event retry; a true append failure is failed/refunded once and cannot resurrect.
+- Added one shared pure Agent event prevalidation contract for identifiers, workspace/type, sensitive
+  fields, JSON-safe values, the 256 KiB payload ceiling and canonical request digest. The service
+  validates and snapshots terminal payloads before settlement; storage repeats validation inside its
+  transaction before any event write.
+- Agent run workspace recovery now comes only from the immutable authorized `run.created` event, so
+  a business result containing its own `workspace` field cannot alter exact-retry identity.
 
 ## RED Evidence
 
@@ -124,3 +131,48 @@ Second-review static verification:
 - `pnpm ts-check`: exit 0.
 - `pnpm lint -- --quiet`: exit 0, zero ESLint errors.
 - `git diff --check`: run immediately before commit; result recorded in the commit evidence.
+
+## Final Review RED Evidence
+
+Unit command:
+
+```powershell
+pnpm exec vitest run src/__tests__/api/agent-runs.test.ts -t "rejects .* before terminal settlement|uses the immutable run.created workspace" --reporter=verbose
+```
+
+Observed: `3 failed / 1 passed / 27 skipped`. Secret-bearing completion and oversized failure
+resolved after invoking settlement instead of rejecting, while an exact terminal retry used the
+mutable business result workspace (`workflow`) instead of the authorized run workspace (`canvas`).
+The unserializable BigInt case already threw before settlement and was retained as a permanent guard.
+
+Real PostgreSQL command:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'
+pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts -t "rejects an invalid terminal payload" --reporter=verbose
+```
+
+Observed: `1 failed / 15 skipped`. The rejected secret-bearing completion changed the durable task
+from `processing/pending` to `completed/charged`, persisted the secret in `cloud_tasks.result`, and
+wrote terminal identity while no matching terminal event existed.
+
+## Final Review GREEN Evidence
+
+Focused regression command:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'
+pnpm exec vitest run src/__tests__/lib/agent-runtime-state.test.ts src/__tests__/lib/agent-runtime-tools.test.ts src/__tests__/api/agent-runs.test.ts src/__tests__/lib/task-model-catalog.test.ts src/__tests__/lib/task-state.test.ts src/__tests__/lib/task-billing.test.ts tests/integration/stage-4-agent-events-postgres.test.ts --reporter=verbose
+```
+
+Observed: `7 files / 207 tests passed`, including all `16/16` Stage 4 real PostgreSQL tests with zero
+skips. The new database assertion compares task status/result, credit status/balance, consume/refund
+ledger counts, terminal identity and event count before and after rejection; every field is unchanged.
+
+Final-review static verification:
+
+- `pnpm ts-check`: exit 0.
+- `pnpm lint -- --quiet`: exit 0, zero ESLint errors.
+- Intended-file `git diff --check`: exit 0. The unscoped command reports only an unrelated trailing
+  blank line in the controller-owned `.superpowers/sdd/task-2-brief.md`; it is not modified or staged
+  by this Task 1 fix.

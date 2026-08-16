@@ -51,13 +51,16 @@ function event(
   type: AgentEvent['type'],
   payload: Record<string, unknown> = {},
 ): AgentEvent {
+  const eventPayload = type === 'run.created' && !('workspace' in payload)
+    ? { ...payload, workspace: 'canvas' }
+    : payload;
   return {
     eventId: `event-${sequence}`,
     runId: 'run-1',
     sequence,
     type,
     timestamp: new Date(sequence).toISOString(),
-    payload,
+    payload: eventPayload,
   };
 }
 
@@ -358,6 +361,84 @@ describe('Agent runtime service', () => {
     expect(dependencies.transitionTask.mock.invocationCallOrder[0]).toBeLessThan(
       dependencies.appendEvent.mock.invocationCallOrder[0],
     );
+  });
+
+  it.each([
+    {
+      name: 'secret-bearing completion',
+      type: 'run.completed' as const,
+      payload: { result: { apiKey: 'never-persist-this' } },
+    },
+    {
+      name: 'oversized failure',
+      type: 'run.failed' as const,
+      payload: {
+        error: {
+          code: 'MODEL_FAILED',
+          message: 'x'.repeat(256 * 1024 + 1),
+          retryable: true,
+        },
+      },
+    },
+    {
+      name: 'unserializable completion',
+      type: 'run.completed' as const,
+      payload: { result: { value: BigInt(1) } },
+    },
+  ])('rejects $name before terminal settlement', async ({ type, payload }) => {
+    const dependencies = serviceDependencies();
+    dependencies.listEvents.mockResolvedValue([
+      event(1, 'run.created', { workspace: 'canvas' }),
+    ]);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: 'invalid-terminal',
+      type,
+      payload,
+    })).rejects.toBeInstanceOf(Error);
+
+    expect(dependencies.transitionTask).not.toHaveBeenCalled();
+    expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
+  });
+
+  it('uses the immutable run.created workspace for an exact terminal retry', async () => {
+    const dependencies = serviceDependencies();
+    const created = event(1, 'run.created', { workspace: 'canvas' });
+    const completed = event(2, 'run.completed', {
+      result: { imageUrl: '/winner.png', workspace: 'workflow' },
+    });
+    dependencies.getTaskForUser.mockResolvedValue({
+      id: 'run-1',
+      userId: user.id,
+      projectId: 'project-1',
+      type: 'agent-run',
+      status: 'completed',
+      progress: 100,
+      result: completed.payload.result as Record<string, unknown>,
+      creditStatus: 'charged',
+      creditCost: 7,
+      createdAt: 1,
+      updatedAt: 2,
+      revision: 3,
+    });
+    dependencies.listEvents.mockResolvedValue([created, completed]);
+    dependencies.appendEvent.mockImplementation(async input => {
+      expect(input.workspace).toBe('canvas');
+      return completed;
+    });
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: completed.eventId,
+      type: completed.type,
+      payload: completed.payload,
+    })).resolves.toMatchObject({ accepted: true, event: completed });
   });
 
   it('does not persist or report a terminal event when authoritative settlement loses', async () => {

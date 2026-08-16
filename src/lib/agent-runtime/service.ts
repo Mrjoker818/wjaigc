@@ -22,9 +22,9 @@ import {
   AgentEventConflictError,
   AgentEventNotFoundError,
   appendAgentEvent,
-  createAgentEventRequestDigest,
   listAgentEventStreamsForActor,
   listAgentEventsForActor,
+  validateAgentEventAppendInput,
 } from './event-storage';
 import {
   AgentEventPayloadError,
@@ -141,6 +141,7 @@ interface OwnedAgentRun {
   task: CloudTask;
   projectId: string;
   workspace: AgentWorkspace;
+  events: AgentEvent[];
 }
 
 export interface AgentRuntimeDependencies {
@@ -342,13 +343,6 @@ function projectedTerminalEvent(
   return events.find(event => event.sequence === projection.lastSequence) || null;
 }
 
-function workspaceFromTask(task: CloudTask): AgentWorkspace | null {
-  const workspace = task.result?.workspace;
-  return WORKSPACES.has(workspace as AgentWorkspace)
-    ? workspace as AgentWorkspace
-    : null;
-}
-
 function terminalError(
   type: AgentEventType,
   payload: Record<string, unknown>,
@@ -391,20 +385,17 @@ export function createAgentRuntimeService(
     if (!task || task.type !== 'agent-run' || !task.projectId) {
       throw new AgentRunNotFoundError();
     }
-    let workspace = workspaceFromTask(task);
-    if (!workspace) {
-      const events = await dependencies.listEvents({
-        actorUserId,
-        projectId: task.projectId,
-        runId,
-      });
-      const createdWorkspace = events.find(event => event.type === 'run.created')?.payload.workspace;
-      workspace = WORKSPACES.has(createdWorkspace as AgentWorkspace)
-        ? createdWorkspace as AgentWorkspace
-        : null;
-    }
+    const events = await dependencies.listEvents({
+      actorUserId,
+      projectId: task.projectId,
+      runId,
+    });
+    const createdWorkspace = events.find(event => event.type === 'run.created')?.payload.workspace;
+    const workspace = WORKSPACES.has(createdWorkspace as AgentWorkspace)
+      ? createdWorkspace as AgentWorkspace
+      : null;
     if (!workspace) throw new AgentRunNotFoundError();
-    return { task, projectId: task.projectId, workspace };
+    return { task, projectId: task.projectId, workspace, events };
   }
 
   async function listEvents(input: {
@@ -413,33 +404,38 @@ export function createAgentRuntimeService(
     afterSequence?: number;
   }): Promise<AgentEvent[]> {
     const run = await ownedRun(input.actorUserId, input.runId);
-    return dependencies.listEvents({
-      actorUserId: input.actorUserId,
-      projectId: run.projectId,
-      runId: input.runId,
-      afterSequence: input.afterSequence,
-    });
+    return input.afterSequence === undefined
+      ? run.events
+      : run.events.filter(event => event.sequence > input.afterSequence!);
   }
 
-  async function appendEvent(input: AgentEventAppendRequest): Promise<AgentEventAppendResult> {
-    const run = await ownedRun(input.actorUserId, input.runId);
-    const beforeEvents = await dependencies.listEvents({
+  async function appendEvent(
+    input: AgentEventAppendRequest,
+    authorizedRun?: OwnedAgentRun,
+  ): Promise<AgentEventAppendResult> {
+    const run = authorizedRun || await ownedRun(input.actorUserId, input.runId);
+    const validated = validateAgentEventAppendInput({
       actorUserId: input.actorUserId,
       projectId: run.projectId,
       runId: input.runId,
+      eventId: input.eventId,
+      workspace: run.workspace,
+      type: input.type,
+      payload: input.payload,
     });
+    const beforeEvents = run.events;
     const beforeProjection = reduceAgentEvents(beforeEvents);
     const existingTerminal = projectedTerminalEvent(beforeEvents, beforeProjection);
     if (existingTerminal) {
-      if (existingTerminal.eventId === input.eventId) {
+      if (existingTerminal.eventId === validated.eventId) {
         const verified = await dependencies.appendEvent({
-          actorUserId: input.actorUserId,
+          actorUserId: validated.actorUserId,
           projectId: run.projectId,
-          runId: input.runId,
-          eventId: input.eventId,
+          runId: validated.runId,
+          eventId: validated.eventId,
           workspace: run.workspace,
-          type: input.type,
-          payload: input.payload,
+          type: validated.type,
+          payload: validated.payload,
         });
         return {
           accepted: true,
@@ -454,18 +450,12 @@ export function createAgentRuntimeService(
       };
     }
 
-    const requestedTerminalStatus = taskStatusForTerminalEvent(input.type);
+    const requestedTerminalStatus = taskStatusForTerminalEvent(validated.type);
     const terminalIdentity = requestedTerminalStatus
       ? {
-          eventId: input.eventId,
-          requestDigest: createAgentEventRequestDigest({
-            projectId: run.projectId,
-            runId: input.runId,
-            workspace: run.workspace,
-            type: input.type,
-            payload: input.payload,
-          }),
-          eventType: input.type,
+          eventId: validated.eventId,
+          requestDigest: validated.requestDigest,
+          eventType: validated.type,
         }
       : undefined;
     if (TERMINAL_TASK_STATUSES.has(run.task.status)) {
@@ -477,9 +467,9 @@ export function createAgentRuntimeService(
       }
     }
     if (requestedTerminalStatus === 'completed') {
-      const result = input.payload.result;
+      const result = validated.payload.result;
       const settlement = await dependencies.transitionTask({
-        taskId: input.runId,
+        taskId: validated.runId,
         from: [...LIVE_TASK_STATUSES],
         to: 'completed',
         creditStatus: 'charged',
@@ -500,17 +490,17 @@ export function createAgentRuntimeService(
         throw new AgentRunTerminalConflictError();
       }
     } else if (requestedTerminalStatus) {
-      const error = terminalError(input.type, input.payload);
+      const error = terminalError(validated.type, validated.payload);
       const settlement = await dependencies.settleFailedTask({
-        taskId: input.runId,
+        taskId: validated.runId,
         status: requestedTerminalStatus,
         error,
         terminalIdentity,
       });
       if (!settlement.transitioned) {
         const authoritative = await dependencies.getTaskForUser(
-          input.runId,
-          input.actorUserId,
+          validated.runId,
+          validated.actorUserId,
         );
         if (
           authoritative?.status !== requestedTerminalStatus
@@ -524,18 +514,18 @@ export function createAgentRuntimeService(
     }
 
     const appended = await dependencies.appendEvent({
-      actorUserId: input.actorUserId,
+      actorUserId: validated.actorUserId,
       projectId: run.projectId,
-      runId: input.runId,
-      eventId: input.eventId,
+      runId: validated.runId,
+      eventId: validated.eventId,
       workspace: run.workspace,
-      type: input.type,
-      payload: input.payload,
+      type: validated.type,
+      payload: validated.payload,
     });
     const events = await dependencies.listEvents({
-      actorUserId: input.actorUserId,
+      actorUserId: validated.actorUserId,
       projectId: run.projectId,
-      runId: input.runId,
+      runId: validated.runId,
     });
     const projection = reduceAgentEvents(events);
     const accepted = acceptedEventFromProjection(events, appended, projection);
@@ -672,7 +662,7 @@ export function createAgentRuntimeService(
       actorUserId: string;
       runId: string;
     }): Promise<AgentEventAppendResult> {
-      await ownedRun(input.actorUserId, input.runId);
+      const run = await ownedRun(input.actorUserId, input.runId);
       dependencies.abortTaskExecution(input.runId, 'cancelled');
       return appendEvent({
         actorUserId: input.actorUserId,
@@ -686,7 +676,7 @@ export function createAgentRuntimeService(
             retryable: false,
           },
         },
-      });
+      }, run);
     },
   };
 }
