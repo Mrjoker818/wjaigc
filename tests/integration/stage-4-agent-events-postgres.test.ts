@@ -496,6 +496,7 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
       const projectId = randomUUID();
       const runId = randomUUID();
       const now = Date.now();
+      vi.resetModules();
       const { ensureCoreTables } = await import('@/lib/db-storage');
       await ensureCoreTables();
       await query(
@@ -522,6 +523,7 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
           providerId: 'provider-exact',
           modelId: 'model-exact',
           kind: 'image',
+          sourceType: 'image',
           protocol: 'images',
           executionMode: 'async',
           allowedRatios: [],
@@ -662,6 +664,191 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
         asset_versions: '0',
       });
       expect(JSON.stringify(facts.rows[0]?.result)).not.toContain('/late.png');
+    });
+  });
+
+  postgresIt('never resurrects a refunded initialization failure on idempotent retry', async () => {
+    await withIsolatedPostgres('stage-4-agent-init-retry', async ({ databaseUrl, query }) => {
+      expect(runMigrations(databaseUrl).status).toBe(0);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const runId = randomUUID();
+      const now = Date.now();
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Agent initialization retry', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+
+      const { createAgentRuntimeService } = await import('@/lib/agent-runtime/service');
+      const { getCloudTaskForUser } = await import('@/lib/cloud-task-storage');
+      const { createBillableTask, settleFailedTask } = await import(
+        '@/lib/task-core/billing-service'
+      );
+      const { transitionTask } = await import('@/lib/task-core/task-service');
+      let appendAttempts = 0;
+      const service = createAgentRuntimeService({
+        randomUUID: () => runId,
+        now: () => now,
+        resolveTaskModel: async () => ({
+          providerId: 'provider-exact', modelId: 'model-exact', kind: 'image',
+          sourceType: 'image', protocol: 'images', executionMode: 'async',
+          allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+          supportsReferenceImages: false, supportsMask: false, outputKinds: ['png'],
+        }),
+        authorizeContext: async ({ request }) => request.context,
+        calculateCreditCost: async () => 7,
+        createBillableTask,
+        appendEvent: async input => {
+          appendAttempts += 1;
+          if (appendAttempts === 1) throw new Error('forced initialization event failure');
+          return appendAgentEvent(input);
+        },
+        listEvents: listAgentEventsForActor,
+        listRunEventStreams: listAgentEventStreamsForActor,
+        getTaskForUser: getCloudTaskForUser,
+        transitionTask,
+        settleFailedTask,
+        abortTaskExecution: () => false,
+      });
+      const actor = {
+        id: ownerId, name: 'Retry owner', role: 'user' as const, status: 'active' as const,
+        productType: 'canvas', createdAt: now, updatedAt: now,
+      };
+      const request = {
+        projectId, workspace: 'canvas' as const, workspaceId: 'canvas-1',
+        mode: 'agent' as const, providerId: 'provider-exact', modelId: 'model-exact',
+        prompt: 'Create an image', sourceVersionIds: [], allowedToolIds: ['generate_image'],
+        idempotencyKey: 'failed-init-retry',
+        context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' as const },
+      };
+
+      await expect(service.createRun({ actor, request })).rejects.toThrow(
+        'forced initialization event failure',
+      );
+      await expect(service.createRun({ actor, request })).rejects.toMatchObject({
+        code: 'AGENT_RUN_TERMINAL',
+        status: 409,
+      });
+
+      const facts = await query<{
+        status: string; credit_status: string; charges: string; refunds: string; events: string;
+      }>(
+        `SELECT task.status, task.credit_status,
+                (SELECT count(*)::text FROM wujie_credit_transactions
+                 WHERE task_id = task.id AND type = 'consume') AS charges,
+                (SELECT count(*)::text FROM wujie_credit_transactions
+                 WHERE task_id = task.id AND type = 'refund') AS refunds,
+                (SELECT count(*)::text FROM wujie_agent_events
+                 WHERE task_id = task.id) AS events
+         FROM cloud_tasks task WHERE task.id = $1`,
+        [runId],
+      );
+      expect(facts.rows[0]).toEqual({
+        status: 'failed', credit_status: 'refunded', charges: '1', refunds: '1', events: '0',
+      });
+      expect(appendAttempts).toBe(1);
+    });
+  });
+
+  postgresIt('rejects and never persists a terminal event that loses the authoritative task race', async () => {
+    await withIsolatedPostgres('stage-4-agent-terminal-race', async ({ databaseUrl, query }) => {
+      expect(runMigrations(databaseUrl).status).toBe(0);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const runId = randomUUID();
+      const now = Date.now();
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Agent terminal race', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+
+      const { createAgentRuntimeService } = await import('@/lib/agent-runtime/service');
+      const { getCloudTaskForUser } = await import('@/lib/cloud-task-storage');
+      const { createBillableTask, settleFailedTask } = await import(
+        '@/lib/task-core/billing-service'
+      );
+      const { transitionTask } = await import('@/lib/task-core/task-service');
+      const service = createAgentRuntimeService({
+        randomUUID: () => runId,
+        now: () => now,
+        resolveTaskModel: async () => ({
+          providerId: 'provider-exact', modelId: 'model-exact', kind: 'image',
+          sourceType: 'image', protocol: 'images', executionMode: 'async',
+          allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+          supportsReferenceImages: false, supportsMask: false, outputKinds: ['png'],
+        }),
+        authorizeContext: async ({ request }) => request.context,
+        calculateCreditCost: async () => 7,
+        createBillableTask,
+        appendEvent: appendAgentEvent,
+        listEvents: listAgentEventsForActor,
+        listRunEventStreams: listAgentEventStreamsForActor,
+        getTaskForUser: getCloudTaskForUser,
+        transitionTask,
+        settleFailedTask,
+        abortTaskExecution: () => false,
+      });
+      const actor = {
+        id: ownerId, name: 'Race owner', role: 'user' as const, status: 'active' as const,
+        productType: 'canvas', createdAt: now, updatedAt: now,
+      };
+      const request = {
+        projectId, workspace: 'canvas' as const, workspaceId: 'canvas-1',
+        mode: 'agent' as const, providerId: 'provider-exact', modelId: 'model-exact',
+        prompt: 'Create an image', sourceVersionIds: [], allowedToolIds: ['generate_image'],
+        idempotencyKey: 'terminal-race',
+        context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' as const },
+      };
+      await service.createRun({ actor, request });
+      await settleFailedTask({
+        taskId: runId,
+        status: 'cancelled',
+        error: { code: 'CANCELLED', message: 'Cancelled first', retryable: false },
+      });
+
+      const losingCompletion = {
+        actorUserId: ownerId,
+        runId,
+        eventId: 'losing-completion',
+        type: 'run.completed' as const,
+        payload: { result: { imageUrl: '/must-not-persist.png' } },
+      };
+      await expect(service.appendEvent(losingCompletion)).rejects.toMatchObject({
+        code: 'AGENT_RUN_TERMINAL_CONFLICT',
+        status: 409,
+      });
+      await expect(service.appendEvent(losingCompletion)).rejects.toMatchObject({
+        code: 'AGENT_RUN_TERMINAL_CONFLICT',
+        status: 409,
+      });
+
+      const facts = await query<{ status: string; completed_events: string; result: unknown }>(
+        `SELECT task.status, task.result,
+                (SELECT count(*)::text FROM wujie_agent_events
+                 WHERE task_id = task.id AND event_type = 'run.completed') AS completed_events
+         FROM cloud_tasks task WHERE task.id = $1`,
+        [runId],
+      );
+      expect(facts.rows[0]).toMatchObject({ status: 'cancelled', completed_events: '0' });
+      expect(JSON.stringify(facts.rows[0]?.result)).not.toContain('/must-not-persist.png');
     });
   });
 });

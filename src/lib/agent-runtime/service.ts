@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   getCloudTaskForUser,
   type CloudTask,
+  type CloudTaskFailureStatus,
 } from '@/lib/cloud-task-storage';
 import { calculateConfiguredCreditCost } from '@/lib/credits';
 import {
@@ -53,6 +54,14 @@ const LIVE_TASK_STATUSES = [
   'processing',
   'uploading',
 ] as const;
+type AgentTerminalTaskStatus = 'completed' | CloudTaskFailureStatus;
+
+const TERMINAL_TASK_STATUSES = new Set<string>([
+  'completed',
+  'failed',
+  'cancelled',
+  'timeout',
+]);
 
 export class AgentRunRequestError extends Error {
   readonly code = 'AGENT_RUN_REQUEST_INVALID';
@@ -81,6 +90,26 @@ export class AgentRunNotFoundError extends Error {
   constructor() {
     super('Agent run not found');
     this.name = 'AgentRunNotFoundError';
+  }
+}
+
+export class AgentRunTerminalError extends Error {
+  readonly code = 'AGENT_RUN_TERMINAL';
+  readonly status = 409;
+
+  constructor(readonly taskStatus: string) {
+    super('Agent run is already terminal');
+    this.name = 'AgentRunTerminalError';
+  }
+}
+
+export class AgentRunTerminalConflictError extends Error {
+  readonly code = 'AGENT_RUN_TERMINAL_CONFLICT';
+  readonly status = 409;
+
+  constructor() {
+    super('Agent run terminal state conflicts with the requested event');
+    this.name = 'AgentRunTerminalConflictError';
   }
 }
 
@@ -278,8 +307,38 @@ function modelCapabilities(model: TaskModelDescriptor): string[] {
     capabilities.add('edit');
   }
   if (model.supportsMask) capabilities.add('edit');
-  if (model.supportsReferenceImages) capabilities.add('vision');
+  if (model.supportsReferenceImages) capabilities.add('reference-images');
+  if (model.sourceType === 'vlm') capabilities.add('vision');
   return [...capabilities];
+}
+
+function taskStatusForTerminalEvent(type: AgentEventType): AgentTerminalTaskStatus | null {
+  switch (type) {
+    case 'run.completed': return 'completed';
+    case 'run.failed': return 'failed';
+    case 'run.cancelled': return 'cancelled';
+    case 'run.timeout': return 'timeout';
+    default: return null;
+  }
+}
+
+function acceptedEventFromProjection(
+  events: readonly AgentEvent[],
+  event: AgentEvent,
+  projection: AgentRunProjection,
+): boolean {
+  return events.some(candidate => (
+    candidate.eventId === event.eventId
+    && candidate.sequence === event.sequence
+  )) && !projection.ignoredEventIds.includes(event.eventId);
+}
+
+function projectedTerminalEvent(
+  events: readonly AgentEvent[],
+  projection: AgentRunProjection,
+): AgentEvent | null {
+  if (!TERMINAL_TASK_STATUSES.has(projection.status)) return null;
+  return events.find(event => event.sequence === projection.lastSequence) || null;
 }
 
 function workspaceFromTask(task: CloudTask): AgentWorkspace | null {
@@ -351,6 +410,78 @@ export function createAgentRuntimeService(
 
   async function appendEvent(input: AgentEventAppendRequest): Promise<AgentEventAppendResult> {
     const run = await ownedRun(input.actorUserId, input.runId);
+    const beforeEvents = await dependencies.listEvents({
+      actorUserId: input.actorUserId,
+      projectId: run.projectId,
+      runId: input.runId,
+    });
+    const beforeProjection = reduceAgentEvents(beforeEvents);
+    const existingTerminal = projectedTerminalEvent(beforeEvents, beforeProjection);
+    if (existingTerminal) {
+      if (existingTerminal.eventId === input.eventId) {
+        const verified = await dependencies.appendEvent({
+          actorUserId: input.actorUserId,
+          projectId: run.projectId,
+          runId: input.runId,
+          eventId: input.eventId,
+          workspace: run.workspace,
+          type: input.type,
+          payload: input.payload,
+        });
+        return {
+          accepted: true,
+          event: verified,
+          projection: beforeProjection,
+        };
+      }
+      return {
+        accepted: false,
+        event: existingTerminal,
+        projection: beforeProjection,
+      };
+    }
+
+    const requestedTerminalStatus = taskStatusForTerminalEvent(input.type);
+    if (TERMINAL_TASK_STATUSES.has(run.task.status)) {
+      if (!requestedTerminalStatus) {
+        throw new AgentRunTerminalError(run.task.status);
+      }
+      if (requestedTerminalStatus !== run.task.status) {
+        throw new AgentRunTerminalConflictError();
+      }
+    }
+    if (requestedTerminalStatus === 'completed') {
+      const result = input.payload.result;
+      const settlement = await dependencies.transitionTask({
+        taskId: input.runId,
+        from: [...LIVE_TASK_STATUSES],
+        to: 'completed',
+        creditStatus: 'charged',
+        result: result && typeof result === 'object' && !Array.isArray(result)
+          ? result as Record<string, unknown>
+          : undefined,
+      });
+      if (!settlement.transitioned && settlement.task.status !== 'completed') {
+        throw new AgentRunTerminalConflictError();
+      }
+    } else if (requestedTerminalStatus) {
+      const error = terminalError(input.type, input.payload);
+      const settlement = await dependencies.settleFailedTask({
+        taskId: input.runId,
+        status: requestedTerminalStatus,
+        error,
+      });
+      if (!settlement.transitioned) {
+        const authoritative = await dependencies.getTaskForUser(
+          input.runId,
+          input.actorUserId,
+        );
+        if (authoritative?.status !== requestedTerminalStatus) {
+          throw new AgentRunTerminalConflictError();
+        }
+      }
+    }
+
     const appended = await dependencies.appendEvent({
       actorUserId: input.actorUserId,
       projectId: run.projectId,
@@ -366,40 +497,7 @@ export function createAgentRuntimeService(
       runId: input.runId,
     });
     const projection = reduceAgentEvents(events);
-    const accepted = projection.lastSequence === appended.sequence
-      && !projection.ignoredEventIds.includes(appended.eventId);
-
-    if (accepted && input.type === 'run.completed') {
-      const result = input.payload.result;
-      await dependencies.transitionTask({
-        taskId: input.runId,
-        from: [...LIVE_TASK_STATUSES],
-        to: 'completed',
-        revision: run.task.revision,
-        creditStatus: 'charged',
-        result: result && typeof result === 'object' && !Array.isArray(result)
-          ? result as Record<string, unknown>
-          : undefined,
-      });
-    } else if (
-      accepted
-      && (
-        input.type === 'run.failed'
-        || input.type === 'run.cancelled'
-        || input.type === 'run.timeout'
-      )
-    ) {
-      const error = terminalError(input.type, input.payload);
-      await dependencies.settleFailedTask({
-        taskId: input.runId,
-        status: input.type === 'run.cancelled'
-          ? 'cancelled'
-          : input.type === 'run.timeout'
-            ? 'timeout'
-            : 'failed',
-        error,
-      });
-    }
+    const accepted = acceptedEventFromProjection(events, appended, projection);
     return { accepted, event: appended, projection };
   }
 
@@ -466,6 +564,9 @@ export function createAgentRuntimeService(
         },
       });
       const runId = created.task.id;
+      if (created.reused && TERMINAL_TASK_STATUSES.has(created.task.status)) {
+        throw new AgentRunTerminalError(created.task.status);
+      }
       let createdEvent: AgentEvent;
       try {
         createdEvent = await dependencies.appendEvent({
@@ -598,6 +699,8 @@ export function agentRuntimeHttpError(error: unknown): {
     error instanceof AgentRunRequestError
     || error instanceof AgentToolAuthorizationError
     || error instanceof AgentRunNotFoundError
+    || error instanceof AgentRunTerminalError
+    || error instanceof AgentRunTerminalConflictError
     || error instanceof AgentEventConflictError
     || error instanceof AgentEventNotFoundError
     || (

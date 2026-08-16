@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import {
+  AgentRunRequestError,
   agentRuntimeHttpError,
   createAgentRun,
   listCurrentUserAgentRuns,
@@ -41,7 +42,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    const runRequest = parseAgentRunRequest(await request.json());
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      throw new AgentRunRequestError();
+    }
+    const runRequest = parseAgentRunRequest(body);
     const result = await createAgentRun({ actor: auth.user, request: runRequest });
     return NextResponse.json(result, { status: result.reused ? 200 : 201 });
   } catch (error) {

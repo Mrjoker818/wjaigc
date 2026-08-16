@@ -26,6 +26,7 @@ export interface TaskModelDescriptor {
   providerId: string;
   modelId: string;
   kind: 'image' | 'video' | 'chat' | 'edit' | 'upscale' | 'layer' | '3d';
+  sourceType: ApiKind;
   protocol: string;
   executionMode: 'sync' | 'async';
   allowedRatios: string[];
@@ -77,7 +78,7 @@ export interface TaskModelCatalogResult {
 type TaskModelKind = TaskModelDescriptor['kind'];
 type TaskModelOverride = Partial<Omit<
   TaskModelDescriptor,
-  'providerId' | 'modelId' | 'kind'
+  'providerId' | 'modelId' | 'kind' | 'sourceType'
 >>;
 
 const EXECUTION_MODES = new Set<TaskModelDescriptor['executionMode']>(['sync', 'async']);
@@ -243,6 +244,7 @@ function createImageDescriptor(
     providerId: provider.id,
     modelId: model.id,
     kind,
+    sourceType,
     protocol: profile.id,
     executionMode: profile.responseMode === 'direct' ? 'sync' : 'async',
     allowedRatios: model.supportedAspectRatios !== undefined
@@ -292,6 +294,7 @@ function createBaseDescriptor(
       providerId: provider.id,
       modelId: model.id,
       kind,
+      sourceType,
       protocol,
       executionMode: 'async',
       allowedRatios: model.supportedAspectRatios !== undefined
@@ -317,6 +320,7 @@ function createBaseDescriptor(
   const shared = {
     providerId: provider.id,
     modelId: model.id,
+    sourceType,
     protocol,
     allowedRatios: [] as string[],
     allowedSizes: [] as string[],

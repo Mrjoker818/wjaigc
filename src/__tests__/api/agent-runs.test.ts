@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as agentRuntime from '@/lib/agent-runtime/service';
 import type { AgentRuntimeDependencies } from '@/lib/agent-runtime/service';
+import { AgentEventConflictError } from '@/lib/agent-runtime/event-storage';
 import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { User } from '@/lib/user-types';
 
@@ -82,6 +83,7 @@ function serviceDependencies() {
       providerId: 'provider-exact',
       modelId: 'model-exact',
       kind: 'image' as const,
+      sourceType: 'image' as const,
       protocol: 'images',
       executionMode: 'async' as const,
       allowedRatios: [],
@@ -112,7 +114,7 @@ function serviceDependencies() {
     getTaskForUser: vi.fn<AgentRuntimeDependencies['getTaskForUser']>(async () => task),
     transitionTask: vi.fn<AgentRuntimeDependencies['transitionTask']>(async () => ({
       transitioned: true,
-      task,
+      task: { ...task, status: 'completed' as const },
     })),
     settleFailedTask: vi.fn<AgentRuntimeDependencies['settleFailedTask']>(async () => ({
       transitioned: true,
@@ -209,6 +211,7 @@ describe('Agent runtime service', () => {
       providerId: 'provider-exact',
       modelId: 'model-exact',
       kind: 'chat',
+      sourceType: 'chat',
       protocol: 'chat-completions',
       executionMode: 'sync',
       allowedRatios: [],
@@ -247,14 +250,69 @@ describe('Agent runtime service', () => {
     expect(dependencies.createBillableTask).not.toHaveBeenCalled();
   });
 
+  it('does not infer vision authorization from reference-image input support', async () => {
+    const dependencies = serviceDependencies();
+    dependencies.resolveTaskModel.mockResolvedValue({
+      providerId: 'provider-exact',
+      modelId: 'reference-image-model',
+      kind: 'image',
+      sourceType: 'image',
+      protocol: 'images',
+      executionMode: 'async',
+      allowedRatios: [],
+      allowedSizes: [],
+      qualityOptions: [],
+      maxOutputs: 1,
+      supportsReferenceImages: true,
+      supportsMask: false,
+      outputKinds: ['png'],
+    });
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.createRun({
+      actor: user,
+      request: request({ allowedToolIds: ['analyze_image'] }),
+    })).rejects.toMatchObject({
+      code: 'AGENT_TOOL_AUTHORIZATION_DENIED',
+      denials: [{ toolId: 'analyze_image', code: 'MODEL_CAPABILITY_REQUIRED' }],
+    });
+    expect(dependencies.createBillableTask).not.toHaveBeenCalled();
+  });
+
+  it('authorizes image analysis only for an explicitly classified VLM', async () => {
+    const dependencies = serviceDependencies();
+    dependencies.resolveTaskModel.mockResolvedValue({
+      providerId: 'provider-exact',
+      modelId: 'vision-model',
+      kind: 'chat',
+      sourceType: 'vlm',
+      protocol: 'chat-completions',
+      executionMode: 'sync',
+      allowedRatios: [],
+      allowedSizes: [],
+      qualityOptions: [],
+      maxOutputs: 1,
+      supportsReferenceImages: true,
+      supportsMask: false,
+      outputKinds: ['text'],
+    });
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.createRun({
+      actor: user,
+      request: request({ allowedToolIds: ['analyze_image'] }),
+    })).resolves.toMatchObject({
+      tools: [expect.objectContaining({ toolId: 'analyze_image' })],
+    });
+  });
+
   it('settles cancellation once through the existing failure settlement path', async () => {
     const dependencies = serviceDependencies();
     const cancelled = event(2, 'run.cancelled');
     dependencies.appendEvent.mockResolvedValue(cancelled);
-    dependencies.listEvents.mockResolvedValue([
-      event(1, 'run.created'),
-      cancelled,
-    ]);
+    dependencies.listEvents
+      .mockResolvedValueOnce([event(1, 'run.created')])
+      .mockResolvedValueOnce([event(1, 'run.created'), cancelled]);
     const service = agentRuntime.createAgentRuntimeService(dependencies);
 
     const result = await service.cancelRun({ actorUserId: user.id, runId: 'run-1' });
@@ -275,10 +333,9 @@ describe('Agent runtime service', () => {
       result: { imageUrl: '/winner.png' },
     });
     dependencies.appendEvent.mockResolvedValue(completed);
-    dependencies.listEvents.mockResolvedValue([
-      event(1, 'run.created'),
-      completed,
-    ]);
+    dependencies.listEvents
+      .mockResolvedValueOnce([event(1, 'run.created')])
+      .mockResolvedValueOnce([event(1, 'run.created'), completed]);
     const service = agentRuntime.createAgentRuntimeService(dependencies);
 
     const result = await service.appendEvent({
@@ -297,6 +354,106 @@ describe('Agent runtime service', () => {
       result: { imageUrl: '/winner.png' },
     }));
     expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
+    expect(dependencies.transitionTask.mock.invocationCallOrder[0]).toBeLessThan(
+      dependencies.appendEvent.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('does not persist or report a terminal event when authoritative settlement loses', async () => {
+    const dependencies = serviceDependencies();
+    const cancelledTask = {
+      id: 'run-1',
+      userId: user.id,
+      projectId: 'project-1',
+      type: 'agent-run',
+      status: 'cancelled' as const,
+      progress: 0,
+      result: { workspace: 'canvas' },
+      creditStatus: 'refunded' as const,
+      creditCost: 7,
+      createdAt: 1,
+      updatedAt: 2,
+      revision: 1,
+    };
+    dependencies.transitionTask.mockResolvedValue({
+      transitioned: false,
+      task: cancelledTask,
+    });
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: 'losing-completion',
+      type: 'run.completed',
+      payload: { result: { imageUrl: '/must-not-persist.png' } },
+    })).rejects.toMatchObject({
+      code: 'AGENT_RUN_TERMINAL_CONFLICT',
+      status: 409,
+    });
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
+  });
+
+  it('keeps an accepted nonterminal event accepted when a later event appears before reread', async () => {
+    const dependencies = serviceDependencies();
+    const progress = event(2, 'tool.progress', { progress: 25 });
+    dependencies.appendEvent.mockResolvedValue(progress);
+    dependencies.listEvents.mockResolvedValue([
+      event(1, 'run.created'),
+      progress,
+      event(3, 'tool.progress', { progress: 50 }),
+    ]);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: progress.eventId,
+      type: progress.type,
+      payload: progress.payload,
+    })).resolves.toMatchObject({
+      accepted: true,
+      event: progress,
+      projection: { lastSequence: 3 },
+    });
+  });
+
+  it('never resurrects a terminal task when initialization append failed and the key is retried', async () => {
+    const dependencies = serviceDependencies();
+    const failedTask = {
+      id: 'run-1',
+      userId: user.id,
+      projectId: 'project-1',
+      type: 'agent-run',
+      status: 'failed' as const,
+      progress: 0,
+      result: { workspace: 'canvas' },
+      error: 'Agent run initialization failed',
+      creditStatus: 'refunded' as const,
+      creditCost: 7,
+      createdAt: 1,
+      updatedAt: 2,
+      revision: 1,
+    };
+    dependencies.appendEvent.mockRejectedValueOnce(new Error('event storage unavailable'));
+    dependencies.createBillableTask
+      .mockResolvedValueOnce({
+        task: { ...failedTask, status: 'processing', creditStatus: 'pending', revision: 0 },
+        reused: false,
+        charged: true,
+      })
+      .mockResolvedValueOnce({ task: failedTask, reused: true, charged: false });
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.createRun({ actor: user, request: request() })).rejects.toThrow(
+      'event storage unavailable',
+    );
+    await expect(service.createRun({ actor: user, request: request() })).rejects.toMatchObject({
+      code: 'AGENT_RUN_TERMINAL',
+      status: 409,
+    });
+    expect(dependencies.appendEvent).toHaveBeenCalledTimes(1);
+    expect(dependencies.settleFailedTask).toHaveBeenCalledTimes(1);
   });
 
   it('ignores late completion without changing task result or settlement', async () => {
@@ -304,11 +461,9 @@ describe('Agent runtime service', () => {
     const completed = event(3, 'run.completed', {
       result: { imageUrl: '/late.png' },
     });
-    dependencies.appendEvent.mockResolvedValue(completed);
     dependencies.listEvents.mockResolvedValue([
       event(1, 'run.created'),
       event(2, 'run.cancelled'),
-      completed,
     ]);
     const service = agentRuntime.createAgentRuntimeService(dependencies);
 
@@ -321,8 +476,56 @@ describe('Agent runtime service', () => {
     });
 
     expect(result).toMatchObject({ accepted: false, projection: { status: 'cancelled' } });
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
     expect(dependencies.transitionTask).not.toHaveBeenCalled();
     expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
+  });
+
+  it('still validates the canonical request when retrying the accepted terminal event ID', async () => {
+    const dependencies = serviceDependencies();
+    dependencies.listEvents.mockResolvedValue([
+      event(1, 'run.created'),
+      event(2, 'run.completed', { result: { imageUrl: '/winner.png' } }),
+    ]);
+    dependencies.appendEvent.mockRejectedValue(new AgentEventConflictError());
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: 'event-2',
+      type: 'run.completed',
+      payload: { result: { imageUrl: '/different.png' } },
+    })).rejects.toBeInstanceOf(AgentEventConflictError);
+  });
+
+  it('rejects nonterminal work when the task is already terminal but its event needs recovery', async () => {
+    const dependencies = serviceDependencies();
+    dependencies.getTaskForUser.mockResolvedValue({
+      id: 'run-1',
+      userId: user.id,
+      projectId: 'project-1',
+      type: 'agent-run',
+      status: 'cancelled',
+      progress: 0,
+      result: { workspace: 'canvas' },
+      creditStatus: 'refunded',
+      creditCost: 7,
+      createdAt: 1,
+      updatedAt: 2,
+      revision: 1,
+    });
+    dependencies.listEvents.mockResolvedValue([event(1, 'run.created')]);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: 'late-progress',
+      type: 'tool.progress',
+      payload: { progress: 90 },
+    })).rejects.toMatchObject({ code: 'AGENT_RUN_TERMINAL', status: 409 });
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
   });
 
   it('returns one generic not-found error for an unowned run', async () => {
@@ -384,6 +587,25 @@ describe('Agent run API routes', () => {
       request: expect.objectContaining({ providerId: 'provider-exact', modelId: 'model-exact' }),
     }));
     expect(JSON.stringify(createRun.mock.calls[0])).not.toContain('attacker-user');
+  });
+
+  it('returns safe 400 for malformed JSON without invoking run creation', async () => {
+    const createRun = vi.spyOn(agentRuntime, 'createAgentRun');
+    const { POST } = await import('@/app/api/agent-runs/route');
+    const response = await POST(new NextRequest('http://localhost/api/agent-runs', {
+      method: 'POST',
+      body: '{"projectId":',
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'AGENT_RUN_REQUEST_INVALID',
+        message: 'Agent run request is invalid',
+      },
+    });
+    expect(createRun).not.toHaveBeenCalled();
   });
 
   it('lists only current-user Agent runs with a bounded limit', async () => {

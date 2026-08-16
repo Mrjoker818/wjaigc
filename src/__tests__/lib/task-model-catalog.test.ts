@@ -332,6 +332,7 @@ describe('task model catalog', () => {
       providerId: 'provider-a',
       modelId: 'gpt-image-1',
       kind: 'image',
+      sourceType: 'image',
       protocol: 'apimart',
       executionMode: 'async',
       allowedRatios: ['1:1', '16:9'],
@@ -351,6 +352,7 @@ describe('task model catalog', () => {
       providerId: 'provider-b',
       modelId: 'dall-e-3',
       kind: 'image',
+      sourceType: 'image',
       protocol: 'openai',
       executionMode: 'sync',
       allowedRatios: expect.arrayContaining(['1:1', '16:9', '9:16']),
@@ -360,6 +362,22 @@ describe('task model catalog', () => {
       supportsReferenceImages: false,
       supportsMask: false,
       outputKinds: ['png'],
+    });
+  });
+
+  it('preserves the effective VLM distinction separately from reference-image support', async () => {
+    const imageDescriptor = await resolveTaskModel('provider-a', 'gpt-image-1', 'admin-a');
+    const vlmDescriptor = await resolveTaskModel('vlm-provider', 'qwen3-vl', 'admin-a');
+
+    expect(imageDescriptor).toMatchObject({
+      kind: 'image',
+      sourceType: 'image',
+      supportsReferenceImages: true,
+    });
+    expect(vlmDescriptor).toMatchObject({
+      kind: 'chat',
+      sourceType: 'vlm',
+      supportsReferenceImages: true,
     });
   });
 
@@ -409,6 +427,7 @@ describe('task model catalog', () => {
       providerId: 'general-provider',
       modelId: 'kling-v3-omni-video-generation',
       kind: 'video',
+      sourceType: 'video',
       protocol: 'dashscope',
       executionMode: 'async',
       allowedRatios: ['1:1', '4:3', '16:9', '9:16'],

@@ -91,6 +91,20 @@ describe('Agent tool authorization', () => {
       { toolId: 'generate_image', code: 'PRODUCT_PERMISSION_REQUIRED' },
     ]);
   });
+
+  it('does not treat reference-image input support as vision analysis capability', () => {
+    const authorization = authorizeAgentTools({
+      requestedToolIds: ['analyze_image'],
+      workspace: 'chat',
+      userProductTypes: ['simple-chat'],
+      modelCapabilities: ['image', 'reference-images'],
+    });
+
+    expect(authorization.tools).toEqual([]);
+    expect(authorization.denials).toEqual([
+      { toolId: 'analyze_image', code: 'MODEL_CAPABILITY_REQUIRED' },
+    ]);
+  });
 });
 
 describe('Agent context ownership adapter', () => {
