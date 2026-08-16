@@ -1,13 +1,13 @@
 # Stage 4 Baseline Report
 
 - Evidence date: 2026-08-17
-- Exact tested code SHA: `dd29868cf8e40cbb1f60d614d2607db24f6972ea`
+- Exact tested code SHA: `f83381fc42cac054e1d8aa0e33de89cf778130f8`
 - Branch: `codex/wj-stable-s4`
 - Task base: `7c668f0`
 - Protected baseline: `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`
 - Documentation commit: bookkeeping only; created after testing the SHA above
 
-The earlier `6c2ead55c6c8277085a97149df45a11037483753` and `615d60d7a3fa768fee42a23bbd99b1d21d1f5ee9` verification sections are retained as historical evidence. They are superseded for the dual-database-variable contract and reproducible environment metadata by the Third Review evidence below.
+The earlier verification sections through `dd29868cf8e40cbb1f60d614d2607db24f6972ea` are retained as historical evidence. The Final Review evidence below supersedes their PostgreSQL query-parameter isolation claims.
 
 ## Result
 
@@ -17,13 +17,14 @@ The Stage 4 fixture baseline is safe to block, not safe to seed, without an expl
 
 - `E2E_STAGE4_DATABASE_URL` is mandatory.
 - Effective application DB selection follows production precedence, and when both `DATABASE_URL` and `PGDATABASE_URL` are configured their normalized identities must also match exactly.
+- Connection identity is resolved with the exact `pg-connection-string` parser used by the installed `pg` package. Raw query parameters are fail-closed except for one canonical lowercase `sslmode` with an allowed value.
 - `E2E_STAGE4_RUN_ID` is mandatory, and both effective URLs must use the exact database name `wujie_stage4_<sanitizedRunId>`.
 - Fixture and effective app URLs must match normalized protocol, host, effective port, database, user, and SSL target. Database/schema identity query parameters are rejected; credentials are never reported.
 - Generic `E2E_TEST_USERNAME` credentials are accepted only when they exactly match the deterministic run-scoped disposable fixture username.
 - Admin credentials may only provision that disposable account through `/api/admin/users`; the test then clears admin cookies and logs in as the disposable user before any project mutation.
 - The seed helper rejects every non-disposable or non-run-scoped session before it sends user-data requests.
 
-## Reproducible Environment
+## Third Review Reproducible Environment (Historical)
 
 Actual PowerShell command output, with database and authentication values reduced to state only:
 
@@ -70,6 +71,30 @@ Result: exit 1, intentionally BLOCKED at the database guard before authenticatio
 - [console.json](/J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s3/test-results/stage-4-baseline/evidence/dd29868cf8e40cbb1f60d614d2607db24f6972ea-worktree-3683a4b89198/stage4-2026-08-16T16-39-42/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/console.json)
 - [network.json](/J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s3/test-results/stage-4-baseline/evidence/dd29868cf8e40cbb1f60d614d2607db24f6972ea-worktree-3683a4b89198/stage4-2026-08-16T16-39-42/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/network.json)
 - [trace.zip](/J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s3/test-results/stage-4-baseline/evidence/dd29868cf8e40cbb1f60d614d2607db24f6972ea-worktree-3683a4b89198/stage4-2026-08-16T16-39-42/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/trace.zip)
+
+## Final Review Evidence
+
+Exact tested code SHA: `f83381fc42cac054e1d8aa0e33de89cf778130f8`.
+
+- RED: the fixture suite exited 1 with 7 failed and 14 passed. `host`, `hostaddr`, `user`, and `service` overrides were accepted; `database`, `dbname`, and `options` used the superseded error contract.
+- GREEN: fixture isolation passed 23/23; the full focused Stage 4/protected suite passed 36/36 across 5 files.
+- Parser probe: the guard resolves `pg`'s own `pg-connection-string` 2.10.1 parser; the repository's direct 2.6.0 dependency and lockfile are unchanged.
+- `pnpm ts-check`: passed.
+- Inventory: 200 routes, 3 workspaces, 51 node types, 10 port types; both output files exist.
+- `pnpm run doctor`: exit 0; `Summary: 25 passed, 12 warnings, 0 failed, 2 blocked`.
+- Protected baseline: fixed `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`, 38/38 IDs, 0 warnings.
+- Committed-range whitespace checks `7d65919..f83381f` and `7fdc010..f83381f`: passed.
+- Errors were checked to exclude both credentials and complete connection strings.
+
+Chromium command: `pnpm exec playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --project=chromium`
+
+Result: exit 1, intentionally BLOCKED at the database guard before authentication or writes because `E2E_STAGE4_DATABASE_URL` was unavailable.
+
+- [final.png](/J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s3/test-results/stage-4-baseline/evidence/f83381fc42cac054e1d8aa0e33de89cf778130f8-worktree-3683a4b89198/stage4-2026-08-16T16-55-46/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/final.png)
+- [video.webm](/J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s3/test-results/stage-4-baseline/evidence/f83381fc42cac054e1d8aa0e33de89cf778130f8-worktree-3683a4b89198/stage4-2026-08-16T16-55-46/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/video.webm)
+- [console.json](/J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s3/test-results/stage-4-baseline/evidence/f83381fc42cac054e1d8aa0e33de89cf778130f8-worktree-3683a4b89198/stage4-2026-08-16T16-55-46/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/console.json)
+- [network.json](/J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s3/test-results/stage-4-baseline/evidence/f83381fc42cac054e1d8aa0e33de89cf778130f8-worktree-3683a4b89198/stage4-2026-08-16T16-55-46/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/network.json)
+- [trace.zip](/J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s3/test-results/stage-4-baseline/evidence/f83381fc42cac054e1d8aa0e33de89cf778130f8-worktree-3683a4b89198/stage4-2026-08-16T16-55-46/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/trace.zip)
 
 ## Inventory
 

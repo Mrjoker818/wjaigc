@@ -568,3 +568,55 @@ No database URL, database username, password, admin credential, or authenticatio
 - Tests cover both conflict directions, normalized-equivalent dual URLs, and exact one-variable acceptance. Errors and evidence contain no credentials.
 - No Agent, chat, workflow, canvas, authentication, provider, billing, or other business behavior changed.
 - Concern: this environment has no isolated Stage 4 DB/auth state, so Chromium correctly blocked before writes and real 100-node browser/performance measurements remain unavailable.
+
+## Final Review Query-Override Fix Evidence (2026-08-17)
+
+> The Third Independent Review evidence remains historical but is superseded for PostgreSQL query-parameter isolation by this section.
+
+### Exact Tested Code Commit
+
+- Tested code commit: `f83381fc42cac054e1d8aa0e33de89cf778130f8` (`test: block postgres query identity overrides`).
+- The following documentation commit is bookkeeping only and references this exact prior code/test SHA.
+
+### Root Cause And RED
+
+- Root cause: WHATWG `URL` exposed authority/path fields while `pg-connection-string` gives some query parameters precedence or retains them as routing/session configuration. The guard therefore validated a different identity surface from `node-postgres`.
+- Parser probe before implementation showed `?host=prod.example` resolved `host` to `prod.example`, while `hostaddr`, `service`, and `options` remained available to PostgreSQL configuration.
+- RED command: `pnpm exec vitest run src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`.
+- RED result: exit 1; 7 failed, 14 passed. `host`, `hostaddr`, `user`, and `service` did not throw; `database`, `dbname`, and `options` threw the superseded error contract.
+
+### Fix And GREEN
+
+- The guard resolves `pg-connection-string` from `pg/lib/connection-parameters`, so both use `pg`'s installed parser version 2.10.1. The direct 2.6.0 dependency and lockfile remain unchanged.
+- The raw query allowlist contains only one lowercase `sslmode`; accepted values are `disable`, `prefer`, `require`, `verify-ca`, `verify-full`, and `no-verify`.
+- Every routing, authority override, service, schema/search-path, credential, duplicate, uppercase-key, and unknown query parameter blocks before parser side effects.
+- Final compared identity contains canonical protocol, parser-resolved host, effective port, user, database, SSL mode, SSL-enabled state, and certificate-verification state. The strict run-scoped database-name requirement remains in force.
+- Focused fixture GREEN: 23/23 tests passed, including `host`, `hostaddr`, `port`, `user`, `database`, `dbname`, `service`, and `options`; exact `sslmode=require`; final-equivalent syntax; and credential/full-URL redaction.
+
+### Required Command Evidence
+
+1. Focused Stage 4 command: `pnpm exec vitest run src/__tests__/lib/stage-4-modes.test.ts src/__tests__/scripts/stage-4-inventory.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts`
+   - Exit 0; 5 files and 36/36 tests passed.
+2. `pnpm ts-check`
+   - Exit 0; Next route types generated and TypeScript passed.
+3. `pnpm test:inventory:stage-4`
+   - Exit 0; routes=200, workspaces=3, nodeTypes=51, portTypes=10.
+4. `pnpm run doctor`
+   - Exit 0; actual stdout ended with `Summary: 25 passed, 12 warnings, 0 failed, 2 blocked`.
+5. `pnpm check:protected-baseline`
+   - Exit 0 against `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`; 38/38 IDs, no source drift, 0 warnings.
+6. `git diff --check 7d659190d458732001be3db059838e76c367f5c7..f83381fc42cac054e1d8aa0e33de89cf778130f8` and `git diff --check 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b..f83381fc42cac054e1d8aa0e33de89cf778130f8`
+   - Both exit 0 with pristine committed-range output.
+7. Chromium: `pnpm exec playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --project=chromium`
+   - Exit 1, intentionally BLOCKED before authentication and fixture writes: `E2E_STAGE4_DATABASE_URL is required for Stage 4 fixture isolation`.
+   - Evidence directory: `test-results/stage-4-baseline/evidence/f83381fc42cac054e1d8aa0e33de89cf778130f8-worktree-3683a4b89198/stage4-2026-08-16T16-55-46/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/`.
+   - Verified files: `final.png` (4254 bytes), `video.webm` (2650 bytes), `console.json` (2 bytes), `network.json` (2 bytes), `trace.zip` (2965 bytes).
+8. Inventory artifacts
+   - `stage-4-inventory.json` exists (12602 bytes); `stage-4-inventory.md` exists (9501 bytes).
+
+### Files And Self-Review
+
+- Code/test commit changed only `scripts/stage-4-e2e-fixtures.mjs` and `src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`.
+- Documentation bookkeeping changes only this report and `docs/testing/STAGE_4_BASELINE_REPORT.md`.
+- No error or report contains a password or complete connection string. No Agent, chat, workflow, canvas, auth, provider, billing, stable, or controller-owned behavior/file changed.
+- Concern: no isolated Stage 4 database was available, so authenticated seeding and real 100-node browser/performance measurements remain BLOCKED.
