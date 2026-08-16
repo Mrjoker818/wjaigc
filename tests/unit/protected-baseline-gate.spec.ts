@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -42,6 +43,16 @@ const baselineFeatures: Feature[] = [
 ];
 
 describe('protected baseline release gate', () => {
+  it('pins the Stage 4 gate to main@7fdc010 and permits only its own evidence report', async () => {
+    const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const command = packageJson.scripts['check:protected-baseline'];
+
+    expect(command).toContain('--base 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b');
+    expect(command).toContain('--allow-path .superpowers/sdd/task-0-report.md');
+  });
+
   it('passes an identical candidate and allows documentation-only changes', async () => {
     const { evaluateProtectedBaseline } = await loadGateModule();
     const result = evaluateProtectedBaseline({
