@@ -29,18 +29,28 @@ interface Stage4FixtureUser {
 
 interface Stage4SeedTarget {
   browserProfile: string;
+  username: string;
   canvasProject: Record<string, unknown>;
   chatProject: Record<string, unknown>;
   nodeCount: number;
 }
 
-interface Stage4AuthContext {
+type Stage4AuthStrategy =
+  | 'register'
+  | 'register-existing-login'
+  | 'env-login'
+  | 'admin-provisioned-login'
+  | 'admin-login';
+
+export interface Stage4AuthContext {
   userId: string;
   username: string;
-  strategy: 'register' | 'register-existing-login' | 'env-login' | 'admin-login';
+  strategy: Stage4AuthStrategy;
+  disposable: boolean;
 }
 
 const SECRET_PATTERN = /((?:api[-_]?key|access[-_]?token|refresh[-_]?token|session[-_]?token|password|credential|secret))(["'=:\s]+)(?:"[^"]*"|'[^']*'|[^\r\n,}]+)/gi;
+let cachedStage4RunId: string | null = null;
 
 function safe(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
@@ -71,9 +81,12 @@ function sanitizeUrl(rawUrl: string): string {
 }
 
 function stage4RunId(): string {
+  if (cachedStage4RunId) return cachedStage4RunId;
   const raw = process.env.E2E_STAGE4_RUN_ID?.trim();
-  if (raw) return safe(raw);
-  return safe(`stage4-${new Date().toISOString().replace(/[:]/g, '-').replace(/\..+$/, '')}`);
+  cachedStage4RunId = raw
+    ? safe(raw)
+    : safe(`stage4-${new Date().toISOString().replace(/[:]/g, '-').replace(/\..+$/, '')}`);
+  return cachedStage4RunId;
 }
 
 async function buildStage4Plan(runId: string) {
@@ -87,6 +100,11 @@ async function buildStage4Plan(runId: string) {
       nodeCount: number;
     }>;
   };
+}
+
+async function assertStage4IsolationDatabaseConfigured(): Promise<void> {
+  const module = await import('../../scripts/stage-4-e2e-fixtures.mjs');
+  module.assertStage4FixtureDatabase(process.env.E2E_STAGE4_DATABASE_URL?.trim());
 }
 
 function evidenceDirectory(testInfo: TestInfo): string {
@@ -240,10 +258,115 @@ async function loginWithPassword(
   return { ok: response.ok(), status: response.status() };
 }
 
+function isRunScopedStage4FixtureUsername(username: string, runId = stage4RunId()): boolean {
+  const normalizedUsername = username.trim().toLowerCase();
+  const normalizedRunId = safe(runId).toLowerCase();
+  return (
+    normalizedUsername.startsWith('stage4_')
+    && normalizedUsername.endsWith(`_${normalizedRunId}`)
+    && normalizedUsername.length > `stage4__${normalizedRunId}`.length
+  );
+}
+
+function resolveControlledStage4EnvLogin(
+  fixture: Stage4FixtureUser,
+  environment: NodeJS.ProcessEnv = process.env,
+  runId = stage4RunId(),
+): { username: string; password: string } | null {
+  const username = environment.E2E_TEST_USERNAME?.trim();
+  const password = environment.E2E_TEST_PASSWORD?.trim();
+  if (!username && !password) return null;
+  if (!username || !password) {
+    throw new Error('BLOCKED: E2E_TEST_USERNAME and E2E_TEST_PASSWORD must both be provided for Stage 4');
+  }
+  if (!isRunScopedStage4FixtureUsername(fixture.username, runId) || username !== fixture.username) {
+    throw new Error(`BLOCKED: E2E_TEST_USERNAME must exactly match the run-scoped Stage 4 fixture user (${fixture.username})`);
+  }
+  return { username, password };
+}
+
+async function provisionDisposableStage4User(
+  page: Page,
+  fixture: Stage4FixtureUser,
+): Promise<Stage4AuthContext> {
+  const adminPassword = process.env.WUJIE_ADMIN_PASSWORD?.trim();
+  const adminUsername = process.env.WUJIE_ADMIN_USERNAME?.trim() || 'Mr.joker';
+  if (!adminPassword) {
+    throw new Error('BLOCKED: WUJIE_ADMIN_PASSWORD is required to provision a disposable Stage 4 fixture user');
+  }
+  if (!isRunScopedStage4FixtureUsername(fixture.username)) {
+    throw new Error(`BLOCKED: fixture username ${fixture.username} is not a run-scoped Stage 4 disposable account`);
+  }
+
+  const adminLogin = await loginWithPassword(page, adminUsername, adminPassword);
+  if (!adminLogin.ok) {
+    throw new Error(`BLOCKED: administrator login failed with HTTP ${adminLogin.status}`);
+  }
+
+  const usersResponse = await page.request.get('/api/admin/users');
+  const usersPayload = await readJson(usersResponse);
+  if (!usersResponse.ok || !Array.isArray(usersPayload.users)) {
+    throw new Error(`BLOCKED: failed to enumerate Stage 4 fixture users through /api/admin/users (HTTP ${usersResponse.status()})`);
+  }
+  const existingUser = usersPayload.users.find(candidate => (
+    candidate
+    && typeof candidate === 'object'
+    && typeof (candidate as Record<string, unknown>).name === 'string'
+    && (candidate as Record<string, unknown>).name === fixture.username
+  )) as Record<string, unknown> | undefined;
+
+  if (!existingUser) {
+    const createResponse = await page.request.post('/api/admin/users', {
+      data: {
+        action: 'create',
+        name: fixture.username,
+        password: fixture.password,
+      },
+    });
+    const createPayload = await readJson(createResponse);
+    if (!createResponse.ok && String(createPayload.error ?? '').trim() !== 'User already exists') {
+      throw new Error(`BLOCKED: failed to provision disposable Stage 4 user ${fixture.username} (HTTP ${createResponse.status()})`);
+    }
+  }
+
+  await page.context().clearCookies();
+  const fixtureLogin = await loginWithPassword(page, fixture.username, fixture.password);
+  if (!fixtureLogin.ok) {
+    throw new Error(`BLOCKED: disposable Stage 4 user ${fixture.username} login failed with HTTP ${fixtureLogin.status}`);
+  }
+  const session = await currentSessionUser(page);
+  if (session.name !== fixture.username) {
+    throw new Error(`BLOCKED: authenticated Stage 4 session user ${session.name} did not match fixture ${fixture.username}`);
+  }
+  return {
+    userId: session.id,
+    username: session.name,
+    strategy: 'admin-provisioned-login',
+    disposable: true,
+  };
+}
+
+export function assertStage4SeedIsolation(
+  fixture: Stage4FixtureUser,
+  auth: Stage4AuthContext,
+  runId = stage4RunId(),
+): void {
+  if (
+    !auth.disposable
+    || auth.strategy === 'admin-login'
+    || !isRunScopedStage4FixtureUsername(fixture.username, runId)
+    || !isRunScopedStage4FixtureUsername(auth.username, runId)
+    || auth.username !== fixture.username
+  ) {
+    throw new Error('BLOCKED: Stage 4 baseline requires a disposable, run-scoped Stage 4 fixture user before any persisted data mutation');
+  }
+}
+
 export async function ensureStage4Session(
   page: Page,
   fixture: Stage4FixtureUser,
 ): Promise<Stage4AuthContext> {
+  await assertStage4IsolationDatabaseConfigured();
   await page.context().clearCookies();
 
   const registerCheck = await page.request.get('/api/auth/register');
@@ -261,13 +384,18 @@ export async function ensureStage4Session(
     });
     if (created.ok()) {
       const session = await currentSessionUser(page);
-      return { userId: session.id, username: session.name, strategy: 'register' };
+      return { userId: session.id, username: session.name, strategy: 'register', disposable: true };
     }
     if (created.status() === 409) {
       const loggedIn = await loginWithPassword(page, fixture.username, fixture.password);
       if (loggedIn.ok) {
         const session = await currentSessionUser(page);
-        return { userId: session.id, username: session.name, strategy: 'register-existing-login' };
+        return {
+          userId: session.id,
+          username: session.name,
+          strategy: 'register-existing-login',
+          disposable: true,
+        };
       }
       throw new Error(`BLOCKED: Stage 4 fixture user exists but login failed with HTTP ${loggedIn.status}`);
     }
@@ -275,30 +403,22 @@ export async function ensureStage4Session(
     throw new Error(`BLOCKED: Stage 4 registration failed with HTTP ${created.status()} (${String(failurePayload.error ?? 'unknown error')})`);
   }
 
-  const envUsername = process.env.E2E_TEST_USERNAME?.trim();
-  const envPassword = process.env.E2E_TEST_PASSWORD?.trim();
-  if (envUsername && envPassword) {
-    const loggedIn = await loginWithPassword(page, envUsername, envPassword);
+  const envLogin = resolveControlledStage4EnvLogin(fixture);
+  if (envLogin) {
+    const loggedIn = await loginWithPassword(page, envLogin.username, envLogin.password);
     if (loggedIn.ok) {
       const session = await currentSessionUser(page);
-      return { userId: session.id, username: session.name, strategy: 'env-login' };
+      return { userId: session.id, username: session.name, strategy: 'env-login', disposable: true };
     }
     throw new Error(`BLOCKED: E2E_TEST_USERNAME login failed with HTTP ${loggedIn.status}`);
   }
 
-  const adminPassword = process.env.WUJIE_ADMIN_PASSWORD?.trim();
-  const adminUsername = process.env.WUJIE_ADMIN_USERNAME?.trim() || 'Mr.joker';
-  if (adminPassword) {
-    const loggedIn = await loginWithPassword(page, adminUsername, adminPassword);
-    if (loggedIn.ok) {
-      const session = await currentSessionUser(page);
-      return { userId: session.id, username: session.name, strategy: 'admin-login' };
-    }
-    throw new Error(`BLOCKED: administrator login failed with HTTP ${loggedIn.status}`);
+  if (process.env.WUJIE_ADMIN_PASSWORD?.trim()) {
+    return provisionDisposableStage4User(page, fixture);
   }
 
   throw new Error(
-    'BLOCKED: Stage 4 baseline requires one of: registration enabled, E2E_TEST_USERNAME/E2E_TEST_PASSWORD, or WUJIE_ADMIN_PASSWORD',
+    'BLOCKED: Stage 4 baseline requires registration enabled, a run-scoped E2E_TEST_USERNAME/E2E_TEST_PASSWORD fixture pair, or WUJIE_ADMIN_PASSWORD for disposable fixture provisioning',
   );
 }
 
@@ -312,6 +432,12 @@ export async function seedStage4Baseline(
   fixture: Stage4SeedTarget,
   auth: Stage4AuthContext,
 ): Promise<{ canvasKernelMode: string | null; projectRevision: number | null }> {
+  assertStage4SeedIsolation({
+    id: auth.userId,
+    browserProfile: fixture.browserProfile,
+    username: fixture.username,
+    password: '',
+  }, auth);
   const readProjects = await page.request.get('/api/user-data/sync?key=projects');
   const projectPayload = await readJson(readProjects);
   expect(readProjects.ok(), `/api/user-data/sync?key=projects returned HTTP ${readProjects.status()}`).toBe(true);

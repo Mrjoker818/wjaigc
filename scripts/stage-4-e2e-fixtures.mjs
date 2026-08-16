@@ -160,7 +160,9 @@ function buildChatProject(runId, profileId) {
 }
 
 export function assertStage4FixtureDatabase(rawUrl) {
-  if (!rawUrl) return;
+  if (!rawUrl || !String(rawUrl).trim()) {
+    throw new Error('BLOCKED: E2E_STAGE4_DATABASE_URL is required for Stage 4 fixture isolation');
+  }
   let parsed;
   try {
     parsed = new URL(rawUrl);
@@ -169,6 +171,24 @@ export function assertStage4FixtureDatabase(rawUrl) {
   }
   if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
     throw new Error('Stage 4 fixture database URL must use postgres or postgresql');
+  }
+
+  const scope = [
+    parsed.hostname,
+    parsed.pathname,
+    parsed.searchParams.get('application_name') || '',
+    parsed.searchParams.get('schema') || '',
+    parsed.searchParams.get('currentSchema') || '',
+    parsed.searchParams.get('options') || '',
+  ].join(' ').toLowerCase();
+  const sharedHints = ['prod', 'production', 'shared', 'stable', 'main', 'primary', 'restore'];
+  if (sharedHints.some(token => scope.includes(token))) {
+    throw new Error('Stage 4 fixture database must not target a shared or production database');
+  }
+
+  const isolatedHints = ['stage4', 'stage-4', 'fixture', 'e2e', 'test', 'sandbox', 'isolated'];
+  if (!isolatedHints.some(token => scope.includes(token))) {
+    throw new Error('Stage 4 fixture database must prove isolated Stage 4 scope via its host, database name, schema, or application_name');
   }
 }
 

@@ -47,6 +47,16 @@ export interface WorkflowPerformanceSample {
 
 type WorkflowInteraction = (page: Page) => Promise<void>;
 
+export function selectWorkflowMonitorIds(
+  rawIds: ReadonlyArray<string | null | undefined>,
+): string[] {
+  return [...new Set(
+    rawIds
+      .map(value => typeof value === 'string' ? value.trim() : '')
+      .filter(value => value.length > 0),
+  )];
+}
+
 function percentile95(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((left, right) => left - right);
@@ -76,7 +86,11 @@ export function summarizeWorkflowPerformance(
 }
 
 async function startMeasurement(page: Page): Promise<void> {
-  await page.evaluate(() => {
+  const monitoredIds = selectWorkflowMonitorIds(await page.locator('[data-node-id]').evaluateAll(nodes => (
+    nodes.map(node => (node as HTMLElement).dataset.nodeId ?? null)
+  )));
+
+  await page.evaluate((nodeIds: string[]) => {
     const windowWithState = window as typeof window & {
       __wujieStage4WorkflowPerformance?: Record<string, unknown>;
     };
@@ -84,11 +98,7 @@ async function startMeasurement(page: Page): Promise<void> {
       throw new Error('Stage 4 workflow measurement is already active');
     }
 
-    const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-node-id]'))
-      .slice(0, 25)
-      .map(node => node.dataset.nodeId)
-      .filter((value): value is string => typeof value === 'string' && value.length > 0);
-    const monitoredIds = new Set(nodes);
+    const monitoredIds = new Set(nodeIds);
 
     const state = {
       startedAt: performance.now(),
@@ -224,7 +234,7 @@ async function startMeasurement(page: Page): Promise<void> {
 
     state.rafId = requestAnimationFrame(tick);
     windowWithState.__wujieStage4WorkflowPerformance = state as unknown as Record<string, unknown>;
-  });
+  }, monitoredIds);
 }
 
 async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample> {
