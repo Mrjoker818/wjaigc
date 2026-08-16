@@ -84,6 +84,7 @@
     "src/lib/legacy-task-recovery.ts",
     "src/lib/model-capabilities.ts",
     "src/lib/model-type-classification.ts",
+    "src/lib/quick-create-compile.ts",
     "src/lib/server-api-config.ts",
     "src/lib/task-core/billing-service.ts",
     "src/lib/task-core/durable-generation-kickoff.ts",
