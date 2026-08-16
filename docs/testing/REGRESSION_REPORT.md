@@ -1119,7 +1119,8 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - The missing hashed chunk returned HTTP 500 while `/` returned HTTP 200 with a one-year `s-maxage` and `X-Nextjs-Cache: HIT`. This preserves the real deployment failure and rejects the false inference that a root 200 means the UI is healthy.
 - A RED/GREEN source contract now requires the authenticated root layout to render dynamically. The production build reports both `/` and `/simple-chat` as dynamic, and a real local production request returns `no-store, private, max-age=0` instead of long-lived shared caching.
 - Full local gates pass against isolated PostgreSQL 18: `441/441` files, `2521/2521` tests, zero skipped; TypeScript passes; ESLint is `0 errors / 973 warnings`; production build and the `38/38` protected-feature gate pass.
-- **Verdict: LOCAL REGRESSION PASS / COZE EXACT-SHA PENDING.** The candidate has not yet been committed or deployed. Stage 3 Task 10 remains active, and this deployment repair does not authorize Stage 4/5 or any change to `stable`.
+- Coze then synchronized exact `main@9a6363f021f7197b3aa5a9cf834c0c1c0419cb67`. Fresh authenticated Chrome tabs loaded both the dashboard and `/simple-chat` without the global error boundary or `Loading chunk`; the current HTML references 11 static assets and all 11 return HTTP 200. The old `5504` chunk is no longer referenced, and the external root response is now private `no-store`.
+- **Verdict: CLOUD REGRESSION PASS FOR S3-BUG-032.** Stage 3 Task 10 remains active: the historical blank project thumbnail is still visible, GitHub immutable workflows remain billing-blocked, and hosted Canvas plus real-P0 evidence are still required. This does not authorize Stage 4/5 or any change to `stable`.
 
 ## 2026-08-15 Space-pan hot-path candidate after immutable run `31884790226`
 

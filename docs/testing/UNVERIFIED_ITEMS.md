@@ -816,7 +816,7 @@ Stage 3 remains in Task 10 (`10/11`, about `91%`).
 | Item | Status | Required evidence |
 |---|---|---|
 | Dynamic app-shell candidate | LOCALLY VERIFIED | Production routes `/` and `/simple-chat` are dynamic; root HTML returns private `no-store`; full PostgreSQL-enabled `2521/2521`, TypeScript, zero-error ESLint, build and protected feature gates pass. |
-| Coze stale chunk closure | UNVERIFIED / P1 | Deploy the new exact `main` SHA to isolated Coze, open it in Google Chrome, and prove the HTML references only present chunks with zero `ChunkLoadError`, zero global error boundary and clean Console/network evidence. |
+| Coze stale chunk closure | VERIFIED ON `9a6363f` | Authenticated Chrome dashboard and `/simple-chat` load without the global error boundary or `Loading chunk`; current HTML assets are `11/11` HTTP 200, old chunk absent, root private `no-store`, `/api/auth/me` 200. |
 | GitHub immutable workflows | BLOCKED EXTERNALLY | Actions runs on `fc190b1` never received a runner because of account payment/spending-limit status. Restore billing and run the exact new SHA; local evidence cannot replace this gate. |
 | Stage 3 hosted Canvas and real-P0 | STILL REQUIRED | Preserve unchanged three-mode performance/continuity thresholds and prove real provider generation, charge, cancel and at-most-once refund. The deployment fix does not close these gates. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; do not enter Stage 4/5. |
