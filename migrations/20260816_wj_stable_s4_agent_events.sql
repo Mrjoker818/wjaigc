@@ -39,3 +39,12 @@ CREATE TABLE IF NOT EXISTS wujie_agent_events (
 
 CREATE INDEX IF NOT EXISTS idx_agent_events_owner_project_task_sequence
   ON wujie_agent_events(owner_id, project_id, task_id, sequence);
+
+DO $$
+BEGIN
+  IF to_regclass('cloud_tasks') IS NOT NULL THEN
+    ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS terminal_event_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS terminal_event_digest TEXT NOT NULL DEFAULT '';
+    ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS terminal_event_type TEXT NOT NULL DEFAULT '';
+  END IF;
+END $$;

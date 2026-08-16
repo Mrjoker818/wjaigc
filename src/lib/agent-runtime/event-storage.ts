@@ -106,15 +106,22 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-function createRequestDigest(input: {
+export function createAgentEventRequestDigest(input: {
   projectId: string;
   runId: string;
   workspace: AgentWorkspace;
   type: AgentEventType;
   payload: Record<string, unknown>;
 }): string {
+  const canonicalRequest = {
+    projectId: input.projectId,
+    runId: input.runId,
+    workspace: input.workspace,
+    type: input.type,
+    payload: input.payload,
+  };
   return createHash('sha256')
-    .update(JSON.stringify(canonicalize(input)))
+    .update(JSON.stringify(canonicalize(canonicalRequest)))
     .digest('hex');
 }
 
@@ -176,19 +183,26 @@ export async function appendAgentEvent(
   if (Buffer.byteLength(serializedPayload, 'utf8') > MAX_PAYLOAD_BYTES) {
     throw new RangeError(`Agent event payload must not exceed ${MAX_PAYLOAD_BYTES} bytes`);
   }
-  const requestDigest = createRequestDigest(input);
+  const requestDigest = createAgentEventRequestDigest(input);
   const client = await getPool().connect();
 
   try {
     await client.query('BEGIN');
-    const task = await client.query(
-      `SELECT id
+    const task = await client.query<{
+      id: string;
+      status: string;
+      terminal_event_id: string;
+      terminal_event_digest: string;
+      terminal_event_type: string;
+    }>(
+      `SELECT id, status, terminal_event_id, terminal_event_digest, terminal_event_type
        FROM cloud_tasks
        WHERE id = $1 AND user_id = $2 AND project_id = $3
        FOR UPDATE`,
       [input.runId, input.actorUserId, input.projectId],
     );
     if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
+    const taskRow = task.rows[0];
 
     const existing = await findExistingEvent(client, input);
     if (existing) {
@@ -197,6 +211,20 @@ export async function appendAgentEvent(
       }
       await client.query('COMMIT');
       return mapEvent(existing);
+    }
+
+    if (input.type.startsWith('run.') && input.type !== 'run.created') {
+      if (
+        taskRow.terminal_event_id !== input.eventId
+        || taskRow.terminal_event_digest !== requestDigest
+        || taskRow.terminal_event_type !== input.type
+      ) {
+        throw new AgentEventConflictError();
+      }
+    } else if (
+      ['completed', 'failed', 'cancelled', 'timeout'].includes(taskRow.status)
+    ) {
+      throw new AgentEventConflictError();
     }
 
     const sequenceResult = await client.query<{ sequence: number }>(
@@ -232,6 +260,13 @@ export async function appendAgentEvent(
       if (isUniqueViolation(error)) throw new AgentEventConflictError();
       throw error;
     }
+    await client.query(
+      `UPDATE cloud_tasks
+       SET revision = revision + 1,
+           updated_at = GREATEST(updated_at, $2)
+       WHERE id = $1`,
+      [input.runId, createdAt],
+    );
     await client.query('COMMIT');
     return mapEvent(inserted.rows[0]);
   } catch (error) {

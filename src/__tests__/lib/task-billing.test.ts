@@ -159,16 +159,31 @@ describe('task billing service', () => {
         refunded: false,
       });
 
+    const terminalIdentity = {
+      eventId: 'timeout-event',
+      requestDigest: 'terminal-digest',
+      eventType: 'run.timeout',
+    };
     await expect(settleFailedTask({
       taskId: 'task-owner',
       status: 'timeout',
       error: { code: 'MODEL_TIMEOUT', message: 'Provider timed out' },
+      expectedRevision: 0,
+      terminalIdentity,
     })).resolves.toEqual({ transitioned: true, refunded: true });
     await expect(settleFailedTask({
       taskId: 'task-owner',
       status: 'failed',
       error: { code: 'MODEL_FAILED', message: 'Provider failed late' },
     })).resolves.toEqual({ transitioned: false, refunded: false });
+
+    expect(storage.settleFailedCloudTask).toHaveBeenNthCalledWith(1, {
+      taskId: 'task-owner',
+      status: 'timeout',
+      error: { code: 'MODEL_TIMEOUT', message: 'Provider timed out' },
+      expectedRevision: 0,
+      terminalIdentity,
+    });
 
     expect(registry.updateTaskProgress).toHaveBeenCalledTimes(1);
     expect(registry.updateTaskProgress).toHaveBeenCalledWith('task-owner', {

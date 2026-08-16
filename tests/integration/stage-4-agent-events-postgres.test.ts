@@ -10,6 +10,7 @@ import {
   AgentEventConflictError,
   AgentEventNotFoundError,
   appendAgentEvent,
+  createAgentEventRequestDigest,
   listAgentEventStreamsForActor,
   listAgentEventsForActor,
 } from '@/lib/agent-runtime/event-storage';
@@ -392,7 +393,7 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
         projectId,
         runId,
         eventId: 'owner-created',
-        workspace: 'canvas',
+        workspace: 'canvas' as const,
         type: 'run.created',
         payload: {},
       });
@@ -434,27 +435,39 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
         payload: {},
       });
 
-      await Promise.all([
-        appendAgentEvent({
-          actorUserId: ownerId,
-          projectId,
+      const failedTerminal = {
+        actorUserId: ownerId,
+        projectId,
+        runId,
+        eventId: 'failed-terminal',
+        workspace: 'canvas' as const,
+        type: 'run.failed' as const,
+        payload: { error: { code: 'FAILED', message: 'failed', retryable: true } },
+      };
+      await query(
+        `UPDATE cloud_tasks
+         SET status = 'failed', terminal_event_id = $2,
+             terminal_event_digest = $3, terminal_event_type = $4,
+             revision = revision + 1
+         WHERE id = $1`,
+        [
           runId,
-          eventId: 'failed-terminal',
-          workspace: 'canvas',
-          type: 'run.failed',
-          payload: { error: { code: 'FAILED', message: 'failed', retryable: true } },
-        }),
-        appendAgentEvent({
-          actorUserId: ownerId,
-          projectId,
-          runId,
-          eventId: 'completed-terminal',
-          workspace: 'canvas',
-          type: 'run.completed',
-          payload: { result: { imageUrl: '/late.png' } },
-        }),
-      ]);
-      await appendAgentEvent({
+          failedTerminal.eventId,
+          createAgentEventRequestDigest(failedTerminal),
+          failedTerminal.type,
+        ],
+      );
+      await appendAgentEvent(failedTerminal);
+      await expect(appendAgentEvent({
+        actorUserId: ownerId,
+        projectId,
+        runId,
+        eventId: 'completed-terminal',
+        workspace: 'canvas',
+        type: 'run.completed',
+        payload: { result: { imageUrl: '/late.png' } },
+      })).rejects.toBeInstanceOf(AgentEventConflictError);
+      await expect(appendAgentEvent({
         actorUserId: ownerId,
         projectId,
         runId,
@@ -462,14 +475,14 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
         workspace: 'canvas',
         type: 'asset.created',
         payload: { assetVersionId: 'late-version' },
-      });
+      })).rejects.toBeInstanceOf(AgentEventConflictError);
 
       const events = await listAgentEventsForActor({ actorUserId: ownerId, projectId, runId });
       const projection = reduceAgentEvents(events);
-      expect(['failed', 'completed']).toContain(projection.status);
+      expect(projection.status).toBe('failed');
       expect(projection.lastSequence).toBe(2);
       expect(projection.assetVersionIds).toEqual([]);
-      expect(projection.ignoredEventIds).toHaveLength(2);
+      expect(projection.ignoredEventIds).toHaveLength(0);
 
       await expect(appendAgentEvent({
         actorUserId: ownerId,
@@ -849,6 +862,198 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
       );
       expect(facts.rows[0]).toMatchObject({ status: 'cancelled', completed_events: '0' });
       expect(JSON.stringify(facts.rows[0]?.result)).not.toContain('/must-not-persist.png');
+    });
+  });
+
+  postgresIt('binds concurrent same-status completions to one task result and one terminal event', async () => {
+    await withIsolatedPostgres('stage-4-agent-terminal-identity-race', async ({ databaseUrl, query }) => {
+      expect(runMigrations(databaseUrl).status).toBe(0);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const runId = randomUUID();
+      const now = Date.now();
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Agent terminal identity race', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+
+      const { createAgentRuntimeService } = await import('@/lib/agent-runtime/service');
+      const { getCloudTaskForUser } = await import('@/lib/cloud-task-storage');
+      const { createBillableTask, settleFailedTask } = await import('@/lib/task-core/billing-service');
+      const { transitionTask } = await import('@/lib/task-core/task-service');
+      const service = createAgentRuntimeService({
+        randomUUID: () => runId,
+        now: () => now,
+        resolveTaskModel: async () => ({
+          providerId: 'provider-exact', modelId: 'model-exact', kind: 'image',
+          sourceType: 'image', protocol: 'images', executionMode: 'async',
+          allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+          supportsReferenceImages: false, supportsMask: false, outputKinds: ['png'],
+        }),
+        authorizeContext: async ({ request }) => request.context,
+        calculateCreditCost: async () => 7,
+        createBillableTask,
+        appendEvent: appendAgentEvent,
+        listEvents: listAgentEventsForActor,
+        listRunEventStreams: listAgentEventStreamsForActor,
+        getTaskForUser: getCloudTaskForUser,
+        transitionTask,
+        settleFailedTask,
+        abortTaskExecution: () => false,
+      });
+      const actor = {
+        id: ownerId, name: 'Identity owner', role: 'user' as const, status: 'active' as const,
+        productType: 'canvas', createdAt: now, updatedAt: now,
+      };
+      await service.createRun({
+        actor,
+        request: {
+          projectId, workspace: 'canvas', workspaceId: 'canvas-1', mode: 'agent',
+          providerId: 'provider-exact', modelId: 'model-exact', prompt: 'Create an image',
+          sourceVersionIds: [], allowedToolIds: ['generate_image'], idempotencyKey: 'terminal-identity-race',
+          context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' },
+        },
+      });
+
+      const outcomes = await Promise.allSettled([
+        service.appendEvent({
+          actorUserId: ownerId, runId, eventId: 'completion-a', type: 'run.completed',
+          payload: { result: { imageUrl: '/result-a.png' } },
+        }),
+        service.appendEvent({
+          actorUserId: ownerId, runId, eventId: 'completion-b', type: 'run.completed',
+          payload: { result: { imageUrl: '/result-b.png' } },
+        }),
+      ]);
+      const acceptedOutcomes = outcomes.filter(
+        outcome => outcome.status === 'fulfilled' && outcome.value.accepted,
+      );
+      expect(acceptedOutcomes).toHaveLength(1);
+
+      const events = await listAgentEventsForActor({ actorUserId: ownerId, projectId, runId });
+      const projection = reduceAgentEvents(events);
+      const facts = await query<{
+        result: Record<string, unknown>;
+        terminal_event_id: string;
+        terminal_event_digest: string;
+        terminal_event_type: string;
+        terminal_events: string;
+      }>(
+        `SELECT task.result, task.terminal_event_id, task.terminal_event_digest,
+                task.terminal_event_type,
+                (SELECT count(*)::text FROM wujie_agent_events
+                 WHERE task_id = task.id AND event_type = 'run.completed') AS terminal_events
+         FROM cloud_tasks task WHERE task.id = $1`,
+        [runId],
+      );
+      expect(facts.rows[0]?.terminal_events).toBe('1');
+      expect(facts.rows[0]?.terminal_event_type).toBe('run.completed');
+      expect(facts.rows[0]?.terminal_event_id).toBe(
+        events.find(item => item.type === 'run.completed')?.eventId,
+      );
+      expect(facts.rows[0]?.terminal_event_digest).toMatch(/^[a-f0-9]{64}$/);
+      expect(facts.rows[0]?.result).toEqual(projection.result);
+    });
+  });
+
+  postgresIt('reconciles run.created committed before an ambiguous response without refunding or charging twice', async () => {
+    await withIsolatedPostgres('stage-4-agent-created-ambiguous-response', async ({ databaseUrl, query }) => {
+      expect(runMigrations(databaseUrl).status).toBe(0);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const runId = randomUUID();
+      const now = Date.now();
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Agent ambiguous initialization', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+
+      const { createAgentRuntimeService } = await import('@/lib/agent-runtime/service');
+      const { getCloudTaskForUser } = await import('@/lib/cloud-task-storage');
+      const { createBillableTask, settleFailedTask } = await import('@/lib/task-core/billing-service');
+      const { transitionTask } = await import('@/lib/task-core/task-service');
+      let loseResponse = true;
+      const service = createAgentRuntimeService({
+        randomUUID: () => runId,
+        now: () => now,
+        resolveTaskModel: async () => ({
+          providerId: 'provider-exact', modelId: 'model-exact', kind: 'image',
+          sourceType: 'image', protocol: 'images', executionMode: 'async',
+          allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+          supportsReferenceImages: false, supportsMask: false, outputKinds: ['png'],
+        }),
+        authorizeContext: async ({ request }) => request.context,
+        calculateCreditCost: async () => 7,
+        createBillableTask,
+        appendEvent: async input => {
+          const persisted = await appendAgentEvent(input);
+          if (input.type === 'run.created' && loseResponse) {
+            loseResponse = false;
+            throw new Error('run.created response lost after commit');
+          }
+          return persisted;
+        },
+        listEvents: listAgentEventsForActor,
+        listRunEventStreams: listAgentEventStreamsForActor,
+        getTaskForUser: getCloudTaskForUser,
+        transitionTask,
+        settleFailedTask,
+        abortTaskExecution: () => false,
+      });
+      const actor = {
+        id: ownerId, name: 'Ambiguous owner', role: 'user' as const, status: 'active' as const,
+        productType: 'canvas', createdAt: now, updatedAt: now,
+      };
+      const request = {
+        projectId, workspace: 'canvas' as const, workspaceId: 'canvas-1', mode: 'agent' as const,
+        providerId: 'provider-exact', modelId: 'model-exact', prompt: 'Create an image',
+        sourceVersionIds: [], allowedToolIds: ['generate_image'], idempotencyKey: 'ambiguous-created',
+        context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' as const },
+      };
+
+      await expect(service.createRun({ actor, request })).resolves.toMatchObject({
+        runId, reused: false, charged: true, projection: { status: 'created' },
+      });
+      await expect(service.createRun({ actor, request })).resolves.toMatchObject({
+        runId, reused: true, charged: false, projection: { status: 'created' },
+      });
+
+      const facts = await query<{
+        status: string; credit_status: string; revision: number;
+        charges: string; refunds: string; created_events: string;
+      }>(
+        `SELECT task.status, task.credit_status, task.revision,
+                (SELECT count(*)::text FROM wujie_credit_transactions
+                 WHERE task_id = task.id AND type = 'consume') AS charges,
+                (SELECT count(*)::text FROM wujie_credit_transactions
+                 WHERE task_id = task.id AND type = 'refund') AS refunds,
+                (SELECT count(*)::text FROM wujie_agent_events
+                 WHERE task_id = task.id AND event_type = 'run.created') AS created_events
+         FROM cloud_tasks task WHERE task.id = $1`,
+        [runId],
+      );
+      expect(facts.rows[0]).toMatchObject({
+        status: 'processing', credit_status: 'pending', charges: '1', refunds: '0', created_events: '1',
+      });
+      expect(facts.rows[0]?.revision).toBeGreaterThanOrEqual(1);
     });
   });
 });

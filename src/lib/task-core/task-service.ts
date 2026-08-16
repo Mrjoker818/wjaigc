@@ -3,6 +3,7 @@ import {
   transitionCloudTaskStatus,
   type CloudTaskCreditStatus,
   type PersistedCloudTask,
+  type TaskTerminalIdentity,
 } from '@/lib/cloud-task-storage';
 import { updateTaskProgress } from '@/lib/task-registry';
 import {
@@ -21,6 +22,7 @@ export interface TransitionTaskInput {
   result?: Record<string, unknown>;
   error?: TaskErrorInput;
   creditStatus?: CloudTaskCreditStatus;
+  terminalIdentity?: TaskTerminalIdentity;
 }
 
 export interface TransitionTaskResult {
@@ -258,6 +260,7 @@ export async function transitionTask(
     result: input.result,
     error: input.error,
     creditStatus: input.creditStatus,
+    terminalIdentity: input.terminalIdentity,
   });
   if (!outcome.task) {
     throw new TaskNotFoundError(input.taskId);

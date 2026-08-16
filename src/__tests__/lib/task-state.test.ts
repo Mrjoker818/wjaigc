@@ -151,6 +151,11 @@ describe('durable task state', () => {
       result: { imageUrl: '/result.png' },
       revision: 5,
     };
+    const terminalIdentity = {
+      eventId: 'completion-event',
+      requestDigest: 'terminal-digest',
+      eventType: 'run.completed',
+    };
     getCloudTaskById.mockResolvedValue(current);
     transitionCloudTaskStatus.mockImplementation(async () => {
       calls.push('database');
@@ -165,6 +170,7 @@ describe('durable task state', () => {
       from: ['processing'],
       to: 'completed',
       result: completed.result,
+      terminalIdentity,
     });
 
     expect(transitionCloudTaskStatus).toHaveBeenCalledWith({
@@ -174,6 +180,8 @@ describe('durable task state', () => {
       revision: 4,
       result: completed.result,
       error: undefined,
+      creditStatus: undefined,
+      terminalIdentity,
     });
     expect(outcome).toEqual({ transitioned: true, task: completed });
     expect(calls).toEqual(['database', 'projection']);

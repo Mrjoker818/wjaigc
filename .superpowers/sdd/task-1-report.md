@@ -6,7 +6,8 @@ DONE LOCALLY / INDEPENDENT REVIEW FINDINGS REMEDIATED
 
 - Task 1 base: `255a8b6fe20924ae30ab8fd99a98393f2bcd1a52`
 - Initial Task 1 commit: `0c5c1adfe3e09eab87a81900a09f33bf789f7881`
-- Review-fix commit: pending at report update time
+- First review-fix commit: `ae8d46082f2f77e815eafb4ca94d02ab4bce098f`
+- Second review-fix commit: pending at report update time
 - Immutable baseline: `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`
 
 ## Delivered
@@ -26,6 +27,14 @@ DONE LOCALLY / INDEPENDENT REVIEW FINDINGS REMEDIATED
 - Nonterminal acceptance is based on whether the appended event was reduced, not whether it remains
   the latest sequence after a concurrent append.
 - Malformed JSON at `POST /api/agent-runs` now returns safe HTTP 400.
+- Bound each authoritative terminal transition to a durable event ID, canonical request digest and
+  terminal event type in `cloud_tasks`. Task result, billing state and this identity now change in
+  the existing atomic task settlement path before event persistence.
+- Agent event storage verifies terminal events against that durable identity and advances the owning
+  task revision in the same transaction as every new event insert.
+- Initialization failure settlement now uses the pre-append revision. A committed `run.created`
+  whose response is lost advances the revision, prevents refund and is reconciled by the exact
+  deterministic event retry; a true append failure is failed/refunded once and cannot resurrect.
 
 ## RED Evidence
 
@@ -52,9 +61,22 @@ After correcting only the PostgreSQL fixture isolation:
 - Defensive terminal retry RED: `2 failed / 24 skipped`; same-ID terminal retries bypassed canonical
   digest validation and a terminal task without its recovery event accepted nonterminal progress.
 
+Second-review RED evidence:
+
+- Unit command:
+  `pnpm exec vitest run src/__tests__/api/agent-runs.test.ts -t "binds a completion result" --reporter=verbose`
+  produced `1 failed / 26 skipped`: after completion A settled and its append response failed, a
+  same-ID retry carrying result B did not produce the required conflict.
+- Real PostgreSQL command:
+  `$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'; pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts -t "binds concurrent same-status|reconciles run.created" --reporter=verbose`
+  produced `2 failed / 13 skipped`: no durable terminal identity columns existed, and a committed
+  `run.created` followed by a lost response was incorrectly surfaced as initialization failure.
+- The pre-existing real PostgreSQL case `never resurrects a refunded initialization failure on
+  idempotent retry` remains the RED/GREEN guard for a true append failure and one-time refund.
+
 ## GREEN Evidence
 
-Final focused command:
+First-review final focused command:
 
 ```powershell
 $env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'
@@ -81,3 +103,24 @@ Static verification:
 - Exact-SHA cloud deployment and real browser integration remain Stage 4 follow-up evidence and are
   not represented as passed by these local tests.
 - This remediation did not modify `stable` or `.superpowers/sdd/task-1-brief.md`.
+
+## Second Review GREEN Evidence
+
+Final combined command:
+
+```powershell
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'
+pnpm exec vitest run src/__tests__/lib/agent-runtime-state.test.ts src/__tests__/lib/agent-runtime-tools.test.ts src/__tests__/api/agent-runs.test.ts src/__tests__/lib/task-model-catalog.test.ts src/__tests__/lib/task-state.test.ts src/__tests__/lib/task-billing.test.ts tests/integration/stage-4-agent-events-postgres.test.ts --reporter=verbose
+```
+
+Observed: `7 files / 202 tests passed`, including all `15/15` Stage 4 real PostgreSQL
+migration/event tests with zero skips. The PostgreSQL evidence includes concurrent different-result
+completion claims producing one durable terminal identity, one terminal event and a task result equal
+to the event projection; committed-then-thrown `run.created` recovery without refund or second charge;
+and true initialization append failure with one refund and no resurrection.
+
+Second-review static verification:
+
+- `pnpm ts-check`: exit 0.
+- `pnpm lint -- --quiet`: exit 0, zero ESLint errors.
+- `git diff --check`: run immediately before commit; result recorded in the commit evidence.

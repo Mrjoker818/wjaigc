@@ -50,6 +50,9 @@ export interface DurableTask {
   leaseExpiresAt?: number;
   attemptCount?: number;
   idempotencyKey?: string;
+  terminalEventId?: string;
+  terminalEventDigest?: string;
+  terminalEventType?: string;
   revision: number;
 }
 

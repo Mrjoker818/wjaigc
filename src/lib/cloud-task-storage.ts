@@ -22,6 +22,12 @@ import {
 export type CloudTaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
 export type CloudTaskCreditStatus = 'pending' | 'charged' | 'refunded' | 'not-applicable';
 
+export interface TaskTerminalIdentity {
+  eventId: string;
+  requestDigest: string;
+  eventType: string;
+}
+
 export interface CloudTask {
   id: string;
   userId: string;
@@ -48,6 +54,9 @@ export interface CloudTask {
   requestDigest?: string;
   chargedTransactionId?: string;
   refundedTransactionId?: string;
+  terminalEventId?: string;
+  terminalEventDigest?: string;
+  terminalEventType?: string;
   revision?: number;
 }
 
@@ -96,6 +105,7 @@ export interface TransitionCloudTaskStatusInput {
   result?: Record<string, unknown>;
   error?: TaskErrorInput;
   creditStatus?: CloudTaskCreditStatus;
+  terminalIdentity?: TaskTerminalIdentity;
 }
 
 export interface TransitionCloudTaskStatusResult {
@@ -168,6 +178,8 @@ export interface SettleFailedCloudTaskInput {
   taskId: string;
   status: CloudTaskFailureStatus;
   error: TaskErrorInput;
+  expectedRevision?: number;
+  terminalIdentity?: TaskTerminalIdentity;
 }
 
 export interface SettleFailedCloudTaskResult {
@@ -225,6 +237,9 @@ async function initializeCloudTaskTables(): Promise<void> {
       request_digest TEXT DEFAULT '',
       charged_transaction_id TEXT DEFAULT '',
       refunded_transaction_id TEXT DEFAULT '',
+      terminal_event_id TEXT NOT NULL DEFAULT '',
+      terminal_event_digest TEXT NOT NULL DEFAULT '',
+      terminal_event_type TEXT NOT NULL DEFAULT '',
       revision INTEGER NOT NULL DEFAULT 0,
       created_at BIGINT NOT NULL,
       updated_at BIGINT NOT NULL
@@ -241,6 +256,9 @@ async function initializeCloudTaskTables(): Promise<void> {
   await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS request_digest TEXT DEFAULT ''");
   await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS charged_transaction_id TEXT DEFAULT ''");
   await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS refunded_transaction_id TEXT DEFAULT ''");
+  await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS terminal_event_id TEXT NOT NULL DEFAULT ''");
+  await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS terminal_event_digest TEXT NOT NULL DEFAULT ''");
+  await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS terminal_event_type TEXT NOT NULL DEFAULT ''");
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS credit_cost NUMERIC NOT NULL DEFAULT 0');
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 0');
   await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_user_idempotency ON cloud_tasks(user_id, idempotency_key) WHERE idempotency_key <> ''");
@@ -490,6 +508,17 @@ export async function settleFailedCloudTask(
     }
 
     const currentStatus = normalizeDurableTaskStatus(String(row.status));
+    if (
+      input.expectedRevision !== undefined
+      && Number(row.revision || 0) !== input.expectedRevision
+    ) {
+      await client.query('COMMIT');
+      return {
+        task: rowToPersistedCloudTask(row),
+        transitioned: false,
+        refunded: false,
+      };
+    }
     if (!canTransitionTaskStatus(currentStatus, input.status)) {
       await client.query('COMMIT');
       return {
@@ -551,22 +580,28 @@ export async function settleFailedCloudTask(
              WHEN credit_cost <= 0 THEN 'not-applicable'
              ELSE credit_status
            END,
-           refunded_transaction_id = CASE
+            refunded_transaction_id = CASE
              WHEN $4::boolean THEN $5
              ELSE refunded_transaction_id
-           END,
-           revision = revision + 1,
+            END,
+            terminal_event_id = CASE WHEN $7 <> '' THEN $7 ELSE terminal_event_id END,
+            terminal_event_digest = CASE WHEN $7 <> '' THEN $8 ELSE terminal_event_digest END,
+            terminal_event_type = CASE WHEN $7 <> '' THEN $9 ELSE terminal_event_type END,
+            revision = revision + 1,
            updated_at = $6
        WHERE id = $1
        RETURNING *`,
       [
-        input.taskId,
+         input.taskId,
         input.status,
         input.error.message,
         shouldRefund,
         refundedTransactionId,
-        Date.now(),
-      ],
+         Date.now(),
+         input.terminalIdentity?.eventId || '',
+         input.terminalIdentity?.requestDigest || '',
+         input.terminalIdentity?.eventType || '',
+       ],
     );
     await client.query('COMMIT');
     return {
@@ -721,6 +756,14 @@ export async function transitionCloudTaskStatus(
   if (input.creditStatus !== undefined) {
     sets.push(`credit_status = $${index++}`);
     params.push(input.creditStatus);
+  }
+  if (input.terminalIdentity !== undefined) {
+    sets.push(`terminal_event_id = $${index++}`);
+    params.push(input.terminalIdentity.eventId);
+    sets.push(`terminal_event_digest = $${index++}`);
+    params.push(input.terminalIdentity.requestDigest);
+    sets.push(`terminal_event_type = $${index++}`);
+    params.push(input.terminalIdentity.eventType);
   }
 
   const result = await execSql(`
@@ -1377,6 +1420,9 @@ function rowToCloudTask(row: Record<string, unknown>): CloudTask {
       String(row.charged_transaction_id || '') || undefined,
     refundedTransactionId:
       String(row.refunded_transaction_id || '') || undefined,
+    terminalEventId: String(row.terminal_event_id || '') || undefined,
+    terminalEventDigest: String(row.terminal_event_digest || '') || undefined,
+    terminalEventType: String(row.terminal_event_type || '') || undefined,
     revision: Number(row.revision || 0),
   };
 }

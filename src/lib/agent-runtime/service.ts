@@ -22,6 +22,7 @@ import {
   AgentEventConflictError,
   AgentEventNotFoundError,
   appendAgentEvent,
+  createAgentEventRequestDigest,
   listAgentEventStreamsForActor,
   listAgentEventsForActor,
 } from './event-storage';
@@ -387,10 +388,22 @@ export function createAgentRuntimeService(
 ) {
   async function ownedRun(actorUserId: string, runId: string): Promise<OwnedAgentRun> {
     const task = await dependencies.getTaskForUser(runId, actorUserId);
-    const workspace = task ? workspaceFromTask(task) : null;
-    if (!task || task.type !== 'agent-run' || !task.projectId || !workspace) {
+    if (!task || task.type !== 'agent-run' || !task.projectId) {
       throw new AgentRunNotFoundError();
     }
+    let workspace = workspaceFromTask(task);
+    if (!workspace) {
+      const events = await dependencies.listEvents({
+        actorUserId,
+        projectId: task.projectId,
+        runId,
+      });
+      const createdWorkspace = events.find(event => event.type === 'run.created')?.payload.workspace;
+      workspace = WORKSPACES.has(createdWorkspace as AgentWorkspace)
+        ? createdWorkspace as AgentWorkspace
+        : null;
+    }
+    if (!workspace) throw new AgentRunNotFoundError();
     return { task, projectId: task.projectId, workspace };
   }
 
@@ -442,6 +455,19 @@ export function createAgentRuntimeService(
     }
 
     const requestedTerminalStatus = taskStatusForTerminalEvent(input.type);
+    const terminalIdentity = requestedTerminalStatus
+      ? {
+          eventId: input.eventId,
+          requestDigest: createAgentEventRequestDigest({
+            projectId: run.projectId,
+            runId: input.runId,
+            workspace: run.workspace,
+            type: input.type,
+            payload: input.payload,
+          }),
+          eventType: input.type,
+        }
+      : undefined;
     if (TERMINAL_TASK_STATUSES.has(run.task.status)) {
       if (!requestedTerminalStatus) {
         throw new AgentRunTerminalError(run.task.status);
@@ -460,8 +486,17 @@ export function createAgentRuntimeService(
         result: result && typeof result === 'object' && !Array.isArray(result)
           ? result as Record<string, unknown>
           : undefined,
+        terminalIdentity,
       });
-      if (!settlement.transitioned && settlement.task.status !== 'completed') {
+      if (
+        !settlement.transitioned
+        && (
+          settlement.task.status !== 'completed'
+          || settlement.task.terminalEventId !== terminalIdentity?.eventId
+          || settlement.task.terminalEventDigest !== terminalIdentity?.requestDigest
+          || settlement.task.terminalEventType !== terminalIdentity?.eventType
+        )
+      ) {
         throw new AgentRunTerminalConflictError();
       }
     } else if (requestedTerminalStatus) {
@@ -470,13 +505,19 @@ export function createAgentRuntimeService(
         taskId: input.runId,
         status: requestedTerminalStatus,
         error,
+        terminalIdentity,
       });
       if (!settlement.transitioned) {
         const authoritative = await dependencies.getTaskForUser(
           input.runId,
           input.actorUserId,
         );
-        if (authoritative?.status !== requestedTerminalStatus) {
+        if (
+          authoritative?.status !== requestedTerminalStatus
+          || authoritative.terminalEventId !== terminalIdentity?.eventId
+          || authoritative.terminalEventDigest !== terminalIdentity?.requestDigest
+          || authoritative.terminalEventType !== terminalIdentity?.eventType
+        ) {
           throw new AgentRunTerminalConflictError();
         }
       }
@@ -568,39 +609,42 @@ export function createAgentRuntimeService(
         throw new AgentRunTerminalError(created.task.status);
       }
       let createdEvent: AgentEvent;
-      try {
-        createdEvent = await dependencies.appendEvent({
-          actorUserId: input.actor.id,
-          projectId: input.request.projectId,
-          runId,
-          eventId: `agent:${runId}:created`,
+      const createdEventInput = {
+        actorUserId: input.actor.id,
+        projectId: input.request.projectId,
+        runId,
+        eventId: `agent:${runId}:created`,
+        workspace: input.request.workspace,
+        type: 'run.created' as const,
+        payload: {
           workspace: input.request.workspace,
-          type: 'run.created',
-          payload: {
-            workspace: input.request.workspace,
-            workspaceId: input.request.workspaceId,
-            mode: input.request.mode,
-            providerId: input.request.providerId,
-            modelId: input.request.modelId,
-            prompt: input.request.prompt,
-            sourceVersionIds: input.request.sourceVersionIds,
-            allowedToolIds: authorization.tools.map(tool => tool.toolId),
-            context: input.request.context,
-          },
-        });
+          workspaceId: input.request.workspaceId,
+          mode: input.request.mode,
+          providerId: input.request.providerId,
+          modelId: input.request.modelId,
+          prompt: input.request.prompt,
+          sourceVersionIds: input.request.sourceVersionIds,
+          allowedToolIds: authorization.tools.map(tool => tool.toolId),
+          context: input.request.context,
+        },
+      };
+      try {
+        createdEvent = await dependencies.appendEvent(createdEventInput);
       } catch (error) {
         if (!created.reused) {
-          await dependencies.settleFailedTask({
+          const settlement = await dependencies.settleFailedTask({
             taskId: runId,
             status: 'failed',
+            expectedRevision: created.task.revision,
             error: {
               code: 'AGENT_EVENT_STORAGE_FAILED',
               message: 'Agent run initialization failed',
               retryable: true,
             },
           });
+          if (settlement.transitioned) throw error;
         }
-        throw error;
+        createdEvent = await dependencies.appendEvent(createdEventInput);
       }
       const events = await dependencies.listEvents({
         actorUserId: input.actor.id,

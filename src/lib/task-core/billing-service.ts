@@ -3,6 +3,7 @@ import {
   settleFailedCloudTask,
   type CloudTaskFailureStatus,
   type PersistedCloudTask,
+  type TaskTerminalIdentity,
 } from '@/lib/cloud-task-storage';
 import { markTaskDurable, updateTaskProgress } from '@/lib/task-registry';
 import {
@@ -41,6 +42,8 @@ export interface SettleFailedTaskInput {
   taskId: string;
   status: CloudTaskFailureStatus;
   error: TaskErrorInput;
+  expectedRevision?: number;
+  terminalIdentity?: TaskTerminalIdentity;
 }
 
 export interface SettleFailedTaskResult {

@@ -5,6 +5,7 @@ import * as agentRuntime from '@/lib/agent-runtime/service';
 import type { AgentRuntimeDependencies } from '@/lib/agent-runtime/service';
 import { AgentEventConflictError } from '@/lib/agent-runtime/event-storage';
 import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
+import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
 
 const authMocks = vi.hoisted(() => ({
@@ -392,6 +393,81 @@ describe('Agent runtime service', () => {
       status: 409,
     });
     expect(dependencies.appendEvent).not.toHaveBeenCalled();
+  });
+
+  it('binds a completion result to its event identity across an ambiguous append failure', async () => {
+    const dependencies = serviceDependencies();
+    const completionA = event(2, 'run.completed', {
+      result: { imageUrl: '/result-a.png' },
+    });
+    const completionB = {
+      ...completionA,
+      payload: { result: { imageUrl: '/result-b.png' } },
+    };
+    let task: CloudTask & {
+      status: 'processing' | 'completed';
+      creditStatus: 'pending' | 'charged';
+      revision: number;
+    } = {
+      id: 'run-1',
+      userId: user.id,
+      projectId: 'project-1',
+      type: 'agent-run',
+      status: 'processing' as const,
+      progress: 0,
+      result: { workspace: 'canvas' },
+      creditStatus: 'pending' as const,
+      creditCost: 7,
+      createdAt: 1,
+      updatedAt: 1,
+      revision: 1,
+    };
+    dependencies.getTaskForUser.mockImplementation(async () => task);
+    dependencies.transitionTask.mockImplementation(async input => {
+      if (task.status === 'processing') {
+        task = {
+          ...task,
+          status: 'completed' as const,
+          result: input.result || {},
+          creditStatus: 'charged' as const,
+          revision: task.revision + 1,
+          terminalEventId: input.terminalIdentity?.eventId,
+          terminalEventDigest: input.terminalIdentity?.requestDigest,
+          terminalEventType: input.terminalIdentity?.eventType,
+        };
+        return { transitioned: true, task };
+      }
+      return { transitioned: false, task };
+    });
+    dependencies.listEvents.mockResolvedValue([
+      event(1, 'run.created', { workspace: 'canvas' }),
+    ]);
+    dependencies.appendEvent
+      .mockRejectedValueOnce(new Error('terminal event response lost'))
+      .mockResolvedValueOnce(completionB)
+      .mockResolvedValueOnce(completionA);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: completionA.eventId,
+      type: completionA.type,
+      payload: completionA.payload,
+    })).rejects.toThrow('terminal event response lost');
+    await expect(service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: completionB.eventId,
+      type: completionB.type,
+      payload: completionB.payload,
+    })).rejects.toMatchObject({
+      code: 'AGENT_RUN_TERMINAL_CONFLICT',
+      status: 409,
+    });
+
+    expect(task.result).toEqual({ imageUrl: '/result-a.png' });
+    expect(dependencies.appendEvent).toHaveBeenCalledTimes(1);
   });
 
   it('keeps an accepted nonterminal event accepted when a later event appears before reread', async () => {
