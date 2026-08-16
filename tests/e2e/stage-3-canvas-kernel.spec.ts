@@ -1157,6 +1157,9 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
         expect(sample.averageFps).toBeGreaterThanOrEqual(nodeCount === 100 ? 55 : 45);
         expect(sample.inputDelayP95Ms).toBeLessThanOrEqual(50);
         expect(sample.longestSaveTaskMs).toBeLessThanOrEqual(100);
+        expect(
+          sample.mediaLoadSamples.filter(event => event.kind === 'load' || event.kind === 'src-mutation'),
+        ).toEqual([]);
       }
       expect(sample.disappearedFrames).toBe(0);
       expect(sample.unclickableDurationMs).toBe(0);

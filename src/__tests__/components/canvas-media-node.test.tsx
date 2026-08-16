@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CanvasMediaNode,
+  areCanvasMediaRenderPropsEqual,
   beginCanvasMediaSourceTransition,
   completeCanvasMediaSourceTransition,
   getCanvasMediaLoadingPolicy,
@@ -14,6 +15,30 @@ import {
 import { CanvasSurface } from '@/components/canvas/CanvasSurface';
 
 describe('CanvasMediaNode', () => {
+  it('treats value-equivalent media render props as stable across viewport renders', () => {
+    const onLoad = () => undefined;
+    const onError = () => undefined;
+    const base = {
+      source: '/stable.png',
+      alt: 'stable',
+      width: 800,
+      height: 600,
+      className: 'media',
+      loading: 'eager' as const,
+      fetchPriority: 'auto' as const,
+      style: { contain: 'paint' as const, imageRendering: 'auto' as const },
+      onLoad,
+      onError,
+    };
+
+    expect(areCanvasMediaRenderPropsEqual(base, {
+      ...base,
+      style: { contain: 'paint', imageRendering: 'auto' },
+    })).toBe(true);
+    expect(areCanvasMediaRenderPropsEqual(base, { ...base, source: '/replacement.png' })).toBe(false);
+    expect(areCanvasMediaRenderPropsEqual(base, { ...base, fetchPriority: 'low' })).toBe(false);
+  });
+
   it('maps render priority to loading and fetch priority', () => {
     expect(getCanvasMediaLoadingPolicy('critical')).toEqual({ loading: 'eager', fetchPriority: 'high' });
     expect(getCanvasMediaLoadingPolicy('visible')).toEqual({ loading: 'eager', fetchPriority: 'auto' });
@@ -39,7 +64,18 @@ describe('CanvasMediaNode', () => {
     });
   });
 
-  it('commits the requested source when the browser expands currentSrc to an absolute URL', () => {
+  it('cancels a pending replacement when the source rolls back to the committed image', () => {
+    const ready = {
+      committedSource: '/a.png',
+      pendingSource: null,
+      loadState: { kind: 'ready' as const, naturalWidth: 800, naturalHeight: 600 },
+    };
+    const pending = beginCanvasMediaSourceTransition(ready, '/b.png');
+
+    expect(beginCanvasMediaSourceTransition(pending, '/a.png')).toEqual(ready);
+  });
+
+  it('keeps an old DOM load event bound to the displayed committed source', () => {
     const loading = beginCanvasMediaSourceTransition({
       committedSource: '/old.png',
       pendingSource: null,
@@ -50,7 +86,17 @@ describe('CanvasMediaNode', () => {
       loading,
       '/new.png',
       'https://example.test/new.png',
-    )).toBe('/new.png');
+    )).toBe('/old.png');
+  });
+
+  it('does not schedule another render when the same decoded source reports load again', () => {
+    const ready = {
+      committedSource: '/stable.png',
+      pendingSource: null,
+      loadState: { kind: 'ready' as const, naturalWidth: 800, naturalHeight: 600 },
+    };
+
+    expect(completeCanvasMediaSourceTransition(ready, '/stable.png', 800, 600)).toBe(ready);
   });
 
   it('renders stable dimensions and explicit media state', () => {

@@ -2,8 +2,12 @@
 
 import NextImage from 'next/image';
 import React, {
+  memo,
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type SyntheticEvent,
@@ -21,6 +25,7 @@ export interface CanvasMediaSourceState {
   committedSource: string | null;
   pendingSource: string | null;
   loadState: CanvasMediaLoadState;
+  retainedLoadState?: CanvasMediaLoadState;
 }
 
 interface CanvasMediaNodeProps {
@@ -35,6 +40,87 @@ interface CanvasMediaNodeProps {
   style?: CSSProperties;
   onError?: (event: SyntheticEvent<HTMLImageElement>) => void;
 }
+
+export interface CanvasMediaRenderProps {
+  'data-canvas-media-node'?: string;
+  'data-canvas-media-state'?: string;
+  'data-canvas-media-source'?: string;
+  source: string;
+  alt: string;
+  width: number;
+  height: number;
+  className?: string;
+  loading: 'eager' | 'lazy';
+  fetchPriority: 'high' | 'auto' | 'low';
+  style?: CSSProperties;
+  onLoad: (event: SyntheticEvent<HTMLImageElement>) => void;
+  onError: (event: SyntheticEvent<HTMLImageElement>) => void;
+}
+
+function canvasMediaStylesEqual(left?: CSSProperties, right?: CSSProperties): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const leftKeys = Object.keys(left) as Array<keyof CSSProperties>;
+  const rightKeys = Object.keys(right) as Array<keyof CSSProperties>;
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every(key => left[key] === right[key]);
+}
+
+export function areCanvasMediaRenderPropsEqual(
+  left: CanvasMediaRenderProps,
+  right: CanvasMediaRenderProps,
+): boolean {
+  return left.source === right.source
+    && left['data-canvas-media-node'] === right['data-canvas-media-node']
+    && left['data-canvas-media-state'] === right['data-canvas-media-state']
+    && left['data-canvas-media-source'] === right['data-canvas-media-source']
+    && left.alt === right.alt
+    && left.width === right.width
+    && left.height === right.height
+    && left.className === right.className
+    && left.loading === right.loading
+    && left.fetchPriority === right.fetchPriority
+    && left.onLoad === right.onLoad
+    && left.onError === right.onError
+    && canvasMediaStylesEqual(left.style, right.style);
+}
+
+const StableCanvasImage = memo(function StableCanvasImage({
+  'data-canvas-media-node': mediaNode,
+  'data-canvas-media-state': mediaState,
+  'data-canvas-media-source': mediaSource,
+  source,
+  alt,
+  width,
+  height,
+  className,
+  loading,
+  fetchPriority,
+  style,
+  onLoad,
+  onError,
+}: CanvasMediaRenderProps) {
+  return (
+    <NextImage
+      unoptimized
+      data-canvas-media-node={mediaNode}
+      data-canvas-media-state={mediaState}
+      data-canvas-media-source={mediaSource}
+      src={source}
+      alt={alt}
+      width={width}
+      height={height}
+      className={className}
+      draggable={false}
+      loading={loading}
+      fetchPriority={fetchPriority}
+      decoding="async"
+      style={style}
+      onLoad={onLoad}
+      onError={onError}
+    />
+  );
+}, areCanvasMediaRenderPropsEqual);
 
 export function getCanvasMediaLoadingPolicy(priority: CanvasRenderPriority): {
   loading: 'eager' | 'lazy';
@@ -74,11 +160,19 @@ export function beginCanvasMediaSourceTransition(
         : { kind: 'placeholder' },
     };
   }
-  if (nextSource === current.committedSource && current.pendingSource === null) return current;
+  if (nextSource === current.committedSource) {
+    if (current.pendingSource === null) return current;
+    return {
+      committedSource: current.committedSource,
+      pendingSource: null,
+      loadState: current.retainedLoadState ?? current.loadState,
+    };
+  }
   return {
     committedSource: current.committedSource,
     pendingSource: nextSource,
     loadState: { kind: 'loading' },
+    retainedLoadState: current.retainedLoadState ?? current.loadState,
   };
 }
 
@@ -89,13 +183,24 @@ export function completeCanvasMediaSourceTransition(
   naturalHeight: number,
 ): CanvasMediaSourceState {
   if (current.pendingSource && current.pendingSource !== source) return current;
+  const normalizedWidth = Math.max(1, naturalWidth);
+  const normalizedHeight = Math.max(1, naturalHeight);
+  if (
+    current.committedSource === source
+    && current.pendingSource === null
+    && current.loadState.kind === 'ready'
+    && current.loadState.naturalWidth === normalizedWidth
+    && current.loadState.naturalHeight === normalizedHeight
+  ) {
+    return current;
+  }
   return {
     committedSource: source,
     pendingSource: null,
     loadState: {
       kind: 'ready',
-      naturalWidth: Math.max(1, naturalWidth),
-      naturalHeight: Math.max(1, naturalHeight),
+      naturalWidth: normalizedWidth,
+      naturalHeight: normalizedHeight,
     },
   };
 }
@@ -105,8 +210,7 @@ export function resolveCanvasMediaLoadedSource(
   requestedSource: string,
   browserCurrentSource: string,
 ): string {
-  return current.pendingSource
-    || current.committedSource
+  return current.committedSource
     || requestedSource
     || browserCurrentSource;
 }
@@ -127,10 +231,27 @@ export function CanvasMediaNode({
     createCanvasMediaSourceState(source)
   ));
   const loadingPolicy = getCanvasMediaLoadingPolicy(priority);
+  const onErrorRef = useRef(onError);
+
+  useLayoutEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   useEffect(() => {
-    if (!source || source === mediaState.committedSource) return;
-    setMediaState(current => beginCanvasMediaSourceTransition(current, source));
+    if (!source) {
+      setMediaState(current => beginCanvasMediaSourceTransition(current, source));
+      return;
+    }
+    if (source === mediaState.committedSource) {
+      if (mediaState.pendingSource !== null) {
+        setMediaState(current => beginCanvasMediaSourceTransition(current, source));
+      }
+      return;
+    }
+    if (mediaState.pendingSource !== source) {
+      setMediaState(current => beginCanvasMediaSourceTransition(current, source));
+      return;
+    }
 
     let cancelled = false;
     const probe = new window.Image();
@@ -165,12 +286,36 @@ export function CanvasMediaNode({
     };
     probe.src = source;
     return () => { cancelled = true; };
-  }, [mediaState.committedSource, source]);
+  }, [mediaState.committedSource, mediaState.pendingSource, source]);
 
   const dimensions = useMemo(() => ({
     width: Math.max(1, Math.round(Math.abs(width))),
     height: Math.max(1, Math.round(Math.abs(height))),
   }), [height, width]);
+  const handleLoad = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
+    const element = event.currentTarget;
+    setMediaState(current => {
+      const loadedSource = resolveCanvasMediaLoadedSource(
+        current,
+        source,
+        element.currentSrc || element.src,
+      );
+      return completeCanvasMediaSourceTransition(
+        current,
+        loadedSource,
+        element.naturalWidth,
+        element.naturalHeight,
+      );
+    });
+  }, [source]);
+  const handleError = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
+    setMediaState(current => ({
+      committedSource: current.committedSource,
+      pendingSource: null,
+      loadState: { kind: 'broken', reason: 'decode-failed' },
+    }));
+    onErrorRef.current?.(event);
+  }, []);
 
   if (!mediaState.committedSource) {
     return (
@@ -187,49 +332,24 @@ export function CanvasMediaNode({
   }
 
   return (
-    <NextImage
-      unoptimized
+    <StableCanvasImage
       data-canvas-media-node={imageId}
       data-canvas-media-state={mediaState.loadState.kind}
       data-canvas-media-source={sourceKind}
-      src={mediaState.committedSource}
+      source={mediaState.committedSource}
       alt={alt}
       width={dimensions.width}
       height={dimensions.height}
       className={className}
-      draggable={false}
       loading={loadingPolicy.loading}
       fetchPriority={loadingPolicy.fetchPriority}
-      decoding="async"
       style={{
         aspectRatio: `${dimensions.width} / ${dimensions.height}`,
         contain: 'paint',
         ...style,
       }}
-      onLoad={(event) => {
-        const element = event.currentTarget;
-        setMediaState(current => {
-          const loadedSource = resolveCanvasMediaLoadedSource(
-            current,
-            source,
-            element.currentSrc || element.src,
-          );
-          return completeCanvasMediaSourceTransition(
-            current,
-            loadedSource,
-            element.naturalWidth,
-            element.naturalHeight,
-          );
-        });
-      }}
-      onError={(event) => {
-        setMediaState(current => ({
-          ...current,
-          pendingSource: null,
-          loadState: { kind: 'broken', reason: 'decode-failed' },
-        }));
-        onError?.(event);
-      }}
+      onLoad={handleLoad}
+      onError={handleError}
     />
   );
 }

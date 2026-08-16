@@ -10,12 +10,38 @@ export interface CanvasUnclickableSample {
   hitStack?: Array<{ tag: string; className: string | null; imageId: string | null }>;
 }
 
+export interface CanvasInputDelaySample {
+  source: 'viewport-listener' | 'event-timing';
+  name: string;
+  delayMs: number;
+  startTime: number;
+  observedAt: number;
+}
+
+export interface CanvasLongTaskSample {
+  startTime: number;
+  durationMs: number;
+  name: string;
+}
+
+export interface CanvasMediaLoadSample {
+  kind: 'load' | 'src-mutation' | 'state-mutation';
+  observedAt: number;
+  imageId: string;
+  state: string;
+  source: string;
+  previousSource: string | null;
+}
+
 export interface CanvasPerformanceRawSample {
   startedAt: number;
   endedAt: number;
   frameTimestamps: number[];
   inputDelaysMs: number[];
+  inputDelaySamples?: CanvasInputDelaySample[];
   longTasksMs: number[];
+  longTaskSamples?: CanvasLongTaskSample[];
+  mediaLoadSamples?: CanvasMediaLoadSample[];
   saveTasksMs: number[];
   disappearedFrames: number;
   unclickableDurationMs: number;
@@ -26,7 +52,10 @@ export interface CanvasPerformanceSample {
   durationMs: number;
   averageFps: number;
   inputDelayP95Ms: number;
+  inputDelaySamples: CanvasInputDelaySample[];
   longestTaskMs: number;
+  longTaskSamples: CanvasLongTaskSample[];
+  mediaLoadSamples: CanvasMediaLoadSample[];
   longestSaveTaskMs: number;
   disappearedFrames: number;
   unclickableDurationMs: number;
@@ -55,7 +84,10 @@ export function summarizeCanvasPerformance(raw: CanvasPerformanceRawSample): Can
     durationMs,
     averageFps: frameSpanMs > 0 ? Number(((frameIntervals * 1000) / frameSpanMs).toFixed(2)) : 0,
     inputDelayP95Ms: Number(percentile95(raw.inputDelaysMs).toFixed(2)),
+    inputDelaySamples: raw.inputDelaySamples ?? [],
     longestTaskMs: Number(Math.max(0, ...raw.longTasksMs).toFixed(2)),
+    longTaskSamples: raw.longTaskSamples ?? [],
+    mediaLoadSamples: raw.mediaLoadSamples ?? [],
     longestSaveTaskMs: Number(Math.max(0, ...raw.saveTasksMs).toFixed(2)),
     disappearedFrames: raw.disappearedFrames,
     unclickableDurationMs: Number(raw.unclickableDurationMs.toFixed(2)),
@@ -105,11 +137,16 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
   await page.evaluate(ids => {
     const windowWithState = window as typeof window & { __wujieStage3Performance?: Record<string, unknown> };
     if (windowWithState.__wujieStage3Performance) throw new Error('Stage 3 measurement is already active');
+    const viewport = document.querySelector<HTMLElement>('[data-canvas-viewport]');
+    const monitoredImageIds = new Set(ids);
     const state = {
       startedAt: performance.now(),
       frameTimestamps: [] as number[],
       inputDelaysMs: [] as number[],
+      inputDelaySamples: [] as CanvasInputDelaySample[],
       longTasksMs: [] as number[],
+      longTaskSamples: [] as CanvasLongTaskSample[],
+      mediaLoadSamples: [] as CanvasMediaLoadSample[],
       saveTasksMs: [] as number[],
       disappearedFrames: 0,
       unclickableDurationMs: 0,
@@ -120,15 +157,28 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
       rafId: 0,
       observers: [] as PerformanceObserver[],
       originalFetch: window.fetch,
+      viewport,
       inputHandler: null as ((event: Event) => void) | null,
+      mediaLoadHandler: null as ((event: Event) => void) | null,
+      mediaObserver: null as MutationObserver | null,
     };
 
     const inputHandler = (event: Event) => {
       const timestamp = Number(event.timeStamp);
-      if (Number.isFinite(timestamp)) state.inputDelaysMs.push(Math.max(0, performance.now() - timestamp));
+      if (Number.isFinite(timestamp)) {
+        const observedAt = performance.now();
+        const delayMs = Math.max(0, observedAt - timestamp);
+        state.inputDelaysMs.push(delayMs);
+        state.inputDelaySamples.push({
+          source: 'viewport-listener',
+          name: event.type,
+          delayMs,
+          startTime: timestamp,
+          observedAt,
+        });
+      }
     };
     state.inputHandler = inputHandler;
-    const viewport = document.querySelector('[data-canvas-viewport]');
     const monitoredNodes = new Map<string, { image: HTMLImageElement; card: HTMLElement }>();
     const resolveMonitoredNode = (id: string) => {
       const cached = monitoredNodes.get(id);
@@ -150,10 +200,32 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
       viewport?.addEventListener(type, inputHandler, { capture: true, passive: true });
     }
 
+    const mediaLoadHandler = (event: Event) => {
+      const image = event.target;
+      if (!(image instanceof HTMLImageElement)) return;
+      const imageId = image.dataset.canvasMediaNode;
+      if (!imageId || !monitoredImageIds.has(imageId) || state.mediaLoadSamples.length >= 5_000) return;
+      state.mediaLoadSamples.push({
+        kind: 'load',
+        observedAt: performance.now(),
+        imageId,
+        state: image.dataset.canvasMediaState || '',
+        source: image.getAttribute('src') || image.currentSrc || '',
+        previousSource: null,
+      });
+    };
+    state.mediaLoadHandler = mediaLoadHandler;
+    viewport?.addEventListener('load', mediaLoadHandler, true);
+
     try {
       const longTaskObserver = new PerformanceObserver(list => {
         for (const entry of list.getEntries()) {
           state.longTasksMs.push(entry.duration);
+          state.longTaskSamples.push({
+            startTime: entry.startTime,
+            durationMs: entry.duration,
+            name: entry.name,
+          });
           if (state.saveInFlight > 0) state.saveTasksMs.push(entry.duration);
         }
       });
@@ -161,12 +233,50 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
       state.observers.push(longTaskObserver);
     } catch {}
 
+    if (viewport) {
+      state.mediaObserver = new MutationObserver(records => {
+        for (const record of records) {
+          const element = record.target;
+          if (!(element instanceof HTMLElement)) continue;
+          const imageId = element.dataset.canvasMediaNode;
+          const mediaState = element.dataset.canvasMediaState;
+          if (!imageId || !monitoredImageIds.has(imageId) || !mediaState) continue;
+          if (state.mediaLoadSamples.length >= 5_000) continue;
+          const isSourceMutation = record.attributeName === 'src';
+          state.mediaLoadSamples.push({
+            kind: isSourceMutation ? 'src-mutation' : 'state-mutation',
+            observedAt: performance.now(),
+            imageId,
+            state: mediaState,
+            source: element instanceof HTMLImageElement
+              ? element.getAttribute('src') || element.currentSrc || ''
+              : '',
+            previousSource: isSourceMutation ? record.oldValue : null,
+          });
+        }
+      });
+      state.mediaObserver.observe(viewport, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['src', 'data-canvas-media-state'],
+        attributeOldValue: true,
+      });
+    }
+
     try {
       const eventObserver = new PerformanceObserver(list => {
         for (const entry of list.getEntries()) {
           const timing = entry as PerformanceEntry & { processingStart?: number };
           if (typeof timing.processingStart === 'number' && timing.startTime >= state.startedAt) {
-            state.inputDelaysMs.push(Math.max(0, timing.processingStart - timing.startTime));
+            const delayMs = Math.max(0, timing.processingStart - timing.startTime);
+            state.inputDelaysMs.push(delayMs);
+            state.inputDelaySamples.push({
+              source: 'event-timing',
+              name: timing.name,
+              delayMs,
+              startTime: timing.startTime,
+              observedAt: performance.now(),
+            });
           }
         }
       });
@@ -282,7 +392,10 @@ async function stopMeasurement(page: Page): Promise<CanvasPerformanceRawSample> 
       startedAt: number;
       frameTimestamps: number[];
       inputDelaysMs: number[];
+      inputDelaySamples: CanvasInputDelaySample[];
       longTasksMs: number[];
+      longTaskSamples: CanvasLongTaskSample[];
+      mediaLoadSamples: CanvasMediaLoadSample[];
       saveTasksMs: number[];
       disappearedFrames: number;
       unclickableDurationMs: number;
@@ -291,18 +404,25 @@ async function stopMeasurement(page: Page): Promise<CanvasPerformanceRawSample> 
       rafId: number;
       observers: PerformanceObserver[];
       originalFetch: typeof window.fetch;
+      viewport: HTMLElement | null;
       inputHandler: ((event: Event) => void) | null;
+      mediaLoadHandler: ((event: Event) => void) | null;
+      mediaObserver: MutationObserver | null;
     } | undefined;
     if (!state) throw new Error('Stage 3 measurement is not active');
     state.active = false;
     cancelAnimationFrame(state.rafId);
     state.observers.forEach(observer => observer.disconnect());
+    state.mediaObserver?.disconnect();
     window.fetch = state.originalFetch;
-    const viewport = document.querySelector('[data-canvas-viewport]');
+    const viewport = state.viewport;
     if (state.inputHandler) {
       for (const type of ['pointerdown', 'pointermove', 'pointerup', 'wheel']) {
         viewport?.removeEventListener(type, state.inputHandler, { capture: true });
       }
+    }
+    if (state.mediaLoadHandler) {
+      viewport?.removeEventListener('load', state.mediaLoadHandler, true);
     }
     delete windowWithState.__wujieStage3Performance;
     return {
@@ -310,7 +430,10 @@ async function stopMeasurement(page: Page): Promise<CanvasPerformanceRawSample> 
       endedAt: performance.now(),
       frameTimestamps: state.frameTimestamps,
       inputDelaysMs: state.inputDelaysMs,
+      inputDelaySamples: state.inputDelaySamples,
       longTasksMs: state.longTasksMs,
+      longTaskSamples: state.longTaskSamples,
+      mediaLoadSamples: state.mediaLoadSamples,
       saveTasksMs: state.saveTasksMs,
       disappearedFrames: state.disappearedFrames,
       unclickableDurationMs: state.unclickableDurationMs,

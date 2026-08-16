@@ -101,6 +101,15 @@ describe('Stage 3 performance evidence contract', () => {
       .toBeLessThan(tickBody.indexOf('sampleContinuity(timestamp);'));
   });
 
+  it('records native image loads and src rewrites during the active performance window', () => {
+    expect(canvasPerformanceSource).toContain('const monitoredImageIds = new Set(ids)');
+    expect(canvasPerformanceSource).toContain('!monitoredImageIds.has(imageId)');
+    expect(canvasPerformanceSource).toContain("viewport?.addEventListener('load', mediaLoadHandler, true)");
+    expect(canvasPerformanceSource).toContain("viewport?.removeEventListener('load', state.mediaLoadHandler, true)");
+    expect(canvasPerformanceSource).toContain("attributeFilter: ['src', 'data-canvas-media-state']");
+    expect(canvasPerformanceSource).toContain('attributeOldValue: true');
+  });
+
   it('proves the API-selected Canvas mode reaches the rendered viewport', () => {
     expect(stage3FixtureSource).toContain('E2E_STAGE3_EXPECTED_CANVAS_MODE');
     expect(stage3BrowserHelperSource).toContain("'E2E_STAGE3_EXPECTED_CANVAS_MODE'");
@@ -283,7 +292,36 @@ describe('Stage 3 performance sample summarization', () => {
       endedAt: 1_000,
       frameTimestamps: [0, 16, 32, 48, 64, 80, 96],
       inputDelaysMs: [2, 4, 8, 16, 32],
+      inputDelaySamples: [
+        {
+          source: 'viewport-listener',
+          name: 'pointermove',
+          delayMs: 4,
+          startTime: 12,
+          observedAt: 16,
+        },
+        {
+          source: 'event-timing',
+          name: 'keyup',
+          delayMs: 32,
+          startTime: 48,
+          observedAt: 80,
+        },
+      ],
       longTasksMs: [12, 72, 31],
+      longTaskSamples: [
+        { startTime: 128, durationMs: 72, name: 'self' },
+      ],
+      mediaLoadSamples: [
+        {
+          kind: 'load',
+          observedAt: 136,
+          imageId: 'node-a',
+          state: 'ready',
+          source: '/node-a.png',
+          previousSource: null,
+        },
+      ],
       saveTasksMs: [18, 91],
       disappearedFrames: 2,
       unclickableDurationMs: 48,
@@ -292,7 +330,17 @@ describe('Stage 3 performance sample summarization', () => {
 
     expect(sample.averageFps).toBe(62.5);
     expect(sample.inputDelayP95Ms).toBe(32);
+    expect(sample.inputDelaySamples).toEqual([
+      expect.objectContaining({ source: 'viewport-listener', name: 'pointermove', delayMs: 4 }),
+      expect.objectContaining({ source: 'event-timing', name: 'keyup', delayMs: 32 }),
+    ]);
     expect(sample.longestTaskMs).toBe(72);
+    expect(sample.longTaskSamples).toEqual([
+      expect.objectContaining({ startTime: 128, durationMs: 72 }),
+    ]);
+    expect(sample.mediaLoadSamples).toEqual([
+      expect.objectContaining({ kind: 'load', imageId: 'node-a', state: 'ready' }),
+    ]);
     expect(sample.longestSaveTaskMs).toBe(91);
     expect(sample.disappearedFrames).toBe(2);
     expect(sample.unclickableDurationMs).toBe(48);
