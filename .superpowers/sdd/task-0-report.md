@@ -489,3 +489,82 @@ Summary: 25 passed, 12 warnings, 0 failed, 2 blocked
 - Both URLs must independently match `wujie_stage4_<sanitized E2E_STAGE4_RUN_ID>` and then match protocol, host, effective port, database, user, and SSL target. Database/schema query tricks are rejected and credentials never enter errors or reports.
 - The fixture retains its exact 100 expected node IDs. DOM IDs are not deduplicated; duplicates, missing IDs, unexpected IDs, and 100 wrong IDs block before measurement. The browser sampler receives only the fixture's expected IDs.
 - Concern: no isolated Stage 4 database was available, so authenticated seeding and real 100-node performance values remain BLOCKED rather than passed.
+
+## Third Independent Review Fix Evidence (2026-08-17)
+
+> The Second Independent Review evidence remains historical but is superseded for the dual-DB-variable contract and environment metadata below.
+
+### Exact Tested Code Commit
+
+- Tested code commit: `dd29868cf8e40cbb1f60d614d2607db24f6972ea` (`test: require matching stage four database variables`).
+- The following documentation commit is bookkeeping only and references this exact prior code/test SHA.
+
+### RED Evidence
+
+Command: `pnpm exec vitest run src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`
+
+- Exit 1; 1 test failed and 12 passed.
+- Exact failing case: `blocks when either configured application database variable is shared or production`.
+- Exact assertion failure: expected isolated `DATABASE_URL` plus shared `PGDATABASE_URL` to throw, but no exception was raised.
+
+### GREEN And Gate Evidence
+
+1. `pnpm exec vitest run src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`
+   - Exit 0; 13/13 tests passed.
+2. `pnpm exec vitest run src/__tests__/lib/stage-4-modes.test.ts src/__tests__/scripts/stage-4-inventory.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts`
+   - Exit 0; 5 files and 26/26 tests passed.
+3. `pnpm ts-check`
+   - Exit 0; Next route types generated and TypeScript completed without errors.
+4. `pnpm test:inventory:stage-4`
+   - Exit 0; routes=200, workspaces=3, nodeTypes=51, portTypes=10.
+5. `pnpm run doctor`
+   - Exit 0; stdout included all checks and ended with `Summary: 25 passed, 12 warnings, 0 failed, 2 blocked`.
+6. `pnpm check:protected-baseline`
+   - Exit 0 against fixed `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`; 38/38 feature IDs present, no drift, 0 warnings.
+7. `git diff --check ffbacdb..dd29868cf8e40cbb1f60d614d2607db24f6972ea` and `git diff --check 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b..dd29868cf8e40cbb1f60d614d2607db24f6972ea`
+   - Both exit 0 with no whitespace errors.
+8. `pnpm exec playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --project=chromium`
+   - Exit 1, intentionally BLOCKED before authentication and fixture writes: `E2E_STAGE4_DATABASE_URL is required for Stage 4 fixture isolation`.
+   - Verified evidence directory: `test-results/stage-4-baseline/evidence/dd29868cf8e40cbb1f60d614d2607db24f6972ea-worktree-3683a4b89198/stage4-2026-08-16T16-39-42/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/`.
+   - Verified non-missing files: `final.png` (4254 bytes), `video.webm` (2584 bytes), `console.json` (2 bytes), `network.json` (2 bytes), and `trace.zip` (2962 bytes).
+9. Inventory artifact verification
+   - `test-results/stage-4-baseline/inventory/stage-4-inventory.json` exists (12602 bytes).
+   - `test-results/stage-4-baseline/inventory/stage-4-inventory.md` exists (9501 bytes).
+
+### Reproducible Environment Metadata
+
+PowerShell command output was captured directly. DB and auth entries intentionally report state only:
+
+```text
+OS=Microsoft Windows 10 专业版 10.0.19045 build 19045 64 位
+Node=v25.2.1
+pnpm=9.0.0
+Playwright=Version 1.60.0
+Next=Next.js v16.2.11
+BrowserProject=chromium
+BaseURL=http://127.0.0.1:5000 (default)
+AgentRuntimeMode=legacy (default)
+WorkflowRendererMode=legacy (default)
+DATABASE_URL=unconfigured
+PGDATABASE_URL=unconfigured
+E2E_STAGE4_DATABASE_URL=unconfigured
+E2E_STAGE4_RUN_ID=unconfigured
+E2E_TEST_CREDENTIAL_PAIR=unconfigured
+WUJIE_ADMIN_PASSWORD=unconfigured
+TestedCodeSHA=dd29868cf8e40cbb1f60d614d2607db24f6972ea
+```
+
+No database URL, database username, password, admin credential, or authentication secret is persisted in this evidence.
+
+### Files Changed By Third Review Fix
+
+- Code/test commit: `scripts/stage-4-e2e-fixtures.mjs`, `src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`.
+- Documentation-only bookkeeping commit: `.superpowers/sdd/task-0-report.md`, `docs/testing/STAGE_4_BASELINE_REPORT.md`.
+- Controller-owned `.superpowers/sdd/task-1-brief.md` was neither modified, reverted, staged, nor committed.
+
+### Self-Review And Concern
+
+- When both application DB variables exist, each is strictly parsed and validated, their normalized protocol/host/effective port/database/user/SSL identities must match, and the effective app target must still match `E2E_STAGE4_DATABASE_URL`.
+- Tests cover both conflict directions, normalized-equivalent dual URLs, and exact one-variable acceptance. Errors and evidence contain no credentials.
+- No Agent, chat, workflow, canvas, authentication, provider, billing, or other business behavior changed.
+- Concern: this environment has no isolated Stage 4 DB/auth state, so Chromium correctly blocked before writes and real 100-node browser/performance measurements remain unavailable.
