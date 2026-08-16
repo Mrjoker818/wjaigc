@@ -33,6 +33,12 @@ export interface AuthorizeAgentToolsInput {
 
 export const AGENT_TOOL_REGISTRY: readonly AgentToolDefinition[] = [
   {
+    toolId: 'agent_edit',
+    workspaces: ['canvas'],
+    productTypes: ['canvas'],
+    modelCapabilities: ['chat'],
+  },
+  {
     toolId: 'generate_image',
     workspaces: ['canvas', 'workflow', 'chat'],
     productTypes: ['canvas', 'chat', 'simple-chat'],

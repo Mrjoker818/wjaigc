@@ -4,6 +4,8 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, ImagePlus, Minus, Zap, Timer, Clock, FileText } from 'lucide-react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
+import { AgentProgressTimeline } from '@/components/agent-runtime/AgentProgressTimeline';
+import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-events';
 
 interface AgentEditorProps {
   projectId?: string;
@@ -133,6 +135,8 @@ export function AgentEditor({
   const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
   const [resultPrompt, setResultPrompt] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [agentRunId, setAgentRunId] = useState<string | null>(null);
+  const agentRun = useAgentRunEvents(agentRunId);
   const { elapsed, totalTime, formatTime, startTimer, stopTimer, resetTimer } = useProgressTimer();
 
   // 拖动状态
@@ -284,6 +288,7 @@ export function AgentEditor({
     setResultPrompt('');
     startTimer();
     setTaskId(null);
+    setAgentRunId(null);
 
     try {
       const resp = await fetch('/api/agent-edit', {
@@ -311,6 +316,7 @@ export function AgentEditor({
       }
 
       const tid = String(data.taskId || '');
+      setAgentRunId(typeof data.runId === 'string' && data.runId ? data.runId : null);
       if (tid) {
         setTaskId(tid);
         setProgress(10);
@@ -340,6 +346,14 @@ export function AgentEditor({
         await fetch(`/api/agent-edit?taskId=${encodeURIComponent(taskId)}&action=cancel`);
       } catch { /* ignore */ }
     }
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    setIsProcessing(false);
+    setProgress(0);
+    setError('任务已取消');
+  };
+
+  const handleAgentRunCancel = async () => {
+    await agentRun.cancel();
     if (pollTimer.current) clearTimeout(pollTimer.current);
     setIsProcessing(false);
     setProgress(0);
@@ -555,6 +569,16 @@ export function AgentEditor({
                 {isProcessing ? formatTime(elapsed) : (totalTime !== null ? `总耗时 ${formatTime(totalTime)}` : '')}
               </span>
             </div>
+          </div>
+        )}
+
+        {agentRunId && (
+          <div className="px-3 py-1.5" style={{ color: mutedColor }}>
+            <AgentProgressTimeline
+              projection={agentRun.projection}
+              stale={agentRun.stale}
+              onCancel={() => { void handleAgentRunCancel(); }}
+            />
           </div>
         )}
 

@@ -105,6 +105,18 @@ describe('Agent tool authorization', () => {
       { toolId: 'analyze_image', code: 'MODEL_CAPABILITY_REQUIRED' },
     ]);
   });
+
+  it('authorizes the existing Agent-edit planner only for a canvas chat model', () => {
+    const authorization = authorizeAgentTools({
+      requestedToolIds: ['agent_edit'],
+      workspace: 'canvas',
+      userProductTypes: ['canvas'],
+      modelCapabilities: ['chat'],
+    });
+
+    expect(authorization.tools.map(tool => tool.toolId)).toEqual(['agent_edit']);
+    expect(authorization.denials).toEqual([]);
+  });
 });
 
 describe('Agent context ownership adapter', () => {

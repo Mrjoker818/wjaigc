@@ -103,6 +103,7 @@ interface PendingGenerationMessage {
 
 export interface ChatSessionMessageSnapshot extends PendingGenerationMessage {
   id: string;
+  agentRunId?: string;
 }
 
 export function getResumableChatGenerationTasks(
@@ -132,9 +133,10 @@ export function mergeChatSessionMessages<T extends ChatSessionMessageSnapshot>(
     const persisted = persistedById.get(incoming.id);
     const persistedTasks = persisted ? getResumableChatGenerationTasks(persisted) : [];
     const incomingTasks = getResumableChatGenerationTasks(incoming);
+    let merged = incoming;
 
     if (persistedTasks.length > 0 && incomingTasks.length === 0) {
-      return {
+      merged = {
         ...persisted,
         ...incoming,
         isGeneratingImage: true,
@@ -142,7 +144,11 @@ export function mergeChatSessionMessages<T extends ChatSessionMessageSnapshot>(
       } as T;
     }
 
-    return incoming;
+    if (persisted?.agentRunId && !merged.agentRunId) {
+      return { ...merged, agentRunId: persisted.agentRunId } as T;
+    }
+
+    return merged;
   });
 }
 

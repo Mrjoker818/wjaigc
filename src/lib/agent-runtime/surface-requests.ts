@@ -24,9 +24,9 @@ interface SurfaceRequestInput {
   password?: unknown;
 }
 
-export interface CanvasAgentRequestInput extends SurfaceRequestInput {}
+export type CanvasAgentRequestInput = SurfaceRequestInput;
 
-export interface SimpleChatAgentRequestInput extends SurfaceRequestInput {}
+export type SimpleChatAgentRequestInput = SurfaceRequestInput;
 
 export interface AgentEditRequestInput extends Omit<SurfaceRequestInput,
   'selectedEntityIds' | 'sourceVersionIds' | 'mode'
@@ -126,10 +126,11 @@ export function buildSimpleChatAgentRequest(
 
 export function buildAgentEditRequest(input: AgentEditRequestInput): AgentRunRequest {
   const sourceVersionIds = input.sourceVersionId ? [input.sourceVersionId] : [];
-  return build('canvas', {
+  const request = build('canvas', {
     ...input,
     sourceVersionIds,
     selectedEntityIds: [input.selectedEntityId],
     mode: 'agent',
   });
+  return { ...request, allowedToolIds: ['agent_edit'] };
 }

@@ -1,0 +1,116 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  prepareAdmittedAgentTaskExecution,
+  type AdmittedAgentTaskExecutionDependencies,
+} from '@/lib/agent-runtime/surface-dispatch';
+
+function routeSource(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), 'utf8');
+}
+
+function dependencies(): AdmittedAgentTaskExecutionDependencies {
+  return {
+    observeShadow: vi.fn().mockResolvedValue(undefined),
+    adopt: vi.fn().mockResolvedValue({
+      runId: 'task-1',
+      reused: false,
+      claimed: true,
+      projection: { status: 'executing' },
+      tools: [],
+    }),
+    executeAdoption: vi.fn().mockImplementation(async ({ execute }) => execute()),
+  } as unknown as AdmittedAgentTaskExecutionDependencies;
+}
+
+const observation = {
+  runId: 'task-1',
+  actorUserId: 'user-1',
+  projectId: 'project-1',
+  workspace: 'canvas' as const,
+  providerId: 'provider-image',
+  modelId: 'model-image',
+  mode: 'agent' as const,
+  prompt: 'Create an image',
+  sourceVersionIds: [],
+  allowedToolIds: ['generate_image'],
+};
+
+const adoption = {
+  actor: {
+    id: 'user-1', name: 'Owner', role: 'user' as const, status: 'active' as const,
+    productType: 'canvas', createdAt: 1, updatedAt: 1,
+  },
+  taskId: 'task-1',
+  request: {
+    projectId: 'project-1', workspace: 'canvas' as const, workspaceId: 'canvas-1',
+    mode: 'agent' as const, providerId: 'provider-image', modelId: 'model-image',
+    prompt: 'Create an image', sourceVersionIds: [], allowedToolIds: ['generate_image'],
+    idempotencyKey: 'task-1',
+    context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' as const },
+  },
+  toolId: 'generate_image',
+};
+
+describe('Agent runtime route rollout modes', () => {
+  it('legacy invokes the existing executor with zero shared-runtime calls', async () => {
+    const deps = dependencies();
+    const execute = vi.fn().mockResolvedValue('legacy-result');
+
+    const prepared = await prepareAdmittedAgentTaskExecution({
+      mode: 'legacy', observation, adoption, execute,
+    }, deps);
+
+    expect(prepared.runId).toBeUndefined();
+    await expect(prepared.execute()).resolves.toBe('legacy-result');
+    expect(deps.observeShadow).not.toHaveBeenCalled();
+    expect(deps.adopt).not.toHaveBeenCalled();
+    expect(deps.executeAdoption).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('shadow observes without replacing or duplicating the existing executor', async () => {
+    const deps = dependencies();
+    const execute = vi.fn().mockResolvedValue('shadow-result');
+
+    const prepared = await prepareAdmittedAgentTaskExecution({
+      mode: 'shadow', observation, adoption, execute,
+    }, deps);
+
+    expect(prepared.runId).toBeUndefined();
+    await expect(prepared.execute()).resolves.toBe('shadow-result');
+    expect(deps.observeShadow).toHaveBeenCalledTimes(1);
+    expect(deps.adopt).not.toHaveBeenCalled();
+    expect(deps.executeAdoption).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('agent-v2 claims the admitted task and exposes only that exact run ID', async () => {
+    const deps = dependencies();
+    const execute = vi.fn().mockResolvedValue('agent-v2-result');
+
+    const prepared = await prepareAdmittedAgentTaskExecution({
+      mode: 'agent-v2', observation, adoption, execute,
+    }, deps);
+
+    expect(prepared.runId).toBe('task-1');
+    await expect(prepared.execute()).resolves.toBe('agent-v2-result');
+    expect(deps.observeShadow).not.toHaveBeenCalled();
+    expect(deps.adopt).toHaveBeenCalledTimes(1);
+    expect(deps.executeAdoption).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('wires all three public routes to the same admitted-task dispatcher', () => {
+    for (const path of [
+      'src/app/api/chat/route.ts',
+      'src/app/api/simple-chat/chat/route.ts',
+      'src/app/api/agent-edit/route.ts',
+    ]) {
+      expect(routeSource(path)).toContain('prepareAdmittedAgentTaskExecution({');
+    }
+  });
+});

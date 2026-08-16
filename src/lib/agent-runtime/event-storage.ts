@@ -47,6 +47,19 @@ export interface ValidatedAgentEventInput extends AppendAgentEventInput {
   serializedPayload: string;
 }
 
+export interface AppendAdoptedAgentEventResult {
+  event: AgentEvent;
+  inserted: boolean;
+}
+
+export interface ObserveAdoptedAgentTaskTerminalInput {
+  actorUserId: string;
+  projectId: string;
+  runId: string;
+  workspace: AgentWorkspace;
+  toolId: string;
+}
+
 export interface ListAgentEventsInput {
   actorUserId: string;
   projectId: string;
@@ -197,6 +210,54 @@ async function findExistingEvent(
   return existing.rows[0] || null;
 }
 
+async function insertValidatedEvent(
+  client: PoolClient,
+  input: ValidatedAgentEventInput,
+): Promise<AppendAdoptedAgentEventResult> {
+  const existing = await findExistingEvent(client, input);
+  if (existing) {
+    if (existing.request_digest !== input.requestDigest) {
+      throw new AgentEventConflictError();
+    }
+    return { event: mapEvent(existing), inserted: false };
+  }
+
+  const sequenceResult = await client.query<{ sequence: number }>(
+    `SELECT COALESCE(MAX(sequence), 0)::integer + 1 AS sequence
+     FROM wujie_agent_events
+     WHERE task_id = $1`,
+    [input.runId],
+  );
+  const sequence = Number(sequenceResult.rows[0]?.sequence || 1);
+  const createdAt = Date.now();
+  let inserted;
+  try {
+    inserted = await client.query<AgentEventRow>(
+      `INSERT INTO wujie_agent_events(
+        event_id, task_id, owner_id, project_id, workspace, sequence,
+        event_type, request_digest, payload, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+      RETURNING event_id, task_id, sequence, event_type, request_digest, payload, created_at`,
+      [
+        input.eventId,
+        input.runId,
+        input.actorUserId,
+        input.projectId,
+        input.workspace,
+        sequence,
+        input.type,
+        input.requestDigest,
+        input.serializedPayload,
+        createdAt,
+      ],
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new AgentEventConflictError();
+    throw error;
+  }
+  return { event: mapEvent(inserted.rows[0]), inserted: true };
+}
+
 export async function appendAgentEvent(
   rawInput: AppendAgentEventInput,
 ): Promise<AgentEvent> {
@@ -245,48 +306,172 @@ export async function appendAgentEvent(
       throw new AgentEventConflictError();
     }
 
-    const sequenceResult = await client.query<{ sequence: number }>(
-      `SELECT COALESCE(MAX(sequence), 0)::integer + 1 AS sequence
-       FROM wujie_agent_events
-       WHERE task_id = $1`,
-      [input.runId],
-    );
-    const sequence = Number(sequenceResult.rows[0]?.sequence || 1);
-    const createdAt = Date.now();
-    let inserted;
-    try {
-      inserted = await client.query<AgentEventRow>(
-        `INSERT INTO wujie_agent_events(
-          event_id, task_id, owner_id, project_id, workspace, sequence,
-          event_type, request_digest, payload, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
-        RETURNING event_id, task_id, sequence, event_type, request_digest, payload, created_at`,
-        [
-          input.eventId,
-          input.runId,
-          input.actorUserId,
-          input.projectId,
-          input.workspace,
-          sequence,
-          input.type,
-          requestDigest,
-          serializedPayload,
-          createdAt,
-        ],
-      );
-    } catch (error) {
-      if (isUniqueViolation(error)) throw new AgentEventConflictError();
-      throw error;
-    }
+    const appended = await insertValidatedEvent(client, input);
+    if (!appended.inserted) throw new AgentEventConflictError();
     await client.query(
       `UPDATE cloud_tasks
        SET revision = revision + 1,
            updated_at = GREATEST(updated_at, $2)
        WHERE id = $1`,
-      [input.runId, createdAt],
+      [input.runId, Date.now()],
     );
     await client.query('COMMIT');
-    return mapEvent(inserted.rows[0]);
+    return appended.event;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function appendAdoptedAgentEvent(
+  rawInput: AppendAgentEventInput,
+): Promise<AppendAdoptedAgentEventResult> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const input = validateAgentEventAppendInput(rawInput);
+    const task = await client.query<{ status: string }>(
+      `SELECT status
+       FROM cloud_tasks
+       WHERE id = $1 AND user_id = $2 AND project_id = $3
+       FOR UPDATE`,
+      [input.runId, input.actorUserId, input.projectId],
+    );
+    if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
+
+    const existing = await findExistingEvent(client, input);
+    if (existing) {
+      if (existing.request_digest !== input.requestDigest) {
+        throw new AgentEventConflictError();
+      }
+      await client.query('COMMIT');
+      return { event: mapEvent(existing), inserted: false };
+    }
+    if (['completed', 'failed', 'cancelled', 'timeout'].includes(task.rows[0].status)) {
+      throw new AgentEventConflictError();
+    }
+
+    const appended = await insertValidatedEvent(client, input);
+    if (appended.inserted) {
+      await client.query(
+        `UPDATE cloud_tasks
+         SET revision = revision + 1,
+             updated_at = GREATEST(updated_at, $2)
+         WHERE id = $1`,
+        [input.runId, Date.now()],
+      );
+    }
+    await client.query('COMMIT');
+    return appended;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function terminalObservation(status: string): {
+  type: Extract<AgentEventType, 'run.completed' | 'run.failed' | 'run.cancelled' | 'run.timeout'>;
+  payload: Record<string, unknown>;
+} | null {
+  if (status === 'completed') {
+    return { type: 'run.completed', payload: { result: { adoptedTask: true } } };
+  }
+  if (status !== 'failed' && status !== 'cancelled' && status !== 'timeout') {
+    return null;
+  }
+  const code = status === 'cancelled'
+    ? 'AGENT_RUN_CANCELLED'
+    : status === 'timeout'
+      ? 'AGENT_RUN_TIMEOUT'
+      : 'AGENT_RUN_FAILED';
+  return {
+    type: `run.${status}`,
+    payload: {
+      error: {
+        code,
+        message: status === 'cancelled'
+          ? 'Agent run cancelled'
+          : status === 'timeout'
+            ? 'Agent run timed out'
+            : 'Agent run failed',
+        retryable: status !== 'cancelled',
+      },
+    },
+  };
+}
+
+export async function observeAdoptedAgentTaskTerminal(
+  rawInput: ObserveAdoptedAgentTaskTerminalInput,
+): Promise<AgentEvent[]> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const actorUserId = validateIdentifier('actorUserId', rawInput.actorUserId);
+    const projectId = validateIdentifier('projectId', rawInput.projectId);
+    const runId = validateIdentifier('runId', rawInput.runId);
+    const toolId = validateIdentifier('toolId', rawInput.toolId);
+    const task = await client.query<{ status: string; type: string }>(
+      `SELECT status, type
+       FROM cloud_tasks
+       WHERE id = $1 AND user_id = $2 AND project_id = $3
+       FOR UPDATE`,
+      [runId, actorUserId, projectId],
+    );
+    if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
+    const terminal = terminalObservation(task.rows[0].status);
+    if (!terminal || task.rows[0].type === 'agent-run') {
+      await client.query('COMMIT');
+      return [];
+    }
+
+    const existingTerminal = await client.query<AgentEventRow>(
+      `SELECT event_id, task_id, sequence, event_type, request_digest, payload, created_at
+       FROM wujie_agent_events
+       WHERE task_id = $1 AND event_type IN ('run.completed', 'run.failed', 'run.cancelled', 'run.timeout')
+       ORDER BY sequence
+       LIMIT 1`,
+      [runId],
+    );
+    if ((existingTerminal.rowCount ?? 0) > 0) {
+      await client.query('COMMIT');
+      return existingTerminal.rows.map(mapEvent);
+    }
+
+    const completedInput = validateAgentEventAppendInput({
+      actorUserId,
+      projectId,
+      runId,
+      eventId: `agent-adopt:${runId}:tool:${toolId}:completed`,
+      workspace: rawInput.workspace,
+      type: 'tool.completed',
+      payload: { toolId },
+    });
+    const terminalInput = validateAgentEventAppendInput({
+      actorUserId,
+      projectId,
+      runId,
+      eventId: `agent-adopt:${runId}:terminal:${task.rows[0].status}`,
+      workspace: rawInput.workspace,
+      type: terminal.type,
+      payload: terminal.payload,
+    });
+    const completed = await insertValidatedEvent(client, completedInput);
+    const terminalEvent = await insertValidatedEvent(client, terminalInput);
+    if (completed.inserted || terminalEvent.inserted) {
+      await client.query(
+        `UPDATE cloud_tasks
+         SET revision = revision + 1,
+             updated_at = GREATEST(updated_at, $2)
+         WHERE id = $1`,
+        [runId, Date.now()],
+      );
+    }
+    await client.query('COMMIT');
+    return [completed.event, terminalEvent.event];
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
@@ -343,10 +528,15 @@ export async function listAgentEventStreamsForActor(
 
   const result = await getPool().query<AgentEventRow>(
     `WITH recent_runs AS (
-       SELECT task.id, task.updated_at
+       SELECT DISTINCT task.id, task.updated_at
        FROM cloud_tasks task
+       JOIN wujie_agent_events created
+         ON created.task_id = task.id
+        AND created.owner_id = task.user_id
+        AND created.project_id = task.project_id
+        AND created.event_type = 'run.created'
+        AND created.payload ->> 'observed' IS DISTINCT FROM 'true'
        WHERE task.user_id = $1
-         AND task.type = 'agent-run'
        ORDER BY task.updated_at DESC, task.id DESC
        LIMIT $2
      )

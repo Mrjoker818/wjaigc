@@ -11,8 +11,10 @@ import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult }
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
-import { observeLegacyAgentRun } from '@/lib/agent-runtime/legacy-observer';
+import { buildCanvasAgentRequest } from '@/lib/agent-runtime/surface-requests';
+import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode, type AgentRuntimeMode } from '@/lib/agent-runtime/mode';
+import type { User } from '@/lib/user-types';
 
 export const maxDuration = 120;
 
@@ -125,6 +127,15 @@ export async function POST(request: NextRequest) {
     
     sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+    const runtimeActor: User = sessionUser || {
+      id: userId,
+      name: userId,
+      role: authResult.userRole === 'admin' ? 'admin' : 'user',
+      status: 'active',
+      productType: 'canvas,chat',
+      createdAt: 0,
+      updatedAt: 0,
+    };
     const taskContext = {
       projectId: typeof requestProjectId === 'string' ? requestProjectId : undefined,
       sessionId: typeof requestSessionId === 'string' ? requestSessionId : undefined,
@@ -281,7 +292,7 @@ export async function POST(request: NextRequest) {
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
 
     if (effectiveEnableTools && stream) {
-      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks, agentRuntimeMode);
+      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks, agentRuntimeMode, runtimeActor);
     }
 
     // Non-stream or non-tool mode: original behavior
@@ -374,7 +385,7 @@ export async function POST(request: NextRequest) {
 
       // Handle tool_calls in non-stream mode
       if (effectiveEnableTools && retryData.choices?.[0]?.message?.tool_calls) {
-        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks);
+        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks, agentRuntimeMode, runtimeActor);
       }
 
       tokenBillingHooks?.addUsage(retryData?.usage);
@@ -516,7 +527,7 @@ export async function POST(request: NextRequest) {
     
     // Handle tool_calls in non-stream mode
     if (effectiveEnableTools && data.choices?.[0]?.message?.tool_calls) {
-      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, undefined, taskContext, tokenBillingHooks);
+      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, undefined, taskContext, tokenBillingHooks, agentRuntimeMode, runtimeActor);
     }
 
     tokenBillingHooks?.addUsage(data?.usage);
@@ -565,6 +576,7 @@ async function handleAgentStream(
   taskContext: ChatTaskContext = {},
   tokenBilling?: TokenBillingHooks,
   agentRuntimeMode: AgentRuntimeMode = 'legacy',
+  runtimeActor?: User,
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false; // 捕获isAgentMode到局部变量
   const encoder = new TextEncoder();
@@ -736,7 +748,7 @@ async function handleAgentStream(
           });
 
           // Execute each tool call and add results
-          for (const toolCall of completedToolCalls) {
+          for (const [toolCallIndex, toolCall] of completedToolCalls.entries()) {
             const toolName = toolCall.function.name;
             let toolArgs: Record<string, unknown>;
             try {
@@ -771,6 +783,9 @@ async function handleAgentStream(
                   imageProviderId: imageProviderId || '',
                   allowedTools: availableTools.map(tool => tool.function.name),
                   ...taskContext,
+                  idempotencyKey: taskContext.messageId
+                    ? `chat-agent:${taskContext.messageId}:${iteration}:${toolCallIndex}:${toolName}`
+                    : undefined,
                 }),
                 new Promise<ToolCallResult>((_, reject) =>
                   setTimeout(() => reject(new Error('Tool execution timeout')), TOOL_EXECUTION_TIMEOUT)
@@ -781,20 +796,58 @@ async function handleAgentStream(
               toolResult = { success: false, error: msg, resultText: `工具执行超时或出错: ${msg}` };
             }
 
-            if (agentRuntimeMode === 'shadow' && taskContext.projectId) {
+            if (taskContext.projectId && runtimeActor) {
               for (const task of toolResult.taskIds || []) {
-                void observeLegacyAgentRun({
-                  runId: task.taskId,
-                  actorUserId: userId,
-                  projectId: taskContext.projectId,
-                  workspace: 'canvas',
-                  providerId: task.providerId || imageProviderId || providerId || '',
-                  modelId: task.model || imageModel || model,
-                  mode: 'agent',
-                  prompt: typeof toolArgs.prompt === 'string' ? toolArgs.prompt : toolName,
-                  sourceVersionIds: [],
-                  allowedToolIds: [toolName],
+                const runtimeToolId = toolName === 'generate_image' || toolName === 'img2img'
+                  ? 'generate_image'
+                  : toolName === 'edit_image'
+                    ? 'edit_image'
+                    : null;
+                if (!runtimeToolId) continue;
+                const taskProviderId = task.providerId || imageProviderId || providerId || '';
+                const taskModelId = task.model || imageModel || model;
+                const taskPrompt = typeof toolArgs.prompt === 'string' ? toolArgs.prompt : toolName;
+                const runtimeRequest = () => ({
+                  ...buildCanvasAgentRequest({
+                    projectId: taskContext.projectId!,
+                    workspaceId: `embedded-chat:${taskContext.sessionId || 'chat'}`,
+                    providerId: taskProviderId,
+                    modelId: taskModelId,
+                    prompt: taskPrompt,
+                    sourceVersionIds: [],
+                    mode: 'agent',
+                    conversationId: taskContext.sessionId,
+                    idempotencyKey: task.taskId,
+                  }),
+                  allowedToolIds: [runtimeToolId],
                 });
+                const preparedAgentTask = await prepareAdmittedAgentTaskExecution({
+                  mode: agentRuntimeMode,
+                  observation: () => {
+                    const request = runtimeRequest();
+                    return {
+                      runId: task.taskId,
+                      actorUserId: userId,
+                      projectId: request.projectId,
+                      workspace: request.workspace,
+                      providerId: request.providerId,
+                      modelId: request.modelId,
+                      mode: request.mode,
+                      prompt: request.prompt,
+                      sourceVersionIds: request.sourceVersionIds,
+                      allowedToolIds: request.allowedToolIds,
+                    };
+                  },
+                  adoption: () => ({
+                    actor: runtimeActor,
+                    taskId: task.taskId,
+                    request: runtimeRequest(),
+                    toolId: runtimeToolId,
+                  }),
+                  execute: async () => undefined,
+                });
+                await preparedAgentTask.execute();
+                if (preparedAgentTask.runId) task.runId = preparedAgentTask.runId;
               }
             }
 
@@ -880,6 +933,8 @@ async function handleNonStreamAgentLoop(
   isAgentMode?: boolean,
   taskContext: ChatTaskContext = {},
   tokenBilling?: TokenBillingHooks,
+  agentRuntimeMode: AgentRuntimeMode = 'legacy',
+  runtimeActor?: User,
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false;
   const currentMessages = [...fixedMessages];
@@ -902,7 +957,7 @@ async function handleNonStreamAgentLoop(
     if (!toolCalls || toolCalls.length === 0) break;
 
     // Execute each tool call
-    for (const toolCall of toolCalls) {
+    for (const [toolCallIndex, toolCall] of toolCalls.entries()) {
       const toolName = toolCall.function.name;
       let toolArgs: Record<string, unknown>;
       try {
@@ -920,7 +975,65 @@ async function handleNonStreamAgentLoop(
         imageProviderId: imgProviderId,
         allowedTools: availableTools.map(tool => tool.function.name),
         ...taskContext,
+        idempotencyKey: taskContext.messageId
+          ? `chat-agent:${taskContext.messageId}:${iteration}:${toolCallIndex}:${toolName}`
+          : undefined,
       });
+
+      if (taskContext.projectId && runtimeActor) {
+        for (const task of toolResult.taskIds || []) {
+          const runtimeToolId = toolName === 'generate_image' || toolName === 'img2img'
+            ? 'generate_image'
+            : toolName === 'edit_image'
+              ? 'edit_image'
+              : null;
+          if (!runtimeToolId) continue;
+          const taskProviderId = task.providerId || imgProviderId || providerId || '';
+          const taskModelId = task.model || imgModel || model;
+          const taskPrompt = typeof toolArgs.prompt === 'string' ? toolArgs.prompt : toolName;
+          const runtimeRequest = () => ({
+            ...buildCanvasAgentRequest({
+              projectId: taskContext.projectId!,
+              workspaceId: `embedded-chat:${taskContext.sessionId || 'chat'}`,
+              providerId: taskProviderId,
+              modelId: taskModelId,
+              prompt: taskPrompt,
+              sourceVersionIds: [],
+              mode: 'agent',
+              conversationId: taskContext.sessionId,
+              idempotencyKey: task.taskId,
+            }),
+            allowedToolIds: [runtimeToolId],
+          });
+          const preparedAgentTask = await prepareAdmittedAgentTaskExecution({
+            mode: agentRuntimeMode,
+            observation: () => {
+              const request = runtimeRequest();
+              return {
+                runId: task.taskId,
+                actorUserId: userId,
+                projectId: request.projectId,
+                workspace: request.workspace,
+                providerId: request.providerId,
+                modelId: request.modelId,
+                mode: request.mode,
+                prompt: request.prompt,
+                sourceVersionIds: request.sourceVersionIds,
+                allowedToolIds: request.allowedToolIds,
+              };
+            },
+            adoption: () => ({
+              actor: runtimeActor,
+              taskId: task.taskId,
+              request: runtimeRequest(),
+              toolId: runtimeToolId,
+            }),
+            execute: async () => undefined,
+          });
+          await preparedAgentTask.execute();
+          if (preparedAgentTask.runId) task.runId = preparedAgentTask.runId;
+        }
+      }
 
       allToolResults.push({ toolName, result: toolResult });
 

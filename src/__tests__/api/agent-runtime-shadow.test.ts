@@ -13,9 +13,8 @@ describe('legacy Agent runtime shadow observation', () => {
     );
 
     expect(routeSource).toContain('resolveAgentRuntimeMode(process.env.WUJIE_AGENT_RUNTIME_MODE)');
-    expect(routeSource).toContain("agentRuntimeMode === 'shadow'");
-    expect(routeSource).toContain('observeLegacyAgentRun({');
-    expect(routeSource.indexOf('observeLegacyAgentRun({')).toBeGreaterThan(
+    expect(routeSource).toContain('prepareAdmittedAgentTaskExecution({');
+    expect(routeSource.indexOf('prepareAdmittedAgentTaskExecution({')).toBeGreaterThan(
       routeSource.indexOf('const taskId = admission.value.taskId;'),
     );
   });

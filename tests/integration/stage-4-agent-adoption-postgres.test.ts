@@ -1,0 +1,285 @@
+import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
+
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  createSameTaskAgentAdapter,
+  type SameTaskAgentAdapterDependencies,
+} from '@/lib/agent-runtime/same-task-adapter';
+import {
+  appendAdoptedAgentEvent,
+  listAgentEventStreamsForActor,
+  listAgentEventsForActor,
+  observeAdoptedAgentTaskTerminal,
+} from '@/lib/agent-runtime/event-storage';
+import { cancelAgentRun } from '@/lib/agent-runtime/service';
+import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
+import { createBillableTask } from '@/lib/task-core/billing-service';
+import { transitionTask } from '@/lib/task-core/task-service';
+import type { AgentRunRequest } from '@/lib/agent-runtime/types';
+import type { User } from '@/lib/user-types';
+import { withIsolatedPostgres } from '../helpers/postgres-test-database';
+
+vi.mock('server-only', () => ({}));
+
+const databaseUrl = process.env.POSTGRES_TEST_DATABASE_URL?.trim();
+const postgresIt = databaseUrl ? it : it.skip;
+
+if (!databaseUrl) {
+  console.warn(
+    'BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured; same-task Agent adoption tests skipped.',
+  );
+}
+
+function runMigrations(isolatedDatabaseUrl: string): void {
+  const result = spawnSync(
+    process.execPath,
+    [resolve(process.cwd(), 'scripts/run-migrations.mjs')],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        DATABASE_URL: isolatedDatabaseUrl,
+        PGDATABASE_URL: isolatedDatabaseUrl,
+      },
+    },
+  );
+  expect(result.status, String(result.stderr || result.stdout)).toBe(0);
+}
+
+function actor(userId: string): User {
+  return {
+    id: userId,
+    name: 'Adopted task owner',
+    role: 'user',
+    status: 'active',
+    productType: 'canvas',
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
+function request(projectId: string, taskId: string): AgentRunRequest {
+  return {
+    projectId,
+    workspace: 'canvas',
+    workspaceId: 'canvas-1',
+    mode: 'agent',
+    providerId: 'provider-image',
+    modelId: 'model-image',
+    prompt: 'Create one image',
+    sourceVersionIds: [],
+    allowedToolIds: ['generate_image'],
+    idempotencyKey: taskId,
+    context: {
+      selectedEntityIds: [],
+      visibleVersionIds: [],
+      locale: 'zh-CN',
+    },
+  };
+}
+
+function adapterDependencies(): SameTaskAgentAdapterDependencies {
+  return {
+    getTaskForUser: getCloudTaskForUser,
+    resolveTaskModel: vi.fn().mockResolvedValue({
+      providerId: 'provider-image',
+      modelId: 'model-image',
+      kind: 'image',
+      sourceType: 'image',
+      protocol: 'images',
+      executionMode: 'async',
+      allowedRatios: [],
+      allowedSizes: [],
+      qualityOptions: [],
+      maxOutputs: 1,
+      supportsReferenceImages: false,
+      supportsMask: false,
+      outputKinds: ['png'],
+    }),
+    authorizeContext: vi.fn().mockImplementation(async ({ request: runRequest }) => (
+      runRequest.context
+    )),
+    appendAdoptedEvent: appendAdoptedAgentEvent,
+    observeTerminal: observeAdoptedAgentTaskTerminal,
+    listEvents: listAgentEventsForActor,
+  };
+}
+
+async function createChargedTask(input: {
+  ownerId: string;
+  projectId: string;
+  taskId: string;
+}): Promise<void> {
+  const now = Date.now();
+  await createBillableTask({
+    userId: input.ownerId,
+    idempotencyKey: `adopt:${input.taskId}`,
+    requestDigest: randomUUID().replaceAll('-', ''),
+    creditCost: 7,
+    task: {
+      id: input.taskId,
+      projectId: input.projectId,
+      type: 'generate-async',
+      status: 'processing',
+      providerId: 'provider-image',
+      model: 'model-image',
+      progress: 0,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+}
+
+describe('same-task Agent adoption on real PostgreSQL', () => {
+  postgresIt('claims one executor across twenty retries without another charge or refund', async () => {
+    await withIsolatedPostgres('stage-4-agent-adoption-concurrency', async ({ databaseUrl, query }) => {
+      runMigrations(databaseUrl);
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const taskId = randomUUID();
+      const now = Date.now();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Adoption concurrency', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+      await createChargedTask({ ownerId, projectId, taskId });
+
+      let releaseExecution!: () => void;
+      const executionGate = new Promise<void>(resolvePromise => {
+        releaseExecution = resolvePromise;
+      });
+      const execute = vi.fn(async () => {
+        await executionGate;
+        return 'provider-request-once';
+      });
+      const adapter = createSameTaskAgentAdapter(adapterDependencies());
+      const attempts = Array.from({ length: 20 }, () => adapter.adoptAndExecute({
+        actor: actor(ownerId),
+        taskId,
+        request: request(projectId, taskId),
+        toolId: 'generate_image',
+        execute,
+      }));
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+      releaseExecution();
+      const results = await Promise.all(attempts);
+
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(results.filter(result => result.executed)).toHaveLength(1);
+      const facts = await query<{
+        charges: string;
+        refunds: string;
+        started_events: string;
+      }>(
+        `SELECT
+           (SELECT count(*)::text FROM wujie_credit_transactions
+            WHERE task_id = task.id AND type = 'consume') AS charges,
+           (SELECT count(*)::text FROM wujie_credit_transactions
+            WHERE task_id = task.id AND type = 'refund') AS refunds,
+           (SELECT count(*)::text FROM wujie_agent_events
+            WHERE task_id = task.id AND event_type = 'tool.started') AS started_events
+         FROM cloud_tasks task WHERE task.id = $1`,
+        [taskId],
+      );
+      expect(facts.rows).toEqual([{ charges: '1', refunds: '0', started_events: '1' }]);
+    });
+  });
+
+  postgresIt('keeps cancellation terminal and rejects the executor late completion', async () => {
+    await withIsolatedPostgres('stage-4-agent-adoption-cancel', async ({ databaseUrl, query }) => {
+      runMigrations(databaseUrl);
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const taskId = randomUUID();
+      const now = Date.now();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Adoption cancellation', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+      await createChargedTask({ ownerId, projectId, taskId });
+
+      let releaseExecution!: () => void;
+      const executionGate = new Promise<void>(resolvePromise => {
+        releaseExecution = resolvePromise;
+      });
+      let lateTransition: Awaited<ReturnType<typeof transitionTask>> | undefined;
+      const execution = createSameTaskAgentAdapter(adapterDependencies()).adoptAndExecute({
+        actor: actor(ownerId),
+        taskId,
+        request: request(projectId, taskId),
+        toolId: 'generate_image',
+        execute: async () => {
+          await executionGate;
+          lateTransition = await transitionTask({
+            taskId,
+            from: ['processing'],
+            to: 'completed',
+            creditStatus: 'charged',
+            result: { imageUrl: '/late-result.png' },
+          });
+          return 'late-result';
+        },
+      });
+      await vi.waitFor(async () => {
+        const events = await listAgentEventsForActor({ actorUserId: ownerId, projectId, runId: taskId });
+        expect(events.some(event => event.type === 'tool.started')).toBe(true);
+      });
+
+      const cancelled = await cancelAgentRun({ actorUserId: ownerId, runId: taskId });
+      expect(cancelled.projection.status).toBe('cancelled');
+      releaseExecution();
+      const result = await execution;
+
+      expect(result.projection.status).toBe('cancelled');
+      expect(lateTransition?.transitioned).toBe(false);
+      const facts = await query<{
+        status: string;
+        result: Record<string, unknown> | null;
+        charges: string;
+        refunds: string;
+        completed_events: string;
+      }>(
+        `SELECT task.status, task.result,
+           (SELECT count(*)::text FROM wujie_credit_transactions
+            WHERE task_id = task.id AND type = 'consume') AS charges,
+           (SELECT count(*)::text FROM wujie_credit_transactions
+            WHERE task_id = task.id AND type = 'refund') AS refunds,
+           (SELECT count(*)::text FROM wujie_agent_events
+            WHERE task_id = task.id AND event_type = 'run.completed') AS completed_events
+         FROM cloud_tasks task WHERE task.id = $1`,
+        [taskId],
+      );
+      expect(facts.rows[0]).toMatchObject({
+        status: 'cancelled',
+        charges: '1',
+        refunds: '1',
+        completed_events: '0',
+      });
+      expect(JSON.stringify(facts.rows[0]?.result)).not.toContain('/late-result.png');
+      expect(await listAgentEventStreamsForActor({ actorUserId: ownerId, limit: 10 })).toHaveLength(1);
+    });
+  });
+});

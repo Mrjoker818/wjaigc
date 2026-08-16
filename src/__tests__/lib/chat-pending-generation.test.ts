@@ -289,6 +289,19 @@ describe('mergeChatSessionMessages', () => {
     expect(result[0].isGeneratingImage).toBe(true);
     expect(result[0].pendingGenerationTasks).toHaveLength(1);
   });
+
+  it('preserves a stored agent run ID when a late stream snapshot omits it', () => {
+    const stored: ChatSessionMessageSnapshot[] = [
+      { id: 'msg-1', agentRunId: 'task-1' },
+    ];
+    const incoming: ChatSessionMessageSnapshot[] = [
+      { id: 'msg-1' },
+    ];
+
+    const result = mergeChatSessionMessages(stored, incoming);
+
+    expect(result[0].agentRunId).toBe('task-1');
+  });
 });
 
 describe('mergeRecoveredChatTasks', () => {

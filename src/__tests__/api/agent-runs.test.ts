@@ -129,6 +129,63 @@ function serviceDependencies() {
 }
 
 describe('Agent runtime service', () => {
+  it('does not expose a shadow-observed durable task as a cancellable Agent run', async () => {
+    const dependencies = {
+      ...serviceDependencies(),
+      getTaskForUser: vi.fn(async () => ({
+        id: 'run-1', userId: user.id, projectId: 'project-1', type: 'image',
+        status: 'processing', progress: 10, creditStatus: 'charged', creditCost: 7,
+        createdAt: 1, updatedAt: 2, revision: 1,
+      } as CloudTask)),
+      listEvents: vi.fn(async () => [
+        event(1, 'run.created', { workspace: 'canvas', observed: true }),
+      ]),
+    } as unknown as AgentRuntimeDependencies;
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.cancelRun({
+      actorUserId: user.id,
+      runId: 'run-1',
+    })).rejects.toMatchObject({ code: 'AGENT_RUN_NOT_FOUND', status: 404 });
+    expect(dependencies.abortTaskExecution).not.toHaveBeenCalled();
+    expect(dependencies.transitionTask).not.toHaveBeenCalled();
+  });
+
+  it('materializes an adopted run terminal event from the settled durable task on recovery', async () => {
+    const events = [
+      event(1, 'run.created', { workspace: 'canvas', adopted: true }),
+      event(2, 'tool.started', { toolId: 'generate_image' }),
+    ];
+    const terminal = event(3, 'run.completed', { result: { taskId: 'run-1' } });
+    const dependencies = {
+      ...serviceDependencies(),
+      getTaskForUser: vi.fn(async () => ({
+        id: 'run-1', userId: user.id, projectId: 'project-1', type: 'image',
+        status: 'completed', progress: 100, creditStatus: 'consumed', creditCost: 7,
+        result: { imageUrl: '/done.png' }, createdAt: 1, updatedAt: 2, revision: 2,
+      })),
+      listEvents: vi.fn(async () => events),
+      observeAdoptedTerminal: vi.fn(async () => {
+        events.push(terminal);
+        return [terminal];
+      }),
+    } as unknown as AgentRuntimeDependencies;
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.listEvents({
+      actorUserId: user.id,
+      runId: 'run-1',
+      afterSequence: 2,
+    })).resolves.toEqual([terminal]);
+    expect(dependencies.observeAdoptedTerminal).toHaveBeenCalledWith({
+      actorUserId: user.id,
+      projectId: 'project-1',
+      runId: 'run-1',
+      workspace: 'canvas',
+      toolId: 'generate_image',
+    });
+  });
+
   it('lists only the authenticated actor Agent projections from persisted event streams', async () => {
     const firstRun = [event(1, 'run.created')];
     const secondRun = [

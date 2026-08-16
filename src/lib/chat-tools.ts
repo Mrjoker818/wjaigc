@@ -272,7 +272,7 @@ export interface ToolCallResult {
   /** 工具执行产生的视频URL列表 */
   videoUrls?: string[];
   /** 异步任务ID列表（包含model/providerId供前端轮询） */
-  taskIds?: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video' }>;
+  taskIds?: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video'; runId?: string }>;
   /** 结果描述，用于回传给 LLM */
   resultText: string;
 }
@@ -296,6 +296,7 @@ export async function executeToolCall(
     projectId?: string;
     sessionId?: string;
     messageId?: string;
+    idempotencyKey?: string;
     allowedTools?: string[];
   }
 ): Promise<ToolCallResult> {
@@ -342,6 +343,7 @@ interface ToolContext {
   projectId?: string;
   sessionId?: string;
   messageId?: string;
+  idempotencyKey?: string;
 }
 
 function embeddedChatWorkspaceId(context: ToolContext): string | undefined {
@@ -375,6 +377,7 @@ async function executeGenerateImage(
       headers: {
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
+        ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,
@@ -468,6 +471,7 @@ async function executeEditImage(
       headers: {
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
+        ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         image: imageUrl,
@@ -542,6 +546,7 @@ async function executeImg2Img(
       headers: {
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
+        ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         prompt: fullPrompt,
@@ -606,6 +611,7 @@ async function executeRemoveBg(
       headers: {
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
+        ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         action: 'removebg',
@@ -655,6 +661,7 @@ async function executeUpscale(
       headers: {
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
+        ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         action: 'upscale',
@@ -707,6 +714,7 @@ async function executeGenerateVideo(
       headers: {
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
+        ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         prompt,
@@ -823,6 +831,7 @@ async function executeExtendCanvas(
       headers: {
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
+        ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         action: 'extend',

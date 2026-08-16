@@ -40,6 +40,8 @@ import {
   findWorkspaceAssetReferenceByUrl,
   mergeWorkspaceAssetReferences,
 } from '@/lib/asset-core/workspace-transfer';
+import { AgentProgressTimeline } from '@/components/agent-runtime/AgentProgressTimeline';
+import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-events';
 
 const CHAT_RENDER_WINDOW = 80;
 
@@ -72,6 +74,7 @@ interface Message {
   generateImageCount?: number; // 生成图片数量
   generateError?: string; // 生成失败时的错误信息
   pendingGenerationTasks?: ChatPendingGenerationTask[];
+  agentRunId?: string;
   imageAnchors?: Array<{
     imageId: string;
     imageUrl: string;
@@ -95,6 +98,17 @@ interface ToolExecution {
   audioUrl?: string;      // 生成的音频URL
   progress?: number;      // 进度百分比 0-100
   error?: string;         // 错误信息
+}
+
+function AgentRunMessageProgress({ runId }: { runId: string }): React.ReactElement {
+  const run = useAgentRunEvents(runId);
+  return (
+    <AgentProgressTimeline
+      projection={run.projection}
+      stale={run.stale}
+      onCancel={() => { void run.cancel(); }}
+    />
+  );
 }
 
 interface NextSuggestion {
@@ -4168,7 +4182,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       const toolExecutions: ToolExecution[] = []; // Agent工具执行记录
       const toolGeneratedImages: string[] = []; // 工具生成的图片URL
       const addedImageUrls = new Set<string>(); // 已添加到画布的图片URL去重
-      const toolPendingTaskIds: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video' }> = []; // 工具返回的异步任务，需轮询
+      const toolPendingTaskIds: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video'; runId?: string }> = []; // 工具返回的异步任务，需轮询
       let toolGeneratedVideo: string | undefined; // 工具生成的视频URL
       let currentSSEEvent = ''; // 当前SSE事件类型
       let sseBuffer = ''; // SSE buffer拼接，防止跨chunk JSON破裂
@@ -4334,6 +4348,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     // 如果同时有imageUrls，直接使用imageUrls；否则添加到待轮询列表
                     if (!parsed.imageUrls || parsed.imageUrls.length === 0) {
                       toolPendingTaskIds.push(...parsed.taskIds);
+                      const runId = parsed.taskIds.find((task: { runId?: unknown }) => typeof task.runId === 'string')?.runId;
+                      if (typeof runId === 'string') {
+                        persistMessageUpdate(assistantMessageId, message => ({ ...message, agentRunId: runId }));
+                      }
                     }
                   }
                   continue;
@@ -4435,6 +4453,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             generateProgress: 5,
             generateImageCount: toolPendingTaskIds.length,
             pendingGenerationTasks,
+            agentRunId: toolPendingTaskIds.find(task => task.runId)?.runId,
           }));
 
           (async () => {
@@ -5940,6 +5959,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     </div>
                   )}
                   {/* 正在生成图片 - ChatGPT风格：每张图独立进度卡片 */}
+                  {message.agentRunId && (
+                    <div className="mt-3">
+                      <AgentRunMessageProgress runId={message.agentRunId} />
+                    </div>
+                  )}
                   {message.isGeneratingImage && (
                     <div className="flex flex-col gap-3 mt-3">
                       {Array.from({ length: message.generateImageCount || 1 }).map((_, imgIdx) => (

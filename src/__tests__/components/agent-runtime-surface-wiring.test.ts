@@ -17,4 +17,19 @@ describe('Agent runtime surface boundaries', () => {
     expect(standalone).toMatch(/window\.open\(\s*`\/\?projectId=\$\{encodeURIComponent\(targetProjectId\)\}`/);
     expect(editor).not.toMatch(/API\s*Key.*(?:配置|设置)|配置.*API\s*Key/);
   });
+
+  it('mounts shared progress only from real run IDs and preserves them in chat history', () => {
+    const canvas = source('src/components/chat-panel.tsx');
+    const standalone = source('src/components/simple-chat/chat-area.tsx');
+    const standaloneTypes = source('src/components/simple-chat/simple-chat-types.ts');
+    const editor = source('src/components/agent-editor.tsx');
+
+    for (const component of [canvas, standalone, editor]) {
+      expect(component).toContain('useAgentRunEvents');
+      expect(component).toContain('AgentProgressTimeline');
+    }
+    expect(canvas).toContain('agentRunId?: string');
+    expect(standaloneTypes).toContain('agentRunId?: string');
+    expect(editor).toContain('data.runId');
+  });
 });

@@ -46,7 +46,7 @@ describe('agent runtime surface requests', () => {
   });
 
   it('keeps the selected image entity in the Agent-edit context', () => {
-    expect(buildAgentEditRequest({
+    const request = buildAgentEditRequest({
       projectId: 'project-1',
       workspaceId: 'canvas:project-1',
       providerId: 'provider-chat',
@@ -54,7 +54,9 @@ describe('agent runtime surface requests', () => {
       prompt: '把天空改成日落',
       selectedEntityId: 'canvas-image-1',
       sourceVersionId: 'version-1',
-    }).context.selectedEntityIds).toEqual(['canvas-image-1']);
+    });
+    expect(request.context.selectedEntityIds).toEqual(['canvas-image-1']);
+    expect(request.allowedToolIds).toEqual(['agent_edit']);
   });
 
   it('does not enable tools for conversation mode', () => {

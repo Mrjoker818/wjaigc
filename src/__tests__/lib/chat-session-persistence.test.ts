@@ -28,4 +28,19 @@ describe('normalizePersistedChatSessions', () => {
 
     expect(normalizePersistedChatSessions([session])).toEqual([session]);
   });
+
+  it('preserves a real Agent run ID inside a recovered canvas-chat message', () => {
+    const session = {
+      id: 'session-agent',
+      title: 'agent',
+      messages: [{
+        id: 'message-agent', role: 'assistant', content: 'working', timestamp: 1,
+        agentRunId: 'durable-task-1',
+      }],
+      model: 'provider::model', systemPrompt: '', createdAt: 1, updatedAt: 2,
+    };
+
+    expect(normalizePersistedChatSessions<typeof session>([session])[0]
+      ?.messages[0].agentRunId).toBe('durable-task-1');
+  });
 });

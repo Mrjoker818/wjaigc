@@ -47,6 +47,7 @@ export interface SimpleChatMessage {
   providerId?: string;
   parentMessageId?: string;
   branchId?: string;
+  agentRunId?: string;
   createdAt: number;
 }
 

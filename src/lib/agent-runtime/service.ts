@@ -24,6 +24,7 @@ import {
   appendAgentEvent,
   listAgentEventStreamsForActor,
   listAgentEventsForActor,
+  observeAdoptedAgentTaskTerminal,
   validateAgentEventAppendInput,
 } from './event-storage';
 import {
@@ -153,6 +154,7 @@ export interface AgentRuntimeDependencies {
   createBillableTask: typeof createBillableTask;
   appendEvent: typeof appendAgentEvent;
   listEvents: typeof listAgentEventsForActor;
+  observeAdoptedTerminal?: typeof observeAdoptedAgentTaskTerminal;
   listRunEventStreams: typeof listAgentEventStreamsForActor;
   getTaskForUser: typeof getCloudTaskForUser;
   transitionTask: typeof transitionTask;
@@ -169,6 +171,7 @@ const defaultDependencies: AgentRuntimeDependencies = {
   createBillableTask,
   appendEvent: appendAgentEvent,
   listEvents: listAgentEventsForActor,
+  observeAdoptedTerminal: observeAdoptedAgentTaskTerminal,
   listRunEventStreams: listAgentEventStreamsForActor,
   getTaskForUser: getCloudTaskForUser,
   transitionTask,
@@ -382,7 +385,7 @@ export function createAgentRuntimeService(
 ) {
   async function ownedRun(actorUserId: string, runId: string): Promise<OwnedAgentRun> {
     const task = await dependencies.getTaskForUser(runId, actorUserId);
-    if (!task || task.type !== 'agent-run' || !task.projectId) {
+    if (!task || !task.projectId) {
       throw new AgentRunNotFoundError();
     }
     const events = await dependencies.listEvents({
@@ -390,7 +393,11 @@ export function createAgentRuntimeService(
       projectId: task.projectId,
       runId,
     });
-    const createdWorkspace = events.find(event => event.type === 'run.created')?.payload.workspace;
+    const created = events.find(event => event.type === 'run.created');
+    if (!created || (task.type !== 'agent-run' && created.payload.adopted !== true)) {
+      throw new AgentRunNotFoundError();
+    }
+    const createdWorkspace = created.payload.workspace;
     const workspace = WORKSPACES.has(createdWorkspace as AgentWorkspace)
       ? createdWorkspace as AgentWorkspace
       : null;
@@ -404,9 +411,34 @@ export function createAgentRuntimeService(
     afterSequence?: number;
   }): Promise<AgentEvent[]> {
     const run = await ownedRun(input.actorUserId, input.runId);
+    let events = run.events;
+    const projection = reduceAgentEvents(events);
+    if (
+      run.task.type !== 'agent-run'
+      && TERMINAL_TASK_STATUSES.has(run.task.status)
+      && !TERMINAL_TASK_STATUSES.has(projection.status)
+      && dependencies.observeAdoptedTerminal
+    ) {
+      const started = [...events].reverse().find(event => event.type === 'tool.started');
+      const toolId = typeof started?.payload.toolId === 'string'
+        ? started.payload.toolId
+        : 'adopted_task';
+      await dependencies.observeAdoptedTerminal({
+        actorUserId: input.actorUserId,
+        projectId: run.projectId,
+        runId: input.runId,
+        workspace: run.workspace,
+        toolId,
+      });
+      events = await dependencies.listEvents({
+        actorUserId: input.actorUserId,
+        projectId: run.projectId,
+        runId: input.runId,
+      });
+    }
     return input.afterSequence === undefined
-      ? run.events
-      : run.events.filter(event => event.sequence > input.afterSequence!);
+      ? events
+      : events.filter(event => event.sequence > input.afterSequence!);
   }
 
   async function appendEvent(

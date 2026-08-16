@@ -23,6 +23,8 @@ import {
 import { User } from "@/lib/user-types";
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from "@/lib/chat-generation-controls";
 import { useTheme } from "@/app/simple-chat/providers";
+import { AgentProgressTimeline } from "@/components/agent-runtime/AgentProgressTimeline";
+import { useAgentRunEvents } from "@/components/agent-runtime/use-agent-run-events";
 
 type ChatModelInfo = {
   id: string;
@@ -38,6 +40,17 @@ type CanvasProjectOption = {
   id: string;
   name: string;
 };
+
+function AgentRunMessageProgress({ runId }: { runId: string }) {
+  const run = useAgentRunEvents(runId);
+  return (
+    <AgentProgressTimeline
+      projection={run.projection}
+      stale={run.stale}
+      onCancel={() => { void run.cancel(); }}
+    />
+  );
+}
 
 function readWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | null {
   if (!value || typeof value !== 'object') return null;
@@ -847,6 +860,7 @@ export default function ChatArea({
                     updated[updated.length - 1] = {
                       ...last,
                       content: `*${parsed.label || '正在处理图片任务...'}*`,
+                      ...(typeof parsed.runId === 'string' ? { agentRunId: parsed.runId } : {}),
                     };
                   }
                   return updated;
@@ -1554,6 +1568,11 @@ export default function ChatArea({
                     </div>
                   ) : (
                     <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
+                  )}
+                  {msg.agentRunId && (
+                    <div className="mt-3">
+                      <AgentRunMessageProgress runId={msg.agentRunId} />
+                    </div>
                   )}
                   {msg.images && msg.images.length > 0 && (
                     <div className="flex gap-2 mt-2 flex-wrap">

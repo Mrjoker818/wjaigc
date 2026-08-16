@@ -2,9 +2,10 @@
 
 Date: 2026-08-17
 Baseline: `7b3ca85797ee56f381cdb0ef8b120898a84d7296` (`codex/wj-stable-s4`)
+Blocker-resolution baseline: `18af75a70f383eacddbb46494a2405be51c333e4`
 
-Status: BLOCKED - the safe shadow integration is implemented and verified, but
-Task 1 has no same-task executor adapter for `agent-v2`.
+Status: COMPLETE - the historical blocker and limitation recorded below were
+resolved by the same-task adoption adapter described in the completion addendum.
 
 ## Scope
 
@@ -70,3 +71,73 @@ task/executor adapter with atomic terminal settlement. The legacy fallbacks in
 the existing routes also cannot be changed safely as part of this shadow-only
 work; strict `MODEL_ROUTE_MISMATCH` enforcement belongs in that adapter. No
 provider fallback or client credential path was introduced by this patch.
+
+## Completion Addendum: Same-Task Adoption
+
+The blocker was resolved without changing billing semantics. The shared adapter
+binds an already admitted durable task as the run, using the task ID as `runId`.
+It verifies exact owner/project and provider/model before context authorization,
+reuses Task 1 Asset Graph/model/tool authorization, and recursively rejects
+credential-bearing input before event persistence. Deterministic event IDs and
+the transactionally inserted `tool.started` row form the execution claim, so
+concurrent retries invoke the supplied continuation once. The adapter has no
+charge or refund dependency; completion, failure, cancellation, refunds, and
+late-result rejection remain in the existing durable task paths.
+
+`legacy` defers and performs zero shared-runtime work. `shadow` performs only the
+existing contained observation and cannot be listed or cancelled as a real run.
+`agent-v2` adopts the already admitted task and wraps each route's existing
+post-admission continuation. Stable inner idempotency keys prevent another task,
+charge, or provider submission. All three legacy response structures remain
+intact, with `runId` added only when a real adopted run exists.
+
+The shared hook and timeline are mounted independently in canvas chat,
+standalone chat, and image Agent. They show an immediate created/queued state,
+recover from `GET .../events?after=0`, and cancel through the shared DELETE API.
+Canvas session merge now preserves a durable `agentRunId` against late stream
+snapshots. Standalone chat already stores complete message JSON in
+`chat_simple_projects` and syncs it through the existing allowed `chat_` key.
+Executable persistence tests proved both paths, so no no-op user-data sync or
+user-manager edit was made.
+
+## Completion RED Evidence
+
+- Adapter RED: the first focused run failed because `same-task-adapter` did not
+  exist. Ownership/project, exact `MODEL_ROUTE_MISMATCH`, and 20-way execution
+  claim cases were then added before implementation.
+- PostgreSQL RED: the first real-database run lacked adopted event storage and
+  task-type support. The corrected isolated fixture then exercised the missing
+  same-task claim and terminal behavior against PostgreSQL 17.
+- Route RED: mode tests failed because `surface-dispatch` did not exist; tool and
+  request tests failed because `agent_edit` was not authorized by the registry.
+- Recovery/UI RED: terminal refresh returned no terminal event; four hook and
+  surface assertions failed before first-progress, shared cancel, recovery, and
+  production mounting were implemented.
+- Persistence RED: `chat-pending-generation.test.ts` received `undefined`
+  instead of stored `task-1` when a late snapshot omitted `agentRunId`.
+- Review RED: a shadow-observed image task incorrectly resolved through shared
+  cancellation; nested `context.metadata.accessToken` also reached execution.
+  Both now reject before cancellation/event persistence/execution.
+- Baseline RED: the protected gate reported five exact unapproved source files;
+  the per-file allowlist was expanded only for the reviewed Task 2 surfaces.
+
+## Completion GREEN Evidence
+
+- Expanded Task 2 focused suite: `14 files / 96 tests passed`.
+- Task 1 plus same-task PostgreSQL regression: `8 files / 212 tests passed`,
+  including all `18/18` real PostgreSQL event/adoption tests with zero skips.
+- PostgreSQL adoption proves one executor and one consume ledger row across 20
+  concurrent retries, no second charge/refund, and one `tool.started`. Its race
+  test proves cancellation remains terminal, exactly one existing-path refund
+  occurs, and a late completion persists neither result nor completion event.
+- Final PostgreSQL-enabled full Vitest: `454 files passed / 3 skipped`,
+  `2666 tests passed / 4 skipped`. The four unrelated skips use the separate
+  `TEST_POSTGRES_URL`; all Task 1 and Task 2 database suites executed.
+- `pnpm ts-check` passed; `pnpm lint -- --quiet` exited `0`; production build
+  completed `113/113` pages; protected baseline passed `38/38` with zero
+  warnings; scoped `git diff --check` passed.
+- Playwright remains **UNVERIFIED**. The strict five-browser fixture requires an
+  isolated `E2E_STAGE4_DATABASE_URL`; the prior attempt stopped before product
+  interaction, and no unsafe substitute database or fabricated result was used.
+- Controller-owned `task-1-brief.md` and `task-2-brief.md` remain unstaged and
+  uncommitted. Stable was not touched.

@@ -12,7 +12,8 @@ import { AssetServiceError, createAssetService } from '@/lib/asset-core/service'
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { getSafeImageTypeFromDataUrl, getSafeMediaTypeFromResponse } from '@/lib/media-validation';
 import { projectCompletedTaskToAssets } from '@/lib/asset-core/task-projector';
-import { observeLegacyAgentRun } from '@/lib/agent-runtime/legacy-observer';
+import { buildSimpleChatAgentRequest } from '@/lib/agent-runtime/surface-requests';
+import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
@@ -643,7 +644,11 @@ export async function POST(request: NextRequest) {
               const internalHeaders = await getInternalRequestHeaders(user.id, user.role === 'admin' ? 'admin' : 'user');
               const imgRes = await fetch(getInternalApiUrl('/api/generate'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...internalHeaders },
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...internalHeaders,
+                  'idempotency-key': `simple-chat:${body.taskId || body.projectId || 'chat'}:${body.responseMessageId || tc.id}:generate`,
+                },
                 body: JSON.stringify({
                   prompt: imgPrompt,
                   model: imageModel,
@@ -665,44 +670,72 @@ export async function POST(request: NextRequest) {
                 await sendGeneratedImage(directUrls[0], imgPrompt);
               } else if (imgData.success && imgData.taskIds?.length) {
                 const taskId = imgData.taskIds[0];
-                if (agentRuntimeMode === 'shadow' && body.assetProjectId) {
-                  void observeLegacyAgentRun({
-                    runId: taskId,
-                    actorUserId: user.id,
-                    projectId: body.assetProjectId,
-                    workspace: 'chat',
-                    providerId: imageProviderId,
-                    modelId: imageModel,
-                    mode: 'agent',
-                    prompt: imgPrompt,
-                    sourceVersionIds: [],
-                    allowedToolIds: ['generate_image'],
-                  });
-                }
-                send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: '图片生成中...', taskId });
+                const pollExistingTask = async (): Promise<void> => {
+                  let attempts = 0;
+                  while (attempts < 100) {
+                    await new Promise(r => setTimeout(r, 3000));
+                    const pollRes = await fetch(getInternalApiUrl('/api/poll-task'), {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', ...internalHeaders },
+                      body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),
+                    });
+                    const pollData = await pollRes.json() as { status?: string; imageUrl?: string; progress?: number };
 
-                // 轮询直到完成
-                let attempts = 0;
-                while (attempts < 100) {
-                  await new Promise(r => setTimeout(r, 3000));
-                  const pollRes = await fetch(getInternalApiUrl('/api/poll-task'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...internalHeaders },
-                    body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),
-                  });
-                  const pollData = await pollRes.json() as { status?: string; imageUrl?: string; progress?: number };
-
-                  if (pollData.status === 'completed' && pollData.imageUrl) {
-                    await sendGeneratedImage(pollData.imageUrl, imgPrompt, taskId);
-                    break;
+                    if (pollData.status === 'completed' && pollData.imageUrl) {
+                      await sendGeneratedImage(pollData.imageUrl, imgPrompt, taskId);
+                      break;
+                    }
+                    if (pollData.status === 'failed' || pollData.status === 'cancelled') {
+                      send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: '图片生成失败' });
+                      break;
+                    }
+                    send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `图片生成中... ${pollData.progress || ''}`, taskId, progress: pollData.progress });
+                    attempts++;
                   }
-                  if (pollData.status === 'failed') {
-                    send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: '图片生成失败' });
-                    break;
-                  }
-                  send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `图片生成中... ${pollData.progress || ''}`, taskId, progress: pollData.progress });
-                  attempts++;
-                }
+                };
+                const preparedAgentTask = body.assetProjectId
+                  ? await prepareAdmittedAgentTaskExecution({
+                      mode: agentRuntimeMode,
+                      observation: () => ({
+                        runId: taskId,
+                        actorUserId: user.id,
+                        projectId: body.assetProjectId!,
+                        workspace: 'chat',
+                        providerId: imageProviderId,
+                        modelId: imageModel,
+                        mode: 'agent',
+                        prompt: imgPrompt,
+                        sourceVersionIds: [],
+                        allowedToolIds: ['generate_image'],
+                      }),
+                      adoption: () => ({
+                        actor: user,
+                        taskId,
+                        request: buildSimpleChatAgentRequest({
+                          projectId: body.assetProjectId!,
+                          workspaceId: `standalone-chat:${body.projectId || 'chat'}`,
+                          providerId: imageProviderId,
+                          modelId: imageModel,
+                          prompt: imgPrompt,
+                          sourceVersionIds: [],
+                          mode: 'agent',
+                          conversationId: body.projectId,
+                          idempotencyKey: taskId,
+                        }),
+                        toolId: 'generate_image',
+                      }),
+                      execute: pollExistingTask,
+                    })
+                  : { execute: pollExistingTask, runId: undefined };
+                send({
+                  type: 'tool_status',
+                  tool: 'generating_image',
+                  status: 'polling',
+                  label: '图片生成中...',
+                  taskId,
+                  ...(preparedAgentTask.runId ? { runId: preparedAgentTask.runId } : {}),
+                });
+                await preparedAgentTask.execute();
               }
             } catch (e: unknown) {
               send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败: ${errorMessage(e, '未知错误')}` });

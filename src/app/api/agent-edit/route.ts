@@ -32,7 +32,8 @@ import { createBillableTask } from '@/lib/task-core/billing-service';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import type { DurableTaskStatus } from '@/lib/task-core/task-state';
 import { getRequestId } from '@/lib/request-id';
-import { observeLegacyAgentRun } from '@/lib/agent-runtime/legacy-observer';
+import { buildAgentEditRequest } from '@/lib/agent-runtime/surface-requests';
+import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
@@ -304,28 +305,6 @@ export async function POST(request: NextRequest) {
     const taskId = admission.value.taskId;
     localTaskId = taskId;
     deductedCredits = admission.value.creditCost;
-    if (agentRuntimeMode === 'shadow' && typeof projectId === 'string' && projectId) {
-      after(() => observeLegacyAgentRun({
-        runId: taskId,
-        actorUserId: authResult.userId,
-        projectId,
-        workspace: 'canvas',
-        providerId: typeof providerId === 'string' ? providerId : '',
-        modelId: typeof pureModel === 'string' ? pureModel : '',
-        mode: 'agent',
-        prompt: typeof prompt === 'string' ? prompt : '',
-        sourceVersionIds: Array.isArray(assetParentVersionIds)
-          ? assetParentVersionIds.filter((value): value is string => typeof value === 'string')
-          : [],
-        allowedToolIds: ['edit_image', 'generate_image'],
-      }, {
-        appendEvent: async event => {
-          const { appendAgentEvent } = await import('@/lib/agent-runtime/event-storage');
-          return appendAgentEvent(event);
-        },
-        recordDiagnostic: diagnostic => console.warn('[agent-edit] agent shadow observation:', diagnostic.code),
-      }));
-    }
     if (admission.value.reused) {
       if (
         admission.value.status === 'failed'
@@ -341,14 +320,16 @@ export async function POST(request: NextRequest) {
           replayed: true,
         }, { status: 409 });
       }
-      return NextResponse.json({
-        success: true,
-        taskId,
-        status: admission.value.status,
-        result: admission.value.result,
-        mode: 'agent',
-        replayed: true,
-      });
+      if (agentRuntimeMode !== 'agent-v2') {
+        return NextResponse.json({
+          success: true,
+          taskId,
+          status: admission.value.status,
+          result: admission.value.result,
+          mode: 'agent',
+          replayed: true,
+        });
+      }
     }
 
     // 注册任务到本地存储
@@ -362,7 +343,31 @@ export async function POST(request: NextRequest) {
 
     await recordAgentTaskProgress(taskId, 5, 'Agent processing');
 
-    after(async () => {
+    const sourceVersionIds = Array.isArray(assetParentVersionIds)
+      ? assetParentVersionIds.filter((value): value is string => typeof value === 'string')
+      : [];
+    const runtimeActor = sessionUser || {
+      id: authResult.userId,
+      name: authResult.userId,
+      role: authResult.userRole === 'admin' ? 'admin' as const : 'user' as const,
+      status: 'active' as const,
+      productType: 'canvas',
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    const runtimeRequest = () => buildAgentEditRequest({
+      projectId: typeof projectId === 'string' ? projectId : '',
+      workspaceId: `canvas:${typeof projectId === 'string' ? projectId : taskId}`,
+      providerId: typeof providerId === 'string' ? providerId : '',
+      modelId: typeof pureModel === 'string' ? pureModel : '',
+      prompt: typeof prompt === 'string' ? prompt : '',
+      selectedEntityId: typeof messageId === 'string' && messageId ? messageId : taskId,
+      sourceVersionId: sourceVersionIds[0],
+      visibleVersionIds: sourceVersionIds,
+      conversationId: typeof sessionId === 'string' ? sessionId : undefined,
+      idempotencyKey: taskId,
+    });
+    const executeAgentEditTask = async (): Promise<void> => {
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
         void (async () => {
@@ -891,6 +896,36 @@ export async function POST(request: NextRequest) {
       } finally {
         clearTimeout(timeout);
       }
+    };
+    const preparedAgentTask = await prepareAdmittedAgentTaskExecution({
+      mode: agentRuntimeMode,
+      observation: () => {
+        const agentRequest = runtimeRequest();
+        return {
+          runId: taskId,
+          actorUserId: authResult.userId,
+          projectId: agentRequest.projectId,
+          workspace: agentRequest.workspace,
+          providerId: agentRequest.providerId,
+          modelId: agentRequest.modelId,
+          mode: agentRequest.mode,
+          prompt: agentRequest.prompt,
+          sourceVersionIds: agentRequest.sourceVersionIds,
+          allowedToolIds: agentRequest.allowedToolIds,
+        };
+      },
+      adoption: () => ({
+        actor: runtimeActor,
+        taskId,
+        request: runtimeRequest(),
+        toolId: 'agent_edit',
+      }),
+      execute: executeAgentEditTask,
+    });
+    after(() => {
+      void preparedAgentTask.execute().catch(error => {
+        console.error('[agent-edit] admitted task execution failed:', error);
+      });
     });
 
     // 立即返回 taskId
@@ -898,6 +933,12 @@ export async function POST(request: NextRequest) {
       success: true,
       taskId,
       mode: 'agent',
+      ...(preparedAgentTask.runId ? { runId: preparedAgentTask.runId } : {}),
+      ...(admission.value.reused ? {
+        status: admission.value.status,
+        result: admission.value.result,
+        replayed: true,
+      } : {}),
     });
   } catch (err) {
     const durationMs = Date.now() - startTime;
@@ -930,6 +971,20 @@ export async function POST(request: NextRequest) {
         code: err.code,
         error: err.message,
       }, { status: err.statusCode });
+    }
+    if (
+      err instanceof Error
+      && 'code' in err
+      && 'status' in err
+      && typeof err.code === 'string'
+      && typeof err.status === 'number'
+    ) {
+      return NextResponse.json({
+        success: false,
+        code: err.code,
+        error: err.message,
+        ...(localTaskId ? { taskId: localTaskId } : {}),
+      }, { status: err.status });
     }
     return NextResponse.json(
       { success: false, error: '请求处理失败' },
