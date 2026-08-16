@@ -11,6 +11,8 @@ import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult }
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
+import { observeLegacyAgentRun } from '@/lib/agent-runtime/legacy-observer';
+import { resolveAgentRuntimeMode, type AgentRuntimeMode } from '@/lib/agent-runtime/mode';
 
 export const maxDuration = 120;
 
@@ -93,6 +95,7 @@ export async function POST(request: NextRequest) {
   try {
     const authResult = await requireApiAuthOrReject(request);
     if (authResult instanceof NextResponse) return authResult;
+    const agentRuntimeMode = resolveAgentRuntimeMode(process.env.WUJIE_AGENT_RUNTIME_MODE);
     const {
       model,
       messages,
@@ -278,7 +281,7 @@ export async function POST(request: NextRequest) {
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
 
     if (effectiveEnableTools && stream) {
-      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks);
+      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks, agentRuntimeMode);
     }
 
     // Non-stream or non-tool mode: original behavior
@@ -561,6 +564,7 @@ async function handleAgentStream(
   isAgentMode?: boolean,
   taskContext: ChatTaskContext = {},
   tokenBilling?: TokenBillingHooks,
+  agentRuntimeMode: AgentRuntimeMode = 'legacy',
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false; // 捕获isAgentMode到局部变量
   const encoder = new TextEncoder();
@@ -775,6 +779,23 @@ async function handleAgentStream(
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
               toolResult = { success: false, error: msg, resultText: `工具执行超时或出错: ${msg}` };
+            }
+
+            if (agentRuntimeMode === 'shadow' && taskContext.projectId) {
+              for (const task of toolResult.taskIds || []) {
+                void observeLegacyAgentRun({
+                  runId: task.taskId,
+                  actorUserId: userId,
+                  projectId: taskContext.projectId,
+                  workspace: 'canvas',
+                  providerId: task.providerId || imageProviderId || providerId || '',
+                  modelId: task.model || imageModel || model,
+                  mode: 'agent',
+                  prompt: typeof toolArgs.prompt === 'string' ? toolArgs.prompt : toolName,
+                  sourceVersionIds: [],
+                  allowedToolIds: [toolName],
+                });
+              }
             }
 
             // Send tool execution result event

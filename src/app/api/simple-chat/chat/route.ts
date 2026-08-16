@@ -12,6 +12,8 @@ import { AssetServiceError, createAssetService } from '@/lib/asset-core/service'
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { getSafeImageTypeFromDataUrl, getSafeMediaTypeFromResponse } from '@/lib/media-validation';
 import { projectCompletedTaskToAssets } from '@/lib/asset-core/task-projector';
+import { observeLegacyAgentRun } from '@/lib/agent-runtime/legacy-observer';
+import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -252,6 +254,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  const agentRuntimeMode = resolveAgentRuntimeMode(process.env.WUJIE_AGENT_RUNTIME_MODE);
   const body = await request.json() as {
     assetAction?: string;
     messages?: { role: string; content: string; images?: string[] }[];
@@ -662,6 +665,20 @@ export async function POST(request: NextRequest) {
                 await sendGeneratedImage(directUrls[0], imgPrompt);
               } else if (imgData.success && imgData.taskIds?.length) {
                 const taskId = imgData.taskIds[0];
+                if (agentRuntimeMode === 'shadow' && body.assetProjectId) {
+                  void observeLegacyAgentRun({
+                    runId: taskId,
+                    actorUserId: user.id,
+                    projectId: body.assetProjectId,
+                    workspace: 'chat',
+                    providerId: imageProviderId,
+                    modelId: imageModel,
+                    mode: 'agent',
+                    prompt: imgPrompt,
+                    sourceVersionIds: [],
+                    allowedToolIds: ['generate_image'],
+                  });
+                }
                 send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: '图片生成中...', taskId });
 
                 // 轮询直到完成

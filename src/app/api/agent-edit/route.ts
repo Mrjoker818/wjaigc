@@ -32,6 +32,8 @@ import { createBillableTask } from '@/lib/task-core/billing-service';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import type { DurableTaskStatus } from '@/lib/task-core/task-state';
 import { getRequestId } from '@/lib/request-id';
+import { observeLegacyAgentRun } from '@/lib/agent-runtime/legacy-observer';
+import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -88,6 +90,7 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
   const requestId = getRequestId(request);
   const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
+  const agentRuntimeMode = resolveAgentRuntimeMode(process.env.WUJIE_AGENT_RUNTIME_MODE);
   let deductedCredits = 0;
   let sessionUser: import('@/lib/user-types').User | null = null;
   let localTaskId: string | null = null;
@@ -301,6 +304,28 @@ export async function POST(request: NextRequest) {
     const taskId = admission.value.taskId;
     localTaskId = taskId;
     deductedCredits = admission.value.creditCost;
+    if (agentRuntimeMode === 'shadow' && typeof projectId === 'string' && projectId) {
+      after(() => observeLegacyAgentRun({
+        runId: taskId,
+        actorUserId: authResult.userId,
+        projectId,
+        workspace: 'canvas',
+        providerId: typeof providerId === 'string' ? providerId : '',
+        modelId: typeof pureModel === 'string' ? pureModel : '',
+        mode: 'agent',
+        prompt: typeof prompt === 'string' ? prompt : '',
+        sourceVersionIds: Array.isArray(assetParentVersionIds)
+          ? assetParentVersionIds.filter((value): value is string => typeof value === 'string')
+          : [],
+        allowedToolIds: ['edit_image', 'generate_image'],
+      }, {
+        appendEvent: async event => {
+          const { appendAgentEvent } = await import('@/lib/agent-runtime/event-storage');
+          return appendAgentEvent(event);
+        },
+        recordDiagnostic: diagnostic => console.warn('[agent-edit] agent shadow observation:', diagnostic.code),
+      }));
+    }
     if (admission.value.reused) {
       if (
         admission.value.status === 'failed'
