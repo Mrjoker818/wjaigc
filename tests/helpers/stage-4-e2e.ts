@@ -98,6 +98,7 @@ async function buildStage4Plan(runId: string) {
       canvasProject: Record<string, unknown>;
       chatProject: Record<string, unknown>;
       nodeCount: number;
+      expectedNodeIds: string[];
     }>;
   };
 }
@@ -220,7 +221,9 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
 
 export { expect };
 
-export async function stage4FixtureForProject(projectName: string): Promise<Stage4FixtureUser & Stage4SeedTarget> {
+export async function stage4FixtureForProject(
+  projectName: string,
+): Promise<Stage4FixtureUser & Stage4SeedTarget & { expectedNodeIds: string[] }> {
   const plan = await buildStage4Plan(stage4RunId());
   const user = plan.users.find(candidate => candidate.browserProfile === projectName);
   const workflow = plan.workflows.find(candidate => candidate.browserProfile === projectName);
@@ -233,6 +236,7 @@ export async function stage4FixtureForProject(projectName: string): Promise<Stag
     canvasProject: workflow.canvasProject,
     chatProject: workflow.chatProject,
     nodeCount: workflow.nodeCount,
+    expectedNodeIds: workflow.expectedNodeIds,
   };
 }
 
@@ -442,12 +446,12 @@ export async function seedStage4Baseline(
   const projectPayload = await readJson(readProjects);
   expect(readProjects.ok(), `/api/user-data/sync?key=projects returned HTTP ${readProjects.status()}`).toBe(true);
   const existingProjects = Array.isArray(projectPayload.value)
-    ? projectPayload.value as Array<Record<string, unknown>>
+    ? projectPayload.value as Array<Record<string, unknown> & { id: string }>
     : [];
   const canvasProject = {
     ...fixture.canvasProject,
     userId: auth.userId,
-  } as Record<string, unknown> & { id: string };
+  } as unknown as Record<string, unknown> & { id: string };
   const saveProjects = await page.request.post('/api/user-data/sync', {
     data: {
       key: 'projects',
@@ -464,7 +468,7 @@ export async function seedStage4Baseline(
   const chatPayload = await readJson(readChatProjects);
   expect(readChatProjects.ok(), `/api/user-data/sync?key=chat_simple_projects returned HTTP ${readChatProjects.status()}`).toBe(true);
   const existingChatProjects = Array.isArray(chatPayload.value)
-    ? chatPayload.value as Array<Record<string, unknown>>
+    ? chatPayload.value as Array<Record<string, unknown> & { id: string }>
     : [];
   const chatProject = fixture.chatProject as Record<string, unknown> & { id: string };
   const saveChatProjects = await page.request.post('/api/user-data/sync', {

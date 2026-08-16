@@ -52,21 +52,32 @@ type WorkflowInteraction = (page: Page) => Promise<void>;
 export function selectWorkflowMonitorIds(
   rawIds: ReadonlyArray<string | null | undefined>,
 ): string[] {
-  return [...new Set(
-    rawIds
-      .map(value => typeof value === 'string' ? value.trim() : '')
-      .filter(value => value.length > 0),
-  )];
+  return rawIds
+    .map(value => typeof value === 'string' ? value.trim() : '')
+    .filter(value => value.length > 0);
 }
 
 export function assertWorkflowMonitorCoverage(
   monitoredIds: ReadonlyArray<string>,
-  expectedNodeCount: number,
+  expectedNodeIds: ReadonlyArray<string>,
 ): void {
-  if (monitoredIds.length !== expectedNodeCount) {
+  const monitoredSet = new Set(monitoredIds);
+  if (monitoredSet.size !== monitoredIds.length) {
+    throw new Error('BLOCKED: Stage 4 workflow performance gate found duplicate monitored node IDs');
+  }
+  const expectedSet = new Set(expectedNodeIds);
+  if (expectedSet.size !== expectedNodeIds.length) {
+    throw new Error('BLOCKED: Stage 4 workflow fixture contains duplicate expected node IDs');
+  }
+  const missingIds = expectedNodeIds.filter(id => !monitoredSet.has(id));
+  if (missingIds.length > 0) {
     throw new Error(
-      `BLOCKED: Stage 4 workflow performance gate must monitor all ${expectedNodeCount} fixture nodes; found ${monitoredIds.length}`,
+      `BLOCKED: Stage 4 workflow performance gate is missing expected node IDs (${missingIds.length})`,
     );
+  }
+  const unexpectedIds = monitoredIds.filter(id => !expectedSet.has(id));
+  if (unexpectedIds.length > 0) {
+    throw new Error(`BLOCKED: Stage 4 workflow performance gate found unexpected node IDs (${unexpectedIds.length})`);
   }
 }
 
@@ -99,11 +110,11 @@ export function summarizeWorkflowPerformance(
   };
 }
 
-async function startMeasurement(page: Page): Promise<void> {
+async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<string>): Promise<void> {
   const monitoredIds = selectWorkflowMonitorIds(await page.locator('[data-node-id]').evaluateAll(nodes => (
     nodes.map(node => (node as HTMLElement).dataset.nodeId ?? null)
   )));
-  assertWorkflowMonitorCoverage(monitoredIds, 100);
+  assertWorkflowMonitorCoverage(monitoredIds, expectedNodeIds);
 
   await page.evaluate((nodeIds: string[]) => {
     const windowWithState = window as typeof window & {
@@ -250,7 +261,7 @@ async function startMeasurement(page: Page): Promise<void> {
 
     state.rafId = requestAnimationFrame(tick);
     windowWithState.__wujieStage4WorkflowPerformance = state as unknown as Record<string, unknown>;
-  }, monitoredIds);
+  }, [...expectedNodeIds]);
 }
 
 async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample> {
@@ -307,9 +318,10 @@ async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample
 
 export async function measureWorkflowInteraction(
   page: Page,
+  expectedNodeIds: ReadonlyArray<string>,
   action: WorkflowInteraction,
 ): Promise<WorkflowPerformanceSample> {
-  await startMeasurement(page);
+  await startMeasurement(page, expectedNodeIds);
   let actionError: unknown;
   try {
     await action(page);

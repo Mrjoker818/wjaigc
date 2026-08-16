@@ -159,10 +159,22 @@ function buildChatProject(runId, profileId) {
   };
 }
 
-export function assertStage4FixtureDatabase(rawUrl) {
+function normalizeStage4RunId(rawRunId) {
+  if (!rawRunId || !String(rawRunId).trim()) {
+    throw new Error('BLOCKED: E2E_STAGE4_RUN_ID is required for Stage 4 fixture isolation');
+  }
+  const runId = String(rawRunId).trim();
+  if (runId.length < 4 || runId.length > 80 || safeToken(runId) !== runId) {
+    throw new Error('BLOCKED: E2E_STAGE4_RUN_ID must contain 4-80 letters, numbers, underscores, or hyphens');
+  }
+  return runId.toLowerCase().replaceAll('-', '_');
+}
+
+function stage4DatabaseTarget(rawUrl, rawRunId) {
   if (!rawUrl || !String(rawUrl).trim()) {
     throw new Error('BLOCKED: E2E_STAGE4_DATABASE_URL is required for Stage 4 fixture isolation');
   }
+  const normalizedRunId = normalizeStage4RunId(rawRunId);
   let parsed;
   try {
     parsed = new URL(rawUrl);
@@ -173,48 +185,65 @@ export function assertStage4FixtureDatabase(rawUrl) {
     throw new Error('Stage 4 fixture database URL must use postgres or postgresql');
   }
 
-  const scope = [
-    parsed.hostname,
-    parsed.pathname,
-    parsed.searchParams.get('application_name') || '',
-    parsed.searchParams.get('schema') || '',
-    parsed.searchParams.get('currentSchema') || '',
-    parsed.searchParams.get('options') || '',
-  ].join(' ').toLowerCase();
-  const sharedHints = ['prod', 'production', 'shared', 'stable', 'main', 'primary', 'restore'];
-  if (sharedHints.some(token => scope.includes(token))) {
-    throw new Error('Stage 4 fixture database must not target a shared or production database');
+  const hostname = parsed.hostname.toLowerCase();
+  if (!hostname) {
+    throw new Error('Stage 4 fixture database host is required');
+  }
+  if (/(^|[._-])(prod|production|shared|stable|main|primary|restore)([._-]|$)/i.test(hostname)) {
+    throw new Error('BLOCKED: Stage 4 fixture database must not use a production-looking database host');
   }
 
-  const isolatedHints = ['stage4', 'stage-4', 'fixture', 'e2e', 'test', 'sandbox', 'isolated'];
-  if (!isolatedHints.some(token => scope.includes(token))) {
-    throw new Error('Stage 4 fixture database must prove isolated Stage 4 scope via its host, database name, schema, or application_name');
+  const forbiddenQueryKeys = new Set(['database', 'dbname', 'schema', 'currentschema', 'options']);
+  if ([...parsed.searchParams.keys()].some(key => forbiddenQueryKeys.has(key.toLowerCase()))) {
+    throw new Error('BLOCKED: Stage 4 fixture database URL must not use database identity query parameters');
   }
+
+  let databaseName;
+  let username;
+  try {
+    databaseName = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+    username = decodeURIComponent(parsed.username);
+  } catch {
+    throw new Error('Stage 4 fixture database URL contains invalid encoding');
+  }
+  const expectedDatabaseName = `wujie_stage4_${normalizedRunId}`;
+  if (databaseName !== expectedDatabaseName) {
+    throw new Error(`BLOCKED: Stage 4 fixture database name must exactly match ${expectedDatabaseName}`);
+  }
+  if (!username) {
+    throw new Error('BLOCKED: Stage 4 fixture database user is required');
+  }
+
+  return {
+    protocol: 'postgresql:',
+    hostname,
+    port: parsed.port || '5432',
+    databaseName,
+    username,
+    sslMode: (parsed.searchParams.get('sslmode') || '').toLowerCase(),
+    ssl: parsed.searchParams.get('ssl') || '',
+    sslCert: parsed.searchParams.get('sslcert') || '',
+    sslKey: parsed.searchParams.get('sslkey') || '',
+    sslRootCert: parsed.searchParams.get('sslrootcert') || '',
+  };
 }
 
-function stage4DatabaseTarget(rawUrl) {
-  const parsed = new URL(rawUrl);
-  return JSON.stringify({
-    protocol: parsed.protocol,
-    hostname: parsed.hostname,
-    port: parsed.port,
-    pathname: parsed.pathname,
-    schema: parsed.searchParams.get('schema') || parsed.searchParams.get('currentSchema') || '',
-    applicationName: parsed.searchParams.get('application_name') || '',
-    options: parsed.searchParams.get('options') || '',
-  });
+export function assertStage4FixtureDatabase(rawUrl, rawRunId) {
+  stage4DatabaseTarget(rawUrl, rawRunId);
 }
 
+/** @param {Record<string, string | undefined>} [environment] */
 export function assertStage4FixtureDatabaseEnvironment(environment = process.env) {
   const fixtureUrl = environment.E2E_STAGE4_DATABASE_URL?.trim();
-  assertStage4FixtureDatabase(fixtureUrl);
+  const runId = environment.E2E_STAGE4_RUN_ID?.trim();
+  const fixtureTarget = stage4DatabaseTarget(fixtureUrl, runId);
 
-  const applicationUrl = environment.PGDATABASE_URL?.trim() || environment.DATABASE_URL?.trim();
-  if (!applicationUrl) {
+  const applicationUrl = environment.DATABASE_URL || environment.PGDATABASE_URL;
+  if (!applicationUrl || !String(applicationUrl).trim()) {
     throw new Error('BLOCKED: application database URL (PGDATABASE_URL or DATABASE_URL) is required for Stage 4 fixture isolation');
   }
-  assertStage4FixtureDatabase(applicationUrl);
-  if (stage4DatabaseTarget(fixtureUrl) !== stage4DatabaseTarget(applicationUrl)) {
+  const applicationTarget = stage4DatabaseTarget(applicationUrl, runId);
+  if (JSON.stringify(fixtureTarget) !== JSON.stringify(applicationTarget)) {
     throw new Error('BLOCKED: application database target must exactly match E2E_STAGE4_DATABASE_URL for Stage 4 fixture isolation');
   }
 }
@@ -231,6 +260,7 @@ export function buildStage4FixturePlan(rawRunId) {
       id: workflow.id,
       browserProfile: profileId,
       nodeCount: workflow.nodes.length,
+      expectedNodeIds: workflow.nodes.map(node => node.id),
       workflow,
       canvasProject: buildCanvasProject(runId, profileId, workflow),
       chatProject: buildChatProject(runId, profileId),

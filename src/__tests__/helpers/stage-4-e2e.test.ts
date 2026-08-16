@@ -27,8 +27,8 @@ describe('Stage 4 browser fixture auth isolation', () => {
   });
 
   it('fails closed when E2E_TEST_USERNAME is not the run-scoped Stage 4 fixture user', async () => {
-    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
-    vi.stubEnv('PGDATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://stage4_runner@127.0.0.1:5432/wujie_stage4_s4_run');
+    vi.stubEnv('PGDATABASE_URL', 'postgresql://stage4_runner@127.0.0.1:5432/wujie_stage4_s4_run');
     vi.stubEnv('DATABASE_URL', '');
     vi.stubEnv('E2E_STAGE4_RUN_ID', 's4-run');
     vi.stubEnv('E2E_TEST_USERNAME', 'Mr.joker');
@@ -52,8 +52,8 @@ describe('Stage 4 browser fixture auth isolation', () => {
   });
 
   it('uses administrator credentials only to provision and then log into the disposable Stage 4 fixture user', async () => {
-    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
-    vi.stubEnv('PGDATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://stage4_runner@127.0.0.1:5432/wujie_stage4_s4_run');
+    vi.stubEnv('PGDATABASE_URL', 'postgresql://stage4_runner@127.0.0.1:5432/wujie_stage4_s4_run');
     vi.stubEnv('DATABASE_URL', '');
     vi.stubEnv('E2E_STAGE4_RUN_ID', 's4-run');
     vi.stubEnv('WUJIE_ADMIN_USERNAME', 'Mr.joker');
@@ -107,7 +107,8 @@ describe('Stage 4 browser fixture auth isolation', () => {
   });
 
   it('blocks before auth requests when the application database is absent or does not match the disposable fixture database', async () => {
-    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://stage4_runner@127.0.0.1:5432/wujie_stage4_s4_run');
+    vi.stubEnv('E2E_STAGE4_RUN_ID', 's4-run');
     vi.stubEnv('PGDATABASE_URL', '');
     vi.stubEnv('DATABASE_URL', '');
 

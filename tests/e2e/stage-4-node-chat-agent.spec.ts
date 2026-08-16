@@ -43,7 +43,7 @@ test('establishes the local legacy node, chat, and agent baseline', async ({ pag
   await expect(backToCanvas).toBeVisible({ timeout: 20_000 });
   await expect.poll(() => page.locator('[data-node-id]').count(), { timeout: 20_000 }).toBe(fixture.nodeCount);
 
-  const workflowSample = await measureWorkflowInteraction(page, async current => {
+  const workflowSample = await measureWorkflowInteraction(page, fixture.expectedNodeIds, async current => {
     const firstNode = current.locator('[data-node-id="stage4-node-1"]');
     const middleNode = current.locator('[data-node-id="stage4-node-50"]');
     await expect(firstNode).toBeVisible({ timeout: 10_000 });
