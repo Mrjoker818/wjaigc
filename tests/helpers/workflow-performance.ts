@@ -28,6 +28,7 @@ export interface WorkflowPerformanceRawSample {
   inputDelaySamples?: WorkflowInputDelaySample[];
   longTasksMs: number[];
   longTaskSamples?: WorkflowLongTaskSample[];
+  monitoredNodeCount: number;
   lostNodeCount: number;
   unclickableDurationMs: number;
   unclickableSamples?: WorkflowUnclickableSample[];
@@ -40,6 +41,7 @@ export interface WorkflowPerformanceSample {
   inputDelaySamples: WorkflowInputDelaySample[];
   longestTaskMs: number;
   longTaskSamples: WorkflowLongTaskSample[];
+  monitoredNodeCount: number;
   lostNodeCount: number;
   unclickableDurationMs: number;
   unclickableSamples: WorkflowUnclickableSample[];
@@ -55,6 +57,17 @@ export function selectWorkflowMonitorIds(
       .map(value => typeof value === 'string' ? value.trim() : '')
       .filter(value => value.length > 0),
   )];
+}
+
+export function assertWorkflowMonitorCoverage(
+  monitoredIds: ReadonlyArray<string>,
+  expectedNodeCount: number,
+): void {
+  if (monitoredIds.length !== expectedNodeCount) {
+    throw new Error(
+      `BLOCKED: Stage 4 workflow performance gate must monitor all ${expectedNodeCount} fixture nodes; found ${monitoredIds.length}`,
+    );
+  }
 }
 
 function percentile95(values: number[]): number {
@@ -79,6 +92,7 @@ export function summarizeWorkflowPerformance(
     inputDelaySamples: raw.inputDelaySamples ?? [],
     longestTaskMs: Number(Math.max(0, ...raw.longTasksMs).toFixed(2)),
     longTaskSamples: raw.longTaskSamples ?? [],
+    monitoredNodeCount: raw.monitoredNodeCount,
     lostNodeCount: raw.lostNodeCount,
     unclickableDurationMs: Number(raw.unclickableDurationMs.toFixed(2)),
     unclickableSamples: raw.unclickableSamples ?? [],
@@ -89,6 +103,7 @@ async function startMeasurement(page: Page): Promise<void> {
   const monitoredIds = selectWorkflowMonitorIds(await page.locator('[data-node-id]').evaluateAll(nodes => (
     nodes.map(node => (node as HTMLElement).dataset.nodeId ?? null)
   )));
+  assertWorkflowMonitorCoverage(monitoredIds, 100);
 
   await page.evaluate((nodeIds: string[]) => {
     const windowWithState = window as typeof window & {
@@ -107,6 +122,7 @@ async function startMeasurement(page: Page): Promise<void> {
       inputDelaySamples: [] as WorkflowInputDelaySample[],
       longTasksMs: [] as number[],
       longTaskSamples: [] as WorkflowLongTaskSample[],
+      monitoredNodeCount: monitoredIds.size,
       lostNodeCount: 0,
       unclickableDurationMs: 0,
       unclickableSamples: [] as WorkflowUnclickableSample[],
@@ -249,6 +265,7 @@ async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample
       inputDelaySamples: WorkflowInputDelaySample[];
       longTasksMs: number[];
       longTaskSamples: WorkflowLongTaskSample[];
+      monitoredNodeCount: number;
       lostNodeCount: number;
       unclickableDurationMs: number;
       unclickableSamples: WorkflowUnclickableSample[];
@@ -280,6 +297,7 @@ async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample
       inputDelaySamples: state.inputDelaySamples,
       longTasksMs: state.longTasksMs,
       longTaskSamples: state.longTaskSamples,
+      monitoredNodeCount: state.monitoredNodeCount,
       lostNodeCount: state.lostNodeCount,
       unclickableDurationMs: state.unclickableDurationMs,
       unclickableSamples: state.unclickableSamples,

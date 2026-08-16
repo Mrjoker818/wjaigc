@@ -104,7 +104,7 @@ async function buildStage4Plan(runId: string) {
 
 async function assertStage4IsolationDatabaseConfigured(): Promise<void> {
   const module = await import('../../scripts/stage-4-e2e-fixtures.mjs');
-  module.assertStage4FixtureDatabase(process.env.E2E_STAGE4_DATABASE_URL?.trim());
+  module.assertStage4FixtureDatabaseEnvironment(process.env);
 }
 
 function evidenceDirectory(testInfo: TestInfo): string {

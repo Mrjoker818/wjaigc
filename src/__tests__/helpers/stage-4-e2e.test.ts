@@ -27,7 +27,9 @@ describe('Stage 4 browser fixture auth isolation', () => {
   });
 
   it('fails closed when E2E_TEST_USERNAME is not the run-scoped Stage 4 fixture user', async () => {
-    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://fixture_user:secret@127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('PGDATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('DATABASE_URL', '');
     vi.stubEnv('E2E_STAGE4_RUN_ID', 's4-run');
     vi.stubEnv('E2E_TEST_USERNAME', 'Mr.joker');
     vi.stubEnv('E2E_TEST_PASSWORD', 'not-a-fixture');
@@ -50,7 +52,9 @@ describe('Stage 4 browser fixture auth isolation', () => {
   });
 
   it('uses administrator credentials only to provision and then log into the disposable Stage 4 fixture user', async () => {
-    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://fixture_user:secret@127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('PGDATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('DATABASE_URL', '');
     vi.stubEnv('E2E_STAGE4_RUN_ID', 's4-run');
     vi.stubEnv('WUJIE_ADMIN_USERNAME', 'Mr.joker');
     vi.stubEnv('WUJIE_ADMIN_PASSWORD', 'super-secret-admin-password');
@@ -99,6 +103,30 @@ describe('Stage 4 browser fixture auth isolation', () => {
     expect(post).toHaveBeenNthCalledWith(3, '/api/auth/login', expect.objectContaining({
       data: expect.objectContaining({ name: fixture.username }),
     }));
+    expect(post.mock.calls.some(([url]) => String(url).startsWith('/api/user-data/'))).toBe(false);
+  });
+
+  it('blocks before auth requests when the application database is absent or does not match the disposable fixture database', async () => {
+    vi.stubEnv('E2E_STAGE4_DATABASE_URL', 'postgresql://127.0.0.1:5432/wujie_stage4_fixture');
+    vi.stubEnv('PGDATABASE_URL', '');
+    vi.stubEnv('DATABASE_URL', '');
+
+    const clearCookies = vi.fn(async () => {});
+    const get = vi.fn(async () => {
+      throw new Error('auth reads must not run without an explicit isolated application database');
+    });
+    const post = vi.fn(async () => {
+      throw new Error('auth writes must not run without an explicit isolated application database');
+    });
+
+    await expect(ensureStage4Session({
+      context: () => ({ clearCookies }),
+      request: { get, post },
+    } as never, fixture)).rejects.toThrow(/application database URL .* required/i);
+
+    expect(clearCookies).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
   });
 
   it('refuses to seed persisted lists when the auth context is not a disposable Stage 4 fixture user', async () => {

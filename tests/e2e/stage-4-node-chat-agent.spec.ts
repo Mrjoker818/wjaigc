@@ -58,6 +58,7 @@ test('establishes the local legacy node, chat, and agent baseline', async ({ pag
   });
 
   await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-performance', workflowSample);
+  expect(workflowSample.monitoredNodeCount).toBe(fixture.nodeCount);
   expect(workflowSample.averageFps).toBeGreaterThanOrEqual(55);
   expect(workflowSample.inputDelayP95Ms).toBeLessThanOrEqual(50);
   expect(workflowSample.lostNodeCount).toBe(0);

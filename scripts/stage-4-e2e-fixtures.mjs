@@ -192,6 +192,33 @@ export function assertStage4FixtureDatabase(rawUrl) {
   }
 }
 
+function stage4DatabaseTarget(rawUrl) {
+  const parsed = new URL(rawUrl);
+  return JSON.stringify({
+    protocol: parsed.protocol,
+    hostname: parsed.hostname,
+    port: parsed.port,
+    pathname: parsed.pathname,
+    schema: parsed.searchParams.get('schema') || parsed.searchParams.get('currentSchema') || '',
+    applicationName: parsed.searchParams.get('application_name') || '',
+    options: parsed.searchParams.get('options') || '',
+  });
+}
+
+export function assertStage4FixtureDatabaseEnvironment(environment = process.env) {
+  const fixtureUrl = environment.E2E_STAGE4_DATABASE_URL?.trim();
+  assertStage4FixtureDatabase(fixtureUrl);
+
+  const applicationUrl = environment.PGDATABASE_URL?.trim() || environment.DATABASE_URL?.trim();
+  if (!applicationUrl) {
+    throw new Error('BLOCKED: application database URL (PGDATABASE_URL or DATABASE_URL) is required for Stage 4 fixture isolation');
+  }
+  assertStage4FixtureDatabase(applicationUrl);
+  if (stage4DatabaseTarget(fixtureUrl) !== stage4DatabaseTarget(applicationUrl)) {
+    throw new Error('BLOCKED: application database target must exactly match E2E_STAGE4_DATABASE_URL for Stage 4 fixture isolation');
+  }
+}
+
 export function buildStage4FixturePlan(rawRunId) {
   const runId = safeToken(rawRunId);
   if (!runId || runId.length < 4) {
