@@ -409,3 +409,12 @@ Protected stable branch: read-only and untouched
 - Focused Stage 4 suite passes `36/36`; TypeScript, inventory generation, protected baseline `38/38` and committed-range whitespace checks pass. Application doctor reports `25 passed / 12 warnings / 0 failed / 2 blocked`.
 - Authenticated fixture seeding and real 100-node performance values remain explicitly BLOCKED because no strict run-scoped isolated Stage 4 database is configured. Chromium evidence proves the guard stops before authentication and persisted writes; this is not classified as a browser pass.
 - Next unique action is Stage 4 Task 1: shared Agent domain contracts and ordered event storage. Stage 3 immutable Actions/Coze release gates remain external and incomplete; Stage 4 is not release-ready and Stage 5 remains prohibited.
+
+## 2026-08-17 Stage 4 Task 1 shared Agent runtime
+
+- Task 1: complete (commits `255a8b6..62e916c`, third independent review approved with Critical/Important `0/0`; one report-only Minor corrected during bookkeeping).
+- Added owner/project-scoped ordered Agent events, deterministic projection, exact provider/model and tool authorization, Asset Graph context validation, authenticated run/list/event/cancel APIs, and shared durable task/billing settlement.
+- Review-driven fixes close initialization ambiguity, terminal race ordering, durable terminal event identity, mutable workspace recovery, and terminal payload validation before settlement. Invalid secret-bearing, oversized or unserializable terminal payloads leave task, billing, terminal identity and events unchanged.
+- Fresh focused evidence passes `7 files / 207 tests`, including `16/16` real PostgreSQL migration, ordering, isolation, idempotency, cancellation, refund and terminal-race cases with zero Task 1 skips. PostgreSQL-enabled full Vitest passes `446 files / 2628 tests`; the four tests using the separate `TEST_POSTGRES_URL` variable pass in a dedicated `3 files / 4 tests` run. TypeScript, ESLint, production build `113/113`, protected baseline `38/38 / 0 warnings` and whitespace checks pass at the Task 1 gate.
+- Exact-SHA cloud/browser evidence remains deferred to Stage 4 Task 4 and is not represented as passed. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+- Next unique action is Stage 4 Task 2: connect Canvas chat, standalone chat and image-edit Agent through the shared runtime while preserving all legacy surface behavior.
