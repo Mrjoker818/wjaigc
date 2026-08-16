@@ -350,6 +350,30 @@ function checkCanvasKernelMode() {
   add('WARN', 'canvas-kernel-mode', 'unsupported value; runtime falls back to legacy');
 }
 
+function resolveAgentRuntimeMode(raw) {
+  return raw === 'shadow' || raw === 'agent-v2' ? raw : 'legacy';
+}
+
+function resolveWorkflowRendererMode(raw) {
+  return raw === 'shadow' || raw === 'react-flow-v2' ? raw : 'legacy';
+}
+
+function checkStage4Modes() {
+  const rawAgentMode = process.env.WUJIE_AGENT_RUNTIME_MODE?.trim();
+  const resolvedAgentMode = resolveAgentRuntimeMode(rawAgentMode);
+  add('PASS', 'agent-runtime-mode', rawAgentMode ? resolvedAgentMode : 'legacy (default)');
+  if (rawAgentMode && resolvedAgentMode === 'legacy' && rawAgentMode !== 'legacy') {
+    add('WARN', 'agent-runtime-mode', 'unsupported value; runtime falls back to legacy');
+  }
+
+  const rawWorkflowMode = process.env.WUJIE_WORKFLOW_RENDERER_MODE?.trim();
+  const resolvedWorkflowMode = resolveWorkflowRendererMode(rawWorkflowMode);
+  add('PASS', 'workflow-renderer-mode', rawWorkflowMode ? resolvedWorkflowMode : 'legacy (default)');
+  if (rawWorkflowMode && resolvedWorkflowMode === 'legacy' && rawWorkflowMode !== 'legacy') {
+    add('WARN', 'workflow-renderer-mode', 'unsupported value; runtime falls back to legacy');
+  }
+}
+
 // ===== 新增: 构建产物检查 =====
 async function checkBuildArtifacts() {
   const nextDir = path.resolve('.next');
@@ -447,6 +471,7 @@ async function main() {
   checkNodeVersion();
   add('PASS', 'runtime', `Node ${process.version}; mode=${production ? 'production' : 'development'}`);
   checkCanvasKernelMode();
+  checkStage4Modes();
   const strictCredentials = production && !startup;
   secretCheckAny('authentication-secret', ['WUJIE_AUTH_SECRET', 'NEXTAUTH_SECRET'], strictCredentials);
   secretCheck('INTERNAL_API_SECRET', strictCredentials);

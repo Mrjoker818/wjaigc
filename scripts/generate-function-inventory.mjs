@@ -30,11 +30,11 @@ const PRODUCT_SURFACES = [
 
 const WORKSPACES = ['canvas', 'workflow', 'chat'];
 
-function posixPath(path) {
+export function posixPath(path) {
   return path.split(sep).join('/');
 }
 
-async function walk(directory, predicate = () => true) {
+export async function walk(directory, predicate = () => true) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
@@ -48,17 +48,21 @@ async function walk(directory, predicate = () => true) {
   return files;
 }
 
-function appFileToRoute(appRoot, file, filename) {
+export function appFileToRoute(appRoot, file, filename) {
   const directory = relative(appRoot, dirname(file));
   const segments = directory === '' ? [] : posixPath(directory).split('/');
+  const isApiRoute = segments[0] === 'api';
   const routeSegments = segments
     .filter((segment) => !segment.startsWith('(') && !segment.startsWith('@'))
+    .filter((segment, index) => !(isApiRoute && index === 0))
     .map((segment) => segment
       .replace(/^\[\.\.\.(.+)\]$/, ':$1*')
       .replace(/^\[\[(.+)\]\]$/, ':$1?')
       .replace(/^\[(.+)\]$/, ':$1'));
   const prefix = routeSegments.length === 0 ? '' : `/${routeSegments.join('/')}`;
-  return filename === 'route.ts' ? `/api${prefix}` : prefix || '/';
+  return filename === 'route.ts'
+    ? `${isApiRoute ? '/api' : ''}${prefix || (isApiRoute ? '' : '/')}`
+    : prefix || '/';
 }
 
 function git(root, args, fallback = 'unknown') {
@@ -128,7 +132,7 @@ export function validateProtectedFeatures(candidate, baseline = candidate, remov
   }
 }
 
-function extractQuotedValues(source) {
+export function extractQuotedValues(source) {
   return [...source.matchAll(/['"]([^'"]+)['"]/g)].map((match) => match[1]);
 }
 
@@ -137,9 +141,16 @@ function extractNodeTypes(source) {
   return match ? [...new Set(extractQuotedValues(match[1]))].sort() : [];
 }
 
-function extractAgentTools(source) {
+export function extractAgentTools(source) {
   return [...new Set(
     [...source.matchAll(/registerTool\(\s*\{\s*name:\s*['"]([^'"]+)['"]/g)]
+      .map((match) => match[1]),
+  )].sort();
+}
+
+function extractReferencedApiRoutes(source) {
+  return [...new Set(
+    [...source.matchAll(/['"`](\/api\/[^'"`\s)]+)['"`]/g)]
       .map((match) => match[1]),
   )].sort();
 }
@@ -162,6 +173,7 @@ function extractPreferenceItems(source) {
 export async function discoverRepository(root) {
   const appRoot = join(root, 'src', 'app');
   const componentRoot = join(root, 'src', 'components');
+  const sourceRoot = join(root, 'src');
   const appFiles = await walk(
     appRoot,
     (file) => file.endsWith('page.tsx') || file.endsWith('route.ts'),
@@ -211,7 +223,15 @@ export async function discoverRepository(root) {
       ...extractPreferenceItems(toolbarPreferenceSource),
       ...extractImageToolbarActions(canvasSource),
     ])],
+    referencedApiRoutes: uniqueSorted(await Promise.all(
+      (await walk(sourceRoot, file => ['.ts', '.tsx'].includes(extname(file))))
+        .map(async file => extractReferencedApiRoutes(await readFile(file, 'utf8'))),
+    ).then(groups => groups.flat())),
   };
+}
+
+function uniqueSorted(values) {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 function escapeCell(value) {
@@ -306,6 +326,10 @@ ${pageRows}
 | 路由 | 方法 | 文件 |
 | --- | --- | --- |
 ${apiRows}
+
+## 源码引用 API 端点
+
+${discoveredList(discovered.referencedApiRoutes)}
 
 ## 工作流节点类型
 
