@@ -2,9 +2,11 @@
   "schemaVersion": 1,
   "remote": "https://github.com/Mrjoker818/wjaigc.git",
   "branch": "origin/main",
-  "commit": "69ba94ef6bde041293ad9609ec76285d3e287a7f",
+  "commit": "7fdc0108952fb3a68415ca3a2a26b5d33641dc6b",
   "packageVersion": "4.0.0",
-  "generatedAt": "2026-08-08T13:31:28+08:00",
+  "generatedAt": "2026-08-17T00:00:00+08:00",
+  "historicalSnapshotCommit": "69ba94ef6bde041293ad9609ec76285d3e287a7f",
+  "baselineReconciliation": "Stage 4 pins the protected-feature gate to main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b; the verification observations below remain historical Stage 0 evidence.",
   "worktreePolicy": {
     "implementationBranch": "codex/wj-stable-s0",
     "isolatedWorktree": true,

@@ -5,7 +5,7 @@
 - Branch: `codex/wj-stable-s4`
 - Task base commit: `7c668f0`
 - Worktree: `J:\无界本地版\projects\_upstream-wjaigc-restore\.worktrees\wj-stable-s3`
-- Status: DONE_WITH_CONCERNS (pending final commit hash update)
+- Status: SUPERSEDED_BY_REJECTION_FIX_EVIDENCE (see the appended 2026-08-17 entry)
 
 ## Implementation Summary
 
@@ -328,3 +328,57 @@ Intentionally excluded from commit:
 2. The local dev server environment did not provide `DATABASE_URL` or `PGDATABASE_URL`.
 3. The local environment reported missing local AI Python/runtime models; these were non-fatal for this task but are part of the real baseline.
 4. Stage 3 external immutable Actions / Coze release gates remain incomplete outside this task and were not executed here; they are not classified as pass evidence.
+
+## Rejection Fix Evidence (2026-08-17)
+
+### Exact Tested Code Commit
+
+- Tested code commit: `6c2ead55c6c8277085a97149df45a11037483753` (`test: pin stage four protected baseline gate`)
+- Preceding code/test fix: `c53f429a5c7ccb0730956b33555f62ea288ddb34` (`test: enforce stage four isolated baseline fixtures`)
+- This document's subsequent commit is documentation-only bookkeeping and must reference the exact tested code commit above.
+
+### RED Evidence
+
+1. `pnpm exec vitest run src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts`
+   - Failed 4 tests before implementation: missing `assertStage4FixtureDatabaseEnvironment`, missing `assertWorkflowMonitorCoverage`, and authentication continued without an application database target.
+2. `pnpm exec vitest run tests/unit/protected-baseline-gate.spec.ts`
+   - Failed the new contract because `check:protected-baseline` did not allow the exact `.superpowers/sdd/task-0-report.md` evidence path.
+
+### GREEN Evidence
+
+1. `pnpm exec vitest run src/__tests__/lib/stage-4-modes.test.ts src/__tests__/scripts/stage-4-inventory.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts`
+   - Exit 0; 5 files passed, 20 tests passed.
+2. `pnpm test:inventory:stage-4`
+   - Exit 0; routes=200, workspaces=3, nodeTypes=51, portTypes=10.
+3. `pnpm doctor`
+   - Exit 0; actual stdout was empty.
+4. `pnpm check:protected-baseline`
+   - Exit 0; fixed base `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`, all 38 protected IDs present, no warning, no unapproved drift.
+5. `git diff --check 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b..6c2ead5`
+   - Exit 0; pristine committed-range whitespace output.
+6. `pnpm exec playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --project=chromium`
+   - Intentionally blocked before authentication and writes: `BLOCKED: E2E_STAGE4_DATABASE_URL is required for Stage 4 fixture isolation`.
+   - Verified retained evidence: `final.png`, `video.webm`, `console.json`, and `network.json` at `test-results/stage-4-baseline/evidence/6c2ead55c6c8277085a97149df45a11037483753-worktree-3683a4b89198/stage4-2026-08-16T16-08-58/chromium/establishes-the-local-legacy-node-chat-and-agent-baseline/retry-0/repeat-0/`.
+
+### Files Changed By Rejection Fix
+
+- `scripts/stage-4-e2e-fixtures.mjs`
+- `tests/helpers/stage-4-e2e.ts`
+- `tests/helpers/workflow-performance.ts`
+- `tests/e2e/stage-4-node-chat-agent.spec.ts`
+- `src/__tests__/helpers/stage-4-e2e.test.ts`
+- `src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`
+- `package.json`
+- `tests/unit/protected-baseline-gate.spec.ts`
+
+### Self-Review
+
+- Generic test credentials fail closed unless the configured username exactly equals the run-scoped disposable fixture username.
+- Admin credentials are used only to create or locate that deterministic disposable user, then the test clears cookies and logs in as the fixture. Persisted project reads/writes are guarded by disposable-session checks.
+- Both `E2E_STAGE4_DATABASE_URL` and the application's `PGDATABASE_URL` or `DATABASE_URL` must be isolated and resolve to the same non-credential target before any auth request.
+- The performance sampler records and requires all 100 fixture node IDs, then the browser spec asserts the recorded count before accepting lost/unclickable metrics.
+- The protected baseline remains a 38-feature gate; it now pins the fixed main SHA and permits only this task's report path.
+
+### Remaining Concern
+
+- No isolated Stage 4 database was available, so authenticated seeding and real 100-node performance values remain blocked. The older `7c668f0` browser evidence did not test this rejection fix and is superseded for fixture-isolation claims.

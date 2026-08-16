@@ -6,13 +6,14 @@
 
 - 远程仓库：`https://github.com/Mrjoker818/wjaigc.git`
 - 远程分支：`origin/main`
-- 基线提交：`69ba94ef6bde041293ad9609ec76285d3e287a7f`
+- 受保护门禁基线提交：`7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`
+- 历史 Stage 0 证据快照：`69ba94ef6bde041293ad9609ec76285d3e287a7f`
 - 软件版本：`4.0.0`
-- 采集时间：`2026-08-08T13:31:28+08:00`
+- 门禁基线协调时间：`2026-08-17T00:00:00+08:00`
 - 实施分支：`codex/wj-stable-s0`
 - 实施范围：Stage 0 测试基础设施、功能保护清单、证据规范和发布门禁
 
-开始 Stage 0 时，以下业务源码范围与 `origin/main` 完全一致：
+历史 Stage 0 采样时，以下业务源码范围与当时的 `origin/main` 完全一致；当前受保护门禁固定比较 `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`，并继续要求全部 38 个受保护功能 ID 存在：
 
 ```text
 src/
