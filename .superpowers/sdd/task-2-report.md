@@ -2241,3 +2241,41 @@ git diff --check
   `tests/e2e/stage-4-node-chat-agent.spec.ts`.
 - Evidence: this report. Controller-owned Task 1 and Task 2 briefs remain
   dirty and are excluded from staging and commit.
+
+## R21 - Exact-SHA five-browser closure
+
+### Source and quality gates
+
+- Evidence source: `1f6219e8666c565864dc3d8005f4010149f4fd84`.
+- Full Vitest: 450 files / 2738 passed / 68 environment-gated skipped / 0 failed.
+- Real PostgreSQL Agent event/adoption suites: 2 files / 24 tests passed.
+- Production build: 113/113 routes generated; TypeScript and build exited 0.
+- `pnpm ts-check`, error-only ESLint, protected baseline 38/38, and
+  `git diff --check` exited 0.
+
+### Exact runtime matrices
+
+- `task2r22_shadow`: Chromium, Chromium 1920x1080, Firefox, WebKit, and
+  mobile Chromium passed 5/5 against a fresh isolated PostgreSQL database.
+- `task2r22_v2`: the same five profiles passed 5/5 against a second fresh
+  isolated PostgreSQL database.
+- All ten results contain `final.png`, `video.webm`, `trace.zip`,
+  `console.json`, `network.json`, `source-state.json`,
+  `agent-runtime-mode.json`, and `browser-frame-rate.json`.
+- All ten source-state files name exact commit `1f6219e`, report a clean
+  product tree and contain no product-status drift. The only excluded files
+  are the controller-owned Task 1 and Task 2 briefs.
+- Evidence audit: Console Error/PageError 0, HTTP 4xx/5xx 0, missing artifact
+  files 0. Each profile retains one existing DataIsolation warning.
+- Shadow database: five cancelled tasks, each with exactly
+  `run.created,plan.updated`.
+- Agent-v2 database: five cancelled tasks, each with exactly
+  `run.created,plan.updated,tool.started,run.cancelled`.
+
+### Remaining evidence boundary
+
+- `browser-frame-rate.json` intentionally retains raw FPS as `UNVERIFIED`;
+  Task 2 does not relax or claim the Task 3 100-node performance threshold.
+- Cloud exact-SHA rollout and mandatory rollback remain Task 4 scope.
+- Task 2 is complete locally. Task 3 is the next permitted implementation
+  scope; `stable` remains read-only.
