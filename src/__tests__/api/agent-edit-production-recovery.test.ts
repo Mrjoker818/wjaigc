@@ -19,10 +19,13 @@ const state = vi.hoisted(() => ({
   internalPolls: [] as Array<{ taskId: string; userId: string }>,
   externalSubmits: [] as Array<{ body: Record<string, unknown>; key: string }>,
   externalPolls: [] as string[],
+  chatSubmits: [] as Array<{ key: string }>,
+  acceptanceWriteAttempts: 0,
   pollResponses: [] as Array<Record<string, unknown>>,
   crashPollTaskId: '' as string,
   crashedPoll: false,
-  plan: 'multi-step' as 'multi-step' | 'submission-unknown' | 'remove-background' | 'async-image-edit' | 'video-tools',
+  plan: 'multi-step' as 'multi-step' | 'submission-unknown' | 'remove-background' | 'async-image-edit'
+    | 'async-image-edit-acceptance-failure' | 'sync-image-edit-loss' | 'chat-post-send-loss' | 'video-tools',
   childCounter: 0,
 }));
 
@@ -66,7 +69,7 @@ vi.mock('@/lib/server-api-config', () => ({
     id === fixtures.chatProvider.id
       ? fixtures.chatProvider
       : id === fixtures.imageProvider.id
-        ? state.plan === 'async-image-edit'
+        ? state.plan === 'async-image-edit' || state.plan === 'async-image-edit-acceptance-failure'
           ? { ...fixtures.imageProvider, compatProfile: 'apimart' }
           : fixtures.imageProvider
         : null
@@ -75,7 +78,7 @@ vi.mock('@/lib/server-api-config', () => ({
     model === 'Chat::Exact'
       ? fixtures.chatProvider
       : model === 'Exact::Model'
-        ? state.plan === 'async-image-edit'
+        ? state.plan === 'async-image-edit' || state.plan === 'async-image-edit-acceptance-failure'
           ? { ...fixtures.imageProvider, compatProfile: 'apimart' }
           : fixtures.imageProvider
         : null
@@ -110,9 +113,18 @@ vi.mock('@/lib/agent-runtime/admission-gate', () => ({
     value: await admit({ selectedEntityVersionUrls: { 'entity-1': '/source.png' } }),
   })),
 }));
-vi.mock('@/lib/agent-engine', () => ({
+vi.mock('@/lib/agent-engine', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/agent-engine')>();
+  return {
+  ...actual,
   getToolsForLLM: vi.fn().mockReturnValue([]),
-  executeAgentLoop: vi.fn(async (_context: unknown, llmCall: (messages: unknown[], tools: unknown[]) => Promise<unknown>) => {
+  executeAgentLoop: vi.fn(async (
+    context: Parameters<typeof actual.executeAgentLoop>[0],
+    llmCall: Parameters<typeof actual.executeAgentLoop>[1],
+  ) => {
+    if (state.plan === 'chat-post-send-loss') {
+      return actual.executeAgentLoop(context, llmCall);
+    }
     if (state.plan === 'submission-unknown') {
       await llmCall([{ role: 'user', content: 'ambiguous' }], []);
       throw new Error('unreachable');
@@ -120,6 +132,8 @@ vi.mock('@/lib/agent-engine', () => ({
     const steps = state.plan === 'remove-background'
       ? [{ round: 1, toolName: 'remove_background', params: {}, result: 'planned', success: true }]
       : state.plan === 'async-image-edit'
+        || state.plan === 'async-image-edit-acceptance-failure'
+        || state.plan === 'sync-image-edit-loss'
         ? [{ round: 1, toolName: 'image_edit', params: { prompt: 'Edit asynchronously' }, result: 'planned', success: true }]
         : state.plan === 'video-tools'
           ? [
@@ -139,7 +153,8 @@ vi.mock('@/lib/agent-engine', () => ({
       steps,
     };
   }),
-}));
+  };
+});
 vi.mock('@/lib/prompt-safety', () => ({
   checkPromptSafety: vi.fn().mockReturnValue({ level: 'safe' }),
   logSafetyWarning: vi.fn(),
@@ -342,6 +357,13 @@ vi.mock('@/lib/agent-runtime/event-storage', () => ({
     return operation;
   }),
   markAgentDownstreamOperationAccepted: vi.fn(async (input: Record<string, unknown>) => {
+    state.acceptanceWriteAttempts += 1;
+    if (
+      state.plan === 'async-image-edit-acceptance-failure'
+      && input.stepId === 'image_edit:0'
+    ) {
+      throw new Error('simulated acceptance persistence failure');
+    }
     const operationKey = String(input.operationKey);
     const operation = { ...state.operations.get(operationKey), ...input, status: 'accepted' };
     state.operations.set(operationKey, operation);
@@ -468,6 +490,7 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
     }
   }
   if (url.hostname === 'chat.example') {
+    state.chatSubmits.push({ key: request.headers.get('idempotency-key') || '' });
     throw new Error('connection lost after chat provider submit');
   }
   if (url.hostname === 'image.example') {
@@ -479,12 +502,20 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
       }
       return Response.json({ status: 'completed', data: [{ url: '/async-edited.png' }] });
     }
+    if (state.plan === 'sync-image-edit-loss') {
+      const formData = init?.body instanceof FormData ? init.body : null;
+      state.externalSubmits.push({
+        body: { model: String(formData?.get('model') || '') },
+        key: new Headers(init?.headers ?? request.headers).get('idempotency-key') || '',
+      });
+      throw new Error('connection lost after synchronous image edit submit');
+    }
     const body = JSON.parse(String(init?.body ?? await request.text())) as Record<string, unknown>;
     state.externalSubmits.push({
       body,
       key: new Headers(init?.headers ?? request.headers).get('idempotency-key') || '',
     });
-    const providerResponse = state.plan === 'async-image-edit'
+    const providerResponse = state.plan === 'async-image-edit' || state.plan === 'async-image-edit-acceptance-failure'
       ? { task_id: 'async-edit-provider-task', status: 'processing' }
       : { data: [{ url: `/generated-${state.externalSubmits.length}.png` }] };
     return new Response(JSON.stringify(providerResponse), {
@@ -513,7 +544,8 @@ describe('Agent route default-adapter production recovery', () => {
     state.parentLeaseClaimed = false; state.parentLeaseCompleted = false;
     state.parentCharges = 0; state.parentRefunds = 0; state.parentTerminalCalls = 0;
     state.submitOnlyCalls.length = 0; state.internalSubmits.length = 0; state.internalPolls.length = 0;
-    state.externalSubmits.length = 0; state.externalPolls.length = 0; state.pollResponses.length = 0;
+    state.externalSubmits.length = 0; state.externalPolls.length = 0; state.chatSubmits.length = 0;
+    state.pollResponses.length = 0; state.acceptanceWriteAttempts = 0;
     state.crashPollTaskId = ''; state.crashedPoll = false; state.plan = 'multi-step'; state.childCounter = 0;
     process.env.WUJIE_TASK_CORE_MODE = 'core-v2';
     process.env.WUJIE_AGENT_RUNTIME_MODE = 'agent-v2';
@@ -688,6 +720,91 @@ describe('Agent route default-adapter production recovery', () => {
 
     await Promise.all(Array.from({ length: 8 }, () => agentPost(agentRequest('route-video-tools') as never)));
     expect(state.internalSubmits).toHaveLength(2);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('fails closed when acceptance persistence fails after an async image task ID is returned', async () => {
+    state.plan = 'async-image-edit-acceptance-failure';
+    const taskId = await startAgent('route-async-image-edit-acceptance-failure');
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('failed'));
+
+    const parent = state.tasks.get(taskId)!;
+    expect((parent.result as Record<string, unknown>).taskError).toMatchObject({
+      code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN', retryable: false,
+    });
+    expect([...state.operations.values()].find(operation => operation.stepId === 'image_edit:0')).toMatchObject({
+      status: 'submission_unknown',
+    });
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalSubmits[0]).toMatchObject({ body: { model: 'Exact::Model' } });
+    expect(state.acceptanceWriteAttempts).toBe(1);
+    expect(state.externalPolls).toHaveLength(0);
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    const late = await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-async-image-edit-acceptance-failure') as never)
+    )));
+    expect(late.every(response => response.status === 409)).toBe(true);
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.acceptanceWriteAttempts).toBe(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+    expect((state.tasks.get(taskId)?.result as Record<string, unknown>).taskError).toMatchObject({
+      code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN', retryable: false,
+    });
+  });
+
+  it('fails closed after synchronous image_edit loses the connection after send', async () => {
+    state.plan = 'sync-image-edit-loss';
+    const taskId = await startAgent('route-sync-image-edit-loss');
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('failed'));
+
+    expect((state.tasks.get(taskId)?.result as Record<string, unknown>).taskError).toMatchObject({
+      code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN', retryable: false,
+    });
+    expect([...state.operations.values()].find(operation => operation.stepId === 'image_edit:0')).toMatchObject({
+      status: 'submission_unknown',
+    });
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalSubmits[0]).toMatchObject({ body: { model: 'Exact::Model' } });
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    const late = await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-sync-image-edit-loss') as never)
+    )));
+    expect(late.every(response => response.status === 409)).toBe(true);
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('fails closed when the real Agent loop sees chat connection loss after send', async () => {
+    state.plan = 'chat-post-send-loss';
+    const taskId = await startAgent('route-chat-post-send-loss');
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('failed'));
+
+    expect((state.tasks.get(taskId)?.result as Record<string, unknown>).taskError).toMatchObject({
+      code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN', retryable: false,
+    });
+    expect([...state.operations.values()].find(operation => operation.stepId === 'llm:0')).toMatchObject({
+      status: 'submission_unknown',
+    });
+    expect(state.chatSubmits).toHaveLength(1);
+    expect(state.chatSubmits[0].key).not.toBe('');
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    const late = await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-chat-post-send-loss') as never)
+    )));
+    expect(late.every(response => response.status === 409)).toBe(true);
+    expect(state.chatSubmits).toHaveLength(1);
+    expect(state.parentRefunds).toBe(1);
     expect(state.parentTerminalCalls).toBe(1);
   });
 });

@@ -41,9 +41,10 @@ import { submitAgentImageProviderRequest } from '@/lib/agent-runtime/provider-su
 import { AgentModelRouteMismatchError } from '@/lib/agent-runtime/same-task-adapter';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 import { submitStrictAgentGeneration } from '@/lib/agent-runtime/generate-image-adapter';
-import type {
-  AgentDownstreamExecutionContext,
-  AgentDownstreamStepInput,
+import {
+  AgentDownstreamSubmissionUnknownError,
+  type AgentDownstreamExecutionContext,
+  type AgentDownstreamStepInput,
 } from '@/lib/agent-runtime/downstream-operations';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
@@ -757,6 +758,7 @@ export async function POST(request: NextRequest) {
 
         // LLM 调用函数
         let llmCallIndex = 0;
+        let llmSubmissionUnknown: AgentDownstreamSubmissionUnknownError | null = null;
         const llmCall = async (
           messages: Array<{ role: string; content: string }>,
           tools: ReturnType<typeof getToolsForLLM>
@@ -784,15 +786,16 @@ export async function POST(request: NextRequest) {
             stream: false,
             max_tokens: 2048,
           };
-          return operationContext.executeOperation({
-            stepId: `llm:${currentLlmCallIndex}`,
-            toolId: 'agent_llm',
-            requestDigest: digestAgentDownstreamRequest({
-              providerId: chatProvider.id,
-              model: chatModel,
-              requestBody,
-            }),
-          }, async stepContext => {
+          try {
+            return await operationContext.executeOperation({
+              stepId: `llm:${currentLlmCallIndex}`,
+              toolId: 'agent_llm',
+              requestDigest: digestAgentDownstreamRequest({
+                providerId: chatProvider.id,
+                model: chatModel,
+                requestBody,
+              }),
+            }, async stepContext => {
             headers['Idempotency-Key'] = stepContext.idempotencyKey;
             await stepContext.beginSubmission();
             const resp = await fetchWithV1Retry(baseUrl, '/chat/completions', {
@@ -855,12 +858,19 @@ export async function POST(request: NextRequest) {
               content: String(message.content || ''),
               finishReason: String(choice.finish_reason || ''),
             };
-          });
+            });
+          } catch (error) {
+            if (error instanceof AgentDownstreamSubmissionUnknownError) {
+              llmSubmissionUnknown = error;
+            }
+            throw error;
+          }
         };
 
         // 执行 Agent 循环
         console.log('[agent-edit] Starting agent loop, chatModel:', chatModel, 'maxRounds:', context.maxRounds);
         const result: AgentResult = await executeAgentLoop(context, llmCall);
+        if (llmSubmissionUnknown) throw llmSubmissionUnknown;
         console.log('[agent-edit] Agent loop completed, steps:', result.steps.length, 'success:', result.success);
 
         // 实际执行所有图像编辑步骤（按轮次顺序）
@@ -1535,6 +1545,7 @@ async function performImageEdit(
   // Path A: 支持 /images/edits 端点的提供商（OpenAI 官方等）
   if (resolvedEndpoint === '/images/edits') {
     console.log('[agent-edit] Path A: /images/edits, baseUrl:', baseUrl, 'model:', imageModel);
+    let providerSubmissionStarted = false;
     try {
       const headers: Record<string, string> = {
         'Authorization': `Bearer ${apiKey}`,
@@ -1571,6 +1582,7 @@ async function performImageEdit(
 
       console.log('[agent-edit] Path A: sending request to', `${baseUrl}/images/edits`);
       await beginSubmission?.();
+      providerSubmissionStarted = true;
       const resp = await submitAgentImageProviderRequest({
         baseUrl,
         path: '/images/edits',
@@ -1640,6 +1652,7 @@ async function performImageEdit(
       console.error('[agent-edit] Path A: no images in response', JSON.stringify(data).slice(0, 200));
       return { success: false, error: 'OpenAI 未返回图片' };
     } catch (err) {
+      if (strictProviderModel && providerSubmissionStarted) throw err;
       // Timeout → try /chat/completions fallback
       const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
       if (isTimeout && !strictProviderModel) {
@@ -1674,7 +1687,7 @@ async function performImageEdit(
     console.log('[agent-edit] Path B: /images/generations, baseUrl:', baseUrl, 'model:', imageModel);
     let imageBase64 = '';
     let imageMimeType = 'image/png';
-    let acceptedProviderTaskId = '';
+    let providerSubmissionStarted = false;
     try {
       // 解析图片为 base64
       if (imageUrl.startsWith('data:')) {
@@ -1718,6 +1731,7 @@ async function performImageEdit(
 
       console.log('[agent-edit] Path B: sending request to', `${baseUrl}/images/generations`, 'with image_urls');
       await beginSubmission?.();
+      providerSubmissionStarted = true;
       const genResp = await submitAgentImageProviderRequest({
         baseUrl,
         path: '/images/generations',
@@ -1768,7 +1782,6 @@ async function performImageEdit(
         // 异步任务 - 轮询等待结果
         const remoteTaskId = parsedResult.taskIds[0];
         await recordAccepted?.(remoteTaskId);
-        acceptedProviderTaskId = remoteTaskId;
         let pollAttempts = 0;
         const maxPollAttempts = 60;
         const pollInterval = 5000;
@@ -1835,7 +1848,7 @@ async function performImageEdit(
       console.error('[agent-edit] Path B: no images in response');
       return { success: false, error: '模型未返回编辑后的图片' };
     } catch (err) {
-      if (strictProviderModel && acceptedProviderTaskId) throw err;
+      if (strictProviderModel && providerSubmissionStarted) throw err;
       // Timeout → try /chat/completions fallback
       const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
       if (isTimeout && !strictProviderModel) {
@@ -1868,6 +1881,7 @@ async function performImageEdit(
   // 非 OpenAI: 使用 chat/completions + 图片输入 (Gemini / 兼容 API)
   // 直接调用提供商 API，不经过 /api/edit 路由（避免 Next.js dev 模式内存隔离问题）
   console.log('[agent-edit] Path C: chat/completions, baseUrl:', baseUrl, 'model:', imageModel);
+  let providerSubmissionStarted = false;
   try {
     // 解析图片为 base64
     let imageBase64 = '';
@@ -1927,6 +1941,7 @@ async function performImageEdit(
 
     console.log('[agent-edit] Path C: sending request to', `${baseUrl}/chat/completions`);
     await beginSubmission?.();
+    providerSubmissionStarted = true;
     const chatResp = await submitAgentImageProviderRequest({
       baseUrl,
       path: '/chat/completions',
@@ -1986,6 +2001,7 @@ async function performImageEdit(
 
     return { success: false, error: '模型未返回编辑后的图片' };
   } catch (err) {
+    if (strictProviderModel && providerSubmissionStarted) throw err;
     console.error('[agent-edit] Path C: exception', err);
     return { success: false, error: err instanceof Error ? translateApiError(err.message) : '编辑请求失败' };
   }

@@ -918,3 +918,106 @@ exact committed SHA.
   no FPS normalization or manufactured threshold pass is used.
 - The pre-existing provider JSON-to-PostgreSQL array migration warning remains
   outside Task 2 scope.
+
+## R7 Independent Re-review Repair (2026-08-17)
+
+Status before the binding post-commit browser gate: **IMPLEMENTATION GREEN**.
+The remaining Critical provider-submission uncertainty gap is closed inside the
+authorized Agent route surface. The controller-owned Task 1 and Task 2 briefs
+remain unstaged and uncommitted. The authoritative browser run ID is
+`task2_r7_gate_final`; it is run only after this exact tracked state is
+committed, under
+`test-results/stage-4-baseline/evidence/<FINAL_SHA>/task2_r7_gate_final/`, with
+no later tracked edits.
+
+### R7 RED evidence
+
+1. Before any production edit, `pnpm exec vitest run
+   src/__tests__/api/agent-edit-production-recovery.test.ts
+   --reporter=verbose` exercised the actual `POST /api/agent-edit` route and
+   production default adapter. It failed exactly the three new behavioral
+   cases (**3 failed / 5 passed**): an async image-edit provider task ID followed
+   by acceptance persistence failure completed the parent, synchronous
+   `/images/edits` connection loss after send completed the parent, and chat
+   provider connection loss after send was flattened by the real Agent loop to
+   a generic failure without `AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN`.
+2. The five inherited R6 route/default-adapter cases stayed green during RED.
+   The new tests assert one external submit, no fallback or blind retry, durable
+   `submission_unknown`, structured terminal replay, one parent charge/refund/
+   terminal transition, and eight concurrent late retries rejected without
+   resurrection.
+
+### R7 finding resolution
+
+1. Each strict direct image-edit branch now records the exact boundary after
+   durable `submitted` and before its provider POST. A connection/timeout/parse
+   exception after that boundary is rethrown to the durable operation executor
+   instead of becoming an ordinary tool result. Parseable provider rejection
+   and terminal response handling retain their existing behavior.
+2. The async `/images/generations` path also rethrows acceptance persistence
+   failure after the provider has returned a task ID. Because durable
+   `accepted` was not committed, the operation settles fail-closed as
+   `submission_unknown`; it cannot poll, recover, or submit again blindly.
+   Previously accepted R6 operations still release for exact poll-only recovery.
+3. The route retains an `AgentDownstreamSubmissionUnknownError` raised by its
+   durable chat child and rethrows it immediately after the real Agent loop
+   returns its ordinary failure value. This preserves the established parent
+   settlement/refund/structured replay path without changing the protected
+   shared Agent engine or any allowlist.
+
+### R7 GREEN and final pre-commit verification
+
+- Focused GREEN: `pnpm exec vitest run
+  src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=verbose`
+  and the final-state `--reporter=dot` rerun: **1 file / 8 tests passed**.
+- Agent closure matrix: PowerShell array-splatted output of
+  `rg --files src/__tests__ | rg '(agent|chat-agent-tool-choice)'` into
+  `pnpm exec vitest run ... --reporter=dot`: **20 files / 166 tests passed**.
+- Real PostgreSQL: `$env:POSTGRES_TEST_DATABASE_URL=
+  'postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable';
+  pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  **2 files / 22 tests passed**, zero skips.
+- `pnpm ts-check`: passed. `pnpm lint -- --quiet`: exit `0`; only the existing
+  Babel large-file note for `infinite-canvas.tsx` was emitted.
+- `pnpm build`: compiled and type-checked successfully; **113/113** static pages
+  generated.
+- `pnpm check:protected-baseline`: all **38** feature IDs passed, no unapproved
+  source drift, zero warnings. An initial check correctly rejected a tentative
+  shared `agent-engine.ts` edit; that edit was removed and the behavior was
+  implemented in the authorized route without changing protected allowlists.
+- `git diff --check`: exit `0`. Scope audit via `git diff --exit-code
+  4f8d965cc6c470fd7b37588fdff1f2c7ce79f24c --
+  src/components/node-editor.tsx
+  src/__tests__/components/node-editor-drag-throttle-wiring.test.ts
+  tests/helpers/workflow-performance.ts`: exit `0`, zero R7 drift.
+
+### R7 changed files
+
+- Production: `src/app/api/agent-edit/route.ts`.
+- Tests: `src/__tests__/api/agent-edit-production-recovery.test.ts`.
+- Evidence/report: `.superpowers/sdd/task-2-report.md`.
+- No task brief, stable branch, Task 3, node editor, protected allowlist,
+  package metadata, schema, or unrelated production file is included.
+
+### R7 post-commit authoritative gate contract
+
+After committing this exact tracked state, seed a fresh isolated Stage 4
+database and run the production build with `PLAYWRIGHT_WORKERS=1 pnpm exec
+playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --grep 'chat|agent'`
+using run ID `task2_r7_gate_final`. Chromium, Chromium 1080p, Firefox, WebKit,
+and mobile Chromium must each execute ordinary chat, real vision failure stop,
+first Agent progress, shared cancellation, and refresh recovery. Retained
+evidence must include relevant runtime network calls, `source-state.json`,
+trace, video, screenshot, console, network, and raw frame-rate records under the
+exact committed SHA.
+
+### R7 concerns
+
+- Raw browser FPS remains evidence only and **UNVERIFIED**, especially WebKit;
+  no FPS normalization or manufactured threshold pass is used.
+- As noted by the R7 reviewer, the existing protected-baseline command still
+  allowlists `src/components/node-editor.tsx`. This R7 repair does not change
+  the allowlist or node editor.
+- The pre-existing provider JSON-to-PostgreSQL array migration warning remains
+  outside Task 2 scope.
