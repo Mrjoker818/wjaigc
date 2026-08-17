@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const source = readFileSync(resolve(process.cwd(), 'src/components/node-editor.tsx'), 'utf8');
+const legacySurfaceSource = readFileSync(resolve(process.cwd(), 'src/components/workflow/WorkflowLegacySurface.tsx'), 'utf8');
 
 describe('node editor drag throttling', () => {
   it('batches node drag updates per animation frame and flushes the final position', () => {
@@ -17,8 +18,10 @@ describe('node editor drag throttling', () => {
     expect(source).toContain('const updateNodePanPreview = useCallback');
     expect(source).toContain('const visibleNodes = useMemo');
     expect(source).toContain('const visibleConnections = useMemo');
-    expect(source).toContain('visibleConnections.map(conn =>');
-    expect(source).toContain('visibleNodes.map(node =>');
+    expect(source).toContain('visibleConnections={visibleConnections}');
+    expect(source).toContain('visibleNodes={visibleNodes}');
+    expect(legacySurfaceSource).toContain('visibleConnections.map(connection =>');
+    expect(legacySurfaceSource).toContain('visibleNodes.map(node =>');
     expect(source).not.toContain('setViewport(v => ({ ...v, x: panStart.vx');
   });
 

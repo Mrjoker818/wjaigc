@@ -1,5 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createEmptyWorkflow, createWorkflowNode } from '@/lib/workflow-engine';
@@ -10,6 +12,8 @@ import {
 } from '@/components/workflow/WorkflowReactFlowSurface';
 import { WorkflowLegacySurface } from '@/components/workflow/WorkflowLegacySurface';
 import { WorkflowShadowProbe } from '@/components/workflow/WorkflowShadowProbe';
+
+const legacyRendererSource = readFileSync(resolve(process.cwd(), 'src/components/workflow/WorkflowLegacyNodeCard.tsx'), 'utf8');
 
 describe('WorkflowReactFlowSurface', () => {
   it('renders the domain projection as an inert custom-node surface without dispatching commands', () => {
@@ -28,25 +32,31 @@ describe('WorkflowReactFlowSurface', () => {
     expect(onCommand).not.toHaveBeenCalled();
   });
 
-  it('passes the legacy projection and command callback through its render boundary', () => {
+  it('owns the legacy edge and node DOM while preserving port and collapse accessibility contracts', () => {
     const workflow = createEmptyWorkflow('legacy');
     workflow.nodes = [createWorkflowNode('input-text', 0, 0, 'Legacy prompt')];
     const model = projectReactFlowRenderModel(workflow, { x: 4, y: 8, zoom: 1 });
     const onCommand = vi.fn();
-    const renderCanvas = vi.fn((receivedModel, dispatch) => {
-      dispatch({ type: 'selection.set', nodeIds: ['node-1'], transactionId: 'select-1' });
-      return createElement('div', { 'data-legacy-canvas': true }, receivedModel.nodes[0]?.label);
-    });
 
     const markup = renderToStaticMarkup(createElement(WorkflowLegacySurface, {
       model,
       onCommand,
-      children: renderCanvas,
+      nodes: workflow.nodes,
     }));
 
-    expect(markup).toContain('data-legacy-canvas');
-    expect(renderCanvas).toHaveBeenCalledWith(model, onCommand);
-    expect(onCommand).toHaveBeenCalledWith({ type: 'selection.set', nodeIds: ['node-1'], transactionId: 'select-1' });
+    expect(markup).toContain('data-workflow-legacy-edge-layer');
+    expect(markup).toContain('data-workflow-legacy-node-layer');
+    expect(markup).toContain(`data-node-id="${workflow.nodes[0].id}"`);
+    expect(markup).toContain(`data-port-id="${workflow.nodes[0].id}-out-out-prompt"`);
+    expect(markup).toContain('aria-label="折叠节点"');
+    expect(onCommand).not.toHaveBeenCalled();
+  });
+
+  it('keeps legacy card side effects in the host callbacks rather than the renderer module', () => {
+    expect(legacyRendererSource).not.toContain("fetch('/api/save-image'");
+    expect(legacyRendererSource).not.toContain('localStorage.');
+    expect(legacyRendererSource).toContain('onImageFileDrop');
+    expect(legacyRendererSource).toContain('onSavePromptPreset');
   });
 
   it('compares the exact legacy and shadow models supplied by the host', () => {

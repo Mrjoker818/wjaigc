@@ -67,6 +67,40 @@ The exact command discovered and scheduled the new scenario for Chromium, Chromi
 - Shadow is hidden/read-only and has no direct action, persistence, billing, execution, Task Core, or Asset Graph dependency.
 - Existing legacy node DOM, roles, labels, keyboard handlers, save path, and execute path remain in place.
 
-## Remaining Concern
+## Follow-up: Physical Legacy Ownership Extraction
 
-`WorkflowLegacySurface` now carries the actual projection and command dispatch through a tested render boundary, and visual node/edge mutation paths dispatch commands. However, to avoid changing the 5,135-line legacy DOM in this task, the product node/edge JSX is still physically located in `src/components/node-editor.tsx` and supplied through that boundary. This is not a complete physical JSX extraction into `WorkflowLegacySurface.tsx`; do not describe Task 3 as fully extracted until that follow-up is performed with DOM/accessibility regression evidence.
+The planned physical extraction is complete. `WorkflowLegacySurface.tsx` now owns the legacy SVG edge layer and visible-node map, while `WorkflowLegacyNodeCard.tsx` owns the original full node card DOM and node-type controls. `node-editor.tsx` supplies workflow-domain data and host callbacks only. The surface dispatches destructive connection mutations through `onCommand`; node mutations retain the same host callbacks and domain update path, without React Flow state or duplicate history.
+
+RED before follow-up production edits:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/workflow-react-flow-surface.test.tsx
+```
+
+Result: failed with `children is not a function`, proving `WorkflowLegacySurface` still required the render-prop wrapper instead of owning the SVG/node DOM.
+
+Second RED, after the physical move exposed renderer-side effects:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/workflow-react-flow-surface.test.tsx
+```
+
+Result: failed because `WorkflowLegacyNodeCard.tsx` contained `fetch('/api/save-image')`; the companion assertion also rejects `localStorage` in renderer modules.
+
+GREEN:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workflow-render-view-model.test.ts src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/lib/workflow-render-shadow.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/components/node-editor-ui-regression.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-execution-wiring.test.ts src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-editor-layering-wiring.test.ts
+pnpm ts-check
+```
+
+Result: 9 files / 26 tests passed; `pnpm ts-check` passed. The contract covers legacy edge/node ownership, `data-node-id`, port identifiers, collapse accessible name, host-only renderer side effects, command dispatch, culling handoff, history, execution, and UI regression wiring.
+
+Changed follow-up files:
+
+- `src/components/node-editor.tsx`
+- `src/components/workflow/WorkflowLegacySurface.tsx`
+- `src/components/workflow/WorkflowLegacyNodeCard.tsx`
+- `src/__tests__/components/workflow-react-flow-surface.test.tsx`
+- `src/__tests__/components/node-editor-drag-throttle-wiring.test.ts`
+- `.superpowers/sdd/stage-4-task-3-report.md`

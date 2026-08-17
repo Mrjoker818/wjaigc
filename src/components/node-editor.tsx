@@ -845,6 +845,13 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const bcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [wfRaw, setWfRaw] = useState<WorkflowData>(workflow || createEmptyWorkflow('新工作流'));
+  const [nodePromptPresets, setNodePromptPresets] = useState<{ id: string; name: string; text: string }[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('wujie-node-presets') || '[]') as { id: string; name: string; text: string }[];
+    } catch {
+      return [];
+    }
+  });
   const workflowRendererMode = resolveWorkflowRendererMode(rendererMode);
   // P2: 包装setWf以广播变化
   const broadcastWorkflow = useCallback((updatedWf: WorkflowData) => {
@@ -862,6 +869,21 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
       return next;
     });
   }, [broadcastWorkflow]);
+  const saveNodePromptPreset = useCallback((name: string, text: string) => {
+    if (!name.trim() || !text.trim()) return;
+    setNodePromptPresets(previous => {
+      const next = [...previous, { id: `p-${Date.now()}`, name: name.trim(), text }];
+      localStorage.setItem('wujie-node-presets', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+  const deleteNodePromptPreset = useCallback((presetId: string) => {
+    setNodePromptPresets(previous => {
+      const next = previous.filter(preset => preset.id !== presetId);
+      localStorage.setItem('wujie-node-presets', JSON.stringify(next));
+      return next;
+    });
+  }, []);
   const wf = wfRaw;
   const wfRef = useRef(wf);
   wfRef.current = wf;
@@ -3097,217 +3119,97 @@ ${contextInfo}
             <WorkflowReactFlowSurface model={reactFlowWorkflowRenderModel} onCommand={handleWorkflowRenderCommand} readOnly={false} />
           ) : (
             <>
-          <WorkflowLegacySurface model={legacyWorkflowRenderModel} onCommand={handleWorkflowRenderCommand}>
-          {(_model, dispatch) => <>
-          {/* SVG连线层 (z-index:1, pointer-events:stroke仅对hit-area) */}
-          <svg
-            ref={svgRef}
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ zIndex: 1 }}
-            aria-hidden="true"
-          >
-            <defs>
-              {/* 端口类型标记 */}
-              <marker id="arrow-image" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" fill={PORT_COLORS.image} />
-              </marker>
-              <marker id="arrow-prompt" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" fill={PORT_COLORS.prompt} />
-              </marker>
-              <marker id="arrow-mask" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" fill={PORT_COLORS.mask} />
-              </marker>
-              <marker id="arrow-condition" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" fill={PORT_COLORS.condition} />
-              </marker>
-              <marker id="arrow-data" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" fill={PORT_COLORS.data} />
-              </marker>
-              <marker id="arrow-default" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" fill={T.connColor} />
-              </marker>
-            </defs>
-            <g ref={svgViewportTransformRef} transform={`translate(${nodeRenderViewport.x}, ${nodeRenderViewport.y}) scale(${nodeRenderViewport.zoom})`}>
-              {/* 连线 */}
-              {visibleConnections.map(conn => {
-                const fromNode = nodeById.get(conn.fromNodeId);
-                const toNode = nodeById.get(conn.toNodeId);
-                if (!fromNode || !toNode) return null;
-                const fromPort = fromNode.ports.find(p => p.id === conn.fromPortId);
-                const toPort = toNode.ports.find(p => p.id === conn.toPortId);
-                if (!fromPort || !toPort) return null;
-                const from = getPortPositionLocal(fromNode, fromPort);
-                const to = getPortPositionLocal(toNode, toPort);
-                if (!from || !to) return null;
-                const color = PORT_COLORS[conn.type] || T.connColor;
-                const isHighlighted = isConnectionHighlighted(conn);
-                const isRunning = execStatus === 'running' && (execResults[conn.fromNodeId]?.status === 'success');
-
-                const markerId = conn.type === 'image' ? 'arrow-image'
-                  : conn.type === 'prompt' ? 'arrow-prompt'
-                  : conn.type === 'mask' ? 'arrow-mask'
-                  : conn.type === 'condition' ? 'arrow-condition'
-                  : conn.type === 'data' ? 'arrow-data'
-                  : 'arrow-default';
-
-                return (
-                  <g key={conn.id}>
-                    {(() => {
-                      const isBlocked = Array.isArray(toNode.config?.blockedInputs) && (toNode.config.blockedInputs as string[]).includes(conn.id);
-                      return (
-                        <>
-                          {isHighlighted && !isBlocked && (
-                            <path d={getConnPath(from.x, from.y, to.x, to.y)} fill="none" stroke={color} strokeWidth={6} strokeOpacity={0.15} />
-                          )}
-                          <path
-                            d={getConnPath(from.x, from.y, to.x, to.y)}
-                            fill="none" stroke={isBlocked ? '#666' : color} strokeWidth={isHighlighted ? 3 : 2}
-                            strokeOpacity={isBlocked ? 0.3 : isHighlighted ? 1 : isRunning ? 0.9 : 0.5}
-                            strokeLinecap="round"
-                            strokeDasharray={isBlocked ? '4 4' : undefined}
-                            markerEnd={isBlocked ? undefined : `url(#${markerId})`}
-                            className={isRunning && !isBlocked ? 'animate-pulse' : 'transition-all duration-200'}
-                          />
-                          {isRunning && !isBlocked && (
-                            <>
-                              <path d={getConnPath(from.x, from.y, to.x, to.y)} fill="none" stroke={color} strokeWidth={2} strokeOpacity={0.5} strokeDasharray="10 5" className="ne-conn-flowing" />
-                              <circle r={3} fill={color}>
-                                <animateMotion dur="1.2s" repeatCount="indefinite" path={getConnPath(from.x, from.y, to.x, to.y)} />
-                              </circle>
-                            </>
-                          )}
-                          {(conn.type !== 'any' && (isHighlighted || nodeRenderViewport.zoom > 0.6)) && (
-                            <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 6} textAnchor="middle" fill={isBlocked ? '#666' : color} fontSize={10} fillOpacity={isBlocked ? 0.4 : 0.7} className="pointer-events-none">
-                              {isBlocked ? 'blocked' : conn.type}
-                            </text>
-                          )}
-                          <g
-                            className="cursor-pointer"
-                            style={{ pointerEvents: 'stroke' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const blocked = Array.isArray(toNode.config?.blockedInputs) ? [...(toNode.config.blockedInputs as string[])] : [];
-                              const idx = blocked.indexOf(conn.id);
-                              if (idx >= 0) blocked.splice(idx, 1);
-                              else blocked.push(conn.id);
-                              setWf(prev => ({
-                                ...prev,
-                                nodes: prev.nodes.map(n =>
-                                  n.id === toNode.id ? { ...n, config: { ...n.config, blockedInputs: blocked } } : n
-                                ),
-                              }));
-                            }}
-                          >
-                            <circle cx={(from.x + to.x) / 2} cy={(from.y + to.y) / 2} r={6} fill={isBlocked ? '#ef4444' : 'transparent'} stroke={isBlocked ? '#ef4444' : 'transparent'} strokeWidth={1} opacity={isHighlighted || isBlocked ? 1 : 0} className="transition-opacity" />
-                            {isBlocked && (
-                              <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 + 3.5} textAnchor="middle" fill="white" fontSize={8} fontWeight="bold">✕</text>
-                            )}
-                          </g>
-                          <path d={getConnPath(from.x, from.y, to.x, to.y)} fill="none" stroke="transparent" strokeWidth={16} style={{ pointerEvents: 'stroke' }} onClick={() => dispatch({ type: 'connection.delete', connectionId: conn.id, transactionId: `legacy-connection-delete:${conn.id}` })} className="cursor-pointer" />
-                        </>
-                      );
-                    })()}
-                  </g>
-                );
-              })}
-
-              {/* 临时连线 */}
-              {draggingConn && (
-                <path d={getConnPath(draggingConn.fromX, draggingConn.fromY, draggingConn.toX, draggingConn.toY)} fill="none" stroke={PORT_COLORS[draggingConn.portType]} strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.7} />
-              )}
-
-              {/* 框选矩形 */}
-              {boxSelect && (() => {
-                const minX = Math.min(boxSelect.startX, boxSelect.endX);
-                const minY = Math.min(boxSelect.startY, boxSelect.endY);
-                const w = Math.abs(boxSelect.endX - boxSelect.startX);
-                const h = Math.abs(boxSelect.endY - boxSelect.startY);
-                if (w < 5 && h < 5) return null;
-                return (
-                  <rect x={minX} y={minY} width={w} height={h} fill="rgba(212, 175, 55, 0.08)" stroke="rgba(212, 175, 55, 0.4)" strokeWidth={1} strokeDasharray="4 2" rx={2} />
-                );
-              })()}
-            </g>
-          </svg>
-
-          {/* HTML节点层 (z-index:2, 绝对定位div元素, 与原型对齐) */}
-          <div
-            ref={nodeViewportTransformRef}
-            className="absolute inset-0"
-            style={{
-              zIndex: 2,
-              transform: `translate(${nodeRenderViewport.x}px, ${nodeRenderViewport.y}px) scale(${nodeRenderViewport.zoom})`,
-              transformOrigin: '0 0',
-              willChange: 'transform',
-              contain: 'layout style',
+          <WorkflowLegacySurface
+            model={legacyWorkflowRenderModel}
+            onCommand={handleWorkflowRenderCommand}
+            nodes={wf.nodes}
+            visibleNodes={visibleNodes}
+            visibleConnections={visibleConnections}
+            theme={T}
+            execResults={execResults}
+            execStatus={execStatus}
+            selectedNodeIds={selectedNodeIds}
+            highlightedNodeIds={getConnectedNodeIds}
+            hoveredNodeId={hoveredNodeId}
+            canvasImages={canvasImages}
+            llmModels={chatModels}
+            imageModels={imageModels}
+            upstreamImageUrls={upstreamImageUrls}
+            draggingConnection={draggingConn}
+            boxSelect={boxSelect}
+            svgViewportTransformRef={svgViewportTransformRef}
+            nodeViewportTransformRef={nodeViewportTransformRef}
+            getConnectionPath={getConnPath}
+            getPortPosition={getPortPositionLocal}
+            isConnectionHighlighted={isConnectionHighlighted}
+            onToggleConnectionBlocked={(connection, targetNode) => {
+              setWf(prev => {
+                const currentTarget = prev.nodes.find(node => node.id === targetNode.id);
+                if (!currentTarget) return prev;
+                const blocked = Array.isArray(currentTarget.config?.blockedInputs) ? [...(currentTarget.config.blockedInputs as string[])] : [];
+                const index = blocked.indexOf(connection.id);
+                if (index >= 0) blocked.splice(index, 1);
+                else blocked.push(connection.id);
+                return {
+                  ...prev,
+                  nodes: prev.nodes.map(node => node.id === targetNode.id ? { ...node, config: { ...node.config, blockedInputs: blocked } } : node),
+                };
+              });
             }}
-          >
-            {visibleNodes.map(node => (
-              <NodeCard
-                key={node.id}
-                node={node}
-                isSelected={selectedNodeIds.has(node.id)}
-                isHighlighted={getConnectedNodeIds.has(node.id)}
-                isHovered={hoveredNodeId === node.id}
-                execResult={execResults[node.id]}
-                isRunning={execStatus === 'running'}
-                theme={T}
-                onSelect={(e) => {
-                  if (e && (e.ctrlKey || e.metaKey)) {
-                    setSelectedNodeIds(prev => {
-                      const next = new Set(prev);
-                      if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
-                      return next;
-                    });
-                  } else {
-                    setSelectedNodeIds(new Set([node.id]));
-                  }
-                  setSidebarTab('props');
-                }}
-                onHover={(id: string | null) => { setHighlightNodeId(id); setHoveredNodeId(id); }}
-                onDragStart={(e) => {
-                  const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
-                  if (!canvasRect) return;
-                  const vp = viewportRef.current;
-                  const mx = (e.clientX - canvasRect.left - vp.x) / vp.zoom;
-                  const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
-                  draggingNodeRef.current = node.id;
-                  dragOffsetRef.current = { x: mx - node.x, y: my - node.y };
-                  isDraggingRef.current = true;
-                  setBoxSelect(null);
-                  isBoxSelectingRef.current = false;
-                }}
-                onPortMouseDown={handlePortMouseDown}
-                onPortMouseUp={handlePortMouseUp}
-                onDelete={() => handleDeleteNode(node.id)}
-                onDeselect={() => setSelectedNodeIds(new Set())}
-                onPreviewImage={(url) => setImagePreviewUrl(url)}
-                onLlmOptimize={handleLlmOptimize}
-                onCascadeRun={handleCascadeRun}
-                onNodeFieldChange={handleNodeFieldChange}
-                onExtractToSource={handleExtractToSource}
-                onGridSplit={handleGridSplit}
-                onCompare={handleCompare}
-                onTriggerImageUpload={triggerNodeImageUpload}
-                upstreamImageUrl={upstreamImageUrls.get(node.id)}
-                llmModels={chatModels}
-                imageModels={imageModels}
-                canvasImages={canvasImages}
-                onResizeNode={resizeNodeForImageUrl}
-                onUpdateNodeSize={updateNodeSize}
-                collapsedNodes={collapsedNodes}
-                onToggleCollapse={toggleNodeCollapse}
-                onContextMenu={(e) => handleNodeContextMenu(e, node.id)}
-                onDoubleClickAnnotation={() => {
-                  if (node.type === 'ai-annotation-edit') {
-                    requestNodeAnnotation(node);
-                  }
-                }}
-              />
-            ))}
-          </div>
-          </>}
-          </WorkflowLegacySurface>
+            cardCallbacks={{
+              onNodeFieldChange: handleNodeFieldChange,
+              onLlmOptimize: handleLlmOptimize,
+              onCascadeRun: handleCascadeRun,
+              onExtractToSource: handleExtractToSource,
+              onGridSplit: handleGridSplit,
+              onCompare: handleCompare,
+              onTriggerImageUpload: triggerNodeImageUpload,
+              onImageFileDrop: handleImageUpload,
+              promptPresets: nodePromptPresets,
+              onSavePromptPreset: saveNodePromptPreset,
+              onDeletePromptPreset: deleteNodePromptPreset,
+              onSelect: (nodeId, event) => {
+                if (event && (event.ctrlKey || event.metaKey)) {
+                  setSelectedNodeIds(prev => {
+                    const next = new Set(prev);
+                    if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
+                    return next;
+                  });
+                } else {
+                  setSelectedNodeIds(new Set([nodeId]));
+                }
+                setSidebarTab('props');
+              },
+              onHover: (nodeId) => { setHighlightNodeId(nodeId); setHoveredNodeId(nodeId); },
+              onDragStart: (nodeId, event) => {
+                const node = wfRef.current.nodes.find(candidate => candidate.id === nodeId);
+                const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
+                if (!node || !canvasRect) return;
+                const currentViewport = viewportRef.current;
+                const mouseX = (event.clientX - canvasRect.left - currentViewport.x) / currentViewport.zoom;
+                const mouseY = (event.clientY - canvasRect.top - currentViewport.y) / currentViewport.zoom;
+                draggingNodeRef.current = nodeId;
+                dragOffsetRef.current = { x: mouseX - node.x, y: mouseY - node.y };
+                isDraggingRef.current = true;
+                setBoxSelect(null);
+                isBoxSelectingRef.current = false;
+              },
+              onPortMouseDown: handlePortMouseDown,
+              onPortMouseUp: handlePortMouseUp,
+              onDelete: () => undefined,
+              onDeselect: () => setSelectedNodeIds(new Set()),
+              onPreviewImage: setImagePreviewUrl,
+              onResizeNode: resizeNodeForImageUrl,
+              onUpdateNodeSize: updateNodeSize,
+              collapsedNodes,
+              onToggleCollapse: toggleNodeCollapse,
+              onContextMenu: (nodeId, event) => handleNodeContextMenu(event, nodeId),
+              onDoubleClickAnnotation: (nodeId) => {
+                const node = wfRef.current.nodes.find(candidate => candidate.id === nodeId);
+                if (node?.type === 'ai-annotation-edit') requestNodeAnnotation(node);
+              },
+            }}
+          />
           {workflowRendererMode === 'shadow' ? (
             <WorkflowShadowProbe
               legacyModel={legacyWorkflowRenderModel}
@@ -3879,781 +3781,6 @@ ${contextInfo}
     </>
   );
 }
-
-// ==================== 节点卡片 ====================
-
-type NodeThemeType = (typeof nodeThemes)[keyof typeof nodeThemes];
-
-interface NodeCardProps {
-  node: WorkflowNode;
-  isSelected: boolean;
-  isHighlighted: boolean;
-  isHovered: boolean;
-  execResult?: { status: string; output?: Record<string, unknown>; error?: string };
-  isRunning: boolean;
-  theme: NodeThemeType;
-  canvasImages?: CanvasImageRef[];
-  llmModels?: ModelOption[];
-  imageModels?: ModelOption[];
-  onNodeFieldChange?: (nodeId: string, fieldId: string, value: unknown) => void;
-  onLlmOptimize?: (nodeId: string, prompt: string, model: string, systemPrompt: string, instruction: string) => void;
-  onCascadeRun?: (nodeId: string) => void;
-  onExtractToSource?: (nodeId: string) => void;
-  onGridSplit?: (nodeId: string, cols: number, rows: number) => void;
-  onCompare?: (nodeId: string) => void;
-  onTriggerImageUpload?: (nodeId: string) => void;
-  upstreamImageUrl?: string;
-  onSelect: (e?: React.MouseEvent) => void;
-  onHover: (id: string | null) => void;
-  onDragStart: (e: React.MouseEvent) => void;
-  onPortMouseDown: (e: React.MouseEvent, nodeId: string, port: NodePort) => void;
-  onPortMouseUp: (nodeId: string, port: NodePort) => void;
-  onDelete: () => void;
-  onDeselect: () => void;
-  onPreviewImage: (url: string) => void;
-  onResizeNode?: (nodeId: string, imageUrl: string) => void;
-  onUpdateNodeSize?: (nodeId: string, width: number, height: number) => void;
-  collapsedNodes?: Set<string>;
-  onToggleCollapse?: (nodeId: string) => void;
-  onContextMenu?: (e: React.MouseEvent) => void;
-  onDoubleClickAnnotation?: () => void;
-}
-
-/** output-image-group 节点内容: 多图分页浏览 */
-function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
-  imageUrls: string[];
-  theme: Record<string, string>;
-  onPreviewImage: (url: string) => void;
-}) {
-  const [page, setPage] = useState(0);
-  const total = imageUrls.length;
-  const currentUrl = total > 0 ? imageUrls[page] : '';
-
-  return (
-    <div className="w-full h-full flex flex-col gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      {total > 0 && currentUrl ? (
-        /* 有图片时显示当前页图片 */
-        <div
-          className="flex-1 w-full relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
-          style={{ background: T.nodeBg === '#161b22' ? '#1c2128' : '#f0f0f0' }}
-          onClick={() => onPreviewImage(currentUrl)}
-        >
-          <NextImage unoptimized width={1} height={1} src={currentUrl} alt={`图片 ${page + 1}`} className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
-          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-            <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
-          </div>
-        </div>
-      ) : (
-        /* 无图片时显示虚线占位框 */
-        <div
-          className="flex-1 w-full flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
-          style={{
-            borderColor: T.accent + '40',
-            background: T.nodeBg === '#161b22' ? '#1c2128' : '#fafafa',
-          }}
-        >
-          <Layers size={22} style={{ color: T.accent, opacity: 0.35 }} />
-          <span className="text-[10px] font-medium" style={{ color: T.nodeBg === '#161b22' ? '#8b949e' : '#999' }}>等待图片组</span>
-        </div>
-      )}
-      {/* 分页控件 */}
-      {total > 1 && (
-        <div className="flex items-center justify-center gap-1 shrink-0">
-          <button
-            className="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
-            style={{ background: T.btnBg, color: T.btnText }}
-            onClick={(e) => { e.stopPropagation(); setPage(Math.max(0, page - 1)); }}
-            disabled={page === 0}
-          >
-            <ChevronLeft size={12} />
-          </button>
-          <span className="text-[9px] font-mono min-w-[28px] text-center" style={{ color: T.textMuted }}>
-            {page + 1}/{total}
-          </span>
-          <button
-            className="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
-            style={{ background: T.btnBg, color: T.btnText }}
-            onClick={(e) => { e.stopPropagation(); setPage(Math.min(total - 1, page + 1)); }}
-            disabled={page >= total - 1}
-          >
-            <ChevronRight size={12} />
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation }: NodeCardProps) {
-  const T = theme;
-  const cat = getNodeCategory(node.type);
-  const color = NODE_TYPE_COLORS[cat];
-  const nodeRef = useRef<HTMLDivElement>(null);
-
-  // 自动测量节点实际尺寸并同步到node.width/height
-  useEffect(() => {
-    if (!nodeRef.current || !onUpdateNodeSize) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (Math.abs(width - node.width) > 2 || Math.abs(height - node.height) > 2) {
-          onUpdateNodeSize(node.id, width, height);
-        }
-      }
-    });
-    observer.observe(nodeRef.current);
-    return () => observer.disconnect();
-  }, [node.id, node.width, node.height, onUpdateNodeSize]);
-  const inputPorts = node.ports.filter(p => p.direction === 'in');
-  const outputPorts = node.ports.filter(p => p.direction === 'out');
-  const isCondition = node.type.startsWith('condition-');
-  const isInputText = node.type === 'input-text';
-  const isInputImage = node.type === 'input-image';
-  const isOutputImage = node.type === 'output-image';
-  const isOutputImageGroup = node.type === 'output-image-group';
-
-  // 图片URL: 优先执行结果, 其次节点配置(input-image节点)
-  const hasImageOutput = (execResult?.output?.imageUrl || node.config?.imageUrl) as string | undefined;
-  // 画布模式专用节点标记
-  const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
-  const isCollapsed = collapsedNodes?.has(node.id) ?? false;
-
-  // P0: input-text 节点内嵌功能状态
-  const llmEnabled = node.config?.llmEnabled as boolean ?? false;
-  const llmModel = node.config?.llmModel as string ?? '';
-  const llmInstruction = node.config?.llmInstruction as string ?? '';
-  const llmSystemEnabled = node.config?.llmSystemEnabled as boolean ?? false;
-  const llmSystemPrompt = node.config?.llmSystemPrompt as string ?? '';
-  const textContent = node.config?.textContent as string ?? '';
-
-  // 提示词模板触发状态
-  const [showTemplatePopup, setShowTemplatePopup] = useState(false);
-  const [templateSearch, setTemplateSearch] = useState('');
-  const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
-  const [hoveredTemplateId, setHoveredTemplateId] = useState<string | null>(null);
-  const [thumbnailRect, setThumbnailRect] = useState<DOMRect | null>(null);
-  const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
-
-  // P0: 解析文本中的 [img:id] 引用，渲染为缩略图
-  // P1: 提示词预设列表 (localStorage, 支持增删)
-  const [presetList, setPresetList] = useState<{ id: string; name: string; text: string }[]>(() => {
-    try { return JSON.parse(localStorage.getItem('wujie-node-presets') || '[]'); } catch { return []; }
-  });
-  const [presetOpen, setPresetOpen] = useState(false);
-  const [presetSaving, setPresetSaving] = useState(false);
-  const [presetName, setPresetName] = useState('');
-
-  const savePreset = (name: string, text: string) => {
-    if (!name.trim() || !text.trim()) return;
-    const newList = [...presetList, { id: `p-${Date.now()}`, name: name.trim(), text }];
-    setPresetList(newList);
-    localStorage.setItem('wujie-node-presets', JSON.stringify(newList));
-    setPresetSaving(false);
-    setPresetName('');
-  };
-
-  const deletePreset = (id: string) => {
-    const newList = presetList.filter(p => p.id !== id);
-    setPresetList(newList);
-    localStorage.setItem('wujie-node-presets', JSON.stringify(newList));
-  };
-
-  // 拖拽上传处理 (input-image 节点)
-  const handleDragOver = (e: React.DragEvent) => {
-    if (!isInputImage) return;
-    e.preventDefault();
-    e.stopPropagation();
-  };
-  const handleDrop = async (e: React.DragEvent) => {
-    if (!isInputImage) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const file = e.dataTransfer.files?.[0];
-    if (!file || !file.type.startsWith('image/')) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await fetch('/api/save-image', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (data.url) {
-        onNodeFieldChange?.(node.id, 'imageUrl', data.url);
-        onNodeFieldChange?.(node.id, 'source', 'upload');
-        onResizeNode?.(node.id, data.url);
-      }
-    } catch (err) { console.error('拖拽上传失败:', err); }
-  };
-
-  return (
-    <div
-      ref={nodeRef}
-      data-node-id={node.id}
-      className={`node-card ${isSelected ? 'selected' : ''} ${isCollapsed ? 'collapsed' : ''} ${isInputText ? 'prompt-node' : isInputImage || isOutputImage ? 'image-node' : 'generator-node'}`}
-      style={{
-        left: node.x,
-        top: node.y,
-        height: isCollapsed ? 45 : 'auto',
-        zIndex: isSelected ? 10 : isHovered ? 5 : 1,
-      }}
-      tabIndex={0}
-      onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e); }}
-      onMouseEnter={() => onHover(node.id)}
-      onMouseLeave={() => onHover(null)}
-      onContextMenu={onContextMenu}
-      onDoubleClick={(event) => {
-        if (node.type !== 'ai-annotation-edit') return;
-        event.stopPropagation();
-        onDoubleClickAnnotation?.();
-      }}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
-      {/* 分类色条 - 顶部3px */}
-      <div className="node-type-bar" style={{ background: color, opacity: 0.85 }} />
-
-      {/* 执行成功光圈 */}
-      {execResult?.status === 'success' && !isSelected && (
-        <div className="absolute -inset-[3px] rounded-[18px] pointer-events-none" style={{ border: `1.5px solid ${T.statusSuccess}`, opacity: 0.5, animation: 'fadeOut 1.5s ease-out forwards' }} />
-      )}
-
-      {/* ===== 节点标题区 — 42px高度 ===== */}
-      {!isCondition && (
-        <div className="node-header" style={{ background: `${color}0F` }}>
-          <div className="node-header-left">
-            <div className="flex items-center justify-center w-[22px] h-[22px] rounded-md" style={{ background: color + '20', color }}>
-              {getNodeIcon(node.type, 12)}
-            </div>
-            <div className="node-header-title">
-              <span className="truncate block">{node.label.toUpperCase()}</span>
-            </div>
-          </div>
-          {/* 折叠开关 */}
-          <button
-            className="collapse-toggle"
-            onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(node.id); }}
-            aria-label={collapsedNodes?.has(node.id) ? '展开节点' : '折叠节点'}
-            tabIndex={0}
-          >
-            <ChevronDown size={12} style={{ transition: 'transform 0.2s ease', transform: collapsedNodes?.has(node.id) ? 'rotate(0deg)' : 'rotate(180deg)' }} />
-          </button>
-          {/* 状态徽章 */}
-          {execResult?.status === 'running' && (
-            <span className="status-badge running"><span className="status-dot" />运行中</span>
-          )}
-          {execResult?.status === 'success' && (
-            <span className="status-badge done"><span className="status-dot" />完成</span>
-          )}
-          {execResult?.status === 'error' && (
-            <span className="status-badge failed"><span className="status-dot" />失败</span>
-          )}
-          {!execResult && !isRunning && (
-            <span className="status-badge queued"><span className="status-dot" />就绪</span>
-          )}
-          {isRunning && !execResult && (
-            <span className="status-badge running"><span className="status-dot" />运行中</span>
-          )}
-        </div>
-      )}
-
-      {/* ===== 节点体内容 (非折叠时显示) ===== */}
-      {!isCollapsed && !isCondition && (
-        <div className="node-body">
-          {/* input-text 节点: 文本编辑 + LLM优化 + 预设 */}
-          {isInputText && (
-            <div className="flex flex-col gap-1.5 relative" style={{ color: T.nodeTitle, fontSize: 12 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-              <textarea
-                className="prompt-textarea"
-                placeholder="输入提示词... (输入 / 使用模板)"
-                value={textContent}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  const val = e.target.value;
-                  onNodeFieldChange?.(node.id, 'textContent', val);
-                  if (val.endsWith('/')) {
-                    setShowTemplatePopup(true);
-                    setTemplateSearch('');
-                    setTemplatePopupIndex(0);
-                  } else if (showTemplatePopup) {
-                    const slashIdx = val.lastIndexOf('/');
-                    if (slashIdx >= 0) {
-                      const afterSlash = val.slice(slashIdx + 1);
-                      if (!afterSlash.includes(' ') && !afterSlash.includes('\n')) {
-                        setTemplateSearch(afterSlash);
-                        setTemplatePopupIndex(0);
-                      } else {
-                        setShowTemplatePopup(false);
-                      }
-                    } else {
-                      setShowTemplatePopup(false);
-                    }
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (showTemplatePopup && filteredTemplates.length > 0) {
-                    if (e.key === 'ArrowUp') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setTemplatePopupIndex((i) => (i - 1 + filteredTemplates.length) % filteredTemplates.length);
-                    } else if (e.key === 'ArrowDown') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setTemplatePopupIndex((i) => (i + 1) % filteredTemplates.length);
-                    } else if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const tpl = filteredTemplates[templatePopupIndex];
-                      if (tpl) {
-                        const val = textContent;
-                        const slashIdx = val.lastIndexOf('/');
-                        const before = val.slice(0, slashIdx);
-                        onNodeFieldChange?.(node.id, 'textContent', before + tpl.content);
-                        setShowTemplatePopup(false);
-                      }
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setShowTemplatePopup(false);
-                    }
-                  }
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                rows={3}
-              />
-              {showTemplatePopup && filteredTemplates.length > 0 && (
-                <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-white/10 bg-[#1a1a1a] shadow-xl z-50">
-                  <div className="max-h-48 overflow-y-auto overscroll-contain rounded-lg">
-                  {filteredTemplates.slice(0, 20).map((tpl, i) => (
-                    <button
-                      key={tpl.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const val = textContent;
-                        const slashIdx = val.lastIndexOf('/');
-                        const before = val.slice(0, slashIdx);
-                        onNodeFieldChange?.(node.id, 'textContent', before + tpl.content);
-                        setShowTemplatePopup(false);
-                      }}
-                      onMouseEnter={(e) => {
-                        if (tpl.thumbnail) {
-                          setHoveredTemplateId(tpl.id);
-                          setThumbnailRect(e.currentTarget.getBoundingClientRect());
-                        }
-                      }}
-                      onMouseLeave={() => setHoveredTemplateId(null)}
-                      className={`w-full text-left px-3 py-2 text-sm border-b border-white/5 last:border-0 transition-colors relative ${i === templatePopupIndex ? 'bg-[#d4af37]/20 text-white' : 'text-gray-300 hover:bg-white/5'}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        {tpl.thumbnail ? (
-                          <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-6 h-6 rounded object-cover flex-shrink-0 border border-white/10" />
-                        ) : (
-                          <FileText className="w-3.5 h-3.5 flex-shrink-0 text-gold-muted/50" />
-                        )}
-                        <span className="font-medium truncate">{tpl.name}</span>
-                      </div>
-                      <div className="text-xs text-gray-500 truncate mt-0.5 pl-8">{tpl.content}</div>
-                    </button>
-                  ))}
-                  </div>
-                  {/* Floating thumbnail - portal to body to avoid overflow clipping */}
-                  {hoveredTemplateId && (() => {
-                    const tpl = filteredTemplates.find(t => t.id === hoveredTemplateId);
-                    if (!tpl?.thumbnail || !thumbnailRect) return null;
-                    return createPortal(
-                      <div
-                        className="fixed z-[9999] pointer-events-none"
-                        style={{
-                          left: thumbnailRect.left - 160,
-                          top: Math.max(8, thumbnailRect.top - 40),
-                        }}
-                      >
-                        <div className="rounded-lg shadow-2xl overflow-hidden border border-white/10 bg-[#1a1a1a]">
-                          <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
-                          <div className="px-2 py-1 text-[10px] truncate text-gold-muted">{tpl.name}</div>
-                        </div>
-                      </div>,
-                      document.body
-                    );
-                  })()}
-                </div>
-              )}
-              {canvasImages?.length && textContent.includes('[img:') && (
-                <div className="flex gap-0.5 flex-wrap">
-                  {textContent.split(/(\[img:[^\]]+\])/g).filter(p => p.match(/^\[img:/)).map((ref, i) => {
-                    const id = ref.match(/^\[img:(.+)\]$/)?.[1];
-                    const img = canvasImages.find(ci => ci.id === id);
-                    return img ? (
-                      <NextImage unoptimized width={1} height={1} key={i} src={img.url} alt="" className="w-5 h-5 rounded object-cover border border-border/50" title={img.name || id} onClick={(e) => { e.stopPropagation(); onPreviewImage(img.url); }} />
-                    ) : null;
-                  })}
-                </div>
-              )}
-              <div className="flex items-center gap-1">
-                <button
-                  className={`px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors flex items-center gap-0.5 ${llmEnabled ? 'bg-primary text-white' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
-                  onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmEnabled', !llmEnabled); }}
-                  title="LLM 提示词优化"
-                >
-                  <Sparkles size={9} /> LLM
-                </button>
-                <div className="relative">
-                  <button
-                    className="px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors bg-muted text-muted-foreground hover:bg-muted/80 flex items-center gap-0.5"
-                    onClick={(e) => { e.stopPropagation(); setPresetOpen(!presetOpen); }}
-                    title="提示词预设"
-                  >
-                    <Bookmark size={9} /> 预设
-                  </button>
-                  {presetOpen && (
-                    <div className="absolute left-0 top-full mt-0.5 z-50 bg-popover border border-border rounded shadow-lg min-w-[140px] max-h-[120px] overflow-y-auto" onMouseDown={(e) => e.stopPropagation()}>
-                      {!presetSaving ? (
-                        <button className="block w-full text-left px-2 py-1 text-[10px] hover:bg-muted text-primary flex items-center gap-1" onClick={(e) => { e.stopPropagation(); setPresetSaving(true); }}>
-                          <BookmarkPlus size={9} /> 保存为预设
-                        </button>
-                      ) : (
-                        <div className="flex items-center gap-1 px-2 py-1">
-                          <input type="text" className="flex-1 text-[9px] rounded px-1 py-0.5 outline-none min-w-0" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="预设名称" value={presetName} onChange={(e) => setPresetName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { savePreset(presetName, textContent); } if (e.key === 'Escape') { setPresetSaving(false); setPresetName(''); } }} autoFocus />
-                          <button className="text-[9px] text-primary hover:opacity-80 shrink-0" onClick={() => savePreset(presetName, textContent)}>✓</button>
-                        </div>
-                      )}
-                      {presetList.length > 0 && <div className="border-t border-border" />}
-                      {presetList.map(p => (
-                        <div key={p.id} className="flex items-center gap-0.5 px-1 py-0.5 hover:bg-muted group">
-                          <button className="flex-1 text-left text-[10px] truncate cursor-pointer" onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'textContent', p.text); setPresetOpen(false); }}>{p.name}</button>
-                          <button className="text-[8px] text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); deletePreset(p.id); }} title="删除预设">×</button>
-                        </div>
-                      ))}
-                      {presetList.length === 0 && !presetSaving && (<div className="px-2 py-1 text-[9px] text-muted-foreground">暂无预设</div>)}
-                    </div>
-                  )}
-                </div>
-                <button className="px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer transition-colors bg-muted text-muted-foreground hover:bg-muted/80 flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }} title="运行此链">
-                  <Play size={9} /> 运行链
-                </button>
-              </div>
-
-              {llmEnabled && (
-                <div className="mt-1 flex flex-col gap-1 p-1.5 rounded" style={{ background: T.inputBg, border: `1px solid ${T.border}` }}>
-                  <select className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} value={llmModel} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmModel', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
-                    <option value="">选择模型</option>
-                    {(llmModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: T.optionBg, color: T.optionText }}>{m.apiDisplayName || m.name || getModelDisplayName(m.id)}{m.provider ? ` (${m.provider})` : ''}</option>)}
-                  </select>
-                  <input type="text" className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="优化指令 (如: 优化为英文)" value={llmInstruction} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmInstruction', e.target.value); }} onMouseDown={(e) => e.stopPropagation()} />
-                  <div className="flex items-center gap-1">
-                    <button className={`text-[8px] cursor-pointer ${llmSystemEnabled ? 'text-primary' : 'text-muted-foreground'}`} onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemEnabled', !llmSystemEnabled); }}>
-                      {llmSystemEnabled ? '●' : '○'} 系统提示
-                    </button>
-                    <button className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-primary text-white hover:opacity-80 flex items-center gap-0.5 disabled:opacity-50 disabled:cursor-not-allowed" onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.textContent || ''), String(node.config?.llmModel || ''), String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }} disabled={isRunning || !!node.config?.llmOptimizing} title="运行 LLM 优化">
-                      {node.config?.llmOptimizing ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />} {node.config?.llmOptimizing ? '优化中...' : '优化'}
-                    </button>
-                  </div>
-                  {llmSystemEnabled && (
-                    <input type="text" className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="系统提示词" value={llmSystemPrompt} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemPrompt', e.target.value); }} onMouseDown={(e) => e.stopPropagation()} />
-                  )}
-                </div>
-              )}
-              {/* 输出端口行 */}
-              {outputPorts.map((port) => {
-                const portColor = PORT_COLORS[port.type] || T.connColor;
-                return (
-                  <div key={port.id} className="port-row" style={{ marginTop: 8 }}>
-                    <div className="port-dot input-port" style={{ visibility: 'hidden' }} />
-                    <span className="port-label">{port.label}</span>
-                    <div
-                      className="port-dot output-port"
-                      data-port-id={`${node.id}-out-${port.id}`}
-                      style={{ borderColor: portColor, color: portColor }}
-                      onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
-                      title={port.label}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* input-image 节点: 图片预览 + 拖拽上传区 */}
-          {isInputImage && (
-            <div className="flex flex-col gap-1.5" style={{ color: T.nodeTitle, fontSize: 10 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-              <div className="image-preview has-image">
-                {hasImageOutput ? (
-                  <div
-                    className="w-full h-full relative group cursor-pointer"
-                    style={{ background: '#1c2128' }}
-                    onClick={() => onPreviewImage(hasImageOutput)}
-                  >
-                    <NextImage unoptimized width={1} height={1} src={hasImageOutput} alt="" className="image-preview img" style={{ objectFit: 'cover' }} />
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                      <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    className="image-preview empty cursor-pointer"
-                    style={{ aspectRatio: '4/3' }}
-                    onClick={() => onTriggerImageUpload?.(node.id)}
-                  >
-                    <div className="flex flex-col items-center gap-1.5 text-muted-foreground/50">
-                      <ImagePlus size={24} />
-                      <span className="text-[10px]">拖拽或点击上传</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {!hasImageOutput && (
-                <input
-                  type="text"
-                  placeholder="粘贴图片 URL..."
-                  className="w-full px-2 py-0.5 rounded text-[10px] border outline-none transition-colors"
-                  style={{
-                    background: '#1c2128',
-                    borderColor: T.cardBorder,
-                    color: T.nodeTitle,
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const url = (e.target as HTMLInputElement).value.trim();
-                      if (url) {
-                        onNodeFieldChange?.(node.id, 'imageUrl', url);
-                        onNodeFieldChange?.(node.id, 'source', 'url');
-                        onResizeNode?.(node.id, url);
-                        (e.target as HTMLInputElement).value = '';
-                      }
-                    }
-                  }}
-                />
-              )}
-              {hasImageOutput && (
-                <div className="flex gap-0.5 items-center">
-                  <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onExtractToSource?.(node.id); }} title="抽取为源节点">
-                    <ArrowLeftFromLine size={8} /> 抽取
-                  </button>
-                  <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onGridSplit?.(node.id, Number(node.config?.gridCols || 2), Number(node.config?.gridRows || 2)); }} title="宫格切分">
-                    <Grid3X3 size={8} /> 切分
-                  </button>
-                  {upstreamImageUrl && (
-                    <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onCompare?.(node.id); }} title="对比原图">
-                      <GitCompare size={8} /> 对比
-                    </button>
-                  )}
-                  <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5 ml-auto" onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }} title="运行此链">
-                    <Play size={8} /> 运行链
-                  </button>
-                </div>
-              )}
-              {/* 输出端口行 */}
-              {outputPorts.map((port) => {
-                const portColor = PORT_COLORS[port.type] || T.connColor;
-                return (
-                  <div key={port.id} className="port-row" style={{ padding: '4px 12px' }}>
-                    <div className="port-dot hidden" />
-                    <span className="port-label" style={{ color: T.nodePortText, fontSize: 10 }}>{port.label}</span>
-                    <div className="port-dot output-port"
-                      data-port-id={`${node.id}-out-${port.id}`}
-                      style={{ borderColor: portColor, color: portColor }}
-                      onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* AI 生成类节点: input-card + port-row + 下拉选择 + RUN按钮 */}
-          {!isInputText && !isInputImage && !isOutputImage && !isOutputImageGroup && !hasImageOutput && (node.type.startsWith('ai-') || node.type === 'output-image') && (
-            <div className="flex flex-col gap-0">
-              {/* 输入端口行 - input-card 模式（带图标+名称+端口点） */}
-              {inputPorts.map((port, idx) => {
-                const portColor = PORT_COLORS[port.type] || T.connColor;
-                const iconBg = portColor + '12';
-                return (
-                  <div key={port.id} className="input-card" style={{ marginBottom: idx < inputPorts.length - 1 ? 6 : 8 }}>
-                    <div style={{ width: 28, height: 28, borderRadius: 4, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {port.type === 'prompt' ? <Type size={14} style={{ color: portColor }} /> :
-                       port.type === 'image' ? <ImageIcon size={14} style={{ color: portColor }} /> :
-                       port.type === 'mask' ? <Paintbrush size={14} style={{ color: portColor }} /> :
-                       <Bookmark size={14} style={{ color: portColor }} />}
-                    </div>
-                    <span className="input-card-name">{port.label}</span>
-                    <div
-                      className="port-dot input-port"
-                      data-port-id={`${node.id}-in-${port.id}`}
-                      style={{ borderColor: portColor, color: portColor, flexShrink: 0 }}
-                      onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, port); }}
-                      title={port.label}
-                    />
-                  </div>
-                );
-              })}
-              {/* 模型选择 */}
-              {node.type === 'ai-generate' && (
-                <div style={{ marginBottom: 6 }}>
-                  <select className="node-select" value={String(node.config?.model || '')} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'model', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
-                    <option value="">选择模型</option>
-                    {(imageModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: '#2a2a2a', color: '#e0e0e0' }}>{m.apiDisplayName || m.name || m.id}{m.provider ? ` (${m.provider})` : ''}</option>)}
-                  </select>
-                </div>
-              )}
-              {node.type === 'ai-generate' && (
-                <div style={{ marginBottom: 8 }}>
-                  <select className="node-select" value={String(node.config?.aspectRatio || '16:9')} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'aspectRatio', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
-                    <option value="1:1">1:1 正方形</option>
-                    <option value="4:3">4:3 横版</option>
-                    <option value="16:9">16:9 宽屏</option>
-                    <option value="9:16">9:16 竖版</option>
-                    <option value="3:4">3:4 竖版</option>
-                    <option value="21:9">21:9 超宽</option>
-                  </select>
-                </div>
-              )}
-              {/* 输出端口行 - port-row 模式（左隐藏+标签+右端口） */}
-              {outputPorts.map((port) => {
-                const portColor = PORT_COLORS[port.type] || T.connColor;
-                return (
-                  <div key={port.id} className="port-row">
-                    <div className="port-dot input-port" style={{ visibility: 'hidden' }} />
-                    <span className="port-label">{port.label}</span>
-                    <div
-                      className="port-dot output-port"
-                      data-port-id={`${node.id}-out-${port.id}`}
-                      style={{ borderColor: portColor, color: portColor }}
-                      onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
-                      title={port.label}
-                    />
-                  </div>
-                );
-              })}
-              {/* 运行中进度条 */}
-              {isRunning && (
-                <div className="progress-bar" style={{ marginTop: 8 }}>
-                  <div className="progress-bar-fill" style={{ width: '60%' }} />
-                </div>
-              )}
-              {/* RUN 按钮 */}
-              <button
-                className="run-btn"
-                style={{ marginTop: 8 }}
-                onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }}
-                title="运行此节点"
-              >
-                RUN
-              </button>
-            </div>
-          )}
-
-          {/* 非AI/非图片节点: 执行后显示结果图 */}
-          {!isInputText && !isInputImage && !isOutputImage && !isOutputImageGroup && hasImageOutput && (
-            <div className="w-full h-full px-2 py-1">
-              <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)} onWheel={(e) => e.stopPropagation()}>
-                <NextImage unoptimized width={1} height={1} src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
-              </div>
-            </div>
-          )}
-
-          {/* output-image 节点 */}
-          {isOutputImage && (() => {
-            const imageUrls = (execResult?.output?.imageUrls as string[]) || [];
-            const singleUrl = hasImageOutput || '';
-            const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
-            // 输入端口行
-            const imageInputPort = inputPorts.find(p => p.type === 'image' || p.label === '图片');
-            return (
-              <div className="w-full h-full flex flex-col">
-                {imageInputPort && (
-                  <div className="port-row" style={{ marginBottom: 8 }}>
-                    <div
-                      className="port-dot input-port"
-                      data-port-id={`${node.id}-in-${imageInputPort.id}`}
-                      style={{ borderColor: PORT_COLORS[imageInputPort.type] || T.connColor, color: PORT_COLORS[imageInputPort.type] || T.connColor }}
-                      onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, imageInputPort); }}
-                      title={imageInputPort.label}
-                    />
-                    <span className="port-label">{imageInputPort.label}</span>
-                    <div className="port-dot output-port" style={{ visibility: 'hidden' }} />
-                  </div>
-                )}
-                {allUrls.length > 1 ? (
-                  <OutputImageGroupContent imageUrls={allUrls} theme={T} onPreviewImage={onPreviewImage} />
-                ) : singleUrl ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                    <div className="image-preview has-image cursor-pointer" onClick={() => onPreviewImage(singleUrl)}>
-                      <NextImage unoptimized width={1} height={1} src={singleUrl} alt="" style={{ objectFit: 'cover' }} />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                    <div className="image-preview empty" style={{ aspectRatio: '4/3' }}>
-                      <div className="flex flex-col items-center gap-1.5 text-muted-foreground/40">
-                        <ImagePlus size={22} />
-                        <span className="text-[10px] font-medium">等待图片</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* output-image-group 节点 */}
-          {isOutputImageGroup && (() => {
-            const imageUrls = (execResult?.output?.imageUrls as string[]) || [];
-            const singleUrl = (execResult?.output?.imageUrl as string) || '';
-            const allUrls = imageUrls.length > 0 ? imageUrls : (singleUrl ? [singleUrl] : []);
-            return (
-              <div className="w-full h-full">
-                <OutputImageGroupContent imageUrls={allUrls} theme={T} onPreviewImage={onPreviewImage} />
-              </div>
-            );
-          })()}
-
-          {/* 非AI/非图片节点显示级联运行 */}
-          {!isInputText && !isInputImage && !hasImageOutput && !isCondition && !(node.type.startsWith('ai-') || node.type === 'output-image') && (
-            <div className="flex justify-end">
-              <button className="px-1 py-0 rounded text-[8px] font-medium cursor-pointer bg-muted/60 text-muted-foreground hover:bg-muted flex items-center gap-0.5" onClick={(e) => { e.stopPropagation(); onCascadeRun?.(node.id); }} title="运行此链">
-                <Play size={8} /> 运行链
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 条件节点: 文字 */}
-      {isCondition && (
-        <div className="w-full h-full flex items-center justify-center">
-          <span className="text-[12px] font-medium truncate px-2" style={{ color: T.nodeTitle }}>{node.label}</span>
-        </div>
-      )}
-
-      {/* 画布模式专用标记 (右上角小徽章) */}
-      {isCanvasFeature && !isCondition && (
-        <div className="absolute top-[3px] right-2 w-6 h-6 flex items-center justify-center rounded-full text-[7px] font-bold z-10" style={{ background: color, color: T.badgeText, opacity: 0.8 }}>
-          {node.type === 'ai-font-design' ? '字' : node.type === 'ai-refine-engine' ? '精' : node.type === 'ai-human-repair' ? '人' : node.type === 'ai-brand-ecommerce' ? '品' : node.type === 'ai-segment' ? '层' : node.type === 'ai-multi-angle' ? '角' : '3D'}
-        </div>
-      )}
-
-      {/* 断点标记 */}
-      {node.breakpoint && (
-        <div className="absolute top-[3px] right-2 w-2 h-2 rounded-full" style={{ background: T.statusError }} />
-      )}
-
-      {/* 关闭编辑按钮 (选中时显示) */}
-      {isSelected && (
-        <div className="absolute -right-[12px] -top-[14px] z-20">
-          <button
-            title="关闭编辑"
-            onClick={(e) => { e.stopPropagation(); onDeselect(); }}
-            className="w-[22px] h-[22px] rounded-full bg-muted border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 cursor-pointer transition-colors"
-          >
-            <X size={12} />
-          </button>
-        </div>
-      )}
-
-      {/* 执行错误提示 */}
-      {execResult?.error && (
-        <div className="absolute top-full left-0 w-full mt-0.5 text-[10px] text-red-400 truncate px-1 z-20">{execResult.error}</div>
-      )}
-    </div>
-  );
-});
 
 // ==================== 属性面板 ====================
 
