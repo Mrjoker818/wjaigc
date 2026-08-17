@@ -100,7 +100,7 @@ describe('agent task persistence', () => {
     }));
   });
 
-  it('records non-completed terminal states without presenting stale progress', async () => {
+  it('settles non-completed terminal facts atomically without a prewrite', async () => {
     await recordAgentTaskTerminal('agent-1', {
       status: 'timeout', error: 'Agent task timed out',
     });
@@ -110,30 +110,32 @@ describe('agent task persistence', () => {
       status: 'timeout',
       error: expect.objectContaining({ message: 'Agent task timed out' }),
     }));
-    expect(updateCloudTask).toHaveBeenCalledWith('agent-1', expect.objectContaining({
-      result: expect.objectContaining({
-        taskError: expect.objectContaining({ code: 'AGENT_TASK_ERROR', retryable: true }),
-      }),
-      expectedStatuses: ['queued', 'pending', 'processing'],
-    }));
+    expect(updateCloudTask).not.toHaveBeenCalled();
   });
 
-  it('persists a structured submission_unknown code before exactly-once settlement', async () => {
+  it('passes a structured submission_unknown error to exactly-once settlement without a result prewrite', async () => {
     await recordAgentTaskTerminal('agent-1', {
       status: 'failed',
       code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
       error: 'Submission outcome is unknown',
       retryable: false,
+      imageUrl: '/partially-complete.png',
+      steps: [{ toolName: 'image_edit', success: false }],
+      finalResponse: 'The provider accepted the edit before failing',
     });
 
-    expect(updateCloudTask).toHaveBeenCalledWith('agent-1', expect.objectContaining({
-      result: expect.objectContaining({
-        taskError: expect.objectContaining({
-          code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
-          retryable: false,
-        }),
+    expect(settleFailedTask).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({
+        code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+        retryable: false,
       }),
+      result: {
+        imageUrl: '/partially-complete.png',
+        steps: [{ toolName: 'image_edit', success: false }],
+        finalResponse: 'The provider accepted the edit before failing',
+      },
     }));
+    expect(updateCloudTask).not.toHaveBeenCalled();
     expect(settleFailedTask).toHaveBeenCalledTimes(1);
   });
 
@@ -186,12 +188,12 @@ describe('agent task persistence', () => {
     });
   });
 
-  it('rejects a failed projection when durable settlement does not transition', async () => {
+  it('leaves a different durable terminal winner untouched when settlement does not transition', async () => {
     settleFailedTask.mockResolvedValueOnce({ transitioned: false, refunded: false });
 
     await expect(recordAgentTaskTerminal('agent-1', {
       status: 'failed', error: 'Provider failed',
-    })).rejects.toThrow('Agent task terminal transition conflict');
+    })).resolves.toBeUndefined();
   });
 
   it('wires agent-edit task lifecycle through persistent storage', () => {

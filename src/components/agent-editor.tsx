@@ -48,10 +48,7 @@ interface PendingAgentAttempt {
   version: 1;
   key: string;
   digest: string;
-  expiresAt: number;
 }
-
-const PENDING_ATTEMPT_TTL_MS = 30 * 60 * 1000;
 
 const EMPTY_AGENT_TASK_STATE: AgentTaskState = {
   taskId: null,
@@ -84,9 +81,7 @@ function isPendingAgentAttempt(value: unknown): value is PendingAgentAttempt {
     && typeof record.key === 'string'
     && /^agent-editor:[^\s:]+:[^\s]+$/.test(record.key)
     && typeof record.digest === 'string'
-    && /^[a-f0-9]{64}$/.test(record.digest)
-    && typeof record.expiresAt === 'number'
-    && Number.isFinite(record.expiresAt);
+    && /^[a-f0-9]{64}$/.test(record.digest);
 }
 
 export async function digestAgentAttemptRequest(requestBody: string): Promise<string> {
@@ -239,6 +234,8 @@ export function AgentEditor({
   const setResultPrompt = useCallback((value: string) => updateTaskState({ resultPrompt: value }), [updateTaskState]);
   const [agentRunIdsByScope, setAgentRunIdsByScope] = useState<Record<string, string | null>>({});
   const attemptKeysByScope = useRef<Record<string, PendingAgentAttempt>>({});
+  const [attemptHydrationByScope, setAttemptHydrationByScope] = useState<Record<string, true>>({});
+  const isAttemptHydrated = Object.prototype.hasOwnProperty.call(attemptHydrationByScope, runScopeKey);
   const hasScopedRun = Object.prototype.hasOwnProperty.call(agentRunIdsByScope, runScopeKey);
   const agentRunId = hasScopedRun ? agentRunIdsByScope[runScopeKey] : null;
   const setAgentRunIdForScope = useCallback((scopeKey: string, runId: string | null) => {
@@ -253,19 +250,26 @@ export function AgentEditor({
   }, [runScopeKey, runStorageKey]);
   useEffect(() => {
     const storageKey = pendingAttemptStorageKey(runScopeKey);
-    if (!storageKey || typeof localStorage === 'undefined') return;
-    try {
-      const storedAttempt = localStorage.getItem(storageKey);
-      if (!storedAttempt) return;
-      const parsedAttempt = JSON.parse(storedAttempt) as unknown;
-      if (!isPendingAgentAttempt(parsedAttempt)) {
-        localStorage.removeItem(storageKey);
-        return;
+    if (storageKey && typeof localStorage !== 'undefined') {
+      try {
+        const storedAttempt = localStorage.getItem(storageKey);
+        if (storedAttempt) {
+          const parsedAttempt = JSON.parse(storedAttempt) as unknown;
+          if (!isPendingAgentAttempt(parsedAttempt)) {
+            localStorage.removeItem(storageKey);
+          } else {
+            attemptKeysByScope.current[runScopeKey] = parsedAttempt;
+          }
+        }
+      } catch {
+        try { localStorage.removeItem(storageKey); } catch { /* storage is unavailable */ }
       }
-      attemptKeysByScope.current[runScopeKey] = parsedAttempt;
-    } catch {
-      try { localStorage.removeItem(storageKey); } catch { /* storage is unavailable */ }
     }
+    setAttemptHydrationByScope(current => (
+      Object.prototype.hasOwnProperty.call(current, runScopeKey)
+        ? current
+        : { ...current, [runScopeKey]: true }
+    ));
   }, [runScopeKey]);
   useEffect(() => {
     if (!runStorageKey || !hasScopedRun || !agentRunId || typeof localStorage === 'undefined') return;
@@ -489,6 +493,12 @@ export function AgentEditor({
   const handleSubmit = async () => {
     if (!prompt.trim() && !imageUrl) return;
     const submissionScopeKey = runScopeKey;
+    if (!Object.prototype.hasOwnProperty.call(attemptHydrationByScope, submissionScopeKey)) {
+      updateTaskStateForScope(submissionScopeKey, {
+        error: '正在恢复待处理请求，请稍后重试',
+      });
+      return;
+    }
     const imageModelInfo = getCurrentImageModelInfo();
     const requestPayload = {
       image: imageUrl || '',
@@ -523,7 +533,6 @@ export function AgentEditor({
           version: 1,
           key: createAgentAttemptIdempotencyKey(submissionScopeKey),
           digest: requestDigest,
-          expiresAt: Date.now() + PENDING_ATTEMPT_TTL_MS,
         };
     const attemptIdempotencyKey = attempt.key;
     try {
@@ -649,7 +658,7 @@ export function AgentEditor({
       updateTaskState({
         isProcessing: false,
         progress: 0,
-        error: locallyCancelled ? '任务已在本地取消，等待服务端确认' : '任务已取消',
+        error: locallyCancelled ? '任务仅在当前进程取消，服务端状态尚未确认' : '任务已取消',
         completedAt: Date.now(),
       });
     } catch (error) {
@@ -1126,12 +1135,12 @@ export function AgentEditor({
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); handleSubmit(); }}
-              disabled={!prompt.trim() && !imageUrl}
+              disabled={(!prompt.trim() && !imageUrl) || !isAttemptHydrated}
               className="flex-1 py-1.5 rounded text-sm font-medium transition-colors"
               style={{
                 backgroundColor: accentColor,
                 color: isMonochrome ? '#fff' : '#1a1a1a',
-                opacity: (!prompt.trim() && !imageUrl) ? 0.5 : 1,
+                opacity: ((!prompt.trim() && !imageUrl) || !isAttemptHydrated) ? 0.5 : 1,
               }}
             >
               执行

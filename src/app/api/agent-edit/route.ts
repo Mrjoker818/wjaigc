@@ -1513,6 +1513,7 @@ export async function GET(request: NextRequest) {
         status: 'cancelled',
         confirmedLocal: true,
         durableTerminal: false,
+        message: 'Task cancelled only in the current process; durable server status is unknown',
       });
     }
 

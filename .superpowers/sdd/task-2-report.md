@@ -2015,3 +2015,99 @@ git diff --check
 
 - The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
   staged or committed.
+
+## R18 - Attempt hydration and atomic terminal-fact repair
+
+### RED evidence
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/lib/agent-task-persistence.test.ts src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot --silent
+# controlled exit 1; 3 files, 7 failed / 53 passed in 6.23s.
+# The first render left Execute enabled before hydration, pending records still
+# wrote expiresAt, failed terminal facts were prewritten with updateCloudTask,
+# a terminal loser threw a conflict, and real legacy/shadow cancellation did
+# not create an addressable local task.
+
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'; pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts --reporter=dot --silent
+# controlled exit 1; the new conflicting cancel/failed/timeout race rejected
+# with "Agent task terminal transition conflict" before it could prove winner
+# facts and exactly-once refund consistency.
+
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/lib/agent-task-persistence.test.ts --reporter=dot --silent
+# controlled exit 1 after review follow-up; non-completed result facts were
+# absent from settleFailedTask, and the storage-read-error test initially hit
+# the separate run-ID read before being narrowed to the pending-attempt key.
+```
+
+### Design and implementation
+
+- Each agent-editor scope is synchronously not ready until its passive
+  pending-attempt hydration effect has completed. Execute is disabled and the
+  submit handler independently fails closed before digesting, creating, or
+  posting a paid attempt. The effect never reads storage during render;
+  malformed attempts are removed, while valid attempts survive until a known
+  durable terminal. `expiresAt` and advisory TTL semantics are removed.
+- The first-frame behavior test keeps effects undrained, proves no POST and no
+  new key, then drains hydration and verifies the recovered key is sent.
+  A separate pending-attempt storage-read exception test proves a later
+  persistence failure prevents POST rather than treating the read exception
+  as permission to submit.
+- `recordAgentTaskTerminal` no longer prewrites terminal results. The locked
+  `settleFailedCloudTask` transaction atomically selects the first terminal
+  winner and writes status, top-level error, `result.taskError`, any supplied
+  `imageUrl`/`steps`/`finalResponse`, credit status, and refund. Later
+  cancel/fail/timeout contenders leave that row untouched.
+- The production recovery fixture now honors the real migration and admission
+  return shapes, and runs local-only cancellation under both `legacy` and
+  `shadow`. Confirmed-local UI language explicitly says only the current
+  process was cancelled and durable server status remains unknown.
+- `package.json` adds only the exact
+  `.superpowers/sdd/task-2-review-r18-findings.md` protected-baseline
+  allow-path.
+
+### GREEN verification
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/lib/agent-task-persistence.test.ts src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot --silent
+# 3 files / 61 tests passed in 6.24s.
+
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'; pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts --reporter=dot --silent
+# 1 file / 18 tests passed in 22.47s, including 24 conflicting terminal
+# contenders with winner-consistent status/error/result facts and one refund.
+
+pnpm ts-check
+# exit 0.
+
+$files = @(rg --files src/__tests__ | rg '(agent|chat-agent-tool-choice)'); pnpm exec vitest run @files --reporter=dot --silent
+# 22 files / 220 tests passed in 18.56s.
+
+pnpm exec vitest run src/__tests__/api/chat-agent-v2-generation-routing.test.ts src/__tests__/lib/chat-tools-analyze-image.test.ts src/__tests__/lib/chat-tools-governance.test.ts src/__tests__/components/chat-panel-generation-recovery-contract.test.ts src/__tests__/components/simple-chat-workspace-return-contract.test.ts src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot --silent
+# 7 files / 81 tests passed in 8.82s.
+
+pnpm exec vitest run --reporter=json --outputFile "$env:TEMP\r18-full-vitest.json" --silent
+# exit 0; 1,012 files / 2,729 passed / 68 skipped / 0 failed.
+
+pnpm exec eslint . --format json --output-file "$env:TEMP\r18-lint.json"
+# exit 0; 0 errors and 973 existing repository warnings.
+
+pnpm build
+# exit 0; production build compiled, typechecked, generated all 113 static pages,
+# and collected traces.
+```
+
+### R18 changed files
+
+- Production: `src/components/agent-editor.tsx`,
+  `src/lib/agent-task-persistence.ts`, `src/lib/cloud-task-storage.ts`,
+  `src/lib/task-core/billing-service.ts`, and `src/app/api/agent-edit/route.ts`.
+- Tests: `src/__tests__/components/agent-editor-run-scope.test.tsx`,
+  `src/__tests__/lib/agent-task-persistence.test.ts`,
+  `src/__tests__/api/agent-edit-production-recovery.test.ts`, and
+  `tests/integration/stage-4-agent-events-postgres.test.ts`.
+- Guard/evidence: `package.json`,
+  `.superpowers/sdd/task-2-review-r18-findings.md`, and this report.
+
+### R18 concerns
+
+- The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
+  staged or committed.

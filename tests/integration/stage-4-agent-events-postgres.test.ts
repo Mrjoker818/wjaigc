@@ -1217,4 +1217,110 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
       vi.resetModules();
     });
   }, 15_000);
+
+  postgresIt('keeps the winning terminal status, error, result, and refund together under conflicting settlement races', async () => {
+    await withIsolatedPostgres('stage-4-agent-edit-terminal-facts', async ({ databaseUrl, query }) => {
+      expect(runMigrations(databaseUrl).status).toBe(0);
+      vi.resetModules();
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const taskId = randomUUID();
+      const now = Date.now();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      const { createCloudTask } = await import('@/lib/cloud-task-storage');
+      const { recordAgentTaskTerminal: settleAgentTask } = await import('@/lib/agent-task-persistence');
+      await ensureCoreTables();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Agent terminal facts', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 93, 100, 7, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+      await createCloudTask({
+        id: taskId,
+        userId: ownerId,
+        projectId,
+        type: 'agent-edit',
+        status: 'processing',
+        progress: 50,
+        result: { submissionPayload: { prompt: 'keep this unrelated result data' } },
+        creditStatus: 'pending',
+        creditCost: 7,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const contenders = [
+        {
+          status: 'cancelled' as const,
+          code: 'R18_CANCELLED',
+          error: 'r18 cancelled winner',
+          imageUrl: '/terminal-cancelled.png',
+          steps: [{ toolName: 'cancel', success: true }],
+          finalResponse: 'cancelled terminal result',
+        },
+        {
+          status: 'failed' as const,
+          code: 'R18_FAILED',
+          error: 'r18 failed winner',
+          imageUrl: '/terminal-failed.png',
+          steps: [{ toolName: 'fail', success: false }],
+          finalResponse: 'failed terminal result',
+        },
+        {
+          status: 'timeout' as const,
+          code: 'R18_TIMEOUT',
+          error: 'r18 timeout winner',
+          imageUrl: '/terminal-timeout.png',
+          steps: [{ toolName: 'timeout', success: false }],
+          finalResponse: 'timeout terminal result',
+        },
+      ];
+      await expect(Promise.all(contenders.flatMap(contender => (
+        Array.from({ length: 8 }, () => settleAgentTask(taskId, contender))
+      )))).resolves.toHaveLength(24);
+
+      const facts = await query<{
+        status: 'cancelled' | 'failed' | 'timeout';
+        error: string;
+        result: { taskError?: { code?: string; message?: string }; submissionPayload?: unknown };
+        credit_status: string;
+        balance: string;
+        total_used: string;
+        refunds: string;
+      }>(
+        `SELECT task.status, task.error, task.result, task.credit_status,
+                credits.balance::text AS balance, credits.total_used::text AS total_used,
+                (SELECT count(*)::text FROM wujie_credit_transactions
+                 WHERE task_id = task.id AND type = 'refund') AS refunds
+         FROM cloud_tasks task
+         JOIN wujie_credits credits ON credits.user_id = task.user_id
+         WHERE task.id = $1`,
+        [taskId],
+      );
+      const fact = facts.rows[0];
+      expect(fact).toBeDefined();
+      const winner = contenders.find(contender => contender.status === fact?.status);
+      expect(winner).toBeDefined();
+      expect(fact).toMatchObject({
+        error: winner?.error,
+        result: {
+          submissionPayload: { prompt: 'keep this unrelated result data' },
+          taskError: { code: winner?.code, message: winner?.error },
+          imageUrl: winner?.imageUrl,
+          steps: winner?.steps,
+          finalResponse: winner?.finalResponse,
+        },
+        credit_status: 'refunded',
+        balance: '100',
+        total_used: '0',
+        refunds: '1',
+      });
+      vi.resetModules();
+    });
+  }, 15_000);
 });

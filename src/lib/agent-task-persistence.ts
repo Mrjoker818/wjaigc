@@ -72,8 +72,6 @@ export async function recordAgentTaskProgress(taskId: string, progress: number, 
 }
 
 export async function recordAgentTaskTerminal(taskId: string, input: AgentTaskTerminal): Promise<void> {
-  const current = await getCloudTaskById(taskId);
-  if (!current) return;
   if (input.status !== 'completed') {
     const normalizedError = normalizeTaskError(
       { code: input.code || 'AGENT_TASK_ERROR', message: input.error || `Agent task ${input.status}` },
@@ -84,30 +82,23 @@ export async function recordAgentTaskTerminal(taskId: string, input: AgentTaskTe
         retryable: input.retryable ?? input.status === 'timeout',
       },
     );
-    await updateCloudTask(taskId, {
-      result: {
-        ...(current.result || {}),
-        ...(input.imageUrl || input.steps?.length || input.finalResponse ? {
+    const terminalResult = input.imageUrl || input.steps?.length || input.finalResponse
+      ? {
           imageUrl: input.imageUrl || '',
           steps: input.steps || [],
           finalResponse: input.finalResponse || '',
-        } : {}),
-        taskError: normalizedError,
-      },
-      expectedStatuses: ['queued', 'pending', 'processing'],
-    });
-    const terminal = await settleFailedTask({
+        }
+      : undefined;
+    await settleFailedTask({
       taskId,
       status: input.status,
       error: normalizedError,
+      ...(terminalResult ? { result: terminalResult } : {}),
     });
-    if (!terminal.transitioned) {
-      const settled = await getCloudTaskById(taskId);
-      if (settled?.status === input.status) return;
-      throw new Error('Agent task terminal transition conflict');
-    }
     return;
   }
+  const current = await getCloudTaskById(taskId);
+  if (!current) return;
   const terminal = await transitionTask({
     taskId,
     from: ['processing'],

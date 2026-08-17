@@ -130,7 +130,8 @@ function storedAttemptKey(storage: Storage, scope: string): string | null {
   return (JSON.parse(storedAttempt) as { key?: string }).key || null;
 }
 
-function renderEditor(selectedEntityId: string): void {
+function renderEditor(selectedEntityId: string, options: { drainEffects?: boolean } = {}): void {
+  const drainEffects = options.drainEffects ?? true;
   for (let renderCount = 0; renderCount < 10; renderCount++) {
     hooks.cursor = 0;
     hooks.dirty = false;
@@ -149,11 +150,18 @@ function renderEditor(selectedEntityId: string): void {
     } finally {
       isRendering = false;
     }
+    if (!drainEffects) return;
     const effects = hooks.pendingEffects.splice(0);
     effects.forEach(effect => effect());
     if (!hooks.dirty) return;
   }
   throw new Error('AgentEditor hook harness did not settle');
+}
+
+function drainEditorEffects(selectedEntityId: string): void {
+  const effects = hooks.pendingEffects.splice(0);
+  effects.forEach(effect => effect());
+  if (hooks.dirty || hooks.pendingEffects.length > 0) renderEditor(selectedEntityId);
 }
 
 function resetRenderHarness(): void {
@@ -191,7 +199,7 @@ function findButton(
   text: string,
   node: unknown = lastTree,
   visited = new Set<object>(),
-): { props: { onClick?: (event: { stopPropagation(): void }) => unknown } } {
+): { props: { onClick?: (event: { stopPropagation(): void }) => unknown; disabled?: boolean } } {
   if (Array.isArray(node)) {
     for (const child of node) {
       try {
@@ -201,7 +209,7 @@ function findButton(
   } else if (node && typeof node === 'object' && 'props' in node) {
     if (visited.has(node)) throw new Error(`Button not found: ${text}`);
     visited.add(node);
-    const element = node as { type?: unknown; props: { children?: unknown; onClick?: (event: { stopPropagation(): void }) => unknown } };
+    const element = node as { type?: unknown; props: { children?: unknown; onClick?: (event: { stopPropagation(): void }) => unknown; disabled?: boolean } };
     if (element.type === 'button' && elementHasText(element.props.children, text)) return element;
     try {
       return findButton(text, element.props.children, visited);
@@ -488,6 +496,46 @@ describe('AgentEditor selected-image run scope', () => {
     expect(retryKey).toBe(firstKey);
   });
 
+  it('fails closed on the first frame until the current scope hydrates its persisted attempt', async () => {
+    const recoveredKey = 'agent-editor:project-1:image-a:recovered';
+    const recoveredDigest = '07'.repeat(32);
+    const storage = storageHarness([
+      ['wujie_agent_attempt:project-1:image-a', JSON.stringify({
+        version: 1,
+        key: recoveredKey,
+        digest: recoveredDigest,
+      })],
+    ]);
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('crypto', {
+      randomUUID: () => 'unexpected-new-key',
+      subtle: { digest: async () => new Uint8Array(32).fill(7).buffer },
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (String(input) === '/api/agent-edit' && init?.method === 'POST') return Promise.resolve(Response.json({ taskId: 'task-a' }));
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a', { drainEffects: false });
+    expect(findButton('执行').props.disabled).toBe(true);
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/agent-edit')).toHaveLength(0);
+    expect(storedAttemptKey(storage, 'project-1:image-a')).toBe(recoveredKey);
+
+    drainEditorEffects('image-a');
+    expect(findButton('执行').props.disabled).toBe(false);
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const submit = fetchMock.mock.calls.find(([input]) => String(input) === '/api/agent-edit');
+    expect(new Headers((submit?.[1] as RequestInit).headers).get('idempotency-key')).toBe(recoveredKey);
+    expect(storedAttemptKey(storage, 'project-1:image-a')).toBe(recoveredKey);
+  });
+
   it.each([
     [400, null],
     [401, 'not json'],
@@ -677,7 +725,7 @@ describe('AgentEditor selected-image run scope', () => {
     renderEditor('image-a');
 
     expect(storedAttemptKey(storage, 'project-1:image-a')).toMatch(/^agent-editor:/);
-    expect(elementHasText(lastTree, '任务已在本地取消，等待服务端确认')).toBe(true);
+    expect(elementHasText(lastTree, '任务仅在当前进程取消，服务端状态尚未确认')).toBe(true);
   });
 
   it('clears the key only for a structured terminal replay and shows its terminal state', async () => {
@@ -776,7 +824,30 @@ describe('AgentEditor selected-image run scope', () => {
     expect(elementHasText(lastTree, '无法安全保存')).toBe(true);
   });
 
-  it('retains an expired valid attempt across refresh and reuses it for the accepted server operation', async () => {
+  it('fails closed without POST when pending-attempt storage cannot be read during hydration', async () => {
+    const storage = failingStorage();
+    storage.getItem = key => {
+      if (key.startsWith('wujie_agent_attempt:')) {
+        throw new DOMException('storage disabled', 'SecurityError');
+      }
+      return null;
+    };
+    vi.stubGlobal('localStorage', storage);
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (String(input) === '/api/agent-edit' && init?.method === 'POST') return Promise.resolve(Response.json({ taskId: 'unexpected' }));
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/agent-edit')).toHaveLength(0);
+  });
+
+  it('retains a valid pending attempt across refresh and reuses it for the accepted server operation', async () => {
     const storage = storageHarness([]);
     const acceptedKeys = new Set<string>();
     vi.stubGlobal('localStorage', storage);
@@ -798,9 +869,6 @@ describe('AgentEditor selected-image run scope', () => {
     findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
     await new Promise(resolve => setTimeout(resolve, 0));
     const firstKey = storedAttemptKey(storage, 'project-1:image-a');
-    const record = JSON.parse(storage.getItem('wujie_agent_attempt:project-1:image-a') || '{}');
-    storage.setItem('wujie_agent_attempt:project-1:image-a', JSON.stringify({ ...record, expiresAt: 1 }));
-
     resetRenderHarness();
     renderEditor('image-a');
     findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
@@ -828,7 +896,7 @@ describe('AgentEditor selected-image run scope', () => {
     const persisted = storage.getItem('wujie_agent_attempt:project-1:image-a') || '';
     expect(persisted).toMatch(/"version":1/);
     expect(persisted).toMatch(/"digest":"[a-f0-9]{64}"/);
-    expect(persisted).toMatch(/"expiresAt":\d+/);
+    expect(persisted).not.toContain('expiresAt');
     expect(persisted).not.toContain('/images/image-a.png');
     expect(persisted).not.toContain('a different request');
   });

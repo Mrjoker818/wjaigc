@@ -178,6 +178,7 @@ export interface SettleFailedCloudTaskInput {
   taskId: string;
   status: CloudTaskFailureStatus;
   error: TaskErrorInput;
+  result?: Record<string, unknown>;
   expectedRevision?: number;
   terminalIdentity?: TaskTerminalIdentity;
 }
@@ -575,6 +576,7 @@ export async function settleFailedCloudTask(
        SET status = $2,
            progress = 0,
            error = $3,
+           result = COALESCE(result, '{}'::jsonb) || $10::jsonb,
            credit_status = CASE
              WHEN $4::boolean THEN 'refunded'
              WHEN credit_cost <= 0 THEN 'not-applicable'
@@ -601,6 +603,7 @@ export async function settleFailedCloudTask(
          input.terminalIdentity?.eventId || '',
          input.terminalIdentity?.requestDigest || '',
          input.terminalIdentity?.eventType || '',
+         JSON.stringify({ ...(input.result || {}), taskError: input.error }),
        ],
     );
     await client.query('COMMIT');

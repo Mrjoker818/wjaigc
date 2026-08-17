@@ -124,9 +124,9 @@ vi.mock('@/lib/agent-runtime/context-adapters', () => ({
   resolveSelectedAgentMediaUrl: vi.fn().mockReturnValue('/source.png'),
 }));
 vi.mock('@/lib/agent-runtime/admission-gate', () => ({
-  admitAuthorizedAgentExecution: vi.fn(async ({ admit }: { admit: (context: Record<string, unknown>) => unknown }) => ({
-    value: await admit({ selectedEntityVersionUrls: { 'entity-1': '/source.png' } }),
-  })),
+  admitAuthorizedAgentExecution: vi.fn(async ({ admit }: { admit: (context: Record<string, unknown>) => unknown }) => (
+    admit({ selectedEntityVersionUrls: { 'entity-1': '/source.png' } })
+  )),
 }));
 vi.mock('@/lib/agent-engine', async importOriginal => {
   const actual = await importOriginal<typeof import('@/lib/agent-engine')>();
@@ -192,7 +192,10 @@ vi.mock('@/lib/credits', () => ({
 vi.mock('@/lib/task-core/entry-migration', () => ({
   resolveTaskCoreMode: vi.fn().mockReturnValue('core-v2'),
   createTaskEntryAudit: vi.fn().mockReturnValue({ entry: 'agent', mode: 'core-v2' }),
-  executeTaskEntryMigration: vi.fn(async (input: { coreV2: () => Promise<unknown> }) => input.coreV2()),
+  executeTaskEntryMigration: vi.fn(async (input: { coreV2: () => Promise<unknown> }) => ({
+    value: await input.coreV2(),
+    mode: 'core-v2',
+  })),
 }));
 vi.mock('@/lib/task-core/billing-service', () => ({
   createBillableTask: vi.fn(async (input: Record<string, unknown>) => {
@@ -695,7 +698,8 @@ describe('Agent route default-adapter production recovery', () => {
     expect(state.tasks.get(taskId)).toMatchObject({ status: 'cancelled' });
   });
 
-  it('cancels a local-only legacy task with an explicit non-durable confirmation', async () => {
+  it.each(['legacy', 'shadow'] as const)('cancels a local-only %s task with an explicit non-durable confirmation', async mode => {
+    process.env.WUJIE_AGENT_RUNTIME_MODE = mode;
     const response = await agentPost(agentRequest('local-only-cancel') as never);
     const { taskId } = await response.json() as { taskId: string };
     state.hiddenCloudTaskIds.add(taskId);
