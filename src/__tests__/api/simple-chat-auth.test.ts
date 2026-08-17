@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   createWorkspacePlacement: vi.fn(),
   createVersionWithPlacement: vi.fn(),
   projectCompletedTaskToAssets: vi.fn(),
+  recordTaskProjectionCompleted: vi.fn(),
   getInternalApiUrl: vi.fn((path: string) => `http://127.0.0.1:5000${path}`),
   getInternalRequestHeaders: vi.fn(),
 }));
@@ -54,6 +55,7 @@ vi.mock('coze-coding-dev-sdk', () => ({
 
 vi.mock('@/lib/asset-core/task-projector', () => ({
   projectCompletedTaskToAssets: mocks.projectCompletedTaskToAssets,
+  recordTaskProjectionCompleted: mocks.recordTaskProjectionCompleted,
 }));
 
 import { POST } from '@/app/api/simple-chat/chat/route';
@@ -182,6 +184,7 @@ describe('POST /api/simple-chat/chat', () => {
       placements: [{ id: 'chat-placement-generated', entityId: 'assistant-message:0' }],
       reused: false,
     });
+    mocks.recordTaskProjectionCompleted.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {

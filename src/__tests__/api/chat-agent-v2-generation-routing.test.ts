@@ -87,7 +87,18 @@ vi.mock('@/lib/asset-core/service', () => {
     }),
   };
 });
-vi.mock('@/lib/asset-core/task-projector', () => ({ projectCompletedTaskToAssets: vi.fn() }));
+vi.mock('@/lib/asset-core/task-projector', () => ({
+  projectCompletedTaskToAssets: vi.fn().mockResolvedValue({
+    versions: [{
+      id: 'version-generated',
+      assetId: 'asset-generated',
+      file: { url: '/api/serve-upload/generated.png' },
+    }],
+    placements: [{ id: 'placement-generated', entityId: 'assistant-message:0' }],
+    reused: false,
+  }),
+  recordTaskProjectionCompleted: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('coze-coding-dev-sdk', () => ({
   SearchClient: class {},
   Config: class {},

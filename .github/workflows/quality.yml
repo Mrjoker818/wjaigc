@@ -204,6 +204,91 @@ jobs:
             /tmp/wujie-stage3-server.log
           if-no-files-found: error
 
+  stage-4-workspace-interoperability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGDATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      POSTGRES_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      E2E_STAGE4_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      E2E_STAGE4_RUN_ID: ci_${{ github.run_id }}_${{ github.run_attempt }}
+      E2E_BASE_URL: http://127.0.0.1:5000
+      WUJIE_AUTH_SECRET: stage4-ci-auth-secret-minimum-32-bytes-${{ github.run_id }}-${{ github.run_attempt }}
+      INTERNAL_API_SECRET: stage4-ci-internal-${{ github.run_id }}-${{ github.run_attempt }}
+      WUJIE_ADMIN_PASSWORD: Stage4-Admin-${{ github.run_id }}!
+      WUJIE_DATA_DIR: /tmp/wujie-stage4-data
+      WUJIE_AGENT_RUNTIME_MODE: agent-v2
+      WUJIE_WORKFLOW_RENDERER_MODE: react-flow-v2
+      E2E_STAGE4_EXPECTED_AGENT_MODE: agent-v2
+      E2E_STAGE4_EXPECTED_WORKFLOW_RENDERER_MODE: react-flow-v2
+      PLAYWRIGHT_WORKERS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Generate Stage 4 inventory
+        run: pnpm test:inventory:stage-4
+      - name: Run Stage 4 PostgreSQL event and accounting tests
+        run: >-
+          pnpm exec vitest run
+          tests/integration/stage-4-agent-events-postgres.test.ts
+          tests/integration/stage-4-agent-accounting-postgres.test.ts
+          --pool=forks --poolOptions.forks.singleFork=true
+      - name: Prepare Stage 4 application database
+        run: pnpm migrate
+      - name: Build production application
+        run: pnpm build
+      - name: Start production application
+        shell: bash
+        run: |
+          pnpm start > /tmp/wujie-stage4-server.log 2>&1 &
+          echo $! > /tmp/wujie-stage4-server.pid
+          for attempt in {1..90}; do
+            if curl --fail --silent "$E2E_BASE_URL/" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wujie-stage4-server.log
+          exit 1
+      - name: Run five-browser Stage 4 workspace matrix
+        run: pnpm test:e2e:stage-4
+      - name: Upload Stage 4 browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-4-workspace-evidence-${{ github.sha }}
+          path: |
+            test-results/stage-4-baseline/
+            playwright-report/
+            .playwright-output/
+            /tmp/wujie-stage4-server.log
+          if-no-files-found: error
+
   real-p0-browser:
     if: >-
       github.event_name != 'pull_request' ||

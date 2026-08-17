@@ -25,6 +25,7 @@ import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from "@/lib
 import { useTheme } from "@/app/simple-chat/providers";
 import { AgentProgressTimeline } from "@/components/agent-runtime/AgentProgressTimeline";
 import { useAgentRunEvents } from "@/components/agent-runtime/use-agent-run-events";
+import { isWorkspaceResultScopeCurrent } from "@/lib/asset-core/workspace-transfer";
 
 type ChatModelInfo = {
   id: string;
@@ -261,10 +262,15 @@ export default function ChatArea({
 
   // Messages: sync from task
   const [messages, setMessages] = useState<SimpleChatMessage[]>((task?.messages || []).filter(Boolean));
+  const projectIdRef = useRef(project?.id);
+  const taskIdRef = useRef(task?.id);
+  projectIdRef.current = project?.id;
+  taskIdRef.current = task?.id;
 
   // Sync when task changes
   useEffect(() => {
     if (task) {
+      setIsStreaming(false);
       setMessages((task.messages || []).filter(Boolean));
       setSelectedModel(task.model);
       setSelectedProviderId(task.providerId);
@@ -683,11 +689,18 @@ export default function ChatArea({
     if (isStreaming || !project || !task) return;
 
     setIsStreaming(true);
+    const requestProjectId = project.id;
+    const requestTaskId = task.id;
+    const requestScopeIsCurrent = () => (
+      isWorkspaceResultScopeCurrent(requestProjectId, projectIdRef.current)
+      && requestTaskId === taskIdRef.current
+    );
     const userMessageId = Math.random().toString(36).slice(2, 10);
     const assistantMessageId = Math.random().toString(36).slice(2, 10);
     const attachmentRefs = await Promise.all(uploadedImages.map((attachment, index) => (
       registerChatAttachment(attachment, userMessageId, index, project.id, task.id)
     )));
+    if (!requestScopeIsCurrent()) return;
     const mediaSlots = alignSimpleChatMediaSlots(uploadedImages, attachmentRefs);
 
     const userMsg: SimpleChatMessage = {
@@ -822,6 +835,10 @@ export default function ChatArea({
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (!requestScopeIsCurrent()) {
+          await reader.cancel();
+          return;
+        }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || "";
@@ -930,12 +947,14 @@ export default function ChatArea({
         }
       }
     } catch {
+      if (!requestScopeIsCurrent()) return;
       setMessages(prev => prev.map(message => (
         message.id === assistantMessageId
           ? { ...message, content: '抱歉，请求失败，请重试。' }
           : message
       )));
     } finally {
+      if (!requestScopeIsCurrent()) return;
       setIsStreaming(false);
       // 估算 token 用量（中文≈1.5字/token，英文≈4字符/token，取近似值）
       const estimateTokens = (text: string) => {

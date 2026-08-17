@@ -152,6 +152,8 @@ describe('NodeEditor react-flow-v2 integration', () => {
       expect(element).not.toBeNull();
       return element!;
     });
+    expect(container.querySelector('[data-workflow-react-flow-surface]')?.getAttribute('aria-hidden'))
+      .toBe('false');
     expect(screen.getByText(/drag source/i)).toBeTruthy();
     await waitFor(() => {
       const listeners = (flowNode as HTMLElement & { __on?: Array<{ type: string }> }).__on;

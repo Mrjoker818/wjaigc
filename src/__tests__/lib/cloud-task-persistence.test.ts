@@ -53,7 +53,12 @@ describe('cloud-task-persistence', () => {
     createCloudTask.mockReset().mockResolvedValue(true);
     getCloudTaskById.mockReset();
     projectCompletedTaskToAssets.mockReset().mockResolvedValue({
-      versions: [{ id: 'version-result-1' }],
+      versions: [{
+        id: 'version-result-1',
+        assetId: 'asset-result-1',
+        file: { url: '/uploads/result.png' },
+      }],
+      placements: [{ id: 'placement-result-1', entityId: 'remote-task-1:0' }],
       reused: false,
     });
     recordTaskProjectionCompleted.mockReset().mockResolvedValue(undefined);
@@ -259,11 +264,19 @@ describe('cloud-task-persistence', () => {
       workspace: 'canvas',
       sourceEntityId: 'remote-task-1',
       parentVersionIds: [],
+      idempotencyKey: 'task-workspace:remote-task-1:canvas:project-a:remote-task-1',
     });
     expect(recordTaskProjectionCompleted).toHaveBeenCalledWith({
       actorUserId: 'user-a',
       taskId: 'remote-task-1',
       versionIds: ['version-result-1'],
+      references: [{
+        assetId: 'asset-result-1',
+        assetVersionId: 'version-result-1',
+        placementId: 'placement-result-1',
+        entityId: 'remote-task-1:0',
+        url: '/uploads/result.png',
+      }],
     });
     expect(updateCloudTask).not.toHaveBeenCalled();
   });

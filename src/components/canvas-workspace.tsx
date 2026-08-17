@@ -120,6 +120,8 @@ import {
 } from '@/lib/asset-core/canvas-adapter';
 import {
   canvasEntityIdForTransferredReference,
+  extractTaskAssetReferences,
+  isWorkspaceResultScopeCurrent,
   prepareCanvasAssetForChat,
 } from '@/lib/asset-core/workspace-transfer';
 import {
@@ -1293,7 +1295,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, [currentProject?.id]);
 
   const handleSendCanvasImageToChat = useCallback(async (image: CanvasImage) => {
+    const expectedProjectId = currentProjectRef.current?.id;
     const transferredImage = await resolveCanvasImageForChat(image);
+    if (!isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)) return;
     setChatInitialImage(transferredImage);
     setChatTabOpen(true);
   }, [resolveCanvasImageForChat]);
@@ -2225,6 +2229,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       ? resultRecord.result as Record<string, unknown>
       : {};
     const resultUrl = extractGeneratedImageUrls(resultRecord)[0];
+    const projectedReference = extractTaskAssetReferences(resultRecord)[0];
     projectWorkspaceTaskEvent({
       taskId: event.taskId,
       outputIndex: 0,
@@ -2236,15 +2241,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         result: {
           url: resultUrl,
           sourceUrl: resultUrl,
-          assetId: typeof resultRecord.assetId === 'string'
+          assetId: projectedReference?.assetId || (typeof resultRecord.assetId === 'string'
             ? resultRecord.assetId
-            : typeof nestedResult.assetId === 'string' ? nestedResult.assetId : undefined,
-          assetVersionId: typeof resultRecord.assetVersionId === 'string'
+            : typeof nestedResult.assetId === 'string' ? nestedResult.assetId : undefined),
+          assetVersionId: projectedReference?.assetVersionId || (typeof resultRecord.assetVersionId === 'string'
             ? resultRecord.assetVersionId
-            : typeof nestedResult.assetVersionId === 'string' ? nestedResult.assetVersionId : undefined,
-          placementId: typeof resultRecord.placementId === 'string'
+            : typeof nestedResult.assetVersionId === 'string' ? nestedResult.assetVersionId : undefined),
+          placementId: projectedReference?.placementId || (typeof resultRecord.placementId === 'string'
             ? resultRecord.placementId
-            : typeof nestedResult.placementId === 'string' ? nestedResult.placementId : undefined,
+            : typeof nestedResult.placementId === 'string' ? nestedResult.placementId : undefined),
         },
       } : {}),
       ...((status === 'failed' || status === 'cancelled' || status === 'timeout') ? {
@@ -3322,6 +3327,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // 加载图片真实尺寸
   // 添加多张图片到画布（自动排列布局）
   const handleAddImages = useCallback(async (imageInputs: Array<string | WorkflowCanvasInsertionItem>, sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType }) => {
+    const expectedProjectId = currentProjectRef.current?.id;
     const newImages: CanvasImage[] = [];
 
     // Find source image for positioning if provided
@@ -3412,7 +3418,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       });
     }
 
-    if (newImages.length > 0) {
+    if (
+      newImages.length > 0
+      && isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)
+    ) {
       const previousImages = latestImagesRef.current;
       const insertedImages = sourceImg
         ? newImages
@@ -3472,6 +3481,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       await handleAddImages([reference.url], meta?.sourceImageId, meta);
       return;
     }
+    const expectedProjectId = currentProject.id;
     const requestNonce = Date.now();
     const response = await fetch('/api/assets/transfer', {
       method: 'POST',
@@ -3491,6 +3501,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (!transferred.assetVersionId || !transferred.placementId) {
       throw new Error('Asset transfer returned an incomplete reference');
     }
+    if (!isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)) return;
     await handleAddImages([{
       outputNodeId: `embedded-chat:${transferred.placementId}`,
       url: transferred.url,

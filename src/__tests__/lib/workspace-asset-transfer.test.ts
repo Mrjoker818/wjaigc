@@ -30,6 +30,28 @@ describe('managed workspace reference identity', () => {
     ]);
   });
 
+  it('prefers complete projected placement references over URL-only reconstruction', () => {
+    expect(extractTaskAssetReferences({
+      imageUrls: ['/legacy-order.png'],
+      assetProjection: {
+        versionIds: ['legacy-version'],
+        references: [{
+          url: '/canonical.png',
+          assetId: 'asset-a',
+          assetVersionId: 'version-a',
+          placementId: 'placement-a',
+          entityId: 'canvas-result-a',
+        }],
+      },
+    })).toEqual([{
+      url: '/canonical.png',
+      assetId: 'asset-a',
+      assetVersionId: 'version-a',
+      placementId: 'placement-a',
+      entityId: 'canvas-result-a',
+    }]);
+  });
+
   it('merges progressive task references by immutable version identity', () => {
     expect(mergeWorkspaceAssetReferences(
       [{ url: '/old-a.png', assetVersionId: 'version-a' }],

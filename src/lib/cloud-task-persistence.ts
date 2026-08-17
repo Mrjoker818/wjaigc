@@ -18,12 +18,11 @@ import type {
 import { normalizeTaskError } from '@/lib/task-core/task-error';
 import type { TaskEntryAudit } from '@/lib/task-core/entry-migration';
 import {
-  projectCompletedTaskToAssets,
-  recordTaskProjectionCompleted,
   recordTaskLateResultAudit,
   recordTaskProjectionPending,
   type ProjectCompletedTaskInput,
 } from '@/lib/asset-core/task-projector';
+import { projectAgentResultToWorkspace } from '@/lib/agent-runtime/workspace-results';
 
 interface ImageTaskSubmission {
   taskId: string;
@@ -237,16 +236,14 @@ async function projectCompletedTask(task: ProjectableTask): Promise<void> {
   }
   const target = taskProjectionTarget(task);
   try {
-    const projected = await projectCompletedTaskToAssets({
+    const targetWorkspaceId = target.workspaceId
+      || (target.workspace === 'canvas' ? task.projectId : `${target.workspace}:${task.projectId}`);
+    await projectAgentResultToWorkspace({
       actorUserId: task.userId,
       taskId: task.id,
       targetProjectId: task.projectId,
       ...target,
-    });
-    await recordTaskProjectionCompleted({
-      actorUserId: task.userId,
-      taskId: task.id,
-      versionIds: projected.versions.map((version) => version.id),
+      idempotencyKey: `task-workspace:${task.id}:${target.workspace}:${targetWorkspaceId}:${target.sourceEntityId}`,
     });
   } catch (error) {
     await recordProjectionPendingSafely({

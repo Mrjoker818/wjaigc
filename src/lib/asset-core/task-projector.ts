@@ -7,6 +7,7 @@ import type {
   AssetFile,
   AssetKind,
   AssetVersion,
+  WorkspaceAssetReference,
   WorkspaceEntityType,
   WorkspaceKind,
 } from './types';
@@ -35,6 +36,7 @@ export interface ProjectCompletedTaskInput {
   sourceEntityId?: string;
   parentVersionIds: string[];
   projectionMode?: TaskProjectionMode;
+  idempotencyKey?: string;
 }
 
 export interface TaskProjectionPendingInput {
@@ -55,6 +57,7 @@ export interface TaskProjectionCompletedInput {
   actorUserId: string;
   taskId: string;
   versionIds: string[];
+  references?: WorkspaceAssetReference[];
 }
 
 export interface TaskProjectionCreateInput {
@@ -70,6 +73,8 @@ export interface TaskProjectionCreateInput {
   entityId: string;
   idempotencyKey: string;
   requestDigest: string;
+  placementIdempotencyKey?: string;
+  placementRequestDigest?: string;
   providerId?: string;
   modelId?: string;
   parameters: Record<string, unknown>;
@@ -456,8 +461,53 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
     assetId: string,
     versionId: string,
   ): Promise<TaskProjectionPlacementReference> {
-    const existing = await this.client.query<{ id: string; asset_version_id: string; entity_id: string }>(
-      `SELECT id, asset_version_id, entity_id FROM wujie_workspace_placements
+    if (input.placementIdempotencyKey) {
+      await this.client.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`task-placement:${input.actorUserId}:${input.placementIdempotencyKey}`],
+      );
+      const bound = await this.client.query<{
+        id: string;
+        project_id: string;
+        asset_version_id: string;
+        workspace_kind: WorkspaceKind;
+        workspace_id: string;
+        entity_type: WorkspaceEntityType;
+        entity_id: string;
+        request_digest: string | null;
+      }>(
+        `SELECT id, project_id, asset_version_id, workspace_kind, workspace_id,
+                entity_type, entity_id, request_digest
+         FROM wujie_workspace_placements
+         WHERE owner_id = $1 AND idempotency_key = $2
+         FOR UPDATE`,
+        [input.actorUserId, input.placementIdempotencyKey],
+      );
+      const existingBinding = bound.rows[0];
+      if (existingBinding) {
+        if (
+          existingBinding.project_id !== input.projectId
+          || existingBinding.asset_version_id !== versionId
+          || existingBinding.workspace_kind !== input.workspace
+          || existingBinding.workspace_id !== input.workspaceId
+          || existingBinding.entity_type !== input.entityType
+          || existingBinding.entity_id !== input.entityId
+          || existingBinding.request_digest !== input.placementRequestDigest
+        ) {
+          throw new TaskProjectionError('TASK_PROJECTION_CONFLICT');
+        }
+        return { id: existingBinding.id, entityId: existingBinding.entity_id };
+      }
+    }
+
+    const existing = await this.client.query<{
+      id: string;
+      asset_version_id: string;
+      entity_id: string;
+      idempotency_key: string | null;
+    }>(
+      `SELECT id, asset_version_id, entity_id, idempotency_key
+       FROM wujie_workspace_placements
        WHERE owner_id = $1 AND project_id = $2 AND workspace_kind = $3
          AND workspace_id = $4 AND entity_type = $5 AND entity_id = $6
          AND status = 'active'
@@ -471,6 +521,32 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
       if (existing.rows[0].asset_version_id !== versionId) {
         throw new TaskProjectionError('TASK_PROJECTION_CONFLICT');
       }
+      if (input.placementIdempotencyKey) {
+        if (
+          existing.rows[0].idempotency_key
+          && existing.rows[0].idempotency_key !== input.placementIdempotencyKey
+        ) {
+          throw new TaskProjectionError('TASK_PROJECTION_CONFLICT');
+        }
+        await this.client.query(
+          `UPDATE wujie_workspace_placements
+           SET idempotency_key = $4, request_digest = $5, source_version_id = $6,
+               metadata = metadata || $7::jsonb, updated_at = now()
+           WHERE id = $1 AND owner_id = $2 AND project_id = $3
+             AND (idempotency_key IS NULL OR idempotency_key = $4)`,
+          [
+            existing.rows[0].id,
+            input.actorUserId,
+            input.projectId,
+            input.placementIdempotencyKey,
+            input.placementRequestDigest,
+            versionId,
+            JSON.stringify({
+              resultProjectionIdempotencyKey: input.placementIdempotencyKey,
+            }),
+          ],
+        );
+      }
       return { id: existing.rows[0].id, entityId: existing.rows[0].entity_id };
     }
     const timestamp = new Date().toISOString();
@@ -479,15 +555,25 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
       `INSERT INTO wujie_workspace_placements(
         id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
         workspace_id, entity_type, entity_id, status, deleted_at, transform,
-        metadata, created_at, updated_at
+        metadata, idempotency_key, request_digest, source_version_id, created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', NULL, '{}'::jsonb,
-        $10::jsonb, $11, $11
+        $10::jsonb, $11, $12, $13, $14, $14
       )`,
       [
         placementId, input.actorUserId, input.projectId, assetId, versionId,
         input.workspace, input.workspaceId, input.entityType, input.entityId,
-        JSON.stringify({ source: 'task-projection', taskId: input.taskId, outputIndex: input.outputIndex }),
+        JSON.stringify({
+          source: 'task-projection',
+          taskId: input.taskId,
+          outputIndex: input.outputIndex,
+          ...(input.placementIdempotencyKey
+            ? { resultProjectionIdempotencyKey: input.placementIdempotencyKey }
+            : {}),
+        }),
+        input.placementIdempotencyKey ?? null,
+        input.placementRequestDigest ?? null,
+        input.placementIdempotencyKey ? versionId : null,
         timestamp,
       ],
     );
@@ -527,7 +613,11 @@ export function createTaskAssetProjector(
       }
       return repository.transaction(async (transaction) => {
         const task = await transaction.findTaskForUpdate(input.actorUserId, input.taskId);
-        if (!task || !await transaction.findProject(input.actorUserId, input.targetProjectId)) {
+        if (
+          !task
+          || (task.projectId && task.projectId !== input.targetProjectId)
+          || !await transaction.findProject(input.actorUserId, input.targetProjectId)
+        ) {
           throw new TaskProjectionError('TASK_PROJECTION_NOT_FOUND');
         }
         const urls = outputUrls(task);
@@ -587,6 +677,24 @@ export function createTaskAssetProjector(
             parentVersionIds: input.parentVersionIds,
             projectionMode,
           });
+          const placementIdempotencyKey = input.idempotencyKey
+            ? `agent-result:${input.idempotencyKey}:${outputIndex}`
+            : undefined;
+          const placementRequestDigest = placementIdempotencyKey
+            ? stableDigest({
+                actorUserId: input.actorUserId,
+                taskId: task.id,
+                targetProjectId: input.targetProjectId,
+                workspace: input.workspace,
+                workspaceId: targetWorkspaceId,
+                sourceEntityId,
+                entityType: targetEntityType,
+                entityId: `${sourceEntityId}:${outputIndex}`,
+                callerIdempotencyKey: input.idempotencyKey,
+                outputIndex,
+                outputDigest,
+              })
+            : undefined;
           const created = await transaction.createProjection({
             actorUserId: input.actorUserId,
             projectId: input.targetProjectId,
@@ -605,6 +713,8 @@ export function createTaskAssetProjector(
             entityId: `${sourceEntityId}:${outputIndex}`,
             idempotencyKey: `task-result:${task.id}:${outputIndex}:${outputDigest}`,
             requestDigest,
+            ...(placementIdempotencyKey ? { placementIdempotencyKey } : {}),
+            ...(placementRequestDigest ? { placementRequestDigest } : {}),
             ...(task.providerId ? { providerId: task.providerId } : {}),
             ...(task.modelId ? { modelId: task.modelId } : {}),
             parameters,
@@ -702,6 +812,7 @@ export async function recordTaskProjectionCompleted(
   const completed = {
     status: 'completed',
     versionIds: [...input.versionIds],
+    ...(input.references ? { references: structuredClone(input.references) } : {}),
     completedAt: new Date().toISOString(),
   };
   await getPool().query(

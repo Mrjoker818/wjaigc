@@ -39,6 +39,35 @@ export function extractTaskAssetReferences(payload: unknown): WorkspaceAssetRefe
   const projection = record.assetProjection && typeof record.assetProjection === 'object'
     ? record.assetProjection as Record<string, unknown>
     : null;
+  const projectedReferences = Array.isArray(projection?.references)
+    ? projection.references.flatMap((value): WorkspaceAssetReference[] => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+        const reference = value as Record<string, unknown>;
+        if (
+          typeof reference.url !== 'string'
+          || !reference.url
+          || typeof reference.assetVersionId !== 'string'
+          || !reference.assetVersionId
+          || typeof reference.placementId !== 'string'
+          || !reference.placementId
+        ) return [];
+        return [{
+          url: reference.url,
+          assetVersionId: reference.assetVersionId,
+          placementId: reference.placementId,
+          ...(typeof reference.assetId === 'string' && reference.assetId
+            ? { assetId: reference.assetId }
+            : {}),
+          ...(typeof reference.entityId === 'string' && reference.entityId
+            ? { entityId: reference.entityId }
+            : {}),
+          ...(typeof reference.name === 'string' && reference.name
+            ? { name: reference.name }
+            : {}),
+        }];
+      })
+    : [];
+  if (projectedReferences.length > 0) return projectedReferences;
   const versionIds = Array.isArray(projection?.versionIds)
     ? projection.versionIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
     : [];
@@ -58,6 +87,28 @@ export function mergeWorkspaceAssetReferences(
     if (reference.assetVersionId) merged.set(reference.assetVersionId, reference);
   }
   return [...merged.values()];
+}
+
+export function isWorkspaceResultScopeCurrent(
+  expectedProjectId: string | undefined,
+  currentProjectId: string | undefined,
+): boolean {
+  return Boolean(expectedProjectId) && expectedProjectId === currentProjectId;
+}
+
+export async function applyWorkspaceResultToCurrentProject<T>(options: {
+  expectedProjectId: string;
+  getCurrentProjectId: () => string | undefined;
+  load: () => Promise<T>;
+  apply: (result: T) => void | Promise<void>;
+}): Promise<'applied' | 'stale'> {
+  const result = await options.load();
+  if (!isWorkspaceResultScopeCurrent(
+    options.expectedProjectId,
+    options.getCurrentProjectId(),
+  )) return 'stale';
+  await options.apply(result);
+  return 'applied';
 }
 
 export function serializeCanvasAssetDragPayload(payload: CanvasAssetDragPayload): string {

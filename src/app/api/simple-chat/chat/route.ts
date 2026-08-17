@@ -11,7 +11,7 @@ import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { getSafeImageTypeFromDataUrl, getSafeMediaTypeFromResponse } from '@/lib/media-validation';
-import { projectCompletedTaskToAssets } from '@/lib/asset-core/task-projector';
+import { projectAgentResultToWorkspace } from '@/lib/agent-runtime/workspace-results';
 import {
   buildSimpleChatAgentRequest,
   parseBoundedAgentSurfaceBody,
@@ -514,7 +514,7 @@ export async function POST(request: NextRequest) {
         if (body.assetProjectId && body.projectId && body.taskId && body.responseMessageId) {
           try {
             if (authoritativeTaskId) {
-              const projected = await projectCompletedTaskToAssets({
+              const projected = await projectAgentResultToWorkspace({
                 actorUserId: user.id,
                 taskId: authoritativeTaskId,
                 targetProjectId: body.assetProjectId,
@@ -522,21 +522,13 @@ export async function POST(request: NextRequest) {
                 workspaceId: `standalone-chat:${body.projectId}`,
                 sourceEntityId: body.responseMessageId,
                 parentVersionIds: [],
+                idempotencyKey: `simple-chat-agent-result:${authoritativeTaskId}:${body.projectId}:${body.responseMessageId}`,
               });
-              const version = projected.versions.find(item => item.file.url === imageUrl)
-                || projected.versions[0];
-              const versionIndex = version ? projected.versions.indexOf(version) : -1;
-              const placement = versionIndex >= 0 ? projected.placements[versionIndex] : undefined;
-              if (version && placement) {
-                imageRef = {
-                  assetId: version.assetId,
-                  assetVersionId: version.id,
-                  placementId: placement.id,
-                  entityId: placement.entityId,
-                  url: version.file.url,
-                  name: prompt.slice(0, 120) || 'Generated image',
-                };
-              }
+              const reference = projected.find(item => item.url === imageUrl) || projected[0];
+              if (reference) imageRef = {
+                ...reference,
+                name: prompt.slice(0, 120) || 'Generated image',
+              };
             } else {
               imageRef = await registerStandaloneChatAsset(user, {
                 projectId: body.assetProjectId,

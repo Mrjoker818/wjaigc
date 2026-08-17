@@ -48,6 +48,7 @@ import {
   CANVAS_ASSET_DRAG_MIME,
   createPendingWorkflowInputReference,
   createWorkflowInputTransferGuard,
+  isWorkspaceResultScopeCurrent,
   parseCanvasAssetDragPayload,
   prepareWorkflowCanvasInsertions,
   runGuardedWorkflowInputTransfer,
@@ -860,6 +861,8 @@ const nodeThemes = {
 
 export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
   // CSS自定义属性，供Tailwind中 var(--ne-xxx) 引用
   const neVars = {
     '--ne-accent': T.accent,
@@ -2490,6 +2493,7 @@ ${contextInfo}
   // 轮询执行状态
   useEffect(() => {
     if (execStatus !== 'running' || !executionId) return;
+    const executionProjectId = projectId;
     let pollCount = 0;
     let timerId: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
@@ -2501,6 +2505,7 @@ ${contextInfo}
           body: JSON.stringify({ action: 'status', executionId }),
         });
         const data = await res.json();
+        if (!isWorkspaceResultScopeCurrent(executionProjectId, projectIdRef.current)) return;
         if (data.status === 'completed' || data.status === 'failed') {
           setExecStatus(data.status === 'completed' ? 'completed' : 'failed');
           setExecResults(data.results || {});

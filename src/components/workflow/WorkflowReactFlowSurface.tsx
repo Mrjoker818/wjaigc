@@ -277,7 +277,7 @@ export function WorkflowReactFlowSurface({
   const commandHandlers = createReactFlowCommandHandlers(model, onCommand, onViewportChange);
   const nextTransactionId = (prefix: string): string => `${prefix}:${++transactionCounterRef.current}`;
   return (
-    <div data-workflow-react-flow-surface aria-hidden={readOnly ? 'true' : undefined} className="absolute inset-0">
+    <div data-workflow-react-flow-surface aria-hidden={readOnly ? 'true' : 'false'} className="absolute inset-0">
       <ReactFlow<WorkflowFlowNode, WorkflowFlowEdge>
         nodes={createReactFlowNodes(model, readOnly, { ...presentation, onCommand })}
         edges={createReactFlowEdges(model, presentation.execResults, presentation.execStatus)}
