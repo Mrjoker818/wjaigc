@@ -25,8 +25,17 @@ describe('image tool request integrity', () => {
   });
 
   it('forwards the selected image provider to Agent background removal', () => {
-    expect(agentEditSource).toContain("action: 'removebg', model: imageModel, providerId: imageProviderId");
-    expect(agentEditSource).toContain("engine: imageModel ? 'ai' : 'auto'");
+    const requestStart = agentEditSource.indexOf('const removeBackgroundRequest = {');
+    const requestEnd = agentEditSource.indexOf('};', requestStart);
+    const requestBlock = agentEditSource.slice(requestStart, requestEnd);
+
+    expect(requestStart).toBeGreaterThan(-1);
+    expect(requestEnd).toBeGreaterThan(requestStart);
+    expect(requestBlock).toContain('imageUrl: finalImageUrl');
+    expect(requestBlock).toContain("action: 'removebg'");
+    expect(requestBlock).toContain('model: imageModel');
+    expect(requestBlock).toContain('providerId: imageProviderId');
+    expect(requestBlock).toContain("engine: imageModel ? 'ai' : 'auto'");
   });
 
   it('uses requested face limits for Tripo and does not expose unsupported 302 Tripo controls', () => {

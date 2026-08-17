@@ -1454,3 +1454,88 @@ exact committed SHA.
   allowlist entry. R11 does not modify that allowlist or node editor.
 - The pre-existing provider JSON-to-PostgreSQL array migration warning remains
   outside Task 2 scope.
+
+## R12 Test-contract Maintenance (2026-08-17)
+
+Status: **GREEN**. The PostgreSQL-enabled full-gate failures independently
+reproduced by the controller were test setup/contract defects only. R12 changes
+no production code and preserves both production mismatch guards, the
+`server-only` boundary, and the existing Agent remove-background request data.
+The controller-owned Task 1 and Task 2 briefs remain unstaged and uncommitted.
+
+### R12 RED evidence
+
+1. `pnpm exec vitest run
+   src/__tests__/api/poll-task-authoritative-direct.test.ts --reporter=dot`:
+   **1 file failed during collection / no tests ran**. The transitive
+   `server-only` marker threw before route tests could execute.
+2. `pnpm exec vitest run
+   src/__tests__/api/generate-provider-model-mismatch-contract.test.ts
+   --reporter=dot`: **1 file / 1 test failed**. Global `source.indexOf` selected
+   the strict-Agent missing-routing mismatch at offset `10347`, before user
+   resolution at offset `11789`, instead of the configured provider/model
+   mismatch after hydration.
+3. `pnpm exec vitest run
+   src/__tests__/components/image-tool-request-integrity.test.ts
+   --reporter=dot`: **1 failed / 5 passed**. Production retained every required
+   `removeBackgroundRequest` field, but the test required `action`, `model`, and
+   `providerId` on one physical source line.
+
+### R12 minimal fixes
+
+1. The poll-task route test now uses the established
+   `vi.mock('server-only', () => ({}))` setup. The production server-only marker
+   and import boundary are unchanged.
+2. The mismatch contract searches for `MODEL_PROVIDER_MISMATCH` starting at
+   `userResolution`. Its existing ordering and configured-provider catalog
+   assertions remain intact, while the earlier strict-Agent guard is neither
+   moved nor weakened.
+3. The remove-background contract scopes its assertions to the
+   `removeBackgroundRequest` object, verifies the object boundaries, and checks
+   `imageUrl`, `action`, `model`, `providerId`, and `engine` independently.
+   Production request construction is unchanged.
+
+### R12 GREEN verification
+
+- `pnpm exec vitest run
+  src/__tests__/api/poll-task-authoritative-direct.test.ts --reporter=dot`:
+  **1 file / 2 tests passed**.
+- `pnpm exec vitest run
+  src/__tests__/api/generate-provider-model-mismatch-contract.test.ts
+  --reporter=dot`: **1 file / 1 test passed**.
+- `pnpm exec vitest run
+  src/__tests__/components/image-tool-request-integrity.test.ts --reporter=dot`:
+  **1 file / 6 tests passed**.
+- Combined: `pnpm exec vitest run
+  src/__tests__/api/poll-task-authoritative-direct.test.ts
+  src/__tests__/api/generate-provider-model-mismatch-contract.test.ts
+  src/__tests__/components/image-tool-request-integrity.test.ts --reporter=dot`:
+  **3 files / 9 tests passed**.
+- Task 2 Agent matrix: `$files = @(rg --files src/__tests__ | rg
+  '(agent|chat-agent-tool-choice)'); pnpm exec vitest run @files
+  --reporter=dot`: **20 files / 174 tests passed**.
+- `git diff --check`: exit `0`; only line-ending notices for the two inherited
+  briefs and three R12 test files were emitted.
+- Scoped production audit: `git diff --exit-code
+  5a8e1a16ab5757e444398685e4c93acbf0ef005c -- src/app src/lib
+  src/components/node-editor.tsx package.json migrations`: exit `0`.
+- Baseline status audit identified only the two excluded controller briefs and
+  the three intended test changes before this report was appended. The ignored
+  controller-provided R12 findings file is intentionally included in the R12
+  commit per the controller instruction.
+
+### R12 changed files
+
+- Tests: `src/__tests__/api/poll-task-authoritative-direct.test.ts`,
+  `src/__tests__/api/generate-provider-model-mismatch-contract.test.ts`, and
+  `src/__tests__/components/image-tool-request-integrity.test.ts`.
+- Review/evidence: `.superpowers/sdd/task-2-review-r12-findings.md` and
+  `.superpowers/sdd/task-2-report.md`.
+- No production code, task brief, stable branch, Task 3, node editor, package
+  metadata, migration, protected allowlist, or unrelated file is included.
+
+### R12 concerns
+
+- None specific to R12. The two controller briefs remain intentionally dirty
+  and unstaged; the pre-existing concerns documented in prior rounds are not
+  changed by this test-only maintenance commit.

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
+vi.mock('server-only', () => ({}));
+
 const mocks = vi.hoisted(() => ({
   getTaskInfo: vi.fn(),
   isTaskCancelled: vi.fn(),
