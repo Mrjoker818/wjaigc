@@ -25,7 +25,8 @@ const state = vi.hoisted(() => ({
   crashPollTaskId: '' as string,
   crashedPoll: false,
   plan: 'multi-step' as 'multi-step' | 'submission-unknown' | 'remove-background' | 'async-image-edit'
-    | 'async-image-edit-acceptance-failure' | 'sync-image-edit-loss' | 'chat-post-send-loss' | 'video-tools',
+    | 'async-image-edit-acceptance-failure' | 'sync-image-edit-loss' | 'chat-post-send-loss' | 'video-tools'
+    | 'chat-provider-rejection' | 'sync-image-edit-rejection' | 'generate-image-rejection',
   childCounter: 0,
 }));
 
@@ -122,7 +123,7 @@ vi.mock('@/lib/agent-engine', async importOriginal => {
     context: Parameters<typeof actual.executeAgentLoop>[0],
     llmCall: Parameters<typeof actual.executeAgentLoop>[1],
   ) => {
-    if (state.plan === 'chat-post-send-loss') {
+    if (state.plan === 'chat-post-send-loss' || state.plan === 'chat-provider-rejection') {
       return actual.executeAgentLoop(context, llmCall);
     }
     if (state.plan === 'submission-unknown') {
@@ -134,13 +135,14 @@ vi.mock('@/lib/agent-engine', async importOriginal => {
       : state.plan === 'async-image-edit'
         || state.plan === 'async-image-edit-acceptance-failure'
         || state.plan === 'sync-image-edit-loss'
+        || state.plan === 'sync-image-edit-rejection'
         ? [{ round: 1, toolName: 'image_edit', params: { prompt: 'Edit asynchronously' }, result: 'planned', success: true }]
         : state.plan === 'video-tools'
           ? [
               { round: 1, toolName: 'generate_video', params: { prompt: 'Generate video' }, result: 'planned', success: true },
               { round: 2, toolName: 'extend_video', params: { videoUrl: '/generated-video.mp4', duration: 5 }, result: 'planned', success: true },
             ]
-          : [0, 1].map(index => ({
+          : (state.plan === 'generate-image-rejection' ? [0] : [0, 1]).map(index => ({
               round: index + 1,
               toolName: 'generate_image',
               params: { prompt: `Generated step ${index}`, size: '1:1' },
@@ -185,6 +187,7 @@ vi.mock('@/lib/task-core/billing-service', () => ({
     state.parentCharges += 1;
     return { task, reused: false };
   }),
+  settleFailedTask: vi.fn().mockResolvedValue({ transitioned: true, refunded: false }),
 }));
 vi.mock('@/lib/agent-task-persistence', () => ({
   recordAgentTaskSubmitted: vi.fn(),
@@ -268,7 +271,7 @@ vi.mock('@/lib/cloud-task-storage', () => ({
     if (task) state.tasks.set(taskId, { ...task, ...patch, updatedAt: Date.now() });
     return true;
   }),
-  terminateCloudTaskAndRefund: vi.fn(),
+  terminateCloudTaskAndRefund: vi.fn().mockResolvedValue({ transitioned: true, refunded: false }),
   refundCloudTaskCredits: vi.fn().mockResolvedValue({ refunded: false }),
   deferCloudTaskRecovery: vi.fn(),
 }));
@@ -491,6 +494,9 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
   }
   if (url.hostname === 'chat.example') {
     state.chatSubmits.push({ key: request.headers.get('idempotency-key') || '' });
+    if (state.plan === 'chat-provider-rejection') {
+      return Response.json({ error: { message: 'controlled chat rejection' } }, { status: 429 });
+    }
     throw new Error('connection lost after chat provider submit');
   }
   if (url.hostname === 'image.example') {
@@ -502,12 +508,15 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
       }
       return Response.json({ status: 'completed', data: [{ url: '/async-edited.png' }] });
     }
-    if (state.plan === 'sync-image-edit-loss') {
+    if (state.plan === 'sync-image-edit-loss' || state.plan === 'sync-image-edit-rejection') {
       const formData = init?.body instanceof FormData ? init.body : null;
       state.externalSubmits.push({
         body: { model: String(formData?.get('model') || '') },
         key: new Headers(init?.headers ?? request.headers).get('idempotency-key') || '',
       });
+      if (state.plan === 'sync-image-edit-rejection') {
+        return Response.json({ error: { message: 'controlled image edit rejection' } }, { status: 422 });
+      }
       throw new Error('connection lost after synchronous image edit submit');
     }
     const body = JSON.parse(String(init?.body ?? await request.text())) as Record<string, unknown>;
@@ -515,6 +524,9 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
       body,
       key: new Headers(init?.headers ?? request.headers).get('idempotency-key') || '',
     });
+    if (state.plan === 'generate-image-rejection') {
+      return Response.json({ error: { message: 'controlled image generation rejection' } }, { status: 429 });
+    }
     const providerResponse = state.plan === 'async-image-edit' || state.plan === 'async-image-edit-acceptance-failure'
       ? { task_id: 'async-edit-provider-task', status: 'processing' }
       : { data: [{ url: `/generated-${state.externalSubmits.length}.png` }] };
@@ -804,6 +816,118 @@ describe('Agent route default-adapter production recovery', () => {
     )));
     expect(late.every(response => response.status === 409)).toBe(true);
     expect(state.chatSubmits).toHaveLength(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('durably terminalizes an explicit chat provider rejection without resubmit', async () => {
+    state.plan = 'chat-provider-rejection';
+    const taskId = await startAgent('route-chat-provider-rejection');
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('failed'));
+
+    const parent = state.tasks.get(taskId)!;
+    expect((parent.result as Record<string, unknown>).taskError).toMatchObject({
+      code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED', retryable: false,
+    });
+    expect(parent.status).not.toBe('completed');
+    expect([...state.operations.values()].find(operation => operation.stepId === 'llm:0')).toMatchObject({
+      status: 'completed',
+      response: expect.objectContaining({
+        __agentDownstreamOutcome: 'known_provider_rejection',
+        code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+      }),
+    });
+    expect(state.chatSubmits).toHaveLength(1);
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    const late = await Promise.all(Array.from({ length: 8 }, async () => {
+      const response = await agentPost(agentRequest('route-chat-provider-rejection') as never);
+      return { status: response.status, body: await response.json() as Record<string, unknown> };
+    }));
+    expect(late.every(replay => replay.status === 409)).toBe(true);
+    expect(new Set(late.map(replay => JSON.stringify(replay.body))).size).toBe(1);
+    expect(late[0].body).toMatchObject({
+      success: false, code: 'AGENT_TASK_TERMINAL', taskId, status: 'failed', replayed: true,
+    });
+    expect(state.chatSubmits).toHaveLength(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('durably terminalizes an explicit direct image_edit rejection without resubmit', async () => {
+    state.plan = 'sync-image-edit-rejection';
+    const taskId = await startAgent('route-sync-image-edit-rejection');
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('failed'));
+
+    const parent = state.tasks.get(taskId)!;
+    expect((parent.result as Record<string, unknown>).taskError).toMatchObject({
+      code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED', retryable: false,
+    });
+    expect(parent.status).not.toBe('completed');
+    expect([...state.operations.values()].find(operation => operation.stepId === 'image_edit:0')).toMatchObject({
+      status: 'completed',
+      response: expect.objectContaining({
+        __agentDownstreamOutcome: 'known_provider_rejection',
+        code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+      }),
+    });
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalSubmits[0]).toMatchObject({ body: { model: 'Exact::Model' } });
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    const late = await Promise.all(Array.from({ length: 8 }, async () => {
+      const response = await agentPost(agentRequest('route-sync-image-edit-rejection') as never);
+      return { status: response.status, body: await response.json() as Record<string, unknown> };
+    }));
+    expect(late.every(replay => replay.status === 409)).toBe(true);
+    expect(new Set(late.map(replay => JSON.stringify(replay.body))).size).toBe(1);
+    expect(late[0].body).toMatchObject({
+      success: false, code: 'AGENT_TASK_TERMINAL', taskId, status: 'failed', replayed: true,
+    });
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('durably terminalizes an explicit generate_image rejection without resubmit', async () => {
+    state.plan = 'generate-image-rejection';
+    const taskId = await startAgent('route-generate-image-rejection');
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('failed'));
+
+    const parent = state.tasks.get(taskId)!;
+    expect((parent.result as Record<string, unknown>).taskError).toMatchObject({
+      code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED', retryable: false,
+    });
+    expect(parent.status).not.toBe('completed');
+    expect([...state.operations.values()].find(operation => operation.stepId === 'generate_image:0')).toMatchObject({
+      status: 'completed',
+      response: expect.objectContaining({
+        __agentDownstreamOutcome: 'known_provider_rejection',
+        code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+      }),
+    });
+    expect(state.submitOnlyCalls).toHaveLength(1);
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalSubmits[0]).toMatchObject({ body: { model: 'Exact::Model' } });
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    const late = await Promise.all(Array.from({ length: 8 }, async () => {
+      const response = await agentPost(agentRequest('route-generate-image-rejection') as never);
+      return { status: response.status, body: await response.json() as Record<string, unknown> };
+    }));
+    expect(late.every(replay => replay.status === 409)).toBe(true);
+    expect(new Set(late.map(replay => JSON.stringify(replay.body))).size).toBe(1);
+    expect(late[0].body).toMatchObject({
+      success: false, code: 'AGENT_TASK_TERMINAL', taskId, status: 'failed', replayed: true,
+    });
+    expect(state.submitOnlyCalls).toHaveLength(1);
+    expect(state.externalSubmits).toHaveLength(1);
     expect(state.parentRefunds).toBe(1);
     expect(state.parentTerminalCalls).toBe(1);
   });

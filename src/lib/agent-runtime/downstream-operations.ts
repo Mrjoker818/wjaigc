@@ -84,6 +84,44 @@ export class AgentDownstreamSubmissionUnknownError extends Error {
   }
 }
 
+export class AgentDownstreamProviderRejectedError extends Error {
+  readonly code = 'AGENT_DOWNSTREAM_PROVIDER_REJECTED';
+
+  constructor(readonly providerStatus?: number) {
+    super('Agent downstream provider rejected the request');
+    this.name = 'AgentDownstreamProviderRejectedError';
+  }
+}
+
+interface AgentDownstreamKnownRejectionOutcome {
+  __agentDownstreamOutcome: 'known_provider_rejection';
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED';
+  providerStatus?: number;
+}
+
+function serializeKnownProviderRejection(
+  error: AgentDownstreamProviderRejectedError,
+): AgentDownstreamKnownRejectionOutcome {
+  return {
+    __agentDownstreamOutcome: 'known_provider_rejection',
+    code: error.code,
+    ...(error.providerStatus === undefined ? {} : { providerStatus: error.providerStatus }),
+  };
+}
+
+function replayKnownProviderRejection(response: unknown): void {
+  if (
+    !response
+    || typeof response !== 'object'
+    || (response as Record<string, unknown>).__agentDownstreamOutcome !== 'known_provider_rejection'
+    || (response as Record<string, unknown>).code !== 'AGENT_DOWNSTREAM_PROVIDER_REJECTED'
+  ) return;
+  const providerStatus = (response as Record<string, unknown>).providerStatus;
+  throw new AgentDownstreamProviderRejectedError(
+    typeof providerStatus === 'number' ? providerStatus : undefined,
+  );
+}
+
 export function createAgentDownstreamOperationIdentity(
   input: AgentDownstreamOperationInput,
 ): AgentDownstreamOperationIdentity {
@@ -108,7 +146,10 @@ async function waitForCompleted<T>(
   if (!dependencies.read) throw new Error('Agent downstream operation is already claimed');
   for (let attempt = 0; attempt < 200; attempt++) {
     const current = await dependencies.read(identity);
-    if (current?.status === 'completed') return current.response as T;
+    if (current?.status === 'completed') {
+      replayKnownProviderRejection(current.response);
+      return current.response as T;
+    }
     if (current?.status === 'submission_unknown') throw new AgentDownstreamSubmissionUnknownError();
     await new Promise(resolve => setTimeout(resolve, 10));
   }
@@ -123,7 +164,10 @@ export async function executeDurableAgentDownstreamOperation<T>(
 ): Promise<T> {
   const identity = createAgentDownstreamOperationIdentity(input);
   const operation = await dependencies.prepare(identity);
-  if (operation.status === 'completed') return operation.response as T;
+  if (operation.status === 'completed') {
+    replayKnownProviderRejection(operation.response);
+    return operation.response as T;
+  }
   if (operation.status === 'submission_unknown') throw new AgentDownstreamSubmissionUnknownError();
   if (operation.claimed === false) return waitForCompleted<T>(identity, dependencies);
   let submissionStarted = operation.status === 'submitted' || operation.status === 'accepted';
@@ -176,6 +220,13 @@ export async function executeDurableAgentDownstreamOperation<T>(
       await dependencies.complete({ ...identity, response });
       return response;
     } catch (error) {
+      if (error instanceof AgentDownstreamProviderRejectedError) {
+        await dependencies.complete({
+          ...identity,
+          response: serializeKnownProviderRejection(error),
+        });
+        throw error;
+      }
       await dependencies.release?.(identity).catch(() => false);
       throw error;
     }
@@ -185,7 +236,12 @@ export async function executeDurableAgentDownstreamOperation<T>(
     await dependencies.complete({ ...identity, response });
     return response;
   } catch (error) {
-    if (submissionStarted && !acceptanceRecorded) {
+    if (error instanceof AgentDownstreamProviderRejectedError) {
+      await dependencies.complete({
+        ...identity,
+        response: serializeKnownProviderRejection(error),
+      });
+    } else if (submissionStarted && !acceptanceRecorded) {
       await dependencies.markSubmissionUnknown({
         ...identity,
         reason: error instanceof Error ? error.message : 'Provider submission outcome is unknown',

@@ -1021,3 +1021,112 @@ exact committed SHA.
   the allowlist or node editor.
 - The pre-existing provider JSON-to-PostgreSQL array migration warning remains
   outside Task 2 scope.
+
+## R8 Independent Re-review Repair (2026-08-17)
+
+Status before the binding post-commit browser gate: **IMPLEMENTATION GREEN**.
+The remaining Critical explicit-provider-rejection gap is closed with a durable
+known-rejection outcome that is separate from R7 submission uncertainty. The
+controller-owned Task 1 and Task 2 briefs remain unstaged and uncommitted. The
+authoritative browser run ID is `task2_r8_gate_final`; it is run only after this
+exact tracked state is committed, under
+`test-results/stage-4-baseline/evidence/<FINAL_SHA>/task2_r8_gate_final/`, with
+no later tracked edits.
+
+### R8 RED evidence
+
+1. Before any production edit, `pnpm exec vitest run
+   src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot`
+   exercised actual `POST /api/agent-edit`, the production default adapter, and
+   real route-to-provider boundaries. The final clean RED was **3 failed / 8
+   passed**: explicit chat HTTP 429 became
+   `AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN`, direct `/images/edits` HTTP 422 let the
+   parent complete, and a real `/api/generate` submit-only provider HTTP 429 plus
+   `/api/poll-task` terminal failure left the parent processing. All eight R7/R6
+   production recovery cases remained green.
+2. Each RED case asserted one provider submit, one parent charge, a durable
+   per-step operation, failed rather than completed parent state, once-only
+   refund/terminal settlement, and eight concurrent deterministic terminal
+   replays. The generate case uses the production submit-only child route and
+   poll route; no decisive callback is manually injected.
+
+### R8 finding resolution
+
+1. `AgentDownstreamProviderRejectedError` now identifies a parseable known
+   provider rejection. The durable operation executor persists a compact
+   `known_provider_rejection` completion envelope before propagating the error,
+   including after accepted-task reconciliation. Claimed and unclaimed replays
+   reconstruct the same rejection from that durable envelope and never invoke
+   the provider again.
+2. The production same-task adapter terminalizes this outcome as failed through
+   `recordAgentTaskTerminal` with code
+   `AGENT_DOWNSTREAM_PROVIDER_REJECTED` and `retryable: false`, then completes
+   the execution lease. Existing terminal guards and billing settlement provide
+   exactly one parent refund/terminal transition under concurrency.
+3. The Agent route maps explicit chat non-2xx, strict direct image-edit non-2xx,
+   accepted image-edit terminal provider failure, immediate generate rejection,
+   and accepted generate poll failure to the known-rejection path. Transport
+   loss, response parse failure, acceptance-persistence failure, and poll
+   timeout/exception retain the R7 `AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN` or
+   accepted poll-only recovery behavior. Terminal replay JSON no longer varies
+   with an event-observation race.
+
+### R8 GREEN and final pre-commit verification
+
+- Focused GREEN: `pnpm exec vitest run
+  src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot`:
+  **1 file / 11 tests passed**. It proves the three new known-rejection cases
+  plus all eight prior production recovery cases.
+- Agent closure matrix: `$files = @(rg --files src/__tests__ | rg
+  '(agent|chat-agent-tool-choice)'); pnpm exec vitest run @files
+  --reporter=dot`: **20 files / 169 tests passed**. An initial invocation without
+  explicit `@files` splatting selected no files and exited 1; the corrected
+  command above is the authoritative run.
+- Real PostgreSQL: `$env:POSTGRES_TEST_DATABASE_URL=
+  'postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable'; pnpm exec
+  vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  **2 files / 22 tests passed**, zero skips.
+- `pnpm ts-check`: passed. `pnpm lint -- --quiet`: exit `0`; only the established
+  Babel large-file note for `infinite-canvas.tsx` was emitted.
+- `pnpm build`: compiled and type-checked successfully; **113/113** static pages
+  generated.
+- `pnpm check:protected-baseline`: all **38** feature IDs passed, no unapproved
+  drift, zero warnings. `git diff --check`: exit `0`.
+- Scope audit: `git diff --exit-code
+  ab67b21c1f80d5723d28ae6eeeebae9fdc412d49 --
+  src/components/node-editor.tsx
+  src/__tests__/components/node-editor-drag-throttle-wiring.test.ts
+  tests/helpers/workflow-performance.ts`: exit `0`, zero R8 drift.
+
+### R8 changed files
+
+- Production: `src/app/api/agent-edit/route.ts`,
+  `src/lib/agent-runtime/downstream-operations.ts`, and
+  `src/lib/agent-runtime/same-task-adapter.ts`.
+- Tests: `src/__tests__/api/agent-edit-production-recovery.test.ts`.
+- Evidence/report: `.superpowers/sdd/task-2-report.md`.
+- No task brief, stable branch, Task 3, node editor, protected allowlist,
+  migration, package metadata, or unrelated file is included in the R8 commit.
+
+### R8 post-commit authoritative gate contract
+
+After committing this exact tracked state, seed a fresh isolated Stage 4
+database and run the production build with `PLAYWRIGHT_WORKERS=1 pnpm exec
+playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --grep 'chat|agent'`
+using run ID `task2_r8_gate_final`. Chromium, Chromium 1080p, Firefox, WebKit,
+and mobile Chromium must each execute ordinary chat, real vision failure stop,
+first Agent progress, shared cancellation, and refresh recovery. Retained
+evidence must include relevant runtime network calls, `source-state.json`,
+trace, video, screenshot, console, network, and raw frame-rate records under the
+exact committed SHA.
+
+### R8 concerns
+
+- Raw browser FPS remains evidence only and **UNVERIFIED**, especially WebKit;
+  no FPS normalization or manufactured threshold pass is used.
+- As recorded by the R8 reviewer, the existing protected-baseline command still
+  allowlists `src/components/node-editor.tsx`. This repair does not change that
+  allowlist or the node editor.
+- The pre-existing provider JSON-to-PostgreSQL array migration warning remains
+  outside Task 2 scope.

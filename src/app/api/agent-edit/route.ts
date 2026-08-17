@@ -42,6 +42,7 @@ import { AgentModelRouteMismatchError } from '@/lib/agent-runtime/same-task-adap
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 import { submitStrictAgentGeneration } from '@/lib/agent-runtime/generate-image-adapter';
 import {
+  AgentDownstreamProviderRejectedError,
   AgentDownstreamSubmissionUnknownError,
   type AgentDownstreamExecutionContext,
   type AgentDownstreamStepInput,
@@ -112,7 +113,10 @@ async function pollAcceptedAgentGeneration(input: {
     const data = await response.json().catch(() => null) as Record<string, unknown> | null;
     const status = String(data?.status || '').toLowerCase();
     if (status === 'completed' && data?.imageUrl) return String(data.imageUrl);
-    if (['failed', 'cancelled', 'timeout'].includes(status)) {
+    if (status === 'failed') {
+      throw new AgentDownstreamProviderRejectedError();
+    }
+    if (['cancelled', 'timeout'].includes(status)) {
       throw new Error(String(data?.error || `Agent image generation ${status}`));
     }
   }
@@ -323,7 +327,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: false, code: 'AGENT_TASK_TERMINAL',
           error: `Agent task is already ${existing.status}`, taskId: existing.id,
-          status: existing.status, replayed: true, ...(runId ? { runId } : {}),
+          status: existing.status, replayed: true,
         }, { status: 409 });
       }
     }
@@ -758,6 +762,7 @@ export async function POST(request: NextRequest) {
 
         // LLM 调用函数
         let llmCallIndex = 0;
+        let llmProviderRejection: AgentDownstreamProviderRejectedError | null = null;
         let llmSubmissionUnknown: AgentDownstreamSubmissionUnknownError | null = null;
         const llmCall = async (
           messages: Array<{ role: string; content: string }>,
@@ -808,7 +813,8 @@ export async function POST(request: NextRequest) {
 
             if (!resp.ok) {
               const errText = await resp.text().catch(() => '');
-              throw new Error(`LLM API 返回 ${resp.status}: ${errText.slice(0, 200)}`);
+              console.error('[agent-edit] LLM API rejected request:', resp.status, errText.slice(0, 200));
+              throw new AgentDownstreamProviderRejectedError(resp.status);
             }
 
           // 检测响应类型：SSE 流式 vs JSON
@@ -860,6 +866,9 @@ export async function POST(request: NextRequest) {
             };
             });
           } catch (error) {
+            if (error instanceof AgentDownstreamProviderRejectedError) {
+              llmProviderRejection = error;
+            }
             if (error instanceof AgentDownstreamSubmissionUnknownError) {
               llmSubmissionUnknown = error;
             }
@@ -871,6 +880,7 @@ export async function POST(request: NextRequest) {
         console.log('[agent-edit] Starting agent loop, chatModel:', chatModel, 'maxRounds:', context.maxRounds);
         const result: AgentResult = await executeAgentLoop(context, llmCall);
         if (llmSubmissionUnknown) throw llmSubmissionUnknown;
+        if (llmProviderRejection) throw llmProviderRejection;
         console.log('[agent-edit] Agent loop completed, steps:', result.steps.length, 'success:', result.success);
 
         // 实际执行所有图像编辑步骤（按轮次顺序）
@@ -1084,10 +1094,7 @@ export async function POST(request: NextRequest) {
                   submitOnly: true,
                 });
                 if (!genData.success || !genData.taskId) {
-                  return {
-                    success: false as const,
-                    error: String(genData.error || 'Agent image generation was not accepted'),
-                  };
+                  throw new AgentDownstreamProviderRejectedError();
                 }
                 const genTaskId = String(genData.taskId);
                 await stepContext.recordAccepted(genTaskId);
@@ -1111,12 +1118,8 @@ export async function POST(request: NextRequest) {
                   }),
                 }),
               });
-              if (generationResult.success) {
-                finalImageUrl = generationResult.imageUrl;
-                step.result = '图像生成成功';
-              } else {
-                throw new Error(generationResult.error);
-              }
+              finalImageUrl = generationResult.imageUrl;
+              step.result = '图像生成成功';
             } else if (step.toolName === 'generate_video') {
               // 调用视频生成 API
               const task = localTaskStore.get(taskId);
@@ -1596,6 +1599,7 @@ async function performImageEdit(
       if (!resp.ok) {
         const errText = await resp.text().catch(() => '');
         console.error('[agent-edit] Path A: API error', resp.status, errText.slice(0, 300));
+        if (strictProviderModel) throw new AgentDownstreamProviderRejectedError(resp.status);
         if (errText.includes('No available channel') || errText.includes('model_not_found') || errText.includes('not configured')) {
           return { success: false, error: `模型在当前渠道暂不可用，请稍后重试或更换模型` };
         }
@@ -1745,6 +1749,7 @@ async function performImageEdit(
       if (!genResp.ok) {
         const errText = await genResp.text().catch(() => '');
         console.error('[agent-edit] Path B: API error', genResp.status, errText.slice(0, 300));
+        if (strictProviderModel) throw new AgentDownstreamProviderRejectedError(genResp.status);
 
         // ★ Try /chat/completions fallback for channel errors
         if (!strictProviderModel && isChannelUnavailableError(`${errText} ${genResp.status}`)) {
@@ -1830,7 +1835,7 @@ async function performImageEdit(
 
           if (status === 'failed' || status === 'error') {
             const errMsg = String((pollData.error as Record<string, unknown>)?.message || pollData.message || '远程任务失败');
-            if (strictProviderModel) throw new Error(translateApiError(errMsg));
+            if (strictProviderModel) throw new AgentDownstreamProviderRejectedError();
             return { success: false, error: translateApiError(errMsg) };
           }
         }
@@ -1955,6 +1960,7 @@ async function performImageEdit(
     if (!chatResp.ok) {
       const errText = await chatResp.text().catch(() => '');
       console.error('[agent-edit] Path C: API error', chatResp.status, errText.slice(0, 300));
+      if (strictProviderModel) throw new AgentDownstreamProviderRejectedError(chatResp.status);
       return { success: false, error: `编辑请求失败 (${chatResp.status}): ${errText.slice(0, 200)}` };
     }
 

@@ -3,6 +3,7 @@ import type { TaskModelDescriptor } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
 import type { AuthorizeAgentContextInput } from './context-adapters';
 import {
+  AgentDownstreamProviderRejectedError,
   AgentDownstreamSubmissionUnknownError,
   createAgentDownstreamOperationIdentity,
   executeDurableAgentDownstreamOperation,
@@ -135,6 +136,12 @@ export interface SameTaskAgentAdapterDependencies {
     taskId: string;
     actorUserId: string;
     code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN';
+    message: string;
+  }): Promise<boolean>;
+  terminalizeProviderRejection?(input: {
+    taskId: string;
+    actorUserId: string;
+    code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED';
     message: string;
   }): Promise<boolean>;
 }
@@ -397,6 +404,25 @@ export function createSameTaskAgentAdapter(
             });
           } catch (error) {
             if (
+              error instanceof AgentDownstreamProviderRejectedError
+              && dependencies.terminalizeProviderRejection
+            ) {
+              await dependencies.terminalizeProviderRejection({
+                taskId: adoption.runId,
+                actorUserId: adoption.actorUserId,
+                code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+                message: error.message,
+              });
+              await dependencies.completeExecution({
+                actorUserId: adoption.actorUserId,
+                projectId: adoption.projectId,
+                runId: adoption.runId,
+                toolId: adoption.toolId,
+                leaseOwner: lease.leaseOwner,
+              });
+              throw error;
+            }
+            if (
               error instanceof AgentDownstreamSubmissionUnknownError
               && dependencies.terminalizeSubmissionUnknown
             ) {
@@ -492,6 +518,17 @@ function defaultSameTaskAgentAdapter(): Promise<ReturnType<typeof createSameTask
     claimExecution: eventStorage.claimAdoptedAgentExecution,
     completeExecution: eventStorage.completeAdoptedAgentExecution,
     releaseExecution: eventStorage.releaseAdoptedAgentExecution,
+    terminalizeProviderRejection: async input => {
+      const current = await taskStorage.getCloudTaskForUser(input.taskId, input.actorUserId);
+      if (!current || TERMINAL_TASK_STATUSES.has(current.status)) return false;
+      await taskPersistence.recordAgentTaskTerminal(input.taskId, {
+        status: 'failed',
+        code: input.code,
+        error: input.message,
+        retryable: false,
+      });
+      return true;
+    },
     terminalizeSubmissionUnknown: async input => {
       const current = await taskStorage.getCloudTaskForUser(input.taskId, input.actorUserId);
       if (!current || TERMINAL_TASK_STATUSES.has(current.status)) return false;
