@@ -1879,7 +1879,12 @@ async function performImageEdit(
 
           if (status === 'failed' || status === 'error') {
             const errMsg = String((pollData.error as Record<string, unknown>)?.message || pollData.message || '远程任务失败');
-            if (strictProviderModel) throw knownProviderTaskRejection(pollData, status);
+            if (strictProviderModel) {
+              if (status === 'error' && pollData.retryable === true) {
+                throw retryableProviderTaskPollError(pollData, status);
+              }
+              throw knownProviderTaskRejection(pollData, status);
+            }
             return { success: false, error: translateApiError(errMsg) };
           }
         }

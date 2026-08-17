@@ -1348,3 +1348,109 @@ exact committed SHA.
   allowlist entry. R10 does not modify that allowlist or node editor.
 - The pre-existing provider JSON-to-PostgreSQL array migration warning remains
   outside Task 2 scope.
+
+## R11 Independent Re-review Repair (2026-08-17)
+
+Status before the binding post-commit browser gate: **IMPLEMENTATION GREEN**.
+The direct external `image_edit` inline poll now applies the same exact
+retryable-result classification as accepted recovery: a parseable
+`status:error,retryable:true` response retains the durable accepted child and
+releases its claim for later exact polling. The controller-owned Task 1 and
+Task 2 briefs remain unstaged and uncommitted. The authoritative browser run ID
+is `task2_r11_gate_final`; it is run only after this exact tracked state is
+committed, under
+`test-results/stage-4-baseline/evidence/<FINAL_SHA>/task2_r11_gate_final/`, with
+no later tracked edits.
+
+### R11 RED evidence
+
+1. Before any production edit, `pnpm exec vitest run
+   src/__tests__/api/agent-edit-production-recovery.test.ts -t "initial direct
+   provider poll" --reporter=dot` exercised actual `POST /api/agent-edit`, the
+   production default adapter, direct external `image_edit` submission,
+   accepted child persistence, and the inline exact provider poll. It failed as
+   required: **1 failed / 15 skipped**.
+2. The RED persisted provider task ID `async-edit-provider-task`, then returned
+   parseable `status:error,retryable:true` from the first exact external poll.
+   Production incorrectly converted that transient outcome into
+   `AgentDownstreamProviderRejectedError`, completed the child as
+   `known_provider_rejection`, failed and refunded the parent, and therefore
+   violated the expected retained `accepted` state.
+3. The behavioral test asserts one provider submit, the exact accepted ID, one
+   initial external poll, zero internal `/api/poll-task` calls, no transient
+   refund or parent terminal, concurrent poll-only recovery, one final parent
+   terminal settlement, and no late submit, poll, refund, or resurrection.
+
+### R11 finding resolution
+
+1. In direct external `image_edit` Path B, the inline poll classifier now checks
+   the exact transient contract before the established known-rejection path:
+   only `status:error` together with `retryable:true` raises the existing bounded
+   retryable poll error.
+2. The downstream operation executor consequently releases the claim while
+   preserving `accepted`, its exact provider task ID, and the parent processing
+   state. A later concurrent recovery claims that same child and polls the exact
+   provider URL without resubmitting.
+3. Explicit `failed` and nonretryable `error` results remain unchanged on the
+   durable `known_provider_rejection` path. Transport and submission-unknown
+   handling, exact model/idempotency propagation, and all prior once-only
+   settlement closures are unchanged.
+
+### R11 GREEN and final pre-commit verification
+
+- Targeted GREEN: `pnpm exec vitest run
+  src/__tests__/api/agent-edit-production-recovery.test.ts -t "initial direct
+  provider poll" --reporter=dot`: **1 passed / 15 skipped**.
+- Focused production route/default-adapter suite: `pnpm exec vitest run
+  src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot`:
+  **1 file / 16 tests passed**.
+- Agent closure matrix: `$files = @(rg --files src/__tests__ | rg
+  '(agent|chat-agent-tool-choice)'); pnpm exec vitest run @files
+  --reporter=dot`: **20 files / 174 tests passed**.
+- Real PostgreSQL: `$env:POSTGRES_TEST_DATABASE_URL=
+  'postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable'; pnpm exec
+  vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  **2 files / 22 tests passed**, zero skips.
+- `pnpm ts-check`: passed. `pnpm lint -- --quiet`: exit `0`; only the established
+  Babel large-file note for `infinite-canvas.tsx` was emitted.
+- `pnpm build`: compiled and type-checked successfully; **113/113** static pages
+  generated.
+- `pnpm check:protected-baseline`: all **38** feature IDs passed, no unapproved
+  source drift, zero warnings. `git diff --check`: exit `0` (line-ending notices
+  only for the two inherited briefs and the two R11 source/test files).
+- Scope audit: `git diff --exit-code
+  b62b0c51859866c4786ccbfeb593388b9c05af40 --
+  src/components/node-editor.tsx
+  src/__tests__/components/node-editor-drag-throttle-wiring.test.ts
+  tests/helpers/workflow-performance.ts`: exit `0`, zero R11 drift.
+
+### R11 changed files
+
+- Production: `src/app/api/agent-edit/route.ts`.
+- Tests: `src/__tests__/api/agent-edit-production-recovery.test.ts`.
+- Evidence/report: `.superpowers/sdd/task-2-report.md`.
+- No task brief, stable branch, Task 3, node editor, protected allowlist,
+  migration, package metadata, schema, or unrelated file is included in the R11
+  commit.
+
+### R11 post-commit authoritative gate contract
+
+After committing this exact tracked state, seed a fresh isolated Stage 4
+database and run the production build with `PLAYWRIGHT_WORKERS=1 pnpm exec
+playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --grep 'chat|agent'`
+using run ID `task2_r11_gate_final`. Chromium, Chromium 1080p, Firefox, WebKit,
+and mobile Chromium must each execute ordinary chat, real vision failure stop,
+first Agent progress, shared cancellation, and refresh recovery. Retained
+evidence must include relevant runtime network calls, `source-state.json`,
+trace, video, screenshot, console, network, and raw frame-rate records under the
+exact committed SHA.
+
+### R11 concerns
+
+- Raw browser FPS remains evidence only and **UNVERIFIED**, especially WebKit;
+  no FPS normalization or manufactured threshold pass is used.
+- The protected-baseline command still contains the pre-existing node-editor
+  allowlist entry. R11 does not modify that allowlist or node editor.
+- The pre-existing provider JSON-to-PostgreSQL array migration warning remains
+  outside Task 2 scope.

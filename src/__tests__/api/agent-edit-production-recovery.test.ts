@@ -26,7 +26,8 @@ const state = vi.hoisted(() => ({
   crashedPoll: false,
   transientPollDelivered: false,
   plan: 'multi-step' as 'multi-step' | 'submission-unknown' | 'remove-background' | 'async-image-edit'
-    | 'async-image-edit-retryable-poll' | 'async-image-edit-recovery-rejection'
+    | 'async-image-edit-direct-retryable-poll' | 'async-image-edit-retryable-poll'
+    | 'async-image-edit-recovery-rejection'
     | 'async-image-edit-acceptance-failure'
     | 'sync-image-edit-loss' | 'chat-post-send-loss' | 'video-tools' | 'video-recovery-rejection'
     | 'video-retryable-poll' | 'chat-provider-rejection' | 'sync-image-edit-rejection'
@@ -75,6 +76,7 @@ vi.mock('@/lib/server-api-config', () => ({
       ? fixtures.chatProvider
       : id === fixtures.imageProvider.id
         ? state.plan === 'async-image-edit'
+            || state.plan === 'async-image-edit-direct-retryable-poll'
             || state.plan === 'async-image-edit-retryable-poll'
             || state.plan === 'async-image-edit-recovery-rejection'
             || state.plan === 'async-image-edit-acceptance-failure'
@@ -87,6 +89,7 @@ vi.mock('@/lib/server-api-config', () => ({
       ? fixtures.chatProvider
       : model === 'Exact::Model'
         ? state.plan === 'async-image-edit'
+            || state.plan === 'async-image-edit-direct-retryable-poll'
             || state.plan === 'async-image-edit-retryable-poll'
             || state.plan === 'async-image-edit-recovery-rejection'
             || state.plan === 'async-image-edit-acceptance-failure'
@@ -143,6 +146,7 @@ vi.mock('@/lib/agent-engine', async importOriginal => {
     const steps = state.plan === 'remove-background'
       ? [{ round: 1, toolName: 'remove_background', params: {}, result: 'planned', success: true }]
       : state.plan === 'async-image-edit'
+        || state.plan === 'async-image-edit-direct-retryable-poll'
         || state.plan === 'async-image-edit-retryable-poll'
         || state.plan === 'async-image-edit-recovery-rejection'
         || state.plan === 'async-image-edit-acceptance-failure'
@@ -537,6 +541,17 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
   if (url.hostname === 'image.example') {
     if (request.method === 'GET') {
       state.externalPolls.push(`${url.pathname}${url.search}`);
+      if (state.plan === 'async-image-edit-direct-retryable-poll') {
+        if (!state.transientPollDelivered) {
+          state.transientPollDelivered = true;
+          return Response.json({
+            status: 'error',
+            error: { message: 'controlled transient direct provider poll failure' },
+            retryable: true,
+          });
+        }
+        return Response.json({ status: 'completed', data: [{ url: '/async-edited.png' }] });
+      }
       if (!state.crashedPoll) {
         state.crashedPoll = true;
         throw new Error('simulated direct image edit poll timeout after acceptance');
@@ -572,6 +587,7 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
       return Response.json({ error: { message: 'controlled image generation rejection' } }, { status: 429 });
     }
     const providerResponse = state.plan === 'async-image-edit'
+      || state.plan === 'async-image-edit-direct-retryable-poll'
       || state.plan === 'async-image-edit-retryable-poll'
       || state.plan === 'async-image-edit-recovery-rejection'
       || state.plan === 'async-image-edit-acceptance-failure'
@@ -882,6 +898,54 @@ describe('Agent route default-adapter production recovery', () => {
     )));
     expect(state.externalSubmits).toHaveLength(1);
     expect(state.internalPolls).toHaveLength(2);
+    expect(state.parentRefunds).toBe(0);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('retains accepted image_edit when the initial direct provider poll is retryable', async () => {
+    state.plan = 'async-image-edit-direct-retryable-poll';
+    const taskId = await startAgent('route-async-image-edit-direct-retryable-poll');
+
+    await vi.waitFor(() => {
+      expect([...state.operations.values()].find(operation => operation.stepId === 'image_edit:0')).toMatchObject({
+        status: 'accepted', providerTaskId: 'async-edit-provider-task',
+      });
+      expect(state.parentLeaseClaimed).toBe(false);
+    });
+    expect(state.tasks.get(taskId)?.status).toBe('processing');
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalPolls).toEqual(['/tasks/async-edit-provider-task?language=zh']);
+    expect(state.internalPolls).toHaveLength(0);
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(0);
+    expect(state.parentTerminalCalls).toBe(0);
+
+    const recoveries = await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-async-image-edit-direct-retryable-poll') as never)
+    )));
+    expect(recoveries.every(response => response.status === 200)).toBe(true);
+    await Promise.all(state.afterCallbacks.splice(0).map(worker => worker()));
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('completed'));
+
+    expect([...state.operations.values()].find(operation => operation.stepId === 'image_edit:0')).toMatchObject({
+      status: 'completed', providerTaskId: 'async-edit-provider-task',
+    });
+    expect((state.tasks.get(taskId)?.result as Record<string, unknown>).imageUrl).toBe('/async-edited.png');
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalPolls).toEqual([
+      '/tasks/async-edit-provider-task?language=zh',
+      '/tasks/async-edit-provider-task?language=zh',
+    ]);
+    expect(state.internalPolls).toHaveLength(0);
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(0);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-async-image-edit-direct-retryable-poll') as never)
+    )));
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalPolls).toHaveLength(2);
     expect(state.parentRefunds).toBe(0);
     expect(state.parentTerminalCalls).toBe(1);
   });
