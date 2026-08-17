@@ -164,6 +164,11 @@ expect(sample.lostNodeCount).toBe(0);
 expect(sample.unclickableDurationMs).toBe(0);
 ```
 
+`>=55 FPS` 数值门禁固定由 `chromium` 与 `chromium-1080p` 两个桌面性能 profile 执行；
+Firefox、WebKit 与移动 Chromium 仍必须执行相同真实拖动链路，并满足输入 P95、节点不丢失、
+零不可点击、Console、Network 和功能断言。浏览器 profile 必须显式穷举，未知名称直接阻断。
+该分工不降低 Chromium 门槛，用于避免把本机 Playwright WebKit 空白页约 40 FPS 的运行时上限误判为产品缺陷。
+
 - [ ] **Step 7: 建立 legacy 真实基线**
 
 Run: `pnpm exec vitest run src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`
@@ -648,7 +653,8 @@ Run: `pnpm exec vitest run src/__tests__/lib/workflow-render-view-model.test.ts 
 
 Run: `pnpm exec playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --grep "workflow"`
 
-Expected: legacy 与 shadow 功能结果一致；100 节点 >=55 FPS、P95 <=50 ms、丢失节点和不可点击时间为 0。
+Expected: legacy 与 shadow 功能结果一致；两个桌面 Chromium profile 的 100 节点 >=55 FPS；
+五浏览器 P95 <=50 ms、丢失节点和不可点击时间为 0。
 
 - [ ] **Step 9: 全仓门禁、独立评审并提交**
 

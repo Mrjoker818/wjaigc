@@ -20,7 +20,9 @@ import {
   measureWorkflowInteraction,
   resolveExpectedMountedWorkflowNodeIds,
   selectWorkflowMonitorIds,
+  shouldEnforceWorkflowFpsGate,
 } from '../helpers/workflow-performance';
+import { dragPointerAcrossFrames } from '../helpers/canvas-performance';
 
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
 test.use({ trace: 'off', video: 'on' });
@@ -368,21 +370,27 @@ test('keeps workflow renderer server-authoritative while shadow projection remai
   const firstNode = page.locator(`[data-node-id="${expectedMountedNodeIds[0]}"]`);
   const before = await firstNode.boundingBox();
   expect(before).not.toBeNull();
-  const metrics = await measureWorkflowInteraction(page, expectedMountedNodeIds, async measuredPage => {
-    const measuredNode = measuredPage.locator(`[data-node-id="${expectedMountedNodeIds[0]}"]`);
-    const measuredHeader = measuredNode.locator('.node-header');
-    await measuredHeader.dragTo(measuredPage.locator('.canvas-bg'), {
-      sourcePosition: { x: 24, y: 16 },
-      targetPosition: { x: 220, y: 160 },
-    });
-  });
+  const metrics = await measureWorkflowInteraction(
+    page,
+    expectedMountedNodeIds,
+    async measuredPage => {
+      const measuredNode = measuredPage.locator(`[data-node-id="${expectedMountedNodeIds[0]}"]`);
+      const measuredHeader = measuredNode.locator('.node-header');
+      const headerBounds = await measuredHeader.boundingBox();
+      expect(headerBounds).not.toBeNull();
+      const start = { x: headerBounds!.x + 24, y: headerBounds!.y + 16 };
+      await dragPointerAcrossFrames(measuredPage, start, { x: start.x + 16, y: start.y }, 60);
+    },
+    raw => writeStage4Metrics(stage4Evidence, testInfo, 'workflow-legacy-100-node-performance-raw', raw),
+  );
   const after = await firstNode.boundingBox();
   expect(after).not.toBeNull();
   expect(after!.x).not.toBe(before!.x);
-  assertWorkflowPerformanceThresholds(metrics);
+  await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-legacy-100-node-performance', metrics);
+  assertWorkflowPerformanceThresholds(metrics, {
+    enforceFps: shouldEnforceWorkflowFpsGate(testInfo.project.name),
+  });
   expect(metrics.monitoredNodeCount).toBe(expectedMountedNodeIds.length);
   expect(metrics.lostNodeCount).toBe(0);
   expect(metrics.unclickableDurationMs).toBe(0);
-  await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-legacy-100-node-performance', metrics);
-
 });

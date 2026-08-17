@@ -11,8 +11,10 @@ import {
   assertWorkflowPerformanceThresholds,
   assertWorkflowVirtualizationCoverage,
   resolveExpectedMountedWorkflowNodeIds,
+  recordAndSummarizeWorkflowPerformance,
   selectWorkflowMonitorIds,
   summarizeWorkflowPerformance,
+  shouldEnforceWorkflowFpsGate,
 } from '../../../tests/helpers/workflow-performance';
 
 describe('Stage 4 fixture isolation', () => {
@@ -227,6 +229,33 @@ describe('Stage 4 workflow performance samples', () => {
     })).toThrow(/mounted node IDs/i);
   });
 
+  it('keeps the 55 FPS gate on the two desktop Chromium performance profiles', () => {
+    expect(shouldEnforceWorkflowFpsGate('chromium')).toBe(true);
+    expect(shouldEnforceWorkflowFpsGate('chromium-1080p')).toBe(true);
+    expect(shouldEnforceWorkflowFpsGate('firefox')).toBe(false);
+    expect(shouldEnforceWorkflowFpsGate('webkit')).toBe(false);
+    expect(shouldEnforceWorkflowFpsGate('mobile-chromium')).toBe(false);
+    expect(() => shouldEnforceWorkflowFpsGate('renamed-chromium')).toThrow(/unknown browser profile/i);
+  });
+
+  it('keeps latency and continuity gates active when a browser cannot provide a 55 FPS RAF baseline', () => {
+    const sample = summarizeWorkflowPerformance({
+      startedAt: 0,
+      endedAt: 1_000,
+      frameTimestamps: Array.from({ length: 40 }, (_, index) => index * 25),
+      inputDelaysMs: [5, 10],
+      inputDelaySamples: [{ source: 'pointer', name: 'pointermove', delayMs: 10, startTime: 100, observedAt: 110 }],
+      longTasksMs: [],
+      monitoredNodeCount: 48,
+      lostNodeCount: 0,
+      unclickableDurationMs: 0,
+    });
+
+    expect(() => assertWorkflowPerformanceThresholds(sample, { enforceFps: false })).not.toThrow();
+    expect(() => assertWorkflowPerformanceThresholds({ ...sample, inputDelayP95Ms: 51 }, { enforceFps: false }))
+      .toThrow(/P95 <= 50ms/i);
+  });
+
   it('summarizes workflow interaction evidence without hiding dropped nodes', () => {
     const sample = summarizeWorkflowPerformance({
       startedAt: 0,
@@ -273,8 +302,24 @@ describe('Stage 4 workflow performance samples', () => {
       unclickableDurationMs: 0,
     });
 
-    expect(sample.averageFps).toBe(7);
+    expect(sample.averageFps).toBe(6);
     expect(() => assertWorkflowPerformanceThresholds(sample)).toThrow(/55 FPS/i);
+  });
+
+  it('counts complete frame intervals without granting a free first frame', () => {
+    const sample = summarizeWorkflowPerformance({
+      startedAt: 0,
+      endedAt: 1_000,
+      frameTimestamps: Array.from({ length: 56 }, (_, index) => index * 16),
+      inputDelaysMs: [5],
+      inputDelaySamples: [{ source: 'pointer', name: 'pointermove', delayMs: 5, startTime: 10, observedAt: 15 }],
+      longTasksMs: [],
+      monitoredNodeCount: 48,
+      lostNodeCount: 0,
+      unclickableDurationMs: 0,
+    });
+
+    expect(sample.averageFps).toBe(55);
   });
 
   it('fails closed when frame or input latency evidence is missing', () => {
@@ -299,5 +344,38 @@ describe('Stage 4 workflow performance samples', () => {
       inputDelaysMs: [],
       inputDelaySamples: [],
     })).toThrow(/input latency samples/i);
+  });
+
+  it('reports the raw timing envelope when frame evidence is invalid', () => {
+    expect(() => summarizeWorkflowPerformance({
+      startedAt: 100.2,
+      endedAt: 180,
+      frameTimestamps: [99.9, 116.6, 133.3],
+      inputDelaysMs: [5],
+      inputDelaySamples: [{ source: 'pointer', name: 'pointermove', delayMs: 5, startTime: 110, observedAt: 115 }],
+      longTasksMs: [],
+      monitoredNodeCount: 48,
+      lostNodeCount: 0,
+      unclickableDurationMs: 0,
+    })).toThrow(/startedAt=100\.2.*firstFrame=99\.9.*lastFrame=133\.3.*frameCount=3/i);
+  });
+
+  it('records raw evidence before invalid timing is rejected', async () => {
+    const raw = {
+      startedAt: 100.2,
+      endedAt: 180,
+      frameTimestamps: [99.9, 116.6, 133.3],
+      inputDelaysMs: [5],
+      inputDelaySamples: [{ source: 'pointer' as const, name: 'pointermove', delayMs: 5, startTime: 110, observedAt: 115 }],
+      longTasksMs: [],
+      monitoredNodeCount: 48,
+      lostNodeCount: 0,
+      unclickableDurationMs: 0,
+    };
+    const recorded: unknown[] = [];
+
+    await expect(recordAndSummarizeWorkflowPerformance(raw, evidence => { recorded.push(evidence); }))
+      .rejects.toThrow(/invalid frame timestamps/i);
+    expect(recorded).toEqual([raw]);
   });
 });

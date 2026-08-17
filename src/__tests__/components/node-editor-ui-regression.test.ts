@@ -22,4 +22,8 @@ describe('node editor UI regressions', () => {
     expect(source).toContain('md:relative');
     expect(source).toContain('hidden md:flex w-72');
   });
+
+  it('marks only known layout chrome as workflow canvas occlusion', () => {
+    expect(source.match(/data-workflow-ui-occlusion/g)).toHaveLength(2);
+  });
 });

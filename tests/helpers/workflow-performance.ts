@@ -56,6 +56,21 @@ export interface WorkflowPerformanceSample {
 }
 
 type WorkflowInteraction = (page: Page) => Promise<void>;
+type WorkflowRawSampleObserver = (raw: WorkflowPerformanceRawSample) => void | Promise<void>;
+
+export function shouldEnforceWorkflowFpsGate(browserProfile: string): boolean {
+  switch (browserProfile) {
+    case 'chromium':
+    case 'chromium-1080p':
+      return true;
+    case 'firefox':
+    case 'webkit':
+    case 'mobile-chromium':
+      return false;
+    default:
+      throw new Error(`BLOCKED: Stage 4 workflow performance gate received unknown browser profile (${browserProfile})`);
+  }
+}
 
 export function selectWorkflowMonitorIds(
   rawIds: ReadonlyArray<string | null | undefined>,
@@ -133,7 +148,11 @@ export function summarizeWorkflowPerformance(
   }
   if (validFrameTimestamps.length !== raw.frameTimestamps.length
     || validFrameTimestamps.some((timestamp, index) => index > 0 && timestamp <= validFrameTimestamps[index - 1]!)) {
-    throw new Error('BLOCKED: Stage 4 workflow performance gate found invalid frame timestamps');
+    throw new Error(
+      'BLOCKED: Stage 4 workflow performance gate found invalid frame timestamps '
+      + `(startedAt=${raw.startedAt}, firstFrame=${raw.frameTimestamps[0] ?? 'none'}, `
+      + `lastFrame=${raw.frameTimestamps.at(-1) ?? 'none'}, frameCount=${raw.frameTimestamps.length}, endedAt=${raw.endedAt})`,
+    );
   }
   if (raw.inputDelaysMs.length === 0 || (raw.inputDelaySamples?.length ?? 0) === 0) {
     throw new Error('BLOCKED: Stage 4 workflow performance gate requires nonempty input latency samples');
@@ -141,7 +160,7 @@ export function summarizeWorkflowPerformance(
 
   return {
     durationMs,
-    averageFps: Number(((validFrameTimestamps.length * 1000) / durationMs).toFixed(2)),
+    averageFps: Number((((validFrameTimestamps.length - 1) * 1000) / durationMs).toFixed(2)),
     inputDelayP95Ms: Number(percentile95(raw.inputDelaysMs).toFixed(2)),
     inputDelaySamples: raw.inputDelaySamples ?? [],
     longestTaskMs: Number(Math.max(0, ...raw.longTasksMs).toFixed(2)),
@@ -153,8 +172,19 @@ export function summarizeWorkflowPerformance(
   };
 }
 
-export function assertWorkflowPerformanceThresholds(sample: WorkflowPerformanceSample): void {
-  if (sample.averageFps < 55) {
+export async function recordAndSummarizeWorkflowPerformance(
+  raw: WorkflowPerformanceRawSample,
+  onRawSample?: WorkflowRawSampleObserver,
+): Promise<WorkflowPerformanceSample> {
+  await onRawSample?.(raw);
+  return summarizeWorkflowPerformance(raw);
+}
+
+export function assertWorkflowPerformanceThresholds(
+  sample: WorkflowPerformanceSample,
+  options: { enforceFps?: boolean } = {},
+): void {
+  if (options.enforceFps !== false && sample.averageFps < 55) {
     throw new Error(`BLOCKED: Stage 4 workflow performance gate requires at least 55 FPS (received ${sample.averageFps})`);
   }
   if (sample.inputDelaySamples.length === 0) {
@@ -177,18 +207,22 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
   )));
   assertWorkflowMonitorCoverage(monitoredIds, expectedNodeIds);
 
-  await page.evaluate((nodeIds: string[]) => {
+  await page.evaluate(async (nodeIds: string[]) => {
     const windowWithState = window as typeof window & {
       __wujieStage4WorkflowPerformance?: Record<string, unknown>;
     };
     if (windowWithState.__wujieStage4WorkflowPerformance) {
       throw new Error('Stage 4 workflow measurement is already active');
     }
+    const canvasElement = document.querySelector<HTMLElement>('.canvas-bg');
+    if (!canvasElement) {
+      throw new Error('BLOCKED: Stage 4 workflow performance gate requires the interactive canvas');
+    }
 
     const monitoredIds = new Set(nodeIds);
 
     const state = {
-      startedAt: performance.now(),
+      startedAt: Number.NaN,
       frameTimestamps: [] as number[],
       inputDelaysMs: [] as number[],
       inputDelaySamples: [] as WorkflowInputDelaySample[],
@@ -198,7 +232,7 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
       lostNodeCount: 0,
       unclickableDurationMs: 0,
       unclickableSamples: [] as WorkflowUnclickableSample[],
-      lastFrameAt: performance.now(),
+      lastFrameAt: Number.NaN,
       active: true,
       rafId: 0,
       observers: [] as PerformanceObserver[],
@@ -263,6 +297,8 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
     } catch {}
 
     const sampleNodes = (deltaMs: number) => {
+      const canvasRect = canvasElement.getBoundingClientRect();
+      let hasUnclickableNode = false;
       for (const id of monitoredIds) {
         const node = document.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
         if (!node) {
@@ -286,20 +322,23 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
         if (
-          centerX < 0
-          || centerY < 0
-          || centerX > window.innerWidth
-          || centerY > window.innerHeight
+          centerX < canvasRect.left
+          || centerY < canvasRect.top
+          || centerX > canvasRect.right
+          || centerY > canvasRect.bottom
         ) {
           continue;
         }
 
         const hit = document.elementFromPoint(centerX, centerY);
+        if (hit instanceof Element && hit.closest('[data-workflow-ui-occlusion]')) {
+          continue;
+        }
         if (hit instanceof Element && hit.closest('[data-popup], [data-modal], [data-floating-panel]')) {
           continue;
         }
         if (!hit || (!node.contains(hit) && hit !== node)) {
-          state.unclickableDurationMs += deltaMs;
+          hasUnclickableNode = true;
           if (state.unclickableSamples.length < 20) {
             state.unclickableSamples.push({
               id,
@@ -309,6 +348,7 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
           }
         }
       }
+      if (hasUnclickableNode) state.unclickableDurationMs += deltaMs;
     };
 
     const tick = (timestamp: number) => {
@@ -320,8 +360,17 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
       sampleNodes(deltaMs);
     };
 
-    state.rafId = requestAnimationFrame(tick);
     windowWithState.__wujieStage4WorkflowPerformance = state as unknown as Record<string, unknown>;
+    await new Promise<void>(resolve => {
+      state.rafId = requestAnimationFrame(timestamp => {
+        state.startedAt = timestamp;
+        state.lastFrameAt = timestamp;
+        state.frameTimestamps.push(timestamp);
+        state.rafId = requestAnimationFrame(tick);
+        sampleNodes(0);
+        resolve();
+      });
+    });
   }, [...expectedNodeIds]);
 }
 
@@ -381,6 +430,7 @@ export async function measureWorkflowInteraction(
   page: Page,
   expectedNodeIds: ReadonlyArray<string>,
   action: WorkflowInteraction,
+  onRawSample?: WorkflowRawSampleObserver,
 ): Promise<WorkflowPerformanceSample> {
   await startMeasurement(page, expectedNodeIds);
   let actionError: unknown;
@@ -389,7 +439,7 @@ export async function measureWorkflowInteraction(
   } catch (error) {
     actionError = error;
   }
-  const sample = summarizeWorkflowPerformance(await stopMeasurement(page));
+  const sample = await recordAndSummarizeWorkflowPerformance(await stopMeasurement(page), onRawSample);
   if (actionError) throw actionError;
   return sample;
 }

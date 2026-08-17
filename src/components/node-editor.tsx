@@ -3419,7 +3419,7 @@ ${contextInfo}
       </div>{/* 主画布 end */}
 
       {/* ═══ 右侧属性面板 - 与原型对齐: w-72, 始终可见 ═══ */}
-      <aside className="hidden md:flex w-72 shrink-0 bg-card border-l border-border/20 flex-col overflow-hidden">
+      <aside data-workflow-ui-occlusion className="hidden md:flex w-72 shrink-0 bg-card border-l border-border/20 flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 h-11 border-b border-border/10">
           <span className="text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">节点属性</span>
         </div>
@@ -3447,7 +3447,7 @@ ${contextInfo}
       </div>{/* 主体水平行 end */}
 
       {/* ═══ 底部面板: 内容条 + 执行日志 - 与原型对齐: 全宽底部 ═══ */}
-      <div className="shrink-0 border-t border-border/20 bg-card">
+      <div data-workflow-ui-occlusion className="shrink-0 border-t border-border/20 bg-card">
         {/* 内容条 */}
         {showContentStrip && (
         <div className="hidden border-b border-border/10 md:block">
