@@ -8,6 +8,7 @@ import {
 } from '../../../scripts/stage-4-e2e-fixtures.mjs';
 import {
   assertWorkflowMonitorCoverage,
+  assertWorkflowPerformanceThresholds,
   assertWorkflowVirtualizationCoverage,
   resolveExpectedMountedWorkflowNodeIds,
   selectWorkflowMonitorIds,
@@ -230,7 +231,7 @@ describe('Stage 4 workflow performance samples', () => {
     const sample = summarizeWorkflowPerformance({
       startedAt: 0,
       endedAt: 1_000,
-      frameTimestamps: [0, 16, 32, 48, 64, 80, 96],
+      frameTimestamps: Array.from({ length: 60 }, (_, index) => index * 16),
       inputDelaysMs: [5, 8, 12, 18, 42],
       inputDelaySamples: [
         {
@@ -256,5 +257,47 @@ describe('Stage 4 workflow performance samples', () => {
     expect(sample.monitoredNodeCount).toBe(100);
     expect(sample.lostNodeCount).toBe(0);
     expect(sample.unclickableDurationMs).toBe(0);
+    expect(() => assertWorkflowPerformanceThresholds(sample)).not.toThrow();
+  });
+
+  it('rejects a short RAF burst instead of inflating it across a 1000ms measurement', () => {
+    const sample = summarizeWorkflowPerformance({
+      startedAt: 0,
+      endedAt: 1_000,
+      frameTimestamps: [0, 16, 32, 48, 64, 80, 96],
+      inputDelaysMs: [5],
+      inputDelaySamples: [{ source: 'pointer', name: 'pointermove', delayMs: 5, startTime: 10, observedAt: 15 }],
+      longTasksMs: [],
+      monitoredNodeCount: 48,
+      lostNodeCount: 0,
+      unclickableDurationMs: 0,
+    });
+
+    expect(sample.averageFps).toBe(7);
+    expect(() => assertWorkflowPerformanceThresholds(sample)).toThrow(/55 FPS/i);
+  });
+
+  it('fails closed when frame or input latency evidence is missing', () => {
+    const base = {
+      startedAt: 0,
+      endedAt: 1_000,
+      longTasksMs: [],
+      monitoredNodeCount: 48,
+      lostNodeCount: 0,
+      unclickableDurationMs: 0,
+    };
+
+    expect(() => summarizeWorkflowPerformance({
+      ...base,
+      frameTimestamps: [16],
+      inputDelaysMs: [5],
+      inputDelaySamples: [{ source: 'pointer' as const, name: 'pointermove', delayMs: 5, startTime: 10, observedAt: 15 }],
+    })).toThrow(/at least two valid frames/i);
+    expect(() => summarizeWorkflowPerformance({
+      ...base,
+      frameTimestamps: [16, 32],
+      inputDelaysMs: [],
+      inputDelaySamples: [],
+    })).toThrow(/input latency samples/i);
   });
 });

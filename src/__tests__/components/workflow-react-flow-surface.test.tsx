@@ -5,8 +5,9 @@ import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createEmptyWorkflow, createWorkflowNode } from '@/lib/workflow-engine';
-import { projectReactFlowRenderModel } from '@/lib/workflow-renderer/view-model';
+import { projectLegacyRenderModel, projectReactFlowRenderModel } from '@/lib/workflow-renderer/view-model';
 import {
+  createReactFlowNodes,
   createReactFlowCommandHandlers,
   WorkflowReactFlowSurface,
 } from '@/components/workflow/WorkflowReactFlowSurface';
@@ -53,7 +54,6 @@ describe('WorkflowReactFlowSurface', () => {
     const markup = renderToStaticMarkup(createElement(WorkflowLegacySurface, {
       model,
       onCommand,
-      nodes: workflow.nodes,
     }));
 
     expect(markup).toContain('data-workflow-legacy-edge-layer');
@@ -91,7 +91,6 @@ describe('WorkflowReactFlowSurface', () => {
     const props = {
       model: projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 }),
       onCommand: vi.fn(),
-      nodes: workflow.nodes,
       promptTemplates: [{
         id: 'plain-template', name: 'Plain', content: 'plain prompt', category: 'test', tags: ['plain'],
       }],
@@ -101,6 +100,58 @@ describe('WorkflowReactFlowSurface', () => {
 
     expect(getItem).not.toHaveBeenCalled();
     expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it('renders legacy node, port, geometry, and edge DOM only from the legacy projection', () => {
+    const workflow = createEmptyWorkflow('projected legacy DOM');
+    const source = createWorkflowNode('input-text', 0, 0, 'raw source');
+    const target = createWorkflowNode('ai-generate', 240, 0, 'raw target');
+    workflow.nodes = [source, target];
+    workflow.connections = [{
+      id: 'raw-edge', fromNodeId: source.id, fromPortId: 'out-prompt',
+      toNodeId: target.id, toPortId: 'in-prompt', type: 'prompt',
+    }];
+    const model = projectLegacyRenderModel(workflow, { x: 0, y: 0, zoom: 1 });
+    model.nodes[0] = {
+      ...model.nodes[0]!, label: 'projected source', position: { x: 111, y: 222 },
+      size: { width: 333, height: 144 },
+      ports: [{ id: 'projected-output', label: 'Projected output', type: 'prompt', direction: 'out' }],
+    };
+    model.edges[0] = {
+      ...model.edges[0]!, id: 'projected-edge',
+      source: { nodeId: source.id, portId: 'projected-output' },
+    };
+
+    const markup = renderToStaticMarkup(createElement(WorkflowLegacySurface, {
+      model,
+      onCommand: vi.fn(),
+      getPortPosition: (_node, port) => port.direction === 'out' ? { x: 10, y: 20 } : { x: 30, y: 20 },
+    }));
+
+    expect(markup).toContain('projected source');
+    expect(markup).not.toContain('raw source');
+    expect(markup).toContain('left:111px');
+    expect(markup).toContain('top:222px');
+    expect(markup).toContain('width:333px');
+    expect(markup).toContain('min-height:144px');
+    expect(markup).toContain(`data-port-id="${source.id}-out-projected-output"`);
+    expect(markup).not.toContain(`data-port-id="${source.id}-out-out-prompt"`);
+    expect(markup).toContain('data-edge-id="projected-edge"');
+    expect(markup).not.toContain('data-edge-id="raw-edge"');
+  });
+
+  it('cannot report shadow sync when an omitted legacy projection node is also omitted from actual DOM', () => {
+    const workflow = createEmptyWorkflow('legacy omission');
+    workflow.nodes = [createWorkflowNode('input-text', 0, 0, 'must be omitted')];
+    const shadow = projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 });
+    const legacy = { ...projectLegacyRenderModel(workflow, { x: 0, y: 0, zoom: 1 }), nodes: [] };
+    const markup = renderToStaticMarkup(createElement('div', null,
+      createElement(WorkflowLegacySurface, { model: legacy, onCommand: vi.fn() }),
+      createElement(WorkflowShadowProbe, { legacyModel: legacy, shadowModel: shadow }),
+    ));
+
+    expect(markup).not.toContain('data-node-id');
+    expect(markup).toContain('data-in-sync="false"');
   });
 
   it('compares the exact legacy and shadow models supplied by the host', () => {
@@ -188,6 +239,56 @@ describe('WorkflowReactFlowSurface', () => {
     expect(reactFlowSurfaceSource).toContain("@xyflow/react/dist/style.css");
     expect(reactFlowSurfaceSource).not.toContain('useNodesState');
     expect(reactFlowSurfaceSource).not.toContain('useEdgesState');
+  });
+
+  it('preserves projected Ctrl multi-selection without invoking a second legacy selection path', async () => {
+    const workflow = createEmptyWorkflow('multiselect');
+    const first = createWorkflowNode('input-text', 0, 0, 'first');
+    const second = createWorkflowNode('input-text', 240, 0, 'second');
+    workflow.nodes = [first, second];
+    const model = projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 }, new Set([first.id]));
+    const onCommand = vi.fn();
+    const legacySelect = vi.fn();
+    const surfaceModule = await import('@/components/workflow/WorkflowReactFlowSurface');
+    const nodes = surfaceModule.createReactFlowNodes(model, false, {
+      onCommand,
+      cardCallbacks: { onSelect: legacySelect } as never,
+    });
+
+    nodes[1]!.data.cardProps.onSelect({ ctrlKey: true, metaKey: false } as never);
+
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'selection.set', nodeIds: [first.id, second.id],
+    }));
+    expect(legacySelect).not.toHaveBeenCalled();
+  });
+
+  it('uses each visible product port as the single React Flow handle and forwards size measurement', () => {
+    const workflow = createEmptyWorkflow('visible handles');
+    const node = createWorkflowNode('input-text', 0, 0, 'Prompt');
+    workflow.nodes = [node];
+    const onUpdateNodeSize = vi.fn();
+    const model = projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 });
+    const markup = renderToStaticMarkup(createElement(WorkflowReactFlowSurface, {
+      model,
+      onCommand: vi.fn(),
+      readOnly: false,
+      cardCallbacks: { onUpdateNodeSize } as never,
+    }));
+    const portId = `${node.id}-out-out-prompt`;
+    const portTag = markup.match(new RegExp(`<[^>]*data-port-id="${portId}"[^>]*>`))?.[0];
+
+    expect(portTag).toContain('react-flow__handle');
+    expect(markup.match(new RegExp(`data-port-id="${portId}"`, 'g'))).toHaveLength(1);
+    expect(markup.match(/data-port-id=/g)).toHaveLength(node.ports.length);
+    expect(reactFlowNodeSource).toContain('renderPortHandle');
+    expect(reactFlowNodeSource).not.toContain("style={{ top: `${((index + 1)");
+
+    const flowNode = createReactFlowNodes(model, false, {
+      cardCallbacks: { onUpdateNodeSize } as never,
+    })[0]!;
+    flowNode.data.cardProps.onUpdateNodeSize?.(node.id, 333, 222);
+    expect(onUpdateNodeSize).toHaveBeenCalledWith(node.id, 333, 222);
   });
 
   it('projects custom typed edges instead of React Flow defaults', async () => {

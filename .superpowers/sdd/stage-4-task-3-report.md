@@ -182,3 +182,72 @@ Result: 16 files / 105 tests passed.
 - `tests/unit/protected-baseline-gate.spec.ts`
 
 Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` remained untouched and are excluded from staging and the follow-up commit.
+
+## R2 Independent Review Fix Wave
+
+All six R2 findings were fixed in one bounded follow-up based on `e8fb814`.
+
+### R2 RED
+
+Before product corrections, the controlled regression command was:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts tests/unit/protected-baseline-gate.spec.ts
+```
+
+Result: exit 1; 6 failed files and 17 failed / 47 passed tests. Failures proved that the legacy surface still required raw node arrays, projected drift did not control the actual DOM, React Flow Ctrl selection collapsed to one node, visible product ports were not the real Handles, size measurement was not forwarded, the editor lacked one atomic workflow/history reducer, clipboard paste re-read live sources, short RAF bursts inflated FPS, missing input samples passed, and the renderer library allow-prefix remained broad.
+
+### R2 Corrections
+
+- Legacy DOM now consumes only the legacy render model plus an explicit visible-node ID set. Node identity/type/label/data/ports/position/size and edge identity/endpoints/type/data are reconstructed from the projection, so omitted or drifted projected data changes the real legacy DOM and cannot produce a false shadow-sync result.
+- Workflow plus history now transition through `reduceWorkflowEditorState`. User updates and commands atomically record one transaction, hydration clears history, system drag previews and `node.measure` record none, and broadcast runs from a revision effect outside the reducer.
+- React Flow computes Ctrl/Cmd selection from the projected selected set, uses each visible product port as its one actual Handle, forwards card size measurement as `node.measure`, and remains fully controlled by the host workflow.
+- FPS uses the complete `startedAt..endedAt` interval. Invalid or fewer-than-two frame samples and empty input-latency evidence fail closed; the shared assertion retains >=55 FPS, P95 <=50ms, zero loss, and zero unclickable duration.
+- The protected baseline enumerates exactly `mode.ts`, `view-model.ts`, `commands.ts`, `shadow.ts`, and `presentation.ts`; tests reject both broad component and broad renderer-library prefixes.
+- Clipboard copy captures a deep node/internal-edge snapshot. `clipboard.paste` clones only that snapshot, including after source deletion or source mutation.
+
+### R2 GREEN And Verification
+
+Focused R2 regression GREEN:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts tests/unit/protected-baseline-gate.spec.ts
+```
+
+Result: 6 files / 64 tests passed.
+
+Full Task 3/node-editor/route/helper focused command:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/node-editor-ui-regression.test.ts src/__tests__/components/node-editor-provider-capabilities.test.ts src/__tests__/components/node-editor-layering-wiring.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-execution-wiring.test.ts src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-editor-asset-reference.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/lib/workflow-render-view-model.test.ts src/__tests__/lib/workflow-render-shadow.test.ts src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/lib/stage-4-modes.test.ts src/__tests__/api/user-data-sync-asset-graph.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts
+```
+
+Result: 16 files / 115 tests passed.
+
+- `pnpm ts-check`: first run RED on the optional React mouse event (`TS18048` at `WorkflowReactFlowSurface.tsx:130`); after optional chaining, the rerun passed.
+- Targeted ESLint over all changed TS/TSX files: exit 0, 0 errors; the same 13 existing `node-editor.tsx` warnings remain.
+- `pnpm check:protected-baseline`: passed all checks with 0 warnings.
+- `git diff --check`: passed; Git emitted line-ending notices only.
+- Live database E2E was not run, as required; controller owns that evidence.
+- The final full suite was intentionally not run; controller re-review owns it.
+
+### R2 Files Changed
+
+- `.superpowers/sdd/stage-4-task-3-report.md`
+- `package.json`
+- `src/components/node-editor.tsx`
+- `src/components/workflow/WorkflowLegacyNodeCard.tsx`
+- `src/components/workflow/WorkflowLegacySurface.tsx`
+- `src/components/workflow/WorkflowNodeCard.tsx`
+- `src/components/workflow/WorkflowReactFlowSurface.tsx`
+- `src/lib/workflow-renderer/commands.ts`
+- `src/__tests__/components/node-editor-drag-throttle-wiring.test.ts`
+- `src/__tests__/components/node-editor-history-baseline-contract.test.ts`
+- `src/__tests__/components/workflow-react-flow-surface.test.tsx`
+- `src/__tests__/lib/workflow-render-commands.test.ts`
+- `src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`
+- `tests/e2e/stage-4-node-chat-agent.spec.ts`
+- `tests/helpers/workflow-performance.ts`
+- `tests/unit/protected-baseline-gate.spec.ts`
+
+Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` were not edited by this fix wave and remain excluded from staging and commit.

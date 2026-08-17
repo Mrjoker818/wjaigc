@@ -95,6 +95,7 @@ function createCardProps(
   renderNode: WorkflowRenderNode,
   readOnly: boolean,
   presentation: Partial<WorkflowReactFlowPresentation>,
+  selectedNodeIds: ReadonlySet<string>,
 ): WorkflowProductCardProps {
   const callbacks = presentation.cardCallbacks;
   const invoke = <Args extends unknown[]>(callback: ((...args: Args) => void) | undefined, ...args: Args): void => {
@@ -125,10 +126,17 @@ function createCardProps(
     onDeletePromptPreset: (...args) => invoke(callbacks?.onDeletePromptPreset, ...args),
     onSelect: event => {
       if (readOnly) return;
-      callbacks?.onSelect(renderNode.id, event);
+      const nextSelectedNodeIds = new Set(selectedNodeIds);
+      if (event?.ctrlKey || event?.metaKey) {
+        if (nextSelectedNodeIds.has(renderNode.id)) nextSelectedNodeIds.delete(renderNode.id);
+        else nextSelectedNodeIds.add(renderNode.id);
+      } else {
+        nextSelectedNodeIds.clear();
+        nextSelectedNodeIds.add(renderNode.id);
+      }
       presentation.onCommand?.({
         type: 'selection.set',
-        nodeIds: [renderNode.id],
+        nodeIds: [...nextSelectedNodeIds],
         transactionId: `react-flow-select:${renderNode.id}`,
       });
     },
@@ -140,6 +148,7 @@ function createCardProps(
     onDeselect: () => invoke(callbacks?.onDeselect),
     onPreviewImage: url => invoke(callbacks?.onPreviewImage, url),
     onResizeNode: (...args) => invoke(callbacks?.onResizeNode, ...args),
+    onUpdateNodeSize: (...args) => invoke(callbacks?.onUpdateNodeSize, ...args),
     collapsedNodes: callbacks?.collapsedNodes,
     onToggleCollapse: (...args) => invoke(callbacks?.onToggleCollapse, ...args),
     onContextMenu: event => invoke(callbacks?.onContextMenu, renderNode.id, event),
@@ -152,6 +161,7 @@ export function createReactFlowNodes(
   readOnly: boolean,
   presentation: Partial<WorkflowReactFlowPresentation> = {},
 ): WorkflowFlowNode[] {
+  const selectedNodeIds = new Set(model.nodes.filter(node => node.selected).map(node => node.id));
   return model.nodes.map(node => ({
     id: node.id,
     type: 'workflow',
@@ -162,7 +172,7 @@ export function createReactFlowNodes(
     data: {
       node,
       readOnly,
-      cardProps: createCardProps(node, readOnly, presentation),
+      cardProps: createCardProps(node, readOnly, presentation, selectedNodeIds),
     },
     selectable: !readOnly,
     draggable: !readOnly,

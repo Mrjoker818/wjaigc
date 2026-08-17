@@ -66,6 +66,16 @@ describe('protected baseline release gate', () => {
     ]) {
       expect(command).toContain(`--allow-path ${path}`);
     }
+    expect(command).not.toMatch(/--allow-path src\/lib\/workflow-renderer\/(?:\s|$)/);
+    for (const path of [
+      'src/lib/workflow-renderer/mode.ts',
+      'src/lib/workflow-renderer/view-model.ts',
+      'src/lib/workflow-renderer/commands.ts',
+      'src/lib/workflow-renderer/shadow.ts',
+      'src/lib/workflow-renderer/presentation.ts',
+    ]) {
+      expect(command).toContain(`--allow-path ${path}`);
+    }
   });
 
   it('passes an identical candidate and allows documentation-only changes', async () => {

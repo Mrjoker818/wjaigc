@@ -1,7 +1,7 @@
 'use client';
 
 import NextImage from 'next/image';
-import React, { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, useReducer } from 'react';
 import { createPortal } from 'react-dom';
 import {
   WorkflowNode, WorkflowConnection, Workflow as WorkflowData, NodeType, NodeCategory,
@@ -14,11 +14,10 @@ import {
 } from '@/lib/workflow-engine';
 import {
   applyWorkflowCommand,
-  createWorkflowCommandHistory,
-  recordWorkflowHistoryEntries,
-  redoWorkflowCommandHistory,
-  undoWorkflowCommandHistory,
-  type WorkflowHistoryEntry,
+  createWorkflowClipboardSnapshot,
+  createWorkflowEditorState,
+  reduceWorkflowEditorState,
+  type WorkflowClipboardSnapshot,
   type WorkflowInteractionCommand,
 } from '@/lib/workflow-renderer/commands';
 import { resolveWorkflowRendererMode, type WorkflowRendererMode } from '@/lib/workflow-renderer/mode';
@@ -41,7 +40,6 @@ import { getPromptTemplates, addPromptTemplate, type PromptTemplate } from '@/li
 import {
   getVisibleWorkflowNodeIds,
   resolveWorkflowCullingBounds,
-  selectVisibleWorkflowConnections,
 } from '@/lib/node-canvas-virtualization';
 import {
   CANVAS_ASSET_DRAG_MIME,
@@ -844,8 +842,10 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const bcIgnoreRef = useRef(false); // 防止自己发的消息回触发
   const bcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [wfRaw, setWfRaw] = useState<WorkflowData>(workflow || createEmptyWorkflow('新工作流'));
-  const [workflowHistory, setWorkflowHistory] = useState(() => createWorkflowCommandHistory());
+  const [workflowEditorState, dispatchWorkflowEditorTransition] = useReducer(reduceWorkflowEditorState,
+    workflow || createEmptyWorkflow('新工作流'),
+    createWorkflowEditorState,
+  );
   const editorTransactionCounterRef = useRef(0);
   const [nodePromptPresets, setNodePromptPresets] = useState<{ id: string; name: string; text: string }[]>(() => {
     try {
@@ -855,7 +855,6 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
     }
   });
   const workflowRendererMode = resolveWorkflowRendererMode(rendererMode);
-  // P2: 包装setWf以广播变化
   const broadcastWorkflow = useCallback((updatedWf: WorkflowData) => {
     if (!bcRef.current) return;
     if (bcDebounceRef.current) clearTimeout(bcDebounceRef.current);
@@ -864,35 +863,22 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
       bcRef.current?.postMessage({ type: 'workflow-update', wf: updatedWf, source: 'tab' });
     }, 500);
   }, []);
-  const setWf = useCallback((updater: WorkflowData | ((prev: WorkflowData) => WorkflowData)) => {
-    setWfRaw(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      if (next === prev) return prev;
-      const historyEntry: WorkflowHistoryEntry = {
-        transactionId: `editor-change:${++editorTransactionCounterRef.current}`,
-        before: prev,
-        after: next,
-      };
-      setWorkflowHistory(current => recordWorkflowHistoryEntries(current, [historyEntry]));
-      broadcastWorkflow(next);
-      return next;
+  const updateWorkflow = useCallback((updater: WorkflowData | ((prev: WorkflowData) => WorkflowData)) => {
+    dispatchWorkflowEditorTransition({
+      kind: 'user.update',
+      update: typeof updater === 'function' ? updater : () => updater,
+      transactionId: `editor-change:${++editorTransactionCounterRef.current}`,
     });
-  }, [broadcastWorkflow]);
+  }, []);
+  const updateWorkflowSystem = useCallback((updater: (prev: WorkflowData) => WorkflowData) => {
+    dispatchWorkflowEditorTransition({ kind: 'system.update', update: updater });
+  }, []);
   const dispatchWorkflowStateCommand = useCallback((
     command: WorkflowInteractionCommand,
     baseWorkflow?: WorkflowData,
   ) => {
-    setWfRaw(current => {
-      const result = applyWorkflowCommand(baseWorkflow ?? current, command);
-      if (command.type === 'workflow.hydrate') {
-        setWorkflowHistory(createWorkflowCommandHistory());
-      } else if (result.historyEntries.length > 0) {
-        setWorkflowHistory(history => recordWorkflowHistoryEntries(history, result.historyEntries));
-      }
-      if (command.type !== 'workflow.hydrate' && result.workflow !== current) broadcastWorkflow(result.workflow);
-      return result.workflow;
-    });
-  }, [broadcastWorkflow]);
+    dispatchWorkflowEditorTransition({ kind: 'command', command, baseWorkflow });
+  }, []);
   const saveNodePromptPreset = useCallback((name: string, text: string) => {
     if (!name.trim() || !text.trim()) return;
     setNodePromptPresets(previous => {
@@ -908,9 +894,15 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
       return next;
     });
   }, []);
-  const wf = wfRaw;
+  const wf = workflowEditorState.workflow;
   const wfRef = useRef(wf);
   wfRef.current = wf;
+  const lastBroadcastRevisionRef = useRef(workflowEditorState.broadcastRevision);
+  useEffect(() => {
+    if (lastBroadcastRevisionRef.current === workflowEditorState.broadcastRevision) return;
+    lastBroadcastRevisionRef.current = workflowEditorState.broadcastRevision;
+    broadcastWorkflow(wf);
+  }, [broadcastWorkflow, wf, workflowEditorState.broadcastRevision]);
   const [workflowSyncRevision, setWorkflowSyncRevision] = useState(0);
 
   // BroadcastChannel 接收端
@@ -1010,7 +1002,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const [showContentStrip, setShowContentStrip] = useState(true);
   const [showLeftPanel, setShowLeftPanel] = useState(true);
   const [showExecLog, setShowExecLog] = useState(false);
-  const [clipboard, setClipboard] = useState<{ nodes: WorkflowNode[]; connections: WorkflowConnection[] } | null>(null);
+  const [clipboard, setClipboard] = useState<WorkflowClipboardSnapshot | null>(null);
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ type: 'canvas' | 'node'; x: number; y: number; nodeId?: string } | null>(null);
   const [nodeAnnotationSession, setNodeAnnotationSession] = useState<NodeAnnotationSession | null>(null);
@@ -1054,8 +1046,8 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const [, ] = useState('通用');
 
   // P2: 撤销重做由命令事务直接驱动，避免 effect 和拖拽手工快照双写。
-  const historyStack = workflowHistory.entries;
-  const historyIndex = workflowHistory.index;
+  const historyStack = workflowEditorState.history.entries;
+  const historyIndex = workflowEditorState.history.index;
   const handleCascadeRunRef = useRef<(nodeId: string) => Promise<void>>(async () => {});
   const handleDeleteNodeRef = useRef<(nodeId: string) => void>(() => {});
   const getPortPositionLocalRef = useRef<(node: WorkflowNode, port: NodePort) => { x: number; y: number } | null>(() => null);
@@ -1071,24 +1063,12 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
 
   // P2: 撤销/重做函数
   const handleUndo = useCallback(() => {
-    setWorkflowHistory(history => {
-      if (history.index <= 0) return history;
-      const navigation = undoWorkflowCommandHistory(history);
-      setWfRaw(navigation.workflow);
-      broadcastWorkflow(navigation.workflow);
-      return navigation.history;
-    });
-  }, [broadcastWorkflow]);
+    dispatchWorkflowEditorTransition({ kind: 'history.undo' });
+  }, []);
 
   const handleRedo = useCallback(() => {
-    setWorkflowHistory(history => {
-      if (history.index >= history.entries.length) return history;
-      const navigation = redoWorkflowCommandHistory(history);
-      setWfRaw(navigation.workflow);
-      broadcastWorkflow(navigation.workflow);
-      return navigation.history;
-    });
-  }, [broadcastWorkflow]);
+    dispatchWorkflowEditorTransition({ kind: 'history.redo' });
+  }, []);
 
   // P2: 保存提示词到库 - 同时保存到统一的提示词模板系统
   useCallback((text: string, tags: string[], category: string) => {
@@ -1193,7 +1173,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
                 }
                 // 在选中节点右侧创建新节点
                 const newNode = createWorkflowNode(newNodeType, node.x + node.width + 80, node.y);
-                setWf(prev => {
+                updateWorkflow(prev => {
                   // 自动连线：选中节点输出 → 新节点输入
                   const selOutPort = node.ports.find(p => p.direction === 'out');
                   const newInPort = newNode.ports.find(p => p.direction === 'in');
@@ -1279,7 +1259,7 @@ ${contextInfo}
         } catch {
           setAssistantMessages(prev => [...prev, { role: 'assistant', content: '网络错误，请稍后再试。' }]);
         } finally { setAssistantLoading(false); }
-      }, [assistantInput, wf.nodes, wf.connections, selectedNodeId, setWf]);
+      }, [assistantInput, wf.nodes, wf.connections, selectedNodeId, updateWorkflow]);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -1332,7 +1312,10 @@ ${contextInfo}
     [wf, nodeRenderViewport, selectedNodeIds],
   );
   const handleWorkflowRenderCommand = useCallback((command: WorkflowInteractionCommand) => {
-    if (command.type === 'selection.set') setSelectedNodeIds(new Set(command.nodeIds));
+    if (command.type === 'selection.set') {
+      setSelectedNodeIds(new Set(command.nodeIds));
+      if (command.nodeIds.length > 0) setSidebarTab('props');
+    }
     dispatchWorkflowStateCommand(command);
   }, [dispatchWorkflowStateCommand]);
   const nodeById = useMemo(() => new Map(wf.nodes.map(node => [node.id, node])), [wf.nodes]);
@@ -1349,11 +1332,6 @@ ${contextInfo}
     pinnedNodeIds,
     draggingNodeRef.current,
   ), [wf.nodes, nodeCullingBounds, pinnedNodeIds, isPanning]);
-  const visibleNodes = useMemo(() => wf.nodes.filter(node => visibleNodeIds.has(node.id)), [wf.nodes, visibleNodeIds]);
-  const visibleConnections = useMemo(
-    () => selectVisibleWorkflowConnections(wf.connections, visibleNodeIds),
-    [wf.connections, visibleNodeIds],
-  );
 
   useLayoutEffect(() => {
     if (isPanning) applyNodeViewportPreview(nodePanPreviewRef.current);
@@ -1546,7 +1524,7 @@ ${contextInfo}
     const session = nodeAnnotationSession;
     if (!session) return;
     if (session.editingNodeId) {
-      setWf((prev) => ({
+      updateWorkflow((prev) => ({
         ...prev,
         nodes: prev.nodes.map((node) => node.id === session.editingNodeId
           ? {
@@ -1610,7 +1588,7 @@ ${contextInfo}
       inputPort.id,
       'image',
     );
-    setWf((prev) => ({
+    updateWorkflow((prev) => ({
       ...prev,
       nodes: [...prev.nodes, annotationNode],
       connections: [...prev.connections, connection],
@@ -1619,7 +1597,7 @@ ${contextInfo}
     setSidebarTab('props');
     setNodeAnnotationSession(null);
     setNodeAnnotationError(null);
-  }, [nodeAnnotationSession, setWf, wf.nodes]);
+  }, [nodeAnnotationSession, updateWorkflow, wf.nodes]);
 
   // 避免循环更新：记录最近一次传出的 wf 引用，跳过自身回写
   const lastEmittedRef = useRef<WorkflowData | null>(null);
@@ -1671,7 +1649,7 @@ ${contextInfo}
           return on;
         })()
       : null;
-    setWf(prev => {
+    updateWorkflow(prev => {
       const autoConns: WorkflowConnection[] = [];
       // 生图节点 → 自动输出节点连线
       if (outputNode) {
@@ -1711,7 +1689,7 @@ ${contextInfo}
     });
     setSelectedNodeIds(new Set([node.id]));
     setSidebarTab('props');
-  }, [selectedNodeIds, setWf]);
+  }, [selectedNodeIds, updateWorkflow]);
 
   const handleDeleteNode = useCallback((nodeId: string) => {
     workflowInputTransferGuardRef.current.invalidate(nodeId);
@@ -1730,7 +1708,7 @@ ${contextInfo}
     const token = guard.begin(nodeId);
     const pendingReference = createPendingWorkflowInputReference(image);
     const applyLegacyReference = (): void => {
-      setWf(prev => ({
+      updateWorkflow(prev => ({
         ...prev,
         nodes: prev.nodes.map(node => node.id === nodeId
           ? {
@@ -1748,7 +1726,7 @@ ${contextInfo}
           : node),
       }));
     };
-    setWf(prev => ({
+    updateWorkflow(prev => ({
       ...prev,
       nodes: prev.nodes.map(node => node.id === nodeId
         ? {
@@ -1789,7 +1767,7 @@ ${contextInfo}
         return response.json() as Promise<WorkspaceAssetReference>;
       },
       onSuccess: transferred => {
-        setWf(prev => ({
+        updateWorkflow(prev => ({
           ...prev,
           nodes: prev.nodes.map(node => node.id === nodeId
             ? {
@@ -1811,7 +1789,7 @@ ${contextInfo}
       },
       onFailure: applyLegacyReference,
     });
-  }, [projectId, setWf, wf.id]);
+  }, [projectId, updateWorkflow, wf.id]);
 
 
   // 从内容面板拖拽图片到画布 → 创建 input-image 节点
@@ -1851,21 +1829,21 @@ ${contextInfo}
       : { ...node.config, imageUrl, source: 'canvas-ref', assetTransferPending: false };
     node.width = nodeW;
     node.height = nodeH;
-    setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
+    updateWorkflow(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
     setSelectedNodeIds(new Set([node.id]));
     if (refImage) void transferCanvasImageToWorkflow(node.id, refImage);
-  }, [setWf, transferCanvasImageToWorkflow]);
+  }, [transferCanvasImageToWorkflow, updateWorkflow]);
 
   const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
     const currentImageUrl = wf.nodes.find(node => node.id === nodeId)?.config?.imageUrl;
     if (shouldInvalidateWorkflowInputTransfer(currentImageUrl, updates.config)) {
       workflowInputTransferGuardRef.current.invalidate(nodeId);
     }
-    setWf(prev => ({
+    updateWorkflow(prev => ({
       ...prev,
       nodes: prev.nodes.map(n => n.id === nodeId ? mergeWorkflowNodeUpdate(n, updates) : n),
     }));
-  }, [setWf, wf.nodes]);
+  }, [updateWorkflow, wf.nodes]);
 
   // P0: LLM优化提示词
   const handleLlmOptimize = useCallback(async (nodeId: string, _prompt: string, model: string, systemPrompt: string, instruction: string) => {
@@ -1988,12 +1966,12 @@ ${contextInfo}
     // 清空当前节点的图片
     handleNodeUpdate(nodeId, { config: { ...node.config, imageUrl: '', label: '输出' } });
     // 添加源节点和连线
-    setWf(prev => ({
+    updateWorkflow(prev => ({
       ...prev,
       nodes: [...prev.nodes, sourceNode],
       connections: [...prev.connections, createConnection(sourceNode.id, 'output-image', nodeId, 'input-image', 'image')],
     }));
-  }, [wf.nodes, handleNodeUpdate, setWf]);
+  }, [wf.nodes, handleNodeUpdate, updateWorkflow]);
 
   // P2: 宫格切分
   const handleGridSplit = useCallback((nodeId: string, cols: number, rows: number) => {
@@ -2011,8 +1989,8 @@ ${contextInfo}
         newConns.push(createConnection(nodeId, 'output-image', newNode.id, 'input-image', 'image'));
       }
     }
-    setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
-  }, [setWf, wf.nodes]);
+    updateWorkflow(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
+  }, [updateWorkflow, wf.nodes]);
 
   // P2: 对比滑块 — 找到上游原图，与当前节点图片对比
   const handleCompare = useCallback((nodeId: string) => {
@@ -2062,21 +2040,15 @@ ${contextInfo}
       // Ctrl+C / Cmd+C 复制选中节点（支持多选）
       if ((e.metaKey || e.ctrlKey) && e.key === 'c' && selectedNodeIds.size > 0) {
         e.preventDefault();
-        const selectedNodes = wf.nodes.filter(n => selectedNodeIds.has(n.id));
-        if (selectedNodes.length > 0) {
-          const relatedConns = wf.connections.filter(c =>
-            selectedNodeIds.has(c.fromNodeId) && selectedNodeIds.has(c.toNodeId)
-          );
-          setClipboard({ nodes: selectedNodes, connections: relatedConns });
-        }
+        setClipboard(createWorkflowClipboardSnapshot(wf, [...selectedNodeIds]));
       }
       // Ctrl+V / Cmd+V 粘贴节点
       if ((e.metaKey || e.ctrlKey) && e.key === 'v' && clipboard) {
         e.preventDefault();
         const transactionId = `keyboard-node-copy:${++editorTransactionCounterRef.current}`;
         handleWorkflowRenderCommand({
-          type: 'nodes.copy',
-          nodeIds: clipboard.nodes.map(node => node.id),
+          type: 'clipboard.paste',
+          snapshot: clipboard,
           offset: { x: 40, y: 40 },
           transactionId,
         });
@@ -2157,13 +2129,13 @@ ${contextInfo}
   // ─── 画布交互 ───
 
   const applyNodeDragPosition = useCallback((position: { id: string; x: number; y: number }) => {
-    setWfRaw(current => ({
+    updateWorkflowSystem(current => ({
       ...current,
       nodes: current.nodes.map(node => node.id === position.id
         ? { ...node, x: position.x, y: position.y }
         : node),
     }));
-  }, []);
+  }, [updateWorkflowSystem]);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
@@ -2336,7 +2308,7 @@ ${contextInfo}
           const mx = canvasRect ? (contextMenu.x - canvasRect.left - vp.x) / vp.zoom : 100;
           const my = canvasRect ? (contextMenu.y - canvasRect.top - vp.y) / vp.zoom : 100;
           const newNode = createWorkflowNode('ai-generate', mx - 160, my - 60);
-          setWf(prev => ({ ...prev, nodes: [...prev.nodes, newNode] }));
+          updateWorkflow(prev => ({ ...prev, nodes: [...prev.nodes, newNode] }));
           setSelectedNodeIds(new Set([newNode.id]));
           break;
         }
@@ -2350,8 +2322,8 @@ ${contextInfo}
           const minY = Math.min(...clipboard.nodes.map(node => node.y));
           const transactionId = `context-paste:${++editorTransactionCounterRef.current}`;
           const command: WorkflowInteractionCommand = {
-            type: 'nodes.copy',
-            nodeIds: clipboard.nodes.map(node => node.id),
+            type: 'clipboard.paste',
+            snapshot: clipboard,
             offset: { x: mx2 + 30 - minX, y: my2 + 30 - minY },
             transactionId,
           };
@@ -2374,9 +2346,7 @@ ${contextInfo}
         }
         case 'copy': {
           const selIds = selectedNodeIds.has(nodeId) ? selectedNodeIds : new Set([nodeId]);
-          const selNodes = wf.nodes.filter(n => selIds.has(n.id));
-          const selConns = wf.connections.filter(c => selIds.has(c.fromNodeId) && selIds.has(c.toNodeId));
-          setClipboard({ nodes: selNodes, connections: selConns });
+          setClipboard(createWorkflowClipboardSnapshot(wf, [...selIds]));
           break;
         }
         case 'duplicate': {
@@ -2394,7 +2364,7 @@ ${contextInfo}
           break;
         }
         case 'disconnect': {
-          setWf(prev => ({
+          updateWorkflow(prev => ({
             ...prev,
             connections: prev.connections.filter(c => c.fromNodeId !== nodeId && c.toNodeId !== nodeId),
           }));
@@ -2413,7 +2383,7 @@ ${contextInfo}
       }
     }
     closeContextMenu();
-  }, [contextMenu, closeContextMenu, setWf, clipboard, wf, selectedNodeIds, requestNodeAnnotation, dispatchWorkflowStateCommand]);
+  }, [contextMenu, closeContextMenu, clipboard, wf, selectedNodeIds, requestNodeAnnotation, dispatchWorkflowStateCommand, updateWorkflow]);
 
   // ─── 执行工作流 ───
 
@@ -2665,7 +2635,7 @@ ${contextInfo}
       const nodeW = 220;
       const nodeH = Math.round(nodeW / ratio);
       const clampedH = Math.max(120, Math.min(400, nodeH));
-      setWf(prev => ({
+      updateWorkflow(prev => ({
         ...prev,
         nodes: prev.nodes.map((n: WorkflowNode) =>
           n.id === nodeId ? { ...n, width: nodeW, height: clampedH + 56 } : n
@@ -2675,22 +2645,21 @@ ${contextInfo}
     img.src = imageUrl;
     // 返回清理函数，组件卸载时取消回调
     return () => { cancelled = true; img.onload = null; };
-  }, [setWf]);
+  }, [updateWorkflow]);
 
   const updateNodeSize = useCallback((nodeId: string, width: number, height: number) => {
-    setWf(prev => ({
-      ...prev,
-      nodes: prev.nodes.map((n: WorkflowNode) =>
-        n.id === nodeId ? { ...n, width, height } : n
-      ),
-    }));
+    dispatchWorkflowStateCommand({
+      type: 'node.measure',
+      nodeId,
+      size: { width, height },
+    });
     // 节点尺寸变化时清除该节点的端口位置缓存，下次取端口位置时重新计算
     for (const key of portPositionCacheRef.current.keys()) {
       if (key.startsWith(nodeId + '-')) {
         portPositionCacheRef.current.delete(key);
       }
     }
-  }, [setWf]);
+  }, [dispatchWorkflowStateCommand]);
 
   const handleGlobalImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2756,7 +2725,7 @@ ${contextInfo}
           });
           const data = await res.json();
           if (data.success && data.workflow) {
-            setWf(data.workflow);
+            updateWorkflow(data.workflow);
             setSelectedNodeIds(new Set());
             setSidebarTab('nodes');
             setAiBuildInput('');
@@ -2770,7 +2739,7 @@ ${contextInfo}
         } finally {
           setAiBuildLoading(false);
         }
-      }, [aiBuildInput, setWf]);
+      }, [aiBuildInput, updateWorkflow]);
 
   // ─── 加载预设模板 ───
 
@@ -2802,16 +2771,16 @@ ${contextInfo}
 
         // 自动布局
         const layouted = autoLayoutWorkflow(newWf);
-        setWf(layouted);
+        updateWorkflow(layouted);
         setSelectedNodeIds(new Set());
         setSidebarTab('nodes');
-      }, [setWf]);
+      }, [updateWorkflow]);
 
   // ─── 自动布局 ───
 
   useCallback(() => {
-        setWf(prev => autoLayoutWorkflow(prev));
-      }, [setWf]);
+        updateWorkflow(prev => autoLayoutWorkflow(prev));
+      }, [updateWorkflow]);
 
   // ─── 连线路径计算 ───
 
@@ -3010,7 +2979,7 @@ ${contextInfo}
                   const text = await file.text();
                   const result = parseComfyUIWorkflow(text);
                   if (!result || result.nodes.length === 0) { alert('未能识别有效的ComfyUI工作流节点'); return; }
-                  setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...result.nodes], connections: [...prev.connections, ...result.connections] }));
+                  updateWorkflow(prev => ({ ...prev, nodes: [...prev.nodes, ...result.nodes], connections: [...prev.connections, ...result.connections] }));
                 } catch (err) { alert('导入失败: ' + (err instanceof Error ? err.message : '无效的JSON文件')); }
               };
               input.click();
@@ -3167,13 +3136,10 @@ ${contextInfo}
           <WorkflowLegacySurface
             model={legacyWorkflowRenderModel}
             onCommand={handleWorkflowRenderCommand}
-            nodes={wf.nodes}
-            visibleNodes={visibleNodes}
-            visibleConnections={visibleConnections}
+            visibleNodeIds={visibleNodeIds}
             theme={T}
             execResults={execResults}
             execStatus={execStatus}
-            selectedNodeIds={selectedNodeIds}
             highlightedNodeIds={getConnectedNodeIds}
             hoveredNodeId={hoveredNodeId}
             canvasImages={canvasImages}
@@ -3189,7 +3155,7 @@ ${contextInfo}
             getPortPosition={getPortPositionLocal}
             isConnectionHighlighted={isConnectionHighlighted}
             onToggleConnectionBlocked={(connection, targetNode) => {
-              setWf(prev => {
+              updateWorkflow(prev => {
                 const currentTarget = prev.nodes.find(node => node.id === targetNode.id);
                 if (!currentTarget) return prev;
                 const blocked = Array.isArray(currentTarget.config?.blockedInputs) ? [...(currentTarget.config.blockedInputs as string[])] : [];
@@ -3703,7 +3669,7 @@ ${contextInfo}
                   try {
                     const parsed = JSON.parse(jsonEditContent);
                     if (parsed.nodes && parsed.connections) {
-                      setWf(prev => ({ ...prev, nodes: parsed.nodes, connections: parsed.connections }));
+                      updateWorkflow(prev => ({ ...prev, nodes: parsed.nodes, connections: parsed.connections }));
                       setJsonEditorOpen(false);
                     }
                   } catch { /* JSON解析失败，不关闭 */ }

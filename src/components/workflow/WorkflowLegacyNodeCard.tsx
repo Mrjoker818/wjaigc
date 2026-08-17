@@ -52,6 +52,15 @@ export interface WorkflowLegacyPromptPreset {
   text: string;
 }
 
+export interface WorkflowLegacyPortRenderProps {
+  nodeId: string;
+  port: NodePort;
+  direction: 'in' | 'out';
+  className: string;
+  style: React.CSSProperties;
+  title: string;
+}
+
 export interface WorkflowLegacyPromptTemplate {
   id: string;
   name: string;
@@ -130,6 +139,7 @@ export interface WorkflowLegacyNodeCardProps {
   onContextMenu?: (e: React.MouseEvent) => void;
   onDoubleClickAnnotation?: () => void;
   layout?: 'canvas' | 'embedded';
+  renderPortHandle?: (props: WorkflowLegacyPortRenderProps) => React.ReactNode;
 }
 
 /** output-image-group 节点内容: 多图分页浏览 */
@@ -197,7 +207,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, onImageFileDrop, promptPresets = [], promptTemplates = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation, layout = 'canvas' }: WorkflowLegacyNodeCardProps) {
+export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, onImageFileDrop, promptPresets = [], promptTemplates = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation, layout = 'canvas', renderPortHandle }: WorkflowLegacyNodeCardProps) {
   const T = theme;
   const cat = getWorkflowRenderNodeCategory(node.type);
   const color = WORKFLOW_RENDER_NODE_COLORS[cat];
@@ -219,6 +229,25 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
   }, [node.id, node.width, node.height, onUpdateNodeSize]);
   const inputPorts = node.ports.filter(p => p.direction === 'in');
   const outputPorts = node.ports.filter(p => p.direction === 'out');
+  const renderPortDot = (port: NodePort, direction: 'in' | 'out', style: React.CSSProperties) => {
+    const props: WorkflowLegacyPortRenderProps = {
+      nodeId: node.id,
+      port,
+      direction,
+      className: `port-dot ${direction === 'in' ? 'input-port' : 'output-port'}`,
+      style,
+      title: port.label,
+    };
+    if (renderPortHandle) return renderPortHandle(props);
+    return <div
+      className={props.className}
+      data-port-id={`${node.id}-${direction}-${port.id}`}
+      style={style}
+      onMouseDown={direction === 'out' ? event => { event.stopPropagation(); onPortMouseDown(event, node.id, port); } : undefined}
+      onMouseUp={direction === 'in' ? event => { event.stopPropagation(); onPortMouseUp(node.id, port); } : undefined}
+      title={port.label}
+    />;
+  };
   const isCondition = node.type.startsWith('condition-');
   const isInputText = node.type === 'input-text';
   const isInputImage = node.type === 'input-image';
@@ -290,6 +319,8 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
       style={{
         left: layout === 'canvas' ? node.x : 0,
         top: layout === 'canvas' ? node.y : 0,
+        width: node.width,
+        minHeight: isCollapsed ? 45 : node.height,
         height: isCollapsed ? 45 : 'auto',
         zIndex: isSelected ? 10 : isHovered ? 5 : 1,
       }}
@@ -561,13 +592,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
                   <div key={port.id} className="port-row" style={{ marginTop: 8 }}>
                     <div className="port-dot input-port" style={{ visibility: 'hidden' }} />
                     <span className="port-label">{port.label}</span>
-                    <div
-                      className="port-dot output-port"
-                      data-port-id={`${node.id}-out-${port.id}`}
-                      style={{ borderColor: portColor, color: portColor }}
-                      onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
-                      title={port.label}
-                    />
+                    {renderPortDot(port, 'out', { borderColor: portColor, color: portColor })}
                   </div>
                 );
               })}
@@ -650,11 +675,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
                   <div key={port.id} className="port-row" style={{ padding: '4px 12px' }}>
                     <div className="port-dot hidden" />
                     <span className="port-label" style={{ color: T.nodePortText, fontSize: 10 }}>{port.label}</span>
-                    <div className="port-dot output-port"
-                      data-port-id={`${node.id}-out-${port.id}`}
-                      style={{ borderColor: portColor, color: portColor }}
-                      onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
-                    />
+                    {renderPortDot(port, 'out', { borderColor: portColor, color: portColor })}
                   </div>
                 );
               })}
@@ -677,13 +698,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
                        <Bookmark size={14} style={{ color: portColor }} />}
                     </div>
                     <span className="input-card-name">{port.label}</span>
-                    <div
-                      className="port-dot input-port"
-                      data-port-id={`${node.id}-in-${port.id}`}
-                      style={{ borderColor: portColor, color: portColor, flexShrink: 0 }}
-                      onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, port); }}
-                      title={port.label}
-                    />
+                    {renderPortDot(port, 'in', { borderColor: portColor, color: portColor, flexShrink: 0 })}
                   </div>
                 );
               })}
@@ -715,13 +730,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
                   <div key={port.id} className="port-row">
                     <div className="port-dot input-port" style={{ visibility: 'hidden' }} />
                     <span className="port-label">{port.label}</span>
-                    <div
-                      className="port-dot output-port"
-                      data-port-id={`${node.id}-out-${port.id}`}
-                      style={{ borderColor: portColor, color: portColor }}
-                      onMouseDown={(e) => { e.stopPropagation(); onPortMouseDown(e, node.id, port); }}
-                      title={port.label}
-                    />
+                    {renderPortDot(port, 'out', { borderColor: portColor, color: portColor })}
                   </div>
                 );
               })}
@@ -763,13 +772,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
               <div className="w-full h-full flex flex-col">
                 {imageInputPort && (
                   <div className="port-row" style={{ marginBottom: 8 }}>
-                    <div
-                      className="port-dot input-port"
-                      data-port-id={`${node.id}-in-${imageInputPort.id}`}
-                      style={{ borderColor: PORT_COLORS[imageInputPort.type] || T.connColor, color: PORT_COLORS[imageInputPort.type] || T.connColor }}
-                      onMouseUp={(e) => { e.stopPropagation(); onPortMouseUp(node.id, imageInputPort); }}
-                      title={imageInputPort.label}
-                    />
+                    {renderPortDot(imageInputPort, 'in', { borderColor: PORT_COLORS[imageInputPort.type] || T.connColor, color: PORT_COLORS[imageInputPort.type] || T.connColor })}
                     <span className="port-label">{imageInputPort.label}</span>
                     <div className="port-dot output-port" style={{ visibility: 'hidden' }} />
                   </div>

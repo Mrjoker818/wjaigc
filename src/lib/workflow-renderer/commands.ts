@@ -11,7 +11,14 @@ export type WorkflowInteractionCommand =
   | { type: 'selection.set'; nodeIds: string[]; transactionId: string }
   | { type: 'nodes.delete'; nodeIds: string[]; transactionId: string }
   | { type: 'nodes.copy'; nodeIds: string[]; offset: { x: number; y: number }; transactionId: string }
+  | { type: 'clipboard.paste'; snapshot: WorkflowClipboardSnapshot; offset: { x: number; y: number }; transactionId: string }
+  | { type: 'node.measure'; nodeId: string; size: { width: number; height: number } }
   | { type: 'workflow.hydrate'; workflow: Workflow; transactionId: string };
+
+export interface WorkflowClipboardSnapshot {
+  nodes: Workflow['nodes'];
+  connections: WorkflowConnection[];
+}
 
 export interface WorkflowHistoryEntry {
   transactionId: string;
@@ -33,6 +40,19 @@ export interface WorkflowCommandHistoryNavigation {
   history: WorkflowCommandHistory;
   workflow: Workflow;
 }
+
+export interface WorkflowEditorState {
+  workflow: Workflow;
+  history: WorkflowCommandHistory;
+  broadcastRevision: number;
+}
+
+export type WorkflowEditorTransition =
+  | { kind: 'command'; command: WorkflowInteractionCommand; baseWorkflow?: Workflow }
+  | { kind: 'user.update'; update: (workflow: Workflow) => Workflow; transactionId: string }
+  | { kind: 'system.update'; update: (workflow: Workflow) => Workflow }
+  | { kind: 'history.undo' }
+  | { kind: 'history.redo' };
 
 const MAX_WORKFLOW_HISTORY_ENTRIES = 50;
 
@@ -103,6 +123,62 @@ function copyId(base: string, occupied: Set<string>): string {
   return candidate;
 }
 
+function cloneSnapshotValue<T>(value: T): T {
+  return structuredClone(value);
+}
+
+export function createWorkflowClipboardSnapshot(
+  workflow: Workflow,
+  nodeIds: ReadonlyArray<string>,
+): WorkflowClipboardSnapshot {
+  const selectedIds = new Set(nodeIds);
+  return cloneSnapshotValue({
+    nodes: workflow.nodes.filter(node => selectedIds.has(node.id)),
+    connections: workflow.connections.filter(connection => (
+      selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId)
+    )),
+  });
+}
+
+function pasteWorkflowSnapshot(
+  workflow: Workflow,
+  snapshot: WorkflowClipboardSnapshot,
+  offset: { x: number; y: number },
+  transactionId: string,
+): WorkflowCommandResult {
+  if (snapshot.nodes.length === 0) return noChange(workflow);
+  const occupiedNodeIds = new Set(workflow.nodes.map(node => node.id));
+  const occupiedConnectionIds = new Set(workflow.connections.map(connection => connection.id));
+  const nodeIdMap = new Map<string, string>();
+  const copiedNodes = cloneSnapshotValue(snapshot.nodes).map((node, index) => {
+    const id = copyId(`copy-${node.id}-${transactionId}-${index + 1}`, occupiedNodeIds);
+    nodeIdMap.set(node.id, id);
+    return {
+      ...node,
+      id,
+      x: node.x + offset.x,
+      y: node.y + offset.y,
+      label: `${node.label} (副本)`,
+    };
+  });
+  const copiedConnections = cloneSnapshotValue(snapshot.connections).flatMap(connection => {
+    const fromNodeId = nodeIdMap.get(connection.fromNodeId);
+    const toNodeId = nodeIdMap.get(connection.toNodeId);
+    if (!fromNodeId || !toNodeId) return [];
+    return [{
+      ...connection,
+      id: copyId(`copy-${connection.id}-${transactionId}`, occupiedConnectionIds),
+      fromNodeId,
+      toNodeId,
+    }];
+  });
+  return result({
+    ...workflow,
+    nodes: [...workflow.nodes, ...copiedNodes],
+    connections: [...workflow.connections, ...copiedConnections],
+  }, workflow, transactionId);
+}
+
 /** Applies a user interaction to the workflow domain without rendering or persistence effects. */
 export function applyWorkflowCommand(
   workflow: Workflow,
@@ -113,6 +189,20 @@ export function applyWorkflowCommand(
   }
 
   if (command.type === 'selection.set') return noChange(workflow);
+
+  if (command.type === 'node.measure') {
+    const measuredNode = workflow.nodes.find(node => node.id === command.nodeId);
+    if (!measuredNode
+      || (measuredNode.width === command.size.width && measuredNode.height === command.size.height)) {
+      return noChange(workflow);
+    }
+    return noChange({
+      ...workflow,
+      nodes: workflow.nodes.map(node => node.id === command.nodeId
+        ? { ...node, width: command.size.width, height: command.size.height }
+        : node),
+    });
+  }
 
   if (command.type === 'nodes.move') {
     const movedIds = new Set(command.nodeIds);
@@ -157,39 +247,76 @@ export function applyWorkflowCommand(
     }, workflow, command.transactionId);
   }
 
-  const selectedIds = new Set(command.nodeIds);
-  const selectedNodes = workflow.nodes.filter(node => selectedIds.has(node.id));
-  if (selectedNodes.length === 0) return noChange(workflow);
-  const occupiedNodeIds = new Set(workflow.nodes.map(node => node.id));
-  const occupiedConnectionIds = new Set(workflow.connections.map(connection => connection.id));
-  const nodeIdMap = new Map<string, string>();
-  const copiedNodes = selectedNodes.map((node, index) => {
-    const id = copyId(`copy-${node.id}-${command.transactionId}-${index + 1}`, occupiedNodeIds);
-    nodeIdMap.set(node.id, id);
+  if (command.type === 'clipboard.paste') {
+    return pasteWorkflowSnapshot(workflow, command.snapshot, command.offset, command.transactionId);
+  }
+
+  return pasteWorkflowSnapshot(
+    workflow,
+    createWorkflowClipboardSnapshot(workflow, command.nodeIds),
+    command.offset,
+    command.transactionId,
+  );
+}
+
+export function createWorkflowEditorState(workflow: Workflow): WorkflowEditorState {
+  return { workflow, history: createWorkflowCommandHistory(), broadcastRevision: 0 };
+}
+
+export function reduceWorkflowEditorState(
+  state: WorkflowEditorState,
+  transition: WorkflowEditorTransition,
+): WorkflowEditorState {
+  if (transition.kind === 'history.undo') {
+    if (state.history.index <= 0) return state;
+    const navigation = undoWorkflowCommandHistory(state.history);
     return {
-      ...node,
-      id,
-      x: node.x + command.offset.x,
-      y: node.y + command.offset.y,
-      label: `${node.label} (副本)`,
-      ports: node.ports.map(port => ({ ...port })),
-      config: { ...node.config },
+      workflow: navigation.workflow,
+      history: navigation.history,
+      broadcastRevision: state.broadcastRevision + 1,
     };
-  });
-  const copiedConnections = workflow.connections.flatMap(connection => {
-    const fromNodeId = nodeIdMap.get(connection.fromNodeId);
-    const toNodeId = nodeIdMap.get(connection.toNodeId);
-    if (!fromNodeId || !toNodeId) return [];
-    return [{
-      ...connection,
-      id: copyId(`copy-${connection.id}-${command.transactionId}`, occupiedConnectionIds),
-      fromNodeId,
-      toNodeId,
-    }];
-  });
-  return result({
-    ...workflow,
-    nodes: [...workflow.nodes, ...copiedNodes],
-    connections: [...workflow.connections, ...copiedConnections],
-  }, workflow, command.transactionId);
+  }
+  if (transition.kind === 'history.redo') {
+    if (state.history.index >= state.history.entries.length) return state;
+    const navigation = redoWorkflowCommandHistory(state.history);
+    return {
+      workflow: navigation.workflow,
+      history: navigation.history,
+      broadcastRevision: state.broadcastRevision + 1,
+    };
+  }
+  if (transition.kind === 'system.update') {
+    const workflow = transition.update(state.workflow);
+    return workflow === state.workflow ? state : { ...state, workflow };
+  }
+  if (transition.kind === 'user.update') {
+    const workflow = transition.update(state.workflow);
+    if (workflow === state.workflow) return state;
+    const historyEntry = { transactionId: transition.transactionId, before: state.workflow, after: workflow };
+    return {
+      workflow,
+      history: recordWorkflowHistoryEntries(state.history, [historyEntry]),
+      broadcastRevision: state.broadcastRevision + 1,
+    };
+  }
+
+  const result = applyWorkflowCommand(transition.baseWorkflow ?? state.workflow, transition.command);
+  if (transition.command.type === 'workflow.hydrate') {
+    return {
+      workflow: result.workflow,
+      history: createWorkflowCommandHistory(),
+      broadcastRevision: state.broadcastRevision,
+    };
+  }
+  if (result.workflow === state.workflow && result.historyEntries.length === 0) return state;
+  const recordsUserHistory = result.historyEntries.length > 0;
+  return {
+    workflow: result.workflow,
+    history: recordsUserHistory
+      ? recordWorkflowHistoryEntries(state.history, result.historyEntries)
+      : state.history,
+    broadcastRevision: recordsUserHistory
+      ? state.broadcastRevision + 1
+      : state.broadcastRevision,
+  };
 }

@@ -46,13 +46,10 @@ export type WorkflowLegacyCardCallbacks = Omit<WorkflowLegacyNodeCardProps,
 export interface WorkflowLegacySurfaceProps {
   model: WorkflowRenderModel;
   onCommand: (command: WorkflowInteractionCommand) => void;
-  nodes: WorkflowNode[];
-  visibleNodes?: WorkflowNode[];
-  visibleConnections?: WorkflowConnection[];
+  visibleNodeIds?: ReadonlySet<string>;
   theme?: WorkflowLegacyNodeTheme;
   execResults?: Record<string, { status: string; output?: Record<string, unknown>; error?: string }>;
   execStatus?: string;
-  selectedNodeIds?: Set<string>;
   highlightedNodeIds?: Set<string>;
   hoveredNodeId?: string | null;
   canvasImages?: WorkflowLegacyCanvasImageRef[];
@@ -87,14 +84,29 @@ function defaultConnectionPath(fromX: number, fromY: number, toX: number, toY: n
 
 /** Legacy SVG/HTML composition with all state and side effects held by its host. */
 export function WorkflowLegacySurface({
-  model, onCommand, nodes, visibleNodes = nodes, visibleConnections = [], theme = DEFAULT_WORKFLOW_NODE_THEME,
-  execResults = {}, execStatus = 'idle', selectedNodeIds = new Set<string>(), highlightedNodeIds = new Set<string>(),
+  model, onCommand, visibleNodeIds = new Set(model.nodes.map(node => node.id)), theme = DEFAULT_WORKFLOW_NODE_THEME,
+  execResults = {}, execStatus = 'idle', highlightedNodeIds = new Set<string>(),
   hoveredNodeId = null, canvasImages, llmModels, imageModels, promptTemplates, upstreamImageUrls, cardCallbacks,
   draggingConnection, boxSelect, svgViewportTransformRef, nodeViewportTransformRef,
   getConnectionPath = defaultConnectionPath, getPortPosition, isConnectionHighlighted = () => false,
   onToggleConnectionBlocked,
 }: WorkflowLegacySurfaceProps) {
-  const nodeById = new Map(nodes.map(node => [node.id, node]));
+  const projectedNodes = model.nodes.map(renderNode => ({
+    ...renderNode.workflowNode,
+    id: renderNode.id,
+    type: renderNode.type,
+    label: renderNode.label,
+    x: renderNode.position.x,
+    y: renderNode.position.y,
+    width: renderNode.size.width,
+    height: renderNode.size.height,
+    ports: renderNode.ports.map(port => ({ ...port })),
+  }));
+  const nodeById = new Map(projectedNodes.map(node => [node.id, node]));
+  const visibleNodes = model.nodes.filter(node => visibleNodeIds.has(node.id));
+  const visibleEdges = model.edges.filter(edge => (
+    visibleNodeIds.has(edge.source.nodeId) && visibleNodeIds.has(edge.target.nodeId)
+  ));
   const cardProps = cardCallbacks ?? {
     onSelect: noop, onHover: noop, onDragStart: noop, onPortMouseDown: noop, onPortMouseUp: noop,
     onDelete: noop, onDeselect: noop, onPreviewImage: noop,
@@ -117,7 +129,16 @@ export function WorkflowLegacySurface({
           <marker id="arrow-default" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill={theme.connColor} /></marker>
         </defs>
         <g ref={svgViewportTransformRef} transform={`translate(${model.viewport.x}, ${model.viewport.y}) scale(${model.viewport.zoom})`}>
-          {visibleConnections.map(connection => {
+          {visibleEdges.map(renderEdge => {
+            const connection: WorkflowConnection = {
+              ...renderEdge.workflowConnection,
+              id: renderEdge.id,
+              fromNodeId: renderEdge.source.nodeId,
+              fromPortId: renderEdge.source.portId,
+              toNodeId: renderEdge.target.nodeId,
+              toPortId: renderEdge.target.portId,
+              type: renderEdge.type,
+            };
             const fromNode = nodeById.get(connection.fromNodeId);
             const toNode = nodeById.get(connection.toNodeId);
             const fromPort = fromNode?.ports.find(port => port.id === connection.fromPortId);
@@ -134,7 +155,7 @@ export function WorkflowLegacySurface({
             const markerId = connection.type === 'image' ? 'arrow-image' : connection.type === 'prompt' ? 'arrow-prompt' : connection.type === 'mask' ? 'arrow-mask' : connection.type === 'condition' ? 'arrow-condition' : connection.type === 'data' ? 'arrow-data' : 'arrow-default';
             const path = getConnectionPath(from.x, from.y, to.x, to.y);
 
-            return <g key={connection.id}>
+            return <g key={connection.id} data-edge-id={connection.id}>
               {highlighted && !blocked && <path d={path} fill="none" stroke={color} strokeWidth={6} strokeOpacity={0.15} />}
               <path d={path} fill="none" stroke={blocked ? '#666' : color} strokeWidth={highlighted ? 3 : 2} strokeOpacity={blocked ? 0.3 : highlighted ? 1 : running ? 0.9 : 0.5} strokeLinecap="round" strokeDasharray={blocked ? '4 4' : undefined} markerEnd={blocked ? undefined : `url(#${markerId})`} className={running && !blocked ? 'animate-pulse' : 'transition-all duration-200'} />
               {running && !blocked && <><path d={path} fill="none" stroke={color} strokeWidth={2} strokeOpacity={0.5} strokeDasharray="10 5" className="ne-conn-flowing" /><circle r={3} fill={color}><animateMotion dur="1.2s" repeatCount="indefinite" path={path} /></circle></>}
@@ -158,8 +179,10 @@ export function WorkflowLegacySurface({
       </svg>
 
       <div data-workflow-legacy-node-layer ref={nodeViewportTransformRef} className="absolute inset-0" style={{ zIndex: 2, transform: `translate(${model.viewport.x}px, ${model.viewport.y}px) scale(${model.viewport.zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
-        {visibleNodes.map(node => <WorkflowLegacyNodeCard
-          key={node.id} node={node} isSelected={selectedNodeIds.has(node.id)} isHighlighted={highlightedNodeIds.has(node.id)} isHovered={hoveredNodeId === node.id}
+        {visibleNodes.map(renderNode => {
+          const node = nodeById.get(renderNode.id)!;
+          return <WorkflowLegacyNodeCard
+          key={node.id} node={node} isSelected={renderNode.selected} isHighlighted={highlightedNodeIds.has(node.id)} isHovered={hoveredNodeId === node.id}
           execResult={execResults[node.id]} isRunning={execStatus === 'running'} theme={theme} canvasImages={canvasImages} llmModels={llmModels} imageModels={imageModels} upstreamImageUrl={upstreamImageUrls?.get(node.id)}
           {...cardProps}
           promptTemplates={promptTemplates}
@@ -168,7 +191,8 @@ export function WorkflowLegacySurface({
           onDragStart={event => cardProps.onDragStart(node.id, event)}
           onContextMenu={event => cardProps.onContextMenu?.(node.id, event)}
           onDoubleClickAnnotation={() => cardProps.onDoubleClickAnnotation?.(node.id)}
-        />)}
+        />;
+        })}
       </div>
     </div>
   );

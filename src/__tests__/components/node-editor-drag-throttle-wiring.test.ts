@@ -19,12 +19,12 @@ describe('node editor drag throttling', () => {
 
   it('uses compositor previews and viewport culling for pan-heavy workflows', () => {
     expect(source).toContain('const updateNodePanPreview = useCallback');
-    expect(source).toContain('const visibleNodes = useMemo');
-    expect(source).toContain('const visibleConnections = useMemo');
-    expect(source).toContain('visibleConnections={visibleConnections}');
-    expect(source).toContain('visibleNodes={visibleNodes}');
-    expect(legacySurfaceSource).toContain('visibleConnections.map(connection =>');
-    expect(legacySurfaceSource).toContain('visibleNodes.map(node =>');
+    expect(source).toContain('const visibleNodeIds = useMemo');
+    expect(source).toContain('visibleNodeIds={visibleNodeIds}');
+    expect(source).not.toContain('visibleConnections={visibleConnections}');
+    expect(source).not.toContain('visibleNodes={visibleNodes}');
+    expect(legacySurfaceSource).toContain('model.nodes.filter(node => visibleNodeIds.has(node.id))');
+    expect(legacySurfaceSource).toContain('model.edges.filter(edge =>');
     expect(source).not.toContain('setViewport(v => ({ ...v, x: panStart.vx');
   });
 

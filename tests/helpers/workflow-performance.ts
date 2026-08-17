@@ -121,15 +121,27 @@ function percentile95(values: number[]): number {
 export function summarizeWorkflowPerformance(
   raw: WorkflowPerformanceRawSample,
 ): WorkflowPerformanceSample {
-  const durationMs = Math.max(0, raw.endedAt - raw.startedAt);
-  const frameIntervals = Math.max(0, raw.frameTimestamps.length - 1);
-  const frameSpanMs = frameIntervals > 0
-    ? Math.max(0, raw.frameTimestamps.at(-1)! - raw.frameTimestamps[0]!)
-    : 0;
+  const durationMs = raw.endedAt - raw.startedAt;
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    throw new Error('BLOCKED: Stage 4 workflow performance gate requires a positive measurement interval');
+  }
+  const validFrameTimestamps = raw.frameTimestamps.filter(timestamp => (
+    Number.isFinite(timestamp) && timestamp >= raw.startedAt && timestamp <= raw.endedAt
+  ));
+  if (validFrameTimestamps.length < 2) {
+    throw new Error('BLOCKED: Stage 4 workflow performance gate requires at least two valid frames');
+  }
+  if (validFrameTimestamps.length !== raw.frameTimestamps.length
+    || validFrameTimestamps.some((timestamp, index) => index > 0 && timestamp <= validFrameTimestamps[index - 1]!)) {
+    throw new Error('BLOCKED: Stage 4 workflow performance gate found invalid frame timestamps');
+  }
+  if (raw.inputDelaysMs.length === 0 || (raw.inputDelaySamples?.length ?? 0) === 0) {
+    throw new Error('BLOCKED: Stage 4 workflow performance gate requires nonempty input latency samples');
+  }
 
   return {
     durationMs,
-    averageFps: frameSpanMs > 0 ? Number(((frameIntervals * 1000) / frameSpanMs).toFixed(2)) : 0,
+    averageFps: Number(((validFrameTimestamps.length * 1000) / durationMs).toFixed(2)),
     inputDelayP95Ms: Number(percentile95(raw.inputDelaysMs).toFixed(2)),
     inputDelaySamples: raw.inputDelaySamples ?? [],
     longestTaskMs: Number(Math.max(0, ...raw.longTasksMs).toFixed(2)),
@@ -139,6 +151,24 @@ export function summarizeWorkflowPerformance(
     unclickableDurationMs: Number(raw.unclickableDurationMs.toFixed(2)),
     unclickableSamples: raw.unclickableSamples ?? [],
   };
+}
+
+export function assertWorkflowPerformanceThresholds(sample: WorkflowPerformanceSample): void {
+  if (sample.averageFps < 55) {
+    throw new Error(`BLOCKED: Stage 4 workflow performance gate requires at least 55 FPS (received ${sample.averageFps})`);
+  }
+  if (sample.inputDelaySamples.length === 0) {
+    throw new Error('BLOCKED: Stage 4 workflow performance gate requires nonempty input latency samples');
+  }
+  if (sample.inputDelayP95Ms > 50) {
+    throw new Error(`BLOCKED: Stage 4 workflow performance gate requires input P95 <= 50ms (received ${sample.inputDelayP95Ms}ms)`);
+  }
+  if (sample.lostNodeCount !== 0) {
+    throw new Error(`BLOCKED: Stage 4 workflow performance gate requires zero lost nodes (received ${sample.lostNodeCount})`);
+  }
+  if (sample.unclickableDurationMs !== 0) {
+    throw new Error(`BLOCKED: Stage 4 workflow performance gate requires zero unclickable duration (received ${sample.unclickableDurationMs}ms)`);
+  }
 }
 
 async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<string>): Promise<void> {

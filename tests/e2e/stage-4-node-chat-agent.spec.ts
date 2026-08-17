@@ -16,6 +16,7 @@ import {
 } from '../helpers/stage-4-e2e';
 import {
   assertWorkflowVirtualizationCoverage,
+  assertWorkflowPerformanceThresholds,
   measureWorkflowInteraction,
   resolveExpectedMountedWorkflowNodeIds,
   selectWorkflowMonitorIds,
@@ -378,8 +379,7 @@ test('keeps workflow renderer server-authoritative while shadow projection remai
   const after = await firstNode.boundingBox();
   expect(after).not.toBeNull();
   expect(after!.x).not.toBe(before!.x);
-  expect(metrics.averageFps).toBeGreaterThanOrEqual(55);
-  expect(metrics.inputDelayP95Ms).toBeLessThanOrEqual(50);
+  assertWorkflowPerformanceThresholds(metrics);
   expect(metrics.monitoredNodeCount).toBe(expectedMountedNodeIds.length);
   expect(metrics.lostNodeCount).toBe(0);
   expect(metrics.unclickableDurationMs).toBe(0);

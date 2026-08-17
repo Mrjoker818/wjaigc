@@ -7,8 +7,11 @@ import {
 } from '@/lib/workflow-engine';
 import {
   applyWorkflowCommand,
+  createWorkflowClipboardSnapshot,
   createWorkflowCommandHistory,
+  createWorkflowEditorState,
   recordWorkflowHistoryEntries,
+  reduceWorkflowEditorState,
   redoWorkflowCommandHistory,
   undoWorkflowCommandHistory,
 } from '@/lib/workflow-renderer/commands';
@@ -121,5 +124,64 @@ describe('workflow render commands', () => {
     });
 
     expect(recordWorkflowHistoryEntries(history, hydrated.historyEntries)).toBe(history);
+  });
+
+  it('atomically reduces workflow and history while system measurement and hydration add no user entry', () => {
+    const workflow = workflowFixture();
+    const node = workflow.nodes[0]!;
+    const initial = createWorkflowEditorState(workflow);
+    const moved = reduceWorkflowEditorState(initial, {
+      kind: 'command',
+      command: {
+        type: 'nodes.move', nodeIds: [node.id], delta: { x: 20, y: 0 }, transactionId: 'drag-once',
+      },
+    });
+    const measured = reduceWorkflowEditorState(moved, {
+      kind: 'command',
+      command: { type: 'node.measure', nodeId: node.id, size: { width: 333, height: 222 } },
+    });
+    const hydrated = reduceWorkflowEditorState(measured, {
+      kind: 'command',
+      command: { type: 'workflow.hydrate', workflow: { ...measured.workflow, name: 'server' }, transactionId: 'server' },
+    });
+
+    expect(moved.workflow.nodes[0]!.x).toBe(node.x + 20);
+    expect(moved.history.entries).toHaveLength(1);
+    expect(measured.workflow.nodes[0]).toMatchObject({ width: 333, height: 222 });
+    expect(measured.history).toBe(moved.history);
+    expect(hydrated.history.entries).toEqual([]);
+    expect(hydrated.workflow.name).toBe('server');
+  });
+
+  it('pastes the copy-time node and internal-edge snapshot after the sources are deleted', () => {
+    const workflow = workflowFixture();
+    const selectedIds = workflow.nodes.slice(0, 2).map(node => node.id);
+    const snapshot = createWorkflowClipboardSnapshot(workflow, selectedIds);
+    const deleted = applyWorkflowCommand(workflow, {
+      type: 'nodes.delete', nodeIds: selectedIds, transactionId: 'delete-originals',
+    }).workflow;
+    const pasted = applyWorkflowCommand(deleted, {
+      type: 'clipboard.paste', snapshot, offset: { x: 40, y: 40 }, transactionId: 'paste-deleted',
+    });
+
+    expect(pasted.workflow.nodes).toHaveLength(3);
+    expect(pasted.workflow.nodes.slice(-2).map(node => node.label)).toEqual(['source (副本)', 'target (副本)']);
+    expect(pasted.workflow.connections).toHaveLength(1);
+    expect(pasted.historyEntries).toHaveLength(1);
+  });
+
+  it('pastes immutable copy-time values after the source workflow mutates', () => {
+    const workflow = workflowFixture();
+    workflow.nodes[0]!.config = { nested: { value: 'copied' } };
+    const snapshot = createWorkflowClipboardSnapshot(workflow, workflow.nodes.slice(0, 2).map(node => node.id));
+    workflow.nodes[0]!.label = 'mutated source';
+    (workflow.nodes[0]!.config.nested as { value: string }).value = 'mutated';
+    const pasted = applyWorkflowCommand(workflow, {
+      type: 'clipboard.paste', snapshot, offset: { x: 40, y: 40 }, transactionId: 'paste-snapshot',
+    });
+    const copiedSource = pasted.workflow.nodes.at(-2)!;
+
+    expect(copiedSource.label).toBe('source (副本)');
+    expect(copiedSource.config).toEqual({ nested: { value: 'copied' } });
   });
 });
