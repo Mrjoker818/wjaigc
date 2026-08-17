@@ -181,9 +181,6 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
   })));
   await openStage4CanvasProject(page, String(fixture.canvasProject.id));
   const runStorageKey = `wujie_agent_run:${fixture.canvasProject.id}:${asset.selectedEntityId}`;
-  if (expectedAgentMode === 'shadow') {
-    await page.evaluate(key => localStorage.setItem(key, 'stale-agent-v2-run-before-shadow-rollback'), runStorageKey);
-  }
   const openAgentEditor = async () => {
     const canvasImage = page.locator(`[data-canvas-image-id="${asset.selectedEntityId}"]`);
     await expect(canvasImage).toBeVisible({ timeout: 20_000 });
@@ -196,6 +193,11 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
     await expect(page.getByText('Agent 编排', { exact: true })).toBeVisible({ timeout: 20_000 });
   };
   await openAgentEditor();
+  if (expectedAgentMode === 'shadow') {
+    await page.evaluate(key => localStorage.setItem(key, 'stale-agent-v2-run-before-shadow-rollback'), runStorageKey);
+    await expect.poll(() => page.evaluate(key => localStorage.getItem(key), runStorageKey))
+      .toBe('stale-agent-v2-run-before-shadow-rollback');
+  }
   await page.getByPlaceholder(/描述你想要的编辑效果/)
     .fill(`AGENT_CANCEL_E2E E2E_PROFILE:${fixture.browserProfile}`);
   const agentSubmissionResponse = page.waitForResponse(response => (

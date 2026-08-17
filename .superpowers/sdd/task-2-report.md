@@ -2187,6 +2187,10 @@ pnpm ts-check
 - AgentEditor persists exactly one accepted identity per image scope: shared
   `runId` for agent-v2 or legacy `taskId` for legacy/shadow. Accepting one
   removes the other, and refresh recovery reopens the corresponding real UI.
+- The rollback E2E injects its stale shared key only after AgentEditor has
+  initialized, then proves legacy acceptance removes it. This preserves the
+  mode-switch regression without manufacturing a `/api/agent-runs/...` 404 in
+  otherwise clean browser evidence.
 - Legacy polling validates the active scope and task before handling every
   response, including 404. A current-scope definitive 404 clears only its
   matching legacy key and stops; a delayed response from another image is
