@@ -2,6 +2,7 @@ import {
   isWorkflowConnectionValid,
   type Workflow,
   type WorkflowConnection,
+  type WorkflowNode,
 } from '@/lib/workflow-engine';
 
 export type WorkflowInteractionCommand =
@@ -26,16 +27,41 @@ export interface WorkflowNodePosition {
   position: { x: number; y: number };
 }
 
+export function mergeExternalWorkflowWithPositions(
+  workflow: Workflow,
+  positions: ReadonlyArray<WorkflowNodePosition>,
+): Workflow {
+  if (positions.length === 0) return workflow;
+  const positionById = new Map(positions.map(item => [item.nodeId, item.position]));
+  return {
+    ...workflow,
+    nodes: workflow.nodes.map(node => {
+      const position = positionById.get(node.id);
+      return position ? { ...node, x: position.x, y: position.y } : node;
+    }),
+  };
+}
+
 export interface WorkflowHistoryEntry {
   transactionId: string;
-  before: Workflow;
-  after: Workflow;
+  undo: WorkflowPatchOperation[];
+  redo: WorkflowPatchOperation[];
 }
 
 export interface WorkflowCommandResult {
   workflow: Workflow;
   historyEntries: WorkflowHistoryEntry[];
+  createdNodeIds: string[];
 }
+
+type WorkflowPatchOperation =
+  | { type: 'workflow.set'; path: string[]; value?: unknown; remove?: true }
+  | { type: 'node.set'; nodeId: string; path: string[]; value?: unknown; remove?: true }
+  | { type: 'node.add'; node: WorkflowNode; index: number }
+  | { type: 'node.remove'; nodeId: string }
+  | { type: 'connection.set'; connectionId: string; path: string[]; value?: unknown; remove?: true }
+  | { type: 'connection.add'; connection: WorkflowConnection; index: number }
+  | { type: 'connection.remove'; connectionId: string };
 
 export interface WorkflowCommandHistory {
   entries: WorkflowHistoryEntry[];
@@ -76,7 +102,11 @@ export function recordWorkflowHistoryEntries(
   for (const incoming of incomingEntries) {
     const previous = entries.at(-1);
     if (previous?.transactionId === incoming.transactionId) {
-      entries[entries.length - 1] = { ...previous, after: incoming.after };
+      entries[entries.length - 1] = {
+        transactionId: previous.transactionId,
+        undo: [...incoming.undo, ...previous.undo],
+        redo: [...previous.redo, ...incoming.redo],
+      };
     } else {
       entries.push(incoming);
     }
@@ -88,37 +118,197 @@ export function recordWorkflowHistoryEntries(
 
 export function undoWorkflowCommandHistory(
   history: WorkflowCommandHistory,
+  workflow: Workflow,
 ): WorkflowCommandHistoryNavigation {
   if (history.index <= 0) throw new Error('Workflow history has no undo entry');
   const entry = history.entries[history.index - 1];
   if (!entry) throw new Error('Workflow history undo entry is missing');
   return {
     history: { ...history, index: history.index - 1 },
-    workflow: entry.before,
+    workflow: applyWorkflowPatch(workflow, entry.undo),
   };
 }
 
 export function redoWorkflowCommandHistory(
   history: WorkflowCommandHistory,
+  workflow: Workflow,
 ): WorkflowCommandHistoryNavigation {
   if (history.index >= history.entries.length) throw new Error('Workflow history has no redo entry');
   const entry = history.entries[history.index];
   if (!entry) throw new Error('Workflow history redo entry is missing');
   return {
     history: { ...history, index: history.index + 1 },
-    workflow: entry.after,
+    workflow: applyWorkflowPatch(workflow, entry.redo),
   };
 }
 
-function result(workflow: Workflow, before: Workflow, transactionId: string): WorkflowCommandResult {
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => valuesEqual(value, right[index]));
+  }
+  if (isPlainRecord(left) && isPlainRecord(right)) {
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+    return [...keys].every(key => valuesEqual(left[key], right[key]));
+  }
+  return false;
+}
+
+function collectValuePatch(
+  before: unknown,
+  after: unknown,
+  path: string[],
+  emit: (path: string[], value: unknown, remove: boolean) => void,
+): void {
+  if (valuesEqual(before, after)) return;
+  if (isPlainRecord(before) && isPlainRecord(after)) {
+    const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+    for (const key of keys) {
+      if (!(key in after)) emit([...path, key], undefined, true);
+      else if (!(key in before)) emit([...path, key], after[key], false);
+      else collectValuePatch(before[key], after[key], [...path, key], emit);
+    }
+    return;
+  }
+  emit(path, after, false);
+}
+
+function buildWorkflowPatch(before: Workflow, after: Workflow): WorkflowPatchOperation[] {
+  const operations: WorkflowPatchOperation[] = [];
+  const beforeNodes = new Map(before.nodes.map(node => [node.id, node]));
+  const afterNodes = new Map(after.nodes.map(node => [node.id, node]));
+  const beforeConnections = new Map(before.connections.map(connection => [connection.id, connection]));
+  const afterConnections = new Map(after.connections.map(connection => [connection.id, connection]));
+
+  before.connections.forEach(connection => {
+    if (!afterConnections.has(connection.id)) operations.push({ type: 'connection.remove', connectionId: connection.id });
+  });
+  before.nodes.forEach(node => {
+    if (!afterNodes.has(node.id)) operations.push({ type: 'node.remove', nodeId: node.id });
+  });
+  after.nodes.forEach((node, index) => {
+    if (!beforeNodes.has(node.id)) operations.push({ type: 'node.add', node: cloneSnapshotValue(node), index });
+  });
+  after.connections.forEach((connection, index) => {
+    if (!beforeConnections.has(connection.id)) {
+      operations.push({ type: 'connection.add', connection: cloneSnapshotValue(connection), index });
+    }
+  });
+
+  const beforeWorkflowFields = { ...before } as Record<string, unknown>;
+  const afterWorkflowFields = { ...after } as Record<string, unknown>;
+  delete beforeWorkflowFields.nodes;
+  delete beforeWorkflowFields.connections;
+  delete afterWorkflowFields.nodes;
+  delete afterWorkflowFields.connections;
+  collectValuePatch(beforeWorkflowFields, afterWorkflowFields, [], (path, value, remove) => {
+    operations.push(remove
+      ? { type: 'workflow.set', path, remove: true }
+      : { type: 'workflow.set', path, value: cloneSnapshotValue(value) });
+  });
+
+  after.nodes.forEach(node => {
+    const previous = beforeNodes.get(node.id);
+    if (!previous) return;
+    collectValuePatch(previous, node, [], (path, value, remove) => {
+      operations.push(remove
+        ? { type: 'node.set', nodeId: node.id, path, remove: true }
+        : { type: 'node.set', nodeId: node.id, path, value: cloneSnapshotValue(value) });
+    });
+  });
+  after.connections.forEach(connection => {
+    const previous = beforeConnections.get(connection.id);
+    if (!previous) return;
+    collectValuePatch(previous, connection, [], (path, value, remove) => {
+      operations.push(remove
+        ? { type: 'connection.set', connectionId: connection.id, path, remove: true }
+        : { type: 'connection.set', connectionId: connection.id, path, value: cloneSnapshotValue(value) });
+    });
+  });
+  return operations;
+}
+
+function applyValuePatch(target: Record<string, unknown>, path: string[], value: unknown, remove: boolean): void {
+  if (path.length === 0) return;
+  let cursor = target;
+  for (const key of path.slice(0, -1)) {
+    const child = cursor[key];
+    if (!isPlainRecord(child)) cursor[key] = {};
+    cursor = cursor[key] as Record<string, unknown>;
+  }
+  const key = path[path.length - 1]!;
+  if (remove) delete cursor[key];
+  else cursor[key] = cloneSnapshotValue(value);
+}
+
+function applyWorkflowPatch(workflow: Workflow, operations: ReadonlyArray<WorkflowPatchOperation>): Workflow {
+  const next = cloneSnapshotValue(workflow);
+  for (const operation of operations) {
+    if (operation.type === 'node.remove') {
+      next.nodes = next.nodes.filter(node => node.id !== operation.nodeId);
+      continue;
+    }
+    if (operation.type === 'node.add') {
+      if (!next.nodes.some(node => node.id === operation.node.id)) {
+        next.nodes.splice(Math.min(operation.index, next.nodes.length), 0, cloneSnapshotValue(operation.node));
+      }
+      continue;
+    }
+    if (operation.type === 'connection.remove') {
+      next.connections = next.connections.filter(connection => connection.id !== operation.connectionId);
+      continue;
+    }
+    if (operation.type === 'connection.add') {
+      if (!next.connections.some(connection => connection.id === operation.connection.id)) {
+        next.connections.splice(
+          Math.min(operation.index, next.connections.length),
+          0,
+          cloneSnapshotValue(operation.connection),
+        );
+      }
+      continue;
+    }
+    if (operation.type === 'workflow.set') {
+      applyValuePatch(next as unknown as Record<string, unknown>, operation.path, operation.value, operation.remove === true);
+      continue;
+    }
+    const collection = operation.type === 'node.set' ? next.nodes : next.connections;
+    const id = operation.type === 'node.set' ? operation.nodeId : operation.connectionId;
+    const target = collection.find(item => item.id === id);
+    if (target) {
+      applyValuePatch(target as unknown as Record<string, unknown>, operation.path, operation.value, operation.remove === true);
+    }
+  }
+  return next;
+}
+
+function createHistoryEntry(before: Workflow, after: Workflow, transactionId: string): WorkflowHistoryEntry {
+  return {
+    transactionId,
+    undo: buildWorkflowPatch(after, before),
+    redo: buildWorkflowPatch(before, after),
+  };
+}
+
+function result(
+  workflow: Workflow,
+  before: Workflow,
+  transactionId: string,
+  createdNodeIds: string[] = [],
+): WorkflowCommandResult {
   return {
     workflow,
-    historyEntries: [{ transactionId, before, after: workflow }],
+    historyEntries: [createHistoryEntry(before, workflow, transactionId)],
+    createdNodeIds,
   };
 }
 
 function noChange(workflow: Workflow): WorkflowCommandResult {
-  return { workflow, historyEntries: [] };
+  return { workflow, historyEntries: [], createdNodeIds: [] };
 }
 
 function copyId(base: string, occupied: Set<string>): string {
@@ -182,7 +372,7 @@ function pasteWorkflowSnapshot(
     ...workflow,
     nodes: [...workflow.nodes, ...copiedNodes],
     connections: [...workflow.connections, ...copiedConnections],
-  }, workflow, transactionId);
+  }, workflow, transactionId, copiedNodes.map(node => node.id));
 }
 
 /** Applies a user interaction to the workflow domain without rendering or persistence effects. */
@@ -191,7 +381,7 @@ export function applyWorkflowCommand(
   command: WorkflowInteractionCommand,
 ): WorkflowCommandResult {
   if (command.type === 'workflow.hydrate') {
-    return { workflow: command.workflow, historyEntries: [] };
+    return { workflow: command.workflow, historyEntries: [], createdNodeIds: [] };
   }
 
   if (command.type === 'selection.set') return noChange(workflow);
@@ -301,7 +491,7 @@ export function reduceWorkflowEditorState(
 ): WorkflowEditorState {
   if (transition.kind === 'history.undo') {
     if (state.history.index <= 0) return state;
-    const navigation = undoWorkflowCommandHistory(state.history);
+    const navigation = undoWorkflowCommandHistory(state.history, state.workflow);
     return {
       workflow: navigation.workflow,
       history: navigation.history,
@@ -310,7 +500,7 @@ export function reduceWorkflowEditorState(
   }
   if (transition.kind === 'history.redo') {
     if (state.history.index >= state.history.entries.length) return state;
-    const navigation = redoWorkflowCommandHistory(state.history);
+    const navigation = redoWorkflowCommandHistory(state.history, state.workflow);
     return {
       workflow: navigation.workflow,
       history: navigation.history,
@@ -324,7 +514,7 @@ export function reduceWorkflowEditorState(
   if (transition.kind === 'user.update') {
     const workflow = transition.workflow;
     if (workflow === state.workflow) return state;
-    const historyEntry = { transactionId: transition.transactionId, before: state.workflow, after: workflow };
+    const historyEntry = createHistoryEntry(state.workflow, workflow, transition.transactionId);
     return {
       workflow,
       history: recordWorkflowHistoryEntries(state.history, [historyEntry]),

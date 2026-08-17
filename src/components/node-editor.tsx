@@ -16,9 +16,12 @@ import {
   applyWorkflowCommand,
   createWorkflowClipboardSnapshot,
   createWorkflowEditorState,
+  mergeExternalWorkflowWithPositions,
   reduceWorkflowEditorState,
+  type WorkflowCommandResult,
   type WorkflowClipboardSnapshot,
   type WorkflowInteractionCommand,
+  type WorkflowNodePosition,
 } from '@/lib/workflow-renderer/commands';
 import { resolveWorkflowRendererMode, type WorkflowRendererMode } from '@/lib/workflow-renderer/mode';
 import {
@@ -883,9 +886,11 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
     wfRef.current = workflow;
     dispatchWorkflowEditorTransition({ kind: 'system.update', workflow });
   }, []);
-  const dispatchWorkflowStateCommand = useCallback((command: WorkflowInteractionCommand) => {
-    wfRef.current = applyWorkflowCommand(wfRef.current, command).workflow;
+  const dispatchWorkflowStateCommand = useCallback((command: WorkflowInteractionCommand): WorkflowCommandResult => {
+    const result = applyWorkflowCommand(wfRef.current, command);
+    wfRef.current = result.workflow;
     dispatchWorkflowEditorTransition({ kind: 'command', command });
+    return result;
   }, []);
   const saveNodePromptPreset = useCallback((name: string, text: string) => {
     if (!name.trim() || !text.trim()) return;
@@ -938,6 +943,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const nodeDragPositionRef = useRef<{ id: string; x: number; y: number } | null>(null);
   const nodeDragRafRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false); // 标记正在拖动，跳过历史快照
+  const pendingExternalWorkflowRef = useRef<WorkflowData | null>(null);
   const [draggingConn, setDraggingConn] = useState<DraggingConn | null>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
   const [isPanning, setIsPanning] = useState(false);
@@ -1317,12 +1323,15 @@ ${contextInfo}
     () => projectReactFlowRenderModel(wf, nodeRenderViewport, selectedNodeIds),
     [wf, nodeRenderViewport, selectedNodeIds],
   );
-  const handleWorkflowRenderCommand = useCallback((command: WorkflowInteractionCommand) => {
+  const previewWorkflowNodePositions = useCallback((positions: WorkflowNodePosition[]) => {
+    updateWorkflowSystem(current => mergeExternalWorkflowWithPositions(current, positions));
+  }, [updateWorkflowSystem]);
+  const handleWorkflowRenderCommand = useCallback((command: WorkflowInteractionCommand): WorkflowCommandResult => {
     if (command.type === 'selection.set') {
       setSelectedNodeIds(new Set(command.nodeIds));
       if (command.nodeIds.length > 0) setSidebarTab('props');
     }
-    dispatchWorkflowStateCommand(command);
+    return dispatchWorkflowStateCommand(command);
   }, [dispatchWorkflowStateCommand]);
   const nodeById = useMemo(() => new Map(wf.nodes.map(node => [node.id, node])), [wf.nodes]);
   const nodeCullingBounds = useMemo(() => resolveWorkflowCullingBounds(
@@ -1617,13 +1626,15 @@ ${contextInfo}
     if (!workflow) return;
     // 如果是自身回写（引用相同），跳过
     if (workflow === lastEmittedRef.current) return;
-    if (!isDraggingRef.current) {
-      dispatchWorkflowStateCommand({
-        type: 'workflow.hydrate',
-        workflow,
-        transactionId: 'external-workflow-hydrate',
-      });
+    if (isDraggingRef.current) {
+      pendingExternalWorkflowRef.current = workflow;
+      return;
     }
+    dispatchWorkflowStateCommand({
+      type: 'workflow.hydrate',
+      workflow,
+      transactionId: 'external-workflow-hydrate',
+    });
   }, [dispatchWorkflowStateCommand, workflow]);
 
   // 通知外部 (拖动期间跳过)
@@ -2053,16 +2064,14 @@ ${contextInfo}
       if ((e.metaKey || e.ctrlKey) && e.key === 'v' && clipboard) {
         e.preventDefault();
         const transactionId = `keyboard-node-copy:${++editorTransactionCounterRef.current}`;
-        handleWorkflowRenderCommand({
+        const result = handleWorkflowRenderCommand({
           type: 'clipboard.paste',
           snapshot: clipboard,
           offset: { x: 40, y: 40 },
           transactionId,
         });
-        if (clipboard.nodes.length > 0) {
-          setSelectedNodeIds(new Set(clipboard.nodes.map((node, index) => (
-            `copy-${node.id}-${transactionId}-${index + 1}`
-          ))));
+        if (result.createdNodeIds.length > 0) {
+          setSelectedNodeIds(new Set(result.createdNodeIds));
           setSidebarTab('props');
         }
       }
@@ -2223,6 +2232,9 @@ ${contextInfo}
     setIsPanning(false);
     if (draggingNodeRef.current) {
       const finalPosition = nodeDragPositionRef.current;
+      const finalPositions: WorkflowNodePosition[] = finalPosition
+        ? [{ nodeId: finalPosition.id, position: { x: finalPosition.x, y: finalPosition.y } }]
+        : [];
       if (nodeDragRafRef.current !== null) {
         cancelAnimationFrame(nodeDragRafRef.current);
         nodeDragRafRef.current = null;
@@ -2234,9 +2246,14 @@ ${contextInfo}
         dispatchWorkflowStateCommand({
           type: 'nodes.drag.commit',
           initialPositions: nodeDragInitialPositionsRef.current,
-          positions: [{ nodeId: finalPosition.id, position: { x: finalPosition.x, y: finalPosition.y } }],
+          positions: finalPositions,
           transactionId: `legacy-node-drag:${finalPosition.id}:${++editorTransactionCounterRef.current}`,
         });
+      }
+      const pendingExternalWorkflow = pendingExternalWorkflowRef.current;
+      pendingExternalWorkflowRef.current = null;
+      if (pendingExternalWorkflow) {
+        updateWorkflowSystem(() => mergeExternalWorkflowWithPositions(pendingExternalWorkflow, finalPositions));
       }
       nodeDragInitialPositionsRef.current = [];
       // 让外部同步由 effect 在本次拖拽状态提交后执行，避免在状态更新器中触发父组件更新。
@@ -2263,7 +2280,7 @@ ${contextInfo}
     }
     setBoxSelect(null);
     isBoxSelectingRef.current = false;
-  }, [applyNodeViewportPreview, boxSelect, dispatchWorkflowStateCommand, isPanning, wf.nodes]);
+  }, [applyNodeViewportPreview, boxSelect, dispatchWorkflowStateCommand, isPanning, updateWorkflowSystem, wf.nodes]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -2332,9 +2349,8 @@ ${contextInfo}
             offset: { x: mx2 + 30 - minX, y: my2 + 30 - minY },
             transactionId,
           };
-          const preview = applyWorkflowCommand(wf, command).workflow;
-          setSelectedNodeIds(new Set(preview.nodes.slice(wf.nodes.length).map(node => node.id)));
-          dispatchWorkflowStateCommand(command);
+          const result = dispatchWorkflowStateCommand(command);
+          setSelectedNodeIds(new Set(result.createdNodeIds));
           break;
         }
         case 'select-all': {
@@ -2363,9 +2379,8 @@ ${contextInfo}
             offset: { x: 40, y: 40 },
             transactionId,
           };
-          const preview = applyWorkflowCommand(wf, command).workflow;
-          setSelectedNodeIds(new Set(preview.nodes.slice(wf.nodes.length).map(node => node.id)));
-          dispatchWorkflowStateCommand(command);
+          const result = dispatchWorkflowStateCommand(command);
+          setSelectedNodeIds(new Set(result.createdNodeIds));
           break;
         }
         case 'disconnect': {
@@ -3123,6 +3138,7 @@ ${contextInfo}
             <WorkflowReactFlowSurface
               model={reactFlowWorkflowRenderModel}
               onCommand={handleWorkflowRenderCommand}
+              onNodePositionPreview={previewWorkflowNodePositions}
               onViewportChange={setViewport}
               readOnly={false}
               theme={T}

@@ -27,13 +27,14 @@ import type {
   WorkflowLegacyPromptTemplate,
   WorkflowLegacyNodeTheme,
 } from './WorkflowLegacyNodeCard';
-import type { WorkflowInteractionCommand } from '@/lib/workflow-renderer/commands';
+import type { WorkflowInteractionCommand, WorkflowNodePosition } from '@/lib/workflow-renderer/commands';
 import { WORKFLOW_RENDER_PORT_COLORS as PORT_COLORS } from '@/lib/workflow-renderer/presentation';
 import type { WorkflowRenderEdge, WorkflowRenderModel, WorkflowRenderNode } from '@/lib/workflow-renderer/view-model';
 
 interface WorkflowReactFlowSurfaceProps {
   model: WorkflowRenderModel;
   onCommand: (command: WorkflowInteractionCommand) => void;
+  onNodePositionPreview?: (positions: WorkflowNodePosition[]) => void;
   onViewportChange?: (viewport: WorkflowRenderModel['viewport']) => void;
   readOnly?: boolean;
   theme?: WorkflowLegacyNodeTheme;
@@ -222,14 +223,15 @@ export function createReactFlowCommandHandlers(
     commitNodeDrag(
       nodes: ReadonlyArray<{ id: string; position: { x: number; y: number } }>,
       transactionId: string,
+      dragInitialPositions?: ReadonlyArray<WorkflowNodePosition>,
     ): void {
       const positions = nodes.flatMap(node => model.nodes.some(candidate => candidate.id === node.id)
         ? [{ nodeId: node.id, position: { ...node.position } }]
         : []);
-      const initialPositions = positions.flatMap(item => {
+      const initialPositions = (dragInitialPositions ?? positions.flatMap(item => {
         const node = model.nodes.find(candidate => candidate.id === item.nodeId);
         return node ? [{ nodeId: node.id, position: { ...node.position } }] : [];
-      });
+      })).map(item => ({ nodeId: item.nodeId, position: { ...item.position } }));
       if (positions.length === 0) return;
       onCommand({ type: 'nodes.drag.commit', initialPositions, positions, transactionId });
     },
@@ -261,11 +263,13 @@ export function createReactFlowCommandHandlers(
 export function WorkflowReactFlowSurface({
   model,
   onCommand,
+  onNodePositionPreview,
   onViewportChange,
   readOnly = true,
   ...presentation
 }: WorkflowReactFlowSurfaceProps) {
   const transactionCounterRef = useRef(0);
+  const dragInitialPositionsRef = useRef<WorkflowNodePosition[]>([]);
   const commandHandlers = createReactFlowCommandHandlers(model, onCommand, onViewportChange);
   const nextTransactionId = (prefix: string): string => `${prefix}:${++transactionCounterRef.current}`;
   return (
@@ -277,6 +281,14 @@ export function WorkflowReactFlowSurface({
         edgeTypes={edgeTypes}
         viewport={model.viewport}
         onViewportChange={readOnly ? undefined : commandHandlers.updateViewport}
+        onNodesChange={readOnly ? undefined : changes => {
+          const positions = changes.flatMap(change => (
+            change.type === 'position' && change.position
+              ? [{ nodeId: change.id, position: { ...change.position } }]
+              : []
+          ));
+          if (positions.length > 0) onNodePositionPreview?.(positions);
+        }}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         elementsSelectable={!readOnly}
@@ -284,11 +296,22 @@ export function WorkflowReactFlowSurface({
         zoomOnScroll={!readOnly}
         zoomOnPinch={!readOnly}
         zoomOnDoubleClick={!readOnly}
+        onNodeDragStart={readOnly ? undefined : (_event, node, selectedNodes) => {
+          const draggedNodes = selectedNodes.length > 0 ? selectedNodes : [node];
+          dragInitialPositionsRef.current = draggedNodes.flatMap(draggedNode => {
+            const initialNode = model.nodes.find(candidate => candidate.id === draggedNode.id);
+            return initialNode
+              ? [{ nodeId: initialNode.id, position: { ...initialNode.position } }]
+              : [];
+          });
+        }}
         onNodeDragStop={readOnly ? undefined : (_event, node, selectedNodes) => {
           commandHandlers.commitNodeDrag(
             selectedNodes.length > 0 ? selectedNodes : [node],
             nextTransactionId(`react-flow-drag:${node.id}`),
+            dragInitialPositionsRef.current,
           );
+          dragInitialPositionsRef.current = [];
         }}
         onConnect={readOnly ? undefined : connection => {
           commandHandlers.createConnection(connection, nextTransactionId('react-flow-connect'));

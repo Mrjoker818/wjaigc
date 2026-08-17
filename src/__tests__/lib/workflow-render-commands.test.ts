@@ -10,6 +10,7 @@ import {
   createWorkflowClipboardSnapshot,
   createWorkflowCommandHistory,
   createWorkflowEditorState,
+  mergeExternalWorkflowWithPositions,
   recordWorkflowHistoryEntries,
   reduceWorkflowEditorState,
   redoWorkflowCommandHistory,
@@ -66,7 +67,7 @@ describe('workflow render commands', () => {
 
     expect(deleted.workflow.nodes.map(node => node.id)).not.toContain(workflow.nodes[0]!.id);
     expect(deleted.workflow.connections).toEqual([]);
-    expect(deleted.historyEntries[0]?.before).toBe(workflow);
+    expect(deleted.historyEntries[0]?.undo).toBeDefined();
   });
 
   it('copies selected nodes and preserves only their internal connections', () => {
@@ -106,11 +107,10 @@ describe('workflow render commands', () => {
     );
 
     expect(history.entries).toHaveLength(1);
-    expect(history.entries[0]?.before).toBe(workflow);
-    expect(history.entries[0]?.after.nodes[0]?.x).toBe(workflow.nodes[0]!.x + 25);
-    expect(undoWorkflowCommandHistory(history).workflow).toBe(workflow);
-    expect(redoWorkflowCommandHistory(undoWorkflowCommandHistory(history).history).workflow.nodes[0]?.x)
-      .toBe(workflow.nodes[0]!.x + 25);
+    const undone = undoWorkflowCommandHistory(history, second.workflow);
+    const redone = redoWorkflowCommandHistory(undone.history, undone.workflow);
+    expect(undone.workflow.nodes[0]?.x).toBe(workflow.nodes[0]!.x);
+    expect(redone.workflow.nodes[0]?.x).toBe(workflow.nodes[0]!.x + 25);
   });
 
   it('does not change user history when external hydration is dispatched', () => {
@@ -192,6 +192,112 @@ describe('workflow render commands', () => {
     });
   });
 
+  it('undoes and redoes drag fields against current state after late config image and size updates', () => {
+    const workflow = workflowFixture();
+    const source = workflow.nodes[0]!;
+    const committed = reduceWorkflowEditorState(createWorkflowEditorState(workflow), {
+      kind: 'command',
+      command: {
+        type: 'nodes.drag.commit',
+        initialPositions: [{ nodeId: source.id, position: { x: source.x, y: source.y } }],
+        positions: [{ nodeId: source.id, position: { x: 90, y: 120 } }],
+        transactionId: 'drag-late-update',
+      },
+    });
+    const lateWorkflow = {
+      ...committed.workflow,
+      nodes: committed.workflow.nodes.map(node => node.id === source.id
+        ? {
+            ...node,
+            width: 555,
+            height: 444,
+            config: { ...node.config, imageUrl: '/late.png', lateConfig: 'survives' },
+          }
+        : node),
+    };
+    const late = reduceWorkflowEditorState(committed, { kind: 'system.update', workflow: lateWorkflow });
+    const undone = reduceWorkflowEditorState(late, { kind: 'history.undo' });
+    const redone = reduceWorkflowEditorState(undone, { kind: 'history.redo' });
+
+    expect(undone.workflow.nodes[0]).toMatchObject({
+      x: source.x, y: source.y, width: 555, height: 444,
+      config: expect.objectContaining({ imageUrl: '/late.png', lateConfig: 'survives' }),
+    });
+    expect(redone.workflow.nodes[0]).toMatchObject({
+      x: 90, y: 120, width: 555, height: 444,
+      config: expect.objectContaining({ imageUrl: '/late.png', lateConfig: 'survives' }),
+    });
+  });
+
+  it('undoes and redoes delete paste and connect without clobbering unrelated concurrent state', () => {
+    const workflow = workflowFixture();
+    const source = workflow.nodes[0]!;
+    const text = workflow.nodes[2]!;
+    const connection = {
+      id: 'late-prompt-edge', fromNodeId: text.id, fromPortId: 'out-prompt',
+      toNodeId: workflow.nodes[1]!.id, toPortId: 'in-prompt', type: 'prompt' as const,
+    };
+    const commands = [
+      { type: 'nodes.delete' as const, nodeIds: [source.id], transactionId: 'delete-op' },
+      {
+        type: 'clipboard.paste' as const,
+        snapshot: createWorkflowClipboardSnapshot(workflow, [source.id]),
+        offset: { x: 20, y: 20 },
+        transactionId: 'paste-op',
+      },
+      { type: 'nodes.copy' as const, nodeIds: [source.id], offset: { x: 20, y: 20 }, transactionId: 'copy-op' },
+      { type: 'connection.create' as const, connection, transactionId: 'connect-op' },
+    ];
+
+    for (const command of commands) {
+      const committed = reduceWorkflowEditorState(createWorkflowEditorState(workflow), { kind: 'command', command });
+      const concurrentWorkflow = {
+        ...committed.workflow,
+        nodes: committed.workflow.nodes.map(node => node.id === text.id
+          ? { ...node, config: { ...node.config, unrelated: command.type } }
+          : node),
+      };
+      const concurrent = reduceWorkflowEditorState(committed, { kind: 'system.update', workflow: concurrentWorkflow });
+      const undone = reduceWorkflowEditorState(concurrent, { kind: 'history.undo' });
+      const redone = reduceWorkflowEditorState(undone, { kind: 'history.redo' });
+
+      expect(undone.workflow.nodes.find(node => node.id === text.id)?.config.unrelated).toBe(command.type);
+      expect(redone.workflow.nodes.find(node => node.id === text.id)?.config.unrelated).toBe(command.type);
+      if (command.type === 'nodes.delete') {
+        expect(undone.workflow.nodes.some(node => node.id === source.id)).toBe(true);
+        expect(undone.workflow.connections.some(item => item.id === 'image-edge')).toBe(true);
+        expect(redone.workflow.nodes.some(node => node.id === source.id)).toBe(false);
+        expect(redone.workflow.connections.some(item => item.id === 'image-edge')).toBe(false);
+      } else if (command.type === 'clipboard.paste' || command.type === 'nodes.copy') {
+        expect(undone.workflow.nodes).toHaveLength(workflow.nodes.length);
+        expect(redone.workflow.nodes).toHaveLength(workflow.nodes.length + 1);
+      } else {
+        expect(undone.workflow.connections.some(item => item.id === connection.id)).toBe(false);
+        expect(redone.workflow.connections.some(item => item.id === connection.id)).toBe(true);
+      }
+    }
+  });
+
+  it('merges a deferred external workflow with final drag positions', () => {
+    const workflow = workflowFixture();
+    const source = workflow.nodes[0]!;
+    const external = {
+      ...workflow,
+      nodes: workflow.nodes.map(node => node.id === source.id
+        ? { ...node, config: { ...node.config, externalImage: '/external.png' } }
+        : node),
+    };
+
+    const merged = mergeExternalWorkflowWithPositions(external, [
+      { nodeId: source.id, position: { x: 88, y: 99 } },
+    ]);
+
+    expect(merged.nodes[0]).toMatchObject({
+      x: 88, y: 99,
+      config: expect.objectContaining({ externalImage: '/external.png' }),
+    });
+  });
+
   it('replays the same deterministic workflow action to the same reducer result', () => {
     const workflow = workflowFixture();
     const connection = {
@@ -243,5 +349,20 @@ describe('workflow render commands', () => {
 
     expect(copiedSource.label).toBe('source (副本)');
     expect(copiedSource.config).toEqual({ nested: { value: 'copied' } });
+  });
+
+  it('returns actual suffixed pasted node IDs when the preferred ID already exists', () => {
+    const workflow = workflowFixture();
+    const source = workflow.nodes[0]!;
+    const snapshot = createWorkflowClipboardSnapshot(workflow, [source.id]);
+    const preferredId = `copy-${source.id}-paste-conflict-1`;
+    workflow.nodes.push({ ...structuredClone(source), id: preferredId });
+
+    const pasted = applyWorkflowCommand(workflow, {
+      type: 'clipboard.paste', snapshot, offset: { x: 40, y: 40 }, transactionId: 'paste-conflict',
+    });
+
+    expect(pasted.createdNodeIds).toEqual([`${preferredId}-2`]);
+    expect(pasted.workflow.nodes.some(node => node.id === pasted.createdNodeIds[0])).toBe(true);
   });
 });

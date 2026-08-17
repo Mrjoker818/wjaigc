@@ -311,3 +311,67 @@ Result: 16 files / 118 tests passed.
 - `src/__tests__/lib/workflow-render-commands.test.ts`
 
 Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` remain unstaged and excluded from the R3 commit.
+
+## R4 Independent Review Fix Wave
+
+The six R4 history, drag synchronization, controlled-preview, clipboard-selection, and full-suite findings were fixed in one bounded follow-up based on `e166d95`.
+
+### R4 RED
+
+The initial controlled regression command was:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/components/workflow-react-flow-controlled-behavior.test.tsx src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-annotation-wiring.test.ts
+```
+
+Result: exit 1; 4 failed files and 8 failed / 28 passed tests. Failures proved that history entries still lacked inverse operations, drag undo removed late config/image/size updates, structural undo clobbered unrelated state, deferred external-workflow merging was absent, paste did not return its suffixed IDs, React Flow had no controlled position-preview callback, and the annotation wiring assertion was stale.
+
+A second lifecycle regression required the actual React Flow surface to expose drag-start and retain the selected group's initial positions before controlled previews. Before that correction, the one-file run failed 1 / 1 because `onNodeDragStart` was undefined.
+
+### R4 Corrections
+
+- Workflow history now stores deterministic forward and inverse operations rather than whole-workflow snapshots. Undo and redo apply node, connection, and field operations to the current workflow, so a drag reverses only dragged positions while late config, image, and measured-size changes survive. Delete, copy/paste, and connect restore or remove only their own entities and preserve unrelated concurrent state.
+- Drag history keeps initial positions only. Final positions apply atomically to the current workflow; same-transaction operations coalesce in forward order and inverse order without creating a parallel history authority.
+- The editor caches the latest external workflow received during legacy drag. Drag end commits one user transaction, then applies the cached external workflow as a no-history system update with final dragged positions overlaid, preserving both the external update and drag history.
+- The controlled React Flow surface forwards position changes through `onNodesChange` to a host-owned no-history preview. Drag start captures all selected initial positions, drag stop commits all selected final positions once, and viewport changes remain host-owned.
+- Behavioral surface coverage renders the real adapter, invokes its selected-group drag, preview, and viewport callbacks, then applies a post-commit config/image/size update and verifies undo/redo preserve that update.
+- Paste and copy commands return the actual generated node IDs. Keyboard paste, context paste, and duplicate select those returned IDs, including collision suffixes.
+- The stale annotation wiring test now asserts the intended branch-specific existing-bundle flow and optional-chain node lookup.
+
+### R4 GREEN And Verification
+
+Controlled R4 regression GREEN:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/components/workflow-react-flow-controlled-behavior.test.tsx src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-annotation-wiring.test.ts
+```
+
+Result: 4 files / 36 tests passed.
+
+Full Task 3/node-editor/route/helper focused command:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/node-editor-ui-regression.test.ts src/__tests__/components/node-editor-provider-capabilities.test.ts src/__tests__/components/node-editor-layering-wiring.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-execution-wiring.test.ts src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-editor-asset-reference.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/components/workflow-react-flow-controlled-behavior.test.tsx src/__tests__/components/node-annotation-wiring.test.ts src/__tests__/lib/workflow-render-view-model.test.ts src/__tests__/lib/workflow-render-shadow.test.ts src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/lib/stage-4-modes.test.ts src/__tests__/api/user-data-sync-asset-graph.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts
+```
+
+Result: 18 files / 138 tests passed.
+
+- `pnpm test`: exit 0; 455 files / 2800 tests passed. Fourteen PostgreSQL integration files / 68 tests were honestly skipped because `POSTGRES_TEST_DATABASE_URL` is not configured.
+- `pnpm ts-check`: passed.
+- Targeted ESLint over every R4 changed TS/TSX file with `--quiet`: exit 0.
+- `pnpm check:protected-baseline`: passed all checks with 0 warnings.
+- `git diff --check`: passed; Git emitted line-ending notices only.
+- Live database E2E was not run, as required.
+
+### R4 Files Changed
+
+- `.superpowers/sdd/stage-4-task-3-report.md`
+- `src/components/node-editor.tsx`
+- `src/components/workflow/WorkflowReactFlowSurface.tsx`
+- `src/lib/workflow-renderer/commands.ts`
+- `src/__tests__/components/node-annotation-wiring.test.ts`
+- `src/__tests__/components/node-editor-drag-throttle-wiring.test.ts`
+- `src/__tests__/components/workflow-react-flow-controlled-behavior.test.tsx`
+- `src/__tests__/lib/workflow-render-commands.test.ts`
+
+Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` were not edited by this fix wave and remain excluded from staging and commit.

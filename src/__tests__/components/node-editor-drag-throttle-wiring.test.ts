@@ -42,4 +42,11 @@ describe('node editor drag throttling', () => {
     expect(source).toContain('}, [wf, workflowSyncRevision]);');
     expect(source).not.toContain('onWorkflowChange?.(currentWf);');
   });
+
+  it('caches the latest external workflow during drag and merges it after the commit', () => {
+    expect(source).toContain('pendingExternalWorkflowRef');
+    expect(source).toContain('mergeExternalWorkflowWithPositions');
+    expect(source).toContain('pendingExternalWorkflowRef.current = workflow');
+    expect(source).toContain('pendingExternalWorkflowRef.current = null');
+  });
 });

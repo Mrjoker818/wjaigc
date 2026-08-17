@@ -42,7 +42,9 @@ describe('node-mode annotation wiring', () => {
   it('requires a concrete choice for image groups', () => {
     expect(editorSource).toContain('nodeAnnotationCandidates');
     expect(editorSource).toContain('选择要批注的图片');
-    expect(editorSource).toContain('openNodeAnnotation(sourceNode, candidate)');
+    expect(editorSource).toContain('nodeAnnotationCandidates.existingBundle');
+    expect(editorSource).toContain('nodeAnnotationCandidates.existingBundle,');
+    expect(editorSource).toContain('openNodeAnnotation(sourceNode, candidate);');
     expect(editorSource).toContain('candidate.sourceNodeId');
     expect(editorSource).toContain('candidate.sourcePortId');
   });
@@ -58,7 +60,7 @@ describe('node-mode annotation wiring', () => {
 
   it('reopens an existing annotation bundle on node double click', () => {
     expect(editorSource).toContain('onDoubleClickAnnotation');
-    expect(editorSource).toContain("node.type === 'ai-annotation-edit'");
+    expect(editorSource).toContain("node?.type === 'ai-annotation-edit'");
     expect(editorSource).toContain('existingBundle');
     expect(editorSource).toContain('<NodeAnnotationWorkspace');
   });
