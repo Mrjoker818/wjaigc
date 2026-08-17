@@ -930,6 +930,7 @@ export async function POST(request: NextRequest) {
               }
             } catch (err) {
               console.error(`[agent-edit] Image edit step ${i + 1} failed:`, err);
+              if (agentRuntimeMode === 'agent-v2') throw err;
               step.result = `编辑异常: ${err instanceof Error ? err.message : '未知错误'}`;
               step.success = false;
             }
@@ -979,6 +980,15 @@ export async function POST(request: NextRequest) {
                 providerId: imageProviderId,
                 engine: imageModel ? 'ai' : 'auto',
               };
+              const pollRemoveBackground = async (providerTaskId: string) => ({
+                success: true as const,
+                imageUrl: await pollAcceptedAgentGeneration({
+                  providerTaskId,
+                  userId: authResult.userId,
+                  userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+                  isCancelled,
+                }),
+              });
               const rbData = await operationContext.executeOperation({
                 stepId: stepKey,
                 toolId: 'remove_background',
@@ -994,9 +1004,15 @@ export async function POST(request: NextRequest) {
                   },
                   body: JSON.stringify(removeBackgroundRequest),
                 });
-                return response.json();
-              });
-              if (rbData.success && rbData.imageUrl) {
+                const data = await response.json() as Record<string, unknown>;
+                if (data.success && data.taskId) {
+                  const providerTaskId = String(data.taskId);
+                  await stepContext.recordAccepted(providerTaskId);
+                  return pollRemoveBackground(providerTaskId);
+                }
+                return data;
+              }, { reconcile: pollRemoveBackground });
+              if (rbData.success && typeof rbData.imageUrl === 'string' && rbData.imageUrl) {
                 finalImageUrl = rbData.imageUrl;
                 step.result = '移除背景成功';
               }
@@ -1658,6 +1674,7 @@ async function performImageEdit(
     console.log('[agent-edit] Path B: /images/generations, baseUrl:', baseUrl, 'model:', imageModel);
     let imageBase64 = '';
     let imageMimeType = 'image/png';
+    let acceptedProviderTaskId = '';
     try {
       // 解析图片为 base64
       if (imageUrl.startsWith('data:')) {
@@ -1751,6 +1768,7 @@ async function performImageEdit(
         // 异步任务 - 轮询等待结果
         const remoteTaskId = parsedResult.taskIds[0];
         await recordAccepted?.(remoteTaskId);
+        acceptedProviderTaskId = remoteTaskId;
         let pollAttempts = 0;
         const maxPollAttempts = 60;
         const pollInterval = 5000;
@@ -1799,10 +1817,12 @@ async function performImageEdit(
 
           if (status === 'failed' || status === 'error') {
             const errMsg = String((pollData.error as Record<string, unknown>)?.message || pollData.message || '远程任务失败');
+            if (strictProviderModel) throw new Error(translateApiError(errMsg));
             return { success: false, error: translateApiError(errMsg) };
           }
         }
 
+        if (strictProviderModel) throw new Error('编辑任务轮询超时');
         return { success: false, error: '编辑任务轮询超时' };
       }
 
@@ -1815,6 +1835,7 @@ async function performImageEdit(
       console.error('[agent-edit] Path B: no images in response');
       return { success: false, error: '模型未返回编辑后的图片' };
     } catch (err) {
+      if (strictProviderModel && acceptedProviderTaskId) throw err;
       // Timeout → try /chat/completions fallback
       const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
       if (isTimeout && !strictProviderModel) {

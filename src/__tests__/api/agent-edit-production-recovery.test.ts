@@ -15,11 +15,14 @@ const state = vi.hoisted(() => ({
   parentRefunds: 0,
   parentTerminalCalls: 0,
   submitOnlyCalls: [] as Array<Record<string, unknown>>,
+  internalSubmits: [] as Array<{ path: string; body: Record<string, unknown>; key: string }>,
+  internalPolls: [] as Array<{ taskId: string; userId: string }>,
   externalSubmits: [] as Array<{ body: Record<string, unknown>; key: string }>,
+  externalPolls: [] as string[],
   pollResponses: [] as Array<Record<string, unknown>>,
   crashPollTaskId: '' as string,
   crashedPoll: false,
-  plan: 'multi-step' as 'multi-step' | 'submission-unknown',
+  plan: 'multi-step' as 'multi-step' | 'submission-unknown' | 'remove-background' | 'async-image-edit' | 'video-tools',
   childCounter: 0,
 }));
 
@@ -62,12 +65,20 @@ vi.mock('@/lib/server-api-config', () => ({
   findProviderById: vi.fn(async (id: string) => (
     id === fixtures.chatProvider.id
       ? fixtures.chatProvider
-      : id === fixtures.imageProvider.id ? fixtures.imageProvider : null
+      : id === fixtures.imageProvider.id
+        ? state.plan === 'async-image-edit'
+          ? { ...fixtures.imageProvider, compatProfile: 'apimart' }
+          : fixtures.imageProvider
+        : null
   )),
   findProviderForModel: vi.fn(async (model: string) => (
     model === 'Chat::Exact'
       ? fixtures.chatProvider
-      : model === 'Exact::Model' ? fixtures.imageProvider : null
+      : model === 'Exact::Model'
+        ? state.plan === 'async-image-edit'
+          ? { ...fixtures.imageProvider, compatProfile: 'apimart' }
+          : fixtures.imageProvider
+        : null
   )),
   findProviderForFeature: vi.fn(async (feature: string) => (
     feature === 'chat' ? fixtures.chatProvider : fixtures.imageProvider
@@ -106,16 +117,26 @@ vi.mock('@/lib/agent-engine', () => ({
       await llmCall([{ role: 'user', content: 'ambiguous' }], []);
       throw new Error('unreachable');
     }
+    const steps = state.plan === 'remove-background'
+      ? [{ round: 1, toolName: 'remove_background', params: {}, result: 'planned', success: true }]
+      : state.plan === 'async-image-edit'
+        ? [{ round: 1, toolName: 'image_edit', params: { prompt: 'Edit asynchronously' }, result: 'planned', success: true }]
+        : state.plan === 'video-tools'
+          ? [
+              { round: 1, toolName: 'generate_video', params: { prompt: 'Generate video' }, result: 'planned', success: true },
+              { round: 2, toolName: 'extend_video', params: { videoUrl: '/generated-video.mp4', duration: 5 }, result: 'planned', success: true },
+            ]
+          : [0, 1].map(index => ({
+              round: index + 1,
+              toolName: 'generate_image',
+              params: { prompt: `Generated step ${index}`, size: '1:1' },
+              result: 'planned',
+              success: true,
+            }));
     return {
       success: true,
-      finalResponse: 'two generated images',
-      steps: [0, 1].map(index => ({
-        round: index + 1,
-        toolName: 'generate_image',
-        params: { prompt: `Generated step ${index}`, size: '1:1' },
-        result: 'planned',
-        success: true,
-      })),
+      finalResponse: 'planned tools complete',
+      steps,
     };
   }),
 }));
@@ -397,9 +418,45 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
       await drainRouteAfterCallbacks();
       return response;
     }
+    if (url.pathname === '/source.png') {
+      return new Response(new Uint8Array([137, 80, 78, 71]), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      });
+    }
+    if (url.pathname === '/api/image-edit' || url.pathname === '/api/video/generate' || url.pathname === '/api/video/extend') {
+      const body = await request.clone().json() as Record<string, unknown>;
+      state.internalSubmits.push({
+        path: url.pathname,
+        body,
+        key: request.headers.get('idempotency-key') || '',
+      });
+      const providerTaskId = url.pathname === '/api/image-edit'
+        ? 'remove-background-provider-task'
+        : url.pathname === '/api/video/generate'
+          ? 'generate-video-provider-task'
+          : 'extend-video-provider-task';
+      const result = url.pathname === '/api/image-edit'
+        ? { imageUrl: '/removed-background.png' }
+        : { videoUrl: url.pathname === '/api/video/generate' ? '/generated-video.mp4' : '/extended-video.mp4' };
+      state.tasks.set(providerTaskId, {
+        id: providerTaskId,
+        userId: fixtures.user.id,
+        type: url.pathname.includes('video') ? 'video' : 'generate-async',
+        status: 'completed',
+        progress: 100,
+        result,
+      });
+      if (url.pathname === '/api/image-edit') state.crashPollTaskId = providerTaskId;
+      return Response.json({ success: true, taskId: providerTaskId });
+    }
     if (url.pathname === '/api/poll-task') {
       const pollBody = await request.clone().json() as { taskId?: string };
       const taskId = pollBody.taskId || '';
+      state.internalPolls.push({
+        taskId,
+        userId: request.headers.get('x-wujie-internal-user-id') || '',
+      });
       if (taskId === state.crashPollTaskId && !state.crashedPoll) {
         state.crashedPoll = true;
         throw new Error('simulated crash after second acceptance');
@@ -414,12 +471,23 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
     throw new Error('connection lost after chat provider submit');
   }
   if (url.hostname === 'image.example') {
+    if (request.method === 'GET') {
+      state.externalPolls.push(`${url.pathname}${url.search}`);
+      if (!state.crashedPoll) {
+        state.crashedPoll = true;
+        throw new Error('simulated direct image edit poll timeout after acceptance');
+      }
+      return Response.json({ status: 'completed', data: [{ url: '/async-edited.png' }] });
+    }
     const body = JSON.parse(String(init?.body ?? await request.text())) as Record<string, unknown>;
     state.externalSubmits.push({
       body,
       key: new Headers(init?.headers ?? request.headers).get('idempotency-key') || '',
     });
-    return new Response(JSON.stringify({ data: [{ url: `/generated-${state.externalSubmits.length}.png` }] }), {
+    const providerResponse = state.plan === 'async-image-edit'
+      ? { task_id: 'async-edit-provider-task', status: 'processing' }
+      : { data: [{ url: `/generated-${state.externalSubmits.length}.png` }] };
+    return new Response(JSON.stringify(providerResponse), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     });
@@ -444,14 +512,15 @@ describe('Agent route default-adapter production recovery', () => {
     state.operations.clear(); state.events.length = 0;
     state.parentLeaseClaimed = false; state.parentLeaseCompleted = false;
     state.parentCharges = 0; state.parentRefunds = 0; state.parentTerminalCalls = 0;
-    state.submitOnlyCalls.length = 0; state.externalSubmits.length = 0; state.pollResponses.length = 0;
+    state.submitOnlyCalls.length = 0; state.internalSubmits.length = 0; state.internalPolls.length = 0;
+    state.externalSubmits.length = 0; state.externalPolls.length = 0; state.pollResponses.length = 0;
     state.crashPollTaskId = ''; state.crashedPoll = false; state.plan = 'multi-step'; state.childCounter = 0;
     process.env.WUJIE_TASK_CORE_MODE = 'core-v2';
     process.env.WUJIE_AGENT_RUNTIME_MODE = 'agent-v2';
     vi.stubGlobal('fetch', vi.fn(dispatchFetch));
     const nativeSetTimeout = globalThis.setTimeout;
     vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
-      if (delay === 2000) {
+      if (delay === 2000 || delay === 5000) {
         queueMicrotask(() => callback(...args));
         return { unref: () => undefined } as unknown as ReturnType<typeof setTimeout>;
       }
@@ -526,6 +595,99 @@ describe('Agent route default-adapter production recovery', () => {
     )));
     expect(late.every(response => response.status === 409)).toBe(true);
     expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('persists remove_background acceptance and recovers by exact authenticated poll without resubmit', async () => {
+    state.plan = 'remove-background';
+    const taskId = await startAgent('route-remove-background');
+
+    await vi.waitFor(() => {
+      const operation = [...state.operations.values()].find(candidate => candidate.stepId === 'remove_background:0');
+      expect(operation).toMatchObject({ status: 'accepted', providerTaskId: 'remove-background-provider-task' });
+      expect(state.parentLeaseClaimed).toBe(false);
+    });
+    expect(state.tasks.get(taskId)?.status).not.toBe('completed');
+
+    const recoveryResponses = await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-remove-background') as never)
+    )));
+    expect(recoveryResponses.every(response => response.status === 200)).toBe(true);
+    await Promise.all(state.afterCallbacks.splice(0).map(worker => worker()));
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('completed'));
+
+    expect(state.internalSubmits.filter(submit => submit.path === '/api/image-edit')).toHaveLength(1);
+    expect(state.internalPolls.filter(poll => poll.taskId === 'remove-background-provider-task')).toEqual([
+      { taskId: 'remove-background-provider-task', userId: fixtures.user.id },
+      { taskId: 'remove-background-provider-task', userId: fixtures.user.id },
+    ]);
+    expect(state.pollResponses.some(response => response.imageUrl === '/removed-background.png')).toBe(true);
+    expect([...state.operations.values()].find(operation => operation.stepId === 'remove_background:0')?.status).toBe('completed');
+    expect((state.tasks.get(taskId)?.result as Record<string, unknown>).imageUrl).toBe('/removed-background.png');
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(0);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    const late = await Promise.all(Array.from({ length: 8 }, () => agentPost(agentRequest('route-remove-background') as never)));
+    expect(late.every(response => response.status === 200)).toBe(true);
+    expect(state.internalSubmits.filter(submit => submit.path === '/api/image-edit')).toHaveLength(1);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('keeps direct async image_edit accepted after poll failure and reconciles without resubmit', async () => {
+    state.plan = 'async-image-edit';
+    const taskId = await startAgent('route-async-image-edit');
+
+    await vi.waitFor(() => {
+      const operation = [...state.operations.values()].find(candidate => candidate.stepId === 'image_edit:0');
+      expect(operation).toMatchObject({ status: 'accepted', providerTaskId: 'async-edit-provider-task' });
+      expect(state.parentLeaseClaimed).toBe(false);
+    });
+    expect(state.tasks.get(taskId)?.status).not.toBe('completed');
+
+    const recoveryResponses = await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-async-image-edit') as never)
+    )));
+    expect(recoveryResponses.every(response => response.status === 200)).toBe(true);
+    await Promise.all(state.afterCallbacks.splice(0).map(worker => worker()));
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('completed'));
+
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalSubmits[0].body.model).toBe('Exact::Model');
+    expect(state.externalPolls.every(path => path.startsWith('/tasks/async-edit-provider-task'))).toBe(true);
+    expect(state.externalPolls.length).toBeGreaterThanOrEqual(2);
+    expect((state.tasks.get(taskId)?.result as Record<string, unknown>).imageUrl).toBe('/async-edited.png');
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(0);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    const late = await Promise.all(Array.from({ length: 8 }, () => agentPost(agentRequest('route-async-image-edit') as never)));
+    expect(late.every(response => response.status === 200)).toBe(true);
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('behaviorally persists and polls both video task-returning branches once', async () => {
+    state.plan = 'video-tools';
+    const taskId = await startAgent('route-video-tools');
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('completed'));
+
+    const operations = [...state.operations.values()].filter(operation => (
+      operation.stepId === 'generate_video:0' || operation.stepId === 'extend_video:1'
+    ));
+    expect(operations).toHaveLength(2);
+    expect(operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'completed', providerTaskId: 'generate-video-provider-task' }),
+      expect.objectContaining({ status: 'completed', providerTaskId: 'extend-video-provider-task' }),
+    ]));
+    expect(state.internalSubmits.filter(submit => submit.path === '/api/video/generate')).toHaveLength(1);
+    expect(state.internalSubmits.filter(submit => submit.path === '/api/video/extend')).toHaveLength(1);
+    expect(state.pollResponses.filter(response => response.status === 'completed')).toHaveLength(2);
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    await Promise.all(Array.from({ length: 8 }, () => agentPost(agentRequest('route-video-tools') as never)));
+    expect(state.internalSubmits).toHaveLength(2);
     expect(state.parentTerminalCalls).toBe(1);
   });
 });

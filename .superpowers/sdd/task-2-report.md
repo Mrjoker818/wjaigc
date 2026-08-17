@@ -810,3 +810,111 @@ with no later tracked edits.
   no FPS normalization or manufactured threshold pass is used.
 - The pre-existing provider JSON-to-PostgreSQL array migration warning remains
   outside Task 2 scope.
+
+## R6 Independent Re-review Repair (2026-08-17)
+
+Status before the binding post-commit browser gate: **IMPLEMENTATION GREEN**.
+The remaining Critical async lifecycle gap is closed without changing the
+durable operation state machine or any node/performance code. The controller-
+owned Task 1 and Task 2 briefs remain unstaged and uncommitted. The authoritative
+browser run ID is `task2_r6_gate_final`; it is run only after this exact tracked
+state is committed, under
+`test-results/stage-4-baseline/evidence/<FINAL_SHA>/task2_r6_gate_final/`, with
+no later tracked edits.
+
+### R6 RED evidence
+
+1. Before any production edit, `pnpm vitest run
+   src/__tests__/api/agent-edit-production-recovery.test.ts
+   --reporter=verbose` ran the actual `POST /api/agent-edit` route and production
+   default adapter. It failed exactly the two new behavioral regressions
+   (**2 failed / 3 passed**): `remove_background` completed its child without an
+   accepted provider ID or `/api/poll-task`, while direct async `image_edit`
+   retained the parent execution lease around a simulated post-acceptance poll
+   timeout instead of releasing an accepted child for reconciliation. The
+   existing two-step `generate_image`, `submission_unknown`, and both task-
+   returning video branches remained green.
+2. The RED harness uses real route/default-adapter decisions rather than source
+   string checks. `/api/image-edit` returns a durable child `taskId`; direct
+   image edit returns an external `task_id`; controlled fetch boundaries inject
+   a crash/timeout only after acceptance. Eight concurrent route retries and
+   eight terminal replays are then exercised for each affected path.
+
+### R6 finding resolution
+
+1. `remove_background` now treats an async `/api/image-edit` response as
+   acceptance, persists its exact task ID on the per-step durable child, and
+   uses the existing signed internal JSON `POST /api/poll-task` reconciler.
+   Recovery of an accepted child invokes only that exact poll target and never
+   submits `/api/image-edit` again. Direct synchronous remove-background results
+   retain their existing behavior.
+2. Strict direct async `image_edit` now remembers successful acceptance and
+   rethrows provider failure, poll exception, or timeout after that point. The
+   Agent-v2 step loop no longer converts that durable fault into an ordinary
+   failed tool value. The downstream adapter therefore releases the child lease
+   while preserving `accepted(providerTaskId)`, and recovery polls the exact
+   external task without another provider POST. The parent cannot complete
+   around a pending child.
+3. Behavioral route coverage now audits every Agent tool branch that can return
+   a task ID: two-step `generate_image`, `remove_background`, direct async
+   `image_edit`, `generate_video`, and `extend_video`. It proves one submit per
+   step, persisted accepted IDs, authenticated/exact poll targets, poll-only
+   concurrent recovery, correct terminal media, one parent charge/terminal,
+   zero refunds on success, and no late resurrection. Exact `Exact::Model` and
+   the prior stable idempotency assertions remain covered.
+
+### R6 GREEN and final pre-commit verification
+
+- Focused GREEN: `pnpm vitest run
+  src/__tests__/api/agent-edit-production-recovery.test.ts
+  --reporter=verbose`: **1 file / 5 tests passed**. The same suite passed again
+  after the final runtime type guard.
+- Agent closure matrix: PowerShell array-splatted output of
+  `rg --files src/__tests__ | rg "(agent|chat-agent-tool-choice)"` into
+  `pnpm exec vitest run ... --reporter=dot`: **20 files / 163 tests passed**.
+- Real PostgreSQL: `$env:POSTGRES_TEST_DATABASE_URL=
+  'postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable';
+  pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  **2 files / 22 tests passed**, zero skips.
+- `pnpm ts-check`: passed after one initial type-only failure exposed the newly
+  typed direct remove-background JSON result; the minimal `typeof imageUrl ===
+  'string'` runtime guard fixed it, and the rerun passed.
+- `pnpm lint -- --quiet`: exit `0`; only the existing Babel large-file note for
+  `infinite-canvas.tsx` was emitted.
+- `pnpm build`: compiled and type-checked successfully; **113/113** static pages
+  generated.
+- `pnpm check:protected-baseline`: all **38** feature IDs passed, no unapproved
+  source drift, zero warnings. `git diff --check`: exit `0`.
+- Scope audit: `git diff --exit-code
+  d84ba0850a3f75148f51fd66089c0c0cab8787ef --
+  src/components/node-editor.tsx
+  src/__tests__/components/node-editor-drag-throttle-wiring.test.ts
+  tests/helpers/workflow-performance.ts`: exit `0`, zero R6 drift.
+
+### R6 changed files
+
+- Production: `src/app/api/agent-edit/route.ts`.
+- Tests: `src/__tests__/api/agent-edit-production-recovery.test.ts`.
+- Evidence/report: `.superpowers/sdd/task-2-report.md`.
+- No task brief, stable branch, Task 3, node editor, performance helper, schema,
+  package, or unrelated production file is included in the R6 commit.
+
+### R6 post-commit authoritative gate contract
+
+After committing this exact tracked state, seed a fresh isolated Stage 4
+database and run the production build with `PLAYWRIGHT_WORKERS=1 pnpm exec
+playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --grep 'chat|agent'`
+using run ID `task2_r6_gate_final`. Chromium, Chromium 1080p, Firefox, WebKit,
+and mobile Chromium must each execute ordinary chat, real vision failure stop,
+first Agent progress, shared cancellation, and refresh recovery. Retained
+evidence must include relevant runtime network calls, `source-state.json`,
+trace, video, screenshot, console, network, and raw frame-rate records under the
+exact committed SHA.
+
+### R6 concerns
+
+- Raw browser FPS remains evidence only and **UNVERIFIED**, especially WebKit;
+  no FPS normalization or manufactured threshold pass is used.
+- The pre-existing provider JSON-to-PostgreSQL array migration warning remains
+  outside Task 2 scope.
