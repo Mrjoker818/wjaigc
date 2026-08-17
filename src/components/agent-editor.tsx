@@ -89,13 +89,17 @@ function isPendingAgentAttempt(value: unknown): value is PendingAgentAttempt {
     && Number.isFinite(record.expiresAt);
 }
 
-async function digestAgentAttemptRequest(requestBody: string): Promise<string> {
+export async function digestAgentAttemptRequest(requestBody: string): Promise<string> {
   const digest = await globalThis.crypto?.subtle?.digest(
     'SHA-256',
     new TextEncoder().encode(requestBody),
   );
   if (!digest) throw new Error('安全存储不可用，未发送付费请求');
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function isConfirmedUnadmittedSubmissionStatus(status: number): boolean {
+  return [400, 401, 403, 413, 422].includes(status);
 }
 
 function terminalReplayMessage(status: string, fallback: string): string {
@@ -254,12 +258,7 @@ export function AgentEditor({
       const storedAttempt = localStorage.getItem(storageKey);
       if (!storedAttempt) return;
       const parsedAttempt = JSON.parse(storedAttempt) as unknown;
-      const now = Date.now();
-      if (
-        !isPendingAgentAttempt(parsedAttempt)
-        || parsedAttempt.expiresAt <= now
-        || parsedAttempt.expiresAt > now + PENDING_ATTEMPT_TTL_MS
-      ) {
+      if (!isPendingAgentAttempt(parsedAttempt)) {
         localStorage.removeItem(storageKey);
         return;
       }
@@ -445,6 +444,13 @@ export function AgentEditor({
         if (durableTerminal) clearAttemptKey(scopeKey);
         setError('任务已取消');
         return;
+      } else if (status === 'timeout') {
+        updateTaskState({ isProcessing: false, completedAt: Date.now() });
+        if (durableTerminal) clearAttemptKey(scopeKey);
+        if (result?.imageUrl) setResultImageUrl(String(result.imageUrl));
+        if (result?.prompt) setResultPrompt(String(result.prompt));
+        setError('任务已超时');
+        return;
       }
     } catch {
       // 轮询失败，继续重试
@@ -585,6 +591,9 @@ export function AgentEditor({
       }
 
       if (!resp.ok) {
+        if (isConfirmedUnadmittedSubmissionStatus(resp.status)) {
+          clearAttemptKey(submissionScopeKey);
+        }
         throw new Error(translateErrorFrontend(String(data.error || '提交失败')));
       }
 
@@ -629,13 +638,20 @@ export function AgentEditor({
     try {
       const response = await fetch(`/api/agent-edit?taskId=${encodeURIComponent(taskId)}&action=cancel`);
       const data = await response.json().catch(() => ({})) as Record<string, unknown>;
-      if (!response.ok || data.status !== 'cancelled' || data.durableTerminal !== true) {
+      const durablyCancelled = data.status === 'cancelled' && data.durableTerminal === true;
+      const locallyCancelled = data.status === 'cancelled' && data.confirmedLocal === true;
+      if (!response.ok || (!durablyCancelled && !locallyCancelled)) {
         throw new Error('取消请求未被持久化确认，任务可能仍在执行');
       }
       if (pollTimer.current) clearTimeout(pollTimer.current);
       activePollTaskId.current = null;
-      clearAttemptKey(runScopeKey);
-      updateTaskState({ isProcessing: false, progress: 0, error: '任务已取消', completedAt: Date.now() });
+      if (durablyCancelled) clearAttemptKey(runScopeKey);
+      updateTaskState({
+        isProcessing: false,
+        progress: 0,
+        error: locallyCancelled ? '任务已在本地取消，等待服务端确认' : '任务已取消',
+        completedAt: Date.now(),
+      });
     } catch (error) {
       updateTaskState({
         error: error instanceof Error ? error.message : '取消请求未被持久化确认，任务可能仍在执行',

@@ -114,7 +114,7 @@ describe('agent task persistence', () => {
       result: expect.objectContaining({
         taskError: expect.objectContaining({ code: 'AGENT_TASK_ERROR', retryable: true }),
       }),
-      expectedStatuses: ['processing'],
+      expectedStatuses: ['queued', 'pending', 'processing'],
     }));
   });
 

@@ -94,7 +94,7 @@ export async function recordAgentTaskTerminal(taskId: string, input: AgentTaskTe
         } : {}),
         taskError: normalizedError,
       },
-      expectedStatuses: ['processing'],
+      expectedStatuses: ['queued', 'pending', 'processing'],
     });
     const terminal = await settleFailedTask({
       taskId,
@@ -102,6 +102,8 @@ export async function recordAgentTaskTerminal(taskId: string, input: AgentTaskTe
       error: normalizedError,
     });
     if (!terminal.transitioned) {
+      const settled = await getCloudTaskById(taskId);
+      if (settled?.status === input.status) return;
       throw new Error('Agent task terminal transition conflict');
     }
     return;

@@ -1919,3 +1919,99 @@ git diff --check
   it. No non-isolated database was substituted.
 - The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
   staged or committed.
+
+## R17 - Agent-edit advisory attempt expiry and cancellation repair
+
+### RED evidence
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx --reporter=dot --silent
+# controlled exit 1; 1 file, 8 failed / 20 passed in 1.24s
+# Valid cross-TTL attempts were deleted, durable timeout did not clear the key,
+# confirmed unadmitted 400/401/403/413/422 statuses retained it, and the real
+# WebCrypto digest helper was not exported.
+
+pnpm exec vitest run src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot --silent
+# controlled exit 1; 1 file, 3 failed / 18 passed in 4.21s
+# Persisted queued/pending cancellation and confirmed-local cancellation both
+# returned the old non-cancellable response.
+
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'; pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts --reporter=dot --silent
+# The new real PostgreSQL concurrency assertion rejected with
+# "Agent task terminal transition conflict" on duplicate cancellation.
+# Its first placement also invalidated later test schemas through module-cache
+# reuse; moving the test to the end restored fixture isolation.
+```
+
+### Design and implementation
+
+- A structurally valid pending attempt remains reusable across its advisory
+  client TTL and refresh. Only malformed storage is removed locally; uncertain
+  reconciliation therefore preserves the stable key and fails closed instead
+  of silently creating a second paid submission.
+- `/api/agent-edit` now durably cancels authorized `queued`, legacy `pending`,
+  and `processing` rows. Repeated terminal settlement observes an already
+  matching persisted terminal rather than turning a concurrent cancel into a
+  server error. Local-only processing cancellation returns explicit
+  `confirmedLocal: true, durableTerminal: false`; the client retains its key
+  and labels that result as awaiting server confirmation.
+- Durable poll `timeout` stops polling, retains any returned result, and clears
+  the key. Structured replay remains the terminal 409 exception. Explicitly
+  unadmitted 400/401/403/413/422 responses, including empty or non-JSON bodies,
+  clear the key; 408/409/425/429/5xx and transport failures retain it.
+- `digestAgentAttemptRequest` is exported for a direct Node WebCrypto SHA-256
+  vector test, rather than relying only on a structural crypto stub.
+- `package.json` adds only the exact
+  `.superpowers/sdd/task-2-review-r17-findings.md` protected-baseline
+  allow-path.
+
+### GREEN verification
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/api/agent-edit-production-recovery.test.ts src/__tests__/lib/agent-task-persistence.test.ts src/__tests__/lib/cloud-task-storage.test.ts src/__tests__/components/use-agent-run-events.test.ts --reporter=dot --silent
+# 5 files / 109 tests passed in 7.88s
+
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'; pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts --reporter=dot --silent
+# 1 file / 17 tests passed in 21.09s, including 24 concurrent cancellations
+# across queued/pending/processing and exactly three refunds.
+
+pnpm ts-check
+# exit 0
+
+$files = @(rg --files src/__tests__ | rg '(agent|chat-agent-tool-choice)'); pnpm exec vitest run @files --reporter=dot --silent
+# 22 files / 217 tests passed in 16.53s
+
+pnpm exec vitest run src/__tests__/api/chat-agent-v2-generation-routing.test.ts src/__tests__/lib/chat-tools-analyze-image.test.ts src/__tests__/lib/chat-tools-governance.test.ts src/__tests__/components/chat-panel-generation-recovery-contract.test.ts src/__tests__/components/simple-chat-workspace-return-contract.test.ts src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot --silent
+# 7 files / 78 tests passed in 8.25s
+
+pnpm exec vitest run --reporter=json --outputFile "$env:TEMP\\r17-full-vitest.json" --silent
+# 464 files / 2726 tests passed; 67 skipped; 0 failed
+
+pnpm exec eslint . --format json --output-file "$env:TEMP\\r17-lint.json"
+# exit 0; 0 errors, 973 existing repository warnings
+
+pnpm build
+# production build process completed after the final full-suite verification
+
+pnpm check:protected-baseline
+# 38/38 feature IDs; 0 warnings
+
+git diff --check
+# exit 0; only pre-existing CRLF working-tree notices
+```
+
+### R17 changed files
+
+- Production: `src/components/agent-editor.tsx`,
+  `src/app/api/agent-edit/route.ts`, and `src/lib/agent-task-persistence.ts`.
+- Tests: `src/__tests__/components/agent-editor-run-scope.test.tsx`,
+  `src/__tests__/api/agent-edit-production-recovery.test.ts`,
+  `src/__tests__/lib/agent-task-persistence.test.ts`, and
+  `tests/integration/stage-4-agent-events-postgres.test.ts`.
+- Guard/evidence: `package.json`,
+  `.superpowers/sdd/task-2-review-r17-findings.md`, and this report.
+
+### R17 concerns
+
+- The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
+  staged or committed.

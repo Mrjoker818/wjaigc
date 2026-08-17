@@ -92,7 +92,7 @@ vi.mock('@/components/agent-runtime/AgentProgressTimeline', () => ({
   AgentProgressTimeline: () => null,
 }));
 
-import { AgentEditor } from '@/components/agent-editor';
+import { AgentEditor, digestAgentAttemptRequest } from '@/components/agent-editor';
 
 interface StorageHarness extends Storage {
   writes: Array<[string, string]>;
@@ -488,10 +488,15 @@ describe('AgentEditor selected-image run scope', () => {
     expect(retryKey).toBe(firstKey);
   });
 
-  it('keeps a key after a client rejection until a durable terminal status confirms it', async () => {
+  it.each([
+    [400, null],
+    [401, 'not json'],
+    [403, JSON.stringify({ error: 'forbidden' })],
+    [413, null],
+    [422, JSON.stringify({ error: 'invalid request' })],
+  ])('clears the key after confirmed unadmitted status %i', async (status, body) => {
     const storage = storageHarness([]);
     vi.stubGlobal('localStorage', storage);
-    let submitCount = 0;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === '/api/models?type=chat') {
@@ -500,11 +505,7 @@ describe('AgentEditor selected-image run scope', () => {
         }));
       }
       if (url === '/api/agent-edit' && init?.method === 'POST') {
-        submitCount++;
-        return Promise.resolve(new Response(submitCount === 1 ? null : JSON.stringify({ error: 'invalid request' }), {
-          status: submitCount === 1 ? 422 : 200,
-          headers: { 'Content-Type': 'application/json' },
-        }));
+        return Promise.resolve(new Response(body, { status }));
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -517,17 +518,8 @@ describe('AgentEditor selected-image run scope', () => {
       String(input) === '/api/agent-edit' && (init as RequestInit | undefined)?.method === 'POST'
     ));
     const firstKey = new Headers((firstSubmit?.[1] as RequestInit).headers).get('idempotency-key');
-    expect(storedAttemptKey(storage, 'project-1:image-a')).toBe(firstKey);
-
-    renderEditor('image-a');
-    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
-    await new Promise(resolve => setTimeout(resolve, 0));
-    const retrySubmit = fetchMock.mock.calls.filter(([input, init]) => (
-      String(input) === '/api/agent-edit' && (init as RequestInit | undefined)?.method === 'POST'
-    ))[1];
-    const retryKey = new Headers((retrySubmit?.[1] as RequestInit).headers).get('idempotency-key');
-
-    expect(retryKey).toBe(firstKey);
+    expect(firstKey).toMatch(/^agent-editor:/);
+    expect(storedAttemptKey(storage, 'project-1:image-a')).toBeNull();
   });
 
   it('starts a new key when a retry changes an unconfirmed request payload', async () => {
@@ -603,6 +595,34 @@ describe('AgentEditor selected-image run scope', () => {
     expect(elementHasText(lastTree, '本地已停止等待，可稍后重试查询')).toBe(true);
   });
 
+  it('stops on a durable timeout, preserves its result, and clears the pending key', async () => {
+    vi.useFakeTimers();
+    const storage = storageHarness([]);
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (url === '/api/agent-edit' && init?.method === 'POST') return Promise.resolve(Response.json({ taskId: 'task-timeout' }));
+      if (url === '/api/agent-edit?taskId=task-timeout') return Promise.resolve(Response.json({
+        status: 'timeout', durableTerminal: true, progress: 90, label: 'Provider timed out',
+        result: { imageUrl: '/partial-result.png' }, error: 'provider timeout',
+      }));
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await vi.advanceTimersByTimeAsync(1);
+    renderEditor('image-a');
+    await vi.advanceTimersByTimeAsync(1);
+    renderEditor('image-a');
+
+    expect(storedAttemptKey(storage, 'project-1:image-a')).toBeNull();
+    expect(elementHasText(lastTree, '任务已超时')).toBe(true);
+    expect(elementHasProp(lastTree, 'src', '/partial-result.png')).toBe(true);
+    expect(elementHasText(lastTree, '取消')).toBe(false);
+  });
+
   it.each([
     ['transport failure', () => Promise.reject(new TypeError('network lost'))],
     ['not found', () => Promise.resolve(new Response(JSON.stringify({ error: 'not found' }), { status: 404 }))],
@@ -633,6 +653,31 @@ describe('AgentEditor selected-image run scope', () => {
     expect(storedAttemptKey(storage, 'project-1:image-a')).toMatch(/^agent-editor:/);
     expect(() => findButton('取消')).not.toThrow();
     expect(elementHasText(lastTree, '任务已取消')).toBe(false);
+  });
+
+  it('keeps the key and labels a confirmed-local cancellation as non-durable', async () => {
+    const storage = storageHarness([]);
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (url === '/api/agent-edit' && init?.method === 'POST') return Promise.resolve(Response.json({ taskId: 'task-a' }));
+      if (url === '/api/agent-edit?taskId=task-a&action=cancel') return Promise.resolve(Response.json({
+        success: true, status: 'cancelled', confirmedLocal: true, durableTerminal: false,
+      }));
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-a');
+    findButton('取消').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-a');
+
+    expect(storedAttemptKey(storage, 'project-1:image-a')).toMatch(/^agent-editor:/);
+    expect(elementHasText(lastTree, '任务已在本地取消，等待服务端确认')).toBe(true);
   });
 
   it('clears the key only for a structured terminal replay and shows its terminal state', async () => {
@@ -677,6 +722,24 @@ describe('AgentEditor selected-image run scope', () => {
     expect(elementHasText(lastTree, 'request is already processing')).toBe(true);
   });
 
+  it.each([408, 425, 429, 500])('keeps the key for ambiguous status %i', async status => {
+    const storage = storageHarness([]);
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (String(input) === '/api/agent-edit' && init?.method === 'POST') {
+        return Promise.resolve(new Response(null, { status }));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    }));
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(storedAttemptKey(storage, 'project-1:image-a')).toMatch(/^agent-editor:/);
+  });
+
   it('fails closed before POST when protected pending-attempt storage is unavailable', async () => {
     vi.stubGlobal('localStorage', failingStorage());
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -713,27 +776,51 @@ describe('AgentEditor selected-image run scope', () => {
     expect(elementHasText(lastTree, '无法安全保存')).toBe(true);
   });
 
-  it('removes malformed, expired, and unbounded pending-attempt records without exposing request content', async () => {
-    const expired = JSON.stringify({ version: 1, key: 'old-key', digest: 'a'.repeat(64), expiresAt: 1 });
-    const unbounded = JSON.stringify({
-      version: 1,
-      key: 'agent-editor:project-1:image-c:future-key',
-      digest: 'b'.repeat(64),
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+  it('retains an expired valid attempt across refresh and reuses it for the accepted server operation', async () => {
+    const storage = storageHarness([]);
+    const acceptedKeys = new Set<string>();
+    vi.stubGlobal('localStorage', storage);
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (String(input) === '/api/agent-edit' && init?.method === 'POST') {
+        const key = new Headers(init.headers).get('idempotency-key') || '';
+        const firstAdmission = !acceptedKeys.has(key);
+        acceptedKeys.add(key);
+        return firstAdmission
+          ? Promise.reject(new TypeError('response lost after durable acceptance'))
+          : Promise.resolve(Response.json({ taskId: 'task-a', runId: 'run-a' }));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
     });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const firstKey = storedAttemptKey(storage, 'project-1:image-a');
+    const record = JSON.parse(storage.getItem('wujie_agent_attempt:project-1:image-a') || '{}');
+    storage.setItem('wujie_agent_attempt:project-1:image-a', JSON.stringify({ ...record, expiresAt: 1 }));
+
+    resetRenderHarness();
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const submittedKeys = fetchMock.mock.calls
+      .filter(([input, init]) => String(input) === '/api/agent-edit' && (init as RequestInit).method === 'POST')
+      .map(([, init]) => new Headers((init as RequestInit).headers).get('idempotency-key'));
+
+    expect(submittedKeys).toEqual([firstKey, firstKey]);
+    expect(acceptedKeys).toEqual(new Set([firstKey]));
+  });
+
+  it('removes malformed records without exposing request content', async () => {
     const storage = storageHarness([
       ['wujie_agent_attempt:project-1:image-a', '{not json'],
-      ['wujie_agent_attempt:project-1:image-b', expired],
-      ['wujie_agent_attempt:project-1:image-c', unbounded],
     ]);
     vi.stubGlobal('localStorage', storage);
 
     renderEditor('image-a');
     expect(storage.getItem('wujie_agent_attempt:project-1:image-a')).toBeNull();
-    renderEditor('image-b');
-    expect(storage.getItem('wujie_agent_attempt:project-1:image-b')).toBeNull();
-    renderEditor('image-c');
-    expect(storage.getItem('wujie_agent_attempt:project-1:image-c')).toBeNull();
 
     renderEditor('image-a');
     findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
@@ -744,5 +831,13 @@ describe('AgentEditor selected-image run scope', () => {
     expect(persisted).toMatch(/"expiresAt":\d+/);
     expect(persisted).not.toContain('/images/image-a.png');
     expect(persisted).not.toContain('a different request');
+  });
+
+  it('uses the real WebCrypto SHA-256 digest for a request body', async () => {
+    vi.stubGlobal('crypto', webcrypto);
+
+    await expect(digestAgentAttemptRequest('abc')).resolves.toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    );
   });
 });

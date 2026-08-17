@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   afterCallbacks: [] as Array<() => unknown>,
   tasks: new Map<string, Record<string, unknown>>(),
   taskByIdempotency: new Map<string, string>(),
+  hiddenCloudTaskIds: new Set<string>(),
   registry: new Map<string, Record<string, unknown>>(),
   operations: new Map<string, Record<string, unknown>>(),
   events: [] as Array<Record<string, unknown>>,
@@ -266,6 +267,7 @@ vi.mock('@/lib/cloud-task-persistence', () => ({
 }));
 vi.mock('@/lib/cloud-task-storage', () => ({
   getCloudTaskForUser: vi.fn(async (taskId: string, userId: string) => {
+    if (state.hiddenCloudTaskIds.has(taskId)) return null;
     const task = state.tasks.get(taskId);
     return task?.userId === userId ? task : null;
   }),
@@ -624,7 +626,7 @@ async function startAgent(idempotencyKey: string): Promise<string> {
 describe('Agent route default-adapter production recovery', () => {
   beforeEach(() => {
     state.afterCallbacks.length = 0;
-    state.tasks.clear(); state.taskByIdempotency.clear(); state.registry.clear();
+    state.tasks.clear(); state.taskByIdempotency.clear(); state.hiddenCloudTaskIds.clear(); state.registry.clear();
     state.operations.clear(); state.events.length = 0;
     state.parentLeaseClaimed = false; state.parentLeaseCompleted = false;
     state.parentCharges = 0; state.parentRefunds = 0; state.parentTerminalCalls = 0;
@@ -667,6 +669,45 @@ describe('Agent route default-adapter production recovery', () => {
     await expect(response.json()).resolves.toMatchObject({ success: true, status: 'cancelled' });
     expect(state.tasks.get('persisted-agent-task')).toMatchObject({ status: 'cancelled' });
     expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it.each(['queued', 'pending', 'processing'])('durably cancels a persisted %s task for its owner', async status => {
+    const taskId = `persisted-${status}-task`;
+    state.tasks.set(taskId, {
+      id: taskId,
+      userId: fixtures.user.id,
+      projectId: 'project-route',
+      type: 'agent-edit',
+      status,
+      progress: 5,
+      creditCost: 7,
+      creditStatus: 'pending',
+    });
+
+    const response = await agentGet(new Request(
+      `http://localhost/api/agent-edit?taskId=${taskId}&action=cancel`,
+    ) as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true, status: 'cancelled', durableTerminal: true,
+    });
+    expect(state.tasks.get(taskId)).toMatchObject({ status: 'cancelled' });
+  });
+
+  it('cancels a local-only legacy task with an explicit non-durable confirmation', async () => {
+    const response = await agentPost(agentRequest('local-only-cancel') as never);
+    const { taskId } = await response.json() as { taskId: string };
+    state.hiddenCloudTaskIds.add(taskId);
+
+    const cancelled = await agentGet(new Request(
+      `http://localhost/api/agent-edit?taskId=${taskId}&action=cancel`,
+    ) as never);
+
+    expect(cancelled.status).toBe(200);
+    await expect(cancelled.json()).resolves.toMatchObject({
+      success: true, status: 'cancelled', confirmedLocal: true, durableTerminal: false,
+    });
   });
 
   it('retains both accepted submitOnly children and reconciles them without resubmit', async () => {

@@ -226,6 +226,7 @@ describe('Stage 4 Agent event migration', () => {
       );
     });
   });
+
 });
 
 describe('Stage 4 Agent event storage on real PostgreSQL', () => {
@@ -1155,4 +1156,65 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
       expect(facts.rows[0]?.revision).toBeGreaterThanOrEqual(1);
     });
   });
+
+  postgresIt('atomically cancels queued, pending, and processing Agent-edit tasks once each under concurrency', async () => {
+    await withIsolatedPostgres('stage-4-agent-edit-cancel-concurrency', async ({ databaseUrl, query }) => {
+      expect(runMigrations(databaseUrl).status).toBe(0);
+      vi.resetModules();
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const now = Date.now();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      const { createCloudTask, getCloudTaskById } = await import('@/lib/cloud-task-storage');
+      const { recordAgentTaskTerminal: settleAgentTask } = await import('@/lib/agent-task-persistence');
+      await ensureCoreTables();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Agent edit cancellation', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 79, 100, 21, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+
+      const taskIds = await Promise.all((['queued', 'pending', 'processing'] as const).map(async status => {
+        const taskId = randomUUID();
+        await createCloudTask({
+          id: taskId,
+          userId: ownerId,
+          projectId,
+          type: 'agent-edit',
+          status,
+          progress: 5,
+          creditStatus: 'pending',
+          creditCost: 7,
+          createdAt: now,
+          updatedAt: now,
+        });
+        return taskId;
+      }));
+
+      await expect(Promise.all(taskIds.flatMap(taskId => (
+        Array.from({ length: 8 }, () => settleAgentTask(taskId, {
+          status: 'cancelled', error: 'cancelled concurrently',
+        }))
+      )))).resolves.toHaveLength(24);
+
+      const tasks = await Promise.all(taskIds.map(taskId => getCloudTaskById(taskId)));
+      expect(tasks.map(task => task?.status)).toEqual(['cancelled', 'cancelled', 'cancelled']);
+      const facts = await query<{ balance: number; total_used: number; refunds: string }>(
+        `SELECT credits.balance,
+                credits.total_used,
+                (SELECT count(*)::text FROM wujie_credit_transactions
+                 WHERE type = 'refund' AND task_id = ANY($2::text[])) AS refunds
+         FROM wujie_credits credits
+         WHERE credits.user_id = $1`,
+        [ownerId, taskIds],
+      );
+      expect(facts.rows).toEqual([{ balance: 100, total_used: 0, refunds: '3' }]);
+      vi.resetModules();
+    });
+  }, 15_000);
 });

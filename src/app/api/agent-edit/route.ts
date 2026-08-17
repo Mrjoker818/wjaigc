@@ -1490,7 +1490,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, status: 'cancelled', durableTerminal: true });
     }
 
-    if (persistedTask?.status === 'processing') {
+    if (persistedTask && ['queued', 'pending', 'processing'].includes(persistedTask.status)) {
       await recordAgentTaskTerminal(taskId, { status: 'cancelled', error: 'Task cancelled by user' });
       const confirmedTerminal = await getCloudTaskForUser(taskId, authResult.userId);
       if (confirmedTerminal?.status === 'cancelled') {
@@ -1504,6 +1504,16 @@ export async function GET(request: NextRequest) {
         status: confirmedTerminal?.status || 'processing',
         error: 'Cancellation was not durably confirmed',
       }, { status: 409 });
+    }
+
+    if (localTask?.status === 'processing') {
+      localTaskStore.set(taskId, { ...localTask, status: 'cancelled', error: '任务已取消' });
+      return NextResponse.json({
+        success: true,
+        status: 'cancelled',
+        confirmedLocal: true,
+        durableTerminal: false,
+      });
     }
 
     return NextResponse.json({ success: false, error: '任务不存在或无法取消' });
