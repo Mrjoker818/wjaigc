@@ -494,3 +494,56 @@ Result: 19 files / 146 tests passed.
 - `src/__tests__/components/node-editor-react-flow-v2-integration.test.tsx`
 
 Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` were not edited by this fix wave and remain excluded from staging and commit.
+
+## R7 Performance Evidence And Exact-SHA Closure
+
+Task 3 is closed locally at exact source commit `afbb519cdcc5a346bb227d28544e1413d27109ca`. The legacy renderer remains authoritative in both delivery modes; `shadow` mounts only the inert comparison projection. `react-flow-v2` is still prohibited until Task 4.
+
+### Probe Integrity Corrections
+
+- The first Chromium 1920x1080 run measured `27.71 FPS` because the evidence observer performed 100 query/style/geometry/hit-test scans on every animation frame. Caching elements raised this only to `32.42 FPS`, proving the observer itself still dominated the measurement.
+- The final observer rotates all mounted nodes through a maximum 12-frame batch while measuring RAF timestamps every frame. A pointer-down node is pinned and checked every frame until pointer-up or pointer-cancel; pointer-move cannot replace the active identity.
+- Visibility and opacity are checked before off-canvas hit-test filtering, so an overscan node cannot bypass disappearance detection.
+- A real Chromium fault injection selects a visible and hittable node, moves over a second node while the first remains pinned, covers the first node for one frame, verifies `elementFromPoint` reaches the injected overlay, and requires nonzero unclickable duration. The original implementation produced `0` and changed the active identity; the corrected monitor detects the fault.
+- Unsupported `longtask` observation is registered only when `PerformanceObserver.supportedEntryTypes` advertises it. Runtime evidence now fails closed on every console warning/error/page error, HTTP `>=400`, and unknown failed request. Only exact page-lifecycle cancellation of `GET /api/task-events` is retained as an allowed raw network event.
+- Default administrator demo projects are now created with the administrator owner ID. The former `demo` owner caused every browser run to remove two cross-user projects and emit a console warning.
+
+Independent R7 review finished `APPROVED`, with Critical/Important findings `0/0` after the transient-occlusion, active-node identity, overscan visibility, console-noise, and network fail-closed corrections.
+
+### Exact-SHA Browser Matrix
+
+Evidence root:
+
+```text
+test-results/stage-4-baseline/evidence/afbb519cdcc5a346bb227d28544e1413d27109ca/
+```
+
+| Mode | Profile | Average FPS | Input P95 ms | Monitored nodes | Lost | Unclickable ms |
+|---|---|---:|---:|---:|---:|---:|
+| legacy | chromium | 59.91 | 13.10 | 48 | 0 | 0 |
+| legacy | chromium-1080p | 58.22 | 16.20 | 100 | 0 | 0 |
+| legacy | firefox | 56.35 | 18.00 | 48 | 0 | 0 |
+| legacy | webkit | 20.80 | 8.00 | 48 | 0 | 0 |
+| legacy | mobile-chromium | 59.74 | 15.70 | 30 | 0 | 0 |
+| shadow | chromium | 59.90 | 16.60 | 48 | 0 | 0 |
+| shadow | chromium-1080p | 57.66 | 15.40 | 100 | 0 | 0 |
+| shadow | firefox | 56.66 | 18.00 | 48 | 0 | 0 |
+| shadow | webkit | 20.38 | 4.00 | 48 | 0 | 0 |
+| shadow | mobile-chromium | 59.78 | 16.40 | 30 | 0 | 0 |
+
+Both desktop Chromium profiles satisfy the numeric `>=55 FPS` gate. All five profiles in both modes satisfy P95 `<=50 ms`, lost nodes `0`, unclickable duration `0`, and functional continuity. WebKit is not assigned the Chromium-specific numeric FPS gate because this Windows Playwright WebKit runtime is animation-clock limited near 20 FPS even on a blank page; its interaction latency, continuity, node presence, and clickability gates remain mandatory and passed.
+
+All ten results contain `final.png`, `video.webm`, `trace.zip`, `console.json`, `network.json`, `source-state.json`, raw performance samples, and summaries. Every `source-state.json` records the exact commit above with `productTreeClean: true`. Console events total `0`; unexpected network failures total `0`; missing artifacts total `0`. Raw lifecycle cancellation events for `/api/task-events` remain visible in `network.json` and are not deleted.
+
+### Final Local Gates
+
+- Focused Task 3 regression: `20 files / 156 tests` passed.
+- TypeScript: `pnpm ts-check` passed.
+- ESLint: `0 errors / 987 historical warnings`; exit `0`.
+- PostgreSQL-enabled full Vitest: `468 files / 2882 tests` passed; the four tests using the separate historical `TEST_POSTGRES_URL` variable were then run against a second fresh PostgreSQL database and passed `4/4`.
+- Production build: Next.js `16.2.11`, `113/113` static pages generated; exit `0`.
+- Protected baseline: all `38/38` feature IDs, protected component paths, and evidence contracts present; `0` warnings.
+- Legacy and shadow browser matrices: `5/5 + 5/5` on exact committed source.
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained read-only.
+
+Task 3 is therefore complete locally. Task 4 is the only next scope: unified cross-workspace result projection, real PostgreSQL accounting, five-browser `chat -> canvas -> workflow -> chat`, and the fixed `legacy -> shadow -> v2 -> legacy` rollback sequence. GitHub Actions billing remains an external non-execution condition and is not reclassified as a pass.

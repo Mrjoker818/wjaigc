@@ -428,3 +428,12 @@ Protected stable branch: read-only and untouched
 - PostgreSQL evidence is mode-specific: each of five shadow tasks contains exactly `run.created,plan.updated`; each of five agent-v2 tasks contains exactly `run.created,plan.updated,tool.started,run.cancelled`; all ten tasks are terminal `cancelled`.
 - Raw 100-node FPS remains **UNVERIFIED** and was not relaxed or inferred from Task 2. Cloud exact-SHA rollout/rollback remains Task 4 scope. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
 - Next unique action is Stage 4 Task 3 only: establish the workflow domain/render boundary and React Flow shadow projection before any v2 renderer activation.
+
+## 2026-08-18 Stage 4 Task 3 workflow renderer boundary
+
+- Task 3 is complete locally at exact evidence commit `afbb519cdcc5a346bb227d28544e1413d27109ca`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+- The workflow domain, deterministic command/history layer, legacy surface, controlled React Flow surface, and inert shadow parity probe are separated. Legacy remains authoritative; `react-flow-v2` is not enabled before Task 4.
+- Seven review/fix waves ended `APPROVED` with Critical/Important `0/0`. The final wave removed the 100-node observer effect, pinned active drag identity, covered transient occlusion and overscan visibility, eliminated cross-user demo-project console warnings, and made browser Console/Network evidence fail closed.
+- Exact committed-source browser evidence passes legacy `5/5` and shadow `5/5`. Desktop Chromium is `59.91/58.22 FPS` in legacy and `59.90/57.66 FPS` in shadow; all ten profiles have P95 `<=18 ms`, lost nodes `0`, unclickable time `0`, console events `0`, unexpected network failures `0`, and complete screenshot/video/Trace/source evidence.
+- Fresh gates pass: focused `156/156`; TypeScript; ESLint `0 errors / 987 historical warnings`; PostgreSQL-enabled full Vitest `2882/2882` plus separate historical PostgreSQL concurrency `4/4`; production build `113/113`; protected baseline `38/38 / 0 warnings`.
+- Next unique action is Stage 4 Task 4 only: three-workspace result projection and lineage, real accounting races, five-browser end-to-end chain, then `legacy -> shadow -> react-flow-v2 -> legacy` forced rollback. GitHub Actions billing remains externally unexecuted and must not be reported as passing.
