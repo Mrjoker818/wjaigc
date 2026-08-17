@@ -113,4 +113,41 @@ describe('Agent runtime route rollout modes', () => {
       expect(routeSource(path)).toContain('prepareAdmittedAgentTaskExecution({');
     }
   });
+
+  it('requires admission before paid continuation in both chat routes', () => {
+    const canvas = routeSource('src/app/api/chat/route.ts');
+    expect(canvas).toContain("deferAgentExecution: input.agentRuntimeMode === 'agent-v2'");
+    expect(canvas).toContain('executeAdmittedToolCall');
+
+    const standalone = routeSource('src/app/api/simple-chat/chat/route.ts');
+    expect(standalone).toContain("'x-wujie-agent-defer-execution': 'true'");
+    expect(standalone).toContain('executeAdmittedToolCall');
+  });
+
+  it('resolves exact paid pairs before provider calls and disables agent-v2 fallback', () => {
+    for (const path of ['src/app/api/chat/route.ts', 'src/app/api/simple-chat/chat/route.ts']) {
+      const source = routeSource(path);
+      const exactResolution = source.indexOf('resolveTaskModel(');
+      const firstProviderCall = path.includes('simple-chat')
+        ? source.indexOf('const fetchRes = await fetchWithTimeout')
+        : source.indexOf('const response = await fetchWithV1Retry');
+      expect(exactResolution).toBeGreaterThan(0);
+      expect(firstProviderCall).toBeGreaterThan(0);
+      expect(exactResolution).toBeLessThan(firstProviderCall);
+    }
+
+    const agentEdit = routeSource('src/app/api/agent-edit/route.ts');
+    expect(agentEdit).toContain("agentRuntimeMode !== 'agent-v2'");
+    const agentEditResolution = agentEdit.indexOf('resolveTaskModel(');
+    expect(agentEditResolution).toBeGreaterThan(0);
+    expect(agentEditResolution).toBeLessThan(agentEdit.indexOf('createBillableTask({'));
+
+    const canvas = routeSource('src/app/api/chat/route.ts');
+    expect(canvas).toContain("agentRuntimeMode !== 'agent-v2' && model.endsWith('-thinking')");
+    expect(canvas).toContain("agentRuntimeMode === 'agent-v2'");
+
+    const edit = routeSource('src/app/api/edit/route.ts');
+    expect(edit).toContain('if (resumeAgentExecution)');
+    expect(edit).toContain('await executeEditTask();');
+  });
 });

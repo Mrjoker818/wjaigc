@@ -7,14 +7,16 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits, refundCredits, resolveConfiguredTokenPricing, settleTokenCharge } from '@/lib/credits';
 import type { TokenCreditPricing } from '@/lib/credit-pricing';
-import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
+import { CHAT_TOOLS, executeAdmittedToolCall, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
 import { buildCanvasAgentRequest } from '@/lib/agent-runtime/surface-requests';
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
+import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
 import { resolveAgentRuntimeMode, type AgentRuntimeMode } from '@/lib/agent-runtime/mode';
 import type { User } from '@/lib/user-types';
+import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 
 export const maxDuration = 120;
 
@@ -27,6 +29,130 @@ interface ChatTaskContext {
   projectId?: string;
   sessionId?: string;
   messageId?: string;
+  sourceVersionIds?: string[];
+  selectedEntityIds?: string[];
+}
+
+function runtimeToolId(toolName: string): 'generate_image' | 'edit_image' | 'analyze_image' | null {
+  if (toolName === 'generate_image' || toolName === 'img2img') return 'generate_image';
+  if (toolName === 'edit_image') return 'edit_image';
+  if (toolName === 'analyze_image') return 'analyze_image';
+  return null;
+}
+
+async function executeCanvasChatTool(input: {
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  toolCallIndex: number;
+  iteration: number;
+  chatApiKey: string;
+  chatBaseUrl: string;
+  origin: string;
+  userId: string;
+  userRole: 'user' | 'admin';
+  chatModel: string;
+  chatProviderId?: string;
+  imageModel?: string;
+  imageProviderId?: string;
+  allowedTools: string[];
+  taskContext: ChatTaskContext;
+  agentRuntimeMode: AgentRuntimeMode;
+  runtimeActor?: User;
+}): Promise<ToolCallResult> {
+  const toolId = runtimeToolId(input.toolName);
+  const idempotencyKey = input.taskContext.messageId
+    ? `chat-agent:${input.taskContext.messageId}:${input.iteration}:${input.toolCallIndex}:${input.toolName}`
+    : undefined;
+  const selectedProviderId = toolId === 'analyze_image'
+    ? input.chatProviderId || ''
+    : input.imageProviderId || '';
+  const selectedModelId = toolId === 'analyze_image'
+    ? input.chatModel
+    : input.imageModel || '';
+  const buildRuntimeRequest = (taskId?: string) => ({
+    ...buildCanvasAgentRequest({
+      projectId: input.taskContext.projectId || '',
+      workspaceId: `embedded-chat:${input.taskContext.sessionId || 'chat'}`,
+      providerId: selectedProviderId,
+      modelId: selectedModelId,
+      prompt: typeof input.toolArgs.prompt === 'string' ? input.toolArgs.prompt : input.toolName,
+      sourceVersionIds: input.taskContext.sourceVersionIds || [],
+      selectedEntityIds: input.taskContext.selectedEntityIds || [],
+      mode: toolId === 'analyze_image' ? 'vision' : 'agent',
+      conversationId: input.taskContext.sessionId,
+      idempotencyKey: taskId || idempotencyKey,
+    }),
+    allowedToolIds: toolId ? [toolId] : [],
+  });
+  const execute = () => executeToolCall(input.toolName, input.toolArgs, {
+    chatApiKey: input.chatApiKey,
+    chatBaseUrl: input.chatBaseUrl,
+    chatModel: input.chatModel,
+    chatProviderId: input.chatProviderId,
+    origin: input.origin,
+    userId: input.userId,
+    userRole: input.userRole,
+    imageModel: input.imageModel || '',
+    imageProviderId: input.imageProviderId || '',
+    allowedTools: input.allowedTools,
+    ...input.taskContext,
+    idempotencyKey,
+    deferAgentExecution: input.agentRuntimeMode === 'agent-v2',
+  });
+
+  let toolResult: ToolCallResult;
+  if (input.agentRuntimeMode === 'agent-v2') {
+    if (!input.runtimeActor || !input.taskContext.projectId || !toolId) {
+      return {
+        success: false,
+        error: 'Agent tool is not authorized for this runtime context',
+        resultText: 'Tool authorization failed before execution.',
+      };
+    }
+    const request = buildRuntimeRequest();
+    toolResult = await admitAuthorizedAgentExecution({
+      actor: input.runtimeActor,
+      request,
+      toolId,
+      admit: execute,
+    });
+  } else {
+    toolResult = await execute();
+  }
+
+  if (input.agentRuntimeMode === 'legacy' || !input.taskContext.projectId || !input.runtimeActor || !toolId) {
+    return toolResult;
+  }
+  for (const task of toolResult.taskIds || []) {
+    const request = buildRuntimeRequest(task.taskId);
+    const preparedAgentTask = await prepareAdmittedAgentTaskExecution({
+      mode: input.agentRuntimeMode,
+      observation: () => ({
+        runId: task.taskId,
+        actorUserId: input.userId,
+        projectId: request.projectId,
+        workspace: request.workspace,
+        providerId: request.providerId,
+        modelId: request.modelId,
+        mode: request.mode,
+        prompt: request.prompt,
+        sourceVersionIds: request.sourceVersionIds,
+        allowedToolIds: request.allowedToolIds,
+      }),
+      adoption: () => ({
+        actor: input.runtimeActor!,
+        taskId: task.taskId,
+        request,
+        toolId,
+      }),
+      execute: input.agentRuntimeMode === 'agent-v2'
+        ? () => executeAdmittedToolCall(toolResult)
+        : async () => undefined,
+    });
+    await preparedAgentTask.execute();
+    if (preparedAgentTask.runId) task.runId = preparedAgentTask.runId;
+  }
+  return toolResult;
 }
 
 /**
@@ -114,6 +240,8 @@ export async function POST(request: NextRequest) {
       projectId: requestProjectId = undefined as string | undefined,
       sessionId: requestSessionId = undefined as string | undefined,
       messageId: requestMessageId = undefined as string | undefined,
+      sourceVersionIds: requestSourceVersionIds = undefined as string[] | undefined,
+      selectedEntityIds: requestSelectedEntityIds = undefined as string[] | undefined,
     } = await request.json();
     
     // P2-9: 极度模糊时强制禁用工具，确保LLM只追问不执行
@@ -140,6 +268,12 @@ export async function POST(request: NextRequest) {
       projectId: typeof requestProjectId === 'string' ? requestProjectId : undefined,
       sessionId: typeof requestSessionId === 'string' ? requestSessionId : undefined,
       messageId: typeof requestMessageId === 'string' ? requestMessageId : undefined,
+      sourceVersionIds: Array.isArray(requestSourceVersionIds)
+        ? requestSourceVersionIds.filter((value): value is string => typeof value === 'string')
+        : [],
+      selectedEntityIds: Array.isArray(requestSelectedEntityIds)
+        ? requestSelectedEntityIds.filter((value): value is string => typeof value === 'string')
+        : [],
     };
     deductedCredits = 0; // 跟踪已扣积分，用于失败退款
 
@@ -152,6 +286,23 @@ export async function POST(request: NextRequest) {
     }
     if (messages.length > 100) {
       return NextResponse.json({ error: '消息数量超出限制(最多100条)' }, { status: 400 });
+    }
+    if (agentRuntimeMode === 'agent-v2') {
+      if (!providerId) {
+        return NextResponse.json({
+          code: 'MODEL_ROUTE_MISMATCH',
+          error: 'An exact provider is required',
+        }, { status: 409 });
+      }
+      try {
+        const exactModel = await resolveTaskModel(providerId, model, runtimeActor.id);
+        if (exactModel.kind !== 'chat') throw new Error('The exact pair is not a chat model');
+      } catch {
+        return NextResponse.json({
+          code: 'MODEL_ROUTE_MISMATCH',
+          error: 'The exact provider/model pair is unavailable or unauthorized',
+        }, { status: 409 });
+      }
     }
 
     // 积分扣除（登录用户才扣积分，按模型差异化扣分）
@@ -235,9 +386,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Detect thinking mode
-    const isThinkingModel = model.endsWith('-thinking');
+    const isThinkingModel = agentRuntimeMode !== 'agent-v2' && model.endsWith('-thinking');
     const baseModel = isThinkingModel ? model.replace(/-thinking$/, '') : model;
-    const { apiModelName: requestModel } = normalizeModelForApi(baseModel);
+    const { apiModelName: requestModel } = agentRuntimeMode === 'agent-v2'
+      ? { apiModelName: baseModel }
+      : normalizeModelForApi(baseModel);
     if (requestModel !== baseModel) {
       console.log(`[chat] Model normalized: ${baseModel} → ${requestModel}`);
     }
@@ -774,18 +927,24 @@ async function handleAgentStream(
             let toolResult: ToolCallResult;
             try {
               toolResult = await Promise.race([
-                executeToolCall(toolName, toolArgs, {
+                executeCanvasChatTool({
+                  toolName,
+                  toolArgs,
+                  toolCallIndex,
+                  iteration,
                   chatApiKey,
                   chatBaseUrl,
                   origin,
                   userId,
+                  userRole: runtimeActor?.role === 'admin' ? 'admin' : 'user',
+                  chatModel: model,
+                  chatProviderId: providerId,
                   imageModel: imageModel || '',
                   imageProviderId: imageProviderId || '',
                   allowedTools: availableTools.map(tool => tool.function.name),
-                  ...taskContext,
-                  idempotencyKey: taskContext.messageId
-                    ? `chat-agent:${taskContext.messageId}:${iteration}:${toolCallIndex}:${toolName}`
-                    : undefined,
+                  taskContext,
+                  agentRuntimeMode,
+                  runtimeActor,
                 }),
                 new Promise<ToolCallResult>((_, reject) =>
                   setTimeout(() => reject(new Error('Tool execution timeout')), TOOL_EXECUTION_TIMEOUT)
@@ -794,61 +953,6 @@ async function handleAgentStream(
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
               toolResult = { success: false, error: msg, resultText: `工具执行超时或出错: ${msg}` };
-            }
-
-            if (taskContext.projectId && runtimeActor) {
-              for (const task of toolResult.taskIds || []) {
-                const runtimeToolId = toolName === 'generate_image' || toolName === 'img2img'
-                  ? 'generate_image'
-                  : toolName === 'edit_image'
-                    ? 'edit_image'
-                    : null;
-                if (!runtimeToolId) continue;
-                const taskProviderId = task.providerId || imageProviderId || providerId || '';
-                const taskModelId = task.model || imageModel || model;
-                const taskPrompt = typeof toolArgs.prompt === 'string' ? toolArgs.prompt : toolName;
-                const runtimeRequest = () => ({
-                  ...buildCanvasAgentRequest({
-                    projectId: taskContext.projectId!,
-                    workspaceId: `embedded-chat:${taskContext.sessionId || 'chat'}`,
-                    providerId: taskProviderId,
-                    modelId: taskModelId,
-                    prompt: taskPrompt,
-                    sourceVersionIds: [],
-                    mode: 'agent',
-                    conversationId: taskContext.sessionId,
-                    idempotencyKey: task.taskId,
-                  }),
-                  allowedToolIds: [runtimeToolId],
-                });
-                const preparedAgentTask = await prepareAdmittedAgentTaskExecution({
-                  mode: agentRuntimeMode,
-                  observation: () => {
-                    const request = runtimeRequest();
-                    return {
-                      runId: task.taskId,
-                      actorUserId: userId,
-                      projectId: request.projectId,
-                      workspace: request.workspace,
-                      providerId: request.providerId,
-                      modelId: request.modelId,
-                      mode: request.mode,
-                      prompt: request.prompt,
-                      sourceVersionIds: request.sourceVersionIds,
-                      allowedToolIds: request.allowedToolIds,
-                    };
-                  },
-                  adoption: () => ({
-                    actor: runtimeActor,
-                    taskId: task.taskId,
-                    request: runtimeRequest(),
-                    toolId: runtimeToolId,
-                  }),
-                  execute: async () => undefined,
-                });
-                await preparedAgentTask.execute();
-                if (preparedAgentTask.runId) task.runId = preparedAgentTask.runId;
-              }
             }
 
             // Send tool execution result event
@@ -966,74 +1070,25 @@ async function handleNonStreamAgentLoop(
         toolArgs = {};
       }
 
-      const toolResult = await executeToolCall(toolName, toolArgs, {
+      const toolResult = await executeCanvasChatTool({
+        toolName,
+        toolArgs,
+        toolCallIndex,
+        iteration,
         chatApiKey,
         chatBaseUrl,
         origin,
         userId,
+        userRole: runtimeActor?.role === 'admin' ? 'admin' : 'user',
+        chatModel: model,
+        chatProviderId: providerId,
         imageModel: imgModel,
         imageProviderId: imgProviderId,
         allowedTools: availableTools.map(tool => tool.function.name),
-        ...taskContext,
-        idempotencyKey: taskContext.messageId
-          ? `chat-agent:${taskContext.messageId}:${iteration}:${toolCallIndex}:${toolName}`
-          : undefined,
+        taskContext,
+        agentRuntimeMode,
+        runtimeActor,
       });
-
-      if (taskContext.projectId && runtimeActor) {
-        for (const task of toolResult.taskIds || []) {
-          const runtimeToolId = toolName === 'generate_image' || toolName === 'img2img'
-            ? 'generate_image'
-            : toolName === 'edit_image'
-              ? 'edit_image'
-              : null;
-          if (!runtimeToolId) continue;
-          const taskProviderId = task.providerId || imgProviderId || providerId || '';
-          const taskModelId = task.model || imgModel || model;
-          const taskPrompt = typeof toolArgs.prompt === 'string' ? toolArgs.prompt : toolName;
-          const runtimeRequest = () => ({
-            ...buildCanvasAgentRequest({
-              projectId: taskContext.projectId!,
-              workspaceId: `embedded-chat:${taskContext.sessionId || 'chat'}`,
-              providerId: taskProviderId,
-              modelId: taskModelId,
-              prompt: taskPrompt,
-              sourceVersionIds: [],
-              mode: 'agent',
-              conversationId: taskContext.sessionId,
-              idempotencyKey: task.taskId,
-            }),
-            allowedToolIds: [runtimeToolId],
-          });
-          const preparedAgentTask = await prepareAdmittedAgentTaskExecution({
-            mode: agentRuntimeMode,
-            observation: () => {
-              const request = runtimeRequest();
-              return {
-                runId: task.taskId,
-                actorUserId: userId,
-                projectId: request.projectId,
-                workspace: request.workspace,
-                providerId: request.providerId,
-                modelId: request.modelId,
-                mode: request.mode,
-                prompt: request.prompt,
-                sourceVersionIds: request.sourceVersionIds,
-                allowedToolIds: request.allowedToolIds,
-              };
-            },
-            adoption: () => ({
-              actor: runtimeActor,
-              taskId: task.taskId,
-              request: runtimeRequest(),
-              toolId: runtimeToolId,
-            }),
-            execute: async () => undefined,
-          });
-          await preparedAgentTask.execute();
-          if (preparedAgentTask.runId) task.runId = preparedAgentTask.runId;
-        }
-      }
 
       allToolResults.push({ toolName, result: toolResult });
 

@@ -131,6 +131,8 @@ export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
+  const deferAgentExecution = authResult.source === 'internal'
+    && request.headers.get('x-wujie-agent-defer-execution') === 'true';
   try {
     let deductedCredits = 0;
     let sessionUser: import('@/lib/user-types').User | null = null;
@@ -366,6 +368,7 @@ export async function POST(request: NextRequest) {
     if (
       submitOnly
       && generationChannel !== 'canvas-direct'
+      && !deferAgentExecution
       && process.env.WUJIE_ENABLE_LEGACY_SUBMIT_ONLY_WRAPPER === 'true'
     ) {
       const idempotencyKey = request.headers.get('idempotency-key')?.trim() || '';
@@ -1146,21 +1149,23 @@ export async function POST(request: NextRequest) {
       const kickoffTaskIds = submittedSlots
         .filter((slot) => !['completed', 'failed', 'cancelled', 'timeout'].includes(slot.status))
         .map((slot) => slot.taskId);
-      after(async () => {
-        const kickoff = await kickoffDurableGenerationTasks({
-          taskIds: kickoffTaskIds,
-          userId: authResult.userId,
-          userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
-        });
-        if (kickoff.failed.length > 0) {
-          console.warn('[generate] Durable generation kickoff was not accepted for every slot', {
-            batchId: generationBatch.batchId,
-            attempted: kickoff.attempted,
-            accepted: kickoff.accepted,
-            failed: kickoff.failed,
+      if (!deferAgentExecution) {
+        after(async () => {
+          const kickoff = await kickoffDurableGenerationTasks({
+            taskIds: kickoffTaskIds,
+            userId: authResult.userId,
+            userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
           });
-        }
-      });
+          if (kickoff.failed.length > 0) {
+            console.warn('[generate] Durable generation kickoff was not accepted for every slot', {
+              batchId: generationBatch.batchId,
+              attempted: kickoff.attempted,
+              accepted: kickoff.accepted,
+              failed: kickoff.failed,
+            });
+          }
+        });
+      }
 
       return NextResponse.json({
         success: true,

@@ -10,9 +10,13 @@ import {
 } from '@/lib/agent-runtime/same-task-adapter';
 import {
   appendAdoptedAgentEvent,
+  appendShadowAgentEvent,
+  claimAdoptedAgentExecution,
+  completeAdoptedAgentExecution,
   listAgentEventStreamsForActor,
   listAgentEventsForActor,
   observeAdoptedAgentTaskTerminal,
+  releaseAdoptedAgentExecution,
 } from '@/lib/agent-runtime/event-storage';
 import { cancelAgentRun } from '@/lib/agent-runtime/service';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
@@ -106,6 +110,9 @@ function adapterDependencies(): SameTaskAgentAdapterDependencies {
     appendAdoptedEvent: appendAdoptedAgentEvent,
     observeTerminal: observeAdoptedAgentTaskTerminal,
     listEvents: listAgentEventsForActor,
+    claimExecution: claimAdoptedAgentExecution,
+    completeExecution: completeAdoptedAgentExecution,
+    releaseExecution: releaseAdoptedAgentExecution,
   };
 }
 
@@ -135,6 +142,149 @@ async function createChargedTask(input: {
 }
 
 describe('same-task Agent adoption on real PostgreSQL', () => {
+  postgresIt('recovers an expired crash claim and invokes one stable downstream operation', async () => {
+    await withIsolatedPostgres('stage-4-agent-adoption-crash-recovery', async ({ databaseUrl, query }) => {
+      runMigrations(databaseUrl);
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const taskId = randomUUID();
+      const now = Date.now();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Adoption crash recovery', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+      await query(
+        `CREATE TABLE task2_provider_invocations(
+          stable_key TEXT PRIMARY KEY,
+          invocation_count INTEGER NOT NULL DEFAULT 1
+        )`,
+      );
+      await createChargedTask({ ownerId, projectId, taskId });
+
+      const adapter = createSameTaskAgentAdapter(adapterDependencies());
+      const adoption = await adapter.adopt({
+        actor: actor(ownerId),
+        taskId,
+        request: request(projectId, taskId),
+        toolId: 'generate_image',
+      });
+      const crashedClaim = await claimAdoptedAgentExecution({
+        actorUserId: ownerId,
+        projectId,
+        runId: taskId,
+        toolId: 'generate_image',
+        leaseOwner: 'crashed-worker',
+        now: 1,
+        leaseDurationMs: 1,
+      });
+      expect(crashedClaim).toMatchObject({ claimed: true, leaseOwner: 'crashed-worker' });
+
+      const providerInvocation = vi.fn(async () => {
+        const inserted = await query(
+          `INSERT INTO task2_provider_invocations(stable_key)
+           VALUES ($1) ON CONFLICT (stable_key) DO NOTHING`,
+          [taskId],
+        );
+        expect(inserted.rowCount).toBe(1);
+        return 'provider-task-created';
+      });
+      const retries = await Promise.all(Array.from({ length: 20 }, () => (
+        adapter.executeAdoption({ adoption, execute: providerInvocation })
+      )));
+
+      expect(providerInvocation).toHaveBeenCalledTimes(1);
+      expect(retries.filter(result => result.executed)).toHaveLength(1);
+      const facts = await query<{
+        tasks: string;
+        charges: string;
+        provider_invocations: string;
+        attempts: number;
+        completed_at: string;
+      }>(
+        `SELECT
+           (SELECT count(*)::text FROM cloud_tasks WHERE id = $1) AS tasks,
+           (SELECT count(*)::text FROM wujie_credit_transactions
+            WHERE task_id = $1 AND type = 'consume') AS charges,
+           (SELECT count(*)::text FROM task2_provider_invocations
+            WHERE stable_key = $1) AS provider_invocations,
+           lease.attempt_count AS attempts,
+           lease.completed_at::text AS completed_at
+         FROM wujie_agent_execution_leases lease WHERE lease.task_id = $1`,
+        [taskId],
+      );
+      expect(facts.rows[0]).toMatchObject({
+        tasks: '1',
+        charges: '1',
+        provider_invocations: '1',
+        attempts: 2,
+      });
+      expect(Number(facts.rows[0]?.completed_at)).toBeGreaterThan(0);
+    });
+  });
+
+  postgresIt('persists shadow events without changing the parent task revision or timestamp', async () => {
+    await withIsolatedPostgres('stage-4-agent-shadow-parent-stability', async ({ databaseUrl, query }) => {
+      runMigrations(databaseUrl);
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const taskId = randomUUID();
+      const now = Date.now();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Shadow parent stability', 'active'],
+      );
+      await query(
+        `INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [randomUUID(), ownerId, now],
+      );
+      await createChargedTask({ ownerId, projectId, taskId });
+      const before = (await query<{ revision: number; updated_at: string }>(
+        'SELECT revision, updated_at::text FROM cloud_tasks WHERE id = $1',
+        [taskId],
+      )).rows[0];
+
+      await appendShadowAgentEvent({
+        actorUserId: ownerId,
+        projectId,
+        runId: taskId,
+        eventId: `shadow:${taskId}:created`,
+        workspace: 'canvas',
+        type: 'run.created',
+        payload: { observed: true },
+      });
+
+      const after = await query<{
+        revision: number;
+        updated_at: string;
+        shadow_events: string;
+      }>(
+        `SELECT task.revision, task.updated_at::text,
+           (SELECT count(*)::text FROM wujie_agent_events WHERE task_id = task.id) AS shadow_events
+         FROM cloud_tasks task WHERE task.id = $1`,
+        [taskId],
+      );
+      expect(after.rows[0]).toMatchObject({
+        revision: before?.revision,
+        updated_at: before?.updated_at,
+        shadow_events: '1',
+      });
+    });
+  });
+
   postgresIt('claims one executor across twenty retries without another charge or refund', async () => {
     await withIsolatedPostgres('stage-4-agent-adoption-concurrency', async ({ databaseUrl, query }) => {
       runMigrations(databaseUrl);

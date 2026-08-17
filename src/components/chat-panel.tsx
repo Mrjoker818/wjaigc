@@ -3967,17 +3967,43 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       }
 
       // P1-2: 图片上下文 - 统一收集所有引用图片（@图片 + pendingImages），去重
-      const allRefImageList: Array<{id: string; url: string; name: string}> = [];
+      const allRefImageList: Array<{
+        id: string;
+        url: string;
+        name: string;
+        assetVersionId?: string;
+        placementId?: string;
+      }> = [];
       activeMentions.forEach(m => {
         if (m.type === 'canvas-image' && m.imageUrl && !allRefImageList.find(r => r.id === m.id)) {
-          allRefImageList.push({ id: m.id!, url: m.imageUrl, name: m.label });
+          allRefImageList.push({
+            id: m.id,
+            url: m.imageUrl,
+            name: m.label,
+            assetVersionId: m.assetVersionId,
+            placementId: m.placementId,
+          });
         }
       });
       capturedPendingImages.forEach(img => {
         if (!allRefImageList.find(r => r.id === img.id)) {
-          allRefImageList.push({ id: img.id, url: img.url, name: img.name });
+          allRefImageList.push({
+            id: img.id,
+            url: img.url,
+            name: img.name,
+            assetVersionId: img.assetVersionId,
+            placementId: img.placementId,
+          });
         }
       });
+      const chatSourceVersionIds = [...new Set(
+        allRefImageList.flatMap(image => image.assetVersionId ? [image.assetVersionId] : []),
+      )];
+      const chatSelectedEntityIds = [...new Set(
+        allRefImageList.flatMap(image => (
+          image.assetVersionId && image.placementId ? [image.id] : []
+        )),
+      )];
       // 使用前面已定义的hasCanvasImages变量
       if (hasCanvasImages || allRefImageList.length > 0) {
         const imageDescriptions = allRefImageList.map((img, i) =>
@@ -4157,6 +4183,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           projectId,
           sessionId: taskSessionId,
           messageId: assistantMessageId,
+          sourceVersionIds: chatSourceVersionIds,
+          selectedEntityIds: chatSelectedEntityIds,
         }),
       });
 

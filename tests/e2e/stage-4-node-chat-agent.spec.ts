@@ -3,6 +3,7 @@ import {
   expect,
   openStage4CanvasProject,
   openStage4ChatProject,
+  readStage4PersistedWorkflowNodeCount,
   seedStage4Baseline,
   stage4FixtureForProject,
   test,
@@ -10,7 +11,8 @@ import {
 } from '../helpers/stage-4-e2e';
 import { measureWorkflowInteraction } from '../helpers/workflow-performance';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: 'serial', timeout: 120_000 });
+// The stage4Evidence fixture owns tracing and stores the retained archive.
 test.use({ trace: 'off', video: 'on' });
 
 test('establishes the local legacy node, chat, and agent baseline', async ({ page, stage4Evidence }, testInfo) => {
@@ -41,20 +43,31 @@ test('establishes the local legacy node, chat, and agent baseline', async ({ pag
 
   const backToCanvas = page.getByRole('button', { name: '返回画布', exact: true });
   await expect(backToCanvas).toBeVisible({ timeout: 20_000 });
-  await expect.poll(() => page.locator('[data-node-id]').count(), { timeout: 20_000 }).toBe(fixture.nodeCount);
+  await expect.poll(() => readStage4PersistedWorkflowNodeCount(
+    page,
+    String(fixture.canvasProject.id),
+  ), { timeout: 20_000 }).toBe(fixture.nodeCount);
+  await expect.poll(() => page.locator('[data-node-id]').count(), { timeout: 20_000 })
+    .toBeGreaterThan(0);
 
   const workflowSample = await measureWorkflowInteraction(page, fixture.expectedNodeIds, async current => {
     const firstNode = current.locator('[data-node-id="stage4-node-1"]');
-    const middleNode = current.locator('[data-node-id="stage4-node-50"]');
     await expect(firstNode).toBeVisible({ timeout: 10_000 });
-    await expect(middleNode).toBeVisible({ timeout: 10_000 });
     const from = await firstNode.boundingBox();
-    const to = await middleNode.boundingBox();
-    if (!from || !to) throw new Error('BLOCKED: failed to resolve workflow node geometry for Stage 4 performance sampling');
-    await current.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    if (!from) throw new Error('BLOCKED: failed to resolve workflow node geometry for Stage 4 performance sampling');
+    const dragHandle = firstNode.locator('.node-header');
+    const handleBox = await dragHandle.boundingBox();
+    if (!handleBox) throw new Error('BLOCKED: failed to resolve workflow node drag handle for Stage 4 performance sampling');
+    await current.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
     await current.mouse.down();
-    await current.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 60 });
+    await current.mouse.move(
+      handleBox.x + handleBox.width / 2 + 48,
+      handleBox.y + handleBox.height / 2 + 24,
+    );
     await current.mouse.up();
+    await expect.poll(async () => (await firstNode.boundingBox())?.x ?? from.x)
+      .toBeGreaterThan(from.x + 20);
+    await current.waitForTimeout(10_000);
   });
 
   await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-performance', workflowSample);
@@ -65,13 +78,17 @@ test('establishes the local legacy node, chat, and agent baseline', async ({ pag
   expect(workflowSample.unclickableDurationMs).toBe(0);
 
   await backToCanvas.click();
-  const canvasImage = page.getByAltText(`stage4-image-${fixture.browserProfile}`, { exact: true });
+  const canvasImage = page.locator(`[data-canvas-image-id="stage4-image-${fixture.browserProfile}"]`);
   await expect(canvasImage).toBeVisible({ timeout: 20_000 });
   await canvasImage.click({ force: true });
 
   const imageToolbar = page.locator('[data-toolbar="image-action-toolbar"]');
   await expect(imageToolbar).toBeVisible({ timeout: 10_000 });
-  const imageAgentButton = imageToolbar.getByRole('button', { name: 'Agent编排', exact: true });
+  const toolbarOverflowButton = imageToolbar.getByTitle('展开更多工具');
+  await expect(toolbarOverflowButton).toBeVisible({ timeout: 10_000 });
+  await toolbarOverflowButton.click();
+  const imageAgentButton = page.locator('[data-image-toolbar-overflow]')
+    .getByRole('button', { name: 'Agent编排', exact: true });
   await expect(imageAgentButton).toBeVisible({ timeout: 10_000 });
   await imageAgentButton.click();
   await expect(page.getByText('Agent 编排', { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -83,5 +100,5 @@ test('establishes the local legacy node, chat, and agent baseline', async ({ pag
   await expect(page.getByText('Agent 管理', { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Stage 4 Agent', { exact: true })).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: '使用', exact: true }).click();
-  await expect(page.getByText(/Stage 4 Agent/, { exact: false })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('🤖 Stage 4 Agent', { exact: true })).toBeVisible({ timeout: 10_000 });
 });

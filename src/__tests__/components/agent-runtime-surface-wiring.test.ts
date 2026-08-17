@@ -32,4 +32,17 @@ describe('Agent runtime surface boundaries', () => {
     expect(standaloneTypes).toContain('agentRunId?: string');
     expect(editor).toContain('data.runId');
   });
+
+  it('propagates Asset Graph identity and targets late run updates to the captured message', () => {
+    const canvas = source('src/components/chat-panel.tsx');
+    const standalone = source('src/components/simple-chat/chat-area.tsx');
+    const editor = source('src/components/agent-editor.tsx');
+
+    expect(canvas).toContain('sourceVersionIds: chatSourceVersionIds');
+    expect(canvas).toContain('selectedEntityIds: chatSelectedEntityIds');
+    expect(standalone).toContain('sourceVersionIds: requestSourceVersionIds');
+    expect(standalone).toContain('selectedEntityIds: requestSelectedEntityIds');
+    expect(standalone).toContain('message.id === assistantMessageId');
+    expect(editor).toContain('selectedEntityId');
+  });
 });

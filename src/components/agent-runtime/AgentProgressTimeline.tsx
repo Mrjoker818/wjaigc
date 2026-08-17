@@ -11,7 +11,7 @@ interface AgentProgressTimelineProps {
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'timeout']);
 
 function statusLabel(projection: AgentRunProjection | undefined, stale: boolean): string {
-  if (stale) return '正在排队';
+  if (stale && projection && !TERMINAL_STATUSES.has(projection.status)) return '正在排队';
   if (projection?.status === 'planning') return '正在规划';
   if (projection?.status === 'executing') return '正在执行';
   if (projection?.status === 'uploading') return '正在上传';

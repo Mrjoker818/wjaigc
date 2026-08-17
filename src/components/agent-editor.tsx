@@ -10,6 +10,7 @@ import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-even
 interface AgentEditorProps {
   projectId?: string;
   sourceVersionId?: string;
+  selectedEntityId?: string;
   imageUrl?: string;
   imagePrompt?: string;
   imageWidth?: number;
@@ -84,6 +85,7 @@ function translateErrorFrontend(msg: string): string {
 export function AgentEditor({
   projectId,
   sourceVersionId,
+  selectedEntityId,
   imageUrl,
   imagePrompt,
   imageWidth,
@@ -298,6 +300,7 @@ export function AgentEditor({
           image: imageUrl || '',
           projectId,
           assetParentVersionIds: sourceVersionId ? [sourceVersionId] : [],
+          selectedEntityId,
           assetProjectionMode: sourceVersionId ? 'revision' : 'derived',
           prompt: prompt.trim(),
           imagePrompt: imagePrompt || '',

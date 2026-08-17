@@ -83,4 +83,36 @@ describe('agent runtime surface requests', () => {
       apiKey: 'not-accepted',
     })).toThrow(SurfaceAgentRequestError);
   });
+
+  it.each([
+    ['prompt', { prompt: 'x'.repeat(16_385) }],
+    ['identifier', { projectId: 'x'.repeat(257) }],
+    ['idempotency key', { idempotencyKey: 'x'.repeat(257) }],
+    ['source versions', { sourceVersionIds: Array.from({ length: 65 }, (_, i) => `v-${i}`) }],
+    ['selected entities', { selectedEntityIds: Array.from({ length: 65 }, (_, i) => `e-${i}`) }],
+  ])('rejects an over-limit %s before authorization', (_label, override) => {
+    expect(() => buildCanvasAgentRequest({
+      projectId: 'project-1', workspaceId: 'canvas:project-1',
+      providerId: 'provider-chat', modelId: 'model-chat', prompt: 'hello',
+      sourceVersionIds: [], mode: 'agent', ...override,
+    })).toThrow(SurfaceAgentRequestError);
+  });
+
+  it('accepts exact request boundaries and rejects an oversized serialized input', () => {
+    expect(buildCanvasAgentRequest({
+      projectId: 'project-1', workspaceId: 'canvas:project-1',
+      providerId: 'provider-chat', modelId: 'model-chat', prompt: 'x'.repeat(16_384),
+      idempotencyKey: 'i'.repeat(256),
+      sourceVersionIds: Array.from({ length: 64 }, (_, i) => `v-${i}`),
+      selectedEntityIds: Array.from({ length: 64 }, (_, i) => `e-${i}`),
+      mode: 'agent',
+    })).toMatchObject({ prompt: 'x'.repeat(16_384) });
+
+    expect(() => buildCanvasAgentRequest({
+      projectId: 'project-1', workspaceId: 'canvas:project-1',
+      providerId: 'provider-chat', modelId: 'model-chat', prompt: 'hello',
+      sourceVersionIds: [], mode: 'agent',
+      ignoredPayload: 'x'.repeat(256 * 1024),
+    } as Parameters<typeof buildCanvasAgentRequest>[0])).toThrow(SurfaceAgentRequestError);
+  });
 });

@@ -18,7 +18,7 @@ describe('Stage 4 browser fixture auth isolation', () => {
   const fixture = {
     id: 'stage4-user-s4-run-chromium',
     browserProfile: 'chromium',
-    username: 'stage4_chromium_s4-run',
+    username: 'stage4_chromium_s4_run',
     password: 'Stage4!s4-runchr',
   };
 

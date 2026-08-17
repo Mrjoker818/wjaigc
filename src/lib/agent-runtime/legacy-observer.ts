@@ -1,5 +1,6 @@
-import { appendAgentEvent } from './event-storage';
+import { appendShadowAgentEvent } from './event-storage';
 import type { AgentMode, AgentWorkspace } from './types';
+import type { AppendAgentEventInput } from './event-storage';
 
 export interface LegacyAgentObservationInput {
   runId: string;
@@ -15,7 +16,7 @@ export interface LegacyAgentObservationInput {
 }
 
 export interface LegacyAgentObserverDependencies {
-  appendEvent: (input: Parameters<typeof appendAgentEvent>[0]) => Promise<unknown>;
+  appendEvent: (input: Parameters<typeof appendShadowAgentEvent>[0]) => Promise<unknown>;
   recordDiagnostic?: (diagnostic: {
     code: string;
     message: string;
@@ -23,7 +24,7 @@ export interface LegacyAgentObserverDependencies {
   }) => void;
 }
 
-const observedRunIds = new Set<string>();
+const observedEventIds = new Set<string>();
 
 function redactObservationError(error: unknown): string {
   if (error instanceof Error && /^(TypeError|RangeError)$/.test(error.name)) {
@@ -34,13 +35,12 @@ function redactObservationError(error: unknown): string {
 
 export async function observeLegacyAgentRun(
   input: LegacyAgentObservationInput,
-  dependencies: LegacyAgentObserverDependencies = { appendEvent: appendAgentEvent },
+  dependencies: LegacyAgentObserverDependencies = {
+    appendEvent: appendShadowAgentEvent,
+    recordDiagnostic: diagnostic => console.warn('[agent-shadow]', diagnostic),
+  },
 ): Promise<void> {
-  if (observedRunIds.has(input.runId)) return;
-  observedRunIds.add(input.runId);
-
-  try {
-    await dependencies.appendEvent({
+  const events: AppendAgentEventInput[] = [{
       actorUserId: input.actorUserId,
       projectId: input.projectId,
       runId: input.runId,
@@ -56,8 +56,7 @@ export async function observeLegacyAgentRun(
         sourceVersionIds: input.sourceVersionIds,
         allowedToolIds: input.allowedToolIds,
       },
-    });
-    await dependencies.appendEvent({
+    }, {
       actorUserId: input.actorUserId,
       projectId: input.projectId,
       runId: input.runId,
@@ -68,12 +67,19 @@ export async function observeLegacyAgentRun(
         observed: true,
         plan: [{ id: 'legacy-observation', label: 'Observed legacy task', status: 'completed' }],
       },
-    });
-  } catch (error) {
-    dependencies.recordDiagnostic?.({
-      code: 'AGENT_SHADOW_OBSERVATION_FAILED',
-      message: redactObservationError(error),
-      runId: input.runId,
-    });
+    }];
+  for (const event of events) {
+    if (observedEventIds.has(event.eventId)) continue;
+    try {
+      await dependencies.appendEvent(event);
+      observedEventIds.add(event.eventId);
+    } catch (error) {
+      dependencies.recordDiagnostic?.({
+        code: 'AGENT_SHADOW_OBSERVATION_FAILED',
+        message: redactObservationError(error),
+        runId: input.runId,
+      });
+      return;
+    }
   }
 }

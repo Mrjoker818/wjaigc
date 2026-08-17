@@ -11,6 +11,13 @@ export interface AgentContextTransaction {
     projectId: string,
     versionId: string,
   ): Promise<unknown | null>;
+  findEntityPlacement?(
+    ownerId: string,
+    projectId: string,
+    workspace: AgentRunRequest['workspace'],
+    workspaceId: string,
+    entityId: string,
+  ): Promise<unknown | null>;
 }
 
 export interface AgentContextStorage {
@@ -38,7 +45,24 @@ export class AgentContextNotFoundError extends Error {
 function defaultStorage(): AgentContextStorage {
   const storage = createPostgresAssetStorage();
   return {
-    transaction: callback => storage.transaction(callback),
+    transaction: callback => storage.transaction(transaction => callback({
+      findProject: transaction.findProject.bind(transaction),
+      findVersion: transaction.findVersion.bind(transaction),
+      async findEntityPlacement(ownerId, projectId, workspace, workspaceId, entityId) {
+        const entityTypes = workspace === 'canvas'
+          ? ['canvas-image']
+          : workspace === 'workflow'
+            ? ['workflow-input', 'workflow-output']
+            : ['chat-attachment', 'chat-result'];
+        for (const entityType of entityTypes) {
+          const placement = await transaction.findActivePlacement(
+            ownerId, projectId, workspace, workspaceId, entityType, entityId,
+          );
+          if (placement) return placement;
+        }
+        return null;
+      },
+    })),
   };
 }
 
@@ -63,6 +87,17 @@ export async function authorizeAgentContext({
         versionId,
       );
       if (!version) throw new AgentContextNotFoundError();
+    }
+    for (const entityId of new Set(request.context.selectedEntityIds)) {
+      if (!transaction.findEntityPlacement) throw new AgentContextNotFoundError();
+      const placement = await transaction.findEntityPlacement(
+        actorUserId,
+        request.projectId,
+        request.workspace,
+        request.workspaceId,
+        entityId,
+      );
+      if (!placement) throw new AgentContextNotFoundError();
     }
     return request.context;
   });

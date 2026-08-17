@@ -705,6 +705,18 @@ export default function ChatArea({
       model: selectedModel, providerId: selectedProviderId,
       createdAt: Date.now(),
     };
+    const requestSourceVersionIds = [...new Set(
+      (userMsg.imageRefs || []).flatMap(reference => (
+        reference.assetVersionId ? [reference.assetVersionId] : []
+      )),
+    )];
+    const requestSelectedEntityIds = [...new Set(
+      (userMsg.imageRefs || []).flatMap(reference => (
+        reference.assetVersionId && reference.placementId && reference.entityId
+          ? [reference.entityId]
+          : []
+      )),
+    )];
 
     setMessages(prev => [...prev, userMsg, aiMsg]);
     setInput("");
@@ -790,6 +802,8 @@ export default function ChatArea({
           webSearch, knowledgeItems: apiKnowledgeItems, projectId: project.id, taskId: task.id,
           assetProjectId: selectedCanvasProjectId || undefined,
           responseMessageId: assistantMessageId,
+          sourceVersionIds: requestSourceVersionIds,
+          selectedEntityIds: requestSelectedEntityIds,
           memories: memories.map(m => ({ category: m.category, content: m.content })),
           deepAnalysis: isDeepAnalysis,
           reasoningEffort,
@@ -853,36 +867,31 @@ export default function ChatArea({
                 }
               } else if (parsed.type === 'tool_status') {
                 setSearchStatus(null);
-                setMessages(prev => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === 'assistant') {
-                    updated[updated.length - 1] = {
-                      ...last,
+                setMessages(prev => prev.map(message => (
+                  message.id === assistantMessageId
+                    ? {
+                      ...message,
                       content: `*${parsed.label || '正在处理图片任务...'}*`,
                       ...(typeof parsed.runId === 'string' ? { agentRunId: parsed.runId } : {}),
-                    };
-                  }
-                  return updated;
-                });
+                    }
+                    : message
+                )));
               } else if (parsed.type === 'image' && parsed.imageUrl) {
                 setSearchStatus(null);
                 const imageRef = readWorkspaceAssetReference(parsed.imageRef);
-                setMessages(prev => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === 'assistant') {
+                setMessages(prev => prev.map(message => {
+                  if (message.id === assistantMessageId) {
                     const imageUrl = imageRef?.url || parsed.imageUrl;
-                    const imageIndex = last.images?.length || 0;
-                    updated[updated.length - 1] = {
-                      ...last,
-                      content: last.content || '图片已生成',
-                      images: [...(last.images || []), imageUrl],
-                      imageRefs: [...(last.imageRefs || []), imageRef?.assetVersionId && imageRef.placementId
+                    const imageIndex = message.images?.length || 0;
+                    return {
+                      ...message,
+                      content: message.content || '图片已生成',
+                      images: [...(message.images || []), imageUrl],
+                      imageRefs: [...(message.imageRefs || []), imageRef?.assetVersionId && imageRef.placementId
                         ? imageRef
                         : { url: imageUrl }],
-                      attachments: [...(last.attachments || []), {
-                        id: `${last.id}-image-${imageIndex}`,
+                      attachments: [...(message.attachments || []), {
+                        id: `${message.id}-image-${imageIndex}`,
                         type: 'image',
                         name: typeof parsed.prompt === 'string' && parsed.prompt
                           ? parsed.prompt.slice(0, 120)
@@ -895,46 +904,37 @@ export default function ChatArea({
                       }],
                     };
                   }
-                  return updated;
-                });
+                  return message;
+                }));
               } else if (parsed.type === 'error') {
                 setSearchStatus(null);
-                setMessages(prev => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === 'assistant') {
-                    updated[updated.length - 1] = {
-                      ...last,
+                setMessages(prev => prev.map(message => (
+                  message.id === assistantMessageId
+                    ? {
+                      ...message,
                       content: `请求失败：${parsed.error || '未知错误'}\n\n建议：尝试切换模型或稍后重试。`,
-                    };
-                  }
-                  return updated;
-                });
+                    }
+                    : message
+                )));
               } else if (parsed.type === 'text' && parsed.content) {
                 setSearchStatus(null);
                 fullContent += parsed.content;
-                setMessages(prev => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === 'assistant') {
-                    updated[updated.length - 1] = { ...last, content: fullContent };
-                  }
-                  return updated;
-                });
+                setMessages(prev => prev.map(message => (
+                  message.id === assistantMessageId
+                    ? { ...message, content: fullContent }
+                    : message
+                )));
               }
             } catch { /* skip */ }
           }
         }
       }
     } catch {
-      setMessages(prev => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last?.role === 'assistant') {
-          updated[updated.length - 1] = { ...last, content: '抱歉，请求失败，请重试。' };
-        }
-        return updated;
-      });
+      setMessages(prev => prev.map(message => (
+        message.id === assistantMessageId
+          ? { ...message, content: '抱歉，请求失败，请重试。' }
+          : message
+      )));
     } finally {
       setIsStreaming(false);
       // 估算 token 用量（中文≈1.5字/token，英文≈4字符/token，取近似值）

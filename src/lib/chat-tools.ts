@@ -275,6 +275,58 @@ export interface ToolCallResult {
   taskIds?: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video'; runId?: string }>;
   /** 结果描述，用于回传给 LLM */
   resultText: string;
+  /** Server-only continuation for an agent-v2 task admitted without provider execution. */
+  admittedExecution?: AdmittedToolExecution;
+}
+
+export type AdmittedToolExecution =
+  | {
+      kind: 'generation';
+      taskIds: string[];
+      userId: string;
+      userRole: 'user' | 'admin';
+    }
+  | {
+      kind: 'edit';
+      requestBody: Record<string, unknown>;
+      idempotencyKey: string;
+      userId: string;
+      userRole: 'user' | 'admin';
+    };
+
+export async function executeAdmittedToolCall(
+  input: ToolCallResult | AdmittedToolExecution,
+): Promise<void> {
+  const execution = 'kind' in input ? input : input.admittedExecution;
+  if (!execution) return;
+  if (execution.kind === 'generation') {
+    const { kickoffDurableGenerationTasks } = await import('@/lib/task-core/durable-generation-kickoff');
+    const result = await kickoffDurableGenerationTasks({
+      taskIds: execution.taskIds,
+      userId: execution.userId,
+      userRole: execution.userRole,
+    });
+    if (result.failed.length > 0) {
+      throw new Error(`Generation continuation was rejected for ${result.failed.join(', ')}`);
+    }
+    return;
+  }
+
+  const response = await fetch(`http://localhost:${SERVER_PORT}/api/edit`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await getInternalRequestHeaders(execution.userId, execution.userRole)),
+      'idempotency-key': execution.idempotencyKey,
+      'x-wujie-agent-resume-execution': 'true',
+    },
+    body: JSON.stringify(execution.requestBody),
+  });
+  if (!response.ok) {
+    throw new Error(`Edit continuation failed: ${response.status}`);
+  }
+  const payload = await response.json() as { success?: boolean; error?: string };
+  if (!payload.success) throw new Error(payload.error || 'Edit continuation failed');
 }
 
 /**
@@ -289,6 +341,8 @@ export async function executeToolCall(
   context: {
     chatApiKey: string;
     chatBaseUrl: string;
+    chatModel?: string;
+    chatProviderId?: string;
     origin: string;
     userId: string;
     imageModel?: string;
@@ -297,6 +351,8 @@ export async function executeToolCall(
     sessionId?: string;
     messageId?: string;
     idempotencyKey?: string;
+    deferAgentExecution?: boolean;
+    userRole?: 'user' | 'admin';
     allowedTools?: string[];
   }
 ): Promise<ToolCallResult> {
@@ -336,6 +392,8 @@ export async function executeToolCall(
 interface ToolContext {
   chatApiKey: string;
   chatBaseUrl: string;
+  chatModel?: string;
+  chatProviderId?: string;
   origin: string;
   userId: string;
   imageModel?: string;
@@ -344,6 +402,8 @@ interface ToolContext {
   sessionId?: string;
   messageId?: string;
   idempotencyKey?: string;
+  deferAgentExecution?: boolean;
+  userRole?: 'user' | 'admin';
 }
 
 function embeddedChatWorkspaceId(context: ToolContext): string | undefined {
@@ -378,6 +438,7 @@ async function executeGenerateImage(
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
         ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
+        ...(context.deferAgentExecution ? { 'x-wujie-agent-defer-execution': 'true' } : {}),
       },
       body: JSON.stringify({
         prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,
@@ -431,6 +492,14 @@ async function executeGenerateImage(
           providerId: data.providerId || '',
           type: 'image' as const,
         })),
+        ...(context.deferAgentExecution ? {
+          admittedExecution: {
+            kind: 'generation' as const,
+            taskIds,
+            userId: context.userId,
+            userRole: context.userRole || 'user',
+          },
+        } : {}),
         resultText: `已提交 ${taskIds.length} 个图像生成任务，正在生成中...图片完成后将自动添加到画布。`,
       };
     }
@@ -466,20 +535,22 @@ async function executeEditImage(
     console.log(`[chat-tool:edit_image] model=${model}, providerId=${providerId}, prompt="${(prompt as string).slice(0, 80)}"`);
 
     // 调用语言修图 API
+    const requestBody = {
+      image: imageUrl,
+      prompt,
+      size: `${size}x${size}`,
+      model,
+      providerId,
+    };
     const res = await fetch(`http://localhost:${SERVER_PORT}/api/edit`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
         ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
+        ...(context.deferAgentExecution ? { 'x-wujie-agent-defer-execution': 'true' } : {}),
       },
-      body: JSON.stringify({
-        image: imageUrl,
-        prompt,
-        size: `${size}x${size}`,
-        model,
-        providerId,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!res.ok) {
@@ -497,6 +568,15 @@ async function executeEditImage(
         return {
           success: true,
           taskIds: [{ taskId, model: data.model || '', providerId: data.providerId || '', type: 'image' as const }],
+          ...(context.deferAgentExecution && context.idempotencyKey ? {
+            admittedExecution: {
+              kind: 'edit' as const,
+              requestBody,
+              idempotencyKey: context.idempotencyKey,
+              userId: context.userId,
+              userRole: context.userRole || 'user',
+            },
+          } : {}),
           resultText: `语言修图任务已提交（任务ID: ${taskId}），正在处理中。`,
         };
       }
@@ -547,6 +627,7 @@ async function executeImg2Img(
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
         ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
+        ...(context.deferAgentExecution ? { 'x-wujie-agent-defer-execution': 'true' } : {}),
       },
       body: JSON.stringify({
         prompt: fullPrompt,
@@ -587,6 +668,14 @@ async function executeImg2Img(
       return {
         success: true,
         taskIds: taskIds.map(tid => ({ taskId: tid, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
+        ...(context.deferAgentExecution ? {
+          admittedExecution: {
+            kind: 'generation' as const,
+            taskIds,
+            userId: context.userId,
+            userRole: context.userRole || 'user',
+          },
+        } : {}),
         resultText: `图生图任务已提交（任务ID: ${taskIds.join(', ')}），正在生成中。`,
       };
     }
@@ -764,16 +853,31 @@ async function executeAnalyzeImage(
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
     const question = (args.question as string) || '请详细描述这张图片的内容、风格、色彩、构图等信息。';
 
-    // 使用视觉提示词API或直接用聊天模型分析
-    const { findProviderForModel: findChatProvider } = await import('@/lib/server-api-config');
-    const chatProvider = await findChatProvider('', 'chat');
-    if (!chatProvider) {
-      return { success: false, error: '未配置聊天模型', resultText: '错误：未配置聊天模型，无法分析图片。' };
+    let chatApiKey: string;
+    let chatBaseUrl: string;
+    let chatModel: string;
+    if (context.deferAgentExecution) {
+      if (!context.chatProviderId || !context.chatModel || !context.chatApiKey || !context.chatBaseUrl) {
+        return {
+          success: false,
+          error: 'MODEL_ROUTE_MISMATCH',
+          resultText: 'The exact selected provider/model pair is unavailable.',
+        };
+      }
+      chatApiKey = context.chatApiKey;
+      chatBaseUrl = context.chatBaseUrl.replace(/\/+$/, '');
+      chatModel = context.chatModel;
+    } else {
+      // Preserve legacy default-provider lookup outside agent-v2.
+      const { findProviderForModel: findChatProvider } = await import('@/lib/server-api-config');
+      const chatProvider = await findChatProvider('', 'chat');
+      if (!chatProvider) {
+        return { success: false, error: '未配置聊天模型', resultText: '错误：未配置聊天模型，无法分析图片。' };
+      }
+      chatApiKey = chatProvider.apiKey;
+      chatBaseUrl = chatProvider.baseUrl?.replace(/\/+$/, '') || context.chatBaseUrl;
+      chatModel = chatProvider.selectedModels?.[0] || 'gpt-4o';
     }
-
-    const chatApiKey = chatProvider.apiKey;
-    const chatBaseUrl = chatProvider.baseUrl?.replace(/\/+$/, '') || context.chatBaseUrl;
-    const chatModel = chatProvider.selectedModels?.[0] || 'gpt-4o';
 
     const response = await fetchWithV1Retry(chatBaseUrl, '/chat/completions', {
       method: 'POST',

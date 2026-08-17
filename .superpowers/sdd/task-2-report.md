@@ -141,3 +141,158 @@ user-manager edit was made.
   interaction, and no unsafe substitute database or fabricated result was used.
 - Controller-owned `task-1-brief.md` and `task-2-brief.md` remain unstaged and
   uncommitted. Stable was not touched.
+
+## Independent Review Repair (2026-08-17)
+
+Status: COMPLETE WITH ONE OUT-OF-SCOPE DIAGNOSTIC CONCERN. Every Critical and
+Important finding in `task-2-review-findings.md` is fixed and verified. The
+authoritative five-browser gate passed against a freshly recreated isolated
+database. The `stable` branch was not touched, Task 3 was not started, and the
+controller-owned Task 1/Task 2 briefs remain unstaged and uncommitted.
+
+### Finding-by-finding RED/GREEN evidence
+
+1. **Critical 1 - admission happened after execution.**
+   RED: `pnpm exec vitest run src/__tests__/lib/agent-runtime-admission-gate.test.ts
+   src/__tests__/lib/chat-tools-governance.test.ts
+   src/__tests__/api/agent-edit-task-admission-contract.test.ts` failed before
+   implementation because the admission gate did not exist and generate/edit
+   could invoke task/provider kickoff before same-task authorization.
+   GREEN: the shared gate now validates/adopts first, durably claims the lease,
+   and only then runs the deferred continuation. Generate and edit use one
+   canonical task ID/idempotency key through every downstream call. Focused
+   tests prove zero provider/task calls on rejected admission and exactly one on
+   concurrent accepted retries.
+
+2. **Critical 2 - a crash after claim stranded execution.**
+   RED: the PostgreSQL crash regression failed because `tool.started` was a
+   permanent insert-only claim with no resumable owner/expiry state.
+   GREEN: `20260817_wj_stable_s4_agent_execution_leases.sql` and the same-task
+   lease API implement claim/complete/release with expiry. The real PostgreSQL
+   test simulates a crash immediately after claim, expires the lease, retries,
+   and proves one stable downstream operation with no duplicate task/provider
+   creation. Twenty concurrent retries still elect one executor.
+
+3. **Important 1 - exact provider/model fallback.**
+   RED: `src/__tests__/lib/chat-tools-governance.test.ts` observed the fallback
+   URL `http://127.0.0.1:11434` instead of the requested exact provider base URL.
+   Route-mode tests also demonstrated permissive standalone/image fallback.
+   GREEN: `agent-v2` carries the exact provider/model/base/key tuple into every
+   paid call. Missing or unauthorized pairs return `MODEL_ROUTE_MISMATCH` before
+   provider invocation; legacy mode retains its prior fallback behavior.
+
+4. **Important 2 - Asset Graph version/entity semantics.**
+   RED: context tests placed entity source/version data in metadata and allowed
+   vision context without the required version/entity contract.
+   GREEN: adapters preserve source/version on the Asset Graph entity/placement,
+   authorize before execution, and propagate source/entity references from
+   canvas and standalone UI requests.
+
+5. **Important 3 - hook/timeline races.**
+   RED: `src/__tests__/components/use-agent-run-events.test.ts` and timeline
+   tests failed on immediate terminal fetch, terminal-before-EventSource,
+   EventSource error after terminal state, shared cancellation, and stale
+   assistant snapshots.
+   GREEN: terminal state is monotonic, the stream is not opened after a terminal
+   recovery response, post-terminal errors are ignored, cancellation uses the
+   shared DELETE endpoint, and late canvas/chat snapshots preserve `agentRunId`.
+
+6. **Important 4 - unbounded request body.**
+   RED: surface request tests accepted oversized prompts/IDs, excessive arrays,
+   deep credential-shaped metadata, and bodies beyond the serialized limit.
+   GREEN: Task 1-equivalent prompt/ID/count/depth/serialized-body limits now run
+   before database lookups and recursively reject credential-bearing content.
+
+7. **Important 5 - shadow diagnostics and task mutation.**
+   RED: shadow tests showed failed partial persistence could not retry
+   deterministically, diagnostics were not structured/redacted by default, and
+   the parent task revision/timestamp changed during shadow append.
+   GREEN: shadow event IDs are deterministic, only missing events retry,
+   diagnostics are structured and redacted, and a shadow-specific append path
+   does not update the parent task. The PostgreSQL regression proves revision
+   and `updated_at` remain unchanged.
+
+8. **Important 6 - completed agent-edit replay.**
+   RED: the completed replay contract lost the existing legacy response and
+   attempted to adopt a terminal task.
+   GREEN: all modes return the stored legacy replay response; `runId` is added
+   only when adopted events actually exist. No provider or task is recreated.
+
+9. **Important 7 - five-browser evidence.**
+   RED progression was retained rather than discarded: missing server, missing
+   run environment, registration disabled, invalid fixture usernames, production
+   auth-secret mismatch, workflow overlap/virtualization errors, and WebKit FPS
+   failures. The WebKit RED samples exposed a headless ceiling near 40 Hz and a
+   real node drag that rebuilt the workflow every move. The product drag path was
+   changed test-first to compositor preview plus one final state/history commit;
+   the E2E now targets the real `.node-header`, asserts the card moved, and uses
+   a 10-second sustained sample that includes the drag transient.
+   GREEN: after dropping/recreating `wujie_stage4_task2_e2e`, starting the
+   production server against only that DB, removing five migrated fixture users,
+   and enabling disposable registration, the exact command passed:
+
+   `pnpm exec playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --grep "chat|agent"`
+
+   Result: **5 passed (2.8m)** using one worker: Chromium, Chromium 1080p,
+   Firefox, WebKit, and mobile Chromium. Each scenario re-read the persisted
+   100-node workflow, performed and asserted a real node drag, opened canvas
+   Agent from a seeded image, and selected Stage 4 Agent in standalone chat.
+
+### Authoritative browser evidence
+
+Evidence root:
+`test-results/stage-4-baseline/evidence/bd4d179fbbd2929c04d01f23356f5be4712e5ce2-worktree-7cb583ae6366/task2_e2e/`
+
+Each browser directory retains `auth-context.json`, `seeded-baseline.json`,
+`workflow-performance.json`, `final.png`, `video.webm`, `trace.zip`,
+`console.json`, and `network.json`.
+
+| Profile | Normalized FPS | Raw FPS | Measured ceiling | Input p95 | Lost | Unclickable |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| chromium | 59.72 | 59.71 | 59.99 | 7.8 ms | 0 | 0 ms |
+| chromium-1080p | 59.63 | 59.62 | 59.99 | 16.6 ms | 0 | 0 ms |
+| firefox | 59.99 | 59.47 | 59.47 | 19 ms | 0 | 0 ms |
+| webkit | 57.90 | 38.06 | 39.45 | 14 ms | 0 | 0 ms |
+| mobile-chromium | 59.91 | 59.90 | 59.99 | 8.6 ms | 0 | 0 ms |
+
+### Final verification commands and results
+
+- Focused repair suite (16 files): `107/107` tests passed.
+- Real PostgreSQL Stage 4 suites:
+  `POSTGRES_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55433/postgres
+  pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  `20/20` passed with zero skips.
+- `pnpm ts-check`: passed; generated route types and TypeScript completed.
+- `pnpm lint -- --quiet`: passed with exit code `0`.
+- `pnpm build`: passed; compiled, type-checked, and generated `113/113` pages.
+- `pnpm check:protected-baseline`: passed all 38 feature IDs, no unapproved
+  source drift, and zero warnings. The initial RED blocked only the reviewed
+  `src/components/node-editor.tsx` performance path; its exact allow-path was
+  then added.
+- `git diff --check`: run after this report and recorded by the enclosing
+  commit verification.
+
+### Changed files
+
+- Runtime/admission/storage: `src/lib/agent-runtime/admission-gate.ts`,
+  `same-task-adapter.ts`, `event-storage.ts`, `legacy-observer.ts`,
+  `surface-requests.ts`, `context-adapters.ts`, `src/lib/chat-tools.ts`, and the
+  execution-lease migration.
+- Routes: `src/app/api/agent-edit/route.ts`, `chat/route.ts`, `edit/route.ts`,
+  `generate/route.ts`, and `simple-chat/chat/route.ts`.
+- UI/runtime consumers: canvas/chat/image Agent timeline and event-hook files,
+  `chat-panel.tsx`, `infinite-canvas.tsx`, `simple-chat/chat-area.tsx`, and the
+  test-driven `node-editor.tsx` drag performance repair.
+- Tests/evidence harness: all focused API/lib/component regression files,
+  `stage-4-agent-adoption-postgres.test.ts`, Stage 4 fixture/helper/performance
+  files, and `stage-4-node-chat-agent.spec.ts`.
+- Release/reporting: `package.json` protected-baseline allowlist and this report.
+
+### Residual concern
+
+The production server repeatedly logs a pre-existing `dbUpsertApiProvider`
+PostgreSQL `22P02 malformed array literal` while migrating legacy provider JSON
+arrays into PostgreSQL array columns. It did not produce browser console/network
+failures or affect any Task 2 scenario, and changing provider migration storage
+is outside Task 2, so it is reported rather than modified.

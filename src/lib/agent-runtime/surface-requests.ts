@@ -33,6 +33,7 @@ export interface AgentEditRequestInput extends Omit<SurfaceRequestInput,
 > {
   selectedEntityId: string;
   sourceVersionId?: string;
+  sourceVersionIds?: string[];
 }
 
 export class SurfaceAgentRequestError extends Error {
@@ -44,16 +45,42 @@ export class SurfaceAgentRequestError extends Error {
   }
 }
 
-function required(value: unknown, name: string): string {
+const LIMITS = {
+  identifier: 256,
+  prompt: 16_384,
+  identifiers: 64,
+  serialized: 256 * 1024,
+} as const;
+
+function required(value: unknown, name: string, maximum: number = LIMITS.identifier): string {
   if (typeof value !== 'string' || !value.trim()) {
     throw new SurfaceAgentRequestError(`${name} is required`);
   }
-  return value.trim();
+  const normalized = value.trim();
+  if (normalized.length > maximum) {
+    throw new SurfaceAgentRequestError(`${name} exceeds its limit`);
+  }
+  return normalized;
 }
 
 function identifiers(values: unknown, name: string): string[] {
   if (!Array.isArray(values)) throw new SurfaceAgentRequestError(`${name} is invalid`);
+  if (values.length > LIMITS.identifiers) {
+    throw new SurfaceAgentRequestError(`${name} exceeds its item limit`);
+  }
   return [...new Set(values.map(value => required(value, name)))];
+}
+
+function assertSerializedSize(value: unknown): void {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new SurfaceAgentRequestError('Agent surface request is not serializable');
+  }
+  if (Buffer.byteLength(serialized, 'utf8') > LIMITS.serialized) {
+    throw new SurfaceAgentRequestError('Agent surface request exceeds its serialized limit');
+  }
 }
 
 function assertNoClientCredentials(input: SurfaceRequestInput): void {
@@ -92,6 +119,7 @@ function build(
   workspace: SurfaceWorkspace,
   input: SurfaceRequestInput,
 ): AgentRunRequest {
+  assertSerializedSize(input);
   assertNoClientCredentials(input);
   const requestMode = mode(input.mode);
   const sourceVersionIds = identifiers(input.sourceVersionIds, 'sourceVersionIds');
@@ -99,19 +127,23 @@ function build(
     throw new SurfaceAgentRequestError('vision requires an image version');
   }
   const workspaceId = required(input.workspaceId, 'workspaceId');
-  return {
+  const request: AgentRunRequest = {
     projectId: required(input.projectId, 'projectId'),
     workspace,
     workspaceId,
     mode: requestMode,
     providerId: required(input.providerId, 'providerId'),
     modelId: required(input.modelId, 'modelId'),
-    prompt: required(input.prompt, 'prompt'),
+    prompt: required(input.prompt, 'prompt', LIMITS.prompt),
     sourceVersionIds,
     allowedToolIds: tools(workspace, requestMode),
-    idempotencyKey: input.idempotencyKey || `agent:${workspace}:${workspaceId}:${Date.now()}`,
+    idempotencyKey: input.idempotencyKey === undefined
+      ? `agent:${workspace}:${workspaceId}:${Date.now()}`
+      : required(input.idempotencyKey, 'idempotencyKey'),
     context: context(input, sourceVersionIds),
   };
+  assertSerializedSize(request);
+  return request;
 }
 
 export function buildCanvasAgentRequest(input: CanvasAgentRequestInput): AgentRunRequest {
@@ -125,7 +157,8 @@ export function buildSimpleChatAgentRequest(
 }
 
 export function buildAgentEditRequest(input: AgentEditRequestInput): AgentRunRequest {
-  const sourceVersionIds = input.sourceVersionId ? [input.sourceVersionId] : [];
+  const sourceVersionIds = input.sourceVersionIds
+    ?? (input.sourceVersionId ? [input.sourceVersionId] : []);
   const request = build('canvas', {
     ...input,
     sourceVersionIds,

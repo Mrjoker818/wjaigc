@@ -60,6 +60,21 @@ export interface ObserveAdoptedAgentTaskTerminalInput {
   toolId: string;
 }
 
+export interface AgentExecutionLeaseInput {
+  actorUserId: string;
+  projectId: string;
+  runId: string;
+  toolId: string;
+  leaseOwner?: string;
+  now?: number;
+  leaseDurationMs?: number;
+}
+
+export interface AgentExecutionLeaseClaim {
+  claimed: boolean;
+  leaseOwner: string;
+}
+
 export interface ListAgentEventsInput {
   actorUserId: string;
   projectId: string;
@@ -371,6 +386,129 @@ export async function appendAdoptedAgentEvent(
   } finally {
     client.release();
   }
+}
+
+export async function appendShadowAgentEvent(
+  rawInput: AppendAgentEventInput,
+): Promise<AppendAdoptedAgentEventResult> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const input = validateAgentEventAppendInput(rawInput);
+    const task = await client.query<{ status: string }>(
+      `SELECT status FROM cloud_tasks
+       WHERE id = $1 AND user_id = $2 AND project_id = $3 FOR UPDATE`,
+      [input.runId, input.actorUserId, input.projectId],
+    );
+    if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
+    const existing = await findExistingEvent(client, input);
+    if (existing) {
+      if (existing.request_digest !== input.requestDigest) throw new AgentEventConflictError();
+      await client.query('COMMIT');
+      return { event: mapEvent(existing), inserted: false };
+    }
+    if (['completed', 'failed', 'cancelled', 'timeout'].includes(task.rows[0].status)) {
+      throw new AgentEventConflictError();
+    }
+    const appended = await insertValidatedEvent(client, input);
+    await client.query('COMMIT');
+    return appended;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function claimAdoptedAgentExecution(
+  rawInput: AgentExecutionLeaseInput,
+): Promise<AgentExecutionLeaseClaim> {
+  const { randomUUID } = await import('node:crypto');
+  const input = {
+    actorUserId: validateIdentifier('actorUserId', rawInput.actorUserId),
+    projectId: validateIdentifier('projectId', rawInput.projectId),
+    runId: validateIdentifier('runId', rawInput.runId),
+    toolId: validateIdentifier('toolId', rawInput.toolId),
+    leaseOwner: rawInput.leaseOwner || randomUUID(),
+    now: rawInput.now ?? Date.now(),
+    leaseDurationMs: rawInput.leaseDurationMs ?? 10 * 60_000,
+  };
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const task = await client.query<{ status: string }>(
+      `SELECT status FROM cloud_tasks
+       WHERE id = $1 AND user_id = $2 AND project_id = $3 FOR UPDATE`,
+      [input.runId, input.actorUserId, input.projectId],
+    );
+    if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
+    if (['completed', 'failed', 'cancelled', 'timeout'].includes(task.rows[0].status)) {
+      await client.query('COMMIT');
+      return { claimed: false, leaseOwner: '' };
+    }
+    await client.query(
+      `INSERT INTO wujie_agent_execution_leases(
+         task_id, owner_id, project_id, tool_id, updated_at
+       ) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (task_id) DO NOTHING`,
+      [input.runId, input.actorUserId, input.projectId, input.toolId, input.now],
+    );
+    const claimed = await client.query(
+      `UPDATE wujie_agent_execution_leases
+       SET lease_owner = $5,
+           lease_expires_at = $6,
+           attempt_count = attempt_count + 1,
+           updated_at = $7
+       WHERE task_id = $1 AND owner_id = $2 AND project_id = $3 AND tool_id = $4
+         AND completed_at = 0 AND lease_expires_at <= $7`,
+      [input.runId, input.actorUserId, input.projectId, input.toolId,
+        input.leaseOwner, input.now + input.leaseDurationMs, input.now],
+    );
+    await client.query('COMMIT');
+    return {
+      claimed: (claimed.rowCount ?? 0) === 1,
+      leaseOwner: (claimed.rowCount ?? 0) === 1 ? input.leaseOwner : '',
+    };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function settleAgentExecutionLease(
+  rawInput: AgentExecutionLeaseInput,
+  completed: boolean,
+): Promise<boolean> {
+  const input = {
+    actorUserId: validateIdentifier('actorUserId', rawInput.actorUserId),
+    projectId: validateIdentifier('projectId', rawInput.projectId),
+    runId: validateIdentifier('runId', rawInput.runId),
+    toolId: validateIdentifier('toolId', rawInput.toolId),
+    leaseOwner: validateIdentifier('leaseOwner', rawInput.leaseOwner || ''),
+    now: rawInput.now ?? Date.now(),
+  };
+  const result = await getPool().query(
+    `UPDATE wujie_agent_execution_leases
+     SET lease_owner = '', lease_expires_at = 0,
+         completed_at = CASE WHEN $6 THEN $7 ELSE completed_at END,
+         updated_at = $7
+     WHERE task_id = $1 AND owner_id = $2 AND project_id = $3 AND tool_id = $4
+       AND lease_owner = $5 AND completed_at = 0`,
+    [input.runId, input.actorUserId, input.projectId, input.toolId,
+      input.leaseOwner, completed, input.now],
+  );
+  return (result.rowCount ?? 0) === 1;
+}
+
+export function completeAdoptedAgentExecution(input: AgentExecutionLeaseInput): Promise<boolean> {
+  return settleAgentExecutionLease(input, true);
+}
+
+export function releaseAdoptedAgentExecution(input: AgentExecutionLeaseInput): Promise<boolean> {
+  return settleAgentExecutionLease(input, false);
 }
 
 function terminalObservation(status: string): {

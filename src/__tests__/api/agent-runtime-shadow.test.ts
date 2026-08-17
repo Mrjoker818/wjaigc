@@ -86,4 +86,22 @@ describe('legacy Agent runtime shadow observation', () => {
       message: expect.not.stringContaining('secret-token-value'),
     }));
   });
+
+  it('retries only the missing deterministic event after a partial failure', async () => {
+    const appendEvent = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('temporary'))
+      .mockResolvedValue(undefined);
+    const input = {
+      runId: 'legacy-task-partial', actorUserId: 'user-1', projectId: 'project-1',
+      workspace: 'chat' as const, providerId: 'provider-chat', modelId: 'model-chat',
+      mode: 'conversation' as const, prompt: 'hello', sourceVersionIds: [], allowedToolIds: [],
+    };
+    await observeLegacyAgentRun(input, { appendEvent });
+    await observeLegacyAgentRun(input, { appendEvent });
+    expect(appendEvent).toHaveBeenCalledTimes(3);
+    expect(appendEvent.mock.calls[2]?.[0]).toMatchObject({
+      eventId: 'legacy-observer:legacy-task-partial:plan',
+    });
+  });
 });

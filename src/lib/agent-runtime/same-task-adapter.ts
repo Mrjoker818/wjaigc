@@ -113,6 +113,15 @@ export interface SameTaskAgentAdapterDependencies {
     projectId: string;
     runId: string;
   }): Promise<AgentEvent[]>;
+  claimExecution(input: {
+    actorUserId: string; projectId: string; runId: string; toolId: string;
+  }): Promise<{ claimed: boolean; leaseOwner: string }>;
+  completeExecution(input: {
+    actorUserId: string; projectId: string; runId: string; toolId: string; leaseOwner: string;
+  }): Promise<boolean>;
+  releaseExecution(input: {
+    actorUserId: string; projectId: string; runId: string; toolId: string; leaseOwner: string;
+  }): Promise<boolean>;
 }
 
 export interface AdoptAndExecuteSameTaskInput<T> {
@@ -281,7 +290,7 @@ export function createSameTaskAgentAdapter(
       return {
         runId: input.taskId,
         reused: !started.inserted,
-        claimed: started.inserted,
+        claimed: true,
         projection: reduceAgentEvents(events),
         tools: authorization.tools,
         actorUserId: input.actor.id,
@@ -298,7 +307,13 @@ export function createSameTaskAgentAdapter(
       let value: T | undefined;
       let executed = false;
 
-      if (adoption.claimed) {
+      const lease = await dependencies.claimExecution({
+        actorUserId: adoption.actorUserId,
+        projectId: adoption.projectId,
+        runId: adoption.runId,
+        toolId: adoption.toolId,
+      });
+      if (lease.claimed) {
         const admittedTask = await dependencies.getTaskForUser(
           adoption.runId,
           adoption.actorUserId,
@@ -309,7 +324,25 @@ export function createSameTaskAgentAdapter(
           && !TERMINAL_TASK_STATUSES.has(admittedTask.status)
         ) {
           executed = true;
-          value = await execute();
+          try {
+            value = await execute();
+            await dependencies.completeExecution({
+              actorUserId: adoption.actorUserId,
+              projectId: adoption.projectId,
+              runId: adoption.runId,
+              toolId: adoption.toolId,
+              leaseOwner: lease.leaseOwner,
+            });
+          } catch (error) {
+            await dependencies.releaseExecution({
+              actorUserId: adoption.actorUserId,
+              projectId: adoption.projectId,
+              runId: adoption.runId,
+              toolId: adoption.toolId,
+              leaseOwner: lease.leaseOwner,
+            }).catch(() => false);
+            throw error;
+          }
           const terminalEvents = await dependencies.observeTerminal({
             actorUserId: adoption.actorUserId,
             projectId: adoption.projectId,
@@ -372,6 +405,9 @@ async function defaultSameTaskAgentAdapter() {
     appendAdoptedEvent: eventStorage.appendAdoptedAgentEvent,
     observeTerminal: eventStorage.observeAdoptedAgentTaskTerminal,
     listEvents: eventStorage.listAgentEventsForActor,
+    claimExecution: eventStorage.claimAdoptedAgentExecution,
+    completeExecution: eventStorage.completeAdoptedAgentExecution,
+    releaseExecution: eventStorage.releaseAdoptedAgentExecution,
   });
 }
 

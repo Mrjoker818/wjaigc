@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { NextRequest } from 'next/server';
-import { findProviderForModel } from '@/lib/server-api-config';
+import { findProviderById, findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
@@ -15,6 +15,9 @@ import { projectCompletedTaskToAssets } from '@/lib/asset-core/task-projector';
 import { buildSimpleChatAgentRequest } from '@/lib/agent-runtime/surface-requests';
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
+import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
+import { executeAdmittedToolCall } from '@/lib/chat-tools';
+import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -280,6 +283,8 @@ export async function POST(request: NextRequest) {
     i2iStrength?: number;
     reasoningEffort?: string;
     responseSpeed?: string;
+    sourceVersionIds?: string[];
+    selectedEntityIds?: string[];
   };
   const messages = body.messages || [];
   const model = body.model || 'deepseek-v4-flash';
@@ -318,7 +323,21 @@ export async function POST(request: NextRequest) {
   }
 
   // 查找提供商
-  const provider = await findProviderForModel(model, 'chat' as ApiKind, providerId || undefined);
+  let provider;
+  if (agentRuntimeMode === 'agent-v2') {
+    if (!providerId) {
+      return Response.json({ code: 'MODEL_ROUTE_MISMATCH', error: 'An exact provider is required' }, { status: 409 });
+    }
+    try {
+      const exactModel = await resolveTaskModel(providerId, model, user.id);
+      if (exactModel.kind !== 'chat') throw new Error('The exact pair is not a chat model');
+      provider = await findProviderById(providerId);
+    } catch {
+      return Response.json({ code: 'MODEL_ROUTE_MISMATCH', error: 'The exact provider/model pair is unavailable or unauthorized' }, { status: 409 });
+    }
+  } else {
+    provider = await findProviderForModel(model, 'chat' as ApiKind, providerId || undefined);
+  }
   if (!provider) {
     return Response.json({ error: '未找到可用的 API 提供商' }, { status: 400 });
   }
@@ -642,12 +661,37 @@ export async function POST(request: NextRequest) {
 
             try {
               const internalHeaders = await getInternalRequestHeaders(user.id, user.role === 'admin' ? 'admin' : 'user');
-              const imgRes = await fetch(getInternalApiUrl('/api/generate'), {
+              const stableIdempotencyKey = `simple-chat:${body.taskId || body.projectId || 'chat'}:${body.responseMessageId || tc.id}:generate`;
+              const sourceVersionIds = Array.isArray(body.sourceVersionIds)
+                ? body.sourceVersionIds.filter((value): value is string => typeof value === 'string')
+                : [];
+              const selectedEntityIds = Array.isArray(body.selectedEntityIds)
+                ? body.selectedEntityIds.filter((value): value is string => typeof value === 'string')
+                : [];
+              const runtimeRequest = () => ({
+                ...buildSimpleChatAgentRequest({
+                  projectId: body.assetProjectId || '',
+                  workspaceId: `standalone-chat:${body.projectId || 'chat'}`,
+                  providerId: imageProviderId,
+                  modelId: imageModel,
+                  prompt: imgPrompt,
+                  sourceVersionIds,
+                  selectedEntityIds,
+                  mode: 'agent',
+                  conversationId: body.projectId,
+                  idempotencyKey: stableIdempotencyKey,
+                }),
+                allowedToolIds: ['generate_image'],
+              });
+              const admitGeneration = () => fetch(getInternalApiUrl('/api/generate'), {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
                   ...internalHeaders,
-                  'idempotency-key': `simple-chat:${body.taskId || body.projectId || 'chat'}:${body.responseMessageId || tc.id}:generate`,
+                  'idempotency-key': stableIdempotencyKey,
+                  ...(agentRuntimeMode === 'agent-v2'
+                    ? { 'x-wujie-agent-defer-execution': 'true' }
+                    : {}),
                 },
                 body: JSON.stringify({
                   prompt: imgPrompt,
@@ -662,6 +706,14 @@ export async function POST(request: NextRequest) {
                   ...(referenceImage ? { imageUrl: referenceImage, strength: i2iStrength } : {}),
                 }),
               });
+              const imgRes = agentRuntimeMode === 'agent-v2'
+                ? await admitAuthorizedAgentExecution({
+                    actor: user,
+                    request: runtimeRequest(),
+                    toolId: 'generate_image',
+                    admit: admitGeneration,
+                  })
+                : await admitGeneration();
               const imgData = await imgRes.json() as { success?: boolean; taskIds?: string[]; imageUrls?: string[]; directImageUrls?: string[] };
 
               // 直接返回图片的情况（同步提供商）
@@ -711,20 +763,20 @@ export async function POST(request: NextRequest) {
                       adoption: () => ({
                         actor: user,
                         taskId,
-                        request: buildSimpleChatAgentRequest({
-                          projectId: body.assetProjectId!,
-                          workspaceId: `standalone-chat:${body.projectId || 'chat'}`,
-                          providerId: imageProviderId,
-                          modelId: imageModel,
-                          prompt: imgPrompt,
-                          sourceVersionIds: [],
-                          mode: 'agent',
-                          conversationId: body.projectId,
-                          idempotencyKey: taskId,
-                        }),
+                        request: runtimeRequest(),
                         toolId: 'generate_image',
                       }),
-                      execute: pollExistingTask,
+                      execute: async () => {
+                        if (agentRuntimeMode === 'agent-v2') {
+                          await executeAdmittedToolCall({
+                            kind: 'generation',
+                            taskIds: [taskId],
+                            userId: user.id,
+                            userRole: user.role === 'admin' ? 'admin' : 'user',
+                          });
+                        }
+                        await pollExistingTask();
+                      },
                     })
                   : { execute: pollExistingTask, runId: undefined };
                 send({

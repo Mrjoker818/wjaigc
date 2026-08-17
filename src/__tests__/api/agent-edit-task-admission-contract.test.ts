@@ -54,4 +54,11 @@ describe('agent edit task admission contract', () => {
     expect(chargeTracking).toBeGreaterThan(0);
     expect(chargeTracking).toBeLessThan(durableCreate);
   });
+
+  it('returns completed replays before same-task adoption in every runtime mode', () => {
+    const replay = routeSource.indexOf("admission.value.status === 'completed'");
+    const adoption = routeSource.indexOf('prepareAdmittedAgentTaskExecution({');
+    expect(replay).toBeGreaterThan(0);
+    expect(replay).toBeLessThan(adoption);
+  });
 });

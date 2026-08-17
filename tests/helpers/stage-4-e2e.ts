@@ -1,4 +1,5 @@
 import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
@@ -264,7 +265,10 @@ async function loginWithPassword(
 
 function isRunScopedStage4FixtureUsername(username: string, runId = stage4RunId()): boolean {
   const normalizedUsername = username.trim().toLowerCase();
-  const normalizedRunId = safe(runId).toLowerCase();
+  const fullRunId = safe(runId).toLowerCase().replaceAll('-', '_');
+  const normalizedRunId = fullRunId.length <= 9
+    ? fullRunId
+    : createHash('sha256').update(fullRunId).digest('hex').slice(0, 9);
   return (
     normalizedUsername.startsWith('stage4_')
     && normalizedUsername.endsWith(`_${normalizedRunId}`)
@@ -487,6 +491,25 @@ export async function seedStage4Baseline(
       ? Number(saveProjectPayload.projectRevision)
       : null,
   };
+}
+
+export async function readStage4PersistedWorkflowNodeCount(
+  page: Page,
+  projectId: string,
+): Promise<number> {
+  const response = await page.request.get('/api/user-data/sync?key=projects');
+  const payload = await readJson(response);
+  if (!response.ok() || !Array.isArray(payload.value)) {
+    throw new Error(`BLOCKED: failed to re-read Stage 4 projects (HTTP ${response.status()})`);
+  }
+  const project = payload.value.find(candidate => (
+    candidate
+    && typeof candidate === 'object'
+    && (candidate as Record<string, unknown>).id === projectId
+  )) as Record<string, unknown> | undefined;
+  const metadata = project?.metadata as Record<string, unknown> | undefined;
+  const workflow = metadata?.workflow as Record<string, unknown> | undefined;
+  return Array.isArray(workflow?.nodes) ? workflow.nodes.length : 0;
 }
 
 export async function openStage4CanvasProject(page: Page, projectId: string): Promise<void> {

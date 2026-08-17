@@ -346,7 +346,13 @@ export async function POST(request: NextRequest) {
   const requestId = getRequestId(request);
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
-  const annotationIdempotencyKey = request.headers.get('x-idempotency-key')?.trim() || '';
+  const deferAgentExecution = authResult.source === 'internal'
+    && request.headers.get('x-wujie-agent-defer-execution') === 'true';
+  const resumeAgentExecution = authResult.source === 'internal'
+    && request.headers.get('x-wujie-agent-resume-execution') === 'true';
+  const annotationIdempotencyKey = request.headers.get('idempotency-key')?.trim()
+    || request.headers.get('x-idempotency-key')?.trim()
+    || '';
   if (annotationIdempotencyKey.length > 256) {
     return NextResponse.json({
       success: false,
@@ -632,7 +638,7 @@ export async function POST(request: NextRequest) {
     usesAtomicBilling = admission.mode === 'core-v2';
     annotationTaskId = admission.value.taskId || '';
     deductedCredits = admission.value.creditCost;
-    if (admission.value.reused && admission.value.taskId) {
+    if (admission.value.reused && admission.value.taskId && !resumeAgentExecution) {
       return NextResponse.json({
         success: true,
         mode: 'polling',
@@ -675,10 +681,21 @@ export async function POST(request: NextRequest) {
     registerTaskAbortController(taskId, taskController);
     console.info(`[edit] ★ taskId=${taskId} 创建成功, model=${pureModel}, providerId=${providerId || 'auto'}`);
 
-    // 后台异步执行编辑流程（5分钟全局超时兜底）
-    // ★ 使用 after() 确保 Next.js 不会在响应返回后终止 IIFE
+    if (deferAgentExecution) {
+      return NextResponse.json({
+        success: true,
+        mode: 'polling',
+        taskId,
+        model: pureModel,
+        providerId: actualProviderId,
+        deferred: true,
+      });
+    }
+
+    // 后台异步执行编辑流程（5分钟全局超时兜底）。Agent lease resume
+    // waits for terminal persistence so the lease cannot complete ahead of the worker.
     const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
-    after(async () => {
+    const executeEditTask = async (): Promise<void> => {
       const timeoutId = setTimeout(() => {
         if (!taskSignal.aborted) {
           const timeoutError = new Error('编辑超时，请稍后重试');
@@ -1881,7 +1898,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       clearTimeout(timeoutId);
       unregisterTaskAbortController(taskId, taskController);
     }
-  });
+    };
+    if (resumeAgentExecution) {
+      await executeEditTask();
+    } else {
+      after(executeEditTask);
+    }
 
   // ========== 立即返回 taskId（提交+轮询模式） ==========
    return NextResponse.json({

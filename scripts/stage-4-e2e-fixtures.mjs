@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 
 const requireFromStage4Fixture = createRequire(import.meta.url);
 const requireFromPg = createRequire(requireFromStage4Fixture.resolve('pg/lib/connection-parameters'));
@@ -16,6 +17,13 @@ const BROWSER_PROFILES = [
 
 function safeToken(value) {
   return String(value).trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+}
+
+export function stage4UsernameRunToken(value) {
+  const normalized = safeToken(value).toLowerCase().replaceAll('-', '_');
+  return normalized.length <= 9
+    ? normalized
+    : createHash('sha256').update(normalized).digest('hex').slice(0, 9);
 }
 
 function makePorts(index, total) {
@@ -47,8 +55,8 @@ function makeNode(index, total) {
     id: `stage4-node-${index + 1}`,
     type,
     label: `Stage 4 Node ${index + 1}`,
-    x: 80 + (index % 10) * 240,
-    y: 80 + Math.floor(index / 10) * 140,
+    x: 80 + (index % 10) * 400,
+    y: 80 + Math.floor(index / 10) * 260,
     width: 200,
     height: 92,
     ports,
@@ -298,7 +306,7 @@ export function buildStage4FixturePlan(rawRunId) {
   const users = BROWSER_PROFILES.map(profileId => ({
     id: `stage4-user-${runId}-${profileId}`,
     browserProfile: profileId,
-    username: `stage4_${profileId}_${runId}`,
+    username: `stage4_${profileId.replaceAll('-', '_')}_${stage4UsernameRunToken(runId)}`,
     password: `Stage4!${runId}${profileId.slice(0, 3)}`,
   }));
 

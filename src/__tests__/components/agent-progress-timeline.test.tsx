@@ -43,4 +43,12 @@ describe('Agent progress timeline', () => {
 
     expect(markup).toContain('正在排队');
   });
+
+  it('never lets stale state overwrite a terminal label', () => {
+    const markup = renderToStaticMarkup(
+      <AgentProgressTimeline projection={{ ...planningProjection, status: 'completed' }} stale />,
+    );
+    expect(markup).toContain('已完成');
+    expect(markup).not.toContain('正在排队');
+  });
 });

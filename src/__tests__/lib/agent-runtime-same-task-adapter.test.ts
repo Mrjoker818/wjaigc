@@ -98,6 +98,9 @@ function dependencies(
     }),
     observeTerminal: vi.fn().mockResolvedValue([]),
     listEvents: vi.fn().mockImplementation(async () => [...events]),
+    claimExecution: vi.fn().mockResolvedValue({ claimed: true, leaseOwner: 'lease-1' }),
+    completeExecution: vi.fn().mockResolvedValue(true),
+    releaseExecution: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
 }
@@ -198,7 +201,14 @@ describe('same-task Agent adoption adapter', () => {
   });
 
   it('invokes one supplied executor under twenty concurrent duplicate requests', async () => {
-    const deps = dependencies();
+    let claimed = false;
+    const deps = dependencies({
+      claimExecution: vi.fn().mockImplementation(async () => {
+        if (claimed) return { claimed: false, leaseOwner: '' };
+        claimed = true;
+        return { claimed: true, leaseOwner: 'lease-1' };
+      }),
+    });
     let releaseExecution!: () => void;
     const executionGate = new Promise<void>(resolve => { releaseExecution = resolve; });
     const execute = vi.fn(async () => {
@@ -222,5 +232,29 @@ describe('same-task Agent adoption adapter', () => {
     expect(results.filter(result => result.executed)).toHaveLength(1);
     expect(results.filter(result => result.reused)).toHaveLength(19);
     expect(results.find(result => result.executed)?.value).toBe('single-result');
+  });
+
+  it('releases a failed lease so a retry can resume execution', async () => {
+    let attempts = 0;
+    const deps = dependencies({
+      claimExecution: vi.fn().mockImplementation(async () => ({
+        claimed: true,
+        leaseOwner: `lease-${++attempts}`,
+      })),
+    });
+    const adapter = createSameTaskAgentAdapter(deps);
+    const execute = vi.fn()
+      .mockRejectedValueOnce(new Error('worker crashed'))
+      .mockResolvedValueOnce('recovered');
+
+    await expect(adapter.adoptAndExecute({
+      actor, taskId: 'task-1', request: request(), toolId: 'generate_image', execute,
+    })).rejects.toThrow('worker crashed');
+    await expect(adapter.adoptAndExecute({
+      actor, taskId: 'task-1', request: request(), toolId: 'generate_image', execute,
+    })).resolves.toMatchObject({ executed: true, value: 'recovered' });
+
+    expect(deps.releaseExecution).toHaveBeenCalledWith(expect.objectContaining({ leaseOwner: 'lease-1' }));
+    expect(deps.completeExecution).toHaveBeenCalledWith(expect.objectContaining({ leaseOwner: 'lease-2' }));
   });
 });

@@ -16775,6 +16775,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             <AgentEditor
               projectId={projectId || brandProject?.id}
               sourceVersionId={agentEditImage?.assetVersionId}
+              selectedEntityId={agentEditImage?.id}
               imageUrl={agentEditImage?.url}
               imagePrompt={agentEditImage?.prompt}
               isMonochrome={isMonochrome}

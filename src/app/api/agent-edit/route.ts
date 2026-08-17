@@ -35,6 +35,9 @@ import { getRequestId } from '@/lib/request-id';
 import { buildAgentEditRequest } from '@/lib/agent-runtime/surface-requests';
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
+import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
+import { AgentModelRouteMismatchError } from '@/lib/agent-runtime/same-task-adapter';
+import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -114,7 +117,7 @@ export async function POST(request: NextRequest) {
     const {
       image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt,
       imageModel, imageProviderId, quality, aspectRatio, projectId, sessionId,
-      messageId, assetParentVersionIds, assetProjectionMode,
+      messageId, selectedEntityId, assetParentVersionIds, assetProjectionMode,
     } = body;
 
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
@@ -124,20 +127,24 @@ export async function POST(request: NextRequest) {
       console.log(`[agent-edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
     }
     // ★ 规范化模型名（如 gpt-image-2-2k → gpt-image-2）
-    const modelNorm = normalizeModelForApi(pureModel);
-    if (modelNorm.wasNormalized) {
-      console.log(`[agent-edit] Normalized model alias: "${pureModel}" → "${modelNorm.apiModelName}"`);
-      pureModel = modelNorm.apiModelName;
+    if (agentRuntimeMode !== 'agent-v2') {
+      const modelNorm = normalizeModelForApi(pureModel);
+      if (modelNorm.wasNormalized) {
+        console.log(`[agent-edit] Normalized model alias: "${pureModel}" → "${modelNorm.apiModelName}"`);
+        pureModel = modelNorm.apiModelName;
+      }
     }
     let pureImageModel = imageModel;
     if (imageModel && imageModel.includes('::')) {
       pureImageModel = imageModel.split('::').pop()!;
       console.log(`[agent-edit] Stripped provider prefix from imageModel: "${imageModel}" → "${pureImageModel}"`);
     }
-    const imgModelNorm = normalizeModelForApi(pureImageModel);
-    if (imgModelNorm.wasNormalized) {
-      console.log(`[agent-edit] Normalized imageModel alias: "${pureImageModel}" → "${imgModelNorm.apiModelName}"`);
-      pureImageModel = imgModelNorm.apiModelName;
+    if (agentRuntimeMode !== 'agent-v2') {
+      const imgModelNorm = normalizeModelForApi(pureImageModel);
+      if (imgModelNorm.wasNormalized) {
+        console.log(`[agent-edit] Normalized imageModel alias: "${pureImageModel}" → "${imgModelNorm.apiModelName}"`);
+        pureImageModel = imgModelNorm.apiModelName;
+      }
     }
 
     if (!image || !prompt) {
@@ -154,6 +161,44 @@ export async function POST(request: NextRequest) {
     }
 
     sessionUser = await getSessionUser(request).catch(() => null);
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
+    const sourceVersionIds = Array.isArray(assetParentVersionIds)
+      ? assetParentVersionIds.filter((value): value is string => typeof value === 'string')
+      : [];
+    const runtimeActor = sessionUser || authResult.user;
+    const buildRuntimeRequest = (stableIdempotencyKey: string) => buildAgentEditRequest({
+      projectId: typeof projectId === 'string' ? projectId : '',
+      workspaceId: `canvas:${typeof projectId === 'string' ? projectId : requestId}`,
+      providerId: typeof providerId === 'string' ? providerId : '',
+      modelId: typeof pureModel === 'string' ? pureModel : '',
+      prompt: typeof prompt === 'string' ? prompt : '',
+      selectedEntityId: typeof selectedEntityId === 'string' ? selectedEntityId : '',
+      sourceVersionIds,
+      visibleVersionIds: sourceVersionIds,
+      conversationId: typeof sessionId === 'string' ? sessionId : undefined,
+      idempotencyKey: stableIdempotencyKey,
+    });
+    if (agentRuntimeMode === 'agent-v2') {
+      if (
+        typeof providerId !== 'string' || !providerId
+        || typeof pureModel !== 'string' || !pureModel
+        || typeof imageProviderId !== 'string' || !imageProviderId
+        || typeof pureImageModel !== 'string' || !pureImageModel
+      ) {
+        throw new AgentModelRouteMismatchError();
+      }
+      try {
+        const [chatModel, exactImageModel] = await Promise.all([
+          resolveTaskModel(providerId, pureModel, runtimeActor.id),
+          resolveTaskModel(imageProviderId, pureImageModel, runtimeActor.id),
+        ]);
+        if (chatModel.kind !== 'chat' || !['image', 'edit'].includes(exactImageModel.kind)) {
+          throw new Error('Model kind mismatch');
+        }
+      } catch {
+        throw new AgentModelRouteMismatchError();
+      }
+    }
     const plannedCreditCost = sessionUser
       ? await calculateConfiguredCreditCost(
           'image_retouch',
@@ -161,7 +206,6 @@ export async function POST(request: NextRequest) {
           { providerId: typeof providerId === 'string' ? providerId : undefined },
         )
       : 0;
-    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
     const requestDigest = createHash('sha256').update(JSON.stringify({
       image,
       prompt,
@@ -182,7 +226,7 @@ export async function POST(request: NextRequest) {
       status: DurableTaskStatus;
       result?: Record<string, unknown>;
     };
-    const admission = await executeTaskEntryMigration<AgentAdmission>({
+    const admitAgentTask = () => executeTaskEntryMigration<AgentAdmission>({
       mode: taskCoreMode,
       legacy: async () => {
         let creditCost = 0;
@@ -302,6 +346,14 @@ export async function POST(request: NextRequest) {
         status: 'processing',
       }),
     });
+    const admission = agentRuntimeMode === 'agent-v2'
+      ? await admitAuthorizedAgentExecution({
+          actor: runtimeActor,
+          request: buildRuntimeRequest(idempotencyKey),
+          toolId: 'agent_edit',
+          admit: admitAgentTask,
+        })
+      : await admitAgentTask();
     const taskId = admission.value.taskId;
     localTaskId = taskId;
     deductedCredits = admission.value.creditCost;
@@ -319,6 +371,29 @@ export async function POST(request: NextRequest) {
           status: admission.value.status,
           replayed: true,
         }, { status: 409 });
+      }
+      if (admission.value.status === 'completed') {
+        let adoptedRunId: string | undefined;
+        if (agentRuntimeMode === 'agent-v2' && typeof projectId === 'string' && projectId) {
+          const { listAgentEventsForActor } = await import('@/lib/agent-runtime/event-storage');
+          const events = await listAgentEventsForActor({
+            actorUserId: authResult.userId,
+            projectId,
+            runId: taskId,
+          }).catch(() => []);
+          if (events.some(event => event.type === 'run.created' && event.payload.adopted === true)) {
+            adoptedRunId = taskId;
+          }
+        }
+        return NextResponse.json({
+          success: true,
+          taskId,
+          status: admission.value.status,
+          result: admission.value.result,
+          mode: 'agent',
+          replayed: true,
+          ...(adoptedRunId ? { runId: adoptedRunId } : {}),
+        });
       }
       if (agentRuntimeMode !== 'agent-v2') {
         return NextResponse.json({
@@ -343,30 +418,7 @@ export async function POST(request: NextRequest) {
 
     await recordAgentTaskProgress(taskId, 5, 'Agent processing');
 
-    const sourceVersionIds = Array.isArray(assetParentVersionIds)
-      ? assetParentVersionIds.filter((value): value is string => typeof value === 'string')
-      : [];
-    const runtimeActor = sessionUser || {
-      id: authResult.userId,
-      name: authResult.userId,
-      role: authResult.userRole === 'admin' ? 'admin' as const : 'user' as const,
-      status: 'active' as const,
-      productType: 'canvas',
-      createdAt: 0,
-      updatedAt: 0,
-    };
-    const runtimeRequest = () => buildAgentEditRequest({
-      projectId: typeof projectId === 'string' ? projectId : '',
-      workspaceId: `canvas:${typeof projectId === 'string' ? projectId : taskId}`,
-      providerId: typeof providerId === 'string' ? providerId : '',
-      modelId: typeof pureModel === 'string' ? pureModel : '',
-      prompt: typeof prompt === 'string' ? prompt : '',
-      selectedEntityId: typeof messageId === 'string' && messageId ? messageId : taskId,
-      sourceVersionId: sourceVersionIds[0],
-      visibleVersionIds: sourceVersionIds,
-      conversationId: typeof sessionId === 'string' ? sessionId : undefined,
-      idempotencyKey: taskId,
-    });
+    const runtimeRequest = () => buildRuntimeRequest(taskId);
     const executeAgentEditTask = async (): Promise<void> => {
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
@@ -432,7 +484,7 @@ export async function POST(request: NextRequest) {
         }
 
         // 未指定 providerId 或指定提供商不可用 → 兼容旧调用，回退到功能查找
-        if (!chatProvider) {
+        if (!chatProvider && agentRuntimeMode !== 'agent-v2') {
           chatProvider = await findProviderForFeature('chat');
           if (!chatProvider || isCancelled()) {
             if (!chatProvider) {
@@ -452,7 +504,7 @@ export async function POST(request: NextRequest) {
         }
 
         // 最终兜底：仍无可用模型时给出明确错误，而非带空模型继续执行
-        if (!chatModel) {
+        if (!chatProvider || !chatModel) {
           await recordAgentTaskTerminal(taskId, {
             status: 'failed', error: 'No authorized chat model is available for Agent execution',
           });
@@ -615,6 +667,7 @@ export async function POST(request: NextRequest) {
                 imageProviderId,
                 quality,
                 aspectRatio,
+                agentRuntimeMode === 'agent-v2',
               );
               console.log(`[agent-edit] Edit step ${i + 1} result: success=${editResult.success} hasUrl=${!!editResult.imageUrl} url=${editResult.imageUrl?.substring(0, 80)} error=${editResult.error || ''}`);
               if (editResult.success && editResult.imageUrl) {
@@ -1073,7 +1126,8 @@ async function performImageEdit(
   imageModelFromFrontend?: string,
   imageProviderIdFromFrontend?: string,
   qualityFromFrontend?: string,
-  aspectRatioFromFrontend?: string
+  aspectRatioFromFrontend?: string,
+  strictProviderModel = false,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   // 优先使用前端传递的图像模型和提供商，遵循用户在图像生成面板的选择
   console.log('[agent-edit] performImageEdit called, model:', imageModelFromFrontend, 'providerId:', imageProviderIdFromFrontend);
@@ -1082,11 +1136,11 @@ async function performImageEdit(
     imageProvider = await findProviderById(imageProviderIdFromFrontend);
     console.log('[agent-edit] findProviderById result:', imageProvider ? imageProvider.name : 'null');
   }
-  if (!imageProvider && imageModelFromFrontend) {
+  if (!imageProvider && imageModelFromFrontend && !strictProviderModel) {
     imageProvider = await findProviderForModel(imageModelFromFrontend, 'image', imageProviderIdFromFrontend);
     console.log('[agent-edit] findProviderForModel result:', imageProvider ? imageProvider.name : 'null');
   }
-  if (!imageProvider) {
+  if (!imageProvider && !strictProviderModel) {
     // 兜底：查找图像编辑提供商
     imageProvider = await findProviderForFeature('imageEdit');
     console.log('[agent-edit] findProviderForFeature(imageEdit) result:', imageProvider ? imageProvider.name : 'null');

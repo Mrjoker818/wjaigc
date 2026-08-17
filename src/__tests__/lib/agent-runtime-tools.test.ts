@@ -128,6 +128,13 @@ describe('Agent context ownership adapter', () => {
           ? { id: versionId }
           : null
       )),
+      findEntityPlacement: vi.fn(async (
+        _ownerId: string,
+        _projectId: string,
+        _workspace: string,
+        _workspaceId: string,
+        entityId: string,
+      ) => entityId === 'image-1' ? { id: 'placement-1' } : null),
     };
     const storage = {
       transaction: async <T>(callback: (value: typeof transaction) => Promise<T>): Promise<T> => (
@@ -155,6 +162,29 @@ describe('Agent context ownership adapter', () => {
     expect(transaction.findVersion).toHaveBeenCalledTimes(2);
     expect(transaction.findVersion).toHaveBeenCalledWith('owner-1', 'project-1', 'version-1');
     expect(transaction.findVersion).toHaveBeenCalledWith('owner-1', 'project-1', 'version-2');
+    expect(transaction.findEntityPlacement).toHaveBeenCalledWith(
+      'owner-1', 'project-1', 'canvas', 'canvas-1', 'image-1',
+    );
+  });
+
+  it('fails closed when a selected entity has no active placement in the requested workspace', async () => {
+    const storage = {
+      transaction: async <T>(callback: (value: {
+        findProject: () => Promise<boolean>;
+        findVersion: () => Promise<{ id: string }>;
+        findEntityPlacement: () => Promise<null>;
+      }) => Promise<T>): Promise<T> => callback({
+        findProject: async () => true,
+        findVersion: async () => ({ id: 'version-1' }),
+        findEntityPlacement: async () => null,
+      }),
+    };
+
+    await expect(authorizeAgentContext({
+      actorUserId: 'owner-1',
+      request: request(),
+      storage,
+    })).rejects.toMatchObject({ code: 'AGENT_CONTEXT_NOT_FOUND', status: 404 });
   });
 
   it.each([
