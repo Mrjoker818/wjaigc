@@ -103,6 +103,8 @@ describe('chat tool governance', () => {
         'x-wujie-agent-defer-execution': 'true',
       }),
     });
+    expect((fetcher.mock.calls[0]?.[1]?.headers as Record<string, string>)['x-wujie-agent-strict-routing'])
+      .toBeUndefined();
     await executeAdmittedToolCall(result);
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher.mock.calls[1]?.[1]).toMatchObject({

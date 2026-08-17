@@ -1,6 +1,7 @@
 import { calculateActualPixels } from './canvas-generation-group';
 import { getInternalRequestHeaders } from './api-auth';
 import { fetchWithV1Retry } from './api-helpers';
+import { STRICT_AGENT_GENERATE_HEADER } from './agent-runtime/generate-image-adapter';
 
 // 服务器端口，所有服务器间 fetch 调用统一使用 localhost + 此端口
 const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
@@ -481,7 +482,10 @@ async function executeGenerateImage(
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
         ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
-        ...(context.deferAgentExecution ? { 'x-wujie-agent-defer-execution': 'true' } : {}),
+        ...(context.deferAgentExecution ? {
+          'x-wujie-agent-defer-execution': 'true',
+          [STRICT_AGENT_GENERATE_HEADER]: 'true',
+        } : {}),
       },
       body: JSON.stringify({
         prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,

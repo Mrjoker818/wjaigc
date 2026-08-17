@@ -1539,3 +1539,88 @@ The controller-owned Task 1 and Task 2 briefs remain unstaged and uncommitted.
 - None specific to R12. The two controller briefs remain intentionally dirty
   and unstaged; the pre-existing concerns documented in prior rounds are not
   changed by this test-only maintenance commit.
+
+## R13 Independent-review Repair (2026-08-17)
+
+Status: **GREEN pending final type/protected-baseline gates.** This repair keeps
+the two controller briefs dirty and unstaged, and preserves the incoming R13
+patch while correcting its two design issues.
+
+### R13 RED evidence
+
+1. With only the tracked R13 production patch stashed (the two controller briefs
+   and both new test files remained untouched), the new tests ran against
+   `375e31dc31ddcef50aca13ebc02c035fd82627ca`:
+
+   ```powershell
+   pnpm exec vitest run src/__tests__/api/chat-agent-v2-generation-routing.test.ts src/__tests__/components/agent-editor-run-scope.test.tsx
+   ```
+
+   Result: **2 files failed; 4 failed / 4 passed tests.** Canvas and standalone
+   Agent-v2 generation each lacked `x-wujie-agent-strict-routing`; on an image
+   scope switch both runs exposed `run-a` rather than the destination scope.
+2. The strengthened focused suite then failed as expected before the final
+   minimal repair: **3 files, 3 failed / 19 passed tests.** Both editor cases
+   rejected a `localStorage` read during render, and the edit admission test
+   observed the generation-only strict header on `/api/edit`.
+
+### R13 design and GREEN evidence
+
+- Canvas generation adds strict routing only in `executeGenerateImage` when the
+  existing Agent-v2 defer flag is present. Standalone chat applies the same
+  strict/defer pair only for its Agent-v2 direct `/api/generate` submission.
+  The behavioral contract captures the exact selected provider/model and stable
+  idempotency keys for both paths; legacy and shadow remain non-strict.
+- `executeEditImage` remains defer-only. The strict generation header is not
+  added to the unrelated `/api/edit` request.
+- Agent-editor run identity is a scope-keyed map. A new scope synchronously
+  reports no run; an effect reads and stores only that scope's persisted value.
+  Persistence waits until the scope has been loaded, so a prior selected image
+  cannot be written under the new key. No `localStorage` read occurs during
+  render, avoiding SSR/hydration disagreement.
+- The only protected-baseline change removes the stale
+  `src/components/node-editor.tsx` allow-path.
+
+GREEN commands completed so far:
+
+```powershell
+pnpm exec vitest run src/__tests__/api/chat-agent-v2-generation-routing.test.ts src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/lib/chat-tools-governance.test.ts
+# 3 files / 22 tests passed
+
+pnpm exec vitest run src/__tests__/lib/agent-runtime-surface-requests.test.ts src/__tests__/api/agent-runtime-shadow.test.ts src/__tests__/components/agent-progress-timeline.test.tsx src/__tests__/components/agent-runtime-surface-wiring.test.ts src/__tests__/components/chat-panel-generation-recovery-contract.test.ts src/__tests__/components/simple-chat-workspace-return-contract.test.ts src/__tests__/api/agent-edit-task-admission-contract.test.ts src/__tests__/api/chat-agent-v2-generation-routing.test.ts src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/lib/chat-tools-governance.test.ts src/__tests__/api/agent-runtime-route-modes.test.ts
+# 11 files / 73 tests passed
+```
+
+Targeted ESLint on the four production files and three R13 test files produced
+**0 errors and 11 pre-existing warnings** (unused imports and `<img>` guidance
+in `agent-editor.tsx`, plus two unused legacy helpers in `chat-tools.ts`).
+
+### R13 changed files
+
+- Production: `src/lib/chat-tools.ts`,
+  `src/app/api/simple-chat/chat/route.ts`, and
+  `src/components/agent-editor.tsx`.
+- Tests: `src/__tests__/api/chat-agent-v2-generation-routing.test.ts`,
+  `src/__tests__/components/agent-editor-run-scope.test.tsx`, and the existing
+  `src/__tests__/lib/chat-tools-governance.test.ts`.
+- Guard/evidence: `package.json`,
+  `.superpowers/sdd/task-2-review-r13-findings.md`, and this report.
+
+### R13 concerns
+
+- `pnpm ts-check` passed after correcting the new test mock's `default` export
+  typing. The focused R13 suite reran as **3 files / 22 tests passed**.
+- The full Task 2 Agent matrix (`rg --files src/__tests__ | rg
+  '(agent|chat-agent-tool-choice)'`) passed **22 files / 182 tests**.
+- The package-script protected gate retains its declared Stage 4 base and
+  therefore blocks on the already-committed R12 findings file. R13 does not
+  broaden that allowlist; the R13-base scoped gate is used below to verify the
+  actual repair while preserving the required node-editor allow-path removal.
+- R13 scoped protected gate passed with **38/38** and zero warnings:
+
+  ```powershell
+  node scripts/check-protected-baseline.mjs --base 375e31dc31ddcef50aca13ebc02c035fd82627ca --allow-path .superpowers/sdd/task-1-brief.md --allow-path .superpowers/sdd/task-2-brief.md --allow-path .superpowers/sdd/task-2-report.md --allow-path .superpowers/sdd/task-2-review-r13-findings.md --allow-path src/app/api/simple-chat/chat/route.ts --allow-path src/components/agent-editor.tsx --allow-path src/lib/chat-tools.ts
+  ```
+
+  Both staged and working-tree `git diff --check` gates passed. The only
+  remaining unstaged files are the controller-owned Task 1 and Task 2 briefs.

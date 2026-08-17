@@ -23,6 +23,7 @@ import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
 import { executeAdmittedToolCall } from '@/lib/chat-tools';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
+import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -737,7 +738,10 @@ export async function POST(request: NextRequest) {
                   ...internalHeaders,
                   'idempotency-key': stableIdempotencyKey,
                   ...(agentRuntimeMode === 'agent-v2'
-                    ? { 'x-wujie-agent-defer-execution': 'true' }
+                    ? {
+                        'x-wujie-agent-defer-execution': 'true',
+                        [STRICT_AGENT_GENERATE_HEADER]: 'true',
+                      }
                     : {}),
                 },
                 body: JSON.stringify({

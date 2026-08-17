@@ -137,19 +137,27 @@ export function AgentEditor({
   const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
   const [resultPrompt, setResultPrompt] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [agentRunId, setAgentRunId] = useState<string | null>(null);
   const runStorageKey = projectId && selectedEntityId
     ? `wujie_agent_run:${projectId}:${selectedEntityId}`
     : null;
+  const runScopeKey = runStorageKey || 'unscoped';
+  const [agentRunIdsByScope, setAgentRunIdsByScope] = useState<Record<string, string | null>>({});
+  const hasScopedRun = Object.prototype.hasOwnProperty.call(agentRunIdsByScope, runScopeKey);
+  const agentRunId = hasScopedRun ? agentRunIdsByScope[runScopeKey] : null;
+  const setAgentRunId = useCallback((runId: string | null) => {
+    setAgentRunIdsByScope(current => ({ ...current, [runScopeKey]: runId }));
+  }, [runScopeKey]);
   useEffect(() => {
     if (!runStorageKey || typeof localStorage === 'undefined') return;
-    const recoveredRunId = localStorage.getItem(runStorageKey);
-    if (recoveredRunId) setAgentRunId(recoveredRunId);
-  }, [runStorageKey]);
+    setAgentRunIdsByScope(current => {
+      if (Object.prototype.hasOwnProperty.call(current, runScopeKey)) return current;
+      return { ...current, [runScopeKey]: localStorage.getItem(runStorageKey) };
+    });
+  }, [runScopeKey, runStorageKey]);
   useEffect(() => {
-    if (!runStorageKey || !agentRunId || typeof localStorage === 'undefined') return;
+    if (!runStorageKey || !hasScopedRun || !agentRunId || typeof localStorage === 'undefined') return;
     localStorage.setItem(runStorageKey, agentRunId);
-  }, [agentRunId, runStorageKey]);
+  }, [agentRunId, hasScopedRun, runStorageKey]);
   const agentRun = useAgentRunEvents(agentRunId);
   const { elapsed, totalTime, formatTime, startTimer, stopTimer, resetTimer } = useProgressTimer();
 
