@@ -86,17 +86,24 @@ export class AgentDownstreamSubmissionUnknownError extends Error {
 
 export class AgentDownstreamProviderRejectedError extends Error {
   readonly code = 'AGENT_DOWNSTREAM_PROVIDER_REJECTED';
+  readonly providerCode?: string;
 
-  constructor(readonly providerStatus?: number) {
-    super('Agent downstream provider rejected the request');
+  constructor(
+    readonly providerStatus?: number,
+    details?: { message?: string; providerCode?: string },
+  ) {
+    super(details?.message?.trim() || 'Agent downstream provider rejected the request');
     this.name = 'AgentDownstreamProviderRejectedError';
+    this.providerCode = details?.providerCode?.trim() || undefined;
   }
 }
 
 interface AgentDownstreamKnownRejectionOutcome {
   __agentDownstreamOutcome: 'known_provider_rejection';
   code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED';
+  message: string;
   providerStatus?: number;
+  providerCode?: string;
 }
 
 function serializeKnownProviderRejection(
@@ -105,7 +112,9 @@ function serializeKnownProviderRejection(
   return {
     __agentDownstreamOutcome: 'known_provider_rejection',
     code: error.code,
+    message: error.message,
     ...(error.providerStatus === undefined ? {} : { providerStatus: error.providerStatus }),
+    ...(error.providerCode === undefined ? {} : { providerCode: error.providerCode }),
   };
 }
 
@@ -117,8 +126,14 @@ function replayKnownProviderRejection(response: unknown): void {
     || (response as Record<string, unknown>).code !== 'AGENT_DOWNSTREAM_PROVIDER_REJECTED'
   ) return;
   const providerStatus = (response as Record<string, unknown>).providerStatus;
+  const message = (response as Record<string, unknown>).message;
+  const providerCode = (response as Record<string, unknown>).providerCode;
   throw new AgentDownstreamProviderRejectedError(
     typeof providerStatus === 'number' ? providerStatus : undefined,
+    {
+      message: typeof message === 'string' ? message : undefined,
+      providerCode: typeof providerCode === 'string' ? providerCode : undefined,
+    },
   );
 }
 

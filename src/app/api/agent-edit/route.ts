@@ -92,6 +92,28 @@ function createNonDurableAgentOperationContext(
   return context;
 }
 
+function safeProviderText(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized ? normalized.slice(0, maxLength) : undefined;
+}
+
+function knownProviderTaskRejection(
+  data: Record<string, unknown>,
+  status: string,
+): AgentDownstreamProviderRejectedError {
+  const providerError = data.error && typeof data.error === 'object'
+    ? data.error as Record<string, unknown>
+    : undefined;
+  const message = safeProviderText(providerError?.message, 500)
+    || safeProviderText(data.message, 500)
+    || safeProviderText(data.error, 500)
+    || `Agent provider task ${status}`;
+  const providerCode = safeProviderText(providerError?.code, 100)
+    || safeProviderText(data.code, 100);
+  return new AgentDownstreamProviderRejectedError(undefined, { message, providerCode });
+}
+
 async function pollAcceptedAgentGeneration(input: {
   providerTaskId: string;
   userId: string;
@@ -113,8 +135,8 @@ async function pollAcceptedAgentGeneration(input: {
     const data = await response.json().catch(() => null) as Record<string, unknown> | null;
     const status = String(data?.status || '').toLowerCase();
     if (status === 'completed' && data?.imageUrl) return String(data.imageUrl);
-    if (status === 'failed') {
-      throw new AgentDownstreamProviderRejectedError();
+    if (status === 'failed' || status === 'error') {
+      throw knownProviderTaskRejection(data || {}, status);
     }
     if (['cancelled', 'timeout'].includes(status)) {
       throw new Error(String(data?.error || `Agent image generation ${status}`));
@@ -141,7 +163,10 @@ async function pollAcceptedAgentVideo(input: {
     const data = await response.json().catch(() => null) as Record<string, unknown> | null;
     const status = String(data?.status || '').toLowerCase();
     if (status === 'completed' && data) return data;
-    if (['failed', 'cancelled', 'timeout'].includes(status)) {
+    if (status === 'failed' || status === 'error') {
+      throw knownProviderTaskRejection(data || {}, status);
+    }
+    if (['cancelled', 'timeout'].includes(status)) {
       throw new Error(String(data?.error || `Agent video task ${status}`));
     }
   }
@@ -196,7 +221,10 @@ async function reconcileAcceptedAgentProviderTask(input: {
       if (imageUrl) return imageUrl;
       throw new Error('Accepted Agent provider task completed without an image');
     }
-    if (['failed', 'error', 'cancelled', 'timeout'].includes(status)) {
+    if (status === 'failed' || status === 'error') {
+      throw knownProviderTaskRejection(data || {}, status);
+    }
+    if (['cancelled', 'timeout'].includes(status)) {
       throw new Error(String(data?.message || data?.error || `Agent provider task ${status}`));
     }
   }
@@ -1835,7 +1863,7 @@ async function performImageEdit(
 
           if (status === 'failed' || status === 'error') {
             const errMsg = String((pollData.error as Record<string, unknown>)?.message || pollData.message || '远程任务失败');
-            if (strictProviderModel) throw new AgentDownstreamProviderRejectedError();
+            if (strictProviderModel) throw knownProviderTaskRejection(pollData, status);
             return { success: false, error: translateApiError(errMsg) };
           }
         }

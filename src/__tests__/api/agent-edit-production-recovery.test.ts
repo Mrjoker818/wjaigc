@@ -25,7 +25,8 @@ const state = vi.hoisted(() => ({
   crashPollTaskId: '' as string,
   crashedPoll: false,
   plan: 'multi-step' as 'multi-step' | 'submission-unknown' | 'remove-background' | 'async-image-edit'
-    | 'async-image-edit-acceptance-failure' | 'sync-image-edit-loss' | 'chat-post-send-loss' | 'video-tools'
+    | 'async-image-edit-recovery-rejection' | 'async-image-edit-acceptance-failure'
+    | 'sync-image-edit-loss' | 'chat-post-send-loss' | 'video-tools' | 'video-recovery-rejection'
     | 'chat-provider-rejection' | 'sync-image-edit-rejection' | 'generate-image-rejection',
   childCounter: 0,
 }));
@@ -70,7 +71,9 @@ vi.mock('@/lib/server-api-config', () => ({
     id === fixtures.chatProvider.id
       ? fixtures.chatProvider
       : id === fixtures.imageProvider.id
-        ? state.plan === 'async-image-edit' || state.plan === 'async-image-edit-acceptance-failure'
+        ? state.plan === 'async-image-edit'
+            || state.plan === 'async-image-edit-recovery-rejection'
+            || state.plan === 'async-image-edit-acceptance-failure'
           ? { ...fixtures.imageProvider, compatProfile: 'apimart' }
           : fixtures.imageProvider
         : null
@@ -79,7 +82,9 @@ vi.mock('@/lib/server-api-config', () => ({
     model === 'Chat::Exact'
       ? fixtures.chatProvider
       : model === 'Exact::Model'
-        ? state.plan === 'async-image-edit' || state.plan === 'async-image-edit-acceptance-failure'
+        ? state.plan === 'async-image-edit'
+            || state.plan === 'async-image-edit-recovery-rejection'
+            || state.plan === 'async-image-edit-acceptance-failure'
           ? { ...fixtures.imageProvider, compatProfile: 'apimart' }
           : fixtures.imageProvider
         : null
@@ -133,14 +138,17 @@ vi.mock('@/lib/agent-engine', async importOriginal => {
     const steps = state.plan === 'remove-background'
       ? [{ round: 1, toolName: 'remove_background', params: {}, result: 'planned', success: true }]
       : state.plan === 'async-image-edit'
+        || state.plan === 'async-image-edit-recovery-rejection'
         || state.plan === 'async-image-edit-acceptance-failure'
         || state.plan === 'sync-image-edit-loss'
         || state.plan === 'sync-image-edit-rejection'
         ? [{ round: 1, toolName: 'image_edit', params: { prompt: 'Edit asynchronously' }, result: 'planned', success: true }]
-        : state.plan === 'video-tools'
+        : state.plan === 'video-tools' || state.plan === 'video-recovery-rejection'
           ? [
               { round: 1, toolName: 'generate_video', params: { prompt: 'Generate video' }, result: 'planned', success: true },
-              { round: 2, toolName: 'extend_video', params: { videoUrl: '/generated-video.mp4', duration: 5 }, result: 'planned', success: true },
+              ...(state.plan === 'video-tools'
+                ? [{ round: 2, toolName: 'extend_video', params: { videoUrl: '/generated-video.mp4', duration: 5 }, result: 'planned', success: true }]
+                : []),
             ]
           : (state.plan === 'generate-image-rejection' ? [0] : [0, 1]).map(index => ({
               round: index + 1,
@@ -468,11 +476,16 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
         id: providerTaskId,
         userId: fixtures.user.id,
         type: url.pathname.includes('video') ? 'video' : 'generate-async',
-        status: 'completed',
+        status: state.plan === 'video-recovery-rejection' ? 'failed' : 'completed',
         progress: 100,
         result,
+        ...(state.plan === 'video-recovery-rejection'
+          ? { error: 'controlled video provider rejection' }
+          : {}),
       });
-      if (url.pathname === '/api/image-edit') state.crashPollTaskId = providerTaskId;
+      if (url.pathname === '/api/image-edit' || state.plan === 'video-recovery-rejection') {
+        state.crashPollTaskId = providerTaskId;
+      }
       return Response.json({ success: true, taskId: providerTaskId });
     }
     if (url.pathname === '/api/poll-task') {
@@ -506,6 +519,15 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
         state.crashedPoll = true;
         throw new Error('simulated direct image edit poll timeout after acceptance');
       }
+      if (state.plan === 'async-image-edit-recovery-rejection') {
+        return Response.json({
+          status: 'error',
+          error: {
+            code: 'IMAGE_EDIT_REJECTED',
+            message: 'controlled accepted image edit rejection',
+          },
+        });
+      }
       return Response.json({ status: 'completed', data: [{ url: '/async-edited.png' }] });
     }
     if (state.plan === 'sync-image-edit-loss' || state.plan === 'sync-image-edit-rejection') {
@@ -527,7 +549,9 @@ async function dispatchFetch(input: string | URL | Request, init?: RequestInit):
     if (state.plan === 'generate-image-rejection') {
       return Response.json({ error: { message: 'controlled image generation rejection' } }, { status: 429 });
     }
-    const providerResponse = state.plan === 'async-image-edit' || state.plan === 'async-image-edit-acceptance-failure'
+    const providerResponse = state.plan === 'async-image-edit'
+      || state.plan === 'async-image-edit-recovery-rejection'
+      || state.plan === 'async-image-edit-acceptance-failure'
       ? { task_id: 'async-edit-provider-task', status: 'processing' }
       : { data: [{ url: `/generated-${state.externalSubmits.length}.png` }] };
     return new Response(JSON.stringify(providerResponse), {
@@ -711,6 +735,62 @@ describe('Agent route default-adapter production recovery', () => {
     expect(state.parentTerminalCalls).toBe(1);
   });
 
+  it('durably terminalizes an accepted direct async image_edit rejection during concurrent recovery', async () => {
+    state.plan = 'async-image-edit-recovery-rejection';
+    const taskId = await startAgent('route-async-image-edit-recovery-rejection');
+
+    await vi.waitFor(() => {
+      expect([...state.operations.values()].find(operation => operation.stepId === 'image_edit:0')).toMatchObject({
+        status: 'accepted', providerTaskId: 'async-edit-provider-task',
+      });
+      expect(state.parentLeaseClaimed).toBe(false);
+    });
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalPolls).toHaveLength(1);
+    expect(state.tasks.get(taskId)?.status).not.toBe('completed');
+
+    const recoveries = await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-async-image-edit-recovery-rejection') as never)
+    )));
+    expect(recoveries.every(response => response.status === 200)).toBe(true);
+    await Promise.all(state.afterCallbacks.splice(0).map(worker => worker()));
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('failed'));
+
+    expect([...state.operations.values()].find(operation => operation.stepId === 'image_edit:0')).toMatchObject({
+      status: 'completed',
+      response: expect.objectContaining({
+        __agentDownstreamOutcome: 'known_provider_rejection',
+        code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+        message: 'controlled accepted image edit rejection',
+        providerCode: 'IMAGE_EDIT_REJECTED',
+      }),
+    });
+    expect((state.tasks.get(taskId)?.result as Record<string, unknown>).taskError).toMatchObject({
+      code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+      message: 'controlled accepted image edit rejection',
+      retryable: false,
+    });
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalPolls).toEqual([
+      '/tasks/async-edit-provider-task?language=zh',
+      '/tasks/async-edit-provider-task?language=zh',
+    ]);
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    const late = await Promise.all(Array.from({ length: 8 }, async () => {
+      const response = await agentPost(agentRequest('route-async-image-edit-recovery-rejection') as never);
+      return { status: response.status, body: await response.json() as Record<string, unknown> };
+    }));
+    expect(late.every(replay => replay.status === 409)).toBe(true);
+    expect(new Set(late.map(replay => JSON.stringify(replay.body))).size).toBe(1);
+    expect(state.externalSubmits).toHaveLength(1);
+    expect(state.externalPolls).toHaveLength(2);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
   it('behaviorally persists and polls both video task-returning branches once', async () => {
     state.plan = 'video-tools';
     const taskId = await startAgent('route-video-tools');
@@ -732,6 +812,48 @@ describe('Agent route default-adapter production recovery', () => {
 
     await Promise.all(Array.from({ length: 8 }, () => agentPost(agentRequest('route-video-tools') as never)));
     expect(state.internalSubmits).toHaveLength(2);
+    expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('durably terminalizes an accepted video provider rejection without another submit or poll', async () => {
+    state.plan = 'video-recovery-rejection';
+    const taskId = await startAgent('route-video-recovery-rejection');
+
+    await vi.waitFor(() => {
+      expect([...state.operations.values()].find(operation => operation.stepId === 'generate_video:0')).toMatchObject({
+        status: 'accepted', providerTaskId: 'generate-video-provider-task',
+      });
+      expect(state.parentLeaseClaimed).toBe(false);
+    });
+    expect(state.internalSubmits.filter(submit => submit.path === '/api/video/generate')).toHaveLength(1);
+    expect(state.internalPolls).toHaveLength(1);
+
+    await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-video-recovery-rejection') as never)
+    )));
+    await Promise.all(state.afterCallbacks.splice(0).map(worker => worker()));
+    await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('failed'));
+
+    expect([...state.operations.values()].find(operation => operation.stepId === 'generate_video:0')).toMatchObject({
+      status: 'completed',
+      response: expect.objectContaining({
+        __agentDownstreamOutcome: 'known_provider_rejection',
+        code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+        message: 'controlled video provider rejection',
+      }),
+    });
+    expect(state.internalSubmits.filter(submit => submit.path === '/api/video/generate')).toHaveLength(1);
+    expect(state.internalPolls).toHaveLength(2);
+    expect(state.parentCharges).toBe(1);
+    expect(state.parentRefunds).toBe(1);
+    expect(state.parentTerminalCalls).toBe(1);
+
+    await Promise.all(Array.from({ length: 8 }, () => (
+      agentPost(agentRequest('route-video-recovery-rejection') as never)
+    )));
+    expect(state.internalSubmits.filter(submit => submit.path === '/api/video/generate')).toHaveLength(1);
+    expect(state.internalPolls).toHaveLength(2);
+    expect(state.parentRefunds).toBe(1);
     expect(state.parentTerminalCalls).toBe(1);
   });
 
