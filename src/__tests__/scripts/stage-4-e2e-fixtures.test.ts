@@ -16,7 +16,9 @@ import {
   selectWorkflowMonitorIds,
   summarizeWorkflowPerformance,
   shouldEnforceWorkflowFpsGate,
+  shouldObserveWorkflowLongTasks,
 } from '../../../tests/helpers/workflow-performance';
+import { stage4RuntimeEvidenceFailures } from '../../../tests/helpers/stage-4-evidence-filter';
 
 describe('Stage 4 fixture isolation', () => {
   it('builds isolated browser, user, and workflow plans for the legacy baseline', () => {
@@ -247,6 +249,27 @@ describe('Stage 4 workflow performance samples', () => {
     expect(shouldEnforceWorkflowFpsGate('webkit')).toBe(false);
     expect(shouldEnforceWorkflowFpsGate('mobile-chromium')).toBe(false);
     expect(() => shouldEnforceWorkflowFpsGate('renamed-chromium')).toThrow(/unknown browser profile/i);
+  });
+
+  it('registers the long-task observer only when the browser advertises support', () => {
+    expect(shouldObserveWorkflowLongTasks(undefined)).toBe(false);
+    expect(shouldObserveWorkflowLongTasks([])).toBe(false);
+    expect(shouldObserveWorkflowLongTasks(['event', 'longtask'])).toBe(true);
+  });
+
+  it('fails closed on console warnings and unknown network errors while allowing task SSE cancellation', () => {
+    expect(stage4RuntimeEvidenceFailures([], [{
+      method: 'GET',
+      text: 'NS_ERROR_ABORT',
+      url: 'http://127.0.0.1:5000/api/task-events',
+    }])).toEqual({ consoleFailures: [], networkFailures: [] });
+
+    const consoleWarning = { type: 'warning', text: 'unexpected warning' };
+    const serverFailure = { method: 'POST', status: 500, url: 'http://127.0.0.1:5000/api/workflow/execute' };
+    expect(stage4RuntimeEvidenceFailures([consoleWarning], [serverFailure])).toEqual({
+      consoleFailures: [consoleWarning],
+      networkFailures: [serverFailure],
+    });
   });
 
   it('keeps latency and continuity gates active when a browser cannot provide a 55 FPS RAF baseline', () => {

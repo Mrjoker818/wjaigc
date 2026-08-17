@@ -7,6 +7,7 @@ import { Pool } from 'pg';
 
 import type { Workflow } from '../../src/lib/workflow-engine';
 import { stage3SourceIdentity, stage3SourceState } from './stage-3-source-state';
+import { stage4RuntimeEvidenceFailures } from './stage-4-evidence-filter';
 
 interface Stage4EvidenceEntry {
   type?: string;
@@ -221,8 +222,19 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
         body: Buffer.from(JSON.stringify(evidence.network, null, 2)),
         contentType: 'application/json',
       });
+      const runtimeFailures = stage4RuntimeEvidenceFailures(evidence.console, evidence.network);
       if (testInfo.status === 'passed' && artifactErrors.length > 0) {
         throw new Error(`Stage 4 evidence artifacts failed: ${artifactErrors.join('; ')}`);
+      }
+      if (
+        testInfo.status === 'passed'
+        && (runtimeFailures.consoleFailures.length > 0 || runtimeFailures.networkFailures.length > 0)
+      ) {
+        throw new Error(
+          'Stage 4 runtime evidence failed: '
+          + `${runtimeFailures.consoleFailures.length} console failure(s), `
+          + `${runtimeFailures.networkFailures.length} network failure(s)`,
+        );
       }
     }
   }, { auto: true }],

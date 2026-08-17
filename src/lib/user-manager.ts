@@ -669,7 +669,7 @@ export class UserManager {
       this.multiUserData.users.unshift(admin);
       this.multiUserData.userData[admin.id] = {
         user: admin,
-        projects: this.createDemoProjects(),
+        projects: this.createDemoProjects(admin.id),
         apiKeys: [],
         usageStats: [],
       };
@@ -2342,7 +2342,7 @@ export class UserManager {
     return project;
   }
 
-  private createDemoProjects(): Project[] {
+  private createDemoProjects(ownerId = this.currentUserId || 'demo'): Project[] {
     const now = Date.now();
     const sampleImages: Project['canvasImages'] = [
       {
@@ -2367,7 +2367,7 @@ export class UserManager {
     return [
       {
         id: 'demo-project',
-        userId: this.currentUserId || 'demo',
+        userId: ownerId,
         name: '示例项目',
         canvasImages: sampleImages,
         createdAt: now,
@@ -2377,7 +2377,7 @@ export class UserManager {
       },
       {
         id: 'empty-canvas',
-        userId: this.currentUserId || 'demo',
+        userId: ownerId,
         name: '空画布',
         canvasImages: [],
         createdAt: now,

@@ -72,6 +72,12 @@ export function shouldEnforceWorkflowFpsGate(browserProfile: string): boolean {
   }
 }
 
+export function shouldObserveWorkflowLongTasks(
+  supportedEntryTypes: ReadonlyArray<string> | undefined,
+): boolean {
+  return supportedEntryTypes?.includes('longtask') === true;
+}
+
 export function selectWorkflowMonitorIds(
   rawIds: ReadonlyArray<string | null | undefined>,
 ): string[] {
@@ -224,8 +230,16 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
   const monitorBatches = Array.from({ length: 12 }, (_, frameIndex) => (
     resolveWorkflowMonitorBatch(expectedNodeIds, frameIndex, 12)
   ));
+  const supportedPerformanceEntryTypes = await page.evaluate(() => (
+    typeof PerformanceObserver === 'undefined' ? undefined : PerformanceObserver.supportedEntryTypes
+  ));
+  const observeLongTasks = shouldObserveWorkflowLongTasks(supportedPerformanceEntryTypes);
 
-  await page.evaluate(async ({ nodeIds, batches }: { nodeIds: string[]; batches: string[][] }) => {
+  await page.evaluate(async ({ nodeIds, batches, observeLongTasks }: {
+    nodeIds: string[];
+    batches: string[][];
+    observeLongTasks: boolean;
+  }) => {
     const windowWithState = window as typeof window & {
       __wujieStage4WorkflowPerformance?: Record<string, unknown>;
     };
@@ -298,20 +312,22 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
       document.addEventListener(type, inputHandler, { capture: true, passive: true });
     }
 
-    try {
-      const longTaskObserver = new PerformanceObserver(list => {
-        for (const entry of list.getEntries()) {
-          state.longTasksMs.push(entry.duration);
-          state.longTaskSamples.push({
-            startTime: entry.startTime,
-            durationMs: entry.duration,
-            name: entry.name,
-          });
-        }
-      });
-      longTaskObserver.observe({ entryTypes: ['longtask'] });
-      state.observers.push(longTaskObserver);
-    } catch {}
+    if (observeLongTasks) {
+      try {
+        const longTaskObserver = new PerformanceObserver(list => {
+          for (const entry of list.getEntries()) {
+            state.longTasksMs.push(entry.duration);
+            state.longTaskSamples.push({
+              startTime: entry.startTime,
+              durationMs: entry.duration,
+              name: entry.name,
+            });
+          }
+        });
+        longTaskObserver.observe({ entryTypes: ['longtask'] });
+        state.observers.push(longTaskObserver);
+      } catch {}
+    }
 
     try {
       const eventObserver = new PerformanceObserver(list => {
@@ -416,7 +432,7 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
         resolve();
       });
     });
-  }, { nodeIds: [...expectedNodeIds], batches: monitorBatches });
+  }, { nodeIds: [...expectedNodeIds], batches: monitorBatches, observeLongTasks });
 }
 
 async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample> {
