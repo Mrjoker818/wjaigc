@@ -58,8 +58,14 @@ vi.mock('@/lib/op-log', () => ({
 vi.mock('@/lib/task-core/model-catalog', () => ({ resolveTaskModel: mocks.resolveTaskModel }));
 vi.mock('@/lib/agent-runtime/admission-gate', () => ({
   admitAuthorizedAgentExecution: vi.fn(async (input: {
-    admit: (context: { mediaByVersionId: Record<string, string> }) => Promise<Response>;
-  }) => input.admit({ mediaByVersionId: {} })),
+    admit: (context: {
+      mediaByVersionId: Record<string, string>;
+      selectedEntityVersionIds: Record<string, string>;
+    }) => Promise<Response>;
+  }) => input.admit({
+    mediaByVersionId: { 'canvas-source-version': '/api/serve-upload/source.png' },
+    selectedEntityVersionIds: { 'canvas-source-entity': 'canvas-source-version' },
+  })),
 }));
 vi.mock('@/lib/agent-runtime/surface-dispatch', () => ({
   prepareAdmittedAgentTaskExecution: mocks.prepareAdmittedAgentTaskExecution,
@@ -130,6 +136,29 @@ function canvasToolCallResponse(): Response {
   });
 }
 
+function canvasImg2ImgToolCallResponse(): Response {
+  return jsonResponse({
+    choices: [{
+      message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'canvas-img2img-tool-call',
+          type: 'function',
+          function: {
+            name: 'img2img',
+            arguments: JSON.stringify({
+              prompt: 'Canvas exact variation',
+              image_url: '/api/serve-upload/source.png',
+              strength: 0.65,
+            }),
+          },
+        }],
+      },
+    }],
+  });
+}
+
 function standaloneToolCallResponse(): Response {
   const event = JSON.stringify({
     choices: [{
@@ -171,6 +200,28 @@ function canvasRequest(): NextRequest {
   });
 }
 
+function canvasImg2ImgRequest(): NextRequest {
+  return new NextRequest('http://localhost/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'Exact.Canvas.Chat',
+      providerId: canvasChatProvider.id,
+      messages: [{ role: 'user', content: 'Vary the selected canvas image' }],
+      stream: false,
+      enableTools: true,
+      isAgentMode: true,
+      imageModel: 'Exact.Canvas.Image',
+      imageProviderId: 'canvas-image-provider',
+      projectId: 'canvas-project',
+      sessionId: 'canvas-session',
+      messageId: 'canvas-message',
+      sourceVersionIds: ['canvas-source-version'],
+      selectedEntityIds: ['canvas-source-entity'],
+    }),
+  });
+}
+
 function standaloneRequest(): NextRequest {
   return new NextRequest('http://localhost/api/simple-chat/chat', {
     method: 'POST',
@@ -200,6 +251,23 @@ async function runCanvas(mode: 'legacy' | 'shadow' | 'agent-v2'): Promise<Captur
     }));
 
   const response = await canvasChatPost(canvasRequest());
+  expect(response.status).toBe(200);
+  await response.json();
+  expect(mocks.generateRequests).toHaveLength(1);
+  return mocks.generateRequests[0];
+}
+
+async function runCanvasImg2Img(mode: 'legacy' | 'shadow' | 'agent-v2'): Promise<CapturedGenerateRequest> {
+  process.env.WUJIE_AGENT_RUNTIME_MODE = mode;
+  mocks.generateRequests.length = 0;
+  mocks.fetchWithV1Retry
+    .mockReset()
+    .mockResolvedValueOnce(canvasImg2ImgToolCallResponse())
+    .mockResolvedValueOnce(jsonResponse({
+      choices: [{ message: { role: 'assistant', content: 'Canvas variation complete' } }],
+    }));
+
+  const response = await canvasChatPost(canvasImg2ImgRequest());
   expect(response.status).toBe(200);
   await response.json();
   expect(mocks.generateRequests).toHaveLength(1);
@@ -279,6 +347,22 @@ describe('chat-originated Agent generation routing', () => {
     });
   });
 
+  it('sends strict exact routing through the real Canvas Agent-v2 img2img path', async () => {
+    const submitted = await runCanvasImg2Img('agent-v2');
+
+    expect(submitted.headers.get('x-wujie-agent-strict-routing')).toBe('true');
+    expect(submitted.headers.get('x-wujie-agent-defer-execution')).toBe('true');
+    expect(submitted.headers.get('idempotency-key'))
+      .toBe('chat-agent:canvas-message:1:0:img2img');
+    expect(submitted.body).toMatchObject({
+      prompt: expect.stringContaining('Canvas exact variation'),
+      model: 'Exact.Canvas.Image',
+      providerId: 'canvas-image-provider',
+      referenceImages: ['http://localhost:5000/api/serve-upload/source.png'],
+      submitOnly: true,
+    });
+  });
+
   it('sends strict exact routing through the real standalone Agent-v2 generation path', async () => {
     const submitted = await runStandalone('agent-v2');
 
@@ -298,6 +382,15 @@ describe('chat-originated Agent generation routing', () => {
     'does not broaden Canvas %s generation into strict/deferred execution',
     async mode => {
       const submitted = await runCanvas(mode);
+      expect(submitted.headers.get('x-wujie-agent-strict-routing')).toBeNull();
+      expect(submitted.headers.get('x-wujie-agent-defer-execution')).toBeNull();
+    },
+  );
+
+  it.each(['legacy', 'shadow'] as const)(
+    'does not broaden Canvas %s img2img into strict/deferred execution',
+    async mode => {
+      const submitted = await runCanvasImg2Img(mode);
       expect(submitted.headers.get('x-wujie-agent-strict-routing')).toBeNull();
       expect(submitted.headers.get('x-wujie-agent-defer-execution')).toBeNull();
     },

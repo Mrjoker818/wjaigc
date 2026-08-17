@@ -1653,3 +1653,77 @@ git diff --check
 
 The scope audit found only this report and `package.json` beyond the two
 controller-owned, unstaged briefs.
+
+## R14 Independent-review Repair (2026-08-17)
+
+### RED evidence
+
+1. Before the R14 production patch, the real Canvas Agent-v2 `img2img` route
+   test failed: `expected null to be 'true'` for
+   `x-wujie-agent-strict-routing`. The request already carried defer, proving
+   the missing contract was strict routing on the actual `/api/generate`
+   submission rather than a synthetic helper path.
+2. Before task-state scoping, the selected-image behavior test submitted
+   `task-a`, switched from image A to image B, and failed with
+   `expected true to be false` because B still rendered the A-task Cancel
+   control. That is direct evidence of `isProcessing`/task-state leakage.
+3. Before test-boundary isolation, collecting
+   `src/__tests__/lib/chat-tools-analyze-image.test.ts` failed before tests
+   ran: `This module cannot be imported from a Client Component module` from
+   `server-only/index.js` through `generate-image-adapter`.
+
+### Design and implementation
+
+- `executeImg2Img` now adds the generation-only strict header only when the
+  existing Agent-v2 defer flag is set. The existing provider/model/body and
+  idempotency flow are preserved. Legacy and shadow `img2img` remain defer- and
+  strict-free, and `/api/edit` remains defer-only.
+- AgentEditor task data is a `runScopeKey`-keyed state map. Polling tracks both
+  active scope and task ID, ignores stale responses before state writes, clears
+  on scope changes/cancel, and restarts the accepted task when that image is
+  selected again. Run identity remains effect-loaded from localStorage, so no
+  render-time localStorage read is introduced.
+- The analysis-image unit test mocks `server-only` at the test boundary only;
+  production `generate-image-adapter.ts` retains its server-only import.
+- The custom AgentEditor hook harness now caches callbacks by dependencies,
+  resolves model loading, and executes effect cleanups. This removed the
+  previous open-handle test hang. A controlled single-file execution passed
+  `3/3` in `977ms` and exited with code `0`.
+- `package.json` adds exactly
+  `.superpowers/sdd/task-2-review-r14-findings.md` to
+  `check:protected-baseline`; no wildcard or node-editor allow-path is added.
+
+### GREEN verification
+
+- Focused routing/state/analyze suite:
+  `3 files / 13 tests passed`.
+- Affected chat/editor suite:
+  `6 files / 31 tests passed`.
+- Task 2 Agent matrix (`rg --files src/__tests__ | rg
+  '(agent|chat-agent-tool-choice)'`): `22 files / 186 tests passed`.
+- Full Vitest: `450 files passed / 14 skipped`; `2695 tests passed / 66
+  skipped`.
+- `pnpm ts-check`: passed.
+- `pnpm lint`: exit `0`, `980` existing warnings and `0` errors. Targeted
+  R14 lint: `0` errors and `11` pre-existing warnings; the one newly introduced
+  hook-dependency warning was fixed and no longer appears.
+- `pnpm build`: passed. Next emitted non-blocking invalid
+  `--localstorage-file` environment warnings during static generation.
+- `pnpm check:protected-baseline`: all `38/38` feature IDs passed with `0`
+  warnings.
+
+### R14 changed files
+
+- Production: `src/lib/chat-tools.ts`, `src/components/agent-editor.tsx`.
+- Tests: `src/__tests__/api/chat-agent-v2-generation-routing.test.ts`,
+  `src/__tests__/components/agent-editor-run-scope.test.tsx`, and
+  `src/__tests__/lib/chat-tools-analyze-image.test.ts`.
+- Guard/evidence: `package.json`,
+  `.superpowers/sdd/task-2-review-r14-findings.md`, and this report.
+
+### R14 concerns
+
+- The full-repository lint warning inventory and Next static-generation
+  environment warnings predate or are outside this focused repair; neither
+  produced an error. The two controller-owned briefs remain dirty and are not
+  staged or committed.

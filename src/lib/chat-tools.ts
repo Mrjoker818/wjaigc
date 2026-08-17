@@ -690,7 +690,10 @@ async function executeImg2Img(
         'Content-Type': 'application/json',
         ...(await getInternalRequestHeaders(context.userId)),
         ...(context.idempotencyKey ? { 'idempotency-key': context.idempotencyKey } : {}),
-        ...(context.deferAgentExecution ? { 'x-wujie-agent-defer-execution': 'true' } : {}),
+        ...(context.deferAgentExecution ? {
+          'x-wujie-agent-defer-execution': 'true',
+          [STRICT_AGENT_GENERATE_HEADER]: 'true',
+        } : {}),
       },
       body: JSON.stringify({
         prompt: fullPrompt,

@@ -31,6 +31,28 @@ interface AgentStep {
   detail?: string;
 }
 
+interface AgentTaskState {
+  taskId: string | null;
+  isProcessing: boolean;
+  progress: number;
+  progressLabel: string;
+  steps: AgentStep[];
+  error: string;
+  resultImageUrl: string;
+  resultPrompt: string;
+}
+
+const EMPTY_AGENT_TASK_STATE: AgentTaskState = {
+  taskId: null,
+  isProcessing: false,
+  progress: 0,
+  progressLabel: '',
+  steps: [],
+  error: '',
+  resultImageUrl: '',
+  resultPrompt: '',
+};
+
 // 从图像生成面板读取当前选择的模型信息
 function getCurrentImageModelInfo(): { imageModel?: string; imageProviderId?: string; quality?: string; aspectRatio?: string } {
   try {
@@ -99,13 +121,7 @@ export function AgentEditor({
   // 状态
   const [prompt, setPrompt] = useState('');
   const [maxRounds, setMaxRounds] = useState(3);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [progressLabel, setProgressLabel] = useState('');
-  const [steps, setSteps] = useState<AgentStep[]>([]);
   const [stepsExpanded, setStepsExpanded] = useState(false);
-  const [error, setError] = useState('');
-  const [resultImageUrl, setResultImageUrl] = useState('');
 
   // 决策模型（LLM）选择：Agent 编排的思考模型，从 /api/models?type=chat 加载
   const [chatModelOptions, setChatModelOptions] = useState<{ providerId: string; providerName: string; id: string; name: string; isDefault?: boolean }[]>([]);
@@ -135,12 +151,34 @@ export function AgentEditor({
   const [templateSearch, setTemplateSearch] = useState('');
   const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
   const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
-  const [resultPrompt, setResultPrompt] = useState('');
-  const [taskId, setTaskId] = useState<string | null>(null);
   const runStorageKey = projectId && selectedEntityId
     ? `wujie_agent_run:${projectId}:${selectedEntityId}`
     : null;
   const runScopeKey = runStorageKey || 'unscoped';
+  const [agentTaskStatesByScope, setAgentTaskStatesByScope] = useState<Record<string, AgentTaskState>>({});
+  const taskState = agentTaskStatesByScope[runScopeKey] || EMPTY_AGENT_TASK_STATE;
+  const updateTaskState = useCallback((patch: Partial<AgentTaskState>) => {
+    setAgentTaskStatesByScope(current => ({
+      ...current,
+      [runScopeKey]: { ...(current[runScopeKey] || EMPTY_AGENT_TASK_STATE), ...patch },
+    }));
+  }, [runScopeKey]);
+  const taskId = taskState.taskId;
+  const isProcessing = taskState.isProcessing;
+  const progress = taskState.progress;
+  const progressLabel = taskState.progressLabel;
+  const steps = taskState.steps;
+  const error = taskState.error;
+  const resultImageUrl = taskState.resultImageUrl;
+  const resultPrompt = taskState.resultPrompt;
+  const setTaskId = useCallback((value: string | null) => updateTaskState({ taskId: value }), [updateTaskState]);
+  const setIsProcessing = useCallback((value: boolean) => updateTaskState({ isProcessing: value }), [updateTaskState]);
+  const setProgress = useCallback((value: number) => updateTaskState({ progress: value }), [updateTaskState]);
+  const setProgressLabel = useCallback((value: string) => updateTaskState({ progressLabel: value }), [updateTaskState]);
+  const setSteps = useCallback((value: AgentStep[]) => updateTaskState({ steps: value }), [updateTaskState]);
+  const setError = useCallback((value: string) => updateTaskState({ error: value }), [updateTaskState]);
+  const setResultImageUrl = useCallback((value: string) => updateTaskState({ resultImageUrl: value }), [updateTaskState]);
+  const setResultPrompt = useCallback((value: string) => updateTaskState({ resultPrompt: value }), [updateTaskState]);
   const [agentRunIdsByScope, setAgentRunIdsByScope] = useState<Record<string, string | null>>({});
   const hasScopedRun = Object.prototype.hasOwnProperty.call(agentRunIdsByScope, runScopeKey);
   const agentRunId = hasScopedRun ? agentRunIdsByScope[runScopeKey] : null;
@@ -160,6 +198,19 @@ export function AgentEditor({
   }, [agentRunId, hasScopedRun, runStorageKey]);
   const agentRun = useAgentRunEvents(agentRunId);
   const { elapsed, totalTime, formatTime, startTimer, stopTimer, resetTimer } = useProgressTimer();
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollAttempts = useRef(0);
+  const activePollScopeKey = useRef(runScopeKey);
+  const activePollTaskId = useRef<string | null>(null);
+
+  useEffect(() => {
+    activePollScopeKey.current = runScopeKey;
+    activePollTaskId.current = null;
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    pollTimer.current = null;
+    pollAttempts.current = 0;
+    stopTimer();
+  }, [runScopeKey, stopTimer]);
 
   // 拖动状态
   const [position, setPosition] = useState(() => {
@@ -227,10 +278,8 @@ export function AgentEditor({
   const borderColor = isMonochrome ? MONO_BORDER : 'rgba(255,255,255,0.12)';
 
   // 轮询任务状态
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollAttempts = useRef(0);
-
-  const pollOnce = useCallback(async (tid: string) => {
+  const pollOnce = useCallback(async (tid: string, scopeKey: string) => {
+    if (activePollScopeKey.current !== scopeKey || activePollTaskId.current !== tid) return;
     pollAttempts.current++;
 
     if (pollAttempts.current > 300) {
@@ -244,7 +293,10 @@ export function AgentEditor({
       const resp = await fetch(`/api/agent-edit?taskId=${encodeURIComponent(tid)}`);
       if (!resp.ok) throw new Error('poll failed');
 
+      if (activePollScopeKey.current !== scopeKey || activePollTaskId.current !== tid) return;
+
       const data = await resp.json() as Record<string, unknown>;
+      if (activePollScopeKey.current !== scopeKey || activePollTaskId.current !== tid) return;
       const status = String(data.status || '');
       const prog = Number(data.progress || 0);
       const label = String(data.label || '');
@@ -288,18 +340,36 @@ export function AgentEditor({
     // 动态间隔：前10次1s，10-30次1.5s，之后2s
     const nextInterval = pollAttempts.current <= 10 ? 1000 :
                          pollAttempts.current <= 30 ? 1500 : 2000;
-    pollTimer.current = setTimeout(() => pollOnce(tid), nextInterval);
-  }, [stopTimer]);
+    if (activePollScopeKey.current === scopeKey && activePollTaskId.current === tid) {
+      pollTimer.current = setTimeout(() => { void pollOnce(tid, scopeKey); }, nextInterval);
+    }
+  }, [
+    setError,
+    setIsProcessing,
+    setProgress,
+    setProgressLabel,
+    setResultImageUrl,
+    setResultPrompt,
+    setSteps,
+    stopTimer,
+  ]);
 
   const startPolling = useCallback((tid: string) => {
     if (pollTimer.current) clearTimeout(pollTimer.current);
     pollAttempts.current = 0;
-    pollOnce(tid);
-  }, [pollOnce]);
+    activePollScopeKey.current = runScopeKey;
+    activePollTaskId.current = tid;
+    void pollOnce(tid, runScopeKey);
+  }, [pollOnce, runScopeKey]);
+
+  useEffect(() => {
+    if (isProcessing && taskId) startPolling(taskId);
+  }, [isProcessing, runScopeKey, startPolling, taskId]);
 
   // 提交任务
   const handleSubmit = async () => {
     if (!prompt.trim() && !imageUrl) return;
+    const submissionScopeKey = runScopeKey;
 
     setIsProcessing(true);
     setProgress(5);
@@ -334,6 +404,8 @@ export function AgentEditor({
 
       const data = await resp.json() as Record<string, unknown>;
 
+      if (activePollScopeKey.current !== submissionScopeKey) return;
+
       if (!resp.ok) {
         throw new Error(translateErrorFrontend(String(data.error || '提交失败')));
       }
@@ -344,8 +416,6 @@ export function AgentEditor({
         setTaskId(tid);
         setProgress(10);
         setProgressLabel('任务已提交，等待处理...');
-        // 开始轮询
-        startPolling(tid);
       } else {
         // 没有taskId，可能是同步返回
         if (data.result) {
@@ -370,6 +440,7 @@ export function AgentEditor({
       } catch { /* ignore */ }
     }
     if (pollTimer.current) clearTimeout(pollTimer.current);
+    activePollTaskId.current = null;
     setIsProcessing(false);
     setProgress(0);
     setError('任务已取消');
@@ -378,6 +449,7 @@ export function AgentEditor({
   const handleAgentRunCancel = async () => {
     await agentRun.cancel();
     if (pollTimer.current) clearTimeout(pollTimer.current);
+    activePollTaskId.current = null;
     setIsProcessing(false);
     setProgress(0);
     setError('任务已取消');
