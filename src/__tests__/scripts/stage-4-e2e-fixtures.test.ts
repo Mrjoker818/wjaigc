@@ -12,6 +12,7 @@ import {
   assertWorkflowVirtualizationCoverage,
   resolveExpectedMountedWorkflowNodeIds,
   recordAndSummarizeWorkflowPerformance,
+  resolveWorkflowMonitorBatch,
   selectWorkflowMonitorIds,
   summarizeWorkflowPerformance,
   shouldEnforceWorkflowFpsGate,
@@ -227,6 +228,16 @@ describe('Stage 4 workflow performance samples', () => {
       mountedNodeIds: [],
       expectedMountedNodeIds: ['stage4-node-1'],
     })).toThrow(/mounted node IDs/i);
+  });
+
+  it('rotates bounded monitor batches across every mounted node without duplicates', () => {
+    const batches = Array.from({ length: 12 }, (_, frameIndex) => (
+      resolveWorkflowMonitorBatch(expectedIds, frameIndex, 12)
+    ));
+
+    expect(batches.every(batch => batch.length > 0 && batch.length <= 9)).toBe(true);
+    expect(batches.every(batch => new Set(batch).size === batch.length)).toBe(true);
+    expect(new Set(batches.flat())).toEqual(new Set(expectedIds));
   });
 
   it('keeps the 55 FPS gate on the two desktop Chromium performance profiles', () => {

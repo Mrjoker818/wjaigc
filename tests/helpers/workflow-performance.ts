@@ -80,6 +80,20 @@ export function selectWorkflowMonitorIds(
     .filter(value => value.length > 0);
 }
 
+export function resolveWorkflowMonitorBatch(
+  nodeIds: ReadonlyArray<string>,
+  frameIndex: number,
+  maxCoverageFrames: number,
+): string[] {
+  if (nodeIds.length === 0) return [];
+  const coverageFrames = Math.max(1, Math.floor(maxCoverageFrames));
+  const batchSize = Math.ceil(nodeIds.length / coverageFrames);
+  const startIndex = (Math.max(0, Math.floor(frameIndex)) * batchSize) % nodeIds.length;
+  return Array.from({ length: batchSize }, (_, offset) => (
+    nodeIds[(startIndex + offset) % nodeIds.length]!
+  ));
+}
+
 export function assertWorkflowMonitorCoverage(
   monitoredIds: ReadonlyArray<string>,
   expectedNodeIds: ReadonlyArray<string>,
@@ -207,7 +221,11 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
   )));
   assertWorkflowMonitorCoverage(monitoredIds, expectedNodeIds);
 
-  await page.evaluate(async (nodeIds: string[]) => {
+  const monitorBatches = Array.from({ length: 12 }, (_, frameIndex) => (
+    resolveWorkflowMonitorBatch(expectedNodeIds, frameIndex, 12)
+  ));
+
+  await page.evaluate(async ({ nodeIds, batches }: { nodeIds: string[]; batches: string[][] }) => {
     const windowWithState = window as typeof window & {
       __wujieStage4WorkflowPerformance?: Record<string, unknown>;
     };
@@ -220,6 +238,16 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
     }
 
     const monitoredIds = new Set(nodeIds);
+    const monitoredNodes = new Map<string, HTMLElement>();
+    const resolveMonitoredNode = (id: string): HTMLElement | null => {
+      const cached = monitoredNodes.get(id);
+      if (cached?.isConnected) return cached;
+      const resolved = document.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+      if (resolved) monitoredNodes.set(id, resolved);
+      else monitoredNodes.delete(id);
+      return resolved;
+    };
+    for (const id of monitoredIds) resolveMonitoredNode(id);
 
     const state = {
       startedAt: Number.NaN,
@@ -237,6 +265,8 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
       rafId: 0,
       observers: [] as PerformanceObserver[],
       inputHandler: null as ((event: Event) => void) | null,
+      monitorBatchIndex: 0,
+      activePointerNodeId: null as string | null,
     };
 
     const inputHandler = (event: Event) => {
@@ -252,10 +282,19 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
         startTime: timestamp,
         observedAt,
       });
+      const targetNode = event.target instanceof Element
+        ? event.target.closest<HTMLElement>('[data-node-id]')
+        : null;
+      const targetNodeId = targetNode?.dataset.nodeId ?? null;
+      if (event.type === 'pointerdown') {
+        state.activePointerNodeId = targetNodeId && monitoredIds.has(targetNodeId) ? targetNodeId : null;
+      } else if (event.type === 'pointerup' || event.type === 'pointercancel') {
+        state.activePointerNodeId = null;
+      }
     };
 
     state.inputHandler = inputHandler;
-    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'wheel']) {
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'wheel']) {
       document.addEventListener(type, inputHandler, { capture: true, passive: true });
     }
 
@@ -299,26 +338,32 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
     const sampleNodes = (deltaMs: number) => {
       const canvasRect = canvasElement.getBoundingClientRect();
       let hasUnclickableNode = false;
-      for (const id of monitoredIds) {
-        const node = document.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+      const rotatingBatch = batches[state.monitorBatchIndex % batches.length] ?? [];
+      state.monitorBatchIndex += 1;
+      const batch = state.activePointerNodeId && !rotatingBatch.includes(state.activePointerNodeId)
+        ? [...rotatingBatch, state.activePointerNodeId]
+        : rotatingBatch;
+      for (const id of batch) {
+        const node = resolveMonitoredNode(id);
         if (!node) {
           state.lostNodeCount += 1;
           continue;
         }
 
-        const style = getComputedStyle(node);
         const rect = node.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          state.lostNodeCount += 1;
+          continue;
+        }
+        const style = getComputedStyle(node);
         if (
           style.display === 'none'
           || style.visibility === 'hidden'
           || Number(style.opacity) === 0
-          || rect.width <= 0
-          || rect.height <= 0
         ) {
           state.lostNodeCount += 1;
           continue;
         }
-
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
         if (
@@ -371,7 +416,7 @@ async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<strin
         resolve();
       });
     });
-  }, [...expectedNodeIds]);
+  }, { nodeIds: [...expectedNodeIds], batches: monitorBatches });
 }
 
 async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample> {
@@ -404,7 +449,7 @@ async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample
     cancelAnimationFrame(state.rafId);
     state.observers.forEach(observer => observer.disconnect());
     if (state.inputHandler) {
-      for (const type of ['pointerdown', 'pointermove', 'pointerup', 'wheel']) {
+      for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'wheel']) {
         document.removeEventListener(type, state.inputHandler, { capture: true });
       }
     }

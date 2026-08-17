@@ -367,6 +367,94 @@ test('keeps workflow renderer server-authoritative while shadow projection remai
     expectedMountedNodeIds,
   });
 
+  if (testInfo.project.name === 'chromium') {
+    const faultNodeId = await page.evaluate(nodeIds => {
+      const canvas = document.querySelector<HTMLElement>('.canvas-bg');
+      if (!canvas) return null;
+      const canvasBounds = canvas.getBoundingClientRect();
+      return nodeIds.filter(id => {
+        const node = document.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+        if (!node) return false;
+        const bounds = node.getBoundingClientRect();
+        const centerX = bounds.left + bounds.width / 2;
+        const centerY = bounds.top + bounds.height / 2;
+        if (
+          centerX < canvasBounds.left
+          || centerY < canvasBounds.top
+          || centerX > canvasBounds.right
+          || centerY > canvasBounds.bottom
+        ) return false;
+        const hit = document.elementFromPoint(centerX, centerY);
+        return hit !== null && (hit === node || node.contains(hit));
+      }).at(-1) ?? null;
+    }, expectedMountedNodeIds);
+    expect(faultNodeId).not.toBeNull();
+    expect(expectedMountedNodeIds.indexOf(faultNodeId!)).toBeGreaterThan(8);
+    const faultNode = page.locator(`[data-node-id="${faultNodeId}"]`);
+    const faultBounds = await faultNode.boundingBox();
+    const faultHeaderBounds = await faultNode.locator('.node-header').boundingBox();
+    expect(faultBounds).not.toBeNull();
+    expect(faultHeaderBounds).not.toBeNull();
+    const faultMetrics = await measureWorkflowInteraction(
+      page,
+      expectedMountedNodeIds,
+      async measuredPage => {
+        await measuredPage.mouse.move(faultHeaderBounds!.x + 24, faultHeaderBounds!.y + 16);
+        await measuredPage.mouse.down();
+        const activePointerNodeId = await measuredPage.evaluate(() => (
+          (window as typeof window & {
+            __wujieStage4WorkflowPerformance?: { activePointerNodeId?: string | null };
+          }).__wujieStage4WorkflowPerformance?.activePointerNodeId ?? null
+        ));
+        expect(activePointerNodeId).toBe(faultNodeId);
+        const alternateNodeId = expectedMountedNodeIds.find(id => id !== faultNodeId)!;
+        await measuredPage.locator(`[data-node-id="${alternateNodeId}"]`).dispatchEvent('pointermove', {
+          bubbles: true,
+          buttons: 1,
+          pointerId: 1,
+        });
+        const latchedPointerNodeId = await measuredPage.evaluate(() => (
+          (window as typeof window & {
+            __wujieStage4WorkflowPerformance?: { activePointerNodeId?: string | null };
+          }).__wujieStage4WorkflowPerformance?.activePointerNodeId ?? null
+        ));
+        expect(latchedPointerNodeId).toBe(faultNodeId);
+        await measuredPage.evaluate(bounds => {
+          const overlay = document.createElement('div');
+          overlay.dataset.stage4TransientOcclusion = 'true';
+          Object.assign(overlay.style, {
+            position: 'fixed',
+            left: `${bounds.x}px`,
+            top: `${bounds.y}px`,
+            width: `${bounds.width}px`,
+            height: `${bounds.height}px`,
+            zIndex: '2147483647',
+            pointerEvents: 'auto',
+          });
+          document.body.appendChild(overlay);
+        }, faultBounds!);
+        const hitTransientOcclusion = await measuredPage.evaluate(bounds => (
+          document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+            ?.closest('[data-stage4-transient-occlusion]') !== null
+        ), faultBounds!);
+        expect(hitTransientOcclusion).toBe(true);
+        await measuredPage.evaluate(() => new Promise<void>(resolve => {
+          requestAnimationFrame(() => resolve());
+        }));
+        await measuredPage.locator('[data-stage4-transient-occlusion]').evaluate(node => node.remove());
+        await measuredPage.mouse.up();
+      },
+      raw => writeStage4Metrics(stage4Evidence, testInfo, 'workflow-monitor-transient-occlusion-raw', raw),
+    );
+    await writeStage4Metrics(
+      stage4Evidence,
+      testInfo,
+      'workflow-monitor-transient-occlusion',
+      faultMetrics,
+    );
+    expect(faultMetrics.unclickableDurationMs).toBeGreaterThan(0);
+  }
+
   const firstNode = page.locator(`[data-node-id="${expectedMountedNodeIds[0]}"]`);
   const before = await firstNode.boundingBox();
   expect(before).not.toBeNull();

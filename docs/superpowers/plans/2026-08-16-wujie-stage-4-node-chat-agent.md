@@ -168,6 +168,9 @@ expect(sample.unclickableDurationMs).toBe(0);
 Firefox、WebKit 与移动 Chromium 仍必须执行相同真实拖动链路，并满足输入 P95、节点不丢失、
 零不可点击、Console、Network 和功能断言。浏览器 profile 必须显式穷举，未知名称直接阻断。
 该分工不降低 Chromium 门槛，用于避免把本机 Playwright WebKit 空白页约 40 FPS 的运行时上限误判为产品缺陷。
+性能探针的 RAF 帧计数仍逐帧执行；节点 DOM 连续性在最多 12 帧内轮转覆盖全部已挂载节点，
+当前 pointer 交互节点必须每帧强制检查。Chromium 还必须注入一帧真实遮挡，证明探针能记录非零
+`unclickableDurationMs`；不得用每帧全量 DOM 布局与命中检测把测试自身开销计入产品 FPS。
 
 - [ ] **Step 7: 建立 legacy 真实基线**
 
