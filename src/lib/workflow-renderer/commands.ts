@@ -247,14 +247,20 @@ function applyValuePatch(target: Record<string, unknown>, path: string[], value:
 
 function applyWorkflowPatch(workflow: Workflow, operations: ReadonlyArray<WorkflowPatchOperation>): Workflow {
   const next = cloneSnapshotValue(workflow);
+  let graphStructureChanged = false;
   for (const operation of operations) {
     if (operation.type === 'node.remove') {
       next.nodes = next.nodes.filter(node => node.id !== operation.nodeId);
+      next.connections = next.connections.filter(connection => (
+        connection.fromNodeId !== operation.nodeId && connection.toNodeId !== operation.nodeId
+      ));
+      graphStructureChanged = true;
       continue;
     }
     if (operation.type === 'node.add') {
       if (!next.nodes.some(node => node.id === operation.node.id)) {
         next.nodes.splice(Math.min(operation.index, next.nodes.length), 0, cloneSnapshotValue(operation.node));
+        graphStructureChanged = true;
       }
       continue;
     }
@@ -263,12 +269,22 @@ function applyWorkflowPatch(workflow: Workflow, operations: ReadonlyArray<Workfl
       continue;
     }
     if (operation.type === 'connection.add') {
-      if (!next.connections.some(connection => connection.id === operation.connection.id)) {
+      const duplicate = next.connections.some(connection => (
+        connection.id === operation.connection.id
+        || (
+          connection.fromNodeId === operation.connection.fromNodeId
+          && connection.fromPortId === operation.connection.fromPortId
+          && connection.toNodeId === operation.connection.toNodeId
+          && connection.toPortId === operation.connection.toPortId
+        )
+      ));
+      if (!duplicate && isWorkflowConnectionValid(next, operation.connection)) {
         next.connections.splice(
           Math.min(operation.index, next.connections.length),
           0,
           cloneSnapshotValue(operation.connection),
         );
+        graphStructureChanged = true;
       }
       continue;
     }
@@ -281,7 +297,15 @@ function applyWorkflowPatch(workflow: Workflow, operations: ReadonlyArray<Workfl
     const target = collection.find(item => item.id === id);
     if (target) {
       applyValuePatch(target as unknown as Record<string, unknown>, operation.path, operation.value, operation.remove === true);
+      if (operation.type === 'connection.set'
+        || operation.path[0] === 'id'
+        || operation.path[0] === 'ports') {
+        graphStructureChanged = true;
+      }
     }
+  }
+  if (graphStructureChanged) {
+    next.connections = next.connections.filter(connection => isWorkflowConnectionValid(next, connection));
   }
   return next;
 }

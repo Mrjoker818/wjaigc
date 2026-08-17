@@ -49,4 +49,10 @@ describe('node editor drag throttling', () => {
     expect(source).toContain('pendingExternalWorkflowRef.current = workflow');
     expect(source).toContain('pendingExternalWorkflowRef.current = null');
   });
+
+  it('wires React Flow drag lifecycle into the same host guard as legacy drag', () => {
+    expect(source).toContain('useWorkflowDragSynchronization');
+    expect(source).toContain('onNodeDragStart={beginWorkflowDrag}');
+    expect(source).toContain('onNodeDragEnd={finishWorkflowDrag}');
+  });
 });

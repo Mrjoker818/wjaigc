@@ -35,6 +35,8 @@ interface WorkflowReactFlowSurfaceProps {
   model: WorkflowRenderModel;
   onCommand: (command: WorkflowInteractionCommand) => void;
   onNodePositionPreview?: (positions: WorkflowNodePosition[]) => void;
+  onNodeDragStart?: (positions: WorkflowNodePosition[]) => void;
+  onNodeDragEnd?: (positions: WorkflowNodePosition[]) => void;
   onViewportChange?: (viewport: WorkflowRenderModel['viewport']) => void;
   readOnly?: boolean;
   theme?: WorkflowLegacyNodeTheme;
@@ -264,6 +266,8 @@ export function WorkflowReactFlowSurface({
   model,
   onCommand,
   onNodePositionPreview,
+  onNodeDragStart,
+  onNodeDragEnd,
   onViewportChange,
   readOnly = true,
   ...presentation
@@ -304,14 +308,24 @@ export function WorkflowReactFlowSurface({
               ? [{ nodeId: initialNode.id, position: { ...initialNode.position } }]
               : [];
           });
+          onNodeDragStart?.(dragInitialPositionsRef.current.map(item => ({
+            nodeId: item.nodeId,
+            position: { ...item.position },
+          })));
         }}
         onNodeDragStop={readOnly ? undefined : (_event, node, selectedNodes) => {
+          const draggedNodes = selectedNodes.length > 0 ? selectedNodes : [node];
+          const finalPositions = draggedNodes.map(draggedNode => ({
+            nodeId: draggedNode.id,
+            position: { ...draggedNode.position },
+          }));
           commandHandlers.commitNodeDrag(
-            selectedNodes.length > 0 ? selectedNodes : [node],
+            draggedNodes,
             nextTransactionId(`react-flow-drag:${node.id}`),
             dragInitialPositionsRef.current,
           );
           dragInitialPositionsRef.current = [];
+          onNodeDragEnd?.(finalPositions);
         }}
         onConnect={readOnly ? undefined : connection => {
           commandHandlers.createConnection(connection, nextTransactionId('react-flow-connect'));

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createEmptyWorkflow,
   createWorkflowNode,
+  isWorkflowConnectionValid,
   type Workflow,
 } from '@/lib/workflow-engine';
 import {
@@ -276,6 +277,131 @@ describe('workflow render commands', () => {
         expect(redone.workflow.connections.some(item => item.id === connection.id)).toBe(true);
       }
     }
+  });
+
+  it('delete redo removes late incident edges while preserving unrelated concurrent graph state', () => {
+    const workflow = workflowFixture();
+    const source = workflow.nodes[0]!;
+    const target = workflow.nodes[1]!;
+    const text = workflow.nodes[2]!;
+    const output = createWorkflowNode('output-image', 420, 20, 'late output');
+    const sourcePort = source.ports.find(port => port.direction === 'out' && port.type === 'image')!;
+    const outputPort = output.ports.find(port => port.direction === 'in' && port.type === 'image')!;
+    const textPort = text.ports.find(port => port.direction === 'out' && port.type === 'prompt')!;
+    const targetPromptPort = target.ports.find(port => port.direction === 'in' && port.type === 'prompt')!;
+    const committed = reduceWorkflowEditorState(createWorkflowEditorState(workflow), {
+      kind: 'command',
+      command: { type: 'nodes.delete', nodeIds: [source.id], transactionId: 'delete-race' },
+    });
+    const undone = reduceWorkflowEditorState(committed, { kind: 'history.undo' });
+    const concurrent = reduceWorkflowEditorState(undone, {
+      kind: 'system.update',
+      workflow: {
+        ...undone.workflow,
+        nodes: [...undone.workflow.nodes.map(node => node.id === target.id
+          ? { ...node, config: { ...node.config, concurrent: 'survives' } }
+          : node), output],
+        connections: [...undone.workflow.connections, {
+          id: 'late-incident-edge',
+          fromNodeId: source.id,
+          fromPortId: sourcePort.id,
+          toNodeId: output.id,
+          toPortId: outputPort.id,
+          type: 'image',
+        }, {
+          id: 'late-unrelated-edge',
+          fromNodeId: text.id,
+          fromPortId: textPort.id,
+          toNodeId: target.id,
+          toPortId: targetPromptPort.id,
+          type: 'prompt',
+        }],
+      },
+    });
+
+    const redone = reduceWorkflowEditorState(concurrent, { kind: 'history.redo' });
+
+    expect(redone.history.index).toBe(1);
+    expect(redone.workflow.nodes.some(node => node.id === source.id)).toBe(false);
+    expect(redone.workflow.connections.some(connection => connection.id === 'late-incident-edge')).toBe(false);
+    expect(redone.workflow.connections.some(connection => connection.id === 'late-unrelated-edge')).toBe(true);
+    expect(redone.workflow.nodes.find(node => node.id === target.id)?.config.concurrent).toBe('survives');
+    expect(redone.workflow.connections.every(connection => isWorkflowConnectionValid(redone.workflow, connection))).toBe(true);
+  });
+
+  it('connection redo fails safely when an endpoint disappeared and still advances the history cursor', () => {
+    const workflow = workflowFixture();
+    const target = workflow.nodes[1]!;
+    const text = workflow.nodes[2]!;
+    const connection = {
+      id: 'prompt-redo-race',
+      fromNodeId: text.id,
+      fromPortId: text.ports.find(port => port.direction === 'out' && port.type === 'prompt')!.id,
+      toNodeId: target.id,
+      toPortId: target.ports.find(port => port.direction === 'in' && port.type === 'prompt')!.id,
+      type: 'prompt' as const,
+    };
+    const committed = reduceWorkflowEditorState(createWorkflowEditorState(workflow), {
+      kind: 'command',
+      command: { type: 'connection.create', connection, transactionId: 'connect-redo-race' },
+    });
+    const undone = reduceWorkflowEditorState(committed, { kind: 'history.undo' });
+    const concurrent = reduceWorkflowEditorState(undone, {
+      kind: 'system.update',
+      workflow: {
+        ...undone.workflow,
+        nodes: undone.workflow.nodes
+          .filter(node => node.id !== text.id)
+          .map(node => node.id === target.id
+            ? { ...node, config: { ...node.config, concurrent: 'survives' } }
+            : node),
+      },
+    });
+
+    const redone = reduceWorkflowEditorState(concurrent, { kind: 'history.redo' });
+
+    expect(redone.history.index).toBe(1);
+    expect(redone.workflow.connections.some(item => item.id === connection.id)).toBe(false);
+    expect(redone.workflow.connections.some(item => item.id === 'image-edge')).toBe(true);
+    expect(redone.workflow.nodes.find(node => node.id === target.id)?.config.concurrent).toBe('survives');
+    expect(redone.workflow.connections.every(item => isWorkflowConnectionValid(redone.workflow, item))).toBe(true);
+  });
+
+  it('clipboard undo removes late edges incident to pasted nodes without touching unrelated edges', () => {
+    const workflow = workflowFixture();
+    const pasted = reduceWorkflowEditorState(createWorkflowEditorState(workflow), {
+      kind: 'command',
+      command: {
+        type: 'clipboard.paste',
+        snapshot: createWorkflowClipboardSnapshot(workflow, workflow.nodes.slice(0, 2).map(node => node.id)),
+        offset: { x: 40, y: 40 },
+        transactionId: 'clipboard-undo-race',
+      },
+    });
+    const copiedSource = pasted.workflow.nodes.at(-2)!;
+    const copiedSourcePort = copiedSource.ports.find(port => port.direction === 'out' && port.type === 'image')!;
+    const target = workflow.nodes[1]!;
+    const targetPort = target.ports.find(port => port.direction === 'in' && port.type === 'image')!;
+    const concurrent = reduceWorkflowEditorState(pasted, {
+      kind: 'system.update',
+      workflow: {
+        ...pasted.workflow,
+        connections: [...pasted.workflow.connections, {
+          id: 'late-pasted-incident-edge',
+          fromNodeId: copiedSource.id,
+          fromPortId: copiedSourcePort.id,
+          toNodeId: target.id,
+          toPortId: targetPort.id,
+          type: 'image',
+        }],
+      },
+    });
+
+    const undone = reduceWorkflowEditorState(concurrent, { kind: 'history.undo' });
+
+    expect(undone.workflow.connections.some(item => item.id === 'late-pasted-incident-edge')).toBe(false);
+    expect(undone.workflow.connections.some(item => item.id === 'image-edge')).toBe(true);
+    expect(undone.workflow.connections.every(item => isWorkflowConnectionValid(undone.workflow, item))).toBe(true);
   });
 
   it('merges a deferred external workflow with final drag positions', () => {

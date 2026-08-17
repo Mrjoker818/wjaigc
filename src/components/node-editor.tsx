@@ -667,6 +667,49 @@ interface NodeEditorProps {
   rendererMode?: WorkflowRendererMode;
 }
 
+interface WorkflowDragSynchronizationOptions {
+  externalWorkflow?: WorkflowData | null;
+  lastEmittedWorkflowRef: React.RefObject<WorkflowData | null>;
+  hydrateWorkflow: (workflow: WorkflowData) => void;
+  applyDeferredWorkflow: (workflow: WorkflowData, positions: WorkflowNodePosition[]) => void;
+}
+
+export function useWorkflowDragSynchronization({
+  externalWorkflow,
+  lastEmittedWorkflowRef,
+  hydrateWorkflow,
+  applyDeferredWorkflow,
+}: WorkflowDragSynchronizationOptions) {
+  const isDraggingRef = useRef(false);
+  const pendingExternalWorkflowRef = useRef<WorkflowData | null>(null);
+  const synchronizeExternalWorkflow = useCallback((workflow: WorkflowData) => {
+    if (workflow === lastEmittedWorkflowRef.current) return;
+    if (isDraggingRef.current) {
+      pendingExternalWorkflowRef.current = workflow;
+      return;
+    }
+    hydrateWorkflow(workflow);
+  }, [hydrateWorkflow, lastEmittedWorkflowRef]);
+  useEffect(() => {
+    if (externalWorkflow) synchronizeExternalWorkflow(externalWorkflow);
+  }, [externalWorkflow, synchronizeExternalWorkflow]);
+  const beginWorkflowDrag = useCallback((_positions: WorkflowNodePosition[] = []) => {
+    isDraggingRef.current = true;
+  }, []);
+  const finishWorkflowDrag = useCallback((positions: WorkflowNodePosition[]) => {
+    isDraggingRef.current = false;
+    const pendingExternalWorkflow = pendingExternalWorkflowRef.current;
+    pendingExternalWorkflowRef.current = null;
+    if (pendingExternalWorkflow) applyDeferredWorkflow(pendingExternalWorkflow, positions);
+  }, [applyDeferredWorkflow]);
+  return {
+    isDraggingRef,
+    beginWorkflowDrag,
+    finishWorkflowDrag,
+    synchronizeExternalWorkflow,
+  };
+}
+
 // ==================== 双主题配色 ====================
 const nodeThemes = {
   gold: {
@@ -936,14 +979,36 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   // 兼容：获取单个选中节点ID
   const selectedNodeId = useMemo(() => selectedNodeIds.size > 0 ? [...selectedNodeIds][0] : null, [selectedNodeIds]);
+  const lastEmittedRef = useRef<WorkflowData | null>(null);
+  const hydrateExternalWorkflow = useCallback((externalWorkflow: WorkflowData) => {
+    dispatchWorkflowStateCommand({
+      type: 'workflow.hydrate',
+      workflow: externalWorkflow,
+      transactionId: 'external-workflow-hydrate',
+    });
+  }, [dispatchWorkflowStateCommand]);
+  const applyDeferredExternalWorkflow = useCallback((
+    externalWorkflow: WorkflowData,
+    positions: WorkflowNodePosition[],
+  ) => {
+    updateWorkflowSystem(() => mergeExternalWorkflowWithPositions(externalWorkflow, positions));
+  }, [updateWorkflowSystem]);
+  const {
+    isDraggingRef,
+    beginWorkflowDrag,
+    finishWorkflowDrag,
+  } = useWorkflowDragSynchronization({
+    externalWorkflow: workflow,
+    lastEmittedWorkflowRef: lastEmittedRef,
+    hydrateWorkflow: hydrateExternalWorkflow,
+    applyDeferredWorkflow: applyDeferredExternalWorkflow,
+  });
   // 拖动状态使用ref避免每次mousemove触发重渲染导致闪烁
   const draggingNodeRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const nodeDragInitialPositionsRef = useRef<Array<{ nodeId: string; position: { x: number; y: number } }>>([]);
   const nodeDragPositionRef = useRef<{ id: string; x: number; y: number } | null>(null);
   const nodeDragRafRef = useRef<number | null>(null);
-  const isDraggingRef = useRef(false); // 标记正在拖动，跳过历史快照
-  const pendingExternalWorkflowRef = useRef<WorkflowData | null>(null);
   const [draggingConn, setDraggingConn] = useState<DraggingConn | null>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
   const [isPanning, setIsPanning] = useState(false);
@@ -1614,28 +1679,9 @@ ${contextInfo}
     setNodeAnnotationError(null);
   }, [nodeAnnotationSession, updateWorkflow, wf.nodes]);
 
-  // 避免循环更新：记录最近一次传出的 wf 引用，跳过自身回写
-  const lastEmittedRef = useRef<WorkflowData | null>(null);
-
   // 图片上传: 全局文件输入框 (foreignObject内动态input.click()不可靠)
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const pendingImageUploadNodeId = useRef<string | null>(null);
-
-  // 同步外部workflow变化 (仅当外部真正改变时才同步，跳过自身回写)
-  useEffect(() => {
-    if (!workflow) return;
-    // 如果是自身回写（引用相同），跳过
-    if (workflow === lastEmittedRef.current) return;
-    if (isDraggingRef.current) {
-      pendingExternalWorkflowRef.current = workflow;
-      return;
-    }
-    dispatchWorkflowStateCommand({
-      type: 'workflow.hydrate',
-      workflow,
-      transactionId: 'external-workflow-hydrate',
-    });
-  }, [dispatchWorkflowStateCommand, workflow]);
 
   // 通知外部 (拖动期间跳过)
   const onWorkflowChangeRef = useRef(onWorkflowChange);
@@ -2241,7 +2287,6 @@ ${contextInfo}
       }
       nodeDragPositionRef.current = null;
       draggingNodeRef.current = null;
-      isDraggingRef.current = false;
       if (finalPosition && nodeDragInitialPositionsRef.current.length > 0) {
         dispatchWorkflowStateCommand({
           type: 'nodes.drag.commit',
@@ -2250,11 +2295,7 @@ ${contextInfo}
           transactionId: `legacy-node-drag:${finalPosition.id}:${++editorTransactionCounterRef.current}`,
         });
       }
-      const pendingExternalWorkflow = pendingExternalWorkflowRef.current;
-      pendingExternalWorkflowRef.current = null;
-      if (pendingExternalWorkflow) {
-        updateWorkflowSystem(() => mergeExternalWorkflowWithPositions(pendingExternalWorkflow, finalPositions));
-      }
+      finishWorkflowDrag(finalPositions);
       nodeDragInitialPositionsRef.current = [];
       // 让外部同步由 effect 在本次拖拽状态提交后执行，避免在状态更新器中触发父组件更新。
       setWorkflowSyncRevision(revision => revision + 1);
@@ -2280,7 +2321,7 @@ ${contextInfo}
     }
     setBoxSelect(null);
     isBoxSelectingRef.current = false;
-  }, [applyNodeViewportPreview, boxSelect, dispatchWorkflowStateCommand, isPanning, updateWorkflowSystem, wf.nodes]);
+  }, [applyNodeViewportPreview, boxSelect, dispatchWorkflowStateCommand, finishWorkflowDrag, isPanning, wf.nodes]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -2919,7 +2960,7 @@ ${contextInfo}
       nodeDragInitialPositionsRef.current = [{ nodeId, position: { x: node.x, y: node.y } }];
       nodeDragPositionRef.current = { id: nodeId, x: node.x, y: node.y };
       dragOffsetRef.current = { x: mouseX - node.x, y: mouseY - node.y };
-      isDraggingRef.current = true;
+      beginWorkflowDrag(nodeDragInitialPositionsRef.current);
       setBoxSelect(null);
       isBoxSelectingRef.current = false;
     },
@@ -3139,6 +3180,8 @@ ${contextInfo}
               model={reactFlowWorkflowRenderModel}
               onCommand={handleWorkflowRenderCommand}
               onNodePositionPreview={previewWorkflowNodePositions}
+              onNodeDragStart={beginWorkflowDrag}
+              onNodeDragEnd={finishWorkflowDrag}
               onViewportChange={setViewport}
               readOnly={false}
               theme={T}

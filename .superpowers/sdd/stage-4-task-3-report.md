@@ -375,3 +375,72 @@ Result: 18 files / 138 tests passed.
 - `src/__tests__/lib/workflow-render-commands.test.ts`
 
 Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` were not edited by this fix wave and remain excluded from staging and commit.
+
+## R5 Independent Review Fix Wave
+
+The three R5 graph-replay, React Flow drag-lifecycle, and real-integration-test findings were fixed in one bounded follow-up based on `af4bdd8`.
+
+### R5 RED
+
+The structural history regressions were added first and run with:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workflow-render-commands.test.ts
+```
+
+Result: exit 1; 3 failed / 16 passed tests. The failures proved that delete redo left a late concurrent incident edge dangling, connection redo restored an edge after its source node disappeared, and clipboard undo left a late edge incident to the removed pasted node.
+
+The host drag-lifecycle and DOM integration regressions were then run with:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/workflow-react-flow-controlled-behavior.test.tsx src/__tests__/components/node-editor-drag-throttle-wiring.test.ts
+```
+
+Result: exit 1; 2 failed / 5 passed tests. The failures proved that the React Flow surface had no shared host drag synchronization path and NodeEditor did not wire React Flow drag start/end into the external-hydration guard.
+
+### R5 Corrections
+
+- Structural patch replay is graph-safe against current concurrent state. Replaying `node.remove` removes every current incident edge, including late edges, while retaining unrelated nodes, edges, config, and image state. Clipboard inverse removal receives the same protection.
+- Replaying `connection.add` validates current endpoint nodes, port existence, input/output direction, and data-type compatibility before insertion. Invalid redo safely becomes a no-op while the history cursor advances consistently, so undo/redo cannot create dangling or incompatible edges.
+- Node/connection add, remove, and set replay paths revalidate affected graph structure. Behavioral tests cover delete redo with a late edge, connect redo after source disappearance, clipboard undo with a late pasted-node edge, unrelated concurrent-state survival, and valid history cursor movement.
+- `WorkflowReactFlowSurface` now exposes explicit drag-start and drag-end lifecycle callbacks. NodeEditor routes legacy and React Flow through the same host-owned drag guard and latest-external-workflow queue; preview remains a no-history system update, the selected group commits once, and queued hydration is merged after drag with final positions retained.
+- The React Flow controlled behavior suite now uses jsdom and React Testing Library with a non-null DOM interaction harness. Mouse gestures exercise the real surface and product host synchronization hook, including two-node group preview/commit, an external prop update during drag, deferred replay, and a host-owned viewport callback. Test-only `jsdom` and `@testing-library/react` dependencies support this mounted coverage.
+
+### R5 GREEN And Verification
+
+Focused R5 regression GREEN:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/workflow-react-flow-controlled-behavior.test.tsx src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/lib/workflow-render-commands.test.ts
+```
+
+Result: 3 files / 26 tests passed.
+
+Full Task 3/node-editor/route/helper focused command:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/node-editor-ui-regression.test.ts src/__tests__/components/node-editor-provider-capabilities.test.ts src/__tests__/components/node-editor-layering-wiring.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-execution-wiring.test.ts src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-editor-asset-reference.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/components/workflow-react-flow-controlled-behavior.test.tsx src/__tests__/components/node-annotation-wiring.test.ts src/__tests__/lib/workflow-render-view-model.test.ts src/__tests__/lib/workflow-render-shadow.test.ts src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/lib/stage-4-modes.test.ts src/__tests__/api/user-data-sync-asset-graph.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts
+```
+
+Result: 18 files / 142 tests passed.
+
+- `pnpm test`: exit 0; 455 files / 2804 tests passed. Fourteen PostgreSQL integration files / 68 tests were honestly skipped because `POSTGRES_TEST_DATABASE_URL` is not configured.
+- `pnpm ts-check`: passed.
+- Targeted ESLint over every R5 changed TS/TSX file: exit 0.
+- `pnpm check:protected-baseline`: passed all checks with 0 warnings.
+- `git diff --check`: passed; Git emitted line-ending notices only.
+- Live database E2E was not run, as required.
+
+### R5 Files Changed
+
+- `.superpowers/sdd/stage-4-task-3-report.md`
+- `package.json`
+- `pnpm-lock.yaml`
+- `src/components/node-editor.tsx`
+- `src/components/workflow/WorkflowReactFlowSurface.tsx`
+- `src/lib/workflow-renderer/commands.ts`
+- `src/__tests__/components/node-editor-drag-throttle-wiring.test.ts`
+- `src/__tests__/components/workflow-react-flow-controlled-behavior.test.tsx`
+- `src/__tests__/lib/workflow-render-commands.test.ts`
+
+Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` were not edited by this fix wave and remain excluded from staging and commit.
