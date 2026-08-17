@@ -153,6 +153,66 @@ describe('workflow render commands', () => {
     expect(hydrated.workflow.name).toBe('server');
   });
 
+  it('commits drag positions onto the current workflow and undo preserves concurrent updates', () => {
+    const workflow = workflowFixture();
+    const source = workflow.nodes[0]!;
+    const initial = createWorkflowEditorState(workflow);
+    const concurrentlyUpdated = reduceWorkflowEditorState(initial, {
+      kind: 'user.update',
+      workflow: {
+        ...workflow,
+        nodes: workflow.nodes.map(node => node.id === source.id
+          ? { ...node, config: { ...node.config, asyncImageUrl: '/concurrent.png' } }
+          : node),
+      },
+      transactionId: 'async-config',
+    });
+    const measured = reduceWorkflowEditorState(concurrentlyUpdated, {
+      kind: 'command',
+      command: { type: 'node.measure', nodeId: source.id, size: { width: 444, height: 333 } },
+    });
+    const committed = reduceWorkflowEditorState(measured, {
+      kind: 'command',
+      command: {
+        type: 'nodes.drag.commit',
+        initialPositions: [{ nodeId: source.id, position: { x: source.x, y: source.y } }],
+        positions: [{ nodeId: source.id, position: { x: 90, y: 120 } }],
+        transactionId: 'drag-race',
+      },
+    });
+    const undone = reduceWorkflowEditorState(committed, { kind: 'history.undo' });
+
+    expect(committed.workflow.nodes[0]).toMatchObject({
+      x: 90, y: 120, width: 444, height: 333,
+      config: expect.objectContaining({ asyncImageUrl: '/concurrent.png' }),
+    });
+    expect(undone.workflow.nodes[0]).toMatchObject({
+      x: source.x, y: source.y, width: 444, height: 333,
+      config: expect.objectContaining({ asyncImageUrl: '/concurrent.png' }),
+    });
+  });
+
+  it('replays the same deterministic workflow action to the same reducer result', () => {
+    const workflow = workflowFixture();
+    const connection = {
+      id: 'precomputed-connection',
+      fromNodeId: workflow.nodes[2]!.id,
+      fromPortId: 'out-prompt',
+      toNodeId: workflow.nodes[1]!.id,
+      toPortId: 'in-prompt',
+      type: 'prompt' as const,
+    };
+    const nextWorkflow = { ...workflow, connections: [...workflow.connections, connection] };
+    const action = {
+      kind: 'user.update' as const,
+      workflow: nextWorkflow,
+      transactionId: 'deterministic-update',
+    };
+
+    expect(reduceWorkflowEditorState(createWorkflowEditorState(workflow), action))
+      .toEqual(reduceWorkflowEditorState(createWorkflowEditorState(workflow), action));
+  });
+
   it('pastes the copy-time node and internal-edge snapshot after the sources are deleted', () => {
     const workflow = workflowFixture();
     const selectedIds = workflow.nodes.slice(0, 2).map(node => node.id);

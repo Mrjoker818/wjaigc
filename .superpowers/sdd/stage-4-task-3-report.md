@@ -251,3 +251,63 @@ Result: 16 files / 115 tests passed.
 - `tests/unit/protected-baseline-gate.spec.ts`
 
 Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` were not edited by this fix wave and remain excluded from staging and commit.
+
+## R3 Independent Review Fix Wave
+
+The four R3 runtime/state findings were fixed in one minimal follow-up based on `c421467`.
+
+### R3 RED
+
+Behavioral regressions were added before product changes and run with:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts
+```
+
+Result: exit 1; 4 failed files and 6 failed / 28 passed tests. The failures were `transition.update is not a function` for the desired deterministic reducer payload, missing `nodes.drag.commit`, missing two-node `commitNodeDrag`, missing viewport host callback, stale `nodeDragStartWorkflowRef` wiring, and `createConnection` still executing inside workflow updater callbacks.
+
+### R3 Corrections
+
+- Added deterministic `nodes.drag.commit` with initial and final absolute positions. It applies final positions to the reducer's current workflow, and constructs the undo snapshot by replacing only positions on that same current workflow. Concurrent config, image, size, connection, and other node changes therefore survive commit and undo.
+- Legacy drag now stores only initial positions. Mouseup submits the final position without passing or restoring a stale workflow snapshot.
+- React Flow consumes the full selected-node array from `OnNodeDrag`, emitting one group drag transaction with every selected final position and projected initial position.
+- Controlled React Flow viewport changes call the host's `setViewport`; the next host projection supplies the updated viewport. Viewport changes do not enter workflow history and React Flow remains non-authoritative.
+- User and system reducer transitions now carry precomputed workflow values instead of updater functions. Command payloads are deterministic; connection IDs and other nondeterministic values in modified updater paths are generated before dispatch. Replaying the same action from the same state produces an equal result.
+- Runtime-sensitive tests exercise the reducer race plus undo, two selected React Flow nodes, viewport host-model updates, and deterministic replay. Existing source contracts remain as supplemental wiring checks.
+
+### R3 GREEN And Verification
+
+Focused R3 regression GREEN:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts
+```
+
+Result: 4 files / 34 tests passed.
+
+Full Task 3/node-editor/route/helper focused command:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/node-editor-ui-regression.test.ts src/__tests__/components/node-editor-provider-capabilities.test.ts src/__tests__/components/node-editor-layering-wiring.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-execution-wiring.test.ts src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-editor-asset-reference.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/lib/workflow-render-view-model.test.ts src/__tests__/lib/workflow-render-shadow.test.ts src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/lib/stage-4-modes.test.ts src/__tests__/api/user-data-sync-asset-graph.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts
+```
+
+Result: 16 files / 118 tests passed.
+
+- `pnpm ts-check`: passed.
+- Targeted ESLint over all R3 changed TS/TSX files: exit 0, 0 errors; the same 13 existing `node-editor.tsx` warnings remain.
+- `pnpm check:protected-baseline`: passed all checks with 0 warnings.
+- `git diff --check`: passed; Git emitted line-ending notices only.
+- Live database E2E and the final full suite were not run, as required; controller owns those runs.
+
+### R3 Files Changed
+
+- `.superpowers/sdd/stage-4-task-3-report.md`
+- `src/components/node-editor.tsx`
+- `src/components/workflow/WorkflowReactFlowSurface.tsx`
+- `src/lib/workflow-renderer/commands.ts`
+- `src/__tests__/components/node-editor-drag-throttle-wiring.test.ts`
+- `src/__tests__/components/node-editor-history-baseline-contract.test.ts`
+- `src/__tests__/components/workflow-react-flow-surface.test.tsx`
+- `src/__tests__/lib/workflow-render-commands.test.ts`
+
+Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` remain unstaged and excluded from the R3 commit.

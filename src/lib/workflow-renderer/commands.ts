@@ -6,6 +6,7 @@ import {
 
 export type WorkflowInteractionCommand =
   | { type: 'nodes.move'; nodeIds: string[]; delta: { x: number; y: number }; transactionId: string }
+  | { type: 'nodes.drag.commit'; initialPositions: WorkflowNodePosition[]; positions: WorkflowNodePosition[]; transactionId: string }
   | { type: 'connection.create'; connection: WorkflowConnection; transactionId: string }
   | { type: 'connection.delete'; connectionId: string; transactionId: string }
   | { type: 'selection.set'; nodeIds: string[]; transactionId: string }
@@ -18,6 +19,11 @@ export type WorkflowInteractionCommand =
 export interface WorkflowClipboardSnapshot {
   nodes: Workflow['nodes'];
   connections: WorkflowConnection[];
+}
+
+export interface WorkflowNodePosition {
+  nodeId: string;
+  position: { x: number; y: number };
 }
 
 export interface WorkflowHistoryEntry {
@@ -48,9 +54,9 @@ export interface WorkflowEditorState {
 }
 
 export type WorkflowEditorTransition =
-  | { kind: 'command'; command: WorkflowInteractionCommand; baseWorkflow?: Workflow }
-  | { kind: 'user.update'; update: (workflow: Workflow) => Workflow; transactionId: string }
-  | { kind: 'system.update'; update: (workflow: Workflow) => Workflow }
+  | { kind: 'command'; command: WorkflowInteractionCommand }
+  | { kind: 'user.update'; workflow: Workflow; transactionId: string }
+  | { kind: 'system.update'; workflow: Workflow }
   | { kind: 'history.undo' }
   | { kind: 'history.redo' };
 
@@ -204,6 +210,32 @@ export function applyWorkflowCommand(
     });
   }
 
+  if (command.type === 'nodes.drag.commit') {
+    const initialById = new Map(command.initialPositions.map(item => [item.nodeId, item.position]));
+    const finalById = new Map(command.positions.map(item => [item.nodeId, item.position]));
+    const movedIds = new Set(workflow.nodes.flatMap(node => {
+      const initial = initialById.get(node.id);
+      const final = finalById.get(node.id);
+      return initial && final && (initial.x !== final.x || initial.y !== final.y) ? [node.id] : [];
+    }));
+    if (movedIds.size === 0) return noChange(workflow);
+    const before = {
+      ...workflow,
+      nodes: workflow.nodes.map(node => {
+        const initial = movedIds.has(node.id) ? initialById.get(node.id) : undefined;
+        return initial ? { ...node, x: initial.x, y: initial.y } : node;
+      }),
+    };
+    const after = {
+      ...workflow,
+      nodes: workflow.nodes.map(node => {
+        const final = movedIds.has(node.id) ? finalById.get(node.id) : undefined;
+        return final ? { ...node, x: final.x, y: final.y } : node;
+      }),
+    };
+    return result(after, before, command.transactionId);
+  }
+
   if (command.type === 'nodes.move') {
     const movedIds = new Set(command.nodeIds);
     if (movedIds.size === 0 || !workflow.nodes.some(node => movedIds.has(node.id))) return noChange(workflow);
@@ -286,11 +318,11 @@ export function reduceWorkflowEditorState(
     };
   }
   if (transition.kind === 'system.update') {
-    const workflow = transition.update(state.workflow);
+    const workflow = transition.workflow;
     return workflow === state.workflow ? state : { ...state, workflow };
   }
   if (transition.kind === 'user.update') {
-    const workflow = transition.update(state.workflow);
+    const workflow = transition.workflow;
     if (workflow === state.workflow) return state;
     const historyEntry = { transactionId: transition.transactionId, before: state.workflow, after: workflow };
     return {
@@ -300,7 +332,7 @@ export function reduceWorkflowEditorState(
     };
   }
 
-  const result = applyWorkflowCommand(transition.baseWorkflow ?? state.workflow, transition.command);
+  const result = applyWorkflowCommand(state.workflow, transition.command);
   if (transition.command.type === 'workflow.hydrate') {
     return {
       workflow: result.workflow,

@@ -168,29 +168,46 @@ describe('WorkflowReactFlowSurface', () => {
     expect(markup).toContain('data-in-sync="false"');
   });
 
-  it('translates React Flow moves and connections into controlled workflow commands', () => {
+  it('translates React Flow group drag, viewport, and connections into controlled host updates', () => {
     const workflow = createEmptyWorkflow('commands');
     const source = createWorkflowNode('input-text', 0, 0, 'Prompt');
     const target = createWorkflowNode('ai-generate', 240, 0, 'Generate');
     workflow.nodes = [source, target];
     const onCommand = vi.fn();
+    let hostModel = projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 }, new Set([source.id, target.id]));
     const handlers = createReactFlowCommandHandlers(
-      projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 }),
+      hostModel,
       onCommand,
+      viewport => { hostModel = { ...hostModel, viewport }; },
     );
 
-    handlers.moveNode(source.id, { x: 32, y: 12 }, 'flow-drag');
+    handlers.commitNodeDrag([
+      { id: source.id, position: { x: 32, y: 12 } },
+      { id: target.id, position: { x: 272, y: 12 } },
+    ], 'flow-drag');
+    handlers.updateViewport({ x: -120, y: 48, zoom: 1.5 });
     handlers.createConnection({
       source: source.id, sourceHandle: 'out-prompt', target: target.id, targetHandle: 'in-prompt',
     }, 'flow-connect');
 
     expect(onCommand).toHaveBeenNthCalledWith(1, {
-      type: 'nodes.move', nodeIds: [source.id], delta: { x: 32, y: 12 }, transactionId: 'flow-drag',
+      type: 'nodes.drag.commit',
+      initialPositions: [
+        { nodeId: source.id, position: { x: 0, y: 0 } },
+        { nodeId: target.id, position: { x: 240, y: 0 } },
+      ],
+      positions: [
+        { nodeId: source.id, position: { x: 32, y: 12 } },
+        { nodeId: target.id, position: { x: 272, y: 12 } },
+      ],
+      transactionId: 'flow-drag',
     });
     expect(onCommand).toHaveBeenNthCalledWith(2, expect.objectContaining({
       type: 'connection.create', transactionId: 'flow-connect',
       connection: expect.objectContaining({ type: 'prompt', fromPortId: 'out-prompt', toPortId: 'in-prompt' }),
     }));
+    expect(hostModel.viewport).toEqual({ x: -120, y: 48, zoom: 1.5 });
+    expect(reactFlowSurfaceSource).toContain('onViewportChange=');
   });
 
   it('uses the full product card and status/control/accessibility contract', () => {

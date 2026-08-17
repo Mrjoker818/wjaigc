@@ -25,8 +25,8 @@ describe('node editor history baseline', () => {
   });
 
   it('commits drag end, copy, delete, and connect through the command dispatcher', () => {
-    expect(source).toContain('nodeDragStartWorkflowRef');
-    expect(source).toContain("type: 'nodes.move'");
+    expect(source).toContain('nodeDragInitialPositionsRef');
+    expect(source).toContain("type: 'nodes.drag.commit'");
     expect(source).toContain("type: 'clipboard.paste'");
     expect(source).toContain("type: 'nodes.delete'");
     expect(source).toContain("type: 'connection.create'");

@@ -846,6 +846,9 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
     workflow || createEmptyWorkflow('新工作流'),
     createWorkflowEditorState,
   );
+  const wf = workflowEditorState.workflow;
+  const wfRef = useRef(wf);
+  wfRef.current = wf;
   const editorTransactionCounterRef = useRef(0);
   const [nodePromptPresets, setNodePromptPresets] = useState<{ id: string; name: string; text: string }[]>(() => {
     try {
@@ -864,20 +867,25 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
     }, 500);
   }, []);
   const updateWorkflow = useCallback((updater: WorkflowData | ((prev: WorkflowData) => WorkflowData)) => {
+    const current = wfRef.current;
+    const next = typeof updater === 'function' ? updater(current) : updater;
+    if (next === current) return;
+    wfRef.current = next;
     dispatchWorkflowEditorTransition({
       kind: 'user.update',
-      update: typeof updater === 'function' ? updater : () => updater,
+      workflow: next,
       transactionId: `editor-change:${++editorTransactionCounterRef.current}`,
     });
   }, []);
   const updateWorkflowSystem = useCallback((updater: (prev: WorkflowData) => WorkflowData) => {
-    dispatchWorkflowEditorTransition({ kind: 'system.update', update: updater });
+    const workflow = updater(wfRef.current);
+    if (workflow === wfRef.current) return;
+    wfRef.current = workflow;
+    dispatchWorkflowEditorTransition({ kind: 'system.update', workflow });
   }, []);
-  const dispatchWorkflowStateCommand = useCallback((
-    command: WorkflowInteractionCommand,
-    baseWorkflow?: WorkflowData,
-  ) => {
-    dispatchWorkflowEditorTransition({ kind: 'command', command, baseWorkflow });
+  const dispatchWorkflowStateCommand = useCallback((command: WorkflowInteractionCommand) => {
+    wfRef.current = applyWorkflowCommand(wfRef.current, command).workflow;
+    dispatchWorkflowEditorTransition({ kind: 'command', command });
   }, []);
   const saveNodePromptPreset = useCallback((name: string, text: string) => {
     if (!name.trim() || !text.trim()) return;
@@ -894,9 +902,6 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
       return next;
     });
   }, []);
-  const wf = workflowEditorState.workflow;
-  const wfRef = useRef(wf);
-  wfRef.current = wf;
   const lastBroadcastRevisionRef = useRef(workflowEditorState.broadcastRevision);
   useEffect(() => {
     if (lastBroadcastRevisionRef.current === workflowEditorState.broadcastRevision) return;
@@ -929,7 +934,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   // 拖动状态使用ref避免每次mousemove触发重渲染导致闪烁
   const draggingNodeRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
-  const nodeDragStartWorkflowRef = useRef<WorkflowData | null>(null);
+  const nodeDragInitialPositionsRef = useRef<Array<{ nodeId: string; position: { x: number; y: number } }>>([]);
   const nodeDragPositionRef = useRef<{ id: string; x: number; y: number } | null>(null);
   const nodeDragRafRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false); // 标记正在拖动，跳过历史快照
@@ -1173,15 +1178,16 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
                 }
                 // 在选中节点右侧创建新节点
                 const newNode = createWorkflowNode(newNodeType, node.x + node.width + 80, node.y);
-                updateWorkflow(prev => {
-                  // 自动连线：选中节点输出 → 新节点输入
-                  const selOutPort = node.ports.find(p => p.direction === 'out');
-                  const newInPort = newNode.ports.find(p => p.direction === 'in');
-                  const autoConn = (selOutPort && newInPort && canConnectPorts(selOutPort.type, newInPort.type))
-                    ? [createConnection(node.id, selOutPort.id, newNode.id, newInPort.id, selOutPort.type)]
-                    : [];
-                  return { ...prev, nodes: [...prev.nodes, newNode], connections: [...prev.connections, ...autoConn] };
-                });
+                const selOutPort = node.ports.find(p => p.direction === 'out');
+                const newInPort = newNode.ports.find(p => p.direction === 'in');
+                const autoConn = (selOutPort && newInPort && canConnectPorts(selOutPort.type, newInPort.type))
+                  ? [createConnection(node.id, selOutPort.id, newNode.id, newInPort.id, selOutPort.type)]
+                  : [];
+                updateWorkflow(prev => ({
+                  ...prev,
+                  nodes: [...prev.nodes, newNode],
+                  connections: [...prev.connections, ...autoConn],
+                }));
                 setSelectedNodeIds(new Set([newNode.id]));
                 operationResult = `已添加新节点 [${NODE_TYPE_LABELS[newNodeType] || newNodeType}] 并自动连线，可在右侧属性面板编辑配置。`;
                 break;
@@ -1649,41 +1655,41 @@ ${contextInfo}
           return on;
         })()
       : null;
-    updateWorkflow(prev => {
-      const autoConns: WorkflowConnection[] = [];
-      // 生图节点 → 自动输出节点连线
-      if (outputNode) {
-        const genOutPort = node.ports.find(p => p.direction === 'out' && p.type === 'image');
-        const outInPort = outputNode.ports.find(p => p.direction === 'in' && p.type === 'image');
-        if (genOutPort && outInPort) {
-          autoConns.push(createConnection(node.id, genOutPort.id, outputNode.id, outInPort.id, 'image'));
-        }
+    const currentWorkflow = wfRef.current;
+    const autoConns: WorkflowConnection[] = [];
+    // 生图节点 → 自动输出节点连线
+    if (outputNode) {
+      const genOutPort = node.ports.find(p => p.direction === 'out' && p.type === 'image');
+      const outInPort = outputNode.ports.find(p => p.direction === 'in' && p.type === 'image');
+      if (genOutPort && outInPort) {
+        autoConns.push(createConnection(node.id, genOutPort.id, outputNode.id, outInPort.id, 'image'));
       }
-      // P2: 拖拽自动连线 — 如果有选中节点，尝试自动连线
-      const selectedNodes = prev.nodes.filter(n => selectedNodeIds.has(n.id));
-      if (selectedNodes.length > 0) {
-        for (const selNode of selectedNodes) {
-          // 选中节点的输出端口 → 新节点的输入端口
-          const selOutPorts = selNode.ports.filter(p => p.direction === 'out');
-          const newInPorts = node.ports.filter(p => p.direction === 'in');
-          for (const outP of selOutPorts) {
-            for (const inP of newInPorts) {
-              if (canConnectPorts(outP.type, inP.type)) {
-                const exists = prev.connections.some(c =>
-                  c.fromNodeId === selNode.id && c.fromPortId === outP.id &&
-                  c.toNodeId === node.id && c.toPortId === inP.id
-                );
-                if (!exists) {
-                  autoConns.push(createConnection(selNode.id, outP.id, node.id, inP.id, outP.type));
-                  break; // 每对节点只连一条
-                }
+    }
+    // P2: 拖拽自动连线 — 如果有选中节点，尝试自动连线
+    const selectedNodes = currentWorkflow.nodes.filter(n => selectedNodeIds.has(n.id));
+    if (selectedNodes.length > 0) {
+      for (const selNode of selectedNodes) {
+        const selOutPorts = selNode.ports.filter(p => p.direction === 'out');
+        const newInPorts = node.ports.filter(p => p.direction === 'in');
+        for (const outP of selOutPorts) {
+          for (const inP of newInPorts) {
+            if (canConnectPorts(outP.type, inP.type)) {
+              const exists = currentWorkflow.connections.some(c =>
+                c.fromNodeId === selNode.id && c.fromPortId === outP.id &&
+                c.toNodeId === node.id && c.toPortId === inP.id
+              );
+              if (!exists) {
+                autoConns.push(createConnection(selNode.id, outP.id, node.id, inP.id, outP.type));
+                break;
               }
             }
-            if (autoConns.length > 0) break;
           }
-          if (autoConns.length > 0) break; // 只连接第一个选中节点
+          if (autoConns.length > 0) break;
         }
+        if (autoConns.length > 0) break;
       }
+    }
+    updateWorkflow(prev => {
       const newNodes = outputNode ? [node, outputNode] : [node];
       return { ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...autoConns] };
     });
@@ -1963,13 +1969,14 @@ ${contextInfo}
     // 创建新的源节点
     const sourceNode = createWorkflowNode('input-image', node.x - 280, node.y);
     sourceNode.config = { ...sourceNode.config, imageUrl, label: '源图' };
+    const sourceConnection = createConnection(sourceNode.id, 'output-image', nodeId, 'input-image', 'image');
     // 清空当前节点的图片
     handleNodeUpdate(nodeId, { config: { ...node.config, imageUrl: '', label: '输出' } });
     // 添加源节点和连线
     updateWorkflow(prev => ({
       ...prev,
       nodes: [...prev.nodes, sourceNode],
-      connections: [...prev.connections, createConnection(sourceNode.id, 'output-image', nodeId, 'input-image', 'image')],
+      connections: [...prev.connections, sourceConnection],
     }));
   }, [wf.nodes, handleNodeUpdate, updateWorkflow]);
 
@@ -2216,24 +2223,22 @@ ${contextInfo}
     setIsPanning(false);
     if (draggingNodeRef.current) {
       const finalPosition = nodeDragPositionRef.current;
-      const dragStartWorkflow = nodeDragStartWorkflowRef.current;
       if (nodeDragRafRef.current !== null) {
         cancelAnimationFrame(nodeDragRafRef.current);
         nodeDragRafRef.current = null;
       }
       nodeDragPositionRef.current = null;
-      nodeDragStartWorkflowRef.current = null;
       draggingNodeRef.current = null;
       isDraggingRef.current = false;
-      const startNode = dragStartWorkflow?.nodes.find(node => node.id === finalPosition?.id);
-      if (dragStartWorkflow && startNode && finalPosition) {
+      if (finalPosition && nodeDragInitialPositionsRef.current.length > 0) {
         dispatchWorkflowStateCommand({
-          type: 'nodes.move',
-          nodeIds: [finalPosition.id],
-          delta: { x: finalPosition.x - startNode.x, y: finalPosition.y - startNode.y },
+          type: 'nodes.drag.commit',
+          initialPositions: nodeDragInitialPositionsRef.current,
+          positions: [{ nodeId: finalPosition.id, position: { x: finalPosition.x, y: finalPosition.y } }],
           transactionId: `legacy-node-drag:${finalPosition.id}:${++editorTransactionCounterRef.current}`,
-        }, dragStartWorkflow);
+        });
       }
+      nodeDragInitialPositionsRef.current = [];
       // 让外部同步由 effect 在本次拖拽状态提交后执行，避免在状态更新器中触发父组件更新。
       setWorkflowSyncRevision(revision => revision + 1);
     }
@@ -2896,7 +2901,7 @@ ${contextInfo}
       const mouseX = (event.clientX - canvasRect.left - currentViewport.x) / currentViewport.zoom;
       const mouseY = (event.clientY - canvasRect.top - currentViewport.y) / currentViewport.zoom;
       draggingNodeRef.current = nodeId;
-      nodeDragStartWorkflowRef.current = wfRef.current;
+      nodeDragInitialPositionsRef.current = [{ nodeId, position: { x: node.x, y: node.y } }];
       nodeDragPositionRef.current = { id: nodeId, x: node.x, y: node.y };
       dragOffsetRef.current = { x: mouseX - node.x, y: mouseY - node.y };
       isDraggingRef.current = true;
@@ -3118,6 +3123,7 @@ ${contextInfo}
             <WorkflowReactFlowSurface
               model={reactFlowWorkflowRenderModel}
               onCommand={handleWorkflowRenderCommand}
+              onViewportChange={setViewport}
               readOnly={false}
               theme={T}
               execResults={execResults}

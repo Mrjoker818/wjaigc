@@ -12,9 +12,17 @@ describe('node editor drag throttling', () => {
     expect(source).toContain('const applyNodeDragPosition = useCallback');
     expect(source).toContain('if (nodeDragRafRef.current === null)');
     expect(source).toContain('const finalPosition = nodeDragPositionRef.current');
-    expect(source).toContain("type: 'nodes.move'");
-    expect(source).toContain('}, dragStartWorkflow);');
+    expect(source).toContain("type: 'nodes.drag.commit'");
+    expect(source).toContain('initialPositions: nodeDragInitialPositionsRef.current');
+    expect(source).not.toContain('}, dragStartWorkflow);');
     expect(source).not.toContain('applyNodeDragPosition(nodeDragPositionRef.current)');
+  });
+
+  it('precomputes nondeterministic workflow values before reducer dispatch', () => {
+    const updateBlocks = [...source.matchAll(/updateWorkflow\(prev => \{([\s\S]*?)\n\s*\}\);/g)]
+      .map(match => match[1]);
+
+    expect(updateBlocks.join('\n')).not.toMatch(/createConnection\(|Date\.now\(|Math\.random\(/);
   });
 
   it('uses compositor previews and viewport culling for pan-heavy workflows', () => {
