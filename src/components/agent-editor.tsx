@@ -76,6 +76,11 @@ function pendingAttemptStorageKey(scopeKey: string): string | null {
   return scopeKey.replace(/^wujie_agent_run:/, 'wujie_agent_attempt:');
 }
 
+function legacyTaskStorageKey(scopeKey: string): string | null {
+  if (scopeKey === 'unscoped') return null;
+  return scopeKey.replace(/^wujie_agent_run:/, 'wujie_agent_legacy_task:');
+}
+
 function isPendingAgentAttempt(value: unknown): value is PendingAgentAttempt {
   if (!value || typeof value !== 'object') return false;
   const record = value as Partial<PendingAgentAttempt>;
@@ -252,6 +257,38 @@ export function AgentEditor({
     });
   }, [runScopeKey, runStorageKey]);
   useEffect(() => {
+    const storageKey = legacyTaskStorageKey(runScopeKey);
+    if (!storageKey || !runStorageKey || typeof localStorage === 'undefined') return;
+    let storedTaskId: string | null = null;
+    try {
+      if (localStorage.getItem(runStorageKey)) return;
+      storedTaskId = localStorage.getItem(storageKey);
+      if (storedTaskId && (storedTaskId.length > 256 || /\s/.test(storedTaskId))) {
+        localStorage.removeItem(storageKey);
+        return;
+      }
+    } catch {
+      return;
+    }
+    if (!storedTaskId) return;
+    setAgentTaskStatesByScope(current => {
+      const existing = current[runScopeKey];
+      if (existing?.taskId) return current;
+      return {
+        ...current,
+        [runScopeKey]: {
+          ...(existing || EMPTY_AGENT_TASK_STATE),
+          taskId: storedTaskId,
+          isProcessing: true,
+          progress: 5,
+          progressLabel: '正在恢复任务...',
+          startedAt: Date.now(),
+          completedAt: null,
+        },
+      };
+    });
+  }, [runScopeKey, runStorageKey]);
+  useEffect(() => {
     const storageKey = pendingAttemptStorageKey(runScopeKey);
     let hydrationStatus: AttemptHydrationStatus = 'failed';
     if (storageKey && typeof localStorage !== 'undefined') {
@@ -330,6 +367,21 @@ export function AgentEditor({
     const storageKey = pendingAttemptStorageKey(scopeKey);
     if (!storageKey || typeof localStorage === 'undefined') return;
     try { localStorage.removeItem(storageKey); } catch { /* ignore unavailable browser storage */ }
+  }, []);
+  const persistAcceptedTaskIdentity = useCallback((scopeKey: string, tid: string, sharedRunId: string | null) => {
+    const legacyStorageKey = legacyTaskStorageKey(scopeKey);
+    if (!legacyStorageKey || typeof localStorage === 'undefined') return;
+    try {
+      if (sharedRunId) {
+        localStorage.removeItem(legacyStorageKey);
+        localStorage.setItem(scopeKey, sharedRunId);
+      } else {
+        localStorage.removeItem(scopeKey);
+        localStorage.setItem(legacyStorageKey, tid);
+      }
+    } catch {
+      // The pending-attempt identity still prevents duplicate submission if recovery storage fails.
+    }
   }, []);
 
   useEffect(() => {
@@ -419,6 +471,24 @@ export function AgentEditor({
 
     try {
       const resp = await fetch(`/api/agent-edit?taskId=${encodeURIComponent(tid)}`);
+      if (activePollScopeKey.current !== scopeKey || activePollTaskId.current !== tid) return;
+      if (resp.status === 404) {
+        const legacyStorageKey = legacyTaskStorageKey(scopeKey);
+        if (legacyStorageKey && typeof localStorage !== 'undefined') {
+          try {
+            if (localStorage.getItem(legacyStorageKey) === tid) localStorage.removeItem(legacyStorageKey);
+          } catch { /* the UI still stops the stale recovery loop */ }
+        }
+        activePollTaskId.current = null;
+        updateTaskStateForScope(scopeKey, {
+          isProcessing: false,
+          progress: 0,
+          progressLabel: '',
+          error: '任务不存在或无权访问',
+          completedAt: Date.now(),
+        });
+        return;
+      }
       if (!resp.ok) throw new Error('poll failed');
 
       if (activePollScopeKey.current !== scopeKey || activePollTaskId.current !== tid) return;
@@ -489,6 +559,7 @@ export function AgentEditor({
     setResultPrompt,
     setSteps,
     updateTaskState,
+    updateTaskStateForScope,
     clearAttemptKey,
   ]);
 
@@ -597,8 +668,12 @@ export function AgentEditor({
         && data.replayed === true
         && ['completed', 'failed', 'cancelled', 'timeout'].includes(terminalStatus);
       if (terminalReplay) {
+        const replayTaskId = typeof data.taskId === 'string' ? data.taskId : null;
+        const replayRunId = typeof data.runId === 'string' && data.runId ? data.runId : null;
+        setAgentRunIdForScope(submissionScopeKey, replayRunId);
+        if (replayTaskId) persistAcceptedTaskIdentity(submissionScopeKey, replayTaskId, replayRunId);
         updateTaskStateForScope(submissionScopeKey, {
-          taskId: typeof data.taskId === 'string' ? data.taskId : null,
+          taskId: replayTaskId,
           isProcessing: false,
           progress: 100,
           progressLabel: terminalReplayMessage(terminalStatus, String(data.error || '')),
@@ -624,8 +699,10 @@ export function AgentEditor({
       }
 
       const tid = String(data.taskId || '');
-      setAgentRunIdForScope(submissionScopeKey, typeof data.runId === 'string' && data.runId ? data.runId : null);
+      const sharedRunId = typeof data.runId === 'string' && data.runId ? data.runId : null;
+      setAgentRunIdForScope(submissionScopeKey, sharedRunId);
       if (tid) {
+        persistAcceptedTaskIdentity(submissionScopeKey, tid, sharedRunId);
         updateTaskStateForScope(submissionScopeKey, {
           taskId: tid,
           isProcessing: true,

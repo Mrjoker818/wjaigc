@@ -2163,3 +2163,77 @@ pnpm ts-check
 
 - The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
   staged or committed.
+
+## R20 - Runtime-mode recovery and replay identity repair
+
+### Root cause and RED evidence
+
+- The Stage 4 browser test previously asserted shared Agent UI while the
+  application intentionally ran in `shadow`. The test now requires an explicit
+  `E2E_STAGE4_EXPECTED_AGENT_MODE` and proves the distinct shadow and agent-v2
+  contracts instead of allowing either path to pass accidentally.
+- Five review rounds exposed and reproduced the remaining recovery edges:
+  shadow refresh did not prove the real legacy UI; shadow events were not an
+  exact final set; adopted terminal replay lost `runId`; stale shared identity
+  overrode a rollback legacy task; legacy 404 recovery could loop; an A-scope
+  delayed 404 could interrupt B; and an event-store outage could incorrectly
+  settle/refund a reused processing task.
+- Each implementation change followed a controlled failing test. The final P0
+  reproduction proved a reused `processing / charged` task became
+  `failed / refunded` before the replay-state error bypass was added.
+
+### Design and implementation
+
+- AgentEditor persists exactly one accepted identity per image scope: shared
+  `runId` for agent-v2 or legacy `taskId` for legacy/shadow. Accepting one
+  removes the other, and refresh recovery reopens the corresponding real UI.
+- Legacy polling validates the active scope and task before handling every
+  response, including 404. A current-scope definitive 404 clears only its
+  matching legacy key and stops; a delayed response from another image is
+  ignored.
+- Adopted completed, failed, cancelled, and timeout replays resolve the exact
+  shared run from durable `run.created(adopted=true)` evidence. Event-store
+  failure returns `AGENT_REPLAY_STATE_UNAVAILABLE` (503) and never falls back
+  to legacy identity.
+- Replay-state 503 exits before terminal settlement, refund, provider submit,
+  or background scheduling, so an existing processing task remains untouched.
+- Shadow E2E seeds a stale shared key, proves legacy UI and storage, cancels,
+  refreshes and reopens AgentEditor, then rechecks the database still contains
+  exactly two observed events. Agent-v2 proves shared storage and the absence
+  of the same-scope legacy key.
+
+### Verification before commit
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot --silent
+# 2 files / 62 tests passed.
+
+$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable'; pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot
+# 2 files / 24 tests passed.
+
+pnpm ts-check
+pnpm lint -- --quiet
+pnpm build
+pnpm check:protected-baseline
+git diff --check
+# All passed; protected baseline retained 38/38 feature IDs.
+
+# Fresh isolated PostgreSQL databases and the rebuilt production server:
+# shadow Chromium 1/1; agent-v2 Chromium 1/1.
+```
+
+### Independent review
+
+- Rounds 1-4 returned actionable recovery, false-positive, event-store, and
+  settlement findings. All were reproduced before repair.
+- Round 5 verdict: `APPROVED`, Critical 0 / Important 0 / Minor 0.
+
+### R20 changed files
+
+- Production: `src/components/agent-editor.tsx` and
+  `src/app/api/agent-edit/route.ts`.
+- Tests: `src/__tests__/components/agent-editor-run-scope.test.tsx`,
+  `src/__tests__/api/agent-edit-production-recovery.test.ts`, and
+  `tests/e2e/stage-4-node-chat-agent.spec.ts`.
+- Evidence: this report. Controller-owned Task 1 and Task 2 briefs remain
+  dirty and are excluded from staging and commit.

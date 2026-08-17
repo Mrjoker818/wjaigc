@@ -303,6 +303,155 @@ describe('AgentEditor selected-image run scope', () => {
     expect(storage.writes).not.toContainEqual(['wujie_agent_run:project-1:image-b', 'run-a']);
   });
 
+  it('recovers a legacy task terminal from its scoped task identity after refresh', async () => {
+    const storage = storageHarness([
+      ['wujie_agent_legacy_task:project-1:image-a', 'legacy-task-a'],
+    ]);
+    vi.stubGlobal('localStorage', storage);
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (url === '/api/agent-edit?taskId=legacy-task-a') {
+        return Promise.resolve(Response.json({
+          status: 'cancelled',
+          durableTerminal: true,
+          progress: 0,
+          label: 'Task cancelled',
+          error: 'Task cancelled by user',
+        }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-a');
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input)))
+      .toContain('/api/agent-edit?taskId=legacy-task-a');
+    expect(elementHasText(lastTree, '任务已取消')).toBe(true);
+    expect(storage.getItem('wujie_agent_run:project-1:image-a')).toBeNull();
+    expect(observedRunIds).toHaveBeenLastCalledWith(null);
+  });
+
+  it('persists an accepted legacy task under the selected image scope', async () => {
+    const storage = storageHarness([]);
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (url === '/api/agent-edit' && init?.method === 'POST') {
+        return Promise.resolve(Response.json({ taskId: 'legacy-task-a' }));
+      }
+      if (url === '/api/agent-edit?taskId=legacy-task-a') {
+        return Promise.resolve(Response.json({ status: 'processing', progress: 25, label: '处理中' }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-a');
+
+    expect(storage.getItem('wujie_agent_legacy_task:project-1:image-a')).toBe('legacy-task-a');
+    expect(storage.getItem('wujie_agent_run:project-1:image-a')).toBeNull();
+  });
+
+  it('replaces a stale shared run identity when a rollback accepts a new legacy task', async () => {
+    const storage = storageHarness([
+      ['wujie_agent_run:project-1:image-a', 'old-shared-run'],
+    ]);
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (url === '/api/agent-edit' && init?.method === 'POST') {
+        return Promise.resolve(Response.json({ taskId: 'new-legacy-task' }));
+      }
+      if (url === '/api/agent-edit?taskId=new-legacy-task') {
+        return Promise.resolve(Response.json({ status: 'processing', progress: 25, label: '处理中' }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-a');
+
+    expect(storage.getItem('wujie_agent_run:project-1:image-a')).toBeNull();
+    expect(storage.getItem('wujie_agent_legacy_task:project-1:image-a')).toBe('new-legacy-task');
+    expect(observedRunIds).toHaveBeenLastCalledWith(null);
+  });
+
+  it('stops recovering and clears a stale legacy task identity after a definitive 404', async () => {
+    const storage = storageHarness([
+      ['wujie_agent_legacy_task:project-1:image-a', 'missing-legacy-task'],
+    ]);
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (url === '/api/agent-edit?taskId=missing-legacy-task') {
+        return Promise.resolve(Response.json({ error: 'not found' }, { status: 404 }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    renderEditor('image-a');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-a');
+
+    expect(storage.getItem('wujie_agent_legacy_task:project-1:image-a')).toBeNull();
+    expect(elementHasText(lastTree, '任务不存在或无权访问')).toBe(true);
+    expect(elementHasText(lastTree, '取消')).toBe(false);
+  });
+
+  it('ignores a delayed 404 from image A without interrupting image B recovery', async () => {
+    const storage = storageHarness([
+      ['wujie_agent_legacy_task:project-1:image-a', 'missing-task-a'],
+      ['wujie_agent_legacy_task:project-1:image-b', 'task-b'],
+    ]);
+    vi.stubGlobal('localStorage', storage);
+    let resolveA!: (response: Response) => void;
+    let resolveB!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (url === '/api/agent-edit?taskId=missing-task-a') {
+        return new Promise<Response>(resolve => { resolveA = resolve; });
+      }
+      if (url === '/api/agent-edit?taskId=task-b') {
+        return new Promise<Response>(resolve => { resolveB = resolve; });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    renderEditor('image-a');
+    await Promise.resolve();
+    renderEditor('image-b');
+    await Promise.resolve();
+
+    resolveA(Response.json({ error: 'not found' }, { status: 404 }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-b');
+
+    resolveB(Response.json({
+      status: 'completed',
+      progress: 100,
+      label: '完成',
+      result: { imageUrl: '/results/image-b.png', prompt: 'B result' },
+    }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-b');
+
+    expect(storage.getItem('wujie_agent_legacy_task:project-1:image-a')).toBe('missing-task-a');
+    expect(storage.getItem('wujie_agent_legacy_task:project-1:image-b')).toBe('task-b');
+    expect(elementHasProp(lastTree, 'src', '/results/image-b.png')).toBe(true);
+  });
+
   it('detaches an active image A task so its polling, progress, cancellation, and result cannot leak into image B', async () => {
     const storage = storageHarness([]);
     vi.stubGlobal('localStorage', storage);
@@ -747,6 +896,35 @@ describe('AgentEditor selected-image run scope', () => {
     renderEditor('image-a');
 
     expect(storedAttemptKey(storage, 'project-1:image-a')).toBeNull();
+    expect(elementHasText(lastTree, '任务已取消')).toBe(true);
+  });
+
+  it('restores an adopted agent-v2 terminal replay through the shared run identity', async () => {
+    const storage = storageHarness([]);
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (String(input) === '/api/agent-edit' && init?.method === 'POST') {
+        return Promise.resolve(Response.json({
+          success: false,
+          code: 'AGENT_TASK_TERMINAL',
+          taskId: 'task-a',
+          runId: 'task-a',
+          status: 'cancelled',
+          replayed: true,
+        }, { status: 409 }));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    }));
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-a');
+
+    expect(storage.getItem('wujie_agent_legacy_task:project-1:image-a')).toBeNull();
+    expect(storage.getItem('wujie_agent_run:project-1:image-a')).toBe('task-a');
+    expect(observedRunIds).toHaveBeenLastCalledWith('task-a');
     expect(elementHasText(lastTree, '任务已取消')).toBe(true);
   });
 

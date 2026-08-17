@@ -34,6 +34,7 @@ const state = vi.hoisted(() => ({
     | 'video-retryable-poll' | 'chat-provider-rejection' | 'sync-image-edit-rejection'
     | 'generate-image-rejection',
   childCounter: 0,
+  eventReadFailure: false,
 }));
 
 const fixtures = vi.hoisted(() => ({
@@ -344,9 +345,10 @@ vi.mock('@/lib/agent-runtime/event-storage', () => ({
     return { event, inserted: true };
   }),
   observeAdoptedAgentTaskTerminal: vi.fn().mockResolvedValue([]),
-  listAgentEventsForActor: vi.fn(async ({ runId }: { runId: string }) => (
-    state.events.filter(event => event.runId === runId)
-  )),
+  listAgentEventsForActor: vi.fn(async ({ runId }: { runId: string }) => {
+    if (state.eventReadFailure) throw new Error('controlled event store outage');
+    return state.events.filter(event => event.runId === runId);
+  }),
   claimAdoptedAgentExecution: vi.fn(async () => {
     if (state.parentLeaseClaimed || state.parentLeaseCompleted) return { claimed: false, leaseOwner: '' };
     state.parentLeaseClaimed = true;
@@ -638,6 +640,7 @@ describe('Agent route default-adapter production recovery', () => {
     state.pollResponses.length = 0; state.acceptanceWriteAttempts = 0;
     state.crashPollTaskId = ''; state.crashedPoll = false; state.transientPollDelivered = false;
     state.plan = 'multi-step'; state.childCounter = 0;
+    state.eventReadFailure = false;
     process.env.WUJIE_TASK_CORE_MODE = 'core-v2';
     process.env.WUJIE_AGENT_RUNTIME_MODE = 'agent-v2';
     vi.stubGlobal('fetch', vi.fn(dispatchFetch));
@@ -672,6 +675,82 @@ describe('Agent route default-adapter production recovery', () => {
     await expect(response.json()).resolves.toMatchObject({ success: true, status: 'cancelled' });
     expect(state.tasks.get('persisted-agent-task')).toMatchObject({ status: 'cancelled' });
     expect(state.parentTerminalCalls).toBe(1);
+  });
+
+  it('fails closed when adopted terminal replay identity cannot be resolved', async () => {
+    const idempotencyKey = 'terminal-replay-event-store-outage';
+    const taskId = 'adopted-terminal-event-store-outage';
+    state.taskByIdempotency.set(idempotencyKey, taskId);
+    state.tasks.set(taskId, {
+      id: taskId,
+      userId: fixtures.user.id,
+      projectId: 'project-route',
+      type: 'agent-edit',
+      status: 'cancelled',
+      progress: 100,
+      creditStatus: 'charged',
+    });
+    state.events.push({
+      eventId: `${taskId}:created`,
+      runId: taskId,
+      type: 'run.created',
+      payload: { adopted: true },
+    });
+    state.eventReadFailure = true;
+
+    const response = await agentPost(agentRequest(idempotencyKey) as never);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      code: 'AGENT_REPLAY_STATE_UNAVAILABLE',
+    });
+    expect(state.afterCallbacks).toHaveLength(0);
+    expect(state.parentCharges).toBe(0);
+    expect(state.tasks.get(taskId)).toMatchObject({ status: 'cancelled' });
+  });
+
+  it('does not settle or refund a reused processing task when replay identity lookup fails', async () => {
+    const idempotencyKey = 'processing-replay-event-store-outage';
+    const taskId = 'adopted-processing-event-store-outage';
+    state.taskByIdempotency.set(idempotencyKey, taskId);
+    state.tasks.set(taskId, {
+      id: taskId,
+      userId: fixtures.user.id,
+      projectId: 'project-route',
+      type: 'agent-edit',
+      status: 'processing',
+      progress: 45,
+      creditStatus: 'charged',
+      creditCost: 7,
+    });
+    state.events.push({
+      eventId: `${taskId}:created`,
+      runId: taskId,
+      type: 'run.created',
+      payload: { adopted: true },
+    });
+    state.eventReadFailure = true;
+
+    const response = await agentPost(agentRequest(idempotencyKey) as never);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      code: 'AGENT_REPLAY_STATE_UNAVAILABLE',
+    });
+    expect(state.tasks.get(taskId)).toMatchObject({
+      status: 'processing',
+      progress: 45,
+      creditStatus: 'charged',
+    });
+    expect(state.parentTerminalCalls).toBe(0);
+    expect(state.parentRefunds).toBe(0);
+    expect(state.parentCharges).toBe(0);
+    expect(state.externalSubmits).toHaveLength(0);
+    expect(state.internalSubmits).toHaveLength(0);
+    expect(state.chatSubmits).toHaveLength(0);
+    expect(state.afterCallbacks).toHaveLength(0);
   });
 
   it.each(['queued', 'pending', 'processing'])('durably cancels a persisted %s task for its owner', async status => {
@@ -1245,7 +1324,7 @@ describe('Agent route default-adapter production recovery', () => {
     expect(late.every(replay => replay.status === 409)).toBe(true);
     expect(new Set(late.map(replay => JSON.stringify(replay.body))).size).toBe(1);
     expect(late[0].body).toMatchObject({
-      success: false, code: 'AGENT_TASK_TERMINAL', taskId, status: 'failed', replayed: true,
+      success: false, code: 'AGENT_TASK_TERMINAL', taskId, runId: taskId, status: 'failed', replayed: true,
     });
     expect(state.chatSubmits).toHaveLength(1);
     expect(state.parentRefunds).toBe(1);
@@ -1282,7 +1361,7 @@ describe('Agent route default-adapter production recovery', () => {
     expect(late.every(replay => replay.status === 409)).toBe(true);
     expect(new Set(late.map(replay => JSON.stringify(replay.body))).size).toBe(1);
     expect(late[0].body).toMatchObject({
-      success: false, code: 'AGENT_TASK_TERMINAL', taskId, status: 'failed', replayed: true,
+      success: false, code: 'AGENT_TASK_TERMINAL', taskId, runId: taskId, status: 'failed', replayed: true,
     });
     expect(state.externalSubmits).toHaveLength(1);
     expect(state.parentRefunds).toBe(1);
@@ -1320,7 +1399,7 @@ describe('Agent route default-adapter production recovery', () => {
     expect(late.every(replay => replay.status === 409)).toBe(true);
     expect(new Set(late.map(replay => JSON.stringify(replay.body))).size).toBe(1);
     expect(late[0].body).toMatchObject({
-      success: false, code: 'AGENT_TASK_TERMINAL', taskId, status: 'failed', replayed: true,
+      success: false, code: 'AGENT_TASK_TERMINAL', taskId, runId: taskId, status: 'failed', replayed: true,
     });
     expect(state.submitOnlyCalls).toHaveLength(1);
     expect(state.externalSubmits).toHaveLength(1);

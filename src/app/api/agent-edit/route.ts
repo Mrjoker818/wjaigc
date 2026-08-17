@@ -35,6 +35,7 @@ import { getRequestId } from '@/lib/request-id';
 import { buildAgentEditRequest, parseBoundedAgentSurfaceBody } from '@/lib/agent-runtime/surface-requests';
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
+import { listAgentEventsForActor } from '@/lib/agent-runtime/event-storage';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
 import { resolveSelectedAgentMediaUrl } from '@/lib/agent-runtime/context-adapters';
 import { submitAgentImageProviderRequest } from '@/lib/agent-runtime/provider-submission';
@@ -71,8 +72,39 @@ class AgentMediaUrlMismatchError extends Error {
   }
 }
 
+class AgentReplayStateUnavailableError extends Error {
+  readonly code = 'AGENT_REPLAY_STATE_UNAVAILABLE';
+  readonly status = 503;
+
+  constructor(options?: ErrorOptions) {
+    super('Agent replay state is temporarily unavailable', options);
+    this.name = 'AgentReplayStateUnavailableError';
+  }
+}
+
 function digestAgentDownstreamRequest(input: unknown): string {
   return createHash('sha256').update(JSON.stringify(input)).digest('hex');
+}
+
+async function resolveAdoptedReplayRunId(
+  actorUserId: string,
+  projectId: string | undefined,
+  taskId: string,
+): Promise<string | undefined> {
+  if (!projectId) return undefined;
+  let events: Awaited<ReturnType<typeof listAgentEventsForActor>>;
+  try {
+    events = await listAgentEventsForActor({
+      actorUserId,
+      projectId,
+      runId: taskId,
+    });
+  } catch (error) {
+    throw new AgentReplayStateUnavailableError({ cause: error });
+  }
+  return events.some(event => event.type === 'run.created' && event.payload.adopted === true)
+    ? taskId
+    : undefined;
 }
 
 function createNonDurableAgentOperationContext(
@@ -351,16 +383,11 @@ export async function POST(request: NextRequest) {
         });
       }
       if (existing && ['completed', 'failed', 'cancelled', 'timeout'].includes(existing.status)) {
-        let runId: string | undefined;
-        if (existing.projectId) {
-          const { listAgentEventsForActor } = await import('@/lib/agent-runtime/event-storage');
-          const events = await listAgentEventsForActor({
-            actorUserId: authResult.userId,
-            projectId: existing.projectId,
-            runId: existing.id,
-          }).catch(() => []);
-          if (events.length > 0) runId = existing.id;
-        }
+        const runId = await resolveAdoptedReplayRunId(
+          authResult.userId,
+          existing.projectId,
+          existing.id,
+        );
         if (existing.status === 'completed') {
           return NextResponse.json({
             success: true, taskId: existing.id, status: existing.status,
@@ -372,6 +399,7 @@ export async function POST(request: NextRequest) {
           success: false, code: 'AGENT_TASK_TERMINAL',
           error: `Agent task is already ${existing.status}`, taskId: existing.id,
           status: existing.status, replayed: true,
+          ...(runId ? { runId } : {}),
         }, { status: 409 });
       }
     }
@@ -611,6 +639,13 @@ export async function POST(request: NextRequest) {
     localTaskId = taskId;
     deductedCredits = admission.value.creditCost;
     if (admission.value.reused) {
+      const replayRunId = agentRuntimeMode === 'agent-v2'
+        ? await resolveAdoptedReplayRunId(
+            authResult.userId,
+            typeof projectId === 'string' ? projectId : undefined,
+            taskId,
+          )
+        : undefined;
       if (
         admission.value.status === 'failed'
         || admission.value.status === 'cancelled'
@@ -623,21 +658,10 @@ export async function POST(request: NextRequest) {
           taskId,
           status: admission.value.status,
           replayed: true,
+          ...(replayRunId ? { runId: replayRunId } : {}),
         }, { status: 409 });
       }
       if (admission.value.status === 'completed') {
-        let adoptedRunId: string | undefined;
-        if (agentRuntimeMode === 'agent-v2' && typeof projectId === 'string' && projectId) {
-          const { listAgentEventsForActor } = await import('@/lib/agent-runtime/event-storage');
-          const events = await listAgentEventsForActor({
-            actorUserId: authResult.userId,
-            projectId,
-            runId: taskId,
-          }).catch(() => []);
-          if (events.some(event => event.type === 'run.created' && event.payload.adopted === true)) {
-            adoptedRunId = taskId;
-          }
-        }
         return NextResponse.json({
           success: true,
           taskId,
@@ -645,7 +669,7 @@ export async function POST(request: NextRequest) {
           result: admission.value.result,
           mode: 'agent',
           replayed: true,
-          ...(adoptedRunId ? { runId: adoptedRunId } : {}),
+          ...(replayRunId ? { runId: replayRunId } : {}),
         });
       }
       if (agentRuntimeMode !== 'agent-v2') {
@@ -1421,6 +1445,13 @@ export async function POST(request: NextRequest) {
       durationMs,
       detail: `Agent编排编辑请求失败`,
     });
+    if (err instanceof AgentReplayStateUnavailableError) {
+      return NextResponse.json({
+        success: false,
+        code: err.code,
+        error: err.message,
+      }, { status: err.status });
+    }
     if (localTaskId) {
       try {
         await recordAgentTaskTerminal(localTaskId, {
