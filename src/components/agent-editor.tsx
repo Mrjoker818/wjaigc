@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, ImagePlus, Minus, Zap, Timer, Clock, FileText } from 'lucide-react';
-import { useProgressTimer } from '@/hooks/useProgressTimer';
-import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
+import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, CheckCircle2, XCircle, ImagePlus, Minus, Zap, FileText } from 'lucide-react';
+import { getPromptTemplates, searchTemplates } from '@/lib/prompt-templates';
 import { AgentProgressTimeline } from '@/components/agent-runtime/AgentProgressTimeline';
 import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-events';
 
@@ -40,6 +39,14 @@ interface AgentTaskState {
   error: string;
   resultImageUrl: string;
   resultPrompt: string;
+  startedAt: number | null;
+  completedAt: number | null;
+  attemptIdempotencyKey: string | null;
+}
+
+interface PendingAgentAttempt {
+  key: string;
+  fingerprint: string;
 }
 
 const EMPTY_AGENT_TASK_STATE: AgentTaskState = {
@@ -51,7 +58,24 @@ const EMPTY_AGENT_TASK_STATE: AgentTaskState = {
   error: '',
   resultImageUrl: '',
   resultPrompt: '',
+  startedAt: null,
+  completedAt: null,
+  attemptIdempotencyKey: null,
 };
+
+function createAgentAttemptIdempotencyKey(scopeKey: string): string {
+  const nonce = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `agent-editor:${scopeKey.replace(/^wujie_agent_run:/, '')}:${nonce}`;
+}
+
+function pendingAttemptStorageKey(scopeKey: string): string | null {
+  if (scopeKey === 'unscoped') return null;
+  return scopeKey.replace(/^wujie_agent_run:/, 'wujie_agent_attempt:');
+}
+
+function isConfirmedUnacceptedSubmissionStatus(status: number): boolean {
+  return [400, 401, 403, 404, 405, 406, 410, 411, 413, 415, 422].includes(status);
+}
 
 // 从图像生成面板读取当前选择的模型信息
 function getCurrentImageModelInfo(): { imageModel?: string; imageProviderId?: string; quality?: string; aspectRatio?: string } {
@@ -157,12 +181,15 @@ export function AgentEditor({
   const runScopeKey = runStorageKey || 'unscoped';
   const [agentTaskStatesByScope, setAgentTaskStatesByScope] = useState<Record<string, AgentTaskState>>({});
   const taskState = agentTaskStatesByScope[runScopeKey] || EMPTY_AGENT_TASK_STATE;
-  const updateTaskState = useCallback((patch: Partial<AgentTaskState>) => {
+  const updateTaskStateForScope = useCallback((scopeKey: string, patch: Partial<AgentTaskState>) => {
     setAgentTaskStatesByScope(current => ({
       ...current,
-      [runScopeKey]: { ...(current[runScopeKey] || EMPTY_AGENT_TASK_STATE), ...patch },
+      [scopeKey]: { ...(current[scopeKey] || EMPTY_AGENT_TASK_STATE), ...patch },
     }));
-  }, [runScopeKey]);
+  }, []);
+  const updateTaskState = useCallback((patch: Partial<AgentTaskState>) => {
+    updateTaskStateForScope(runScopeKey, patch);
+  }, [runScopeKey, updateTaskStateForScope]);
   const taskId = taskState.taskId;
   const isProcessing = taskState.isProcessing;
   const progress = taskState.progress;
@@ -171,8 +198,6 @@ export function AgentEditor({
   const error = taskState.error;
   const resultImageUrl = taskState.resultImageUrl;
   const resultPrompt = taskState.resultPrompt;
-  const setTaskId = useCallback((value: string | null) => updateTaskState({ taskId: value }), [updateTaskState]);
-  const setIsProcessing = useCallback((value: boolean) => updateTaskState({ isProcessing: value }), [updateTaskState]);
   const setProgress = useCallback((value: number) => updateTaskState({ progress: value }), [updateTaskState]);
   const setProgressLabel = useCallback((value: string) => updateTaskState({ progressLabel: value }), [updateTaskState]);
   const setSteps = useCallback((value: AgentStep[]) => updateTaskState({ steps: value }), [updateTaskState]);
@@ -180,11 +205,12 @@ export function AgentEditor({
   const setResultImageUrl = useCallback((value: string) => updateTaskState({ resultImageUrl: value }), [updateTaskState]);
   const setResultPrompt = useCallback((value: string) => updateTaskState({ resultPrompt: value }), [updateTaskState]);
   const [agentRunIdsByScope, setAgentRunIdsByScope] = useState<Record<string, string | null>>({});
+  const attemptKeysByScope = useRef<Record<string, PendingAgentAttempt>>({});
   const hasScopedRun = Object.prototype.hasOwnProperty.call(agentRunIdsByScope, runScopeKey);
   const agentRunId = hasScopedRun ? agentRunIdsByScope[runScopeKey] : null;
-  const setAgentRunId = useCallback((runId: string | null) => {
-    setAgentRunIdsByScope(current => ({ ...current, [runScopeKey]: runId }));
-  }, [runScopeKey]);
+  const setAgentRunIdForScope = useCallback((scopeKey: string, runId: string | null) => {
+    setAgentRunIdsByScope(current => ({ ...current, [scopeKey]: runId }));
+  }, []);
   useEffect(() => {
     if (!runStorageKey || typeof localStorage === 'undefined') return;
     setAgentRunIdsByScope(current => {
@@ -193,15 +219,58 @@ export function AgentEditor({
     });
   }, [runScopeKey, runStorageKey]);
   useEffect(() => {
+    const storageKey = pendingAttemptStorageKey(runScopeKey);
+    if (!storageKey || typeof localStorage === 'undefined') return;
+    try {
+      const storedAttempt = localStorage.getItem(storageKey);
+      if (!storedAttempt) return;
+      const parsedAttempt = JSON.parse(storedAttempt) as Partial<PendingAgentAttempt>;
+      if (typeof parsedAttempt.key === 'string' && typeof parsedAttempt.fingerprint === 'string') {
+        attemptKeysByScope.current[runScopeKey] = {
+          key: parsedAttempt.key,
+          fingerprint: parsedAttempt.fingerprint,
+        };
+      }
+    } catch { /* ignore unavailable browser storage */ }
+  }, [runScopeKey]);
+  useEffect(() => {
     if (!runStorageKey || !hasScopedRun || !agentRunId || typeof localStorage === 'undefined') return;
     localStorage.setItem(runStorageKey, agentRunId);
   }, [agentRunId, hasScopedRun, runStorageKey]);
   const agentRun = useAgentRunEvents(agentRunId);
-  const { elapsed, totalTime, formatTime, startTimer, stopTimer, resetTimer } = useProgressTimer();
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const elapsed = taskState.startedAt === null ? 0 : Math.max(0, clockNow - taskState.startedAt);
+  const totalTime = taskState.startedAt !== null && taskState.completedAt !== null
+    ? Math.max(0, taskState.completedAt - taskState.startedAt)
+    : null;
+  const formatTime = useCallback((milliseconds: number): string => {
+    const seconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return minutes > 0 ? `${minutes}:${secs.toString().padStart(2, '0')}` : `${secs}s`;
+  }, []);
+  useEffect(() => {
+    if (!isProcessing || taskState.startedAt === null) return;
+    setClockNow(Date.now());
+    const timer = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [isProcessing, taskState.startedAt]);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollAttempts = useRef(0);
   const activePollScopeKey = useRef(runScopeKey);
   const activePollTaskId = useRef<string | null>(null);
+  const persistAttemptKey = useCallback((scopeKey: string, attempt: PendingAgentAttempt) => {
+    attemptKeysByScope.current[scopeKey] = attempt;
+    const storageKey = pendingAttemptStorageKey(scopeKey);
+    if (!storageKey || typeof localStorage === 'undefined') return;
+    try { localStorage.setItem(storageKey, JSON.stringify(attempt)); } catch { /* ignore unavailable browser storage */ }
+  }, []);
+  const clearAttemptKey = useCallback((scopeKey: string) => {
+    delete attemptKeysByScope.current[scopeKey];
+    const storageKey = pendingAttemptStorageKey(scopeKey);
+    if (!storageKey || typeof localStorage === 'undefined') return;
+    try { localStorage.removeItem(storageKey); } catch { /* ignore unavailable browser storage */ }
+  }, []);
 
   useEffect(() => {
     activePollScopeKey.current = runScopeKey;
@@ -209,8 +278,7 @@ export function AgentEditor({
     if (pollTimer.current) clearTimeout(pollTimer.current);
     pollTimer.current = null;
     pollAttempts.current = 0;
-    stopTimer();
-  }, [runScopeKey, stopTimer]);
+  }, [runScopeKey]);
 
   // 拖动状态
   const [position, setPosition] = useState(() => {
@@ -264,9 +332,8 @@ export function AgentEditor({
         clearTimeout(pollTimer.current);
         pollTimer.current = null;
       }
-      stopTimer();
     };
-  }, [stopTimer]);
+  }, []);
 
   // 主题色变量
   const accentColor = isMonochrome ? MONO_ACCENT : GOLD;
@@ -283,9 +350,8 @@ export function AgentEditor({
     pollAttempts.current++;
 
     if (pollAttempts.current > 300) {
-      stopTimer();
-      setIsProcessing(false);
-      setError('任务超时，请重试');
+      updateTaskState({ isProcessing: false, error: '任务超时，请重试', completedAt: Date.now() });
+      clearAttemptKey(scopeKey);
       return;
     }
 
@@ -308,8 +374,8 @@ export function AgentEditor({
       if (result?.steps) setSteps(result.steps as AgentStep[]);
 
       if (status === 'completed') {
-        stopTimer();
-        setIsProcessing(false);
+        updateTaskState({ isProcessing: false, completedAt: Date.now() });
+        clearAttemptKey(scopeKey);
         setProgress(100);
         setProgressLabel('完成');
         if (result?.imageUrl) setResultImageUrl(String(result.imageUrl));
@@ -324,12 +390,14 @@ export function AgentEditor({
         }
         return;
       } else if (status === 'failed') {
-        setIsProcessing(false); stopTimer();
+        updateTaskState({ isProcessing: false, completedAt: Date.now() });
+        clearAttemptKey(scopeKey);
         const errorMsg = translateErrorFrontend(taskError || (result?.finalResponse ? String(result.finalResponse) : '') || '任务执行失败');
         setError(errorMsg);
         return;
       } else if (status === 'cancelled') {
-        setIsProcessing(false); stopTimer();
+        updateTaskState({ isProcessing: false, completedAt: Date.now() });
+        clearAttemptKey(scopeKey);
         setError('任务已取消');
         return;
       }
@@ -345,13 +413,13 @@ export function AgentEditor({
     }
   }, [
     setError,
-    setIsProcessing,
     setProgress,
     setProgressLabel,
     setResultImageUrl,
     setResultPrompt,
     setSteps,
-    stopTimer,
+    updateTaskState,
+    clearAttemptKey,
   ]);
 
   const startPolling = useCallback((tid: string) => {
@@ -370,65 +438,94 @@ export function AgentEditor({
   const handleSubmit = async () => {
     if (!prompt.trim() && !imageUrl) return;
     const submissionScopeKey = runScopeKey;
+    const imageModelInfo = getCurrentImageModelInfo();
+    const requestPayload = {
+      image: imageUrl || '',
+      projectId,
+      assetParentVersionIds: sourceVersionId ? [sourceVersionId] : [],
+      selectedEntityId,
+      assetProjectionMode: sourceVersionId ? 'revision' : 'derived',
+      prompt: prompt.trim(),
+      imagePrompt: imagePrompt || '',
+      maskDataUrl: '',
+      maxRounds,
+      model: selectedChatModel.split('::')[1] || '',
+      providerId: selectedChatModel.split('::')[0] || '',
+      ...imageModelInfo,
+    };
+    const attemptFingerprint = JSON.stringify(requestPayload);
+    const existingAttempt = attemptKeysByScope.current[submissionScopeKey];
+    const attempt: PendingAgentAttempt = existingAttempt?.fingerprint === attemptFingerprint
+      ? existingAttempt
+      : { key: createAgentAttemptIdempotencyKey(submissionScopeKey), fingerprint: attemptFingerprint };
+    const attemptIdempotencyKey = attempt.key;
+    persistAttemptKey(submissionScopeKey, attempt);
+    const startedAt = Date.now();
 
-    setIsProcessing(true);
-    setProgress(5);
-    setProgressLabel('提交任务...');
-    setError('');
-    setSteps([]);
-    setResultImageUrl('');
-    setResultPrompt('');
-    startTimer();
-    setTaskId(null);
-    setAgentRunId(null);
+    updateTaskStateForScope(submissionScopeKey, {
+      taskId: null,
+      isProcessing: true,
+      progress: 5,
+      progressLabel: '提交任务...',
+      error: '',
+      steps: [],
+      resultImageUrl: '',
+      resultPrompt: '',
+      startedAt,
+      completedAt: null,
+      attemptIdempotencyKey,
+    });
+    setAgentRunIdForScope(submissionScopeKey, null);
 
     try {
       const resp = await fetch('/api/agent-edit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: imageUrl || '',
-          projectId,
-          assetParentVersionIds: sourceVersionId ? [sourceVersionId] : [],
-          selectedEntityId,
-          assetProjectionMode: sourceVersionId ? 'revision' : 'derived',
-          prompt: prompt.trim(),
-          imagePrompt: imagePrompt || '',
-          maskDataUrl: '',
-          maxRounds,
-          model: selectedChatModel.split('::')[1] || '',
-          providerId: selectedChatModel.split('::')[0] || '',
-          ...getCurrentImageModelInfo(),
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'idempotency-key': attemptIdempotencyKey,
+        },
+        body: attemptFingerprint,
       });
 
-      const data = await resp.json() as Record<string, unknown>;
-
-      if (activePollScopeKey.current !== submissionScopeKey) return;
+      const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
 
       if (!resp.ok) {
+        if (isConfirmedUnacceptedSubmissionStatus(resp.status)) clearAttemptKey(submissionScopeKey);
         throw new Error(translateErrorFrontend(String(data.error || '提交失败')));
       }
 
       const tid = String(data.taskId || '');
-      setAgentRunId(typeof data.runId === 'string' && data.runId ? data.runId : null);
+      setAgentRunIdForScope(submissionScopeKey, typeof data.runId === 'string' && data.runId ? data.runId : null);
       if (tid) {
-        setTaskId(tid);
-        setProgress(10);
-        setProgressLabel('任务已提交，等待处理...');
+        updateTaskStateForScope(submissionScopeKey, {
+          taskId: tid,
+          isProcessing: true,
+          progress: 10,
+          progressLabel: '任务已提交，等待处理...',
+          startedAt,
+          completedAt: null,
+          attemptIdempotencyKey,
+        });
       } else {
         // 没有taskId，可能是同步返回
         if (data.result) {
           const result = data.result as Record<string, unknown>;
-          if (result.imageUrl) setResultImageUrl(String(result.imageUrl));
-          if (result.prompt) setResultPrompt(String(result.prompt));
+          if (result.imageUrl) updateTaskStateForScope(submissionScopeKey, { resultImageUrl: String(result.imageUrl) });
+          if (result.prompt) updateTaskStateForScope(submissionScopeKey, { resultPrompt: String(result.prompt) });
         }
-        setIsProcessing(false); stopTimer();
-        setProgress(100);
+        updateTaskStateForScope(submissionScopeKey, {
+          isProcessing: false,
+          progress: 100,
+          completedAt: Date.now(),
+        });
+        clearAttemptKey(submissionScopeKey);
       }
     } catch (err) {
-      setIsProcessing(false);
-      setError(err instanceof Error ? err.message : '提交任务失败');
+      updateTaskStateForScope(submissionScopeKey, {
+        isProcessing: false,
+        error: err instanceof Error ? err.message : '提交任务失败',
+        completedAt: Date.now(),
+      });
     }
   };
 
@@ -441,18 +538,16 @@ export function AgentEditor({
     }
     if (pollTimer.current) clearTimeout(pollTimer.current);
     activePollTaskId.current = null;
-    setIsProcessing(false);
-    setProgress(0);
-    setError('任务已取消');
+    clearAttemptKey(runScopeKey);
+    updateTaskState({ isProcessing: false, progress: 0, error: '任务已取消', completedAt: Date.now() });
   };
 
   const handleAgentRunCancel = async () => {
     await agentRun.cancel();
     if (pollTimer.current) clearTimeout(pollTimer.current);
     activePollTaskId.current = null;
-    setIsProcessing(false);
-    setProgress(0);
-    setError('任务已取消');
+    clearAttemptKey(runScopeKey);
+    updateTaskState({ isProcessing: false, progress: 0, error: '任务已取消', completedAt: Date.now() });
   };
 
   // 应用结果

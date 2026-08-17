@@ -117,6 +117,12 @@ function storageHarness(entries: Array<[string, string]>): StorageHarness {
   };
 }
 
+function storedAttemptKey(storage: Storage, scope: string): string | null {
+  const storedAttempt = storage.getItem(`wujie_agent_attempt:${scope}`);
+  if (!storedAttempt) return null;
+  return (JSON.parse(storedAttempt) as { key?: string }).key || null;
+}
+
 function renderEditor(selectedEntityId: string): void {
   for (let renderCount = 0; renderCount < 10; renderCount++) {
     hooks.cursor = 0;
@@ -141,6 +147,14 @@ function renderEditor(selectedEntityId: string): void {
     if (!hooks.dirty) return;
   }
   throw new Error('AgentEditor hook harness did not settle');
+}
+
+function resetRenderHarness(): void {
+  hooks.slots.forEach(slot => slot.cleanup?.());
+  hooks.cursor = 0;
+  hooks.dirty = false;
+  hooks.slots = [];
+  hooks.pendingEffects = [];
 }
 
 function elementText(node: unknown, visited = new Set<object>()): string {
@@ -187,6 +201,28 @@ function findButton(
     } catch { /* continue */ }
   }
   throw new Error(`Button not found: ${text}`);
+}
+
+function findTextarea(
+  node: unknown = lastTree,
+  visited = new Set<object>(),
+): { props: { onChange?: (event: { target: { value: string } }) => void } } {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      try {
+        return findTextarea(child, visited);
+      } catch { /* continue */ }
+    }
+  } else if (node && typeof node === 'object' && 'props' in node) {
+    if (visited.has(node)) throw new Error('Textarea not found');
+    visited.add(node);
+    const element = node as { type?: unknown; props: { children?: unknown; onChange?: (event: { target: { value: string } }) => void } };
+    if (element.type === 'textarea') return element;
+    try {
+      return findTextarea(element.props.children, visited);
+    } catch { /* continue */ }
+  }
+  throw new Error('Textarea not found');
 }
 
 describe('AgentEditor selected-image run scope', () => {
@@ -307,5 +343,198 @@ describe('AgentEditor selected-image run scope', () => {
 
     expect(elementHasText(lastTree, '取消')).toBe(false);
     expect(elementHasProp(lastTree, 'src', '/results/image-a.png')).toBe(true);
+  });
+
+  it('uses one stable idempotency key for repeated submits of the same pending image attempt', () => {
+    vi.stubGlobal('localStorage', storageHarness([]));
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/models?type=chat') {
+        return Promise.resolve(new Response(JSON.stringify({ models: [] }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      if (String(input) === '/api/agent-edit' && init?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({ taskId: 'task-a' }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a');
+    const execute = findButton('执行').props.onClick;
+    execute?.({ stopPropagation: vi.fn() });
+    execute?.({ stopPropagation: vi.fn() });
+
+    const submits = fetchMock.mock.calls.filter(([input, init]) =>
+      String(input) === '/api/agent-edit' && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(submits).toHaveLength(2);
+    const keys = submits.map(([, init]) => new Headers((init as RequestInit).headers).get('idempotency-key'));
+    expect(keys[0]).toMatch(/^agent-editor:project-1:image-a:/);
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it('persists a delayed A acceptance only to A, then resumes its task and elapsed time after returning from B', async () => {
+    const storage = storageHarness([]);
+    vi.stubGlobal('localStorage', storage);
+    const postResolvers: Array<(response: Response) => void> = [];
+    const pollResolvers: Array<(response: Response) => void> = [];
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') {
+        return Promise.resolve(new Response(JSON.stringify({ models: [] }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      if (url === '/api/agent-edit' && init?.method === 'POST') {
+        return new Promise<Response>(resolve => { postResolvers.push(resolve); });
+      }
+      if (url === '/api/agent-edit?taskId=task-a') {
+        return new Promise<Response>(resolve => { pollResolvers.push(resolve); });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    expect(postResolvers).toHaveLength(1);
+
+    renderEditor('image-b');
+    postResolvers[0]?.(new Response(JSON.stringify({ taskId: 'task-a', runId: 'run-a' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    now.mockReturnValue(5_000);
+    renderEditor('image-b');
+
+    expect(elementHasText(lastTree, '取消')).toBe(false);
+    expect(elementHasText(lastTree, '4s')).toBe(false);
+    expect(observedRunIds.mock.calls.map(([runId]) => runId)).not.toContain('run-a');
+    expect(storage.getItem('wujie_agent_run:project-1:image-b')).toBeNull();
+    expect(pollResolvers).toHaveLength(0);
+
+    renderEditor('image-a');
+
+    expect(() => findButton('取消')).not.toThrow();
+    expect(elementHasText(lastTree, '4s')).toBe(true);
+    expect(observedRunIds).toHaveBeenLastCalledWith('run-a');
+    expect(storage.getItem('wujie_agent_run:project-1:image-a')).toBe('run-a');
+    expect(pollResolvers).toHaveLength(1);
+  });
+
+  it('reuses a persisted pending key after a response-lost refresh retry', async () => {
+    const storage = storageHarness([]);
+    vi.stubGlobal('localStorage', storage);
+    let submitCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') {
+        return Promise.resolve(new Response(JSON.stringify({ models: [] }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      if (url === '/api/agent-edit' && init?.method === 'POST') {
+        submitCount++;
+        if (submitCount === 1) return Promise.reject(new TypeError('response lost after acceptance'));
+        return Promise.resolve(new Response(JSON.stringify({ taskId: 'task-a', runId: 'run-a' }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const firstSubmit = fetchMock.mock.calls.find(([input, init]) =>
+      String(input) === '/api/agent-edit' && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    const firstKey = new Headers((firstSubmit?.[1] as RequestInit).headers).get('idempotency-key');
+    expect(storedAttemptKey(storage, 'project-1:image-a')).toBe(firstKey);
+
+    resetRenderHarness();
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    const submits = fetchMock.mock.calls.filter(([input, init]) =>
+      String(input) === '/api/agent-edit' && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    const retryKey = new Headers((submits[1]?.[1] as RequestInit).headers).get('idempotency-key');
+
+    expect(retryKey).toBe(firstKey);
+  });
+
+  it('clears a key after a confirmed client rejection so a new attempt does not reuse it', async () => {
+    const storage = storageHarness([]);
+    vi.stubGlobal('localStorage', storage);
+    let submitCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') {
+        return Promise.resolve(new Response(JSON.stringify({ models: [] }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      if (url === '/api/agent-edit' && init?.method === 'POST') {
+        submitCount++;
+        return Promise.resolve(new Response(submitCount === 1 ? null : JSON.stringify({ error: 'invalid request' }), {
+          status: submitCount === 1 ? 422 : 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const firstKey = new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get('idempotency-key');
+    expect(storedAttemptKey(storage, 'project-1:image-a')).toBeNull();
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    const retryKey = new Headers((fetchMock.mock.calls[2]?.[1] as RequestInit).headers).get('idempotency-key');
+
+    expect(retryKey).not.toBe(firstKey);
+  });
+
+  it('starts a new key when a retry changes an unconfirmed request payload', async () => {
+    vi.stubGlobal('localStorage', storageHarness([]));
+    let submitCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/models?type=chat') {
+        return Promise.resolve(new Response(JSON.stringify({ models: [] }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      if (url === '/api/agent-edit' && init?.method === 'POST') {
+        submitCount++;
+        if (submitCount === 1) return Promise.reject(new TypeError('response lost after acceptance'));
+        return Promise.resolve(new Response(JSON.stringify({ taskId: 'task-a' }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderEditor('image-a');
+    const firstKey = new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get('idempotency-key');
+
+    findTextarea().props.onChange?.({ target: { value: 'a different request' } });
+    renderEditor('image-a');
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    const retryKey = new Headers((fetchMock.mock.calls[2]?.[1] as RequestInit).headers).get('idempotency-key');
+
+    expect(retryKey).not.toBe(firstKey);
   });
 });

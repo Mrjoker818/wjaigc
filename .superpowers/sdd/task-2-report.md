@@ -1727,3 +1727,101 @@ controller-owned, unstaged briefs.
   environment warnings predate or are outside this focused repair; neither
   produced an error. The two controller-owned briefs remain dirty and are not
   staged or committed.
+
+## R15 Independent-review Repair (2026-08-17)
+
+### RED evidence
+
+1. Before the R15 production repair, the controlled
+   `agent-editor-run-scope` suite exited with code `1`: the repeated submit
+   test received no `idempotency-key` header, and the delayed A -> B accepted
+   response case could not render A's elapsed time after returning to A. This
+   was the missing stable-attempt identity and offscreen accepted-response
+   persistence.
+2. The first refresh-recovery RED, still before pending-attempt persistence,
+   exited with code `1`: after a simulated response lost after server
+   acceptance, `wujie_agent_attempt:project-1:image-a` was `null`; a confirmed
+   `422` rejection also reused the old key on the next submit.
+3. The follow-up RED strengthened those semantics and exited with code `1`
+   with `2 failed / 6 passed`: an empty-body `422` left the key persisted
+   because JSON parsing threw first, and a changed prompt after an uncertain
+   network failure reused the old key. Both cases would either fail to clear a
+   definite rejection or permanently reuse an idempotency key for different
+   request content.
+
+All focused RED commands used a short, isolated `Start-Process` runner with a
+15-second watchdog and terminated normally; no R15 test process hung.
+
+### Design and implementation
+
+- Submission state, task identity, result/progress, and timing facts are
+  keyed by `wujie_agent_run:<project>:<entity>`. An accepted response captures
+  its submission scope and writes that scope even if it has become offscreen;
+  the visible scope alone starts polling. Therefore an A response cannot
+  mutate B, while returning to A resumes the accepted task and its cancel/run
+  identity.
+- Each pending attempt persists after render, under the exact scope-keyed
+  `wujie_agent_attempt:<project>:<entity>` key, as `{ key, fingerprint }`.
+  The fingerprint is the serialized Agent-edit request. A refresh retry with
+  identical input reuses the header value; an explicit changed request creates
+  a new attempt rather than sending a conflicting payload under the old key.
+  This storage read happens only in an effect, preserving SSR/hydration safety.
+- Uncertain transport failures preserve the pending attempt. Explicit terminal
+  outcomes, cancellation, and confirmed unaccepted client statuses clear it.
+  Empty error bodies are tolerated before the status is classified; ambiguous
+  statuses such as conflict/timeout/rate-limit conservatively retain the key.
+- Elapsed time is derived from per-scope `startedAt`/`completedAt` facts and a
+  visible-scope clock. Switching images cannot show A's timer in B, and A
+  resumes from its own start time when selected again.
+- `package.json` adds only the exact
+  `.superpowers/sdd/task-2-review-r15-findings.md` allow-path. No wildcard or
+  node-editor allow-path was added.
+
+### GREEN verification
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx --reporter=dot --silent
+# controlled exit 0; 1 file / 8 tests passed in 1.14s
+
+pnpm exec vitest run src/__tests__/api/chat-agent-v2-generation-routing.test.ts src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/lib/chat-tools-analyze-image.test.ts src/__tests__/lib/chat-tools-governance.test.ts src/__tests__/components/chat-panel-generation-recovery-contract.test.ts src/__tests__/components/simple-chat-workspace-return-contract.test.ts --reporter=dot --silent
+# 6 files / 36 tests passed
+
+$files = @(rg --files src/__tests__ | rg '(agent|chat-agent-tool-choice)'); pnpm exec vitest run @files --reporter=dot --silent
+# 22 files / 191 tests passed
+
+pnpm exec vitest run --reporter=dot --silent
+# exit 0; 450 files passed / 14 skipped; 2700 tests passed / 66 skipped
+
+pnpm ts-check
+# exit 0
+
+pnpm exec eslint src/components/agent-editor.tsx src/__tests__/components/agent-editor-run-scope.test.tsx
+# exit 0; 0 errors, 4 existing <img> warnings
+
+pnpm lint
+# exit 0; 0 errors, 974 existing repository warnings
+
+pnpm build
+# exit 0; compiled, TypeScript, and 113 static pages completed
+
+pnpm check:protected-baseline
+# 38/38 feature IDs; 0 warnings
+
+git diff --check
+# exit 0
+```
+
+### R15 changed files
+
+- Production: `src/components/agent-editor.tsx`.
+- Tests: `src/__tests__/components/agent-editor-run-scope.test.tsx`.
+- Guard/evidence: `package.json`,
+  `.superpowers/sdd/task-2-review-r15-findings.md`, and this report.
+
+### R15 concerns
+
+- Full lint still has the pre-existing repository warning inventory and build
+  emits two non-blocking invalid `--localstorage-file` environment warnings;
+  both commands exited successfully.
+- The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
+  staged or committed.
