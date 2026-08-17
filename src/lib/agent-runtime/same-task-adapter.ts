@@ -354,6 +354,8 @@ export function createSameTaskAgentAdapter(
                 idempotencyKey: identity.idempotencyKey,
                 operationKey: identity.operationKey,
                 recovery: false,
+                beginSubmission: async () => undefined,
+                recordAccepted: async () => undefined,
               });
             }
             await dependencies.completeExecution({
@@ -440,6 +442,9 @@ async function defaultSameTaskAgentAdapter() {
     releaseExecution: eventStorage.releaseAdoptedAgentExecution,
     downstreamOperations: {
       prepare: eventStorage.prepareAgentDownstreamOperation,
+      markSubmitted: eventStorage.markAgentDownstreamOperationSubmitted,
+      markAccepted: eventStorage.markAgentDownstreamOperationAccepted,
+      markSubmissionUnknown: eventStorage.markAgentDownstreamSubmissionUnknown,
       complete: eventStorage.completeAgentDownstreamOperation,
       read: eventStorage.getAgentDownstreamOperation,
       release: eventStorage.releaseAgentDownstreamOperation,

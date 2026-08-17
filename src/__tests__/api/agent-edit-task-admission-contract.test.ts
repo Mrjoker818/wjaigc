@@ -11,6 +11,14 @@ const persistenceSource = readFileSync(
   resolve(process.cwd(), 'src/lib/agent-task-persistence.ts'),
   'utf8',
 );
+const chatRouteSource = readFileSync(
+  resolve(process.cwd(), 'src/app/api/chat/route.ts'),
+  'utf8',
+);
+const providerSubmissionSource = readFileSync(
+  resolve(process.cwd(), 'src/lib/agent-runtime/provider-submission.ts'),
+  'utf8',
+);
 
 describe('agent edit task admission contract', () => {
   it('validates content safety before any credit admission', () => {
@@ -77,6 +85,32 @@ describe('agent edit task admission contract', () => {
 
   it('never normalizes exact agent-v2 chat or image model spelling', () => {
     expect(routeSource).toContain('strictProviderModel ? imageModel : normalizeModelForApi(imageModel)');
-    expect(routeSource).not.toMatch(/agentRuntimeMode === 'agent-v2'[\s\S]{0,500}?split\('::'\)/);
+    expect(routeSource).toContain('pureImageModel,');
+    expect(routeSource).toContain('strictProviderModel ? exactImageModel : stripProviderModelPrefix(exactImageModel)');
+  });
+
+  it('binds both agent-edit and canvas chat to the selected entity placement URL', () => {
+    expect(routeSource).toContain('resolveSelectedAgentMediaUrl(authorizedContext, selectedEntityIds)');
+    expect(chatRouteSource).toContain(
+      'resolveSelectedAgentMediaUrl(authorizedContext, input.taskContext.selectedEntityIds || [])',
+    );
+  });
+
+  it('never retries a strict provider submit at an alternate v1 endpoint', () => {
+    expect(routeSource).toContain("skipV1Retry: agentRuntimeMode === 'agent-v2'");
+    expect(routeSource.match(/submitAgentImageProviderRequest\(\{/g)).toHaveLength(3);
+    expect(providerSubmissionSource).toContain('skipV1Retry: strictProviderModel');
+  });
+
+  it('carries stable idempotency on every Agent provider-facing submit', () => {
+    expect(routeSource).toContain("headers['Idempotency-Key'] = `${operationContext.idempotencyKey}:llm:${llmCallIndex}`");
+    expect(routeSource).toContain("'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`");
+    expect(routeSource).toContain("'Idempotency-Key': providerIdempotencyKey");
+  });
+
+  it('propagates an Agent-v2 provider exception after its one terminal settlement', () => {
+    expect(routeSource).toMatch(
+      /await recordAgentTaskTerminal\(taskId,[\s\S]{0,500}?if \(agentRuntimeMode === 'agent-v2'\) throw err;/,
+    );
   });
 });

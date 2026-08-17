@@ -18,18 +18,31 @@ export interface AgentDownstreamOperationIdentity extends AgentDownstreamOperati
 }
 
 export interface AgentDownstreamOperation extends AgentDownstreamOperationIdentity {
-  status: 'prepared' | 'completed';
+  status: 'prepared' | 'submitted' | 'accepted' | 'submission_unknown' | 'completed';
   attempts: number;
   claimed?: boolean;
   response?: unknown;
+  providerTaskId?: string;
+  submissionError?: string;
 }
 
 export interface CompleteAgentDownstreamOperationInput extends AgentDownstreamOperationIdentity {
   response: unknown;
 }
 
+export interface AcceptAgentDownstreamOperationInput extends AgentDownstreamOperationIdentity {
+  providerTaskId: string;
+}
+
+export interface MarkAgentDownstreamSubmissionUnknownInput extends AgentDownstreamOperationIdentity {
+  reason: string;
+}
+
 export interface AgentDownstreamOperationDependencies {
   prepare(input: AgentDownstreamOperationIdentity): Promise<AgentDownstreamOperation>;
+  markSubmitted(input: AgentDownstreamOperationIdentity): Promise<AgentDownstreamOperation>;
+  markAccepted(input: AcceptAgentDownstreamOperationInput): Promise<AgentDownstreamOperation>;
+  markSubmissionUnknown(input: MarkAgentDownstreamSubmissionUnknownInput): Promise<AgentDownstreamOperation>;
   complete(input: CompleteAgentDownstreamOperationInput): Promise<AgentDownstreamOperation>;
   release?(input: AgentDownstreamOperationIdentity): Promise<boolean>;
   read?(input: AgentDownstreamOperationIdentity): Promise<AgentDownstreamOperation | null>;
@@ -39,6 +52,21 @@ export interface AgentDownstreamExecutionContext {
   idempotencyKey: string;
   operationKey: string;
   recovery: boolean;
+  beginSubmission(): Promise<void>;
+  recordAccepted(providerTaskId: string): Promise<void>;
+}
+
+export interface AgentDownstreamRecovery<T> {
+  reconcile(providerTaskId: string, context: AgentDownstreamExecutionContext): Promise<T>;
+}
+
+export class AgentDownstreamSubmissionUnknownError extends Error {
+  readonly code = 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN';
+
+  constructor() {
+    super('Agent downstream submission state is unknown; manual reconciliation is required');
+    this.name = 'AgentDownstreamSubmissionUnknownError';
+  }
 }
 
 export function createAgentDownstreamOperationIdentity(
@@ -63,6 +91,7 @@ async function waitForCompleted<T>(
   for (let attempt = 0; attempt < 200; attempt++) {
     const current = await dependencies.read(identity);
     if (current?.status === 'completed') return current.response as T;
+    if (current?.status === 'submission_unknown') throw new AgentDownstreamSubmissionUnknownError();
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   throw new Error('Agent downstream operation recovery timed out');
@@ -72,21 +101,70 @@ export async function executeDurableAgentDownstreamOperation<T>(
   input: AgentDownstreamOperationInput,
   execute: (context: AgentDownstreamExecutionContext) => Promise<T>,
   dependencies: AgentDownstreamOperationDependencies,
+  recovery?: AgentDownstreamRecovery<T>,
 ): Promise<T> {
   const identity = createAgentDownstreamOperationIdentity(input);
   const operation = await dependencies.prepare(identity);
   if (operation.status === 'completed') return operation.response as T;
+  if (operation.status === 'submission_unknown') throw new AgentDownstreamSubmissionUnknownError();
   if (operation.claimed === false) return waitForCompleted<T>(identity, dependencies);
-  try {
-    const response = await execute({
-      idempotencyKey: identity.idempotencyKey,
-      operationKey: identity.operationKey,
-      recovery: operation.attempts > 1,
+  let submissionStarted = operation.status === 'submitted' || operation.status === 'accepted';
+  let acceptanceRecorded = operation.status === 'accepted';
+  const context: AgentDownstreamExecutionContext = {
+    idempotencyKey: identity.idempotencyKey,
+    operationKey: identity.operationKey,
+    recovery: operation.attempts > 1,
+    async beginSubmission() {
+      if (submissionStarted) return;
+      await dependencies.markSubmitted(identity);
+      submissionStarted = true;
+    },
+    async recordAccepted(providerTaskId: string) {
+      if (!submissionStarted || acceptanceRecorded) {
+        throw new Error('Agent downstream operation was not submitted');
+      }
+      await dependencies.markAccepted({ ...identity, providerTaskId });
+      acceptanceRecorded = true;
+    },
+  };
+
+  if (operation.status === 'submitted') {
+    await dependencies.markSubmissionUnknown({
+      ...identity,
+      reason: 'Recovery found a submitted operation without a reconcilable provider task ID',
     });
+    throw new AgentDownstreamSubmissionUnknownError();
+  }
+  if (operation.status === 'accepted') {
+    if (!operation.providerTaskId || !recovery) {
+      await dependencies.markSubmissionUnknown({
+        ...identity,
+        reason: 'Accepted provider task cannot be reconciled by this adapter',
+      });
+      throw new AgentDownstreamSubmissionUnknownError();
+    }
+    try {
+      const response = await recovery.reconcile(operation.providerTaskId, context);
+      await dependencies.complete({ ...identity, response });
+      return response;
+    } catch (error) {
+      await dependencies.release?.(identity).catch(() => false);
+      throw error;
+    }
+  }
+  try {
+    const response = await execute(context);
     await dependencies.complete({ ...identity, response });
     return response;
   } catch (error) {
-    await dependencies.release?.(identity).catch(() => false);
+    if (submissionStarted && !acceptanceRecorded) {
+      await dependencies.markSubmissionUnknown({
+        ...identity,
+        reason: error instanceof Error ? error.message : 'Provider submission outcome is unknown',
+      }).catch(() => undefined);
+    } else {
+      await dependencies.release?.(identity).catch(() => false);
+    }
     throw error;
   }
 }

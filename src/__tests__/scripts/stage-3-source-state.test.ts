@@ -1,10 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { stage3SourceIdentity } from '../../../tests/helpers/stage-3-source-state';
+import {
+  stage3SourceIdentity,
+  stage3SourceState,
+} from '../../../tests/helpers/stage-3-source-state';
 
 const temporaryRepositories: string[] = [];
 
@@ -48,5 +51,22 @@ describe('stage3SourceIdentity', () => {
 
     writeFileSync(join(directory, 'untracked.txt'), 'second\n');
     expect(stage3SourceIdentity(directory)).not.toBe(firstUntrackedIdentity);
-  });
+  }, 20_000);
+
+  it('records an exact commit/tree manifest while excluding only controller briefs', () => {
+    const { directory, head } = createRepository();
+    const controllerBrief = join(directory, '.superpowers', 'sdd', 'task-2-brief.md');
+    execFileSync('git', ['config', 'core.autocrlf', 'false'], { cwd: directory });
+    mkdirSync(join(directory, '.superpowers', 'sdd'), { recursive: true });
+    writeFileSync(controllerBrief, 'controller-owned\n', { flag: 'w' });
+
+    const state = stage3SourceState(directory);
+    expect(stage3SourceIdentity(directory)).toBe(head);
+    expect(state).toMatchObject({ commit: head, productTreeClean: true });
+    expect(state.tree).toMatch(/^[a-f0-9]{40}$/);
+    expect(state.excludedControllerPaths).toEqual([
+      '.superpowers/sdd/task-1-brief.md',
+      '.superpowers/sdd/task-2-brief.md',
+    ]);
+  }, 15_000);
 });

@@ -7,7 +7,9 @@ import { assertAgentEventPayloadSafe } from './event-reducer';
 import type {
   AgentDownstreamOperation,
   AgentDownstreamOperationIdentity,
+  AcceptAgentDownstreamOperationInput,
   CompleteAgentDownstreamOperationInput,
+  MarkAgentDownstreamSubmissionUnknownInput,
 } from './downstream-operations';
 import type {
   AgentEvent,
@@ -88,8 +90,10 @@ interface AgentDownstreamOperationRow {
   tool_id: string;
   request_digest: string;
   idempotency_key: string;
-  status: 'prepared' | 'completed';
+  status: 'prepared' | 'submitted' | 'accepted' | 'submission_unknown' | 'completed';
   response: unknown;
+  provider_task_id: string | null;
+  submission_error: string | null;
   lease_owner: string;
   attempt_count: number;
 }
@@ -111,6 +115,8 @@ function mapDownstreamOperation(
     attempts: Number(row.attempt_count || 0),
     ...(claimed === undefined ? {} : { claimed }),
     ...(row.response === null || row.response === undefined ? {} : { response: row.response }),
+    ...(row.provider_task_id ? { providerTaskId: row.provider_task_id } : {}),
+    ...(row.submission_error ? { submissionError: row.submission_error } : {}),
   };
 }
 
@@ -592,7 +598,8 @@ export async function prepareAgentDownstreamOperation(
     );
     const existing = await client.query<AgentDownstreamOperationRow>(
       `SELECT operation_key, owner_id, project_id, task_id, tool_id, request_digest,
-              idempotency_key, status, response, lease_owner, attempt_count
+              idempotency_key, status, response, provider_task_id, submission_error,
+              lease_owner, attempt_count
        FROM wujie_agent_downstream_operations
        WHERE operation_key = $1 AND owner_id = $2 AND project_id = $3 AND task_id = $4
        FOR UPDATE`,
@@ -603,7 +610,7 @@ export async function prepareAgentDownstreamOperation(
     if (current.request_digest !== input.requestDigest || current.idempotency_key !== input.idempotencyKey) {
       throw new Error('Agent downstream operation identity conflict');
     }
-    if (current.status === 'completed') {
+    if (current.status === 'completed' || current.status === 'submission_unknown') {
       await client.query('COMMIT');
       return mapDownstreamOperation(current, false);
     }
@@ -611,9 +618,12 @@ export async function prepareAgentDownstreamOperation(
       `UPDATE wujie_agent_downstream_operations
        SET lease_owner = $2, lease_expires_at = $3,
            attempt_count = attempt_count + 1, updated_at = $4
-       WHERE operation_key = $1 AND status = 'prepared' AND lease_expires_at <= $4
+       WHERE operation_key = $1
+         AND status IN ('prepared', 'submitted', 'accepted')
+         AND lease_expires_at <= $4
        RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
-                 idempotency_key, status, response, lease_owner, attempt_count`,
+                 idempotency_key, status, response, provider_task_id, submission_error,
+                 lease_owner, attempt_count`,
       [input.operationKey, input.leaseOwner, now + leaseDurationMs, now],
     );
     await client.query('COMMIT');
@@ -634,7 +644,8 @@ export async function getAgentDownstreamOperation(
   const input = validateDownstreamIdentity(rawInput);
   const result = await getPool().query<AgentDownstreamOperationRow>(
     `SELECT operation_key, owner_id, project_id, task_id, tool_id, request_digest,
-            idempotency_key, status, response, lease_owner, attempt_count
+            idempotency_key, status, response, provider_task_id, submission_error,
+            lease_owner, attempt_count
      FROM wujie_agent_downstream_operations
      WHERE operation_key = $1 AND owner_id = $2 AND project_id = $3 AND task_id = $4`,
     [input.operationKey, input.actorUserId, input.projectId, input.runId],
@@ -655,10 +666,69 @@ export async function completeAgentDownstreamOperation(
     `UPDATE wujie_agent_downstream_operations
      SET status = 'completed', response = $3::jsonb, lease_owner = '',
          lease_expires_at = 0, completed_at = $4, updated_at = $4
+     WHERE operation_key = $1 AND lease_owner = $2
+       AND status IN ('prepared', 'submitted', 'accepted')
+     RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+               idempotency_key, status, response, provider_task_id, submission_error,
+               lease_owner, attempt_count`,
+    [input.operationKey, input.leaseOwner, serialized, now],
+  );
+  if (!result.rows[0]) throw new Error('Agent downstream operation lease was lost');
+  return mapDownstreamOperation(result.rows[0], true);
+}
+
+export async function markAgentDownstreamOperationSubmitted(
+  rawInput: AgentDownstreamOperationIdentity,
+): Promise<AgentDownstreamOperation> {
+  const input = validateDownstreamIdentity(rawInput);
+  const now = input.now ?? Date.now();
+  const result = await getPool().query<AgentDownstreamOperationRow>(
+    `UPDATE wujie_agent_downstream_operations
+     SET status = 'submitted', submitted_at = $3, updated_at = $3
      WHERE operation_key = $1 AND lease_owner = $2 AND status = 'prepared'
      RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
-               idempotency_key, status, response, lease_owner, attempt_count`,
-    [input.operationKey, input.leaseOwner, serialized, now],
+               idempotency_key, status, response, provider_task_id, submission_error,
+               lease_owner, attempt_count`,
+    [input.operationKey, input.leaseOwner, now],
+  );
+  if (!result.rows[0]) throw new Error('Agent downstream operation lease was lost');
+  return mapDownstreamOperation(result.rows[0], true);
+}
+
+export async function markAgentDownstreamOperationAccepted(
+  rawInput: AcceptAgentDownstreamOperationInput,
+): Promise<AgentDownstreamOperation> {
+  const input = validateDownstreamIdentity(rawInput);
+  const providerTaskId = validateIdentifier('providerTaskId', rawInput.providerTaskId);
+  const now = input.now ?? Date.now();
+  const result = await getPool().query<AgentDownstreamOperationRow>(
+    `UPDATE wujie_agent_downstream_operations
+     SET status = 'accepted', provider_task_id = $3, accepted_at = $4, updated_at = $4
+     WHERE operation_key = $1 AND lease_owner = $2 AND status = 'submitted'
+     RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+               idempotency_key, status, response, provider_task_id, submission_error,
+               lease_owner, attempt_count`,
+    [input.operationKey, input.leaseOwner, providerTaskId, now],
+  );
+  if (!result.rows[0]) throw new Error('Agent downstream operation lease was lost');
+  return mapDownstreamOperation(result.rows[0], true);
+}
+
+export async function markAgentDownstreamSubmissionUnknown(
+  rawInput: MarkAgentDownstreamSubmissionUnknownInput,
+): Promise<AgentDownstreamOperation> {
+  const input = validateDownstreamIdentity(rawInput);
+  const reason = String(rawInput.reason || 'Provider submission outcome is unknown').slice(0, 2048);
+  const now = input.now ?? Date.now();
+  const result = await getPool().query<AgentDownstreamOperationRow>(
+    `UPDATE wujie_agent_downstream_operations
+     SET status = 'submission_unknown', submission_error = $3,
+         submission_unknown_at = $4, lease_owner = '', lease_expires_at = 0, updated_at = $4
+     WHERE operation_key = $1 AND lease_owner = $2 AND status IN ('submitted', 'accepted')
+     RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+               idempotency_key, status, response, provider_task_id, submission_error,
+               lease_owner, attempt_count`,
+    [input.operationKey, input.leaseOwner, reason, now],
   );
   if (!result.rows[0]) throw new Error('Agent downstream operation lease was lost');
   return mapDownstreamOperation(result.rows[0], true);
@@ -671,7 +741,7 @@ export async function releaseAgentDownstreamOperation(
   const result = await getPool().query(
     `UPDATE wujie_agent_downstream_operations
      SET lease_owner = '', lease_expires_at = 0, updated_at = $3
-     WHERE operation_key = $1 AND lease_owner = $2 AND status = 'prepared'`,
+     WHERE operation_key = $1 AND lease_owner = $2 AND status IN ('prepared', 'accepted')`,
     [input.operationKey, input.leaseOwner, input.now ?? Date.now()],
   );
   return (result.rowCount ?? 0) === 1;

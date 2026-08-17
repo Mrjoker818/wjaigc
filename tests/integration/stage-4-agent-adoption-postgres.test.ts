@@ -20,6 +20,9 @@ import {
   prepareAgentDownstreamOperation,
   completeAgentDownstreamOperation,
   getAgentDownstreamOperation,
+  markAgentDownstreamOperationAccepted,
+  markAgentDownstreamOperationSubmitted,
+  markAgentDownstreamSubmissionUnknown,
   releaseAgentDownstreamOperation,
 } from '@/lib/agent-runtime/event-storage';
 import {
@@ -166,49 +169,54 @@ describe('same-task Agent adoption on real PostgreSQL', () => {
           id, user_id, balance, total_recharged, total_used, created_at, updated_at
         ) VALUES ($1, $2, 100, 100, 0, $3, $3)`, [randomUUID(), ownerId, now]);
       await query(`CREATE TABLE task2_controlled_provider_tasks(
-        idempotency_key TEXT PRIMARY KEY, provider_task_id TEXT NOT NULL
+        id BIGSERIAL PRIMARY KEY, idempotency_key TEXT NOT NULL, provider_task_id TEXT NOT NULL
       )`);
       await createChargedTask({ ownerId, projectId, taskId });
       const operationInput = {
         actorUserId: ownerId, projectId, runId: taskId, toolId: 'generate_image',
         requestDigest: 'b'.repeat(64),
       };
-      const provider = vi.fn(async (idempotencyKey: string, crash: boolean) => {
+      const provider = vi.fn(async (idempotencyKey: string) => {
         await query(`INSERT INTO task2_controlled_provider_tasks(idempotency_key, provider_task_id)
-          VALUES ($1, $2) ON CONFLICT (idempotency_key) DO NOTHING`,
+          VALUES ($1, $2)`,
         [idempotencyKey, 'provider-task-1']);
-        if (crash) throw new Error('simulated process crash after provider acceptance');
         return { taskId: 'provider-task-1' };
       });
       const dependencies = {
         prepare: prepareAgentDownstreamOperation,
         complete: completeAgentDownstreamOperation,
+        markSubmitted: markAgentDownstreamOperationSubmitted,
+        markAccepted: markAgentDownstreamOperationAccepted,
+        markSubmissionUnknown: markAgentDownstreamSubmissionUnknown,
         read: getAgentDownstreamOperation,
         release: releaseAgentDownstreamOperation,
       };
-
-      const crashedIdentity = createAgentDownstreamOperationIdentity({
-        ...operationInput, leaseOwner: 'crashed-worker', now: 1, leaseDurationMs: 1,
-      });
-      const crashedOperation = await prepareAgentDownstreamOperation(crashedIdentity);
-      expect(crashedOperation).toMatchObject({ claimed: true, status: 'prepared' });
-      await expect(provider(crashedIdentity.idempotencyKey, true))
-        .rejects.toThrow('simulated process crash after provider acceptance');
+      await expect(executeDurableAgentDownstreamOperation(
+        operationInput,
+        async context => {
+          await context.beginSubmission();
+          const accepted = await provider(context.idempotencyKey);
+          await context.recordAccepted(accepted.taskId);
+          throw new Error('simulated process crash after provider acceptance');
+        },
+        dependencies,
+      )).rejects.toThrow('simulated process crash after provider acceptance');
+      const recoverySubmit = vi.fn(async () => ({ taskId: 'must-not-submit' }));
       const retries = await Promise.all(Array.from({ length: 20 }, () => (
         executeDurableAgentDownstreamOperation(
           operationInput,
-          async context => {
-            const accepted = await provider(context.idempotencyKey, false);
+          recoverySubmit,
+          dependencies,
+          { reconcile: async providerTaskId => {
             await transitionTask({
               taskId,
               from: ['processing'],
               to: 'completed',
               creditStatus: 'charged',
-              result: { downstreamTaskId: accepted.taskId },
+              result: { downstreamTaskId: providerTaskId },
             });
-            return accepted;
-          },
-          dependencies,
+            return { taskId: providerTaskId };
+          } },
         )
       )));
       expect(retries).toEqual(Array.from({ length: 20 }, () => ({ taskId: 'provider-task-1' })));
@@ -226,7 +234,8 @@ describe('same-task Agent adoption on real PostgreSQL', () => {
         operations: '1', provider_tasks: '1', charges: '1',
         status: 'completed', task_status: 'completed',
       });
-      expect(new Set(provider.mock.calls.map(call => call[0]))).toHaveLength(1);
+      expect(provider).toHaveBeenCalledTimes(1);
+      expect(recoverySubmit).not.toHaveBeenCalled();
     });
   });
 
@@ -316,6 +325,83 @@ describe('same-task Agent adoption on real PostgreSQL', () => {
         attempts: 2,
       });
       expect(Number(facts.rows[0]?.completed_at)).toBeGreaterThan(0);
+    });
+  });
+
+  postgresIt('fails closed after an unreconciled submit without resubmitting or recharging', async () => {
+    await withIsolatedPostgres('stage-4-agent-submission-unknown', async ({ databaseUrl, query }) => {
+      runMigrations(databaseUrl);
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const taskId = randomUUID();
+      const now = Date.now();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Unknown provider submission', 'active'],
+      );
+      await query(`INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`, [randomUUID(), ownerId, now]);
+      await query(`CREATE TABLE task2_unknown_provider_calls(
+        id BIGSERIAL PRIMARY KEY, idempotency_key TEXT NOT NULL
+      )`);
+      await createChargedTask({ ownerId, projectId, taskId });
+      const operationInput = {
+        actorUserId: ownerId, projectId, runId: taskId, toolId: 'image_edit',
+        requestDigest: 'd'.repeat(64),
+      };
+      const dependencies = {
+        prepare: prepareAgentDownstreamOperation,
+        complete: completeAgentDownstreamOperation,
+        markSubmitted: markAgentDownstreamOperationSubmitted,
+        markAccepted: markAgentDownstreamOperationAccepted,
+        markSubmissionUnknown: markAgentDownstreamSubmissionUnknown,
+        read: getAgentDownstreamOperation,
+        release: releaseAgentDownstreamOperation,
+      };
+      const provider = vi.fn(async (idempotencyKey: string) => {
+        await query('INSERT INTO task2_unknown_provider_calls(idempotency_key) VALUES ($1)', [idempotencyKey]);
+        throw new Error('connection lost after provider submit');
+      });
+
+      await expect(executeDurableAgentDownstreamOperation(
+        operationInput,
+        async context => {
+          await context.beginSubmission();
+          return provider(context.idempotencyKey);
+        },
+        dependencies,
+      )).rejects.toThrow('connection lost after provider submit');
+      await transitionTask({
+        taskId,
+        from: ['processing'],
+        to: 'failed',
+        creditStatus: 'charged',
+        error: {
+          code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+          message: 'Provider submission requires manual reconciliation',
+        },
+      });
+      await expect(executeDurableAgentDownstreamOperation(
+        operationInput,
+        async context => provider(context.idempotencyKey),
+        dependencies,
+      )).rejects.toMatchObject({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' });
+
+      const facts = await query<{
+        operation_status: string; provider_calls: string; charges: string; task_status: string;
+      }>(`SELECT
+          (SELECT status FROM wujie_agent_downstream_operations WHERE task_id = $1) operation_status,
+          (SELECT count(*)::text FROM task2_unknown_provider_calls) provider_calls,
+          (SELECT count(*)::text FROM wujie_credit_transactions WHERE task_id = $1 AND type = 'consume') charges,
+          (SELECT status FROM cloud_tasks WHERE id = $1) task_status`, [taskId]);
+      expect(facts.rows[0]).toEqual({
+        operation_status: 'submission_unknown', provider_calls: '1', charges: '1', task_status: 'failed',
+      });
+      expect(provider).toHaveBeenCalledTimes(1);
     });
   });
 

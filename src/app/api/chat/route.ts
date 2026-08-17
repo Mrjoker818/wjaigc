@@ -12,7 +12,10 @@ import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
 import { buildCanvasAgentRequest, parseBoundedAgentSurfaceBody } from '@/lib/agent-runtime/surface-requests';
-import type { AuthorizedAgentContext } from '@/lib/agent-runtime/context-adapters';
+import {
+  resolveSelectedAgentMediaUrl,
+  type AuthorizedAgentContext,
+} from '@/lib/agent-runtime/context-adapters';
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
 import { resolveAgentRuntimeMode, type AgentRuntimeMode } from '@/lib/agent-runtime/mode';
@@ -99,8 +102,8 @@ async function executeCanvasChatTool(input: {
     ...input.taskContext,
     idempotencyKey,
     deferAgentExecution: input.agentRuntimeMode === 'agent-v2',
-    canonicalImageUrl: authorizedContext
-      ? authorizedContext.mediaByVersionId[buildRuntimeRequest().sourceVersionIds[0]]
+    canonicalImageUrl: authorizedContext && (input.taskContext.selectedEntityIds?.length || 0) > 0
+      ? resolveSelectedAgentMediaUrl(authorizedContext, input.taskContext.selectedEntityIds || [])
       : undefined,
   });
 

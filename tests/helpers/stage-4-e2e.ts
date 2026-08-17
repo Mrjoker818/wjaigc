@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
 import { Pool } from 'pg';
 
-import { stage3SourceIdentity } from './stage-3-source-state';
+import { stage3SourceIdentity, stage3SourceState } from './stage-3-source-state';
 
 interface Stage4EvidenceEntry {
   type?: string;
@@ -134,6 +134,11 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
     const directory = evidenceDirectory(testInfo);
     const evidence: Stage4Evidence = { directory, console: [], network: [] };
     await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, 'source-state.json'),
+      JSON.stringify(stage3SourceState(), null, 2),
+      'utf8',
+    );
     page.on('console', message => {
       if (message.type() === 'error' || message.type() === 'warning') {
         evidence.console.push({

@@ -450,3 +450,127 @@ post-refresh event recovery is also retained.
   delayed provider socket is closed after each browser test, the rejected late
   executor logs a terminal-transition conflict; retained network/UI state remains
   cancelled and the PostgreSQL tests prove no resurrection or duplicate charge.
+
+## R3 Independent Re-review Repair (2026-08-17)
+
+Status before the binding post-commit browser gate: **IMPLEMENTATION GREEN**.
+Both Critical and both Important R3 findings are fixed. This section and every
+tracked production/test change are committed before the authoritative browser
+run. By contract, the five-browser result is retained under the exact committed
+SHA with `source-state.json`; no tracked production/test/report file is changed
+after that run. The controller-owned Task 1 and Task 2 briefs remain unstaged and
+uncommitted.
+
+### R3 RED evidence
+
+1. Initial exact-model/submission/media RED:
+   `pnpm vitest run src/__tests__/lib/agent-runtime-downstream-operations.test.ts
+   src/__tests__/lib/agent-runtime-tools.test.ts
+   src/__tests__/lib/chat-tools-governance.test.ts
+   src/__tests__/api/agent-edit-task-admission-contract.test.ts
+   --reporter=verbose` failed `6` tests (`33` passed). Missing contracts were
+   `beginSubmission`/accepted recovery/`submission_unknown`, selected-placement
+   URL resolution in both routes, and immutable strict image-model forwarding.
+2. Strict endpoint retry RED:
+   `pnpm vitest run src/__tests__/api/agent-edit-task-admission-contract.test.ts
+   --reporter=verbose` failed `1` of `12`: strict provider submits still allowed
+   `fetchWithV1Retry` to POST an alternate `/v1` endpoint.
+3. Final-provider capture RED:
+   `pnpm vitest run src/__tests__/lib/agent-provider-submission.test.ts
+   --reporter=verbose` failed at import because the provider-boundary module did
+   not exist. The GREEN test captures JSON and multipart requests and observes
+   exact `Exact::Model` in both final payloads.
+4. Agent-v2 error propagation RED:
+   `pnpm vitest run src/__tests__/api/agent-edit-task-admission-contract.test.ts
+   --reporter=dot` failed `1` of `13`: the executor settled the failed task but
+   swallowed the provider exception, allowing the downstream operation to be
+   marked completed instead of `submission_unknown`.
+5. Exact-source evidence RED:
+   `pnpm vitest run src/__tests__/scripts/stage-3-source-state.test.ts
+   --reporter=verbose` initially lacked `stage3SourceState`; GREEN records exact
+   commit/tree/product cleanliness and excludes only the two controller briefs.
+6. Protected-baseline RED: `pnpm check:protected-baseline` blocked only the new
+   submission-state migration until its exact allow-path was added.
+
+### R3 finding resolution
+
+1. **Critical 1 - immutable exact image model.** Agent-v2 now passes the already
+   authorized `pureImageModel` into image execution. Strict provider routing
+   never strips `::` prefixes or normalizes aliases. All three external image
+   submit formats use `submitAgentImageProviderRequest`, which writes the exact
+   model into the final JSON/FormData payload and disables alternate endpoint
+   retry. Provider-capture tests prove `Exact::Model` reaches the provider.
+2. **Critical 2 - never resubmit after submission/acceptance.** Migration
+   `20260817_wj_stable_s4_agent_downstream_submission_state.sql` adds durable
+   `prepared`, `submitted`, `accepted`, `submission_unknown`, and `completed`
+   states plus provider task ID and diagnostic timestamps. The runtime marks
+   `submitted` before the first provider call. Recovery from `submitted` never
+   invokes submit and fails closed as `AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN`.
+   Accepted provider task IDs are persisted immediately and reconciled without
+   submit. Agent LLM/image/generate/edit/video submissions carry deterministic
+   idempotency headers; strict LLM/image calls cannot perform `/v1` POST fallback.
+   Agent-v2 propagates a provider exception only after its one durable terminal
+   task settlement, allowing the operation to persist `submission_unknown`.
+3. **Important 1 - exact selected placement binding.** The authorized context's
+   selected-entity-to-version map is now the only resolver used by agent-edit and
+   selected-media canvas chat. The selected entity resolves to its placement's
+   canonical version URL regardless of client `sourceVersionIds` order. Missing,
+   foreign, or mismatched mappings fail before provider execution; the tests use
+   reversed versions and assert zero provider calls on mismatch.
+4. **Important 2 - exact final source evidence.** Stage 4 evidence directories
+   now use exact HEAD when the product tree is clean and each scenario writes a
+   `source-state.json` containing the exact commit, Git tree ID, product status,
+   and the two explicitly excluded controller brief paths. Test outputs remain
+   untracked. The authoritative run ID is `task2_r3_gate_final`, so its root is
+   `test-results/stage-4-baseline/evidence/<FINAL_SHA>/task2_r3_gate_final/`.
+
+### R3 GREEN and final pre-commit verification
+
+- Focused R2/R3 regression matrix:
+  `pnpm exec vitest run` with the 12 changed/closure suites listed in the shell
+  history: **12 files / 126 tests passed**.
+- Real PostgreSQL Stage 4 suites:
+  `POSTGRES_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable
+  pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  **2 files / 22 tests passed**, zero skips. Crash-after-acceptance plus twenty
+  concurrent recoveries invoked provider submit exactly once, charged once, and
+  settled once. The unreconcilable case also invoked submit once, persisted
+  `submission_unknown`, retained one charge, and produced one failed terminal.
+- `pnpm ts-check`: passed after route type generation.
+- `pnpm lint -- --quiet`: passed with exit `0`.
+- `pnpm build`: compiled, type-checked, and generated `113/113` pages.
+- `pnpm check:protected-baseline`: all `38` feature IDs passed, no unapproved
+  source drift, zero warnings.
+- `git diff --check`: exit `0`.
+- Node/performance scope audit:
+  `git diff --exit-code 14adbf0ce0414f8b90a3022371285a2e173a8492 --
+  src/components/node-editor.tsx
+  src/__tests__/components/node-editor-drag-throttle-wiring.test.ts
+  tests/helpers/workflow-performance.ts`: exit `0` (zero R3 drift).
+
+### R3 changed files
+
+- Runtime/storage: the new submission-state migration,
+  `src/lib/agent-runtime/downstream-operations.ts`, `event-storage.ts`,
+  `same-task-adapter.ts`, `context-adapters.ts`, and new
+  `provider-submission.ts`.
+- Routes: `src/app/api/agent-edit/route.ts` and `src/app/api/chat/route.ts`.
+- Tests: exact provider capture, downstream state machine, context mapping,
+  Agent route/model contracts, chat tool model capture, both real PostgreSQL
+  suites, and exact-source identity tests.
+- Evidence/release: `tests/helpers/stage-3-source-state.ts`,
+  `tests/helpers/stage-4-e2e.ts`, `package.json` migration allow-path, and this
+  report. Database/Git harness tests received explicit Windows timing allowances;
+  assertions and behavior were unchanged.
+
+### R3 concerns
+
+- Raw browser FPS remains evidence only and **UNVERIFIED**, especially WebKit;
+  no FPS normalization or manufactured threshold pass is used.
+- The exact-SHA five-browser behavior gate is deliberately run only after this
+  tracked state is committed. Its authoritative status, exact SHA, and evidence
+  root are returned to the controller and are self-verifiable from each retained
+  `source-state.json`.
+- The pre-existing provider JSON-to-PostgreSQL array migration warning reported
+  in R2 remains outside Task 2 scope.

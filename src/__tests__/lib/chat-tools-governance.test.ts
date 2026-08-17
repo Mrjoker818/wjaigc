@@ -204,7 +204,7 @@ describe('chat tool governance', () => {
   it('submits the exact selected model spelling and canonical media URL', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       success: true, mode: 'polling', taskId: 'edit-exact',
-      model: 'Exact.Image/Model', providerId: 'exact-image-provider',
+      model: 'Exact::Model', providerId: 'exact-image-provider',
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
     await executeToolCall('edit_image', {
@@ -212,7 +212,7 @@ describe('chat tool governance', () => {
     }, {
       chatApiKey: 'exact-key', chatBaseUrl: 'https://exact.example.com/v1',
       origin: 'https://app.example.com', userId: 'user-1',
-      imageModel: 'Exact.Image/Model', imageProviderId: 'exact-image-provider',
+      imageModel: 'Exact::Model', imageProviderId: 'exact-image-provider',
       canonicalImageUrl: 'https://media.example.com/version-1.png',
       idempotencyKey: 'exact-edit', deferAgentExecution: true,
     });
@@ -220,7 +220,7 @@ describe('chat tool governance', () => {
     const submitted = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
     expect(submitted).toMatchObject({
       image: 'https://media.example.com/version-1.png',
-      model: 'Exact.Image/Model',
+      model: 'Exact::Model',
       providerId: 'exact-image-provider',
     });
   });

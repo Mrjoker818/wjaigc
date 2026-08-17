@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 
 const SOURCE_PATHS = [
   '.',
+  ':(exclude).superpowers/sdd/task-1-brief.md',
+  ':(exclude).superpowers/sdd/task-2-brief.md',
   ':(exclude).playwright-cli/**',
   ':(exclude).playwright-output/**',
   ':(exclude)output/**',
@@ -12,15 +14,42 @@ const SOURCE_PATHS = [
   ':(exclude)test-results/**',
 ];
 
+const EXCLUDED_CONTROLLER_PATHS = [
+  '.superpowers/sdd/task-1-brief.md',
+  '.superpowers/sdd/task-2-brief.md',
+];
+
+export interface Stage3SourceState {
+  commit: string;
+  tree: string;
+  productTreeClean: boolean;
+  productStatus: string[];
+  excludedControllerPaths: string[];
+}
+
+export function stage3SourceState(cwd = process.cwd()): Stage3SourceState {
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
+  const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd, encoding: 'utf8' }).trim();
+  const status = execFileSync(
+    'git',
+    ['status', '--porcelain=v1', '--untracked-files=all', '--', ...SOURCE_PATHS],
+    { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+  ).trim();
+  return {
+    commit,
+    tree,
+    productTreeClean: status.length === 0,
+    productStatus: status ? status.split(/\r?\n/) : [],
+    excludedControllerPaths: [...EXCLUDED_CONTROLLER_PATHS],
+  };
+}
+
 export function stage3SourceIdentity(cwd = process.cwd()): string {
   try {
-    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
-    const status = execFileSync(
-      'git',
-      ['status', '--porcelain=v1', '--untracked-files=all', '--', ...SOURCE_PATHS],
-      { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
-    );
-    if (!status.trim()) return head;
+    const sourceState = stage3SourceState(cwd);
+    const head = sourceState.commit;
+    const status = `${sourceState.productStatus.join('\n')}\n`;
+    if (sourceState.productTreeClean) return head;
 
     const diff = execFileSync(
       'git',

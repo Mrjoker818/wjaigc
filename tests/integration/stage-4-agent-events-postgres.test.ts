@@ -678,7 +678,7 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
       });
       expect(JSON.stringify(facts.rows[0]?.result)).not.toContain('/late.png');
     });
-  });
+  }, 15_000);
 
   postgresIt('never resurrects a refunded initialization failure on idempotent retry', async () => {
     await withIsolatedPostgres('stage-4-agent-init-retry', async ({ databaseUrl, query }) => {

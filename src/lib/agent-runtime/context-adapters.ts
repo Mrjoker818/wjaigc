@@ -48,6 +48,17 @@ export class AgentContextNotFoundError extends Error {
   }
 }
 
+export function resolveSelectedAgentMediaUrl(
+  context: AuthorizedAgentContext,
+  selectedEntityIds: string[],
+): string {
+  if (selectedEntityIds.length !== 1) throw new AgentContextNotFoundError();
+  const versionId = context.selectedEntityVersionIds[selectedEntityIds[0]];
+  const mediaUrl = versionId ? context.mediaByVersionId[versionId] : undefined;
+  if (!mediaUrl) throw new AgentContextNotFoundError();
+  return mediaUrl;
+}
+
 function defaultStorage(): AgentContextStorage {
   const storage = createPostgresAssetStorage();
   return {

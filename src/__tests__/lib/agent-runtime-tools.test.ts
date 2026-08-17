@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AgentContextNotFoundError,
   authorizeAgentContext,
+  resolveSelectedAgentMediaUrl,
 } from '@/lib/agent-runtime/context-adapters';
 import {
   authorizeAgentTools,
@@ -120,6 +121,33 @@ describe('Agent tool authorization', () => {
 });
 
 describe('Agent context ownership adapter', () => {
+  it('resolves the selected entity placement regardless of source-version ordering', () => {
+    const authorized = {
+      snapshot: { selectedEntityIds: ['image-2'], visibleVersionIds: [], locale: 'zh-CN' as const },
+      mediaByVersionId: {
+        'version-1': 'https://media.example.com/version-1.png',
+        'version-2': 'https://media.example.com/version-2.png',
+      },
+      selectedEntityVersionIds: { 'image-2': 'version-2' },
+    };
+
+    expect(resolveSelectedAgentMediaUrl(authorized, ['image-2']))
+      .toBe('https://media.example.com/version-2.png');
+  });
+
+  it('fails closed before provider execution for a missing selected placement/version mapping', () => {
+    const provider = vi.fn();
+    const authorized = {
+      snapshot: { selectedEntityIds: ['image-2'], visibleVersionIds: [], locale: 'zh-CN' as const },
+      mediaByVersionId: { 'version-1': 'https://media.example.com/version-1.png' },
+      selectedEntityVersionIds: { 'image-2': 'foreign-version' },
+    };
+
+    expect(() => resolveSelectedAgentMediaUrl(authorized, ['image-2']))
+      .toThrow(AgentContextNotFoundError);
+    expect(provider).not.toHaveBeenCalled();
+  });
+
   it('validates project and every unique source or visible version through Asset Graph scope', async () => {
     const transaction = {
       findProject: vi.fn(async () => true),

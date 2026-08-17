@@ -36,6 +36,8 @@ import { buildAgentEditRequest, parseBoundedAgentSurfaceBody } from '@/lib/agent
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
+import { resolveSelectedAgentMediaUrl } from '@/lib/agent-runtime/context-adapters';
+import { submitAgentImageProviderRequest } from '@/lib/agent-runtime/provider-submission';
 import { AgentModelRouteMismatchError } from '@/lib/agent-runtime/same-task-adapter';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 export const runtime = 'nodejs';
@@ -235,6 +237,9 @@ export async function POST(request: NextRequest) {
     const sourceVersionIds = Array.isArray(assetParentVersionIds)
       ? assetParentVersionIds.filter((value): value is string => typeof value === 'string')
       : [];
+    const selectedEntityIds = typeof selectedEntityId === 'string' && selectedEntityId
+      ? [selectedEntityId]
+      : [];
     const runtimeActor = sessionUser || authResult.user;
     const buildRuntimeRequest = (stableIdempotencyKey: string) => buildAgentEditRequest({
       projectId: typeof projectId === 'string' ? projectId : '',
@@ -410,7 +415,7 @@ export async function POST(request: NextRequest) {
           request: buildRuntimeRequest(idempotencyKey),
           toolId: 'agent_edit',
           admit: authorizedContext => {
-            const canonicalImageUrl = authorizedContext.mediaByVersionId[sourceVersionIds[0]];
+            const canonicalImageUrl = resolveSelectedAgentMediaUrl(authorizedContext, selectedEntityIds);
             if (!canonicalImageUrl || canonicalImageUrl !== image) {
               throw new AgentMediaUrlMismatchError();
             }
@@ -486,7 +491,13 @@ export async function POST(request: NextRequest) {
     const runtimeRequest = () => buildRuntimeRequest(taskId);
     const executeAgentEditTask = async (operationContext: {
       idempotencyKey: string;
-    } = { idempotencyKey: `agent-provider:${taskId}` }): Promise<void> => {
+      beginSubmission(): Promise<void>;
+      recordAccepted(providerTaskId: string): Promise<void>;
+    } = {
+      idempotencyKey: `agent-provider:${taskId}`,
+      beginSubmission: async () => undefined,
+      recordAccepted: async () => undefined,
+    }): Promise<void> => {
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
         void (async () => {
@@ -615,6 +626,7 @@ export async function POST(request: NextRequest) {
         };
 
         // LLM 调用函数
+        let llmCallIndex = 0;
         const llmCall = async (
           messages: Array<{ role: string; content: string }>,
           tools: ReturnType<typeof getToolsForLLM>
@@ -633,6 +645,7 @@ export async function POST(request: NextRequest) {
               }
             }
           }
+          headers['Idempotency-Key'] = `${operationContext.idempotencyKey}:llm:${llmCallIndex}`;
 
           const requestBody: Record<string, unknown> = {
             model: chatModel,
@@ -643,11 +656,14 @@ export async function POST(request: NextRequest) {
             max_tokens: 2048,
           };
 
+          await operationContext.beginSubmission();
+          llmCallIndex += 1;
           const resp = await fetchWithV1Retry(baseUrl, '/chat/completions', {
             method: 'POST',
             headers,
             body: JSON.stringify(requestBody),
             signal: AbortSignal.timeout(60000),
+            skipV1Retry: agentRuntimeMode === 'agent-v2',
           });
 
           if (!resp.ok) {
@@ -730,7 +746,7 @@ export async function POST(request: NextRequest) {
                 finalImageUrl, // 使用上一步的结果（第一步用原图）
                 String(step.params.prompt || prompt),
                 i === 0 ? maskDataUrl : undefined, // 仅第一步使用用户蒙版
-                imageModel,
+                pureImageModel,
                 imageProviderId,
                 quality,
                 aspectRatio,
@@ -863,6 +879,7 @@ export async function POST(request: NextRequest) {
                 headers: {
                   'Content-Type': 'application/json',
                   ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
                 },
                 body: JSON.stringify({
                   prompt: String(step.params.prompt || prompt),
@@ -906,6 +923,7 @@ export async function POST(request: NextRequest) {
                 headers: {
                   'Content-Type': 'application/json',
                   ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
                 },
                 body: JSON.stringify({
                   videoUrl: String(step.params.videoUrl || context.videoUrl || ''),
@@ -1019,6 +1037,7 @@ export async function POST(request: NextRequest) {
           });
           localTaskStore.set(taskId, { ...task, status: 'failed', error: translateApiError(errMsg), progress: 100 });
         }
+        if (agentRuntimeMode === 'agent-v2') throw err;
       } finally {
         clearTimeout(timeout);
       }
@@ -1226,11 +1245,8 @@ async function performImageEdit(
 
   const baseUrl = imageProvider.baseUrl?.replace(/\/+$/, '') || '';
   const apiKey = imageProvider.apiKey || '';
-  // ★ 去除 imageModel 中的 providerId:: 前缀 + 规范化模型别名
-  let imageModel = imageModelFromFrontend || imageProvider.selectedModels?.[0] || '';
-  if (imageModel.includes('::')) {
-    imageModel = imageModel.split('::').pop()!;
-  }
+  const exactImageModel = imageModelFromFrontend || imageProvider.selectedModels?.[0] || '';
+  let imageModel = strictProviderModel ? exactImageModel : stripProviderModelPrefix(exactImageModel);
   const pImgNorm = strictProviderModel ? imageModel : normalizeModelForApi(imageModel);
   if (typeof pImgNorm !== 'string' && pImgNorm.wasNormalized) {
     console.log(`[agent-edit] Normalized performImageEdit model: "${imageModel}" → "${pImgNorm.apiModelName}"`);
@@ -1284,11 +1300,14 @@ async function performImageEdit(
       }
 
       console.log('[agent-edit] Path A: sending request to', `${baseUrl}/images/edits`);
-      const resp = await fetchWithV1Retry(baseUrl, '/images/edits', {
-        method: 'POST',
+      const resp = await submitAgentImageProviderRequest({
+        baseUrl,
+        path: '/images/edits',
+        exactModel: imageModel,
         headers,
         body: formData,
         signal: AbortSignal.timeout(120000),
+        strictProviderModel,
       });
 
       if (!resp.ok) {
@@ -1426,11 +1445,14 @@ async function performImageEdit(
       };
 
       console.log('[agent-edit] Path B: sending request to', `${baseUrl}/images/generations`, 'with image_urls');
-      const genResp = await fetchWithV1Retry(baseUrl, '/images/generations', {
-        method: 'POST',
+      const genResp = await submitAgentImageProviderRequest({
+        baseUrl,
+        path: '/images/generations',
+        exactModel: imageModel,
         headers: genHeaders,
-        body: JSON.stringify(genBody),
+        body: genBody,
         signal: AbortSignal.timeout(120000),
+        strictProviderModel,
       });
 
       if (!genResp.ok) {
@@ -1438,7 +1460,7 @@ async function performImageEdit(
         console.error('[agent-edit] Path B: API error', genResp.status, errText.slice(0, 300));
 
         // ★ Try /chat/completions fallback for channel errors
-        if (isChannelUnavailableError(`${errText} ${genResp.status}`)) {
+        if (!strictProviderModel && isChannelUnavailableError(`${errText} ${genResp.status}`)) {
           console.info('[agent-edit] Path B: channel error, trying /chat/completions fallback...');
           try {
             const chatImageUrls = await tryChatCompletionsImageFallback({
@@ -1626,11 +1648,14 @@ async function performImageEdit(
     };
 
     console.log('[agent-edit] Path C: sending request to', `${baseUrl}/chat/completions`);
-    const chatResp = await fetchWithV1Retry(baseUrl, '/chat/completions', {
-      method: 'POST',
+    const chatResp = await submitAgentImageProviderRequest({
+      baseUrl,
+      path: '/chat/completions',
+      exactModel: imageModel,
       headers: chatHeaders,
-      body: JSON.stringify(chatBody),
+      body: chatBody,
       signal: AbortSignal.timeout(120000),
+      strictProviderModel,
     });
 
     if (!chatResp.ok) {
@@ -1685,6 +1710,10 @@ async function performImageEdit(
     console.error('[agent-edit] Path C: exception', err);
     return { success: false, error: err instanceof Error ? translateApiError(err.message) : '编辑请求失败' };
   }
+}
+
+function stripProviderModelPrefix(model: string): string {
+  return model.includes('::') ? model.split('::').pop()! : model;
 }
 
 function dataUrlToBlob(dataUrl: string): Blob {
