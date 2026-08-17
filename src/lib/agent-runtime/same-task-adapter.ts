@@ -3,6 +3,12 @@ import type { TaskModelDescriptor } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
 import type { AuthorizeAgentContextInput } from './context-adapters';
 import {
+  createAgentDownstreamOperationIdentity,
+  executeDurableAgentDownstreamOperation,
+  type AgentDownstreamExecutionContext,
+  type AgentDownstreamOperationDependencies,
+} from './downstream-operations';
+import {
   AgentEventPayloadError,
   assertAgentEventPayloadSafe,
   reduceAgentEvents,
@@ -122,6 +128,7 @@ export interface SameTaskAgentAdapterDependencies {
   releaseExecution(input: {
     actorUserId: string; projectId: string; runId: string; toolId: string; leaseOwner: string;
   }): Promise<boolean>;
+  downstreamOperations?: AgentDownstreamOperationDependencies;
 }
 
 export interface AdoptAndExecuteSameTaskInput<T> {
@@ -129,7 +136,7 @@ export interface AdoptAndExecuteSameTaskInput<T> {
   taskId: string;
   request: AgentRunRequest;
   toolId: string;
-  execute: () => Promise<T>;
+  execute: (context: AgentDownstreamExecutionContext) => Promise<T>;
 }
 
 export type AdoptSameTaskInput = Omit<AdoptAndExecuteSameTaskInput<never>, 'execute'>;
@@ -144,11 +151,12 @@ export interface SameTaskAgentAdoption {
   projectId: string;
   workspace: AgentRunRequest['workspace'];
   toolId: string;
+  requestDigest: string;
 }
 
 export interface ExecuteSameTaskAdoptionInput<T> {
   adoption: SameTaskAgentAdoption;
-  execute: () => Promise<T>;
+  execute: (context: AgentDownstreamExecutionContext) => Promise<T>;
 }
 
 export interface AdoptAndExecuteSameTaskResult<T> {
@@ -297,6 +305,7 @@ export function createSameTaskAgentAdapter(
         projectId: input.request.projectId,
         workspace: input.request.workspace,
         toolId: input.toolId,
+        requestDigest: createHash('sha256').update(JSON.stringify(input.request)).digest('hex'),
       };
   }
 
@@ -325,7 +334,28 @@ export function createSameTaskAgentAdapter(
         ) {
           executed = true;
           try {
-            value = await execute();
+            if (dependencies.downstreamOperations) {
+              value = await executeDurableAgentDownstreamOperation({
+                actorUserId: adoption.actorUserId,
+                projectId: adoption.projectId,
+                runId: adoption.runId,
+                toolId: adoption.toolId,
+                requestDigest: adoption.requestDigest,
+              }, execute, dependencies.downstreamOperations);
+            } else {
+              const identity = createAgentDownstreamOperationIdentity({
+                actorUserId: adoption.actorUserId,
+                projectId: adoption.projectId,
+                runId: adoption.runId,
+                toolId: adoption.toolId,
+                requestDigest: adoption.requestDigest,
+              });
+              value = await execute({
+                idempotencyKey: identity.idempotencyKey,
+                operationKey: identity.operationKey,
+                recovery: false,
+              });
+            }
             await dependencies.completeExecution({
               actorUserId: adoption.actorUserId,
               projectId: adoption.projectId,
@@ -408,6 +438,12 @@ async function defaultSameTaskAgentAdapter() {
     claimExecution: eventStorage.claimAdoptedAgentExecution,
     completeExecution: eventStorage.completeAdoptedAgentExecution,
     releaseExecution: eventStorage.releaseAdoptedAgentExecution,
+    downstreamOperations: {
+      prepare: eventStorage.prepareAgentDownstreamOperation,
+      complete: eventStorage.completeAgentDownstreamOperation,
+      read: eventStorage.getAgentDownstreamOperation,
+      release: eventStorage.releaseAgentDownstreamOperation,
+    },
   });
 }
 
@@ -428,3 +464,4 @@ export function adoptAndExecuteExistingAgentTask<T>(
 ): Promise<AdoptAndExecuteSameTaskResult<T>> {
   return defaultSameTaskAgentAdapter().then(adapter => adapter.adoptAndExecute(input));
 }
+import { createHash } from 'node:crypto';

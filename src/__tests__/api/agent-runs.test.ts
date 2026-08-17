@@ -98,7 +98,9 @@ function serviceDependencies() {
       supportsMask: false,
       outputKinds: ['png'],
     })),
-    authorizeContext: vi.fn<AgentRuntimeDependencies['authorizeContext']>(async ({ request: input }) => input.context),
+    authorizeContext: vi.fn<AgentRuntimeDependencies['authorizeContext']>(async ({ request: input }) => ({
+      snapshot: input.context, mediaByVersionId: {}, selectedEntityVersionIds: {},
+    })),
     calculateCreditCost: vi.fn<AgentRuntimeDependencies['calculateCreditCost']>(async () => 7),
     createBillableTask: vi.fn<AgentRuntimeDependencies['createBillableTask']>(async input => ({
       task: {

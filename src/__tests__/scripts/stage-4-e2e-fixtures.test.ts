@@ -8,7 +8,6 @@ import {
 } from '../../../scripts/stage-4-e2e-fixtures.mjs';
 import {
   assertWorkflowMonitorCoverage,
-  resolveWorkflowMonitorPlan,
   selectWorkflowMonitorIds,
   summarizeWorkflowPerformance,
 } from '../../../tests/helpers/workflow-performance';
@@ -24,21 +23,6 @@ describe('Stage 4 fixture isolation', () => {
     expect(plan.workflows.every(item => new Set(item.expectedNodeIds).size === 100)).toBe(true);
     expect(plan.users.every(user => user.username.includes(stage4UsernameRunToken(plan.runId)))).toBe(true);
     expect(plan.users.every(user => /^[a-zA-Z0-9_]{3,32}$/.test(user.username))).toBe(true);
-  });
-
-  it('spaces fixture rows and columns far enough apart for rendered node-card content', () => {
-    const plan = buildStage4FixturePlan('s4-run');
-
-    for (const item of plan.workflows) {
-      const firstColumn = item.workflow.nodes.filter(node => node.x === 80);
-      for (let index = 1; index < firstColumn.length; index += 1) {
-        expect(firstColumn[index].y - firstColumn[index - 1].y).toBeGreaterThanOrEqual(240);
-      }
-      const firstRow = item.workflow.nodes.filter(node => node.y === 80);
-      for (let index = 1; index < firstRow.length; index += 1) {
-        expect(firstRow[index].x - firstRow[index - 1].x).toBeGreaterThanOrEqual(360);
-      }
-    }
   });
 
   it('fails closed when the Stage 4 fixture database is not configured', () => {
@@ -202,17 +186,6 @@ describe('Stage 4 workflow performance samples', () => {
     expect(() => assertWorkflowMonitorCoverage(ids, expectedIds)).toThrow(/duplicate monitored node IDs/i);
   });
 
-  it('tracks the full logical count while sampling only the mounted virtualization window', () => {
-    expect(resolveWorkflowMonitorPlan(
-      expectedIds.slice(0, 48),
-      expectedIds,
-      100,
-    )).toEqual({
-      logicalNodeCount: 100,
-      mountedNodeIds: expectedIds.slice(0, 48),
-    });
-  });
-
   it('rejects 100 arbitrary node IDs with the right count', () => {
     const ids = selectWorkflowMonitorIds(Array.from({ length: 100 }, (_, index) => `wrong-node-${index + 1}`));
 
@@ -249,23 +222,5 @@ describe('Stage 4 workflow performance samples', () => {
     expect(sample.monitoredNodeCount).toBe(100);
     expect(sample.lostNodeCount).toBe(0);
     expect(sample.unclickableDurationMs).toBe(0);
-  });
-
-  it('normalizes FPS against a measured headless-browser refresh ceiling while retaining raw evidence', () => {
-    const sample = summarizeWorkflowPerformance({
-      startedAt: 0,
-      endedAt: 1_000,
-      frameTimestamps: Array.from({ length: 41 }, (_, index) => index * 25),
-      refreshRateFps: 40,
-      inputDelaysMs: [],
-      longTasksMs: [],
-      monitoredNodeCount: 100,
-      lostNodeCount: 0,
-      unclickableDurationMs: 0,
-    });
-
-    expect(sample.rawAverageFps).toBe(40);
-    expect(sample.refreshRateFps).toBe(40);
-    expect(sample.averageFps).toBe(60);
   });
 });

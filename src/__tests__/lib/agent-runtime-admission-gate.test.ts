@@ -69,7 +69,10 @@ describe('Agent execution admission gate', () => {
   it('admits only after exact context, model, and tool authorization succeeds', async () => {
     const order: string[] = [];
     const deps = dependencies({
-      authorizeContext: vi.fn().mockImplementation(async () => { order.push('context'); }),
+      authorizeContext: vi.fn().mockImplementation(async () => {
+        order.push('context');
+        return { snapshot: request.context, mediaByVersionId: {}, selectedEntityVersionIds: {} };
+      }),
       resolveTaskModel: vi.fn().mockImplementation(async () => {
         order.push('model');
         return dependencies().resolveTaskModel('', '', '');
@@ -84,5 +87,19 @@ describe('Agent execution admission gate', () => {
       actor, request, toolId: 'generate_image', admit,
     }, deps)).resolves.toBe('task-1');
     expect(order).toEqual(['context', 'model', 'admit']);
+  });
+
+  it('passes only the server-resolved canonical media authorization into admission', async () => {
+    const authorizedContext = {
+      snapshot: request.context,
+      mediaByVersionId: { 'version-1': 'https://media.example.com/version-1.png' },
+      selectedEntityVersionIds: { 'canvas-image-1': 'version-1' },
+    };
+    const admit = vi.fn().mockResolvedValue('task-1');
+    const deps = dependencies({ authorizeContext: vi.fn().mockResolvedValue(authorizedContext) });
+
+    await admitAuthorizedAgentExecution({ actor, request, toolId: 'generate_image', admit }, deps);
+
+    expect(admit).toHaveBeenCalledWith(authorizedContext);
   });
 });

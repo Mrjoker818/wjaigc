@@ -296,3 +296,157 @@ PostgreSQL `22P02 malformed array literal` while migrating legacy provider JSON
 arrays into PostgreSQL array columns. It did not produce browser console/network
 failures or affect any Task 2 scenario, and changing provider migration storage
 is outside Task 2, so it is reported rather than modified.
+
+## R2 Independent Re-review Repair (2026-08-17)
+
+Status: **DONE WITH PERFORMANCE CONCERN**. All two Critical and four Important
+R2 findings are fixed. The authoritative five-browser run executed against the
+final production bundle and a fresh isolated PostgreSQL database. The earlier
+R1 normalized FPS table is superseded by the raw measurements below; no
+normalized score or FPS threshold pass is claimed. Task 3 and `stable` were not
+touched. Controller-owned Task 1/Task 2 briefs remain unstaged and uncommitted.
+
+### R2 RED evidence
+
+1. Exact tuple/canonical media/admission RED:
+   `pnpm exec vitest run src/__tests__/lib/chat-tools-governance.test.ts
+   src/__tests__/lib/agent-runtime-tools.test.ts
+   src/__tests__/lib/agent-runtime-admission-gate.test.ts
+   src/__tests__/lib/agent-runtime-surface-requests.test.ts
+   src/__tests__/api/agent-edit-task-admission-contract.test.ts --reporter=dot`
+   failed `12` tests (`38` passed). Generate/edit/img2img tool arguments could
+   override the admitted pair, URL/version mismatches reached fetch, raw bounds
+   parsing was absent, admission lacked canonical media, and replay/bounds/model
+   spelling ordering contracts failed.
+2. Durable downstream-operation RED:
+   `pnpm exec vitest run
+   src/__tests__/lib/agent-runtime-downstream-operations.test.ts --reporter=dot`
+   failed because `src/lib/agent-runtime/downstream-operations.ts` did not exist.
+   The first real-PostgreSQL migration attempt also exposed an invalid migration
+   ordering dependency when the new table referenced `cloud_tasks` before core
+   table bootstrap; the migration was corrected to remain independently
+   applicable before any GREEN claim.
+3. Expanded focused-suite RED after implementation:
+   the first final-matrix run reported `5 failed / 180 passed`. It exposed a real
+   standalone-chat issue where over-limit bodies threw outside the HTTP error
+   boundary; GREEN now returns HTTP 400 immediately after session authentication
+   and before provider lookup. The other failures were corrected test contracts:
+   executable-call ordering instead of import order, a complete authorized
+   context mock, and stable operation/idempotency keys tested separately from
+   intentionally unique lease owners.
+4. Browser RED progression was retained: disabled registration, wrong production
+   auth-secret variable, missing credits, a stale production bundle, SSE `/v1`
+   discovery retries, non-VLM vision fixture classification, and a prefixed model
+   ID rejected by exact routing. Each was corrected without bypassing product
+   APIs. Chromium then passed before the authoritative five-project run.
+
+### R2 finding resolution
+
+1. **Critical 1 - immutable paid provider/model tuple.** Agent-v2
+   generate/edit/img2img reject tool-level provider/model overrides before fetch.
+   The server-selected exact tuple is carried through preflight, task creation,
+   same-task adoption, and provider calls. Agent-v2 no longer strips provider
+   prefixes, normalizes aliases, or enables protocol fallback. Focused tests cover
+   generate/edit/img2img rejection and exact `Exact.Image/Model` spelling.
+2. **Critical 2 - provider-acceptance crash recovery.** Migration
+   `20260817_wj_stable_s4_agent_downstream_operations.sql` and
+   `downstream-operations.ts` add a durable actor/project/run/tool/request-digest
+   operation with a stable provider idempotency key, lease fencing, persisted
+   response, and reconciliation. The actual admitted executor is wrapped at the
+   downstream boundary. Real PostgreSQL simulates a crash immediately after
+   provider acceptance plus concurrent retry and proves one provider task, one
+   charge, one terminal settlement, and no duplicate submission.
+3. **Important 1 - consumed media bound to Asset Graph authorization.** Context
+   authorization resolves the canonical `AssetVersion.file.url`, verifies each
+   selected placement belongs to the exact owner/project/workspace and references
+   an authorized version, and passes canonical media into execution. Client/tool
+   URL mismatches and foreign project/user/version inputs produce zero provider
+   calls. Simple chat now propagates source version IDs.
+4. **Important 2 - cheap bounds ordering.** All three entry routes authenticate,
+   read raw text, and enforce UTF-8 body size, depth, field length, array count,
+   and credential-shaped-key limits before model/provider/task work. Standalone
+   chat has behavioral provider spies proving oversized input returns 400 with
+   zero provider invocation; admission/source-order tests cover the other routes.
+5. **Important 3 - owned terminal replay ordering.** Agent edit derives the
+   stable idempotency key after authentication/bounds, resolves an owned existing
+   task, verifies digest equality, and returns stored completed/terminal state
+   before current model, placement, or selection authorization. `runId` is only
+   returned when stored events exist. Disabled current model, missing placement,
+   and absent fresh selection therefore cannot recreate a provider task.
+6. **Important 4 - real five-browser behavior.** The final spec submits ordinary
+   standalone chat, drives a real canvas vision tool whose upstream returns 502
+   and proves no second main-LLM continuation, opens Agent from a canonical canvas
+   image, observes first progress, cancels through shared DELETE, verifies durable
+   `cancelled`, reloads, reopens Agent, and restores the same run/terminal state.
+7. **Scope drift removal.** `src/components/node-editor.tsx`, its drag wiring test,
+   and `tests/helpers/workflow-performance.ts` are byte-for-byte equal to parent
+   `571ba587^`. The protected-baseline allow-path only acknowledges node-editor
+   changes predating this R2 branch. Task 2 retains no node/performance behavior
+   change.
+
+### Final verification
+
+- Focused Task 2 suite: `16 files / 185 tests passed`.
+- Real PostgreSQL Stage 4 suites:
+  `POSTGRES_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable
+  pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  `2 files / 21 tests passed`, zero skips.
+- `pnpm ts-check`: passed.
+- `pnpm lint -- --quiet`: exit `0`.
+- `pnpm build`: compiled/type-checked and generated `113/113` pages.
+- `pnpm check:protected-baseline`: all `38` feature IDs passed, no unapproved
+  source drift, zero warnings.
+- `git diff --check`: exit `0`.
+- Final browser command, against freshly created isolated database
+  `wujie_stage4_task2_r2_gate_final2` and final production build:
+  `PLAYWRIGHT_WORKERS=1 pnpm exec playwright test
+  tests/e2e/stage-4-node-chat-agent.spec.ts --grep 'chat|agent'`:
+  **5 passed (1.1m)**: Chromium, Chromium 1080p, Firefox, WebKit, mobile Chromium.
+
+### Final retained browser evidence
+
+Evidence root:
+`test-results/stage-4-baseline/evidence/571ba58751d0438b6e488d0eeb0e2d5ef3ae6ec3-worktree-b5ea546e0b48/task2_r2_gate_final2/`
+
+Every browser directory contains `trace.zip`, `video.webm`, `final.png`,
+`console.json`, `network.json`, and `browser-frame-rate.json`. Every network log
+contains one successful `/api/simple-chat/chat` POST, one `/api/chat` vision POST,
+one `/api/agent-edit` POST, Agent event reads, one successful shared
+`DELETE /api/agent-runs/{runId}`, and a successful durable run GET after cancel;
+post-refresh event recovery is also retained.
+
+| Profile | Raw average FPS | Separately measured ceiling | Status |
+| --- | ---: | ---: | --- |
+| chromium | 60.01 | 60.00 | UNVERIFIED |
+| chromium-1080p | 60.00 | 59.99 | UNVERIFIED |
+| firefox | 60.60 | 60.21 | UNVERIFIED |
+| webkit | 41.06 | 38.84 | UNVERIFIED |
+| mobile-chromium | 60.00 | 60.00 | UNVERIFIED |
+
+### R2 changed files
+
+- Durable runtime/storage: new downstream-operation migration,
+  `src/lib/agent-runtime/downstream-operations.ts`, `event-storage.ts`,
+  `same-task-adapter.ts`, `admission-gate.ts`, `context-adapters.ts`, and
+  `surface-requests.ts`.
+- Route/tool/UI fixes: `src/lib/chat-tools.ts`, canvas chat, standalone chat and
+  agent-edit routes, plus exact-run persistence in `src/components/agent-editor.tsx`.
+- Tests: focused admission, tool, bounds, replay, downstream-operation, surface
+  wiring and agent-run regressions; real PostgreSQL event/adoption regressions.
+- E2E: Stage 4 fixture plan/runtime seeding, browser helper, and the real
+  five-browser chat/vision/progress/cancel/refresh scenario.
+- Scope correction: inverse R1 changes restore node editor, node drag wiring test,
+  workflow performance helper, and fixture expectations to their pre-R1 state.
+- Release: protected-baseline allowlist for the new migration and pre-existing
+  node-editor baseline acknowledgment; this R2 appendix.
+
+### Concerns
+
+- WebKit raw FPS is `41.06` in this headless environment, with a separately
+  sampled ceiling of `38.84`; the performance item is **UNVERIFIED** pending
+  controller/user adjudication. No normalization was applied.
+- Cancellation intentionally wins the durable terminal race. When the controlled
+  delayed provider socket is closed after each browser test, the rejected late
+  executor logs a terminal-transition conflict; retained network/UI state remains
+  cancelled and the PostgreSQL tests prove no resurrection or duplicate charge.

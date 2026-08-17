@@ -354,6 +354,7 @@ export async function executeToolCall(
     deferAgentExecution?: boolean;
     userRole?: 'user' | 'admin';
     allowedTools?: string[];
+    canonicalImageUrl?: string;
   }
 ): Promise<ToolCallResult> {
   if (context.allowedTools && !context.allowedTools.includes(toolName)) {
@@ -404,6 +405,42 @@ interface ToolContext {
   idempotencyKey?: string;
   deferAgentExecution?: boolean;
   userRole?: 'user' | 'admin';
+  canonicalImageUrl?: string;
+}
+
+function routeMismatch(): ToolCallResult {
+  return {
+    success: false,
+    error: 'MODEL_ROUTE_MISMATCH',
+    resultText: 'The exact selected provider/model pair is unavailable.',
+  };
+}
+
+function hasAgentRouteOverride(
+  args: Record<string, unknown>,
+  context: ToolContext,
+): boolean {
+  if (!context.deferAgentExecution) return false;
+  const model = typeof args.model === 'string' ? args.model : undefined;
+  const providerId = typeof args.provider_id === 'string' ? args.provider_id : undefined;
+  return (model !== undefined && model !== context.imageModel)
+    || (providerId !== undefined && providerId !== context.imageProviderId);
+}
+
+function authorizedAgentImageUrl(
+  args: Record<string, unknown>,
+  context: ToolContext,
+): { imageUrl?: string; error?: ToolCallResult } {
+  const requested = normalizeImageUrl(String(args.image_url || ''), context.origin);
+  if (!context.deferAgentExecution) return { imageUrl: requested };
+  if (!context.canonicalImageUrl) {
+    return { error: { success: false, error: 'AGENT_CONTEXT_NOT_FOUND', resultText: 'Authorized media is unavailable.' } };
+  }
+  const canonical = normalizeImageUrl(context.canonicalImageUrl, context.origin);
+  if (requested !== canonical) {
+    return { error: { success: false, error: 'AGENT_MEDIA_URL_MISMATCH', resultText: 'The image URL does not match the authorized Asset Version.' } };
+  }
+  return { imageUrl: canonical };
 }
 
 function embeddedChatWorkspaceId(context: ToolContext): string | undefined {
@@ -415,6 +452,7 @@ async function executeGenerateImage(
   context: ToolContext
 ): Promise<ToolCallResult> {
   try {
+    if (hasAgentRouteOverride(args, context)) return routeMismatch();
     const prompt = args.prompt as string;
     const aspectRatio = (args.aspect_ratio as string) || '1:1';
     const quality = (args.quality as string) || '1K';
@@ -423,8 +461,13 @@ async function executeGenerateImage(
     const negativePrompt = args.negative_prompt as string | undefined;
 
     // 从 args 或 context 获取 model 和 providerId
-    const model = (args.model as string) || context.imageModel || '';
-    const providerId = (args.provider_id as string) || context.imageProviderId || '';
+    const model = context.deferAgentExecution
+      ? context.imageModel || ''
+      : (args.model as string) || context.imageModel || '';
+    const providerId = context.deferAgentExecution
+      ? context.imageProviderId || ''
+      : (args.provider_id as string) || context.imageProviderId || '';
+    if (context.deferAgentExecution && (!model || !providerId)) return routeMismatch();
 
     console.log(`[chat-tools] generate_image: model=${model}, providerId=${providerId}, prompt="${prompt?.substring(0, 80)}...", aspectRatio=${aspectRatio}, quality=${quality}`);
 
@@ -524,13 +567,21 @@ async function executeEditImage(
   context: ToolContext
 ): Promise<ToolCallResult> {
   try {
-    const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
+    if (hasAgentRouteOverride(args, context)) return routeMismatch();
+    const authorizedImage = authorizedAgentImageUrl(args, context);
+    if (authorizedImage.error) return authorizedImage.error;
+    const imageUrl = authorizedImage.imageUrl!;
 
     console.log(`[chat-tool:remove_bg] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}`);
     const prompt = args.prompt as string;
     const size = parseInt(args.size as string, 10) || 1024;
-    const model = (args.model as string) || context.imageModel || '';
-    const providerId = (args.provider_id as string) || context.imageProviderId || '';
+    const model = context.deferAgentExecution
+      ? context.imageModel || ''
+      : (args.model as string) || context.imageModel || '';
+    const providerId = context.deferAgentExecution
+      ? context.imageProviderId || ''
+      : (args.provider_id as string) || context.imageProviderId || '';
+    if (context.deferAgentExecution && (!model || !providerId)) return routeMismatch();
 
     console.log(`[chat-tool:edit_image] model=${model}, providerId=${providerId}, prompt="${(prompt as string).slice(0, 80)}"`);
 
@@ -599,13 +650,21 @@ async function executeImg2Img(
   context: ToolContext
 ): Promise<ToolCallResult> {
   try {
-    const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
+    if (hasAgentRouteOverride(args, context)) return routeMismatch();
+    const authorizedImage = authorizedAgentImageUrl(args, context);
+    if (authorizedImage.error) return authorizedImage.error;
+    const imageUrl = authorizedImage.imageUrl!;
     const prompt = args.prompt as string;
     const strength = (args.strength as number) || 0.7;
     const referenceTypes = args.reference_types as string[] || ['style', 'composition'];
     const negativePrompt = args.negative_prompt as string | undefined;
-    const model = (args.model as string) || context.imageModel || '';
-    const providerId = (args.provider_id as string) || context.imageProviderId || '';
+    const model = context.deferAgentExecution
+      ? context.imageModel || ''
+      : (args.model as string) || context.imageModel || '';
+    const providerId = context.deferAgentExecution
+      ? context.imageProviderId || ''
+      : (args.provider_id as string) || context.imageProviderId || '';
+    if (context.deferAgentExecution && (!model || !providerId)) return routeMismatch();
 
     console.log(`[chat-tool:img2img] model=${model}, providerId=${providerId}, prompt="${prompt.slice(0, 80)}", strength=${strength}`);
 
@@ -850,7 +909,9 @@ async function executeAnalyzeImage(
   context: ToolContext
 ): Promise<ToolCallResult> {
   try {
-    const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
+    const authorizedImage = authorizedAgentImageUrl(args, context);
+    if (authorizedImage.error) return authorizedImage.error;
+    const imageUrl = authorizedImage.imageUrl!;
     const question = (args.question as string) || '请详细描述这张图片的内容、风格、色彩、构图等信息。';
 
     let chatApiKey: string;

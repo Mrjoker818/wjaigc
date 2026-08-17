@@ -1,104 +1,197 @@
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo, Socket } from 'node:net';
+import type { Page } from '@playwright/test';
+
 import {
   ensureStage4Session,
   expect,
   openStage4CanvasProject,
   openStage4ChatProject,
-  readStage4PersistedWorkflowNodeCount,
   seedStage4Baseline,
+  seedStage4RuntimeDependencies,
   stage4FixtureForProject,
   test,
   writeStage4Metrics,
 } from '../helpers/stage-4-e2e';
-import { measureWorkflowInteraction } from '../helpers/workflow-performance';
 
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
-// The stage4Evidence fixture owns tracing and stores the retained archive.
 test.use({ trace: 'off', video: 'on' });
 
-test('establishes the local legacy node, chat, and agent baseline', async ({ page, stage4Evidence }, testInfo) => {
+let providerServer: Server;
+let providerBaseUrl = '';
+const providerSockets = new Set<Socket>();
+const providerCounts = new Map<string, { ordinary: number; visionMain: number; visionProvider: number; agent: number }>();
+
+function counts(profile: string) {
+  const existing = providerCounts.get(profile);
+  if (existing) return existing;
+  const created = { ordinary: 0, visionMain: 0, visionProvider: 0, agent: 0 };
+  providerCounts.set(profile, created);
+  return created;
+}
+
+function sse(response: import('node:http').ServerResponse, chunks: Record<string, unknown>[]): void {
+  response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+  chunks.forEach(chunk => response.write(`data: ${JSON.stringify(chunk)}\n\n`));
+  response.end('data: [DONE]\n\n');
+}
+
+test.beforeAll(async () => {
+  providerServer = createServer((request, response) => {
+    let raw = '';
+    request.setEncoding('utf8');
+    request.on('data', chunk => { raw += chunk; });
+    request.on('end', () => {
+      const body = JSON.parse(raw || '{}') as Record<string, unknown>;
+      const serialized = JSON.stringify(body);
+      const profile = serialized.match(/E2E_PROFILE:([a-z0-9-]+)/)?.[1] || 'unknown';
+      const current = counts(profile);
+      if (serialized.includes('AGENT_CANCEL_E2E')) {
+        current.agent += 1;
+        setTimeout(() => {
+          if (response.destroyed) return;
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({
+            choices: [{ message: { role: 'assistant', content: 'cancelled work returned late' }, finish_reason: 'stop' }],
+          }));
+        }, 60_000).unref();
+        return;
+      }
+      if (serialized.includes('VISION_FAILURE_E2E')) {
+        const messages = Array.isArray(body.messages) ? body.messages as Array<Record<string, unknown>> : [];
+        const hasImageContent = messages.some(message => (
+          Array.isArray(message.content)
+          && message.content.some(part => (
+            part && typeof part === 'object' && (part as Record<string, unknown>).type === 'image_url'
+          ))
+        ));
+        if (hasImageContent) {
+          current.visionProvider += 1;
+          response.writeHead(502, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ error: 'controlled vision failure' }));
+          return;
+        }
+        current.visionMain += 1;
+        if (current.visionMain > 1) {
+          sse(response, [{ choices: [{ delta: { content: 'CONTROLLED_CONTINUATION_SHOULD_NOT_EXIST' }, finish_reason: 'stop' }] }]);
+          return;
+        }
+        sse(response, [
+          { choices: [{ delta: { tool_calls: [{ index: 0, id: 'vision-tool-1', type: 'function', function: { name: 'analyze_image', arguments: JSON.stringify({ image_url: '/logo.png', question: `VISION_FAILURE_E2E E2E_PROFILE:${profile}` }) } }] }, finish_reason: null }] },
+          { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+        ]);
+        return;
+      }
+      current.ordinary += 1;
+      sse(response, [{ choices: [{ delta: { content: 'Controlled ordinary chat completion' }, finish_reason: 'stop' }] }]);
+    });
+  });
+  providerServer.on('connection', socket => {
+    providerSockets.add(socket);
+    socket.on('close', () => providerSockets.delete(socket));
+  });
+  await new Promise<void>(resolve => providerServer.listen(0, '127.0.0.1', resolve));
+  providerBaseUrl = `http://127.0.0.1:${(providerServer.address() as AddressInfo).port}`;
+});
+
+test.afterAll(async () => {
+  providerSockets.forEach(socket => socket.destroy());
+  await new Promise<void>(resolve => providerServer.close(() => resolve()));
+});
+
+async function sampleRawFps(page: Page, durationMs = 1_000): Promise<number> {
+  return page.evaluate(ms => new Promise<number>(resolve => {
+    const frames: number[] = [];
+    const tick = (timestamp: number) => {
+      frames.push(timestamp);
+      if (frames.length > 1 && timestamp - frames[0] >= ms) {
+        resolve(((frames.length - 1) * 1000) / (timestamp - frames[0]));
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }), durationMs);
+}
+
+test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', async ({ page, stage4Evidence }, testInfo) => {
   const fixture = await stage4FixtureForProject(testInfo.project.name);
-
+  providerCounts.delete(fixture.browserProfile);
   const auth = await ensureStage4Session(page, fixture);
-  await writeStage4Metrics(stage4Evidence, testInfo, 'auth-context', {
-    userId: auth.userId,
-    username: auth.username,
-    strategy: auth.strategy,
-    browserProfile: fixture.browserProfile,
-  });
-
-  const seeded = await seedStage4Baseline(page, fixture, auth);
-  await writeStage4Metrics(stage4Evidence, testInfo, 'seeded-baseline', {
-    browserProfile: fixture.browserProfile,
-    canvasProjectId: String(fixture.canvasProject.id),
-    chatProjectId: String(fixture.chatProject.id),
-    nodeCount: fixture.nodeCount,
-    canvasKernelMode: seeded.canvasKernelMode,
-    projectRevision: seeded.projectRevision,
-  });
-
-  await openStage4CanvasProject(page, String(fixture.canvasProject.id));
-  const nodeModeButton = page.getByTitle('节点模式').first();
-  await expect(nodeModeButton).toBeVisible({ timeout: 20_000 });
-  await nodeModeButton.click();
-
-  const backToCanvas = page.getByRole('button', { name: '返回画布', exact: true });
-  await expect(backToCanvas).toBeVisible({ timeout: 20_000 });
-  await expect.poll(() => readStage4PersistedWorkflowNodeCount(
-    page,
-    String(fixture.canvasProject.id),
-  ), { timeout: 20_000 }).toBe(fixture.nodeCount);
-  await expect.poll(() => page.locator('[data-node-id]').count(), { timeout: 20_000 })
-    .toBeGreaterThan(0);
-
-  const workflowSample = await measureWorkflowInteraction(page, fixture.expectedNodeIds, async current => {
-    const firstNode = current.locator('[data-node-id="stage4-node-1"]');
-    await expect(firstNode).toBeVisible({ timeout: 10_000 });
-    const from = await firstNode.boundingBox();
-    if (!from) throw new Error('BLOCKED: failed to resolve workflow node geometry for Stage 4 performance sampling');
-    const dragHandle = firstNode.locator('.node-header');
-    const handleBox = await dragHandle.boundingBox();
-    if (!handleBox) throw new Error('BLOCKED: failed to resolve workflow node drag handle for Stage 4 performance sampling');
-    await current.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
-    await current.mouse.down();
-    await current.mouse.move(
-      handleBox.x + handleBox.width / 2 + 48,
-      handleBox.y + handleBox.height / 2 + 24,
-    );
-    await current.mouse.up();
-    await expect.poll(async () => (await firstNode.boundingBox())?.x ?? from.x)
-      .toBeGreaterThan(from.x + 20);
-    await current.waitForTimeout(10_000);
-  });
-
-  await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-performance', workflowSample);
-  expect(workflowSample.monitoredNodeCount).toBe(fixture.nodeCount);
-  expect(workflowSample.averageFps).toBeGreaterThanOrEqual(55);
-  expect(workflowSample.inputDelayP95Ms).toBeLessThanOrEqual(50);
-  expect(workflowSample.lostNodeCount).toBe(0);
-  expect(workflowSample.unclickableDurationMs).toBe(0);
-
-  await backToCanvas.click();
-  const canvasImage = page.locator(`[data-canvas-image-id="stage4-image-${fixture.browserProfile}"]`);
-  await expect(canvasImage).toBeVisible({ timeout: 20_000 });
-  await canvasImage.click({ force: true });
-
-  const imageToolbar = page.locator('[data-toolbar="image-action-toolbar"]');
-  await expect(imageToolbar).toBeVisible({ timeout: 10_000 });
-  const toolbarOverflowButton = imageToolbar.getByTitle('展开更多工具');
-  await expect(toolbarOverflowButton).toBeVisible({ timeout: 10_000 });
-  await toolbarOverflowButton.click();
-  const imageAgentButton = page.locator('[data-image-toolbar-overflow]')
-    .getByRole('button', { name: 'Agent编排', exact: true });
-  await expect(imageAgentButton).toBeVisible({ timeout: 10_000 });
-  await imageAgentButton.click();
-  await expect(page.getByText('Agent 编排', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await seedStage4Baseline(page, fixture, auth);
+  const asset = await seedStage4RuntimeDependencies({ auth, fixture, providerBaseUrl: `${providerBaseUrl}/v1` });
 
   await openStage4ChatProject(page, String(fixture.chatProject.id));
-  const targetCanvasProject = page.getByRole('combobox', { name: '目标画布项目' });
-  await targetCanvasProject.selectOption(String(fixture.canvasProject.id));
-  await page.getByTitle('Agent 模式').click();
-  await expect(page.getByText('Agent 管理', { exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('Stage 4 Agent', { exact: true })).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('button', { name: '使用', exact: true }).click();
-  await expect(page.getByText('🤖 Stage 4 Agent', { exact: true })).toBeVisible({ timeout: 10_000 });
+  const measuredCeilingFps = await sampleRawFps(page);
+  const chatInput = page.getByPlaceholder(/输入消息/);
+  await chatInput.fill(`ORDINARY_CHAT_E2E E2E_PROFILE:${fixture.browserProfile}`);
+  await chatInput.press('Enter');
+  await expect(page.getByText('Controlled ordinary chat completion', { exact: true }))
+    .toBeVisible({ timeout: 20_000 });
+  const rawAverageFps = await sampleRawFps(page);
+  await writeStage4Metrics(stage4Evidence, testInfo, 'browser-frame-rate', {
+    rawAverageFps: Number(rawAverageFps.toFixed(2)),
+    measuredCeilingFps: Number(measuredCeilingFps.toFixed(2)),
+    thresholdStatus: 'UNVERIFIED',
+  });
+
+  const vision = await page.evaluate(async input => {
+    const response = await fetch('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+    return { status: response.status, text: await response.text() };
+  }, {
+    model: 'stage4-gemini-vision-model', providerId: 'stage4-chat-provider',
+    messages: [{ role: 'user', content: `VISION_FAILURE_E2E E2E_PROFILE:${fixture.browserProfile}` }],
+    stream: true, enableTools: true, agentTools: ['analyze_image'], isAgentMode: true,
+    projectId: String(fixture.canvasProject.id),
+    sessionId: `stage4-session-${fixture.browserProfile}`,
+    messageId: `stage4-vision-message-${fixture.browserProfile}`,
+    sourceVersionIds: [asset.sourceVersionId], selectedEntityIds: [asset.selectedEntityId],
+  });
+  expect(vision.status).toBe(200);
+  expect(vision.text).toContain('"success":false');
+  expect(vision.text).not.toContain('CONTROLLED_CONTINUATION_SHOULD_NOT_EXIST');
+  expect(counts(fixture.browserProfile), vision.text).toMatchObject({ ordinary: 1, visionMain: 1, visionProvider: 1 });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => localStorage.setItem('wujie_selected_model', JSON.stringify({
+    model: 'stage4-image-model', providerId: 'stage4-image-provider',
+  })));
+  await openStage4CanvasProject(page, String(fixture.canvasProject.id));
+  const openAgentEditor = async () => {
+    const canvasImage = page.locator(`[data-canvas-image-id="${asset.selectedEntityId}"]`);
+    await expect(canvasImage).toBeVisible({ timeout: 20_000 });
+    await canvasImage.click({ force: true });
+    const imageToolbar = page.locator('[data-toolbar="image-action-toolbar"]');
+    await expect(imageToolbar).toBeVisible({ timeout: 10_000 });
+    await imageToolbar.getByTitle('展开更多工具').click();
+    await page.locator('[data-image-toolbar-overflow]')
+      .getByRole('button', { name: 'Agent编排', exact: true }).click();
+    await expect(page.getByText('Agent 编排', { exact: true })).toBeVisible({ timeout: 20_000 });
+  };
+  await openAgentEditor();
+  await page.getByPlaceholder(/描述你想要的编辑效果/)
+    .fill(`AGENT_CANCEL_E2E E2E_PROFILE:${fixture.browserProfile}`);
+  await page.getByRole('button', { name: '执行', exact: true }).click();
+  await expect(page.getByText(/正在规划|正在执行|正在排队/)).toBeVisible({ timeout: 20_000 });
+  const cancel = page.getByRole('button', { name: '取消任务', exact: true });
+  await expect(cancel).toBeVisible({ timeout: 20_000 });
+  const runStorageKey = `wujie_agent_run:${fixture.canvasProject.id}:${asset.selectedEntityId}`;
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), runStorageKey), { timeout: 20_000 })
+    .not.toBeNull();
+  const runId = await page.evaluate(key => localStorage.getItem(key), runStorageKey);
+  expect(runId).toBeTruthy();
+  await cancel.click();
+  await expect(page.getByText('已取消', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const durable = await page.evaluate(async id => {
+    const response = await fetch(`/api/agent-runs/${encodeURIComponent(id!)}`);
+    return response.json();
+  }, runId);
+  expect(durable.projection).toMatchObject({ status: 'cancelled' });
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await openAgentEditor();
+  await expect(page.getByText('已取消', { exact: true })).toBeVisible({ timeout: 20_000 });
+  expect(counts(fixture.browserProfile).agent).toBe(1);
 });

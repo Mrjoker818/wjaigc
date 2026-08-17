@@ -125,7 +125,7 @@ describe('Agent context ownership adapter', () => {
       findProject: vi.fn(async () => true),
       findVersion: vi.fn(async (_ownerId: string, _projectId: string, versionId: string) => (
         versionId === 'version-1' || versionId === 'version-2'
-          ? { id: versionId }
+          ? { id: versionId, file: { url: `https://media.example.com/${versionId}.png` } }
           : null
       )),
       findEntityPlacement: vi.fn(async (
@@ -134,7 +134,7 @@ describe('Agent context ownership adapter', () => {
         _workspace: string,
         _workspaceId: string,
         entityId: string,
-      ) => entityId === 'image-1' ? { id: 'placement-1' } : null),
+      ) => entityId === 'image-1' ? { id: 'placement-1', assetVersionId: 'version-1' } : null),
     };
     const storage = {
       transaction: async <T>(callback: (value: typeof transaction) => Promise<T>): Promise<T> => (
@@ -153,10 +153,17 @@ describe('Agent context ownership adapter', () => {
         },
       }),
       storage,
-    })).resolves.toEqual({
-      selectedEntityIds: ['image-1'],
-      visibleVersionIds: ['version-1', 'version-2'],
-      locale: 'zh-CN',
+    })).resolves.toMatchObject({
+      snapshot: {
+        selectedEntityIds: ['image-1'],
+        visibleVersionIds: ['version-1', 'version-2'],
+        locale: 'zh-CN',
+      },
+      mediaByVersionId: {
+        'version-1': expect.any(String),
+        'version-2': expect.any(String),
+      },
+      selectedEntityVersionIds: { 'image-1': 'version-1' },
     });
     expect(transaction.findProject).toHaveBeenCalledWith('owner-1', 'project-1');
     expect(transaction.findVersion).toHaveBeenCalledTimes(2);
@@ -165,6 +172,26 @@ describe('Agent context ownership adapter', () => {
     expect(transaction.findEntityPlacement).toHaveBeenCalledWith(
       'owner-1', 'project-1', 'canvas', 'canvas-1', 'image-1',
     );
+  });
+
+  it('rejects a placement/version mismatch instead of authorizing an unrelated URL', async () => {
+    const provider = vi.fn();
+    const storage = {
+      transaction: async <T>(callback: (value: {
+        findProject: () => Promise<boolean>;
+        findVersion: () => Promise<{ id: string; file: { url: string } }>;
+        findEntityPlacement: () => Promise<{ id: string; assetVersionId: string }>;
+      }) => Promise<T>): Promise<T> => callback({
+        findProject: async () => true,
+        findVersion: async () => ({ id: 'version-1', file: { url: 'https://media.example.com/v1.png' } }),
+        findEntityPlacement: async () => ({ id: 'placement-1', assetVersionId: 'foreign-version' }),
+      }),
+    };
+
+    await expect(authorizeAgentContext({
+      actorUserId: 'owner-1', request: request(), storage,
+    })).rejects.toMatchObject({ code: 'AGENT_CONTEXT_NOT_FOUND' });
+    expect(provider).not.toHaveBeenCalled();
   });
 
   it('fails closed when a selected entity has no active placement in the requested workspace', async () => {

@@ -92,6 +92,7 @@ describe('chat tool governance', () => {
     }, {
       chatApiKey: 'test-key', chatBaseUrl: 'https://example.com', origin: 'https://app.example.com',
       userId: 'user-1', imageModel: 'model-edit', imageProviderId: 'provider-edit',
+      canonicalImageUrl: 'https://example.com/source.png',
       idempotencyKey: 'stable-edit-key', deferAgentExecution: true,
     });
 
@@ -126,6 +127,7 @@ describe('chat tool governance', () => {
       chatBaseUrl: 'https://exact.example.com/v1',
       chatModel: 'exact-vision-model',
       chatProviderId: 'exact-provider',
+      canonicalImageUrl: 'https://example.com/source.png',
       origin: 'https://app.example.com',
       userId: 'user-1',
       deferAgentExecution: true,
@@ -148,6 +150,7 @@ describe('chat tool governance', () => {
     }, {
       chatApiKey: 'exact-key',
       chatBaseUrl: 'https://exact.example.com/v1',
+      canonicalImageUrl: 'https://example.com/source.png',
       origin: 'https://app.example.com',
       userId: 'user-1',
       deferAgentExecution: true,
@@ -155,5 +158,70 @@ describe('chat tool governance', () => {
 
     expect(result).toMatchObject({ success: false, error: 'MODEL_ROUTE_MISMATCH' });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['generate_image', { prompt: 'poster', model: 'override-model', provider_id: 'override-provider' }],
+    ['edit_image', { image_url: 'https://media.example.com/version-1.png', prompt: 'brighter', model: 'override-model' }],
+    ['img2img', { image_url: 'https://media.example.com/version-1.png', prompt: 'variation', provider_id: 'override-provider' }],
+  ])('rejects an agent-v2 %s tuple override before task or provider invocation', async (toolName, args) => {
+    const fetcher = vi.spyOn(globalThis, 'fetch');
+
+    const result = await executeToolCall(toolName, args, {
+      chatApiKey: 'exact-key', chatBaseUrl: 'https://exact.example.com/v1',
+      chatModel: 'Exact.Chat/Model', chatProviderId: 'exact-chat-provider',
+      origin: 'https://app.example.com', userId: 'user-1',
+      imageModel: 'Exact.Image/Model', imageProviderId: 'exact-image-provider',
+      canonicalImageUrl: 'https://media.example.com/version-1.png',
+      deferAgentExecution: true,
+    });
+
+    expect(result).toMatchObject({ success: false, error: 'MODEL_ROUTE_MISMATCH' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(['edit_image', 'img2img', 'analyze_image']) (
+    'rejects an agent-v2 %s URL/version mismatch before provider invocation',
+    async (toolName) => {
+      const fetcher = vi.spyOn(globalThis, 'fetch');
+      const result = await executeToolCall(toolName, {
+        image_url: 'https://attacker.example.com/not-authorized.png',
+        ...(toolName === 'analyze_image' ? {} : { prompt: 'change it' }),
+      }, {
+        chatApiKey: 'exact-key', chatBaseUrl: 'https://exact.example.com/v1',
+        chatModel: 'Exact.Chat/Model', chatProviderId: 'exact-chat-provider',
+        origin: 'https://app.example.com', userId: 'user-1',
+        imageModel: 'Exact.Image/Model', imageProviderId: 'exact-image-provider',
+        canonicalImageUrl: 'https://media.example.com/version-1.png',
+        deferAgentExecution: true,
+      });
+
+      expect(result).toMatchObject({ success: false, error: 'AGENT_MEDIA_URL_MISMATCH' });
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it('submits the exact selected model spelling and canonical media URL', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      success: true, mode: 'polling', taskId: 'edit-exact',
+      model: 'Exact.Image/Model', providerId: 'exact-image-provider',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await executeToolCall('edit_image', {
+      image_url: 'https://media.example.com/version-1.png', prompt: 'brighter',
+    }, {
+      chatApiKey: 'exact-key', chatBaseUrl: 'https://exact.example.com/v1',
+      origin: 'https://app.example.com', userId: 'user-1',
+      imageModel: 'Exact.Image/Model', imageProviderId: 'exact-image-provider',
+      canonicalImageUrl: 'https://media.example.com/version-1.png',
+      idempotencyKey: 'exact-edit', deferAgentExecution: true,
+    });
+
+    const submitted = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
+    expect(submitted).toMatchObject({
+      image: 'https://media.example.com/version-1.png',
+      model: 'Exact.Image/Model',
+      providerId: 'exact-image-provider',
+    });
   });
 });

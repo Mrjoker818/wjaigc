@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
+import { Pool } from 'pg';
 
 import { stage3SourceIdentity } from './stage-3-source-state';
 
@@ -491,6 +492,92 @@ export async function seedStage4Baseline(
       ? Number(saveProjectPayload.projectRevision)
       : null,
   };
+}
+
+export async function seedStage4RuntimeDependencies(input: {
+  auth: Stage4AuthContext;
+  fixture: Stage4SeedTarget;
+  providerBaseUrl: string;
+}): Promise<{ sourceVersionId: string; selectedEntityId: string; canonicalUrl: string }> {
+  await assertStage4IsolationDatabaseConfigured();
+  const connectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
+  if (!connectionString) throw new Error('BLOCKED: Stage 4 runtime database is not configured');
+  const pool = new Pool({ connectionString });
+  const profile = input.fixture.browserProfile;
+  const projectId = String(input.fixture.canvasProject.id);
+  const selectedEntityId = `stage4-image-${profile}`;
+  const assetId = `stage4-asset-${profile}`;
+  const sourceVersionId = `stage4-version-${profile}`;
+  const placementId = `stage4-placement-${profile}`;
+  const canonicalUrl = '/logo.png';
+  const now = Date.now();
+  try {
+    await pool.query(
+      `INSERT INTO wujie_api_providers(
+         id, name, display_name, base_url, api_key, is_enabled, type, model_type,
+         request_style, selected_models, advanced_params, is_default, created_at, updated_at,
+         connection_status, discovered_models, sort_order
+       ) VALUES
+         ('stage4-chat-provider', 'Stage 4 Chat Provider', 'Stage 4 Chat Provider', $1, 'controlled-key', true,
+          'general', 'general', 'chat-completions', $2::text[], '{}'::jsonb, true, $3, $3, 'connected', '[]'::jsonb, 1),
+         ('stage4-image-provider', 'Stage 4 Image Provider', 'Stage 4 Image Provider', $1, 'controlled-key', true,
+          'image', 'image', 'images-generations', $4::text[], '{}'::jsonb, true, $3, $3, 'connected', '[]'::jsonb, 2)
+       ON CONFLICT (id) DO UPDATE SET
+         base_url = EXCLUDED.base_url, api_key = EXCLUDED.api_key,
+         type = EXCLUDED.type, model_type = EXCLUDED.model_type,
+         selected_models = EXCLUDED.selected_models,
+         is_enabled = true, updated_at = EXCLUDED.updated_at`,
+      [input.providerBaseUrl, ['stage4-chat-model', 'stage4-gemini-vision-model'], now, ['stage4-image-model']],
+    );
+    await pool.query(
+      `INSERT INTO wujie_projects(id, owner_id, name, status)
+       VALUES ($1, $2, $3, 'active') ON CONFLICT (id) DO NOTHING`,
+      [projectId, input.auth.userId, `Stage 4 ${profile}`],
+    );
+    await pool.query(
+      `INSERT INTO wujie_credits(
+         id, user_id, balance, total_recharged, total_used, created_at, updated_at
+       ) VALUES ($1, $2, 10000, 10000, 0, $3, $3)
+       ON CONFLICT (user_id) DO UPDATE SET
+         balance = GREATEST(wujie_credits.balance, 10000),
+         total_recharged = GREATEST(wujie_credits.total_recharged, 10000),
+         updated_at = EXCLUDED.updated_at`,
+      [`stage4-credits-${profile}`, input.auth.userId, now],
+    );
+    await pool.query(
+      `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+       VALUES ($1, $2, $3, 'image', 'active') ON CONFLICT (id) DO NOTHING`,
+      [assetId, input.auth.userId, projectId],
+    );
+    await pool.query(
+      `INSERT INTO wujie_asset_versions(
+         id, asset_id, owner_id, project_id, file_url, availability, idempotency_key
+       ) VALUES ($1, $2, $3, $4, $5, 'ready', $6) ON CONFLICT (id) DO NOTHING`,
+      [sourceVersionId, assetId, input.auth.userId, projectId, canonicalUrl, `stage4:${profile}:source`],
+    );
+    await pool.query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, sourceVersionId]);
+    await pool.query(
+      `INSERT INTO wujie_workspace_placements(
+         id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
+         workspace_id, entity_type, entity_id, status
+       ) VALUES ($1, $2, $3, $4, $5, 'canvas', $6, 'canvas-image', $7, 'active')
+       ON CONFLICT (id) DO NOTHING`,
+      [placementId, input.auth.userId, projectId, assetId, sourceVersionId,
+        `canvas:${projectId}`, selectedEntityId],
+    );
+    await pool.query(
+      `INSERT INTO wujie_workspace_placements(
+         id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
+         workspace_id, entity_type, entity_id, status
+       ) VALUES ($1, $2, $3, $4, $5, 'canvas', $6, 'canvas-image', $7, 'active')
+       ON CONFLICT (id) DO NOTHING`,
+      [`${placementId}-chat`, input.auth.userId, projectId, assetId, sourceVersionId,
+        `embedded-chat:stage4-session-${profile}`, selectedEntityId],
+    );
+  } finally {
+    await pool.end();
+  }
+  return { sourceVersionId, selectedEntityId, canonicalUrl };
 }
 
 export async function readStage4PersistedWorkflowNodeCount(

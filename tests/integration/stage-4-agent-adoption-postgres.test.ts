@@ -17,7 +17,15 @@ import {
   listAgentEventsForActor,
   observeAdoptedAgentTaskTerminal,
   releaseAdoptedAgentExecution,
+  prepareAgentDownstreamOperation,
+  completeAgentDownstreamOperation,
+  getAgentDownstreamOperation,
+  releaseAgentDownstreamOperation,
 } from '@/lib/agent-runtime/event-storage';
+import {
+  createAgentDownstreamOperationIdentity,
+  executeDurableAgentDownstreamOperation,
+} from '@/lib/agent-runtime/downstream-operations';
 import { cancelAgentRun } from '@/lib/agent-runtime/service';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
 import { createBillableTask } from '@/lib/task-core/billing-service';
@@ -142,6 +150,86 @@ async function createChargedTask(input: {
 }
 
 describe('same-task Agent adoption on real PostgreSQL', () => {
+  postgresIt('recovers the same provider task after crashing immediately after acceptance', async () => {
+    await withIsolatedPostgres('stage-4-agent-provider-acceptance-crash', async ({ databaseUrl, query }) => {
+      runMigrations(databaseUrl);
+      vi.resetModules();
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const taskId = randomUUID();
+      const now = Date.now();
+      await query('INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Provider acceptance crash', 'active']);
+      await query(`INSERT INTO wujie_credits(
+          id, user_id, balance, total_recharged, total_used, created_at, updated_at
+        ) VALUES ($1, $2, 100, 100, 0, $3, $3)`, [randomUUID(), ownerId, now]);
+      await query(`CREATE TABLE task2_controlled_provider_tasks(
+        idempotency_key TEXT PRIMARY KEY, provider_task_id TEXT NOT NULL
+      )`);
+      await createChargedTask({ ownerId, projectId, taskId });
+      const operationInput = {
+        actorUserId: ownerId, projectId, runId: taskId, toolId: 'generate_image',
+        requestDigest: 'b'.repeat(64),
+      };
+      const provider = vi.fn(async (idempotencyKey: string, crash: boolean) => {
+        await query(`INSERT INTO task2_controlled_provider_tasks(idempotency_key, provider_task_id)
+          VALUES ($1, $2) ON CONFLICT (idempotency_key) DO NOTHING`,
+        [idempotencyKey, 'provider-task-1']);
+        if (crash) throw new Error('simulated process crash after provider acceptance');
+        return { taskId: 'provider-task-1' };
+      });
+      const dependencies = {
+        prepare: prepareAgentDownstreamOperation,
+        complete: completeAgentDownstreamOperation,
+        read: getAgentDownstreamOperation,
+        release: releaseAgentDownstreamOperation,
+      };
+
+      const crashedIdentity = createAgentDownstreamOperationIdentity({
+        ...operationInput, leaseOwner: 'crashed-worker', now: 1, leaseDurationMs: 1,
+      });
+      const crashedOperation = await prepareAgentDownstreamOperation(crashedIdentity);
+      expect(crashedOperation).toMatchObject({ claimed: true, status: 'prepared' });
+      await expect(provider(crashedIdentity.idempotencyKey, true))
+        .rejects.toThrow('simulated process crash after provider acceptance');
+      const retries = await Promise.all(Array.from({ length: 20 }, () => (
+        executeDurableAgentDownstreamOperation(
+          operationInput,
+          async context => {
+            const accepted = await provider(context.idempotencyKey, false);
+            await transitionTask({
+              taskId,
+              from: ['processing'],
+              to: 'completed',
+              creditStatus: 'charged',
+              result: { downstreamTaskId: accepted.taskId },
+            });
+            return accepted;
+          },
+          dependencies,
+        )
+      )));
+      expect(retries).toEqual(Array.from({ length: 20 }, () => ({ taskId: 'provider-task-1' })));
+
+      const facts = await query<{
+        operations: string; provider_tasks: string; charges: string;
+        status: string; task_status: string;
+      }>(`SELECT
+          (SELECT count(*)::text FROM wujie_agent_downstream_operations WHERE task_id = $1) operations,
+          (SELECT count(*)::text FROM task2_controlled_provider_tasks) provider_tasks,
+          (SELECT count(*)::text FROM wujie_credit_transactions WHERE task_id = $1 AND type = 'consume') charges,
+          (SELECT status FROM wujie_agent_downstream_operations WHERE task_id = $1) status,
+          (SELECT status FROM cloud_tasks WHERE id = $1) task_status`, [taskId]);
+      expect(facts.rows[0]).toEqual({
+        operations: '1', provider_tasks: '1', charges: '1',
+        status: 'completed', task_status: 'completed',
+      });
+      expect(new Set(provider.mock.calls.map(call => call[0]))).toHaveLength(1);
+    });
+  });
+
   postgresIt('recovers an expired crash claim and invokes one stable downstream operation', async () => {
     await withIsolatedPostgres('stage-4-agent-adoption-crash-recovery', async ({ databaseUrl, query }) => {
       runMigrations(databaseUrl);

@@ -5,6 +5,11 @@ import type { PoolClient } from 'pg';
 import { getPool } from '@/lib/db-client';
 import { assertAgentEventPayloadSafe } from './event-reducer';
 import type {
+  AgentDownstreamOperation,
+  AgentDownstreamOperationIdentity,
+  CompleteAgentDownstreamOperationInput,
+} from './downstream-operations';
+import type {
   AgentEvent,
   AgentEventType,
   AgentWorkspace,
@@ -73,6 +78,40 @@ export interface AgentExecutionLeaseInput {
 export interface AgentExecutionLeaseClaim {
   claimed: boolean;
   leaseOwner: string;
+}
+
+interface AgentDownstreamOperationRow {
+  operation_key: string;
+  owner_id: string;
+  project_id: string;
+  task_id: string;
+  tool_id: string;
+  request_digest: string;
+  idempotency_key: string;
+  status: 'prepared' | 'completed';
+  response: unknown;
+  lease_owner: string;
+  attempt_count: number;
+}
+
+function mapDownstreamOperation(
+  row: AgentDownstreamOperationRow,
+  claimed?: boolean,
+): AgentDownstreamOperation {
+  return {
+    actorUserId: row.owner_id,
+    projectId: row.project_id,
+    runId: row.task_id,
+    toolId: row.tool_id,
+    requestDigest: row.request_digest,
+    operationKey: row.operation_key,
+    idempotencyKey: row.idempotency_key,
+    leaseOwner: row.lease_owner,
+    status: row.status,
+    attempts: Number(row.attempt_count || 0),
+    ...(claimed === undefined ? {} : { claimed }),
+    ...(row.response === null || row.response === undefined ? {} : { response: row.response }),
+  };
 }
 
 export interface ListAgentEventsInput {
@@ -509,6 +548,133 @@ export function completeAdoptedAgentExecution(input: AgentExecutionLeaseInput): 
 
 export function releaseAdoptedAgentExecution(input: AgentExecutionLeaseInput): Promise<boolean> {
   return settleAgentExecutionLease(input, false);
+}
+
+function validateDownstreamIdentity(
+  input: AgentDownstreamOperationIdentity,
+): AgentDownstreamOperationIdentity {
+  return {
+    ...input,
+    actorUserId: validateIdentifier('actorUserId', input.actorUserId),
+    projectId: validateIdentifier('projectId', input.projectId),
+    runId: validateIdentifier('runId', input.runId),
+    toolId: validateIdentifier('toolId', input.toolId),
+    requestDigest: validateIdentifier('requestDigest', input.requestDigest),
+    operationKey: validateIdentifier('operationKey', input.operationKey),
+    idempotencyKey: validateIdentifier('idempotencyKey', input.idempotencyKey),
+    leaseOwner: validateIdentifier('leaseOwner', input.leaseOwner),
+  };
+}
+
+export async function prepareAgentDownstreamOperation(
+  rawInput: AgentDownstreamOperationIdentity,
+): Promise<AgentDownstreamOperation> {
+  const input = validateDownstreamIdentity(rawInput);
+  const now = input.now ?? Date.now();
+  const leaseDurationMs = input.leaseDurationMs ?? 10 * 60_000;
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const task = await client.query(
+      `SELECT id FROM cloud_tasks
+       WHERE id = $1 AND user_id = $2 AND project_id = $3 FOR UPDATE`,
+      [input.runId, input.actorUserId, input.projectId],
+    );
+    if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
+    await client.query(
+      `INSERT INTO wujie_agent_downstream_operations(
+         operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+         idempotency_key, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+       ON CONFLICT (operation_key) DO NOTHING`,
+      [input.operationKey, input.actorUserId, input.projectId, input.runId,
+        input.toolId, input.requestDigest, input.idempotencyKey, now],
+    );
+    const existing = await client.query<AgentDownstreamOperationRow>(
+      `SELECT operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+              idempotency_key, status, response, lease_owner, attempt_count
+       FROM wujie_agent_downstream_operations
+       WHERE operation_key = $1 AND owner_id = $2 AND project_id = $3 AND task_id = $4
+       FOR UPDATE`,
+      [input.operationKey, input.actorUserId, input.projectId, input.runId],
+    );
+    if ((existing.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
+    const current = existing.rows[0];
+    if (current.request_digest !== input.requestDigest || current.idempotency_key !== input.idempotencyKey) {
+      throw new Error('Agent downstream operation identity conflict');
+    }
+    if (current.status === 'completed') {
+      await client.query('COMMIT');
+      return mapDownstreamOperation(current, false);
+    }
+    const claimed = await client.query<AgentDownstreamOperationRow>(
+      `UPDATE wujie_agent_downstream_operations
+       SET lease_owner = $2, lease_expires_at = $3,
+           attempt_count = attempt_count + 1, updated_at = $4
+       WHERE operation_key = $1 AND status = 'prepared' AND lease_expires_at <= $4
+       RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+                 idempotency_key, status, response, lease_owner, attempt_count`,
+      [input.operationKey, input.leaseOwner, now + leaseDurationMs, now],
+    );
+    await client.query('COMMIT');
+    return claimed.rows[0]
+      ? mapDownstreamOperation(claimed.rows[0], true)
+      : mapDownstreamOperation(current, false);
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getAgentDownstreamOperation(
+  rawInput: AgentDownstreamOperationIdentity,
+): Promise<AgentDownstreamOperation | null> {
+  const input = validateDownstreamIdentity(rawInput);
+  const result = await getPool().query<AgentDownstreamOperationRow>(
+    `SELECT operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+            idempotency_key, status, response, lease_owner, attempt_count
+     FROM wujie_agent_downstream_operations
+     WHERE operation_key = $1 AND owner_id = $2 AND project_id = $3 AND task_id = $4`,
+    [input.operationKey, input.actorUserId, input.projectId, input.runId],
+  );
+  return result.rows[0] ? mapDownstreamOperation(result.rows[0]) : null;
+}
+
+export async function completeAgentDownstreamOperation(
+  rawInput: CompleteAgentDownstreamOperationInput,
+): Promise<AgentDownstreamOperation> {
+  const input = validateDownstreamIdentity(rawInput);
+  const now = input.now ?? Date.now();
+  const serialized = JSON.stringify(rawInput.response ?? null);
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_PAYLOAD_BYTES) {
+    throw new RangeError('Agent downstream operation response exceeds its limit');
+  }
+  const result = await getPool().query<AgentDownstreamOperationRow>(
+    `UPDATE wujie_agent_downstream_operations
+     SET status = 'completed', response = $3::jsonb, lease_owner = '',
+         lease_expires_at = 0, completed_at = $4, updated_at = $4
+     WHERE operation_key = $1 AND lease_owner = $2 AND status = 'prepared'
+     RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+               idempotency_key, status, response, lease_owner, attempt_count`,
+    [input.operationKey, input.leaseOwner, serialized, now],
+  );
+  if (!result.rows[0]) throw new Error('Agent downstream operation lease was lost');
+  return mapDownstreamOperation(result.rows[0], true);
+}
+
+export async function releaseAgentDownstreamOperation(
+  rawInput: AgentDownstreamOperationIdentity,
+): Promise<boolean> {
+  const input = validateDownstreamIdentity(rawInput);
+  const result = await getPool().query(
+    `UPDATE wujie_agent_downstream_operations
+     SET lease_owner = '', lease_expires_at = 0, updated_at = $3
+     WHERE operation_key = $1 AND lease_owner = $2 AND status = 'prepared'`,
+    [input.operationKey, input.leaseOwner, input.now ?? Date.now()],
+  );
+  return (result.rowCount ?? 0) === 1;
 }
 
 function terminalObservation(status: string): {

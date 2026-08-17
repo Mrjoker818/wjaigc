@@ -12,7 +12,12 @@ import { AssetServiceError, createAssetService } from '@/lib/asset-core/service'
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { getSafeImageTypeFromDataUrl, getSafeMediaTypeFromResponse } from '@/lib/media-validation';
 import { projectCompletedTaskToAssets } from '@/lib/asset-core/task-projector';
-import { buildSimpleChatAgentRequest } from '@/lib/agent-runtime/surface-requests';
+import {
+  buildSimpleChatAgentRequest,
+  parseBoundedAgentSurfaceBody,
+  SurfaceAgentRequestError,
+} from '@/lib/agent-runtime/surface-requests';
+import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
@@ -259,7 +264,11 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export async function POST(request: NextRequest) {
   const agentRuntimeMode = resolveAgentRuntimeMode(process.env.WUJIE_AGENT_RUNTIME_MODE);
-  const body = await request.json() as {
+  const user = await getSessionUser(request);
+  if (!user) {
+    return Response.json({ error: 'Authentication required' }, { status: 401 });
+  }
+  let body: {
     assetAction?: string;
     messages?: { role: string; content: string; images?: string[] }[];
     model?: string;
@@ -286,6 +295,14 @@ export async function POST(request: NextRequest) {
     sourceVersionIds?: string[];
     selectedEntityIds?: string[];
   };
+  try {
+    body = parseBoundedAgentSurfaceBody(await request.text()) as typeof body;
+  } catch (error) {
+    if (error instanceof SurfaceAgentRequestError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
   const messages = body.messages || [];
   const model = body.model || 'deepseek-v4-flash';
   const providerId = body.providerId || '';
@@ -296,11 +313,6 @@ export async function POST(request: NextRequest) {
   const memories = body.memories || [];
   const deepAnalysis = body.deepAnalysis || false;
   const i2iStrength = body.i2iStrength || 0.7;
-
-  const user = await getSessionUser(request);
-  if (!user) {
-    return Response.json({ error: 'Authentication required' }, { status: 401 });
-  }
 
   const productTypes = (user.productType || '').split(',').map(type => type.trim()).filter(Boolean);
   if (user.role !== 'admin' && (
@@ -340,6 +352,41 @@ export async function POST(request: NextRequest) {
   }
   if (!provider) {
     return Response.json({ error: '未找到可用的 API 提供商' }, { status: 400 });
+  }
+
+  let canonicalSourceUrls: string[] = [];
+  const hasImageInput = messages.some(message => Array.isArray(message.images) && message.images.length > 0);
+  if (agentRuntimeMode === 'agent-v2' && hasImageInput) {
+    const sourceVersionIds = Array.isArray(body.sourceVersionIds) ? body.sourceVersionIds : [];
+    const selectedEntityIds = Array.isArray(body.selectedEntityIds) ? body.selectedEntityIds : [];
+    try {
+      const authorized = await authorizeAgentContext({
+        actorUserId: user.id,
+        request: buildSimpleChatAgentRequest({
+          projectId: body.assetProjectId || '',
+          workspaceId: body.workspaceId || `standalone-chat:${body.projectId || 'chat'}`,
+          providerId,
+          modelId: model,
+          prompt: messages.at(-1)?.content || 'vision',
+          sourceVersionIds,
+          selectedEntityIds,
+          mode: 'vision',
+          conversationId: body.projectId,
+          idempotencyKey: body.idempotencyKey,
+        }),
+      });
+      canonicalSourceUrls = sourceVersionIds.map(versionId => authorized.mediaByVersionId[versionId]);
+      const requestedUrls = messages.flatMap(message => message.images || []);
+      if (
+        canonicalSourceUrls.length !== requestedUrls.length
+        || requestedUrls.some((url, index) => url !== canonicalSourceUrls[index])
+      ) {
+        return Response.json({ code: 'AGENT_MEDIA_URL_MISMATCH', error: 'Image URL does not match the authorized Asset Version' }, { status: 409 });
+      }
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error ? String(error.code) : 'AGENT_CONTEXT_NOT_FOUND';
+      return Response.json({ code, error: 'Authorized image context was not found' }, { status: 404 });
+    }
   }
 
   // 模型权限校验：非管理员用户需检查 chatModels 授权列表
@@ -437,7 +484,7 @@ export async function POST(request: NextRequest) {
         for (const img of m.images) {
           parts.push({
             type: 'image_url',
-            image_url: { url: img, detail: 'auto' },
+            image_url: { url: agentRuntimeMode === 'agent-v2' ? canonicalSourceUrls.shift() || img : img, detail: 'auto' },
           });
         }
       }
@@ -757,7 +804,7 @@ export async function POST(request: NextRequest) {
                         modelId: imageModel,
                         mode: 'agent',
                         prompt: imgPrompt,
-                        sourceVersionIds: [],
+                        sourceVersionIds: runtimeRequest().sourceVersionIds,
                         allowedToolIds: ['generate_image'],
                       }),
                       adoption: () => ({

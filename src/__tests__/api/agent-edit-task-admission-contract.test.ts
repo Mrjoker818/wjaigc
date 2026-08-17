@@ -61,4 +61,22 @@ describe('agent edit task admission contract', () => {
     expect(replay).toBeGreaterThan(0);
     expect(replay).toBeLessThan(adoption);
   });
+
+  it('bounds and replays an owned terminal task before current model or placement authorization', () => {
+    const auth = routeSource.indexOf('requireApiAuthOrReject(request)');
+    const bounds = routeSource.indexOf('parseBoundedAgentSurfaceBody', auth);
+    const replayLookup = routeSource.indexOf('getCloudTaskForUserByIdempotencyKey', bounds);
+    const modelAuthorization = routeSource.indexOf('resolveTaskModel(', replayLookup);
+    const placementAuthorization = routeSource.indexOf('admitAuthorizedAgentExecution({', replayLookup);
+
+    expect(bounds).toBeGreaterThan(auth);
+    expect(replayLookup).toBeGreaterThan(bounds);
+    expect(replayLookup).toBeLessThan(modelAuthorization);
+    expect(replayLookup).toBeLessThan(placementAuthorization);
+  });
+
+  it('never normalizes exact agent-v2 chat or image model spelling', () => {
+    expect(routeSource).toContain('strictProviderModel ? imageModel : normalizeModelForApi(imageModel)');
+    expect(routeSource).not.toMatch(/agentRuntimeMode === 'agent-v2'[\s\S]{0,500}?split\('::'\)/);
+  });
 });

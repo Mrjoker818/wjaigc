@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   SurfaceAgentRequestError,
+  parseBoundedAgentSurfaceBody,
   buildAgentEditRequest,
   buildCanvasAgentRequest,
   buildSimpleChatAgentRequest,
@@ -114,5 +115,14 @@ describe('agent runtime surface requests', () => {
       sourceVersionIds: [], mode: 'agent',
       ignoredPayload: 'x'.repeat(256 * 1024),
     } as Parameters<typeof buildCanvasAgentRequest>[0])).toThrow(SurfaceAgentRequestError);
+  });
+
+  it('rejects oversized raw JSON and nested identifier arrays before route work', () => {
+    expect(() => parseBoundedAgentSurfaceBody(JSON.stringify({
+      prompt: 'ok', sourceVersionIds: Array.from({ length: 65 }, (_, i) => `v-${i}`),
+    }))).toThrow(SurfaceAgentRequestError);
+    expect(() => parseBoundedAgentSurfaceBody(JSON.stringify({
+      prompt: 'x'.repeat(256 * 1024),
+    }))).toThrow(SurfaceAgentRequestError);
   });
 });

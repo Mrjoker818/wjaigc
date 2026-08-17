@@ -24,7 +24,6 @@ export interface WorkflowPerformanceRawSample {
   startedAt: number;
   endedAt: number;
   frameTimestamps: number[];
-  refreshRateFps?: number;
   inputDelaysMs: number[];
   inputDelaySamples?: WorkflowInputDelaySample[];
   longTasksMs: number[];
@@ -38,8 +37,6 @@ export interface WorkflowPerformanceRawSample {
 export interface WorkflowPerformanceSample {
   durationMs: number;
   averageFps: number;
-  rawAverageFps: number;
-  refreshRateFps: number;
   inputDelayP95Ms: number;
   inputDelaySamples: WorkflowInputDelaySample[];
   longestTaskMs: number;
@@ -84,29 +81,6 @@ export function assertWorkflowMonitorCoverage(
   }
 }
 
-export function resolveWorkflowMonitorPlan(
-  rawMountedIds: ReadonlyArray<string | null | undefined>,
-  expectedNodeIds: ReadonlyArray<string>,
-  declaredLogicalNodeCount: number,
-): { logicalNodeCount: number; mountedNodeIds: string[] } {
-  const mountedNodeIds = selectWorkflowMonitorIds(rawMountedIds);
-  if (declaredLogicalNodeCount !== expectedNodeIds.length) {
-    throw new Error('BLOCKED: Stage 4 workflow logical node count does not match the fixture');
-  }
-  if (mountedNodeIds.length === 0) {
-    throw new Error('BLOCKED: Stage 4 workflow virtualization mounted no nodes');
-  }
-  if (new Set(mountedNodeIds).size !== mountedNodeIds.length) {
-    throw new Error('BLOCKED: Stage 4 workflow virtualization mounted duplicate node IDs');
-  }
-  const expectedSet = new Set(expectedNodeIds);
-  const unexpectedIds = mountedNodeIds.filter(id => !expectedSet.has(id));
-  if (unexpectedIds.length > 0) {
-    throw new Error('BLOCKED: Stage 4 workflow virtualization mounted unexpected node IDs');
-  }
-  return { logicalNodeCount: expectedNodeIds.length, mountedNodeIds };
-}
-
 function percentile95(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((left, right) => left - right);
@@ -122,19 +96,9 @@ export function summarizeWorkflowPerformance(
     ? Math.max(0, raw.frameTimestamps.at(-1)! - raw.frameTimestamps[0]!)
     : 0;
 
-  const rawAverageFps = frameSpanMs > 0 ? (frameIntervals * 1000) / frameSpanMs : 0;
-  const refreshRateFps = raw.refreshRateFps && raw.refreshRateFps > 0
-    ? raw.refreshRateFps
-    : rawAverageFps;
-  const normalizedFps = refreshRateFps > 0
-    ? Math.min(60, rawAverageFps * (60 / refreshRateFps))
-    : 0;
-
   return {
     durationMs,
-    averageFps: Number(normalizedFps.toFixed(2)),
-    rawAverageFps: Number(rawAverageFps.toFixed(2)),
-    refreshRateFps: Number(refreshRateFps.toFixed(2)),
+    averageFps: frameSpanMs > 0 ? Number(((frameIntervals * 1000) / frameSpanMs).toFixed(2)) : 0,
     inputDelayP95Ms: Number(percentile95(raw.inputDelaysMs).toFixed(2)),
     inputDelaySamples: raw.inputDelaySamples ?? [],
     longestTaskMs: Number(Math.max(0, ...raw.longTasksMs).toFixed(2)),
@@ -146,32 +110,13 @@ export function summarizeWorkflowPerformance(
   };
 }
 
-async function measureRefreshRate(page: Page): Promise<number> {
-  return page.evaluate(() => new Promise<number>(resolve => {
-    const timestamps: number[] = [];
-    const tick = (timestamp: number) => {
-      timestamps.push(timestamp);
-      const spanMs = timestamps.length > 1 ? timestamp - timestamps[0] : 0;
-      if (spanMs >= 500) {
-        resolve(((timestamps.length - 1) * 1000) / spanMs);
-        return;
-      }
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }));
-}
-
-async function startMeasurement(
-  page: Page,
-  expectedNodeIds: ReadonlyArray<string>,
-  refreshRateFps: number,
-): Promise<void> {
-  const plan = resolveWorkflowMonitorPlan(await page.locator('[data-node-id]').evaluateAll(nodes => (
+async function startMeasurement(page: Page, expectedNodeIds: ReadonlyArray<string>): Promise<void> {
+  const monitoredIds = selectWorkflowMonitorIds(await page.locator('[data-node-id]').evaluateAll(nodes => (
     nodes.map(node => (node as HTMLElement).dataset.nodeId ?? null)
-  )), expectedNodeIds, expectedNodeIds.length);
+  )));
+  assertWorkflowMonitorCoverage(monitoredIds, expectedNodeIds);
 
-  await page.evaluate(({ nodeIds, logicalNodeCount, measuredRefreshRateFps }) => {
+  await page.evaluate((nodeIds: string[]) => {
     const windowWithState = window as typeof window & {
       __wujieStage4WorkflowPerformance?: Record<string, unknown>;
     };
@@ -183,14 +128,12 @@ async function startMeasurement(
 
     const state = {
       startedAt: performance.now(),
-      refreshRateFps: measuredRefreshRateFps,
       frameTimestamps: [] as number[],
       inputDelaysMs: [] as number[],
       inputDelaySamples: [] as WorkflowInputDelaySample[],
       longTasksMs: [] as number[],
       longTaskSamples: [] as WorkflowLongTaskSample[],
-      nodeIds: [...monitoredIds],
-      monitoredNodeCount: logicalNodeCount,
+      monitoredNodeCount: monitoredIds.size,
       lostNodeCount: 0,
       unclickableDurationMs: 0,
       unclickableSamples: [] as WorkflowUnclickableSample[],
@@ -258,20 +201,67 @@ async function startMeasurement(
       state.observers.push(eventObserver);
     } catch {}
 
+    const sampleNodes = (deltaMs: number) => {
+      for (const id of monitoredIds) {
+        const node = document.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+        if (!node) {
+          state.lostNodeCount += 1;
+          continue;
+        }
+
+        const style = getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        if (
+          style.display === 'none'
+          || style.visibility === 'hidden'
+          || Number(style.opacity) === 0
+          || rect.width <= 0
+          || rect.height <= 0
+        ) {
+          state.lostNodeCount += 1;
+          continue;
+        }
+
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        if (
+          centerX < 0
+          || centerY < 0
+          || centerX > window.innerWidth
+          || centerY > window.innerHeight
+        ) {
+          continue;
+        }
+
+        const hit = document.elementFromPoint(centerX, centerY);
+        if (hit instanceof Element && hit.closest('[data-popup], [data-modal], [data-floating-panel]')) {
+          continue;
+        }
+        if (!hit || (!node.contains(hit) && hit !== node)) {
+          state.unclickableDurationMs += deltaMs;
+          if (state.unclickableSamples.length < 20) {
+            state.unclickableSamples.push({
+              id,
+              hitTag: hit?.tagName ?? null,
+              hitClass: hit instanceof HTMLElement ? hit.className || null : null,
+            });
+          }
+        }
+      }
+    };
+
     const tick = (timestamp: number) => {
       if (!state.active) return;
+      const deltaMs = Math.max(0, timestamp - state.lastFrameAt);
       state.lastFrameAt = timestamp;
       state.frameTimestamps.push(timestamp);
       state.rafId = requestAnimationFrame(tick);
+      sampleNodes(deltaMs);
     };
 
     state.rafId = requestAnimationFrame(tick);
     windowWithState.__wujieStage4WorkflowPerformance = state as unknown as Record<string, unknown>;
-  }, {
-    nodeIds: plan.mountedNodeIds,
-    logicalNodeCount: plan.logicalNodeCount,
-    measuredRefreshRateFps: refreshRateFps,
-  });
+  }, [...expectedNodeIds]);
 }
 
 async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample> {
@@ -281,13 +271,11 @@ async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample
     };
     const state = windowWithState.__wujieStage4WorkflowPerformance as unknown as {
       startedAt: number;
-      refreshRateFps: number;
       frameTimestamps: number[];
       inputDelaysMs: number[];
       inputDelaySamples: WorkflowInputDelaySample[];
       longTasksMs: number[];
       longTaskSamples: WorkflowLongTaskSample[];
-      nodeIds: string[];
       monitoredNodeCount: number;
       lostNodeCount: number;
       unclickableDurationMs: number;
@@ -300,61 +288,6 @@ async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample
 
     if (!state) {
       throw new Error('Stage 4 workflow measurement is not active');
-    }
-
-    const canvasViewport = document.querySelector<HTMLElement>('.node-editor-root .canvas-bg');
-    const canvasRect = canvasViewport?.getBoundingClientRect();
-    for (const id of state.nodeIds) {
-      const node = document.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
-      if (!node) {
-        state.lostNodeCount += 1;
-        continue;
-      }
-      const style = getComputedStyle(node);
-      const rect = node.getBoundingClientRect();
-      if (
-        style.display === 'none'
-        || style.visibility === 'hidden'
-        || Number(style.opacity) === 0
-        || rect.width <= 0
-        || rect.height <= 0
-      ) {
-        state.lostNodeCount += 1;
-        continue;
-      }
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      if (
-        centerX < 0
-        || centerY < 0
-        || centerX > window.innerWidth
-        || centerY > window.innerHeight
-        || (canvasRect && (
-          centerX < canvasRect.left
-          || centerY < canvasRect.top
-          || centerX > canvasRect.right
-          || centerY > canvasRect.bottom
-        ))
-      ) {
-        continue;
-      }
-      const hit = document.elementFromPoint(centerX, centerY);
-      if (hit && canvasViewport && !canvasViewport.contains(hit)) {
-        continue;
-      }
-      if (hit instanceof Element && hit.closest('[data-popup], [data-modal], [data-floating-panel]')) {
-        continue;
-      }
-      if (!hit || (!node.contains(hit) && hit !== node)) {
-        state.unclickableSamples.push({
-          id,
-          hitTag: hit?.tagName ?? null,
-          hitClass: hit instanceof HTMLElement ? hit.className || null : null,
-        });
-      }
-    }
-    if (state.unclickableSamples.length > 0) {
-      state.unclickableDurationMs = Math.max(0, performance.now() - state.startedAt);
     }
 
     state.active = false;
@@ -371,7 +304,6 @@ async function stopMeasurement(page: Page): Promise<WorkflowPerformanceRawSample
       startedAt: state.startedAt,
       endedAt: performance.now(),
       frameTimestamps: state.frameTimestamps,
-      refreshRateFps: state.refreshRateFps,
       inputDelaysMs: state.inputDelaysMs,
       inputDelaySamples: state.inputDelaySamples,
       longTasksMs: state.longTasksMs,
@@ -389,15 +321,10 @@ export async function measureWorkflowInteraction(
   expectedNodeIds: ReadonlyArray<string>,
   action: WorkflowInteraction,
 ): Promise<WorkflowPerformanceSample> {
-  await page.bringToFront();
-  const refreshRateFps = await measureRefreshRate(page);
-  await startMeasurement(page, expectedNodeIds, refreshRateFps);
+  await startMeasurement(page, expectedNodeIds);
   let actionError: unknown;
   try {
     await action(page);
-    await page.evaluate(() => new Promise<void>(resolve => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-    }));
   } catch (error) {
     actionError = error;
   }

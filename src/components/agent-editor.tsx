@@ -138,6 +138,18 @@ export function AgentEditor({
   const [resultPrompt, setResultPrompt] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
   const [agentRunId, setAgentRunId] = useState<string | null>(null);
+  const runStorageKey = projectId && selectedEntityId
+    ? `wujie_agent_run:${projectId}:${selectedEntityId}`
+    : null;
+  useEffect(() => {
+    if (!runStorageKey || typeof localStorage === 'undefined') return;
+    const recoveredRunId = localStorage.getItem(runStorageKey);
+    if (recoveredRunId) setAgentRunId(recoveredRunId);
+  }, [runStorageKey]);
+  useEffect(() => {
+    if (!runStorageKey || !agentRunId || typeof localStorage === 'undefined') return;
+    localStorage.setItem(runStorageKey, agentRunId);
+  }, [agentRunId, runStorageKey]);
   const agentRun = useAgentRunEvents(agentRunId);
   const { elapsed, totalTime, formatTime, startTimer, stopTimer, resetTimer } = useProgressTimer();
 

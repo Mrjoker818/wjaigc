@@ -45,4 +45,11 @@ describe('Agent runtime surface boundaries', () => {
     expect(standalone).toContain('message.id === assistantMessageId');
     expect(editor).toContain('selectedEntityId');
   });
+
+  it('persists the exact image Agent run identity for refresh recovery', () => {
+    const editor = source('src/components/agent-editor.tsx');
+    expect(editor).toContain('wujie_agent_run:${projectId}:${selectedEntityId}');
+    expect(editor).toContain('localStorage.getItem(runStorageKey)');
+    expect(editor).toContain('localStorage.setItem(runStorageKey, agentRunId)');
+  });
 });

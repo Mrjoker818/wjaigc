@@ -4,6 +4,7 @@ import type { User } from '@/lib/user-types';
 import {
   authorizeAgentContext,
   type AuthorizeAgentContextInput,
+  type AuthorizedAgentContext,
 } from './context-adapters';
 import {
   AgentModelRouteMismatchError,
@@ -11,9 +12,10 @@ import {
 } from './same-task-adapter';
 import { authorizeAgentTools } from './tool-registry';
 import type { AgentRunRequest } from './types';
+import type { AgentContextSnapshot } from './types';
 
 export interface AgentExecutionAdmissionDependencies {
-  authorizeContext(input: AuthorizeAgentContextInput): Promise<unknown>;
+  authorizeContext(input: AuthorizeAgentContextInput): Promise<AuthorizedAgentContext | AgentContextSnapshot>;
   resolveTaskModel(
     providerId: string,
     modelId: string,
@@ -25,7 +27,7 @@ export interface AdmitAuthorizedAgentExecutionInput<T> {
   actor: User;
   request: AgentRunRequest;
   toolId: string;
-  admit(): Promise<T>;
+  admit(context: AuthorizedAgentContext): Promise<T>;
 }
 
 const defaultDependencies: AgentExecutionAdmissionDependencies = {
@@ -55,10 +57,13 @@ export async function admitAuthorizedAgentExecution<T>(
   input: AdmitAuthorizedAgentExecutionInput<T>,
   dependencies: AgentExecutionAdmissionDependencies = defaultDependencies,
 ): Promise<T> {
-  await dependencies.authorizeContext({
+  const authorizedValue = await dependencies.authorizeContext({
     actorUserId: input.actor.id,
     request: input.request,
   });
+  const authorizedContext: AuthorizedAgentContext = 'snapshot' in authorizedValue
+    ? authorizedValue
+    : { snapshot: authorizedValue, mediaByVersionId: {}, selectedEntityVersionIds: {} };
 
   let model: TaskModelDescriptor;
   try {
@@ -84,5 +89,5 @@ export async function admitAuthorizedAgentExecution<T>(
     throw new SameTaskAgentToolError(authorization.denials);
   }
 
-  return input.admit();
+  return input.admit(authorizedContext);
 }

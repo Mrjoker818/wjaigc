@@ -7,7 +7,7 @@ import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { canAccessAgentTask } from '@/lib/agent-task-access';
 import { recordAgentTaskProgress, recordAgentTaskSubmitted, recordAgentTaskTerminal } from '@/lib/agent-task-persistence';
-import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
+import { getCloudTaskForUser, getCloudTaskForUserByIdempotencyKey } from '@/lib/cloud-task-storage';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { calculateActualPixelsFromRatio } from '@/lib/canvas-generation-group';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
@@ -32,7 +32,7 @@ import { createBillableTask } from '@/lib/task-core/billing-service';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import type { DurableTaskStatus } from '@/lib/task-core/task-state';
 import { getRequestId } from '@/lib/request-id';
-import { buildAgentEditRequest } from '@/lib/agent-runtime/surface-requests';
+import { buildAgentEditRequest, parseBoundedAgentSurfaceBody } from '@/lib/agent-runtime/surface-requests';
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
@@ -51,6 +51,36 @@ const AGENT_EDIT_ALLOWED_TOOLS = [
   'generate_video',
   'extend_video',
 ];
+
+class AgentMediaUrlMismatchError extends Error {
+  readonly code = 'AGENT_MEDIA_URL_MISMATCH';
+  readonly status = 409;
+
+  constructor() {
+    super('Image URL does not match the authorized Asset Version');
+    this.name = 'AgentMediaUrlMismatchError';
+  }
+}
+
+interface AgentEditPostBody {
+  image?: string;
+  prompt?: string;
+  maskDataUrl?: string;
+  model?: string;
+  providerId?: string;
+  maxRounds?: number;
+  imagePrompt?: string;
+  imageModel?: string;
+  imageProviderId?: string;
+  quality?: string;
+  aspectRatio?: string;
+  projectId?: string;
+  sessionId?: string;
+  messageId?: string;
+  selectedEntityId?: string;
+  assetParentVersionIds?: string[];
+  assetProjectionMode?: string;
+}
 
 // ─── 本地任务存储 ──────────────────────────────────────────────────
 // 由于 Next.js dev 模式下不同路由的内存不共享，
@@ -104,7 +134,7 @@ export async function POST(request: NextRequest) {
     const authResult = await requireApiAuthOrReject(request);
     if (authResult instanceof NextResponse) return authResult;
 
-    const body = await request.json();
+    const body = parseBoundedAgentSurfaceBody(await request.text()) as AgentEditPostBody;
     // 输入校验
     const _validationError = validateApiInputs(body, {
         prompt: 'optionalPrompt',
@@ -120,27 +150,68 @@ export async function POST(request: NextRequest) {
       messageId, selectedEntityId, assetParentVersionIds, assetProjectionMode,
     } = body;
 
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
+    const requestDigest = createHash('sha256').update(JSON.stringify({
+      image, prompt, maskDataUrl, providerId, model, imageProviderId, imageModel,
+      imagePrompt, quality, aspectRatio, maxRounds,
+    })).digest('hex');
+    if (agentRuntimeMode === 'agent-v2') {
+      const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, idempotencyKey);
+      if (existing && existing.requestDigest && existing.requestDigest !== requestDigest) {
+        throw new IdempotencyConflictError({
+          userId: authResult.userId,
+          idempotencyKey,
+          requestDigest,
+          existingDigest: existing.requestDigest,
+        });
+      }
+      if (existing && ['completed', 'failed', 'cancelled', 'timeout'].includes(existing.status)) {
+        let runId: string | undefined;
+        if (existing.projectId) {
+          const { listAgentEventsForActor } = await import('@/lib/agent-runtime/event-storage');
+          const events = await listAgentEventsForActor({
+            actorUserId: authResult.userId,
+            projectId: existing.projectId,
+            runId: existing.id,
+          }).catch(() => []);
+          if (events.length > 0) runId = existing.id;
+        }
+        if (existing.status === 'completed') {
+          return NextResponse.json({
+            success: true, taskId: existing.id, status: existing.status,
+            result: existing.result, mode: 'agent', replayed: true,
+            ...(runId ? { runId } : {}),
+          });
+        }
+        return NextResponse.json({
+          success: false, code: 'AGENT_TASK_TERMINAL',
+          error: `Agent task is already ${existing.status}`, taskId: existing.id,
+          status: existing.status, replayed: true, ...(runId ? { runId } : {}),
+        }, { status: 409 });
+      }
+    }
+
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
     let pureModel = model;
-    if (model && model.includes('::')) {
+    if (agentRuntimeMode !== 'agent-v2' && typeof model === 'string' && model.includes('::')) {
       pureModel = model.split('::').pop()!;
       console.log(`[agent-edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
     }
     // ★ 规范化模型名（如 gpt-image-2-2k → gpt-image-2）
     if (agentRuntimeMode !== 'agent-v2') {
-      const modelNorm = normalizeModelForApi(pureModel);
+      const modelNorm = normalizeModelForApi(pureModel || '');
       if (modelNorm.wasNormalized) {
         console.log(`[agent-edit] Normalized model alias: "${pureModel}" → "${modelNorm.apiModelName}"`);
         pureModel = modelNorm.apiModelName;
       }
     }
     let pureImageModel = imageModel;
-    if (imageModel && imageModel.includes('::')) {
+    if (agentRuntimeMode !== 'agent-v2' && typeof imageModel === 'string' && imageModel.includes('::')) {
       pureImageModel = imageModel.split('::').pop()!;
       console.log(`[agent-edit] Stripped provider prefix from imageModel: "${imageModel}" → "${pureImageModel}"`);
     }
     if (agentRuntimeMode !== 'agent-v2') {
-      const imgModelNorm = normalizeModelForApi(pureImageModel);
+      const imgModelNorm = normalizeModelForApi(pureImageModel || '');
       if (imgModelNorm.wasNormalized) {
         console.log(`[agent-edit] Normalized imageModel alias: "${pureImageModel}" → "${imgModelNorm.apiModelName}"`);
         pureImageModel = imgModelNorm.apiModelName;
@@ -161,7 +232,6 @@ export async function POST(request: NextRequest) {
     }
 
     sessionUser = await getSessionUser(request).catch(() => null);
-    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
     const sourceVersionIds = Array.isArray(assetParentVersionIds)
       ? assetParentVersionIds.filter((value): value is string => typeof value === 'string')
       : [];
@@ -206,19 +276,6 @@ export async function POST(request: NextRequest) {
           { providerId: typeof providerId === 'string' ? providerId : undefined },
         )
       : 0;
-    const requestDigest = createHash('sha256').update(JSON.stringify({
-      image,
-      prompt,
-      maskDataUrl,
-      providerId,
-      model: pureModel,
-      imageProviderId,
-      imageModel: pureImageModel,
-      imagePrompt,
-      quality,
-      aspectRatio,
-      maxRounds,
-    })).digest('hex');
     type AgentAdmission = {
       taskId: string;
       creditCost: number;
@@ -346,12 +403,20 @@ export async function POST(request: NextRequest) {
         status: 'processing',
       }),
     });
+    let executionImage = String(image);
     const admission = agentRuntimeMode === 'agent-v2'
       ? await admitAuthorizedAgentExecution({
           actor: runtimeActor,
           request: buildRuntimeRequest(idempotencyKey),
           toolId: 'agent_edit',
-          admit: admitAgentTask,
+          admit: authorizedContext => {
+            const canonicalImageUrl = authorizedContext.mediaByVersionId[sourceVersionIds[0]];
+            if (!canonicalImageUrl || canonicalImageUrl !== image) {
+              throw new AgentMediaUrlMismatchError();
+            }
+            executionImage = canonicalImageUrl;
+            return admitAgentTask();
+          },
         })
       : await admitAgentTask();
     const taskId = admission.value.taskId;
@@ -419,7 +484,9 @@ export async function POST(request: NextRequest) {
     await recordAgentTaskProgress(taskId, 5, 'Agent processing');
 
     const runtimeRequest = () => buildRuntimeRequest(taskId);
-    const executeAgentEditTask = async (): Promise<void> => {
+    const executeAgentEditTask = async (operationContext: {
+      idempotencyKey: string;
+    } = { idempotencyKey: `agent-provider:${taskId}` }): Promise<void> => {
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
         void (async () => {
@@ -521,7 +588,7 @@ export async function POST(request: NextRequest) {
         const context: AgentContext = {
           taskId,
           userPrompt: prompt,
-          imageUrl: image,
+          imageUrl: executionImage,
           imagePrompt: imagePrompt || '',
           maskDataUrl,
           model: chatModel,
@@ -645,7 +712,7 @@ export async function POST(request: NextRequest) {
         // 实际执行所有图像编辑步骤（按轮次顺序）
         if (isCancelled()) return;
 
-        let finalImageUrl = image;
+        let finalImageUrl = executionImage;
         const allEditSteps = result.steps.filter(s => s.toolName === 'image_edit' && s.success);
 
         if (allEditSteps.length > 0) {
@@ -668,6 +735,7 @@ export async function POST(request: NextRequest) {
                 quality,
                 aspectRatio,
                 agentRuntimeMode === 'agent-v2',
+                `${operationContext.idempotencyKey}:image-edit:${i}`,
               );
               console.log(`[agent-edit] Edit step ${i + 1} result: success=${editResult.success} hasUrl=${!!editResult.imageUrl} url=${editResult.imageUrl?.substring(0, 80)} error=${editResult.error || ''}`);
               if (editResult.success && editResult.imageUrl) {
@@ -689,6 +757,7 @@ export async function POST(request: NextRequest) {
         // 执行其他非 image_edit 工具的实际操作
         const otherSteps = result.steps.filter(s => s.toolName !== 'image_edit' && s.success);
         for (const step of otherSteps) {
+          const stepKey = `${step.toolName}:${result.steps.indexOf(step)}`;
           if (isCancelled()) break;
           try {
             if (step.toolName === 'upscale') {
@@ -700,6 +769,7 @@ export async function POST(request: NextRequest) {
                 headers: {
                   'Content-Type': 'application/json',
                   ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
                 },
                 body: JSON.stringify({ imageUrl: finalImageUrl, scale: step.params.scale || '2', outputFormat: 'png' }),
               });
@@ -717,6 +787,7 @@ export async function POST(request: NextRequest) {
                 headers: {
                   'Content-Type': 'application/json',
                   ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
                 },
                 body: JSON.stringify({ imageUrl: finalImageUrl, action: 'removebg', model: imageModel, providerId: imageProviderId, engine: imageModel ? 'ai' : 'auto' }),
               });
@@ -734,6 +805,7 @@ export async function POST(request: NextRequest) {
                 headers: {
                   'Content-Type': 'application/json',
                   ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
                 },
                 body: JSON.stringify({ imageUrl: finalImageUrl, mode: step.params.mode || 'color', quality: step.params.quality || 'balanced' }),
               });
@@ -751,6 +823,7 @@ export async function POST(request: NextRequest) {
                 headers: {
                   'Content-Type': 'application/json',
                   ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
                 },
                 body: JSON.stringify({
                   prompt: String(step.params.prompt || prompt),
@@ -1128,6 +1201,7 @@ async function performImageEdit(
   qualityFromFrontend?: string,
   aspectRatioFromFrontend?: string,
   strictProviderModel = false,
+  providerIdempotencyKey?: string,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   // 优先使用前端传递的图像模型和提供商，遵循用户在图像生成面板的选择
   console.log('[agent-edit] performImageEdit called, model:', imageModelFromFrontend, 'providerId:', imageProviderIdFromFrontend);
@@ -1157,8 +1231,8 @@ async function performImageEdit(
   if (imageModel.includes('::')) {
     imageModel = imageModel.split('::').pop()!;
   }
-  const pImgNorm = normalizeModelForApi(imageModel);
-  if (pImgNorm.wasNormalized) {
+  const pImgNorm = strictProviderModel ? imageModel : normalizeModelForApi(imageModel);
+  if (typeof pImgNorm !== 'string' && pImgNorm.wasNormalized) {
     console.log(`[agent-edit] Normalized performImageEdit model: "${imageModel}" → "${pImgNorm.apiModelName}"`);
     imageModel = pImgNorm.apiModelName;
   }
@@ -1178,6 +1252,7 @@ async function performImageEdit(
     try {
       const headers: Record<string, string> = {
         'Authorization': `Bearer ${apiKey}`,
+        ...(providerIdempotencyKey ? { 'Idempotency-Key': providerIdempotencyKey } : {}),
       };
 
       const formData = new FormData();
@@ -1224,7 +1299,7 @@ async function performImageEdit(
         }
 
         // ★ Try /chat/completions fallback for channel errors
-        if (isChannelUnavailableError(`${errText} ${resp.status}`)) {
+        if (!strictProviderModel && isChannelUnavailableError(`${errText} ${resp.status}`)) {
           console.info('[agent-edit] Path A: channel error, trying /chat/completions fallback...');
           try {
             const chatImageUrls = await tryChatCompletionsImageFallback({
@@ -1277,7 +1352,7 @@ async function performImageEdit(
     } catch (err) {
       // Timeout → try /chat/completions fallback
       const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
-      if (isTimeout) {
+      if (isTimeout && !strictProviderModel) {
         console.info('[agent-edit] Path A: timed out, trying /chat/completions fallback...');
         try {
           const chatImageUrls = await tryChatCompletionsImageFallback({
@@ -1347,6 +1422,7 @@ async function performImageEdit(
       const genHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
+        ...(providerIdempotencyKey ? { 'Idempotency-Key': providerIdempotencyKey } : {}),
       };
 
       console.log('[agent-edit] Path B: sending request to', `${baseUrl}/images/generations`, 'with image_urls');
@@ -1462,7 +1538,7 @@ async function performImageEdit(
     } catch (err) {
       // Timeout → try /chat/completions fallback
       const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
-      if (isTimeout) {
+      if (isTimeout && !strictProviderModel) {
         console.info('[agent-edit] Path B: timed out, trying /chat/completions fallback...');
         try {
           const chatImageUrls = await tryChatCompletionsImageFallback({
@@ -1546,6 +1622,7 @@ async function performImageEdit(
     const chatHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
+      ...(providerIdempotencyKey ? { 'Idempotency-Key': providerIdempotencyKey } : {}),
     };
 
     console.log('[agent-edit] Path C: sending request to', `${baseUrl}/chat/completions`);

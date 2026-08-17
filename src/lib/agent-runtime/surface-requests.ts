@@ -38,6 +38,7 @@ export interface AgentEditRequestInput extends Omit<SurfaceRequestInput,
 
 export class SurfaceAgentRequestError extends Error {
   readonly code = 'AGENT_SURFACE_REQUEST_INVALID';
+  readonly status = 400;
 
   constructor(message = 'Agent surface request is invalid') {
     super(message);
@@ -51,6 +52,60 @@ const LIMITS = {
   identifiers: 64,
   serialized: 256 * 1024,
 } as const;
+
+const IDENTIFIER_FIELDS = new Set([
+  'projectId', 'workspaceId', 'providerId', 'modelId', 'model', 'imageModel',
+  'imageProviderId', 'idempotencyKey', 'selectedEntityId', 'sessionId', 'messageId',
+]);
+const IDENTIFIER_ARRAY_FIELDS = new Set([
+  'sourceVersionIds', 'visibleVersionIds', 'selectedEntityIds', 'assetParentVersionIds',
+]);
+const PROMPT_FIELDS = new Set(['prompt', 'imagePrompt', 'content']);
+const CREDENTIAL_FIELD = /(?:api[_-]?key|access[_-]?token|password|secret|authorization)/i;
+
+function inspectBoundedValue(value: unknown, key = '', depth = 0): void {
+  if (depth > 20) throw new SurfaceAgentRequestError('Agent surface request is too deeply nested');
+  if (typeof value === 'string') {
+    const maximum = PROMPT_FIELDS.has(key)
+      ? LIMITS.prompt
+      : IDENTIFIER_FIELDS.has(key) ? LIMITS.identifier : null;
+    if (maximum !== null && value.length > maximum) {
+      throw new SurfaceAgentRequestError(`${key} exceeds its limit`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    if (IDENTIFIER_ARRAY_FIELDS.has(key) && value.length > LIMITS.identifiers) {
+      throw new SurfaceAgentRequestError(`${key} exceeds its item limit`);
+    }
+    value.forEach(item => inspectBoundedValue(item, key, depth + 1));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+    if (CREDENTIAL_FIELD.test(nestedKey)) {
+      throw new SurfaceAgentRequestError('Client credentials are not accepted');
+    }
+    inspectBoundedValue(nestedValue, nestedKey, depth + 1);
+  }
+}
+
+export function parseBoundedAgentSurfaceBody(rawBody: string): Record<string, unknown> {
+  if (Buffer.byteLength(rawBody, 'utf8') > LIMITS.serialized) {
+    throw new SurfaceAgentRequestError('Agent surface request exceeds its serialized limit');
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(rawBody);
+  } catch {
+    throw new SurfaceAgentRequestError('Agent surface request is not valid JSON');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new SurfaceAgentRequestError('Agent surface request must be an object');
+  }
+  inspectBoundedValue(value);
+  return value as Record<string, unknown>;
+}
 
 function required(value: unknown, name: string, maximum: number = LIMITS.identifier): string {
   if (typeof value !== 'string' || !value.trim()) {

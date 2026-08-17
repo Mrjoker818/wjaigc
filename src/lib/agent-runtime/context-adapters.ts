@@ -10,14 +10,14 @@ export interface AgentContextTransaction {
     ownerId: string,
     projectId: string,
     versionId: string,
-  ): Promise<unknown | null>;
+  ): Promise<{ id: string; file?: { url?: string } } | null>;
   findEntityPlacement?(
     ownerId: string,
     projectId: string,
     workspace: AgentRunRequest['workspace'],
     workspaceId: string,
     entityId: string,
-  ): Promise<unknown | null>;
+  ): Promise<{ id: string; assetVersionId?: string } | null>;
 }
 
 export interface AgentContextStorage {
@@ -30,6 +30,12 @@ export interface AuthorizeAgentContextInput {
   actorUserId: string;
   request: AgentRunRequest;
   storage?: AgentContextStorage;
+}
+
+export interface AuthorizedAgentContext {
+  snapshot: AgentContextSnapshot;
+  mediaByVersionId: Record<string, string>;
+  selectedEntityVersionIds: Record<string, string>;
 }
 
 export class AgentContextNotFoundError extends Error {
@@ -70,7 +76,7 @@ export async function authorizeAgentContext({
   actorUserId,
   request,
   storage = defaultStorage(),
-}: AuthorizeAgentContextInput): Promise<AgentContextSnapshot> {
+}: AuthorizeAgentContextInput): Promise<AuthorizedAgentContext> {
   return storage.transaction(async transaction => {
     if (!await transaction.findProject(actorUserId, request.projectId)) {
       throw new AgentContextNotFoundError();
@@ -80,14 +86,17 @@ export async function authorizeAgentContext({
       ...request.sourceVersionIds,
       ...request.context.visibleVersionIds,
     ]);
+    const mediaByVersionId: Record<string, string> = {};
     for (const versionId of versionIds) {
       const version = await transaction.findVersion(
         actorUserId,
         request.projectId,
         versionId,
       );
-      if (!version) throw new AgentContextNotFoundError();
+      if (!version || !version.file?.url) throw new AgentContextNotFoundError();
+      mediaByVersionId[versionId] = version.file.url;
     }
+    const selectedEntityVersionIds: Record<string, string> = {};
     for (const entityId of new Set(request.context.selectedEntityIds)) {
       if (!transaction.findEntityPlacement) throw new AgentContextNotFoundError();
       const placement = await transaction.findEntityPlacement(
@@ -97,8 +106,10 @@ export async function authorizeAgentContext({
         request.workspaceId,
         entityId,
       );
-      if (!placement) throw new AgentContextNotFoundError();
+      if (!placement?.assetVersionId) throw new AgentContextNotFoundError();
+      if (!versionIds.has(placement.assetVersionId)) throw new AgentContextNotFoundError();
+      selectedEntityVersionIds[entityId] = placement.assetVersionId;
     }
-    return request.context;
+    return { snapshot: request.context, mediaByVersionId, selectedEntityVersionIds };
   });
 }

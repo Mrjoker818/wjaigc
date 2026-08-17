@@ -11,7 +11,8 @@ import { CHAT_TOOLS, executeAdmittedToolCall, executeToolCall, parseToolCallsFro
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
-import { buildCanvasAgentRequest } from '@/lib/agent-runtime/surface-requests';
+import { buildCanvasAgentRequest, parseBoundedAgentSurfaceBody } from '@/lib/agent-runtime/surface-requests';
+import type { AuthorizedAgentContext } from '@/lib/agent-runtime/context-adapters';
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
 import { resolveAgentRuntimeMode, type AgentRuntimeMode } from '@/lib/agent-runtime/mode';
@@ -84,7 +85,7 @@ async function executeCanvasChatTool(input: {
     }),
     allowedToolIds: toolId ? [toolId] : [],
   });
-  const execute = () => executeToolCall(input.toolName, input.toolArgs, {
+  const execute = (authorizedContext?: AuthorizedAgentContext) => executeToolCall(input.toolName, input.toolArgs, {
     chatApiKey: input.chatApiKey,
     chatBaseUrl: input.chatBaseUrl,
     chatModel: input.chatModel,
@@ -98,6 +99,9 @@ async function executeCanvasChatTool(input: {
     ...input.taskContext,
     idempotencyKey,
     deferAgentExecution: input.agentRuntimeMode === 'agent-v2',
+    canonicalImageUrl: authorizedContext
+      ? authorizedContext.mediaByVersionId[buildRuntimeRequest().sourceVersionIds[0]]
+      : undefined,
   });
 
   let toolResult: ToolCallResult;
@@ -114,7 +118,7 @@ async function executeCanvasChatTool(input: {
       actor: input.runtimeActor,
       request,
       toolId,
-      admit: execute,
+      admit: authorizedContext => execute(authorizedContext),
     });
   } else {
     toolResult = await execute();
@@ -242,7 +246,25 @@ export async function POST(request: NextRequest) {
       messageId: requestMessageId = undefined as string | undefined,
       sourceVersionIds: requestSourceVersionIds = undefined as string[] | undefined,
       selectedEntityIds: requestSelectedEntityIds = undefined as string[] | undefined,
-    } = await request.json();
+    } = parseBoundedAgentSurfaceBody(await request.text()) as {
+      model?: string;
+      messages?: Array<{ role: string; content: string; images?: string[] }>;
+      stream?: boolean;
+      providerId?: string;
+      userId?: string;
+      enableTools?: boolean;
+      agentTools?: string[];
+      canvasSummary?: string;
+      intentLevel?: string;
+      imageModel?: string;
+      imageProviderId?: string;
+      isAgentMode?: boolean;
+      projectId?: string;
+      sessionId?: string;
+      messageId?: string;
+      sourceVersionIds?: string[];
+      selectedEntityIds?: string[];
+    };
     
     // P2-9: 极度模糊时强制禁用工具，确保LLM只追问不执行
     // Agent模式例外：用户明确希望自动执行，放宽意图检测
@@ -901,6 +923,7 @@ async function handleAgentStream(
           });
 
           // Execute each tool call and add results
+          let terminalToolFailure = false;
           for (const [toolCallIndex, toolCall] of completedToolCalls.entries()) {
             const toolName = toolCall.function.name;
             let toolArgs: Record<string, unknown>;
@@ -974,6 +997,10 @@ async function handleAgentStream(
               tool_call_id: toolCall.id,
               content: toolResult.resultText,
             });
+            if (toolName === 'analyze_image' && !toolResult.success) {
+              terminalToolFailure = true;
+              break;
+            }
           }
 
           // Send tool execution complete event — LLM will continue thinking
@@ -982,6 +1009,8 @@ async function handleAgentStream(
             iteration,
             toolsExecuted: completedToolCalls.length,
           })}\n\n`));
+
+          if (terminalToolFailure) break;
 
           // Continue the loop — LLM will now see the tool results and decide next action
         }
@@ -1061,6 +1090,7 @@ async function handleNonStreamAgentLoop(
     if (!toolCalls || toolCalls.length === 0) break;
 
     // Execute each tool call
+    let terminalToolFailure = false;
     for (const [toolCallIndex, toolCall] of toolCalls.entries()) {
       const toolName = toolCall.function.name;
       let toolArgs: Record<string, unknown>;
@@ -1097,7 +1127,13 @@ async function handleNonStreamAgentLoop(
         tool_call_id: toolCall.id,
         content: toolResult.resultText,
       });
+      if (toolName === 'analyze_image' && !toolResult.success) {
+        terminalToolFailure = true;
+        break;
+      }
     }
+
+    if (terminalToolFailure) break;
 
     // Call LLM again with tool results
     const nextRequestBody: Record<string, unknown> = {

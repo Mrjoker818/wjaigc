@@ -875,8 +875,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const draggingNodeRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const nodeDragPositionRef = useRef<{ id: string; x: number; y: number } | null>(null);
-  const nodeDragOriginRef = useRef({ x: 0, y: 0 });
-  const nodeDragElementRef = useRef<HTMLElement | null>(null);
+  const nodeDragRafRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false); // 标记正在拖动，跳过历史快照
   const [draggingConn, setDraggingConn] = useState<DraggingConn | null>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
@@ -2161,10 +2160,12 @@ ${contextInfo}
       const nodeId = draggingNodeRef.current;
       const offset = dragOffsetRef.current;
       nodeDragPositionRef.current = { id: nodeId, x: mx - offset.x, y: my - offset.y };
-      if (nodeDragElementRef.current) {
-        const deltaX = nodeDragPositionRef.current.x - nodeDragOriginRef.current.x;
-        const deltaY = nodeDragPositionRef.current.y - nodeDragOriginRef.current.y;
-        nodeDragElementRef.current.style.transform = `translate3d(${deltaX}px, ${deltaY}px, 0)`;
+      if (nodeDragRafRef.current === null) {
+        nodeDragRafRef.current = requestAnimationFrame(() => {
+          nodeDragRafRef.current = null;
+          const position = nodeDragPositionRef.current;
+          if (position) applyNodeDragPosition(position);
+        });
       }
     } else if (draggingConn) {
       const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
@@ -2197,16 +2198,14 @@ ${contextInfo}
     }
     setIsPanning(false);
     if (draggingNodeRef.current) {
+      if (nodeDragRafRef.current !== null) {
+        cancelAnimationFrame(nodeDragRafRef.current);
+        nodeDragRafRef.current = null;
+      }
       if (nodeDragPositionRef.current) {
-        if (nodeDragElementRef.current) {
-          nodeDragElementRef.current.style.left = `${nodeDragPositionRef.current.x}px`;
-          nodeDragElementRef.current.style.top = `${nodeDragPositionRef.current.y}px`;
-          nodeDragElementRef.current.style.transform = '';
-        }
         applyNodeDragPosition(nodeDragPositionRef.current);
       }
       nodeDragPositionRef.current = null;
-      nodeDragElementRef.current = null;
       // 拖动结束：标记结束，记录一次历史快照，通知外部
       draggingNodeRef.current = null;
       isDraggingRef.current = false;
@@ -3240,9 +3239,6 @@ ${contextInfo}
                   const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
                   draggingNodeRef.current = node.id;
                   dragOffsetRef.current = { x: mx - node.x, y: my - node.y };
-                  nodeDragOriginRef.current = { x: node.x, y: node.y };
-                  nodeDragElementRef.current = e.currentTarget as HTMLElement;
-                  nodeDragPositionRef.current = { id: node.id, x: node.x, y: node.y };
                   isDraggingRef.current = true;
                   setBoxSelect(null);
                   isBoxSelectingRef.current = false;
