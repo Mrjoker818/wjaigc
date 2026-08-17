@@ -4,6 +4,7 @@ import {
   createSameTaskAgentAdapter,
   type SameTaskAgentAdapterDependencies,
 } from '@/lib/agent-runtime/same-task-adapter';
+import type { AgentDownstreamOperation } from '@/lib/agent-runtime/downstream-operations';
 import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
@@ -256,5 +257,114 @@ describe('same-task Agent adoption adapter', () => {
 
     expect(deps.releaseExecution).toHaveBeenCalledWith(expect.objectContaining({ leaseOwner: 'lease-1' }));
     expect(deps.completeExecution).toHaveBeenCalledWith(expect.objectContaining({ leaseOwner: 'lease-2' }));
+  });
+
+  it('reconciles an accepted production operation without a second submit', async () => {
+    let operation: AgentDownstreamOperation | null = null;
+    const downstreamOperations = {
+      prepare: vi.fn(async input => {
+        const current = operation ?? { ...input, status: 'prepared' as const, attempts: 0 };
+        operation = { ...current, attempts: current.attempts + 1, claimed: true };
+        return operation!;
+      }),
+      markSubmitted: vi.fn(async input => {
+        operation = { ...operation!, ...input, status: 'submitted' };
+        return operation!;
+      }),
+      markAccepted: vi.fn(async input => {
+        operation = { ...operation!, ...input, status: 'accepted' };
+        return operation!;
+      }),
+      markSubmissionUnknown: vi.fn(async input => {
+        operation = { ...operation!, ...input, status: 'submission_unknown' };
+        return operation!;
+      }),
+      complete: vi.fn(async input => {
+        operation = { ...operation!, ...input, status: 'completed' };
+        return operation!;
+      }),
+      release: vi.fn(async () => true),
+      read: vi.fn(async () => operation),
+    } satisfies NonNullable<SameTaskAgentAdapterDependencies['downstreamOperations']>;
+    const deps = dependencies({ downstreamOperations });
+    const adapter = createSameTaskAgentAdapter(deps);
+    const adoption = await adapter.adopt({
+      actor, taskId: 'task-1', request: request(), toolId: 'generate_image',
+    });
+    const submit = vi.fn(async () => ({ taskId: 'provider-task-1' }));
+
+    await expect(adapter.executeAdoption({
+      adoption,
+      execute: async context => {
+        await context.beginSubmission();
+        const accepted = await submit();
+        await context.recordAccepted(accepted.taskId);
+        throw new Error('crash after acceptance');
+      },
+      recovery: {
+        reconcile: vi.fn(async providerTaskId => ({ taskId: providerTaskId })),
+      },
+    })).rejects.toThrow('crash after acceptance');
+
+    const recovered = await adapter.executeAdoption({
+      adoption,
+      execute: async () => submit(),
+      recovery: {
+        reconcile: vi.fn(async providerTaskId => ({ taskId: providerTaskId })),
+      },
+    });
+
+    expect(recovered.value).toEqual({ taskId: 'provider-task-1' });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(downstreamOperations.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it('terminalizes submission_unknown once instead of releasing it for resurrection', async () => {
+    let operation: AgentDownstreamOperation | null = null;
+    const terminalizeSubmissionUnknown = vi.fn().mockResolvedValue(true);
+    const downstreamOperations = {
+      prepare: vi.fn(async input => {
+        const current = operation ?? { ...input, status: 'prepared' as const, attempts: 0 };
+        operation = { ...current, attempts: current.attempts + 1, claimed: true };
+        return operation!;
+      }),
+      markSubmitted: vi.fn(async input => {
+        operation = { ...operation!, ...input, status: 'submitted' };
+        return operation!;
+      }),
+      markAccepted: vi.fn(),
+      markSubmissionUnknown: vi.fn(async input => {
+        operation = { ...operation!, ...input, status: 'submission_unknown' };
+        return operation!;
+      }),
+      complete: vi.fn(),
+      release: vi.fn(async () => true),
+      read: vi.fn(async () => operation),
+    } satisfies NonNullable<SameTaskAgentAdapterDependencies['downstreamOperations']>;
+    const deps = dependencies({ downstreamOperations, terminalizeSubmissionUnknown });
+    const adapter = createSameTaskAgentAdapter(deps);
+    const adoption = await adapter.adopt({
+      actor, taskId: 'task-1', request: request(), toolId: 'generate_image',
+    });
+    const submit = vi.fn(async () => {
+      throw new Error('connection lost after submit');
+    });
+
+    await expect(adapter.executeAdoption({
+      adoption,
+      execute: async context => {
+        await context.beginSubmission();
+        return submit();
+      },
+    })).rejects.toMatchObject({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(terminalizeSubmissionUnknown).toHaveBeenCalledTimes(1);
+    expect(terminalizeSubmissionUnknown).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'task-1',
+      code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+    }));
+    expect(deps.completeExecution).toHaveBeenCalledTimes(1);
+    expect(deps.releaseExecution).not.toHaveBeenCalled();
   });
 });

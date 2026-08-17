@@ -25,14 +25,11 @@ import {
   markAgentDownstreamSubmissionUnknown,
   releaseAgentDownstreamOperation,
 } from '@/lib/agent-runtime/event-storage';
-import {
-  createAgentDownstreamOperationIdentity,
-  executeDurableAgentDownstreamOperation,
-} from '@/lib/agent-runtime/downstream-operations';
 import { cancelAgentRun } from '@/lib/agent-runtime/service';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
 import { createBillableTask } from '@/lib/task-core/billing-service';
 import { transitionTask } from '@/lib/task-core/task-service';
+import { recordAgentTaskTerminal } from '@/lib/agent-task-persistence';
 import type { AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { User } from '@/lib/user-types';
 import { withIsolatedPostgres } from '../helpers/postgres-test-database';
@@ -97,7 +94,9 @@ function request(projectId: string, taskId: string): AgentRunRequest {
   };
 }
 
-function adapterDependencies(): SameTaskAgentAdapterDependencies {
+function adapterDependencies(
+  overrides: Partial<SameTaskAgentAdapterDependencies> = {},
+): SameTaskAgentAdapterDependencies {
   return {
     getTaskForUser: getCloudTaskForUser,
     resolveTaskModel: vi.fn().mockResolvedValue({
@@ -124,6 +123,22 @@ function adapterDependencies(): SameTaskAgentAdapterDependencies {
     claimExecution: claimAdoptedAgentExecution,
     completeExecution: completeAdoptedAgentExecution,
     releaseExecution: releaseAdoptedAgentExecution,
+    downstreamOperations: {
+      prepare: prepareAgentDownstreamOperation,
+      complete: completeAgentDownstreamOperation,
+      markSubmitted: markAgentDownstreamOperationSubmitted,
+      markAccepted: markAgentDownstreamOperationAccepted,
+      markSubmissionUnknown: markAgentDownstreamSubmissionUnknown,
+      read: getAgentDownstreamOperation,
+      release: releaseAgentDownstreamOperation,
+    },
+    terminalizeSubmissionUnknown: async input => {
+      await recordAgentTaskTerminal(input.taskId, {
+        status: 'failed', code: input.code, error: input.message, retryable: false,
+      });
+      return true;
+    },
+    ...overrides,
   };
 }
 
@@ -172,70 +187,65 @@ describe('same-task Agent adoption on real PostgreSQL', () => {
         id BIGSERIAL PRIMARY KEY, idempotency_key TEXT NOT NULL, provider_task_id TEXT NOT NULL
       )`);
       await createChargedTask({ ownerId, projectId, taskId });
-      const operationInput = {
-        actorUserId: ownerId, projectId, runId: taskId, toolId: 'generate_image',
-        requestDigest: 'b'.repeat(64),
-      };
       const provider = vi.fn(async (idempotencyKey: string) => {
         await query(`INSERT INTO task2_controlled_provider_tasks(idempotency_key, provider_task_id)
           VALUES ($1, $2)`,
         [idempotencyKey, 'provider-task-1']);
         return { taskId: 'provider-task-1' };
       });
-      const dependencies = {
-        prepare: prepareAgentDownstreamOperation,
-        complete: completeAgentDownstreamOperation,
-        markSubmitted: markAgentDownstreamOperationSubmitted,
-        markAccepted: markAgentDownstreamOperationAccepted,
-        markSubmissionUnknown: markAgentDownstreamSubmissionUnknown,
-        read: getAgentDownstreamOperation,
-        release: releaseAgentDownstreamOperation,
-      };
-      await expect(executeDurableAgentDownstreamOperation(
-        operationInput,
-        async context => {
+      const adapter = createSameTaskAgentAdapter(adapterDependencies());
+      const adoption = await adapter.adopt({
+        actor: actor(ownerId), taskId, request: request(projectId, taskId), toolId: 'generate_image',
+      });
+      const reconcile = vi.fn(async (providerTaskId: string) => {
+        await transitionTask({
+          taskId,
+          from: ['processing'],
+          to: 'completed',
+          creditStatus: 'charged',
+          result: { downstreamTaskId: providerTaskId },
+        });
+        return { taskId: providerTaskId };
+      });
+
+      await expect(adapter.executeAdoption({
+        adoption,
+        execute: async context => {
           await context.beginSubmission();
           const accepted = await provider(context.idempotencyKey);
           await context.recordAccepted(accepted.taskId);
           throw new Error('simulated process crash after provider acceptance');
         },
-        dependencies,
-      )).rejects.toThrow('simulated process crash after provider acceptance');
+        recovery: { reconcile },
+      })).rejects.toThrow('simulated process crash after provider acceptance');
       const recoverySubmit = vi.fn(async () => ({ taskId: 'must-not-submit' }));
       const retries = await Promise.all(Array.from({ length: 20 }, () => (
-        executeDurableAgentDownstreamOperation(
-          operationInput,
-          recoverySubmit,
-          dependencies,
-          { reconcile: async providerTaskId => {
-            await transitionTask({
-              taskId,
-              from: ['processing'],
-              to: 'completed',
-              creditStatus: 'charged',
-              result: { downstreamTaskId: providerTaskId },
-            });
-            return { taskId: providerTaskId };
-          } },
-        )
+        adapter.executeAdoption({
+          adoption,
+          execute: recoverySubmit,
+          recovery: { reconcile },
+        })
       )));
-      expect(retries).toEqual(Array.from({ length: 20 }, () => ({ taskId: 'provider-task-1' })));
+      expect(retries.filter(result => result.executed)).toHaveLength(1);
 
       const facts = await query<{
-        operations: string; provider_tasks: string; charges: string;
-        status: string; task_status: string;
+        operations: string; provider_tasks: string; charges: string; refunds: string;
+        status: string; task_status: string; provider_task_id: string;
       }>(`SELECT
           (SELECT count(*)::text FROM wujie_agent_downstream_operations WHERE task_id = $1) operations,
           (SELECT count(*)::text FROM task2_controlled_provider_tasks) provider_tasks,
           (SELECT count(*)::text FROM wujie_credit_transactions WHERE task_id = $1 AND type = 'consume') charges,
+          (SELECT count(*)::text FROM wujie_credit_transactions WHERE task_id = $1 AND type = 'refund') refunds,
           (SELECT status FROM wujie_agent_downstream_operations WHERE task_id = $1) status,
+          (SELECT provider_task_id FROM wujie_agent_downstream_operations WHERE task_id = $1) provider_task_id,
           (SELECT status FROM cloud_tasks WHERE id = $1) task_status`, [taskId]);
       expect(facts.rows[0]).toEqual({
-        operations: '1', provider_tasks: '1', charges: '1',
-        status: 'completed', task_status: 'completed',
+        operations: '1', provider_tasks: '1', charges: '1', refunds: '0',
+        status: 'completed', task_status: 'completed', provider_task_id: 'provider-task-1',
       });
       expect(provider).toHaveBeenCalledTimes(1);
       expect(recoverySubmit).not.toHaveBeenCalled();
+      expect(reconcile).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -349,59 +359,56 @@ describe('same-task Agent adoption on real PostgreSQL', () => {
         id BIGSERIAL PRIMARY KEY, idempotency_key TEXT NOT NULL
       )`);
       await createChargedTask({ ownerId, projectId, taskId });
-      const operationInput = {
-        actorUserId: ownerId, projectId, runId: taskId, toolId: 'image_edit',
-        requestDigest: 'd'.repeat(64),
-      };
-      const dependencies = {
-        prepare: prepareAgentDownstreamOperation,
-        complete: completeAgentDownstreamOperation,
-        markSubmitted: markAgentDownstreamOperationSubmitted,
-        markAccepted: markAgentDownstreamOperationAccepted,
-        markSubmissionUnknown: markAgentDownstreamSubmissionUnknown,
-        read: getAgentDownstreamOperation,
-        release: releaseAgentDownstreamOperation,
-      };
       const provider = vi.fn(async (idempotencyKey: string) => {
         await query('INSERT INTO task2_unknown_provider_calls(idempotency_key) VALUES ($1)', [idempotencyKey]);
         throw new Error('connection lost after provider submit');
       });
+      const terminalizeSubmissionUnknown = vi.fn(async (input: {
+        taskId: string; code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN'; message: string;
+      }) => {
+        await recordAgentTaskTerminal(input.taskId, {
+          status: 'failed', code: input.code, error: input.message, retryable: false,
+        });
+        return true;
+      });
+      const adapter = createSameTaskAgentAdapter(adapterDependencies({
+        terminalizeSubmissionUnknown,
+      }));
+      const adoption = await adapter.adopt({
+        actor: actor(ownerId), taskId, request: request(projectId, taskId), toolId: 'generate_image',
+      });
 
-      await expect(executeDurableAgentDownstreamOperation(
-        operationInput,
-        async context => {
+      await expect(adapter.executeAdoption({
+        adoption,
+        execute: async context => {
           await context.beginSubmission();
           return provider(context.idempotencyKey);
         },
-        dependencies,
-      )).rejects.toThrow('connection lost after provider submit');
-      await transitionTask({
-        taskId,
-        from: ['processing'],
-        to: 'failed',
-        creditStatus: 'charged',
-        error: {
-          code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
-          message: 'Provider submission requires manual reconciliation',
-        },
-      });
-      await expect(executeDurableAgentDownstreamOperation(
-        operationInput,
-        async context => provider(context.idempotencyKey),
-        dependencies,
-      )).rejects.toMatchObject({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' });
+      })).rejects.toMatchObject({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' });
+      const recoveries = await Promise.all(Array.from({ length: 20 }, () => (
+        adapter.executeAdoption({
+          adoption,
+          execute: async context => provider(context.idempotencyKey),
+        })
+      )));
+      expect(recoveries.every(result => result.executed === false)).toBe(true);
 
       const facts = await query<{
-        operation_status: string; provider_calls: string; charges: string; task_status: string;
+        operation_status: string; provider_calls: string; charges: string; refunds: string;
+        task_status: string; error_code: string;
       }>(`SELECT
           (SELECT status FROM wujie_agent_downstream_operations WHERE task_id = $1) operation_status,
           (SELECT count(*)::text FROM task2_unknown_provider_calls) provider_calls,
           (SELECT count(*)::text FROM wujie_credit_transactions WHERE task_id = $1 AND type = 'consume') charges,
-          (SELECT status FROM cloud_tasks WHERE id = $1) task_status`, [taskId]);
+          (SELECT count(*)::text FROM wujie_credit_transactions WHERE task_id = $1 AND type = 'refund') refunds,
+          (SELECT status FROM cloud_tasks WHERE id = $1) task_status,
+          (SELECT result->'taskError'->>'code' FROM cloud_tasks WHERE id = $1) error_code`, [taskId]);
       expect(facts.rows[0]).toEqual({
-        operation_status: 'submission_unknown', provider_calls: '1', charges: '1', task_status: 'failed',
+        operation_status: 'submission_unknown', provider_calls: '1', charges: '1', refunds: '1',
+        task_status: 'failed', error_code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
       });
       expect(provider).toHaveBeenCalledTimes(1);
+      expect(terminalizeSubmissionUnknown).toHaveBeenCalledTimes(1);
     });
   });
 

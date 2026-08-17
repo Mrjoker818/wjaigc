@@ -37,6 +37,8 @@ interface AgentTaskTerminal {
   steps?: unknown[];
   finalResponse?: string;
   error?: string;
+  code?: string;
+  retryable?: boolean;
 }
 
 export async function recordAgentTaskSubmitted(input: AgentTaskSubmission): Promise<boolean> {
@@ -73,29 +75,31 @@ export async function recordAgentTaskTerminal(taskId: string, input: AgentTaskTe
   const current = await getCloudTaskById(taskId);
   if (!current) return;
   if (input.status !== 'completed') {
-    if (input.imageUrl || input.steps?.length || input.finalResponse) {
-      await updateCloudTask(taskId, {
-        result: {
-          ...(current.result || {}),
+    const normalizedError = normalizeTaskError(
+      { code: input.code || 'AGENT_TASK_ERROR', message: input.error || `Agent task ${input.status}` },
+      {
+        code: input.code || 'AGENT_TASK_ERROR',
+        message: input.error || `Agent task ${input.status}`,
+        source: 'wujie',
+        retryable: input.retryable ?? input.status === 'timeout',
+      },
+    );
+    await updateCloudTask(taskId, {
+      result: {
+        ...(current.result || {}),
+        ...(input.imageUrl || input.steps?.length || input.finalResponse ? {
           imageUrl: input.imageUrl || '',
           steps: input.steps || [],
           finalResponse: input.finalResponse || '',
-        },
-        expectedStatuses: ['processing'],
-      });
-    }
+        } : {}),
+        taskError: normalizedError,
+      },
+      expectedStatuses: ['processing'],
+    });
     const terminal = await settleFailedTask({
       taskId,
       status: input.status,
-      error: normalizeTaskError(
-        { code: 'AGENT_TASK_ERROR', message: input.error || `Agent task ${input.status}` },
-        {
-          code: 'AGENT_TASK_ERROR',
-          message: input.error || `Agent task ${input.status}`,
-          source: 'wujie',
-          retryable: input.status === 'timeout',
-        },
-      ),
+      error: normalizedError,
     });
     if (!terminal.transitioned) {
       throw new Error('Agent task terminal transition conflict');

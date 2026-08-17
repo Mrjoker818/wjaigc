@@ -63,8 +63,10 @@ export interface AgentDownstreamRecovery<T> {
 export class AgentDownstreamSubmissionUnknownError extends Error {
   readonly code = 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN';
 
-  constructor() {
-    super('Agent downstream submission state is unknown; manual reconciliation is required');
+  constructor(cause?: unknown) {
+    super('Agent downstream submission state is unknown; manual reconciliation is required', {
+      cause,
+    });
     this.name = 'AgentDownstreamSubmissionUnknownError';
   }
 }
@@ -162,6 +164,7 @@ export async function executeDurableAgentDownstreamOperation<T>(
         ...identity,
         reason: error instanceof Error ? error.message : 'Provider submission outcome is unknown',
       }).catch(() => undefined);
+      throw new AgentDownstreamSubmissionUnknownError(error);
     } else {
       await dependencies.release?.(identity).catch(() => false);
     }

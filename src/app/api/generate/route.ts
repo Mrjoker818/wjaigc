@@ -48,6 +48,7 @@ import {
   compileReferenceConstraints,
 } from '@/lib/reference-constraint-compiler';
 import { kickoffDurableGenerationTasks } from '@/lib/task-core/durable-generation-kickoff';
+import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -133,6 +134,11 @@ export async function POST(request: NextRequest) {
   if (authResult instanceof NextResponse) return authResult;
   const deferAgentExecution = authResult.source === 'internal'
     && request.headers.get('x-wujie-agent-defer-execution') === 'true';
+  const strictAgentRouting = authResult.source === 'internal'
+    && request.headers.get(STRICT_AGENT_GENERATE_HEADER) === 'true';
+  const agentProviderIdempotencyKey = strictAgentRouting
+    ? request.headers.get('idempotency-key')?.trim() || ''
+    : '';
   try {
     let deductedCredits = 0;
     let sessionUser: import('@/lib/user-types').User | null = null;
@@ -207,13 +213,21 @@ export async function POST(request: NextRequest) {
     let model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
     //   providerId 已通过独立的 providerId 字段传递，model 中不应包含前缀
-    const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
-    if (model.includes('::')) {
+    const extractedProviderId = !strictAgentRouting && model.includes('::') ? model.split('::')[0] : '';
+    if (!strictAgentRouting && model.includes('::')) {
       model = model.split('::').pop()!;
       console.log(`[generate] Stripped provider prefix from model: "${rawModel}" → "${model}" (providerId via field: "${providerId || 'none'}")`);
     }
     // 如果 providerId 字段为空但从 model 中提取到了，自动回填
     const effectiveProviderId = providerId || extractedProviderId || '';
+
+    if (strictAgentRouting && (!effectiveProviderId || !model || !agentProviderIdempotencyKey)) {
+      return NextResponse.json({
+        success: false,
+        code: 'MODEL_PROVIDER_MISMATCH',
+        error: 'Strict Agent generation requires an exact provider, model, and idempotency key',
+      }, { status: 400 });
+    }
 
     // ★ 模型别名规范化：延迟到找到 provider 后再做精确匹配；初始仅推断 quality/resolution 后缀
     // 保留原始 modelId 用于 provider 匹配和精确比对
@@ -257,11 +271,13 @@ export async function POST(request: NextRequest) {
         ? selectedProviderModels
         : (requestedProvider?.discoveredModels || []).map(item => item.id);
       const normalizedRequestedModel = normalizeModelForApi(rawModelId, { providerModels: requestedProviderModels });
-      const configuredModel = requestedProviderModels.find((configuredId) => {
-        const configured = String(configuredId).toLowerCase();
-        return configured === rawModelId.toLowerCase()
-          || configured === normalizedRequestedModel.apiModelName.toLowerCase();
-      });
+      const configuredModel = strictAgentRouting
+        ? requestedProviderModels.find(configuredId => configuredId === rawModelId)
+        : requestedProviderModels.find((configuredId) => {
+            const configured = String(configuredId).toLowerCase();
+            return configured === rawModelId.toLowerCase()
+              || configured === normalizedRequestedModel.apiModelName.toLowerCase();
+          });
       const providerKind = requestedProvider?.modelType || requestedProvider?.type || '';
       const supportsImageGeneration = ['image', 'universal', 'general', 'imageEdit'].includes(providerKind);
 
@@ -1023,6 +1039,10 @@ export async function POST(request: NextRequest) {
         assetSourceEntityId,
         requestDigest,
         workerMode: 'recovery',
+        ...(strictAgentRouting ? {
+          agentStrictRouting: true,
+          agentProviderIdempotencyKey,
+        } : {}),
       };
       const submittedSlots: CanonicalGenerationSlot[] = [];
       const pendingCharges: Array<{ taskId: string; slotId: string; slotIndex: number }> = [];
@@ -1200,8 +1220,8 @@ export async function POST(request: NextRequest) {
     // 只有当 provider 模型列表中不存在 exact 模型时，才使用别名映射
     const providerModels = Array.isArray(provider?.selectedModels) ? provider.selectedModels : [];
     normalized = normalizeModelForApi(rawModelId, { providerModels });
-    model = normalized.apiModelName;
-    if (normalized.wasNormalized) {
+    if (!strictAgentRouting) model = normalized.apiModelName;
+    if (!strictAgentRouting && normalized.wasNormalized) {
       console.log(`[generate] 模型规范化: "${rawModelId}" → "${model}" (在提供商列表中精确匹配: ${providerModels.some(m => String(m).toLowerCase() === rawModelId.toLowerCase()) ? '是' : '否'})`);
     }
     
@@ -1587,6 +1607,9 @@ export async function POST(request: NextRequest) {
         prompt: enhancedPrompt,
         n: requestN,
         size: finalSize,
+        ...(agentProviderIdempotencyKey
+          ? { idempotency_key: agentProviderIdempotencyKey }
+          : {}),
       };
 
       // 像素辅助字段（仅当有像素尺寸时添加）
@@ -1855,6 +1878,7 @@ export async function POST(request: NextRequest) {
       // 然后从响应的 content 中提取 base64 图片数据。
       if (isGeminiImageRoute) {
         const chatRequestBody = buildGeminiChatImageRequest(requestBody);
+        if (agentProviderIdempotencyKey) chatRequestBody.idempotency_key = agentProviderIdempotencyKey;
         console.log('Gemini image route: using /chat/completions for model', currentModelConfig.modelId, 'size:', requestBody.size, 'quality:', requestBody.quality || requestBody.resolution);
         const msgs = chatRequestBody.messages as Array<Record<string, unknown>> | undefined;
         console.log('Gemini chatRequestBody messages[0]:', JSON.stringify(msgs?.[0]?.content || '').substring(0, 200));
@@ -1872,9 +1896,11 @@ export async function POST(request: NextRequest) {
               headers: {
                 'Authorization': `Bearer ${currentApiKey}`,
                 'Content-Type': 'application/json',
+                ...(agentProviderIdempotencyKey ? { 'Idempotency-Key': agentProviderIdempotencyKey } : {}),
               },
               body: JSON.stringify(chatRequestBody),
               signal: geminiController.signal,
+              skipV1Retry: strictAgentRouting,
             }
           );
 
@@ -1958,6 +1984,7 @@ export async function POST(request: NextRequest) {
         hasImage: hasImageFlag,
         hasReferenceImages: hasRefImagesFlag,
       });
+      if (agentProviderIdempotencyKey) adjustedBody.idempotency_key = agentProviderIdempotencyKey;
 
       console.log('Submitting image task:', {
         model: currentModelConfig.modelId,
@@ -2025,6 +2052,7 @@ export async function POST(request: NextRequest) {
               noPromptRevision: true,
             },
           );
+          if (agentProviderIdempotencyKey) payload.idempotency_key = agentProviderIdempotencyKey;
 
           // ★ FHL等中转站流式返回私有IP URL，非流式返回外部URL
           // 直接使用非流式请求避免4层降级的60秒延迟
@@ -2041,6 +2069,7 @@ export async function POST(request: NextRequest) {
               headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${currentApiKey}`,
+                ...(agentProviderIdempotencyKey ? { 'Idempotency-Key': agentProviderIdempotencyKey } : {}),
               },
               body: JSON.stringify(payload),
               signal: controller.signal,
@@ -2099,7 +2128,7 @@ export async function POST(request: NextRequest) {
                 console.log('[generate] Provider domain fix failed (unreachable)');
               }
               // 尝试2: 服务器端代理下载
-              if (!isUrlAccessible) {
+              if (!strictAgentRouting && !isUrlAccessible) {
                 const downloadedUrl = await downloadAndSaveImage(imageUrl);
                 if (downloadedUrl) {
                   imageUrl = downloadedUrl;
@@ -2112,7 +2141,7 @@ export async function POST(request: NextRequest) {
               const baseUrlLower = currentApiBaseUrl.toLowerCase();
               const providersDisablingChatRetry = ['fhl.mom', 'ai-link.shop', 'rust.cat'];
               const shouldSkipChatRetry = providersDisablingChatRetry.some(p => baseUrlLower.includes(p));
-              if (!isUrlAccessible && !shouldSkipChatRetry) {
+              if (!strictAgentRouting && !isUrlAccessible && !shouldSkipChatRetry) {
                 console.log('[generate] Private IP URL not accessible, retrying via /chat/completions for external URL...');
                 try {
                   const chatResult = await tryChatCompletionsImageFallback({
@@ -2136,7 +2165,7 @@ export async function POST(request: NextRequest) {
                 console.log(`[generate] Provider "${baseUrlLower}" disables /chat/completions, skipping chat retry for private IP URL`);
               }
               // 尝试4: 非流式 Responses API 重试 (部分中转站 stream:true 返回私有 IP，stream:false 返回外部 URL)
-              if (!isUrlAccessible) {
+              if (!strictAgentRouting && !isUrlAccessible) {
                 console.log('[generate] Trying non-stream /v1/responses for external image URL...');
                 try {
                   const nsPayload = buildResponsesApiPayload(
@@ -2146,9 +2175,14 @@ export async function POST(request: NextRequest) {
                     { size: String(requestBody.size || '1024x1024'), quality: requestBody.quality as string | undefined, outputFormat: requestBody.output_format as string | undefined }
                   );
                   nsPayload.stream = false;
+                  if (agentProviderIdempotencyKey) nsPayload.idempotency_key = agentProviderIdempotencyKey;
                   const nsResp = await fetchWithV1Retry(currentApiBaseUrl, '/v1/responses', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentApiKey}` },
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${currentApiKey}`,
+                      ...(agentProviderIdempotencyKey ? { 'Idempotency-Key': agentProviderIdempotencyKey } : {}),
+                    },
                     body: JSON.stringify(nsPayload),
                     signal: AbortSignal.timeout(120000),
                   }, true);
@@ -2256,7 +2290,9 @@ export async function POST(request: NextRequest) {
             const providersDisablingChatFallback = ['fhl.mom', 'ai-link.shop', 'rust.cat'];
             const isProviderDisablingChatFallback = providersDisablingChatFallback.some(p => currentBaseUrlLower.includes(p));
 
-            const shouldTryChatFallback = !isProviderDisablingChatFallback && (isChannelError || isCloudflareDown || isNoCompatibleAccount || resp.status >= 502);
+            const shouldTryChatFallback = !strictAgentRouting
+              && !isProviderDisablingChatFallback
+              && (isChannelError || isCloudflareDown || isNoCompatibleAccount || resp.status >= 502);
 
             // ★ 先尝试 /chat/completions 兜底生图（排除禁用的提供商）
             if (shouldTryChatFallback) {
@@ -2311,7 +2347,7 @@ export async function POST(request: NextRequest) {
           // ★ 模型名称建议自动重试：某些中转服务（如 FHL）拒绝带后缀的模型名（如 gpt-image-2-4k），
           // 但错误信息中会建议使用正确的模型名（如 "Use gpt-image-2"），自动提取并重试
           const modelSuggestionMatch = combinedErrorText.match(/use\s+([a-z][\w.-]*[a-z0-9])/i);
-          if (modelSuggestionMatch && modelSuggestionMatch[1] && modelSuggestionMatch[1] !== currentModelConfig.modelId) {
+          if (!strictAgentRouting && modelSuggestionMatch && modelSuggestionMatch[1] && modelSuggestionMatch[1] !== currentModelConfig.modelId) {
             const suggestedModel = modelSuggestionMatch[1];
             console.log(`[generate] Model "${currentModelConfig.modelId}" not supported, provider suggests "${suggestedModel}", auto-retrying...`);
             try {
@@ -2437,13 +2473,15 @@ export async function POST(request: NextRequest) {
             headers: {
               'Authorization': `Bearer ${currentApiKey}`,
               'Content-Type': 'application/json',
+              ...(agentProviderIdempotencyKey ? { 'Idempotency-Key': agentProviderIdempotencyKey } : {}),
             },
             body: JSON.stringify(adjustedBody),
             signal: controller.signal,
+            skipV1Retry: strictAgentRouting,
           }
         );
 
-        if (!submitResponse.ok) {
+        if (!strictAgentRouting && !submitResponse.ok) {
           const errorText = await submitResponse.text();
 
           // 检查是否是不支持 /images/edits 端点的错误 → 自动回退到 /images/generations
@@ -2504,12 +2542,14 @@ export async function POST(request: NextRequest) {
                 '/images/generations',
                 {
                   method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${currentApiKey}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify(fallbackBody),
-                  signal: fallbackController.signal,
+                    headers: {
+                      'Authorization': `Bearer ${currentApiKey}`,
+                      'Content-Type': 'application/json',
+                      ...(agentProviderIdempotencyKey ? { 'Idempotency-Key': agentProviderIdempotencyKey } : {}),
+                    },
+                    body: JSON.stringify(fallbackBody),
+                    signal: fallbackController.signal,
+                    skipV1Retry: strictAgentRouting,
                 }
               );
             } catch (fallbackFetchErr: unknown) {
@@ -2617,12 +2657,15 @@ export async function POST(request: NextRequest) {
                       'Authorization': `Bearer ${currentApiKey}`,
                       ...fd.getHeaders(),
                       'Content-Length': String(fdBuffer.length),
+                      ...(agentProviderIdempotencyKey ? { 'Idempotency-Key': agentProviderIdempotencyKey } : {}),
                     },
                     body: fdBuffer as unknown as BodyInit,
                     signal: multipartController.signal,
+                    skipV1Retry: strictAgentRouting,
                   }
                 );
-              } catch {
+              } catch (multipartError) {
+                if (strictAgentRouting) throw multipartError;
                 // form-data 包不可用时，回退到浏览器 FormData
                 submitResponse = await fetchWithV1Retry(
                   currentApiBaseUrl,
@@ -2631,9 +2674,11 @@ export async function POST(request: NextRequest) {
                     method: 'POST',
                     headers: {
                       'Authorization': `Bearer ${currentApiKey}`,
+                      ...(agentProviderIdempotencyKey ? { 'Idempotency-Key': agentProviderIdempotencyKey } : {}),
                     },
                     body: buildMultipartBody(),
                     signal: multipartController.signal,
+                    skipV1Retry: strictAgentRouting,
                   }
                 );
               }
@@ -2675,9 +2720,11 @@ export async function POST(request: NextRequest) {
             headers: {
               'Authorization': `Bearer ${currentApiKey}`,
               'Content-Type': 'application/json',
+              ...(agentProviderIdempotencyKey ? { 'Idempotency-Key': agentProviderIdempotencyKey } : {}),
             },
             body: JSON.stringify(adjustedBody),
             signal: controller.signal,
+            skipV1Retry: strictAgentRouting,
           }
         );
 
@@ -2685,7 +2732,7 @@ export async function POST(request: NextRequest) {
         // "请上传参考图" or "reference #" error, retry with image_urls (flat string array) format.
         // Some providers (e.g. AI Link) don't support the nested images[] format on
         // /images/generations and require the flat image_urls field instead.
-        if (!submitResponse.ok && Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0) {
+        if (!strictAgentRouting && !submitResponse.ok && Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0) {
           const refErrorText = await submitResponse.text();
           if (isEditsEndpointRejected(submitResponse.status, refErrorText)) {
             console.info('[generate] /images/generations with images[] format rejected, retrying with image_urls flat format...');
@@ -2782,7 +2829,7 @@ export async function POST(request: NextRequest) {
         const isSizeError = errorClassify.category === 'invalid_size';
         
         // Size Auto-Repair: 检测尺寸错误，自动修正后重试一次
-        if (isSizeError && !sizeRepairAttempted) {
+        if (!strictAgentRouting && isSizeError && !sizeRepairAttempted) {
           sizeRepairAttempted = true;
           const repairedSize = repairSize(errMsg, modelConfig.modelId);
           if (repairedSize) {
@@ -2803,7 +2850,7 @@ export async function POST(request: NextRequest) {
         }
         
         // CF 524/504: 同模型重试 2 次（间隔递增），因为可能是临时网络问题
-        if (isCloudflareTimeout && !cfRetryAttempted) {
+        if (!strictAgentRouting && isCloudflareTimeout && !cfRetryAttempted) {
           cfRetryAttempted = true;
           for (let cfRetry = 1; cfRetry <= 2; cfRetry++) {
             const delay = cfRetry * 10000; // 10s, 20s
@@ -2824,7 +2871,7 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        if (!submitted && isRetryable && candidateModels.length > 0) {
+        if (!strictAgentRouting && !submitted && isRetryable && candidateModels.length > 0) {
           console.log(`模型 ${modelConfig.modelId} 不可用 (${errMsg})，尝试备选模型...`);
           
           for (let ci = 0; ci < candidateModels.length; ci++) {

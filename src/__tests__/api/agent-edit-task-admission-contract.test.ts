@@ -105,12 +105,17 @@ describe('agent edit task admission contract', () => {
   it('carries stable idempotency on every Agent provider-facing submit', () => {
     expect(routeSource).toContain("headers['Idempotency-Key'] = `${operationContext.idempotencyKey}:llm:${llmCallIndex}`");
     expect(routeSource).toContain("'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`");
+    expect(routeSource).toContain('submitStrictAgentGeneration({');
+    expect(routeSource).toContain('model: String(pureImageModel)');
+    expect(routeSource).toContain('await operationContext.recordAccepted(genTaskId)');
+    expect(routeSource).toContain('recovery: {');
+    expect(routeSource).not.toContain('model: imageModel,\n                  providerId: imageProviderId');
     expect(routeSource).toContain("'Idempotency-Key': providerIdempotencyKey");
   });
 
-  it('propagates an Agent-v2 provider exception after its one terminal settlement', () => {
+  it('propagates an Agent-v2 provider exception to the durable adapter for one terminal settlement', () => {
     expect(routeSource).toMatch(
-      /await recordAgentTaskTerminal\(taskId,[\s\S]{0,500}?if \(agentRuntimeMode === 'agent-v2'\) throw err;/,
+      /console\.error\('\[agent-edit\] Error:'[\s\S]{0,200}?if \(agentRuntimeMode === 'agent-v2'\) throw err;[\s\S]{0,300}?await recordAgentTaskTerminal\(taskId/,
     );
   });
 });

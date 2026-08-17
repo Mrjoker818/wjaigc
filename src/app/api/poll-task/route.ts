@@ -61,6 +61,7 @@ import {
 } from '@/lib/task-core/task-error';
 import { getRequestId } from '@/lib/request-id';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
+import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 
 export const dynamic = 'force-dynamic';
 
@@ -1380,11 +1381,19 @@ export async function POST(request: NextRequest) {
             let recoveryResponseData: Record<string, unknown> | null = null;
             try {
             if (isTaskCancelled(recovered.taskId)) return;
+            const persistedSubmission = submissionPayload as Record<string, unknown>;
+            const strictAgentRecovery = persistedSubmission.agentStrictRouting === true;
+            const strictAgentIdempotencyKey = strictAgentRecovery
+              && typeof persistedSubmission.agentProviderIdempotencyKey === 'string'
+              ? persistedSubmission.agentProviderIdempotencyKey
+              : '';
             const resumed = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 ...(await getInternalRequestHeaders(sessionUser.id, sessionUser.role === 'admin' ? 'admin' : 'user')),
+                ...(strictAgentRecovery ? { [STRICT_AGENT_GENERATE_HEADER]: 'true' } : {}),
+                ...(strictAgentIdempotencyKey ? { 'idempotency-key': strictAgentIdempotencyKey } : {}),
               },
               body: JSON.stringify({
                 ...(submissionPayload as Record<string, unknown>),

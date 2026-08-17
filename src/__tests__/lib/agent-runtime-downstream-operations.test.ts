@@ -116,7 +116,10 @@ describe('durable Agent downstream operations', () => {
     await expect(executeDurableAgentDownstreamOperation(input, async context => {
       await context.beginSubmission();
       return submit();
-    }, dependencies)).rejects.toThrow('connection lost after submit');
+    }, dependencies)).rejects.toMatchObject({
+      code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+      cause: expect.objectContaining({ message: 'connection lost after submit' }),
+    });
     await expect(executeDurableAgentDownstreamOperation(
       input, async () => submit(), dependencies,
     )).rejects.toMatchObject({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' });

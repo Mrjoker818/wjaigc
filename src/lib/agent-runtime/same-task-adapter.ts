@@ -3,10 +3,12 @@ import type { TaskModelDescriptor } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
 import type { AuthorizeAgentContextInput } from './context-adapters';
 import {
+  AgentDownstreamSubmissionUnknownError,
   createAgentDownstreamOperationIdentity,
   executeDurableAgentDownstreamOperation,
   type AgentDownstreamExecutionContext,
   type AgentDownstreamOperationDependencies,
+  type AgentDownstreamRecovery,
 } from './downstream-operations';
 import {
   AgentEventPayloadError,
@@ -129,6 +131,12 @@ export interface SameTaskAgentAdapterDependencies {
     actorUserId: string; projectId: string; runId: string; toolId: string; leaseOwner: string;
   }): Promise<boolean>;
   downstreamOperations?: AgentDownstreamOperationDependencies;
+  terminalizeSubmissionUnknown?(input: {
+    taskId: string;
+    actorUserId: string;
+    code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN';
+    message: string;
+  }): Promise<boolean>;
 }
 
 export interface AdoptAndExecuteSameTaskInput<T> {
@@ -137,9 +145,10 @@ export interface AdoptAndExecuteSameTaskInput<T> {
   request: AgentRunRequest;
   toolId: string;
   execute: (context: AgentDownstreamExecutionContext) => Promise<T>;
+  recovery?: AgentDownstreamRecovery<T>;
 }
 
-export type AdoptSameTaskInput = Omit<AdoptAndExecuteSameTaskInput<never>, 'execute'>;
+export type AdoptSameTaskInput = Omit<AdoptAndExecuteSameTaskInput<never>, 'execute' | 'recovery'>;
 
 export interface SameTaskAgentAdoption {
   runId: string;
@@ -157,6 +166,7 @@ export interface SameTaskAgentAdoption {
 export interface ExecuteSameTaskAdoptionInput<T> {
   adoption: SameTaskAgentAdoption;
   execute: (context: AgentDownstreamExecutionContext) => Promise<T>;
+  recovery?: AgentDownstreamRecovery<T>;
 }
 
 export interface AdoptAndExecuteSameTaskResult<T> {
@@ -312,6 +322,7 @@ export function createSameTaskAgentAdapter(
   async function executeAdoption<T>({
     adoption,
     execute,
+    recovery,
   }: ExecuteSameTaskAdoptionInput<T>): Promise<AdoptAndExecuteSameTaskResult<T>> {
       let value: T | undefined;
       let executed = false;
@@ -341,7 +352,7 @@ export function createSameTaskAgentAdapter(
                 runId: adoption.runId,
                 toolId: adoption.toolId,
                 requestDigest: adoption.requestDigest,
-              }, execute, dependencies.downstreamOperations);
+              }, execute, dependencies.downstreamOperations, recovery);
             } else {
               const identity = createAgentDownstreamOperationIdentity({
                 actorUserId: adoption.actorUserId,
@@ -366,6 +377,25 @@ export function createSameTaskAgentAdapter(
               leaseOwner: lease.leaseOwner,
             });
           } catch (error) {
+            if (
+              error instanceof AgentDownstreamSubmissionUnknownError
+              && dependencies.terminalizeSubmissionUnknown
+            ) {
+              await dependencies.terminalizeSubmissionUnknown({
+                taskId: adoption.runId,
+                actorUserId: adoption.actorUserId,
+                code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+                message: error.message,
+              });
+              await dependencies.completeExecution({
+                actorUserId: adoption.actorUserId,
+                projectId: adoption.projectId,
+                runId: adoption.runId,
+                toolId: adoption.toolId,
+                leaseOwner: lease.leaseOwner,
+              });
+              throw error;
+            }
             await dependencies.releaseExecution({
               actorUserId: adoption.actorUserId,
               projectId: adoption.projectId,
@@ -418,17 +448,18 @@ export function createSameTaskAgentAdapter(
       input: AdoptAndExecuteSameTaskInput<T>,
     ): Promise<AdoptAndExecuteSameTaskResult<T>> {
       const adoption = await adopt(input);
-      return executeAdoption({ adoption, execute: input.execute });
+      return executeAdoption({ adoption, execute: input.execute, recovery: input.recovery });
     },
   };
 }
 
 async function defaultSameTaskAgentAdapter() {
-  const [taskStorage, modelCatalog, contextAdapters, eventStorage] = await Promise.all([
+  const [taskStorage, modelCatalog, contextAdapters, eventStorage, taskPersistence] = await Promise.all([
     import('@/lib/cloud-task-storage'),
     import('@/lib/task-core/model-catalog'),
     import('./context-adapters'),
     import('./event-storage'),
+    import('@/lib/agent-task-persistence'),
   ]);
   return createSameTaskAgentAdapter({
     getTaskForUser: taskStorage.getCloudTaskForUser,
@@ -440,6 +471,17 @@ async function defaultSameTaskAgentAdapter() {
     claimExecution: eventStorage.claimAdoptedAgentExecution,
     completeExecution: eventStorage.completeAdoptedAgentExecution,
     releaseExecution: eventStorage.releaseAdoptedAgentExecution,
+    terminalizeSubmissionUnknown: async input => {
+      const current = await taskStorage.getCloudTaskForUser(input.taskId, input.actorUserId);
+      if (!current || TERMINAL_TASK_STATUSES.has(current.status)) return false;
+      await taskPersistence.recordAgentTaskTerminal(input.taskId, {
+        status: 'failed',
+        code: input.code,
+        error: input.message,
+        retryable: false,
+      });
+      return true;
+    },
     downstreamOperations: {
       prepare: eventStorage.prepareAgentDownstreamOperation,
       markSubmitted: eventStorage.markAgentDownstreamOperationSubmitted,

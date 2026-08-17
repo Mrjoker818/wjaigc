@@ -7,6 +7,10 @@ import {
 } from './same-task-adapter';
 import type { LegacyAgentObservationInput } from './legacy-observer';
 import type { AgentRuntimeMode } from './mode';
+import type {
+  AgentDownstreamExecutionContext,
+  AgentDownstreamRecovery,
+} from './downstream-operations';
 
 type Deferred<T> = T | (() => T);
 
@@ -15,7 +19,8 @@ export interface AdmittedAgentTaskExecutionDependencies {
   adopt(input: AdoptSameTaskInput): Promise<SameTaskAgentAdoption>;
   executeAdoption<T>(input: {
     adoption: SameTaskAgentAdoption;
-    execute: () => Promise<T>;
+    execute: (context: AgentDownstreamExecutionContext) => Promise<T>;
+    recovery?: AgentDownstreamRecovery<T>;
   }): Promise<AdoptAndExecuteSameTaskResult<T>>;
 }
 
@@ -23,7 +28,8 @@ export interface PrepareAdmittedAgentTaskExecutionInput<T> {
   mode: AgentRuntimeMode;
   observation: Deferred<LegacyAgentObservationInput>;
   adoption: Deferred<AdoptSameTaskInput>;
-  execute: () => Promise<T>;
+  execute: (context?: AgentDownstreamExecutionContext) => Promise<T>;
+  recovery?: AgentDownstreamRecovery<T>;
 }
 
 export interface PreparedAdmittedAgentTaskExecution<T> {
@@ -72,6 +78,7 @@ export async function prepareAdmittedAgentTaskExecution<T>(
       const result = await dependencies.executeAdoption({
         adoption,
         execute: input.execute,
+        recovery: input.recovery,
       });
       if (typeof result === 'object' && result !== null && 'executed' in result) {
         return result.value;

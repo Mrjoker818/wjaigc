@@ -574,3 +574,130 @@ uncommitted.
   `source-state.json`.
 - The pre-existing provider JSON-to-PostgreSQL array migration warning reported
   in R2 remains outside Task 2 scope.
+
+## R4 Independent Re-review Repair (2026-08-17)
+
+Status before the binding post-commit browser gate: **IMPLEMENTATION GREEN**.
+Both remaining Critical production-path gaps are fixed. This report and every
+tracked production/test change are committed before the authoritative browser
+run. The run ID is `task2_r4_gate_final`; retained evidence is written under
+`test-results/stage-4-baseline/evidence/<FINAL_SHA>/task2_r4_gate_final/` and no
+tracked file is changed after the run. The controller-owned Task 1 and Task 2
+briefs remain unstaged and uncommitted.
+
+### R4 RED evidence
+
+1. Production bridge/lifecycle RED:
+   `pnpm exec vitest run
+   src/__tests__/api/agent-generate-provider-path.test.ts
+   src/__tests__/lib/agent-runtime-same-task-adapter.test.ts
+   src/__tests__/lib/agent-runtime-downstream-operations.test.ts
+   --reporter=verbose` failed the real bridge suite and `3` lifecycle tests
+   (`10` passed). The Agent-to-generate bridge module did not exist, accepted
+   recovery was not forwarded to the durable operation, and an ambiguous submit
+   rethrew the raw network error instead of the durable
+   `AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN` error.
+2. The isolated bridge RED was repeated after fixing its test harness:
+   `pnpm exec vitest run
+   src/__tests__/api/agent-generate-provider-path.test.ts --reporter=verbose`
+   failed at import because `generate-image-adapter` was absent. This test then
+   became the behavioral route/provider capture for the real
+   Agent `generate_image` -> `/api/generate` -> external provider path.
+3. PostgreSQL production-settlement RED:
+   `POSTGRES_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable
+   pnpm exec vitest run
+   tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=verbose`
+   exposed that the old test manually terminalized the parent and retained no
+   refund/code proof. The replacement routes acceptance and
+   `submission_unknown` through the same-task adapter and existing billing/task
+   service; intermediate query-shape failures were test-only (`text ->>`, then
+   invalid JSON cast) and were corrected to inspect the structured durable
+   `result.taskError` record.
+
+### R4 finding resolution
+
+1. **Critical 1 - exact Agent generation reaches the external provider once.**
+   `submitStrictAgentGeneration` signs the internal `/api/generate` request with
+   the existing internal-request secret, a server-only strict-routing header,
+   and the stable downstream idempotency key. `/api/generate` honors strict mode
+   only when authentication reports `source: internal`; session clients cannot
+   forge it. Strict mode requires an exact configured `providerId`/`modelId`
+   byte match, preserves `Exact::Model`, skips prefix/alias normalization,
+   alternate `/v1` POSTs, endpoint/model/size/Cloudflare retries, and paid model
+   fallback. The same stable key is placed in the final provider
+   `Idempotency-Key` header and JSON `idempotency_key` field. Submit-only recovery
+   persists the trusted strict marker/key and re-signs the resumed internal
+   request. The provider-capture regression observes exactly one external POST,
+   exact `Exact::Model`, and one identical key in header/body; strict mismatch
+   creates no provider/task, and a provider rejection still produces one POST.
+2. **Critical 2 - production acceptance/reconciliation and unknown settlement.**
+   Agent generation now submits one durable child, calls `recordAccepted` with
+   its task ID before polling, and production recovery polls that exact ID
+   without invoking submit. Async image-edit provider IDs are likewise recorded
+   immediately before polling; recovery distinguishes owned durable generation
+   IDs from external provider IDs and polls the exact accepted target. The
+   same-task/surface adapters now forward the real reconciliation adapter.
+   Ambiguous submitted operations are converted to
+   `AgentDownstreamSubmissionUnknownError`; the default same-task adapter
+   terminalizes the parent through `recordAgentTaskTerminal`, stores structured
+   code `AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN`, refunds through the existing
+   exactly-once billing settlement, completes the execution lease, and never
+   releases it for resurrection. PostgreSQL concurrency proves one provider
+   submit, one parent terminal callback, one refund transaction, and zero
+   execution across twenty later recovery attempts. Accepted recovery proves a
+   persisted `provider_task_id`, one reconcile, one charge, zero refunds, and
+   zero second submits.
+
+### R4 GREEN and final pre-commit verification
+
+- Initial GREEN slice: the three RED suites passed `3 files / 15 tests`.
+- Final focused Task 2 closure matrix: the 17 route/runtime/auth/generation/source
+  suites listed in shell history passed **17 files / 143 tests**.
+- Real PostgreSQL Stage 4 suites:
+  `POSTGRES_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable
+  pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  **2 files / 22 tests passed**, zero skips.
+- `pnpm ts-check`: passed after Next route type generation.
+- `pnpm lint -- --quiet`: passed with exit `0`.
+- `pnpm build`: compiled, type-checked, and generated `113/113` static pages.
+- `pnpm check:protected-baseline`: all `38` feature IDs passed, no unapproved
+  source drift, zero warnings. The exact required allow-path additions are
+  `src/app/api/poll-task/route.ts` and `src/lib/agent-task-persistence.ts`.
+- `git diff --check`: exit `0`.
+- Node/performance scope audit:
+  `git diff --exit-code 2175b4f4d644750195584c2bc1b896f7494f1fb0 --
+  src/components/node-editor.tsx
+  src/__tests__/components/node-editor-drag-throttle-wiring.test.ts
+  tests/helpers/workflow-performance.ts`: exit `0` (zero R4 drift).
+
+### R4 changed files
+
+- Production routes: `src/app/api/agent-edit/route.ts`,
+  `src/app/api/generate/route.ts`, and `src/app/api/poll-task/route.ts`.
+- Runtime/task service: new
+  `src/lib/agent-runtime/generate-image-adapter.ts`, downstream operation,
+  same-task adapter, surface dispatch, and Agent task persistence modules.
+- Tests: new real generate provider-path capture; Agent admission, downstream,
+  same-task, task-persistence, and real PostgreSQL adoption regressions.
+- Release/report: `package.json` protected-baseline allow-paths and this R4
+  appendix. No node editor/performance file changed.
+
+### R4 post-commit authoritative gate contract
+
+After committing this exact tracked state, run the production build against a
+fresh isolated database `wujie_stage4_task2_r4_gate_final`, then execute:
+`PLAYWRIGHT_WORKERS=1 pnpm exec playwright test
+tests/e2e/stage-4-node-chat-agent.spec.ts --grep 'chat|agent'` with run ID
+`task2_r4_gate_final`. Each of Chromium, Chromium 1080p, Firefox, WebKit, and
+mobile Chromium must execute ordinary chat, real vision failure stop, first
+Agent progress, shared cancellation, and refresh recovery, retaining the
+relevant network calls plus `source-state.json`, trace, video, screenshot,
+console, network, and raw frame-rate evidence under the exact committed SHA.
+
+### R4 concerns
+
+- Raw browser FPS remains evidence only and **UNVERIFIED**, especially WebKit;
+  no FPS normalization or manufactured threshold pass is used.
+- The pre-existing provider JSON-to-PostgreSQL array migration warning remains
+  outside Task 2 scope.

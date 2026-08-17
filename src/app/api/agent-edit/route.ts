@@ -40,6 +40,7 @@ import { resolveSelectedAgentMediaUrl } from '@/lib/agent-runtime/context-adapte
 import { submitAgentImageProviderRequest } from '@/lib/agent-runtime/provider-submission';
 import { AgentModelRouteMismatchError } from '@/lib/agent-runtime/same-task-adapter';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
+import { submitStrictAgentGeneration } from '@/lib/agent-runtime/generate-image-adapter';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -62,6 +63,85 @@ class AgentMediaUrlMismatchError extends Error {
     super('Image URL does not match the authorized Asset Version');
     this.name = 'AgentMediaUrlMismatchError';
   }
+}
+
+async function pollAcceptedAgentGeneration(input: {
+  providerTaskId: string;
+  userId: string;
+  userRole: 'user' | 'admin';
+  isCancelled: () => boolean;
+}): Promise<string> {
+  const internalHeaders = await getInternalRequestHeaders(input.userId, input.userRole);
+  for (let poll = 0; poll < 120; poll++) {
+    if (input.isCancelled()) throw new Error('Agent task was cancelled');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const response = await fetch(
+      getInternalApiUrl(`/api/poll-task?taskId=${encodeURIComponent(input.providerTaskId)}`),
+      { method: 'POST', headers: internalHeaders },
+    );
+    const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const status = String(data?.status || '').toLowerCase();
+    if (status === 'completed' && data?.imageUrl) return String(data.imageUrl);
+    if (['failed', 'cancelled', 'timeout'].includes(status)) {
+      throw new Error(String(data?.error || `Agent image generation ${status}`));
+    }
+  }
+  throw new Error('Agent image generation reconciliation timed out');
+}
+
+function extractReconciledImageUrl(data: Record<string, unknown>): string {
+  const direct = data.imageUrl || data.url;
+  if (typeof direct === 'string' && direct) return direct;
+  const candidates = data.results || data.images || data.data;
+  if (!Array.isArray(candidates) || candidates.length === 0) return '';
+  const first = candidates[0];
+  if (!first || typeof first !== 'object') return '';
+  const item = first as Record<string, unknown>;
+  if (typeof item.url === 'string' && item.url) return item.url;
+  if (typeof item.b64_json === 'string' && item.b64_json) {
+    return `data:image/png;base64,${item.b64_json}`;
+  }
+  return '';
+}
+
+async function reconcileAcceptedAgentProviderTask(input: {
+  providerTaskId: string;
+  userId: string;
+  userRole: 'user' | 'admin';
+  imageProviderId: string;
+  isCancelled: () => boolean;
+}): Promise<string> {
+  const durableTask = await getCloudTaskForUser(input.providerTaskId, input.userId);
+  if (durableTask) return pollAcceptedAgentGeneration(input);
+
+  const provider = await findProviderById(input.imageProviderId);
+  if (!provider?.baseUrl || !provider.apiKey) {
+    throw new Error('Accepted Agent provider task cannot be reconciled');
+  }
+  const baseUrl = provider.baseUrl.replace(/\/+$/, '');
+  const profile = resolveCompatProfile(provider);
+  const pollUrl = (profile.pollPathTemplate || '/tasks/{taskId}')
+    .replace('{taskId}', input.providerTaskId);
+  for (let attempt = 0; attempt < 60; attempt++) {
+    if (input.isCancelled()) throw new Error('Agent task was cancelled');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    const response = await fetchWithV1Retry(baseUrl, pollUrl, {
+      headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) continue;
+    const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const status = String(data?.status || '').toLowerCase();
+    if (['completed', 'success', 'succeeded'].includes(status) && data) {
+      const imageUrl = extractReconciledImageUrl(data);
+      if (imageUrl) return imageUrl;
+      throw new Error('Accepted Agent provider task completed without an image');
+    }
+    if (['failed', 'error', 'cancelled', 'timeout'].includes(status)) {
+      throw new Error(String(data?.message || data?.error || `Agent provider task ${status}`));
+    }
+  }
+  throw new Error('Accepted Agent provider task reconciliation timed out');
 }
 
 interface AgentEditPostBody {
@@ -752,6 +832,7 @@ export async function POST(request: NextRequest) {
                 aspectRatio,
                 agentRuntimeMode === 'agent-v2',
                 `${operationContext.idempotencyKey}:image-edit:${i}`,
+                operationContext.recordAccepted,
               );
               console.log(`[agent-edit] Edit step ${i + 1} result: success=${editResult.success} hasUrl=${!!editResult.imageUrl} url=${editResult.imageUrl?.substring(0, 80)} error=${editResult.error || ''}`);
               if (editResult.success && editResult.imageUrl) {
@@ -834,41 +915,28 @@ export async function POST(request: NextRequest) {
               // 调用图像生成 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行图像生成...' });
-              const genResp = await fetch(getInternalApiUrl('/api/generate'), {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
-                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
-                },
-                body: JSON.stringify({
-                  prompt: String(step.params.prompt || prompt),
-                  aspectRatio: step.params.size || '1:1',
-                  quality: 'high',
-                  model: imageModel,
-                  providerId: imageProviderId,
-                }),
+              const genData = await submitStrictAgentGeneration({
+                userId: authResult.userId,
+                userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+                prompt: String(step.params.prompt || prompt),
+                aspectRatio: String(step.params.size || '1:1'),
+                model: String(pureImageModel),
+                providerId: String(imageProviderId),
+                idempotencyKey: `${operationContext.idempotencyKey}:${stepKey}`,
+                submitOnly: true,
               });
-              const genData = await genResp.json() as Record<string, unknown>;
               if (genData.success && genData.taskId) {
-                // 轮询等待结果
                 const genTaskId = String(genData.taskId);
-                for (let poll = 0; poll < 120; poll++) {
-                  if (isCancelled()) break;
-                  await new Promise(r => setTimeout(r, 2000));
-                  const pollResp = await fetch(getInternalApiUrl(`/api/poll-task?taskId=${genTaskId}`), { method: 'POST' });
-                  const pollData = await pollResp.json() as Record<string, unknown>;
-                  const status = String(pollData.status || '');
-                  if (status === 'completed' && pollData.imageUrl) {
-                    finalImageUrl = String(pollData.imageUrl);
-                    step.result = '图像生成成功';
-                    break;
-                  } else if (status === 'failed') {
-                    step.result = `图像生成失败: ${pollData.error || '未知错误'}`;
-                    step.success = false;
-                    break;
-                  }
-                }
+                await operationContext.recordAccepted(genTaskId);
+                finalImageUrl = await pollAcceptedAgentGeneration({
+                  providerTaskId: genTaskId,
+                  userId: authResult.userId,
+                  userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+                  isCancelled,
+                });
+                step.result = '图像生成成功';
+              } else {
+                throw new Error(String(genData.error || 'Agent image generation was not accepted'));
               }
             } else if (step.toolName === 'generate_video') {
               // 调用视频生成 API
@@ -953,6 +1021,7 @@ export async function POST(request: NextRequest) {
             }
           } catch (err) {
             console.error(`[agent-edit] Tool ${step.toolName} execution failed:`, err);
+            if (agentRuntimeMode === 'agent-v2') throw err;
             step.result = `执行失败: ${err instanceof Error ? err.message : '未知错误'}`;
             step.success = false;
           }
@@ -1030,6 +1099,7 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : '未知错误';
         console.error('[agent-edit] Error:', errMsg);
+        if (agentRuntimeMode === 'agent-v2') throw err;
         const task = localTaskStore.get(taskId);
         if (task && task.status === 'processing') {
           await recordAgentTaskTerminal(taskId, {
@@ -1037,7 +1107,6 @@ export async function POST(request: NextRequest) {
           });
           localTaskStore.set(taskId, { ...task, status: 'failed', error: translateApiError(errMsg), progress: 100 });
         }
-        if (agentRuntimeMode === 'agent-v2') throw err;
       } finally {
         clearTimeout(timeout);
       }
@@ -1066,6 +1135,36 @@ export async function POST(request: NextRequest) {
         toolId: 'agent_edit',
       }),
       execute: executeAgentEditTask,
+      recovery: {
+        reconcile: async providerTaskId => {
+          try {
+            const imageUrl = await reconcileAcceptedAgentProviderTask({
+              providerTaskId,
+              userId: authResult.userId,
+              userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+              imageProviderId: String(imageProviderId),
+              isCancelled: () => isRegistryCancelled(taskId),
+            });
+            await recordAgentTaskTerminal(taskId, {
+              status: 'completed', imageUrl, steps: [], finalResponse: 'Recovered accepted generation',
+            });
+            const current = localTaskStore.get(taskId);
+            if (current) {
+              localTaskStore.set(taskId, {
+                ...current, status: 'completed', progress: 100, label: '完成',
+                result: { imageUrl, steps: [], finalResponse: 'Recovered accepted generation' },
+              });
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await recordAgentTaskTerminal(taskId, {
+              status: 'failed', code: 'AGENT_DOWNSTREAM_RECONCILIATION_FAILED', error: message,
+            });
+            const current = localTaskStore.get(taskId);
+            if (current) localTaskStore.set(taskId, { ...current, status: 'failed', progress: 100, error: message });
+          }
+        },
+      },
     });
     after(() => {
       void preparedAgentTask.execute().catch(error => {
@@ -1221,6 +1320,7 @@ async function performImageEdit(
   aspectRatioFromFrontend?: string,
   strictProviderModel = false,
   providerIdempotencyKey?: string,
+  recordAccepted?: (providerTaskId: string) => Promise<void>,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   // 优先使用前端传递的图像模型和提供商，遵循用户在图像生成面板的选择
   console.log('[agent-edit] performImageEdit called, model:', imageModelFromFrontend, 'providerId:', imageProviderIdFromFrontend);
@@ -1494,6 +1594,7 @@ async function performImageEdit(
       if (parsedResult.mode === 'polling' && parsedResult.taskIds.length > 0) {
         // 异步任务 - 轮询等待结果
         const remoteTaskId = parsedResult.taskIds[0];
+        await recordAccepted?.(remoteTaskId);
         let pollAttempts = 0;
         const maxPollAttempts = 60;
         const pollInterval = 5000;

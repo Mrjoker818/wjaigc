@@ -110,6 +110,31 @@ describe('agent task persistence', () => {
       status: 'timeout',
       error: expect.objectContaining({ message: 'Agent task timed out' }),
     }));
+    expect(updateCloudTask).toHaveBeenCalledWith('agent-1', expect.objectContaining({
+      result: expect.objectContaining({
+        taskError: expect.objectContaining({ code: 'AGENT_TASK_ERROR', retryable: true }),
+      }),
+      expectedStatuses: ['processing'],
+    }));
+  });
+
+  it('persists a structured submission_unknown code before exactly-once settlement', async () => {
+    await recordAgentTaskTerminal('agent-1', {
+      status: 'failed',
+      code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+      error: 'Submission outcome is unknown',
+      retryable: false,
+    });
+
+    expect(updateCloudTask).toHaveBeenCalledWith('agent-1', expect.objectContaining({
+      result: expect.objectContaining({
+        taskError: expect.objectContaining({
+          code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+          retryable: false,
+        }),
+      }),
+    }));
+    expect(settleFailedTask).toHaveBeenCalledTimes(1);
   });
 
   it('records the successful asset projection for the terminal transition winner', async () => {
