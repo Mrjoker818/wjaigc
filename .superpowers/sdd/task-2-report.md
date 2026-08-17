@@ -1624,3 +1624,32 @@ in `agent-editor.tsx`, plus two unused legacy helpers in `chat-tools.ts`).
 
   Both staged and working-tree `git diff --check` gates passed. The only
   remaining unstaged files are the controller-owned Task 1 and Task 2 briefs.
+
+## R13 Protected-baseline Follow-up (2026-08-17)
+
+### RED
+
+`pnpm check:protected-baseline` reproduced the controller report: all **38**
+feature IDs, protected paths, and evidence contracts passed, while the gate
+blocked only the two committed review evidence files:
+`.superpowers/sdd/task-2-review-r12-findings.md` and
+`.superpowers/sdd/task-2-review-r13-findings.md`.
+
+### Minimal correction and GREEN
+
+The default command now adds only two exact `--allow-path` entries for those
+review files. It does not restore `src/components/node-editor.tsx` and does not
+add a directory wildcard. The fresh default gate, diff check, and scope audit
+completed successfully:
+
+```powershell
+pnpm check:protected-baseline
+# PASS: all 38 baseline feature IDs, protected paths, and evidence contracts;
+# 0 warnings
+
+git diff --check
+# exit 0
+```
+
+The scope audit found only this report and `package.json` beyond the two
+controller-owned, unstaged briefs.
