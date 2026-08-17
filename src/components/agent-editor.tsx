@@ -45,9 +45,13 @@ interface AgentTaskState {
 }
 
 interface PendingAgentAttempt {
+  version: 1;
   key: string;
-  fingerprint: string;
+  digest: string;
+  expiresAt: number;
 }
+
+const PENDING_ATTEMPT_TTL_MS = 30 * 60 * 1000;
 
 const EMPTY_AGENT_TASK_STATE: AgentTaskState = {
   taskId: null,
@@ -73,8 +77,33 @@ function pendingAttemptStorageKey(scopeKey: string): string | null {
   return scopeKey.replace(/^wujie_agent_run:/, 'wujie_agent_attempt:');
 }
 
-function isConfirmedUnacceptedSubmissionStatus(status: number): boolean {
-  return [400, 401, 403, 404, 405, 406, 410, 411, 413, 415, 422].includes(status);
+function isPendingAgentAttempt(value: unknown): value is PendingAgentAttempt {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Partial<PendingAgentAttempt>;
+  return record.version === 1
+    && typeof record.key === 'string'
+    && /^agent-editor:[^\s:]+:[^\s]+$/.test(record.key)
+    && typeof record.digest === 'string'
+    && /^[a-f0-9]{64}$/.test(record.digest)
+    && typeof record.expiresAt === 'number'
+    && Number.isFinite(record.expiresAt);
+}
+
+async function digestAgentAttemptRequest(requestBody: string): Promise<string> {
+  const digest = await globalThis.crypto?.subtle?.digest(
+    'SHA-256',
+    new TextEncoder().encode(requestBody),
+  );
+  if (!digest) throw new Error('安全存储不可用，未发送付费请求');
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function terminalReplayMessage(status: string, fallback: string): string {
+  if (status === 'cancelled') return '任务已取消';
+  if (status === 'timeout') return '任务已超时';
+  if (status === 'failed') return fallback || '任务执行失败';
+  if (status === 'completed') return '任务已完成';
+  return fallback || '任务已结束';
 }
 
 // 从图像生成面板读取当前选择的模型信息
@@ -224,14 +253,20 @@ export function AgentEditor({
     try {
       const storedAttempt = localStorage.getItem(storageKey);
       if (!storedAttempt) return;
-      const parsedAttempt = JSON.parse(storedAttempt) as Partial<PendingAgentAttempt>;
-      if (typeof parsedAttempt.key === 'string' && typeof parsedAttempt.fingerprint === 'string') {
-        attemptKeysByScope.current[runScopeKey] = {
-          key: parsedAttempt.key,
-          fingerprint: parsedAttempt.fingerprint,
-        };
+      const parsedAttempt = JSON.parse(storedAttempt) as unknown;
+      const now = Date.now();
+      if (
+        !isPendingAgentAttempt(parsedAttempt)
+        || parsedAttempt.expiresAt <= now
+        || parsedAttempt.expiresAt > now + PENDING_ATTEMPT_TTL_MS
+      ) {
+        localStorage.removeItem(storageKey);
+        return;
       }
-    } catch { /* ignore unavailable browser storage */ }
+      attemptKeysByScope.current[runScopeKey] = parsedAttempt;
+    } catch {
+      try { localStorage.removeItem(storageKey); } catch { /* storage is unavailable */ }
+    }
   }, [runScopeKey]);
   useEffect(() => {
     if (!runStorageKey || !hasScopedRun || !agentRunId || typeof localStorage === 'undefined') return;
@@ -262,8 +297,15 @@ export function AgentEditor({
   const persistAttemptKey = useCallback((scopeKey: string, attempt: PendingAgentAttempt) => {
     attemptKeysByScope.current[scopeKey] = attempt;
     const storageKey = pendingAttemptStorageKey(scopeKey);
-    if (!storageKey || typeof localStorage === 'undefined') return;
-    try { localStorage.setItem(storageKey, JSON.stringify(attempt)); } catch { /* ignore unavailable browser storage */ }
+    if (!storageKey || typeof localStorage === 'undefined') {
+      throw new Error('无法安全保存待处理请求，请检查浏览器存储后重试');
+    }
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(attempt));
+    } catch {
+      delete attemptKeysByScope.current[scopeKey];
+      throw new Error('无法安全保存待处理请求，请检查浏览器存储后重试');
+    }
   }, []);
   const clearAttemptKey = useCallback((scopeKey: string) => {
     delete attemptKeysByScope.current[scopeKey];
@@ -350,8 +392,10 @@ export function AgentEditor({
     pollAttempts.current++;
 
     if (pollAttempts.current > 300) {
-      updateTaskState({ isProcessing: false, error: '任务超时，请重试', completedAt: Date.now() });
-      clearAttemptKey(scopeKey);
+      updateTaskState({
+        progressLabel: '本地已停止等待，可稍后重试查询',
+        error: '本地等待超时，任务可能仍在执行',
+      });
       return;
     }
 
@@ -368,6 +412,7 @@ export function AgentEditor({
       const label = String(data.label || '');
       const result = data.result as Record<string, unknown> | undefined;
       const taskError = String(data.error || '');
+      const durableTerminal = data.durableTerminal === true;
 
       setProgress(prog);
       setProgressLabel(label);
@@ -375,7 +420,7 @@ export function AgentEditor({
 
       if (status === 'completed') {
         updateTaskState({ isProcessing: false, completedAt: Date.now() });
-        clearAttemptKey(scopeKey);
+        if (durableTerminal) clearAttemptKey(scopeKey);
         setProgress(100);
         setProgressLabel('完成');
         if (result?.imageUrl) setResultImageUrl(String(result.imageUrl));
@@ -391,13 +436,13 @@ export function AgentEditor({
         return;
       } else if (status === 'failed') {
         updateTaskState({ isProcessing: false, completedAt: Date.now() });
-        clearAttemptKey(scopeKey);
+        if (durableTerminal) clearAttemptKey(scopeKey);
         const errorMsg = translateErrorFrontend(taskError || (result?.finalResponse ? String(result.finalResponse) : '') || '任务执行失败');
         setError(errorMsg);
         return;
       } else if (status === 'cancelled') {
         updateTaskState({ isProcessing: false, completedAt: Date.now() });
-        clearAttemptKey(scopeKey);
+        if (durableTerminal) clearAttemptKey(scopeKey);
         setError('任务已取消');
         return;
       }
@@ -453,13 +498,38 @@ export function AgentEditor({
       providerId: selectedChatModel.split('::')[0] || '',
       ...imageModelInfo,
     };
-    const attemptFingerprint = JSON.stringify(requestPayload);
+    const requestBody = JSON.stringify(requestPayload);
+    let requestDigest: string;
+    try {
+      requestDigest = await digestAgentAttemptRequest(requestBody);
+    } catch (error) {
+      updateTaskStateForScope(submissionScopeKey, {
+        isProcessing: false,
+        error: error instanceof Error ? error.message : '无法安全保存待处理请求，请检查浏览器存储后重试',
+        completedAt: Date.now(),
+      });
+      return;
+    }
     const existingAttempt = attemptKeysByScope.current[submissionScopeKey];
-    const attempt: PendingAgentAttempt = existingAttempt?.fingerprint === attemptFingerprint
+    const attempt: PendingAgentAttempt = existingAttempt?.digest === requestDigest
       ? existingAttempt
-      : { key: createAgentAttemptIdempotencyKey(submissionScopeKey), fingerprint: attemptFingerprint };
+      : {
+          version: 1,
+          key: createAgentAttemptIdempotencyKey(submissionScopeKey),
+          digest: requestDigest,
+          expiresAt: Date.now() + PENDING_ATTEMPT_TTL_MS,
+        };
     const attemptIdempotencyKey = attempt.key;
-    persistAttemptKey(submissionScopeKey, attempt);
+    try {
+      persistAttemptKey(submissionScopeKey, attempt);
+    } catch (error) {
+      updateTaskStateForScope(submissionScopeKey, {
+        isProcessing: false,
+        error: error instanceof Error ? error.message : '无法安全保存待处理请求，请检查浏览器存储后重试',
+        completedAt: Date.now(),
+      });
+      return;
+    }
     const startedAt = Date.now();
 
     updateTaskStateForScope(submissionScopeKey, {
@@ -484,13 +554,37 @@ export function AgentEditor({
           'Content-Type': 'application/json',
           'idempotency-key': attemptIdempotencyKey,
         },
-        body: attemptFingerprint,
+        body: requestBody,
       });
 
       const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
 
+      const terminalStatus = typeof data.status === 'string' ? data.status : '';
+      const terminalReplay = resp.status === 409
+        && data.code === 'AGENT_TASK_TERMINAL'
+        && data.replayed === true
+        && ['completed', 'failed', 'cancelled', 'timeout'].includes(terminalStatus);
+      if (terminalReplay) {
+        updateTaskStateForScope(submissionScopeKey, {
+          taskId: typeof data.taskId === 'string' ? data.taskId : null,
+          isProcessing: false,
+          progress: 100,
+          progressLabel: terminalReplayMessage(terminalStatus, String(data.error || '')),
+          error: terminalReplayMessage(terminalStatus, String(data.error || '')),
+          completedAt: Date.now(),
+          ...(data.result && typeof data.result === 'object'
+            ? {
+                resultImageUrl: typeof (data.result as Record<string, unknown>).imageUrl === 'string'
+                  ? String((data.result as Record<string, unknown>).imageUrl)
+                  : '',
+              }
+            : {}),
+        });
+        clearAttemptKey(submissionScopeKey);
+        return;
+      }
+
       if (!resp.ok) {
-        if (isConfirmedUnacceptedSubmissionStatus(resp.status)) clearAttemptKey(submissionScopeKey);
         throw new Error(translateErrorFrontend(String(data.error || '提交失败')));
       }
 
@@ -518,7 +612,7 @@ export function AgentEditor({
           progress: 100,
           completedAt: Date.now(),
         });
-        clearAttemptKey(submissionScopeKey);
+        if (data.durableTerminal === true) clearAttemptKey(submissionScopeKey);
       }
     } catch (err) {
       updateTaskStateForScope(submissionScopeKey, {
@@ -531,23 +625,39 @@ export function AgentEditor({
 
   // 取消任务
   const handleCancel = async () => {
-    if (taskId) {
-      try {
-        await fetch(`/api/agent-edit?taskId=${encodeURIComponent(taskId)}&action=cancel`);
-      } catch { /* ignore */ }
+    if (!taskId) return;
+    try {
+      const response = await fetch(`/api/agent-edit?taskId=${encodeURIComponent(taskId)}&action=cancel`);
+      const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+      if (!response.ok || data.status !== 'cancelled' || data.durableTerminal !== true) {
+        throw new Error('取消请求未被持久化确认，任务可能仍在执行');
+      }
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+      activePollTaskId.current = null;
+      clearAttemptKey(runScopeKey);
+      updateTaskState({ isProcessing: false, progress: 0, error: '任务已取消', completedAt: Date.now() });
+    } catch (error) {
+      updateTaskState({
+        error: error instanceof Error ? error.message : '取消请求未被持久化确认，任务可能仍在执行',
+      });
     }
-    if (pollTimer.current) clearTimeout(pollTimer.current);
-    activePollTaskId.current = null;
-    clearAttemptKey(runScopeKey);
-    updateTaskState({ isProcessing: false, progress: 0, error: '任务已取消', completedAt: Date.now() });
   };
 
   const handleAgentRunCancel = async () => {
-    await agentRun.cancel();
-    if (pollTimer.current) clearTimeout(pollTimer.current);
-    activePollTaskId.current = null;
-    clearAttemptKey(runScopeKey);
-    updateTaskState({ isProcessing: false, progress: 0, error: '任务已取消', completedAt: Date.now() });
+    try {
+      const projection = await agentRun.cancel();
+      if (projection?.status !== 'cancelled') {
+        throw new Error('取消请求未被持久化确认，任务可能仍在执行');
+      }
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+      activePollTaskId.current = null;
+      clearAttemptKey(runScopeKey);
+      updateTaskState({ isProcessing: false, progress: 0, error: '任务已取消', completedAt: Date.now() });
+    } catch (error) {
+      updateTaskState({
+        error: error instanceof Error ? error.message : '取消请求未被持久化确认，任务可能仍在执行',
+      });
+    }
   };
 
   // 应用结果

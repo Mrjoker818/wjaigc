@@ -1476,36 +1476,53 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const taskId = searchParams.get('taskId');
   const action = searchParams.get('action');
-
-  if (taskId && action !== 'cancel' && !localTaskStore.has(taskId)) {
-    const persisted = await getCloudTaskForUser(taskId, authResult.userId);
-    if (persisted) {
-      return NextResponse.json({
-        success: persisted.status === 'completed',
-        status: persisted.status,
-        progress: persisted.progress,
-        label: persisted.label,
-        result: persisted.result,
-        error: persisted.error,
-      });
-    }
-  }
+  const persistedTask = taskId
+    ? await getCloudTaskForUser(taskId, authResult.userId)
+    : null;
 
   if (taskId && action === 'cancel') {
-    // 取消任务
-    const task = localTaskStore.get(taskId);
-    if (!task || !canAccessAgentTask(task.userId, authResult.userId, authResult.userRole)) {
+    const localTask = localTaskStore.get(taskId);
+    if (!persistedTask && (!localTask || !canAccessAgentTask(localTask.userId, authResult.userId, authResult.userRole))) {
       return NextResponse.json({ success: false, error: 'Task not found or access denied' }, { status: 404 });
     }
-    if (task && task.status === 'processing') {
-      await recordAgentTaskTerminal(taskId, { status: 'cancelled', error: 'Task cancelled by user' });
-      localTaskStore.set(taskId, { ...task, status: 'cancelled', error: '任务已取消' });
-      return NextResponse.json({ success: true, status: 'cancelled' });
+
+    if (persistedTask?.status === 'cancelled') {
+      return NextResponse.json({ success: true, status: 'cancelled', durableTerminal: true });
     }
+
+    if (persistedTask?.status === 'processing') {
+      await recordAgentTaskTerminal(taskId, { status: 'cancelled', error: 'Task cancelled by user' });
+      const confirmedTerminal = await getCloudTaskForUser(taskId, authResult.userId);
+      if (confirmedTerminal?.status === 'cancelled') {
+        if (localTask) {
+          localTaskStore.set(taskId, { ...localTask, status: 'cancelled', error: '任务已取消' });
+        }
+        return NextResponse.json({ success: true, status: 'cancelled', durableTerminal: true });
+      }
+      return NextResponse.json({
+        success: false,
+        status: confirmedTerminal?.status || 'processing',
+        error: 'Cancellation was not durably confirmed',
+      }, { status: 409 });
+    }
+
     return NextResponse.json({ success: false, error: '任务不存在或无法取消' });
   }
 
   if (taskId) {
+    if (persistedTask) {
+      const durableTerminal = ['completed', 'failed', 'cancelled', 'timeout'].includes(persistedTask.status);
+      return NextResponse.json({
+        success: persistedTask.status === 'completed',
+        status: persistedTask.status,
+        progress: persistedTask.progress,
+        label: persistedTask.label,
+        result: persistedTask.result,
+        error: persistedTask.error,
+        durableTerminal,
+      });
+    }
+
     // 查询任务状态
     const task = localTaskStore.get(taskId);
     if (!task || !canAccessAgentTask(task.userId, authResult.userId, authResult.userRole)) {

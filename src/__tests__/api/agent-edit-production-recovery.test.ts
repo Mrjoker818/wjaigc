@@ -427,7 +427,7 @@ vi.mock('@/lib/op-log', () => ({
   sanitizeRequestData: vi.fn((value: unknown) => value), OP_ACTIONS: new Proxy({}, { get: () => 'test' }),
 }));
 
-import { POST as agentPost } from '@/app/api/agent-edit/route';
+import { GET as agentGet, POST as agentPost } from '@/app/api/agent-edit/route';
 import { POST as generatePost } from '@/app/api/generate/route';
 import { POST as pollPost } from '@/app/api/poll-task/route';
 
@@ -644,6 +644,29 @@ describe('Agent route default-adapter production recovery', () => {
       }
       return nativeSetTimeout(callback, delay, ...args);
     }) as typeof setTimeout);
+  });
+
+  it('cancels a persisted processing task after a route restart through durable settlement', async () => {
+    state.tasks.set('persisted-agent-task', {
+      id: 'persisted-agent-task',
+      userId: fixtures.user.id,
+      projectId: 'project-route',
+      type: 'agent-edit',
+      status: 'processing',
+      progress: 40,
+      label: 'Persisted work',
+      creditCost: 7,
+      creditStatus: 'charged',
+    });
+
+    const response = await agentGet(new Request(
+      'http://localhost/api/agent-edit?taskId=persisted-agent-task&action=cancel',
+    ) as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ success: true, status: 'cancelled' });
+    expect(state.tasks.get('persisted-agent-task')).toMatchObject({ status: 'cancelled' });
+    expect(state.parentTerminalCalls).toBe(1);
   });
 
   it('retains both accepted submitOnly children and reconciles them without resubmit', async () => {

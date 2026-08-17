@@ -8,7 +8,7 @@ import type { AgentEvent, AgentRunProjection } from '@/lib/agent-runtime/types';
 interface AgentRunEventsResult {
   projection?: AgentRunProjection;
   stale: boolean;
-  cancel: () => Promise<void>;
+  cancel: () => Promise<AgentRunProjection | undefined>;
 }
 
 const EVENT_POLL_INTERVAL_MS = 500;
@@ -109,7 +109,7 @@ export function createAgentRunEventPoller({
           if (terminal) active = false;
         }
         if (active) onStale(now() - lastAdvanceAt > EVENT_STALE_AFTER_MS);
-      } catch (error) {
+      } catch {
         if (active && !requestController.signal.aborted) {
           onStale(now() - lastAdvanceAt > EVENT_STALE_AFTER_MS);
         }
@@ -165,8 +165,8 @@ export function useAgentRunEvents(runId: string | null | undefined): AgentRunEve
     };
   }, [runId]);
 
-  const cancel = useCallback(async (): Promise<void> => {
-    if (!runId) return;
+  const cancel = useCallback(async (): Promise<AgentRunProjection | undefined> => {
+    if (!runId) return undefined;
     const expectedGeneration = generation.current;
     const cancelled = await cancelAgentRunRequest(runId);
     if (
@@ -176,6 +176,7 @@ export function useAgentRunEvents(runId: string | null | undefined): AgentRunEve
     ) {
       setProjection(cancelled);
     }
+    return cancelled;
   }, [runId]);
 
   return { projection, stale, cancel };

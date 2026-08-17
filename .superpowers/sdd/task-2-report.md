@@ -1825,3 +1825,97 @@ git diff --check
   both commands exited successfully.
 - The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
   staged or committed.
+
+## R16 - Durable Agent-edit attempt and restart cancellation repair
+
+### RED evidence
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx --reporter=dot --silent
+# controlled exit 1; 1 file, 7 failed / 8 passed in 1.01s
+# Proved client poll-limit, cancel transport/404/500, terminal 409 replay,
+# quota failure, and malformed storage were not handled durably.
+
+pnpm exec vitest run src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot --silent
+# controlled exit 1; 1 file, 1 failed / 16 passed in 4.37s
+# GET /api/agent-edit?taskId=persisted-agent-task&action=cancel returned 404
+# after a simulated process restart because it consulted only localTaskStore.
+
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx --reporter=dot --silent
+# controlled exit 1; 1 file, 1 failed / 14 passed in 1.11s
+# A structurally valid record with a 24-hour future expiry was accepted rather
+# than bounded to the pending-attempt TTL window.
+```
+
+### Design and implementation
+
+- Pending Agent-edit attempts are scope-keyed and persisted only after a
+  SHA-256 digest is available. The record contains schema version, random
+  idempotency key, digest, and bounded expiry only: no prompt, image URL, or
+  serialized request body. Hydration reads are effect-only; malformed,
+  expired, or unbounded records are removed.
+- A storage write is required before the paid POST. Storage unavailable/quota
+  failures fail closed and send no request. Uncertain client outcomes (poll
+  limit and cancel transport/404/5xx) preserve the pending key and processing
+  state. Only `durableTerminal: true` responses, or a structured replayed
+  `409 AGENT_TASK_TERMINAL` with a real terminal status, clear it.
+- `/api/agent-edit` now resolves persisted tasks before the in-process store
+  for reads and cancellation. A restart can therefore cancel a persisted
+  processing task through the existing durable terminal/refund transition;
+  success is returned only after the database confirms `cancelled`.
+- The Agent run-events cancellation projection is now checked before its
+  visible scope clears identity. A rejected/uncertain event cancellation keeps
+  the current task attached for later retry or recovery.
+- `package.json` adds only the exact
+  `.superpowers/sdd/task-2-review-r16-findings.md` protected-baseline
+  allow-path; no wildcard or node-editor allow-path was added.
+
+### GREEN verification
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/api/agent-edit-production-recovery.test.ts src/__tests__/components/use-agent-run-events.test.ts --reporter=dot --silent
+# 3 files / 39 tests passed in 6.49s
+
+pnpm ts-check
+# exit 0
+
+pnpm exec vitest run src/__tests__/api/chat-agent-v2-generation-routing.test.ts src/__tests__/components/agent-editor-run-scope.test.tsx src/__tests__/lib/chat-tools-analyze-image.test.ts src/__tests__/lib/chat-tools-governance.test.ts src/__tests__/components/chat-panel-generation-recovery-contract.test.ts src/__tests__/components/simple-chat-workspace-return-contract.test.ts src/__tests__/api/agent-edit-production-recovery.test.ts src/__tests__/api/agent-edit-task-admission-contract.test.ts src/__tests__/components/use-agent-run-events.test.ts --reporter=dot --silent
+# 9 files / 79 tests passed in 8.72s
+
+$files = @(rg --files src/__tests__ | rg '(agent|chat-agent-tool-choice)'); pnpm exec vitest run @files --reporter=dot --silent
+# 22 files / 199 tests passed in 17.34s
+
+pnpm exec vitest run --reporter=json --outputFile "$env:TEMP\\r16-full-vitest.json" --silent
+# 464 files passed; 2710 tests passed / 66 skipped / 0 failed
+
+pnpm exec eslint . --format json --output-file "$env:TEMP\\r16-lint.json"
+# exit 0; 0 errors, 973 existing repository warnings
+
+pnpm build
+# production build process completed after TypeScript and full-suite verification
+
+pnpm check:protected-baseline
+# 38/38 feature IDs; 0 warnings
+
+git diff --check
+# exit 0; only pre-existing CRLF working-tree notices
+```
+
+### R16 changed files
+
+- Production: `src/components/agent-editor.tsx`,
+  `src/components/agent-runtime/use-agent-run-events.ts`, and
+  `src/app/api/agent-edit/route.ts`.
+- Tests: `src/__tests__/components/agent-editor-run-scope.test.tsx` and
+  `src/__tests__/api/agent-edit-production-recovery.test.ts`.
+- Guard/evidence: `package.json`,
+  `.superpowers/sdd/task-2-review-r16-findings.md`, and this report.
+
+### R16 concerns
+
+- Browser Stage 4 fixture tests were not run: `E2E_STAGE4_DATABASE_URL`,
+  `PGDATABASE_URL`, and `DATABASE_URL` are unset, and the fixture guard
+  requires an isolated PostgreSQL target whose application URL exactly matches
+  it. No non-isolated database was substituted.
+- The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
+  staged or committed.
