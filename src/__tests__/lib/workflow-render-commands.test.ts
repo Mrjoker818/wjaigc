@@ -404,6 +404,131 @@ describe('workflow render commands', () => {
     expect(undone.workflow.connections.every(item => isWorkflowConnectionValid(undone.workflow, item))).toBe(true);
   });
 
+  it('delete redo preserves a same-id edge that was concurrently retargeted away from the deleted node', () => {
+    const workflow = workflowFixture();
+    const source = workflow.nodes[0]!;
+    const target = workflow.nodes[1]!;
+    const text = workflow.nodes[2]!;
+    const retargeted = {
+      id: 'image-edge',
+      fromNodeId: text.id,
+      fromPortId: text.ports.find(port => port.direction === 'out' && port.type === 'prompt')!.id,
+      toNodeId: target.id,
+      toPortId: target.ports.find(port => port.direction === 'in' && port.type === 'prompt')!.id,
+      type: 'prompt' as const,
+      data: { revision: 'concurrent-retarget' },
+    };
+    const deleted = reduceWorkflowEditorState(createWorkflowEditorState(workflow), {
+      kind: 'command',
+      command: { type: 'nodes.delete', nodeIds: [source.id], transactionId: 'identity-delete' },
+    });
+    const restored = reduceWorkflowEditorState(deleted, { kind: 'history.undo' });
+    const retargetedState = reduceWorkflowEditorState(restored, {
+      kind: 'system.update',
+      workflow: { ...restored.workflow, connections: [retargeted] },
+    });
+
+    const redone = reduceWorkflowEditorState(retargetedState, { kind: 'history.redo' });
+
+    expect(redone.workflow.nodes.some(node => node.id === source.id)).toBe(false);
+    expect(redone.workflow.connections).toContainEqual(retargeted);
+    expect(redone.workflow.connections.every(connection => isWorkflowConnectionValid(redone.workflow, connection))).toBe(true);
+  });
+
+  it('clipboard undo preserves a same-id edge retargeted away from the pasted nodes', () => {
+    const workflow = workflowFixture();
+    const target = workflow.nodes[1]!;
+    const text = workflow.nodes[2]!;
+    const pasted = reduceWorkflowEditorState(createWorkflowEditorState(workflow), {
+      kind: 'command',
+      command: {
+        type: 'clipboard.paste',
+        snapshot: createWorkflowClipboardSnapshot(workflow, workflow.nodes.slice(0, 2).map(node => node.id)),
+        offset: { x: 40, y: 40 },
+        transactionId: 'identity-clipboard',
+      },
+    });
+    const pastedEdge = pasted.workflow.connections.find(connection => connection.id !== 'image-edge')!;
+    const retargeted = {
+      id: pastedEdge.id,
+      fromNodeId: text.id,
+      fromPortId: text.ports.find(port => port.direction === 'out' && port.type === 'prompt')!.id,
+      toNodeId: target.id,
+      toPortId: target.ports.find(port => port.direction === 'in' && port.type === 'prompt')!.id,
+      type: 'prompt' as const,
+      data: { revision: 'clipboard-replacement' },
+    };
+    const retargetedState = reduceWorkflowEditorState(pasted, {
+      kind: 'system.update',
+      workflow: {
+        ...pasted.workflow,
+        connections: pasted.workflow.connections.map(connection => (
+          connection.id === pastedEdge.id ? retargeted : connection
+        )),
+      },
+    });
+
+    const undone = reduceWorkflowEditorState(retargetedState, { kind: 'history.undo' });
+
+    expect(undone.workflow.nodes).toHaveLength(workflow.nodes.length);
+    expect(undone.workflow.connections).toContainEqual(retargeted);
+    expect(undone.workflow.connections.every(connection => isWorkflowConnectionValid(undone.workflow, connection))).toBe(true);
+  });
+
+  it('undo after a no-op connection redo preserves a concurrent same-id replacement', () => {
+    const workflow = workflowFixture();
+    const target = workflow.nodes[1]!;
+    const text = workflow.nodes[2]!;
+    const connection = {
+      id: 'identity-connect',
+      fromNodeId: text.id,
+      fromPortId: text.ports.find(port => port.direction === 'out' && port.type === 'prompt')!.id,
+      toNodeId: target.id,
+      toPortId: target.ports.find(port => port.direction === 'in' && port.type === 'prompt')!.id,
+      type: 'prompt' as const,
+    };
+    const connected = reduceWorkflowEditorState(createWorkflowEditorState(workflow), {
+      kind: 'command',
+      command: { type: 'connection.create', connection, transactionId: 'identity-connect' },
+    });
+    const undone = reduceWorkflowEditorState(connected, { kind: 'history.undo' });
+    const sourceRemoved = reduceWorkflowEditorState(undone, {
+      kind: 'system.update',
+      workflow: {
+        ...undone.workflow,
+        nodes: undone.workflow.nodes.filter(node => node.id !== text.id),
+      },
+    });
+    const noOpRedo = reduceWorkflowEditorState(sourceRemoved, { kind: 'history.redo' });
+    const output = createWorkflowNode('output-image', 420, 20, 'replacement target');
+    const source = workflow.nodes[0]!;
+    const replacement = {
+      id: connection.id,
+      fromNodeId: source.id,
+      fromPortId: source.ports.find(port => port.direction === 'out' && port.type === 'image')!.id,
+      toNodeId: output.id,
+      toPortId: output.ports.find(port => port.direction === 'in' && port.type === 'image')!.id,
+      type: 'image' as const,
+      data: { revision: 'post-noop-replacement' },
+    };
+    const replacementState = reduceWorkflowEditorState(noOpRedo, {
+      kind: 'system.update',
+      workflow: {
+        ...noOpRedo.workflow,
+        nodes: [...noOpRedo.workflow.nodes, output],
+        connections: [...noOpRedo.workflow.connections, replacement],
+      },
+    });
+
+    const afterUndo = reduceWorkflowEditorState(replacementState, { kind: 'history.undo' });
+
+    expect(noOpRedo.history.index).toBe(1);
+    expect(noOpRedo.workflow.connections.some(item => item.id === connection.id)).toBe(false);
+    expect(afterUndo.history.index).toBe(0);
+    expect(afterUndo.workflow.connections).toContainEqual(replacement);
+    expect(afterUndo.workflow.connections.every(item => isWorkflowConnectionValid(afterUndo.workflow, item))).toBe(true);
+  });
+
   it('merges a deferred external workflow with final drag positions', () => {
     const workflow = workflowFixture();
     const source = workflow.nodes[0]!;

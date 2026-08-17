@@ -61,7 +61,7 @@ type WorkflowPatchOperation =
   | { type: 'node.remove'; nodeId: string }
   | { type: 'connection.set'; connectionId: string; path: string[]; value?: unknown; remove?: true }
   | { type: 'connection.add'; connection: WorkflowConnection; index: number }
-  | { type: 'connection.remove'; connectionId: string };
+  | { type: 'connection.remove'; connection: WorkflowConnection };
 
 export interface WorkflowCommandHistory {
   entries: WorkflowHistoryEntry[];
@@ -185,7 +185,9 @@ function buildWorkflowPatch(before: Workflow, after: Workflow): WorkflowPatchOpe
   const afterConnections = new Map(after.connections.map(connection => [connection.id, connection]));
 
   before.connections.forEach(connection => {
-    if (!afterConnections.has(connection.id)) operations.push({ type: 'connection.remove', connectionId: connection.id });
+    if (!afterConnections.has(connection.id)) {
+      operations.push({ type: 'connection.remove', connection: cloneSnapshotValue(connection) });
+    }
   });
   before.nodes.forEach(node => {
     if (!afterNodes.has(node.id)) operations.push({ type: 'node.remove', nodeId: node.id });
@@ -265,7 +267,9 @@ function applyWorkflowPatch(workflow: Workflow, operations: ReadonlyArray<Workfl
       continue;
     }
     if (operation.type === 'connection.remove') {
-      next.connections = next.connections.filter(connection => connection.id !== operation.connectionId);
+      next.connections = next.connections.filter(connection => (
+        connection.id !== operation.connection.id || !valuesEqual(connection, operation.connection)
+      ));
       continue;
     }
     if (operation.type === 'connection.add') {

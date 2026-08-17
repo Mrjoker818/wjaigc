@@ -444,3 +444,53 @@ Result: 18 files / 142 tests passed.
 - `src/__tests__/lib/workflow-render-commands.test.ts`
 
 Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` were not edited by this fix wave and remain excluded from staging and commit.
+
+## R6 Independent Review Fix Wave
+
+The two R6 identity-safe replay and actual NodeEditor integration findings were addressed in one bounded follow-up based on `f8ec308`.
+
+### R6 RED
+
+The three exact structural regressions were added first and run with:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workflow-render-commands.test.ts
+```
+
+Result: exit 1; 3 failed / 19 passed tests. Delete redo removed a same-ID edge retargeted from the historical deleted node to unrelated current nodes; clipboard undo removed the equivalent pasted-edge replacement; and undo after an invalid/no-op connection redo removed a concurrent replacement that reused the historical ID.
+
+The mandatory integration proof was absent before R6: the existing mounted controlled test used a synthetic host and did not mount `NodeEditor`. The new test mounts the real `NodeEditor` and actual `@xyflow/react` surface. During test construction it failed closed until a real d3 mouse gesture crossed React Flow's drag threshold and the card's uppercase product-label rendering was asserted case-insensitively. The final scenario uses DOM `mousedown`/`mousemove`/`mouseup`, observes the real node transform, rerenders an external workflow during drag, verifies the external label remains deferred, and requires the final callback and DOM to contain both external config and dragged position. Removing either NodeEditor drag lifecycle prop causes the during-drag or post-drag assertions to fail.
+
+### R6 Corrections
+
+- `connection.remove` patch operations now carry the complete expected historical connection snapshot. Replay removes a current edge only when ID, endpoints, ports, type, data, and other serialized fields still equal that snapshot; a retargeted or replaced same-ID edge survives.
+- `node.remove` continues to remove only edges currently incident to the node actually removed. Historical connection removals no longer pre-delete by ID, while historical connection additions retain current endpoint, port-direction, type-compatibility, duplicate-ID, and duplicate-route validation.
+- Clipboard inverse replay inherits the same identity-safe removal. An invalid/no-op connection redo may advance the cursor, but its inverse fingerprint cannot later remove a concurrent same-ID replacement.
+- Added a real NodeEditor/react-flow-v2 jsdom integration test without mocking React Flow or `WorkflowReactFlowSurface`. Only network, storage/broadcast, and required DOM APIs are controlled; actual React Flow DOM and drag listeners exercise the host lifecycle, queued external hydration, preview, and final commit path.
+
+### R6 GREEN And Verification
+
+Focused Task 3/node-editor/route/helper command:
+
+```powershell
+pnpm exec vitest run src/__tests__/components/node-editor-ui-regression.test.ts src/__tests__/components/node-editor-provider-capabilities.test.ts src/__tests__/components/node-editor-layering-wiring.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-execution-wiring.test.ts src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-editor-asset-reference.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/components/workflow-react-flow-controlled-behavior.test.tsx src/__tests__/components/node-editor-react-flow-v2-integration.test.tsx src/__tests__/components/node-annotation-wiring.test.ts src/__tests__/lib/workflow-render-view-model.test.ts src/__tests__/lib/workflow-render-shadow.test.ts src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/lib/stage-4-modes.test.ts src/__tests__/api/user-data-sync-asset-graph.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts
+```
+
+Result: 19 files / 146 tests passed.
+
+- Post-type-fix focused rerun: 2 files / 23 tests passed (`node-editor-react-flow-v2-integration` and `workflow-render-commands`).
+- `pnpm test`: exit 0; 456 files / 2808 tests passed. Fourteen PostgreSQL integration files / 68 tests were skipped because `POSTGRES_TEST_DATABASE_URL` is not configured; live database E2E was not run.
+- `pnpm ts-check`: the first run failed only on three new-test type declarations; after narrowing the event target and accepting the nullable component callback contract, it passed.
+- `pnpm lint:build`: passed (`eslint . --quiet`).
+- `pnpm build`: passed; Next.js production build compiled, type-checked, generated 113 static pages, and completed route collection.
+- `pnpm check:protected-baseline`: passed all checks with 0 warnings.
+- `git diff --check`: passed after the report update.
+
+### R6 Files Changed
+
+- `.superpowers/sdd/stage-4-task-3-report.md`
+- `src/lib/workflow-renderer/commands.ts`
+- `src/__tests__/lib/workflow-render-commands.test.ts`
+- `src/__tests__/components/node-editor-react-flow-v2-integration.test.tsx`
+
+Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` were not edited by this fix wave and remain excluded from staging and commit.
