@@ -8,6 +8,8 @@ import {
 } from '../../../scripts/stage-4-e2e-fixtures.mjs';
 import {
   assertWorkflowMonitorCoverage,
+  assertWorkflowVirtualizationCoverage,
+  resolveExpectedMountedWorkflowNodeIds,
   selectWorkflowMonitorIds,
   summarizeWorkflowPerformance,
 } from '../../../tests/helpers/workflow-performance';
@@ -190,6 +192,38 @@ describe('Stage 4 workflow performance samples', () => {
     const ids = selectWorkflowMonitorIds(Array.from({ length: 100 }, (_, index) => `wrong-node-${index + 1}`));
 
     expect(() => assertWorkflowMonitorCoverage(ids, expectedIds)).toThrow(/missing expected node IDs/i);
+  });
+
+  it('derives the explicit mounted subset for the 100-node virtualized fixture', () => {
+    const workflow = buildStage4FixturePlan('mounted-subset').workflows[0]!.workflow;
+    const expectedMountedIds = Array.from({ length: 8 }, (_, row) => (
+      Array.from({ length: 6 }, (_, column) => `stage4-node-${row * 10 + column + 1}`)
+    )).flat();
+
+    const mountedIds = resolveExpectedMountedWorkflowNodeIds(
+      workflow.nodes,
+      { x: 0, y: 0, zoom: 0.8 },
+      { width: 800, height: 600 },
+    );
+
+    expect(mountedIds).toEqual(expectedMountedIds);
+    expect(mountedIds).toHaveLength(48);
+    expect(mountedIds.length).toBeLessThan(workflow.nodes.length);
+    expect(() => assertWorkflowVirtualizationCoverage({
+      domainNodeIds: workflow.nodes.map(node => node.id),
+      expectedDomainNodeIds: expectedIds,
+      mountedNodeIds: mountedIds,
+      expectedMountedNodeIds: expectedMountedIds,
+    })).not.toThrow();
+  });
+
+  it('rejects an empty mounted set instead of turning the performance gate into a domain-only test', () => {
+    expect(() => assertWorkflowVirtualizationCoverage({
+      domainNodeIds: expectedIds,
+      expectedDomainNodeIds: expectedIds,
+      mountedNodeIds: [],
+      expectedMountedNodeIds: ['stage4-node-1'],
+    })).toThrow(/mounted node IDs/i);
   });
 
   it('summarizes workflow interaction evidence without hiding dropped nodes', () => {

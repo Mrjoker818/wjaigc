@@ -1,7 +1,7 @@
 'use client';
 
 import NextImage from 'next/image';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeftFromLine, Bookmark, BookmarkPlus, ChevronDown, ChevronLeft, ChevronRight,
@@ -13,12 +13,14 @@ import {
   SlidersHorizontal, Box, X, GitCompare,
 } from 'lucide-react';
 
-import {
-  type NodePort, type NodeType, type WorkflowNode,
-  NODE_TYPE_COLORS, NODE_TYPE_ICONS, PORT_COLORS, getNodeCategory,
-} from '@/lib/workflow-engine';
+import type { NodePort, NodeType, WorkflowNode } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { getPromptTemplates, searchTemplates } from '@/lib/prompt-templates';
+import {
+  getWorkflowRenderNodeCategory,
+  WORKFLOW_RENDER_NODE_COLORS,
+  WORKFLOW_RENDER_NODE_ICONS,
+  WORKFLOW_RENDER_PORT_COLORS as PORT_COLORS,
+} from '@/lib/workflow-renderer/presentation';
 
 export interface WorkflowLegacyModelOption {
   id: string;
@@ -50,6 +52,29 @@ export interface WorkflowLegacyPromptPreset {
   text: string;
 }
 
+export interface WorkflowLegacyPromptTemplate {
+  id: string;
+  name: string;
+  content: string;
+  category: string;
+  tags: string[];
+  thumbnail?: string;
+}
+
+export function filterWorkflowPromptTemplates(
+  templates: ReadonlyArray<WorkflowLegacyPromptTemplate>,
+  query: string,
+): WorkflowLegacyPromptTemplate[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) return [...templates];
+  return templates.filter(template => (
+    template.name.toLocaleLowerCase().includes(normalizedQuery)
+    || template.content.toLocaleLowerCase().includes(normalizedQuery)
+    || template.category.toLocaleLowerCase().includes(normalizedQuery)
+    || template.tags.some(tag => tag.toLocaleLowerCase().includes(normalizedQuery))
+  ));
+}
+
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Image: ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
@@ -58,7 +83,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: 
 };
 
 function getNodeIcon(type: NodeType, size = 14, className = '') {
-  const iconName = NODE_TYPE_ICONS[type];
+  const iconName = WORKFLOW_RENDER_NODE_ICONS[type];
   const IconComp = ICON_MAP[iconName] || Settings;
   return <IconComp size={size} className={className} />;
 }
@@ -86,6 +111,7 @@ export interface WorkflowLegacyNodeCardProps {
   onTriggerImageUpload?: (nodeId: string) => void;
   onImageFileDrop?: (nodeId: string, file: File) => void;
   promptPresets?: WorkflowLegacyPromptPreset[];
+  promptTemplates?: WorkflowLegacyPromptTemplate[];
   onSavePromptPreset?: (name: string, text: string) => void;
   onDeletePromptPreset?: (presetId: string) => void;
   upstreamImageUrl?: string;
@@ -103,6 +129,7 @@ export interface WorkflowLegacyNodeCardProps {
   onToggleCollapse?: (nodeId: string) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   onDoubleClickAnnotation?: () => void;
+  layout?: 'canvas' | 'embedded';
 }
 
 /** output-image-group 节点内容: 多图分页浏览 */
@@ -170,10 +197,10 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, onImageFileDrop, promptPresets = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation }: WorkflowLegacyNodeCardProps) {
+export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, onImageFileDrop, promptPresets = [], promptTemplates = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation, layout = 'canvas' }: WorkflowLegacyNodeCardProps) {
   const T = theme;
-  const cat = getNodeCategory(node.type);
-  const color = NODE_TYPE_COLORS[cat];
+  const cat = getWorkflowRenderNodeCategory(node.type);
+  const color = WORKFLOW_RENDER_NODE_COLORS[cat];
   const nodeRef = useRef<HTMLDivElement>(null);
 
   // 自动测量节点实际尺寸并同步到node.width/height
@@ -218,7 +245,10 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
   const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
   const [hoveredTemplateId, setHoveredTemplateId] = useState<string | null>(null);
   const [thumbnailRect, setThumbnailRect] = useState<DOMRect | null>(null);
-  const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
+  const filteredTemplates = useMemo(
+    () => filterWorkflowPromptTemplates(promptTemplates, templateSearch),
+    [promptTemplates, templateSearch],
+  );
 
   // P0: 解析文本中的 [img:id] 引用，渲染为缩略图
   // P1: The host owns persistence; this renderer keeps only popup state.
@@ -258,13 +288,18 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
       data-node-id={node.id}
       className={`node-card ${isSelected ? 'selected' : ''} ${isCollapsed ? 'collapsed' : ''} ${isInputText ? 'prompt-node' : isInputImage || isOutputImage ? 'image-node' : 'generator-node'}`}
       style={{
-        left: node.x,
-        top: node.y,
+        left: layout === 'canvas' ? node.x : 0,
+        top: layout === 'canvas' ? node.y : 0,
         height: isCollapsed ? 45 : 'auto',
         zIndex: isSelected ? 10 : isHovered ? 5 : 1,
       }}
+      aria-label={node.label}
       tabIndex={0}
-      onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e); }}
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        onSelect(e);
+        if (layout === 'canvas') onDragStart(e);
+      }}
       onMouseEnter={() => onHover(node.id)}
       onMouseLeave={() => onHover(null)}
       onContextMenu={onContextMenu}

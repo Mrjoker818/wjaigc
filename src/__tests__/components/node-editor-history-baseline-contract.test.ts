@@ -8,10 +8,26 @@ const source = readFileSync(
 );
 
 describe('node editor history baseline', () => {
-  it('seeds the initial workflow as history entry zero so the first node addition can be undone', () => {
-    expect(source).toContain("const [historyStack, setHistoryStack] = useState<HistoryEntry[]>(() => [{");
-    expect(source).toContain("label: '初始状态'");
-    expect(source).toContain('const [historyIndex, setHistoryIndex] = useState(0);');
-    expect(source).toContain('const historyIndexRef = useRef(0);');
+  it('uses command entries as the actual editor history without an automatic parallel snapshot effect', () => {
+    expect(source).toContain('createWorkflowCommandHistory');
+    expect(source).toContain('recordWorkflowHistoryEntries');
+    expect(source).toContain('result.historyEntries');
+    expect(source).not.toContain('P2: 保存历史快照');
+    expect(source).not.toContain('手动记录一次历史快照');
+  });
+
+  it('hydrates external workflow state without adding user history', () => {
+    expect(source).toContain("type: 'workflow.hydrate'");
+    expect(source).toContain("transactionId: 'external-workflow-hydrate'");
+    expect(source).not.toContain('if (!isDraggingRef.current) setWf(workflow)');
+  });
+
+  it('commits drag end, copy, delete, and connect through the command dispatcher', () => {
+    expect(source).toContain('nodeDragStartWorkflowRef');
+    expect(source).toContain("type: 'nodes.move'");
+    expect(source).toContain("type: 'nodes.copy'");
+    expect(source).toContain("type: 'nodes.delete'");
+    expect(source).toContain("type: 'connection.create'");
+    expect(source).not.toContain("transactionId: 'legacy-node-drag-preview'");
   });
 });

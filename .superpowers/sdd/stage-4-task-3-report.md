@@ -104,3 +104,81 @@ Changed follow-up files:
 - `src/__tests__/components/workflow-react-flow-surface.test.tsx`
 - `src/__tests__/components/node-editor-drag-throttle-wiring.test.ts`
 - `.superpowers/sdd/stage-4-task-3-report.md`
+
+## R1 Rejection Fix Wave
+
+All 2 Critical, 4 Important, and 2 Minor findings were addressed together after independent R1 rejection.
+
+### R1 RED
+
+The controlled regression command before product corrections was:
+
+```powershell
+pnpm exec vitest run src/__tests__/lib/workflow-render-view-model.test.ts src/__tests__/lib/workflow-render-shadow.test.ts src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/lib/stage-4-modes.test.ts src/__tests__/api/user-data-sync-asset-graph.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts tests/unit/protected-baseline-gate.spec.ts
+```
+
+Result: exit 1, 8 failed / 1 passed files and 28 failed / 57 passed tests. The failures covered render-time storage access, incomplete React Flow product markup, aliased projections and omitted parity fields, discarded command history, missing virtualization helpers, the broad protected component prefix, and the missing delivery-mode clamp helper. The route matrix itself already passed once exercised.
+
+Additional controlled RED evidence:
+
+- Transitive renderer boundary: `pnpm exec vitest run src/__tests__/components/workflow-react-flow-surface.test.tsx` failed because the new pure `src/lib/workflow-renderer/presentation.ts` boundary did not exist. Runtime workflow-engine imports were then replaced with type-only imports plus pure renderer metadata.
+- Fixed port oracle mutation: temporarily changing the expected `any` row to `['any', 'image']` made `src/__tests__/lib/workflow-render-view-model.test.ts` fail 1 / pass 3 with the exact matrix diff. The mutation was restored before GREEN.
+- The expanded node-editor group initially failed its old direct-final-position source assertion. That assertion was corrected to require RAF preview plus one final `nodes.move` dispatcher transaction, rather than restoring the rejected parallel write/history path.
+
+### R1 Corrections
+
+- Renderer purity: prompt templates load in `node-editor.tsx`, plain template data is passed to both surfaces, filtering is pure, and renderer runtime imports no longer traverse `workflow-engine` into fetch-capable modules. A real render-time `localStorage` spy remains at zero calls.
+- Adapter parity: legacy and React Flow projections are separate implementations that clone complete workflow nodes/connections. Shadow comparison covers node type, label, full node data, ports, edge endpoints/type/full data, selection, position, size, and viewport; injected drift covers each class.
+- History: one command-history cursor now drives undo/redo. Prop and broadcast hydration add no user entry; legacy drag previews are unrecorded and mouseup commits one transaction; keyboard/context copy and delete plus connection creation use the dispatcher.
+- React Flow: the controlled surface wraps the complete legacy product card, carries status/config/control/accessibility props, uses custom typed/status edges and official CSS, and conditionally enables movement/selection/connection. It has no independent workflow state hook.
+- Delivery: server modes resolve as `legacy -> legacy`, `shadow -> shadow`, and `react-flow-v2 -> legacy`; users still cannot receive React Flow v2.
+- E2E: the 100-node domain set is asserted separately from the explicit production-culling mounted set. Performance monitors only the non-empty expected mounted set while retaining >=55 FPS, P95 <=50 ms, zero-loss, and zero-unclickable thresholds.
+- Baseline and ports: the workflow component allow-prefix was replaced by five exact component files; port expectations are a fixed literal matrix tested across every output/input pair.
+
+### R1 GREEN And Verification
+
+```powershell
+pnpm exec vitest run src/__tests__/components/node-editor-ui-regression.test.ts src/__tests__/components/node-editor-provider-capabilities.test.ts src/__tests__/components/node-editor-layering-wiring.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-execution-wiring.test.ts src/__tests__/components/node-editor-drag-throttle-wiring.test.ts src/__tests__/components/node-editor-asset-reference.test.ts src/__tests__/components/workflow-react-flow-surface.test.tsx src/__tests__/lib/workflow-render-view-model.test.ts src/__tests__/lib/workflow-render-shadow.test.ts src/__tests__/lib/workflow-render-commands.test.ts src/__tests__/lib/stage-4-modes.test.ts src/__tests__/api/user-data-sync-asset-graph.test.ts src/__tests__/scripts/stage-4-e2e-fixtures.test.ts src/__tests__/helpers/stage-4-e2e.test.ts tests/unit/protected-baseline-gate.spec.ts
+```
+
+Result: 16 files / 105 tests passed.
+
+- `pnpm ts-check`: passed.
+- Targeted ESLint over every changed TS/TSX file: exit 0, 0 errors; 13 existing `node-editor.tsx` warnings remain.
+- `pnpm check:protected-baseline`: passed all checks with 0 warnings.
+- `git diff --check`: passed; Git emitted line-ending notices only.
+- Playwright contract loading with both expected rollout modes set and `--grep "workflow renderer" --list`: passed and enumerated the workflow scenario for all 5 browser projects.
+- The live isolated-database browser run remains UNVERIFIED because `E2E_STAGE4_DATABASE_URL=UNSET`; no performance threshold was weakened or claimed as measured.
+- The final full suite was intentionally not run; controller re-review owns it.
+
+### R1 Files Changed
+
+- `.superpowers/sdd/stage-4-task-3-report.md`
+- `package.json`
+- `src/app/api/user-data/sync/route.ts`
+- `src/components/node-editor.tsx`
+- `src/components/workflow/WorkflowLegacyNodeCard.tsx`
+- `src/components/workflow/WorkflowLegacySurface.tsx`
+- `src/components/workflow/WorkflowNodeCard.tsx`
+- `src/components/workflow/WorkflowReactFlowSurface.tsx`
+- `src/components/workflow/WorkflowShadowProbe.tsx`
+- `src/lib/workflow-renderer/commands.ts`
+- `src/lib/workflow-renderer/mode.ts`
+- `src/lib/workflow-renderer/presentation.ts`
+- `src/lib/workflow-renderer/shadow.ts`
+- `src/lib/workflow-renderer/view-model.ts`
+- `src/__tests__/api/user-data-sync-asset-graph.test.ts`
+- `src/__tests__/components/node-editor-drag-throttle-wiring.test.ts`
+- `src/__tests__/components/node-editor-history-baseline-contract.test.ts`
+- `src/__tests__/components/workflow-react-flow-surface.test.tsx`
+- `src/__tests__/lib/stage-4-modes.test.ts`
+- `src/__tests__/lib/workflow-render-commands.test.ts`
+- `src/__tests__/lib/workflow-render-shadow.test.ts`
+- `src/__tests__/lib/workflow-render-view-model.test.ts`
+- `src/__tests__/scripts/stage-4-e2e-fixtures.test.ts`
+- `tests/e2e/stage-4-node-chat-agent.spec.ts`
+- `tests/helpers/stage-4-e2e.ts`
+- `tests/helpers/workflow-performance.ts`
+- `tests/unit/protected-baseline-gate.spec.ts`
+
+Controller-owned `.superpowers/sdd/task-1-brief.md` and `.superpowers/sdd/task-2-brief.md` remained untouched and are excluded from staging and the follow-up commit.

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
 import { Pool } from 'pg';
 
+import type { Workflow } from '../../src/lib/workflow-engine';
 import { stage3SourceIdentity, stage3SourceState } from './stage-3-source-state';
 
 interface Stage4EvidenceEntry {
@@ -101,6 +102,7 @@ async function buildStage4Plan(runId: string) {
       chatProject: Record<string, unknown>;
       nodeCount: number;
       expectedNodeIds: string[];
+      workflow: Workflow;
     }>;
   };
 }
@@ -230,7 +232,7 @@ export { expect };
 
 export async function stage4FixtureForProject(
   projectName: string,
-): Promise<Stage4FixtureUser & Stage4SeedTarget & { expectedNodeIds: string[] }> {
+): Promise<Stage4FixtureUser & Stage4SeedTarget & { expectedNodeIds: string[]; workflow: Workflow }> {
   const plan = await buildStage4Plan(stage4RunId());
   const user = plan.users.find(candidate => candidate.browserProfile === projectName);
   const workflow = plan.workflows.find(candidate => candidate.browserProfile === projectName);
@@ -244,6 +246,7 @@ export async function stage4FixtureForProject(
     chatProject: workflow.chatProject,
     nodeCount: workflow.nodeCount,
     expectedNodeIds: workflow.expectedNodeIds,
+    workflow: workflow.workflow,
   };
 }
 

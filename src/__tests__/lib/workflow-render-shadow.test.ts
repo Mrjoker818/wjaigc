@@ -24,9 +24,69 @@ describe('workflow renderer shadow comparison', () => {
       projectReactFlowRenderModel(workflow, viewport),
     );
 
-    expect(diff.missingNodeIds).toEqual([]);
-    expect(diff.extraNodeIds).toEqual([]);
-    expect(diff.mismatchedPortIds).toEqual([]);
-    expect(diff.mismatchedEdgeIds).toEqual([]);
+    expect(diff).toEqual({
+      missingNodeIds: [],
+      extraNodeIds: [],
+      mismatchedNodeIds: [],
+      mismatchedPortIds: [],
+      mismatchedEdgeIds: [],
+      mismatchedSelectionNodeIds: [],
+      mismatchedGeometryNodeIds: [],
+      viewportMismatch: false,
+    });
+  });
+
+  it.each([
+    ['complete node data', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.nodes[0]!.workflowNode.config = { injected: true };
+    }, 'mismatchedNodeIds'],
+    ['node type', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.nodes[0]!.type = 'ai-generate';
+    }, 'mismatchedNodeIds'],
+    ['node label', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.nodes[0]!.label = 'drifted';
+    }, 'mismatchedNodeIds'],
+    ['port label', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.nodes[0]!.ports[0]!.label = 'drifted';
+    }, 'mismatchedPortIds'],
+    ['selection', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.nodes[0]!.selected = true;
+    }, 'mismatchedSelectionNodeIds'],
+    ['position', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.nodes[0]!.position.x += 1;
+    }, 'mismatchedGeometryNodeIds'],
+    ['size', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.nodes[0]!.size.height += 1;
+    }, 'mismatchedGeometryNodeIds'],
+    ['complete edge data', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.edges[0]!.workflowConnection.type = 'data';
+    }, 'mismatchedEdgeIds'],
+    ['edge endpoint', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.edges[0]!.target.portId = 'drifted';
+    }, 'mismatchedEdgeIds'],
+    ['viewport', (model: ReturnType<typeof projectReactFlowRenderModel>) => {
+      model.viewport.zoom = 0.5;
+    }, 'viewportMismatch'],
+  ] as const)('detects injected %s drift', (_label, injectDrift, expectedField) => {
+    const workflow = createEmptyWorkflow('drift');
+    const source = createWorkflowNode('input-text', 10, 20, 'source');
+    const target = createWorkflowNode('ai-generate', 260, 20, 'target');
+    workflow.nodes = [source, target];
+    workflow.connections = [{
+      id: 'edge', fromNodeId: source.id, fromPortId: 'out-prompt',
+      toNodeId: target.id, toPortId: 'in-prompt', type: 'prompt',
+    }];
+    const viewport = { x: 8, y: 12, zoom: 1 };
+    const legacy = projectLegacyRenderModel(workflow, viewport);
+    const shadow = projectReactFlowRenderModel(workflow, viewport);
+
+    injectDrift(shadow);
+    const diff = compareWorkflowRenderers(legacy, shadow);
+
+    if (expectedField === 'viewportMismatch') {
+      expect(diff.viewportMismatch).toBe(true);
+    } else {
+      expect(diff[expectedField]).toContain(expectedField === 'mismatchedEdgeIds' ? 'edge' : source.id);
+    }
   });
 });

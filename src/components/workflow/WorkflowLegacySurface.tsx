@@ -2,14 +2,16 @@
 
 import type { MouseEvent, RefObject } from 'react';
 
-import { PORT_COLORS, type NodePort, type PortType, type WorkflowConnection, type WorkflowNode } from '@/lib/workflow-engine';
+import type { NodePort, PortType, WorkflowConnection, WorkflowNode } from '@/lib/workflow-engine';
 import type { WorkflowInteractionCommand } from '@/lib/workflow-renderer/commands';
+import { WORKFLOW_RENDER_PORT_COLORS as PORT_COLORS } from '@/lib/workflow-renderer/presentation';
 import type { WorkflowRenderModel } from '@/lib/workflow-renderer/view-model';
 import {
   WorkflowLegacyNodeCard,
   type WorkflowLegacyCanvasImageRef,
   type WorkflowLegacyModelOption,
   type WorkflowLegacyNodeCardProps,
+  type WorkflowLegacyPromptTemplate,
   type WorkflowLegacyNodeTheme,
 } from './WorkflowLegacyNodeCard';
 
@@ -30,9 +32,9 @@ interface LegacyBoxSelect {
   endY: number;
 }
 
-type LegacyCardCallbacks = Omit<WorkflowLegacyNodeCardProps,
+export type WorkflowLegacyCardCallbacks = Omit<WorkflowLegacyNodeCardProps,
   'node' | 'isSelected' | 'isHighlighted' | 'isHovered' | 'execResult' | 'isRunning' | 'theme' |
-  'canvasImages' | 'llmModels' | 'imageModels' | 'upstreamImageUrl' |
+  'canvasImages' | 'llmModels' | 'imageModels' | 'promptTemplates' | 'upstreamImageUrl' |
   'onSelect' | 'onHover' | 'onDragStart' | 'onContextMenu' | 'onDoubleClickAnnotation'> & {
   onSelect: (nodeId: string, event?: MouseEvent) => void;
   onHover: (nodeId: string | null) => void;
@@ -41,7 +43,7 @@ type LegacyCardCallbacks = Omit<WorkflowLegacyNodeCardProps,
   onDoubleClickAnnotation?: (nodeId: string) => void;
 };
 
-interface WorkflowLegacySurfaceProps {
+export interface WorkflowLegacySurfaceProps {
   model: WorkflowRenderModel;
   onCommand: (command: WorkflowInteractionCommand) => void;
   nodes: WorkflowNode[];
@@ -56,8 +58,9 @@ interface WorkflowLegacySurfaceProps {
   canvasImages?: WorkflowLegacyCanvasImageRef[];
   llmModels?: WorkflowLegacyModelOption[];
   imageModels?: WorkflowLegacyModelOption[];
+  promptTemplates?: WorkflowLegacyPromptTemplate[];
   upstreamImageUrls?: Map<string, string>;
-  cardCallbacks?: LegacyCardCallbacks;
+  cardCallbacks?: WorkflowLegacyCardCallbacks;
   draggingConnection?: LegacyDraggingConnection | null;
   boxSelect?: LegacyBoxSelect | null;
   svgViewportTransformRef?: RefObject<SVGGElement | null>;
@@ -68,7 +71,7 @@ interface WorkflowLegacySurfaceProps {
   onToggleConnectionBlocked?: (connection: WorkflowConnection, targetNode: WorkflowNode) => void;
 }
 
-const DEFAULT_THEME: WorkflowLegacyNodeTheme = {
+export const DEFAULT_WORKFLOW_NODE_THEME: WorkflowLegacyNodeTheme = {
   accent: '#d4af37', badgeText: '#ffffff', border: '#30363d', btnBg: '#30363d', btnText: '#ffffff',
   cardBorder: '#30363d', connColor: '#d4af37', gridDot: '#30363d', inputBg: '#161b22', nodeBg: '#161b22',
   nodeBody: '#161b22', nodePortText: '#8b949e', nodeTitle: '#f0f6fc', optionBg: '#161b22', optionText: '#f0f6fc',
@@ -84,9 +87,9 @@ function defaultConnectionPath(fromX: number, fromY: number, toX: number, toY: n
 
 /** Legacy SVG/HTML composition with all state and side effects held by its host. */
 export function WorkflowLegacySurface({
-  model, onCommand, nodes, visibleNodes = nodes, visibleConnections = [], theme = DEFAULT_THEME,
+  model, onCommand, nodes, visibleNodes = nodes, visibleConnections = [], theme = DEFAULT_WORKFLOW_NODE_THEME,
   execResults = {}, execStatus = 'idle', selectedNodeIds = new Set<string>(), highlightedNodeIds = new Set<string>(),
-  hoveredNodeId = null, canvasImages, llmModels, imageModels, upstreamImageUrls, cardCallbacks,
+  hoveredNodeId = null, canvasImages, llmModels, imageModels, promptTemplates, upstreamImageUrls, cardCallbacks,
   draggingConnection, boxSelect, svgViewportTransformRef, nodeViewportTransformRef,
   getConnectionPath = defaultConnectionPath, getPortPosition, isConnectionHighlighted = () => false,
   onToggleConnectionBlocked,
@@ -98,7 +101,12 @@ export function WorkflowLegacySurface({
   };
 
   return (
-    <div data-workflow-legacy-surface className="absolute inset-0">
+    <div
+      data-workflow-legacy-surface
+      data-domain-node-count={model.nodes.length}
+      data-domain-node-ids={model.nodes.map(node => node.id).join(' ')}
+      className="absolute inset-0"
+    >
       <svg data-workflow-legacy-edge-layer className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 1 }} aria-hidden="true">
         <defs>
           <marker id="arrow-image" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill={PORT_COLORS.image} /></marker>
@@ -154,6 +162,7 @@ export function WorkflowLegacySurface({
           key={node.id} node={node} isSelected={selectedNodeIds.has(node.id)} isHighlighted={highlightedNodeIds.has(node.id)} isHovered={hoveredNodeId === node.id}
           execResult={execResults[node.id]} isRunning={execStatus === 'running'} theme={theme} canvasImages={canvasImages} llmModels={llmModels} imageModels={imageModels} upstreamImageUrl={upstreamImageUrls?.get(node.id)}
           {...cardProps}
+          promptTemplates={promptTemplates}
           onSelect={event => cardProps.onSelect(node.id, event)}
           onHover={id => cardProps.onHover(id)}
           onDragStart={event => cardProps.onDragStart(node.id, event)}

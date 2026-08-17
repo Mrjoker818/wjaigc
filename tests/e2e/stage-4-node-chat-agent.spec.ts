@@ -14,7 +14,12 @@ import {
   test,
   writeStage4Metrics,
 } from '../helpers/stage-4-e2e';
-import { measureWorkflowInteraction } from '../helpers/workflow-performance';
+import {
+  assertWorkflowVirtualizationCoverage,
+  measureWorkflowInteraction,
+  resolveExpectedMountedWorkflowNodeIds,
+  selectWorkflowMonitorIds,
+} from '../helpers/workflow-performance';
 
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
 test.use({ trace: 'off', video: 'on' });
@@ -337,14 +342,33 @@ test('keeps workflow renderer server-authoritative while shadow projection remai
   } else {
     await expect(page.locator('[data-workflow-shadow-probe]')).toHaveCount(0);
   }
-  await expect(page.locator('[data-node-id]')).toHaveCount(fixture.nodeCount);
+  const legacySurface = page.locator('[data-workflow-legacy-surface]');
+  await expect(legacySurface).toHaveAttribute('data-domain-node-count', String(fixture.nodeCount));
+  const canvasBounds = await page.locator('.canvas-bg').boundingBox();
+  expect(canvasBounds).not.toBeNull();
+  const expectedMountedNodeIds = resolveExpectedMountedWorkflowNodeIds(
+    fixture.workflow.nodes,
+    { x: 0, y: 0, zoom: 0.8 },
+    { width: canvasBounds!.width, height: canvasBounds!.height },
+  );
+  const domainNodeIds = selectWorkflowMonitorIds(
+    ((await legacySurface.getAttribute('data-domain-node-ids')) ?? '').split(' '),
+  );
+  const mountedNodeIds = selectWorkflowMonitorIds(await page.locator('[data-node-id]').evaluateAll(nodes => (
+    nodes.map(node => (node as HTMLElement).dataset.nodeId ?? null)
+  )));
+  assertWorkflowVirtualizationCoverage({
+    domainNodeIds,
+    expectedDomainNodeIds: fixture.expectedNodeIds,
+    mountedNodeIds,
+    expectedMountedNodeIds,
+  });
 
-  const firstNode = page.locator(`[data-node-id="${fixture.expectedNodeIds[0]}"]`);
-  const header = firstNode.locator('.node-header');
+  const firstNode = page.locator(`[data-node-id="${expectedMountedNodeIds[0]}"]`);
   const before = await firstNode.boundingBox();
   expect(before).not.toBeNull();
-  const metrics = await measureWorkflowInteraction(page, fixture.expectedNodeIds, async measuredPage => {
-    const measuredNode = measuredPage.locator(`[data-node-id="${fixture.expectedNodeIds[0]}"]`);
+  const metrics = await measureWorkflowInteraction(page, expectedMountedNodeIds, async measuredPage => {
+    const measuredNode = measuredPage.locator(`[data-node-id="${expectedMountedNodeIds[0]}"]`);
     const measuredHeader = measuredNode.locator('.node-header');
     await measuredHeader.dragTo(measuredPage.locator('.canvas-bg'), {
       sourcePosition: { x: 24, y: 16 },
@@ -356,6 +380,7 @@ test('keeps workflow renderer server-authoritative while shadow projection remai
   expect(after!.x).not.toBe(before!.x);
   expect(metrics.averageFps).toBeGreaterThanOrEqual(55);
   expect(metrics.inputDelayP95Ms).toBeLessThanOrEqual(50);
+  expect(metrics.monitoredNodeCount).toBe(expectedMountedNodeIds.length);
   expect(metrics.lostNodeCount).toBe(0);
   expect(metrics.unclickableDurationMs).toBe(0);
   await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-legacy-100-node-performance', metrics);

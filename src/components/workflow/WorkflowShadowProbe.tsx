@@ -16,8 +16,12 @@ export function WorkflowShadowProbe({ legacyModel, shadowModel }: WorkflowShadow
   );
   const isInSync = diff.missingNodeIds.length === 0
     && diff.extraNodeIds.length === 0
+    && diff.mismatchedNodeIds.length === 0
     && diff.mismatchedPortIds.length === 0
-    && diff.mismatchedEdgeIds.length === 0;
+    && diff.mismatchedEdgeIds.length === 0
+    && diff.mismatchedSelectionNodeIds.length === 0
+    && diff.mismatchedGeometryNodeIds.length === 0
+    && !diff.viewportMismatch;
 
   return <output data-workflow-shadow-probe hidden aria-hidden="true" data-in-sync={isInSync ? 'true' : 'false'} />;
 }

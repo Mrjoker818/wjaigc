@@ -12,13 +12,21 @@ import {
   canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
   mergeWorkflowNodeUpdate, resolveWorkflowOutputAssetReference, type WorkspaceAssetReference,
 } from '@/lib/workflow-engine';
-import { applyWorkflowCommand, type WorkflowInteractionCommand } from '@/lib/workflow-renderer/commands';
+import {
+  applyWorkflowCommand,
+  createWorkflowCommandHistory,
+  recordWorkflowHistoryEntries,
+  redoWorkflowCommandHistory,
+  undoWorkflowCommandHistory,
+  type WorkflowHistoryEntry,
+  type WorkflowInteractionCommand,
+} from '@/lib/workflow-renderer/commands';
 import { resolveWorkflowRendererMode, type WorkflowRendererMode } from '@/lib/workflow-renderer/mode';
 import {
   projectLegacyRenderModel,
   projectReactFlowRenderModel,
 } from '@/lib/workflow-renderer/view-model';
-import { WorkflowLegacySurface } from '@/components/workflow/WorkflowLegacySurface';
+import { WorkflowLegacySurface, type WorkflowLegacyCardCallbacks } from '@/components/workflow/WorkflowLegacySurface';
 import { WorkflowReactFlowSurface } from '@/components/workflow/WorkflowReactFlowSurface';
 import { WorkflowShadowProbe } from '@/components/workflow/WorkflowShadowProbe';
 import { getModelDisplayName } from '@/lib/model-name-map';
@@ -29,7 +37,7 @@ import {
   getResolutionTierOptions,
 } from '@/lib/canvas-generation-group';
 import { modelSupports } from '@/lib/model-capabilities';
-import { getPromptTemplates, searchTemplates, addPromptTemplate } from '@/lib/prompt-templates';
+import { getPromptTemplates, addPromptTemplate, type PromptTemplate } from '@/lib/prompt-templates';
 import {
   getVisibleWorkflowNodeIds,
   resolveWorkflowCullingBounds,
@@ -182,14 +190,6 @@ interface PromptSnippet {
   tags: string[];
   category: string;
   createdAt: number;
-}
-
-// ==================== P2: 撤销重做历史 ====================
-
-interface HistoryEntry {
-  nodes: WorkflowNode[];
-  connections: WorkflowConnection[];
-  label: string;
 }
 
 interface WorkflowExecutionLog {
@@ -845,6 +845,8 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const bcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [wfRaw, setWfRaw] = useState<WorkflowData>(workflow || createEmptyWorkflow('新工作流'));
+  const [workflowHistory, setWorkflowHistory] = useState(() => createWorkflowCommandHistory());
+  const editorTransactionCounterRef = useRef(0);
   const [nodePromptPresets, setNodePromptPresets] = useState<{ id: string; name: string; text: string }[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('wujie-node-presets') || '[]') as { id: string; name: string; text: string }[];
@@ -865,8 +867,30 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const setWf = useCallback((updater: WorkflowData | ((prev: WorkflowData) => WorkflowData)) => {
     setWfRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (next === prev) return prev;
+      const historyEntry: WorkflowHistoryEntry = {
+        transactionId: `editor-change:${++editorTransactionCounterRef.current}`,
+        before: prev,
+        after: next,
+      };
+      setWorkflowHistory(current => recordWorkflowHistoryEntries(current, [historyEntry]));
       broadcastWorkflow(next);
       return next;
+    });
+  }, [broadcastWorkflow]);
+  const dispatchWorkflowStateCommand = useCallback((
+    command: WorkflowInteractionCommand,
+    baseWorkflow?: WorkflowData,
+  ) => {
+    setWfRaw(current => {
+      const result = applyWorkflowCommand(baseWorkflow ?? current, command);
+      if (command.type === 'workflow.hydrate') {
+        setWorkflowHistory(createWorkflowCommandHistory());
+      } else if (result.historyEntries.length > 0) {
+        setWorkflowHistory(history => recordWorkflowHistoryEntries(history, result.historyEntries));
+      }
+      if (command.type !== 'workflow.hydrate' && result.workflow !== current) broadcastWorkflow(result.workflow);
+      return result.workflow;
     });
   }, [broadcastWorkflow]);
   const saveNodePromptPreset = useCallback((name: string, text: string) => {
@@ -898,17 +922,22 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
       if (bcIgnoreRef.current) { bcIgnoreRef.current = false; return; }
       const msg = e.data as { type: string; wf: WorkflowData; source: string };
       if (msg.type === 'workflow-update' && msg.wf) {
-        setWfRaw(msg.wf); // 直接更新raw，避免触发广播
+        dispatchWorkflowStateCommand({
+          type: 'workflow.hydrate',
+          workflow: msg.wf,
+          transactionId: 'broadcast-workflow-hydrate',
+        });
       }
     };
     return () => { bc.close(); bcRef.current = null; };
-  }, []);
+  }, [dispatchWorkflowStateCommand]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   // 兼容：获取单个选中节点ID
   const selectedNodeId = useMemo(() => selectedNodeIds.size > 0 ? [...selectedNodeIds][0] : null, [selectedNodeIds]);
   // 拖动状态使用ref避免每次mousemove触发重渲染导致闪烁
   const draggingNodeRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const nodeDragStartWorkflowRef = useRef<WorkflowData | null>(null);
   const nodeDragPositionRef = useRef<{ id: string; x: number; y: number } | null>(null);
   const nodeDragRafRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false); // 标记正在拖动，跳过历史快照
@@ -1002,14 +1031,13 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   }, []);
 
   // P2: 提示词库 - 使用统一的提示词模板系统
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>(() => getPromptTemplates());
   const [, setPromptSnippets] = useState<PromptSnippet[]>(() => {
     try {
-      // 从统一的提示词模板系统加载
-      const templates = getPromptTemplates();
       // 同时兼容旧的提示词库数据
       const oldSnippets: PromptSnippet[] = (() => { try { return JSON.parse(localStorage.getItem('wujie-prompt-snippets') || '[]'); } catch { return []; } })();
       // 合并：模板优先，旧数据补充
-      const fromTemplates: PromptSnippet[] = templates.map(t => ({
+      const fromTemplates: PromptSnippet[] = promptTemplates.map(t => ({
         id: t.id,
         text: t.content,
         tags: t.tags,
@@ -1025,15 +1053,9 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const [, ] = useState('');
   const [, ] = useState('通用');
 
-  // P2: 撤销重做
-  const [historyStack, setHistoryStack] = useState<HistoryEntry[]>(() => [{
-    nodes: wf.nodes,
-    connections: wf.connections,
-    label: '初始状态',
-  }]);
-  const [historyIndex, setHistoryIndex] = useState(0);
-  const historyIndexRef = useRef(0);
-  const isUndoRedoRef = useRef(false);
+  // P2: 撤销重做由命令事务直接驱动，避免 effect 和拖拽手工快照双写。
+  const historyStack = workflowHistory.entries;
+  const historyIndex = workflowHistory.index;
   const handleCascadeRunRef = useRef<(nodeId: string) => Promise<void>>(async () => {});
   const handleDeleteNodeRef = useRef<(nodeId: string) => void>(() => {});
   const getPortPositionLocalRef = useRef<(node: WorkflowNode, port: NodePort) => { x: number; y: number } | null>(() => null);
@@ -1047,66 +1069,32 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
   const [jsonEditContent, setJsonEditContent] = useState('');
 
-  // P2: 保存历史快照 (每次wf变化时记录，拖动期间跳过)
-  const prevWfRef = useRef(wf);
-  useEffect(() => {
-    if (isUndoRedoRef.current) { isUndoRedoRef.current = false; return; }
-    if (prevWfRef.current === wf) return;
-    if (isDraggingRef.current) return; // 拖动期间不记录历史快照
-    prevWfRef.current = wf;
-    const entry: HistoryEntry = { nodes: wf.nodes, connections: wf.connections, label: '变更' };
-    setHistoryStack(prev => {
-      const idx = historyIndexRef.current;
-      const newStack = prev.slice(0, idx + 1);
-      newStack.push(entry);
-      if (newStack.length > 50) newStack.shift();
-      return newStack;
-    });
-    setHistoryIndex(prev => {
-      const newIdx = Math.min(prev + 1, 49);
-      historyIndexRef.current = newIdx;
-      return newIdx;
-    });
-  }, [wf]);
-
   // P2: 撤销/重做函数
   const handleUndo = useCallback(() => {
-    const idx = historyIndexRef.current;
-    if (idx <= 0) return;
-    isUndoRedoRef.current = true;
-    setHistoryStack(stack => {
-      const entry = stack[idx - 1];
-      if (entry) setWf(prev => ({ ...prev, nodes: entry.nodes, connections: entry.connections }));
-      return stack;
+    setWorkflowHistory(history => {
+      if (history.index <= 0) return history;
+      const navigation = undoWorkflowCommandHistory(history);
+      setWfRaw(navigation.workflow);
+      broadcastWorkflow(navigation.workflow);
+      return navigation.history;
     });
-    setHistoryIndex(prev => {
-      const newIdx = prev - 1;
-      historyIndexRef.current = newIdx;
-      return newIdx;
-    });
-  }, [setWf]);
+  }, [broadcastWorkflow]);
 
   const handleRedo = useCallback(() => {
-    const idx = historyIndexRef.current;
-    setHistoryStack(stack => {
-      if (idx >= stack.length - 1) return stack;
-      isUndoRedoRef.current = true;
-      const entry = stack[idx + 1];
-      if (entry) setWf(prev => ({ ...prev, nodes: entry.nodes, connections: entry.connections }));
-      setHistoryIndex(prev => {
-        const newIdx = prev + 1;
-        historyIndexRef.current = newIdx;
-        return newIdx;
-      });
-      return stack;
+    setWorkflowHistory(history => {
+      if (history.index >= history.entries.length) return history;
+      const navigation = redoWorkflowCommandHistory(history);
+      setWfRaw(navigation.workflow);
+      broadcastWorkflow(navigation.workflow);
+      return navigation.history;
     });
-  }, [setWf]);
+  }, [broadcastWorkflow]);
 
   // P2: 保存提示词到库 - 同时保存到统一的提示词模板系统
   useCallback((text: string, tags: string[], category: string) => {
         const snippet: PromptSnippet = { id: `ps-${Date.now()}`, text, tags, category, createdAt: Date.now() };
         // 保存到统一的提示词模板系统（顶层 import，避免客户端 require）
-        addPromptTemplate({
+        const template = addPromptTemplate({
           name: text.slice(0, 30) + (text.length > 30 ? '...' : ''),
           content: text,
           category,
@@ -1114,6 +1102,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
           createdBy: 'user',
           isGlobal: false,
         });
+        setPromptTemplates(previous => [...previous, template]);
         // 同时保存到旧的存储（向后兼容）
         setPromptSnippets(prev => {
           const next = [...prev, snippet];
@@ -1335,16 +1324,17 @@ ${contextInfo}
 
   const nodeRenderViewport = isPanning ? nodePanViewport : viewport;
   const legacyWorkflowRenderModel = useMemo(
-    () => projectLegacyRenderModel(wf, nodeRenderViewport),
-    [wf, nodeRenderViewport],
+    () => projectLegacyRenderModel(wf, nodeRenderViewport, selectedNodeIds),
+    [wf, nodeRenderViewport, selectedNodeIds],
   );
   const reactFlowWorkflowRenderModel = useMemo(
-    () => projectReactFlowRenderModel(wf, nodeRenderViewport),
-    [wf, nodeRenderViewport],
+    () => projectReactFlowRenderModel(wf, nodeRenderViewport, selectedNodeIds),
+    [wf, nodeRenderViewport, selectedNodeIds],
   );
   const handleWorkflowRenderCommand = useCallback((command: WorkflowInteractionCommand) => {
-    setWf(current => applyWorkflowCommand(current, command).workflow);
-  }, [setWf]);
+    if (command.type === 'selection.set') setSelectedNodeIds(new Set(command.nodeIds));
+    dispatchWorkflowStateCommand(command);
+  }, [dispatchWorkflowStateCommand]);
   const nodeById = useMemo(() => new Map(wf.nodes.map(node => [node.id, node])), [wf.nodes]);
   const nodeCullingBounds = useMemo(() => resolveWorkflowCullingBounds(
     viewport,
@@ -1643,8 +1633,14 @@ ${contextInfo}
     if (!workflow) return;
     // 如果是自身回写（引用相同），跳过
     if (workflow === lastEmittedRef.current) return;
-    if (!isDraggingRef.current) setWf(workflow);
-  }, [setWf, workflow]);
+    if (!isDraggingRef.current) {
+      dispatchWorkflowStateCommand({
+        type: 'workflow.hydrate',
+        workflow,
+        transactionId: 'external-workflow-hydrate',
+      });
+    }
+  }, [dispatchWorkflowStateCommand, workflow]);
 
   // 通知外部 (拖动期间跳过)
   const onWorkflowChangeRef = useRef(onWorkflowChange);
@@ -2077,30 +2073,31 @@ ${contextInfo}
       // Ctrl+V / Cmd+V 粘贴节点
       if ((e.metaKey || e.ctrlKey) && e.key === 'v' && clipboard) {
         e.preventDefault();
-        const idMap = new Map<string, string>();
-        const newNodes = clipboard.nodes.map(n => {
-          const newId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          idMap.set(n.id, newId);
-          return { ...n, id: newId, x: n.x + 40, y: n.y + 40, label: n.label + ' (副本)' };
+        const transactionId = `keyboard-node-copy:${++editorTransactionCounterRef.current}`;
+        handleWorkflowRenderCommand({
+          type: 'nodes.copy',
+          nodeIds: clipboard.nodes.map(node => node.id),
+          offset: { x: 40, y: 40 },
+          transactionId,
         });
-        const newConns = clipboard.connections
-          .map(c => {
-            const newFrom = idMap.get(c.fromNodeId);
-            const newTo = idMap.get(c.toNodeId);
-            if (!newFrom || !newTo) return null;
-            return createConnection(newFrom, c.fromPortId, newTo, c.toPortId, c.type);
-          })
-          .filter((c): c is WorkflowConnection => c !== null);
-        setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
-        if (newNodes.length > 0) {
-          setSelectedNodeIds(new Set([newNodes[0].id]));
+        if (clipboard.nodes.length > 0) {
+          setSelectedNodeIds(new Set(clipboard.nodes.map((node, index) => (
+            `copy-${node.id}-${transactionId}-${index + 1}`
+          ))));
           setSidebarTab('props');
         }
       }
       // Delete / Backspace 删除选中节点（支持多选）
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeIds.size > 0) {
         e.preventDefault();
-        [...selectedNodeIds].forEach(id => handleDeleteNode(id));
+        const nodeIds = [...selectedNodeIds];
+        nodeIds.forEach(id => workflowInputTransferGuardRef.current.invalidate(id));
+        handleWorkflowRenderCommand({
+          type: 'nodes.delete',
+          nodeIds,
+          transactionId: `keyboard-node-delete:${++editorTransactionCounterRef.current}`,
+        });
+        setSelectedNodeIds(new Set());
       }
       // Ctrl+Z / Cmd+Z 撤销
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
@@ -2115,7 +2112,7 @@ ${contextInfo}
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeIds, selectedNodeId, selectedNode, clipboard, wf, handleDeleteNode, handleUndo, handleRedo, setWf, nodeAnnotationCandidates, nodeAnnotationSession, requestNodeAnnotation]);
+  }, [selectedNodeIds, selectedNodeId, selectedNode, clipboard, wf, handleWorkflowRenderCommand, handleUndo, handleRedo, nodeAnnotationCandidates, nodeAnnotationSession, requestNodeAnnotation]);
 
   // ─── 连线操作 (含端口类型约束) ───
 
@@ -2160,15 +2157,13 @@ ${contextInfo}
   // ─── 画布交互 ───
 
   const applyNodeDragPosition = useCallback((position: { id: string; x: number; y: number }) => {
-    const node = wfRef.current.nodes.find(candidate => candidate.id === position.id);
-    if (!node) return;
-    handleWorkflowRenderCommand({
-        type: 'nodes.move',
-        nodeIds: [position.id],
-        delta: { x: position.x - node.x, y: position.y - node.y },
-        transactionId: 'legacy-node-drag-preview',
-    });
-  }, [handleWorkflowRenderCommand]);
+    setWfRaw(current => ({
+      ...current,
+      nodes: current.nodes.map(node => node.id === position.id
+        ? { ...node, x: position.x, y: position.y }
+        : node),
+    }));
+  }, []);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
@@ -2248,36 +2243,25 @@ ${contextInfo}
     }
     setIsPanning(false);
     if (draggingNodeRef.current) {
+      const finalPosition = nodeDragPositionRef.current;
+      const dragStartWorkflow = nodeDragStartWorkflowRef.current;
       if (nodeDragRafRef.current !== null) {
         cancelAnimationFrame(nodeDragRafRef.current);
         nodeDragRafRef.current = null;
       }
-      if (nodeDragPositionRef.current) {
-        applyNodeDragPosition(nodeDragPositionRef.current);
-      }
       nodeDragPositionRef.current = null;
-      // 拖动结束：标记结束，记录一次历史快照，通知外部
+      nodeDragStartWorkflowRef.current = null;
       draggingNodeRef.current = null;
       isDraggingRef.current = false;
-      // 手动记录一次历史快照 (使用最新的wf状态)
-      setWf(currentWf => {
-        prevWfRef.current = currentWf;
-        const entry: HistoryEntry = { nodes: currentWf.nodes, connections: currentWf.connections, label: '移动节点' };
-        setHistoryStack(prev => {
-          // 使用最新的historyIndex，从historyIndexRef读取
-          const idx = historyIndexRef.current;
-          const newStack = prev.slice(0, idx + 1);
-          newStack.push(entry);
-          if (newStack.length > 50) newStack.shift();
-          return newStack;
-        });
-        setHistoryIndex(prev => {
-          const newIdx = Math.min(prev + 1, 49);
-          historyIndexRef.current = newIdx;
-          return newIdx;
-        });
-        return currentWf; // 不修改状态，只是读取最新值
-      });
+      const startNode = dragStartWorkflow?.nodes.find(node => node.id === finalPosition?.id);
+      if (dragStartWorkflow && startNode && finalPosition) {
+        dispatchWorkflowStateCommand({
+          type: 'nodes.move',
+          nodeIds: [finalPosition.id],
+          delta: { x: finalPosition.x - startNode.x, y: finalPosition.y - startNode.y },
+          transactionId: `legacy-node-drag:${finalPosition.id}:${++editorTransactionCounterRef.current}`,
+        }, dragStartWorkflow);
+      }
       // 让外部同步由 effect 在本次拖拽状态提交后执行，避免在状态更新器中触发父组件更新。
       setWorkflowSyncRevision(revision => revision + 1);
     }
@@ -2302,7 +2286,7 @@ ${contextInfo}
     }
     setBoxSelect(null);
     isBoxSelectingRef.current = false;
-  }, [applyNodeDragPosition, applyNodeViewportPreview, boxSelect, isPanning, setWf, wf.nodes]);
+  }, [applyNodeViewportPreview, boxSelect, dispatchWorkflowStateCommand, isPanning, wf.nodes]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -2362,24 +2346,18 @@ ${contextInfo}
           const vp2 = viewportRef.current;
           const mx2 = canvasRect2 ? (contextMenu.x - canvasRect2.left - vp2.x) / vp2.zoom : 100;
           const my2 = canvasRect2 ? (contextMenu.y - canvasRect2.top - vp2.y) / vp2.zoom : 100;
-          // 偏移粘贴避免完全重叠
-          const offset = 30;
-          const idMap = new Map<string, string>();
-          const newNodes = clipboard.nodes.map(n => {
-            const newId = n.id + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-            idMap.set(n.id, newId);
-            return { ...n, id: newId, x: mx2 + offset, y: my2 + offset };
-          });
-          const newConns = clipboard.connections
-            .map(c => {
-              const newFromId = idMap.get(c.fromNodeId);
-              const newToId = idMap.get(c.toNodeId);
-              if (!newFromId || !newToId) return null;
-              return { ...c, id: c.id + '_' + Date.now().toString(36), fromNodeId: newFromId, toNodeId: newToId };
-            })
-            .filter(Boolean) as WorkflowConnection[];
-          setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
-          setSelectedNodeIds(new Set(newNodes.map(n => n.id)));
+          const minX = Math.min(...clipboard.nodes.map(node => node.x));
+          const minY = Math.min(...clipboard.nodes.map(node => node.y));
+          const transactionId = `context-paste:${++editorTransactionCounterRef.current}`;
+          const command: WorkflowInteractionCommand = {
+            type: 'nodes.copy',
+            nodeIds: clipboard.nodes.map(node => node.id),
+            offset: { x: mx2 + 30 - minX, y: my2 + 30 - minY },
+            transactionId,
+          };
+          const preview = applyWorkflowCommand(wf, command).workflow;
+          setSelectedNodeIds(new Set(preview.nodes.slice(wf.nodes.length).map(node => node.id)));
+          dispatchWorkflowStateCommand(command);
           break;
         }
         case 'select-all': {
@@ -2403,24 +2381,16 @@ ${contextInfo}
         }
         case 'duplicate': {
           const selIds = selectedNodeIds.has(nodeId) ? selectedNodeIds : new Set([nodeId]);
-          const selNodes = wf.nodes.filter(n => selIds.has(n.id));
-          const selConns = wf.connections.filter(c => selIds.has(c.fromNodeId) && selIds.has(c.toNodeId));
-          const idMap = new Map<string, string>();
-          const newNodes = selNodes.map(n => {
-            const newId = n.id + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-            idMap.set(n.id, newId);
-            return { ...n, id: newId, x: n.x + 40, y: n.y + 40 };
-          });
-          const newConns = selConns
-            .map(c => {
-              const newFromId = idMap.get(c.fromNodeId);
-              const newToId = idMap.get(c.toNodeId);
-              if (!newFromId || !newToId) return null;
-              return { ...c, id: c.id + '_' + Date.now().toString(36), fromNodeId: newFromId, toNodeId: newToId };
-            })
-            .filter(Boolean) as WorkflowConnection[];
-          setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
-          setSelectedNodeIds(new Set(newNodes.map(n => n.id)));
+          const transactionId = `context-duplicate:${++editorTransactionCounterRef.current}`;
+          const command: WorkflowInteractionCommand = {
+            type: 'nodes.copy',
+            nodeIds: [...selIds],
+            offset: { x: 40, y: 40 },
+            transactionId,
+          };
+          const preview = applyWorkflowCommand(wf, command).workflow;
+          setSelectedNodeIds(new Set(preview.nodes.slice(wf.nodes.length).map(node => node.id)));
+          dispatchWorkflowStateCommand(command);
           break;
         }
         case 'disconnect': {
@@ -2432,18 +2402,18 @@ ${contextInfo}
         }
         case 'delete': {
           const selIds = selectedNodeIds.has(nodeId) ? selectedNodeIds : new Set([nodeId]);
-          setWf(prev => ({
-            ...prev,
-            nodes: prev.nodes.filter(n => !selIds.has(n.id)),
-            connections: prev.connections.filter(c => !selIds.has(c.fromNodeId) && !selIds.has(c.toNodeId)),
-          }));
+          dispatchWorkflowStateCommand({
+            type: 'nodes.delete',
+            nodeIds: [...selIds],
+            transactionId: `context-delete:${++editorTransactionCounterRef.current}`,
+          });
           setSelectedNodeIds(new Set());
           break;
         }
       }
     }
     closeContextMenu();
-  }, [contextMenu, closeContextMenu, setWf, clipboard, wf.nodes, wf.connections, selectedNodeIds, requestNodeAnnotation]);
+  }, [contextMenu, closeContextMenu, setWf, clipboard, wf, selectedNodeIds, requestNodeAnnotation, dispatchWorkflowStateCommand]);
 
   // ─── 执行工作流 ───
 
@@ -2920,6 +2890,66 @@ ${contextInfo}
         return WORKFLOW_PRESETS.filter(p => p.name.includes(q) || p.description.includes(q) || p.tags.some(t => t.includes(q)));
       }, [searchQuery]);
 
+  const workflowCardCallbacks: WorkflowLegacyCardCallbacks = {
+    onNodeFieldChange: handleNodeFieldChange,
+    onLlmOptimize: handleLlmOptimize,
+    onCascadeRun: handleCascadeRun,
+    onExtractToSource: handleExtractToSource,
+    onGridSplit: handleGridSplit,
+    onCompare: handleCompare,
+    onTriggerImageUpload: triggerNodeImageUpload,
+    onImageFileDrop: handleImageUpload,
+    promptPresets: nodePromptPresets,
+    onSavePromptPreset: saveNodePromptPreset,
+    onDeletePromptPreset: deleteNodePromptPreset,
+    onSelect: (nodeId, event) => {
+      if (event && (event.ctrlKey || event.metaKey)) {
+        setSelectedNodeIds(previous => {
+          const next = new Set(previous);
+          if (next.has(nodeId)) next.delete(nodeId);
+          else next.add(nodeId);
+          return next;
+        });
+      } else {
+        setSelectedNodeIds(new Set([nodeId]));
+      }
+      setSidebarTab('props');
+    },
+    onHover: nodeId => {
+      setHighlightNodeId(nodeId);
+      setHoveredNodeId(nodeId);
+    },
+    onDragStart: (nodeId, event) => {
+      const node = wfRef.current.nodes.find(candidate => candidate.id === nodeId);
+      const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
+      if (!node || !canvasRect) return;
+      const currentViewport = viewportRef.current;
+      const mouseX = (event.clientX - canvasRect.left - currentViewport.x) / currentViewport.zoom;
+      const mouseY = (event.clientY - canvasRect.top - currentViewport.y) / currentViewport.zoom;
+      draggingNodeRef.current = nodeId;
+      nodeDragStartWorkflowRef.current = wfRef.current;
+      nodeDragPositionRef.current = { id: nodeId, x: node.x, y: node.y };
+      dragOffsetRef.current = { x: mouseX - node.x, y: mouseY - node.y };
+      isDraggingRef.current = true;
+      setBoxSelect(null);
+      isBoxSelectingRef.current = false;
+    },
+    onPortMouseDown: handlePortMouseDown,
+    onPortMouseUp: handlePortMouseUp,
+    onDelete: () => undefined,
+    onDeselect: () => setSelectedNodeIds(new Set()),
+    onPreviewImage: setImagePreviewUrl,
+    onResizeNode: resizeNodeForImageUrl,
+    onUpdateNodeSize: updateNodeSize,
+    collapsedNodes,
+    onToggleCollapse: toggleNodeCollapse,
+    onContextMenu: (nodeId, event) => handleNodeContextMenu(event, nodeId),
+    onDoubleClickAnnotation: nodeId => {
+      const node = wfRef.current.nodes.find(candidate => candidate.id === nodeId);
+      if (node?.type === 'ai-annotation-edit') requestNodeAnnotation(node);
+    },
+  };
+
   // ─── 渲染 ───
 
   return (
@@ -2953,7 +2983,7 @@ ${contextInfo}
           <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 Ctrl+Z" aria-label="撤销">
             <RotateCcw size={16} />
           </button>
-          <button onClick={handleRedo} disabled={historyIndex >= historyStack.length - 1} className="p-1.5 rounded-lg text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 Ctrl+Shift+Z" aria-label="重做">
+          <button onClick={handleRedo} disabled={historyIndex >= historyStack.length} className="p-1.5 rounded-lg text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="重做 Ctrl+Shift+Z" aria-label="重做">
             <RotateCcw size={16} className="scale-x-[-1]" />
           </button>
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
@@ -3116,7 +3146,22 @@ ${contextInfo}
           }} />
 
           {workflowRendererMode === 'react-flow-v2' ? (
-            <WorkflowReactFlowSurface model={reactFlowWorkflowRenderModel} onCommand={handleWorkflowRenderCommand} readOnly={false} />
+            <WorkflowReactFlowSurface
+              model={reactFlowWorkflowRenderModel}
+              onCommand={handleWorkflowRenderCommand}
+              readOnly={false}
+              theme={T}
+              execResults={execResults}
+              execStatus={execStatus}
+              highlightedNodeIds={getConnectedNodeIds}
+              hoveredNodeId={hoveredNodeId}
+              canvasImages={canvasImages}
+              llmModels={chatModels}
+              imageModels={imageModels}
+              promptTemplates={promptTemplates}
+              upstreamImageUrls={upstreamImageUrls}
+              cardCallbacks={workflowCardCallbacks}
+            />
           ) : (
             <>
           <WorkflowLegacySurface
@@ -3134,6 +3179,7 @@ ${contextInfo}
             canvasImages={canvasImages}
             llmModels={chatModels}
             imageModels={imageModels}
+            promptTemplates={promptTemplates}
             upstreamImageUrls={upstreamImageUrls}
             draggingConnection={draggingConn}
             boxSelect={boxSelect}
@@ -3156,59 +3202,7 @@ ${contextInfo}
                 };
               });
             }}
-            cardCallbacks={{
-              onNodeFieldChange: handleNodeFieldChange,
-              onLlmOptimize: handleLlmOptimize,
-              onCascadeRun: handleCascadeRun,
-              onExtractToSource: handleExtractToSource,
-              onGridSplit: handleGridSplit,
-              onCompare: handleCompare,
-              onTriggerImageUpload: triggerNodeImageUpload,
-              onImageFileDrop: handleImageUpload,
-              promptPresets: nodePromptPresets,
-              onSavePromptPreset: saveNodePromptPreset,
-              onDeletePromptPreset: deleteNodePromptPreset,
-              onSelect: (nodeId, event) => {
-                if (event && (event.ctrlKey || event.metaKey)) {
-                  setSelectedNodeIds(prev => {
-                    const next = new Set(prev);
-                    if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
-                    return next;
-                  });
-                } else {
-                  setSelectedNodeIds(new Set([nodeId]));
-                }
-                setSidebarTab('props');
-              },
-              onHover: (nodeId) => { setHighlightNodeId(nodeId); setHoveredNodeId(nodeId); },
-              onDragStart: (nodeId, event) => {
-                const node = wfRef.current.nodes.find(candidate => candidate.id === nodeId);
-                const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
-                if (!node || !canvasRect) return;
-                const currentViewport = viewportRef.current;
-                const mouseX = (event.clientX - canvasRect.left - currentViewport.x) / currentViewport.zoom;
-                const mouseY = (event.clientY - canvasRect.top - currentViewport.y) / currentViewport.zoom;
-                draggingNodeRef.current = nodeId;
-                dragOffsetRef.current = { x: mouseX - node.x, y: mouseY - node.y };
-                isDraggingRef.current = true;
-                setBoxSelect(null);
-                isBoxSelectingRef.current = false;
-              },
-              onPortMouseDown: handlePortMouseDown,
-              onPortMouseUp: handlePortMouseUp,
-              onDelete: () => undefined,
-              onDeselect: () => setSelectedNodeIds(new Set()),
-              onPreviewImage: setImagePreviewUrl,
-              onResizeNode: resizeNodeForImageUrl,
-              onUpdateNodeSize: updateNodeSize,
-              collapsedNodes,
-              onToggleCollapse: toggleNodeCollapse,
-              onContextMenu: (nodeId, event) => handleNodeContextMenu(event, nodeId),
-              onDoubleClickAnnotation: (nodeId) => {
-                const node = wfRef.current.nodes.find(candidate => candidate.id === nodeId);
-                if (node?.type === 'ai-annotation-edit') requestNodeAnnotation(node);
-              },
-            }}
+            cardCallbacks={workflowCardCallbacks}
           />
           {workflowRendererMode === 'shadow' ? (
             <WorkflowShadowProbe

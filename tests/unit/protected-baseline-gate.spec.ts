@@ -56,6 +56,16 @@ describe('protected baseline release gate', () => {
     expect(command).toContain('--allow-path scripts/run-migrations.mjs');
     expect(command).toContain('--allow-path src/app/api/agent-runs/');
     expect(command).not.toMatch(/--allow-path src\/app\/api\/(?:\s|$)/);
+    expect(command).not.toMatch(/--allow-path src\/components\/workflow\/(?:\s|$)/);
+    for (const path of [
+      'src/components/workflow/WorkflowLegacyNodeCard.tsx',
+      'src/components/workflow/WorkflowLegacySurface.tsx',
+      'src/components/workflow/WorkflowNodeCard.tsx',
+      'src/components/workflow/WorkflowReactFlowSurface.tsx',
+      'src/components/workflow/WorkflowShadowProbe.tsx',
+    ]) {
+      expect(command).toContain(`--allow-path ${path}`);
+    }
   });
 
   it('passes an identical candidate and allows documentation-only changes', async () => {

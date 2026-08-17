@@ -6,12 +6,15 @@ const source = readFileSync(resolve(process.cwd(), 'src/components/node-editor.t
 const legacySurfaceSource = readFileSync(resolve(process.cwd(), 'src/components/workflow/WorkflowLegacySurface.tsx'), 'utf8');
 
 describe('node editor drag throttling', () => {
-  it('batches node drag updates per animation frame and flushes the final position', () => {
+  it('batches drag previews per animation frame and commits the final position once', () => {
     expect(source).toContain('const nodeDragPositionRef = useRef');
     expect(source).toContain('const nodeDragRafRef = useRef<number | null>(null)');
     expect(source).toContain('const applyNodeDragPosition = useCallback');
     expect(source).toContain('if (nodeDragRafRef.current === null)');
-    expect(source).toContain('applyNodeDragPosition(nodeDragPositionRef.current)');
+    expect(source).toContain('const finalPosition = nodeDragPositionRef.current');
+    expect(source).toContain("type: 'nodes.move'");
+    expect(source).toContain('}, dragStartWorkflow);');
+    expect(source).not.toContain('applyNodeDragPosition(nodeDragPositionRef.current)');
   });
 
   it('uses compositor previews and viewport culling for pan-heavy workflows', () => {

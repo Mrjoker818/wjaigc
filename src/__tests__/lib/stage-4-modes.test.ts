@@ -5,6 +5,7 @@ import {
   type AgentRuntimeMode,
 } from '@/lib/agent-runtime/mode';
 import {
+  resolveDeliveredWorkflowRendererMode,
   resolveWorkflowRendererMode,
   type WorkflowRendererMode,
 } from '@/lib/workflow-renderer/mode';
@@ -28,5 +29,14 @@ describe('Stage 4 runtime modes', () => {
     expect(resolveWorkflowRendererMode('shadow')).toBe('shadow');
     expect(resolveWorkflowRendererMode('react-flow-v2')).toBe('react-flow-v2');
     expect(resolveWorkflowRendererMode('invalid')).toBe('legacy');
+  });
+
+  it.each([
+    ['legacy', 'legacy'],
+    ['shadow', 'shadow'],
+    ['react-flow-v2', 'legacy'],
+    ['invalid', 'legacy'],
+  ] as const)('clamps delivered workflow renderer mode %s to %s', (configured, delivered) => {
+    expect(resolveDeliveredWorkflowRendererMode(configured)).toBe(delivered);
   });
 });

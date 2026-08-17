@@ -5,7 +5,13 @@ import {
   createWorkflowNode,
   type Workflow,
 } from '@/lib/workflow-engine';
-import { applyWorkflowCommand } from '@/lib/workflow-renderer/commands';
+import {
+  applyWorkflowCommand,
+  createWorkflowCommandHistory,
+  recordWorkflowHistoryEntries,
+  redoWorkflowCommandHistory,
+  undoWorkflowCommandHistory,
+} from '@/lib/workflow-renderer/commands';
 
 function workflowFixture(): Workflow {
   const workflow = createEmptyWorkflow('commands');
@@ -80,5 +86,40 @@ describe('workflow render commands', () => {
 
     expect(hydrated.workflow.name).toBe('from server');
     expect(hydrated.historyEntries).toEqual([]);
+  });
+
+  it('coalesces repeated drag updates into one actual editor history transaction', () => {
+    const workflow = workflowFixture();
+    const first = applyWorkflowCommand(workflow, {
+      type: 'nodes.move', nodeIds: [workflow.nodes[0]!.id], delta: { x: 10, y: 0 }, transactionId: 'drag-1',
+    });
+    const second = applyWorkflowCommand(first.workflow, {
+      type: 'nodes.move', nodeIds: [workflow.nodes[0]!.id], delta: { x: 15, y: 0 }, transactionId: 'drag-1',
+    });
+
+    const history = recordWorkflowHistoryEntries(
+      recordWorkflowHistoryEntries(createWorkflowCommandHistory(), first.historyEntries),
+      second.historyEntries,
+    );
+
+    expect(history.entries).toHaveLength(1);
+    expect(history.entries[0]?.before).toBe(workflow);
+    expect(history.entries[0]?.after.nodes[0]?.x).toBe(workflow.nodes[0]!.x + 25);
+    expect(undoWorkflowCommandHistory(history).workflow).toBe(workflow);
+    expect(redoWorkflowCommandHistory(undoWorkflowCommandHistory(history).history).workflow.nodes[0]?.x)
+      .toBe(workflow.nodes[0]!.x + 25);
+  });
+
+  it('does not change user history when external hydration is dispatched', () => {
+    const workflow = workflowFixture();
+    const moved = applyWorkflowCommand(workflow, {
+      type: 'nodes.move', nodeIds: [workflow.nodes[0]!.id], delta: { x: 10, y: 0 }, transactionId: 'move-1',
+    });
+    const history = recordWorkflowHistoryEntries(createWorkflowCommandHistory(), moved.historyEntries);
+    const hydrated = applyWorkflowCommand(moved.workflow, {
+      type: 'workflow.hydrate', workflow: { ...moved.workflow, name: 'server' }, transactionId: 'hydrate-server',
+    });
+
+    expect(recordWorkflowHistoryEntries(history, hydrated.historyEntries)).toBe(history);
   });
 });

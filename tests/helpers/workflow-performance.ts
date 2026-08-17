@@ -1,5 +1,13 @@
 import type { Page } from '@playwright/test';
 
+import {
+  getVisibleWorkflowNodeIds,
+  resolveWorkflowCullingBounds,
+  type WorkflowNodeBounds,
+  type WorkflowViewport,
+  type WorkflowViewportSize,
+} from '../../src/lib/node-canvas-virtualization';
+
 export interface WorkflowInputDelaySample {
   source: 'pointer' | 'event-timing';
   name: string;
@@ -79,6 +87,29 @@ export function assertWorkflowMonitorCoverage(
   if (unexpectedIds.length > 0) {
     throw new Error(`BLOCKED: Stage 4 workflow performance gate found unexpected node IDs (${unexpectedIds.length})`);
   }
+}
+
+export function resolveExpectedMountedWorkflowNodeIds(
+  nodes: WorkflowNodeBounds[],
+  viewport: WorkflowViewport,
+  viewportSize: WorkflowViewportSize,
+): string[] {
+  const bounds = resolveWorkflowCullingBounds(viewport, viewport, viewportSize, false);
+  const visibleIds = getVisibleWorkflowNodeIds(nodes, bounds);
+  return nodes.filter(node => visibleIds.has(node.id)).map(node => node.id);
+}
+
+export function assertWorkflowVirtualizationCoverage(input: {
+  domainNodeIds: ReadonlyArray<string>;
+  expectedDomainNodeIds: ReadonlyArray<string>;
+  mountedNodeIds: ReadonlyArray<string>;
+  expectedMountedNodeIds: ReadonlyArray<string>;
+}): void {
+  assertWorkflowMonitorCoverage(input.domainNodeIds, input.expectedDomainNodeIds);
+  if (input.expectedMountedNodeIds.length === 0 || input.mountedNodeIds.length === 0) {
+    throw new Error('BLOCKED: Stage 4 workflow performance gate requires explicit mounted node IDs');
+  }
+  assertWorkflowMonitorCoverage(input.mountedNodeIds, input.expectedMountedNodeIds);
 }
 
 function percentile95(values: number[]): number {

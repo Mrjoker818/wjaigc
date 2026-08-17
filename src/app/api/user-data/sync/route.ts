@@ -17,7 +17,7 @@ import type { Project } from '@/lib/user-types';
 import type { AssetGraphMode } from '@/lib/asset-core/types';
 import type { LegacyMediaPersistenceInput, LegacyMediaPersistenceResult } from '@/lib/asset-core/legacy-migration';
 import { resolveCanvasKernelMode } from '@/lib/canvas-kernel/mode';
-import { resolveWorkflowRendererMode } from '@/lib/workflow-renderer/mode';
+import { resolveDeliveredWorkflowRendererMode } from '@/lib/workflow-renderer/mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -159,9 +159,8 @@ export async function GET(request: NextRequest) {
 
     let assetGraphMode: AssetGraphMode | undefined;
     const canvasKernelMode = resolveCanvasKernelMode(process.env.WUJIE_CANVAS_KERNEL_MODE);
-    const requestedWorkflowRendererMode = resolveWorkflowRendererMode(process.env.WUJIE_WORKFLOW_RENDERER_MODE);
     // Stage 4 Task 3 only rolls out the read-only shadow. React Flow v2 remains disabled.
-    const workflowRendererMode = requestedWorkflowRendererMode === 'shadow' ? 'shadow' : 'legacy';
+    const workflowRendererMode = resolveDeliveredWorkflowRendererMode(process.env.WUJIE_WORKFLOW_RENDERER_MODE);
     // Read the revision first: a concurrent commit between these reads yields
     // an older revision with newer data, which CAS rejects safely on write.
     const projectRevision = key === 'projects'

@@ -24,6 +24,66 @@ export interface WorkflowCommandResult {
   historyEntries: WorkflowHistoryEntry[];
 }
 
+export interface WorkflowCommandHistory {
+  entries: WorkflowHistoryEntry[];
+  index: number;
+}
+
+export interface WorkflowCommandHistoryNavigation {
+  history: WorkflowCommandHistory;
+  workflow: Workflow;
+}
+
+const MAX_WORKFLOW_HISTORY_ENTRIES = 50;
+
+export function createWorkflowCommandHistory(): WorkflowCommandHistory {
+  return { entries: [], index: 0 };
+}
+
+export function recordWorkflowHistoryEntries(
+  history: WorkflowCommandHistory,
+  incomingEntries: ReadonlyArray<WorkflowHistoryEntry>,
+): WorkflowCommandHistory {
+  if (incomingEntries.length === 0) return history;
+  const entries = history.entries.slice(0, history.index);
+
+  for (const incoming of incomingEntries) {
+    const previous = entries.at(-1);
+    if (previous?.transactionId === incoming.transactionId) {
+      entries[entries.length - 1] = { ...previous, after: incoming.after };
+    } else {
+      entries.push(incoming);
+    }
+    if (entries.length > MAX_WORKFLOW_HISTORY_ENTRIES) entries.shift();
+  }
+
+  return { entries, index: entries.length };
+}
+
+export function undoWorkflowCommandHistory(
+  history: WorkflowCommandHistory,
+): WorkflowCommandHistoryNavigation {
+  if (history.index <= 0) throw new Error('Workflow history has no undo entry');
+  const entry = history.entries[history.index - 1];
+  if (!entry) throw new Error('Workflow history undo entry is missing');
+  return {
+    history: { ...history, index: history.index - 1 },
+    workflow: entry.before,
+  };
+}
+
+export function redoWorkflowCommandHistory(
+  history: WorkflowCommandHistory,
+): WorkflowCommandHistoryNavigation {
+  if (history.index >= history.entries.length) throw new Error('Workflow history has no redo entry');
+  const entry = history.entries[history.index];
+  if (!entry) throw new Error('Workflow history redo entry is missing');
+  return {
+    history: { ...history, index: history.index + 1 },
+    workflow: entry.after,
+  };
+}
+
 function result(workflow: Workflow, before: Workflow, transactionId: string): WorkflowCommandResult {
   return {
     workflow,
