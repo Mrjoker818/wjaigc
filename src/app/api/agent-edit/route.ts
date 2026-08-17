@@ -114,6 +114,13 @@ function knownProviderTaskRejection(
   return new AgentDownstreamProviderRejectedError(undefined, { message, providerCode });
 }
 
+function retryableProviderTaskPollError(
+  data: Record<string, unknown>,
+  status: string,
+): Error {
+  return new Error(knownProviderTaskRejection(data, status).message);
+}
+
 async function pollAcceptedAgentGeneration(input: {
   providerTaskId: string;
   userId: string;
@@ -136,6 +143,9 @@ async function pollAcceptedAgentGeneration(input: {
     const status = String(data?.status || '').toLowerCase();
     if (status === 'completed' && data?.imageUrl) return String(data.imageUrl);
     if (status === 'failed' || status === 'error') {
+      if (status === 'error' && data?.retryable === true) {
+        throw retryableProviderTaskPollError(data, status);
+      }
       throw knownProviderTaskRejection(data || {}, status);
     }
     if (['cancelled', 'timeout'].includes(status)) {
@@ -164,6 +174,9 @@ async function pollAcceptedAgentVideo(input: {
     const status = String(data?.status || '').toLowerCase();
     if (status === 'completed' && data) return data;
     if (status === 'failed' || status === 'error') {
+      if (status === 'error' && data?.retryable === true) {
+        throw retryableProviderTaskPollError(data, status);
+      }
       throw knownProviderTaskRejection(data || {}, status);
     }
     if (['cancelled', 'timeout'].includes(status)) {
@@ -222,6 +235,9 @@ async function reconcileAcceptedAgentProviderTask(input: {
       throw new Error('Accepted Agent provider task completed without an image');
     }
     if (status === 'failed' || status === 'error') {
+      if (status === 'error' && data?.retryable === true) {
+        throw retryableProviderTaskPollError(data, status);
+      }
       throw knownProviderTaskRejection(data || {}, status);
     }
     if (['cancelled', 'timeout'].includes(status)) {

@@ -1238,3 +1238,113 @@ exact committed SHA.
   allowlist entry. R9 does not modify that allowlist or node editor.
 - The pre-existing provider JSON-to-PostgreSQL array migration warning remains
   outside Task 2 scope.
+
+## R10 Independent Re-review Repair (2026-08-17)
+
+Status before the binding post-commit browser gate: **IMPLEMENTATION GREEN**.
+Accepted Agent children now distinguish transient poll-contract errors from
+explicit terminal provider rejection without changing the durable acceptance
+or prior known-rejection paths. The controller-owned Task 1 and Task 2 briefs
+remain unstaged and uncommitted. The authoritative browser run ID is
+`task2_r10_gate_final`; it is run only after this exact tracked state is
+committed, under
+`test-results/stage-4-baseline/evidence/<FINAL_SHA>/task2_r10_gate_final/`, with
+no later tracked edits.
+
+### R10 RED evidence
+
+1. Before any production edit, `pnpm exec vitest run
+   src/__tests__/api/agent-edit-production-recovery.test.ts -t
+   "retryable poll error" --reporter=dot` exercised actual
+   `POST /api/agent-edit`, the production default adapter, accepted child
+   persistence, and `/api/poll-task`. It failed exactly both new cases (**2
+   failed / 13 skipped**): accepted direct async `image_edit` and accepted
+   `generate_video` persisted a transient `status:error,retryable:true` response
+   as completed `known_provider_rejection` instead of retaining `accepted`.
+2. The image-edit RED submits once to the exact external provider, persists
+   `async-edit-provider-task`, simulates the initial post-acceptance direct-poll
+   crash, then sends the transient response through `/api/poll-task`. The video
+   RED submits once through the real internal video route and receives the same
+   transient response from its first `/api/poll-task`. Both assert the exact
+   accepted ID, zero transient refund/parent terminal, no resubmit, later
+   concurrent poll-only completion, one charge, and one final terminal
+   settlement.
+
+### R10 finding resolution
+
+1. Accepted generation, video, and direct-provider reconciliation now identify
+   the poll contract's exact transient pair: `status:error` plus
+   `retryable:true`. That pair raises a bounded ordinary reconciliation error,
+   so the established downstream executor releases only its claim while the
+   durable child remains `accepted` with the same provider task ID.
+2. A later caller claims the same accepted operation and performs the exact
+   poll-only reconciliation. It cannot re-enter provider submission, charge,
+   refund, or terminalize during the transient result; concurrent and late
+   callers reuse the once-only parent and child terminal state.
+3. Explicit `failed` and nonretryable `error` outcomes retain the R9 durable
+   `known_provider_rejection` path. This distinction also preserves the poll
+   route's existing terminal durable-failure projection while transport,
+   non-JSON, and unavailable-status results already marked `error/retryable`
+   remain recoverable.
+
+### R10 GREEN and final pre-commit verification
+
+- Targeted GREEN: `pnpm exec vitest run
+  src/__tests__/api/agent-edit-production-recovery.test.ts -t
+  "retryable poll error" --reporter=dot`: **2 passed / 13 skipped**.
+- The first full focused run after an intentionally broad retryable guard was
+  **2 failed / 13 passed**: it correctly exposed regressions in the established
+  terminal video and generate rejection cases. Narrowing the guard to the exact
+  `status:error,retryable:true` poll contract restored those closures. Final
+  focused rerun: `pnpm exec vitest run
+  src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=dot`:
+  **1 file / 15 tests passed**.
+- Agent closure matrix: `$files = @(rg --files src/__tests__ | rg
+  '(agent|chat-agent-tool-choice)'); pnpm exec vitest run @files
+  --reporter=dot`: **20 files / 173 tests passed**.
+- Real PostgreSQL: `$env:POSTGRES_TEST_DATABASE_URL=
+  'postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable'; pnpm exec
+  vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  **2 files / 22 tests passed**, zero skips.
+- `pnpm ts-check`: passed. `pnpm lint -- --quiet`: exit `0`; only the established
+  Babel large-file note for `infinite-canvas.tsx` was emitted.
+- `pnpm build`: compiled and type-checked successfully; **113/113** static pages
+  generated.
+- `pnpm check:protected-baseline`: all **38** feature IDs passed, no unapproved
+  source drift, zero warnings. `git diff --check`: exit `0`.
+- Scope audit: `git diff --exit-code
+  ee60a0d30f3e7bc21468d50038d1f301c28f174d --
+  src/components/node-editor.tsx
+  src/__tests__/components/node-editor-drag-throttle-wiring.test.ts
+  tests/helpers/workflow-performance.ts`: exit `0`, zero R10 drift.
+
+### R10 changed files
+
+- Production: `src/app/api/agent-edit/route.ts`.
+- Tests: `src/__tests__/api/agent-edit-production-recovery.test.ts`.
+- Evidence/report: `.superpowers/sdd/task-2-report.md`.
+- No task brief, stable branch, Task 3, node editor, protected allowlist,
+  migration, package metadata, schema, or unrelated file is included in the R10
+  commit.
+
+### R10 post-commit authoritative gate contract
+
+After committing this exact tracked state, seed a fresh isolated Stage 4
+database and run the production build with `PLAYWRIGHT_WORKERS=1 pnpm exec
+playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --grep 'chat|agent'`
+using run ID `task2_r10_gate_final`. Chromium, Chromium 1080p, Firefox, WebKit,
+and mobile Chromium must each execute ordinary chat, real vision failure stop,
+first Agent progress, shared cancellation, and refresh recovery. Retained
+evidence must include relevant runtime network calls, `source-state.json`,
+trace, video, screenshot, console, network, and raw frame-rate records under the
+exact committed SHA.
+
+### R10 concerns
+
+- Raw browser FPS remains evidence only and **UNVERIFIED**, especially WebKit;
+  no FPS normalization or manufactured threshold pass is used.
+- The protected-baseline command still contains the pre-existing node-editor
+  allowlist entry. R10 does not modify that allowlist or node editor.
+- The pre-existing provider JSON-to-PostgreSQL array migration warning remains
+  outside Task 2 scope.
