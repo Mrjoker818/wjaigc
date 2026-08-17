@@ -206,6 +206,32 @@ function eventId(taskId: string, suffix: string): string {
 export function createSameTaskAgentAdapter(
   dependencies: SameTaskAgentAdapterDependencies,
 ) {
+  function createPassthroughContext(input: {
+    actorUserId: string;
+    projectId: string;
+    runId: string;
+    toolId: string;
+    stepId?: string;
+    requestDigest: string;
+  }): AgentDownstreamExecutionContext {
+    const identity = createAgentDownstreamOperationIdentity(input);
+    return {
+      idempotencyKey: identity.idempotencyKey,
+      operationKey: identity.operationKey,
+      recovery: false,
+      beginSubmission: async () => undefined,
+      recordAccepted: async () => undefined,
+      executeOperation: (step, execute) => execute(createPassthroughContext({
+        actorUserId: input.actorUserId,
+        projectId: input.projectId,
+        runId: input.runId,
+        toolId: step.toolId,
+        stepId: step.stepId,
+        requestDigest: step.requestDigest,
+      })),
+    };
+  }
+
   async function adopt(input: AdoptSameTaskInput): Promise<SameTaskAgentAdoption> {
       const admittedTask = await dependencies.getTaskForUser(
         input.taskId,
@@ -354,20 +380,13 @@ export function createSameTaskAgentAdapter(
                 requestDigest: adoption.requestDigest,
               }, execute, dependencies.downstreamOperations, recovery);
             } else {
-              const identity = createAgentDownstreamOperationIdentity({
+              value = await execute(createPassthroughContext({
                 actorUserId: adoption.actorUserId,
                 projectId: adoption.projectId,
                 runId: adoption.runId,
                 toolId: adoption.toolId,
                 requestDigest: adoption.requestDigest,
-              });
-              value = await execute({
-                idempotencyKey: identity.idempotencyKey,
-                operationKey: identity.operationKey,
-                recovery: false,
-                beginSubmission: async () => undefined,
-                recordAccepted: async () => undefined,
-              });
+              }));
             }
             await dependencies.completeExecution({
               actorUserId: adoption.actorUserId,
@@ -453,15 +472,17 @@ export function createSameTaskAgentAdapter(
   };
 }
 
-async function defaultSameTaskAgentAdapter() {
-  const [taskStorage, modelCatalog, contextAdapters, eventStorage, taskPersistence] = await Promise.all([
+let defaultSameTaskAgentAdapterPromise: Promise<ReturnType<typeof createSameTaskAgentAdapter>> | null = null;
+
+function defaultSameTaskAgentAdapter(): Promise<ReturnType<typeof createSameTaskAgentAdapter>> {
+  defaultSameTaskAgentAdapterPromise ??= Promise.all([
     import('@/lib/cloud-task-storage'),
     import('@/lib/task-core/model-catalog'),
     import('./context-adapters'),
     import('./event-storage'),
     import('@/lib/agent-task-persistence'),
-  ]);
-  return createSameTaskAgentAdapter({
+  ]).then(([taskStorage, modelCatalog, contextAdapters, eventStorage, taskPersistence]) => (
+    createSameTaskAgentAdapter({
     getTaskForUser: taskStorage.getCloudTaskForUser,
     resolveTaskModel: modelCatalog.resolveTaskModel,
     authorizeContext: contextAdapters.authorizeAgentContext,
@@ -491,7 +512,8 @@ async function defaultSameTaskAgentAdapter() {
       read: eventStorage.getAgentDownstreamOperation,
       release: eventStorage.releaseAgentDownstreamOperation,
     },
-  });
+  })));
+  return defaultSameTaskAgentAdapterPromise;
 }
 
 export function adoptExistingAgentTask(

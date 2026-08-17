@@ -701,3 +701,112 @@ console, network, and raw frame-rate evidence under the exact committed SHA.
   no FPS normalization or manufactured threshold pass is used.
 - The pre-existing provider JSON-to-PostgreSQL array migration warning remains
   outside Task 2 scope.
+
+## R5 Independent Re-review Repair (2026-08-17)
+
+Status before the binding post-commit browser gate: **IMPLEMENTATION GREEN**.
+The remaining Critical multi-step acceptance design and Important production-
+route coverage gap are closed. The controller-owned Task 1 and Task 2 briefs
+remain unstaged and uncommitted. The authoritative browser run ID is
+`task2_r5_gate_final`; it is run only after this exact tracked state is committed,
+under `test-results/stage-4-baseline/evidence/<FINAL_SHA>/task2_r5_gate_final/`,
+with no later tracked edits.
+
+### R5 RED evidence
+
+1. Per-step identity/runtime RED:
+   `pnpm exec vitest run
+   src/__tests__/lib/agent-runtime-downstream-operations.test.ts
+   src/__tests__/lib/agent-runtime-same-task-adapter.test.ts --reporter=verbose`
+   failed `2` tests (`13` passed). Equal tool/request digests at different step
+   identities produced the same operation/key, and the wished-for nested
+   `context.executeOperation` API did not exist.
+2. Remaining provider-tool ownership and compatibility RED:
+   `pnpm exec vitest run
+   src/__tests__/lib/agent-runtime-downstream-operations.test.ts
+   src/__tests__/api/agent-edit-task-admission-contract.test.ts
+   --reporter=verbose` failed `3` tests (`16` passed). The partial implementation
+   changed the legacy root hash, retained parent-derived keys for direct tools,
+   and left video acceptance outside a durable child.
+3. Actual production-route RED:
+   `pnpm exec vitest run
+   src/__tests__/api/agent-edit-production-recovery.test.ts --reporter=verbose`
+   initially failed the multi-step case with `Agent downstream operation was not
+   submitted`: the Agent route still attempted to record both accepted child
+   task IDs in the root operation. The default `submission_unknown` case already
+   passed through the real adapter wiring.
+4. Protected-baseline RED: `pnpm check:protected-baseline` blocked exactly the
+   new `20260817_wj_stable_s4_agent_downstream_step_identity.sql` migration. The
+   package allowlist was expanded only for that exact path.
+
+### R5 finding resolution
+
+1. **Critical - durable multi-step acceptance.** Every Agent provider-facing
+   invocation now runs in a child operation keyed by actor/project/run, exact
+   tool-call step identity, and request digest. Each child owns a stable provider
+   idempotency key, submission state, accepted provider task ID, result, and
+   recovery callback. LLM calls, image edits, generation, upscale, background
+   removal, SVG trace, video generation, and video extension all acquire the
+   child before submit. Async generation uses strict `submitOnly`, records its
+   durable child task ID, then calls the JSON/authenticated `/api/poll-task`
+   contract; video tools likewise record before polling. Recovery reuses
+   completed children and independently polls every accepted child without
+   resubmit. Ambiguous submitted children remain fail-closed as
+   `AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN`, settling/refunding the parent once.
+   Root operation hashes intentionally retain the R4 formula so already-durable
+   in-flight rows remain recoverable; non-root hashes add the exact step ID.
+2. **Important - real route/default-adapter coverage.** The new route test invokes
+   actual `POST /api/agent-edit`, lets production construct its default same-task
+   adapter, invokes actual `POST /api/generate` with `submitOnly: true`, creates
+   actual durable generation children, and resumes them through actual
+   `POST /api/poll-task`. Only auth/catalog/clock/database/external-provider
+   boundaries are controlled; no decisive acceptance, reconciliation, or
+   terminal callback is injected. A two-step plan crashes after the second
+   acceptance, starts eight concurrent route recoveries, and proves two distinct
+   accepted IDs, two distinct stable keys, exact `Exact::Model` in both final
+   provider payloads, exactly two submit-only calls, exactly two external POSTs,
+   one charge, zero refunds, one terminal, and no late resurrection. The
+   ambiguous LLM submit proves the default structured unknown code, one charge,
+   one refund, one terminal, and eight terminal replays without resubmit.
+3. Storage now persists `step_id` through migration, validation, insert, read,
+   update returns, and response mapping. The default adapter is cached per module
+   worker so every route retry uses one production adapter construction while
+   preserving stateless actor/task authorization.
+
+### R5 GREEN and final pre-commit verification
+
+- Initial child-operation GREEN: **2 files / 15 tests passed**. Compatibility and
+  provider-tool contract GREEN: **2 files / 19 tests passed**.
+- Actual production route/default-adapter recovery: **1 file / 2 tests passed**.
+  The focused R4/R5 bridge/runtime slice passed **6 files / 44 tests**.
+- Full Task 2 closure matrix passed **22 files / 195 tests**.
+- Real PostgreSQL Stage 4 suites:
+  `POSTGRES_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55433/postgres?sslmode=disable
+  pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts
+  tests/integration/stage-4-agent-adoption-postgres.test.ts --reporter=dot`:
+  **2 files / 22 tests passed**, zero skips, on fresh migrated databases.
+- `pnpm ts-check`: passed. `pnpm lint -- --quiet`: passed. `pnpm build`:
+  compiled, type-checked, and generated **113/113** pages.
+- `pnpm check:protected-baseline`: all **38** feature IDs passed, no unapproved
+  drift, zero warnings. `git diff --check`: exit `0`.
+- Node/performance scope audit against R4 SHA `3f93aa347ef19a9bfd5d4fca1642bb5051d3d8e8`
+  for `node-editor.tsx`, its drag-throttle test, and
+  `tests/helpers/workflow-performance.ts`: exit `0`, zero R5 diff.
+
+### R5 changed files
+
+- Runtime/storage: `src/lib/agent-runtime/downstream-operations.ts`,
+  `event-storage.ts`, `same-task-adapter.ts`, and the new downstream step-identity
+  migration.
+- Production route: `src/app/api/agent-edit/route.ts`.
+- Tests: Agent route/default-adapter production recovery, admission contract,
+  downstream-operation identity/recovery, and same-task multi-step recovery.
+- Release/report: the exact migration allow-path in `package.json` and this R5
+  appendix. No node/performance file changed.
+
+### R5 concerns
+
+- Raw browser FPS remains evidence only and **UNVERIFIED**, especially WebKit;
+  no FPS normalization or manufactured threshold pass is used.
+- The pre-existing provider JSON-to-PostgreSQL array migration warning remains
+  outside Task 2 scope.

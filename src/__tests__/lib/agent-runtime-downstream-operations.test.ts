@@ -25,6 +25,33 @@ describe('durable Agent downstream operations', () => {
     expect(changed.idempotencyKey).not.toBe(first.idempotencyKey);
   });
 
+  it('includes the exact tool-call step identity in the durable provider key', () => {
+    const input = {
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'image_edit', requestDigest: 'a'.repeat(64),
+    };
+
+    const first = createAgentDownstreamOperationIdentity({ ...input, stepId: 'image-edit:0' });
+    const second = createAgentDownstreamOperationIdentity({ ...input, stepId: 'image-edit:1' });
+
+    expect(first.stepId).toBe('image-edit:0');
+    expect(second.stepId).toBe('image-edit:1');
+    expect(second.operationKey).not.toBe(first.operationKey);
+    expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+
+  it('preserves the pre-step root identity for already-durable operations', () => {
+    const identity = createAgentDownstreamOperationIdentity({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'image_edit', requestDigest: 'a'.repeat(64),
+    });
+
+    expect(identity.stepId).toBe('root');
+    expect(identity.operationKey).toBe(
+      'agent-op:56088e6320f8e1f235dee3a6b9ab0e63c7b5837285e32bc5c45319ad9d0e4cf8',
+    );
+  });
+
   it('reconciles an accepted provider task without invoking submit twice', async () => {
     let operation: AgentDownstreamOperation | null = null;
     const providerTasks = new Map<string, string>();

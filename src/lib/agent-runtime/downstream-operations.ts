@@ -5,13 +5,15 @@ export interface AgentDownstreamOperationInput {
   projectId: string;
   runId: string;
   toolId: string;
+  stepId?: string;
   requestDigest: string;
   leaseOwner?: string;
   now?: number;
   leaseDurationMs?: number;
 }
 
-export interface AgentDownstreamOperationIdentity extends AgentDownstreamOperationInput {
+export interface AgentDownstreamOperationIdentity extends Omit<AgentDownstreamOperationInput, 'stepId'> {
+  stepId: string;
   operationKey: string;
   idempotencyKey: string;
   leaseOwner: string;
@@ -54,6 +56,17 @@ export interface AgentDownstreamExecutionContext {
   recovery: boolean;
   beginSubmission(): Promise<void>;
   recordAccepted(providerTaskId: string): Promise<void>;
+  executeOperation<T>(
+    input: AgentDownstreamStepInput,
+    execute: (context: AgentDownstreamExecutionContext) => Promise<T>,
+    recovery?: AgentDownstreamRecovery<T>,
+  ): Promise<T>;
+}
+
+export interface AgentDownstreamStepInput {
+  stepId: string;
+  toolId: string;
+  requestDigest: string;
 }
 
 export interface AgentDownstreamRecovery<T> {
@@ -74,11 +87,14 @@ export class AgentDownstreamSubmissionUnknownError extends Error {
 export function createAgentDownstreamOperationIdentity(
   input: AgentDownstreamOperationInput,
 ): AgentDownstreamOperationIdentity {
-  const digest = createHash('sha256').update([
-    input.actorUserId, input.projectId, input.runId, input.toolId, input.requestDigest,
-  ].join('\0')).digest('hex');
+  const stepId = input.stepId || 'root';
+  const identityParts = [input.actorUserId, input.projectId, input.runId, input.toolId];
+  if (stepId !== 'root') identityParts.push(stepId);
+  identityParts.push(input.requestDigest);
+  const digest = createHash('sha256').update(identityParts.join('\0')).digest('hex');
   return {
     ...input,
+    stepId,
     operationKey: `agent-op:${digest}`,
     idempotencyKey: `agent-provider:${digest}`,
     leaseOwner: input.leaseOwner || randomUUID(),
@@ -127,6 +143,16 @@ export async function executeDurableAgentDownstreamOperation<T>(
       }
       await dependencies.markAccepted({ ...identity, providerTaskId });
       acceptanceRecorded = true;
+    },
+    executeOperation(step, childExecute, childRecovery) {
+      return executeDurableAgentDownstreamOperation({
+        actorUserId: identity.actorUserId,
+        projectId: identity.projectId,
+        runId: identity.runId,
+        toolId: step.toolId,
+        stepId: step.stepId,
+        requestDigest: step.requestDigest,
+      }, childExecute, dependencies, childRecovery);
     },
   };
 

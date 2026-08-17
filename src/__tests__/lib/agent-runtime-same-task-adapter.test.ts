@@ -367,4 +367,126 @@ describe('same-task Agent adoption adapter', () => {
     expect(deps.completeExecution).toHaveBeenCalledTimes(1);
     expect(deps.releaseExecution).not.toHaveBeenCalled();
   });
+
+  it('recovers two accepted provider steps independently without a third submit', async () => {
+    const operations = new Map<string, AgentDownstreamOperation>();
+    let parentClaimed = false;
+    let parentCompleted = false;
+    const downstreamOperations = {
+      prepare: vi.fn(async input => {
+        const existing = operations.get(input.operationKey);
+        const current = existing ?? {
+          ...input, status: 'prepared' as const, attempts: 0,
+        };
+        const claimed = !existing || !existing.leaseOwner;
+        const next = {
+          ...current,
+          leaseOwner: claimed ? input.leaseOwner : current.leaseOwner,
+          attempts: current.attempts + (claimed ? 1 : 0),
+          claimed,
+        } satisfies AgentDownstreamOperation;
+        operations.set(input.operationKey, next);
+        return next;
+      }),
+      markSubmitted: vi.fn(async input => {
+        const next = { ...operations.get(input.operationKey)!, ...input, status: 'submitted' as const };
+        operations.set(input.operationKey, next);
+        return next;
+      }),
+      markAccepted: vi.fn(async input => {
+        const next = { ...operations.get(input.operationKey)!, ...input, status: 'accepted' as const };
+        operations.set(input.operationKey, next);
+        return next;
+      }),
+      markSubmissionUnknown: vi.fn(async input => {
+        const next = {
+          ...operations.get(input.operationKey)!, ...input,
+          status: 'submission_unknown' as const, leaseOwner: '',
+        };
+        operations.set(input.operationKey, next);
+        return next;
+      }),
+      complete: vi.fn(async input => {
+        const next = {
+          ...operations.get(input.operationKey)!, ...input,
+          status: 'completed' as const, response: input.response, leaseOwner: '',
+        };
+        operations.set(input.operationKey, next);
+        return next;
+      }),
+      release: vi.fn(async input => {
+        const current = operations.get(input.operationKey);
+        if (!current || current.leaseOwner !== input.leaseOwner) return false;
+        operations.set(input.operationKey, { ...current, leaseOwner: '' });
+        return true;
+      }),
+      read: vi.fn(async input => operations.get(input.operationKey) ?? null),
+    } satisfies NonNullable<SameTaskAgentAdapterDependencies['downstreamOperations']>;
+    const deps = dependencies({
+      downstreamOperations,
+      claimExecution: vi.fn(async () => {
+        if (parentClaimed || parentCompleted) return { claimed: false, leaseOwner: '' };
+        parentClaimed = true;
+        return { claimed: true, leaseOwner: 'parent-lease' };
+      }),
+      releaseExecution: vi.fn(async () => {
+        parentClaimed = false;
+        return true;
+      }),
+      completeExecution: vi.fn(async () => {
+        parentClaimed = false;
+        parentCompleted = true;
+        return true;
+      }),
+    });
+    const adapter = createSameTaskAgentAdapter(deps);
+    const adoption = await adapter.adopt({
+      actor, taskId: 'task-1', request: request(), toolId: 'generate_image',
+    });
+    const providerSubmit = vi.fn(async (stepId: string) => ({ providerTaskId: `${stepId}-accepted` }));
+    const reconcile = vi.fn(async (providerTaskId: string) => ({
+      imageUrl: `/${providerTaskId}.png`,
+    }));
+    let crashAfterSecondAcceptance = true;
+    const execute = async (context: Parameters<Parameters<typeof adapter.executeAdoption>[0]['execute']>[0]) => {
+      let imageUrl = '/original.png';
+      for (let index = 0; index < 2; index++) {
+        const stepId = `image-edit:${index}`;
+        const result = await context.executeOperation({
+          stepId,
+          toolId: 'image_edit',
+          requestDigest: `${index}`.repeat(64),
+        }, async stepContext => {
+          await stepContext.beginSubmission();
+          const accepted = await providerSubmit(stepId);
+          await stepContext.recordAccepted(accepted.providerTaskId);
+          if (index === 1 && crashAfterSecondAcceptance) {
+            crashAfterSecondAcceptance = false;
+            throw new Error('crash after second acceptance');
+          }
+          return { imageUrl: `/${accepted.providerTaskId}.png` };
+        }, { reconcile });
+        imageUrl = result.imageUrl;
+      }
+      return imageUrl;
+    };
+
+    await expect(adapter.executeAdoption({ adoption, execute })).rejects.toThrow(
+      'crash after second acceptance',
+    );
+    const recoveries = await Promise.all(Array.from({ length: 20 }, () => (
+      adapter.executeAdoption({ adoption, execute })
+    )));
+
+    expect(providerSubmit).toHaveBeenCalledTimes(2);
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(recoveries.filter(result => result.executed)).toHaveLength(1);
+    const providerOperations = [...operations.values()].filter(operation => operation.stepId !== 'root');
+    expect(providerOperations).toHaveLength(2);
+    expect(providerOperations.map(operation => operation.providerTaskId).sort()).toEqual([
+      'image-edit:0-accepted',
+      'image-edit:1-accepted',
+    ]);
+    expect(providerOperations.every(operation => operation.status === 'completed')).toBe(true);
+  });
 });

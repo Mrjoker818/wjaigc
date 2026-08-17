@@ -41,6 +41,10 @@ import { submitAgentImageProviderRequest } from '@/lib/agent-runtime/provider-su
 import { AgentModelRouteMismatchError } from '@/lib/agent-runtime/same-task-adapter';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 import { submitStrictAgentGeneration } from '@/lib/agent-runtime/generate-image-adapter';
+import type {
+  AgentDownstreamExecutionContext,
+  AgentDownstreamStepInput,
+} from '@/lib/agent-runtime/downstream-operations';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -65,6 +69,27 @@ class AgentMediaUrlMismatchError extends Error {
   }
 }
 
+function digestAgentDownstreamRequest(input: unknown): string {
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex');
+}
+
+function createNonDurableAgentOperationContext(
+  idempotencyKey: string,
+): AgentDownstreamExecutionContext {
+  const context: AgentDownstreamExecutionContext = {
+    idempotencyKey,
+    operationKey: `${idempotencyKey}:operation`,
+    recovery: false,
+    beginSubmission: async () => undefined,
+    recordAccepted: async () => undefined,
+    executeOperation: async <T>(
+      step: AgentDownstreamStepInput,
+      execute: (stepContext: AgentDownstreamExecutionContext) => Promise<T>,
+    ) => execute(createNonDurableAgentOperationContext(`${idempotencyKey}:${step.stepId}`)),
+  };
+  return context;
+}
+
 async function pollAcceptedAgentGeneration(input: {
   providerTaskId: string;
   userId: string;
@@ -76,8 +101,12 @@ async function pollAcceptedAgentGeneration(input: {
     if (input.isCancelled()) throw new Error('Agent task was cancelled');
     await new Promise(resolve => setTimeout(resolve, 2000));
     const response = await fetch(
-      getInternalApiUrl(`/api/poll-task?taskId=${encodeURIComponent(input.providerTaskId)}`),
-      { method: 'POST', headers: internalHeaders },
+      getInternalApiUrl('/api/poll-task'),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...internalHeaders },
+        body: JSON.stringify({ taskId: input.providerTaskId }),
+      },
     );
     const data = await response.json().catch(() => null) as Record<string, unknown> | null;
     const status = String(data?.status || '').toLowerCase();
@@ -87,6 +116,31 @@ async function pollAcceptedAgentGeneration(input: {
     }
   }
   throw new Error('Agent image generation reconciliation timed out');
+}
+
+async function pollAcceptedAgentVideo(input: {
+  providerTaskId: string;
+  userId: string;
+  userRole: 'user' | 'admin';
+  isCancelled: () => boolean;
+}): Promise<Record<string, unknown>> {
+  const internalHeaders = await getInternalRequestHeaders(input.userId, input.userRole);
+  for (let poll = 0; poll < 180; poll++) {
+    if (input.isCancelled()) throw new Error('Agent task was cancelled');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const response = await fetch(getInternalApiUrl('/api/poll-task'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...internalHeaders },
+      body: JSON.stringify({ taskId: input.providerTaskId }),
+    });
+    const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const status = String(data?.status || '').toLowerCase();
+    if (status === 'completed' && data) return data;
+    if (['failed', 'cancelled', 'timeout'].includes(status)) {
+      throw new Error(String(data?.error || `Agent video task ${status}`));
+    }
+  }
+  throw new Error('Agent video reconciliation timed out');
 }
 
 function extractReconciledImageUrl(data: Record<string, unknown>): string {
@@ -569,15 +623,11 @@ export async function POST(request: NextRequest) {
     await recordAgentTaskProgress(taskId, 5, 'Agent processing');
 
     const runtimeRequest = () => buildRuntimeRequest(taskId);
-    const executeAgentEditTask = async (operationContext: {
-      idempotencyKey: string;
-      beginSubmission(): Promise<void>;
-      recordAccepted(providerTaskId: string): Promise<void>;
-    } = {
-      idempotencyKey: `agent-provider:${taskId}`,
-      beginSubmission: async () => undefined,
-      recordAccepted: async () => undefined,
-    }): Promise<void> => {
+    const executeAgentEditTask = async (
+      operationContext: AgentDownstreamExecutionContext = createNonDurableAgentOperationContext(
+        `agent-provider:${taskId}`,
+      ),
+    ): Promise<void> => {
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
         void (async () => {
@@ -711,6 +761,7 @@ export async function POST(request: NextRequest) {
           messages: Array<{ role: string; content: string }>,
           tools: ReturnType<typeof getToolsForLLM>
         ) => {
+          const currentLlmCallIndex = llmCallIndex++;
           const baseUrl = chatProvider.baseUrl.replace(/\/+$/, '');
           const headers: Record<string, string> = {
             'Authorization': `Bearer ${chatProvider.apiKey}`,
@@ -725,8 +776,6 @@ export async function POST(request: NextRequest) {
               }
             }
           }
-          headers['Idempotency-Key'] = `${operationContext.idempotencyKey}:llm:${llmCallIndex}`;
-
           const requestBody: Record<string, unknown> = {
             model: chatModel,
             messages,
@@ -735,21 +784,29 @@ export async function POST(request: NextRequest) {
             stream: false,
             max_tokens: 2048,
           };
+          return operationContext.executeOperation({
+            stepId: `llm:${currentLlmCallIndex}`,
+            toolId: 'agent_llm',
+            requestDigest: digestAgentDownstreamRequest({
+              providerId: chatProvider.id,
+              model: chatModel,
+              requestBody,
+            }),
+          }, async stepContext => {
+            headers['Idempotency-Key'] = stepContext.idempotencyKey;
+            await stepContext.beginSubmission();
+            const resp = await fetchWithV1Retry(baseUrl, '/chat/completions', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(requestBody),
+              signal: AbortSignal.timeout(60000),
+              skipV1Retry: agentRuntimeMode === 'agent-v2',
+            });
 
-          await operationContext.beginSubmission();
-          llmCallIndex += 1;
-          const resp = await fetchWithV1Retry(baseUrl, '/chat/completions', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(requestBody),
-            signal: AbortSignal.timeout(60000),
-            skipV1Retry: agentRuntimeMode === 'agent-v2',
-          });
-
-          if (!resp.ok) {
-            const errText = await resp.text().catch(() => '');
-            throw new Error(`LLM API 返回 ${resp.status}: ${errText.slice(0, 200)}`);
-          }
+            if (!resp.ok) {
+              const errText = await resp.text().catch(() => '');
+              throw new Error(`LLM API 返回 ${resp.status}: ${errText.slice(0, 200)}`);
+            }
 
           // 检测响应类型：SSE 流式 vs JSON
           const contentType = resp.headers.get('content-type') || '';
@@ -793,11 +850,12 @@ export async function POST(request: NextRequest) {
             };
           });
 
-          return {
-            toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
-            content: String(message.content || ''),
-            finishReason: String(choice.finish_reason || ''),
-          };
+            return {
+              toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
+              content: String(message.content || ''),
+              finishReason: String(choice.finish_reason || ''),
+            };
+          });
         };
 
         // 执行 Agent 循环
@@ -822,18 +880,45 @@ export async function POST(request: NextRequest) {
             if (task) localTaskStore.set(taskId, { ...task, progress: progressBase, label: `执行图像编辑 (${i + 1}/${allEditSteps.length})...` });
 
             try {
-              const editResult = await performImageEdit(
-                finalImageUrl, // 使用上一步的结果（第一步用原图）
-                String(step.params.prompt || prompt),
-                i === 0 ? maskDataUrl : undefined, // 仅第一步使用用户蒙版
+              const editPrompt = String(step.params.prompt || prompt);
+              const editMask = i === 0 ? maskDataUrl : undefined;
+              const editStepId = `image_edit:${result.steps.indexOf(step)}`;
+              const editResult = await operationContext.executeOperation({
+                stepId: editStepId,
+                toolId: 'image_edit',
+                requestDigest: digestAgentDownstreamRequest({
+                  imageUrl: finalImageUrl,
+                  prompt: editPrompt,
+                  maskDataUrl: editMask,
+                  model: pureImageModel,
+                  providerId: imageProviderId,
+                  quality,
+                  aspectRatio,
+                }),
+              }, stepContext => performImageEdit(
+                finalImageUrl,
+                editPrompt,
+                editMask,
                 pureImageModel,
                 imageProviderId,
                 quality,
                 aspectRatio,
                 agentRuntimeMode === 'agent-v2',
-                `${operationContext.idempotencyKey}:image-edit:${i}`,
-                operationContext.recordAccepted,
-              );
+                stepContext.idempotencyKey,
+                stepContext.recordAccepted,
+                stepContext.beginSubmission,
+              ), {
+                reconcile: async providerTaskId => ({
+                  success: true,
+                  imageUrl: await reconcileAcceptedAgentProviderTask({
+                    providerTaskId,
+                    userId: authResult.userId,
+                    userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+                    imageProviderId: String(imageProviderId),
+                    isCancelled,
+                  }),
+                }),
+              });
               console.log(`[agent-edit] Edit step ${i + 1} result: success=${editResult.success} hasUrl=${!!editResult.imageUrl} url=${editResult.imageUrl?.substring(0, 80)} error=${editResult.error || ''}`);
               if (editResult.success && editResult.imageUrl) {
                 finalImageUrl = editResult.imageUrl;
@@ -861,16 +946,24 @@ export async function POST(request: NextRequest) {
               // 调用放大 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行无损放大...' });
-              const upscaleResp = await fetch(getInternalApiUrl('/api/image/upscale'), {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
-                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
-                },
-                body: JSON.stringify({ imageUrl: finalImageUrl, scale: step.params.scale || '2', outputFormat: 'png' }),
+              const upscaleRequest = { imageUrl: finalImageUrl, scale: step.params.scale || '2', outputFormat: 'png' };
+              const upscaleData = await operationContext.executeOperation({
+                stepId: stepKey,
+                toolId: 'upscale',
+                requestDigest: digestAgentDownstreamRequest(upscaleRequest),
+              }, async stepContext => {
+                await stepContext.beginSubmission();
+                const response = await fetch(getInternalApiUrl('/api/image/upscale'), {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                    'idempotency-key': stepContext.idempotencyKey,
+                  },
+                  body: JSON.stringify(upscaleRequest),
+                });
+                return response.json();
               });
-              const upscaleData = await upscaleResp.json();
               if (upscaleData.success && upscaleData.imageUrl) {
                 finalImageUrl = upscaleData.imageUrl;
                 step.result = '放大成功';
@@ -879,16 +972,30 @@ export async function POST(request: NextRequest) {
               // 调用去背景 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行移除背景...' });
-              const rbResp = await fetch(getInternalApiUrl('/api/image-edit'), {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
-                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
-                },
-                body: JSON.stringify({ imageUrl: finalImageUrl, action: 'removebg', model: imageModel, providerId: imageProviderId, engine: imageModel ? 'ai' : 'auto' }),
+              const removeBackgroundRequest = {
+                imageUrl: finalImageUrl,
+                action: 'removebg',
+                model: imageModel,
+                providerId: imageProviderId,
+                engine: imageModel ? 'ai' : 'auto',
+              };
+              const rbData = await operationContext.executeOperation({
+                stepId: stepKey,
+                toolId: 'remove_background',
+                requestDigest: digestAgentDownstreamRequest(removeBackgroundRequest),
+              }, async stepContext => {
+                await stepContext.beginSubmission();
+                const response = await fetch(getInternalApiUrl('/api/image-edit'), {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                    'idempotency-key': stepContext.idempotencyKey,
+                  },
+                  body: JSON.stringify(removeBackgroundRequest),
+                });
+                return response.json();
               });
-              const rbData = await rbResp.json();
               if (rbData.success && rbData.imageUrl) {
                 finalImageUrl = rbData.imageUrl;
                 step.result = '移除背景成功';
@@ -897,16 +1004,28 @@ export async function POST(request: NextRequest) {
               // 调用 SVG 描摹 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行SVG描摹...' });
-              const svgResp = await fetch(getInternalApiUrl('/api/svg-trace'), {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
-                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
-                },
-                body: JSON.stringify({ imageUrl: finalImageUrl, mode: step.params.mode || 'color', quality: step.params.quality || 'balanced' }),
+              const svgRequest = {
+                imageUrl: finalImageUrl,
+                mode: step.params.mode || 'color',
+                quality: step.params.quality || 'balanced',
+              };
+              const svgData = await operationContext.executeOperation({
+                stepId: stepKey,
+                toolId: 'svg_trace',
+                requestDigest: digestAgentDownstreamRequest(svgRequest),
+              }, async stepContext => {
+                await stepContext.beginSubmission();
+                const response = await fetch(getInternalApiUrl('/api/svg-trace'), {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                    'idempotency-key': stepContext.idempotencyKey,
+                  },
+                  body: JSON.stringify(svgRequest),
+                });
+                return response.json();
               });
-              const svgData = await svgResp.json();
               if (svgData.success && svgData.svgDataUrl) {
                 finalImageUrl = svgData.previewUrl || finalImageUrl;
                 step.result = 'SVG描摹成功';
@@ -915,109 +1034,143 @@ export async function POST(request: NextRequest) {
               // 调用图像生成 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行图像生成...' });
-              const genData = await submitStrictAgentGeneration({
-                userId: authResult.userId,
-                userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
-                prompt: String(step.params.prompt || prompt),
-                aspectRatio: String(step.params.size || '1:1'),
-                model: String(pureImageModel),
-                providerId: String(imageProviderId),
-                idempotencyKey: `${operationContext.idempotencyKey}:${stepKey}`,
-                submitOnly: true,
-              });
-              if (genData.success && genData.taskId) {
-                const genTaskId = String(genData.taskId);
-                await operationContext.recordAccepted(genTaskId);
-                finalImageUrl = await pollAcceptedAgentGeneration({
-                  providerTaskId: genTaskId,
+              const generationPrompt = String(step.params.prompt || prompt);
+              const generationAspectRatio = String(step.params.size || '1:1');
+              const generationResult = await operationContext.executeOperation({
+                stepId: stepKey,
+                toolId: 'generate_image',
+                requestDigest: digestAgentDownstreamRequest({
+                  prompt: generationPrompt,
+                  aspectRatio: generationAspectRatio,
+                  model: pureImageModel,
+                  providerId: imageProviderId,
+                }),
+              }, async stepContext => {
+                await stepContext.beginSubmission();
+                const genData = await submitStrictAgentGeneration({
                   userId: authResult.userId,
                   userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
-                  isCancelled,
+                  prompt: generationPrompt,
+                  aspectRatio: generationAspectRatio,
+                  model: String(pureImageModel),
+                  providerId: String(imageProviderId),
+                  idempotencyKey: stepContext.idempotencyKey,
+                  submitOnly: true,
                 });
+                if (!genData.success || !genData.taskId) {
+                  return {
+                    success: false as const,
+                    error: String(genData.error || 'Agent image generation was not accepted'),
+                  };
+                }
+                const genTaskId = String(genData.taskId);
+                await stepContext.recordAccepted(genTaskId);
+                return {
+                  success: true as const,
+                  imageUrl: await pollAcceptedAgentGeneration({
+                    providerTaskId: genTaskId,
+                    userId: authResult.userId,
+                    userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+                    isCancelled,
+                  }),
+                };
+              }, {
+                reconcile: async providerTaskId => ({
+                  success: true as const,
+                  imageUrl: await pollAcceptedAgentGeneration({
+                    providerTaskId,
+                    userId: authResult.userId,
+                    userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+                    isCancelled,
+                  }),
+                }),
+              });
+              if (generationResult.success) {
+                finalImageUrl = generationResult.imageUrl;
                 step.result = '图像生成成功';
               } else {
-                throw new Error(String(genData.error || 'Agent image generation was not accepted'));
+                throw new Error(generationResult.error);
               }
             } else if (step.toolName === 'generate_video') {
               // 调用视频生成 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行视频生成...' });
-              const vGenResp = await fetch(getInternalApiUrl('/api/video/generate'), {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
-                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
-                },
-                body: JSON.stringify({
-                  prompt: String(step.params.prompt || prompt),
-                  mode: step.params.mode === 'image2video' ? 'image2video' : 'text2video',
-                  imageUrl: step.params.mode === 'image2video' ? finalImageUrl : undefined,
-                  aspectRatio: step.params.aspect_ratio || '16:9',
-                  duration: String(step.params.duration || '5'),
-                }),
+              const videoRequest = {
+                prompt: String(step.params.prompt || prompt),
+                mode: step.params.mode === 'image2video' ? 'image2video' : 'text2video',
+                imageUrl: step.params.mode === 'image2video' ? finalImageUrl : undefined,
+                aspectRatio: step.params.aspect_ratio || '16:9',
+                duration: String(step.params.duration || '5'),
+              };
+              const pollVideo = (providerTaskId: string) => pollAcceptedAgentVideo({
+                providerTaskId,
+                userId: authResult.userId,
+                userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+                isCancelled,
               });
-              const vGenData = await vGenResp.json() as Record<string, unknown>;
-              if (vGenData.success && vGenData.taskId) {
-                // 轮询等待结果
-                const vTaskId = String(vGenData.taskId);
-                for (let poll = 0; poll < 180; poll++) {
-                  if (isCancelled()) break;
-                  await new Promise(r => setTimeout(r, 2000));
-                  const pollResp = await fetch(getInternalApiUrl(`/api/poll-task?taskId=${vTaskId}`), { method: 'POST' });
-                  const pollData = await pollResp.json() as Record<string, unknown>;
-                  const status = String(pollData.status || '');
-                  if (status === 'completed') {
-                    const videoUrl = pollData.videoUrl || pollData.url;
-                    if (videoUrl) {
-                      step.result = '视频生成成功';
-                      // 视频不替换 finalImageUrl，保留图片，视频URL通过steps返回
-                      step.params.videoUrl = videoUrl;
-                    }
-                    break;
-                  } else if (status === 'failed') {
-                    step.result = `视频生成失败: ${pollData.error || '未知错误'}`;
-                    step.success = false;
-                    break;
-                  }
-                }
+              const pollData = await operationContext.executeOperation({
+                stepId: stepKey,
+                toolId: 'generate_video',
+                requestDigest: digestAgentDownstreamRequest(videoRequest),
+              }, async stepContext => {
+                await stepContext.beginSubmission();
+                const response = await fetch(getInternalApiUrl('/api/video/generate'), {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                    'idempotency-key': stepContext.idempotencyKey,
+                  },
+                  body: JSON.stringify(videoRequest),
+                });
+                const data = await response.json() as Record<string, unknown>;
+                if (!data.success || !data.taskId) throw new Error(String(data.error || 'Video generation was not accepted'));
+                const providerTaskId = String(data.taskId);
+                await stepContext.recordAccepted(providerTaskId);
+                return pollVideo(providerTaskId);
+              }, { reconcile: pollVideo });
+              const videoUrl = pollData.videoUrl || pollData.url;
+              if (videoUrl) {
+                step.result = '视频生成成功';
+                step.params.videoUrl = videoUrl;
               }
             } else if (step.toolName === 'extend_video') {
               // 调用视频延长 API
               const task = localTaskStore.get(taskId);
               if (task) localTaskStore.set(taskId, { ...task, label: '执行视频延长...' });
-              const vExtResp = await fetch(getInternalApiUrl('/api/video/extend'), {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
-                  'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`,
-                },
-                body: JSON.stringify({
-                  videoUrl: String(step.params.videoUrl || context.videoUrl || ''),
-                  prompt: String(step.params.prompt || ''),
-                  extendDuration: Number(step.params.duration || 5),
-                }),
+              const extendRequest = {
+                videoUrl: String(step.params.videoUrl || context.videoUrl || ''),
+                prompt: String(step.params.prompt || ''),
+                extendDuration: Number(step.params.duration || 5),
+              };
+              const pollVideo = (providerTaskId: string) => pollAcceptedAgentVideo({
+                providerTaskId,
+                userId: authResult.userId,
+                userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
+                isCancelled,
               });
-              const vExtData = await vExtResp.json() as Record<string, unknown>;
-              if (vExtData.success && vExtData.taskId) {
-                const exTaskId = String(vExtData.taskId);
-                for (let poll = 0; poll < 180; poll++) {
-                  if (isCancelled()) break;
-                  await new Promise(r => setTimeout(r, 2000));
-                  const pollResp = await fetch(getInternalApiUrl(`/api/poll-task?taskId=${exTaskId}`), { method: 'POST' });
-                  const pollData = await pollResp.json() as Record<string, unknown>;
-                  const status = String(pollData.status || '');
-                  if (status === 'completed') {
-                    step.result = '视频延长成功';
-                    break;
-                  } else if (status === 'failed') {
-                    step.result = `视频延长失败: ${pollData.error || '未知错误'}`;
-                    step.success = false;
-                    break;
-                  }
-                }
-              }
+              await operationContext.executeOperation({
+                stepId: stepKey,
+                toolId: 'extend_video',
+                requestDigest: digestAgentDownstreamRequest(extendRequest),
+              }, async stepContext => {
+                await stepContext.beginSubmission();
+                const response = await fetch(getInternalApiUrl('/api/video/extend'), {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
+                    'idempotency-key': stepContext.idempotencyKey,
+                  },
+                  body: JSON.stringify(extendRequest),
+                });
+                const data = await response.json() as Record<string, unknown>;
+                if (!data.success || !data.taskId) throw new Error(String(data.error || 'Video extension was not accepted'));
+                const providerTaskId = String(data.taskId);
+                await stepContext.recordAccepted(providerTaskId);
+                return pollVideo(providerTaskId);
+              }, { reconcile: pollVideo });
+              step.result = '视频延长成功';
             }
           } catch (err) {
             console.error(`[agent-edit] Tool ${step.toolName} execution failed:`, err);
@@ -1321,6 +1474,7 @@ async function performImageEdit(
   strictProviderModel = false,
   providerIdempotencyKey?: string,
   recordAccepted?: (providerTaskId: string) => Promise<void>,
+  beginSubmission?: () => Promise<void>,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   // 优先使用前端传递的图像模型和提供商，遵循用户在图像生成面板的选择
   console.log('[agent-edit] performImageEdit called, model:', imageModelFromFrontend, 'providerId:', imageProviderIdFromFrontend);
@@ -1400,6 +1554,7 @@ async function performImageEdit(
       }
 
       console.log('[agent-edit] Path A: sending request to', `${baseUrl}/images/edits`);
+      await beginSubmission?.();
       const resp = await submitAgentImageProviderRequest({
         baseUrl,
         path: '/images/edits',
@@ -1545,6 +1700,7 @@ async function performImageEdit(
       };
 
       console.log('[agent-edit] Path B: sending request to', `${baseUrl}/images/generations`, 'with image_urls');
+      await beginSubmission?.();
       const genResp = await submitAgentImageProviderRequest({
         baseUrl,
         path: '/images/generations',
@@ -1749,6 +1905,7 @@ async function performImageEdit(
     };
 
     console.log('[agent-edit] Path C: sending request to', `${baseUrl}/chat/completions`);
+    await beginSubmission?.();
     const chatResp = await submitAgentImageProviderRequest({
       baseUrl,
       path: '/chat/completions',

@@ -103,14 +103,30 @@ describe('agent edit task admission contract', () => {
   });
 
   it('carries stable idempotency on every Agent provider-facing submit', () => {
-    expect(routeSource).toContain("headers['Idempotency-Key'] = `${operationContext.idempotencyKey}:llm:${llmCallIndex}`");
-    expect(routeSource).toContain("'idempotency-key': `${operationContext.idempotencyKey}:${stepKey}`");
+    expect(routeSource).toContain("headers['Idempotency-Key'] = stepContext.idempotencyKey");
+    expect(routeSource).not.toContain("`${operationContext.idempotencyKey}:${stepKey}`");
     expect(routeSource).toContain('submitStrictAgentGeneration({');
     expect(routeSource).toContain('model: String(pureImageModel)');
-    expect(routeSource).toContain('await operationContext.recordAccepted(genTaskId)');
+    expect(routeSource).toContain('await stepContext.recordAccepted(genTaskId)');
     expect(routeSource).toContain('recovery: {');
     expect(routeSource).not.toContain('model: imageModel,\n                  providerId: imageProviderId');
     expect(routeSource).toContain("'Idempotency-Key': providerIdempotencyKey");
+  });
+
+  it('owns every provider-facing tool call with a durable child operation', () => {
+    for (const toolId of [
+      'upscale',
+      'remove_background',
+      'svg_trace',
+      'generate_image',
+      'generate_video',
+      'extend_video',
+    ]) {
+      expect(routeSource).toContain(`toolId: '${toolId}'`);
+    }
+    expect(routeSource).not.toContain("getInternalApiUrl(`/api/poll-task?taskId=${vTaskId}`)");
+    expect(routeSource).not.toContain("getInternalApiUrl(`/api/poll-task?taskId=${exTaskId}`)");
+    expect(routeSource).toContain('await stepContext.recordAccepted(providerTaskId)');
   });
 
   it('propagates an Agent-v2 provider exception to the durable adapter for one terminal settlement', () => {

@@ -88,6 +88,7 @@ interface AgentDownstreamOperationRow {
   project_id: string;
   task_id: string;
   tool_id: string;
+  step_id: string;
   request_digest: string;
   idempotency_key: string;
   status: 'prepared' | 'submitted' | 'accepted' | 'submission_unknown' | 'completed';
@@ -107,6 +108,7 @@ function mapDownstreamOperation(
     projectId: row.project_id,
     runId: row.task_id,
     toolId: row.tool_id,
+    stepId: row.step_id,
     requestDigest: row.request_digest,
     operationKey: row.operation_key,
     idempotencyKey: row.idempotency_key,
@@ -565,6 +567,7 @@ function validateDownstreamIdentity(
     projectId: validateIdentifier('projectId', input.projectId),
     runId: validateIdentifier('runId', input.runId),
     toolId: validateIdentifier('toolId', input.toolId),
+    stepId: validateIdentifier('stepId', input.stepId),
     requestDigest: validateIdentifier('requestDigest', input.requestDigest),
     operationKey: validateIdentifier('operationKey', input.operationKey),
     idempotencyKey: validateIdentifier('idempotencyKey', input.idempotencyKey),
@@ -588,16 +591,16 @@ export async function prepareAgentDownstreamOperation(
     );
     if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
     await client.query(
-      `INSERT INTO wujie_agent_downstream_operations(
-         operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+       `INSERT INTO wujie_agent_downstream_operations(
+         operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
          idempotency_key, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
        ON CONFLICT (operation_key) DO NOTHING`,
       [input.operationKey, input.actorUserId, input.projectId, input.runId,
-        input.toolId, input.requestDigest, input.idempotencyKey, now],
+        input.toolId, input.stepId, input.requestDigest, input.idempotencyKey, now],
     );
     const existing = await client.query<AgentDownstreamOperationRow>(
-      `SELECT operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+      `SELECT operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
               idempotency_key, status, response, provider_task_id, submission_error,
               lease_owner, attempt_count
        FROM wujie_agent_downstream_operations
@@ -621,7 +624,7 @@ export async function prepareAgentDownstreamOperation(
        WHERE operation_key = $1
          AND status IN ('prepared', 'submitted', 'accepted')
          AND lease_expires_at <= $4
-       RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+       RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                  idempotency_key, status, response, provider_task_id, submission_error,
                  lease_owner, attempt_count`,
       [input.operationKey, input.leaseOwner, now + leaseDurationMs, now],
@@ -643,7 +646,7 @@ export async function getAgentDownstreamOperation(
 ): Promise<AgentDownstreamOperation | null> {
   const input = validateDownstreamIdentity(rawInput);
   const result = await getPool().query<AgentDownstreamOperationRow>(
-    `SELECT operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+    `SELECT operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
             idempotency_key, status, response, provider_task_id, submission_error,
             lease_owner, attempt_count
      FROM wujie_agent_downstream_operations
@@ -668,7 +671,7 @@ export async function completeAgentDownstreamOperation(
          lease_expires_at = 0, completed_at = $4, updated_at = $4
      WHERE operation_key = $1 AND lease_owner = $2
        AND status IN ('prepared', 'submitted', 'accepted')
-     RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+     RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                idempotency_key, status, response, provider_task_id, submission_error,
                lease_owner, attempt_count`,
     [input.operationKey, input.leaseOwner, serialized, now],
@@ -686,7 +689,7 @@ export async function markAgentDownstreamOperationSubmitted(
     `UPDATE wujie_agent_downstream_operations
      SET status = 'submitted', submitted_at = $3, updated_at = $3
      WHERE operation_key = $1 AND lease_owner = $2 AND status = 'prepared'
-     RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+     RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                idempotency_key, status, response, provider_task_id, submission_error,
                lease_owner, attempt_count`,
     [input.operationKey, input.leaseOwner, now],
@@ -705,7 +708,7 @@ export async function markAgentDownstreamOperationAccepted(
     `UPDATE wujie_agent_downstream_operations
      SET status = 'accepted', provider_task_id = $3, accepted_at = $4, updated_at = $4
      WHERE operation_key = $1 AND lease_owner = $2 AND status = 'submitted'
-     RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+     RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                idempotency_key, status, response, provider_task_id, submission_error,
                lease_owner, attempt_count`,
     [input.operationKey, input.leaseOwner, providerTaskId, now],
@@ -725,7 +728,7 @@ export async function markAgentDownstreamSubmissionUnknown(
      SET status = 'submission_unknown', submission_error = $3,
          submission_unknown_at = $4, lease_owner = '', lease_expires_at = 0, updated_at = $4
      WHERE operation_key = $1 AND lease_owner = $2 AND status IN ('submitted', 'accepted')
-     RETURNING operation_key, owner_id, project_id, task_id, tool_id, request_digest,
+     RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                idempotency_key, status, response, provider_task_id, submission_error,
                lease_owner, attempt_count`,
     [input.operationKey, input.leaseOwner, reason, now],
