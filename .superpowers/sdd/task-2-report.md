@@ -2111,3 +2111,55 @@ pnpm build
 
 - The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
   staged or committed.
+
+## R19 - Pending-attempt read-failure fail-closed repair
+
+### RED evidence
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx --reporter=dot --silent
+# controlled exit 1; 1 file, 1 failed / 31 passed in 1.31s.
+# With getItem throwing only for the pending-attempt key while setItem remained
+# usable, hydration marked the scope ready and left Execute enabled. The new
+# assertion stopped at that unsafe state before a new idempotency key or POST.
+```
+
+### Design and implementation
+
+- Pending-attempt hydration now records `ready` or `failed` per exact scope;
+  an absent state remains incomplete. Only a successful pending-key read can
+  mark the scope ready. A read failure does not delete the unread identity.
+- Both the Execute button and submit handler require `ready`. Failed hydration
+  reports an explicit fail-closed error, so writable storage cannot turn an
+  unknown accepted paid attempt into a new idempotency key or paid POST.
+- A readable malformed record remains safely removable, preserving the prior
+  recovery contract. Successful hydration, scope isolation, legacy/shadow
+  compatibility, and R18 atomic terminal settlement are unchanged.
+- `package.json` adds only the exact
+  `.superpowers/sdd/task-2-review-r19-findings.md` protected-baseline
+  allow-path.
+
+### GREEN verification
+
+```powershell
+pnpm exec vitest run src/__tests__/components/agent-editor-run-scope.test.tsx --reporter=dot --silent
+# 1 file / 32 tests passed in 1.26s.
+
+$files = @(rg --files src/__tests__ | rg '(agent|chat-agent-tool-choice)'); pnpm exec vitest run @files --reporter=dot --silent
+# 22 files / 221 tests passed in 16.49s.
+
+pnpm ts-check
+# exit 0.
+```
+
+### R19 changed files
+
+- Production: `src/components/agent-editor.tsx`.
+- Tests: `src/__tests__/components/agent-editor-run-scope.test.tsx`.
+- Guard/evidence: `package.json`,
+  `.superpowers/sdd/task-2-review-r19-findings.md`, and this report.
+
+### R19 concerns
+
+- The controller-owned Task 1 and Task 2 briefs remain dirty and will not be
+  staged or committed.

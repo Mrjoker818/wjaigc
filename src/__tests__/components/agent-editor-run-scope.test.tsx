@@ -847,6 +847,42 @@ describe('AgentEditor selected-image run scope', () => {
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/agent-edit')).toHaveLength(0);
   });
 
+  it('does not mark an unread pending identity hydrated when storage remains writable', async () => {
+    const pendingKey = 'wujie_agent_attempt:project-1:image-a';
+    const storage = storageHarness([[pendingKey, JSON.stringify({
+      version: 1,
+      key: 'agent-editor:project-1:image-a:unknown-accepted',
+      digest: '0a'.repeat(32),
+    })]]);
+    const removeItem = vi.fn(storage.removeItem);
+    storage.removeItem = removeItem;
+    storage.getItem = key => {
+      if (key === pendingKey) throw new DOMException('storage read blocked', 'SecurityError');
+      return null;
+    };
+    const randomUUID = vi.fn(() => 'must-not-create-a-new-key');
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('crypto', {
+      randomUUID,
+      subtle: { digest: async () => new Uint8Array(32).fill(10).buffer },
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/models?type=chat') return Promise.resolve(Response.json({ models: [] }));
+      if (String(input) === '/api/agent-edit' && init?.method === 'POST') return Promise.resolve(Response.json({ taskId: 'unexpected' }));
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEditor('image-a');
+    expect(findButton('执行').props.disabled).toBe(true);
+    findButton('执行').props.onClick?.({ stopPropagation: vi.fn() });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/agent-edit')).toHaveLength(0);
+    expect(randomUUID).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalledWith(pendingKey);
+  });
+
   it('retains a valid pending attempt across refresh and reuses it for the accepted server operation', async () => {
     const storage = storageHarness([]);
     const acceptedKeys = new Set<string>();

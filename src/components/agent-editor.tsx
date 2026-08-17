@@ -50,6 +50,8 @@ interface PendingAgentAttempt {
   digest: string;
 }
 
+type AttemptHydrationStatus = 'ready' | 'failed';
+
 const EMPTY_AGENT_TASK_STATE: AgentTaskState = {
   taskId: null,
   isProcessing: false,
@@ -234,8 +236,9 @@ export function AgentEditor({
   const setResultPrompt = useCallback((value: string) => updateTaskState({ resultPrompt: value }), [updateTaskState]);
   const [agentRunIdsByScope, setAgentRunIdsByScope] = useState<Record<string, string | null>>({});
   const attemptKeysByScope = useRef<Record<string, PendingAgentAttempt>>({});
-  const [attemptHydrationByScope, setAttemptHydrationByScope] = useState<Record<string, true>>({});
-  const isAttemptHydrated = Object.prototype.hasOwnProperty.call(attemptHydrationByScope, runScopeKey);
+  const [attemptHydrationByScope, setAttemptHydrationByScope] = useState<Record<string, AttemptHydrationStatus>>({});
+  const attemptHydrationStatus = attemptHydrationByScope[runScopeKey];
+  const isAttemptHydrated = attemptHydrationStatus === 'ready';
   const hasScopedRun = Object.prototype.hasOwnProperty.call(agentRunIdsByScope, runScopeKey);
   const agentRunId = hasScopedRun ? agentRunIdsByScope[runScopeKey] : null;
   const setAgentRunIdForScope = useCallback((scopeKey: string, runId: string | null) => {
@@ -250,25 +253,37 @@ export function AgentEditor({
   }, [runScopeKey, runStorageKey]);
   useEffect(() => {
     const storageKey = pendingAttemptStorageKey(runScopeKey);
+    let hydrationStatus: AttemptHydrationStatus = 'failed';
     if (storageKey && typeof localStorage !== 'undefined') {
+      let storedAttempt: string | null = null;
+      let readSucceeded = false;
       try {
-        const storedAttempt = localStorage.getItem(storageKey);
+        storedAttempt = localStorage.getItem(storageKey);
+        readSucceeded = true;
+      } catch {
+        // A failed read leaves an unknown paid-attempt identity; never delete or replace it.
+      }
+      if (readSucceeded) {
+        let storageRemainsWritable = true;
         if (storedAttempt) {
-          const parsedAttempt = JSON.parse(storedAttempt) as unknown;
-          if (!isPendingAgentAttempt(parsedAttempt)) {
-            localStorage.removeItem(storageKey);
-          } else {
-            attemptKeysByScope.current[runScopeKey] = parsedAttempt;
+          try {
+            const parsedAttempt = JSON.parse(storedAttempt) as unknown;
+            if (!isPendingAgentAttempt(parsedAttempt)) {
+              localStorage.removeItem(storageKey);
+            } else {
+              attemptKeysByScope.current[runScopeKey] = parsedAttempt;
+            }
+          } catch {
+            try { localStorage.removeItem(storageKey); } catch { storageRemainsWritable = false; }
           }
         }
-      } catch {
-        try { localStorage.removeItem(storageKey); } catch { /* storage is unavailable */ }
+        hydrationStatus = storageRemainsWritable ? 'ready' : 'failed';
       }
     }
     setAttemptHydrationByScope(current => (
       Object.prototype.hasOwnProperty.call(current, runScopeKey)
         ? current
-        : { ...current, [runScopeKey]: true }
+        : { ...current, [runScopeKey]: hydrationStatus }
     ));
   }, [runScopeKey]);
   useEffect(() => {
@@ -493,9 +508,11 @@ export function AgentEditor({
   const handleSubmit = async () => {
     if (!prompt.trim() && !imageUrl) return;
     const submissionScopeKey = runScopeKey;
-    if (!Object.prototype.hasOwnProperty.call(attemptHydrationByScope, submissionScopeKey)) {
+    if (attemptHydrationByScope[submissionScopeKey] !== 'ready') {
       updateTaskStateForScope(submissionScopeKey, {
-        error: '正在恢复待处理请求，请稍后重试',
+        error: attemptHydrationByScope[submissionScopeKey] === 'failed'
+          ? '无法安全保存待处理请求，无法确认待处理请求，为避免重复提交已阻止执行'
+          : '正在恢复待处理请求，请稍后重试',
       });
       return;
     }
