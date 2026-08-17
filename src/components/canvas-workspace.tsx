@@ -5572,6 +5572,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }))}
         themeStyle={themeStyle}
         preferredAnnotationModelId={preferredAnnotationModelId}
+        rendererMode={UserManagerCore.getInstance().getWorkflowRendererMode()}
         onAddImages={(urls, meta) => handleAddImages(urls, undefined, meta)}
       />
     );

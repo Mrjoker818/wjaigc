@@ -12,6 +12,15 @@ import {
   canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
   mergeWorkflowNodeUpdate, resolveWorkflowOutputAssetReference, type WorkspaceAssetReference,
 } from '@/lib/workflow-engine';
+import { applyWorkflowCommand, type WorkflowInteractionCommand } from '@/lib/workflow-renderer/commands';
+import { resolveWorkflowRendererMode, type WorkflowRendererMode } from '@/lib/workflow-renderer/mode';
+import {
+  projectLegacyRenderModel,
+  projectReactFlowRenderModel,
+} from '@/lib/workflow-renderer/view-model';
+import { WorkflowLegacySurface } from '@/components/workflow/WorkflowLegacySurface';
+import { WorkflowReactFlowSurface } from '@/components/workflow/WorkflowReactFlowSurface';
+import { WorkflowShadowProbe } from '@/components/workflow/WorkflowShadowProbe';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { computePortPosition } from '@/lib/node-port-position';
 import {
@@ -654,6 +663,7 @@ interface NodeEditorProps {
   /** 生成图片后回调，将图片添加到项目 */
   onAddImages?: (items: WorkflowCanvasInsertionItem[], meta?: { modelName?: string; apiProvider?: string }) => void;
   preferredAnnotationModelId?: string;
+  rendererMode?: WorkflowRendererMode;
 }
 
 // ==================== 双主题配色 ====================
@@ -804,7 +814,7 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 
-export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '' }: NodeEditorProps) {
+export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   // CSS自定义属性，供Tailwind中 var(--ne-xxx) 引用
   const neVars = {
@@ -835,6 +845,7 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
   const bcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [wfRaw, setWfRaw] = useState<WorkflowData>(workflow || createEmptyWorkflow('新工作流'));
+  const workflowRendererMode = resolveWorkflowRendererMode(rendererMode);
   // P2: 包装setWf以广播变化
   const broadcastWorkflow = useCallback((updatedWf: WorkflowData) => {
     if (!bcRef.current) return;
@@ -852,6 +863,8 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
     });
   }, [broadcastWorkflow]);
   const wf = wfRaw;
+  const wfRef = useRef(wf);
+  wfRef.current = wf;
   const [workflowSyncRevision, setWorkflowSyncRevision] = useState(0);
 
   // BroadcastChannel 接收端
@@ -1299,6 +1312,17 @@ ${contextInfo}
   }, [applyNodeViewportPreview]);
 
   const nodeRenderViewport = isPanning ? nodePanViewport : viewport;
+  const legacyWorkflowRenderModel = useMemo(
+    () => projectLegacyRenderModel(wf, nodeRenderViewport),
+    [wf, nodeRenderViewport],
+  );
+  const reactFlowWorkflowRenderModel = useMemo(
+    () => projectReactFlowRenderModel(wf, nodeRenderViewport),
+    [wf, nodeRenderViewport],
+  );
+  const handleWorkflowRenderCommand = useCallback((command: WorkflowInteractionCommand) => {
+    setWf(current => applyWorkflowCommand(current, command).workflow);
+  }, [setWf]);
   const nodeById = useMemo(() => new Map(wf.nodes.map(node => [node.id, node])), [wf.nodes]);
   const nodeCullingBounds = useMemo(() => resolveWorkflowCullingBounds(
     viewport,
@@ -1673,13 +1697,11 @@ ${contextInfo}
 
   const handleDeleteNode = useCallback((nodeId: string) => {
     workflowInputTransferGuardRef.current.invalidate(nodeId);
-    setWf(prev => ({
-      ...prev,
-      nodes: prev.nodes.filter(n => n.id !== nodeId),
-      connections: prev.connections.filter(c => c.fromNodeId !== nodeId && c.toNodeId !== nodeId),
-    }));
+    handleWorkflowRenderCommand({
+      type: 'nodes.delete', nodeIds: [nodeId], transactionId: `legacy-node-delete:${nodeId}`,
+    });
     setSelectedNodeIds(prev => { const next = new Set(prev); next.delete(nodeId); return next; });
-  }, [setWf]);
+  }, [handleWorkflowRenderCommand]);
   useEffect(() => { handleDeleteNodeRef.current = handleDeleteNode; }, [handleDeleteNode]);
 
   const transferCanvasImageToWorkflow = useCallback(async (
@@ -2107,18 +2129,24 @@ ${contextInfo}
     const connType = draggingConn.portType;
 
     const conn = createConnection(draggingConn.fromNodeId, draggingConn.fromPortId, nodeId, port.id, connType);
-    setWf(prev => ({ ...prev, connections: [...prev.connections, conn] }));
+    handleWorkflowRenderCommand({
+      type: 'connection.create', connection: conn, transactionId: `legacy-connection:${conn.id}`,
+    });
     setDraggingConn(null);
-  }, [draggingConn, setWf, wf.connections]);
+  }, [draggingConn, handleWorkflowRenderCommand, wf.connections]);
 
   // ─── 画布交互 ───
 
   const applyNodeDragPosition = useCallback((position: { id: string; x: number; y: number }) => {
-    setWf(prev => ({
-      ...prev,
-      nodes: prev.nodes.map(node => node.id === position.id ? { ...node, x: position.x, y: position.y } : node),
-    }));
-  }, [setWf]);
+    const node = wfRef.current.nodes.find(candidate => candidate.id === position.id);
+    if (!node) return;
+    handleWorkflowRenderCommand({
+        type: 'nodes.move',
+        nodeIds: [position.id],
+        delta: { x: position.x - node.x, y: position.y - node.y },
+        transactionId: 'legacy-node-drag-preview',
+    });
+  }, [handleWorkflowRenderCommand]);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
@@ -3065,6 +3093,12 @@ ${contextInfo}
             backgroundPosition: `${viewport.x % (20 * viewport.zoom)}px ${viewport.y % (20 * viewport.zoom)}px`,
           }} />
 
+          {workflowRendererMode === 'react-flow-v2' ? (
+            <WorkflowReactFlowSurface model={reactFlowWorkflowRenderModel} onCommand={handleWorkflowRenderCommand} readOnly={false} />
+          ) : (
+            <>
+          <WorkflowLegacySurface model={legacyWorkflowRenderModel} onCommand={handleWorkflowRenderCommand}>
+          {(_model, dispatch) => <>
           {/* SVG连线层 (z-index:1, pointer-events:stroke仅对hit-area) */}
           <svg
             ref={svgRef}
@@ -3169,7 +3203,7 @@ ${contextInfo}
                               <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 + 3.5} textAnchor="middle" fill="white" fontSize={8} fontWeight="bold">✕</text>
                             )}
                           </g>
-                          <path d={getConnPath(from.x, from.y, to.x, to.y)} fill="none" stroke="transparent" strokeWidth={16} style={{ pointerEvents: 'stroke' }} onClick={() => { setWf(prev => ({ ...prev, connections: prev.connections.filter(c => c.id !== conn.id) })); }} className="cursor-pointer" />
+                          <path d={getConnPath(from.x, from.y, to.x, to.y)} fill="none" stroke="transparent" strokeWidth={16} style={{ pointerEvents: 'stroke' }} onClick={() => dispatch({ type: 'connection.delete', connectionId: conn.id, transactionId: `legacy-connection-delete:${conn.id}` })} className="cursor-pointer" />
                         </>
                       );
                     })()}
@@ -3272,6 +3306,16 @@ ${contextInfo}
               />
             ))}
           </div>
+          </>}
+          </WorkflowLegacySurface>
+          {workflowRendererMode === 'shadow' ? (
+            <WorkflowShadowProbe
+              legacyModel={legacyWorkflowRenderModel}
+              shadowModel={reactFlowWorkflowRenderModel}
+            />
+          ) : null}
+            </>
+          )}
         </div>
 
         <button

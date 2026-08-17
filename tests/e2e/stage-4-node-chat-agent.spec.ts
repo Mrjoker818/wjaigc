@@ -14,6 +14,7 @@ import {
   test,
   writeStage4Metrics,
 } from '../helpers/stage-4-e2e';
+import { measureWorkflowInteraction } from '../helpers/workflow-performance';
 
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
 test.use({ trace: 'off', video: 'on' });
@@ -24,6 +25,7 @@ let evidencePool: Pool | undefined;
 const providerSockets = new Set<Socket>();
 const providerCounts = new Map<string, { ordinary: number; visionMain: number; visionProvider: number; agent: number }>();
 type Stage4ExpectedAgentMode = 'shadow' | 'agent-v2';
+type Stage4ExpectedWorkflowRendererMode = 'legacy' | 'shadow';
 
 function requiredExpectedAgentMode(): Stage4ExpectedAgentMode {
   const mode = process.env.E2E_STAGE4_EXPECTED_AGENT_MODE?.trim();
@@ -32,6 +34,14 @@ function requiredExpectedAgentMode(): Stage4ExpectedAgentMode {
 }
 
 const expectedAgentMode = requiredExpectedAgentMode();
+
+function requiredExpectedWorkflowRendererMode(): Stage4ExpectedWorkflowRendererMode {
+  const mode = process.env.E2E_STAGE4_EXPECTED_WORKFLOW_RENDERER_MODE?.trim();
+  if (mode === 'legacy' || mode === 'shadow') return mode;
+  throw new Error('BLOCKED: E2E_STAGE4_EXPECTED_WORKFLOW_RENDERER_MODE must be legacy or shadow');
+}
+
+const expectedWorkflowRendererMode = requiredExpectedWorkflowRendererMode();
 
 function counts(profile: string) {
   const existing = providerCounts.get(profile);
@@ -311,4 +321,43 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
     await expect(page.getByText('已取消', { exact: true })).toBeVisible({ timeout: 20_000 });
   }
   expect(counts(fixture.browserProfile).agent).toBe(1);
+});
+
+test('keeps workflow renderer server-authoritative while shadow projection remains inert at 100 nodes', async ({ page, stage4Evidence }, testInfo) => {
+  const fixture = await stage4FixtureForProject(testInfo.project.name);
+  const auth = await ensureStage4Session(page, fixture);
+  await seedStage4Baseline(page, fixture, auth);
+  await openStage4CanvasProject(page, String(fixture.canvasProject.id));
+
+  await page.getByTitle('节点模式').first().click();
+  await expect(page.locator('[data-workflow-legacy-surface]')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('[data-workflow-react-flow-surface]')).toHaveCount(0);
+  if (expectedWorkflowRendererMode === 'shadow') {
+    await expect(page.locator('[data-workflow-shadow-probe]')).toHaveAttribute('data-in-sync', 'true');
+  } else {
+    await expect(page.locator('[data-workflow-shadow-probe]')).toHaveCount(0);
+  }
+  await expect(page.locator('[data-node-id]')).toHaveCount(fixture.nodeCount);
+
+  const firstNode = page.locator(`[data-node-id="${fixture.expectedNodeIds[0]}"]`);
+  const header = firstNode.locator('.node-header');
+  const before = await firstNode.boundingBox();
+  expect(before).not.toBeNull();
+  const metrics = await measureWorkflowInteraction(page, fixture.expectedNodeIds, async measuredPage => {
+    const measuredNode = measuredPage.locator(`[data-node-id="${fixture.expectedNodeIds[0]}"]`);
+    const measuredHeader = measuredNode.locator('.node-header');
+    await measuredHeader.dragTo(measuredPage.locator('.canvas-bg'), {
+      sourcePosition: { x: 24, y: 16 },
+      targetPosition: { x: 220, y: 160 },
+    });
+  });
+  const after = await firstNode.boundingBox();
+  expect(after).not.toBeNull();
+  expect(after!.x).not.toBe(before!.x);
+  expect(metrics.averageFps).toBeGreaterThanOrEqual(55);
+  expect(metrics.inputDelayP95Ms).toBeLessThanOrEqual(50);
+  expect(metrics.lostNodeCount).toBe(0);
+  expect(metrics.unclickableDurationMs).toBe(0);
+  await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-legacy-100-node-performance', metrics);
+
 });

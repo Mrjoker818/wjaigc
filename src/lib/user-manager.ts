@@ -8,6 +8,7 @@ import {
 import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
 import type { AssetGraphMode } from '@/lib/asset-core/types';
 import { resolveCanvasKernelMode, type CanvasKernelMode } from '@/lib/canvas-kernel/mode';
+import { resolveWorkflowRendererMode, type WorkflowRendererMode } from '@/lib/workflow-renderer/mode';
 import { clearCanvasUnloadRecovery } from '@/lib/canvas-autosave-guard';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
@@ -82,6 +83,7 @@ interface ProjectSyncResponse {
   }>>;
   assetGraphMode?: AssetGraphMode;
   canvasKernelMode?: CanvasKernelMode;
+  workflowRendererMode?: WorkflowRendererMode;
 }
 
 export interface ProjectSyncResult {
@@ -427,6 +429,7 @@ export class UserManager {
   private _serverSyncReady = false; // 在 loadProjectsFromServer 成功前阻止 syncToServer 上传空数据
   private _assetGraphMode: AssetGraphMode = 'legacy';
   private _canvasKernelMode: CanvasKernelMode = 'legacy';
+  private _workflowRendererMode: WorkflowRendererMode = 'legacy';
   private _projectSyncRevision = 0;
   private _projectSyncRequestEpoch = 0;
   private _projectSyncSessionEpoch = 0;
@@ -853,6 +856,7 @@ export class UserManager {
     this._projectMutationGeneration = 0;
     this._acceptedProjectMutationGeneration = 0;
     this._canvasKernelMode = 'legacy';
+    this._workflowRendererMode = 'legacy';
     this._recentlyDeletedImageIds.clear();
     this._projectHydration = null;
   }
@@ -1343,6 +1347,10 @@ export class UserManager {
     return this._canvasKernelMode;
   }
 
+  getWorkflowRendererMode(): WorkflowRendererMode {
+    return this._workflowRendererMode;
+  }
+
   private applyAssetGraphMappings(
     assetGraphMappings: NonNullable<ProjectSyncResponse['assetGraphMappings']>,
     assetGraphUpdates: NonNullable<ProjectSyncResponse['assetGraphUpdates']>,
@@ -1686,6 +1694,7 @@ export class UserManager {
         value?: unknown;
         assetGraphMode?: AssetGraphMode;
         canvasKernelMode?: CanvasKernelMode;
+        workflowRendererMode?: WorkflowRendererMode;
         projectRevision?: number;
       };
       if (!this.isCurrentProjectSyncRequest(request)) return false;
@@ -1701,6 +1710,7 @@ export class UserManager {
         ? data.assetGraphMode
         : 'legacy';
       const nextCanvasKernelMode = resolveCanvasKernelMode(data.canvasKernelMode);
+      this._workflowRendererMode = resolveWorkflowRendererMode(data.workflowRendererMode);
       const nextProjectSyncRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
         ? Number(data.projectRevision)
         : 0;

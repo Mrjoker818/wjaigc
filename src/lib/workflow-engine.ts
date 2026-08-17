@@ -344,6 +344,27 @@ export interface Workflow {
   };
 }
 
+/** Validates a connection against the workflow-owned node and port definitions. */
+export function isWorkflowConnectionValid(
+  workflow: Workflow,
+  connection: WorkflowConnection,
+): boolean {
+  const fromNode = workflow.nodes.find(node => node.id === connection.fromNodeId);
+  const toNode = workflow.nodes.find(node => node.id === connection.toNodeId);
+  if (!fromNode || !toNode || fromNode.id === toNode.id) return false;
+
+  const fromPort = fromNode.ports.find(port => port.id === connection.fromPortId);
+  const toPort = toNode.ports.find(port => port.id === connection.toPortId);
+  return Boolean(
+    fromPort
+    && toPort
+    && fromPort.direction === 'out'
+    && toPort.direction === 'in'
+    && connection.type === fromPort.type
+    && canConnectPorts(fromPort.type, toPort.type),
+  );
+}
+
 // ==================== 节点模板 ====================
 
 export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: string; desc: string }[] = [
