@@ -997,3 +997,12 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The new regression gate directly proves that preloaded monitored images do not emit native reloads or `src` rewrites during 100/300-node pan. All modes retain zero disappeared frames and zero unclickable time.
 - Repository gates pass with PostgreSQL enabled: `2527/2527` tests, TypeScript, production build, protected feature gate and zero ESLint errors. Independent review reports no Critical or Important findings.
 - **Decision: CONDITIONALLY READY FOR `main` CANDIDATE PUSH, NOT RELEASE READY.** Hosted immutable Actions remain unexecuted because GitHub did not allocate runners under the billing limit. Coze exact-SHA regression is still required after `main` is updated. `stable` remains untouched and Stage 4/5 remain blocked.
+## 2026-08-18 Stage 4 Task 4 readiness
+
+- Local implementation and full regression are complete, including PostgreSQL task/accounting tests and the five-profile production browser matrix.
+- All local P0/P1 Stage 4 Task 4 defects are closed; no threshold, assertion or failed evidence was removed.
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains protected and unchanged.
+- GitHub Actions did not run because of external billing; this is an explicit missing independent gate, not a pass.
+- The candidate has not yet been validated after an exact-SHA Coze pull, so authenticated cloud workspace transfer and real provider accounting remain required.
+
+**Decision: CONDITIONALLY READY FOR A NORMAL `main`-ONLY CANDIDATE PUSH; NOT YET RELEASE READY.**

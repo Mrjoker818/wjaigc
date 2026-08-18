@@ -905,3 +905,13 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - **Hosted immutable matrix: STILL UNVERIFIED.** GitHub Actions billing prevented runner allocation and no workflow steps executed. Local evidence does not replace this release gate.
 - **Coze exact-SHA Canvas regression: UNVERIFIED.** After `main` receives the candidate, Coze must pull the exact SHA and repeat the required Chrome deployment smoke/regression sequence.
 - **Stage status:** Task 10 remains `10/11`; do not begin Stage 4/5 and do not modify `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`.
+## 2026-08-18 Stage 4 Task 4 remaining verification
+
+| Item | Status | Required proof |
+|---|---|---|
+| Exact pushed SHA | PENDING | Push normally to `main`, fetch again and record the remote SHA. |
+| Coze authenticated Chrome | UNVERIFIED | Pull the exact SHA and repeat login, chat -> Canvas -> workflow -> chat, refresh recovery and browser evidence checks. |
+| Real provider/accounting | UNVERIFIED ON THIS CANDIDATE | Prove one charge, cancellation, monotonic terminal state, late-result rejection and at-most-once refund. |
+| GitHub hosted Actions | BLOCKED EXTERNALLY | Billing prevented runner allocation. Local verification does not reclassify this as passed. |
+| Independent reviewer | UNAVAILABLE LOCALLY | Windows Codex executable returned access denied; manual review completed, but is not labeled independent. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |

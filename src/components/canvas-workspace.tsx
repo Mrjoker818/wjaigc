@@ -121,6 +121,7 @@ import {
 import {
   canvasEntityIdForTransferredReference,
   extractTaskAssetReferences,
+  filterUniqueCanvasImageInsertions,
   isWorkspaceResultScopeCurrent,
   prepareCanvasAssetForChat,
 } from '@/lib/asset-core/workspace-transfer';
@@ -1537,7 +1538,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         });
         if (reason === 'immediate') {
           try {
-            await manager.flushProjectsToServer();
+            await manager.flushProjectsToServerWithConflictRecovery();
           } finally {
             recordAutosave();
           }
@@ -3329,6 +3330,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const handleAddImages = useCallback(async (imageInputs: Array<string | WorkflowCanvasInsertionItem>, sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType }) => {
     const expectedProjectId = currentProjectRef.current?.id;
     const newImages: CanvasImage[] = [];
+    const nextWorkflowImageZIndex = Math.max(
+      0,
+      ...latestImagesRef.current.map(image => image.zIndex || 0),
+    ) + 1;
 
     // Find source image for positioning if provided
     const sourceImg = sourceImageId ? images.find(img => img.id === sourceImageId) : null;
@@ -3407,6 +3412,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         height: displaySize.height,
         originalWidth: natW,
         originalHeight: natH,
+        rotation: 0,
+        zIndex: nextWorkflowImageZIndex + newImages.length,
         createdAt: Date.now(),
         generatedFromImageId: sourceImageId,
         ...(transferredReference?.assetId ? { assetId: transferredReference.assetId } : {}),
@@ -3423,9 +3430,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       && isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)
     ) {
       const previousImages = latestImagesRef.current;
-      const insertedImages = sourceImg
+      const insertionCandidates = sourceImg
         ? newImages
         : autoLayoutImages(previousImages, newImages);
+      const insertedImages = filterUniqueCanvasImageInsertions(previousImages, insertionCandidates);
+      if (insertedImages.length === 0) {
+        toast.info('图片已在画布中', {
+          description: '工作流结果已存在，无需重复添加',
+          className: 'bg-[#141414] border-[#2a2a2a] text-white',
+        });
+        return;
+      }
       const nextImages = [...previousImages, ...insertedImages];
       latestImagesRef.current = nextImages;
       setImages(nextImages);
@@ -5563,6 +5578,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         projectId={currentProject?.id}
         onBack={() => setAppMode('canvas')}
         onWorkflowChange={setNodeWorkflow}
+        onBeforeWorkflowChatNavigation={() => canvasPersistenceScheduler.flush('immediate')}
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
         canvasImages={images.map(img => ({
           id: img.id,

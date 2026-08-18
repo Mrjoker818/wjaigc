@@ -769,6 +769,73 @@ describe('UserManager project sync response isolation', () => {
     expect(manager.getProject('project-a')?.canvasImages).toHaveLength(1);
   });
 
+  it('rebases and retries one guarded flush after a revision conflict', async () => {
+    const initial = project('user-a', '/media/base.png');
+    const remoteImage = imageWithId('remote-addition', '/media/remote.png');
+    const localImage = imageWithId('local-addition', '/media/local.png');
+    let revision = 0;
+    let serverProjects = [structuredClone(initial)];
+    let firstPost = true;
+    const postBodies: Array<{ projectRevision: number; value: ReturnType<typeof project>[] }> = [];
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return new Response(JSON.stringify({
+          success: true,
+          value: serverProjects,
+          assetGraphMode: 'shadow',
+          projectRevision: revision,
+        }), { status: 200 });
+      }
+      const body = JSON.parse(String(init?.body || '{}')) as {
+        projectRevision: number;
+        value: ReturnType<typeof project>[];
+      };
+      postBodies.push(structuredClone(body));
+      if (firstPost) {
+        firstPost = false;
+        serverProjects = [{
+          ...structuredClone(initial),
+          updatedAt: 2,
+          canvasImages: [canvasImage('/media/base.png'), remoteImage],
+        }];
+        revision = 1;
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Canvas project snapshot is stale',
+          currentRevision: revision,
+        }), { status: 409 });
+      }
+      if (body.projectRevision !== revision) {
+        return new Response(JSON.stringify({
+          success: false,
+          currentRevision: revision,
+        }), { status: 409 });
+      }
+      serverProjects = structuredClone(body.value);
+      revision += 1;
+      return new Response(JSON.stringify({ success: true, projectRevision: revision }), { status: 200 });
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    manager.updateProjectInMemory('project-a', {
+      updatedAt: 3,
+      canvasImages: [canvasImage('/media/base.png'), localImage],
+    });
+
+    await expect(manager.flushProjectsToServerWithConflictRecovery()).resolves.toBeTruthy();
+
+    expect(postBodies.map(body => body.projectRevision)).toEqual([0, 1]);
+    expect(serverProjects[0].canvasImages.map(image => image.id)).toEqual([
+      'image-shared',
+      'remote-addition',
+      'local-addition',
+    ]);
+    expect(manager.getProjectSyncRevision()).toBe(2);
+  });
+
   it('rebases debounced autosave once after 409 without resurrecting the remote deletion', async () => {
     let revision = 0;
     let serverProjects = [project('user-a', '/media/a.png')];

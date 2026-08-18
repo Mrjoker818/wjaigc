@@ -1,5 +1,6 @@
 import {
   isBenignStage3RequestAbort,
+  isRecoveredStage3RequestAbort,
   type Stage3EvidenceEntry,
 } from './stage-3-evidence-filter';
 
@@ -18,7 +19,9 @@ export function stage4RuntimeEvidenceFailures(
     )),
     networkFailures: networkEntries.filter(entry => (
       (typeof entry.status === 'number' && entry.status >= 400)
-      || (Boolean(entry.text) && !isBenignStage3RequestAbort(entry))
+      || (Boolean(entry.text)
+        && !isBenignStage3RequestAbort(entry)
+        && !isRecoveredStage3RequestAbort(entry, networkEntries))
     )),
   };
 }

@@ -3,6 +3,15 @@ import { readFileSync } from 'fs';
 import path from 'path';
 
 describe('generate submitOnly idempotency contract', () => {
+  it('uses the verified request identity for billing, registry ownership, and durable persistence', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+
+    expect(source).toContain('sessionUser = authResult.user;');
+    expect(source).toContain('const userId = authResult.userId;');
+    expect(source).not.toContain('sessionUser = await getSessionUser(request);');
+    expect(source).not.toContain('sessionUser?.id ?? requestUserId ?? "anonymous"');
+  });
+
   it('looks up a child Idempotency-Key before registering its async task', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
     const branch = source.indexOf('if (submitOnly)');

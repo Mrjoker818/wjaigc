@@ -10,7 +10,7 @@ const source = readFileSync(
 
 describe('image generation provider-model mismatch contract', () => {
   it('rejects an explicit provider/model mismatch before durable task creation or credit charging', () => {
-    const userResolution = source.indexOf('const userId = sessionUser?.id');
+    const userResolution = source.indexOf('const userId = authResult.userId');
     const firstBatchPersistence = source.indexOf('const generationBatch = createDurableGenerationBatch');
     const mismatchGate = source.indexOf("code: 'MODEL_PROVIDER_MISMATCH'", userResolution);
     const earlyRequestBlock = source.slice(userResolution, firstBatchPersistence);

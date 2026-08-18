@@ -1465,6 +1465,28 @@ export class UserManager {
     });
   }
 
+  async flushProjectsToServerWithConflictRecovery(): Promise<ProjectSyncResult> {
+    const expectedUserId = this.currentUserId;
+    const expectedSessionEpoch = this._projectSyncSessionEpoch;
+    if (!expectedUserId) throw new Error('登录状态已失效，请重新登录');
+    try {
+      return await this.flushProjectsToServer();
+    } catch (error) {
+      if (!(error instanceof ProjectSyncConflictError)) throw error;
+      if (this.currentUserId !== expectedUserId
+        || this._projectSyncSessionEpoch !== expectedSessionEpoch) {
+        throw new Error('登录状态已失效，请重新登录');
+      }
+      const rebased = await this.loadProjectsFromServer(0, expectedUserId);
+      if (!rebased
+        || this.currentUserId !== expectedUserId
+        || this._projectSyncSessionEpoch !== expectedSessionEpoch) {
+        throw error;
+      }
+      return this.flushProjectsToServer();
+    }
+  }
+
   private async performProjectFlush(): Promise<ProjectSyncResult> {
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);

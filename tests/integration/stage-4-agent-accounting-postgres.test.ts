@@ -63,6 +63,20 @@ describe('Stage 4 Agent workspace projection on real PostgreSQL', () => {
          VALUES ($1, $2, 'Stage 4 workspace result', 'active')`,
         [projectId, ownerId],
       );
+      await query(
+        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+         VALUES ('stage-4-source-asset', $1, $2, 'image', 'active')`,
+        [ownerId, projectId],
+      );
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, availability
+         ) VALUES (
+           'stage-4-source-version', 'stage-4-source-asset', $1, $2,
+           '/uploads/stage-4-source.png', 'ready'
+         )`,
+        [ownerId, projectId],
+      );
       await createCloudTask({
         id: taskId,
         userId: ownerId,
@@ -83,7 +97,7 @@ describe('Stage 4 Agent workspace projection on real PostgreSQL', () => {
         actorUserId: ownerId,
         taskId,
         targetProjectId: projectId,
-        parentVersionIds: [] as string[],
+        parentVersionIds: ['stage-4-source-version'],
       };
       const chat = await projectAgentResultToWorkspace({
         ...base,
@@ -111,6 +125,17 @@ describe('Stage 4 Agent workspace projection on real PostgreSQL', () => {
         .toBe(1);
       expect(new Set([chat[0].placementId, canvas[0].placementId, workflow[0].placementId]).size)
         .toBe(3);
+      const lineage = await query<{ source_version_ids: string[]; lineage_mode: string }>(
+        `SELECT
+           ARRAY(SELECT jsonb_array_elements_text(metadata->'sourceVersionIds')) AS source_version_ids,
+           metadata->>'lineageMode' AS lineage_mode
+         FROM wujie_asset_versions WHERE id = $1`,
+        [chat[0].assetVersionId],
+      );
+      expect(lineage.rows[0]).toEqual({
+        source_version_ids: ['stage-4-source-version'],
+        lineage_mode: 'ordered-source-metadata',
+      });
 
       const concurrentInput = {
         ...base,

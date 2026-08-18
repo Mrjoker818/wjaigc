@@ -10,6 +10,15 @@ export interface ProjectAgentResultToWorkspaceInput extends ProjectCompletedTask
   idempotencyKey: string;
 }
 
+export function agentWorkspaceProjectionIdempotencyKey(input: {
+  taskId: string;
+  workspace: ProjectCompletedTaskInput['workspace'];
+  workspaceId: string;
+  sourceEntityId: string;
+}): string {
+  return `task-workspace:${input.taskId}:${input.workspace}:${input.workspaceId}:${input.sourceEntityId}`;
+}
+
 interface CompletedTaskProjection {
   versions: AssetVersion[];
   placements: Array<{ id: string; entityId: string }>;

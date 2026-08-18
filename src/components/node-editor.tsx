@@ -57,6 +57,10 @@ import {
   type WorkflowCanvasInsertionItem,
 } from '@/lib/asset-core/workspace-transfer';
 import {
+  buildWorkflowChatReturnIntentUrl,
+  navigateToWorkflowChatAfterPersistence,
+} from '@/lib/asset-core/workflow-chat-return';
+import {
   NodeAnnotationWorkspace,
   type NodeAnnotationSource,
 } from '@/features/annotations/node-annotation-workspace';
@@ -657,6 +661,7 @@ interface NodeEditorProps {
   projectId?: string;
   onBack?: () => void;
   onWorkflowChange?: (wf: WorkflowData | null) => void;
+  onBeforeWorkflowChatNavigation?: () => Promise<void>;
   onOpenWorkflowHub?: () => void;
   /** P0: 画布图片列表，用于@图片引用 */
   canvasImages?: CanvasImageRef[];
@@ -859,7 +864,7 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 
-export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
+export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, onBeforeWorkflowChatNavigation, canvasImages, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
@@ -1093,7 +1098,6 @@ export default function NodeEditor({ workflow, userId, projectId, onBack, onWork
     const applyMobileLayout = () => {
       if (!media.matches) return;
       setShowLeftPanel(false);
-      setShowContentStrip(false);
     };
 
     applyMobileLayout();
@@ -1349,13 +1353,24 @@ ${contextInfo}
   useEffect(() => {
     const container = canvasContainerRef.current;
     if (!container) return;
+    let viewportResizeFrame = 0;
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) {
-        setNodeViewportSize({ width: entry.contentRect.width, height: entry.contentRect.height });
-      }
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      cancelAnimationFrame(viewportResizeFrame);
+      viewportResizeFrame = requestAnimationFrame(() => {
+        setNodeViewportSize(previous => (
+          previous.width === width && previous.height === height
+            ? previous
+            : { width, height }
+        ));
+      });
     });
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(viewportResizeFrame);
+    };
   }, []);
 
   const applyNodeViewportPreview = useCallback((nextViewport: { x: number; y: number; zoom: number }) => {
@@ -1391,9 +1406,6 @@ ${contextInfo}
     () => projectReactFlowRenderModel(wf, nodeRenderViewport, selectedNodeIds),
     [wf, nodeRenderViewport, selectedNodeIds],
   );
-  const previewWorkflowNodePositions = useCallback((positions: WorkflowNodePosition[]) => {
-    updateWorkflowSystem(current => mergeExternalWorkflowWithPositions(current, positions));
-  }, [updateWorkflowSystem]);
   const handleWorkflowRenderCommand = useCallback((command: WorkflowInteractionCommand): WorkflowCommandResult => {
     if (command.type === 'selection.set') {
       setSelectedNodeIds(new Set(command.nodeIds));
@@ -2076,6 +2088,50 @@ ${contextInfo}
     setCompareImages({ before: beforeUrl, after: imageUrl });
     setComparePosition(50);
   }, [wf.nodes, wf.connections, execResults]);
+
+  const handleSendWorkflowResultToChat = useCallback(async (nodeId: string) => {
+    if (!projectId || !executionId) {
+      setExecLogs(prev => mergeExecutionLogs(prev, [{
+        time: Date.now(), nodeId, label: wf.nodes.find(node => node.id === nodeId)?.label || nodeId,
+        status: 'error', message: '工作流结果尚未完成，无法发送到智能对话',
+      }]));
+      return;
+    }
+    const reference = resolveWorkflowOutputAssetReference(
+      nodeId,
+      wf.nodes,
+      wf.connections,
+      execResults,
+    );
+    if (!reference?.assetVersionId) {
+      setExecLogs(prev => mergeExecutionLogs(prev, [{
+        time: Date.now(), nodeId, label: wf.nodes.find(node => node.id === nodeId)?.label || nodeId,
+        status: 'error', message: '输出缺少规范素材版本，无法发送到智能对话',
+      }]));
+      return;
+    }
+    const targetChatProjectId = localStorage.getItem('wujie_last_simple_chat_project') || undefined;
+    const targetUrl = buildWorkflowChatReturnIntentUrl({
+      assetProjectId: projectId,
+      sourceVersionId: reference.assetVersionId,
+      workflowId: wf.id,
+      executionId,
+      outputNodeId: nodeId,
+      outputLabel: wf.nodes.find(node => node.id === nodeId)?.label || '工作流结果',
+    }, targetChatProjectId);
+    try {
+      await navigateToWorkflowChatAfterPersistence(
+        targetUrl,
+        onBeforeWorkflowChatNavigation || (async () => undefined),
+        target => window.location.assign(target),
+      );
+    } catch (error) {
+      setExecLogs(prev => mergeExecutionLogs(prev, [{
+        time: Date.now(), nodeId, label: wf.nodes.find(node => node.id === nodeId)?.label || nodeId,
+        status: 'error', message: error instanceof Error ? error.message : '保存工作区失败，未跳转到智能对话',
+      }]));
+    }
+  }, [execResults, executionId, onBeforeWorkflowChatNavigation, projectId, wf.connections, wf.id, wf.nodes]);
 
   // P1: 键盘快捷键 (复制/粘贴/删除)
   useEffect(() => {
@@ -2932,6 +2988,7 @@ ${contextInfo}
     onExtractToSource: handleExtractToSource,
     onGridSplit: handleGridSplit,
     onCompare: handleCompare,
+    onSendToChat: handleSendWorkflowResultToChat,
     onTriggerImageUpload: triggerNodeImageUpload,
     onImageFileDrop: handleImageUpload,
     promptPresets: nodePromptPresets,
@@ -3069,6 +3126,25 @@ ${contextInfo}
           {/* 工作流名称 + 统计 */}
           <span className="text-sm font-semibold text-primary mr-1">{wf.name}</span>
           <span className="text-[11px] text-muted-foreground mr-2">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
+          {execStatus !== 'idle' && (
+            <div aria-live="polite" className="flex items-center gap-1.5 rounded-md border border-border/20 bg-muted/50 px-2 py-1 text-[11px]">
+              {execStatus === 'running' && <Loader2 size={12} className="animate-spin text-primary" />}
+              {execStatus === 'completed' && <Check size={12} className="text-green-400" />}
+              {execStatus === 'failed' && <AlertCircle size={12} className="text-red-400" />}
+              <span className={execStatus === 'running' ? 'text-primary' : execStatus === 'completed' ? 'text-green-400' : 'text-red-400'}>
+                {execStatus === 'running' ? '执行中' : execStatus === 'completed' ? '执行完成' : '执行失败'}
+              </span>
+              <span className="text-muted-foreground">{Object.keys(execResults).length}/{wf.nodes.length}</span>
+              <button
+                type="button"
+                onClick={() => { setExecStatus('idle'); setExecResults({}); setExecLogs([]); }}
+                className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="关闭执行状态"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          )}
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
           {/* 缩放控制 */}
           <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max(0.2, v.zoom * 0.8) }))} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer" title="缩小 (Ctrl+-)" aria-label="缩小">
@@ -3184,10 +3260,10 @@ ${contextInfo}
             <WorkflowReactFlowSurface
               model={reactFlowWorkflowRenderModel}
               onCommand={handleWorkflowRenderCommand}
-              onNodePositionPreview={previewWorkflowNodePositions}
               onNodeDragStart={beginWorkflowDrag}
               onNodeDragEnd={finishWorkflowDrag}
               onViewportChange={setViewport}
+              visibleNodeIds={visibleNodeIds}
               readOnly={false}
               theme={T}
               execResults={execResults}
@@ -3253,7 +3329,7 @@ ${contextInfo}
         <button
           type="button"
           data-toolbar="node-annotation-entry"
-          className={`absolute bottom-3 left-1/2 z-20 inline-flex h-9 -translate-x-1/2 items-center gap-2 rounded-md border px-3 text-xs font-medium shadow-lg transition-colors ${
+          className={`absolute bottom-3 left-1/2 z-[1] inline-flex h-9 -translate-x-1/2 items-center gap-2 rounded-md border px-3 text-xs font-medium shadow-lg transition-colors ${
             nodeAnnotationSession
               ? 'border-primary bg-primary text-primary-foreground'
               : 'border-border bg-card/95 text-muted-foreground hover:border-primary/50 hover:text-foreground'
@@ -3280,14 +3356,16 @@ ${contextInfo}
         )}
 
         {/* 端口类型图例 */}
-        <div className="absolute bottom-3 left-3 bg-card/90 border border-border rounded px-3 py-2 flex items-center gap-3 text-xs">
-          {Object.entries(PORT_COLORS).map(([type, color]) => (
-            <div key={type} className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-              <span className="text-muted-foreground">{type}</span>
-            </div>
-          ))}
-        </div>
+        {selectedNodeIds.size === 0 && (
+          <div className="absolute bottom-3 left-3 pointer-events-none bg-card/90 border border-border rounded px-3 py-2 flex items-center gap-3 text-xs">
+            {Object.entries(PORT_COLORS).map(([type, color]) => (
+              <div key={type} className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+                <span className="text-muted-foreground">{type}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* 小地图（P2增强：视口指示+点击导航） */}
         {showMinimap && (() => {
@@ -3310,7 +3388,9 @@ ${contextInfo}
           const vpH = vpScreenH * scale;
           return (
             <div
-              className="absolute bottom-3 right-3 w-[160px] h-[100px] bg-card/90 border border-border rounded overflow-hidden cursor-pointer"
+              data-workflow-minimap
+              data-workflow-ui-occlusion
+              className="absolute bottom-3 right-3 hidden h-[100px] w-[160px] cursor-pointer overflow-hidden rounded border border-border bg-card/90 md:block"
               onClick={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const clickX = e.clientX - rect.left;
@@ -3359,68 +3439,6 @@ ${contextInfo}
           );
         })()}
 
-        {/* 执行状态栏 */}
-        {execStatus !== 'idle' && (
-          <div className="absolute bottom-12 left-3 bg-card/95 border border-border rounded px-3 py-2 flex items-center gap-3 text-sm">
-            {execStatus === 'running' && <Loader2 size={14} className="animate-spin text-primary" />}
-            {execStatus === 'completed' && <Check size={14} className="text-green-400" />}
-            {execStatus === 'failed' && <AlertCircle size={14} className="text-red-400" />}
-            <span className={execStatus === 'running' ? 'text-primary' : execStatus === 'completed' ? 'text-green-400' : 'text-red-400'}>
-              {execStatus === 'running' ? '执行中...' : execStatus === 'completed' ? '执行完成' : '执行失败'}
-            </span>
-            <span className="text-muted-foreground">
-              {Object.keys(execResults).length}/{wf.nodes.length} 节点
-            </span>
-            <button onClick={() => { setExecStatus('idle'); setExecResults({}); setExecLogs([]); }} className="text-muted-foreground hover:text-foreground cursor-pointer">
-              <X size={12} />
-            </button>
-          </div>
-        )}
-
-        {/* P2: 执行日志面板 (增强版) */}
-        {(showExecLog || execLogs.length > 0) && (
-          <div className="absolute bottom-12 right-3 w-[380px] max-h-[280px] bg-card/95 border border-border rounded-lg overflow-hidden flex flex-col shadow-lg">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/50">
-              <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">执行日志</span>
-              <div className="flex items-center gap-2">
-                {(() => {
-                  const success = execLogs.filter(l => l.status === 'success').length;
-                  const failed = execLogs.filter(l => l.status === 'error').length;
-                  const total = execLogs.length;
-                  return (
-                    <div className="flex items-center gap-1.5 text-[10px]">
-                      <span className="text-green-400">{success} 通过</span>
-                      {failed > 0 && <span className="text-red-400">{failed} 失败</span>}
-                      <span className="text-muted-foreground">{total} 总计</span>
-                    </div>
-                  );
-                })()}
-                <button onClick={() => setExecLogs([])} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={10} /></button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto text-[10px]">
-              {execLogs.map((log, i) => {
-                const nodeIcon = log.nodeType === 'image' ? '🖼' : log.nodeType === 'text' ? '📝' : log.nodeType === 'control' ? '🔄' : '⚙';
-                return (
-                  <div key={i} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 group ${log.status === 'error' ? 'bg-red-500/5' : ''}`}>
-                    <span className="flex-shrink-0 text-[10px]">{nodeIcon}</span>
-                    {log.status === 'success' ? <Check size={8} className="text-green-400 flex-shrink-0" /> : log.status === 'running' ? <Loader2 size={8} className="text-yellow-400 flex-shrink-0 animate-spin" /> : <AlertCircle size={8} className="text-red-400 flex-shrink-0" />}
-                    <span className="text-foreground/80 flex-shrink-0 font-medium">{log.label}</span>
-                    <span className={`flex-1 truncate ${log.status === 'success' ? 'text-green-400/60' : log.status === 'running' ? 'text-yellow-400/60' : 'text-red-400/60'}`}>{log.message}</span>
-                    {log.duration != null && <span className="text-muted-foreground/60 flex-shrink-0 tabular-nums">{log.duration >= 1000 ? `${(log.duration / 1000).toFixed(1)}s` : `${log.duration}ms`}</span>}
-                    <span className="text-muted-foreground/40 flex-shrink-0">{new Date(log.time).toLocaleTimeString()}</span>
-                    {/* B2: 失败节点一键重试 */}
-                    {log.status === 'error' && (
-                      <button onClick={(e) => { e.stopPropagation(); handleRetryNode(log.nodeId); }} className="opacity-0 group-hover:opacity-100 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-all cursor-pointer flex-shrink-0" title="重试此节点">
-                        <RefreshCw size={10} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>{/* 主画布 end */}
 
       {/* ═══ 右侧属性面板 - 与原型对齐: w-72, 始终可见 ═══ */}
@@ -3455,7 +3473,7 @@ ${contextInfo}
       <div data-workflow-ui-occlusion className="shrink-0 border-t border-border/20 bg-card">
         {/* 内容条 */}
         {showContentStrip && (
-        <div className="hidden border-b border-border/10 md:block">
+        <div className="block border-b border-border/10">
           <div className="flex items-center justify-between px-4 h-8">
             <div className="flex items-center gap-2">
               <FolderOpen size={12} className="text-primary" />

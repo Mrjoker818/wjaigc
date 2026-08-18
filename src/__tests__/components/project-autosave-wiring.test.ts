@@ -33,16 +33,16 @@ describe('project autosave wiring', () => {
     expect(writerStart).toBeGreaterThan(-1);
     expect(writerSource).toContain("reason === 'immediate'");
     expect(writerSource).toContain('manager.updateProjectInMemory(');
-    expect(writerSource).toContain('await manager.flushProjectsToServer()');
+    expect(writerSource).toContain('await manager.flushProjectsToServerWithConflictRecovery()');
     expect(writerSource.indexOf('manager.updateProjectInMemory('))
-      .toBeLessThan(writerSource.indexOf('await manager.flushProjectsToServer()'));
+      .toBeLessThan(writerSource.indexOf('await manager.flushProjectsToServerWithConflictRecovery()'));
   });
 
   it('sends the full autosave audit after the immediate project sync settles', () => {
     const writerStart = workspaceSource.indexOf('writer: async (snapshot');
     const writerEnd = workspaceSource.indexOf('const canvasPersistenceScheduler =', writerStart);
     const writerSource = workspaceSource.slice(writerStart, writerEnd);
-    const flush = writerSource.indexOf('await manager.flushProjectsToServer()');
+    const flush = writerSource.indexOf('await manager.flushProjectsToServerWithConflictRecovery()');
     const settledAudit = writerSource.indexOf('recordAutosave();', flush);
 
     expect(writerStart).toBeGreaterThan(-1);
@@ -114,6 +114,17 @@ describe('project autosave wiring', () => {
   it('forces a recovered emergency snapshot through the immediate server barrier', () => {
     expect(workspaceSource).toContain('recoveredCanvasPersistenceRef.current = {');
     expect(workspaceSource).toContain("persistCanvasImagesNow(recovered.images, 'immediate')");
+  });
+
+  it('builds workflow output images with every field required by the project sync validator', () => {
+    const handlerStart = workspaceSource.indexOf('const handleAddImages = useCallback');
+    const handlerEnd = workspaceSource.indexOf('const handleAddImage = useCallback', handlerStart);
+    const handlerSource = workspaceSource.slice(handlerStart, handlerEnd);
+
+    expect(handlerStart).toBeGreaterThan(-1);
+    expect(handlerSource).toContain('const nextWorkflowImageZIndex =');
+    expect(handlerSource).toContain('rotation: 0,');
+    expect(handlerSource).toContain('zIndex: nextWorkflowImageZIndex + newImages.length,');
   });
 
   it('forces the committed resize snapshot into the immediate persistence path', () => {

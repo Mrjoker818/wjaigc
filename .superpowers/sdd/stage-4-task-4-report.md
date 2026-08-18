@@ -28,10 +28,25 @@
 - TypeScript: `pnpm ts-check` passed after replacing callback-assigned nullable E2E state with explicit post-poll reads.
 - Changed-file ESLint: `0 errors / 64 historical warnings`.
 
-## Remaining Gates
+## Final Local Verification (2026-08-18)
 
-- Independent task-scoped specification and code-quality review.
-- Fresh full PostgreSQL, Vitest, API, ESLint, build and protected-baseline gates.
-- Five-browser local matrices in the fixed sequence: legacy, shadow, v2, legacy rollback.
-- Final testing reports, progress ledger and Obsidian update.
-- Main-only push and Coze exact-SHA validation; `stable` must remain unchanged.
+- Full PostgreSQL-enabled Vitest: `476/476` files and `2920/2920` tests passed with zero skipped tests.
+- API suite: `117/117` files and `582/582` tests passed.
+- Component/lib regression suite: `320/320` files and `2063/2063` tests passed.
+- Production Stage 4 matrix: Chromium, Chromium 1920x1080, Firefox, WebKit and mobile Chromium all passed, `15/15` total.
+- Chromium 1920x1080 100-node performance repeated `3/3`: `56.70 / 57.15 / 55.62 FPS`; P95 `12.80 / 14.40 / 16.70 ms`; disappeared frames and unclickable duration were all zero.
+- TypeScript passed. ESLint reported `0 errors / 988 historical warnings`.
+- Production build passed with `113` generated pages/routes.
+- Doctor exited successfully. Protected baseline passed `38/38`, with zero unapproved drift and zero warnings.
+- `git diff --check` passed. Manual task-scoped review found no new P0/P1 issue. A separate Codex reviewer could not be launched because the local Windows executable returned access denied, so this is not represented as an independent review.
+
+## Local Task 4 Result
+
+Task 4 is locally complete. The three workspaces now preserve durable AssetVersion lineage, persist before navigation, reject stale/duplicate transfers, keep Agent settlement monotonic, and run React Flow v2 above the fixed performance threshold without reducing any gate.
+
+## Remaining External Gates
+
+- Push the reviewed candidate to `main` only and record the exact resulting SHA.
+- Pull that exact SHA in Coze and repeat the authenticated Chrome smoke, workspace round-trip, paid cancellation and accounting checks.
+- GitHub Actions remains externally unavailable because of account billing. It is bypassed only for local progress and is not classified as a pass.
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` must remain unchanged.

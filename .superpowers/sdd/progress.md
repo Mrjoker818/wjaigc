@@ -437,3 +437,11 @@ Protected stable branch: read-only and untouched
 - Exact committed-source browser evidence passes legacy `5/5` and shadow `5/5`. Desktop Chromium is `59.91/58.22 FPS` in legacy and `59.90/57.66 FPS` in shadow; all ten profiles have P95 `<=18 ms`, lost nodes `0`, unclickable time `0`, console events `0`, unexpected network failures `0`, and complete screenshot/video/Trace/source evidence.
 - Fresh gates pass: focused `156/156`; TypeScript; ESLint `0 errors / 987 historical warnings`; PostgreSQL-enabled full Vitest `2882/2882` plus separate historical PostgreSQL concurrency `4/4`; production build `113/113`; protected baseline `38/38 / 0 warnings`.
 - Next unique action is Stage 4 Task 4 only: three-workspace result projection and lineage, real accounting races, five-browser end-to-end chain, then `legacy -> shadow -> react-flow-v2 -> legacy` forced rollback. GitHub Actions billing remains externally unexecuted and must not be reported as passing.
+## 2026-08-18 Stage 4 Task 4 local completion candidate
+
+- Task 4 local implementation and regression are complete on `codex/wj-stable-s4`, based on `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+- Three-workspace result projection now preserves one canonical AssetVersion lineage across chat, Canvas and workflow placements. Workflow-to-chat navigation waits for Canvas persistence, and repeated transfers are deduplicated by asset/placement identity.
+- React Flow v2 keeps drag state local until drag end, virtualizes to the exact idle viewport while pinning selected/dragged nodes, memoizes projected edges and removes overlapping UI work. The final five-profile production matrix passes `15/15`.
+- Chromium 1080p 100-node performance passed three consecutive runs at `56.70 / 57.15 / 55.62 FPS`; P95 was `12.80 / 14.40 / 16.70 ms`; disappeared frames and unclickable duration were zero.
+- Fresh gates: Vitest `476 files / 2920 tests`, API `117 / 582`, regression `320 / 2063`, TypeScript, build `113` routes, Doctor and protected baseline `38/38` pass; ESLint is `0 errors / 988 historical warnings`.
+- Next unique action is a normal `main`-only push followed by Coze exact-SHA authenticated Chrome validation. GitHub Actions billing remains external/unexecuted, not passed; `stable` must not change.

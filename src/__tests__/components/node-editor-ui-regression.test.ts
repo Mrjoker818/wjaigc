@@ -24,6 +24,9 @@ describe('node editor UI regressions', () => {
   });
 
   it('marks only known layout chrome as workflow canvas occlusion', () => {
-    expect(source.match(/data-workflow-ui-occlusion/g)).toHaveLength(2);
+    expect(source.match(/data-workflow-ui-occlusion/g)).toHaveLength(3);
+    expect(source).toMatch(/data-workflow-minimap\s+data-workflow-ui-occlusion/);
+    expect(source).toMatch(/<aside data-workflow-ui-occlusion/);
+    expect(source).toMatch(/<div data-workflow-ui-occlusion className="shrink-0 border-t/);
   });
 });

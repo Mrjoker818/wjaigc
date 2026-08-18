@@ -29,7 +29,8 @@ export interface WorkflowConnectionBounds {
   toNodeId: string;
 }
 
-const OVERSCAN_FACTOR = 0.5;
+const IDLE_OVERSCAN_FACTOR = 0;
+const PAN_OVERSCAN_FACTOR = 0.5;
 
 function toCanvasOrigin(viewport: WorkflowViewport): { x: number; y: number } {
   return {
@@ -53,12 +54,15 @@ export function resolveWorkflowCullingBounds(
   const zoom = isPanning ? preview.zoom : committed.zoom;
   const width = viewportSize.width / zoom;
   const height = viewportSize.height / zoom;
-  const overscanX = width * OVERSCAN_FACTOR;
-  const overscanY = height * OVERSCAN_FACTOR;
+  const overscanFactor = isPanning ? PAN_OVERSCAN_FACTOR : IDLE_OVERSCAN_FACTOR;
+  const overscanX = width * overscanFactor;
+  const overscanY = height * overscanFactor;
+  const minX = Math.min(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
 
   return {
-    minX: Math.min(start.x, end.x) - overscanX,
-    minY: Math.min(start.y, end.y) - overscanY,
+    minX: overscanX === 0 ? (minX === 0 ? 0 : minX) : minX - overscanX,
+    minY: overscanY === 0 ? (minY === 0 ? 0 : minY) : minY - overscanY,
     maxX: Math.max(start.x + width, end.x + width) + overscanX,
     maxY: Math.max(start.y + height, end.y + height) + overscanY,
   };

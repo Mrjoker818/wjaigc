@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   canvasEntityIdForTransferredReference,
   extractTaskAssetReferences,
+  filterUniqueCanvasImageInsertions,
   mergeWorkspaceAssetReferences,
   parseCanvasAssetDragPayload,
   prepareWorkflowCanvasInsertions,
@@ -67,6 +68,18 @@ describe('managed workspace reference identity', () => {
 });
 
 describe('workflow output canvas insertion', () => {
+  it('drops a concurrent duplicate that resolves to the same canvas placement', () => {
+    const existing = [{ id: 'canvas-node-a', url: '/same.png', placementId: 'placement-a' }];
+
+    expect(filterUniqueCanvasImageInsertions(existing, [
+      { id: 'canvas-node-a', url: '/same.png', placementId: 'placement-a' },
+      { id: 'different-node', url: '/same.png', placementId: 'placement-a' },
+      { id: 'canvas-node-b', url: '/same.png', placementId: 'placement-b' },
+    ])).toEqual([
+      { id: 'canvas-node-b', url: '/same.png', placementId: 'placement-b' },
+    ]);
+  });
+
   it('keeps a managed output retryable when its transfer fails', async () => {
     const transfer = vi.fn().mockRejectedValue(new Error('transfer unavailable'));
 

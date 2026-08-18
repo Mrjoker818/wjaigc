@@ -26,6 +26,12 @@ import { useTheme } from "@/app/simple-chat/providers";
 import { AgentProgressTimeline } from "@/components/agent-runtime/AgentProgressTimeline";
 import { useAgentRunEvents } from "@/components/agent-runtime/use-agent-run-events";
 import { isWorkspaceResultScopeCurrent } from "@/lib/asset-core/workspace-transfer";
+import { completedChatImageMessageContent } from "@/lib/chat-pending-generation";
+import {
+  buildWorkflowChatReturnTransfer,
+  createWorkflowChatReturnMessage,
+  parseWorkflowChatReturnIntent,
+} from "@/lib/asset-core/workflow-chat-return";
 
 type ChatModelInfo = {
   id: string;
@@ -71,6 +77,7 @@ interface ChatAreaProps {
   project: SimpleChatProject | null;
   task: SimpleChatTask | null;
   onUpdateTask: (task: SimpleChatTask) => void;
+  onPersistTask: (task: SimpleChatTask) => Promise<void>;
   onUpdateProject: (project: SimpleChatProject) => void;
   onCreateTask: (projectId: string, initialData?: { name?: string; messages?: SimpleChatMessage[]; model?: string; providerId?: string }) => void;
   onSelectTask: (task: SimpleChatTask) => void;
@@ -163,7 +170,7 @@ function SearchResultsCard({ content }: { content: string }) {
 }
 
 export default function ChatArea({
-  user, project, task, onUpdateTask, onUpdateProject, onCreateTask, onSelectTask,
+  user, project, task, onUpdateTask, onPersistTask, onUpdateProject, onCreateTask, onSelectTask,
   onUpdateAgent, onDeleteAgent, onSkillToAgent,
   onLogout, onBackToWorkspace, sidebarOpen, onToggleSidebar
 }: ChatAreaProps) {
@@ -264,8 +271,54 @@ export default function ChatArea({
   const [messages, setMessages] = useState<SimpleChatMessage[]>((task?.messages || []).filter(Boolean));
   const projectIdRef = useRef(project?.id);
   const taskIdRef = useRef(task?.id);
+  const workflowReturnHandledRef = useRef<string | null>(null);
   projectIdRef.current = project?.id;
   taskIdRef.current = task?.id;
+
+  useEffect(() => {
+    if (project?.id) localStorage.setItem('wujie_last_simple_chat_project', project.id);
+  }, [project?.id]);
+
+  useEffect(() => {
+    if (!project?.id || !task?.id) return;
+    const intent = parseWorkflowChatReturnIntent(window.location.search);
+    if (!intent) return;
+    const intentKey = `${project.id}:${intent.executionId}:${intent.outputNodeId}:${intent.sourceVersionId}`;
+    if (workflowReturnHandledRef.current === intentKey) return;
+    workflowReturnHandledRef.current = intentKey;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch('/api/assets/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildWorkflowChatReturnTransfer(intent, project.id)),
+        });
+        if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
+        const reference = readWorkspaceAssetReference(await response.json());
+        if (!reference?.assetVersionId || !reference.placementId || !reference.entityId) {
+          throw new Error('Asset transfer returned an incomplete reference');
+        }
+        if (cancelled || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
+        const returned = createWorkflowChatReturnMessage(intent, reference);
+        const persistedMessages = (task.messages || []).some(message => message.id === returned.id)
+          ? task.messages
+          : [...(task.messages || []), returned];
+        await onPersistTask({ ...task, messages: persistedMessages, updatedAt: Date.now() });
+        if (cancelled || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
+        setMessages(persistedMessages);
+        const current = new URL(window.location.href);
+        for (const key of [
+          'assetProjectId', 'workflowVersionId', 'workflowId', 'workflowExecutionId',
+          'workflowOutputNodeId', 'workflowOutputLabel',
+        ]) current.searchParams.delete(key);
+        window.history.replaceState(null, '', `${current.pathname}${current.search}${current.hash}`);
+      } catch {
+        if (!cancelled) setSearchStatus('工作流结果返回失败，请重试');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [onPersistTask, project?.id, task?.id]);
 
   // Sync when task changes
   useEffect(() => {
@@ -902,7 +955,7 @@ export default function ChatArea({
                     const imageIndex = message.images?.length || 0;
                     return {
                       ...message,
-                      content: message.content || '图片已生成',
+                      content: completedChatImageMessageContent(message.content),
                       images: [...(message.images || []), imageUrl],
                       imageRefs: [...(message.imageRefs || []), imageRef?.assetVersionId && imageRef.placementId
                         ? imageRef
@@ -1547,7 +1600,13 @@ export default function ChatArea({
             </div>
           )}
           {messages.map((msg, idx) => (
-            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`} style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}>
+            <div
+              key={msg.id}
+              data-chat-message-id={msg.id}
+              data-chat-asset-placement-ids={(msg.imageRefs || []).map(reference => reference.placementId).filter(Boolean).join(' ')}
+              className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}
+              style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}
+            >
               {/* Search results card */}
               {msg.role === 'search' && (
                 <SearchResultsCard content={msg.content} />

@@ -39,14 +39,14 @@ const providerCounts = new Map<string, {
   workspaceVision: number;
   imageGeneration: number;
 }>();
-const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEAQH/3xZsWQAAAABJRU5ErkJggg==';
-type Stage4ExpectedAgentMode = 'shadow' | 'agent-v2';
+const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+type Stage4ExpectedAgentMode = 'legacy' | 'shadow' | 'agent-v2';
 type Stage4ExpectedWorkflowRendererMode = 'legacy' | 'shadow' | 'react-flow-v2';
 
 function requiredExpectedAgentMode(): Stage4ExpectedAgentMode {
   const mode = process.env.E2E_STAGE4_EXPECTED_AGENT_MODE?.trim();
-  if (mode === 'shadow' || mode === 'agent-v2') return mode;
-  throw new Error('BLOCKED: E2E_STAGE4_EXPECTED_AGENT_MODE must be shadow or agent-v2');
+  if (mode === 'legacy' || mode === 'shadow' || mode === 'agent-v2') return mode;
+  throw new Error('BLOCKED: E2E_STAGE4_EXPECTED_AGENT_MODE must be legacy, shadow, or agent-v2');
 }
 
 const expectedAgentMode = requiredExpectedAgentMode();
@@ -235,7 +235,6 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
   expect(vision.text).not.toContain('CONTROLLED_CONTINUATION_SHOULD_NOT_EXIST');
   expect(counts(fixture.browserProfile), vision.text).toMatchObject({ ordinary: 1, visionMain: 1, visionProvider: 1 });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => localStorage.setItem('wujie_selected_model', JSON.stringify({
     model: 'stage4-image-model', providerId: 'stage4-image-provider',
   })));
@@ -272,7 +271,7 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
   const taskId = String(submission.taskId);
   const legacyTaskStorageKey = `wujie_agent_legacy_task:${fixture.canvasProject.id}:${asset.selectedEntityId}`;
 
-  if (expectedAgentMode === 'shadow') {
+  if (expectedAgentMode !== 'agent-v2') {
     expect(submission).not.toHaveProperty('runId');
     await expect(page.getByText(/^Agent round 1:/))
       .toBeVisible({ timeout: 20_000 });
@@ -326,7 +325,9 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
         adopted: null,
       },
     ];
-    await expect.poll(readShadowEvents, { timeout: 20_000 }).toEqual(expectedShadowEvents);
+    if (expectedAgentMode === 'shadow') {
+      await expect.poll(readShadowEvents, { timeout: 20_000 }).toEqual(expectedShadowEvents);
+    }
 
     const cancelResponse = page.waitForResponse(response => (
       response.request().method() === 'GET'
@@ -346,7 +347,9 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
     await openAgentEditor();
     await expect(page.getByText('任务已取消', { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole('button', { name: '取消任务', exact: true })).toHaveCount(0);
-    await expect.poll(readShadowEvents, { timeout: 20_000 }).toEqual(expectedShadowEvents);
+    if (expectedAgentMode === 'shadow') {
+      await expect.poll(readShadowEvents, { timeout: 20_000 }).toEqual(expectedShadowEvents);
+    }
   } else {
     expect(typeof submission.runId).toBe('string');
     const cancel = page.getByRole('button', { name: '取消任务', exact: true });
@@ -378,8 +381,19 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   const fixture = await stage4FixtureForProject(testInfo.project.name);
   providerCounts.delete(fixture.browserProfile);
   const auth = await ensureStage4Session(page, fixture);
-  await seedStage4Baseline(page, fixture, auth);
-  await seedStage4RuntimeDependencies({ auth, fixture, providerBaseUrl: `${providerBaseUrl}/v1` });
+  const chainFixture = structuredClone(fixture);
+  const chainMetadata = chainFixture.canvasProject.metadata as Record<string, unknown>;
+  chainFixture.canvasProject.metadata = {
+    ...chainMetadata,
+    workflow: {
+      ...chainFixture.workflow,
+      nodes: [],
+      connections: [],
+      name: `Stage 4 UI chain ${fixture.browserProfile}`,
+    },
+  };
+  await seedStage4Baseline(page, chainFixture, auth);
+  await seedStage4RuntimeDependencies({ auth, fixture: chainFixture, providerBaseUrl: `${providerBaseUrl}/v1` });
   const canvasProjectId = String(fixture.canvasProject.id);
   const chatProjectId = String(fixture.chatProject.id);
 
@@ -418,7 +432,8 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
       `SELECT task.id, task.status, version.id AS asset_version_id
          FROM cloud_tasks task
          LEFT JOIN wujie_asset_versions version ON version.task_id = task.id
-        WHERE task.user_id = $1 AND task.project_id = $2 AND task.type = 'generate'
+        WHERE task.user_id = $1 AND task.project_id = $2
+          AND task.type IN ('generate', 'generate-async')
         ORDER BY task.created_at DESC
         LIMIT 1`,
       [auth.userId, canvasProjectId],
@@ -485,122 +500,110 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(generatedCanvasImage).toBeVisible({ timeout: 30_000 });
 
-  const workflowReference = await page.evaluate(async input => {
-    const response = await fetch('/api/assets/transfer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sourceVersion: input.assetVersionId,
-        targetProject: input.projectId,
-        targetWorkspace: `workflow:${input.projectId}`,
-        entityType: 'workflow-input',
-        entityId: `stage4-chain-input:${input.profile}`,
-        idempotencyKey: `stage4-chain-workflow:${input.profile}:${input.assetVersionId}`,
-        metadata: { source: 'stage-4-e2e' },
-      }),
-    });
-    return { status: response.status, body: await response.json() };
-  }, {
-    assetVersionId: generatedTask.asset_version_id,
-    projectId: canvasProjectId,
-    profile: fixture.browserProfile,
-  });
-  expect(workflowReference.status).toBe(200);
-
   await page.getByTitle('节点模式').first().click();
   const expectedSurface = expectedWorkflowRendererMode === 'react-flow-v2'
     ? page.locator('[data-workflow-react-flow-surface]')
     : page.locator('[data-workflow-legacy-surface]');
   await expect(expectedSurface).toBeVisible({ timeout: 30_000 });
-  const workflowExecution = await page.evaluate(async input => {
-    const inputNode = {
-      id: 'stage4-chain-input', type: 'input-image', label: 'Stage 4 chain input', x: 80, y: 80,
-      width: 200, height: 92,
-      config: {
-        projectId: input.projectId,
-        imageUrl: input.reference.url,
-        assetVersionId: input.reference.assetVersionId,
-        placementId: input.reference.placementId,
-      },
-      ports: [{ id: 'out-image', label: '图片', type: 'image', direction: 'out' }],
-    };
-    const outputNode = {
-      id: 'stage4-chain-output', type: 'output-image', label: 'Stage 4 chain output', x: 360, y: 80,
-      width: 200, height: 92, config: {},
-      ports: [{ id: 'in-image', label: '图片', type: 'image', direction: 'in' }],
-    };
-    const start = await fetch('/api/workflow/execute', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'start', projectId: input.projectId,
-        nodes: [inputNode, outputNode],
-        connections: [{
-          id: 'stage4-chain-edge', fromNodeId: inputNode.id, fromPortId: 'out-image',
-          toNodeId: outputNode.id, toPortId: 'in-image', type: 'image',
-        }],
-      }),
-    });
-    const started = await start.json();
-    if (!start.ok) return { status: start.status, started };
-    for (let attempt = 0; attempt < 50; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 200));
-      const statusResponse = await fetch('/api/workflow/execute', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'status', executionId: started.executionId }),
-      });
-      const status = await statusResponse.json();
-      if (status.status !== 'running') return { status: statusResponse.status, started, terminal: status };
-    }
-    return { status: 408, started };
-  }, {
-    projectId: canvasProjectId,
-    reference: workflowReference.body as { url: string; assetVersionId: string; placementId: string },
+  const contentImage = page.locator(`[data-node-canvas-image="${canvasReference.entity_id}"]`);
+  await expect(contentImage).toBeVisible({ timeout: 30_000 });
+  const workflowTransferResponse = page.waitForResponse(response => {
+    if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/assets/transfer') return false;
+    const body = response.request().postDataJSON() as Record<string, unknown> | null;
+    return body?.entityType === 'workflow-input' && body?.sourceVersion === generatedTask.asset_version_id;
   });
-  expect(workflowExecution).toMatchObject({
-    status: 200,
-    terminal: {
-      status: 'completed',
-      results: {
-        'stage4-chain-output': {
-          status: 'success',
-          output: { assetVersionId: generatedTask.asset_version_id },
-        },
-      },
-    },
-  });
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.getByTitle('节点模式').first().click();
-  await expect(expectedSurface).toBeVisible({ timeout: 30_000 });
-
-  const returnedChatReference = await page.evaluate(async input => {
-    const response = await fetch('/api/assets/transfer', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sourceVersion: input.assetVersionId,
-        targetProject: input.projectId,
-        targetWorkspace: `standalone-chat:${input.chatProjectId}`,
-        entityType: 'chat-result',
-        entityId: `stage4-chain-return:${input.profile}`,
-        idempotencyKey: `stage4-chain-chat-return:${input.profile}:${input.assetVersionId}`,
-        metadata: { source: 'workflow' },
-      }),
+  const workflowSurfaceBox = await expectedSurface.boundingBox();
+  expect(workflowSurfaceBox).not.toBeNull();
+  const workflowDropPosition = {
+    x: Math.max(24, Math.min(420, workflowSurfaceBox!.width * 0.55)),
+    y: Math.max(24, Math.min(260, workflowSurfaceBox!.height * 0.35)),
+  };
+  if (testInfo.project.name === 'webkit') {
+    await page.evaluate(({ imageId, surfaceSelector, dropPosition }) => {
+      const source = Array.from(document.querySelectorAll<HTMLElement>('[data-node-canvas-image]'))
+        .find(element => element.dataset.nodeCanvasImage === imageId);
+      const target = document.querySelector<HTMLElement>(surfaceSelector);
+      if (!source || !target) throw new Error('Workflow drag source or target is missing');
+      const dataTransfer = new DataTransfer();
+      const rect = target.getBoundingClientRect();
+      const eventInit: DragEventInit = {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+        clientX: rect.left + dropPosition.x,
+        clientY: rect.top + dropPosition.y,
+      };
+      source.dispatchEvent(new DragEvent('dragstart', eventInit));
+      target.dispatchEvent(new DragEvent('dragover', eventInit));
+      target.dispatchEvent(new DragEvent('drop', eventInit));
+      source.dispatchEvent(new DragEvent('dragend', eventInit));
+    }, {
+      imageId: canvasReference.entity_id,
+      surfaceSelector: expectedWorkflowRendererMode === 'react-flow-v2'
+        ? '[data-workflow-react-flow-surface]'
+        : '[data-workflow-legacy-surface]',
+      dropPosition: workflowDropPosition,
     });
-    return { status: response.status, body: await response.json() };
-  }, {
+  } else {
+    await contentImage.dragTo(expectedSurface, {
+      sourcePosition: { x: 28, y: 28 },
+      targetPosition: workflowDropPosition,
+    });
+  }
+  const workflowTransfer = await workflowTransferResponse;
+  expect(workflowTransfer.ok()).toBe(true);
+  await expect(workflowTransfer.json()).resolves.toMatchObject({
     assetVersionId: generatedTask.asset_version_id,
-    projectId: canvasProjectId,
-    chatProjectId,
-    profile: fixture.browserProfile,
+    placementId: expect.any(String),
   });
-  expect(returnedChatReference).toMatchObject({
-    status: 200,
-    body: { assetVersionId: generatedTask.asset_version_id, placementId: expect.any(String) },
-  });
+  const inputNode = page.locator('[data-node-id]').filter({ hasText: '图片输入' }).last();
+  await expect(inputNode).toBeVisible({ timeout: 20_000 });
+  await inputNode.click({ position: { x: 48, y: 20 } });
+  const outputNodeType = page.locator('[data-node-type="output-image"]');
+  if (await outputNodeType.count() === 0) {
+    await page.getByRole('button', { name: '切换节点库面板', exact: true }).click();
+  }
+  await outputNodeType.click();
+  const outputNode = page.locator('[data-node-id]').filter({ hasText: '图片输出' }).last();
+  await expect(outputNode).toBeVisible({ timeout: 20_000 });
 
-  await openStage4ChatProject(page, chatProjectId);
+  const workflowStartedResponse = page.waitForResponse(response => {
+    if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/workflow/execute') return false;
+    const body = response.request().postDataJSON() as Record<string, unknown> | null;
+    return body?.action === 'start';
+  });
+  await page.getByRole('button', { name: '执行工作流', exact: true }).click();
+  const workflowStarted = await workflowStartedResponse;
+  expect(workflowStarted.ok()).toBe(true);
+  const workflowSubmission = await workflowStarted.json() as { executionId?: unknown };
+  expect(typeof workflowSubmission.executionId).toBe('string');
+  const workflowExecutionId = String(workflowSubmission.executionId);
+  const sendToChat = outputNode.getByRole('button', { name: '发送到智能对话', exact: true });
+  await expect(sendToChat).toBeVisible({ timeout: 60_000 });
+
+  const returnedTransferResponse = page.waitForResponse(response => {
+    if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/assets/transfer') return false;
+    const body = response.request().postDataJSON() as Record<string, unknown> | null;
+    return body?.entityType === 'chat-result'
+      && body?.targetWorkspace === `standalone-chat:${chatProjectId}`;
+  });
+  await sendToChat.click();
+  await expect(page).toHaveURL(new RegExp(`/simple-chat\\?`), { timeout: 30_000 });
+  const returnedTransfer = await returnedTransferResponse;
+  expect(returnedTransfer.ok()).toBe(true);
+  const returnedChatReference = await returnedTransfer.json() as {
+    assetVersionId?: unknown;
+    placementId?: unknown;
+  };
+  expect(returnedChatReference).toMatchObject({
+    assetVersionId: generatedTask.asset_version_id,
+    placementId: expect.any(String),
+  });
+  const returnedPlacementId = String(returnedChatReference.placementId);
+  const returnedMessage = page.locator(`[data-chat-asset-placement-ids~="${returnedPlacementId}"]`);
+  await expect(returnedMessage).toContainText('工作流结果已返回：图片输出', { timeout: 30_000 });
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('图片已生成', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('img[alt=""]')).not.toHaveCount(0);
+  await expect(returnedMessage).toContainText('工作流结果已返回：图片输出', { timeout: 30_000 });
 
   const lineage = await evidencePool!.query<{
     workspace_kind: string;
@@ -614,11 +617,11 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
       ORDER BY created_at, id`,
     [auth.userId, canvasProjectId, generatedTask.asset_version_id],
   );
-  expect(lineage.rows.map(row => row.workspace_kind)).toEqual(['chat', 'canvas', 'workflow', 'chat']);
+  expect(lineage.rows.map(row => row.workspace_kind)).toEqual(['chat', 'canvas', 'workflow', 'canvas', 'chat']);
   expect(lineage.rows.every(row => row.source_version_id === generatedTask.asset_version_id)).toBe(true);
   const workflowTask = await evidencePool!.query<{ status: string }>(
     'SELECT status FROM cloud_tasks WHERE id = $1 AND user_id = $2',
-    [(workflowExecution as { started: { executionId: string } }).started.executionId, auth.userId],
+    [workflowExecutionId, auth.userId],
   );
   expect(generatedTask.status).toBe('completed');
   expect(workflowTask.rows[0]?.status).toBe('completed');
@@ -626,7 +629,7 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   await writeStage4Metrics(stage4Evidence, testInfo, 'workspace-lineage', {
     generatedTaskId: generatedTask.id,
     generatedAssetVersionId: generatedTask.asset_version_id,
-    workflowExecutionId: (workflowExecution as { started: { executionId: string } }).started.executionId,
+    workflowExecutionId,
     placements: lineage.rows,
   });
 });

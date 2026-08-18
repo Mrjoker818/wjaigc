@@ -37,6 +37,20 @@ interface FaithfulReactFlowProps {
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
   return {
+    useNodesState: (initialNodes: HarnessNode[]) => {
+      const [nodes, setNodes] = React.useState(initialNodes);
+      const onNodesChange = (changes: Array<{
+        id: string;
+        type: 'position';
+        position: { x: number; y: number };
+      }>) => {
+        setNodes(current => current.map(node => {
+          const change = changes.find(candidate => candidate.id === node.id && candidate.type === 'position');
+          return change ? { ...node, position: { ...change.position } } : node;
+        }));
+      };
+      return [nodes, setNodes, onNodesChange] as const;
+    },
     ReactFlow: ({ nodes, onNodeDragStart, onNodesChange, onNodeDragStop, onViewportChange, children }: FaithfulReactFlowProps) => {
       const selectedNodes = nodes.filter(node => node.selected);
       const draggedNodes = selectedNodes.length > 0 ? selectedNodes : nodes.slice(0, 1);
@@ -83,7 +97,13 @@ vi.mock('@xyflow/react', async () => {
 import {
   useWorkflowDragSynchronization,
 } from '@/components/node-editor';
+import {
+  DEFAULT_WORKFLOW_NODE_THEME,
+} from '@/components/workflow/WorkflowLegacySurface';
+import { WorkflowLegacyNodeCard } from '@/components/workflow/WorkflowLegacyNodeCard';
 import { WorkflowReactFlowSurface } from '@/components/workflow/WorkflowReactFlowSurface';
+
+const resizeObserve = vi.fn();
 
 interface ControlledHostProps {
   externalWorkflow: Workflow;
@@ -118,13 +138,6 @@ function ControlledHost({ externalWorkflow }: ControlledHostProps) {
   const onCommand = useCallback((command: WorkflowInteractionCommand) => {
     dispatch({ kind: 'command', command });
   }, []);
-  const onNodePositionPreview = useCallback((positions: WorkflowNodePosition[]) => {
-    dispatch({
-      kind: 'system.update',
-      workflow: mergeExternalWorkflowWithPositions(editorState.workflow, positions),
-    });
-  }, [editorState.workflow]);
-
   return (
     <>
       <WorkflowReactFlowSurface
@@ -134,7 +147,6 @@ function ControlledHost({ externalWorkflow }: ControlledHostProps) {
           new Set(editorState.workflow.nodes.map(node => node.id)),
         )}
         onCommand={onCommand}
-        onNodePositionPreview={onNodePositionPreview}
         onNodeDragStart={dragSynchronization.beginWorkflowDrag}
         onNodeDragEnd={dragSynchronization.finishWorkflowDrag}
         onViewportChange={setViewport}
@@ -153,12 +165,41 @@ function readWorkflow(): Workflow {
 
 describe('controlled WorkflowReactFlowSurface behavior', () => {
   beforeEach(() => {
+    resizeObserve.mockClear();
     class ResizeObserverMock {
-      observe(): void {}
+      observe(): void { resizeObserve(); }
       unobserve(): void {}
       disconnect(): void {}
     }
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+  });
+
+  it('does not install a second size observer inside React Flow managed nodes', () => {
+    const node = createWorkflowNode('input-text', 0, 0, 'first');
+
+    const { container } = render(
+      <WorkflowLegacyNodeCard
+        node={node}
+        isSelected={false}
+        isHighlighted={false}
+        isHovered={false}
+        isRunning={false}
+        theme={DEFAULT_WORKFLOW_NODE_THEME}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+        onDragStart={vi.fn()}
+        onPortMouseDown={vi.fn()}
+        onPortMouseUp={vi.fn()}
+        onDelete={vi.fn()}
+        onDeselect={vi.fn()}
+        onPreviewImage={vi.fn()}
+        onUpdateNodeSize={vi.fn()}
+        layout="embedded"
+      />,
+    );
+
+    expect(container.querySelector('.node-card')?.classList.contains('react-flow-embedded')).toBe(true);
+    expect(resizeObserve).not.toHaveBeenCalled();
   });
 
   it('mounts DOM interactions through host drag guarding, deferred hydration, group commit, and viewport control', async () => {
@@ -172,7 +213,7 @@ describe('controlled WorkflowReactFlowSurface behavior', () => {
     fireEvent.mouseDown(surface);
     fireEvent.mouseMove(surface);
     expect(readWorkflow().nodes.map(node => ({ x: node.x, y: node.y }))).toEqual([
-      { x: 20, y: 30 }, { x: 260, y: 30 },
+      { x: 0, y: 0 }, { x: 240, y: 0 },
     ]);
     expect(screen.getByTestId('history-count').textContent).toBe('0');
 

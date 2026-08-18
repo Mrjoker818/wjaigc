@@ -11,7 +11,14 @@ import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { getSafeImageTypeFromDataUrl, getSafeMediaTypeFromResponse } from '@/lib/media-validation';
-import { projectAgentResultToWorkspace } from '@/lib/agent-runtime/workspace-results';
+import {
+  agentWorkspaceProjectionIdempotencyKey,
+  projectAgentResultToWorkspace,
+} from '@/lib/agent-runtime/workspace-results';
+import {
+  extractTaskAssetReferences,
+  findWorkspaceAssetReferenceByUrl,
+} from '@/lib/asset-core/workspace-transfer';
 import {
   buildSimpleChatAgentRequest,
   parseBoundedAgentSurfaceBody,
@@ -508,23 +515,35 @@ export async function POST(request: NextRequest) {
         imageUrl: string,
         prompt: string,
         authoritativeTaskId?: string,
+        authoritativeResult?: unknown,
       ): Promise<void> => {
         const outputIndex = generatedOutputIndex++;
         let imageRef: WorkspaceAssetReference | undefined;
         if (body.assetProjectId && body.projectId && body.taskId && body.responseMessageId) {
           try {
             if (authoritativeTaskId) {
-              const projected = await projectAgentResultToWorkspace({
-                actorUserId: user.id,
-                taskId: authoritativeTaskId,
-                targetProjectId: body.assetProjectId,
-                workspace: 'chat',
-                workspaceId: `standalone-chat:${body.projectId}`,
-                sourceEntityId: body.responseMessageId,
-                parentVersionIds: [],
-                idempotencyKey: `simple-chat-agent-result:${authoritativeTaskId}:${body.projectId}:${body.responseMessageId}`,
-              });
-              const reference = projected.find(item => item.url === imageUrl) || projected[0];
+              const workspaceId = `standalone-chat:${body.projectId}`;
+              const durableReferences = extractTaskAssetReferences(authoritativeResult);
+              const projected = durableReferences.length > 0
+                ? durableReferences
+                : await projectAgentResultToWorkspace({
+                    actorUserId: user.id,
+                    taskId: authoritativeTaskId,
+                    targetProjectId: body.assetProjectId,
+                    workspace: 'chat',
+                    workspaceId,
+                    sourceEntityId: body.responseMessageId,
+                    parentVersionIds: Array.isArray(body.sourceVersionIds)
+                      ? body.sourceVersionIds.filter((value): value is string => typeof value === 'string')
+                      : [],
+                    idempotencyKey: agentWorkspaceProjectionIdempotencyKey({
+                      taskId: authoritativeTaskId,
+                      workspace: 'chat',
+                      workspaceId,
+                      sourceEntityId: body.responseMessageId,
+                    }),
+                  });
+              const reference = findWorkspaceAssetReferenceByUrl(imageUrl, projected) || projected[0];
               if (reference) imageRef = {
                 ...reference,
                 name: prompt.slice(0, 120) || 'Generated image',
@@ -546,6 +565,7 @@ export async function POST(request: NextRequest) {
               status: 'failed',
               label: '图片已生成，但素材登记失败',
             });
+            if (agentRuntimeMode === 'agent-v2' && authoritativeTaskId) return;
           }
         }
         send({
@@ -746,6 +766,10 @@ export async function POST(request: NextRequest) {
                   projectId: body.assetProjectId,
                   sessionId: `standalone-chat:${body.projectId}`,
                   messageId: body.responseMessageId,
+                  assetWorkspace: 'chat',
+                  assetWorkspaceId: `standalone-chat:${body.projectId}`,
+                  assetSourceEntityId: body.responseMessageId,
+                  assetParentVersionIds: sourceVersionIds,
                   ...(referenceImage ? { imageUrl: referenceImage, strength: i2iStrength } : {}),
                 }),
               });
@@ -774,10 +798,15 @@ export async function POST(request: NextRequest) {
                       headers: { 'Content-Type': 'application/json', ...internalHeaders },
                       body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),
                     });
-                    const pollData = await pollRes.json() as { status?: string; imageUrl?: string; progress?: number };
+                    const pollData = await pollRes.json() as {
+                      status?: string;
+                      imageUrl?: string;
+                      progress?: number;
+                      assetProjection?: unknown;
+                    };
 
                     if (pollData.status === 'completed' && pollData.imageUrl) {
-                      await sendGeneratedImage(pollData.imageUrl, imgPrompt, taskId);
+                      await sendGeneratedImage(pollData.imageUrl, imgPrompt, taskId, pollData);
                       break;
                     }
                     if (pollData.status === 'failed' || pollData.status === 'cancelled') {

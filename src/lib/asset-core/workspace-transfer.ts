@@ -278,6 +278,22 @@ export interface WorkflowCanvasInsertionResult {
   failedOutputNodeIds: string[];
 }
 
+export function filterUniqueCanvasImageInsertions<
+  T extends { id: string; placementId?: string },
+>(existing: readonly T[], incoming: readonly T[]): T[] {
+  const imageIds = new Set(existing.map(image => image.id));
+  const placementIds = new Set(
+    existing.flatMap(image => image.placementId ? [image.placementId] : []),
+  );
+  return incoming.filter(image => {
+    if (imageIds.has(image.id)) return false;
+    if (image.placementId && placementIds.has(image.placementId)) return false;
+    imageIds.add(image.id);
+    if (image.placementId) placementIds.add(image.placementId);
+    return true;
+  });
+}
+
 export async function prepareWorkflowCanvasInsertions(
   candidates: WorkflowCanvasOutputCandidate[],
   transfer: (

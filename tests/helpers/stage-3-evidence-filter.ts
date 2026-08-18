@@ -58,6 +58,7 @@ export function isBenignStage3RequestAbort(entry: Stage3EvidenceEntry): boolean 
       pathname === '/api/task-events'
       || pathname === '/api/models'
       || pathname.startsWith('/api/serve-upload/')
+      || pathname.startsWith('/_next/static/chunks/')
     )
   ) || (
     entry.method === 'POST'

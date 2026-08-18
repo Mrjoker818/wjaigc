@@ -28,10 +28,10 @@ describe('Agent runtime accounting and result projection boundaries', () => {
 
     expect(persistence).toContain("from '@/lib/agent-runtime/workspace-results'");
     expect(persistence).toContain('await projectAgentResultToWorkspace({');
-    expect(persistence).toContain('idempotencyKey: `task-workspace:');
+    expect(persistence).toContain('idempotencyKey: agentWorkspaceProjectionIdempotencyKey({');
     expect(standaloneChat).toContain("from '@/lib/agent-runtime/workspace-results'");
     expect(standaloneChat).toContain('await projectAgentResultToWorkspace({');
-    expect(standaloneChat).toContain('idempotencyKey: `simple-chat-agent-result:');
+    expect(standaloneChat).toContain('idempotencyKey: agentWorkspaceProjectionIdempotencyKey({');
   });
 
   it('keeps Stage 4 inventory, PostgreSQL accounting, and five-browser v2 evidence in CI', () => {

@@ -34,7 +34,7 @@ describe('Stage 4 runtime modes', () => {
   it.each([
     ['legacy', 'legacy'],
     ['shadow', 'shadow'],
-    ['react-flow-v2', 'legacy'],
+    ['react-flow-v2', 'react-flow-v2'],
     ['invalid', 'legacy'],
   ] as const)('clamps delivered workflow renderer mode %s to %s', (configured, delivered) => {
     expect(resolveDeliveredWorkflowRendererMode(configured)).toBe(delivered);

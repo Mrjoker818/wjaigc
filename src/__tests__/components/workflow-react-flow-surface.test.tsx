@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyWorkflow, createWorkflowNode } from '@/lib/workflow-engine';
 import { projectLegacyRenderModel, projectReactFlowRenderModel } from '@/lib/workflow-renderer/view-model';
 import {
+  createReactFlowEdges,
   createReactFlowNodes,
   createReactFlowCommandHandlers,
   WorkflowReactFlowSurface,
@@ -18,6 +19,8 @@ const legacyRendererSource = readFileSync(resolve(process.cwd(), 'src/components
 const reactFlowSurfaceSource = readFileSync(resolve(process.cwd(), 'src/components/workflow/WorkflowReactFlowSurface.tsx'), 'utf8');
 const reactFlowNodeSource = readFileSync(resolve(process.cwd(), 'src/components/workflow/WorkflowNodeCard.tsx'), 'utf8');
 const rendererPresentationSource = readFileSync(resolve(process.cwd(), 'src/lib/workflow-renderer/presentation.ts'), 'utf8');
+const nodeEditorSource = readFileSync(resolve(process.cwd(), 'src/components/node-editor.tsx'), 'utf8');
+const canvasWorkspaceSource = readFileSync(resolve(process.cwd(), 'src/components/canvas-workspace.tsx'), 'utf8');
 const rendererSources = [
   'WorkflowLegacyNodeCard.tsx',
   'WorkflowLegacySurface.tsx',
@@ -29,6 +32,60 @@ const rendererSources = [
 afterEach(() => vi.unstubAllGlobals());
 
 describe('WorkflowReactFlowSurface', () => {
+  it('keeps execution logs in the bottom dock instead of covering workflow nodes', () => {
+    expect(nodeEditorSource).not.toContain('(showExecLog || execLogs.length > 0)');
+    expect(nodeEditorSource).not.toContain('absolute bottom-12 right-3 w-[380px]');
+    expect(nodeEditorSource).not.toMatch(/setExecStatus\('running'\);\r?\n\s+setShowExecLog\(true\);/);
+    expect(nodeEditorSource).toContain('{showExecLog && (');
+    expect(nodeEditorSource).toContain('data-workflow-ui-occlusion');
+    expect(nodeEditorSource).not.toContain('absolute bottom-12 left-3');
+    expect(nodeEditorSource).toContain('aria-live="polite"');
+    expect(nodeEditorSource).toContain('selectedNodeIds.size === 0 && (');
+    expect(nodeEditorSource).toContain('pointer-events-none bg-card/90');
+  });
+
+  it('keeps the minimap out of the mobile interaction surface', () => {
+    expect(nodeEditorSource).toContain('data-workflow-minimap');
+    expect(nodeEditorSource).toMatch(/data-workflow-minimap[\s\S]*?className="[^"]*\bhidden\b[^"]*\bmd:block\b"/);
+  });
+
+  it('defers ResizeObserver-driven layout writes until the next animation frame', () => {
+    expect(legacyRendererSource).toContain('requestAnimationFrame(() => {');
+    expect(legacyRendererSource).toContain('cancelAnimationFrame(resizeFrame);');
+    expect(nodeEditorSource).toContain('requestAnimationFrame(() => {');
+    expect(nodeEditorSource).toContain('cancelAnimationFrame(viewportResizeFrame);');
+  });
+
+  it('mounts only the host-authorized visible nodes and their internal edges', () => {
+    const workflow = createEmptyWorkflow('virtualized react flow');
+    const first = createWorkflowNode('input-text', 0, 0, 'First');
+    const second = createWorkflowNode('ai-generate', 240, 0, 'Second');
+    const third = createWorkflowNode('output-image', 480, 0, 'Third');
+    workflow.nodes = [first, second, third];
+    workflow.connections = [
+      {
+        id: 'first-second', fromNodeId: first.id, fromPortId: 'out-prompt',
+        toNodeId: second.id, toPortId: 'in-prompt', type: 'prompt',
+      },
+      {
+        id: 'second-third', fromNodeId: second.id, fromPortId: 'out-image',
+        toNodeId: third.id, toPortId: 'in-image', type: 'image',
+      },
+    ];
+    const model = projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 });
+    const visibleNodeIds = new Set([first.id, second.id]);
+
+    expect(createReactFlowNodes(model, false, {}, visibleNodeIds).map(node => node.id)).toEqual([
+      first.id,
+      second.id,
+    ]);
+    expect(createReactFlowEdges(model, {}, 'idle', visibleNodeIds).map(edge => edge.id)).toEqual([
+      'first-second',
+    ]);
+    expect(reactFlowSurfaceSource).toContain('const projectedEdges = useMemo(() => createReactFlowEdges(');
+    expect(reactFlowSurfaceSource).toContain('edges={projectedEdges}');
+  });
+
   it('renders the domain projection as an inert custom-node surface without dispatching commands', () => {
     const workflow = createEmptyWorkflow('react flow');
     workflow.nodes = [createWorkflowNode('input-text', 0, 0, 'Prompt')];
@@ -254,7 +311,9 @@ describe('WorkflowReactFlowSurface', () => {
       data: { readOnly: true },
     });
     expect(reactFlowSurfaceSource).toContain("@xyflow/react/dist/style.css");
-    expect(reactFlowSurfaceSource).not.toContain('useNodesState');
+    expect(reactFlowSurfaceSource).toContain('useNodesState');
+    expect(reactFlowSurfaceSource).toContain('onNodesChange={readOnly ? undefined : onFlowNodesChange}');
+    expect(reactFlowSurfaceSource).toContain('if (!dragActiveRef.current) setFlowNodes(projectedNodes)');
     expect(reactFlowSurfaceSource).not.toContain('useEdgesState');
   });
 
@@ -328,5 +387,21 @@ describe('WorkflowReactFlowSurface', () => {
     expect(createEdges(projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 }))[0])
       .toMatchObject({ type: 'workflow', data: { portType: 'prompt' } });
     expect(reactFlowNodeSource).toContain('WorkflowLegacyNodeCard');
+  });
+
+  it('keeps the workflow-to-chat result action available in both renderers', () => {
+    expect(legacyRendererSource).toContain('发送到智能对话');
+    expect(legacyRendererSource).toContain('onSendToChat?.(node.id)');
+    expect(reactFlowSurfaceSource).toContain('onSendToChat');
+  });
+
+  it('keeps the mobile content strip available and persists before workflow-to-chat navigation', () => {
+    const mobileLayout = nodeEditorSource.match(/const applyMobileLayout = \(\) => \{[\s\S]*?\n\s*\};/)?.[0] || '';
+    expect(mobileLayout).toContain('setShowLeftPanel(false)');
+    expect(mobileLayout).not.toContain('setShowContentStrip(false)');
+    expect(nodeEditorSource).toContain('onBeforeWorkflowChatNavigation');
+    expect(nodeEditorSource).toContain('navigateToWorkflowChatAfterPersistence');
+    expect(canvasWorkspaceSource).toContain('onBeforeWorkflowChatNavigation');
+    expect(canvasWorkspaceSource).toContain("canvasPersistenceScheduler.flush('immediate')");
   });
 });

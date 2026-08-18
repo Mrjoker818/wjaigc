@@ -19,6 +19,15 @@ interface ErrorReport {
   path: string;
 }
 
+const BENIGN_RESIZE_OBSERVER_MESSAGES = new Set([
+  'ResizeObserver loop limit exceeded',
+  'ResizeObserver loop completed with undelivered notifications.',
+]);
+
+export function isBenignResizeObserverDeliveryNotice(message: string): boolean {
+  return BENIGN_RESIZE_OBSERVER_MESSAGES.has(message.trim());
+}
+
 function sendErrorReport(report: ErrorReport): void {
   // fire-and-forget: 不阻塞用户操作
   fetch('/api/client-error', {
@@ -34,6 +43,10 @@ function sendErrorReport(report: ErrorReport): void {
 export function GlobalErrorMonitor() {
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
+      if (isBenignResizeObserverDeliveryNotice(event.message)) {
+        event.preventDefault();
+        return;
+      }
       sendErrorReport({
         type: 'error',
         message: event.message || 'Unknown error',

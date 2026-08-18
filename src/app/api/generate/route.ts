@@ -2,7 +2,6 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createHash } from 'node:crypto';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, findProviderById } from '@/lib/server-api-config';
-import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
 import { logOperation, logError, startTimer, OP_ACTIONS, sanitizeRequestData } from '@/lib/op-log';
@@ -160,7 +159,6 @@ export async function POST(request: NextRequest) {
       outputCount,
       n: requestedN,
       model: rawModel = 'gemini-2.5-flash-image-preview',
-      userId: requestUserId,
       strength,
       providerId,
       submitOnly,
@@ -255,8 +253,8 @@ export async function POST(request: NextRequest) {
       logSafetyWarning(prompt, safetyResult);
     }
 
-    sessionUser = await getSessionUser(request);
-    const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+    sessionUser = authResult.user;
+    const userId = authResult.userId;
 
     // An explicit provider/model pair is a user selection, not a fallback hint.
     // Validate it before task persistence and billing so stale browser state cannot

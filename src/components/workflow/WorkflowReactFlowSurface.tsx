@@ -1,11 +1,12 @@
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   Background,
   BaseEdge,
   ReactFlow,
   getBezierPath,
+  useNodesState,
   type Connection,
   type Edge,
   type EdgeProps,
@@ -34,7 +35,6 @@ import type { WorkflowRenderEdge, WorkflowRenderModel, WorkflowRenderNode } from
 interface WorkflowReactFlowSurfaceProps {
   model: WorkflowRenderModel;
   onCommand: (command: WorkflowInteractionCommand) => void;
-  onNodePositionPreview?: (positions: WorkflowNodePosition[]) => void;
   onNodeDragStart?: (positions: WorkflowNodePosition[]) => void;
   onNodeDragEnd?: (positions: WorkflowNodePosition[]) => void;
   onViewportChange?: (viewport: WorkflowRenderModel['viewport']) => void;
@@ -50,6 +50,7 @@ interface WorkflowReactFlowSurfaceProps {
   promptTemplates?: WorkflowLegacyPromptTemplate[];
   upstreamImageUrls?: Map<string, string>;
   cardCallbacks?: WorkflowLegacyCardCallbacks;
+  visibleNodeIds?: ReadonlySet<string>;
 }
 
 type WorkflowReactFlowPresentation = Omit<WorkflowReactFlowSurfaceProps, 'model' | 'readOnly'>;
@@ -124,6 +125,7 @@ function createCardProps(
     onExtractToSource: (...args) => invoke(callbacks?.onExtractToSource, ...args),
     onGridSplit: (...args) => invoke(callbacks?.onGridSplit, ...args),
     onCompare: (...args) => invoke(callbacks?.onCompare, ...args),
+    onSendToChat: (...args) => invoke(callbacks?.onSendToChat, ...args),
     onTriggerImageUpload: (...args) => invoke(callbacks?.onTriggerImageUpload, ...args),
     onImageFileDrop: (...args) => invoke(callbacks?.onImageFileDrop, ...args),
     onSavePromptPreset: (...args) => invoke(callbacks?.onSavePromptPreset, ...args),
@@ -164,9 +166,10 @@ export function createReactFlowNodes(
   model: WorkflowRenderModel,
   readOnly: boolean,
   presentation: Partial<WorkflowReactFlowPresentation> = {},
+  visibleNodeIds: ReadonlySet<string> = new Set(model.nodes.map(node => node.id)),
 ): WorkflowFlowNode[] {
   const selectedNodeIds = new Set(model.nodes.filter(node => node.selected).map(node => node.id));
-  return model.nodes.map(node => ({
+  return model.nodes.filter(node => visibleNodeIds.has(node.id)).map(node => ({
     id: node.id,
     type: 'workflow',
     position: node.position,
@@ -188,8 +191,11 @@ export function createReactFlowEdges(
   model: WorkflowRenderModel,
   execResults: Record<string, { status: string }> = {},
   execStatus = 'idle',
+  visibleNodeIds: ReadonlySet<string> = new Set(model.nodes.map(node => node.id)),
 ): WorkflowFlowEdge[] {
-  return model.edges.map(edge => {
+  return model.edges.filter(edge => (
+    visibleNodeIds.has(edge.source.nodeId) && visibleNodeIds.has(edge.target.nodeId)
+  )).map(edge => {
     const targetNode = model.nodes.find(node => node.id === edge.target.nodeId);
     const blockedInputs = Array.isArray(targetNode?.workflowNode.config.blockedInputs)
       ? targetNode.workflowNode.config.blockedInputs as string[]
@@ -265,34 +271,83 @@ export function createReactFlowCommandHandlers(
 export function WorkflowReactFlowSurface({
   model,
   onCommand,
-  onNodePositionPreview,
   onNodeDragStart,
   onNodeDragEnd,
   onViewportChange,
+  visibleNodeIds,
   readOnly = true,
-  ...presentation
+  theme,
+  execResults,
+  execStatus,
+  highlightedNodeIds,
+  hoveredNodeId,
+  canvasImages,
+  llmModels,
+  imageModels,
+  promptTemplates,
+  upstreamImageUrls,
+  cardCallbacks,
 }: WorkflowReactFlowSurfaceProps) {
   const transactionCounterRef = useRef(0);
   const dragInitialPositionsRef = useRef<WorkflowNodePosition[]>([]);
+  const dragActiveRef = useRef(false);
   const commandHandlers = createReactFlowCommandHandlers(model, onCommand, onViewportChange);
   const nextTransactionId = (prefix: string): string => `${prefix}:${++transactionCounterRef.current}`;
+  const presentation = useMemo<Partial<WorkflowReactFlowPresentation>>(() => ({
+    onCommand,
+    theme,
+    execResults,
+    execStatus,
+    highlightedNodeIds,
+    hoveredNodeId,
+    canvasImages,
+    llmModels,
+    imageModels,
+    promptTemplates,
+    upstreamImageUrls,
+    cardCallbacks,
+  }), [
+    onCommand,
+    theme,
+    execResults,
+    execStatus,
+    highlightedNodeIds,
+    hoveredNodeId,
+    canvasImages,
+    llmModels,
+    imageModels,
+    promptTemplates,
+    upstreamImageUrls,
+    cardCallbacks,
+  ]);
+  const projectedNodes = useMemo(() => createReactFlowNodes(
+    model,
+    readOnly,
+    presentation,
+    visibleNodeIds,
+  ), [model, presentation, readOnly, visibleNodeIds]);
+  const projectedEdges = useMemo(() => createReactFlowEdges(
+    model,
+    presentation.execResults,
+    presentation.execStatus,
+    visibleNodeIds,
+  ), [model, presentation.execResults, presentation.execStatus, visibleNodeIds]);
+  const [flowNodes, setFlowNodes, onFlowNodesChange] = useNodesState(projectedNodes);
+
+  useEffect(() => {
+    if (!dragActiveRef.current) setFlowNodes(projectedNodes);
+  }, [projectedNodes, setFlowNodes]);
+
   return (
     <div data-workflow-react-flow-surface aria-hidden={readOnly ? 'true' : 'false'} className="absolute inset-0">
       <ReactFlow<WorkflowFlowNode, WorkflowFlowEdge>
-        nodes={createReactFlowNodes(model, readOnly, { ...presentation, onCommand })}
-        edges={createReactFlowEdges(model, presentation.execResults, presentation.execStatus)}
+        nodes={flowNodes}
+        onNodesChange={readOnly ? undefined : onFlowNodesChange}
+        edges={projectedEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         viewport={model.viewport}
         onViewportChange={readOnly ? undefined : commandHandlers.updateViewport}
-        onNodesChange={readOnly ? undefined : changes => {
-          const positions = changes.flatMap(change => (
-            change.type === 'position' && change.position
-              ? [{ nodeId: change.id, position: { ...change.position } }]
-              : []
-          ));
-          if (positions.length > 0) onNodePositionPreview?.(positions);
-        }}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         elementsSelectable={!readOnly}
@@ -301,6 +356,7 @@ export function WorkflowReactFlowSurface({
         zoomOnPinch={!readOnly}
         zoomOnDoubleClick={!readOnly}
         onNodeDragStart={readOnly ? undefined : (_event, node, selectedNodes) => {
+          dragActiveRef.current = true;
           const draggedNodes = selectedNodes.length > 0 ? selectedNodes : [node];
           dragInitialPositionsRef.current = draggedNodes.flatMap(draggedNode => {
             const initialNode = model.nodes.find(candidate => candidate.id === draggedNode.id);
@@ -314,6 +370,7 @@ export function WorkflowReactFlowSurface({
           })));
         }}
         onNodeDragStop={readOnly ? undefined : (_event, node, selectedNodes) => {
+          dragActiveRef.current = false;
           const draggedNodes = selectedNodes.length > 0 ? selectedNodes : [node];
           const finalPositions = draggedNodes.map(draggedNode => ({
             nodeId: draggedNode.id,

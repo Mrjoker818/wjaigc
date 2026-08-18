@@ -242,9 +242,11 @@ describe('task result asset projection wiring', () => {
 
   it('projects asynchronous standalone chat results with the provider task identity', () => {
     const route = source('src/app/api/simple-chat/chat/route.ts');
-    expect(route).toContain('projectCompletedTaskToAssets');
-    expect(route).toMatch(/sendGeneratedImage\(pollData\.imageUrl,\s*imgPrompt,\s*taskId\)/);
-    expect(route).toContain("sessionId: `standalone-chat:${body.projectId}`");
+    expect(route).toContain("from '@/lib/agent-runtime/workspace-results'");
+    expect(route).toContain('await projectAgentResultToWorkspace({');
+    expect(route).toContain('agentWorkspaceProjectionIdempotencyKey({');
+    expect(route).toMatch(/sendGeneratedImage\(pollData\.imageUrl,\s*imgPrompt,\s*taskId,\s*pollData\)/);
+    expect(route).toContain("const workspaceId = `standalone-chat:${body.projectId}`");
     expect(route).toContain('sourceEntityId: body.responseMessageId');
     expect(route).not.toContain('sourceEntityId: `${body.responseMessageId}:${authoritativeTaskId}`');
   });

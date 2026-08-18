@@ -2011,3 +2011,16 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Fix | Memoize the rendered Next image by value, keep event handlers stable, preload replacement sources through a two-phase pending/commit state machine, bind DOM load events to the displayed committed source and clear retained state on every terminal path. Performance evidence now records native `load`, `src` and media-state mutations for preloaded monitored nodes. |
 | Regression | Exact-SHA local matrices pass `180/180`: canvas-v2 `60/60`, legacy `60/60`, shadow `60/60`. Across 30 pan samples, disappeared frames, unclickable duration and monitored media load/src events are all zero. Desktop minimum FPS is `55.62`; maximum input P95 is `43.9ms`. PostgreSQL-enabled Vitest passes `441/441` files and `2527/2527` tests; TypeScript, build, whitespace, protected features `38/38` and ESLint `0 errors / 973 historical warnings` pass. |
 | Status | **FIXED LOCALLY ON EXACT SHA / HOSTED IMMUTABLE ACTIONS STILL UNEXECUTED DUE BILLING.** Stage 3 Task 10 remains active. |
+## 2026-08-18 Stage 4 Task 4 closure register
+
+| ID | Severity | Defect | Resolution | Permanent evidence |
+|---|---|---|---|---|
+| S4-BUG-001 | P1 | Agent result could be projected through separate workspace paths without one canonical idempotency identity. | Centralized the task/workspace projection key and reused durable task asset references. | PostgreSQL projection/accounting tests and Stage 4 workspace E2E. |
+| S4-BUG-002 | P1 | Workflow result navigation could occur before Canvas/chat persistence completed. | Added an explicit persistence barrier and durable workflow-to-chat transfer intent. | `workflow-chat-return` unit tests and refresh E2E. |
+| S4-BUG-003 | P1 | React Flow drag preview repeatedly rewrote the parent workflow and 1080p 100-node FPS fell below 55. | Kept drag positions in local React Flow state, committed once at drag end, memoized edges and applied viewport virtualization. | Three consecutive 1080p runs: `56.70 / 57.15 / 55.62 FPS`. |
+| S4-BUG-004 | P2 | Mobile node mode hid the asset content strip, blocking touch transfer. | Preserved the mobile content strip and hid only the minimap. | Mobile Chromium Stage 4 matrix. |
+| S4-BUG-005 | P1 | Immediate Canvas persistence could fail permanently on a PostgreSQL revision conflict. | Added one bounded session-safe reload/rebase/retry path. | User-manager sync epoch/CAS regressions. |
+| S4-BUG-006 | P2 | Replayed workflow results could create duplicate Canvas images. | Deduplicated incoming images by image and placement identity. | Workspace transfer unit tests and round-trip E2E. |
+| S4-BUG-007 | P2 | Exact benign WebKit ResizeObserver delivery notices polluted Console evidence. | Suppressed only the two browser-defined delivery notices; all other errors remain reportable. | Global error monitor tests and WebKit matrix. |
+
+All listed Stage 4 defects are locally closed. Coze exact-SHA validation remains an external acceptance gate and is not recorded as complete.

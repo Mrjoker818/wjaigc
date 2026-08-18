@@ -22,7 +22,10 @@ import {
   recordTaskProjectionPending,
   type ProjectCompletedTaskInput,
 } from '@/lib/asset-core/task-projector';
-import { projectAgentResultToWorkspace } from '@/lib/agent-runtime/workspace-results';
+import {
+  agentWorkspaceProjectionIdempotencyKey,
+  projectAgentResultToWorkspace,
+} from '@/lib/agent-runtime/workspace-results';
 
 interface ImageTaskSubmission {
   taskId: string;
@@ -243,7 +246,12 @@ async function projectCompletedTask(task: ProjectableTask): Promise<void> {
       taskId: task.id,
       targetProjectId: task.projectId,
       ...target,
-      idempotencyKey: `task-workspace:${task.id}:${target.workspace}:${targetWorkspaceId}:${target.sourceEntityId}`,
+      idempotencyKey: agentWorkspaceProjectionIdempotencyKey({
+        taskId: task.id,
+        workspace: target.workspace,
+        workspaceId: targetWorkspaceId,
+        sourceEntityId: target.sourceEntityId,
+      }),
     });
   } catch (error) {
     await recordProjectionPendingSafely({

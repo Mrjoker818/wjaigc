@@ -212,7 +212,7 @@ describe('user-data asset graph sync route', () => {
   it.each([
     ['legacy', 'legacy'],
     ['shadow', 'shadow'],
-    ['react-flow-v2', 'legacy'],
+    ['react-flow-v2', 'react-flow-v2'],
   ] as const)('clamps server workflow renderer mode %s to %s at the route', async (configured, delivered) => {
     process.env.WUJIE_WORKFLOW_RENDERER_MODE = configured;
     mocks.dbGetUserData.mockResolvedValue(projects);

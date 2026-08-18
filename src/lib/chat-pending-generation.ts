@@ -31,6 +31,15 @@ export interface ChatGenerationSlotImage {
   url: string;
 }
 
+export function completedChatImageMessageContent(content: string | undefined): string {
+  const normalized = typeof content === 'string' ? content.trim() : '';
+  const plainText = normalized.replace(/^\*|\*$/g, '').trim();
+  if (!plainText || /^图片生成中(?:\.{3}|…)?(?:\s+\d+)?$/.test(plainText)) {
+    return '图片已生成';
+  }
+  return content as string;
+}
+
 export function upsertChatGenerationSlotImage(
   images: ChatGenerationSlotImage[],
   slotIndex: number,

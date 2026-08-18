@@ -8,6 +8,7 @@ interface CapturedGenerateRequest {
 
 const mocks = vi.hoisted(() => ({
   appendUserJsonl: vi.fn(),
+  authorizeAgentContext: vi.fn(),
   consumeCredits: vi.fn(),
   fetchWithTimeout: vi.fn(),
   fetchWithV1Retry: vi.fn(),
@@ -17,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   getInternalRequestHeaders: vi.fn(),
   getSessionUser: vi.fn(),
   prepareAdmittedAgentTaskExecution: vi.fn(),
+  projectCompletedTaskToAssets: vi.fn(),
+  recordTaskProjectionCompleted: vi.fn(),
   resolveTaskModel: vi.fn(),
   generateRequests: [] as CapturedGenerateRequest[],
 }));
@@ -70,6 +73,10 @@ vi.mock('@/lib/agent-runtime/admission-gate', () => ({
 vi.mock('@/lib/agent-runtime/surface-dispatch', () => ({
   prepareAdmittedAgentTaskExecution: mocks.prepareAdmittedAgentTaskExecution,
 }));
+vi.mock('@/lib/agent-runtime/context-adapters', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/agent-runtime/context-adapters')>(),
+  authorizeAgentContext: mocks.authorizeAgentContext,
+}));
 vi.mock('@/lib/chat-generation-controls', () => ({ resolveChatControls: () => ({}) }));
 vi.mock('@/lib/asset-core/service', () => {
   class AssetServiceError extends Error {
@@ -88,16 +95,8 @@ vi.mock('@/lib/asset-core/service', () => {
   };
 });
 vi.mock('@/lib/asset-core/task-projector', () => ({
-  projectCompletedTaskToAssets: vi.fn().mockResolvedValue({
-    versions: [{
-      id: 'version-generated',
-      assetId: 'asset-generated',
-      file: { url: '/api/serve-upload/generated.png' },
-    }],
-    placements: [{ id: 'placement-generated', entityId: 'assistant-message:0' }],
-    reused: false,
-  }),
-  recordTaskProjectionCompleted: vi.fn().mockResolvedValue(undefined),
+  projectCompletedTaskToAssets: mocks.projectCompletedTaskToAssets,
+  recordTaskProjectionCompleted: mocks.recordTaskProjectionCompleted,
 }));
 vi.mock('coze-coding-dev-sdk', () => ({
   SearchClient: class {},
@@ -233,7 +232,7 @@ function canvasImg2ImgRequest(): NextRequest {
   });
 }
 
-function standaloneRequest(): NextRequest {
+function standaloneRequest(overrides: Record<string, unknown> = {}): NextRequest {
   return new NextRequest('http://localhost/api/simple-chat/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -247,6 +246,7 @@ function standaloneRequest(): NextRequest {
       taskId: 'standalone-task',
       responseMessageId: 'standalone-message',
       assetProjectId: 'asset-project',
+      ...overrides,
     }),
   });
 }
@@ -323,6 +323,20 @@ describe('chat-originated Agent generation routing', () => {
       runId: undefined,
       execute: vi.fn().mockResolvedValue(undefined),
     });
+    mocks.authorizeAgentContext.mockResolvedValue({
+      mediaByVersionId: { 'canvas-source-version': '/api/serve-upload/source.png' },
+      selectedEntityVersionIds: { 'canvas-source-entity': 'canvas-source-version' },
+    });
+    mocks.projectCompletedTaskToAssets.mockResolvedValue({
+      versions: [{
+        id: 'version-generated',
+        assetId: 'asset-generated',
+        file: { url: '/api/serve-upload/generated.png' },
+      }],
+      placements: [{ id: 'placement-generated', entityId: 'assistant-message:0' }],
+      reused: false,
+    });
+    mocks.recordTaskProjectionCompleted.mockResolvedValue(undefined);
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
       if (!url.endsWith('/api/generate')) throw new Error(`Unexpected fetch URL: ${url}`);
@@ -386,6 +400,79 @@ describe('chat-originated Agent generation routing', () => {
       model: 'Exact.Standalone.Image',
       providerId: 'standalone-image-provider',
       submitOnly: true,
+    });
+  });
+
+  it('reuses the authoritative poll projection instead of projecting the same task twice', async () => {
+    process.env.WUJIE_AGENT_RUNTIME_MODE = 'agent-v2';
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void) => {
+      queueMicrotask(callback);
+      return 0;
+    }) as typeof setTimeout);
+    mocks.fetchWithTimeout.mockReset().mockResolvedValueOnce(standaloneToolCallResponse());
+    mocks.prepareAdmittedAgentTaskExecution.mockImplementationOnce(async (input: {
+      execute: () => Promise<void>;
+    }) => ({ runId: 'durable-task-1', execute: input.execute }));
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/api/generate')) {
+        mocks.generateRequests.push({
+          headers: new Headers(init?.headers),
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return jsonResponse({ success: true, taskIds: ['durable-task-1'] });
+      }
+      if (url.endsWith('/api/poll-task')) {
+        return jsonResponse({
+          success: true,
+          status: 'completed',
+          imageUrl: '/api/serve-upload/generated.png',
+          assetProjection: {
+            status: 'completed',
+            references: [{
+              assetId: 'asset-generated',
+              assetVersionId: 'version-generated',
+              placementId: 'placement-generated',
+              entityId: 'standalone-message:0',
+              url: '/api/serve-upload/generated.png',
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }));
+
+    const response = await standaloneChatPost(standaloneRequest());
+    const events = await response.text();
+
+    expect(mocks.projectCompletedTaskToAssets).not.toHaveBeenCalled();
+    expect(events).toContain('"assetVersionId":"version-generated"');
+    expect(events).toContain('"placementId":"placement-generated"');
+    timeoutSpy.mockRestore();
+  });
+
+  it('preserves authorized source versions in the durable generation submission', async () => {
+    process.env.WUJIE_AGENT_RUNTIME_MODE = 'agent-v2';
+    mocks.fetchWithTimeout.mockReset().mockResolvedValueOnce(standaloneToolCallResponse());
+
+    const response = await standaloneChatPost(standaloneRequest({
+      messages: [{
+        role: 'user',
+        content: 'Generate from this image',
+        images: ['/api/serve-upload/source.png'],
+      }],
+      sourceVersionIds: ['canvas-source-version'],
+      selectedEntityIds: ['canvas-source-entity'],
+    }));
+    expect(response.status).toBe(200);
+    await response.text();
+
+    expect(mocks.generateRequests).toHaveLength(1);
+    expect(mocks.generateRequests[0].body).toMatchObject({
+      assetParentVersionIds: ['canvas-source-version'],
+      assetWorkspace: 'chat',
+      assetWorkspaceId: 'standalone-chat:standalone-project',
+      assetSourceEntityId: 'standalone-message',
     });
   });
 

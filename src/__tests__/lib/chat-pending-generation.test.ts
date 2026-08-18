@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   collectChatGenerationSlotResults,
+  completedChatImageMessageContent,
   settleChatGenerationSlots,
   upsertChatGenerationSlotImage,
   getResumableChatGenerationTasks,
@@ -12,6 +13,15 @@ import {
 } from '@/lib/chat-pending-generation';
 
 describe('chat progressive generation slots', () => {
+  it('replaces a progress placeholder with a completed terminal label', () => {
+    expect(completedChatImageMessageContent('*图片生成中... 1*')).toBe('图片已生成');
+    expect(completedChatImageMessageContent('*图片生成中... *')).toBe('图片已生成');
+  });
+
+  it('preserves meaningful assistant text when an image arrives', () => {
+    expect(completedChatImageMessageContent('这是为你生成的视觉方案')).toBe('这是为你生成的视觉方案');
+  });
+
   it('starts every slot concurrently, emits each completion immediately, and returns stable slot order', async () => {
     const resolvers = new Map<number, (value: string) => void>();
     const started: number[] = [];

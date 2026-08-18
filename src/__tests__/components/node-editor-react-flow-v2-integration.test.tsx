@@ -49,6 +49,10 @@ class PointerEventMock extends MouseEvent {
   }
 }
 
+class DOMMatrixReadOnlyMock {
+  readonly m22 = 1;
+}
+
 function workflowFixture(): Workflow {
   const workflow = createEmptyWorkflow('NodeEditor React Flow integration');
   workflow.nodes = [createWorkflowNode('input-text', 40, 60, 'drag source')];
@@ -80,6 +84,7 @@ describe('NodeEditor react-flow-v2 integration', () => {
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
     vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
     vi.stubGlobal('PointerEvent', PointerEventMock);
+    vi.stubGlobal('DOMMatrixReadOnly', DOMMatrixReadOnlyMock);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ models: [] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

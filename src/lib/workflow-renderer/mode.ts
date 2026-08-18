@@ -6,8 +6,8 @@ export function resolveWorkflowRendererMode(raw?: string): WorkflowRendererMode 
   return raw === 'shadow' || raw === 'react-flow-v2' ? raw : 'legacy';
 }
 
-export type DeliveredWorkflowRendererMode = Exclude<WorkflowRendererMode, 'react-flow-v2'>;
+export type DeliveredWorkflowRendererMode = WorkflowRendererMode;
 
 export function resolveDeliveredWorkflowRendererMode(raw?: string): DeliveredWorkflowRendererMode {
-  return raw === 'shadow' ? 'shadow' : 'legacy';
+  return resolveWorkflowRendererMode(raw);
 }

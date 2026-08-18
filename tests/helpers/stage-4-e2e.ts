@@ -7,11 +7,13 @@ import { Pool } from 'pg';
 
 import type { Workflow } from '../../src/lib/workflow-engine';
 import { stage3SourceIdentity, stage3SourceState } from './stage-3-source-state';
+import { stage3RequestFingerprint } from './stage-3-evidence-filter';
 import { stage4RuntimeEvidenceFailures } from './stage-4-evidence-filter';
 
 interface Stage4EvidenceEntry {
   type?: string;
   method?: string;
+  requestDigest?: string;
   status?: number;
   text?: string;
   url?: string;
@@ -163,6 +165,7 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
     page.on('requestfailed', request => {
       evidence.network.push({
         method: request.method(),
+        requestDigest: stage3RequestFingerprint(request.postData()),
         text: redact(request.failure()?.errorText ?? 'request failed'),
         url: sanitizeUrl(request.url()),
         occurredAt: Date.now(),
@@ -172,6 +175,7 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
       if (response.status() >= 400 || response.url().includes('/api/')) {
         evidence.network.push({
           method: response.request().method(),
+          requestDigest: stage3RequestFingerprint(response.request().postData()),
           status: response.status(),
           url: sanitizeUrl(response.url()),
           occurredAt: Date.now(),

@@ -202,8 +202,8 @@ describe('Stage 4 workflow performance samples', () => {
 
   it('derives the explicit mounted subset for the 100-node virtualized fixture', () => {
     const workflow = buildStage4FixturePlan('mounted-subset').workflows[0]!.workflow;
-    const expectedMountedIds = Array.from({ length: 8 }, (_, row) => (
-      Array.from({ length: 6 }, (_, column) => `stage4-node-${row * 10 + column + 1}`)
+    const expectedMountedIds = Array.from({ length: 5 }, (_, row) => (
+      Array.from({ length: 4 }, (_, column) => `stage4-node-${row * 10 + column + 1}`)
     )).flat();
 
     const mountedIds = resolveExpectedMountedWorkflowNodeIds(
@@ -213,7 +213,7 @@ describe('Stage 4 workflow performance samples', () => {
     );
 
     expect(mountedIds).toEqual(expectedMountedIds);
-    expect(mountedIds).toHaveLength(48);
+    expect(mountedIds).toHaveLength(20);
     expect(mountedIds.length).toBeLessThan(workflow.nodes.length);
     expect(() => assertWorkflowVirtualizationCoverage({
       domainNodeIds: workflow.nodes.map(node => node.id),
@@ -270,6 +270,37 @@ describe('Stage 4 workflow performance samples', () => {
       consoleFailures: [consoleWarning],
       networkFailures: [serverFailure],
     });
+  });
+
+  it('allows an aborted duplicate sync only after the same request payload succeeded', () => {
+    const succeeded = {
+      method: 'POST',
+      status: 200,
+      requestDigest: 'same-payload',
+      url: 'http://127.0.0.1:5000/api/user-data/sync',
+      occurredAt: 100,
+    };
+    const aborted = {
+      method: 'POST',
+      text: 'net::ERR_ABORTED',
+      requestDigest: 'same-payload',
+      url: 'http://127.0.0.1:5000/api/user-data/sync',
+      occurredAt: 110,
+    };
+
+    expect(stage4RuntimeEvidenceFailures([], [succeeded, aborted]).networkFailures).toEqual([]);
+    expect(stage4RuntimeEvidenceFailures([], [aborted]).networkFailures).toEqual([aborted]);
+  });
+
+  it('allows browser-cancelled Next.js chunks during an intentional route change', () => {
+    const abortedChunk = {
+      method: 'GET',
+      text: 'net::ERR_ABORTED',
+      url: 'http://127.0.0.1:5000/_next/static/chunks/3195.example.js',
+    };
+    expect(stage4RuntimeEvidenceFailures([], [abortedChunk]).networkFailures).toEqual([]);
+    expect(stage4RuntimeEvidenceFailures([], [{ ...abortedChunk, status: 404, text: undefined }]).networkFailures)
+      .toHaveLength(1);
   });
 
   it('keeps latency and continuity gates active when a browser cannot provide a 55 FPS RAF baseline', () => {

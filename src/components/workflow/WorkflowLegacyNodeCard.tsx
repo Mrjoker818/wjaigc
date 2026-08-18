@@ -10,7 +10,7 @@ import {
   PenTool, Play, RefreshCw, Repeat, Rotate3d, ScanSearch, Scissors, Settings,
   ShoppingBag, Sparkles, Sun, Type, Video, FileVideo, Volume2, Music, Camera,
   Clapperboard, Scissors as CutIcon, AudioLines, Brain, Bot, Wand2, Pencil,
-  SlidersHorizontal, Box, X, GitCompare,
+  SlidersHorizontal, Box, X, GitCompare, Send,
 } from 'lucide-react';
 
 import type { NodePort, NodeType, WorkflowNode } from '@/lib/workflow-engine';
@@ -117,6 +117,7 @@ export interface WorkflowLegacyNodeCardProps {
   onExtractToSource?: (nodeId: string) => void;
   onGridSplit?: (nodeId: string, cols: number, rows: number) => void;
   onCompare?: (nodeId: string) => void;
+  onSendToChat?: (nodeId: string) => void;
   onTriggerImageUpload?: (nodeId: string) => void;
   onImageFileDrop?: (nodeId: string, file: File) => void;
   promptPresets?: WorkflowLegacyPromptPreset[];
@@ -207,26 +208,42 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, onImageFileDrop, promptPresets = [], promptTemplates = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation, layout = 'canvas', renderPortHandle }: WorkflowLegacyNodeCardProps) {
+export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onSendToChat, onTriggerImageUpload, onImageFileDrop, promptPresets = [], promptTemplates = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation, layout = 'canvas', renderPortHandle }: WorkflowLegacyNodeCardProps) {
   const T = theme;
   const cat = getWorkflowRenderNodeCategory(node.type);
   const color = WORKFLOW_RENDER_NODE_COLORS[cat];
   const nodeRef = useRef<HTMLDivElement>(null);
+  const measuredSizeRef = useRef({ width: node.width, height: node.height });
+  const onUpdateNodeSizeRef = useRef(onUpdateNodeSize);
 
-  // 自动测量节点实际尺寸并同步到node.width/height
   useEffect(() => {
-    if (!nodeRef.current || !onUpdateNodeSize) return;
+    measuredSizeRef.current = { width: node.width, height: node.height };
+    onUpdateNodeSizeRef.current = onUpdateNodeSize;
+  }, [node.width, node.height, onUpdateNodeSize]);
+
+  // The legacy canvas owns card measurement. React Flow measures embedded nodes itself.
+  useEffect(() => {
+    if (layout !== 'canvas' || !nodeRef.current || !onUpdateNodeSizeRef.current) return;
+    let resizeFrame = 0;
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
+      const entriesSnapshot = [...entries];
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => {
+        for (const entry of entriesSnapshot) {
         const { width, height } = entry.contentRect;
-        if (Math.abs(width - node.width) > 2 || Math.abs(height - node.height) > 2) {
-          onUpdateNodeSize(node.id, width, height);
+          const measuredSize = measuredSizeRef.current;
+          if (Math.abs(width - measuredSize.width) > 2 || Math.abs(height - measuredSize.height) > 2) {
+            onUpdateNodeSizeRef.current?.(node.id, width, height);
+          }
         }
-      }
+      });
     });
     observer.observe(nodeRef.current);
-    return () => observer.disconnect();
-  }, [node.id, node.width, node.height, onUpdateNodeSize]);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(resizeFrame);
+    };
+  }, [layout, node.id]);
   const inputPorts = node.ports.filter(p => p.direction === 'in');
   const outputPorts = node.ports.filter(p => p.direction === 'out');
   const renderPortDot = (port: NodePort, direction: 'in' | 'out', style: React.CSSProperties) => {
@@ -315,7 +332,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
     <div
       ref={nodeRef}
       data-node-id={node.id}
-      className={`node-card ${isSelected ? 'selected' : ''} ${isCollapsed ? 'collapsed' : ''} ${isInputText ? 'prompt-node' : isInputImage || isOutputImage ? 'image-node' : 'generator-node'}`}
+      className={`node-card ${layout === 'embedded' ? 'react-flow-embedded' : ''} ${isSelected ? 'selected' : ''} ${isCollapsed ? 'collapsed' : ''} ${isInputText ? 'prompt-node' : isInputImage || isOutputImage ? 'image-node' : 'generator-node'}`}
       style={{
         left: layout === 'canvas' ? node.x : 0,
         top: layout === 'canvas' ? node.y : 0,
@@ -794,6 +811,18 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
                       </div>
                     </div>
                   </div>
+                )}
+                {allUrls.length > 0 && (
+                  <button
+                    type="button"
+                    className="mt-1 inline-flex items-center justify-center gap-1 rounded px-2 py-1 text-[9px] font-medium text-primary bg-primary/10 hover:bg-primary/20"
+                    title="发送到智能对话"
+                    aria-label="发送到智能对话"
+                    onClick={(event) => { event.stopPropagation(); onSendToChat?.(node.id); }}
+                  >
+                    <Send size={10} />
+                    智能对话
+                  </button>
                 )}
               </div>
             );

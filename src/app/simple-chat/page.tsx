@@ -39,9 +39,14 @@ export default function SimpleChatPage() {
   const [showLogin, setShowLogin] = useState(false);
 
   const [projects, setProjects] = useState<Project[]>([]);
+  const projectsRef = useRef<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
 
   // ===== 项目数据跨设备持久化（服务器同步，避免换电脑/换浏览器后数据丢失） =====
   const PROJECTS_SYNC_KEY = 'chat_simple_projects';
@@ -184,6 +189,25 @@ export default function SimpleChatPage() {
     })));
   }, []);
 
+  const handlePersistTask = useCallback(async (task: Task) => {
+    const next = projectsRef.current.map(project => ({
+      ...project,
+      tasks: project.tasks.map(current => current.id === task.id
+        ? { ...task, updatedAt: Date.now() }
+        : current),
+      updatedAt: project.id === task.projectId ? Date.now() : project.updatedAt,
+    }));
+    projectsRef.current = next;
+    setProjects(next);
+    saveProjects(next);
+    const response = await fetch('/api/user-data/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: PROJECTS_SYNC_KEY, value: next }),
+    });
+    if (!response.ok) throw new Error(`Chat task persistence failed (${response.status})`);
+  }, []);
+
   // Agent ops
   const handleCreateAgent = useCallback((projectId: string, agent: SimpleChatAgent) => {
     setProjects(prev => prev.map(p => p.id === projectId ? {
@@ -257,6 +281,7 @@ export default function SimpleChatPage() {
           project={activeProject}
           task={activeTask}
           onUpdateTask={handleUpdateTask}
+          onPersistTask={handlePersistTask}
           onUpdateProject={handleUpdateProject}
           onCreateTask={(projectId) => handleCreateTask(projectId)}
           onSelectTask={(task) => setActiveTaskId(task.id)}

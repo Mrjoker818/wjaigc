@@ -1218,3 +1218,16 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - Desktop Chromium metrics across all modes: minimum `55.62 FPS`, maximum input P95 `43.9ms`; fixed gates remain `55/45 FPS`, `50ms` input P95 and `100ms` save overlap.
 - Full local gates pass: `441/441` Vitest files, `2527/2527` tests, TypeScript, production build `113/113`, ESLint `0 errors / 973 historical warnings`, protected features `38/38` and whitespace.
 - **Verdict: EXACT-SHA LOCAL THREE-MODE REGRESSION PASS.** GitHub Actions executed zero steps because of account billing, so immutable hosted evidence remains unverified and Stage 3 stays at Task 10 (`10/11`).
+## 2026-08-18 Stage 4 Task 4 final local regression
+
+- Candidate source: `codex/wj-stable-s4` based on `main@7fdc0108952fb3a68415ca3a2a26b5d33641dc6b`.
+- Full PostgreSQL-enabled Vitest: `476/476` files, `2920/2920` tests, zero failures and zero skips.
+- API: `117/117` files, `582/582` tests.
+- Component/lib regression: `320/320` files, `2063/2063` tests.
+- Production browser matrix: `15/15` across Chromium, Chromium 1080p, Firefox, WebKit and mobile Chromium.
+- Fixed performance threshold retained: three Chromium 1080p 100-node samples were `56.70`, `57.15` and `55.62 FPS`; P95 stayed below `17 ms`.
+- Console/PageError, unexpected HTTP failures, disappeared frames and unclickable duration: zero in the final matrix.
+- TypeScript, Doctor, production build (`113` routes), protected baseline (`38/38`) and whitespace checks passed.
+- ESLint: `0 errors / 988 historical warnings`; warnings were not hidden or converted to ignores.
+
+Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze exact-SHA or unavailable GitHub-hosted evidence.
