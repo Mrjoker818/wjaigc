@@ -1055,3 +1055,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The current workstation's full run still explicitly skips `70` PostgreSQL-gated tests because `POSTGRES_TEST_DATABASE_URL` is absent. Historical PostgreSQL evidence does not substitute for the current candidate's multi-instance gate.
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains unchanged. V5.8.8 remains a read-only donor and no absorption work starts before the exact-candidate cancellation UI retest and current PostgreSQL gate.
 - **Decision: NOT RELEASE READY.** Push the narrow S4-BUG-012 candidate to `main`, deploy it in Coze, repeat the paid cancel flow with zero Console Error and informational cancellation UI, then execute the current-candidate isolated PostgreSQL concurrency suite.
+
+## 2026-08-20 readiness after S4-BUG-013 local repair
+
+- The exact production rebuild did not regress the authoritative task or refund, but project reload revived the cancelled empty placeholder. This is a P1 recovery defect and prevents Stage 4 acceptance.
+- The local candidate closes the persistence predicate mismatch without altering providers, billing, active placeholders or ordinary damaged-media recovery.
+- Full local gates pass (`2861` tests, TypeScript, zero-error ESLint and `114/114` production build). The `70` PostgreSQL-gated tests remain explicitly skipped and are not represented as passed.
+- V5.8.8 remains read-only and absorption has not started. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains outside the change set.
+- **Decision: NOT RELEASE READY.** Exact-candidate Coze reload cleanup and PostgreSQL multi-instance accounting remain required before Stage 4 closes.

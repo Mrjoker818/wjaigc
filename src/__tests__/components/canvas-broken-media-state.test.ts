@@ -66,6 +66,22 @@ describe('canvas broken managed media state', () => {
     expect(canvasAdapter.shouldPersistCanvasPlacement(image)).toBe(true);
   });
 
+  it('does not persist a cancelled generation placeholder as broken media', () => {
+    const image: CanvasImage = {
+      ...missingImage(''),
+      isProcessingPlaceholder: true,
+      processing: {
+        label: '任务已取消',
+        status: 'cancelled',
+        progress: 1,
+        taskId: 'cancelled-task',
+      },
+    };
+
+    expect(canvasAdapter.shouldPersistCanvasPlacement(image)).toBe(false);
+    expect(canvasAdapter.serializeCanvasWorkspacePlacements([image])).toEqual([]);
+  });
+
   it('recovers managed broken media through the durable recovery endpoint', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
       recovered: true,

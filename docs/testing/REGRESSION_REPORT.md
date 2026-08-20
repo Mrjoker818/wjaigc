@@ -1298,3 +1298,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - TDD was RED for branch precedence, toast severity and red failure styling. The narrow local repair is GREEN across `5 files / 39 tests`; full Vitest passes `2860` tests with `70` PostgreSQL-only tests explicitly skipped. TypeScript, ESLint and production build (`114/114`) pass.
 - Evidence: `docs/testing/evidence/stage4-provider-cancel-accounting-cloud-2026-08-20.json` and `docs/testing/evidence/stage4-provider-cancel-cloud-2026-08-20.png`.
 - **Verdict: BUSINESS CANCELLATION/ACCOUNTING PASS ON DEPLOYED SOURCE; UI FIX LOCAL PASS / CLOUD RETEST REQUIRED.** Direct provider-side remote-task cancellation is not claimed because a distinct provider task ID was not available.
+
+## 2026-08-20 S4-BUG-013 terminal-placeholder persistence regression
+
+- Rebuilding and reloading the production runtime exposed a previously cancelled and refunded task as a fresh 1% Canvas placeholder. The authoritative task remained `cancelled`; only the project placement snapshot was stale.
+- Backward tracing proved task terminal projection and the dedicated processing-placeholder predicate were correct. The generic Canvas placement predicate still retained every placeholder and was used by autosave, unload and user-project serialization.
+- TDD reproduced the bug before the fix (`1 failed / 12 passed`). The minimal persistence-boundary change then passed focused task projection/persistence tests (`41/41`) and the expanded autosave, project-reopen, server-sync and damaged-media matrix (`109/109`).
+- Fresh full gates pass: Vitest `463 files / 2861 tests`, with `15 files / 70 PostgreSQL-gated tests` explicitly skipped; TypeScript exit 0; ESLint exit 0 with `0 errors / 988 historical warnings`; production build `114/114`.
+- **Verdict: LOCAL FIX PASS / STAGE 4 STILL OPEN.** Push the candidate to `main`, pull/build it in Coze, prove the cancelled frame disappears and remains absent after a second reload, then run the exact-candidate PostgreSQL multi-instance suite.

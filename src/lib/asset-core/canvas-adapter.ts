@@ -1,4 +1,5 @@
 import type { CanvasImage as CanvasViewImage } from '@/components/infinite-canvas';
+import { isTerminalGenerationStatus } from '@/lib/generation-batch';
 import type { CanvasImage as PersistedCanvasImage } from '@/lib/user-types';
 
 import type { AssetGraphMode, MediaAvailability } from './types';
@@ -52,8 +53,11 @@ export function getCanvasMediaRenderDecision(
 }
 
 export function shouldPersistCanvasPlacement(image: CanvasPlacementImage): boolean {
+  if (image.isProcessingPlaceholder) {
+    return !isTerminalGenerationStatus(image.processing?.status);
+  }
   if (image.mediaAvailability === 'missing') return true;
-  return Boolean(image.url || image.videoUrl || image.svgDataUrl || image.isProcessingPlaceholder);
+  return Boolean(image.url || image.videoUrl || image.svgDataUrl);
 }
 
 export function shouldRetainCanvasPlacementDuringMerge(image: CanvasPlacementImage): boolean {

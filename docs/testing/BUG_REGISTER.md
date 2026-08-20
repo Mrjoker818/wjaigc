@@ -2099,3 +2099,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Local regression | Focused cancellation/generation coverage passes `5 files / 39 tests`; full Vitest passes `463 files / 2860 tests`, with `15 files / 70` PostgreSQL-gated tests explicitly skipped; TypeScript, ESLint and the `114/114` production build pass. |
 | Evidence | `docs/testing/evidence/stage4-provider-cancel-accounting-cloud-2026-08-20.json` and `docs/testing/evidence/stage4-provider-cancel-cloud-2026-08-20.png`. |
 | Status | **FIXED LOCALLY / EXACT-CANDIDATE COZE CHROME RETEST REQUIRED.** The provider's own remote cancellation remains unverified because the returned `remoteTaskId` did not expose a distinct provider task identity. |
+
+### S4-BUG-013: A cancelled generation placeholder is persisted and revived after project reload
+
+| Field | Detail |
+|---|---|
+| Severity | P1 project recovery and Canvas task-state consistency |
+| Environment | Coze production runtime containing `main@9e41d882`, authenticated Google Chrome, Pear `gpt-image-2`, 2026-08-20 |
+| Reproduction | Cancel task `async-1787238934451-0-9nlxk9`, confirm its durable task status is `cancelled` and its charge is refunded, then rebuild/restart the same source and reload project `project_1786500304299_8vix1z45f`. |
+| Expected | The terminal placeholder is absent after reload and cannot resume polling. |
+| Actual | Persisted image `gen-ph-1787238934569-0-hmfie8` retained an empty URL and `processing.status=processing`; reload rendered it again at 1% as an active generation even though the authoritative task was already cancelled and refunded. |
+| Root cause | Task projection correctly terminalized the placeholder, and `shouldPersistProcessingPlaceholder()` correctly rejected terminal states, but the generic `shouldPersistCanvasPlacement()` returned true for every `isProcessingPlaceholder`. All autosave/logout serializers use that generic predicate, so the cancelled empty frame could still enter the project snapshot and later hydrate with `isResumed=true`. |
+| TDD/fix | Added a RED regression proving a cancelled placeholder was accepted by both the generic placement predicate and workspace serializer. The minimal fix makes the generic predicate retain only non-terminal processing placeholders; ordinary missing media remains persistable and recoverable. |
+| Local regression | RED: `1 failed / 12 passed`. GREEN focused: `4 files / 41 tests`; persistence/project-reopen/sync expansion: `8 files / 109 tests`; full Vitest: `463 files / 2861 tests passed`, with `15 files / 70` PostgreSQL-gated tests skipped. TypeScript and production build `114/114` pass; ESLint exits 0 with `0 errors / 988 historical warnings`. |
+| Status | **FIXED LOCALLY / MAIN PUSH AND EXACT-CANDIDATE COZE RELOAD RETEST REQUIRED.** Current-candidate PostgreSQL multi-instance tests remain unexecuted locally. |

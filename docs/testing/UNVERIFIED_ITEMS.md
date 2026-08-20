@@ -959,3 +959,13 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Hosted immutable Actions | BLOCKED EXTERNALLY | Prior billing prevented runner allocation; retain as missing independent evidence rather than a product failure or pass. |
 | V5.8.8 absorption | NOT STARTED | Keep the snapshot read-only until Stage 4 exact-candidate UI and PostgreSQL gates close. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; all candidate work targets `main` only. |
+
+## 2026-08-20 Stage 4 verification after terminal-placeholder persistence repair
+
+| Item | Status | Remaining proof |
+|---|---|---|
+| Cancelled placeholder persistence | LOCALLY FIXED / CLOUD UNVERIFIED | Pull the new exact `main` candidate into Coze, reload the affected project, verify the cancelled empty frame is removed, wait for project sync and reload again to prove it cannot return. |
+| Cancellation UI and Console cleanliness | CLOUD UNVERIFIED ON NEW CANDIDATE | A paid task must reach durable `cancelled`, show informational cancellation feedback, emit no generic failure Console Error and leave no reloadable placeholder. |
+| PostgreSQL multi-instance accounting race | UNVERIFIED ON CURRENT CANDIDATE | Supply an isolated `POSTGRES_TEST_DATABASE_URL` and execute all `70` gated tests against the exact candidate. |
+| V5.8.8 absorption | NOT STARTED | Keep `J:\无界云端0820` read-only until the two Stage 4 gates above close. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; push only to `main`. |
