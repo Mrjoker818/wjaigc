@@ -1264,7 +1264,18 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - RED first expected `renamed before save` but the save request contained `drag source`. The minimal fix serializes `wfRef.current`, writes `label` at the top level and makes top-level-only node merges null-safe.
 - Fresh local evidence passes focused `4/4`, related Stage 4 `83/83`, full Vitest `2858 passed / 70 PostgreSQL-gated skipped`, TypeScript, ESLint with zero errors, production build `114/114` and whitespace validation.
 - The isolated Coze runtime was restored to `legacy` and root HTTP 200. **Verdict: S4-BUG-010 CLOUD PASS; S4-BUG-011 LOCAL PASS / EXACT-CANDIDATE CLOUD RETEST REQUIRED.**
+
 - Focused tests pass `8/8`; the expanded asset/workflow regression passes `87/87`; full Vitest passes `462` files and `2857` tests with `70` explicitly PostgreSQL-gated skips. TypeScript, production build, whitespace and ESLint `0 errors / 988 historical warnings` pass.
 - **Verdict: LOCAL REGRESSION PASS, CLOUD ACCEPTANCE PENDING.** No Coze or real PostgreSQL success is inferred from mocked route tests; `legacy` remains the delivered renderer until the exact pushed SHA is retested in Google Chrome.
 - Fresh browser logs for the renderer interaction contained no Console Error/Warning. This does not waive the two functional defects.
 - **Verdict: NORMALIZED `CANVAS -> WORKFLOW -> CHAT` PASS; FULL STAGE 4 CHAIN AND REACT FLOW V2 ROLLOUT NOT PASSED.**
+
+## 2026-08-20 S4-BUG-011 exact-business-tree cloud closure
+
+- Coze commit `bdd1122b818783a7c74972184e5f90676610ea37` cleanly cherry-picked `main@5a5ee387a49ad592e0f3a80f7de69bbf5de6dbd4`; `git diff --quiet origin/main -- .` returned 0 and `stable` remained `52f7c601ed150769e15d06fb435c6e360e28c9e7`.
+- The Coze production build exited 0 and generated `114/114` pages. The candidate first started in `react-flow-v2` and returned HTTP 200.
+- Authenticated Google Chrome selected the one restored node, changed its name to `图片输入 · S4云端5a5`, clicked Save immediately after the edit, observed `已保存`, fully reloaded the page and restored that exact value. Blank-pane click then cleared both the React Flow selection and property panel.
+- The test value was restored to `图片输入`, saved and confirmed after another full reload. No test residue remains in the project.
+- Console history retained expected 404/502 warnings from the deliberate build downtime. After the candidate started, no new Console Error/Warning appeared and no global error boundary rendered.
+- Forced rollback started `legacy` with HTTP 200. The reloaded node page exposed `data-workflow-legacy-surface=true`, had zero React Flow surfaces and retained `1 节点 · 0 连线`.
+- **Verdict: S4-BUG-010 AND S4-BUG-011 EXACT-BUSINESS-TREE COZE GOOGLE CHROME PASS.** S4-BUG-009 historical adoption and Stage 4 provider/accounting evidence remain open.

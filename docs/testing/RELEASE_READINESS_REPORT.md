@@ -1032,3 +1032,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The narrow local repair passes focused `4/4`, related Stage 4 `83/83`, full Vitest `2858 passed / 70 PostgreSQL-gated skipped`, TypeScript, zero-error ESLint, `114/114` production build and whitespace validation.
 - `legacy` was restored and remains authoritative. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` was not changed.
 - **Decision: NOT RELEASE READY.** S4-BUG-011 still requires a `main` exact-candidate Coze edit/save/reload/clear/rollback pass. S4-BUG-009 historical asset adoption and real PostgreSQL/provider/accounting evidence also remain open.
+
+## 2026-08-20 readiness after S4-BUG-011 cloud closure
+
+- Coze's business tree exactly matches `main@5a5ee387a49ad592e0f3a80f7de69bbf5de6dbd4`; production build `114/114`, authenticated React Flow v2 edit/save/reload, selection clear, test-data restoration and forced legacy rollback all pass.
+- Candidate-start Console Error/Warning count is zero. Historical 404/502 synchronization warnings occurred only during the deliberate service stop/build interval and are retained as downtime evidence.
+- S4-BUG-010 and S4-BUG-011 are closed. `legacy` is again authoritative and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is unchanged.
+- **Decision: NOT RELEASE READY.** Stage 4 still requires S4-BUG-009 historical Canvas asset adoption through real Coze/PostgreSQL plus current provider charge/cancel/refund evidence. No V5.8.8 absorption starts before those gates close.

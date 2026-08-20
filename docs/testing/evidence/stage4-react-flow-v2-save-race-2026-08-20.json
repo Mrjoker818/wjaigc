@@ -44,7 +44,38 @@
     "build": "114/114",
     "diffCheck": "pass"
   },
+  "cloudAcceptance": {
+    "cozeWorkspaceCommit": "bdd1122b818783a7c74972184e5f90676610ea37",
+    "businessTreeCommit": "5a5ee387a49ad592e0f3a80f7de69bbf5de6dbd4",
+    "businessTreeMatchesOriginMain": true,
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "productionBuild": "exit 0; 114/114 pages",
+    "reactFlowV2": {
+      "rootStatus": 200,
+      "surfaceCount": 1,
+      "nodeCount": 1,
+      "nodeClickPopulatedPropertyPanel": true,
+      "immediateSaveLabel": "图片输入 · S4云端5a5",
+      "labelRestoredAfterFullReload": true,
+      "blankPaneClearedSelection": true,
+      "testLabelRestoredToOriginal": true,
+      "originalLabelVerifiedAfterReload": true,
+      "globalErrorBoundaryCount": 0
+    },
+    "console": {
+      "candidateStartErrors": 0,
+      "candidateStartWarnings": 0,
+      "historicalDowntimeWarningsRetained": [404, 502]
+    },
+    "rollback": {
+      "mode": "legacy",
+      "rootStatus": 200,
+      "legacySurface": true,
+      "reactFlowSurfaceCount": 0,
+      "nodeCountText": "1 节点 · 0 连线"
+    }
+  },
   "restoredMode": "legacy",
   "restoredRootStatus": 200,
-  "verdict": "S4-BUG-010 selection is cloud verified; S4-BUG-011 is fixed locally and requires exact-candidate cloud verification."
+  "verdict": "S4-BUG-010 and S4-BUG-011 exact-business-tree Coze Google Chrome pass."
 }
