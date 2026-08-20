@@ -1240,3 +1240,22 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Coze pulled exact `main@016e5d2feb98cb0377fc0475389b10b914c1020f`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged. The first build was terminated by sandbox memory pressure and briefly left the prior runtime on port 5000, so that attempt was retained as failed deployment evidence rather than counted as a product pass. Coze subsequently completed the production build and restarted the service.
 - In authenticated Google Chrome profile `用户1`, a fresh one-node workflow save returned HTTP 200 from `/api/workflow/save`, followed by HTTP 200 project-sync requests containing `metadata.workflow` and the same `input-image` node. After a full reload, direct node-mode entry restored `1 节点 · 0 连线` without using Workflow Hub. A clean final reload/entry window contained zero fresh Console Error/Warning or uncaught exception.
 - **Verdict: EXACT-SHA COZE GOOGLE CHROME REGRESSION PASS FOR S4-BUG-008.** This closes only project workflow save/reload persistence; PostgreSQL-only, immutable Actions and broader Stage 4 release gates remain unchanged.
+
+## 2026-08-20 Stage 4 cross-workspace and renderer rollout regression
+
+- Testing used authenticated Google Chrome profile `用户1` on the isolated Coze preview. Workspace HEAD was `e097e82aef9221c6cfa2feea781a08f3d44246c8`; its business runtime was equivalent to `016e5d2feb98cb0377fc0475389b10b914c1020f`. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` was not modified.
+- A canonical Canvas asset version `66621b79-77c2-561f-966f-0c9870ba168a` was dragged into node mode. `POST /api/assets/transfer` returned HTTP 200 for `workflow-input`. The connected input/output workflow completed `5/5`.
+- Clicking the normalized output's `发送到智能对话` navigated to `/simple-chat?projectId=s3zk7z3gmsoo15gz`. A second `POST /api/assets/transfer` returned HTTP 200 for `chat-result`, and the page visibly rendered `工作流结果已返回：图片输出` with the blue-cup image. Evidence: `docs/testing/evidence/stage4-workflow-chat-return-2026-08-20.png`.
+- A legacy green-cup Canvas image had no asset identity. Its workflow executed, but output-to-chat failed closed with `输出缺少规范素材版本，无法发送到智能对话`. This is retained as S4-BUG-009, not counted as a cross-workspace pass.
+- The standalone-chat front half could not invoke the image tool because the only authorized chat provider, APImartLLM, returned upstream `get_channel_failed`. No image-provider task was created and no image-generation charge is claimed.
+- Renderer rollout used the same saved project and no rebuild: `legacy -> shadow -> react-flow-v2 -> legacy`. Shadow exposed the legacy surface plus an inert probe with `data-in-sync=true`. React Flow v2 rendered and dragged the node, but a selected React Flow node did not populate the property panel; S4-BUG-010 remains open. The sandbox was restored to server-delivered `legacy` with HTTP 200.
+
+## 2026-08-20 S4-BUG-009 and S4-BUG-010 local repair
+
+- TDD retained two independent RED cases: historical images had no adoption-before-transfer path, and clicking a real React Flow node left `选中节点查看属性` visible.
+- S4-BUG-009 now uses a session-owned, transactional legacy adoption endpoint before canonical workflow transfer. Unknown images and client-supplied owner fields fail closed; the Canvas receives the resulting IDs without polluting undo history.
+- S4-BUG-010 now projects React Flow node/pane clicks into domain `selection.set` commands. React Flow drag remains locally controlled and still commits only at drag end.
+- Focused tests pass `8/8`; the expanded asset/workflow regression passes `87/87`; full Vitest passes `462` files and `2857` tests with `70` explicitly PostgreSQL-gated skips. TypeScript, production build, whitespace and ESLint `0 errors / 988 historical warnings` pass.
+- **Verdict: LOCAL REGRESSION PASS, CLOUD ACCEPTANCE PENDING.** No Coze or real PostgreSQL success is inferred from mocked route tests; `legacy` remains the delivered renderer until the exact pushed SHA is retested in Google Chrome.
+- Fresh browser logs for the renderer interaction contained no Console Error/Warning. This does not waive the two functional defects.
+- **Verdict: NORMALIZED `CANVAS -> WORKFLOW -> CHAT` PASS; FULL STAGE 4 CHAIN AND REACT FLOW V2 ROLLOUT NOT PASSED.**

@@ -453,3 +453,18 @@ Protected stable branch: read-only and untouched
 - Coze pulled exact `main@016e5d2`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged. The first sandbox build was OOM-terminated and briefly served the old runtime, so it was retained as failed deployment evidence. Acceptance began only after a later production build completed and port 5000 restarted.
 - Authenticated Google Chrome then saved one `input-image` node. `/api/workflow/save` returned HTTP 200, followed by HTTP 200 `/api/user-data/sync` requests containing `metadata.workflow` and the same node. A full reload and direct node-mode entry restored `1 节点 · 0 连线`; a clean final reload produced zero fresh Console Error/Warning or uncaught exception.
 - S4-BUG-008 is cloud-closed. Next unique work remains the unrepeated Stage 4 acceptance items only; PostgreSQL-only workstation skips, GitHub Actions billing and broader provider/accounting gates are still open and must not be relabeled as passed.
+
+## 2026-08-20 Stage 4 cloud cross-workspace and renderer acceptance
+
+- Google Chrome profile `用户1` completed the normalized `Canvas -> workflow -> standalone chat` chain. Both canonical transfers returned HTTP 200, the workflow completed `5/5`, and standalone chat rendered the returned blue-cup image.
+- S4-BUG-009 is open: three historical Canvas images lacked `assetVersionId`. Their URL-only workflow path can execute, but the canonical workflow-to-chat boundary correctly fails closed. The next repair must adopt legacy media without weakening version enforcement or creating duplicate assets.
+- The controlled renderer sequence was executed without source, database or stable-branch changes. Shadow reported parity; React Flow v2 rendered and dragged the node, but failed to synchronize node selection to the right-side property panel (S4-BUG-010). The sandbox was restored to `legacy` and returned HTTP 200.
+- The authorized standalone-chat model provider APImartLLM returned external `get_channel_failed` before image-tool invocation. No image-provider task or paid result was claimed. The full `chat -> Canvas -> workflow -> chat` paid chain and current-candidate accounting gate remain open.
+- Next unique implementation work is TDD repair for S4-BUG-009 and S4-BUG-010 on `main` only, followed by focused local regression and a fresh Coze Google Chrome rerun. Do not repeat S4-BUG-008 and do not modify `stable`.
+
+## 2026-08-20 Stage 4 cross-workspace and renderer local repair
+
+- S4-BUG-009 is locally repaired through authenticated historical-image adoption using the existing transactional migration and canonical `/api/assets/transfer`; URL-only chat output remains prohibited.
+- S4-BUG-010 is locally repaired by projecting React Flow node/pane clicks into the workflow domain selection. The real integration test now opens the property panel while preserving drag-end-only commits.
+- Gates pass: focused `8/8`, expanded `87/87`, full Vitest `2857 passed / 70 PostgreSQL-gated skipped`, TypeScript, production build `114` pages, whitespace and ESLint `0 errors / 988 historical warnings`.
+- Next unique action is main-only commit/push, Coze exact-SHA pull, then Google Chrome historical-image adoption/round-trip and `react-flow-v2` click/edit/save/reload/rollback. `stable` remains untouched and Stage 5 remains prohibited.

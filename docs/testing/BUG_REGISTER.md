@@ -2038,3 +2038,32 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Fix | After standalone save succeeds, flush pending Canvas persistence, merge the workflow into the current project's existing metadata, and use the guarded project conflict-recovery flush. The UI reports saved only after both persistence boundaries succeed. |
 | Regression | RED first: `2 failed / 4 passed`. GREEN focused: `6/6`; related persistence/sync/UI: `81/81`; full Vitest: `2852 passed / 70 PostgreSQL-gated skipped`; TypeScript, production build and ESLint `0 errors / 988 historical warnings` pass. Coze `main@016e5d2feb98cb0377fc0475389b10b914c1020f` then produced HTTP 200 for both `/api/workflow/save` and project `/api/user-data/sync`; the latter contained `metadata.workflow` and the `input-image` node. A clean reload followed by direct node-mode entry restored `1 节点 · 0 连线` with zero fresh Console Error/Warning. |
 | Status | **FIXED / EXACT-SHA COZE GOOGLE CHROME VERIFIED.** |
+
+### S4-BUG-009: Historical Canvas images cannot complete workflow-to-chat transfer
+
+| Field | Detail |
+|---|---|
+| Severity | P1 existing-project cross-workspace compatibility |
+| Environment | Coze workspace `main@e097e82aef9221c6cfa2feea781a08f3d44246c8` with business runtime equivalent to `016e5d2feb98cb0377fc0475389b10b914c1020f`; authenticated Google Chrome profile `用户1`; 2026-08-20 |
+| Reproduction | Drag a historical Canvas image without `assetVersionId` into node mode, connect it to an image-output node, execute the workflow, then click `发送到智能对话`. |
+| Expected | Existing Canvas images are migrated or adopted into a canonical asset version, and the workflow result reaches standalone chat. |
+| Actual | The workflow reports completion, but no `/api/assets/transfer` request is made for the input. Clicking the visible chat action only adds `输出缺少规范素材版本，无法发送到智能对话` to the execution log. Three of the four pre-existing images in the tested project had no asset/version/placement identity. |
+| Root cause | `transferCanvasImageToWorkflow()` intentionally falls back to a legacy URL reference when `image.assetVersionId` is absent, while `handleSendWorkflowResultToChat()` correctly refuses any output without a canonical `assetVersionId`. No adoption boundary bridges those two policies for historical data. |
+| Control proof | The normalized blue-cup image had version `66621b79-77c2-561f-966f-0c9870ba168a`. Canvas-to-workflow and workflow-to-chat transfers both returned HTTP 200, execution completed `5/5`, and standalone chat rendered `工作流结果已返回：图片输出`. |
+| TDD/fix | Added a RED source contract for adoption-before-transfer, then introduced authenticated `POST /api/assets/adopt-canvas-image`. It derives the owner only from the session, runs the existing transactional/idempotent legacy migration, returns the exact image mapping, and rejects unknown or client-owned inputs. Node mode then transfers the adopted version canonically and writes the asset/version/placement IDs back to Canvas without adding an undo-history entry. |
+| Local regression | Focused adoption/transfer/renderer tests pass `8/8`; expanded asset/workflow set passes `87/87`; full Vitest passes `2857` with `70` PostgreSQL-gated skips. TypeScript, production build, whitespace and ESLint `0 errors / 988 historical warnings` pass. |
+| Status | **FIXED LOCALLY / COZE AND REAL POSTGRESQL MIGRATION RETEST REQUIRED.** The fail-closed workflow-to-chat rule remains unchanged. |
+
+### S4-BUG-010: React Flow v2 selection does not populate the node property panel
+
+| Field | Detail |
+|---|---|
+| Severity | P1 workflow editor usability / renderer rollout blocker |
+| Environment | Same isolated Coze runtime, `WUJIE_WORKFLOW_RENDERER_MODE=react-flow-v2`, authenticated Google Chrome profile `用户1`, 2026-08-20 |
+| Reproduction | Load the saved one-node workflow in `react-flow-v2`, drag the node, then click the node. |
+| Expected | The selected workflow node is reflected in domain selection state and the right panel displays its editable properties. |
+| Actual | React Flow renders and drags the node, and the DOM node receives `.selected`, but the right panel remains `选中节点查看属性`. |
+| Rollout evidence | `legacy` restored correctly; `shadow` retained the legacy surface and reported `data-in-sync=true`; `react-flow-v2` rendered one React Flow node with no Console Error/Warning. The selection/property defect prevents v2 from becoming authoritative. |
+| TDD/fix | A real-surface integration test first reproduced the stale property panel. `WorkflowReactFlowSurface` now converts node and pane clicks into domain `selection.set` commands, including Ctrl/Command multi-select behavior, instead of relying on React Flow's private DOM selection. |
+| Local regression | Both RED cases are GREEN; React Flow click/property, single-path Ctrl multi-select and drag synchronization pass `3/3`, expanded renderer/command/asset coverage passes `87/87`, and the full gates listed above pass. |
+| Status | **FIXED LOCALLY / COZE REACT-FLOW-V2 CLICK, EDIT, SAVE, RELOAD AND LEGACY ROLLBACK RETEST REQUIRED.** Keep `legacy` authoritative until that evidence exists. |

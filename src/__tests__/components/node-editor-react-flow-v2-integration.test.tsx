@@ -138,6 +138,65 @@ describe('NodeEditor react-flow-v2 integration', () => {
     vi.restoreAllMocks();
   });
 
+  it('synchronizes a React Flow node click with the domain selection and property panel', async () => {
+    const workflow = workflowFixture();
+    const node = workflow.nodes[0]!;
+    const { container } = render(
+      <NodeEditor
+        workflow={workflow}
+        userId="integration-user"
+        projectId="integration-project"
+        canvasImages={[]}
+        rendererMode="react-flow-v2"
+      />,
+    );
+    const flowNode = await waitFor(() => {
+      const element = container.querySelector<HTMLElement>(`.react-flow__node[data-id="${node.id}"]`);
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(screen.getByText('选中节点查看属性')).toBeTruthy();
+
+    fireEvent.click(flowNode);
+
+    await waitFor(() => {
+      expect(screen.queryByText('选中节点查看属性')).toBeNull();
+    });
+  });
+
+  it('uses one domain selection path for the embedded card mouse sequence', async () => {
+    const workflow = workflowFixture();
+    const second = createWorkflowNode('input-text', 360, 60, 'second source');
+    workflow.nodes.push(second);
+    const { container } = render(
+      <NodeEditor
+        workflow={workflow}
+        userId="integration-user"
+        projectId="integration-project"
+        canvasImages={[]}
+        rendererMode="react-flow-v2"
+      />,
+    );
+    const [firstFlowNode, secondFlowNode] = await waitFor(() => {
+      const nodes = [...container.querySelectorAll<HTMLElement>('.react-flow__node')];
+      expect(nodes).toHaveLength(2);
+      return nodes;
+    });
+    const firstCard = firstFlowNode!.querySelector<HTMLElement>('[data-node-id]')!;
+    const secondCard = secondFlowNode!.querySelector<HTMLElement>('[data-node-id]')!;
+
+    dispatchMouse(firstCard, 'mousedown', { button: 0 });
+    dispatchMouse(firstCard, 'mouseup', { button: 0 });
+    fireEvent.click(firstCard);
+    dispatchMouse(secondCard, 'mousedown', { button: 0, ctrlKey: true });
+    dispatchMouse(secondCard, 'mouseup', { button: 0, ctrlKey: true });
+    fireEvent.click(secondCard, { ctrlKey: true });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.react-flow__node.selected')).toHaveLength(2);
+    });
+  });
+
   it('defers an external workflow during an actual React Flow drag and merges it at drag end', async () => {
     const workflow = workflowFixture();
     const node = workflow.nodes[0]!;

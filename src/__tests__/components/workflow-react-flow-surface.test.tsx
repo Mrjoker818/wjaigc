@@ -323,19 +323,16 @@ describe('WorkflowReactFlowSurface', () => {
     const second = createWorkflowNode('input-text', 240, 0, 'second');
     workflow.nodes = [first, second];
     const model = projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 }, new Set([first.id]));
-    const onCommand = vi.fn();
     const legacySelect = vi.fn();
     const surfaceModule = await import('@/components/workflow/WorkflowReactFlowSurface');
     const nodes = surfaceModule.createReactFlowNodes(model, false, {
-      onCommand,
       cardCallbacks: { onSelect: legacySelect } as never,
     });
 
     nodes[1]!.data.cardProps.onSelect({ ctrlKey: true, metaKey: false } as never);
 
-    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'selection.set', nodeIds: [first.id, second.id],
-    }));
+    expect(surfaceModule.resolveReactFlowSelection(model, second.id, true))
+      .toEqual([first.id, second.id]);
     expect(legacySelect).not.toHaveBeenCalled();
   });
 

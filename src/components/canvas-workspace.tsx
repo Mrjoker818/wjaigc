@@ -5581,6 +5581,21 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     await manager.flushProjectsToServerWithConflictRecovery();
   }, [canvasPersistenceScheduler]);
 
+  const handleCanvasImageAssetReferenceAdopted = useCallback((
+    imageId: string,
+    reference: WorkspaceAssetReference,
+  ) => {
+    setImages(current => current.map(image => image.id === imageId
+      ? {
+          ...image,
+          assetId: reference.assetId,
+          assetVersionId: reference.assetVersionId,
+          placementId: reference.placementId,
+          url: reference.url || image.url,
+        }
+      : image), { history: 'skip' });
+  }, [setImages]);
+
   // CanvasWorkspace is only mounted when authenticated, so no auth gate here.
 
   // Mode switching - early return for non-canvas modes
@@ -5618,6 +5633,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           placementId: img.placementId,
           projectId: currentProject?.id,
         }))}
+        onCanvasImageAssetReferenceAdopted={handleCanvasImageAssetReferenceAdopted}
         themeStyle={themeStyle}
         preferredAnnotationModelId={preferredAnnotationModelId}
         rendererMode={UserManagerCore.getInstance().getWorkflowRendererMode()}

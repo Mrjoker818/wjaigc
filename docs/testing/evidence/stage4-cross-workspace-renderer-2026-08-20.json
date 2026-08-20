@@ -1,0 +1,51 @@
+{
+  "date": "2026-08-20",
+  "browser": "Google Chrome profile 用户1",
+  "workspaceCommit": "e097e82aef9221c6cfa2feea781a08f3d44246c8",
+  "businessRuntimeEquivalent": "016e5d2feb98cb0377fc0475389b10b914c1020f",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "projectId": "project_1786500304299_8vix1z45f",
+  "chatProjectId": "s3zk7z3gmsoo15gz",
+  "normalizedAssetVersionId": "66621b79-77c2-561f-966f-0c9870ba168a",
+  "canonicalTransfers": [
+    {
+      "entityType": "workflow-input",
+      "status": 200
+    },
+    {
+      "entityType": "chat-result",
+      "status": 200
+    }
+  ],
+  "workflowExecution": {
+    "status": "completed",
+    "nodes": 5,
+    "connections": 2,
+    "completedNodes": 5
+  },
+  "legacyCompatibility": {
+    "projectImageCount": 4,
+    "imagesWithoutAssetVersion": 3,
+    "failureMessage": "输出缺少规范素材版本，无法发送到智能对话"
+  },
+  "rendererSequence": [
+    "legacy",
+    "shadow",
+    "react-flow-v2",
+    "legacy"
+  ],
+  "shadowProbeInSync": true,
+  "reactFlowV2": {
+    "renderedNodeCount": 1,
+    "dragWorked": true,
+    "selectedDomNodeCount": 1,
+    "propertyPanelUpdated": false
+  },
+  "restoredMode": "legacy",
+  "providerBlocker": "APImartLLM get_channel_failed before image-tool invocation",
+  "screenshots": [
+    "stage4-workflow-chat-return-2026-08-20.png",
+    "stage4-react-flow-v2-selection-gap-2026-08-20.png"
+  ],
+  "verdict": "normalized cross-workspace pass; Stage 4 not complete"
+}

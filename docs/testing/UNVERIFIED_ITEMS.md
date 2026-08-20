@@ -916,6 +916,18 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Independent reviewer | UNAVAILABLE LOCALLY | Windows Codex executable returned access denied; manual review completed, but is not labeled independent. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
 
+## 2026-08-20 Stage 4 cloud acceptance delta
+
+| Item | Status | Required proof |
+|---|---|---|
+| Canonical Canvas -> workflow -> chat | VERIFIED | Google Chrome observed HTTP 200 `workflow-input` and `chat-result` transfers, workflow `5/5`, navigation and rendered returned image. |
+| Historical Canvas images without `assetVersionId` | LOCALLY FIXED / CLOUD UNVERIFIED | Guarded session-owned adoption and canonical transfer now exist. Prove real PostgreSQL migration and the complete Coze Canvas -> workflow -> chat chain without duplicate assets. |
+| Shadow renderer | VERIFIED FOR ONE-NODE PARITY | Server delivered `shadow`; legacy remained authoritative and `data-in-sync=true`. Broader browser matrix remains separate. |
+| React Flow v2 selection/property editing | LOCALLY FIXED / CLOUD UNVERIFIED | Domain selection now follows node/pane clicks. Repeat drag/select/edit/save/reload in Coze and force rollback to legacy before enabling v2. |
+| Chat -> Canvas paid front half | BLOCKED BY PROVIDER | APImartLLM returned `get_channel_failed` before image-tool invocation. Retry only when an authorized chat channel is healthy; do not classify the image provider as failed. |
+| Real current-candidate accounting | UNVERIFIED | Prove one charge, cancellation, monotonic terminal state, late-result rejection and at-most-once refund on this candidate. |
+| Runtime mode after testing | RESTORED | Coze sandbox again delivers `WUJIE_WORKFLOW_RENDERER_MODE=legacy`, HTTP 200. |
+
 ## 2026-08-20 S4-BUG-008 remaining verification
 
 | Item | Status | Required proof |

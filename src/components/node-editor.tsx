@@ -666,6 +666,10 @@ interface NodeEditorProps {
   onOpenWorkflowHub?: () => void;
   /** P0: 画布图片列表，用于@图片引用 */
   canvasImages?: CanvasImageRef[];
+  onCanvasImageAssetReferenceAdopted?: (
+    imageId: string,
+    reference: WorkspaceAssetReference,
+  ) => void;
   /** 主题风格: gold(黑金) / monochrome(单色) */
   themeStyle?: 'gold' | 'monochrome';
   /** 生成图片后回调，将图片添加到项目 */
@@ -865,7 +869,7 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 
-export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, onWorkflowSaved, onBeforeWorkflowChatNavigation, canvasImages, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
+export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, onWorkflowSaved, onBeforeWorkflowChatNavigation, canvasImages, onCanvasImageAssetReferenceAdopted, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
@@ -1821,7 +1825,7 @@ ${contextInfo}
           }
         : node),
     }));
-    if (!projectId || !image.assetVersionId) {
+    if (!projectId) {
       if (guard.isCurrent(token)) applyLegacyReference();
       return;
     }
@@ -1829,16 +1833,32 @@ ${contextInfo}
       guard,
       token,
       transfer: async () => {
+        let sourceReference: WorkspaceAssetReference = image;
+        if (!sourceReference.assetVersionId) {
+          const adoptionResponse = await fetch('/api/assets/adopt-canvas-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId, imageId: image.id }),
+          });
+          if (!adoptionResponse.ok) {
+            throw new Error(`Legacy asset adoption failed (${adoptionResponse.status})`);
+          }
+          sourceReference = await adoptionResponse.json() as WorkspaceAssetReference;
+          if (!sourceReference.assetVersionId) {
+            throw new Error('Legacy asset adoption returned no version');
+          }
+          onCanvasImageAssetReferenceAdopted?.(image.id, sourceReference);
+        }
         const response = await fetch('/api/assets/transfer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sourceVersion: image.assetVersionId,
+            sourceVersion: sourceReference.assetVersionId,
             targetProject: projectId,
             targetWorkspace: wf.id,
             entityType: 'workflow-input',
             entityId: nodeId,
-            idempotencyKey: `canvas-workflow:${wf.id}:${nodeId}:${image.assetVersionId}`,
+            idempotencyKey: `canvas-workflow:${wf.id}:${nodeId}:${sourceReference.assetVersionId}`,
             metadata: { name: image.name, source: 'canvas', sourceImageId: image.id },
           }),
         });
@@ -1868,7 +1888,7 @@ ${contextInfo}
       },
       onFailure: applyLegacyReference,
     });
-  }, [projectId, updateWorkflow, wf.id]);
+  }, [onCanvasImageAssetReferenceAdopted, projectId, updateWorkflow, wf.id]);
 
 
   // 从内容面板拖拽图片到画布 → 创建 input-image 节点

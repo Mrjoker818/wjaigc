@@ -1015,3 +1015,12 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Exact Coze `main@016e5d2feb98cb0377fc0475389b10b914c1020f` passed authenticated Google Chrome save/reload restoration: standalone save and project metadata sync both returned HTTP 200, project sync carried the workflow node, and direct node-mode entry after reload restored `1 节点 · 0 连线` with no fresh Console Error/Warning.
 - The initial Coze production build was OOM-terminated and briefly served the previous runtime. It was not counted as a pass; acceptance ran only after the later production build completed and port 5000 restarted. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged.
 - **Decision: S4-BUG-008 CLOUD GATE PASSED; OVERALL RELEASE STILL NOT APPROVED.** PostgreSQL-only tests skipped on the workstation, immutable GitHub Actions, real provider/accounting and the remaining Stage 4 acceptance matrix are still open.
+
+## 2026-08-20 readiness after cross-workspace and renderer rollout checks
+
+- Canonical `Canvas -> workflow -> standalone chat` transfer is proven in authenticated Google Chrome: both asset transfers returned HTTP 200, the workflow completed, and the returned image rendered in chat.
+- Existing-project compatibility now has a local guarded adoption repair for S4-BUG-009, but release readiness remains blocked until a real historical image is migrated in Coze/PostgreSQL and completes Canvas -> workflow -> chat without duplicate assets.
+- Shadow renderer parity passed its cloud probe (`data-in-sync=true`). S4-BUG-010 has a local domain-selection repair and permanent integration test, but `legacy` remains authoritative until Coze proves click/edit/save/reload and forced rollback.
+- The only authorized chat provider returned `get_channel_failed`, so the paid `chat -> Canvas` front half and current-candidate accounting evidence remain unverified rather than passed.
+- The isolated Coze sandbox was restored to `WUJIE_WORKFLOW_RENDERER_MODE=legacy`; root HTTP returned 200 and server delivery reported `legacy`. `stable` was untouched.
+- **Decision: NOT RELEASE READY.** Normalized cross-workspace transfer passes, but open P1 compatibility and React Flow selection defects plus provider/accounting evidence prevent Stage 4 completion.

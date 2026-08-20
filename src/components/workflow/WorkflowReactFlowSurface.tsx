@@ -100,7 +100,6 @@ function createCardProps(
   renderNode: WorkflowRenderNode,
   readOnly: boolean,
   presentation: Partial<WorkflowReactFlowPresentation>,
-  selectedNodeIds: ReadonlySet<string>,
 ): WorkflowProductCardProps {
   const callbacks = presentation.cardCallbacks;
   const invoke = <Args extends unknown[]>(callback: ((...args: Args) => void) | undefined, ...args: Args): void => {
@@ -130,22 +129,9 @@ function createCardProps(
     onImageFileDrop: (...args) => invoke(callbacks?.onImageFileDrop, ...args),
     onSavePromptPreset: (...args) => invoke(callbacks?.onSavePromptPreset, ...args),
     onDeletePromptPreset: (...args) => invoke(callbacks?.onDeletePromptPreset, ...args),
-    onSelect: event => {
-      if (readOnly) return;
-      const nextSelectedNodeIds = new Set(selectedNodeIds);
-      if (event?.ctrlKey || event?.metaKey) {
-        if (nextSelectedNodeIds.has(renderNode.id)) nextSelectedNodeIds.delete(renderNode.id);
-        else nextSelectedNodeIds.add(renderNode.id);
-      } else {
-        nextSelectedNodeIds.clear();
-        nextSelectedNodeIds.add(renderNode.id);
-      }
-      presentation.onCommand?.({
-        type: 'selection.set',
-        nodeIds: [...nextSelectedNodeIds],
-        transactionId: `react-flow-select:${renderNode.id}`,
-      });
-    },
+    // React Flow owns selection gestures in this surface. Publishing here as
+    // well would toggle Ctrl/Command selection twice for one pointer gesture.
+    onSelect: noop,
     onHover: id => invoke(callbacks?.onHover, id),
     onDragStart: noop,
     onPortMouseDown: noop,
@@ -168,7 +154,6 @@ export function createReactFlowNodes(
   presentation: Partial<WorkflowReactFlowPresentation> = {},
   visibleNodeIds: ReadonlySet<string> = new Set(model.nodes.map(node => node.id)),
 ): WorkflowFlowNode[] {
-  const selectedNodeIds = new Set(model.nodes.filter(node => node.selected).map(node => node.id));
   return model.nodes.filter(node => visibleNodeIds.has(node.id)).map(node => ({
     id: node.id,
     type: 'workflow',
@@ -179,7 +164,7 @@ export function createReactFlowNodes(
     data: {
       node,
       readOnly,
-      cardProps: createCardProps(node, readOnly, presentation, selectedNodeIds),
+      cardProps: createCardProps(node, readOnly, presentation),
     },
     selectable: !readOnly,
     draggable: !readOnly,
@@ -267,6 +252,24 @@ export function createReactFlowCommandHandlers(
   };
 }
 
+export function resolveReactFlowSelection(
+  model: WorkflowRenderModel,
+  nodeId: string,
+  additive: boolean,
+): string[] {
+  const selectedNodeIds = new Set(
+    model.nodes.filter(candidate => candidate.selected).map(candidate => candidate.id),
+  );
+  if (additive) {
+    if (selectedNodeIds.has(nodeId)) selectedNodeIds.delete(nodeId);
+    else selectedNodeIds.add(nodeId);
+  } else {
+    selectedNodeIds.clear();
+    selectedNodeIds.add(nodeId);
+  }
+  return [...selectedNodeIds];
+}
+
 /** Controlled surface: React Flow owns interaction mechanics, never workflow state. */
 export function WorkflowReactFlowSurface({
   model,
@@ -351,6 +354,20 @@ export function WorkflowReactFlowSurface({
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         elementsSelectable={!readOnly}
+        onNodeClick={readOnly ? undefined : (event, node) => {
+          onCommand({
+            type: 'selection.set',
+            nodeIds: resolveReactFlowSelection(model, node.id, event.ctrlKey || event.metaKey),
+            transactionId: nextTransactionId(`react-flow-select:${node.id}`),
+          });
+        }}
+        onPaneClick={readOnly ? undefined : () => {
+          onCommand({
+            type: 'selection.set',
+            nodeIds: [],
+            transactionId: nextTransactionId('react-flow-select-clear'),
+          });
+        }}
         panOnDrag={!readOnly}
         zoomOnScroll={!readOnly}
         zoomOnPinch={!readOnly}
