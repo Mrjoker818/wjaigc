@@ -293,7 +293,7 @@ export function mergeWorkflowNodeUpdate(
   const topLevel: Partial<WorkflowNode> = { ...updates };
   delete topLevel.config;
   const config = { ...node.config, ...(updates.config || {}) };
-  const hasImageUrlUpdate = Object.prototype.hasOwnProperty.call(updates.config, 'imageUrl');
+  const hasImageUrlUpdate = Object.prototype.hasOwnProperty.call(updates.config ?? {}, 'imageUrl');
   if (hasImageUrlUpdate && updates.config?.imageUrl !== node.config.imageUrl) {
     for (const key of WORKFLOW_IMAGE_IDENTITY_KEYS) delete config[key];
   }

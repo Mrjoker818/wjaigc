@@ -2066,4 +2066,19 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Rollout evidence | `legacy` restored correctly; `shadow` retained the legacy surface and reported `data-in-sync=true`; `react-flow-v2` rendered one React Flow node with no Console Error/Warning. The selection/property defect prevents v2 from becoming authoritative. |
 | TDD/fix | A real-surface integration test first reproduced the stale property panel. `WorkflowReactFlowSurface` now converts node and pane clicks into domain `selection.set` commands, including Ctrl/Command multi-select behavior, instead of relying on React Flow's private DOM selection. |
 | Local regression | Both RED cases are GREEN; React Flow click/property, single-path Ctrl multi-select and drag synchronization pass `3/3`, expanded renderer/command/asset coverage passes `87/87`, and the full gates listed above pass. |
-| Status | **FIXED LOCALLY / COZE REACT-FLOW-V2 CLICK, EDIT, SAVE, RELOAD AND LEGACY ROLLBACK RETEST REQUIRED.** Keep `legacy` authoritative until that evidence exists. |
+| Cloud regression | Coze business tree equivalent to `main@c99fb7270e1dc81343733675b2b18d9935499ff9` was started temporarily with `WUJIE_WORKFLOW_RENDERER_MODE=react-flow-v2`. Clicking the node populated the property panel; clicking the blank pane cleared both React Flow and domain selection; no Console Error/Warning was emitted. The isolated server was then restored to `legacy` and returned HTTP 200. |
+| Status | **FIXED / COZE GOOGLE CHROME CLICK AND CLEAR VERIFIED.** Renderer promotion remains blocked by S4-BUG-011 save/reload persistence, so `legacy` stays authoritative. |
+
+### S4-BUG-011: Immediate property blur followed by Save persists the previous node value
+
+| Field | Detail |
+|---|---|
+| Severity | P1 workflow editor persistence / renderer rollout blocker |
+| Environment | Coze business tree equivalent to `main@c99fb7270e1dc81343733675b2b18d9935499ff9`, `WUJIE_WORKFLOW_RENDERER_MODE=react-flow-v2`, authenticated Google Chrome profile `用户1`, 2026-08-20 |
+| Reproduction | Select a node, change `名称` from `图片输入` to `图片输入 · S4验证`, immediately click Save, observe `已保存`, reload, select the node again. |
+| Expected | The latest visible node name is included in `/api/workflow/save`, synchronized to project metadata and restored after reload. |
+| Actual | The UI reported `已保存`, but reload restored the previous name `图片输入`. |
+| Root cause | The property blur updated the latest workflow ref, while `handleSaveWorkflow` serialized the previous React render's `wf` closure. In addition, the generic property writer stored the special `label` field inside `node.config` instead of the top-level `node.label`. Exercising the correct top-level path also exposed an unsafe `hasOwnProperty` call when `updates.config` was absent. |
+| TDD/fix | A real React Flow v2 integration test first failed because the saved request contained `drag source` instead of `renamed before save`. Save now serializes `wfRef.current`; the `label` property updates the top-level field; `mergeWorkflowNodeUpdate` safely handles top-level-only updates. |
+| Local regression | Focused integration is GREEN `4/4`; related Stage 4 renderer/command/asset matrix is GREEN `83/83`; full Vitest is `462 files passed / 15 skipped`, `2858 tests passed / 70 PostgreSQL-gated skipped`; TypeScript passes; ESLint exits 0 with `0 errors / 988 historical warnings`; production build completes `114/114`; whitespace check passes. |
+| Status | **FIXED LOCALLY / MAIN PUSH AND COZE EXACT-CANDIDATE EDIT, SAVE, RELOAD, CLEAR AND LEGACY ROLLBACK REQUIRED.** |

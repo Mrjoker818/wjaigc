@@ -2745,7 +2745,7 @@ ${contextInfo}
     setSaveStatus('saving');
     try {
       if (!userId) throw new Error('未登录');
-      const savedWorkflow = { ...wf, updatedAt: Date.now() };
+      const savedWorkflow = { ...wfRef.current, updatedAt: Date.now() };
       const res = await fetch('/api/workflow/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2759,7 +2759,7 @@ ${contextInfo}
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 2000);
     }
-  }, [onWorkflowSaved, userId, wf]);
+  }, [onWorkflowSaved, userId]);
 
   // ─── 图片上传 ───
 
@@ -3923,7 +3923,9 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
       // 失焦时同步到父组件
       const localVal = localTextValues[field.key];
       if (localVal !== undefined && localVal !== serializedExternalValue) {
-        onUpdate(node.id, { config: { [field.key]: localVal } });
+        onUpdate(node.id, field.key === 'label'
+          ? { label: localVal }
+          : { config: { [field.key]: localVal } });
       }
       setLocalTextValues(prev => {
         const next = { ...prev };

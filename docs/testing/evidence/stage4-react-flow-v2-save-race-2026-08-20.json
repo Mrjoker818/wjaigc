@@ -1,0 +1,50 @@
+{
+  "date": "2026-08-20",
+  "browser": "Google Chrome profile 用户1",
+  "sourceCommit": "c99fb7270e1dc81343733675b2b18d9935499ff9",
+  "cozeWorkspaceCommit": "5052b9f125d5ea72237417164bbc21bc90c67997",
+  "cozeTreeEquivalentToSource": true,
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "projectId": "project_1786500304299_8vix1z45f",
+  "deploymentProbe": {
+    "rootStatus": 200,
+    "chunk9205Status": 200,
+    "adoptCanvasImageGetStatus": 405,
+    "interpretation": "The earlier missing-chunk screen was transient deployment/static skew; the current chunk and route exist."
+  },
+  "reactFlowV2Selection": {
+    "reactFlowSurfaceCount": 1,
+    "legacySurfaceCount": 0,
+    "renderedNodeCount": 1,
+    "nodeClickSelectedDomainNode": true,
+    "propertyPanelPopulated": true,
+    "blankPaneClearedSelection": true,
+    "consoleErrors": 0,
+    "consoleWarnings": 0
+  },
+  "saveReloadReproduction": {
+    "previousLabel": "图片输入",
+    "editedLabel": "图片输入 · S4验证",
+    "saveUiReportedSuccess": true,
+    "labelAfterReload": "图片输入",
+    "result": "failed"
+  },
+  "rootCause": [
+    "Save serialized the previous React wf closure instead of wfRef.current.",
+    "The label field was written to node.config rather than node.label.",
+    "Top-level-only updates reached an unsafe hasOwnProperty call on an absent updates.config."
+  ],
+  "localTdd": {
+    "red": "expected renamed before save, received drag source",
+    "focusedGreen": "4/4",
+    "relatedGreen": "83/83",
+    "fullVitest": "462 files passed, 15 skipped; 2858 tests passed, 70 PostgreSQL-gated skipped",
+    "typecheck": "pass",
+    "lint": "0 errors, 988 historical warnings",
+    "build": "114/114",
+    "diffCheck": "pass"
+  },
+  "restoredMode": "legacy",
+  "restoredRootStatus": 200,
+  "verdict": "S4-BUG-010 selection is cloud verified; S4-BUG-011 is fixed locally and requires exact-candidate cloud verification."
+}

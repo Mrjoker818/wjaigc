@@ -1255,6 +1255,15 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - TDD retained two independent RED cases: historical images had no adoption-before-transfer path, and clicking a real React Flow node left `选中节点查看属性` visible.
 - S4-BUG-009 now uses a session-owned, transactional legacy adoption endpoint before canonical workflow transfer. Unknown images and client-supplied owner fields fail closed; the Canvas receives the resulting IDs without polluting undo history.
 - S4-BUG-010 now projects React Flow node/pane clicks into domain `selection.set` commands. React Flow drag remains locally controlled and still commits only at drag end.
+
+## 2026-08-20 React Flow v2 selection cloud pass and S4-BUG-011 local repair
+
+- Coze's business tree was equivalent to `main@c99fb7270e1dc81343733675b2b18d9935499ff9`. A transient missing-chunk screen was not counted as product evidence: the root and current `9205` chunk both subsequently returned HTTP 200, while the adoption route returned the expected GET 405.
+- In authenticated Google Chrome, forced `react-flow-v2` rendered exactly one React Flow surface and no legacy surface. Node click selected the domain node and populated the property panel; blank-pane click cleared both selections; Console Error/Warning remained zero. S4-BUG-010 selection behavior therefore passes its cloud gate.
+- Editing `名称` and immediately clicking Save exposed a new reproducible persistence failure: the UI displayed `已保存`, but reload restored the old label. This evidence is retained as S4-BUG-011 rather than hidden under the selection pass.
+- RED first expected `renamed before save` but the save request contained `drag source`. The minimal fix serializes `wfRef.current`, writes `label` at the top level and makes top-level-only node merges null-safe.
+- Fresh local evidence passes focused `4/4`, related Stage 4 `83/83`, full Vitest `2858 passed / 70 PostgreSQL-gated skipped`, TypeScript, ESLint with zero errors, production build `114/114` and whitespace validation.
+- The isolated Coze runtime was restored to `legacy` and root HTTP 200. **Verdict: S4-BUG-010 CLOUD PASS; S4-BUG-011 LOCAL PASS / EXACT-CANDIDATE CLOUD RETEST REQUIRED.**
 - Focused tests pass `8/8`; the expanded asset/workflow regression passes `87/87`; full Vitest passes `462` files and `2857` tests with `70` explicitly PostgreSQL-gated skips. TypeScript, production build, whitespace and ESLint `0 errors / 988 historical warnings` pass.
 - **Verdict: LOCAL REGRESSION PASS, CLOUD ACCEPTANCE PENDING.** No Coze or real PostgreSQL success is inferred from mocked route tests; `legacy` remains the delivered renderer until the exact pushed SHA is retested in Google Chrome.
 - Fresh browser logs for the renderer interaction contained no Console Error/Warning. This does not waive the two functional defects.

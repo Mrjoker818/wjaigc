@@ -1024,3 +1024,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The only authorized chat provider returned `get_channel_failed`, so the paid `chat -> Canvas` front half and current-candidate accounting evidence remain unverified rather than passed.
 - The isolated Coze sandbox was restored to `WUJIE_WORKFLOW_RENDERER_MODE=legacy`; root HTTP returned 200 and server delivery reported `legacy`. `stable` was untouched.
 - **Decision: NOT RELEASE READY.** Normalized cross-workspace transfer passes, but open P1 compatibility and React Flow selection defects plus provider/accounting evidence prevent Stage 4 completion.
+
+## 2026-08-20 readiness after React Flow v2 selection acceptance and save-race repair
+
+- S4-BUG-010 node and pane selection now passes authenticated Coze Google Chrome acceptance on the `c99fb727` business tree with no Console Error/Warning.
+- The same run found S4-BUG-011: immediate property blur plus Save reported success but persisted the previous node label. The failure was reproduced before code changes and is not represented as a renderer pass.
+- The narrow local repair passes focused `4/4`, related Stage 4 `83/83`, full Vitest `2858 passed / 70 PostgreSQL-gated skipped`, TypeScript, zero-error ESLint, `114/114` production build and whitespace validation.
+- `legacy` was restored and remains authoritative. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` was not changed.
+- **Decision: NOT RELEASE READY.** S4-BUG-011 still requires a `main` exact-candidate Coze edit/save/reload/clear/rollback pass. S4-BUG-009 historical asset adoption and real PostgreSQL/provider/accounting evidence also remain open.

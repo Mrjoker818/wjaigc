@@ -164,6 +164,68 @@ describe('NodeEditor react-flow-v2 integration', () => {
     });
   });
 
+  it('saves the latest node name when blur and save happen in the same click', async () => {
+    const workflow = workflowFixture();
+    const node = workflow.nodes[0]!;
+    const onWorkflowSaved = vi.fn<(workflow: Workflow) => Promise<void>>().mockResolvedValue(undefined);
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (input) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      if (url === '/api/workflow/save') {
+        return new Response(JSON.stringify({ success: true, workflowId: workflow.id }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    const { container } = render(
+      <NodeEditor
+        workflow={workflow}
+        userId="integration-user"
+        projectId="integration-project"
+        onWorkflowSaved={onWorkflowSaved}
+        canvasImages={[]}
+        rendererMode="react-flow-v2"
+      />,
+    );
+    const flowNode = await waitFor(() => {
+      const element = container.querySelector<HTMLElement>(`.react-flow__node[data-id="${node.id}"]`);
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    fireEvent.click(flowNode);
+    const nameInput = await screen.findByDisplayValue('drag source');
+
+    fireEvent.focus(nameInput);
+    fireEvent.change(nameInput, { target: { value: 'renamed before save' } });
+    fireEvent.blur(nameInput);
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => {
+      const saveCall = fetchMock.mock.calls.find(([input]) => (
+        (typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url) === '/api/workflow/save'
+      ));
+      expect(saveCall).toBeDefined();
+      const request = JSON.parse(String(saveCall?.[1]?.body)) as { workflow: Workflow };
+      expect(request.workflow.nodes[0]?.label).toBe('renamed before save');
+      expect(onWorkflowSaved).toHaveBeenCalledWith(expect.objectContaining({
+        nodes: [expect.objectContaining({ label: 'renamed before save' })],
+      }));
+    });
+  });
+
   it('uses one domain selection path for the embedded card mouse sequence', async () => {
     const workflow = workflowFixture();
     const second = createWorkflowNode('input-text', 360, 60, 'second source');
