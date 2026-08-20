@@ -45,6 +45,7 @@ describe('canvas project reopen contract', () => {
   it('hydrates persisted canvas images through the asset placement adapter', () => {
     expect(workspace).toContain("from '@/lib/asset-core/canvas-adapter';");
     expect(workspace).toContain('hydrateCanvasPlacements');
-    expect(workspace).toContain('hydrateCanvasPlacements(targetProject.canvasImages)');
+    expect(workspace).toContain('const visibleTargetImages = hydratedTargetImages.filter(shouldPersistCanvasPlacement);');
+    expect(workspace).toContain('setImages(visibleTargetImages.map(img => ({');
   });
 });

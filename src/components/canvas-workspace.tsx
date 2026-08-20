@@ -771,6 +771,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               updatedAt: Date.now(),
             }
           : storedProject;
+        const hydratedTargetImages = hydrateCanvasPlacements(
+          targetProject.canvasImages || [],
+        ) as CanvasImage[];
+        const visibleTargetImages = hydratedTargetImages.filter(shouldPersistCanvasPlacement);
         if (recoveredCanvasSnapshot) {
           userMgr.updateProject(targetProject.id, {
             canvasImages: targetProject.canvasImages,
@@ -778,7 +782,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           });
           recoveredCanvasPersistenceRef.current = {
             projectId: targetProject.id,
-            images: hydrateCanvasPlacements(targetProject.canvasImages || []) as CanvasImage[],
+            images: visibleTargetImages,
           };
         }
         if (hadPendingMedia) {
@@ -788,7 +792,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }
         hydrationAutosaveGuardRef.current = createCanvasHydrationGuard(
           targetProject.id,
-          hydrateCanvasPlacements(targetProject.canvasImages || []),
+          hydratedTargetImages,
         );
         window.history.replaceState(
           null,
@@ -803,7 +807,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         // ★ 调试日志：追踪项目加载
         console.log('[page] loadProjectById:', targetProject.id, targetProject.name, 'canvasImages:', targetProject.canvasImages?.length || 0);
         if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
-          setImages(hydrateCanvasPlacements(targetProject.canvasImages).map(img => ({
+          setImages(visibleTargetImages.map(img => ({
             ...img,
             id: img.id,
             url: img.url,
@@ -1062,6 +1066,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                       updatedAt: Date.now(),
                     }
                   : storedProject;
+                const hydratedTargetImages = hydrateCanvasPlacements(
+                  targetProject.canvasImages || [],
+                ) as CanvasImage[];
+                const visibleTargetImages = hydratedTargetImages.filter(shouldPersistCanvasPlacement);
                 if (recoveredCanvasSnapshot) {
                   userMgr.updateProject(targetProject.id, {
                     canvasImages: targetProject.canvasImages,
@@ -1069,7 +1077,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   });
                   recoveredCanvasPersistenceRef.current = {
                     projectId: targetProject.id,
-                    images: hydrateCanvasPlacements(targetProject.canvasImages || []) as CanvasImage[],
+                    images: visibleTargetImages,
                   };
                 }
                 if (hadPendingMedia) {
@@ -1079,12 +1087,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 }
                 hydrationAutosaveGuardRef.current = createCanvasHydrationGuard(
                   targetProject.id,
-                  hydrateCanvasPlacements(targetProject.canvasImages || []),
+                  hydratedTargetImages,
                 );
                 setCurrentProject(targetProject);
                 setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));
                 if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
-                setImages(hydrateCanvasPlacements(targetProject.canvasImages).map(img => ({
+                setImages(visibleTargetImages.map(img => ({
                   ...img,
                     id: img.id,
                     url: img.url,

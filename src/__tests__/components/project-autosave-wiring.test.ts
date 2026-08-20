@@ -160,6 +160,26 @@ describe('project autosave wiring', () => {
     expect(workspaceSource).toContain('serverSyncMergeRevision');
   });
 
+  it('schedules cleanup when a hydrated project contains terminal task placeholders', () => {
+    const hydratedSnapshots = workspaceSource.match(
+      /const hydratedTargetImages = hydrateCanvasPlacements\(\s*targetProject\.canvasImages \|\| \[\],\s*\) as CanvasImage\[\];/g,
+    ) || [];
+    const visibleSnapshots = workspaceSource.match(
+      /const visibleTargetImages = hydratedTargetImages\.filter\(shouldPersistCanvasPlacement\);/g,
+    ) || [];
+    const fullSnapshotGuards = workspaceSource.match(
+      /createCanvasHydrationGuard\(\s*targetProject\.id,\s*hydratedTargetImages,\s*\)/g,
+    ) || [];
+    const filteredHydrations = workspaceSource.match(
+      /setImages\(visibleTargetImages\.map\(img => \(\{/g,
+    ) || [];
+
+    expect(hydratedSnapshots).toHaveLength(2);
+    expect(visibleSnapshots).toHaveLength(2);
+    expect(fullSnapshotGuards).toHaveLength(2);
+    expect(filteredHydrations).toHaveLength(2);
+  });
+
   it('does not reload the model catalog when the same authenticated user object is rehydrated', () => {
     const loaderStart = workspaceSource.indexOf('const loadQuickCreateModels = async');
     const nextStateStart = workspaceSource.indexOf("const [ohMyPromptOpen", loaderStart);
