@@ -2024,3 +2024,17 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | S4-BUG-007 | P2 | Exact benign WebKit ResizeObserver delivery notices polluted Console evidence. | Suppressed only the two browser-defined delivery notices; all other errors remain reportable. | Global error monitor tests and WebKit matrix. |
 
 All listed Stage 4 defects are locally closed. Coze exact-SHA validation remains an external acceptance gate and is not recorded as complete.
+
+### S4-BUG-008: Project node mode discarded an explicitly saved workflow after refresh
+
+| Field | Detail |
+|---|---|
+| Severity | P1 project persistence |
+| Environment | Coze exact `main@2557d67cab367ca0f90fba3671e521186cbf6fc5`, authenticated Google Chrome profile `用户1`, 2026-08-20 |
+| Reproduction | Open a Canvas project, enter node mode, create one image-input node, click Save, reload the project, then enter node mode directly again. |
+| Expected | The same project-scoped workflow reopens with `1 节点 · 0 连线`. |
+| Actual | `POST /api/workflow/save` returned HTTP 200 and `{"success":true,"workflowId":"wf-..."}`, and Workflow Hub could reopen the saved node, but direct project node mode restored `0 节点 · 0 连线`. |
+| Root cause | The save button persisted only the standalone `workflow_<id>` record. Project startup restores node mode exclusively from `project.metadata.workflow`, and that binding was never updated. |
+| Fix | After standalone save succeeds, flush pending Canvas persistence, merge the workflow into the current project's existing metadata, and use the guarded project conflict-recovery flush. The UI reports saved only after both persistence boundaries succeed. |
+| Regression | RED first: `2 failed / 4 passed`. GREEN focused: `6/6`; related persistence/sync/UI: `81/81`; full Vitest: `2852 passed / 70 PostgreSQL-gated skipped`; TypeScript, production build and ESLint `0 errors / 988 historical warnings` pass. |
+| Status | **FIXED LOCALLY / NEW COZE EXACT-SHA GOOGLE CHROME RETEST REQUIRED.** |

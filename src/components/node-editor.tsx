@@ -661,6 +661,7 @@ interface NodeEditorProps {
   projectId?: string;
   onBack?: () => void;
   onWorkflowChange?: (wf: WorkflowData | null) => void;
+  onWorkflowSaved?: (wf: WorkflowData) => Promise<void>;
   onBeforeWorkflowChatNavigation?: () => Promise<void>;
   onOpenWorkflowHub?: () => void;
   /** P0: 画布图片列表，用于@图片引用 */
@@ -864,7 +865,7 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 
-export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, onBeforeWorkflowChatNavigation, canvasImages, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
+export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, onWorkflowSaved, onBeforeWorkflowChatNavigation, canvasImages, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
@@ -2724,18 +2725,21 @@ ${contextInfo}
     setSaveStatus('saving');
     try {
       if (!userId) throw new Error('未登录');
+      const savedWorkflow = { ...wf, updatedAt: Date.now() };
       const res = await fetch('/api/workflow/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, workflow: { ...wf, updatedAt: Date.now() } }),
+        body: JSON.stringify({ userId, workflow: savedWorkflow }),
       });
-      setSaveStatus(res.ok ? 'saved' : 'error');
+      if (!res.ok) throw new Error('工作流保存失败');
+      await onWorkflowSaved?.(savedWorkflow);
+      setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 2000);
     }
-  }, [userId, wf]);
+  }, [onWorkflowSaved, userId, wf]);
 
   // ─── 图片上传 ───
 

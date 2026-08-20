@@ -1231,3 +1231,10 @@ The verified implementation was subsequently fast-forward pushed to `main@644a08
 - ESLint: `0 errors / 988 historical warnings`; warnings were not hidden or converted to ignores.
 
 Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze exact-SHA or unavailable GitHub-hosted evidence.
+
+## 2026-08-20 S4-BUG-008 project workflow persistence regression
+
+- Authenticated Google Chrome on Coze `main@2557d67` proved the defect at both boundaries: standalone workflow save returned HTTP 200 and Workflow Hub reopened one node, while project reload followed by direct node-mode entry restored zero nodes.
+- TDD began RED (`2 failed / 4 passed`) and now passes the focused workflow suite (`6/6`) plus related project recovery, autosave, UI and sync coverage (`81/81`).
+- Fresh full gates pass: Vitest `2852 passed / 70 explicitly PostgreSQL-gated skipped`, TypeScript, production build (`113` routes), whitespace check and ESLint `0 errors / 988 historical warnings`.
+- **Verdict: LOCAL REGRESSION PASS / CLOUD RETEST PENDING.** The next exact `main` SHA must preserve one node after save, reload and direct project node-mode entry in Google Chrome.

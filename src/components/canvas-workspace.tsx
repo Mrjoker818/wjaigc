@@ -135,7 +135,10 @@ import { buildProjectWorkspaceUrl } from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
-import { workflowFromProjectMetadata } from '@/lib/project-workflow';
+import {
+  mergeWorkflowIntoProjectMetadata,
+  workflowFromProjectMetadata,
+} from '@/lib/project-workflow';
 import {
   consumeCanvasPendingMediaRecovery,
   consumePreparedCanvasUnloadSnapshot,
@@ -5561,6 +5564,23 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
 
+  const persistNodeWorkflow = useCallback(async (workflow: Workflow): Promise<void> => {
+    const project = currentProjectRef.current;
+    if (!project) throw new Error('当前项目不存在，无法保存工作流');
+
+    await canvasPersistenceScheduler.flush('immediate');
+    const manager = UserManagerCore.getInstance();
+    const latestProject = manager.getProject(project.id) || project;
+    const updatedProject = manager.updateProjectInMemory(project.id, {
+      metadata: mergeWorkflowIntoProjectMetadata(latestProject.metadata, workflow),
+    });
+    if (!updatedProject) throw new Error('当前项目不存在，无法绑定工作流');
+
+    currentProjectRef.current = updatedProject;
+    setCurrentProject(updatedProject);
+    await manager.flushProjectsToServerWithConflictRecovery();
+  }, [canvasPersistenceScheduler]);
+
   // CanvasWorkspace is only mounted when authenticated, so no auth gate here.
 
   // Mode switching - early return for non-canvas modes
@@ -5578,6 +5598,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         projectId={currentProject?.id}
         onBack={() => setAppMode('canvas')}
         onWorkflowChange={setNodeWorkflow}
+        onWorkflowSaved={persistNodeWorkflow}
         onBeforeWorkflowChatNavigation={() => canvasPersistenceScheduler.flush('immediate')}
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
         canvasImages={images.map(img => ({

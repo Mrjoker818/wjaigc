@@ -22,3 +22,13 @@ export function workflowFromProjectMetadata(metadata: unknown): Workflow | null 
   }
   return workflow as unknown as Workflow;
 }
+
+export function mergeWorkflowIntoProjectMetadata(
+  metadata: unknown,
+  workflow: Workflow,
+): Record<string, unknown> {
+  return {
+    ...(isRecord(metadata) ? metadata : {}),
+    workflow,
+  };
+}

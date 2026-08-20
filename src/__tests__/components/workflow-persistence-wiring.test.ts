@@ -22,4 +22,12 @@ describe('workflow persistence wiring', () => {
     expect(editorSource).toContain('userId?: string');
     expect(editorSource).not.toContain("localStorage.getItem('wujie_user_id') || 'anonymous'");
   });
+
+  it('persists an explicitly saved workflow back into the current project', () => {
+    expect(editorSource).toContain('onWorkflowSaved?: (wf: WorkflowData) => Promise<void>');
+    expect(editorSource).toContain('await onWorkflowSaved?.(savedWorkflow)');
+    expect(workspaceSource).toContain('onWorkflowSaved={persistNodeWorkflow}');
+    expect(workspaceSource).toContain('mergeWorkflowIntoProjectMetadata');
+    expect(workspaceSource).toContain('flushProjectsToServerWithConflictRecovery');
+  });
 });

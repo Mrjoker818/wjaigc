@@ -915,3 +915,11 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | GitHub hosted Actions | BLOCKED EXTERNALLY | Billing prevented runner allocation. Local verification does not reclassify this as passed. |
 | Independent reviewer | UNAVAILABLE LOCALLY | Windows Codex executable returned access denied; manual review completed, but is not labeled independent. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
+
+## 2026-08-20 S4-BUG-008 remaining verification
+
+| Item | Status | Required proof |
+|---|---|---|
+| Project workflow save/reload | FIXED LOCALLY / CLOUD PENDING | On the new exact Coze SHA in Google Chrome, create a node, save, confirm both workflow and project-sync POSTs, reload, enter node mode directly and retain the same node. |
+| PostgreSQL-only regression | BLOCKED IN CURRENT WORKSTATION RUN | Supply an isolated `POSTGRES_TEST_DATABASE_URL` and rerun the 70 explicitly skipped tests; do not count them as passed. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |

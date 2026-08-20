@@ -1006,3 +1006,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The candidate has not yet been validated after an exact-SHA Coze pull, so authenticated cloud workspace transfer and real provider accounting remain required.
 
 **Decision: CONDITIONALLY READY FOR A NORMAL `main`-ONLY CANDIDATE PUSH; NOT YET RELEASE READY.**
+
+## 2026-08-20 readiness after S4-BUG-008 repair
+
+- Coze `2557d67` is not release-ready for project node persistence: the standalone workflow record survives, but direct node mode loses the saved workflow after reload.
+- The narrow local candidate synchronizes explicit workflow save with the current project metadata through the existing guarded project-sync path. It does not change login, Canvas media, providers, task execution, billing or `stable`.
+- Full local gates pass (`2852` tests, TypeScript, production build, ESLint with zero errors). PostgreSQL-only tests are still explicitly skipped in this workstation run and are not represented as passed.
+- **Decision: CONDITIONALLY READY FOR A NORMAL `main`-ONLY PUSH; NOT RELEASE READY UNTIL THE NEW EXACT SHA PASSES GOOGLE CHROME SAVE/RELOAD RESTORATION.**
