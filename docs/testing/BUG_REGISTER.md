@@ -2023,7 +2023,7 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | S4-BUG-006 | P2 | Replayed workflow results could create duplicate Canvas images. | Deduplicated incoming images by image and placement identity. | Workspace transfer unit tests and round-trip E2E. |
 | S4-BUG-007 | P2 | Exact benign WebKit ResizeObserver delivery notices polluted Console evidence. | Suppressed only the two browser-defined delivery notices; all other errors remain reportable. | Global error monitor tests and WebKit matrix. |
 
-All listed Stage 4 defects are locally closed. Coze exact-SHA validation remains an external acceptance gate and is not recorded as complete.
+All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-SHA Coze Google Chrome acceptance; the remaining Stage 4 cloud and release gates are tracked separately.
 
 ### S4-BUG-008: Project node mode discarded an explicitly saved workflow after refresh
 
@@ -2036,5 +2036,5 @@ All listed Stage 4 defects are locally closed. Coze exact-SHA validation remains
 | Actual | `POST /api/workflow/save` returned HTTP 200 and `{"success":true,"workflowId":"wf-..."}`, and Workflow Hub could reopen the saved node, but direct project node mode restored `0 节点 · 0 连线`. |
 | Root cause | The save button persisted only the standalone `workflow_<id>` record. Project startup restores node mode exclusively from `project.metadata.workflow`, and that binding was never updated. |
 | Fix | After standalone save succeeds, flush pending Canvas persistence, merge the workflow into the current project's existing metadata, and use the guarded project conflict-recovery flush. The UI reports saved only after both persistence boundaries succeed. |
-| Regression | RED first: `2 failed / 4 passed`. GREEN focused: `6/6`; related persistence/sync/UI: `81/81`; full Vitest: `2852 passed / 70 PostgreSQL-gated skipped`; TypeScript, production build and ESLint `0 errors / 988 historical warnings` pass. |
-| Status | **FIXED LOCALLY / NEW COZE EXACT-SHA GOOGLE CHROME RETEST REQUIRED.** |
+| Regression | RED first: `2 failed / 4 passed`. GREEN focused: `6/6`; related persistence/sync/UI: `81/81`; full Vitest: `2852 passed / 70 PostgreSQL-gated skipped`; TypeScript, production build and ESLint `0 errors / 988 historical warnings` pass. Coze `main@016e5d2feb98cb0377fc0475389b10b914c1020f` then produced HTTP 200 for both `/api/workflow/save` and project `/api/user-data/sync`; the latter contained `metadata.workflow` and the `input-image` node. A clean reload followed by direct node-mode entry restored `1 节点 · 0 连线` with zero fresh Console Error/Warning. |
+| Status | **FIXED / EXACT-SHA COZE GOOGLE CHROME VERIFIED.** |

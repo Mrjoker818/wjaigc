@@ -445,3 +445,11 @@ Protected stable branch: read-only and untouched
 - Chromium 1080p 100-node performance passed three consecutive runs at `56.70 / 57.15 / 55.62 FPS`; P95 was `12.80 / 14.40 / 16.70 ms`; disappeared frames and unclickable duration were zero.
 - Fresh gates: Vitest `476 files / 2920 tests`, API `117 / 582`, regression `320 / 2063`, TypeScript, build `113` routes, Doctor and protected baseline `38/38` pass; ESLint is `0 errors / 988 historical warnings`.
 - Next unique action is a normal `main`-only push followed by Coze exact-SHA authenticated Chrome validation. GitHub Actions billing remains external/unexecuted, not passed; `stable` must not change.
+
+## 2026-08-20 Stage 4 Task 4 project workflow cloud persistence closure
+
+- Google Chrome, not 360 or the in-app browser, reproduced S4-BUG-008 on Coze `main@2557d67`: standalone workflow save returned HTTP 200 and Workflow Hub could reopen the node, but direct node mode after reload restored zero nodes.
+- TDD repair commit `016e5d2feb98cb0377fc0475389b10b914c1020f` binds explicit workflow save to the current project's existing metadata through the guarded project-sync path. Local gates pass: focused `6/6`, related persistence/sync/UI `81/81`, full Vitest `2852 passed / 70 PostgreSQL-gated skipped`, TypeScript, production build and ESLint `0 errors / 988 historical warnings`.
+- Coze pulled exact `main@016e5d2`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged. The first sandbox build was OOM-terminated and briefly served the old runtime, so it was retained as failed deployment evidence. Acceptance began only after a later production build completed and port 5000 restarted.
+- Authenticated Google Chrome then saved one `input-image` node. `/api/workflow/save` returned HTTP 200, followed by HTTP 200 `/api/user-data/sync` requests containing `metadata.workflow` and the same node. A full reload and direct node-mode entry restored `1 节点 · 0 连线`; a clean final reload produced zero fresh Console Error/Warning or uncaught exception.
+- S4-BUG-008 is cloud-closed. Next unique work remains the unrepeated Stage 4 acceptance items only; PostgreSQL-only workstation skips, GitHub Actions billing and broader provider/accounting gates are still open and must not be relabeled as passed.
