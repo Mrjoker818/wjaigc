@@ -935,3 +935,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Project workflow save/reload | VERIFIED | Coze `main@016e5d2feb98cb0377fc0475389b10b914c1020f`, authenticated Google Chrome profile `用户1`: `/api/workflow/save` and project `/api/user-data/sync` returned HTTP 200; project metadata contained the one-node workflow; reload plus direct node-mode entry restored `1 节点 · 0 连线`; zero fresh Console Error/Warning. |
 | PostgreSQL-only regression | BLOCKED IN CURRENT WORKSTATION RUN | Supply an isolated `POSTGRES_TEST_DATABASE_URL` and rerun the 70 explicitly skipped tests; do not count them as passed. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
+
+## 2026-08-20 Stage 4 verification after historical adoption closure
+
+| Item | Status | Remaining proof |
+|---|---|---|
+| Historical Canvas image adoption | VERIFIED | Real Coze/PostgreSQL adoption, workflow transfer, `3/3` execution, chat transfer, duplicate-intent placement reuse and full-reload identity retention passed in authenticated Google Chrome. |
+| React Flow v2 selection and immediate Save | VERIFIED | Exact-business-tree Coze edit/save/reload/blank-pane clear and forced legacy rollback passed; keep broader renderer rollout gates separate. |
+| Current provider generation/accounting | UNVERIFIED | Run one authorized real provider task, cancel before completion, prove one charge, durable `cancelled`, late-result rejection and exactly one refund. |
+| PostgreSQL multi-instance accounting race | UNVERIFIED ON CURRENT CANDIDATE | Execute the current candidate against an isolated PostgreSQL concurrency environment; historical Stage 3 evidence does not automatically cover current Stage 4. |
+| Hosted immutable Actions | BLOCKED EXTERNALLY | GitHub billing previously prevented runner allocation; local and Coze evidence do not reclassify the hosted gate as passed. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |

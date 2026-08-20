@@ -1039,3 +1039,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Candidate-start Console Error/Warning count is zero. Historical 404/502 synchronization warnings occurred only during the deliberate service stop/build interval and are retained as downtime evidence.
 - S4-BUG-010 and S4-BUG-011 are closed. `legacy` is again authoritative and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is unchanged.
 - **Decision: NOT RELEASE READY.** Stage 4 still requires S4-BUG-009 historical Canvas asset adoption through real Coze/PostgreSQL plus current provider charge/cancel/refund evidence. No V5.8.8 absorption starts before those gates close.
+
+## 2026-08-20 readiness after S4-BUG-009 cloud closure
+
+- A real historical Canvas image completed authenticated adoption, canonical workflow transfer, `3/3` pass-through execution and canonical standalone-chat transfer in the isolated Coze deployment.
+- The same asset version was preserved across all three workspaces. Replaying the exact chat return reused the same placement, and full project reload retained the canonical source identity.
+- Test-created workflow nodes, the generated Canvas output and the transient upload file were removed. The project again exposes five Canvas images and one empty workflow node. Console Error/Warning count is zero.
+- S4-BUG-009, S4-BUG-010 and S4-BUG-011 are now closed. `legacy` remains authoritative; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is unchanged.
+- **Decision: NOT RELEASE READY.** Stage 4 still requires a current real-provider generation/cancellation run proving one charge, monotonic cancellation, late-result rejection and at-most-once refund. Hosted immutable Actions remain a separate unavailable gate. V5.8.8 stays read-only until the Stage 4 provider/accounting gate closes.

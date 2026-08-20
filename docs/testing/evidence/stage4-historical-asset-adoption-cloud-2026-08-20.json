@@ -1,0 +1,70 @@
+{
+  "date": "2026-08-20",
+  "environment": {
+    "browser": "Google Chrome",
+    "authenticated": true,
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "projectId": "project_1786500304299_8vix1z45f",
+    "cozeWorkspaceCommit": "bdd1122b818783a7c74972184e5f90676610ea37",
+    "businessTreeCommit": "5a5ee387a49ad592e0f3a80f7de69bbf5de6dbd4",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "renderer": "legacy"
+  },
+  "historicalSource": {
+    "imageId": "gen-ph-1786870574533-0-udi5ds",
+    "url": "/api/serve-upload/uploads/gen-1786870615869-42tmc8.png",
+    "assetId": "00f43bc6-6bef-55de-be8f-55aa5c155a74",
+    "assetVersionId": "d4e3cb84-6fb9-5cd0-9baf-a902a3da8ac3",
+    "canvasPlacementId": "000d7289-6ae9-51a8-96f2-2af8cd9a7a94"
+  },
+  "adoption": {
+    "requestId": "25624.2947",
+    "status": 200,
+    "request": {
+      "projectId": "project_1786500304299_8vix1z45f",
+      "imageId": "gen-ph-1786870574533-0-udi5ds"
+    },
+    "reusedCanonicalAsset": true
+  },
+  "workflowTransfer": {
+    "requestId": "25624.2954",
+    "status": 200,
+    "workflowId": "wf-1787202451433-jarch4",
+    "inputNodeId": "node-1787236485422-6kjsoz",
+    "placementId": "836ce9f3-cdaf-437d-9335-5a5e1c1563eb"
+  },
+  "workflowExecution": {
+    "executionId": "exec-1787236595194-y1ys05",
+    "status": "completed",
+    "progress": "3/3",
+    "outputNodeId": "node-1787236588340-j75vm9"
+  },
+  "chatTransfer": {
+    "requestId": "25624.3127",
+    "status": 200,
+    "placementId": "2988d36b-fa29-4eba-9ab7-f9859986ba70",
+    "reused": false,
+    "renderedMessage": "工作流结果已返回：图片输出",
+    "renderedImage": "/api/serve-upload/uploads/gen-1786870615869-42tmc8.png"
+  },
+  "duplicateIntent": {
+    "requestId": "25624.3181",
+    "status": 200,
+    "placementId": "2988d36b-fa29-4eba-9ab7-f9859986ba70",
+    "reused": true,
+    "sameAssetVersion": true
+  },
+  "reloadAndCleanup": {
+    "sourceIdentityRetainedAfterFullReload": true,
+    "canvasImageCountRestored": 5,
+    "workflowNodeCountRestored": 1,
+    "workflowConnectionCountRestored": 0,
+    "originalNodeEmpty": true,
+    "testOutputRemoved": true,
+    "temporaryUploadRemoved": true,
+    "consoleErrors": 0,
+    "consoleWarnings": 0
+  },
+  "billingScope": "No provider generation or charge was used by this pass-through workflow; provider accounting remains a separate gate.",
+  "verdict": "S4-BUG-009 real Coze PostgreSQL and Google Chrome pass."
+}

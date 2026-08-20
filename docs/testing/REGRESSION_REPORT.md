@@ -1279,3 +1279,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Console history retained expected 404/502 warnings from the deliberate build downtime. After the candidate started, no new Console Error/Warning appeared and no global error boundary rendered.
 - Forced rollback started `legacy` with HTTP 200. The reloaded node page exposed `data-workflow-legacy-surface=true`, had zero React Flow surfaces and retained `1 节点 · 0 连线`.
 - **Verdict: S4-BUG-010 AND S4-BUG-011 EXACT-BUSINESS-TREE COZE GOOGLE CHROME PASS.** S4-BUG-009 historical adoption and Stage 4 provider/accounting evidence remain open.
+
+## 2026-08-20 S4-BUG-009 historical asset cloud closure
+
+- The authenticated legacy Canvas loaded five existing images. The green-cup record `gen-ph-1786870574533-0-udi5ds` initially lacked canonical IDs in the client workflow payload.
+- Dragging that historical image to empty node space issued `POST /api/assets/adopt-canvas-image` with only `projectId + imageId`. HTTP 200 returned asset `00f43bc6-6bef-55de-be8f-55aa5c155a74`, version `d4e3cb84-6fb9-5cd0-9baf-a902a3da8ac3` and Canvas placement `000d7289-6ae9-51a8-96f2-2af8cd9a7a94`.
+- The client then issued the canonical `workflow-input` transfer with that exact version. HTTP 200 created placement `836ce9f3-cdaf-437d-9335-5a5e1c1563eb`. The request body for workflow execution contained the canonical IDs, one connection and the intended historical image URL; execution completed `3/3`.
+- Sending the output to standalone chat issued a `chat-result` transfer with the same version and returned placement `2988d36b-fa29-4eba-9ab7-f9859986ba70`. Chat visibly rendered `工作流结果已返回：图片输出` and `/api/serve-upload/uploads/gen-1786870615869-42tmc8.png`.
+- Replaying the exact workflow-return intent returned the same placement with `reused: true`. A full project reload retained the canonical IDs in the historical image drag payload, proving the identity write-back survived hydration.
+- Test state was restored to five Canvas images and the original one empty workflow node. The generated output node/image and one transient upload file created during interaction targeting were removed. Fresh Console Error/Warning count was zero.
+- **Verdict: S4-BUG-009 REAL COZE POSTGRESQL + GOOGLE CHROME PASS.** Stage 4 provider charge/cancel/refund evidence remains open and is not inferred from this non-billable pass-through workflow.
