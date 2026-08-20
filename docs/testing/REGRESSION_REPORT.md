@@ -1306,3 +1306,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - TDD reproduced the bug before the fix (`1 failed / 12 passed`). The minimal persistence-boundary change then passed focused task projection/persistence tests (`41/41`) and the expanded autosave, project-reopen, server-sync and damaged-media matrix (`109/109`).
 - Fresh full gates pass: Vitest `463 files / 2861 tests`, with `15 files / 70 PostgreSQL-gated tests` explicitly skipped; TypeScript exit 0; ESLint exit 0 with `0 errors / 988 historical warnings`; production build `114/114`.
 - **Verdict: LOCAL FIX PASS / STAGE 4 STILL OPEN.** Push the candidate to `main`, pull/build it in Coze, prove the cancelled frame disappears and remains absent after a second reload, then run the exact-candidate PostgreSQL multi-instance suite.
+
+## 2026-08-21 Stage 4 cloud acceptance closure
+
+- GitHub `main@8490fc14ec313000da37475627b4a101c8ecb546` filters terminal task placeholders before Canvas hydration while retaining the unfiltered snapshot in the hydration guard, which schedules one cleanup save instead of suppressing it.
+- The Coze business tree matched GitHub `main`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged.
+- Authenticated Google Chrome exposed three stale tabs for the same project during the first investigation. Their concurrent autosave explained the rapid project-revision growth and the apparent resurrection. After every surviving preview loaded the current source and only one project tab remained, the authoritative server snapshot returned `target=null` twice, at revisions `5295` and `5305`, with seven retained images.
+- Focused regression passed `52/52`; full non-PostgreSQL Vitest passed `463 files / 2862 tests`, with the `70` PostgreSQL-gated tests explicitly skipped in that run. The immediately preceding isolated PostgreSQL 18 candidate gate passed `2931/2931` with zero skips. TypeScript, ESLint (`0 errors / 988 historical warnings`) and production build (`114/114`) passed.
+- **Verdict: STAGE 4 CLOUD ACCEPTANCE PASS.** The terminal placeholder is absent from durable project state and remains absent after subsequent revisions. V5.8.8 may now be frozen and analyzed strictly as a read-only donor; no Stage 4 business suite is repeated.

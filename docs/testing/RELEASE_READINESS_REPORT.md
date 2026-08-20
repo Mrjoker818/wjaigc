@@ -1063,3 +1063,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Full local gates pass (`2861` tests, TypeScript, zero-error ESLint and `114/114` production build). The `70` PostgreSQL-gated tests remain explicitly skipped and are not represented as passed.
 - V5.8.8 remains read-only and absorption has not started. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains outside the change set.
 - **Decision: NOT RELEASE READY.** Exact-candidate Coze reload cleanup and PostgreSQL multi-instance accounting remain required before Stage 4 closes.
+
+## 2026-08-21 Stage 4 final readiness decision
+
+- S4-BUG-013 is closed on GitHub `main@8490fc14ec313000da37475627b4a101c8ecb546` and the matching Coze business tree. The cancelled placeholder `gen-ph-1787238934569-0-hmfie8` is absent from two authenticated server snapshots at revisions `5295` and `5305`.
+- The earlier apparent resurrection was correlated with three simultaneously open stale project tabs writing the same legacy snapshot. After all surviving tabs loaded the fixed source and only one project tab remained, no further resurrection occurred.
+- Local gates remain green: focused `52/52`, full non-PostgreSQL `2862` tests, TypeScript, zero-error ESLint and `114/114` build. The isolated PostgreSQL 18 candidate gate immediately before this client-only hydration change passed `2931/2931`, zero skipped.
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is unchanged.
+- **Decision: STAGE 4 ACCEPTED.** This authorizes the next plan item only: freeze `J:\无界云端0820` as a read-only V5.8.8 donor and build an absorption inventory. It is not authorization for whole-tree replacement or for changing `stable`.

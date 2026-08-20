@@ -969,3 +969,13 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | PostgreSQL multi-instance accounting race | UNVERIFIED ON CURRENT CANDIDATE | Supply an isolated `POSTGRES_TEST_DATABASE_URL` and execute all `70` gated tests against the exact candidate. |
 | V5.8.8 absorption | NOT STARTED | Keep `J:\无界云端0820` read-only until the two Stage 4 gates above close. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; push only to `main`. |
+
+## 2026-08-21 Stage 4 closure and V5.8.8 transition
+
+| Item | Status | Evidence / next boundary |
+|---|---|---|
+| Cancelled placeholder persistence | VERIFIED / CLOSED | Coze authenticated server snapshots at revisions `5295` and `5305` both contain seven images and no `gen-ph-1787238934569-0-hmfie8`. Evidence: `docs/testing/evidence/stage4-terminal-placeholder-cloud-2026-08-21.json`. |
+| Stage 4 PostgreSQL concurrency/accounting | VERIFIED | Isolated PostgreSQL 18 candidate gate passed `2931/2931` with zero skipped immediately before the client-only hydration repair. |
+| Stage 4 status | ACCEPTED | Do not repeat completed Stage 4 matrices. Reopen only if a new, independently reproducible regression appears. |
+| V5.8.8 donor | NEXT / READ-ONLY | Freeze `J:\无界云端0820`, record its file and dependency baseline, then create the absorption inventory. No files are copied before an item has a RED compatibility test. |
+| Stable branch | PROTECTED | `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains unchanged. All future changes target `main` only. |

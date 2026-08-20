@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-21T00:00:00+08:00",
+  "environment": {
+    "surface": "Coze preview",
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_1786500304299_8vix1z45f",
+    "browser": "Google Chrome",
+    "authenticated": true,
+    "githubMainCommit": "8490fc14ec313000da37475627b4a101c8ecb546",
+    "cozeBusinessTreeCommit": "64e4378d",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "target": {
+    "projectId": "project_1786500304299_8vix1z45f",
+    "taskId": "async-1787238934451-0-9nlxk9",
+    "placeholderId": "gen-ph-1787238934569-0-hmfie8"
+  },
+  "cloudSnapshots": [
+    {
+      "httpStatus": 200,
+      "projectRevision": 5295,
+      "imageCount": 7,
+      "target": null
+    },
+    {
+      "httpStatus": 200,
+      "projectRevision": 5305,
+      "imageCount": 7,
+      "target": null
+    }
+  ],
+  "multiTabFinding": {
+    "initialPreviewTabCount": 3,
+    "finalProjectPreviewTabCount": 1,
+    "finding": "Three stale project tabs had concurrently autosaved the same legacy snapshot. After all surviving previews loaded the current source and only one project tab remained, the cleaned server snapshot stayed authoritative."
+  },
+  "localGates": {
+    "focusedRegression": "52/52 passed",
+    "fullVitestWithoutPostgres": "463 files / 2862 tests passed; 15 files / 70 PostgreSQL-gated tests skipped",
+    "postgresCandidateBeforeClientOnlyHydrationFix": "2931/2931 passed with zero skips on isolated PostgreSQL 18",
+    "typescript": "passed",
+    "eslint": "0 errors / 988 historical warnings",
+    "productionBuild": "114/114 routes passed"
+  },
+  "verdict": {
+    "terminalPlaceholderCleanup": "passed",
+    "serverPersistenceAfterRevisionAdvance": "passed",
+    "stage4CloudAcceptance": "passed",
+    "v588Absorption": "authorized as read-only donor analysis",
+    "stableBranch": "unchanged"
+  }
+}
