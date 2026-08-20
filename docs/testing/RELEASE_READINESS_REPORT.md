@@ -1071,3 +1071,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Local gates remain green: focused `52/52`, full non-PostgreSQL `2862` tests, TypeScript, zero-error ESLint and `114/114` build. The isolated PostgreSQL 18 candidate gate immediately before this client-only hydration change passed `2931/2931`, zero skipped.
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is unchanged.
 - **Decision: STAGE 4 ACCEPTED.** This authorizes the next plan item only: freeze `J:\无界云端0820` as a read-only V5.8.8 donor and build an absorption inventory. It is not authorization for whole-tree replacement or for changing `stable`.
+
+## 2026-08-21 readiness after V588-ADMIN-001 local integration
+
+- The first selective donor item removes fabricated administrator dashboard metrics without changing authentication, task execution, accounting, Canvas, node mode or standalone chat.
+- Local evidence is green: focused `4/4`, related administrator `8/8`, full Vitest `2866` tests, TypeScript, zero-error ESLint and production build `114/114`.
+- The `70` PostgreSQL-gated tests remain explicitly skipped on this workstation. This item does not touch persistence/accounting, so the prior isolated Stage 4 accounting result remains separate rather than being rerun or relabeled.
+- **Decision: LOCAL CANDIDATE READY FOR `main`; NOT YET CLOUD-ACCEPTED.** Pull the exact commit into Coze and verify an authenticated administrator dashboard with empty and real metric states before starting the next absorption ID.

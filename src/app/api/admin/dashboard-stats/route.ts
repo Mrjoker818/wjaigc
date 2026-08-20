@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { listManagedUsers, requireAdminUser } from '@/lib/server-auth';
 import { dbGetDashboardStats } from '@/lib/db-storage';
 import { getApiProviders } from '@/lib/server-api-config';
+import { projectDashboardMetrics } from '@/lib/admin-dashboard-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,24 +27,9 @@ export async function GET(request: NextRequest) {
       listManagedUsers(),
     ]);
 
-    // Enrich with real provider status
     const providers = await getApiProviders();
     const providerViews = providers as DashboardProviderView[];
-    const providerStatus = providerViews.map((p) => ({
-      name: p.name,
-      calls24h: 0, // No per-provider call tracking yet
-      failRate: 0,
-      status: '正常' as string,
-    }));
-
-    // Build model rank from providers' selected models
-    const modelRank: Array<{ name: string; calls: number; successRate: number }> = [];
-    providerViews.forEach((p) => {
-      const models: string[] = p.selected_models || p.selectedModels || [];
-      models.forEach((m: string) => {
-        modelRank.push({ name: m, calls: 0, successRate: 99.0 });
-      });
-    });
+    const metrics = projectDashboardMetrics(stats);
 
     // Build alerts from providers with issues
     const alerts: Array<{ type: string; severity: string; items: Array<{ name: string; value: string }> }> = [];
@@ -68,8 +54,9 @@ export async function GET(request: NextRequest) {
       totalApiCalls: stats.totalApiCalls || 0,
       userTrend: stats.userTrend || [],
       creditTrend: stats.creditTrend || [],
-      modelRank: stats.modelRank && stats.modelRank.length > 0 ? stats.modelRank.slice(0, 10) : modelRank.slice(0, 10),
-      providerStatus: stats.providerStatus && stats.providerStatus.length > 0 ? stats.providerStatus : providerStatus,
+      modelRank: metrics.modelRank,
+      providerStatus: metrics.providerStatus,
+      metricsCoverage: metrics.metricsCoverage,
       alerts: stats.alerts && stats.alerts.length > 0 ? stats.alerts : alerts,
       recentUsers: stats.recentUsers || [],
     };

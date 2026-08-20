@@ -251,8 +251,9 @@ export default function AdminTabs(props: AdminTabsProps) {
     creditsRecharged: number; creditsConsumed: number; todayGenerations: number;
     userTrend: { date: string; count: number }[];
     creditTrend: { date: string; income: number; expense: number }[];
-    modelRank: { name: string; calls: number; successRate: number }[];
-    providerStatus: { name: string; calls24h: number; failRate: number; status: string }[];
+    modelRank: { name: string; calls: number; successRate: number | null }[];
+    providerStatus: { name: string; calls24h: number; failRate: number | null; status: string }[];
+    metricsCoverage?: { modelCalls: 'available' | 'unavailable'; providerCalls: 'available' | 'unavailable' };
     alerts: { type: string; severity: string; items: { name: string; value: string }[] }[];
     recentUsers: { name: string; date: string; email: string }[];
   } | null>(null);
@@ -655,7 +656,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   const maxCalls = s!.modelRank![0]?.calls || 1;
                   const pct = (m.calls / maxCalls * 100).toFixed(1);
                   const barColors = ['bg-primary', 'bg-primary/80', 'bg-primary/60', 'bg-blue-500/60', 'bg-blue-500/50', 'bg-blue-500/40', 'bg-blue-500/30', 'bg-blue-500/25', 'bg-blue-500/20', 'bg-blue-500/15'];
-                  const rateColor = m.successRate >= 95 ? 'text-green-500' : m.successRate >= 90 ? 'text-yellow-500' : 'text-destructive';
+                  const rateColor = m.successRate === null ? 'text-muted-foreground' : m.successRate >= 95 ? 'text-green-500' : m.successRate >= 90 ? 'text-yellow-500' : 'text-destructive';
                   return (
                     <div key={i} className="flex items-center gap-3">
                       <span className={`w-5 text-xs font-bold text-right ${i < 3 ? 'text-primary' : 'text-muted-foreground'}`}>{i + 1}</span>
@@ -663,7 +664,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm font-medium text-foreground truncate">{m.name}</span>
                           <div className="flex items-center gap-3">
-                            <span className={`text-xs ${rateColor}`}>{m.successRate}%</span>
+                            <span className={`text-xs ${rateColor}`}>{m.successRate === null ? '—' : `${m.successRate}%`}</span>
                             <span className="text-xs font-mono text-muted-foreground">{m.calls.toLocaleString('zh-CN')}</span>
                           </div>
                         </div>
@@ -694,7 +695,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 (s!.providerStatus || []).map((p, i) => {
                   const dotColor = p.status === '正常' ? 'bg-green-500' : p.status === '告警' ? 'bg-yellow-500' : 'bg-destructive';
                   const badgeBg = p.status === '正常' ? 'bg-green-500/15 text-green-500' : p.status === '告警' ? 'bg-yellow-500/15 text-yellow-500' : 'bg-destructive/15 text-destructive';
-                  const rateColor = p.failRate < 5 ? 'text-green-500' : p.failRate < 10 ? 'text-yellow-500' : 'text-destructive';
+                  const rateColor = p.failRate === null ? 'text-muted-foreground' : p.failRate < 5 ? 'text-green-500' : p.failRate < 10 ? 'text-yellow-500' : 'text-destructive';
                   return (
                     <div key={i} className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -703,7 +704,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                       </div>
                       <div className="flex items-center gap-6 text-xs">
                         <div className="text-muted-foreground">24h <span className="text-foreground font-mono font-medium">{p.calls24h.toLocaleString('zh-CN')}</span></div>
-                        <div className="text-muted-foreground">失败率 <span className={`${rateColor} font-mono font-medium`}>{p.failRate}%</span></div>
+                        <div className="text-muted-foreground">失败率 <span className={`${rateColor} font-mono font-medium`}>{p.failRate === null ? '—' : `${p.failRate}%`}</span></div>
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium ${badgeBg}`}>{p.status}</span>
                       </div>
                     </div>

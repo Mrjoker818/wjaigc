@@ -2113,3 +2113,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | TDD/fix | Added a RED regression proving a cancelled placeholder was accepted by both the generic placement predicate and workspace serializer. The minimal fix makes the generic predicate retain only non-terminal processing placeholders; ordinary missing media remains persistable and recoverable. |
 | Local regression | RED: `1 failed / 12 passed`. GREEN focused: `4 files / 41 tests`; persistence/project-reopen/sync expansion: `8 files / 109 tests`; full Vitest: `463 files / 2861 tests passed`, with `15 files / 70` PostgreSQL-gated tests skipped. TypeScript and production build `114/114` pass; ESLint exits 0 with `0 errors / 988 historical warnings`. |
 | Status | **FIXED / GITHUB MAIN AND COZE GOOGLE CHROME VERIFIED.** GitHub `main@8490fc14ec313000da37475627b4a101c8ecb546` was applied to the Coze business tree. The affected server snapshot returned `target=null` at revisions `5295` and `5305` with seven retained images, proving the terminal placeholder was removed and did not revive after later synchronization. The isolated PostgreSQL gate immediately before this client-only hydration repair passed `2931/2931` with zero skips; the new source then passed focused `52/52`, full non-PostgreSQL `2862` tests, TypeScript, zero-error ESLint and `114/114` build. Evidence: `docs/testing/evidence/stage4-terminal-placeholder-cloud-2026-08-21.json`. |
+
+### V588-BUG-001: Administrator dashboard fabricated model and provider usage metrics
+
+| Field | Detail |
+|---|---|
+| Severity | P1 administrator reporting integrity |
+| Reproduction | Return no real usage metrics while at least one API provider/model is configured, then request `/api/admin/dashboard-stats`. |
+| Expected | Empty rankings/status lists and explicit unavailable coverage; no invented success or health percentage. |
+| Actual | The route returned every configured provider as healthy with zero calls and every selected model with zero calls plus `99%` success. Database provider-configuration rows could also pass through as call metrics. |
+| Root cause | The API mixed configuration inventory with observability data and used fabricated rows as a fallback when real aggregates were empty. |
+| TDD/fix | Three API tests and one UI source contract first failed. `projectDashboardMetrics()` now accepts only finite positive call rows, normalizes missing rates to `null`, reports coverage, and the UI renders `—`. |
+| Regression | Focused `4/4`, related administrator `8/8`, full Vitest `2866 passed / 70 PostgreSQL-gated skipped`, TypeScript pass, ESLint `0 errors / 988 warnings`, build `114/114`. |
+| Status | **FIXED LOCALLY / EXACT-CANDIDATE COZE CHROME VERIFICATION REQUIRED.** |

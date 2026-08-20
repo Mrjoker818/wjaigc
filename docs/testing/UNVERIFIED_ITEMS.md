@@ -979,3 +979,13 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Stage 4 status | ACCEPTED | Do not repeat completed Stage 4 matrices. Reopen only if a new, independently reproducible regression appears. |
 | V5.8.8 donor | NEXT / READ-ONLY | Freeze `J:\无界云端0820`, record its file and dependency baseline, then create the absorption inventory. No files are copied before an item has a RED compatibility test. |
 | Stable branch | PROTECTED | `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains unchanged. All future changes target `main` only. |
+
+## 2026-08-21 V5.8.8 selective absorption verification
+
+| Item | Status | Remaining proof |
+|---|---|---|
+| V588-ADMIN-001 local implementation | VERIFIED LOCALLY | RED/GREEN contracts, related admin regression, full Vitest, TypeScript, zero-error ESLint and build passed. |
+| V588-ADMIN-001 cloud behavior | UNVERIFIED | Deploy the exact `main` commit, sign in as administrator in Google Chrome, verify no fabricated rows when usage data is absent, valid rows when present, `—` for unknown rates, and zero Console errors. |
+| Next absorption item | BLOCKED BY ITEM ORDER | Do not start another donor item until V588-ADMIN-001 cloud evidence is recorded. |
+| Donor snapshot | READ-ONLY VERIFIED | No donor file has a write time after the captured baseline; lock digest remains unchanged. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; push candidate changes only to `main`. |
