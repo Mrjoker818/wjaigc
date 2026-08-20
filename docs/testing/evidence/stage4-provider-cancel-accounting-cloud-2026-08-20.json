@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-20T00:00:00+08:00",
+  "environment": {
+    "surface": "Coze preview",
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_1786500304299_8vix1z45f",
+    "browser": "Google Chrome",
+    "authenticated": true,
+    "sourceCommit": "92d0edee35dc7e004af4b42a6825ef64759ce4af",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "provider": {
+    "providerId": "api_1780630178347_rjqlmam",
+    "providerName": "PearAPI 图像",
+    "modelId": "gpt-image-2"
+  },
+  "positiveControl": {
+    "taskId": "async-1787237076677-0-40ht09",
+    "prompt": "Stage 4 取消与退款一致性验证 20260820：纯白背景上的一枚青色圆环，正面产品摄影，无文字",
+    "status": "completed",
+    "durationMs": 63800,
+    "chargedCredits": 120,
+    "balanceBefore": 138,
+    "balanceAfter": 18,
+    "resultEnteredCanvas": true,
+    "resultDimensions": "1537x1023"
+  },
+  "testCreditRecharge": {
+    "transactionId": "tx_1787237301013_955rsf",
+    "amount": 120,
+    "description": "Stage 4 取消与退款一致性测试额度",
+    "balanceAfter": 138,
+    "realPayment": false
+  },
+  "cancelledRun": {
+    "taskId": "async-1787237343655-0-ehq3d9",
+    "batchId": "batch-1787237343655-pavjg1",
+    "prompt": "Stage 4 当前候选取消退款验证 20260820-B：纯白背景中央一个青色圆环，产品摄影，无文字",
+    "request": {
+      "generateNetworkRequestId": "25624.4563",
+      "cancelNetworkRequestId": "25624.4605",
+      "terminalPollNetworkRequestId": "25624.4607",
+      "quantity": 1,
+      "aspectRatio": "1:1",
+      "size": "1K",
+      "submitOnly": true
+    },
+    "cancelDelayMs": 10500,
+    "terminalStatus": "cancelled",
+    "terminalPoll": {
+      "success": false,
+      "status": "cancelled",
+      "error": "任务已被取消",
+      "retryable": false
+    },
+    "accounting": {
+      "chargeTransactionId": "ctx_1787237343671_m9a94abt",
+      "chargeAmount": -60,
+      "chargeBalanceAfter": 78,
+      "refundTransactionId": "ctx_1787237353799_dle2e175",
+      "refundAmount": 60,
+      "refundBalanceAfter": 138,
+      "billingStatus": "refunded",
+      "consumeCount": 1,
+      "refundCount": 1
+    },
+    "repeatCancel": {
+      "httpStatus": 200,
+      "terminalStatus": "cancelled",
+      "consumeCountAfterRepeat": 1,
+      "refundCountAfterRepeat": 1
+    },
+    "lateResultObservation": {
+      "elapsedMs": 73895,
+      "statusAfterWait": "cancelled",
+      "matchingResultEnteredCanvas": false,
+      "visibleRealImageCount": 6
+    },
+    "providerCancellationLimit": "The durable application task is proven cancelled. The remoteTaskId remained equal to the local task ID, so direct cancellation of the provider's own remote task is not claimed."
+  },
+  "uiDefect": {
+    "observedConsoleError": "[poll] taskId=async-1787237343655-0-ehq3d9 NON-RETRYABLE error after 10s, pollCount=11 任务已被取消",
+    "observedToastTitle": "生成失败",
+    "rootCause": "The generic non-retryable branch handled success=false/retryable=false before the dedicated cancelled branch.",
+    "localFix": "Exclude cancelled from the generic failure branch and render a neutral informational cancellation toast.",
+    "cloudRetest": "pending"
+  },
+  "artifacts": {
+    "screenshot": "docs/testing/evidence/stage4-provider-cancel-cloud-2026-08-20.png"
+  },
+  "verdict": {
+    "durableCancellation": "passed",
+    "lateResultRejection": "passed",
+    "atMostOnceRefund": "passed",
+    "remoteProviderCancellation": "unverified",
+    "consoleCleanCancellationUi": "pending deployment of local fix"
+  }
+}

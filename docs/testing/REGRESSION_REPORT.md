@@ -1289,3 +1289,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Replaying the exact workflow-return intent returned the same placement with `reused: true`. A full project reload retained the canonical IDs in the historical image drag payload, proving the identity write-back survived hydration.
 - Test state was restored to five Canvas images and the original one empty workflow node. The generated output node/image and one transient upload file created during interaction targeting were removed. Fresh Console Error/Warning count was zero.
 - **Verdict: S4-BUG-009 REAL COZE POSTGRESQL + GOOGLE CHROME PASS.** Stage 4 provider charge/cancel/refund evidence remains open and is not inferred from this non-billable pass-through workflow.
+
+## 2026-08-20 Stage 4 real-provider cancellation and UI regression
+
+- Authenticated Google Chrome submitted Pear `gpt-image-2` task `async-1787237343655-0-ehq3d9` through the professional generation panel and clicked the visible cancel control about 10.5 seconds later.
+- The terminal poll returned `cancelled`; after 73,895 ms no matching result entered Canvas. PostgreSQL-backed credits evidence contained one `-60` charge and one `+60` refund, restoring balance `138`. Repeating cancellation returned the same terminal task and retained exactly one refund.
+- The run also exposed S4-BUG-012: `success=false/retryable=false/status=cancelled` entered the generic failure branch before the dedicated cancellation branch, producing one Console Error and a `生成失败` toast despite correct business cancellation.
+- TDD was RED for branch precedence, toast severity and red failure styling. The narrow local repair is GREEN across `5 files / 39 tests`; full Vitest passes `2860` tests with `70` PostgreSQL-only tests explicitly skipped. TypeScript, ESLint and production build (`114/114`) pass.
+- Evidence: `docs/testing/evidence/stage4-provider-cancel-accounting-cloud-2026-08-20.json` and `docs/testing/evidence/stage4-provider-cancel-cloud-2026-08-20.png`.
+- **Verdict: BUSINESS CANCELLATION/ACCOUNTING PASS ON DEPLOYED SOURCE; UI FIX LOCAL PASS / CLOUD RETEST REQUIRED.** Direct provider-side remote-task cancellation is not claimed because a distinct provider task ID was not available.

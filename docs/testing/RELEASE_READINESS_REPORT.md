@@ -1047,3 +1047,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Test-created workflow nodes, the generated Canvas output and the transient upload file were removed. The project again exposes five Canvas images and one empty workflow node. Console Error/Warning count is zero.
 - S4-BUG-009, S4-BUG-010 and S4-BUG-011 are now closed. `legacy` remains authoritative; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` is unchanged.
 - **Decision: NOT RELEASE READY.** Stage 4 still requires a current real-provider generation/cancellation run proving one charge, monotonic cancellation, late-result rejection and at-most-once refund. Hosted immutable Actions remain a separate unavailable gate. V5.8.8 stays read-only until the Stage 4 provider/accounting gate closes.
+
+## 2026-08-20 readiness after current-provider cancellation/accounting run
+
+- The deployed current candidate passed the business boundary for a real Pear cancellation: one charge, durable `cancelled`, no late Canvas result after 73,895 ms, one refund and no duplicate refund after repeated cancellation.
+- The same run found S4-BUG-012, a P2 presentation defect: cancellation emitted a generic non-retryable Console Error and displayed a failure toast. The narrow local fix and permanent regression pass, together with full Vitest, TypeScript, ESLint and production build.
+- The current workstation's full run still explicitly skips `70` PostgreSQL-gated tests because `POSTGRES_TEST_DATABASE_URL` is absent. Historical PostgreSQL evidence does not substitute for the current candidate's multi-instance gate.
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains unchanged. V5.8.8 remains a read-only donor and no absorption work starts before the exact-candidate cancellation UI retest and current PostgreSQL gate.
+- **Decision: NOT RELEASE READY.** Push the narrow S4-BUG-012 candidate to `main`, deploy it in Coze, repeat the paid cancel flow with zero Console Error and informational cancellation UI, then execute the current-candidate isolated PostgreSQL concurrency suite.

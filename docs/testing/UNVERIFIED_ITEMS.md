@@ -946,3 +946,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | PostgreSQL multi-instance accounting race | UNVERIFIED ON CURRENT CANDIDATE | Execute the current candidate against an isolated PostgreSQL concurrency environment; historical Stage 3 evidence does not automatically cover current Stage 4. |
 | Hosted immutable Actions | BLOCKED EXTERNALLY | GitHub billing previously prevented runner allocation; local and Coze evidence do not reclassify the hosted gate as passed. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged. |
+
+## 2026-08-20 Stage 4 verification after real-provider cancellation
+
+| Item | Status | Remaining proof |
+|---|---|---|
+| Durable cancellation and late-result rejection | VERIFIED ON DEPLOYED `92d0ede` | Task `async-1787237343655-0-ehq3d9` remained `cancelled` for 73,895 ms and produced no matching Canvas result. |
+| At-most-once charge/refund | VERIFIED ON DEPLOYED `92d0ede` | One `-60` consume and one `+60` refund restored balance `138`; repeated cancellation retained one refund. |
+| Cancellation UI and Console cleanliness | LOCALLY FIXED / CLOUD UNVERIFIED | Deploy the narrow S4-BUG-012 fix, cancel a fresh paid task, observe informational `任务已取消`, zero generic `生成失败` toast and zero Console Error. |
+| Direct provider remote-task cancellation | UNVERIFIED | Obtain a distinct provider `remoteTaskId` or provider audit evidence. Current evidence proves durable application cancellation and late-result rejection only. |
+| PostgreSQL multi-instance accounting race | UNVERIFIED ON CURRENT CANDIDATE | Supply isolated `POSTGRES_TEST_DATABASE_URL` and execute all `70` currently gated tests against the exact candidate. |
+| Hosted immutable Actions | BLOCKED EXTERNALLY | Prior billing prevented runner allocation; retain as missing independent evidence rather than a product failure or pass. |
+| V5.8.8 absorption | NOT STARTED | Keep the snapshot read-only until Stage 4 exact-candidate UI and PostgreSQL gates close. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; all candidate work targets `main` only. |

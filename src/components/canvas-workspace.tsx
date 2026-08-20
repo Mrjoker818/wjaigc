@@ -2714,7 +2714,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               const pollData = await pollResponse.json();
               console.log(`[poll] #${pollCount} taskId=${currentTaskId} success=${pollData.success} status=${pollData.status} retryable=${pollData.retryable} progress=${pollData.progress} taskElapsed=${Math.round((Date.now()-taskStartTime)/1000)}s`);
 
-              if (!pollData.success && !pollData.retryable) {
+              if (!pollData.success && !pollData.retryable && pollData.status !== 'cancelled') {
                 // 不可重试的错误
                 console.error(`[poll] taskId=${currentTaskId} NON-RETRYABLE error after ${Math.round((Date.now()-taskStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
                 projectWorkspaceTaskEvent({
@@ -2894,9 +2894,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 });
                 terminalTaskCount++;
                 updateBatchProgress();
-                toast.error('任务已取消', {
+                toast.info('任务已取消', {
                   description: pollData.error || '图像生成任务被取消',
-                  className: 'bg-[#141414] border border-red-900 text-white',
+                  className: 'bg-[#141414] border border-[#2a2a2a] text-white',
                 });
                 taskCompleted = true;
 

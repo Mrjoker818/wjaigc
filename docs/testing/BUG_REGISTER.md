@@ -2084,3 +2084,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Local regression | Focused integration is GREEN `4/4`; related Stage 4 renderer/command/asset matrix is GREEN `83/83`; full Vitest is `462 files passed / 15 skipped`, `2858 tests passed / 70 PostgreSQL-gated skipped`; TypeScript passes; ESLint exits 0 with `0 errors / 988 historical warnings`; production build completes `114/114`; whitespace check passes. |
 | Cloud regression | Coze workspace `bdd1122b818783a7c74972184e5f90676610ea37` is a clean cherry-pick whose business tree matches `main@5a5ee387a49ad592e0f3a80f7de69bbf5de6dbd4`; `stable` remained `52f7c601ed150769e15d06fb435c6e360e28c9e7`. Production build exited 0 with `114/114` pages. In authenticated Google Chrome, `react-flow-v2` restored one node, immediate blur+Save persisted `图片输入 · S4云端5a5`, full reload restored that exact value, and blank-pane click cleared selection. The test name was changed back to `图片输入`, saved and verified after reload. Candidate-start Console Error/Warning count was zero. The runtime was restored to `legacy`; HTTP returned 200, `data-workflow-legacy-surface=true`, and React Flow surface count was zero. |
 | Status | **FIXED / EXACT-BUSINESS-TREE COZE GOOGLE CHROME VERIFIED.** |
+
+### S4-BUG-012: A cancelled generation was reported as a generation failure in the Canvas UI
+
+| Field | Detail |
+|---|---|
+| Severity | P2 cancellation feedback and Console cleanliness |
+| Environment | Coze `main@92d0edee35dc7e004af4b42a6825ef64759ce4af`, authenticated Google Chrome, Pear `gpt-image-2`, 2026-08-20 |
+| Reproduction | Submit one real professional image-generation task, cancel it from the visible processing card, then observe the terminal poll result, toast and Console. |
+| Expected | A durable `cancelled` result is projected as an informational cancellation, without entering the generic generation-failure branch or emitting a Console Error. |
+| Actual | The server returned `success=false`, `status=cancelled`, `retryable=false`; the client evaluated the generic non-retryable branch first, logged `NON-RETRYABLE error` and displayed `生成失败 / 任务已被取消`. |
+| Business control | Task `async-1787237343655-0-ehq3d9` remained durably cancelled for 73,895 ms, produced no late Canvas image, created one `-60` charge and one `+60` refund, and a repeated cancel created no second refund. The business cancellation/accounting path therefore passed independently of this UI defect. |
+| TDD/fix | A new source contract was RED for generic-branch precedence, error-toast usage and red failure styling. The minimal fix excludes `cancelled` from the generic branch and uses a neutral `toast.info` in the dedicated cancellation branch. |
+| Local regression | Focused cancellation/generation coverage passes `5 files / 39 tests`; full Vitest passes `463 files / 2860 tests`, with `15 files / 70` PostgreSQL-gated tests explicitly skipped; TypeScript, ESLint and the `114/114` production build pass. |
+| Evidence | `docs/testing/evidence/stage4-provider-cancel-accounting-cloud-2026-08-20.json` and `docs/testing/evidence/stage4-provider-cancel-cloud-2026-08-20.png`. |
+| Status | **FIXED LOCALLY / EXACT-CANDIDATE COZE CHROME RETEST REQUIRED.** The provider's own remote cancellation remains unverified because the returned `remoteTaskId` did not expose a distinct provider task identity. |
