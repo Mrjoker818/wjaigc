@@ -1026,8 +1026,10 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Six-project shadow parity | VERIFIED | `6/6` legacy/graph projects match; mismatch, unmigrated, orphan and checkpoint-error counters are zero. |
 | Project/image preservation | VERIFIED IN GOOGLE CHROME | The authenticated dashboard still contains 6 projects and 48 images; fresh Console Error/Warning is `0/0`. |
 | Historical missing media | OPEN / 2 RECORDS | Classify each missing current media and placement, recover from controlled durable storage when possible, or record an explicit administrator decision without fabricating bytes. |
+| Historical missing media classification | VERIFIED | One empty chat-only placeholder and one expired Canvas proxy asset are explicitly missing; neither has durable recovery metadata. |
+| False-ready physical media | OPEN P1 / V588-BUG-005 | A third current AssetVersion is marked `ready` while the shared proxy URL returns 404. Add a durability gate and permanent regression before promotion. |
 | `asset-v3` promotion | BLOCKED BY DOCTOR | `releaseReady=false`, `switchAuthorized=false`, blocker `non-ready-current-media`. Do not force the mode switch. |
 | Thumbnail projection/reload | UNVERIFIED | After the two media records are resolved and the doctor authorizes promotion, prove 512/256 delivery, original fallback, reload and no image-count drift. |
 | S3 thumbnail recovery | UNVERIFIED IN CLOUD | Prove the nested durable object can reconstruct the exact public thumbnail path after local loss. |
-| V588-PROVIDER-001 | NOT STARTED | The current inventory still requires ADMIN-003 projection closure before starting the provider display-map item. |
+| V588-PROVIDER-001 | NOT STARTED | The current inventory still requires ADMIN-003 projection closure and V588-BUG-005 readiness hardening before starting the provider display-map item. |
 | Donor and stable | PROTECTED | Donor lock digest remains `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains unchanged. |

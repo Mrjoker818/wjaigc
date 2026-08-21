@@ -2168,3 +2168,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Cloud regression | Coze pulled exact `main@99d226a4`. In `shadow`, production readiness changed from historical `5/6` to `6/6` matching projects with zero mismatch, orphan, unmigrated or checkpoint errors. Six projects and 48 images remained visible; settled Chrome Console errors/warnings were `0/0`. |
 | Residual boundary | Two historical media records remain missing. This no longer causes shadow projection drift, but it correctly keeps `releaseReady=false` and `switchAuthorized=false`; `asset-v3` promotion is not authorized. |
 | Status | **FIXED / EXACT-SHA COZE GOOGLE CHROME VERIFIED IN SHADOW.** Evidence: `docs/testing/evidence/stage4-asset-shadow-reconciliation-cloud-2026-08-21.json` and `.jpg`. |
+
+### V588-BUG-005: Release readiness trusts `ready` even when ephemeral media returns 404
+
+| Field | Detail |
+|---|---|
+| Severity | P1 asset-v3 release safety and user-visible data integrity |
+| Environment | Coze exact `main@99d226a4`, authenticated Google Chrome and read-only PostgreSQL, 2026-08-21 |
+| Reproduction | Load the administrator readiness result, then fetch every relative URL in the 48-image project snapshot and compare it with the current AssetVersion availability. |
+| Expected | Any current media whose physical payload is absent is non-ready and blocks promotion, including expired internal proxy paths. |
+| Actual | Asset `e9cc0eff-9ed0-4c1e-baff-c8e1f883b5a4` / version `013cb0de-335b-54ca-86d8-60375e1f092e` is `ready`, but `/v1/images/proxy/img_96d9753789af4461aaceaf9f5d3d951a` returns HTTP 404. A second missing asset references the same URL, so the doctor reports two missing versions while three active assets/placements are physically unusable. |
+| Root cause | Readiness aggregates the persisted `availability` enum and does not reject current versions backed only by non-durable ephemeral proxy URLs or validate their managed durability contract. The historical migration preserved the URL but no storage key, recovery source or task identity. |
+| Data scope | Two current versions are explicitly `missing`: one chat-only empty-URL placeholder and one Canvas proxy URL. A third current version is false-ready on the same 404 proxy URL. The related completed task stores only that expired URL; exact-byte recovery is unavailable. |
+| Required fix | Add a deterministic durability/readiness contract for current media, fail closed for empty or ephemeral internal proxy paths without durable storage, and provide an audited remediation action (replace/regenerate/archive) rather than silently deleting or fabricating content. |
+| Evidence | `docs/testing/evidence/v588-admin-003-missing-media-diagnosis-cloud-2026-08-21.json`, `v588-admin-003-missing-media-db-2026-08-21.jpg`, and `v588-admin-003-false-ready-media-2026-08-21.jpg`. |
+| Status | **OPEN / STABLE CLOUD REPRODUCTION COMPLETE.** No database mutation or code adjustment was performed during diagnosis. |

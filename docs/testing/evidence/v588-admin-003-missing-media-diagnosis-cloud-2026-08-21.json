@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-21T18:24:33+08:00",
+  "environment": {
+    "surface": "Coze preview and workspace terminal",
+    "browser": "Google Chrome",
+    "githubMainCommitRunning": "99d226a4fa9a1ffe7425e241963f110ec8609055",
+    "assetGraphMode": "shadow",
+    "databaseAccess": "read-only SELECT queries only"
+  },
+  "aggregateFacts": {
+    "currentVersions": {
+      "ready": 46,
+      "missing": 2
+    },
+    "activePlacements": {
+      "ready": 61,
+      "missing": 2
+    },
+    "projectSnapshot": {
+      "projects": 6,
+      "images": 48,
+      "revision": 5357
+    },
+    "relativeUrlProbe": {
+      "tested": 28,
+      "failed": 2,
+      "failedStatus": 404
+    },
+    "managedUploadProbe": {
+      "tested": 26,
+      "failed": 0
+    }
+  },
+  "missingCurrentVersions": [
+    {
+      "assetId": "5db74931-d70f-51fc-b7f5-418b6071e042",
+      "assetVersionId": "c57d0763-bf92-5cac-ab79-ab7761747dd5",
+      "projectId": "project_1786342484250_vjti42ltw",
+      "fileUrl": "",
+      "recoverySourceUrl": null,
+      "storageKey": null,
+      "taskId": null,
+      "placementId": "4eedec25-c00d-4d52-be8f-6da287a08332",
+      "workspaceKind": "chat",
+      "entityId": "gen-ph-1786342838186-1-kaynl1",
+      "legacyUserDataReference": false,
+      "classification": "orphaned historical chat placeholder without recoverable bytes"
+    },
+    {
+      "assetId": "a7cc7a28-9228-5d44-beba-18d078cf29f3",
+      "assetVersionId": "7d8e8acc-50d3-5c7e-935b-414f2093defd",
+      "projectId": "project_1786342484250_vjti42ltw",
+      "fileUrl": "/v1/images/proxy/img_96d9753789af4461aaceaf9f5d3d951a",
+      "httpStatus": 404,
+      "recoverySourceUrl": null,
+      "storageKey": null,
+      "taskId": null,
+      "placementId": "b59508d3-fb53-59c4-a6d6-d199b5c5c04f",
+      "workspaceKind": "canvas",
+      "entityId": "chat-bridge-1786453734373-0",
+      "legacyUserDataReference": true,
+      "classification": "historical chat-to-canvas bridge whose ephemeral proxy payload expired"
+    }
+  ],
+  "falseReadyCurrentVersion": {
+    "assetId": "e9cc0eff-9ed0-4c1e-baff-c8e1f883b5a4",
+    "assetVersionId": "013cb0de-335b-54ca-86d8-60375e1f092e",
+    "projectId": "project_1786342484250_vjti42ltw",
+    "availability": "ready",
+    "fileUrl": "/v1/images/proxy/img_96d9753789af4461aaceaf9f5d3d951a",
+    "httpStatus": 404,
+    "recoverySourceUrl": null,
+    "storageKey": null,
+    "taskId": null,
+    "placementId": "c674f49f-1d08-4d81-9f1a-d4d07e2ffa01",
+    "workspaceKind": "canvas",
+    "entityId": "simple-chat:bf9wrk7pmsoobdwb:lgqau4ko:0",
+    "classification": "database-ready but physically unavailable ephemeral proxy media"
+  },
+  "relatedHistoricalTask": {
+    "taskId": "async-1786453562964-0-pcyjs8",
+    "status": "completed",
+    "creditStatus": "not-applicable",
+    "providerId": "api_1786180762780_r50vf4v",
+    "modelId": "gpt-image-2",
+    "resultContainsOnlyExpiredProxyUrl": true,
+    "storedPromptAvailableForExplicitRegeneration": true,
+    "byteIdenticalRecoverySourceAvailable": false
+  },
+  "findings": [
+    "The two doctor-reported missing current versions are real and have no storage key or recovery source.",
+    "One missing record is a chat-only placeholder that is absent from current user-data snapshots.",
+    "The expired proxy URL is referenced by both project data and standalone-chat project data.",
+    "A third current AssetVersion is marked ready even though its URL returns 404, so aggregate availability alone can under-report broken media.",
+    "No database write, recovery POST, project sync, deletion or mode switch was performed."
+  ],
+  "artifacts": [
+    "docs/testing/evidence/v588-admin-003-missing-media-db-2026-08-21.jpg",
+    "docs/testing/evidence/v588-admin-003-false-ready-media-2026-08-21.jpg"
+  ],
+  "verdict": {
+    "missingRecordsClassified": true,
+    "automaticByteRecoveryPossible": false,
+    "readinessFalseNegative": true,
+    "assetV3Promotion": "blocked",
+    "destructiveRemediationPerformed": false
+  }
+}

@@ -1129,3 +1129,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - All 17 enabled providers are configuration-ready, but the shared task-event backend remains unconfigured and clients use durable polling. Neither fact is converted into proof of unexecuted paid-provider workflows.
 - Authenticated Chrome retained six projects and 48 images and produced zero fresh Console Error/Warning after the deployment settled.
 - **Decision: CURRENT SHADOW ACCEPTANCE PASSED / OVERALL RELEASE REMAINS CONDITIONAL.** Do not enable `asset-v3` or start the next donor absorption item by bypassing the two-media doctor blocker. Keep V5.8.8 read-only and `stable` untouched.
+
+## 2026-08-21 readiness correction after physical media probe
+
+- Direct database facts confirm two current versions and two active placements marked `missing`. One is an empty chat-only placeholder; one is an expired Canvas proxy URL. Neither has a storage key or recovery source.
+- Browser probes found a third active current version marked `ready` that uses the same expired proxy URL and returns HTTP 404. The earlier `46 ready / 2 missing` summary is therefore accurate only as database state, not as physical media availability.
+- The related completed task retains provider/model/prompt metadata but only the expired proxy URL, so exact-byte automatic recovery is unavailable. Regeneration would be a new creative result and cannot be treated as transparent recovery.
+- **Decision: NOT READY FOR `asset-v3`.** First close V588-BUG-005 with a deterministic durability gate and an audited administrator remediation path. Do not delete, regenerate or rewrite historical content silently.
