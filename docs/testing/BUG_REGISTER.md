@@ -2187,14 +2187,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Cloud regression | Coze pulled exact `main@e809f5c105d6e42d584a38ae217d7791c7864759`, kept `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` and `shadow`, built successfully and served HTTP 200. Authenticated readiness returned `falseReadyCurrentVersions=1`, `falseReadyActivePlacements=2`, blocker `non-durable-ready-media`, `releaseReady=false` and `switchAuthorized=false`. The one unsafe ready version is referenced by two active placements. Six projects and 48 images remained, and a clean Google Chrome reload produced zero fresh Console errors/warnings. |
 | Status | **FIXED / EXACT-SHA COZE GOOGLE CHROME VERIFIED.** Historical media remediation remains open and `asset-v3` is not authorized. Evidence: `docs/testing/evidence/v588-bug-005-cloud-durability-gate-2026-08-21.json` and `.png`. |
 
-### S4-HISTORICAL-MEDIA-SAFE-ARCHIVE Task 6: local completion gate failure
+### S4-HISTORICAL-MEDIA-SAFE-ARCHIVE Task 6: obsolete restore-concurrency test contract
 
 | Field | Detail |
 |---|---|
-| Severity | P0 release blocker |
-| Candidate | Runtime code `86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54` |
+| Severity | P0 local gate failure, now closed |
+| Candidate | Production source `86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54`; corrected test contract `aca74ea33bbaa92eac2566edf502e46656dfcd74` |
 | Reproduction | Run the required focused, affected, or full Vitest command with all PostgreSQL test URL variables set to the fresh loopback PostgreSQL 18.4 database. |
 | Actual | `serializes archive before overlapping Canvas restore without deadlock or partial state` throws `ASSET_MEDIA_UNRECOVERABLE` from `src/lib/asset-core/service.ts:678`; focused `96/97`, affected `76/77`, and full `3065/3066` tests pass, each with this single failure. |
-| Expected | The overlapping restore/archive serialization contract passes with no partial state and no unrecoverable-media rejection. |
-| PostgreSQL skips | Zero. The full run reports `491 passed + 1 failed` files and `3065 passed + 1 failed` tests, with no skipped files or tests. |
-| Release decision | **BLOCKED.** No archive request, cloud POST, billing action, regeneration, replacement, delete, or runtime mode change was made. No push is authorized. |
+| Expected | The approved contract requires archive to commit first, then the blocked restore to reject with `ASSET_MEDIA_UNRECOVERABLE`, without partial Asset, placement, snapshot, revision, ledger, or audit writes. |
+| Root cause | The Task 4 race test predated Task 5's permanent unrecoverable-media restore guard and retained the obsolete expectation that both operations succeed. Production behavior was correct. |
+| Fix | Updated only the PostgreSQL concurrency assertion. The final state requires both placements and the Asset to remain trashed, the version to remain unrecoverable, revision `11`, one ledger row, one audit row, and neither entity in the Canvas snapshot. |
+| Final regression | Focused `97/97`, affected `77/77`, and full `492 files / 3066 tests` pass on migrated PostgreSQL 18.4 with zero failures and zero skips. Validate, lint (`0 errors / 988 warnings`), build `116/116`, and whitespace pass. |
+| Status | **CLOSED LOCALLY.** The separate protected-baseline governance gate still blocks 23 accumulated source paths; no main push or cloud mutation has occurred. |

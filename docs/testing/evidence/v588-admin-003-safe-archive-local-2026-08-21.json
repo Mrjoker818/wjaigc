@@ -1,16 +1,18 @@
 {
   "item": "S4-HISTORICAL-MEDIA-SAFE-ARCHIVE-TASK-6",
-  "testedAt": "2026-08-21T23:52:50+08:00",
-  "runtimeCodeCommit": "86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54",
+  "testedAt": "2026-08-22T00:15:12+08:00",
+  "productionSourceCommit": "86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54",
+  "runtimeCodeCommit": "aca74ea33bbaa92eac2566edf502e46656dfcd74",
   "docsEvidenceCommit": null,
-  "status": "blocked",
+  "status": "local-gates-passed-governance-blocked",
   "database": {
     "engine": "PostgreSQL",
     "version": "18.4",
     "isolation": "fresh temporary loopback-only cluster",
     "host": "127.0.0.1",
-    "port": 55434,
-    "database": "wujie_safe_archive_task6"
+    "port": 55436,
+    "database": "wujie_safe_archive_task6_0822",
+    "appliedMigrations": 13
   },
   "environmentVariables": ["POSTGRES_TEST_DATABASE_URL", "TEST_POSTGRES_URL", "DATABASE_URL", "PGDATABASE_URL"],
   "migration": {
@@ -22,17 +24,26 @@
     "donorPnPmLockSha256": "cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0"
   },
   "gates": {
-    "focusedVitest": {"status": "failed", "files": {"passed": 6, "failed": 1, "skipped": 0}, "tests": {"passed": 96, "failed": 1, "skipped": 0}, "durationSeconds": 17.22},
-    "affectedVitest": {"status": "failed", "files": {"passed": 8, "failed": 1, "skipped": 0}, "tests": {"passed": 76, "failed": 1, "skipped": 0}, "durationSeconds": 31.87},
-    "fullVitest": {"command": "pnpm test", "status": "failed", "files": {"passed": 491, "failed": 1, "skipped": 0}, "tests": {"passed": 3065, "failed": 1, "skipped": 0}, "durationSeconds": 391.23},
+    "focusedVitest": {"status": "passed", "files": {"passed": 7, "failed": 0, "skipped": 0}, "tests": {"passed": 97, "failed": 0, "skipped": 0}, "durationSeconds": 20.16},
+    "affectedVitest": {"status": "passed", "files": {"passed": 9, "failed": 0, "skipped": 0}, "tests": {"passed": 77, "failed": 0, "skipped": 0}, "durationSeconds": 34.73},
+    "fullVitest": {"command": "pnpm test", "status": "passed", "files": {"passed": 492, "failed": 0, "skipped": 0}, "tests": {"passed": 3066, "failed": 0, "skipped": 0}, "durationSeconds": 389.71},
     "validate": {"status": "passed", "exitCode": 0},
     "lint": {"status": "passed", "exitCode": 0, "errors": 0, "warnings": 988},
     "build": {"status": "passed", "exitCode": 0, "staticPages": 116, "remediationRoutePresent": true},
     "protectedBaseline": {"status": "failed", "protectedFeatureIdsPresent": 38, "unapprovedSourceDriftBlockers": 23},
     "gitDiffCheck": {"status": "passed", "exitCode": 0}
   },
-  "failure": {"test": "serializes archive before overlapping Canvas restore without deadlock or partial state", "error": "ASSET_MEDIA_UNRECOVERABLE", "location": "src/lib/asset-core/service.ts:678"},
+  "contractCorrection": {
+    "commit": "aca74ea33bbaa92eac2566edf502e46656dfcd74",
+    "productionCodeChanged": false,
+    "rootCause": "The Task 4 concurrency test still expected restore success after archive, contradicting the approved Task 5 unrecoverable-media restore guard.",
+    "verifiedOutcome": "Archive commits atomically; the overlapping restore rejects ASSET_MEDIA_UNRECOVERABLE; no placement, snapshot, revision, ledger, or audit partial restore occurs."
+  },
+  "retainedFailedAttempts": [
+    {"kind": "obsolete-test-contract", "result": "3065 passed, 1 failed, 0 skipped", "error": "ASSET_MEDIA_UNRECOVERABLE"},
+    {"kind": "unmigrated-test-database", "result": "3059 passed, 1 failed file, 7 skipped", "error": "relation wujie_projects does not exist", "excludedFromFinalEvidence": true}
+  ],
   "unverified": ["cloud archive", "cloud idempotent retry", "asset-v3 acceptance"],
   "prohibitedActionsPerformed": [],
-  "push": {"attempted": false, "originMain": "449c635702d25a2f80358043420d03500bb42bb6", "reason": "Focused, affected, full Vitest, and protected-baseline gates did not all pass."}
+  "push": {"attempted": false, "originMain": "449c635702d25a2f80358043420d03500bb42bb6", "reason": "Functional gates pass, but the protected-baseline gate still blocks 23 accumulated source paths pending a dedicated authorization review."}
 }

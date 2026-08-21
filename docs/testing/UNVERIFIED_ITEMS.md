@@ -1042,11 +1042,11 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Historical broken-media remediation | Three active broken asset/placement records are classified | Explicitly replace, regenerate or archive them; never silently fabricate or delete user content. |
 | Protected baseline refresh | All protected features remain present, but 16 source-drift entries exceed the older allowlist | Review against the currently authorized main baseline in a dedicated change; do not weaken the gate inside this bug fix. |
 
-## 2026-08-21 Task 6 safe-archive unresolved items
+## 2026-08-22 Task 6 safe-archive unresolved items
 
 | Item | Status | Required closure |
 |---|---|---|
-| Overlapping archive then Canvas restore | BLOCKED LOCALLY | Repair and prove the real PostgreSQL contract that currently throws `ASSET_MEDIA_UNRECOVERABLE`; rerun focused, affected, and full gates with zero failures. |
+| Overlapping archive then Canvas restore | VERIFIED LOCALLY | Archive commits first, restore rejects exact `ASSET_MEDIA_UNRECOVERABLE`, and final Asset/placement/snapshot/revision/ledger/audit state proves no partial restore. Focused `97/97`, affected `77/77`, full `3066/3066`. |
 | Protected baseline source drift | BLOCKED | Review the `23` current drift paths in a dedicated authorization/baseline task; do not broaden the allowlist in historical-media remediation. |
 | Cloud archive action | UNVERIFIED | No cloud POST or archive action was performed. Verify only after the local race is green and an explicit controlled target is approved. |
 | Idempotent cloud retry | UNVERIFIED | No cloud retry was exercised; local tests do not replace an exact cloud execution proof. |

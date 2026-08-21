@@ -1149,10 +1149,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 | Protected baseline gate | BLOCKED BY STALE BASELINE | Sixteen previously accumulated source-drift entries require an authorized baseline refresh; no allowlist was weakened. |
 | Release decision | CONDITIONAL / ASSET-V3 BLOCKED | Exact-SHA cloud proof is complete and current shadow remains usable. Promotion is still prohibited until explicit historical media remediation and the remaining thumbnail/recovery acceptance are complete. |
 
-## 2026-08-21 Task 6 safe-archive readiness decision
+## 2026-08-22 Task 6 safe-archive readiness decision
 
-**BLOCKED / NOT PUSHED.** Fresh local PostgreSQL 18.4 evidence on runtime candidate `86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54` has zero PostgreSQL skips but one failing historical-media remediation contract: overlapping Canvas restore after archive returns `ASSET_MEDIA_UNRECOVERABLE`. The full repository run is `3065 passed / 1 failed / 0 skipped` tests (`491 passed / 1 failed` files).
+**FUNCTIONAL LOCAL GATES PASSED / GOVERNANCE BLOCKED / NOT PUSHED.** Production source remains `86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54`; test-contract correction `aca74ea33bbaa92eac2566edf502e46656dfcd74` makes no production change. On a migrated PostgreSQL 18.4 database, focused `97/97`, affected `77/77`, and full `492 files / 3066 tests` pass with zero failures and zero skips.
 
-Supporting gates: validate passed; lint passed with `0 errors / 988 warnings`; build passed with `116/116` static pages; whitespace check passed. The protected baseline is independently blocked by `23` unapproved accumulated source-drift paths despite preserving all `38` protected feature IDs. Therefore no main push, cloud request, billing action, archive, replacement, regeneration, deletion, or `asset-v3` mode change is authorized.
+Supporting gates: validate passed; lint passed with `0 errors / 988 warnings`; build passed with `116/116` static pages; whitespace check passed. The protected baseline is independently blocked by `23` unapproved accumulated source-drift paths despite preserving all `38` protected feature IDs, paths, evidence contracts, and refs. Therefore no main push, cloud request, billing action, archive, replacement, regeneration, deletion, or `asset-v3` mode change is authorized until a dedicated baseline authorization review closes that governance gate.
 
 `origin/stable` was fetched and remains `52f7c601ed150769e15d06fb435c6e360e28c9e7`; donor `J:\无界云端0820\pnpm-lock.yaml` remains SHA-256 `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`. Cloud archive, idempotent retry, and `asset-v3` acceptance are **UNVERIFIED**.

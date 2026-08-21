@@ -1392,11 +1392,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - The deployment retained `6` projects, `48` Canvas images, migration `6/6` and shadow parity `6/6`. A clean reload after deployment produced zero fresh Console errors and zero fresh warnings.
 - **Verdict: LOCAL + EXACT-SHA COZE GOOGLE CHROME PASS.** Detection is closed; historical media remediation remains deliberately open, so `asset-v3` stays blocked.
 
-## 2026-08-21 Task 6 historical-media safe-archive local gates
+## 2026-08-22 Task 6 historical-media safe-archive local gates
 
-- Fresh candidate: runtime code `86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54`, verified against a new temporary PostgreSQL 18.4 cluster at loopback-only `127.0.0.1:55434/wujie_safe_archive_task6`. `POSTGRES_TEST_DATABASE_URL`, `TEST_POSTGRES_URL`, `DATABASE_URL`, and `PGDATABASE_URL` all targeted that database.
-- Focused exact command: `7` files, `96` passed / `1` failed / `0` skipped tests. Affected exact command: `9` files, `76` passed / `1` failed / `0` skipped tests. Both fail only on the overlapping Canvas restore/archive remediation case with `ASSET_MEDIA_UNRECOVERABLE`.
-- Full `pnpm test`: `491` passed + `1` failed files; `3065` passed + `1` failed tests; no skips reported. The same integration test is the sole failure. No non-PostgreSQL environment-gated skip was reported by this run.
+- Production source remains `86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54`; test-contract correction `aca74ea33bbaa92eac2566edf502e46656dfcd74` changes no production code. Final evidence used migrated PostgreSQL 18.4 at loopback-only `127.0.0.1:55436/wujie_safe_archive_task6_0822`, with all four repository PostgreSQL URL variables populated.
+- The old Task 4 concurrency assertion was preserved as RED evidence, then aligned with the approved Task 5 restore guard. Archive succeeds first; overlapping restore rejects exact `ASSET_MEDIA_UNRECOVERABLE`; Asset/placements/snapshot/revision/ledger/audit prove no partial restore.
+- Focused exact command passed `7 files / 97 tests`; affected exact command passed `9 files / 77 tests`. Full `pnpm test` passed `492/492` files and `3066/3066` tests with zero failures and zero skips.
 - `pnpm validate` passed (TypeScript plus quiet ESLint); `pnpm lint` passed with `0 errors / 988 warnings`; `pnpm build` passed with `116/116` static pages and includes `/api/admin/assets/remediation`; `git diff --check` passed.
 - `pnpm check:protected-baseline` failed with `23` unapproved source-drift blockers, while its `38` feature IDs, protected component paths, evidence contracts, and refs all passed. The allowlist was not changed.
-- This is a blocked local-evidence result. Cloud archive, idempotent retry, and `asset-v3` acceptance remain **UNVERIFIED**. Evidence: `docs/testing/evidence/v588-admin-003-safe-archive-local-2026-08-21.json`.
+- Functional local evidence passes. The protected-baseline governance gate remains blocked by 23 accumulated source paths even though all `38/38` protected identities and contracts are present; no allowlist was changed. Cloud archive, idempotent retry, and `asset-v3` acceptance remain **UNVERIFIED**. Evidence: `docs/testing/evidence/v588-admin-003-safe-archive-local-2026-08-21.json`.
