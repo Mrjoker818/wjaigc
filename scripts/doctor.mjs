@@ -138,10 +138,11 @@ async function checkAssetGraph() {
     add(
       summary.media.pendingPersist + summary.media.missing + summary.media.recovering + summary.media.unrecoverable
         + summary.media.activeAssetsMissingCurrentVersion + summary.media.placementPendingPersist
-        + summary.media.placementMissing + summary.media.placementRecovering + summary.media.placementUnrecoverable === 0
+        + summary.media.placementMissing + summary.media.placementRecovering + summary.media.placementUnrecoverable
+        + summary.media.falseReadyCurrentVersions + summary.media.falseReadyActivePlacements === 0
         ? 'PASS' : mode === 'asset-v3' ? 'FAIL' : 'WARN',
       'asset-media',
-      `currentReady=${summary.media.ready}; currentPendingPersist=${summary.media.pendingPersist}; currentMissing=${summary.media.missing}; currentRecovering=${summary.media.recovering}; currentUnrecoverable=${summary.media.unrecoverable}; missingCurrentVersion=${summary.media.activeAssetsMissingCurrentVersion}; placementPendingPersist=${summary.media.placementPendingPersist}; placementMissing=${summary.media.placementMissing}; placementRecovering=${summary.media.placementRecovering}; placementUnrecoverable=${summary.media.placementUnrecoverable}`,
+      `currentReady=${summary.media.ready}; currentPendingPersist=${summary.media.pendingPersist}; currentMissing=${summary.media.missing}; currentRecovering=${summary.media.recovering}; currentUnrecoverable=${summary.media.unrecoverable}; missingCurrentVersion=${summary.media.activeAssetsMissingCurrentVersion}; placementPendingPersist=${summary.media.placementPendingPersist}; placementMissing=${summary.media.placementMissing}; placementRecovering=${summary.media.placementRecovering}; placementUnrecoverable=${summary.media.placementUnrecoverable}; falseReadyCurrent=${summary.media.falseReadyCurrentVersions}; falseReadyPlacements=${summary.media.falseReadyActivePlacements}`,
     );
     add('PASS', 'asset-trash', `active=${summary.assets.active}; trashed=${summary.assets.trashed}`);
     add(

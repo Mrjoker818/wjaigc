@@ -1033,3 +1033,11 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | S3 thumbnail recovery | UNVERIFIED IN CLOUD | Prove the nested durable object can reconstruct the exact public thumbnail path after local loss. |
 | V588-PROVIDER-001 | NOT STARTED | The current inventory still requires ADMIN-003 projection closure and V588-BUG-005 readiness hardening before starting the provider display-map item. |
 | Donor and stable | PROTECTED | Donor lock digest remains `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains unchanged. |
+
+## 2026-08-21 V588-BUG-005 remaining verification
+
+| Item | Current evidence | Required closure |
+|---|---|---|
+| Exact-SHA cloud durability gate | Local implementation and PostgreSQL tests pass | Deploy the new `main` candidate in `shadow` and prove readiness reports one false-ready current version, one false-ready active placement, and blocker `non-durable-ready-media`. |
+| Historical broken-media remediation | Three active broken asset/placement records are classified | Explicitly replace, regenerate or archive them; never silently fabricate or delete user content. |
+| Protected baseline refresh | All protected features remain present, but 16 source-drift entries exceed the older allowlist | Review against the currently authorized main baseline in a dedicated change; do not weaken the gate inside this bug fix. |

@@ -4,17 +4,17 @@
 
 ## Tasks
 
-- [ ] Add failing doctor-summary tests for false-ready current versions and placements.
-- [ ] Add a failing collector query-contract test that requires deterministic ephemeral-media counts.
-- [ ] Run the focused test and confirm the failure is caused by missing durability facts.
-- [ ] Extend `collectAssetGraphDoctorFacts()` with read-only aggregate queries.
-- [ ] Extend the media summary and blocker calculation with aggregate false-ready counts.
-- [ ] Extend the public readiness projection types without exposing record details.
-- [ ] Run focused tests and confirm GREEN.
-- [ ] Run the real PostgreSQL asset suite and all repository gates.
+- [x] Add failing doctor-summary tests for false-ready current versions and placements.
+- [x] Add a failing collector query-contract test that requires deterministic ephemeral-media counts.
+- [x] Run the focused test and confirm the failure is caused by missing durability facts.
+- [x] Extend `collectAssetGraphDoctorFacts()` with read-only aggregate queries.
+- [x] Extend the media summary and blocker calculation with aggregate false-ready counts.
+- [x] Extend the public readiness projection types without exposing record details.
+- [x] Run focused tests and confirm GREEN.
+- [x] Run the real PostgreSQL asset suite and all repository gates.
 - [ ] Commit and push only the verified files to `main`; verify `stable` is unchanged.
 - [ ] Deploy the exact commit to Coze and use the existing Google Chrome preview tab for regression.
-- [ ] Update BUG_REGISTER, REGRESSION_REPORT, RELEASE_READINESS_REPORT, UNVERIFIED_ITEMS and Obsidian progress.
+- [x] Update BUG_REGISTER, REGRESSION_REPORT, RELEASE_READINESS_REPORT and UNVERIFIED_ITEMS; Obsidian is updated before push.
 
 ## Acceptance Criteria
 

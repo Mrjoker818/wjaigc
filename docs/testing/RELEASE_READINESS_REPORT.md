@@ -1136,3 +1136,15 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Browser probes found a third active current version marked `ready` that uses the same expired proxy URL and returns HTTP 404. The earlier `46 ready / 2 missing` summary is therefore accurate only as database state, not as physical media availability.
 - The related completed task retains provider/model/prompt metadata but only the expired proxy URL, so exact-byte automatic recovery is unavailable. Regeneration would be a new creative result and cannot be treated as transparent recovery.
 - **Decision: NOT READY FOR `asset-v3`.** First close V588-BUG-005 with a deterministic durability gate and an audited administrator remediation path. Do not delete, regenerate or rewrite historical content silently.
+
+## 2026-08-21 V588-BUG-005 durability gate
+
+| Item | Status | Remaining proof |
+|---|---|---|
+| Deterministic false-ready detection | VERIFIED LOCALLY | Empty or internal proxy-only current media without durable storage/recovery is counted for both current versions and active placements. |
+| Release fail-closed behavior | VERIFIED LOCALLY | Either aggregate adds `non-durable-ready-media`; `asset-v3` cannot be authorized. |
+| PostgreSQL and repository regression | VERIFIED | `489/489` files and `2992/2992` tests passed with zero skips; validate and build `115/115` passed. |
+| Exact Coze deployment | PENDING | Pull the new `main` SHA, retain `shadow`, and verify the authenticated readiness API reports `falseReadyCurrentVersions=1` and `falseReadyActivePlacements=1`. |
+| Historical data remediation | NOT PERFORMED | One empty chat placeholder and two Canvas placements on the shared expired proxy remain. Choose replace, regenerate or archive explicitly. |
+| Protected baseline gate | BLOCKED BY STALE BASELINE | Sixteen previously accumulated source-drift entries require an authorized baseline refresh; no allowlist was weakened. |
+| Release decision | CONDITIONAL / ASSET-V3 BLOCKED | Current shadow runtime remains usable, but promotion is prohibited until exact-SHA cloud proof and explicit media remediation are complete. |

@@ -179,6 +179,8 @@ export function summarizeAssetGraphDoctor(input) {
     placementMissing: countRows(input.activePlacementVersionAvailability || [], 'availability', 'missing'),
     placementRecovering: countRows(input.activePlacementVersionAvailability || [], 'availability', 'recovering'),
     placementUnrecoverable: countRows(input.activePlacementVersionAvailability || [], 'availability', 'unrecoverable'),
+    falseReadyCurrentVersions: Number(input.falseReadyCurrentVersions || 0),
+    falseReadyActivePlacements: Number(input.falseReadyActivePlacements || 0),
   };
   const assets = {
     active: countRows(input.assetStatuses, 'status', 'active'),
@@ -205,6 +207,9 @@ export function summarizeAssetGraphDoctor(input) {
     || media.placementMissing > 0 || media.placementRecovering > 0 || media.placementUnrecoverable > 0
   ) {
     assetV3Blockers.push('non-ready-current-media');
+  }
+  if (media.falseReadyCurrentVersions > 0 || media.falseReadyActivePlacements > 0) {
+    assetV3Blockers.push('non-durable-ready-media');
   }
   if (gc.purged > 0 || gc.physicalFailed > 0 || gc.unregistered > 0) {
     assetV3Blockers.push('gc-governance-not-closed');
@@ -282,6 +287,8 @@ export async function collectAssetGraphDoctorFacts(client, options = {}) {
     currentVersionAvailability,
     activeAssetsMissingCurrentVersion,
     activePlacementVersionAvailability,
+    falseReadyCurrentVersions,
+    falseReadyActivePlacements,
     assetStatuses,
     gcStatuses,
     unregisteredGcCandidates,
@@ -320,8 +327,38 @@ export async function collectAssetGraphDoctorFacts(client, options = {}) {
                    AND version.asset_id = placement.asset_id
                    AND version.owner_id = placement.owner_id
                    AND version.project_id = placement.project_id
+                   WHERE placement.status = 'active'
+                   GROUP BY version.availability`),
+    query('false-ready-current-versions', `SELECT COUNT(*)::int AS count
+                  FROM wujie_assets asset
+                  JOIN wujie_asset_versions version
+                    ON version.id = asset.current_version_id
+                   AND version.asset_id = asset.id
+                   AND version.owner_id = asset.owner_id
+                   AND version.project_id = asset.project_id
+                  WHERE asset.status = 'active'
+                    AND version.availability = 'ready'
+                    AND (
+                      btrim(coalesce(version.file_url, '')) = ''
+                      OR version.file_url LIKE '/v1/images/proxy/%'
+                    )
+                    AND nullif(btrim(coalesce(version.storage_key, '')), '') IS NULL
+                    AND nullif(btrim(coalesce(version.recovery_source_url, '')), '') IS NULL`),
+    query('false-ready-active-placements', `SELECT COUNT(*)::int AS count
+                  FROM wujie_workspace_placements placement
+                  JOIN wujie_asset_versions version
+                    ON version.id = placement.asset_version_id
+                   AND version.asset_id = placement.asset_id
+                   AND version.owner_id = placement.owner_id
+                   AND version.project_id = placement.project_id
                   WHERE placement.status = 'active'
-                  GROUP BY version.availability`),
+                    AND version.availability = 'ready'
+                    AND (
+                      btrim(coalesce(version.file_url, '')) = ''
+                      OR version.file_url LIKE '/v1/images/proxy/%'
+                    )
+                    AND nullif(btrim(coalesce(version.storage_key, '')), '') IS NULL
+                    AND nullif(btrim(coalesce(version.recovery_source_url, '')), '') IS NULL`),
     query('asset-statuses', `SELECT status, COUNT(*)::int AS count FROM wujie_assets GROUP BY status`),
     query('gc-statuses', `SELECT status, physical_purge_status AS "physicalPurgeStatus", (not_before <= now()) AS due, COUNT(*)::int AS count
                   FROM wujie_media_gc_candidates
@@ -408,6 +445,8 @@ export async function collectAssetGraphDoctorFacts(client, options = {}) {
     currentVersionAvailability: currentVersionAvailability.rows,
     activeAssetsMissingCurrentVersion: Number(activeAssetsMissingCurrentVersion.rows[0]?.count || 0),
     activePlacementVersionAvailability: activePlacementVersionAvailability.rows,
+    falseReadyCurrentVersions: Number(falseReadyCurrentVersions.rows[0]?.count || 0),
+    falseReadyActivePlacements: Number(falseReadyActivePlacements.rows[0]?.count || 0),
     assetStatuses: assetStatuses.rows,
     gcStatuses: gcStatuses.rows,
     unregisteredGcCandidates: Number(unregisteredGcCandidates.rows[0]?.count || 0),

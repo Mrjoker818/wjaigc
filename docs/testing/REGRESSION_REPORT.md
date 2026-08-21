@@ -1379,3 +1379,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - The two historical missing media/placement records remain explicit. Therefore `releaseReady=false`, `switchAuthorized=false` and `asset-v3` promotion stays blocked; the current shadow-mode acceptance is not being misreported as full media readiness.
 - Evidence: `docs/testing/evidence/stage4-asset-shadow-reconciliation-cloud-2026-08-21.json` and `docs/testing/evidence/stage4-asset-shadow-reconciliation-cloud-2026-08-21.jpg`.
 - **Verdict: SHADOW RECONCILIATION PASS / ASSET-V3 PROJECTION STILL CONDITIONAL.** The prior `shadow-projection-drift` blocker is closed. The next unique verification concerns the two missing historical media records, not a repeat of the completed Stage 4 browser matrix.
+
+## 2026-08-21 V588-BUG-005 local durability-gate regression
+
+- RED first proved that a current AssetVersion could be counted as release-safe while its only media locator was an expired `/v1/images/proxy/...` path with no durable storage or recovery source.
+- The minimal change adds two read-only PostgreSQL aggregates for false-ready current versions and active placements. It adds blocker `non-durable-ready-media` and exposes aggregate counts only; it does not fetch remote media or reveal record details.
+- A temporary local PostgreSQL false-ready record made `npm run doctor` emit `asset-media WARN` with `falseReadyCurrent=1`; cleanup ran in `finally` and left no test residue.
+- Focused unit and PostgreSQL regression passed. The final full run passed `489/489` files and `2992/2992` tests with zero failures and zero skips. `pnpm validate`, TypeScript, zero-error ESLint, production build `115/115`, and `git diff --check` passed.
+- `pnpm check:protected-baseline` remains blocked by 16 source-drift entries accumulated since the older protected baseline. All 38 protected feature IDs, component paths, evidence contracts and refs are present. The allowlist was not weakened to manufacture a pass.
+- **Verdict: LOCAL FIX PASS / CLOUD EXACT-SHA VERIFICATION PENDING.** Historical broken media is deliberately unchanged, so `asset-v3` must remain blocked until explicit remediation.

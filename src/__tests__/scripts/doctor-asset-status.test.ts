@@ -33,6 +33,8 @@ function healthyInput(mode: 'legacy' | 'shadow' | 'asset-v3' = 'asset-v3') {
     currentVersionAvailability: [{ availability: 'ready', count: 1 }],
     activeAssetsMissingCurrentVersion: 0,
     activePlacementVersionAvailability: [{ availability: 'ready', count: 1 }],
+    falseReadyCurrentVersions: 0,
+    falseReadyActivePlacements: 0,
     assetStatuses: [{ status: 'active', count: 1 }, { status: 'trashed', count: 0 }],
     gcStatuses: [{ status: 'pending', physicalPurgeStatus: 'disabled', due: false, count: 0 }],
     unregisteredGcCandidates: 0,
@@ -102,6 +104,22 @@ describe('Stage 2 Doctor asset graph release gate', () => {
     });
     expect(summary.releaseReady).toBe(false);
     expect(summary.media).toMatchObject({ activeAssetsMissingCurrentVersion: 1, placementMissing: 1 });
+  });
+
+  it('blocks ready media backed only by a non-durable internal proxy', () => {
+    const input = healthyInput();
+    const summary = summarizeAssetGraphDoctor({
+      ...input,
+      falseReadyCurrentVersions: 1,
+      falseReadyActivePlacements: 1,
+    });
+
+    expect(summary.releaseReady).toBe(false);
+    expect(summary.assetV3Blockers).toContain('non-durable-ready-media');
+    expect(summary.media).toMatchObject({
+      falseReadyCurrentVersions: 1,
+      falseReadyActivePlacements: 1,
+    });
   });
 
   it('blocks malformed legacy project data instead of treating it as an empty database', () => {
@@ -244,6 +262,31 @@ describe('Stage 2 Doctor asset graph release gate', () => {
     const summary = summarizeAssetGraphDoctor(facts);
     expect(summary.releaseReady).toBe(false);
     expect(summary.assetV3Blockers).toContain('asset-facts-unavailable');
+  });
+
+  it('collects false-ready current assets and placements without network probes', async () => {
+    const queries: string[] = [];
+    const client = {
+      query: async (sql: string) => {
+        queries.push(sql);
+        if (sql.includes("version.file_url LIKE '/v1/images/proxy/%'")) {
+          return { rows: [{ count: sql.includes('wujie_workspace_placements') ? 1 : 2 }] };
+        }
+        return { rows: [] };
+      },
+    };
+
+    const facts = await collectAssetGraphDoctorFacts(client, { mode: 'shadow' });
+    const durabilityQueries = queries.filter(sql => sql.includes("version.file_url LIKE '/v1/images/proxy/%'"));
+
+    expect(facts.falseReadyCurrentVersions).toBe(2);
+    expect(facts.falseReadyActivePlacements).toBe(1);
+    expect(durabilityQueries).toHaveLength(2);
+    for (const sql of durabilityQueries) {
+      expect(sql).toContain("version.availability = 'ready'");
+      expect(sql).toContain('version.storage_key');
+      expect(sql).toContain('version.recovery_source_url');
+    }
   });
 
   it('uses the same database precedence as the application runtime', () => {

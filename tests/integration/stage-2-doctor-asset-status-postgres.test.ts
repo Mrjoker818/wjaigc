@@ -106,6 +106,28 @@ describe('Stage 2 Doctor PostgreSQL projection audit', () => {
       expect(healthy.shadowComparison).toMatchObject({ matchingProjects: 1, mismatchedProjects: 0 });
 
       await query(
+        `UPDATE wujie_asset_versions
+         SET file_url = '/v1/images/proxy/img_expired', storage_key = NULL,
+             recovery_source_url = NULL, availability = 'ready'
+         WHERE id = $1`,
+        [versionId],
+      );
+      const falseReady = summarizeAssetGraphDoctor(await collectAssetGraphDoctorFacts(client, { mode: 'asset-v3' }));
+      expect(falseReady.media).toMatchObject({
+        falseReadyCurrentVersions: 1,
+        falseReadyActivePlacements: 1,
+      });
+      expect(falseReady.assetV3Blockers).toContain('non-durable-ready-media');
+      expect(falseReady.releaseReady).toBe(false);
+
+      await query(
+        `UPDATE wujie_asset_versions
+         SET file_url = $2, storage_key = 'uploads/doctor-a.png'
+         WHERE id = $1`,
+        [versionId, fileUrl],
+      );
+
+      await query(
         `UPDATE wujie_workspace_placements
          SET transform = jsonb_set(transform, '{x}', '999'::jsonb)
          WHERE id = $1`,

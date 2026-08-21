@@ -44,6 +44,8 @@ export interface AssetGraphReleaseReadiness {
     placementMissing: number;
     placementRecovering: number;
     placementUnrecoverable: number;
+    falseReadyCurrentVersions: number;
+    falseReadyActivePlacements: number;
   };
   assets: { active: number; trashed: number };
   gc: {
@@ -150,6 +152,8 @@ export function createUnavailableAssetGraphReleaseReadiness(
       placementMissing: 0,
       placementRecovering: 0,
       placementUnrecoverable: 0,
+      falseReadyCurrentVersions: 0,
+      falseReadyActivePlacements: 0,
     },
     assets: { active: 0, trashed: 0 },
     gc: {

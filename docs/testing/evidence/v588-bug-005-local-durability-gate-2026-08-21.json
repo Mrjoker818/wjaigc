@@ -1,0 +1,45 @@
+{
+  "bugId": "V588-BUG-005",
+  "recordedAt": "2026-08-21T19:15:00+08:00",
+  "baseCommit": "e3c6e2e",
+  "branch": "codex/wj-stable-s4",
+  "targetBranch": "main",
+  "protectedStableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "change": {
+    "falseReadyCurrentVersions": true,
+    "falseReadyActivePlacements": true,
+    "blocker": "non-durable-ready-media",
+    "networkProbeAdded": false,
+    "historicalRowsMutated": false,
+    "publicRecordIdentityExposed": false
+  },
+  "tdd": {
+    "red": [
+      "doctor summary accepted one false-ready current version",
+      "collector omitted deterministic false-ready aggregate counts"
+    ],
+    "greenFocusedTests": 33,
+    "realPostgresNegativeProbe": {
+      "observedDoctorStatus": "WARN",
+      "observedFalseReadyCurrentVersions": 1,
+      "temporaryRowsCleaned": true
+    }
+  },
+  "verification": {
+    "vitestFilesPassed": 489,
+    "vitestTestsPassed": 2992,
+    "vitestFailures": 0,
+    "vitestSkipped": 0,
+    "validate": "passed",
+    "eslintErrors": 0,
+    "productionBuild": "passed",
+    "staticPages": "115/115",
+    "diffCheck": "passed"
+  },
+  "residual": {
+    "cloudExactShaVerification": "pending",
+    "assetV3Authorized": false,
+    "historicalMediaRemediation": "administrator decision required",
+    "protectedBaseline": "blocked by 16 accumulated source-drift entries against the older allowlist"
+  }
+}

@@ -51,6 +51,8 @@ const readySummary = {
     placementMissing: 0,
     placementRecovering: 0,
     placementUnrecoverable: 0,
+    falseReadyCurrentVersions: 0,
+    falseReadyActivePlacements: 0,
   },
   assets: { active: 4, trashed: 0 },
   gc: {
@@ -85,6 +87,10 @@ describe('asset release readiness', () => {
     });
     expect(JSON.stringify(result)).not.toContain('entries');
     expect(JSON.stringify(result)).not.toContain('Checksum');
+    expect(result.media).toMatchObject({
+      falseReadyCurrentVersions: 0,
+      falseReadyActivePlacements: 0,
+    });
   });
 
   it('warns without blocking the active legacy release when blockers exist', () => {

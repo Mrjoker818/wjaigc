@@ -145,3 +145,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - All 26 managed `/api/serve-upload/...` URLs passed. Of 28 relative project URLs, only the two Canvas references to the shared expired proxy URL failed.
 - Evidence: `docs/testing/evidence/v588-admin-003-missing-media-diagnosis-cloud-2026-08-21.json` plus the two referenced `.jpg` screenshots.
 - **Status: DATA CLASSIFIED / NO DESTRUCTIVE ACTION TAKEN.** The next implementation must first make readiness reject false-ready ephemeral media and provide an audited remediation choice. Do not silently delete user history or regenerate content without an explicit administrator decision.
+
+### V588-ADMIN-003 — 2026-08-21 durability gate local closure
+
+- TDD added deterministic detection for active current versions and active placements that claim `ready` but rely on an empty or `/v1/images/proxy/...` URL without `storage_key` or `recovery_source_url`.
+- The doctor now emits aggregate `falseReadyCurrentVersions` and `falseReadyActivePlacements` counts and blocker `non-durable-ready-media`; no network probe, record identity or historical mutation was added.
+- Real PostgreSQL negative verification observed `falseReadyCurrent=1`; final full regression passed `489/489` files and `2992/2992` tests with zero skips. Validate, zero-error ESLint and build `115/115` passed.
+- The protected baseline gate still reports 16 accumulated source-drift entries against its older allowlist. All feature/path/evidence contracts remain present; the gate was not weakened in this change.
+- **Status: DURABILITY GATE VERIFIED LOCALLY / COZE EXACT-SHA PENDING.** Keep `asset-v3` blocked and do not start destructive remediation until the administrator chooses replace, regenerate or archive for each historical record.
