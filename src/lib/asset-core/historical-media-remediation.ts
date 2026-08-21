@@ -15,7 +15,28 @@ import type {
 const MAX_CANONICAL_JSON_BYTES = 64 * 1024;
 const MAX_CANDIDATES = 20;
 const MAX_DISCOVERY_CANDIDATES = 100;
-const MAX_CANDIDATE_PLACEMENTS = Math.floor(MAX_CANONICAL_JSON_BYTES / 64);
+const MAX_DATABASE_FACT_CHARACTERS = 256;
+const MAX_ESCAPED_DATABASE_FACT = '\u0001'.repeat(MAX_DATABASE_FACT_CHARACTERS);
+const MAX_CANONICAL_PLACEMENT_BYTES = Buffer.byteLength(JSON.stringify({
+  id: MAX_ESCAPED_DATABASE_FACT,
+  workspace: MAX_ESCAPED_DATABASE_FACT,
+  workspaceId: MAX_ESCAPED_DATABASE_FACT,
+  entityType: MAX_ESCAPED_DATABASE_FACT,
+  entityId: MAX_ESCAPED_DATABASE_FACT,
+}), 'utf8');
+const MAX_CANONICAL_CANDIDATE_BASE_BYTES = Buffer.byteLength(JSON.stringify({
+  ownerId: MAX_ESCAPED_DATABASE_FACT,
+  projectId: MAX_ESCAPED_DATABASE_FACT,
+  assetId: MAX_ESCAPED_DATABASE_FACT,
+  assetVersionId: MAX_ESCAPED_DATABASE_FACT,
+  availability: MAX_ESCAPED_DATABASE_FACT,
+  urlClass: MAX_ESCAPED_DATABASE_FACT,
+  placements: [],
+}), 'utf8');
+const MAX_CANDIDATE_PLACEMENTS = Math.floor(
+  (MAX_CANONICAL_JSON_BYTES - MAX_CANONICAL_CANDIDATE_BASE_BYTES + 1)
+  / (MAX_CANONICAL_PLACEMENT_BYTES + 1),
+);
 const INVALID_REQUEST = 'HISTORICAL_MEDIA_REQUEST_INVALID';
 
 export type HistoricalMediaRemediationErrorCode =
@@ -119,6 +140,14 @@ interface LockedPlacementRow {
 
 interface LockedHistoricalMediaCandidate extends Omit<HistoricalMediaCandidate, 'placements'> {
   placements: WorkspacePlacement[];
+}
+
+interface ResolvedArchiveSelection extends HistoricalMediaArchiveSelection {
+  ownerId: string;
+}
+
+interface ResolvedArchiveOwnerRow {
+  owner_id: string;
 }
 
 interface RemediationLedgerRow {
@@ -446,19 +475,19 @@ function mapDiscoveryCandidates(rows: DiscoveryRow[]): HistoricalMediaCandidate[
     });
   }
 
-  return [...candidates.values()].map(candidate => {
-    candidate.placements.sort(compareByFields<HistoricalMediaPlacementFact>([
-      'id',
-      'workspace',
-      'workspaceId',
-      'entityType',
-      'entityId',
-    ] as const));
-    return {
-      ...candidate,
-      candidateDigest: buildHistoricalMediaCandidateDigest(candidate),
-    };
-  });
+  const mapped: HistoricalMediaCandidate[] = [];
+  for (const candidate of candidates.values()) {
+    try {
+      mapped.push({
+        ...candidate,
+        candidateDigest: buildHistoricalMediaCandidateDigest(candidate),
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === INVALID_REQUEST) continue;
+      throw error;
+    }
+  }
+  return mapped;
 }
 
 export async function discoverHistoricalMediaArchiveCandidates(
@@ -653,9 +682,52 @@ function resolveExistingOrConflict(
   return readPersistedArchiveResult(existing);
 }
 
+async function resolveArchiveSelections(
+  client: AssetCoreSqlTransaction,
+  selections: HistoricalMediaArchiveSelection[],
+): Promise<ResolvedArchiveSelection[]> {
+  const resolved: ResolvedArchiveSelection[] = [];
+  for (const selection of selections) {
+    const result = await client.query<ResolvedArchiveOwnerRow>(
+      `SELECT asset.owner_id
+       FROM wujie_assets asset
+       JOIN wujie_asset_versions version
+         ON version.id = $3
+        AND version.asset_id = asset.id
+        AND version.owner_id = asset.owner_id
+        AND version.project_id = asset.project_id
+       WHERE asset.project_id = $1 AND asset.id = $2`,
+      [selection.projectId, selection.assetId, selection.assetVersionId],
+    );
+    const ownerId = result.rows[0]?.owner_id;
+    if (!ownerId) throw remediationError('HISTORICAL_MEDIA_NOT_FOUND');
+    resolved.push({ ...selection, ownerId });
+  }
+  return resolved.sort(compareByFields<ResolvedArchiveSelection>([
+    'ownerId',
+    'projectId',
+    'assetId',
+    'assetVersionId',
+    'candidateDigest',
+  ] as const));
+}
+
+async function lockArchiveOwnerSnapshots(
+  client: AssetCoreSqlTransaction,
+  selections: ResolvedArchiveSelection[],
+): Promise<void> {
+  const ownerIds = [...new Set(selections.map(selection => selection.ownerId))].sort(compareStrings);
+  for (const ownerId of ownerIds) {
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+      [ownerId, '__asset_graph_projects_revision'],
+    );
+  }
+}
+
 async function lockCandidateFacts(
   client: AssetCoreSqlTransaction,
-  selection: HistoricalMediaArchiveSelection,
+  selection: ResolvedArchiveSelection,
 ): Promise<LockedHistoricalMediaCandidate> {
   const candidateResult = await client.query<LockedCandidateRow>(
     `SELECT
@@ -682,7 +754,8 @@ async function lockCandidateFacts(
   const row = candidateResult.rows[0];
   if (!row) throw remediationError('HISTORICAL_MEDIA_NOT_FOUND');
   if (
-    row.asset_status !== 'active'
+    row.owner_id !== selection.ownerId
+    || row.asset_status !== 'active'
     || row.current_version_id !== row.asset_version_id
     || !isAllowedBrokenCandidate(row)
   ) {
@@ -741,7 +814,15 @@ function assertCandidateDigest(
   locked: LockedHistoricalMediaCandidate,
   expectedDigest: string,
 ): string {
-  const candidateDigest = buildHistoricalMediaCandidateDigest(locked);
+  let candidateDigest: string;
+  try {
+    candidateDigest = buildHistoricalMediaCandidateDigest(locked);
+  } catch (error) {
+    if (error instanceof Error && error.message === INVALID_REQUEST) {
+      throw remediationError('HISTORICAL_MEDIA_CANDIDATE_STALE');
+    }
+    throw error;
+  }
   if (candidateDigest !== expectedDigest) {
     throw remediationError('HISTORICAL_MEDIA_CANDIDATE_STALE');
   }
@@ -919,14 +1000,6 @@ export async function archiveHistoricalMedia(input: {
   request: HistoricalMediaArchiveRequest;
 }): Promise<HistoricalMediaArchiveResult> {
   const normalized = normalizeArchiveInput(input);
-  const sortedSelections = [...normalized.request.candidates].sort(
-    compareByFields<HistoricalMediaArchiveSelection>([
-      'projectId',
-      'assetId',
-      'assetVersionId',
-      'candidateDigest',
-    ] as const),
-  );
 
   return withAssetCoreTransaction(async (client) => {
     await client.query(
@@ -943,6 +1016,12 @@ export async function archiveHistoricalMedia(input: {
     if (existing) {
       return resolveExistingOrConflict(existing, normalized.requestDigest);
     }
+
+    const sortedSelections = await resolveArchiveSelections(
+      client,
+      normalized.request.candidates,
+    );
+    await lockArchiveOwnerSnapshots(client, sortedSelections);
 
     const beforeCandidates: HistoricalMediaBeforeCandidate[] = [];
     const projectRevisions: Record<string, number> = {};

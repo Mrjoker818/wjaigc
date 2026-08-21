@@ -2,7 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { setImmediate as yieldImmediate } from 'node:timers/promises';
 
+import { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 import type {
@@ -62,6 +64,29 @@ interface ArchiveCommand {
   request: HistoricalMediaArchiveRequest;
 }
 
+interface AssetLifecycleService {
+  trashPlacement(input: {
+    actorUserId: string;
+    projectId: string;
+    placementId: string;
+    assetId?: string;
+  }): Promise<{
+    placementTrashed: boolean;
+    assetTrashed: boolean;
+    projectRevision?: number;
+  }>;
+  restorePlacement(input: {
+    actorUserId: string;
+    projectId: string;
+    placementId: string;
+    assetId?: string;
+  }): Promise<{
+    placement: { id: string; status: string };
+    asset: { id: string; status: string };
+    projectRevision?: number;
+  }>;
+}
+
 interface ArchiveState {
   assets: unknown[];
   audit: unknown[];
@@ -97,6 +122,83 @@ function runMigrations(isolatedDatabaseUrl: string): void {
 
 async function loadHistoricalMediaService(): Promise<HistoricalMediaService> {
   return import('../../src/lib/asset-core/historical-media-remediation') as unknown as Promise<HistoricalMediaService>;
+}
+
+async function loadAssetLifecycleService(): Promise<AssetLifecycleService> {
+  const { createAssetService } = await import('../../src/lib/asset-core/service');
+  return createAssetService();
+}
+
+function boundedPostgresUrl(isolatedDatabaseUrl: string): string {
+  const parsed = new URL(isolatedDatabaseUrl);
+  const existingOptions = parsed.searchParams.get('options')?.trim() || '';
+  parsed.searchParams.set(
+    'options',
+    [
+      existingOptions,
+      '-cstatement_timeout=8000',
+      '-clock_timeout=7500',
+      '-cdeadlock_timeout=100ms',
+    ].filter(Boolean).join(' '),
+  );
+  return parsed.toString();
+}
+
+function bindBoundedBusinessDatabase(isolatedDatabaseUrl: string): string {
+  const databaseUrl = boundedPostgresUrl(isolatedDatabaseUrl);
+  process.env.DATABASE_URL = databaseUrl;
+  process.env.PGDATABASE_URL = databaseUrl;
+  return databaseUrl;
+}
+
+async function connectIsolatedClient(databaseUrl: string): Promise<Client> {
+  const client = new Client({
+    connectionString: databaseUrl,
+    connectionTimeoutMillis: 5_000,
+  });
+  await client.connect();
+  return client;
+}
+
+async function closeTestClients(clients: Client[]): Promise<void> {
+  await Promise.all(clients.map(async client => {
+    await client.query('ROLLBACK').catch(() => undefined);
+    await client.end().catch(() => undefined);
+  }));
+}
+
+async function waitForBlockedQuery(
+  monitor: Client,
+  queryFragments: string[],
+  excludedPids: number[] = [],
+): Promise<{ pid: number; query: string }> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await monitor.query<{ pid: number; query: string }>(
+      `SELECT pid, query
+       FROM pg_stat_activity
+       WHERE datname = current_database()
+         AND pid <> pg_backend_pid()
+         AND state = 'active'
+         AND wait_event_type = 'Lock'
+         AND NOT (pid = ANY($2::int[]))
+         AND EXISTS (
+           SELECT 1 FROM unnest($1::text[]) AS fragment
+           WHERE position(fragment IN query) > 0
+         )
+       ORDER BY query_start, pid
+       LIMIT 1`,
+      [queryFragments, excludedPids],
+    );
+    if (result.rows[0]) return result.rows[0];
+    await yieldImmediate();
+  }
+  throw new Error(`Timed out waiting for PostgreSQL lock state: ${queryFragments.join(' | ')}`);
+}
+
+function unwrapFulfilled<T>(result: PromiseSettledResult<T>): T {
+  if (result.status === 'rejected') throw result.reason;
+  return result.value;
 }
 
 async function createRuntimeTables(query: QueryFn): Promise<void> {
@@ -233,6 +335,142 @@ async function seedHistoricalMediaFixture(query: QueryFn): Promise<void> {
         updatedAt: 1000,
       },
     ])],
+  );
+}
+
+async function seedOversizedDiscoveryCandidate(
+  query: QueryFn,
+  placementCount: number,
+): Promise<void> {
+  await query(
+    `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+     VALUES ('asset-000-oversized', $1, $2, 'image', 'active')`,
+    [OWNER_ID, PROJECT_ID],
+  );
+  await query(
+    `INSERT INTO wujie_asset_versions(
+       id, asset_id, owner_id, project_id, file_url, storage_key,
+       availability, recovery_source_url, metadata
+     ) VALUES (
+       'version-000-oversized', 'asset-000-oversized', $1, $2,
+       '/v1/images/proxy/oversized', NULL, 'missing', NULL, '{}'::jsonb
+     )`,
+    [OWNER_ID, PROJECT_ID],
+  );
+  await query(
+    `UPDATE wujie_assets
+     SET current_version_id = 'version-000-oversized'
+     WHERE id = 'asset-000-oversized'`,
+  );
+  await query(
+    `INSERT INTO wujie_workspace_placements(
+       id, owner_id, project_id, asset_id, asset_version_id,
+       workspace_kind, workspace_id, entity_type, entity_id
+     )
+     SELECT
+       lpad(position::text, 3, '0') || repeat($4, 253),
+       $1,
+       $2,
+       'asset-000-oversized',
+       'version-000-oversized',
+       'chat',
+       lpad(position::text, 3, '0') || repeat($4, 253),
+       'chat-result',
+       lpad(position::text, 3, '0') || repeat($4, 253)
+     FROM generate_series(1, $3) AS position`,
+    [OWNER_ID, PROJECT_ID, placementCount, '\uFFFF'],
+  );
+}
+
+async function growCandidatePlacements(
+  query: QueryFn,
+  placementCount: number,
+): Promise<void> {
+  await query(
+    `INSERT INTO wujie_workspace_placements(
+       id, owner_id, project_id, asset_id, asset_version_id,
+       workspace_kind, workspace_id, entity_type, entity_id
+     )
+     SELECT
+       lpad(position::text, 3, '0') || repeat($4, 253),
+       $1,
+       $2,
+       'asset-chat-empty',
+       'version-chat-empty',
+       'chat',
+       lpad(position::text, 3, '0') || repeat($4, 253),
+       'chat-result',
+       lpad(position::text, 3, '0') || repeat($4, 253)
+     FROM generate_series(1, $3) AS position`,
+    [OWNER_ID, PROJECT_ID, placementCount, '\uFFFE'],
+  );
+}
+
+async function seedMultiOwnerBatchFixture(query: QueryFn): Promise<void> {
+  await query(
+    `INSERT INTO wujie_projects(id, owner_id, name) VALUES
+       ('project-batch-a', $1, 'Batch A'),
+       ('project-batch-b', $2, 'Batch B'),
+       ('project-batch-c', $2, 'Batch C'),
+       ('project-batch-d', $1, 'Batch D')`,
+    [OWNER_ID, OTHER_OWNER_ID],
+  );
+  await query(
+    `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status) VALUES
+       ('asset-batch-a', $1, 'project-batch-a', 'image', 'active'),
+       ('asset-batch-b', $2, 'project-batch-b', 'image', 'active'),
+       ('asset-batch-c', $2, 'project-batch-c', 'image', 'active'),
+       ('asset-batch-d', $1, 'project-batch-d', 'image', 'active')`,
+    [OWNER_ID, OTHER_OWNER_ID],
+  );
+  await query(
+    `INSERT INTO wujie_asset_versions(
+       id, asset_id, owner_id, project_id, file_url, availability, metadata
+     ) VALUES
+       ('version-batch-a', 'asset-batch-a', $1, 'project-batch-a', '/v1/images/proxy/a', 'missing', '{}'::jsonb),
+       ('version-batch-b', 'asset-batch-b', $2, 'project-batch-b', '/v1/images/proxy/b', 'missing', '{}'::jsonb),
+       ('version-batch-c', 'asset-batch-c', $2, 'project-batch-c', '/v1/images/proxy/c', 'missing', '{}'::jsonb),
+       ('version-batch-d', 'asset-batch-d', $1, 'project-batch-d', '/v1/images/proxy/d', 'missing', '{}'::jsonb)`,
+    [OWNER_ID, OTHER_OWNER_ID],
+  );
+  await query(
+    `UPDATE wujie_assets
+     SET current_version_id = replace(id, 'asset-', 'version-')
+     WHERE id LIKE 'asset-batch-%'`,
+  );
+  await query(
+    `INSERT INTO wujie_workspace_placements(
+       id, owner_id, project_id, asset_id, asset_version_id,
+       workspace_kind, workspace_id, entity_type, entity_id
+     ) VALUES
+       ('placement-batch-a', $1, 'project-batch-a', 'asset-batch-a', 'version-batch-a',
+        'canvas', 'project-batch-a', 'canvas-image', 'entity-batch-a'),
+       ('placement-batch-b', $2, 'project-batch-b', 'asset-batch-b', 'version-batch-b',
+        'canvas', 'project-batch-b', 'canvas-image', 'entity-batch-b'),
+       ('placement-batch-c', $2, 'project-batch-c', 'asset-batch-c', 'version-batch-c',
+        'canvas', 'project-batch-c', 'canvas-image', 'entity-batch-c'),
+       ('placement-batch-d', $1, 'project-batch-d', 'asset-batch-d', 'version-batch-d',
+        'canvas', 'project-batch-d', 'canvas-image', 'entity-batch-d')`,
+    [OWNER_ID, OTHER_OWNER_ID],
+  );
+  await query(
+    `INSERT INTO wujie_user_data(user_id, data_key, data_value, updated_at) VALUES
+       ($1, 'projects', $3::jsonb, 1000),
+       ($1, '__asset_graph_projects_revision', '0'::jsonb, 1000),
+       ($2, 'projects', $4::jsonb, 1000),
+       ($2, '__asset_graph_projects_revision', '0'::jsonb, 1000)`,
+    [
+      OWNER_ID,
+      OTHER_OWNER_ID,
+      JSON.stringify([
+        { id: 'project-batch-a', canvasImages: [{ id: 'entity-batch-a' }], updatedAt: 1000 },
+        { id: 'project-batch-d', canvasImages: [{ id: 'entity-batch-d' }], updatedAt: 1000 },
+      ]),
+      JSON.stringify([
+        { id: 'project-batch-b', canvasImages: [{ id: 'entity-batch-b' }], updatedAt: 1000 },
+        { id: 'project-batch-c', canvasImages: [{ id: 'entity-batch-c' }], updatedAt: 1000 },
+      ]),
+    ],
   );
 }
 
@@ -441,6 +679,48 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
     });
   });
 
+  postgresIt('skips an oversized database candidate while preserving bounded discovery counts', async () => {
+    await withIsolatedPostgres('historical-media-oversized-discovery', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      await seedOversizedDiscoveryCandidate(query, 100);
+      const service = await loadHistoricalMediaService();
+
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+
+      expect(discovery.candidates.map(candidate => candidate.assetId)).toEqual([
+        'asset-canvas-bridge',
+        'asset-chat-empty',
+        'asset-false-ready',
+      ]);
+      expect(discovery.candidates.some(candidate => candidate.assetId === 'asset-000-oversized')).toBe(false);
+      expect(discovery.counts).toEqual({ versions: 3, activePlacements: 4 });
+    });
+  });
+
+  postgresIt('fails stale when locked placement facts grow beyond the reviewed canonical bound', async () => {
+    await withIsolatedPostgres('historical-media-oversized-stale', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetId === 'asset-chat-empty',
+      ) as HistoricalMediaCandidate;
+      await growCandidatePlacements(query, 100);
+
+      await expect(service.archiveHistoricalMedia(createArchiveCommand(
+        [candidate],
+        'historical-media-oversized-stale',
+      ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_CANDIDATE_STALE' });
+
+      await expect(query(
+        `SELECT
+           (SELECT count(*)::int FROM wujie_asset_media_remediations) AS ledger,
+           (SELECT count(*)::int FROM wujie_audit_log) AS audit,
+           (SELECT count(*)::int FROM wujie_workspace_placements WHERE status = 'trashed') AS trashed`,
+      )).resolves.toMatchObject({ rows: [{ ledger: 0, audit: 0, trashed: 0 }] });
+    });
+  });
+
   postgresIt('serializes identical archives, reuses one result and rejects a changed request', async () => {
     await withIsolatedPostgres('historical-media-concurrent-archive', async ({ databaseUrl: isolatedUrl, query }) => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
@@ -601,6 +881,328 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       });
     });
   });
+
+  postgresIt('serializes archive before overlapping Canvas trash without deadlock or partial state', async () => {
+    await withIsolatedPostgres('historical-media-canvas-trash-overlap', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const databaseUrl = bindBoundedBusinessDatabase(isolatedUrl);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetId === 'asset-canvas-bridge',
+      ) as HistoricalMediaCandidate;
+      const lifecycle = await loadAssetLifecycleService();
+      const [assetBarrier, monitor] = await Promise.all([
+        connectIsolatedClient(databaseUrl),
+        connectIsolatedClient(databaseUrl),
+      ]);
+      const operations: Promise<unknown>[] = [];
+
+      try {
+        await assetBarrier.query('BEGIN');
+        await assetBarrier.query(
+          `SELECT id FROM wujie_assets
+           WHERE id = 'asset-canvas-bridge' FOR UPDATE`,
+        );
+
+        const archive = service.archiveHistoricalMedia(createArchiveCommand(
+          [candidate],
+          'historical-media-canvas-trash-overlap',
+        ));
+        operations.push(archive);
+        const archiveActivity = await waitForBlockedQuery(
+          monitor,
+          ['FOR UPDATE OF asset, version'],
+        );
+
+        const trash = lifecycle.trashPlacement({
+          actorUserId: OWNER_ID,
+          projectId: PROJECT_ID,
+          placementId: 'placement-canvas-bridge',
+          assetId: 'asset-canvas-bridge',
+        });
+        operations.push(trash);
+        await waitForBlockedQuery(
+          monitor,
+          ['pg_advisory_xact_lock(hashtext($1), hashtext($2))'],
+          [archiveActivity.pid],
+        );
+
+        await assetBarrier.query('COMMIT');
+        const [archiveSettled, trashSettled] = await Promise.allSettled([archive, trash]);
+        const archiveResult = unwrapFulfilled(archiveSettled);
+        const trashResult = unwrapFulfilled(trashSettled);
+
+        expect(archiveResult).toMatchObject({
+          archivedVersionCount: 1,
+          archivedPlacementCount: 1,
+          projectRevisions: { [PROJECT_ID]: 11 },
+        });
+        expect(trashResult).toEqual({
+          placementTrashed: false,
+          assetTrashed: false,
+          projectRevision: 11,
+        });
+        await expect(query(
+          `SELECT
+             (SELECT status FROM wujie_assets WHERE id = 'asset-canvas-bridge') AS asset_status,
+             (SELECT availability FROM wujie_asset_versions WHERE id = 'version-canvas-bridge') AS availability,
+             (SELECT status FROM wujie_workspace_placements WHERE id = 'placement-canvas-bridge') AS placement_status,
+             (SELECT data_value #>> '{}' FROM wujie_user_data
+               WHERE user_id = $1 AND data_key = '__asset_graph_projects_revision') AS revision,
+             (SELECT count(*)::int FROM wujie_asset_media_remediations) AS ledger,
+             (SELECT count(*)::int FROM wujie_audit_log) AS audit`,
+          [OWNER_ID],
+        )).resolves.toMatchObject({
+          rows: [{
+            asset_status: 'trashed',
+            availability: 'unrecoverable',
+            placement_status: 'trashed',
+            revision: '11',
+            ledger: 1,
+            audit: 1,
+          }],
+        });
+      } finally {
+        await assetBarrier.query('ROLLBACK').catch(() => undefined);
+        await Promise.allSettled(operations);
+        await closeTestClients([assetBarrier, monitor]);
+      }
+    });
+  }, 20_000);
+
+  postgresIt('serializes archive before overlapping Canvas restore without deadlock or partial state', async () => {
+    await withIsolatedPostgres('historical-media-canvas-restore-overlap', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id,
+           workspace_kind, workspace_id, entity_type, entity_id,
+           status, deleted_at, transform, metadata
+         ) VALUES (
+           'placement-canvas-restore', $1, $2, 'asset-canvas-bridge', 'version-canvas-bridge',
+           'canvas', $2, 'canvas-image', 'entity-canvas-restore',
+           'trashed', now(), '{"x":40,"y":50}'::jsonb,
+           '{"legacyImage":{"name":"Restored historical image"}}'::jsonb
+         )`,
+        [OWNER_ID, PROJECT_ID],
+      );
+      const databaseUrl = bindBoundedBusinessDatabase(isolatedUrl);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetId === 'asset-canvas-bridge',
+      ) as HistoricalMediaCandidate;
+      const lifecycle = await loadAssetLifecycleService();
+      const [assetBarrier, monitor] = await Promise.all([
+        connectIsolatedClient(databaseUrl),
+        connectIsolatedClient(databaseUrl),
+      ]);
+      const operations: Promise<unknown>[] = [];
+
+      try {
+        await assetBarrier.query('BEGIN');
+        await assetBarrier.query(
+          `SELECT id FROM wujie_assets
+           WHERE id = 'asset-canvas-bridge' FOR UPDATE`,
+        );
+
+        const archive = service.archiveHistoricalMedia(createArchiveCommand(
+          [candidate],
+          'historical-media-canvas-restore-overlap',
+        ));
+        operations.push(archive);
+        const archiveActivity = await waitForBlockedQuery(
+          monitor,
+          ['FOR UPDATE OF asset, version'],
+        );
+
+        const restore = lifecycle.restorePlacement({
+          actorUserId: OWNER_ID,
+          projectId: PROJECT_ID,
+          placementId: 'placement-canvas-restore',
+          assetId: 'asset-canvas-bridge',
+        });
+        operations.push(restore);
+        await waitForBlockedQuery(
+          monitor,
+          ['pg_advisory_xact_lock(hashtext($1), hashtext($2))'],
+          [archiveActivity.pid],
+        );
+
+        await assetBarrier.query('COMMIT');
+        const [archiveSettled, restoreSettled] = await Promise.allSettled([archive, restore]);
+        const archiveResult = unwrapFulfilled(archiveSettled);
+        const restoreResult = unwrapFulfilled(restoreSettled);
+
+        expect(archiveResult).toMatchObject({
+          archivedVersionCount: 1,
+          archivedPlacementCount: 1,
+          projectRevisions: { [PROJECT_ID]: 11 },
+        });
+        expect(restoreResult).toMatchObject({
+          placement: { id: 'placement-canvas-restore', status: 'active' },
+          asset: { id: 'asset-canvas-bridge', status: 'active' },
+          projectRevision: 12,
+        });
+        const state = await query<{
+          asset_status: string;
+          archived_status: string;
+          restored_status: string;
+          availability: string;
+          revision: string;
+          snapshot: Array<{ canvasImages: Array<{ id: string }> }>;
+          ledger: number;
+          audit: number;
+        }>(
+          `SELECT
+             (SELECT status FROM wujie_assets WHERE id = 'asset-canvas-bridge') AS asset_status,
+             (SELECT status FROM wujie_workspace_placements WHERE id = 'placement-canvas-bridge') AS archived_status,
+             (SELECT status FROM wujie_workspace_placements WHERE id = 'placement-canvas-restore') AS restored_status,
+             (SELECT availability FROM wujie_asset_versions WHERE id = 'version-canvas-bridge') AS availability,
+             (SELECT data_value #>> '{}' FROM wujie_user_data
+               WHERE user_id = $1 AND data_key = '__asset_graph_projects_revision') AS revision,
+             (SELECT data_value FROM wujie_user_data
+               WHERE user_id = $1 AND data_key = 'projects') AS snapshot,
+             (SELECT count(*)::int FROM wujie_asset_media_remediations) AS ledger,
+             (SELECT count(*)::int FROM wujie_audit_log) AS audit`,
+          [OWNER_ID],
+        );
+        expect(state.rows[0]).toMatchObject({
+          asset_status: 'active',
+          archived_status: 'trashed',
+          restored_status: 'active',
+          availability: 'unrecoverable',
+          revision: '12',
+          ledger: 1,
+          audit: 1,
+        });
+        const imageIds = state.rows[0]?.snapshot[0]?.canvasImages.map(image => image.id) ?? [];
+        expect(imageIds).not.toContain('entity-canvas-bridge');
+        expect(imageIds).toContain('entity-canvas-restore');
+      } finally {
+        await assetBarrier.query('ROLLBACK').catch(() => undefined);
+        await Promise.allSettled(operations);
+        await closeTestClients([assetBarrier, monitor]);
+      }
+    });
+  }, 20_000);
+
+  postgresIt('serializes reversed different-key multi-owner batches in database-derived owner order', async () => {
+    await withIsolatedPostgres('historical-media-multi-owner-overlap', async ({ databaseUrl: isolatedUrl, query }) => {
+      runMigrations(isolatedUrl);
+      await createRuntimeTables(query);
+      await seedMultiOwnerBatchFixture(query);
+      const databaseUrl = bindBoundedBusinessDatabase(isolatedUrl);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const byAsset = new Map(discovery.candidates.map(candidate => [candidate.assetId, candidate]));
+      const firstCommand = createArchiveCommand([
+        byAsset.get('asset-batch-a') as HistoricalMediaCandidate,
+        byAsset.get('asset-batch-c') as HistoricalMediaCandidate,
+      ], 'historical-media-multi-owner-first');
+      const secondCommand = createArchiveCommand([
+        byAsset.get('asset-batch-b') as HistoricalMediaCandidate,
+        byAsset.get('asset-batch-d') as HistoricalMediaCandidate,
+      ], 'historical-media-multi-owner-second');
+      const [firstBarrier, secondBarrier, monitor] = await Promise.all([
+        connectIsolatedClient(databaseUrl),
+        connectIsolatedClient(databaseUrl),
+        connectIsolatedClient(databaseUrl),
+      ]);
+      const operations: Promise<unknown>[] = [];
+
+      try {
+        await firstBarrier.query('BEGIN');
+        await firstBarrier.query(
+          `SELECT id FROM wujie_assets WHERE id = 'asset-batch-c' FOR UPDATE`,
+        );
+        await secondBarrier.query('BEGIN');
+        await secondBarrier.query(
+          `SELECT id FROM wujie_assets WHERE id = 'asset-batch-d' FOR UPDATE`,
+        );
+
+        const firstArchive = service.archiveHistoricalMedia(firstCommand);
+        operations.push(firstArchive);
+        const firstActivity = await waitForBlockedQuery(
+          monitor,
+          ['FOR UPDATE OF asset, version'],
+        );
+
+        const secondArchive = service.archiveHistoricalMedia(secondCommand);
+        operations.push(secondArchive);
+        await waitForBlockedQuery(
+          monitor,
+          [
+            'FOR UPDATE OF asset, version',
+            'pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+          ],
+          [firstActivity.pid],
+        );
+
+        await Promise.all([
+          firstBarrier.query('COMMIT'),
+          secondBarrier.query('COMMIT'),
+        ]);
+        const [firstSettled, secondSettled] = await Promise.allSettled([
+          firstArchive,
+          secondArchive,
+        ]);
+        const firstResult = unwrapFulfilled(firstSettled);
+        const secondResult = unwrapFulfilled(secondSettled);
+
+        expect(firstResult).toMatchObject({
+          archivedVersionCount: 2,
+          archivedPlacementCount: 2,
+          projectRevisions: {
+            'project-batch-a': 1,
+            'project-batch-c': 1,
+          },
+        });
+        expect(secondResult).toMatchObject({
+          archivedVersionCount: 2,
+          archivedPlacementCount: 2,
+          projectRevisions: {
+            'project-batch-b': 2,
+            'project-batch-d': 2,
+          },
+        });
+        await expect(query(
+          `SELECT
+             (SELECT count(*)::int FROM wujie_assets
+               WHERE id LIKE 'asset-batch-%' AND status = 'trashed') AS assets,
+             (SELECT count(*)::int FROM wujie_asset_versions
+               WHERE id LIKE 'version-batch-%' AND availability = 'unrecoverable') AS versions,
+             (SELECT count(*)::int FROM wujie_workspace_placements
+               WHERE id LIKE 'placement-batch-%' AND status = 'trashed') AS placements,
+             (SELECT count(*)::int FROM wujie_asset_media_remediations) AS ledger,
+             (SELECT count(*)::int FROM wujie_audit_log) AS audit,
+             (SELECT data_value #>> '{}' FROM wujie_user_data
+               WHERE user_id = $1 AND data_key = '__asset_graph_projects_revision') AS first_revision,
+             (SELECT data_value #>> '{}' FROM wujie_user_data
+               WHERE user_id = $2 AND data_key = '__asset_graph_projects_revision') AS second_revision`,
+          [OWNER_ID, OTHER_OWNER_ID],
+        )).resolves.toMatchObject({
+          rows: [{
+            assets: 4,
+            versions: 4,
+            placements: 4,
+            ledger: 2,
+            audit: 2,
+            first_revision: '2',
+            second_revision: '2',
+          }],
+        });
+      } finally {
+        await Promise.all([
+          firstBarrier.query('ROLLBACK').catch(() => undefined),
+          secondBarrier.query('ROLLBACK').catch(() => undefined),
+        ]);
+        await Promise.allSettled(operations);
+        await closeTestClients([firstBarrier, secondBarrier, monitor]);
+      }
+    });
+  }, 20_000);
 
   postgresIt('rejects changed placements, recovered sources and non-current versions as stale', async () => {
     await withIsolatedPostgres('historical-media-stale-candidates', async ({ databaseUrl: isolatedUrl, query }) => {
