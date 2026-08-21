@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isIP } from 'node:net';
 
 import { getRequestUser } from '@/lib/api-auth';
 import {
@@ -10,6 +11,8 @@ import {
 const DEFAULT_DISCOVERY_LIMIT = 20;
 const MAX_DISCOVERY_LIMIT = 100;
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+const MAX_FORWARD_HEADER_BYTES = 2048;
+const MAX_TRUSTED_PROXY_HOPS = 10;
 
 function invalidRequest(requestId: string): NextResponse {
   return errorResponse(
@@ -28,6 +31,33 @@ function administratorRequired(requestId: string): NextResponse {
   return errorResponse(403, 'ADMINISTRATOR_REQUIRED', 'Administrator session required', requestId);
 }
 
+function invalidAdministratorOrigin(requestId: string): NextResponse {
+  return errorResponse(
+    403,
+    'ADMINISTRATOR_ORIGIN_INVALID',
+    'Administrator request origin is invalid',
+    requestId,
+  );
+}
+
+function invalidAdministratorAuthSource(requestId: string): NextResponse {
+  return errorResponse(
+    403,
+    'ADMINISTRATOR_AUTH_SOURCE_INVALID',
+    'Administrator authentication source is invalid',
+    requestId,
+  );
+}
+
+function unsupportedContentType(requestId: string): NextResponse {
+  return errorResponse(
+    415,
+    'HISTORICAL_MEDIA_CONTENT_TYPE_UNSUPPORTED',
+    'Historical media remediation requires application/json',
+    requestId,
+  );
+}
+
 function internalFailure(requestId: string): NextResponse {
   return errorResponse(
     500,
@@ -43,6 +73,93 @@ function parseDiscoveryLimit(value: string | null): number | null {
   return Number.isInteger(limit) && limit >= 1 && limit <= MAX_DISCOVERY_LIMIT
     ? limit
     : null;
+}
+
+function configuredPublicOrigin(): string | null {
+  const configuredDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT?.trim();
+  if (!configuredDomain) return null;
+  try {
+    const parsed = new URL(
+      /^[a-z][a-z\d+.-]*:\/\//i.test(configuredDomain)
+        ? configuredDomain
+        : `https://${configuredDomain}`,
+    );
+    if (
+      !['http:', 'https:'].includes(parsed.protocol)
+      || parsed.username
+      || parsed.password
+    ) return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function hasConfiguredSameOrigin(request: NextRequest): boolean {
+  const expectedOrigin = configuredPublicOrigin();
+  const suppliedOrigin = request.headers.get('origin')?.trim();
+  if (!expectedOrigin || !suppliedOrigin) return false;
+  try {
+    const parsed = new URL(suppliedOrigin);
+    return ['http:', 'https:'].includes(parsed.protocol)
+      && !parsed.username
+      && !parsed.password
+      && parsed.pathname === '/'
+      && !parsed.search
+      && !parsed.hash
+      && parsed.origin === expectedOrigin;
+  } catch {
+    return false;
+  }
+}
+
+function hasJsonContentType(request: NextRequest): boolean {
+  const contentType = request.headers.get('content-type');
+  if (!contentType) return false;
+  return contentType.split(';', 1)[0]?.trim().toLowerCase() === 'application/json';
+}
+
+function readTrustedProxyHops(): number | null {
+  const configured = process.env.WUJIE_TRUSTED_PROXY_HOPS?.trim();
+  if (!configured || !/^[1-9]\d*$/.test(configured)) return null;
+  const hops = Number(configured);
+  return Number.isSafeInteger(hops) && hops <= MAX_TRUSTED_PROXY_HOPS ? hops : null;
+}
+
+function canonicalizeIp(value: string): string | null {
+  const candidate = value.trim();
+  const version = isIP(candidate);
+  if (version === 4) return candidate;
+  if (version !== 6) return null;
+  try {
+    const hostname = new URL(`http://[${candidate}]/`).hostname.toLowerCase();
+    return hostname.startsWith('[') && hostname.endsWith(']')
+      ? hostname.slice(1, -1)
+      : hostname;
+  } catch {
+    return null;
+  }
+}
+
+function resolveAuditIp(request: NextRequest): string | null {
+  const trustedHops = readTrustedProxyHops();
+  if (trustedHops === null) return null;
+
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  if (forwardedFor !== null) {
+    if (Buffer.byteLength(forwardedFor, 'utf8') > MAX_FORWARD_HEADER_BYTES) return null;
+    const addresses = forwardedFor.split(',').map(value => value.trim());
+    if (addresses.length < trustedHops) return null;
+    return canonicalizeIp(addresses[addresses.length - trustedHops] ?? '');
+  }
+
+  const realIp = request.headers.get('x-real-ip');
+  if (
+    trustedHops !== 1
+    || realIp === null
+    || Buffer.byteLength(realIp, 'utf8') > MAX_FORWARD_HEADER_BYTES
+  ) return null;
+  return canonicalizeIp(realIp);
 }
 
 async function readBoundedJson(request: NextRequest): Promise<unknown> {
@@ -96,12 +213,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const limit = parseDiscoveryLimit(request.nextUrl.searchParams.get('limit'));
   if (limit === null) return invalidRequest(requestId);
 
+  let remediation: typeof import('@/lib/asset-core/historical-media-remediation');
   try {
-    const remediation = await import('@/lib/asset-core/historical-media-remediation');
+    remediation = await import('@/lib/asset-core/historical-media-remediation');
+  } catch {
+    return internalFailure(requestId);
+  }
+
+  try {
     const discovery = await remediation.discoverHistoricalMediaArchiveCandidates({ limit });
     return successResponse(discovery, requestId);
   } catch (error) {
-    const remediation = await import('@/lib/asset-core/historical-media-remediation');
     if (
       error instanceof remediation.HistoricalMediaRemediationError
       && error.code === 'HISTORICAL_MEDIA_REQUEST_INVALID'
@@ -122,6 +244,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (!auth) return authenticationRequired(requestId);
   if (auth.user.role !== 'admin') return administratorRequired(requestId);
+  if (auth.source === 'cookie') {
+    if (!hasConfiguredSameOrigin(request)) return invalidAdministratorOrigin(requestId);
+  } else if (auth.source !== 'desktop-token' && auth.source !== 'internal') {
+    return invalidAdministratorAuthSource(requestId);
+  }
+  if (!hasJsonContentType(request)) return unsupportedContentType(requestId);
 
   let rawRequest: unknown;
   try {
@@ -130,7 +258,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return invalidRequest(requestId);
   }
 
-  const remediation = await import('@/lib/asset-core/historical-media-remediation');
+  let remediation: typeof import('@/lib/asset-core/historical-media-remediation');
+  try {
+    remediation = await import('@/lib/asset-core/historical-media-remediation');
+  } catch {
+    return internalFailure(requestId);
+  }
   let archiveRequest: ReturnType<typeof remediation.parseHistoricalMediaArchiveRequest>;
   try {
     archiveRequest = remediation.parseHistoricalMediaArchiveRequest(rawRequest);
@@ -142,9 +275,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result = await remediation.archiveHistoricalMedia({
       actorUserId: auth.user.id,
       actorUserName: auth.user.name,
-      ipAddress: request.headers.get('x-forwarded-for')
-        || request.headers.get('x-real-ip')
-        || null,
+      ipAddress: resolveAuditIp(request),
       request: archiveRequest,
     });
     return successResponse({ ...result }, requestId);

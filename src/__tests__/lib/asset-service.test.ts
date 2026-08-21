@@ -126,6 +126,7 @@ function projectKey(ownerId: string, projectId: string): string {
 class MemoryStorage {
   readonly data: MemoryRecord;
   readonly lifecycleCalls: string[] = [];
+  readonly findVersionCalls: Array<[string, string, string]> = [];
   readonly restoredCanvasSnapshots: WorkspacePlacement[] = [];
   readonly trashedCanvasSnapshots: WorkspacePlacement[] = [];
   canvasProjectRevision = 0;
@@ -191,6 +192,8 @@ class MemoryStorage {
   }
 
   async findVersion(ownerId: string, projectId: string, versionId: string): Promise<AssetVersion | null> {
+    this.lifecycleCalls.push('findVersion');
+    this.findVersionCalls.push([ownerId, projectId, versionId]);
     const version = this.data.versions.get(versionId);
     return version?.ownerId === ownerId && version.projectId === projectId ? version : null;
   }
@@ -407,6 +410,7 @@ class MemoryStorage {
   }
 
   async activateAsset(ownerId: string, projectId: string, assetId: string): Promise<Asset | null> {
+    this.lifecycleCalls.push('activateAsset');
     const asset = await this.findAsset(ownerId, projectId, assetId);
     if (!asset) return null;
     const active = { ...asset, status: 'active' as const };
@@ -429,6 +433,7 @@ class MemoryStorage {
     projectId: string,
     placementId: string,
   ): Promise<WorkspacePlacement | null> {
+    this.lifecycleCalls.push('restorePlacement');
     const placement = await this.findPlacement(ownerId, projectId, placementId);
     if (!placement) return null;
     const active = { ...placement, status: 'active' as const, deletedAt: null } as WorkspacePlacement;
@@ -901,25 +906,36 @@ describe('asset graph service', () => {
     const storage = new MemoryStorage(ownerId, projectId);
     const { createAssetService } = await loadService();
     const service = createAssetService(storage);
-    const version = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    const historical = await service.createAssetVersion(createVersionInput(ownerId, projectId));
     const placed = await service.createWorkspacePlacement({
       actorUserId: ownerId,
       projectId,
-      assetVersionId: version.version.id,
+      assetVersionId: historical.version.id,
       workspace: 'canvas',
       workspaceId: 'canvas-a',
       entityType: 'canvas-image',
       entityId: 'image-a',
     });
+    const current = await service.createAssetVersion(createVersionInput(ownerId, projectId, {
+      assetId: historical.asset.id,
+      file: file('https://canonical.test/current-ready.png'),
+      idempotencyKey: 'current-ready-version',
+      requestDigest: 'current-ready-version-digest',
+    }));
     await service.trashPlacement({
       actorUserId: ownerId,
       projectId,
       placementId: placed.placement.id,
     });
-    storage.data.versions.set(version.version.id, {
-      ...version.version,
-      file: { ...version.version.file, availability: 'unrecoverable' },
+    storage.data.versions.set(historical.version.id, {
+      ...historical.version,
+      file: { ...historical.version.file, availability: 'unrecoverable' },
     });
+    expect(current.asset.currentVersionId).toBe(current.version.id);
+    expect(current.version.id).not.toBe(historical.version.id);
+    expect(current.version.file.availability).toBe('ready');
+    storage.lifecycleCalls.length = 0;
+    storage.findVersionCalls.length = 0;
 
     await expect(service.restorePlacement({
       actorUserId: ownerId,
@@ -927,8 +943,17 @@ describe('asset graph service', () => {
       placementId: placed.placement.id,
     })).rejects.toMatchObject({ code: 'ASSET_MEDIA_UNRECOVERABLE' });
 
+    expect(storage.findVersionCalls).toEqual([
+      [ownerId, projectId, historical.version.id],
+    ]);
+    expect(storage.lifecycleCalls.indexOf('lockPlacement')).toBeLessThan(
+      storage.lifecycleCalls.indexOf('findVersion'),
+    );
+    expect(storage.lifecycleCalls).not.toContain('activateAsset');
+    expect(storage.lifecycleCalls).not.toContain('restorePlacement');
+    expect(storage.lifecycleCalls).not.toContain('restoreCanvasPlacementSnapshot');
     expect(storage.data.placements.get(placed.placement.id)?.status).toBe('trashed');
-    expect(storage.data.assets.get(version.asset.id)?.status).toBe('trashed');
+    expect(storage.data.assets.get(historical.asset.id)?.status).toBe('trashed');
     expect(storage.restoredCanvasSnapshots).toEqual([]);
   });
 
