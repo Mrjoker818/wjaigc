@@ -19,6 +19,9 @@ describe('migration runner connection contract', () => {
     await expect(runner.listMigrationFiles()).resolves.toContain(
       '20260816_wj_stable_s4_agent_events.sql',
     );
+    await expect(runner.listMigrationFiles()).resolves.toContain(
+      '20260821_v588_admin_thumbnail_variants.sql',
+    );
     expect(runner.migrationChecksum(Buffer.from('agent-events'))).toMatch(
       /^[a-f0-9]{64}$/,
     );

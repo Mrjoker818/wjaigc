@@ -1108,3 +1108,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The public credential-free administrator orphan route returned `401`. The authenticated administrator dashboard refreshed successfully in the existing Chrome preview tab and exposed the expected live summary/empty states with zero new Console Error/Warning.
 - The contract now permanently fails if an administrator route is added, removed or loses an approved guard pattern. Runtime authorization remains owned by the current shared and explicitly reviewed guards.
 - **Decision: V588-ADMIN-002 CLOUD ACCEPTED.** Evidence: `docs/testing/evidence/v588-admin-002-cloud-api-2026-08-21.json` and `docs/testing/evidence/v588-admin-002-cloud-ui-2026-08-21.png`. This authorizes `V588-ADMIN-003` only; it does not authorize a donor media subsystem replacement.
+
+## 2026-08-21 readiness after V588-ADMIN-003 local candidate
+
+- The current candidate adds an administrator-only, asset-graph-backed thumbnail backfill and persistent Canvas thumbnail projection without importing the donor's raw directory scanner or process-local lock.
+- Local gates are green: focused `57/57`, asset/media `245/245`, full Vitest `2895/2895`, TypeScript, zero-error ESLint and production build `115/115`.
+- `72` PostgreSQL-gated tests remain explicitly skipped on this workstation. Two are new authoritative thumbnail tests for schema uniqueness, concurrent claims, expired-lease recovery and stale-worker rejection.
+- Rollout compatibility is covered: project loading falls back only when the new thumbnail table is the missing relation; other database faults are not hidden. S3 object names now match the public media path used after an instance restart.
+- **Decision: LOCAL CANDIDATE READY FOR REVIEW; NOT CLOUD-ACCEPTED.** Do not start `V588-PROVIDER-001` until exact-candidate PostgreSQL and Coze/Chrome evidence closes ADMIN-003. `stable` remains unchanged.

@@ -1354,3 +1354,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Authenticated Google Chrome reused the same two existing tabs. Refreshing the administrator operations dashboard retained visible real summary data and both expected empty-state projections. Fresh Console Error/Warning count was zero.
 - Evidence: `docs/testing/evidence/v588-admin-002-cloud-api-2026-08-21.json` and `docs/testing/evidence/v588-admin-002-cloud-ui-2026-08-21.png`.
 - **Verdict: V588-ADMIN-002 LOCAL + CLOUD PASS.** The repository-wide route contract is absorbed; `V588-ADMIN-003` is the next authorized RED item.
+
+## 2026-08-21 V588-ADMIN-003 local regression
+
+- Donor behavior was reproduced as an architecture mismatch before implementation: it depended on a raw uploads scan and process-local lock. The current-line RED suite instead required asset-graph discovery, durable leases, exact lease-owner settlement and administrator guards.
+- The additive migration creates one 256/512 WebP variant per exact asset version. The worker uses current safe-image, Sharp pixel-limit, server-data-root and S3 boundaries; the S3 key mirrors the public media-gateway path so an instance restart can recover the same thumbnail.
+- Canvas hydration projects only ready variants, prefers 512 over 256, preserves old thumbnails when none are ready and safely falls back during the narrow pre-migration deployment interval without hiding unrelated database failures.
+- Focused thumbnail/admin/Canvas regression passed `57/57`. Related asset/media regression passed `245/245`; 27 PostgreSQL cases were explicitly skipped. Full Vitest passed `2895/2895`, with `72` PostgreSQL-only tests explicitly skipped and not counted as verified.
+- TypeScript passed; ESLint completed with `0 errors / 988 historical warnings`; production build completed `115/115` routes.
+- **Verdict: LOCAL REGRESSION PASS / POSTGRESQL AND CLOUD PENDING.** The two new real PostgreSQL schema/lease tests require `POSTGRES_TEST_DATABASE_URL`. No cloud backfill or Canvas thumbnail behavior is claimed yet.

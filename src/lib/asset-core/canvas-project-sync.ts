@@ -315,6 +315,7 @@ export interface AssetV3CanvasPlacement {
   assetVersionId: string;
   placementId: string;
   fileUrl: string;
+  thumbnailUrl?: string;
   availability: MediaAvailability;
   recoverySourceUrl?: string;
   transform: Record<string, unknown>;
@@ -328,6 +329,7 @@ interface AssetV3PlacementRow extends QueryResultRow {
   asset_version_id: string;
   placement_id: string;
   file_url: string;
+  thumbnail_url: string | null;
   availability: MediaAvailability;
   recovery_source_url: string | null;
   transform: Record<string, unknown>;
@@ -363,6 +365,7 @@ export function hydrateAssetV3Projects(
         ...base,
         id: placement.entityId,
         url: placement.fileUrl,
+        thumbnailUrl: placement.thumbnailUrl ?? base.thumbnailUrl,
         sourceUrl: placement.recoverySourceUrl ?? base.sourceUrl,
         x: numberOr(transform.x, base.x ?? 0),
         y: numberOr(transform.y, base.y ?? 0),
@@ -383,26 +386,59 @@ export function hydrateAssetV3Projects(
   });
 }
 
-export async function readAssetV3Projects(actorUserId: string, projects: Project[]): Promise<Project[]> {
-  if (projects.length === 0) return [];
-  const result = await getPool().query<AssetV3PlacementRow>(
-    `SELECT placement.project_id, placement.entity_id, placement.asset_id,
+function assetV3PlacementQuery(includeThumbnailVariants: boolean): string {
+  const thumbnailSelection = includeThumbnailVariants
+    ? 'thumbnail_variant.file_url AS thumbnail_url'
+    : 'NULL::text AS thumbnail_url';
+  const thumbnailJoin = includeThumbnailVariants
+    ? `LEFT JOIN LATERAL (
+       SELECT variant.file_url
+       FROM wujie_asset_thumbnail_variants variant
+       WHERE variant.asset_version_id = version.id
+         AND variant.status = 'ready'
+         AND variant.size IN (512, 256)
+         AND variant.file_url <> ''
+       ORDER BY variant.size DESC
+       LIMIT 1
+     ) thumbnail_variant ON TRUE`
+    : '';
+  return `SELECT placement.project_id, placement.entity_id, placement.asset_id,
             placement.asset_version_id, placement.id AS placement_id,
             version.file_url, version.availability, version.recovery_source_url,
-            placement.transform, placement.metadata
+            ${thumbnailSelection}, placement.transform, placement.metadata
      FROM wujie_workspace_placements placement
      JOIN wujie_asset_versions version
        ON version.id = placement.asset_version_id
       AND version.owner_id = placement.owner_id
       AND version.project_id = placement.project_id
+     ${thumbnailJoin}
      WHERE placement.owner_id = $1
        AND placement.project_id = ANY($2::text[])
        AND placement.workspace_kind = 'canvas'
        AND placement.entity_type = 'canvas-image'
        AND placement.status = 'active'
-     ORDER BY placement.created_at, placement.id`,
-    [actorUserId, projects.map((project) => project.id)],
-  );
+     ORDER BY placement.created_at, placement.id`;
+}
+
+function isMissingThumbnailVariantTable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: unknown; message?: unknown };
+  return candidate.code === '42P01'
+    && typeof candidate.message === 'string'
+    && candidate.message.includes('wujie_asset_thumbnail_variants');
+}
+
+export async function readAssetV3Projects(actorUserId: string, projects: Project[]): Promise<Project[]> {
+  if (projects.length === 0) return [];
+  const values = [actorUserId, projects.map((project) => project.id)];
+  const pool = getPool();
+  let result: { rows: AssetV3PlacementRow[] };
+  try {
+    result = await pool.query<AssetV3PlacementRow>(assetV3PlacementQuery(true), values);
+  } catch (error) {
+    if (!isMissingThumbnailVariantTable(error)) throw error;
+    result = await pool.query<AssetV3PlacementRow>(assetV3PlacementQuery(false), values);
+  }
   const placementsByProject: Record<string, AssetV3CanvasPlacement[]> = {};
   for (const row of result.rows) {
     (placementsByProject[row.project_id] ??= []).push({
@@ -411,6 +447,7 @@ export async function readAssetV3Projects(actorUserId: string, projects: Project
       assetVersionId: row.asset_version_id,
       placementId: row.placement_id,
       fileUrl: row.file_url,
+      ...(row.thumbnail_url ? { thumbnailUrl: row.thumbnail_url } : {}),
       availability: row.availability,
       ...(row.recovery_source_url ? { recoverySourceUrl: row.recovery_source_url } : {}),
       transform: asRecord(row.transform),

@@ -8,6 +8,7 @@ const expectedRoutes = [
   'apis/route.ts',
   'assets/orphans/route.ts',
   'audit/route.ts',
+  'backfill-thumbnails/route.ts',
   'backups/[id]/download/route.ts',
   'backups/[id]/route.ts',
   'backups/route.ts',

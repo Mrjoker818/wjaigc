@@ -1004,3 +1004,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Next absorption item | AUTHORIZED | Start `V588-ADMIN-003` with a RED dry-run/idempotency contract against the current media-health subsystem; do not import a parallel donor media source of truth. |
 | Donor snapshot | READ-ONLY VERIFIED | Lock digest remains `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`. |
 | Stable branch | PROTECTED | `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains unchanged. |
+
+## 2026-08-21 V588-ADMIN-003 verification
+
+| Item | Status | Remaining proof |
+|---|---|---|
+| Thumbnail migration and lease concurrency | BLOCKED LOCALLY | Supply isolated `POSTGRES_TEST_DATABASE_URL`; execute the two new schema/claim/reclaim/stale-finalization tests with zero skips. |
+| Coze migration | UNVERIFIED | Pull the exact candidate, run the checksum-managed migration and prove the ledger contains `20260821_v588_admin_thumbnail_variants.sql`. |
+| Administrator backfill API | UNVERIFIED | Prove unauthenticated GET/POST return 401, authenticated dry-run is non-mutating, a limited real batch reaches durable status and repeated execution does not duplicate a variant. |
+| Canvas thumbnail projection | UNVERIFIED IN CLOUD | Reload a project with a generated ready variant, prove the thumbnail is served, original media remains the zoom/high-resolution fallback and the project remains readable after restart. |
+| Storage recovery | UNVERIFIED IN CLOUD | Remove or bypass the local thumbnail copy and prove `/api/serve-upload/thumbnails/{version}/{size}.webp` recovers the exact S3 object. |
+| Browser evidence | UNVERIFIED | Reuse the existing Google Chrome tabs only; capture API JSON, screenshot and zero fresh Console Error/Warning. |
+| Donor snapshot | READ-ONLY VERIFIED | Lock digest remains `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`. |
+| Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; candidate changes target `main` only. |

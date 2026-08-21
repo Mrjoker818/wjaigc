@@ -1093,10 +1093,15 @@ describe('continuous canvas shadow synchronization', () => {
         assetVersionId: 'version-graph',
         placementId: 'placement-graph',
         fileUrl: '',
+        thumbnailUrl: '/media/thumbnails/version-graph/512.webp',
         availability: 'missing',
         recoverySourceUrl: 'https://recovery.test/graph-image.png',
         transform: { x: 44, y: 55, width: 640, height: 480, rotation: 12, zIndex: 7 },
-        metadata: { legacyImage: image('graph-image') },
+        metadata: {
+          legacyImage: image('graph-image', {
+            thumbnailUrl: '/media/thumbnails/legacy.webp',
+          }),
+        },
       }],
     });
 
@@ -1104,6 +1109,7 @@ describe('continuous canvas shadow synchronization', () => {
       expect.objectContaining({
         id: 'graph-image',
         url: '',
+        thumbnailUrl: '/media/thumbnails/version-graph/512.webp',
         x: 44,
         rotation: 12,
         zIndex: 7,
@@ -1113,6 +1119,25 @@ describe('continuous canvas shadow synchronization', () => {
         mediaAvailability: 'missing',
       }),
     ]);
+  });
+
+  it('keeps the legacy thumbnail when the asset graph has no ready thumbnail variant', () => {
+    const [hydrated] = hydrateAssetV3Projects([
+      project([image('graph-image', { thumbnailUrl: '/media/thumbnails/legacy.webp' })]),
+    ], {
+      'project-1': [{
+        entityId: 'graph-image',
+        assetId: 'asset-graph',
+        assetVersionId: 'version-graph',
+        placementId: 'placement-graph',
+        fileUrl: '/media/graph-image.png',
+        availability: 'ready',
+        transform: { x: 10, y: 20, width: 300, height: 200 },
+        metadata: {},
+      }],
+    });
+
+    expect(hydrated.canvasImages[0].thumbnailUrl).toBe('/media/thumbnails/legacy.webp');
   });
 
   it('keeps an unmigrated legacy project readable until its first copy-on-write save', () => {

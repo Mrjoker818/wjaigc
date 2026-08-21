@@ -2126,3 +2126,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | TDD/fix | Three API tests and one UI source contract first failed. `projectDashboardMetrics()` now accepts only finite positive call rows, normalizes missing rates to `null`, reports coverage, and the UI renders `—`. |
 | Regression | Focused `4/4`, related administrator `8/8`, full Vitest `2866 passed / 70 PostgreSQL-gated skipped`, TypeScript pass, ESLint `0 errors / 988 warnings`, build `114/114`. |
 | Status | **FIXED LOCALLY / EXACT-CANDIDATE COZE CHROME VERIFICATION REQUIRED.** |
+
+### V588-BUG-002: Thumbnail backfill could create non-recoverable media and break project reads during migration rollout
+
+| Field | Detail |
+|---|---|
+| Severity | P1 project availability and media durability during selective absorption |
+| Reproduction | Implement persistent thumbnails with an S3 filename unrelated to `/api/serve-upload/thumbnails/{version}/{size}.webp`, or deploy the Canvas thumbnail join before `wujie_asset_thumbnail_variants` exists. |
+| Expected | The public media path resolves the same durable object after local loss, and project reads remain available during the narrow code/migration ordering interval. |
+| Actual | The initial local candidate uploaded `thumbnail-{version}-{size}.webp` while persisting a different nested public path; the media gateway could not deterministically recover that object. The initial Canvas query also failed on PostgreSQL `42P01` before the additive migration was applied. |
+| Root cause | Object-key naming was not aligned with the existing media gateway derivation contract, and the additive rollout had no narrowly scoped compatibility fallback. |
+| TDD/fix | RED contracts now require object/public-path identity and reproduce the missing-table failure. Upload uses `thumbnails/{version}/{size}.webp`; Canvas retries the prior query only for `42P01` naming this exact new table, while all unrelated database errors propagate. |
+| Regression | Focused `57/57`; related asset/media `245/245`; full Vitest `2895/2895` with 72 explicit PostgreSQL skips; TypeScript pass; ESLint `0 errors / 988 warnings`; build `115/115`. |
+| Status | **FIXED LOCALLY / POSTGRESQL AND COZE CLOUD VERIFICATION REQUIRED.** |
