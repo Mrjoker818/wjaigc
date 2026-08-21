@@ -1338,3 +1338,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Fresh Console Error/Warning count after the hard refresh and dashboard navigation was zero.
 - Screenshot evidence: `docs/testing/evidence/v588-admin-001-cloud-ui-2026-08-21.png`.
 - **Verdict: V588-ADMIN-001 LOCAL + CLOUD PASS.** The item is absorbed and `V588-ADMIN-002` is now the next authorized RED test.
+
+## 2026-08-21 V588-ADMIN-002 local regression
+
+- RED reproduced one false negative in the donor authorization test: the current `assets/orphans` route has an explicit `getRequestUser + role` guard, but the donor contract did not recognize that reviewed pattern.
+- The minimal integration is test-only. It freezes all 24 administrator routes, accepts only the shared guard and two explicitly reviewed manual guard contracts, and fails on route-set drift or an unguarded route.
+- Representative runtime assertions now prove unauthenticated orphan scans return `401`, non-admin scans return `403`, and both paths avoid invoking the media-health service.
+- Focused tests passed `6/6`; the administrator regression group passed `26/26`. Full Vitest passed `466 files / 2868 tests`, with `15 files / 70` PostgreSQL-only tests explicitly skipped. TypeScript, ESLint (`0 errors / 988 historical warnings`) and production build (`114/114`) passed.
+- **Verdict: LOCAL REGRESSION PASS / CLOUD PENDING.** No production business code changed. Push the exact candidate to `main`, pull it into Coze and verify representative administrator and unauthenticated route behavior before closing the item.

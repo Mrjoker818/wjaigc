@@ -991,3 +991,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Next absorption item | AUTHORIZED | Start `V588-ADMIN-002` with a repository-wide RED authorization-manifest contract. |
 | Donor snapshot | READ-ONLY VERIFIED | No donor file has a write time after the captured baseline; lock digest remains unchanged. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; push candidate changes only to `main`. |
+
+## 2026-08-21 V588-ADMIN-002 verification
+
+| Item | Status | Remaining proof |
+|---|---|---|
+| Exact administrator route manifest | VERIFIED LOCALLY | The contract enumerates all 24 current routes and rejects route-set drift or an unreviewed guard pattern. |
+| Representative rejection behavior | VERIFIED LOCALLY | Unauthenticated orphan scan returns `401`; non-admin returns `403`; neither path calls the protected media-health service. |
+| Full local regression | VERIFIED | Focused `6/6`, administrator `26/26`, full Vitest `2868` tests, TypeScript, ESLint with zero errors, and build `114/114` passed. |
+| PostgreSQL-only suite | NOT RUN FOR THIS ITEM | `70` tests remain gated by the absent isolated database. This item changes tests only and does not modify persistence or accounting. |
+| V588-ADMIN-002 cloud behavior | UNVERIFIED | Coze must pull the exact candidate; verify a representative unauthenticated `401` and authenticated administrator success without creating another Chrome tab. |
+| Next absorption item | BLOCKED UNTIL CLOUD ACCEPTANCE | Do not start `V588-ADMIN-003` before the exact-candidate cloud check is recorded. |
+| Donor snapshot | READ-ONLY VERIFIED | Lock digest remains `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`. |
+| Stable branch | PROTECTED | `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains unchanged. |

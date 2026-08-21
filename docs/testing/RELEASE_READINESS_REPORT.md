@@ -1093,3 +1093,11 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - The operations dashboard visibly rendered one `暂无模型调用数据` state and one `暂无提供商数据` state. No `99%` value or fabricated provider-health row was present. Fresh Console Error/Warning count was zero.
 - The cloud unavailable-data state did not contain a legitimate unknown-rate row. Rendering `—` for nullable rates remains proven by the permanent focused UI contract rather than by fabricated cloud data.
 - **Decision: V588-ADMIN-001 CLOUD ACCEPTED.** Evidence: `docs/testing/evidence/v588-admin-001-cloud-api-2026-08-21.json` and `docs/testing/evidence/v588-admin-001-cloud-ui-2026-08-21.png`. The next authorized item is `V588-ADMIN-002`.
+
+## 2026-08-21 readiness after V588-ADMIN-002 local integration
+
+- The administrator authorization inventory is now an exact 24-route contract. It preserves the current runtime guards and prevents future routes from entering `/api/admin` without an explicitly reviewed authorization form.
+- The donor contract's failure on `assets/orphans` was a test-architecture mismatch, not an unguarded production route. Representative API tests prove unauthenticated `401`, non-admin `403` and no protected service invocation on either rejection path.
+- Local gates are green: focused `6/6`, related administrator `26/26`, full Vitest `2868` tests, TypeScript, zero-error ESLint and production build `114/114`. The `70` PostgreSQL-gated tests remain explicitly skipped; this test-only item does not alter persistence or accounting.
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` and the read-only donor remain unchanged.
+- **Decision: LOCAL CANDIDATE READY FOR `main`; CLOUD ACCEPTANCE PENDING.** The exact commit must be pulled into Coze and representative route behavior verified before `V588-ADMIN-003` starts.

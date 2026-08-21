@@ -17,6 +17,13 @@ describe('asset orphan scan API', () => {
     mocks.scanMediaHealth.mockReset();
   });
 
+  it('denies unauthenticated orphan scans before invoking the media health service', async () => {
+    mocks.getRequestUser.mockResolvedValue(null);
+    const response = await scanOrphans(new NextRequest('http://localhost/api/admin/assets/orphans'));
+    expect(response.status).toBe(401);
+    expect(mocks.scanMediaHealth).not.toHaveBeenCalled();
+  });
+
   it('denies non-admin orphan scans before invoking the media health service', async () => {
     mocks.getRequestUser.mockResolvedValue({ user: { id: 'user-a', role: 'user' } });
     const response = await scanOrphans(new NextRequest('http://localhost/api/admin/assets/orphans'));
