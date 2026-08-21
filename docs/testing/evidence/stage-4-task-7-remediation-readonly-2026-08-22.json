@@ -1,0 +1,57 @@
+{
+  "capturedAt": "2026-08-22T06:45:00+08:00",
+  "environment": "coze-preview",
+  "baseUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+  "expectedMainCommit": "8b1293fff077b6dc0086ac305e0195af9454f2d9",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "authentication": {
+    "status": 200,
+    "role": "admin"
+  },
+  "remediation": {
+    "status": 200,
+    "requestIds": [
+      "56db8195-5a2c-911e-a79f-9ba91c7a13ca",
+      "4973b638-66ad-91f6-9f72-7d9cac2a1eb4"
+    ],
+    "stableAcrossReads": true,
+    "counts": {
+      "versions": 3,
+      "activePlacements": 3
+    },
+    "candidates": [
+      {
+        "assetVersionId": "7d8e8acc-50d3-5c7e-935b-414f2093defd",
+        "candidateDigest": "14c167a06702f941f86304ff0bc6373303005b2777a760f230adecebc597e571",
+        "placementIds": ["b59508d3-fb53-59c4-a6d6-d199b5c5c04f"]
+      },
+      {
+        "assetVersionId": "013cb0de-335b-54ca-86d8-60375e1f092e",
+        "candidateDigest": "5f4de2805d2e4df544508e103d420468940d8431b10955c010bc46062c2f6fda",
+        "placementIds": ["c674f49f-1d08-4d81-9f1a-d4d07e2ffa01"]
+      },
+      {
+        "assetVersionId": "c57d0763-bf92-5cac-ab79-ab7761747dd5",
+        "candidateDigest": "a6a35a647919b1f7df17499729430c73300a07c81717fbc0df22d3b1f083be8c",
+        "placementIds": ["4eedec25-c00d-4d52-be8f-6da287a08332"]
+      }
+    ]
+  },
+  "readiness": {
+    "status": 200,
+    "assetGraphMode": "shadow",
+    "releaseReady": false,
+    "switchAuthorized": false,
+    "blockers": ["non-ready-current-media", "non-durable-ready-media"],
+    "media": {
+      "missing": 2,
+      "placementMissing": 2,
+      "falseReadyCurrentVersions": 1,
+      "falseReadyActivePlacements": 2
+    },
+    "migrations": "6/6",
+    "shadowComparison": "6/6"
+  },
+  "decision": "ABORT_ARCHIVE_COUNT_MISMATCH",
+  "writeActionsPerformed": false
+}

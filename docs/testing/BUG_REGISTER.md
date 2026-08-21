@@ -2212,3 +2212,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Fix | Authorized exactly 23 files, recorded the source commit for each in `docs/testing/baselines/protected-source-authorizations.json`, and added a regression that rejects broad directory grants and verifies every source commit touched its declared file. |
 | Regression | RED failed because the manifest was absent, then exposed three incorrect provenance mappings. GREEN passes `7/7`; the real gate passes `38/38` with zero warnings and zero blockers. |
 | Status | **CLOSED LOCALLY / NOT YET CLOUD DEPLOYED.** No business code, `stable`, donor file, cloud data, billing, archive, deletion, regeneration or runtime mode was changed. |
+
+### S4-BUG-014: Historical-media remediation candidates do not cover all active readiness blockers
+
+| Field | Detail |
+|---|---|
+| Severity | P1 release-governance and historical media consistency |
+| Environment | Coze preview running the new remediation route, authenticated administrator API session, 2026-08-22 |
+| Reproduction | GET `/api/admin/assets/remediation?limit=20` twice and GET `/api/admin/production-readiness` in the same administrator session. |
+| Expected | The reviewed remediation candidate set reconciles exactly with every active non-ready or non-durable placement blocker before any archive is authorized. The approved Task 7 baseline expected three versions and four active placements. |
+| Actual | Both candidate reads are stable at three versions and three active placements, while readiness reports two missing placements plus two false-ready active placements. The candidate set therefore leaves one active blocker unexplained. |
+| Current root-cause hypothesis | Discovery requires the broken version to be the Asset's current version, while readiness counts active placements referencing matching bad versions regardless of current-version identity. An active placement on a non-current bad version would therefore block release but be absent from remediation discovery. This hypothesis is not yet promoted to a confirmed root cause without a RED PostgreSQL reproduction. |
+| Safety decision | Archive is aborted fail-closed. No POST, deletion, billing action, physical purge or `asset-v3` switch was performed. |
+| Evidence | `docs/testing/evidence/stage-4-task-7-remediation-readonly-2026-08-22.json`; stable request IDs `56db8195-5a2c-911e-a79f-9ba91c7a13ca` and `4973b638-66ad-91f6-9f72-7d9cac2a1eb4`. |
+| Approved design | `docs/superpowers/specs/2026-08-22-historical-media-active-placement-coverage-design.md` |
+| Status | **OPEN / DESIGN APPROVED / TDD NOT STARTED.** |
