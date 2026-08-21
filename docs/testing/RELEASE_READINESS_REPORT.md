@@ -1156,3 +1156,9 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 Supporting gates: validate passed; lint passed with `0 errors / 988 warnings`; build passed with `116/116` static pages; whitespace check passed. The protected baseline is independently blocked by `23` unapproved accumulated source-drift paths despite preserving all `38` protected feature IDs, paths, evidence contracts, and refs. Therefore no main push, cloud request, billing action, archive, replacement, regeneration, deletion, or `asset-v3` mode change is authorized until a dedicated baseline authorization review closes that governance gate.
 
 `origin/stable` was fetched and remains `52f7c601ed150769e15d06fb435c6e360e28c9e7`; donor `J:\无界云端0820\pnpm-lock.yaml` remains SHA-256 `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`. Cloud archive, idempotent retry, and `asset-v3` acceptance are **UNVERIFIED**.
+
+## 2026-08-22 protected-baseline authorization decision
+
+**LOCAL GOVERNANCE GATE PASSED / CLOUD ACCEPTANCE NOT STARTED.** The administrator approved exact-path authorization. Commit `34391fbda9ee2dfe7c32c103c1418d0b59361dcb` records 23 paths and their verified source commits, forbids broad directory grants in regression tests, and changes no business code.
+
+The focused gate test passes `7/7`; the actual protected-baseline command passes `38/38` identities with zero warnings and zero blockers. Fresh final verification passes `492/492` files and `3067/3067` tests, validate, full lint (`0` errors / `988` warnings), production build `116/116`, and whitespace checks. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` and the donor lock digest remain unchanged. Only a normal fast-forward push to `main` remains before Coze may pull the candidate. No cloud archive POST or `asset-v3` mode change is authorized by this result.

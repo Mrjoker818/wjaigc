@@ -1054,3 +1054,13 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Remediation module size | OPEN MINOR | `src/lib/asset-core/historical-media-remediation.ts` is a mixed `1079`-line module; review decomposition separately without changing the archive behavior in this task. |
 | Broad asset ignore rule | OPEN MINOR | The repository-level `assets/` ignore rule remains broad and should receive a scoped ownership review. |
 | Self-hosted production origin documentation/readiness | OPEN MINOR | Document and verify the self-hosted production origin/readiness boundary before treating local route/build evidence as deployment acceptance. |
+
+## 2026-08-22 post-authorization unresolved items
+
+| Item | Status | Required closure |
+|---|---|---|
+| Protected baseline authorization | VERIFIED LOCALLY | Exact 23-path manifest and provenance checks pass; no broad directory authorization exists. |
+| Candidate push and Coze exact SHA | UNVERIFIED | Final local gates pass; fast-forward only `main`, then prove Coze pulled the exact resulting SHA. |
+| Cloud archive action | UNVERIFIED / REQUIRES ACTION-TIME CONFIRMATION | Perform no POST until a fresh read-only candidate digest is compared and the administrator confirms the exact action. |
+| Cloud idempotent retry | UNVERIFIED | After the authorized archive, replay the same idempotency key and prove one ledger/audit outcome and no duplicate mutation. |
+| `asset-v3` acceptance | UNVERIFIED / BLOCKED | Keep `shadow` until archive/readiness closes and controlled thumbnail projection, reload, original fallback and S3 recovery pass. |

@@ -162,3 +162,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Validate, lint (`0` errors / `988` warnings), build (`116/116` static pages, including remediation route), and whitespace checks pass. The protected baseline still blocks on `23` unapproved historical source-drift paths, although all `38` protected feature IDs remain present. No allowlist was changed.
 - **Decision: FUNCTIONAL LOCAL PASS / GOVERNANCE BLOCKED / NO MAIN PUSH.** The remaining blocker is the dedicated authorization review for 23 accumulated protected-baseline source paths, not a failing business or PostgreSQL test. `origin/stable` remains exact `52f7c601ed150769e15d06fb435c6e360e28c9e7`; the V5.8.8 donor lock SHA-256 remains `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`.
 - Cloud archive, idempotent retry, and `asset-v3` acceptance remain **UNVERIFIED**. No cloud POST, archive, billing, regeneration, replacement, physical delete, or runtime-mode change was performed. Open minors remain the mixed `1079`-line remediation module, broad `assets/` ignore rule, and self-hosted production-origin documentation/readiness.
+
+### V588-ADMIN-003 - 2026-08-22 protected-baseline authorization
+
+- The administrator approved the dedicated exact-path design. Commit `34391fbda9ee2dfe7c32c103c1418d0b59361dcb` authorizes the 23 traced files without adding any directory-wide source grant.
+- `docs/testing/baselines/protected-source-authorizations.json` records one source commit per path. The regression test verifies both exact command membership and that each commit actually touched its declared file.
+- RED exposed the absent manifest and then three inaccurate provenance proposals; corrected GREEN passes `7/7`. The real gate now passes all `38/38` contracts with zero warning and zero blocker.
+- Final PostgreSQL-enabled verification passes `492/492` files and `3067/3067` tests, validate, full lint (`0` errors / `988` warnings), build `116/116`, protected baseline and whitespace checks.
+- **Decision: LOCAL GOVERNANCE + FINAL GATES PASS / MAIN PUSH PENDING.** This approval does not authorize a cloud archive POST, billing action, physical deletion, `asset-v3` promotion or donor copying.

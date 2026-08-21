@@ -3,8 +3,8 @@
   "testedAt": "2026-08-22T00:15:12+08:00",
   "productionSourceCommit": "86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54",
   "runtimeCodeCommit": "aca74ea33bbaa92eac2566edf502e46656dfcd74",
-  "docsEvidenceCommit": null,
-  "status": "local-gates-passed-governance-blocked",
+  "docsEvidenceCommit": "45281ca591f51458f2b0839366ea1992ee9a830d",
+  "status": "local-gates-passed-baseline-authorized-awaiting-push",
   "database": {
     "engine": "PostgreSQL",
     "version": "18.4",
@@ -30,7 +30,7 @@
     "validate": {"status": "passed", "exitCode": 0},
     "lint": {"status": "passed", "exitCode": 0, "errors": 0, "warnings": 988},
     "build": {"status": "passed", "exitCode": 0, "staticPages": 116, "remediationRoutePresent": true},
-    "protectedBaseline": {"status": "failed", "protectedFeatureIdsPresent": 38, "unapprovedSourceDriftBlockers": 23},
+    "protectedBaseline": {"status": "passed", "protectedFeatureIdsPresent": 38, "unapprovedSourceDriftBlockers": 0, "warnings": 0, "authorizedExactPaths": 23},
     "gitDiffCheck": {"status": "passed", "exitCode": 0}
   },
   "contractCorrection": {
@@ -39,11 +39,27 @@
     "rootCause": "The Task 4 concurrency test still expected restore success after archive, contradicting the approved Task 5 unrecoverable-media restore guard.",
     "verifiedOutcome": "Archive commits atomically; the overlapping restore rejects ASSET_MEDIA_UNRECOVERABLE; no placement, snapshot, revision, ledger, or audit partial restore occurs."
   },
+  "baselineAuthorization": {
+    "commit": "34391fbda9ee2dfe7c32c103c1418d0b59361dcb",
+    "manifest": "docs/testing/baselines/protected-source-authorizations.json",
+    "exactPaths": 23,
+    "broadDirectoryGrants": 0,
+    "focusedTests": {"passed": 7, "failed": 0},
+    "sourceCommitMappingsVerified": 23,
+    "finalVerification": {
+      "fullVitest": {"filesPassed": 492, "testsPassed": 3067, "failed": 0, "skipped": 0},
+      "validate": "passed",
+      "lint": {"errors": 0, "warnings": 988},
+      "build": {"status": "passed", "staticPages": 116},
+      "protectedBaseline": {"status": "passed", "warnings": 0, "blockers": 0},
+      "gitDiffCheck": "passed"
+    }
+  },
   "retainedFailedAttempts": [
     {"kind": "obsolete-test-contract", "result": "3065 passed, 1 failed, 0 skipped", "error": "ASSET_MEDIA_UNRECOVERABLE"},
     {"kind": "unmigrated-test-database", "result": "3059 passed, 1 failed file, 7 skipped", "error": "relation wujie_projects does not exist", "excludedFromFinalEvidence": true}
   ],
   "unverified": ["cloud archive", "cloud idempotent retry", "asset-v3 acceptance"],
   "prohibitedActionsPerformed": [],
-  "push": {"attempted": false, "originMain": "449c635702d25a2f80358043420d03500bb42bb6", "reason": "Functional gates pass, but the protected-baseline gate still blocks 23 accumulated source paths pending a dedicated authorization review."}
+  "push": {"attempted": false, "originMain": "449c635702d25a2f80358043420d03500bb42bb6", "reason": "Exact-path authorization is green; final full local verification remains required before the normal fast-forward main push."}
 }

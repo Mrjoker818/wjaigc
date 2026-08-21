@@ -1400,3 +1400,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `pnpm validate` passed (TypeScript plus quiet ESLint); `pnpm lint` passed with `0 errors / 988 warnings`; `pnpm build` passed with `116/116` static pages and includes `/api/admin/assets/remediation`; `git diff --check` passed.
 - `pnpm check:protected-baseline` failed with `23` unapproved source-drift blockers, while its `38` feature IDs, protected component paths, evidence contracts, and refs all passed. The allowlist was not changed.
 - Functional local evidence passes. The protected-baseline governance gate remains blocked by 23 accumulated source paths even though all `38/38` protected identities and contracts are present; no allowlist was changed. Cloud archive, idempotent retry, and `asset-v3` acceptance remain **UNVERIFIED**. Evidence: `docs/testing/evidence/v588-admin-003-safe-archive-local-2026-08-21.json`.
+
+## 2026-08-22 protected-baseline authorization regression
+
+- The approved change authorizes only the 23 independently traced files. No directory-wide `migrations/`, `scripts/`, `src/app/api/admin/`, `src/app/api/assets/`, `src/components/dashboard/`, `src/lib/`, or `src/lib/asset-core/` grant was added.
+- TDD RED first failed on the missing provenance manifest. A second RED proved three proposed source mappings did not touch their declared files; those mappings were corrected from repository history.
+- Commit `34391fbda9ee2dfe7c32c103c1418d0b59361dcb` adds the exact command grants, the 23-entry machine-readable provenance manifest, and a permanent Git-history regression test.
+- Focused test passes `7/7`; the fresh full PostgreSQL-enabled run passes `492/492` files and `3067/3067` tests with zero failures and zero skips. Validate, full lint (`0` errors / `988` warnings), build (`116/116`), protected baseline and whitespace checks pass.
+- This closes only the local governance blocker. Cloud archive, cloud idempotent retry and `asset-v3` acceptance remain **UNVERIFIED** and require the planned exact-SHA cloud sequence.

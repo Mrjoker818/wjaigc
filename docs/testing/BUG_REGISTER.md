@@ -2200,3 +2200,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Fix | Updated only the PostgreSQL concurrency assertion. The final state requires both placements and the Asset to remain trashed, the version to remain unrecoverable, revision `11`, one ledger row, one audit row, and neither entity in the Canvas snapshot. |
 | Final regression | Focused `97/97`, affected `77/77`, and full `492 files / 3066 tests` pass on migrated PostgreSQL 18.4 with zero failures and zero skips. Validate, lint (`0 errors / 988 warnings`), build `116/116`, and whitespace pass. |
 | Status | **CLOSED LOCALLY.** The separate protected-baseline governance gate still blocks 23 accumulated source paths; no main push or cloud mutation has occurred. |
+
+### S4-PROTECTED-BASELINE-AUTHORIZATION: reviewed historical source drift
+
+| Field | Detail |
+|---|---|
+| Severity | Release-governance blocker, now closed locally |
+| Candidate | `34391fbda9ee2dfe7c32c103c1418d0b59361dcb` |
+| Reproduction | Run `pnpm check:protected-baseline` before the authorization commit. The gate preserves all `38/38` contracts but blocks 23 accumulated source paths. |
+| Root cause | Previously reviewed Stage 3/4 asset, Canvas, admin and deployment files had not yet received their dedicated baseline authorization. |
+| Fix | Authorized exactly 23 files, recorded the source commit for each in `docs/testing/baselines/protected-source-authorizations.json`, and added a regression that rejects broad directory grants and verifies every source commit touched its declared file. |
+| Regression | RED failed because the manifest was absent, then exposed three incorrect provenance mappings. GREEN passes `7/7`; the real gate passes `38/38` with zero warnings and zero blockers. |
+| Status | **CLOSED LOCALLY / NOT YET CLOUD DEPLOYED.** No business code, `stable`, donor file, cloud data, billing, archive, deletion, regeneration or runtime mode was changed. |
