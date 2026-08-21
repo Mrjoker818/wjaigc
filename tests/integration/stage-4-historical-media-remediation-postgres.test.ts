@@ -47,7 +47,18 @@ const SECRET_MARKERS = [
 interface HistoricalMediaService {
   discoverHistoricalMediaArchiveCandidates(input?: { limit?: number }): Promise<{
     candidates: HistoricalMediaCandidate[];
-    counts: { versions: number; activePlacements: number };
+    counts: {
+      versions: number;
+      activePlacements: number;
+      currentVersions: number;
+      nonCurrentVersions: number;
+    };
+    coverage: {
+      eligibleBlockingPlacements: number;
+      candidatePlacements: number;
+      uncoveredBlockingPlacements: number;
+      complete: boolean;
+    };
   }>;
   archiveHistoricalMedia(input: {
     actorUserId: string;
@@ -250,6 +261,7 @@ async function seedHistoricalMediaFixture(query: QueryFn): Promise<void> {
        ('asset-chat-empty', $1, $2, 'image', 'active'),
        ('asset-canvas-bridge', $1, $2, 'image', 'active'),
        ('asset-false-ready', $1, $2, 'image', 'active'),
+       ('asset-non-current-broken', $1, $2, 'image', 'active'),
        ('asset-managed', $1, $2, 'image', 'active'),
        ('asset-other-owner', $3, $4, 'image', 'active')`,
     [OWNER_ID, PROJECT_ID, OTHER_OWNER_ID, OTHER_PROJECT_ID],
@@ -272,7 +284,12 @@ async function seedHistoricalMediaFixture(query: QueryFn): Promise<void> {
           'remoteUrl', $8::text
         )),
        ('version-false-ready-older', 'asset-false-ready', $1, $2,
-        '/api/serve-upload/older.png', 'uploads/older.png', 'ready', NULL, '{}'::jsonb),
+         '/api/serve-upload/older.png', 'uploads/older.png', 'ready', NULL, '{}'::jsonb),
+       ('version-non-current-healthy', 'asset-non-current-broken', $1, $2,
+        '/api/serve-upload/non-current-healthy.png', 'uploads/non-current-healthy.png',
+        'ready', NULL, '{}'::jsonb),
+       ('version-non-current-broken', 'asset-non-current-broken', $1, $2,
+        '/v1/images/proxy/non-current-expired', NULL, 'missing', NULL, '{}'::jsonb),
        ('version-managed', 'asset-managed', $1, $2,
         '/api/serve-upload/managed.png', 'uploads/managed.png', 'ready', NULL, '{}'::jsonb),
        ('version-other-owner', 'asset-other-owner', $3, $4,
@@ -291,12 +308,13 @@ async function seedHistoricalMediaFixture(query: QueryFn): Promise<void> {
        WHEN 'asset-chat-empty' THEN 'version-chat-empty'
        WHEN 'asset-canvas-bridge' THEN 'version-canvas-bridge'
        WHEN 'asset-false-ready' THEN 'version-false-ready'
+       WHEN 'asset-non-current-broken' THEN 'version-non-current-healthy'
        WHEN 'asset-managed' THEN 'version-managed'
        WHEN 'asset-other-owner' THEN 'version-other-owner'
      END
      WHERE id IN (
        'asset-chat-empty', 'asset-canvas-bridge', 'asset-false-ready',
-       'asset-managed', 'asset-other-owner'
+       'asset-non-current-broken', 'asset-managed', 'asset-other-owner'
      )`,
   );
   await query(
@@ -313,7 +331,11 @@ async function seedHistoricalMediaFixture(query: QueryFn): Promise<void> {
        ('placement-false-ready-workflow', $1, $2, 'asset-false-ready', 'version-false-ready',
         'workflow', 'workflow-false-ready', 'workflow-output', 'entity-false-ready-workflow'),
        ('placement-false-ready-older', $1, $2, 'asset-false-ready', 'version-false-ready-older',
-        'chat', 'chat-older', 'chat-attachment', 'entity-false-ready-older'),
+         'chat', 'chat-older', 'chat-attachment', 'entity-false-ready-older'),
+       ('placement-non-current-healthy', $1, $2, 'asset-non-current-broken', 'version-non-current-healthy',
+        'canvas', $2, 'canvas-image', 'entity-non-current-healthy'),
+       ('placement-non-current-broken', $1, $2, 'asset-non-current-broken', 'version-non-current-broken',
+        'canvas', $2, 'canvas-image', 'entity-non-current-broken'),
        ('placement-managed', $1, $2, 'asset-managed', 'version-managed',
         'canvas', $2, 'canvas-image', 'entity-managed')`,
     [OWNER_ID, PROJECT_ID],
@@ -328,8 +350,10 @@ async function seedHistoricalMediaFixture(query: QueryFn): Promise<void> {
         id: PROJECT_ID,
         canvasImages: [
           { id: 'entity-canvas-bridge', url: '/v1/images/proxy/canvas-expired' },
-          { id: 'entity-false-ready-canvas', url: '/v1/images/proxy/false-ready-expired' },
-          { id: 'entity-managed', url: '/api/serve-upload/managed.png' },
+           { id: 'entity-false-ready-canvas', url: '/v1/images/proxy/false-ready-expired' },
+           { id: 'entity-non-current-healthy', url: '/api/serve-upload/non-current-healthy.png' },
+           { id: 'entity-non-current-broken', url: '/v1/images/proxy/non-current-expired' },
+           { id: 'entity-managed', url: '/api/serve-upload/managed.png' },
           { id: 'entity-unrelated', url: '/api/serve-upload/unrelated.png' },
         ],
         updatedAt: 1000,
@@ -657,25 +681,85 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
     });
   });
 
-  postgresIt('discovers only bounded current broken media without changing database state', async () => {
+  postgresIt('discovers bounded current and non-current broken media without changing database state', async () => {
     await withIsolatedPostgres('historical-media-discovery', async ({ databaseUrl: isolatedUrl, query }) => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
       const before = await readArchiveState(query);
       const service = await loadHistoricalMediaService();
 
       const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const readinessBlockers = await query<{ count: number }>(
+        `SELECT count(*)::int AS count
+         FROM wujie_workspace_placements placement
+         JOIN wujie_asset_versions version
+           ON version.id = placement.asset_version_id
+          AND version.asset_id = placement.asset_id
+          AND version.owner_id = placement.owner_id
+          AND version.project_id = placement.project_id
+         WHERE placement.status = 'active'
+           AND (
+             version.availability IN ('missing', 'unrecoverable')
+             OR (
+               version.availability = 'ready'
+               AND (
+                 btrim(coalesce(version.file_url, '')) = ''
+                 OR version.file_url LIKE '/v1/images/proxy/%'
+               )
+               AND nullif(btrim(coalesce(version.storage_key, '')), '') IS NULL
+               AND nullif(btrim(coalesce(version.recovery_source_url, '')), '') IS NULL
+             )
+           )`,
+      );
 
-      expect(discovery.counts).toEqual({ versions: 3, activePlacements: 4 });
-      expect(discovery.candidates.flatMap(item => item.placements)).toHaveLength(4);
+      expect(readinessBlockers.rows).toEqual([{ count: 5 }]);
+      expect(discovery.counts).toEqual({
+        versions: 4,
+        activePlacements: 5,
+        currentVersions: 3,
+        nonCurrentVersions: 1,
+      });
+      expect(discovery.coverage).toEqual({
+        eligibleBlockingPlacements: 5,
+        candidatePlacements: 5,
+        uncoveredBlockingPlacements: 0,
+        complete: true,
+      });
+      expect(discovery.candidates.flatMap(item => item.placements)).toHaveLength(5);
       expect(discovery.candidates.map(item => item.assetId)).toEqual([
         'asset-canvas-bridge',
         'asset-chat-empty',
         'asset-false-ready',
+        'asset-non-current-broken',
       ]);
+      expect(discovery.candidates.find(
+        item => item.assetVersionId === 'version-non-current-broken',
+      )).toMatchObject({ isCurrentVersion: false });
       expect(discovery.candidates.some(item => item.assetId === 'asset-managed')).toBe(false);
       expect(discovery.candidates.every(item => item.ownerId === OWNER_ID)).toBe(true);
       expect(discovery.candidates.every(item => /^[a-f0-9]{64}$/.test(item.candidateDigest))).toBe(true);
       expect(await readArchiveState(query)).toEqual(before);
+    });
+  });
+
+  postgresIt('reports incomplete coverage when the discovery limit omits eligible placements', async () => {
+    await withIsolatedPostgres('historical-media-limited-discovery', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const service = await loadHistoricalMediaService();
+
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 2 });
+
+      expect(discovery.counts).toEqual({
+        versions: 2,
+        activePlacements: 2,
+        currentVersions: 2,
+        nonCurrentVersions: 0,
+      });
+      expect(discovery.coverage).toEqual({
+        eligibleBlockingPlacements: 5,
+        candidatePlacements: 2,
+        uncoveredBlockingPlacements: 3,
+        complete: false,
+      });
     });
   });
 
@@ -691,9 +775,21 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
         'asset-canvas-bridge',
         'asset-chat-empty',
         'asset-false-ready',
+        'asset-non-current-broken',
       ]);
       expect(discovery.candidates.some(candidate => candidate.assetId === 'asset-000-oversized')).toBe(false);
-      expect(discovery.counts).toEqual({ versions: 3, activePlacements: 4 });
+      expect(discovery.counts).toEqual({
+        versions: 4,
+        activePlacements: 5,
+        currentVersions: 3,
+        nonCurrentVersions: 1,
+      });
+      expect(discovery.coverage).toEqual({
+        eligibleBlockingPlacements: 105,
+        candidatePlacements: 5,
+        uncoveredBlockingPlacements: 100,
+        complete: false,
+      });
     });
   });
 
@@ -726,7 +822,9 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
       const service = await loadHistoricalMediaService();
       const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
-      const command = createArchiveCommand(discovery.candidates);
+      const command = createArchiveCommand(
+        discovery.candidates.filter(candidate => candidate.isCurrentVersion),
+      );
 
       const concurrent = await Promise.all([
         service.archiveHistoricalMedia(command),
@@ -815,6 +913,8 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
         [OWNER_ID],
       );
       expect(projectSnapshot.rows[0]?.data_value[0]?.canvasImages.map(image => image.id)).toEqual([
+        'entity-non-current-healthy',
+        'entity-non-current-broken',
         'entity-managed',
         'entity-unrelated',
       ]);
@@ -877,7 +977,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
            (SELECT count(*)::int FROM wujie_asset_media_remediations) AS request_results,
            (SELECT count(*)::int FROM wujie_audit_log) AS audits`,
       )).resolves.toMatchObject({
-        rows: [{ assets: 5, versions: 6, placements: 6, request_results: 1, audits: 1 }],
+        rows: [{ assets: 6, versions: 8, placements: 8, request_results: 1, audits: 1 }],
       });
     });
   });
@@ -1293,7 +1393,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       });
 
       await expect(service.archiveHistoricalMedia(createArchiveCommand(
-        discovery.candidates,
+        discovery.candidates.filter(candidate => candidate.isCurrentVersion),
         'historical-media-audit-rollback',
       ))).rejects.toThrow('injected audit failure');
 

@@ -39,6 +39,16 @@ const MAX_CANDIDATE_PLACEMENTS = Math.floor(
   / (MAX_CANONICAL_PLACEMENT_BYTES + 1),
 );
 const INVALID_REQUEST = 'HISTORICAL_MEDIA_REQUEST_INVALID';
+const HISTORICAL_MEDIA_ELIGIBILITY_WHERE = `
+  asset.status = 'active'
+  AND nullif(btrim(coalesce(version.storage_key, '')), '') IS NULL
+  AND nullif(btrim(coalesce(version.recovery_source_url, '')), '') IS NULL
+  AND (
+    btrim(coalesce(version.file_url, '')) = ''
+    OR version.file_url LIKE '/v1/images/proxy/%'
+  )
+  AND version.availability IN ('ready', 'missing', 'unrecoverable')
+`;
 
 export type HistoricalMediaRemediationErrorCode =
   | 'HISTORICAL_MEDIA_REQUEST_INVALID'
@@ -73,6 +83,26 @@ export interface HistoricalMediaCandidate {
   candidateDigest: string;
 }
 
+export interface HistoricalMediaDiscoveryCounts {
+  versions: number;
+  activePlacements: number;
+  currentVersions: number;
+  nonCurrentVersions: number;
+}
+
+export interface HistoricalMediaCoverage {
+  eligibleBlockingPlacements: number;
+  candidatePlacements: number;
+  uncoveredBlockingPlacements: number;
+  complete: boolean;
+}
+
+export interface HistoricalMediaDiscovery extends Record<string, unknown> {
+  candidates: HistoricalMediaCandidate[];
+  counts: HistoricalMediaDiscoveryCounts;
+  coverage: HistoricalMediaCoverage;
+}
+
 export interface HistoricalMediaArchiveSelection {
   projectId: string;
   assetId: string;
@@ -102,6 +132,7 @@ interface DiscoveryRow {
   project_id: string;
   asset_id: string;
   asset_version_id: string;
+  is_current_version: boolean;
   availability: MediaAvailability;
   url_class: 'empty' | 'ephemeral-proxy';
   placement_id: string;
@@ -109,6 +140,10 @@ interface DiscoveryRow {
   workspace_id: string;
   entity_type: WorkspaceEntityType;
   entity_id: string;
+}
+
+interface DiscoveryCoverageRow {
+  eligible_blocking_placements: number;
 }
 
 interface LockedCandidateRow {
@@ -468,7 +503,7 @@ function mapDiscoveryCandidates(rows: DiscoveryRow[]): HistoricalMediaCandidate[
         projectId: row.project_id,
         assetId: row.asset_id,
         assetVersionId: row.asset_version_id,
-        isCurrentVersion: true,
+        isCurrentVersion: row.is_current_version,
         availability: row.availability,
         urlClass: row.url_class,
         placements: [],
@@ -502,12 +537,24 @@ function mapDiscoveryCandidates(rows: DiscoveryRow[]): HistoricalMediaCandidate[
 
 export async function discoverHistoricalMediaArchiveCandidates(
   input?: { limit?: number },
-): Promise<{
-  candidates: HistoricalMediaCandidate[];
-  counts: { versions: number; activePlacements: number };
-}> {
+): Promise<HistoricalMediaDiscovery> {
   const limit = parseDiscoveryLimit(input);
   return withAssetCoreTransaction(async (client) => {
+    const coverageResult = await client.query<DiscoveryCoverageRow>(
+      `SELECT count(*)::int AS eligible_blocking_placements
+       FROM wujie_assets asset
+       JOIN wujie_workspace_placements placement
+         ON placement.asset_id = asset.id
+        AND placement.owner_id = asset.owner_id
+        AND placement.project_id = asset.project_id
+        AND placement.status = 'active'
+       JOIN wujie_asset_versions version
+         ON version.id = placement.asset_version_id
+        AND version.asset_id = asset.id
+        AND version.owner_id = asset.owner_id
+        AND version.project_id = asset.project_id
+       WHERE ${HISTORICAL_MEDIA_ELIGIBILITY_WHERE}`,
+    );
     const result = await client.query<DiscoveryRow>(
       `WITH candidate_versions AS (
          SELECT
@@ -515,37 +562,31 @@ export async function discoverHistoricalMediaArchiveCandidates(
            asset.project_id,
            asset.id AS asset_id,
            version.id AS asset_version_id,
+           coalesce(asset.current_version_id = version.id, false) AS is_current_version,
            version.availability,
            CASE
              WHEN btrim(version.file_url) = '' THEN 'empty'
              ELSE 'ephemeral-proxy'
            END AS url_class
-         FROM wujie_assets asset
-         JOIN wujie_asset_versions version
-           ON version.id = asset.current_version_id
-          AND version.asset_id = asset.id
-          AND version.owner_id = asset.owner_id
-          AND version.project_id = asset.project_id
-         JOIN wujie_workspace_placements placement
-           ON placement.asset_version_id = version.id
-          AND placement.asset_id = asset.id
-          AND placement.owner_id = asset.owner_id
-          AND placement.project_id = asset.project_id
-          AND placement.status = 'active'
-         WHERE asset.status = 'active'
-           AND version.storage_key IS NULL
-           AND version.recovery_source_url IS NULL
-           AND (
-             btrim(version.file_url) = ''
-             OR version.file_url LIKE '/v1/images/proxy/%'
-           )
-           AND version.availability IN ('ready', 'missing', 'unrecoverable')
-         GROUP BY
+          FROM wujie_assets asset
+          JOIN wujie_workspace_placements placement
+            ON placement.asset_id = asset.id
+           AND placement.owner_id = asset.owner_id
+           AND placement.project_id = asset.project_id
+           AND placement.status = 'active'
+          JOIN wujie_asset_versions version
+            ON version.id = placement.asset_version_id
+           AND version.asset_id = asset.id
+           AND version.owner_id = asset.owner_id
+           AND version.project_id = asset.project_id
+          WHERE ${HISTORICAL_MEDIA_ELIGIBILITY_WHERE}
+          GROUP BY
            asset.owner_id,
            asset.project_id,
-           asset.id,
-           version.id,
-           version.availability,
+            asset.id,
+            version.id,
+            coalesce(asset.current_version_id = version.id, false),
+            version.availability,
            CASE
              WHEN btrim(version.file_url) = '' THEN 'empty'
              ELSE 'ephemeral-proxy'
@@ -557,9 +598,10 @@ export async function discoverHistoricalMediaArchiveCandidates(
        SELECT
          candidate.owner_id,
          candidate.project_id,
-         candidate.asset_id,
-         candidate.asset_version_id,
-         candidate.availability,
+          candidate.asset_id,
+          candidate.asset_version_id,
+          candidate.is_current_version,
+          candidate.availability,
          candidate.url_class,
          placement.id AS placement_id,
          placement.workspace_kind,
@@ -582,14 +624,28 @@ export async function discoverHistoricalMediaArchiveCandidates(
       [limit, MAX_CANDIDATE_PLACEMENTS],
     );
     const candidates = mapDiscoveryCandidates(result.rows);
+    const candidatePlacements = candidates.reduce(
+      (count, candidate) => count + candidate.placements.length,
+      0,
+    );
+    const eligibleBlockingPlacements = coverageResult.rows[0]?.eligible_blocking_placements ?? 0;
+    const uncoveredBlockingPlacements = Math.max(
+      0,
+      eligibleBlockingPlacements - candidatePlacements,
+    );
     return {
       candidates,
       counts: {
         versions: candidates.length,
-        activePlacements: candidates.reduce(
-          (count, candidate) => count + candidate.placements.length,
-          0,
-        ),
+        activePlacements: candidatePlacements,
+        currentVersions: candidates.filter(candidate => candidate.isCurrentVersion).length,
+        nonCurrentVersions: candidates.filter(candidate => !candidate.isCurrentVersion).length,
+      },
+      coverage: {
+        eligibleBlockingPlacements,
+        candidatePlacements,
+        uncoveredBlockingPlacements,
+        complete: uncoveredBlockingPlacements === 0,
       },
     };
   });
