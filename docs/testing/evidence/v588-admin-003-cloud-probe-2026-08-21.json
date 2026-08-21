@@ -97,5 +97,90 @@
     "mutationAttempted": false,
     "rootCause": "Coze build and startup scripts did not execute the checksum-managed migration runner, so the new route was deployed before its additive table."
   },
-  "conclusion": "The route and administrator guard are deployed, but the database migration is not. Cloud acceptance remains open; no real backfill mutation was attempted."
+  "migrationFixProbe": {
+    "probedAt": "2026-08-21T11:11:00+08:00",
+    "candidateCommit": "172f38c5454b7fa5a708b61392c47d99e9f46461",
+    "unauthenticated": {
+      "method": "GET",
+      "status": 401,
+      "requestId": "e190b67f-2b79-971d-a17b-fce5c9940d4f"
+    },
+    "administrator": {
+      "loginStatus": 200,
+      "loginRequestId": "b5d4fa11-3b38-92d5-976e-c5be8a69f837",
+      "role": "admin"
+    },
+    "statusBefore": {
+      "status": 200,
+      "requestId": "94b2e884-b7ec-9f0c-aaad-7fe2bc5ffe87",
+      "pending": 0,
+      "processing": 0,
+      "ready": 0,
+      "failed": 0
+    },
+    "dryRun": {
+      "status": 200,
+      "requestId": "ba319b6d-87e9-9e7f-b617-5b31252aef78",
+      "limit": 10,
+      "discovered": 10,
+      "claimed": 0,
+      "completed": 0,
+      "failed": 0,
+      "skipped": 0
+    },
+    "statusAfterDryRun": {
+      "status": 200,
+      "requestId": "9cfbe765-b763-9f42-82dc-e7e7c098a5d1",
+      "pending": 0,
+      "processing": 0,
+      "ready": 0,
+      "failed": 0
+    },
+    "limitedRuns": [
+      {
+        "status": 200,
+        "requestId": "5fa94c4d-8acf-92bf-a836-4a24e6d625d8",
+        "limit": 1,
+        "discovered": 1,
+        "claimed": 1,
+        "completed": 1,
+        "failed": 0,
+        "readyAfter": 1
+      },
+      {
+        "status": 200,
+        "requestId": "bfe896b5-4a7f-98fa-b5f7-aebd725285aa",
+        "limit": 1,
+        "discovered": 1,
+        "claimed": 1,
+        "completed": 1,
+        "failed": 0,
+        "readyAfter": 2
+      }
+    ],
+    "finalStatus": {
+      "status": 200,
+      "requestId": "a87e0fa0-409f-952f-b95d-ab5895ede183",
+      "pending": 0,
+      "processing": 0,
+      "ready": 2,
+      "failed": 0
+    },
+    "canvasProjection": {
+      "status": "blocked-by-runtime-mode",
+      "assetGraphMode": "legacy",
+      "canvasKernelMode": "legacy",
+      "projectRevision": 5354,
+      "projectCount": 6,
+      "imageCount": 48,
+      "thumbnailCount": 0,
+      "requestIds": [
+        "4eba8668-db77-99f6-b2a1-a851405a9ae7",
+        "87f64401-3968-90c6-92c7-5342d6f50f9f"
+      ],
+      "reason": "Canvas reads variants only in asset-v3; the deployed runtime intentionally remains in legacy mode."
+    },
+    "chromeControl": "The existing project and preview tabs were listed, but two claim attempts timed out. No new tab or alternate browser was used; screenshot and Console evidence remain unverified."
+  },
+  "conclusion": "The Coze build migration and administrator backfill API are cloud-verified on 172f38c. Two durable variants completed with no failed or processing residue. Canvas projection and media recovery remain open because the runtime is in legacy mode and Chrome control could not claim the existing tab."
 }
