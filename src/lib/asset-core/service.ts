@@ -22,7 +22,8 @@ export type AssetServiceErrorCode =
   | 'ASSET_NOT_FOUND'
   | 'ASSET_IDEMPOTENCY_CONFLICT'
   | 'ASSET_PLACEMENT_CONFLICT'
-  | 'ASSET_RESTORE_NOT_ALLOWED';
+  | 'ASSET_RESTORE_NOT_ALLOWED'
+  | 'ASSET_MEDIA_UNRECOVERABLE';
 
 export class AssetServiceError extends Error {
   constructor(readonly code: AssetServiceErrorCode) {
@@ -103,6 +104,10 @@ function placementConflict(): never {
 
 function restoreNotAllowed(): never {
   throw new AssetServiceError('ASSET_RESTORE_NOT_ALLOWED');
+}
+
+function mediaUnrecoverable(): never {
+  throw new AssetServiceError('ASSET_MEDIA_UNRECOVERABLE');
 }
 
 function isDatabaseConflict(error: unknown, constraint: string): boolean {
@@ -664,6 +669,13 @@ export class AssetService {
           placement.entityId,
         );
         if (occupied && occupied.id !== placement.id) placementConflict();
+        const version = await transaction.findVersion(
+          input.actorUserId,
+          input.projectId,
+          placement.assetVersionId,
+        );
+        if (!version || version.assetId !== placement.assetId) notFound();
+        if (version.file.availability === 'unrecoverable') mediaUnrecoverable();
         const asset = lockedAsset.status === 'trashed'
           ? await transaction.activateAsset(input.actorUserId, input.projectId, placement.assetId)
           : lockedAsset;

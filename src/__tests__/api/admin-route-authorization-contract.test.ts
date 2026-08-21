@@ -7,6 +7,7 @@ const expectedRoutes = [
   'api-balance/route.ts',
   'apis/route.ts',
   'assets/orphans/route.ts',
+  'assets/remediation/route.ts',
   'audit/route.ts',
   'backfill-thumbnails/route.ts',
   'backups/[id]/download/route.ts',
@@ -34,6 +35,7 @@ const expectedRoutes = [
 const manualGuardContracts = new Map<string, readonly string[]>([
   ['api-balance/route.ts', ['getSessionUser(', "user.role !== 'admin'", 'status: 401']],
   ['assets/orphans/route.ts', ['getRequestUser(', "auth.user.role !== 'admin'", 'status: 401', 'status: 403']],
+  ['assets/remediation/route.ts', ['getRequestUser(', "auth.user.role !== 'admin'", 'errorResponse(401', 'errorResponse(403']],
 ]);
 
 function relativeRoutePath(routePath: string): string {

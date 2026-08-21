@@ -37,7 +37,9 @@ export async function POST(request: NextRequest, context: RouteContext): Promise
     return NextResponse.json(restored);
   } catch (error) {
     if (error instanceof AssetServiceError) {
-      const status = error.code === 'ASSET_NOT_FOUND' ? 404 : 409;
+      let status = 409;
+      if (error.code === 'ASSET_NOT_FOUND') status = 404;
+      if (error.code === 'ASSET_MEDIA_UNRECOVERABLE') status = 409;
       return NextResponse.json({ error: error.code }, { status });
     }
     return NextResponse.json({ error: 'ASSET_RESTORE_FAILED' }, { status: 500 });

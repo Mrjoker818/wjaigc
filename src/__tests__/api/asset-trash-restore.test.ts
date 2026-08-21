@@ -1,16 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 const mocks = vi.hoisted(() => ({
   getRequestUser: vi.fn(),
   restorePlacement: vi.fn(),
 }));
 
+const MockAssetServiceError = vi.hoisted(() => class AssetServiceError extends Error {
+  constructor(readonly code: string) { super(code); }
+});
+
 vi.mock('@/lib/api-auth', () => ({ getRequestUser: mocks.getRequestUser }));
 vi.mock('@/lib/asset-core/service', () => ({
-  AssetServiceError: class AssetServiceError extends Error {
-    constructor(readonly code: string) { super(code); }
-  },
+  AssetServiceError: MockAssetServiceError,
   createAssetService: () => ({ restorePlacement: mocks.restorePlacement }),
 }));
 
@@ -56,5 +60,33 @@ describe('asset restore API', () => {
       actorUserId: 'owner-a', projectId: 'project-a', placementId: 'placement-a', assetId: 'asset-a',
     });
     expect(await response.json()).toEqual(expect.objectContaining({ projectRevision: 7 }));
+  });
+
+  it('returns 409 when the selected media is unrecoverable', async () => {
+    mocks.getRequestUser.mockResolvedValue({ user: { id: 'owner-a', role: 'user' } });
+    mocks.restorePlacement.mockRejectedValue(
+      new MockAssetServiceError('ASSET_MEDIA_UNRECOVERABLE'),
+    );
+
+    const response = await restoreAsset(
+      new NextRequest('http://localhost/api/assets/asset-a/restore', {
+        method: 'POST',
+        body: JSON.stringify({ projectId: 'project-a', placementId: 'placement-a' }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      { params: Promise.resolve({ assetId: 'asset-a' }) },
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'ASSET_MEDIA_UNRECOVERABLE' });
+  });
+
+  it('keeps the unrecoverable terminal conflict explicit in the route map', () => {
+    const routeSource = readFileSync(
+      path.join(process.cwd(), 'src/app/api/assets/[assetId]/restore/route.ts'),
+      'utf8',
+    );
+
+    expect(routeSource).toContain("error.code === 'ASSET_MEDIA_UNRECOVERABLE'");
   });
 });

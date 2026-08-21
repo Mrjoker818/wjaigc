@@ -895,6 +895,43 @@ describe('asset graph service', () => {
     }
   });
 
+  it('rejects restore when the selected version is unrecoverable', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const version = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    const placed = await service.createWorkspacePlacement({
+      actorUserId: ownerId,
+      projectId,
+      assetVersionId: version.version.id,
+      workspace: 'canvas',
+      workspaceId: 'canvas-a',
+      entityType: 'canvas-image',
+      entityId: 'image-a',
+    });
+    await service.trashPlacement({
+      actorUserId: ownerId,
+      projectId,
+      placementId: placed.placement.id,
+    });
+    storage.data.versions.set(version.version.id, {
+      ...version.version,
+      file: { ...version.version.file, availability: 'unrecoverable' },
+    });
+
+    await expect(service.restorePlacement({
+      actorUserId: ownerId,
+      projectId,
+      placementId: placed.placement.id,
+    })).rejects.toMatchObject({ code: 'ASSET_MEDIA_UNRECOVERABLE' });
+
+    expect(storage.data.placements.get(placed.placement.id)?.status).toBe('trashed');
+    expect(storage.data.assets.get(version.asset.id)?.status).toBe('trashed');
+    expect(storage.restoredCanvasSnapshots).toEqual([]);
+  });
+
   it('locks the asset before re-reading the placement for trash and restore decisions', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-12T00:00:00.000Z'));
