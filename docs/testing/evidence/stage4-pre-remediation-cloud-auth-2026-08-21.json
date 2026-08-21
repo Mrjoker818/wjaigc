@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-21T11:57:23.969Z",
+  "environment": {
+    "surface": "Coze preview",
+    "browser": "Google Chrome",
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/"
+  },
+  "authentication": {
+    "status": 200,
+    "user": {
+      "id": "admin_mr_joker",
+      "name": "Mr.joker",
+      "role": "admin"
+    }
+  },
+  "dashboard": {
+    "projects": 6,
+    "images": 48,
+    "users": 6,
+    "providers": 19
+  },
+  "productionReadiness": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "database": {
+        "status": "pass",
+        "detail": "Cloud task storage is available"
+      },
+      "security": {
+        "status": "pass",
+        "issues": []
+      },
+      "taskEvents": {
+        "status": "warn",
+        "issue": "Shared task event backend is not configured; clients use durable task polling across instances."
+      },
+      "assetGraph": {
+        "mode": "shadow",
+        "status": "warn",
+        "releaseReady": false,
+        "switchAuthorized": false,
+        "blockingCurrentRelease": false,
+        "blockers": [
+          "non-ready-current-media",
+          "non-durable-ready-media"
+        ],
+        "migrations": {
+          "required": 6,
+          "verified": 6,
+          "missing": [],
+          "checksumMismatches": []
+        },
+        "shadowComparison": {
+          "legacyProjects": 6,
+          "graphProjects": 6,
+          "matchingProjects": 6,
+          "mismatchedProjects": 0,
+          "unmigratedProjects": 0,
+          "orphanGraphProjects": 0,
+          "nonV3GraphProjects": 0,
+          "failedCheckpoints": 0,
+          "missingCheckpoints": 0,
+          "invalidLegacyRecords": 0
+        },
+        "media": {
+          "ready": 46,
+          "pendingPersist": 0,
+          "missing": 2,
+          "recovering": 0,
+          "unrecoverable": 0,
+          "activeAssetsMissingCurrentVersion": 0,
+          "placementPendingPersist": 0,
+          "placementMissing": 2,
+          "placementRecovering": 0,
+          "placementUnrecoverable": 0,
+          "falseReadyCurrentVersions": 1,
+          "falseReadyActivePlacements": 2
+        },
+        "assets": {
+          "active": 48,
+          "trashed": 4
+        },
+        "gc": {
+          "pending": 0,
+          "deferred": 0,
+          "purged": 0,
+          "due": 0,
+          "physicalDeferred": 0,
+          "physicalFailed": 0,
+          "unregistered": 0
+        },
+        "queryErrorCount": 0,
+        "collectionUnavailable": false
+      },
+      "summary": {
+        "total": 19,
+        "enabled": 17,
+        "ready": 17,
+        "warnings": 0,
+        "failures": 0
+      },
+      "providers": [
+        {
+          "id": "api_1786180762780_r50vf4v",
+          "name": "AILINK  图像",
+          "modelType": "image",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1785207153851_dpk92wk",
+          "name": "302放大",
+          "modelType": "upscaler",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1785190544435_1heimk6",
+          "name": "pear分层",
+          "modelType": "layer",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1785163335757_vmrqumm",
+          "name": "Recraft矢量",
+          "modelType": "vectorize",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1784986701405_us45heb",
+          "name": "AIlink视频",
+          "modelType": "video",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1782556839314_5zzrau2",
+          "name": "FHL图像模型",
+          "modelType": "image",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1782550826289_eg6d3h9",
+          "name": "Pear放大接口",
+          "modelType": "upscaler",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1781689188675_6m49gpe",
+          "name": "4S API VLM",
+          "modelType": "vlm",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1781141128851_jry72yo",
+          "name": "Apimart视频",
+          "modelType": "video",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1781140778520_hmu8s39",
+          "name": "Pear视频",
+          "modelType": "video",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1780646091844_uz9gb3l",
+          "name": "AI link 图像",
+          "modelType": "general",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1780636172228_0mhitfd",
+          "name": "4sapi 图像",
+          "modelType": "image",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1780630178347_rjqlmam",
+          "name": "PearAPI 图像",
+          "modelType": "image",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1778430731224_533e09a",
+          "name": "APImart imgae",
+          "modelType": "image",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1778428130626_2qpg71v",
+          "name": "APImartLLM",
+          "modelType": "chat",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1778556417924_41pm1aw",
+          "name": "302-3D",
+          "modelType": "3d",
+          "status": "pass",
+          "issues": []
+        },
+        {
+          "id": "api_1778562075189_o1delp7",
+          "name": "302-SVG",
+          "modelType": "vectorize",
+          "status": "pass",
+          "issues": []
+        }
+      ]
+    }
+  },
+  "freshApplicationConsole": {
+    "errors": 0,
+    "warnings": 0,
+    "extensionErrorsExcluded": true
+  },
+  "verdict": "authenticated-read-only-pre-remediation-pass"
+}
