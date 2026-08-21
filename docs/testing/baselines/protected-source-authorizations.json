@@ -1,0 +1,31 @@
+{
+  "authorizationId": "stage-4-safe-archive-2026-08-22",
+  "approvedAt": "2026-08-22",
+  "scope": "Exact paths only; directory-prefix authorization is prohibited.",
+  "stableBranchMutationAllowed": false,
+  "authorizations": [
+    { "path": "migrations/20260821_v588_admin_thumbnail_variants.sql", "sourceCommit": "d941384" },
+    { "path": "migrations/20260821_wj_stable_s4_historical_media_remediations.sql", "sourceCommit": "bc74b89" },
+    { "path": "scripts/coze-deploy-build.sh", "sourceCommit": "172f38c" },
+    { "path": "scripts/coze-preview-build.sh", "sourceCommit": "172f38c" },
+    { "path": "scripts/doctor-asset-status.mjs", "sourceCommit": "e809f5c" },
+    { "path": "src/app/api/admin/assets/remediation/route.ts", "sourceCommit": "86b8e17" },
+    { "path": "src/app/api/admin/backfill-thumbnails/route.ts", "sourceCommit": "d941384" },
+    { "path": "src/app/api/admin/dashboard-stats/route.ts", "sourceCommit": "1ba98f7" },
+    { "path": "src/app/api/admin/production-readiness/route.ts", "sourceCommit": "05f6717" },
+    { "path": "src/app/api/assets/[assetId]/restore/route.ts", "sourceCommit": "0756f71" },
+    { "path": "src/app/api/assets/adopt-canvas-image/route.ts", "sourceCommit": "c99fb72" },
+    { "path": "src/components/dashboard/admin-tabs.tsx", "sourceCommit": "1ba98f7" },
+    { "path": "src/lib/admin-dashboard-projection.ts", "sourceCommit": "1ba98f7" },
+    { "path": "src/lib/asset-core/asset-release-readiness.ts", "sourceCommit": "e809f5c" },
+    { "path": "src/lib/asset-core/canvas-adapter.ts", "sourceCommit": "5a35b98" },
+    { "path": "src/lib/asset-core/canvas-placement-snapshot.ts", "sourceCommit": "69479f7" },
+    { "path": "src/lib/asset-core/canvas-project-sync.ts", "sourceCommit": "d941384" },
+    { "path": "src/lib/asset-core/historical-media-remediation.ts", "sourceCommit": "fdd7791" },
+    { "path": "src/lib/asset-core/legacy-migration.ts", "sourceCommit": "99d226a" },
+    { "path": "src/lib/asset-core/service.ts", "sourceCommit": "0756f71" },
+    { "path": "src/lib/asset-core/storage.ts", "sourceCommit": "69479f7" },
+    { "path": "src/lib/asset-core/thumbnail-backfill.ts", "sourceCommit": "d941384" },
+    { "path": "src/lib/project-workflow.ts", "sourceCommit": "016e5d2" }
+  ]
+}

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -42,6 +43,32 @@ const baselineFeatures: Feature[] = [
   },
 ];
 
+const historicalSourceAuthorizations = [
+  ['migrations/20260821_v588_admin_thumbnail_variants.sql', 'd941384'],
+  ['migrations/20260821_wj_stable_s4_historical_media_remediations.sql', 'bc74b89'],
+  ['scripts/coze-deploy-build.sh', '172f38c'],
+  ['scripts/coze-preview-build.sh', '172f38c'],
+  ['scripts/doctor-asset-status.mjs', 'e809f5c'],
+  ['src/app/api/admin/assets/remediation/route.ts', '86b8e17'],
+  ['src/app/api/admin/backfill-thumbnails/route.ts', 'd941384'],
+  ['src/app/api/admin/dashboard-stats/route.ts', '1ba98f7'],
+  ['src/app/api/admin/production-readiness/route.ts', '05f6717'],
+  ['src/app/api/assets/[assetId]/restore/route.ts', '0756f71'],
+  ['src/app/api/assets/adopt-canvas-image/route.ts', 'c99fb72'],
+  ['src/components/dashboard/admin-tabs.tsx', '1ba98f7'],
+  ['src/lib/admin-dashboard-projection.ts', '1ba98f7'],
+  ['src/lib/asset-core/asset-release-readiness.ts', 'e809f5c'],
+  ['src/lib/asset-core/canvas-adapter.ts', '5a35b98'],
+  ['src/lib/asset-core/canvas-placement-snapshot.ts', '69479f7'],
+  ['src/lib/asset-core/canvas-project-sync.ts', 'd941384'],
+  ['src/lib/asset-core/historical-media-remediation.ts', 'fdd7791'],
+  ['src/lib/asset-core/legacy-migration.ts', '99d226a'],
+  ['src/lib/asset-core/service.ts', '0756f71'],
+  ['src/lib/asset-core/storage.ts', '69479f7'],
+  ['src/lib/asset-core/thumbnail-backfill.ts', 'd941384'],
+  ['src/lib/project-workflow.ts', '016e5d2'],
+] as const;
+
 describe('protected baseline release gate', () => {
   it('pins the Stage 4 gate and permits only the declared Stage 4 task surfaces', async () => {
     const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as {
@@ -75,6 +102,43 @@ describe('protected baseline release gate', () => {
       'src/lib/workflow-renderer/presentation.ts',
     ]) {
       expect(command).toContain(`--allow-path ${path}`);
+    }
+  });
+
+  it('authorizes reviewed historical source drift by exact path with provenance', async () => {
+    const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const provenance = JSON.parse(await readFile(
+      resolve(process.cwd(), 'docs/testing/baselines/protected-source-authorizations.json'),
+      'utf8',
+    )) as {
+      authorizations: Array<{ path: string; sourceCommit: string }>;
+    };
+    const command = packageJson.scripts['check:protected-baseline'];
+
+    expect(provenance.authorizations).toHaveLength(historicalSourceAuthorizations.length);
+    for (const [path, sourceCommit] of historicalSourceAuthorizations) {
+      expect(command).toContain(`--allow-path ${path}`);
+      expect(provenance.authorizations).toContainEqual({ path, sourceCommit });
+      expect(execFileSync(
+        'git',
+        ['diff-tree', '--no-commit-id', '--name-only', '-r', sourceCommit, '--', path],
+        { cwd: process.cwd(), encoding: 'utf8' },
+      ).trim()).toBe(path);
+    }
+
+    for (const broadPath of [
+      'migrations/',
+      'scripts/',
+      'src/app/api/admin/',
+      'src/app/api/assets/',
+      'src/components/dashboard/',
+      'src/lib/',
+      'src/lib/asset-core/',
+    ]) {
+      expect(command).not.toContain(`--allow-path ${broadPath} `);
+      expect(command).not.toMatch(new RegExp(`--allow-path ${broadPath.replaceAll('/', '\\/')}$`));
     }
   });
 
