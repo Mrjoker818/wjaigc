@@ -12,6 +12,7 @@ const candidate = {
   projectId: 'project-a',
   assetId: 'asset-a',
   assetVersionId: 'version-a',
+  isCurrentVersion: true,
   availability: 'missing' as const,
   urlClass: 'ephemeral-proxy' as const,
   placements: [
@@ -53,6 +54,22 @@ describe('historical media remediation domain', () => {
     expect(buildHistoricalMediaCandidateDigest(candidate)).toBe(
       buildHistoricalMediaCandidateDigest({ ...candidate, candidateDigest: 'different-output' }),
     );
+  });
+
+  it('changes the candidate digest when current-version identity changes', () => {
+    expect(buildHistoricalMediaCandidateDigest(candidate)).not.toBe(
+      buildHistoricalMediaCandidateDigest({
+        ...candidate,
+        isCurrentVersion: false,
+      }),
+    );
+  });
+
+  it('rejects a non-boolean current-version identity', () => {
+    expect(() => buildHistoricalMediaCandidateDigest({
+      ...candidate,
+      isCurrentVersion: 'true',
+    } as unknown as typeof candidate)).toThrow('HISTORICAL_MEDIA_REQUEST_INVALID');
   });
 
   it('rejects candidate and placement strings outside the 1-256 bounds', () => {

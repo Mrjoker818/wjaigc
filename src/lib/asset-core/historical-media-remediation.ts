@@ -29,6 +29,7 @@ const MAX_CANONICAL_CANDIDATE_BASE_BYTES = Buffer.byteLength(JSON.stringify({
   projectId: MAX_ESCAPED_DATABASE_FACT,
   assetId: MAX_ESCAPED_DATABASE_FACT,
   assetVersionId: MAX_ESCAPED_DATABASE_FACT,
+  isCurrentVersion: true,
   availability: MAX_ESCAPED_DATABASE_FACT,
   urlClass: MAX_ESCAPED_DATABASE_FACT,
   placements: [],
@@ -65,6 +66,7 @@ export interface HistoricalMediaCandidate {
   projectId: string;
   assetId: string;
   assetVersionId: string;
+  isCurrentVersion: boolean;
   availability: MediaAvailability;
   urlClass: 'empty' | 'ephemeral-proxy';
   placements: HistoricalMediaPlacementFact[];
@@ -243,6 +245,11 @@ function readBoundedString(
   return normalized;
 }
 
+function readBoolean(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error(INVALID_REQUEST);
+  return value;
+}
+
 function remediationError(
   code: HistoricalMediaRemediationErrorCode,
 ): HistoricalMediaRemediationError {
@@ -335,6 +342,7 @@ function candidateCanonicalValue(candidate: HistoricalMediaCandidate): StringRec
   const projectId = readBoundedString(candidate.projectId, 1, 256);
   const assetId = readBoundedString(candidate.assetId, 1, 256);
   const assetVersionId = readBoundedString(candidate.assetVersionId, 1, 256);
+  const isCurrentVersion = readBoolean(candidate.isCurrentVersion);
   const availability = readBoundedString(candidate.availability, 1, 256);
   const urlClass = readBoundedString(candidate.urlClass, 1, 256);
 
@@ -353,6 +361,7 @@ function candidateCanonicalValue(candidate: HistoricalMediaCandidate): StringRec
     projectId,
     assetId,
     assetVersionId,
+    isCurrentVersion,
     availability,
     urlClass,
     placements,
@@ -459,6 +468,7 @@ function mapDiscoveryCandidates(rows: DiscoveryRow[]): HistoricalMediaCandidate[
         projectId: row.project_id,
         assetId: row.asset_id,
         assetVersionId: row.asset_version_id,
+        isCurrentVersion: true,
         availability: row.availability,
         urlClass: row.url_class,
         placements: [],
@@ -803,6 +813,7 @@ async function lockCandidateFacts(
     projectId: row.project_id,
     assetId: row.asset_id,
     assetVersionId: row.asset_version_id,
+    isCurrentVersion: true,
     availability: row.availability,
     urlClass,
     placements: placementsResult.rows.map(mapLockedPlacement),
