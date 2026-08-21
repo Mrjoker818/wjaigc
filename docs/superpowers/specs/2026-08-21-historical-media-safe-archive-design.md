@@ -1,10 +1,10 @@
 # Historical Media Safe Archive Design
 
-**Date:** 2026-08-21  
-**Status:** Approved design; implementation not started  
-**Scope:** Stage 4 historical broken-media remediation only  
-**Runtime baseline:** `main@acd288487c4e44c9f6c6f41328c9a97ea169ab01`  
-**Protected baseline:** `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains untouched  
+**Date:** 2026-08-21
+**Status:** Approved design; implementation not started
+**Scope:** Stage 4 historical broken-media remediation only
+**Runtime baseline:** `main@acd288487c4e44c9f6c6f41328c9a97ea169ab01`
+**Protected baseline:** `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains untouched
 **Donor rule:** V5.8.8 remains read-only and is not a source for this remediation
 
 ## Decision
