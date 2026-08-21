@@ -95,7 +95,7 @@ export function projectAssetGraphReleaseReadiness(
     releaseReady,
     switchAuthorized: releaseReady && !collectionUnavailable,
     blockingCurrentRelease,
-    blockers: [...summary.assetV3Blockers],
+    blockers: collectionUnavailable ? ['asset-facts-unavailable'] : [...summary.assetV3Blockers],
     migrations: {
       required: summary.migrations.required,
       verified: summary.migrations.verified,

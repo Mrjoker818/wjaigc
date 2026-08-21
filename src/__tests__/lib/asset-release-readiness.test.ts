@@ -112,6 +112,28 @@ describe('asset release readiness', () => {
     })).toMatchObject({ status: 'fail', blockingCurrentRelease: true });
   });
 
+  it('collapses collector-reported partial failures to the unavailable blocker', async () => {
+    const client = { query: vi.fn().mockResolvedValue(undefined), release: vi.fn() };
+    mocks.getPool.mockReturnValue({ connect: vi.fn().mockResolvedValue(client) });
+    mocks.collectFacts.mockResolvedValue({ facts: true });
+    mocks.summarize.mockReturnValue({
+      ...readySummary,
+      releaseReady: false,
+      assetV3Blockers: ['asset-facts-unavailable', 'missing-migrations'],
+    });
+
+    const result = await collectAssetGraphReleaseReadiness();
+
+    expect(result).toMatchObject({
+      blockers: ['asset-facts-unavailable'],
+      collectionUnavailable: true,
+      releaseReady: false,
+      switchAuthorized: false,
+      status: 'fail',
+    });
+    expect(result.blockers).toEqual(['asset-facts-unavailable']);
+  });
+
   it('collects facts inside a bounded read-only transaction and releases the client', async () => {
     const client = { query: vi.fn().mockResolvedValue(undefined), release: vi.fn() };
     mocks.getPool.mockReturnValue({ connect: vi.fn().mockResolvedValue(client) });
