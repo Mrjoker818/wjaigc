@@ -38,7 +38,7 @@
 
 ---
 
-### 任务 1：用 RED 测试锁定候选契约和当前版本身份摘要
+### Task 1：用 RED 测试锁定候选契约和当前版本身份摘要
 
 **文件：**
 - 修改：`src/__tests__/lib/historical-media-remediation.test.ts`
@@ -154,7 +154,7 @@ git commit -m "test: bind historical media digest to current version"
 
 ---
 
-### 任务 2：用真实 PostgreSQL 复现并修复非当前坏版本遗漏
+### Task 2：用真实 PostgreSQL 复现并修复非当前坏版本遗漏
 
 **文件：**
 - 修改：`tests/integration/stage-4-historical-media-remediation-postgres.test.ts`
@@ -298,7 +298,7 @@ git commit -m "fix: cover active non-current media placements"
 
 ---
 
-### 任务 3：让非当前版本归档保持健康当前媒体逐字段不变
+### Task 3：让非当前版本归档保持健康当前媒体逐字段不变
 
 **文件：**
 - 修改：`tests/integration/stage-4-historical-media-remediation-postgres.test.ts`
@@ -399,7 +399,7 @@ git commit -m "fix: archive broken historical versions atomically"
 
 ---
 
-### 任务 4：在 API 和事务入口建立覆盖完整性写入门禁
+### Task 4：在 API 和事务入口建立覆盖完整性写入门禁
 
 **文件：**
 - 修改：`src/lib/asset-core/historical-media-remediation.ts`
@@ -524,7 +524,7 @@ git commit -m "fix: block incomplete historical media archives"
 
 ---
 
-### 任务 5：完成并发、回滚、审计和 readiness 对账回归
+### Task 5：完成并发、回滚、审计和 readiness 对账回归
 
 **文件：**
 - 修改：`tests/integration/stage-4-historical-media-remediation-postgres.test.ts`
@@ -577,7 +577,7 @@ git commit -m "test: prove historical media archive isolation"
 
 ---
 
-### 任务 6：更新精确源码授权并执行本地全量门禁
+### Task 6：更新精确源码授权并执行本地全量门禁
 
 **文件：**
 - 修改：`docs/testing/baselines/protected-source-authorizations.json`
@@ -679,7 +679,7 @@ git commit -m "docs: record historical media coverage verification"
 
 ---
 
-### 任务 7：推送 main 并执行云端只读验收
+### Task 7：推送 main 并执行云端只读验收
 
 **文件：**
 - 修改：`F:\AIGC\vault-template\无界计划\09-测试发布与回退门禁.md`
@@ -768,7 +768,7 @@ switchAuthorized = false，直到 readiness 独立判定允许
 
 ---
 
-### 任务 8：获得操作时确认后执行一次云端归档及幂等重试
+### Task 8：获得操作时确认后执行一次云端归档及幂等重试
 
 **前置条件：** 任务 7 的两轮只读结果稳定、`coverage.complete=true`、用户已看到精确候选与影响并明确确认。
 
