@@ -95,19 +95,25 @@ function configuredPublicOrigin(): string | null {
   }
 }
 
-function hasConfiguredSameOrigin(request: NextRequest): boolean {
+function hasAllowedAdministratorOrigin(request: NextRequest): boolean {
   const expectedOrigin = configuredPublicOrigin();
   const suppliedOrigin = request.headers.get('origin')?.trim();
-  if (!expectedOrigin || !suppliedOrigin) return false;
+  if (!suppliedOrigin) return false;
   try {
     const parsed = new URL(suppliedOrigin);
-    return ['http:', 'https:'].includes(parsed.protocol)
+    const isValidOrigin = ['http:', 'https:'].includes(parsed.protocol)
       && !parsed.username
       && !parsed.password
       && parsed.pathname === '/'
       && !parsed.search
-      && !parsed.hash
-      && parsed.origin === expectedOrigin;
+      && !parsed.hash;
+    if (!isValidOrigin) return false;
+    if (expectedOrigin) return parsed.origin === expectedOrigin;
+    if (process.env.NODE_ENV === 'production') return false;
+
+    const requestHostname = request.nextUrl.hostname.toLowerCase();
+    return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(requestHostname)
+      && parsed.origin === request.nextUrl.origin;
   } catch {
     return false;
   }
@@ -245,7 +251,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!auth) return authenticationRequired(requestId);
   if (auth.user.role !== 'admin') return administratorRequired(requestId);
   if (auth.source === 'cookie') {
-    if (!hasConfiguredSameOrigin(request)) return invalidAdministratorOrigin(requestId);
+    if (!hasAllowedAdministratorOrigin(request)) return invalidAdministratorOrigin(requestId);
   } else if (auth.source !== 'desktop-token' && auth.source !== 'internal') {
     return invalidAdministratorAuthSource(requestId);
   }

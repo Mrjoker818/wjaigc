@@ -70,8 +70,9 @@ async function expectRequestId(response: Response): Promise<Record<string, unkno
 function createArchiveRequest(
   body: string = JSON.stringify(archiveRequest),
   headers: Record<string, string> = {},
+  url = 'https://app.example/api/admin/assets/remediation',
 ): NextRequest {
-  return new NextRequest('https://app.example/api/admin/assets/remediation', {
+  return new NextRequest(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -198,7 +199,8 @@ describe('historical media remediation admin API', () => {
     expect(mocks.archive).not.toHaveBeenCalled();
   });
 
-  it('allows a cookie-authenticated archive from the configured same origin', async () => {
+  it('allows a cookie-authenticated archive from the configured production origin', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', 'https://app.example');
     mocks.getRequestUser.mockResolvedValue(adminAuth('cookie'));
 
@@ -209,6 +211,90 @@ describe('historical media remediation admin API', () => {
     expect(response.status).toBe(200);
     expect(mocks.archive).toHaveBeenCalledTimes(1);
     await expectRequestId(response);
+  });
+
+  it.each([undefined, 'not a valid origin'])(
+    'allows exact localhost cookie origin outside production without a usable configured origin (%s)',
+    async (configuredOrigin) => {
+      vi.stubEnv('NODE_ENV', 'development');
+      vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', configuredOrigin);
+      mocks.getRequestUser.mockResolvedValue(adminAuth('cookie'));
+
+      const response = await POST(createArchiveRequest(undefined, {
+        Origin: 'http://localhost:3000',
+      }, 'http://localhost:3000/api/admin/assets/remediation'));
+
+      expect(response.status).toBe(200);
+      expect(mocks.archive).toHaveBeenCalledTimes(1);
+      await expectRequestId(response);
+    },
+  );
+
+  it.each([
+    [
+      'cross-port',
+      'http://localhost:3000/api/admin/assets/remediation',
+      'http://localhost:3001',
+    ],
+    [
+      'cross-host',
+      'http://localhost:3000/api/admin/assets/remediation',
+      'http://127.0.0.1:3000',
+    ],
+    [
+      'LAN same-origin',
+      'http://192.168.1.20:3000/api/admin/assets/remediation',
+      'http://192.168.1.20:3000',
+    ],
+  ])(
+    'rejects a local cookie archive from a %s origin without configured public origin',
+    async (_label, requestUrl, origin) => {
+      vi.stubEnv('NODE_ENV', 'development');
+      vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', '');
+      mocks.getRequestUser.mockResolvedValue(adminAuth('cookie'));
+
+      const response = await POST(createArchiveRequest(undefined, {
+        Origin: origin,
+      }, requestUrl));
+
+      expect(response.status).toBe(403);
+      expect(await expectRequestId(response)).toEqual(expect.objectContaining({
+        code: 'ADMINISTRATOR_ORIGIN_INVALID',
+      }));
+      expect(mocks.archive).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects exact loopback cookie origin in production without configured public origin', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', undefined);
+    mocks.getRequestUser.mockResolvedValue(adminAuth('cookie'));
+
+    const response = await POST(createArchiveRequest(undefined, {
+      Origin: 'http://localhost:3000',
+    }, 'http://localhost:3000/api/admin/assets/remediation'));
+
+    expect(response.status).toBe(403);
+    expect(await expectRequestId(response)).toEqual(expect.objectContaining({
+      code: 'ADMINISTRATOR_ORIGIN_INVALID',
+    }));
+    expect(mocks.archive).not.toHaveBeenCalled();
+  });
+
+  it('does not use the loopback fallback when a valid configured origin exists', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', 'https://app.example');
+    mocks.getRequestUser.mockResolvedValue(adminAuth('cookie'));
+
+    const response = await POST(createArchiveRequest(undefined, {
+      Origin: 'http://localhost:3000',
+    }, 'http://localhost:3000/api/admin/assets/remediation'));
+
+    expect(response.status).toBe(403);
+    expect(await expectRequestId(response)).toEqual(expect.objectContaining({
+      code: 'ADMINISTRATOR_ORIGIN_INVALID',
+    }));
+    expect(mocks.archive).not.toHaveBeenCalled();
   });
 
   it.each([
