@@ -142,8 +142,9 @@ interface DiscoveryRow {
   entity_id: string;
 }
 
-interface DiscoveryCoverageRow {
+interface DiscoverySnapshotRow {
   eligible_blocking_placements: number;
+  candidate_rows: DiscoveryRow[];
 }
 
 interface LockedCandidateRow {
@@ -540,23 +541,8 @@ export async function discoverHistoricalMediaArchiveCandidates(
 ): Promise<HistoricalMediaDiscovery> {
   const limit = parseDiscoveryLimit(input);
   return withAssetCoreTransaction(async (client) => {
-    const coverageResult = await client.query<DiscoveryCoverageRow>(
-      `SELECT count(*)::int AS eligible_blocking_placements
-       FROM wujie_assets asset
-       JOIN wujie_workspace_placements placement
-         ON placement.asset_id = asset.id
-        AND placement.owner_id = asset.owner_id
-        AND placement.project_id = asset.project_id
-        AND placement.status = 'active'
-       JOIN wujie_asset_versions version
-         ON version.id = placement.asset_version_id
-        AND version.asset_id = asset.id
-        AND version.owner_id = asset.owner_id
-        AND version.project_id = asset.project_id
-       WHERE ${HISTORICAL_MEDIA_ELIGIBILITY_WHERE}`,
-    );
-    const result = await client.query<DiscoveryRow>(
-      `WITH candidate_versions AS (
+    const result = await client.query<DiscoverySnapshotRow>(
+      `WITH eligible_placements AS MATERIALIZED (
          SELECT
            asset.owner_id,
            asset.project_id,
@@ -567,68 +553,94 @@ export async function discoverHistoricalMediaArchiveCandidates(
            CASE
              WHEN btrim(version.file_url) = '' THEN 'empty'
              ELSE 'ephemeral-proxy'
-           END AS url_class
-          FROM wujie_assets asset
-          JOIN wujie_workspace_placements placement
-            ON placement.asset_id = asset.id
-           AND placement.owner_id = asset.owner_id
-           AND placement.project_id = asset.project_id
-           AND placement.status = 'active'
-          JOIN wujie_asset_versions version
-            ON version.id = placement.asset_version_id
-           AND version.asset_id = asset.id
-           AND version.owner_id = asset.owner_id
-           AND version.project_id = asset.project_id
-          WHERE ${HISTORICAL_MEDIA_ELIGIBILITY_WHERE}
-          GROUP BY
-           asset.owner_id,
-           asset.project_id,
-            asset.id,
-            version.id,
-            coalesce(asset.current_version_id = version.id, false),
-            version.availability,
-           CASE
-             WHEN btrim(version.file_url) = '' THEN 'empty'
-             ELSE 'ephemeral-proxy'
-           END
+           END AS url_class,
+           placement.id AS placement_id,
+           placement.workspace_kind,
+           placement.workspace_id,
+           placement.entity_type,
+           placement.entity_id
+         FROM wujie_assets asset
+         JOIN wujie_workspace_placements placement
+           ON placement.asset_id = asset.id
+          AND placement.owner_id = asset.owner_id
+          AND placement.project_id = asset.project_id
+          AND placement.status = 'active'
+         JOIN wujie_asset_versions version
+           ON version.id = placement.asset_version_id
+          AND version.asset_id = asset.id
+          AND version.owner_id = asset.owner_id
+          AND version.project_id = asset.project_id
+         WHERE ${HISTORICAL_MEDIA_ELIGIBILITY_WHERE}
+       ),
+       candidate_versions AS (
+         SELECT
+           owner_id,
+           project_id,
+           asset_id,
+           asset_version_id,
+           is_current_version,
+           availability,
+           url_class
+         FROM eligible_placements
+         GROUP BY
+           owner_id,
+           project_id,
+           asset_id,
+           asset_version_id,
+           is_current_version,
+           availability,
+           url_class
          HAVING count(*) BETWEEN 1 AND $2
-         ORDER BY asset.owner_id, asset.project_id, asset.id, version.id
+         ORDER BY owner_id, project_id, asset_id, asset_version_id
          LIMIT $1
+       ),
+       candidate_rows AS (
+         SELECT
+           eligible.owner_id,
+           eligible.project_id,
+           eligible.asset_id,
+           eligible.asset_version_id,
+           eligible.is_current_version,
+           eligible.availability,
+           eligible.url_class,
+           eligible.placement_id,
+           eligible.workspace_kind,
+           eligible.workspace_id,
+           eligible.entity_type,
+           eligible.entity_id
+         FROM eligible_placements eligible
+         JOIN candidate_versions candidate
+           ON candidate.owner_id = eligible.owner_id
+          AND candidate.project_id = eligible.project_id
+          AND candidate.asset_id = eligible.asset_id
+          AND candidate.asset_version_id = eligible.asset_version_id
        )
        SELECT
-         candidate.owner_id,
-         candidate.project_id,
-          candidate.asset_id,
-          candidate.asset_version_id,
-          candidate.is_current_version,
-          candidate.availability,
-         candidate.url_class,
-         placement.id AS placement_id,
-         placement.workspace_kind,
-         placement.workspace_id,
-         placement.entity_type,
-         placement.entity_id
-       FROM candidate_versions candidate
-       JOIN wujie_workspace_placements placement
-         ON placement.asset_version_id = candidate.asset_version_id
-        AND placement.asset_id = candidate.asset_id
-        AND placement.owner_id = candidate.owner_id
-        AND placement.project_id = candidate.project_id
-        AND placement.status = 'active'
-       ORDER BY
-         candidate.owner_id,
-         candidate.project_id,
-         candidate.asset_id,
-         candidate.asset_version_id,
-         placement.id`,
+         (SELECT count(*)::int FROM eligible_placements) AS eligible_blocking_placements,
+         coalesce(
+           (
+             SELECT jsonb_agg(
+               to_jsonb(candidate)
+               ORDER BY
+                 candidate.owner_id,
+                 candidate.project_id,
+                 candidate.asset_id,
+                 candidate.asset_version_id,
+                 candidate.placement_id
+             )
+             FROM candidate_rows candidate
+           ),
+           '[]'::jsonb
+         ) AS candidate_rows`,
       [limit, MAX_CANDIDATE_PLACEMENTS],
     );
-    const candidates = mapDiscoveryCandidates(result.rows);
+    const snapshot = result.rows[0];
+    const candidates = mapDiscoveryCandidates(snapshot?.candidate_rows ?? []);
     const candidatePlacements = candidates.reduce(
       (count, candidate) => count + candidate.placements.length,
       0,
     );
-    const eligibleBlockingPlacements = coverageResult.rows[0]?.eligible_blocking_placements ?? 0;
+    const eligibleBlockingPlacements = snapshot?.eligible_blocking_placements ?? 0;
     const uncoveredBlockingPlacements = Math.max(
       0,
       eligibleBlockingPlacements - candidatePlacements,

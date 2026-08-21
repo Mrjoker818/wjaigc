@@ -741,6 +741,150 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
     });
   });
 
+  postgresIt('keeps current and non-current broken versions of one asset as separate candidates', async () => {
+    await withIsolatedPostgres('historical-media-same-asset-versions', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      await query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, storage_key,
+           availability, recovery_source_url, metadata
+         ) VALUES (
+           'version-false-ready-extra-broken', 'asset-false-ready', $1, $2,
+           '/v1/images/proxy/false-ready-extra-expired', NULL, 'missing', NULL, '{}'::jsonb
+         )`,
+        [OWNER_ID, PROJECT_ID],
+      );
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id,
+           workspace_kind, workspace_id, entity_type, entity_id
+         ) VALUES (
+           'placement-false-ready-extra-broken', $1, $2, 'asset-false-ready',
+           'version-false-ready-extra-broken', 'canvas', $2, 'canvas-image',
+           'entity-false-ready-extra-broken'
+         )`,
+        [OWNER_ID, PROJECT_ID],
+      );
+
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const sameAssetCandidates = discovery.candidates.filter(
+        candidate => candidate.assetId === 'asset-false-ready',
+      );
+
+      expect(sameAssetCandidates).toHaveLength(2);
+      expect(sameAssetCandidates.map(candidate => ({
+        assetVersionId: candidate.assetVersionId,
+        isCurrentVersion: candidate.isCurrentVersion,
+        placementIds: candidate.placements.map(placement => placement.id),
+      }))).toEqual([
+        {
+          assetVersionId: 'version-false-ready',
+          isCurrentVersion: true,
+          placementIds: ['placement-false-ready-canvas', 'placement-false-ready-workflow'],
+        },
+        {
+          assetVersionId: 'version-false-ready-extra-broken',
+          isCurrentVersion: false,
+          placementIds: ['placement-false-ready-extra-broken'],
+        },
+      ]);
+      expect(new Set(sameAssetCandidates.map(candidate => candidate.candidateDigest)).size).toBe(2);
+      expect(discovery.counts).toEqual({
+        versions: 5,
+        activePlacements: 6,
+        currentVersions: 3,
+        nonCurrentVersions: 2,
+      });
+      expect(discovery.coverage).toEqual({
+        eligibleBlockingPlacements: 6,
+        candidatePlacements: 6,
+        uncoveredBlockingPlacements: 0,
+        complete: true,
+      });
+    });
+  });
+
+  postgresIt('computes discovery candidates and coverage from one PostgreSQL statement snapshot', async () => {
+    await withIsolatedPostgres('historical-media-discovery-snapshot', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const databaseUrl = bindBoundedBusinessDatabase(isolatedUrl);
+      const barrier = await connectIsolatedClient(databaseUrl);
+      const writer = await connectIsolatedClient(databaseUrl);
+      const monitor = await connectIsolatedClient(databaseUrl);
+      const gateClass = 178735;
+      const gateKey = 2202;
+
+      try {
+        await query(
+          `CREATE FUNCTION historical_media_discovery_snapshot_gate() RETURNS boolean
+           LANGUAGE plpgsql VOLATILE AS $gate$
+           BEGIN
+             PERFORM pg_advisory_xact_lock(${gateClass}, ${gateKey});
+             RETURN true;
+           END;
+           $gate$`,
+        );
+        await query(
+          'ALTER TABLE wujie_workspace_placements RENAME TO wujie_workspace_placements_snapshot_base',
+        );
+        await query(
+          `CREATE VIEW wujie_workspace_placements AS
+           SELECT placement.*
+           FROM wujie_workspace_placements_snapshot_base placement
+           WHERE historical_media_discovery_snapshot_gate()`,
+        );
+
+        const barrierPid = Number((await barrier.query('SELECT pg_backend_pid() AS pid')).rows[0]?.pid);
+        const writerPid = Number((await writer.query('SELECT pg_backend_pid() AS pid')).rows[0]?.pid);
+        await barrier.query('SELECT pg_advisory_lock($1, $2)', [gateClass, gateKey]);
+
+        const service = await loadHistoricalMediaService();
+        const discoveryPromise = service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+        await waitForBlockedQuery(
+          monitor,
+          ['eligible_blocking_placements', 'wujie_workspace_placements'],
+          [barrierPid, writerPid],
+        );
+
+        await writer.query(
+          `INSERT INTO wujie_asset_versions(
+             id, asset_id, owner_id, project_id, file_url, storage_key,
+             availability, recovery_source_url, metadata
+           ) VALUES (
+             'version-concurrent-broken', 'asset-managed', $1, $2,
+             '/v1/images/proxy/concurrent-expired', NULL, 'missing', NULL, '{}'::jsonb
+           )`,
+          [OWNER_ID, PROJECT_ID],
+        );
+        await writer.query(
+          `INSERT INTO wujie_workspace_placements_snapshot_base(
+             id, owner_id, project_id, asset_id, asset_version_id,
+             workspace_kind, workspace_id, entity_type, entity_id
+           ) VALUES (
+             'placement-concurrent-broken', $1, $2, 'asset-managed',
+             'version-concurrent-broken', 'canvas', $2, 'canvas-image',
+             'entity-concurrent-broken'
+           )`,
+          [OWNER_ID, PROJECT_ID],
+        );
+        await barrier.query('SELECT pg_advisory_unlock($1, $2)', [gateClass, gateKey]);
+
+        const discovery = await discoveryPromise;
+        expect(discovery.coverage.eligibleBlockingPlacements).toBe(
+          discovery.coverage.candidatePlacements,
+        );
+        expect(discovery.coverage).toMatchObject({
+          uncoveredBlockingPlacements: 0,
+          complete: true,
+        });
+      } finally {
+        await barrier.query('SELECT pg_advisory_unlock($1, $2)', [gateClass, gateKey]).catch(() => undefined);
+        await closeTestClients([barrier, writer, monitor]);
+      }
+    });
+  }, 20_000);
+
   postgresIt('reports incomplete coverage when the discovery limit omits eligible placements', async () => {
     await withIsolatedPostgres('historical-media-limited-discovery', async ({ databaseUrl: isolatedUrl, query }) => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
