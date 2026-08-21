@@ -334,7 +334,7 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
     });
   });
 
-  it('prefers the exact current managed mapping over a stale checkpoint alias', async () => {
+  it('prefers a namespaced current canvas mapping over a stale checkpoint alias', async () => {
     const localSuffix = randomUUID();
     const localOwnerId = `shadow-current-owner-${localSuffix}`;
     const localProjectId = `shadow-current-project-${localSuffix}`;
@@ -387,6 +387,7 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
         projectId: localProjectId,
         assetId: currentAssetId,
         versionId: currentVersionId,
+        workspaceId: `canvas:${localProjectId}`,
         entityId: imageId,
       });
       await insertAssetGraph(client, {

@@ -132,7 +132,7 @@ describe('continuous canvas shadow synchronization', () => {
     )).rejects.toMatchObject({ code: 'LEGACY_MIGRATION_INTEGRITY_CONFLICT' });
   });
 
-  it('locks a managed asset before its version and requires the exact canvas workspace', () => {
+  it('locks a managed asset before its version and requires a project canvas workspace', () => {
     const migrationSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
       'utf8',
@@ -149,7 +149,7 @@ describe('continuous canvas shadow synchronization', () => {
     expect(placementLock).toBeGreaterThan(-1);
     expect(assetLock).toBeLessThan(versionLock);
     expect(versionLock).toBeLessThan(placementLock);
-    expect(adoptionSource).toContain('workspace_id = $3');
+    expect(adoptionSource).toContain("workspace_id IN ($3, 'canvas:' || $3)");
   });
 
   it('keeps processing placeholders out of the asset graph', () => {
@@ -253,7 +253,7 @@ describe('continuous canvas shadow synchronization', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('locks a projected task asset before its version and exact canvas placement', () => {
+  it('locks a projected task asset before its version and project canvas placement', () => {
     const migrationSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
       'utf8',
@@ -271,7 +271,7 @@ describe('continuous canvas shadow synchronization', () => {
     expect(placementLock).toBeGreaterThan(-1);
     expect(assetLock).toBeLessThan(versionLock);
     expect(versionLock).toBeLessThan(placementLock);
-    expect(adoptionSource).toContain('placement.workspace_id = $2');
+    expect(adoptionSource).toContain("placement.workspace_id IN ($2, 'canvas:' || $2)");
   });
 
   it('retains unmanaged blob and missing broken-media placements during autosave', () => {

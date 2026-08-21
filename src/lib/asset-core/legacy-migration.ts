@@ -196,6 +196,10 @@ export function selectCanvasImagesForAssetGraph(images: CanvasImage[]): CanvasIm
   return images.filter((image) => !image.isProcessingPlaceholder);
 }
 
+function isProjectCanvasWorkspace(workspaceId: string, projectId: string): boolean {
+  return workspaceId === projectId || workspaceId === `canvas:${projectId}`;
+}
+
 export async function adoptManagedCanvasMapping(
   client: Pick<PoolClient, 'query'>,
   input: Pick<LegacyMigrationInput, 'actorUserId' | 'projectId'>,
@@ -236,7 +240,7 @@ export async function adoptManagedCanvasMapping(
      FROM wujie_workspace_placements
       WHERE id = $1 AND owner_id = $2 AND project_id = $3
         AND asset_id = $4 AND asset_version_id = $5
-        AND workspace_kind = 'canvas' AND workspace_id = $3
+        AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
         AND entity_type = 'canvas-image'
        AND entity_id = $6 AND status = 'active'
      FOR UPDATE`,
@@ -260,7 +264,7 @@ export async function adoptManagedCanvasMapping(
      SET transform = $4::jsonb, metadata = $5::jsonb, updated_at = now()
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
        AND asset_id = $6 AND asset_version_id = $7
-       AND workspace_kind = 'canvas' AND workspace_id = $3
+       AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
        AND entity_type = 'canvas-image' AND entity_id = $8 AND status = 'active'`,
     [
       mapping.placementId,
@@ -335,7 +339,7 @@ export async function adoptTaskProjectedCanvasMapping(
      FROM wujie_workspace_placements placement
       WHERE placement.owner_id = $1 AND placement.project_id = $2
          AND placement.workspace_kind = 'canvas'
-         AND placement.workspace_id = $2
+         AND placement.workspace_id IN ($2, 'canvas:' || $2)
         AND placement.entity_type = 'canvas-image'
         AND placement.entity_id = $3
         AND placement.status = 'active'
@@ -357,7 +361,7 @@ export async function adoptTaskProjectedCanvasMapping(
      SET transform = $4::jsonb, metadata = $5::jsonb, updated_at = now()
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
        AND asset_id = $6 AND asset_version_id = $7
-       AND workspace_kind = 'canvas' AND workspace_id = $3
+       AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
        AND entity_type = 'canvas-image' AND entity_id = $8 AND status = 'active'`,
     [
       row.placement_id,
@@ -770,7 +774,7 @@ async function updateGraphForImage(
     || placementRow.owner_id !== input.actorUserId
     || placementRow.project_id !== input.projectId
     || placementRow.workspace_kind !== 'canvas'
-    || placementRow.workspace_id !== input.projectId
+    || !isProjectCanvasWorkspace(placementRow.workspace_id, input.projectId)
     || placementRow.entity_type !== 'canvas-image'
     || placementRow.entity_id !== image.id
   )) {
@@ -909,7 +913,7 @@ async function trashGraphForImage(
   if (placementRow && (
     placementRow.asset_id !== mapping.assetId
     || placementRow.workspace_kind !== 'canvas'
-    || placementRow.workspace_id !== input.projectId
+    || !isProjectCanvasWorkspace(placementRow.workspace_id, input.projectId)
     || placementRow.entity_type !== 'canvas-image'
     || placementRow.entity_id !== imageId
   )) {
@@ -919,7 +923,8 @@ async function trashGraphForImage(
     `UPDATE wujie_workspace_placements
      SET status = 'trashed', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
-       AND asset_id = $4 AND workspace_kind = 'canvas' AND workspace_id = $3
+       AND asset_id = $4 AND workspace_kind = 'canvas'
+       AND workspace_id IN ($3, 'canvas:' || $3)
        AND entity_type = 'canvas-image' AND entity_id = $5 AND status = 'active'`,
     [mapping.placementId, input.actorUserId, input.projectId, mapping.assetId, imageId],
   );
@@ -949,7 +954,8 @@ async function trashStaleCanvasPlacements(
          SELECT placement.asset_id
          FROM wujie_workspace_placements placement
          WHERE placement.owner_id = $1 AND placement.project_id = $2
-           AND placement.workspace_kind = 'canvas' AND placement.workspace_id = $2
+           AND placement.workspace_kind = 'canvas'
+           AND placement.workspace_id IN ($2, 'canvas:' || $2)
            AND placement.entity_type = 'canvas-image' AND placement.status = 'active'
        )
      ORDER BY asset.id
@@ -960,7 +966,7 @@ async function trashStaleCanvasPlacements(
     `SELECT id, asset_id
      FROM wujie_workspace_placements
      WHERE owner_id = $1 AND project_id = $2
-       AND workspace_kind = 'canvas' AND workspace_id = $2
+       AND workspace_kind = 'canvas' AND workspace_id IN ($2, 'canvas:' || $2)
        AND entity_type = 'canvas-image' AND status = 'active'
      ORDER BY id
      FOR UPDATE`,
@@ -978,7 +984,7 @@ async function trashStaleCanvasPlacements(
     `UPDATE wujie_workspace_placements
      SET status = 'trashed', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
      WHERE owner_id = $1 AND project_id = $2 AND id = ANY($3::text[])
-       AND workspace_kind = 'canvas' AND workspace_id = $2
+       AND workspace_kind = 'canvas' AND workspace_id IN ($2, 'canvas:' || $2)
        AND entity_type = 'canvas-image' AND status = 'active'`,
     [input.actorUserId, input.projectId, stalePlacementIds],
   );
