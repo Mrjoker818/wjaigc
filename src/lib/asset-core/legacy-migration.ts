@@ -452,6 +452,11 @@ function checkpointMappings(checkpoint: Record<string, unknown>): Record<string,
   return mappings;
 }
 
+function hasCompleteManagedCanvasMapping(image: CanvasImage): boolean {
+  return [image.assetId, image.assetVersionId, image.placementId]
+    .every(value => typeof value === 'string' && value.length > 0);
+}
+
 async function loadAuthorizedLegacyProject(
   client: PoolClient,
   actorUserId: string,
@@ -583,7 +588,10 @@ async function existingCompletedMigration(
   await lockProjectAssetsForReconciliation(client, input);
 
   for (const { image, mapping } of plan.updates) {
-    const updated = await updateGraphForImage(client, input, image, mapping);
+    const managed = hasCompleteManagedCanvasMapping(image)
+      ? await adoptManagedCanvasMapping(client, input, image)
+      : null;
+    const updated = managed ?? await updateGraphForImage(client, input, image, mapping);
     const activeMapping = updated ?? await insertGraphForImage(client, input, image, mapping);
     plan.activeMappings[image.id] = activeMapping;
     plan.checkpointMappings[image.id] = activeMapping;

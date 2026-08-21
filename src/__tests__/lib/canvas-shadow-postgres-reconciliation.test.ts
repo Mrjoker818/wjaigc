@@ -334,6 +334,157 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
     });
   });
 
+  it('prefers the exact current managed mapping over a stale checkpoint alias', async () => {
+    const localSuffix = randomUUID();
+    const localOwnerId = `shadow-current-owner-${localSuffix}`;
+    const localProjectId = `shadow-current-project-${localSuffix}`;
+    const imageId = `shadow-current-image-${localSuffix}`;
+    const currentAssetId = `shadow-current-asset-${localSuffix}`;
+    const currentVersionId = `shadow-current-version-${localSuffix}`;
+    const currentPlacementId = `shadow-current-placement-${localSuffix}`;
+    const staleAssetId = `shadow-stale-asset-${localSuffix}`;
+    const staleVersionId = `shadow-stale-version-${localSuffix}`;
+    const stalePlacementId = `shadow-stale-placement-${localSuffix}`;
+    const localCheckpointId = `shadow-current-checkpoint-${localSuffix}`;
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO wujie_projects(id, owner_id, name, status, schema_version, metadata)
+         VALUES ($1, $2, 'Current mapping', 'active', 3, '{}'::jsonb)`,
+        [localProjectId, localOwnerId],
+      );
+      const snapshot: Project = {
+        id: localProjectId,
+        userId: localOwnerId,
+        name: 'Current mapping',
+        createdAt: 1700000000000,
+        updatedAt: 1700000000000,
+        canvasImages: [{
+          ...canvasImage(imageId),
+          assetId: currentAssetId,
+          assetVersionId: currentVersionId,
+          placementId: currentPlacementId,
+        }],
+        settings: {},
+      };
+      await client.query(
+        `INSERT INTO wujie_user_data(user_id, data_key, data_value, updated_at)
+         VALUES ($1, 'projects', $2::jsonb, $3)`,
+        [localOwnerId, JSON.stringify([snapshot]), Date.now()],
+      );
+      await insertAssetGraph(client, {
+        assetId: currentAssetId,
+        versionId: currentVersionId,
+        ownerId: localOwnerId,
+        projectId: localProjectId,
+        url: '/media/current-managed.png',
+      });
+      await insertPlacement(client, {
+        id: currentPlacementId,
+        ownerId: localOwnerId,
+        projectId: localProjectId,
+        assetId: currentAssetId,
+        versionId: currentVersionId,
+        entityId: imageId,
+      });
+      await insertAssetGraph(client, {
+        assetId: staleAssetId,
+        versionId: staleVersionId,
+        ownerId: localOwnerId,
+        projectId: localProjectId,
+        url: '/media/stale-managed.png',
+      });
+      await insertPlacement(client, {
+        id: stalePlacementId,
+        ownerId: localOwnerId,
+        projectId: localProjectId,
+        assetId: staleAssetId,
+        versionId: staleVersionId,
+        entityId: 'stale-checkpoint-alias',
+      });
+      await client.query(
+        `INSERT INTO wujie_asset_migration_checkpoints(
+           id, owner_id, project_id, legacy_project_id, status, checkpoint
+         ) VALUES ($1, $2, $3, $3, 'completed', $4::jsonb)`,
+        [
+          localCheckpointId,
+          localOwnerId,
+          localProjectId,
+          JSON.stringify({
+            sourceSchemaVersion: 1,
+            legacyImageMappings: {
+              [imageId]: {
+                assetId: staleAssetId,
+                versionId: staleVersionId,
+                placementId: stalePlacementId,
+              },
+            },
+          }),
+        ],
+      );
+      await client.query('COMMIT');
+
+      await client.query('BEGIN');
+      const result = await migrateLegacyProjectOnWriteInTransaction(client, {
+        actorUserId: localOwnerId,
+        projectId: localProjectId,
+      });
+      await client.query('COMMIT');
+
+      expect(result.mappings[imageId]).toEqual({
+        assetId: currentAssetId,
+        versionId: currentVersionId,
+        placementId: currentPlacementId,
+      });
+      await expect(pool.query<{ id: string; status: string }>(
+        `SELECT id, status FROM wujie_workspace_placements
+         WHERE id = ANY($1::text[]) ORDER BY id`,
+        [[currentPlacementId, stalePlacementId]],
+      )).resolves.toMatchObject({
+        rows: expect.arrayContaining([
+          { id: currentPlacementId, status: 'active' },
+          { id: stalePlacementId, status: 'trashed' },
+        ]),
+      });
+      const checkpoint = await pool.query<{ checkpoint: { legacyImageMappings: Record<string, unknown> } }>(
+        `SELECT checkpoint FROM wujie_asset_migration_checkpoints WHERE id = $1`,
+        [localCheckpointId],
+      );
+      expect(checkpoint.rows[0]?.checkpoint.legacyImageMappings[imageId]).toEqual({
+        assetId: currentAssetId,
+        versionId: currentVersionId,
+        placementId: currentPlacementId,
+      });
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined);
+      await pool.query('DELETE FROM wujie_workspace_placements WHERE id = ANY($1::text[])', [[
+        currentPlacementId,
+        stalePlacementId,
+      ]]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_asset_migration_checkpoints WHERE id = $1', [localCheckpointId]).catch(() => undefined);
+      await pool.query('UPDATE wujie_assets SET current_version_id = NULL WHERE id = ANY($1::text[])', [[
+        currentAssetId,
+        staleAssetId,
+      ]]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_asset_versions WHERE id = ANY($1::text[])', [[
+        currentVersionId,
+        staleVersionId,
+      ]]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_assets WHERE id = ANY($1::text[])', [[
+        currentAssetId,
+        staleAssetId,
+      ]]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_projects WHERE id = $1', [localProjectId]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_user_data WHERE user_id = $1 AND data_key = $2', [
+        localOwnerId,
+        'projects',
+      ]).catch(() => undefined);
+      client.release();
+    }
+  });
+
   it('rolls back stale-placement cleanup with the surrounding transaction', async () => {
     await pool.query(
       `UPDATE wujie_workspace_placements
