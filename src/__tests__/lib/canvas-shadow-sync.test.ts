@@ -55,6 +55,10 @@ describe('continuous canvas shadow synchronization', () => {
       }
     ).adoptManagedCanvasMapping;
     const query = vi.fn(async (sql: string, params: unknown[]) => {
+      if (sql.includes('FROM wujie_assets asset')) {
+        expect(params).toEqual(['asset-transfer', 'user-1', 'project-1']);
+        return { rows: [{ id: 'asset-transfer' }], rowCount: 1 };
+      }
       if (sql.includes('FROM wujie_asset_versions')) {
         expect(params).toEqual(['version-transfer', 'asset-transfer', 'user-1', 'project-1']);
         return { rows: [{ asset_id: 'asset-transfer', asset_version_id: 'version-transfer' }], rowCount: 1 };
@@ -91,7 +95,7 @@ describe('continuous canvas shadow synchronization', () => {
       versionId: 'version-transfer',
       placementId: 'placement-transfer',
     });
-    expect(query).toHaveBeenCalledTimes(3);
+    expect(query).toHaveBeenCalledTimes(4);
   });
 
   it('fails closed when a complete managed reference does not match its canvas placement', async () => {
@@ -105,6 +109,9 @@ describe('continuous canvas shadow synchronization', () => {
       }
     ).adoptManagedCanvasMapping;
     const query = vi.fn(async (sql: string) => {
+      if (sql.includes('FROM wujie_assets asset')) {
+        return { rows: [{ id: 'asset-transfer' }], rowCount: 1 };
+      }
       if (sql.includes('FROM wujie_asset_versions')) {
         return { rows: [{ asset_id: 'asset-transfer', asset_version_id: 'version-transfer' }], rowCount: 1 };
       }
@@ -123,6 +130,26 @@ describe('continuous canvas shadow synchronization', () => {
         placementId: 'placement-transfer',
       }),
     )).rejects.toMatchObject({ code: 'LEGACY_MIGRATION_INTEGRITY_CONFLICT' });
+  });
+
+  it('locks a managed asset before its version and requires the exact canvas workspace', () => {
+    const migrationSource = readFileSync(
+      resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
+      'utf8',
+    ).replace(/\r\n/g, '\n');
+    const adoptionStart = migrationSource.indexOf('export async function adoptManagedCanvasMapping');
+    const adoptionEnd = migrationSource.indexOf('\nexport async function adoptTaskProjectedCanvasMapping', adoptionStart);
+    const adoptionSource = migrationSource.slice(adoptionStart, adoptionEnd);
+    const assetLock = adoptionSource.indexOf('FROM wujie_assets asset');
+    const versionLock = adoptionSource.indexOf('FROM wujie_asset_versions');
+    const placementLock = adoptionSource.indexOf('FROM wujie_workspace_placements');
+
+    expect(assetLock).toBeGreaterThan(-1);
+    expect(versionLock).toBeGreaterThan(-1);
+    expect(placementLock).toBeGreaterThan(-1);
+    expect(assetLock).toBeLessThan(versionLock);
+    expect(versionLock).toBeLessThan(placementLock);
+    expect(adoptionSource).toContain('workspace_id = $3');
   });
 
   it('keeps processing placeholders out of the asset graph', () => {
@@ -155,7 +182,11 @@ describe('continuous canvas shadow synchronization', () => {
   it('adopts an existing task projection instead of creating a duplicate legacy asset', async () => {
     const query = vi.fn(async (sql: string, params: unknown[]) => {
       if (sql.includes('FROM wujie_asset_versions')) {
-        expect(params).toEqual(['user-1', 'project-1', 'task-1', 0]);
+        if (sql.includes('FOR UPDATE OF asset')) {
+          expect(params).toEqual(['user-1', 'project-1', 'task-1', 0]);
+        } else {
+          expect(params).toEqual(['version-task', 'asset-task', 'user-1', 'project-1', 'task-1', 0]);
+        }
         return {
           rows: [{ asset_id: 'asset-task', asset_version_id: 'version-task' }],
           rowCount: 1,
@@ -190,7 +221,7 @@ describe('continuous canvas shadow synchronization', () => {
       versionId: 'version-task',
       placementId: 'placement-task',
     });
-    expect(query).toHaveBeenCalledTimes(3);
+    expect(query).toHaveBeenCalledTimes(4);
   });
 
   it('adopts the exact output index when one task projects multiple versions', async () => {
@@ -222,7 +253,7 @@ describe('continuous canvas shadow synchronization', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('locks a projected task version before its placement during adoption', () => {
+  it('locks a projected task asset before its version and exact canvas placement', () => {
     const migrationSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
       'utf8',
@@ -230,13 +261,17 @@ describe('continuous canvas shadow synchronization', () => {
     const adoptionStart = migrationSource.indexOf('export async function adoptTaskProjectedCanvasMapping');
     const adoptionEnd = migrationSource.indexOf('\nexport ', adoptionStart + 1);
     const adoptionSource = migrationSource.slice(adoptionStart, adoptionEnd);
-    const versionLock = adoptionSource.indexOf('FROM wujie_asset_versions');
-    const placementLock = adoptionSource.indexOf('FROM wujie_workspace_placements');
+    const assetLock = adoptionSource.indexOf('FOR UPDATE OF asset');
+    const versionLock = adoptionSource.indexOf('FOR UPDATE', assetLock + 'FOR UPDATE OF asset'.length);
+    const placementLock = adoptionSource.indexOf('FOR UPDATE OF placement');
 
     expect(adoptionStart).toBeGreaterThan(-1);
+    expect(assetLock).toBeGreaterThan(-1);
     expect(versionLock).toBeGreaterThan(-1);
     expect(placementLock).toBeGreaterThan(-1);
+    expect(assetLock).toBeLessThan(versionLock);
     expect(versionLock).toBeLessThan(placementLock);
+    expect(adoptionSource).toContain('placement.workspace_id = $2');
   });
 
   it('retains unmanaged blob and missing broken-media placements during autosave', () => {
@@ -417,6 +452,22 @@ describe('continuous canvas shadow synchronization', () => {
     expect(versionLock).toBeLessThan(placementLock);
   });
 
+  it('locks the completed project asset set before adoption can lock versions or placements', () => {
+    const migrationSource = readFileSync(
+      resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
+      'utf8',
+    ).replace(/\r\n/g, '\n');
+    const migrationStart = migrationSource.indexOf('async function existingCompletedMigration');
+    const migrationEnd = migrationSource.indexOf('async function insertGraphForImage', migrationStart);
+    const completedSource = migrationSource.slice(migrationStart, migrationEnd);
+    const projectAssetLock = completedSource.indexOf('await lockProjectAssetsForReconciliation');
+    const firstGraphMutation = completedSource.indexOf('for (const { image, mapping } of plan.updates)');
+
+    expect(projectAssetLock).toBeGreaterThan(-1);
+    expect(firstGraphMutation).toBeGreaterThan(-1);
+    expect(projectAssetLock).toBeLessThan(firstGraphMutation);
+  });
+
   it('plans geometry updates, additions, and deletions after the initial checkpoint', () => {
     const previousMappings = {
       retained: { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' },
@@ -442,7 +493,7 @@ describe('continuous canvas shadow synchronization', () => {
     expect(plan.additions).toEqual([
       expect.objectContaining({ image: expect.objectContaining({ id: 'added' }) }),
     ]);
-    expect(plan.removals).toEqual([previousMappings.removed]);
+    expect(plan.removals).toEqual([{ imageId: 'removed', mapping: previousMappings.removed }]);
     expect(plan.activeMappings).toEqual(expect.objectContaining({
       retained: previousMappings.retained,
       added: expect.objectContaining({ assetId: expect.any(String), placementId: expect.any(String) }),
@@ -569,8 +620,17 @@ describe('continuous canvas shadow synchronization', () => {
       if (sql.includes('SELECT schema_version, metadata') && sql.includes('FROM wujie_projects')) {
         return { rows: [{ schema_version: 3, metadata: {} }], rowCount: 1 };
       }
+      if (sql.includes('SELECT asset.id AS locked_asset_id')) {
+        return { rows: [{ locked_asset_id: 'asset-a' }], rowCount: 1 };
+      }
       if (sql.includes('SELECT asset_id') && sql.includes('FROM wujie_workspace_placements')) {
-        return { rows: [{ asset_id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
+        return {
+          rows: [{
+            asset_id: 'asset-a', owner_id: 'user-1', project_id: 'project-1',
+            workspace_kind: 'canvas', workspace_id: 'project-1', entity_type: 'canvas-image', entity_id: 'retained',
+          }],
+          rowCount: 1,
+        };
       }
       if (sql.includes('SELECT id, owner_id, project_id') && sql.includes('FROM wujie_assets')) {
         return { rows: [{ id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
@@ -599,6 +659,12 @@ describe('continuous canvas shadow synchronization', () => {
       if (sql.includes('UPDATE wujie_workspace_placements')) {
         state.placementVersionId = String(params[3]);
         return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT asset.id') && sql.includes("entity_type = 'canvas-image'")) {
+        return { rows: [{ id: 'asset-a' }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id, asset_id') && sql.includes("entity_type = 'canvas-image'")) {
+        return { rows: [{ id: 'placement-a', asset_id: 'asset-a' }], rowCount: 1 };
       }
       if (sql.includes('UPDATE wujie_asset_migration_checkpoints')) {
         const checkpoint = JSON.parse(String(params[3])) as {
@@ -634,6 +700,187 @@ describe('continuous canvas shadow synchronization', () => {
       placementId: 'placement-a',
     });
     expect(result.mappings.retained).toEqual(state.checkpointMapping);
+  });
+
+  it('tombstones active canvas placements missing from both the checkpoint and current project snapshot', async () => {
+    const mapping = { assetId: 'asset-current', versionId: 'version-current', placementId: 'placement-current' };
+    const rawProject = project([image('current')]);
+    const state = {
+      placements: [
+        { id: 'placement-current', assetId: 'asset-current', status: 'active' },
+        { id: 'placement-stale', assetId: 'asset-stale', status: 'active' },
+      ],
+      assets: [
+        { id: 'asset-current', status: 'active' },
+        { id: 'asset-stale', status: 'active' },
+      ],
+    };
+    const sqlLog: string[] = [];
+    const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+      sqlLog.push(sql);
+      if (sql.includes('SELECT legacy.value AS legacy_project')) {
+        return { rows: [{ legacy_project: rawProject }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_asset_migration_checkpoints') && sql.includes('SELECT status')) {
+        return {
+          rows: [{
+            status: 'completed',
+            checkpoint: { sourceSchemaVersion: 1, legacyImageMappings: { current: mapping } },
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('SELECT schema_version, metadata') && sql.includes('FROM wujie_projects')) {
+        return { rows: [{ schema_version: 3, metadata: {}, status: 'active' }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT asset.id AS locked_asset_id')) {
+        return { rows: [{ locked_asset_id: 'asset-current' }, { locked_asset_id: 'asset-stale' }], rowCount: 2 };
+      }
+      if (sql.includes('SELECT id, owner_id, project_id') && sql.includes('FROM wujie_assets')) {
+        return { rows: [{ id: 'asset-current', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_asset_versions') && sql.includes('FOR UPDATE')) {
+        return {
+          rows: [{
+            file_url: '/media/current.png', storage_key: null, checksum: null, mime_type: null,
+            byte_size: null, width: 600, height: 400, availability: 'ready', recovery_source_url: null,
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('SELECT asset_id, owner_id, project_id') && sql.includes('FROM wujie_workspace_placements')) {
+        return {
+          rows: [{
+            asset_id: 'asset-current', owner_id: 'user-1', project_id: 'project-1',
+            workspace_kind: 'canvas', workspace_id: 'project-1', entity_type: 'canvas-image', entity_id: 'current',
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('UPDATE wujie_assets') && sql.includes('SET kind =')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_workspace_placements') && sql.includes('SET asset_version_id')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT asset.id') && sql.includes("entity_type = 'canvas-image'")) {
+        return {
+          rows: state.assets
+            .filter(asset => asset.status === 'active')
+            .map(asset => ({ id: asset.id })),
+          rowCount: state.assets.filter(asset => asset.status === 'active').length,
+        };
+      }
+      if (sql.includes('SELECT id, asset_id') && sql.includes("entity_type = 'canvas-image'")) {
+        return {
+          rows: state.placements
+            .filter(placement => placement.status === 'active')
+            .map(placement => ({ id: placement.id, asset_id: placement.assetId })),
+          rowCount: state.placements.filter(placement => placement.status === 'active').length,
+        };
+      }
+      if (sql.includes('UPDATE wujie_workspace_placements') && sql.includes('id = ANY')) {
+        const stalePlacementIds = new Set(params[2] as string[]);
+        for (const placement of state.placements) {
+          if (stalePlacementIds.has(placement.id) && placement.status === 'active') placement.status = 'trashed';
+        }
+        return { rows: [], rowCount: stalePlacementIds.size };
+      }
+      if (sql.includes('UPDATE wujie_assets asset') && sql.includes('id = ANY')) {
+        const staleAssetIds = new Set(params[2] as string[]);
+        for (const asset of state.assets) {
+          const hasActivePlacement = state.placements.some(placement => (
+            placement.assetId === asset.id && placement.status === 'active'
+          ));
+          if (staleAssetIds.has(asset.id) && !hasActivePlacement) asset.status = 'trashed';
+        }
+        return { rows: [], rowCount: staleAssetIds.size };
+      }
+      if (sql.includes('UPDATE wujie_asset_migration_checkpoints')) return { rows: [], rowCount: 1 };
+      if (sql.includes('UPDATE wujie_projects SET name')) return { rows: [], rowCount: 1 };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+    const client = { query } as unknown as Parameters<typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction>[0];
+
+    await legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    expect(state.placements).toEqual([
+      { id: 'placement-current', assetId: 'asset-current', status: 'active' },
+      { id: 'placement-stale', assetId: 'asset-stale', status: 'trashed' },
+    ]);
+    expect(state.assets).toEqual([
+      { id: 'asset-current', status: 'active' },
+      { id: 'asset-stale', status: 'trashed' },
+    ]);
+    expect(sqlLog.some(sql => /^\s*DELETE\s/i.test(sql))).toBe(false);
+    expect(sqlLog.some(sql => /(UPDATE|DELETE FROM) wujie_asset_versions/.test(sql))).toBe(false);
+  });
+
+  it('fails closed when a removed checkpoint mapping aliases a workflow placement', async () => {
+    const mapping = { assetId: 'asset-shared', versionId: 'version-shared', placementId: 'placement-collision' };
+    const state = { placementStatus: 'active', assetStatus: 'active' };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT legacy.value AS legacy_project')) {
+        return { rows: [{ legacy_project: project([]) }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_asset_migration_checkpoints') && sql.includes('SELECT status')) {
+        return {
+          rows: [{
+            status: 'completed',
+            checkpoint: { sourceSchemaVersion: 1, legacyImageMappings: { removed: mapping } },
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('SELECT schema_version, metadata') && sql.includes('FROM wujie_projects')) {
+        return { rows: [{ schema_version: 3, metadata: {}, status: 'active' }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT asset.id AS locked_asset_id')) {
+        return { rows: [{ locked_asset_id: 'asset-shared' }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM wujie_assets') && sql.includes('FOR UPDATE')) {
+        return { rows: [{ id: 'asset-shared' }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT asset_id') && sql.includes('FROM wujie_workspace_placements')) {
+        return {
+          rows: [{
+            asset_id: 'asset-shared',
+            workspace_kind: 'workflow',
+            workspace_id: 'project-1',
+            entity_type: 'workflow-input',
+            entity_id: 'workflow-node-1',
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('UPDATE wujie_workspace_placements')) {
+        state.placementStatus = 'trashed';
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE wujie_assets asset')) {
+        state.assetStatus = 'trashed';
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT asset.id') && sql.includes("entity_type = 'canvas-image'")) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes('SELECT id, asset_id') && sql.includes("entity_type = 'canvas-image'")) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes('UPDATE wujie_asset_migration_checkpoints')) return { rows: [], rowCount: 1 };
+      if (sql.includes('UPDATE wujie_projects SET name')) return { rows: [], rowCount: 1 };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+    const client = { query } as unknown as Parameters<typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction>[0];
+
+    await expect(legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+    })).rejects.toMatchObject({ code: 'LEGACY_MIGRATION_INTEGRITY_CONFLICT' });
+    expect(state).toEqual({ placementStatus: 'active', assetStatus: 'active' });
   });
 
   it('recreates only a missing placement after placement and asset locks', async () => {
@@ -759,9 +1006,15 @@ describe('continuous canvas shadow synchronization', () => {
           rowCount: 1,
         };
       }
+      if (sql.includes('SELECT asset.id AS locked_asset_id')) {
+        return { rows: [{ locked_asset_id: 'asset-a' }], rowCount: 1 };
+      }
       if (sql.includes('SELECT asset_id') && sql.includes('FROM wujie_workspace_placements')) {
         return {
-          rows: [{ asset_id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }],
+          rows: [{
+            asset_id: 'asset-a', owner_id: 'user-1', project_id: 'project-1',
+            workspace_kind: 'canvas', workspace_id: 'project-1', entity_type: 'canvas-image', entity_id: 'retained',
+          }],
           rowCount: 1,
         };
       }
@@ -796,6 +1049,12 @@ describe('continuous canvas shadow synchronization', () => {
         expect(params.slice(0, 3)).toEqual(['placement-a', 'user-1', 'project-1']);
         state.placementStatus = 'active';
         return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT asset.id') && sql.includes("entity_type = 'canvas-image'")) {
+        return { rows: [{ id: 'asset-a' }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id, asset_id') && sql.includes("entity_type = 'canvas-image'")) {
+        return { rows: [{ id: 'placement-a', asset_id: 'asset-a' }], rowCount: 1 };
       }
       if (sql.includes('UPDATE wujie_asset_migration_checkpoints')) {
         expect(params.slice(0, 3)).toEqual(['user-1', 'project-1', 'project-1']);

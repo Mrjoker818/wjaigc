@@ -187,7 +187,7 @@ export function planCanvasAssetVersionUpdate(input: {
 export interface CanvasShadowReconciliationPlan {
   additions: Array<{ image: CanvasImage; mapping: LegacyImageMapping }>;
   updates: Array<{ image: CanvasImage; mapping: LegacyImageMapping }>;
-  removals: LegacyImageMapping[];
+  removals: Array<{ imageId: string; mapping: LegacyImageMapping }>;
   activeMappings: Record<string, LegacyImageMapping>;
   checkpointMappings: Record<string, LegacyImageMapping>;
 }
@@ -211,6 +211,14 @@ export async function adoptManagedCanvasMapping(
     versionId: image.assetVersionId as string,
     placementId: image.placementId as string,
   };
+  const asset = await client.query<{ id: string }>(
+    `SELECT asset.id
+     FROM wujie_assets asset
+     WHERE asset.id = $1 AND asset.owner_id = $2 AND asset.project_id = $3
+     FOR UPDATE`,
+    [mapping.assetId, input.actorUserId, input.projectId],
+  );
+  if (!asset.rows[0]) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
   const version = await client.query<{ asset_id: string; asset_version_id: string }>(
     `SELECT asset_id, id AS asset_version_id
      FROM wujie_asset_versions
@@ -226,9 +234,10 @@ export async function adoptManagedCanvasMapping(
   }>(
     `SELECT asset_id, asset_version_id, id AS placement_id
      FROM wujie_workspace_placements
-     WHERE id = $1 AND owner_id = $2 AND project_id = $3
-       AND asset_id = $4 AND asset_version_id = $5
-       AND workspace_kind = 'canvas' AND entity_type = 'canvas-image'
+      WHERE id = $1 AND owner_id = $2 AND project_id = $3
+        AND asset_id = $4 AND asset_version_id = $5
+        AND workspace_kind = 'canvas' AND workspace_id = $3
+        AND entity_type = 'canvas-image'
        AND entity_id = $6 AND status = 'active'
      FOR UPDATE`,
     [
@@ -249,13 +258,19 @@ export async function adoptManagedCanvasMapping(
   const updated = await client.query(
     `UPDATE wujie_workspace_placements
      SET transform = $4::jsonb, metadata = $5::jsonb, updated_at = now()
-     WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'active'`,
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3
+       AND asset_id = $6 AND asset_version_id = $7
+       AND workspace_kind = 'canvas' AND workspace_id = $3
+       AND entity_type = 'canvas-image' AND entity_id = $8 AND status = 'active'`,
     [
       mapping.placementId,
       input.actorUserId,
       input.projectId,
       JSON.stringify(imageTransform(image)),
       metadata,
+      mapping.assetId,
+      mapping.versionId,
+      image.id,
     ],
   );
   if ((updated.rowCount ?? 0) !== 1) throw migrationError('LEGACY_MIGRATION_FAILED');
@@ -274,19 +289,43 @@ export async function adoptTaskProjectedCanvasMapping(
   if (!/^\d+$/.test(rawOutputIndex)) return null;
   const outputIndex = Number(rawOutputIndex);
   if (!Number.isInteger(outputIndex) || outputIndex < 0) return null;
+  const projectedAsset = await client.query<{
+    asset_id: string;
+    asset_version_id: string;
+  }>(
+    `SELECT version.asset_id, version.id AS asset_version_id
+     FROM wujie_asset_versions version
+     JOIN wujie_assets asset
+       ON asset.id = version.asset_id
+      AND asset.owner_id = version.owner_id
+      AND asset.project_id = version.project_id
+     WHERE version.owner_id = $1 AND version.project_id = $2 AND version.task_id = $3
+       AND version.metadata->>'outputIndex' = $4::text
+     FOR UPDATE OF asset`,
+    [input.actorUserId, input.projectId, image.generationTaskId, outputIndex],
+  );
+  const projectedAssetRow = projectedAsset.rows[0];
+  if (!projectedAssetRow) return null;
   const projectedVersion = await client.query<{
     asset_id: string;
     asset_version_id: string;
   }>(
     `SELECT asset_id, id AS asset_version_id
      FROM wujie_asset_versions
-     WHERE owner_id = $1 AND project_id = $2 AND task_id = $3
-       AND metadata->>'outputIndex' = $4::text
+     WHERE id = $1 AND asset_id = $2 AND owner_id = $3 AND project_id = $4
+       AND task_id = $5 AND metadata->>'outputIndex' = $6::text
      FOR UPDATE`,
-    [input.actorUserId, input.projectId, image.generationTaskId, outputIndex],
+    [
+      projectedAssetRow.asset_version_id,
+      projectedAssetRow.asset_id,
+      input.actorUserId,
+      input.projectId,
+      image.generationTaskId,
+      outputIndex,
+    ],
   );
   const versionRow = projectedVersion.rows[0];
-  if (!versionRow) return null;
+  if (!versionRow) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
   const projectedPlacement = await client.query<{
     asset_id: string;
     asset_version_id: string;
@@ -294,8 +333,9 @@ export async function adoptTaskProjectedCanvasMapping(
   }>(
     `SELECT placement.asset_id, placement.asset_version_id, placement.id AS placement_id
      FROM wujie_workspace_placements placement
-     WHERE placement.owner_id = $1 AND placement.project_id = $2
-        AND placement.workspace_kind = 'canvas'
+      WHERE placement.owner_id = $1 AND placement.project_id = $2
+         AND placement.workspace_kind = 'canvas'
+         AND placement.workspace_id = $2
         AND placement.entity_type = 'canvas-image'
         AND placement.entity_id = $3
         AND placement.status = 'active'
@@ -315,13 +355,19 @@ export async function adoptTaskProjectedCanvasMapping(
   const updated = await client.query(
     `UPDATE wujie_workspace_placements
      SET transform = $4::jsonb, metadata = $5::jsonb, updated_at = now()
-     WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'active'`,
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3
+       AND asset_id = $6 AND asset_version_id = $7
+       AND workspace_kind = 'canvas' AND workspace_id = $3
+       AND entity_type = 'canvas-image' AND entity_id = $8 AND status = 'active'`,
     [
       row.placement_id,
       input.actorUserId,
       input.projectId,
       JSON.stringify(imageTransform(image)),
       metadata,
+      row.asset_id,
+      row.asset_version_id,
+      image.id,
     ],
   );
   if ((updated.rowCount ?? 0) !== 1) throw migrationError('LEGACY_MIGRATION_FAILED');
@@ -358,7 +404,7 @@ export function planCanvasShadowReconciliation(input: {
     updates,
     removals: Object.entries(input.previousMappings)
       .filter(([imageId]) => !currentIds.has(imageId))
-      .map(([, mapping]) => mapping),
+      .map(([imageId, mapping]) => ({ imageId, mapping })),
     activeMappings,
     checkpointMappings,
   };
@@ -534,6 +580,7 @@ async function existingCompletedMigration(
     previousMappings: checkpointMappings(row.checkpoint),
     images: read.project.canvasImages,
   });
+  await lockProjectAssetsForReconciliation(client, input);
 
   for (const { image, mapping } of plan.updates) {
     const updated = await updateGraphForImage(client, input, image, mapping);
@@ -548,9 +595,10 @@ async function existingCompletedMigration(
     plan.activeMappings[image.id] = activeMapping;
     plan.checkpointMappings[image.id] = activeMapping;
   }
-  for (const mapping of plan.removals) {
-    await trashGraphForImage(client, input, mapping);
+  for (const { imageId, mapping } of plan.removals) {
+    await trashGraphForImage(client, input, imageId, mapping);
   }
+  await trashStaleCanvasPlacements(client, input, plan.activeMappings);
   await client.query(
     `UPDATE wujie_asset_migration_checkpoints
      SET checkpoint = $4::jsonb, error_code = NULL, updated_at = now()
@@ -574,6 +622,20 @@ async function existingCompletedMigration(
     reused: true,
     mappings: plan.activeMappings,
   };
+}
+
+async function lockProjectAssetsForReconciliation(
+  client: PoolClient,
+  input: LegacyMigrationInput,
+): Promise<void> {
+  await client.query(
+    `SELECT asset.id AS locked_asset_id
+     FROM wujie_assets asset
+     WHERE asset.owner_id = $1 AND asset.project_id = $2
+     ORDER BY asset.id
+     FOR UPDATE`,
+    [input.actorUserId, input.projectId],
+  );
 }
 
 async function insertGraphForImage(
@@ -679,8 +741,16 @@ async function updateGraphForImage(
   );
   const row = currentVersion.rows[0];
   if (!row) throw migrationError('LEGACY_MIGRATION_FAILED');
-  const lockedPlacement = await client.query<{ asset_id: string; owner_id: string; project_id: string }>(
-    `SELECT asset_id, owner_id, project_id
+  const lockedPlacement = await client.query<{
+    asset_id: string;
+    owner_id: string;
+    project_id: string;
+    workspace_kind: string;
+    workspace_id: string;
+    entity_type: string;
+    entity_id: string;
+  }>(
+    `SELECT asset_id, owner_id, project_id, workspace_kind, workspace_id, entity_type, entity_id
      FROM wujie_workspace_placements
      WHERE id = $1
      FOR UPDATE`,
@@ -691,6 +761,10 @@ async function updateGraphForImage(
     placementRow.asset_id !== mapping.assetId
     || placementRow.owner_id !== input.actorUserId
     || placementRow.project_id !== input.projectId
+    || placementRow.workspace_kind !== 'canvas'
+    || placementRow.workspace_id !== input.projectId
+    || placementRow.entity_type !== 'canvas-image'
+    || placementRow.entity_id !== image.id
   )) {
     throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
   }
@@ -800,6 +874,7 @@ async function updateGraphForImage(
 async function trashGraphForImage(
   client: PoolClient,
   input: LegacyMigrationInput,
+  imageId: string,
   mapping: LegacyImageMapping,
 ): Promise<void> {
   const assetLock = await client.query<{ id: string }>(
@@ -809,20 +884,36 @@ async function trashGraphForImage(
     [mapping.assetId, input.actorUserId, input.projectId],
   );
   if (!assetLock.rows[0]) return;
-  const placementLock = await client.query<{ asset_id: string }>(
-    `SELECT asset_id FROM wujie_workspace_placements
+  const placementLock = await client.query<{
+    asset_id: string;
+    workspace_kind: string;
+    workspace_id: string;
+    entity_type: string;
+    entity_id: string;
+  }>(
+    `SELECT asset_id, workspace_kind, workspace_id, entity_type, entity_id
+     FROM wujie_workspace_placements
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
      FOR UPDATE`,
     [mapping.placementId, input.actorUserId, input.projectId],
   );
-  if (placementLock.rows[0] && placementLock.rows[0].asset_id !== mapping.assetId) {
+  const placementRow = placementLock.rows[0];
+  if (placementRow && (
+    placementRow.asset_id !== mapping.assetId
+    || placementRow.workspace_kind !== 'canvas'
+    || placementRow.workspace_id !== input.projectId
+    || placementRow.entity_type !== 'canvas-image'
+    || placementRow.entity_id !== imageId
+  )) {
     throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
   }
   await client.query(
     `UPDATE wujie_workspace_placements
      SET status = 'trashed', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
-     WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'active'`,
-    [mapping.placementId, input.actorUserId, input.projectId],
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3
+       AND asset_id = $4 AND workspace_kind = 'canvas' AND workspace_id = $3
+       AND entity_type = 'canvas-image' AND entity_id = $5 AND status = 'active'`,
+    [mapping.placementId, input.actorUserId, input.projectId, mapping.assetId, imageId],
   );
   await client.query(
     `UPDATE wujie_assets asset
@@ -834,6 +925,65 @@ async function trashGraphForImage(
            AND placement.project_id = asset.project_id AND placement.status = 'active'
        )`,
     [mapping.assetId, input.actorUserId, input.projectId],
+  );
+}
+
+async function trashStaleCanvasPlacements(
+  client: PoolClient,
+  input: LegacyMigrationInput,
+  activeMappings: Record<string, LegacyImageMapping>,
+): Promise<void> {
+  await client.query(
+    `SELECT asset.id
+     FROM wujie_assets asset
+     WHERE asset.owner_id = $1 AND asset.project_id = $2
+       AND asset.id IN (
+         SELECT placement.asset_id
+         FROM wujie_workspace_placements placement
+         WHERE placement.owner_id = $1 AND placement.project_id = $2
+           AND placement.workspace_kind = 'canvas' AND placement.workspace_id = $2
+           AND placement.entity_type = 'canvas-image' AND placement.status = 'active'
+       )
+     ORDER BY asset.id
+     FOR UPDATE`,
+    [input.actorUserId, input.projectId],
+  );
+  const placementLock = await client.query<{ id: string; asset_id: string }>(
+    `SELECT id, asset_id
+     FROM wujie_workspace_placements
+     WHERE owner_id = $1 AND project_id = $2
+       AND workspace_kind = 'canvas' AND workspace_id = $2
+       AND entity_type = 'canvas-image' AND status = 'active'
+     ORDER BY id
+     FOR UPDATE`,
+    [input.actorUserId, input.projectId],
+  );
+  const activePlacementIds = new Set(
+    Object.values(activeMappings).map(mapping => mapping.placementId),
+  );
+  const staleRows = placementLock.rows.filter(row => !activePlacementIds.has(row.id));
+  if (staleRows.length === 0) return;
+
+  const stalePlacementIds = staleRows.map(row => row.id);
+  const staleAssetIds = [...new Set(staleRows.map(row => row.asset_id))];
+  await client.query(
+    `UPDATE wujie_workspace_placements
+     SET status = 'trashed', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
+     WHERE owner_id = $1 AND project_id = $2 AND id = ANY($3::text[])
+       AND workspace_kind = 'canvas' AND workspace_id = $2
+       AND entity_type = 'canvas-image' AND status = 'active'`,
+    [input.actorUserId, input.projectId, stalePlacementIds],
+  );
+  await client.query(
+    `UPDATE wujie_assets asset
+     SET status = 'trashed', updated_at = now()
+     WHERE asset.owner_id = $1 AND asset.project_id = $2 AND asset.id = ANY($3::text[])
+       AND NOT EXISTS (
+         SELECT 1 FROM wujie_workspace_placements placement
+         WHERE placement.asset_id = asset.id AND placement.owner_id = asset.owner_id
+           AND placement.project_id = asset.project_id AND placement.status = 'active'
+       )`,
+    [input.actorUserId, input.projectId, staleAssetIds],
   );
 }
 
