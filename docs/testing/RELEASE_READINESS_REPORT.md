@@ -1144,7 +1144,7 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 | Deterministic false-ready detection | VERIFIED LOCALLY | Empty or internal proxy-only current media without durable storage/recovery is counted for both current versions and active placements. |
 | Release fail-closed behavior | VERIFIED LOCALLY | Either aggregate adds `non-durable-ready-media`; `asset-v3` cannot be authorized. |
 | PostgreSQL and repository regression | VERIFIED | `489/489` files and `2992/2992` tests passed with zero skips; validate and build `115/115` passed. |
-| Exact Coze deployment | PENDING | Pull the new `main` SHA, retain `shadow`, and verify the authenticated readiness API reports `falseReadyCurrentVersions=1` and `falseReadyActivePlacements=1`. |
+| Exact Coze deployment | VERIFIED ON `e809f5c` | Coze retained `shadow` and `stable`; build and HTTP health passed. Authenticated readiness reports `falseReadyCurrentVersions=1`, `falseReadyActivePlacements=2` and `non-durable-ready-media`. The unsafe version has two active placements. |
 | Historical data remediation | NOT PERFORMED | One empty chat placeholder and two Canvas placements on the shared expired proxy remain. Choose replace, regenerate or archive explicitly. |
 | Protected baseline gate | BLOCKED BY STALE BASELINE | Sixteen previously accumulated source-drift entries require an authorized baseline refresh; no allowlist was weakened. |
-| Release decision | CONDITIONAL / ASSET-V3 BLOCKED | Current shadow runtime remains usable, but promotion is prohibited until exact-SHA cloud proof and explicit media remediation are complete. |
+| Release decision | CONDITIONAL / ASSET-V3 BLOCKED | Exact-SHA cloud proof is complete and current shadow remains usable. Promotion is still prohibited until explicit historical media remediation and the remaining thumbnail/recovery acceptance are complete. |

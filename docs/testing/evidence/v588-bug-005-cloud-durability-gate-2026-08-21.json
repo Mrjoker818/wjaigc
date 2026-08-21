@@ -1,0 +1,70 @@
+{
+  "bugId": "V588-BUG-005",
+  "capturedAt": "2026-08-21T11:33:45.267Z",
+  "environment": {
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "commit": "e809f5c105d6e42d584a38ae217d7791c7864759",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "assetGraphMode": "shadow",
+    "canvasKernelMode": "legacy",
+    "browser": "Google Chrome",
+    "authenticatedRole": "admin"
+  },
+  "deployment": {
+    "workspaceClean": true,
+    "productionBuild": "passed",
+    "port5000": "HTTP 200",
+    "publicRoot": "HTTP 200"
+  },
+  "readiness": {
+    "status": 200,
+    "requestId": "27ebc56f-b99e-9d7e-8e8a-6d77ad154fe6",
+    "releaseReady": false,
+    "switchAuthorized": false,
+    "blockers": [
+      "non-ready-current-media",
+      "non-durable-ready-media"
+    ],
+    "media": {
+      "ready": 46,
+      "missing": 2,
+      "placementMissing": 2,
+      "falseReadyCurrentVersions": 1,
+      "falseReadyActivePlacements": 2
+    },
+    "shadowComparison": {
+      "legacyProjects": 6,
+      "graphProjects": 6,
+      "matchingProjects": 6,
+      "mismatchedProjects": 0,
+      "unmigratedProjects": 0,
+      "orphanGraphProjects": 0,
+      "failedCheckpoints": 0,
+      "missingCheckpoints": 0
+    },
+    "migrations": {
+      "required": 6,
+      "verified": 6,
+      "missing": [],
+      "checksumMismatches": []
+    }
+  },
+  "projectPreservation": {
+    "status": 200,
+    "projectRevision": 5359,
+    "projectCount": 6,
+    "imageCount": 48
+  },
+  "browserRegression": {
+    "freshConsoleErrors": 0,
+    "freshConsoleWarnings": 0,
+    "screenshot": "v588-bug-005-cloud-durability-gate-2026-08-21.png"
+  },
+  "interpretation": {
+    "falseReadyCurrentVersions": "One current version is falsely marked ready.",
+    "falseReadyActivePlacements": "That unsafe ready version is referenced by two active Canvas placements.",
+    "historicalRowsMutated": false,
+    "assetV3Authorized": false,
+    "remediation": "Explicit administrator decision is still required."
+  }
+}

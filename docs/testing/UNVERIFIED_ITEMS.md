@@ -1027,7 +1027,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Project/image preservation | VERIFIED IN GOOGLE CHROME | The authenticated dashboard still contains 6 projects and 48 images; fresh Console Error/Warning is `0/0`. |
 | Historical missing media | OPEN / 2 RECORDS | Classify each missing current media and placement, recover from controlled durable storage when possible, or record an explicit administrator decision without fabricating bytes. |
 | Historical missing media classification | VERIFIED | One empty chat-only placeholder and one expired Canvas proxy asset are explicitly missing; neither has durable recovery metadata. |
-| False-ready physical media | OPEN P1 / V588-BUG-005 | A third current AssetVersion is marked `ready` while the shared proxy URL returns 404. Add a durability gate and permanent regression before promotion. |
+| False-ready physical media | DETECTION VERIFIED / DATA OPEN | `e809f5c` reports one false-ready current version and its two active placements through `non-durable-ready-media`. Historical content remediation remains explicit. |
 | `asset-v3` promotion | BLOCKED BY DOCTOR | `releaseReady=false`, `switchAuthorized=false`, blocker `non-ready-current-media`. Do not force the mode switch. |
 | Thumbnail projection/reload | UNVERIFIED | After the two media records are resolved and the doctor authorizes promotion, prove 512/256 delivery, original fallback, reload and no image-count drift. |
 | S3 thumbnail recovery | UNVERIFIED IN CLOUD | Prove the nested durable object can reconstruct the exact public thumbnail path after local loss. |
@@ -1038,6 +1038,6 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 | Item | Current evidence | Required closure |
 |---|---|---|
-| Exact-SHA cloud durability gate | Local implementation and PostgreSQL tests pass | Deploy the new `main` candidate in `shadow` and prove readiness reports one false-ready current version, one false-ready active placement, and blocker `non-durable-ready-media`. |
+| Exact-SHA cloud durability gate | VERIFIED ON `e809f5c` | Authenticated Google Chrome proved one false-ready current version, two active placements, blocker `non-durable-ready-media`, and zero fresh Console errors/warnings. No further gate verification is required. |
 | Historical broken-media remediation | Three active broken asset/placement records are classified | Explicitly replace, regenerate or archive them; never silently fabricate or delete user content. |
 | Protected baseline refresh | All protected features remain present, but 16 source-drift entries exceed the older allowlist | Review against the currently authorized main baseline in a dedicated change; do not weaken the gate inside this bug fix. |

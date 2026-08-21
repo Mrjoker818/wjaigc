@@ -12,8 +12,8 @@
 - [x] Extend the public readiness projection types without exposing record details.
 - [x] Run focused tests and confirm GREEN.
 - [x] Run the real PostgreSQL asset suite and all repository gates.
-- [ ] Commit and push only the verified files to `main`; verify `stable` is unchanged.
-- [ ] Deploy the exact commit to Coze and use the existing Google Chrome preview tab for regression.
+- [x] Commit and push only the verified files to `main`; verify `stable` is unchanged.
+- [x] Deploy the exact commit to Coze and use the existing Google Chrome preview tab for regression.
 - [x] Update BUG_REGISTER, REGRESSION_REPORT, RELEASE_READINESS_REPORT and UNVERIFIED_ITEMS; Obsidian is updated before push.
 
 ## Acceptance Criteria
