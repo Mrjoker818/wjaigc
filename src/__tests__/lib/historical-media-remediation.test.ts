@@ -92,13 +92,46 @@ describe('historical media remediation domain', () => {
   });
 
   it('rejects candidate structures beyond the canonical JSON work budget', () => {
-    expect(() => buildHistoricalMediaCandidateDigest({
-      ...candidate,
-      placements: Array.from({ length: 1025 }, (_, index) => ({
+    const oversizedPlacements = new Proxy(
+      Array.from({ length: 1025 }, (_, index) => ({
         ...candidate.placements[0],
         id: `placement-${index}`,
       })),
+      {
+        get(target, property, receiver) {
+          if (property === 'map') throw new Error('PLACEMENT_MAP_ACCESSED');
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+
+    expect(() => buildHistoricalMediaCandidateDigest({
+      ...candidate,
+      placements: oversizedPlacements,
     } as typeof candidate)).toThrow('HISTORICAL_MEDIA_REQUEST_INVALID');
+  });
+
+  it('normalizes candidate and placement whitespace before hashing', () => {
+    const paddedCandidate = {
+      ...candidate,
+      ownerId: ' owner-a ',
+      projectId: ' project-a ',
+      assetId: ' asset-a ',
+      assetVersionId: ' version-a ',
+      availability: ' missing ',
+      urlClass: ' ephemeral-proxy ',
+      placements: candidate.placements.map((placement) => ({
+        id: ` ${placement.id} `,
+        workspace: ` ${placement.workspace} `,
+        workspaceId: ` ${placement.workspaceId} `,
+        entityType: ` ${placement.entityType} `,
+        entityId: ` ${placement.entityId} `,
+      })),
+    } as unknown as typeof candidate;
+
+    expect(buildHistoricalMediaCandidateDigest(paddedCandidate)).toBe(
+      buildHistoricalMediaCandidateDigest(candidate),
+    );
   });
 
   it('preserves the 64 KiB canonical JSON guard', () => {
