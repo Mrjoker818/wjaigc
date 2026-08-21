@@ -690,8 +690,8 @@ function mapLockedPlacement(row: LockedPlacementRow): WorkspacePlacement {
 }
 
 function isAllowedBrokenCandidate(row: LockedCandidateRow): boolean {
-  return row.storage_key === null
-    && row.recovery_source_url === null
+  return (row.storage_key === null || /^ *$/.test(row.storage_key))
+    && (row.recovery_source_url === null || /^ *$/.test(row.recovery_source_url))
     && classifyHistoricalMediaUrl(row.file_url) !== 'durable-or-external'
     && (
       row.availability === 'ready'
@@ -920,9 +920,9 @@ async function markVersionUnrecoverable(
        AND asset_id = $2
        AND owner_id = $3
        AND project_id = $4
-       AND storage_key IS NULL
-       AND recovery_source_url IS NULL
-       AND (btrim(file_url) = '' OR file_url LIKE '/v1/images/proxy/%')
+       AND nullif(btrim(coalesce(storage_key, '')), '') IS NULL
+       AND nullif(btrim(coalesce(recovery_source_url, '')), '') IS NULL
+       AND (btrim(coalesce(file_url, '')) = '' OR file_url LIKE '/v1/images/proxy/%')
        AND availability IN ('ready', 'missing', 'unrecoverable')`,
     [locked.assetVersionId, locked.assetId, locked.ownerId, locked.projectId],
   );

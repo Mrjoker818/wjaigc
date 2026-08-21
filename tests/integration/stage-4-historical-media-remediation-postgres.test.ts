@@ -532,8 +532,7 @@ function createArchiveCommand(
 async function readArchiveState(query: QueryFn): Promise<ArchiveState> {
   const [assets, audit, ledger, placements, projects, revision, versions] = await Promise.all([
     query(
-      `SELECT id, status, current_version_id
-       FROM wujie_assets ORDER BY id`,
+      'SELECT * FROM wujie_assets ORDER BY id',
     ),
     query(
       `SELECT id, user_id, user_name, action, target_type, target_id, detail, ip_address
@@ -545,24 +544,20 @@ async function readArchiveState(query: QueryFn): Promise<ArchiveState> {
        FROM wujie_asset_media_remediations ORDER BY id`,
     ),
     query(
-      `SELECT id, status, deleted_at, metadata
-       FROM wujie_workspace_placements ORDER BY id`,
+      'SELECT * FROM wujie_workspace_placements ORDER BY id',
     ),
     query(
-      `SELECT data_value
-       FROM wujie_user_data
+      `SELECT * FROM wujie_user_data
        WHERE user_id = $1 AND data_key = 'projects'`,
       [OWNER_ID],
     ),
     query(
-      `SELECT data_value
-       FROM wujie_user_data
+      `SELECT * FROM wujie_user_data
        WHERE user_id = $1 AND data_key = '__asset_graph_projects_revision'`,
       [OWNER_ID],
     ),
     query(
-      `SELECT id, availability, storage_key, recovery_source_url
-       FROM wujie_asset_versions ORDER BY id`,
+      'SELECT * FROM wujie_asset_versions ORDER BY id',
     ),
   ]);
   return {
@@ -1096,6 +1091,50 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
     });
   });
 
+  postgresIt('archives current and non-current candidates with trimmed-empty storage fields', async () => {
+    await withIsolatedPostgres('historical-media-trimmed-empty-storage', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      await query(
+        `UPDATE wujie_asset_versions
+         SET storage_key = '   ', recovery_source_url = '  '
+         WHERE id = ANY($1::text[])`,
+        [['version-chat-empty', 'version-non-current-broken']],
+      );
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const selected = discovery.candidates.filter(candidate => [
+        'version-chat-empty',
+        'version-non-current-broken',
+      ].includes(candidate.assetVersionId));
+
+      expect(selected.map(candidate => ({
+        assetVersionId: candidate.assetVersionId,
+        isCurrentVersion: candidate.isCurrentVersion,
+      }))).toEqual([
+        { assetVersionId: 'version-chat-empty', isCurrentVersion: true },
+        { assetVersionId: 'version-non-current-broken', isCurrentVersion: false },
+      ]);
+      await expect(service.archiveHistoricalMedia(createArchiveCommand(
+        selected,
+        'historical-media-trimmed-empty-storage',
+      ))).resolves.toMatchObject({
+        archivedVersionCount: 2,
+        archivedPlacementCount: 2,
+        projectRevisions: { [PROJECT_ID]: 11 },
+      });
+      await expect(query(
+        `SELECT id, availability FROM wujie_asset_versions
+         WHERE id = ANY($1::text[]) ORDER BY id`,
+        [['version-chat-empty', 'version-non-current-broken']],
+      )).resolves.toMatchObject({
+        rows: [
+          { id: 'version-chat-empty', availability: 'unrecoverable' },
+          { id: 'version-non-current-broken', availability: 'unrecoverable' },
+        ],
+      });
+    });
+  });
+
   postgresIt('serializes identical archives, reuses one result and rejects a changed request', async () => {
     await withIsolatedPostgres('historical-media-concurrent-archive', async ({ databaseUrl: isolatedUrl, query }) => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
@@ -1618,20 +1657,24 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
          SET current_version_id = 'version-false-ready-older'
          WHERE id = 'asset-false-ready'`,
       );
+      const demotedState = await readArchiveState(query);
       await expect(service.archiveHistoricalMedia(createArchiveCommand(
         [byAsset.get('asset-false-ready') as HistoricalMediaCandidate],
         'historical-media-stale-current-version',
       ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_CANDIDATE_STALE' });
+      expect(await readArchiveState(query)).toEqual(demotedState);
 
       await query(
         `UPDATE wujie_assets
          SET current_version_id = 'version-non-current-broken'
          WHERE id = 'asset-non-current-broken'`,
       );
+      const promotedState = await readArchiveState(query);
       await expect(service.archiveHistoricalMedia(createArchiveCommand(
         [byAsset.get('asset-non-current-broken') as HistoricalMediaCandidate],
         'historical-media-stale-promoted-current-version',
       ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_CANDIDATE_STALE' });
+      expect(await readArchiveState(query)).toEqual(promotedState);
 
       await expect(query(
         `SELECT count(*)::int AS count FROM wujie_workspace_placements
