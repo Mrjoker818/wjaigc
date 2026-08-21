@@ -28,4 +28,23 @@ describe('Coze preview runtime contract', () => {
     expect(startScript).toContain('pnpm run build');
     expect(startScript).not.toContain('pnpm run dev');
   });
+
+  it.each([
+    'scripts/coze-preview-build.sh',
+    'scripts/coze-deploy-build.sh',
+  ])('applies checksum-managed migrations before building: %s', (scriptPath) => {
+    const buildScript = readFileSync(resolve(process.cwd(), scriptPath), 'utf8');
+    const migrationIndex = buildScript.indexOf('pnpm run migrate');
+    const buildIndex = buildScript.indexOf('pnpm run build');
+
+    expect(migrationIndex).toBeGreaterThan(-1);
+    expect(buildIndex).toBeGreaterThan(migrationIndex);
+    expect(buildScript).toContain('DATABASE_URL');
+    expect(buildScript).toContain('PGDATABASE_URL');
+  });
+
+  it('keeps migration work out of the cold-start runtime path', () => {
+    const startScript = readFileSync(resolve(process.cwd(), 'scripts/coze-start.sh'), 'utf8');
+    expect(startScript).not.toContain('pnpm run migrate');
+  });
 });

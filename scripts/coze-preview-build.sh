@@ -14,6 +14,15 @@ if ! pnpm install --frozen-lockfile 2>&1; then
   node scripts/patch-pg-ssl.js 2>/dev/null || true
 fi
 
+# Apply checksum-managed migrations during the build phase so the runtime
+# fast path can remain within Coze's cold-start budget.
+if [ -n "${DATABASE_URL:-${PGDATABASE_URL:-}}" ]; then
+  echo "[coze-preview-build] Applying database migrations..."
+  pnpm run migrate
+else
+  echo "[coze-preview-build] Database URL is not configured; skipping migrations."
+fi
+
 # Step 2: Build the project
 echo "[coze-preview-build] Building Next.js project..."
 pnpm run build

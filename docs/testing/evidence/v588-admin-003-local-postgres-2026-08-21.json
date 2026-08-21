@@ -1,0 +1,41 @@
+{
+  "item": "V588-ADMIN-003",
+  "candidateCommit": "d941384f3f7abb5c0b7a67d71686e4ebfee24da8",
+  "testedAt": "2026-08-21T09:39:34+08:00",
+  "database": {
+    "engine": "PostgreSQL",
+    "version": "18.4",
+    "isolation": "temporary local cluster",
+    "connection": "postgresql://postgres@127.0.0.1:55433/wujie_v588_admin003"
+  },
+  "command": "pnpm exec vitest run tests/integration/v588-admin-thumbnail-backfill-postgres.test.ts",
+  "result": {
+    "status": "passed",
+    "testFilesPassed": 1,
+    "testsPassed": 2,
+    "testsFailed": 0,
+    "testsSkipped": 0,
+    "durationSeconds": 3.96
+  },
+  "fullRegression": {
+    "testedAt": "2026-08-21T09:45:10+08:00",
+    "command": "pnpm test",
+    "environment": [
+      "POSTGRES_TEST_DATABASE_URL",
+      "TEST_POSTGRES_URL"
+    ],
+    "status": "passed",
+    "testFilesPassed": 487,
+    "testsPassed": 2967,
+    "testsFailed": 0,
+    "testsSkipped": 0,
+    "durationSeconds": 313.19
+  },
+  "assertions": [
+    "The checksum-managed migration applies on real PostgreSQL.",
+    "The database enforces one thumbnail row per asset version and size.",
+    "Concurrent workers cannot claim the same leased variant.",
+    "A stale worker cannot finalize a variant after lease expiry and reclaim.",
+    "The full PostgreSQL-enabled repository regression passes with zero skips."
+  ]
+}

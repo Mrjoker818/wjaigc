@@ -1009,11 +1009,11 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 | Item | Status | Remaining proof |
 |---|---|---|
-| Thumbnail migration and lease concurrency | BLOCKED LOCALLY | Supply isolated `POSTGRES_TEST_DATABASE_URL`; execute the two new schema/claim/reclaim/stale-finalization tests with zero skips. |
-| Coze migration | UNVERIFIED | Pull the exact candidate, run the checksum-managed migration and prove the ledger contains `20260821_v588_admin_thumbnail_variants.sql`. |
-| Administrator backfill API | UNVERIFIED | Prove unauthenticated GET/POST return 401, authenticated dry-run is non-mutating, a limited real batch reaches durable status and repeated execution does not duplicate a variant. |
+| Thumbnail migration and lease concurrency | VERIFIED LOCALLY | Isolated PostgreSQL 18.4 passed the full repository `2967/2967` with zero skips, including the two schema/claim/reclaim/stale-finalization tests. Evidence: `docs/testing/evidence/v588-admin-003-local-postgres-2026-08-21.json`. |
+| Coze migration | FAILED ON `d941384`; LOCAL FIX READY | The route deployed before its table because Coze build scripts omitted migrations. Rebuild from the new main candidate and prove the ledger contains `20260821_v588_admin_thumbnail_variants.sql`. |
+| Administrator backfill API | PARTIAL | Unauthenticated GET/POST return `401` and administrator login succeeds. Authenticated status/dry-run currently return `500`; after rebuilding, prove dry-run is non-mutating and a limited real batch reaches durable status without duplicate variants. |
 | Canvas thumbnail projection | UNVERIFIED IN CLOUD | Reload a project with a generated ready variant, prove the thumbnail is served, original media remains the zoom/high-resolution fallback and the project remains readable after restart. |
 | Storage recovery | UNVERIFIED IN CLOUD | Remove or bypass the local thumbnail copy and prove `/api/serve-upload/thumbnails/{version}/{size}.webp` recovers the exact S3 object. |
-| Browser evidence | UNVERIFIED | Reuse the existing Google Chrome tabs only; capture API JSON, screenshot and zero fresh Console Error/Warning. |
+| Browser evidence | CLOUD REBUILD + CHROME CONTROL PENDING | `d941384` route/auth behavior is proven by real API responses, but the missing migration blocks UI/Canvas evidence. Rebuild from the migration-delivery candidate, then reuse the existing Google Chrome tabs only and capture API JSON, screenshot and zero fresh Console Error/Warning. |
 | Donor snapshot | READ-ONLY VERIFIED | Lock digest remains `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; candidate changes target `main` only. |

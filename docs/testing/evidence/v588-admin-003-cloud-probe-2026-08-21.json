@@ -1,0 +1,101 @@
+{
+  "item": "V588-ADMIN-003",
+  "candidateCommit": "d941384f3f7abb5c0b7a67d71686e4ebfee24da8",
+  "probedAt": "2026-08-21T09:35:00+08:00",
+  "baseUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/admin/backfill-thumbnails",
+      "status": 404,
+      "errorCode": "instance_not_found",
+      "requestId": "f70c8663-8eb7-9e70-8bca-01536a246aee"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/backfill-thumbnails",
+      "status": 404,
+      "errorCode": "instance_not_found",
+      "requestId": "6640d89c-bbe0-9448-b50e-0cd9b04d58d1"
+    }
+  ],
+  "followUp": {
+    "probedAt": "2026-08-21T09:43:00+08:00",
+    "method": "GET",
+    "path": "/api/admin/backfill-thumbnails",
+    "status": 404,
+    "responseType": "Next.js not-found page",
+    "conclusion": "The sandbox recovered but still serves a build without the candidate route."
+  },
+  "reconnectProbe": {
+    "probedAt": "2026-08-21T10:02:00+08:00",
+    "rootStatus": 200,
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/admin/backfill-thumbnails",
+        "status": 404,
+        "responseType": "Next.js not-found page",
+        "requestId": "cf8034dc-5be8-9b95-a302-87d450642257"
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/backfill-thumbnails",
+        "status": 404,
+        "responseType": "Next.js not-found page",
+        "requestId": "679cfca6-cb59-9372-a404-95af79da70c8"
+      }
+    ],
+    "chromeControl": "The correct existing project and preview tabs were discovered, but both tab-claim attempts timed out. No new tab or alternate browser was used.",
+    "conclusion": "The sandbox is reachable, but the candidate route is still absent from the running build."
+  },
+  "deployedCandidateProbe": {
+    "probedAt": "2026-08-21T10:23:00+08:00",
+    "candidateCommit": "d941384f3f7abb5c0b7a67d71686e4ebfee24da8",
+    "unauthenticated": [
+      {
+        "method": "GET",
+        "path": "/api/admin/backfill-thumbnails",
+        "status": 401,
+        "body": { "success": false, "error": "Admin required" },
+        "requestId": "1cbf6f56-36b0-937c-8199-1a66cb8a77e7"
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/backfill-thumbnails",
+        "status": 401,
+        "body": { "success": false, "error": "Admin required" },
+        "requestId": "c1b134ba-b9ec-996e-b297-ce973b86f4bf"
+      }
+    ],
+    "administrator": {
+      "loginStatus": 200,
+      "user": "Mr.joker",
+      "role": "admin",
+      "requests": [
+        {
+          "method": "GET",
+          "status": 500,
+          "body": { "success": false, "error": "Thumbnail backfill failed" },
+          "requestId": "89d4e1f2-258e-92c6-b265-e87f3b4508b3"
+        },
+        {
+          "method": "POST",
+          "input": { "dryRun": true, "limit": 10 },
+          "status": 500,
+          "body": { "success": false, "error": "Thumbnail backfill failed" },
+          "requestId": "b5707190-2e91-96ed-89c2-f657b8b88481"
+        },
+        {
+          "method": "GET",
+          "status": 500,
+          "body": { "success": false, "error": "Thumbnail backfill failed" },
+          "requestId": "b800790b-e3e3-9dd3-b3c2-52fa67ffdd61"
+        }
+      ]
+    },
+    "mutationAttempted": false,
+    "rootCause": "Coze build and startup scripts did not execute the checksum-managed migration runner, so the new route was deployed before its additive table."
+  },
+  "conclusion": "The route and administrator guard are deployed, but the database migration is not. Cloud acceptance remains open; no real backfill mutation was attempted."
+}

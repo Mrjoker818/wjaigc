@@ -2137,5 +2137,19 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Actual | The initial local candidate uploaded `thumbnail-{version}-{size}.webp` while persisting a different nested public path; the media gateway could not deterministically recover that object. The initial Canvas query also failed on PostgreSQL `42P01` before the additive migration was applied. |
 | Root cause | Object-key naming was not aligned with the existing media gateway derivation contract, and the additive rollout had no narrowly scoped compatibility fallback. |
 | TDD/fix | RED contracts now require object/public-path identity and reproduce the missing-table failure. Upload uses `thumbnails/{version}/{size}.webp`; Canvas retries the prior query only for `42P01` naming this exact new table, while all unrelated database errors propagate. |
-| Regression | Focused `57/57`; related asset/media `245/245`; full Vitest `2895/2895` with 72 explicit PostgreSQL skips; TypeScript pass; ESLint `0 errors / 988 warnings`; build `115/115`. |
-| Status | **FIXED LOCALLY / POSTGRESQL AND COZE CLOUD VERIFICATION REQUIRED.** |
+| Regression | Focused `57/57`; related asset/media `245/245`; full non-PostgreSQL Vitest `2895/2895`; TypeScript pass; ESLint `0 errors / 988 warnings`; build `115/115`. A subsequent isolated PostgreSQL 18.4 run passed the complete repository `487/487` files and `2967/2967` tests with zero skips. |
+| Status | **FIXED LOCALLY + FULL POSTGRESQL VERIFIED / COZE CLOUD VERIFICATION REQUIRED.** |
+
+### V588-BUG-003: Coze deployed additive-schema code without running migrations
+
+| Field | Detail |
+|---|---|
+| Severity | P1 deployment and administrator feature availability |
+| Reproduction | Pull `main@d941384` into Coze, authenticate as `Mr.joker`, then call GET or dry-run POST `/api/admin/backfill-thumbnails`. |
+| Expected | The build applies all checksum-managed migrations before the new route can serve traffic; GET returns durable counts and dry-run returns a non-mutating summary. |
+| Actual | The route and authorization guard were deployed, but authenticated GET and dry-run both returned generic `500`. No real batch was attempted. |
+| Root cause | `coze-preview-build.sh` and `coze-deploy-build.sh` installed dependencies and built Next.js without invoking `scripts/run-migrations.mjs`; the intentionally fast runtime launcher also does not migrate. |
+| TDD/fix | RED deployment contracts failed for both scripts. The minimal fix runs `pnpm run migrate` during preview/deploy build when either database URL is configured, before `pnpm run build`, while keeping migration work out of `coze-start.sh`. |
+| Regression | RED `2 failed / 2 passed`; GREEN focused deployment/migration/protection/route suite `21/21`; full non-PostgreSQL Vitest `2898/2898` with 72 PostgreSQL-gated tests explicitly skipped; TypeScript, zero-error ESLint, Git Bash syntax and production build `115/115` pass. The prior isolated PostgreSQL full run remains `2967/2967` with zero skips. |
+| Cloud evidence | Unauthenticated GET/POST returned `401`; administrator login returned `200`; authenticated GET/dry-run/GET returned `500` with request IDs retained in `docs/testing/evidence/v588-admin-003-cloud-probe-2026-08-21.json`. |
+| Status | **FIXED LOCALLY / NEW MAIN CANDIDATE AND COZE REBUILD REQUIRED.** |
