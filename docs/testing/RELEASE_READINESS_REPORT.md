@@ -1078,3 +1078,18 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Local evidence is green: focused `4/4`, related administrator `8/8`, full Vitest `2866` tests, TypeScript, zero-error ESLint and production build `114/114`.
 - The `70` PostgreSQL-gated tests remain explicitly skipped on this workstation. This item does not touch persistence/accounting, so the prior isolated Stage 4 accounting result remains separate rather than being rerun or relabeled.
 - **Decision: LOCAL CANDIDATE READY FOR `main`; NOT YET CLOUD-ACCEPTED.** Pull the exact commit into Coze and verify an authenticated administrator dashboard with empty and real metric states before starting the next absorption ID.
+
+## 2026-08-21 V588-ADMIN-001 cloud API checkpoint
+
+- Coze serves exact `main@1ba98f776b0c19141a9f05343ce7bb23d0c50fb2`; public root health is HTTP 200 with private no-store cache headers.
+- An authenticated administrator request to `/api/admin/dashboard-stats?period=7` returned HTTP 200, both metrics-coverage objects, `modelCalls=unavailable`, `providerCalls=unavailable`, an empty model ranking and an empty provider-status projection. The deployed route therefore no longer fabricates `99%` model success or zero-call healthy-provider rows when usage data is unavailable.
+- Existing Chrome tabs were discoverable, but both page-control attempts timed out. Browser, extension and native-host diagnostics passed. The UI is deliberately left unverified; API evidence is not being relabeled as browser proof.
+- **Decision: CLOUD API PASS / CHROME UI PENDING.** Do not start the next absorption item until the existing preview tab proves the empty states, nullable `—` rendering and zero fresh Console Error/Warning. No new Chrome tab may be created for this acceptance.
+
+## 2026-08-21 V588-ADMIN-001 cloud UI closure
+
+- After the Chrome extension released its stale control session, the same two existing tabs were reused; no new Chrome tab was created and 360 Browser was not used.
+- The existing Coze project page exposed no sandbox-disconnect dialog and confirmed `main@1ba98f77`; the existing preview page was hard-refreshed and retained the authenticated administrator session.
+- The operations dashboard visibly rendered one `暂无模型调用数据` state and one `暂无提供商数据` state. No `99%` value or fabricated provider-health row was present. Fresh Console Error/Warning count was zero.
+- The cloud unavailable-data state did not contain a legitimate unknown-rate row. Rendering `—` for nullable rates remains proven by the permanent focused UI contract rather than by fabricated cloud data.
+- **Decision: V588-ADMIN-001 CLOUD ACCEPTED.** Evidence: `docs/testing/evidence/v588-admin-001-cloud-api-2026-08-21.json` and `docs/testing/evidence/v588-admin-001-cloud-ui-2026-08-21.png`. The next authorized item is `V588-ADMIN-002`.

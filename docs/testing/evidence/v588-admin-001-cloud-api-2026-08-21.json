@@ -1,0 +1,33 @@
+{
+  "testId": "V588-ADMIN-001-CLOUD-API",
+  "testedAt": "2026-08-21",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "gitCommit": "1ba98f776b0c19141a9f05343ce7bb23d0c50fb2",
+  "authenticatedRole": "admin",
+  "request": {
+    "method": "GET",
+    "path": "/api/admin/dashboard-stats?period=7"
+  },
+  "response": {
+    "httpStatus": 200,
+    "success": true,
+    "topLevelMetricsCoveragePresent": true,
+    "statsMetricsCoveragePresent": true,
+    "modelCallsCoverage": "unavailable",
+    "providerCallsCoverage": "unavailable",
+    "modelRankCount": 0,
+    "providerStatusCount": 0
+  },
+  "browserUi": {
+    "status": "verified",
+    "browser": "Google Chrome",
+    "existingTabsOnly": true,
+    "hardRefresh": true,
+    "modelEmptyStateCount": 1,
+    "providerEmptyStateCount": 1,
+    "fabricated99PercentCount": 0,
+    "consoleErrorWarningCount": 0,
+    "screenshot": "docs/testing/evidence/v588-admin-001-cloud-ui-2026-08-21.png"
+  },
+  "verdict": "CLOUD_API_AND_UI_PASS"
+}

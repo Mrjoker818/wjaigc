@@ -985,7 +985,9 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Item | Status | Remaining proof |
 |---|---|---|
 | V588-ADMIN-001 local implementation | VERIFIED LOCALLY | RED/GREEN contracts, related admin regression, full Vitest, TypeScript, zero-error ESLint and build passed. |
-| V588-ADMIN-001 cloud behavior | UNVERIFIED | Deploy the exact `main` commit, sign in as administrator in Google Chrome, verify no fabricated rows when usage data is absent, valid rows when present, `—` for unknown rates, and zero Console errors. |
-| Next absorption item | BLOCKED BY ITEM ORDER | Do not start another donor item until V588-ADMIN-001 cloud evidence is recorded. |
+| V588-ADMIN-001 cloud API behavior | VERIFIED ON `1ba98f7` | Authenticated HTTP 200 response exposes both coverage objects, unavailable model/provider metrics and zero fabricated rows. Evidence: `docs/testing/evidence/v588-admin-001-cloud-api-2026-08-21.json`. |
+| V588-ADMIN-001 Chrome UI | VERIFIED ON `1ba98f7` | Existing preview tab was hard-refreshed; model/provider empty states each appeared once, fabricated `99%` appeared zero times, and fresh Console Error/Warning count was zero. |
+| Nullable `—` cloud row | NOT APPLICABLE TO CURRENT DATASET | The cloud response contained no valid row with an unknown rate. The branch is covered by the permanent focused UI contract; no cloud data was fabricated to force it. |
+| Next absorption item | AUTHORIZED | Start `V588-ADMIN-002` with a repository-wide RED authorization-manifest contract. |
 | Donor snapshot | READ-ONLY VERIFIED | No donor file has a write time after the captured baseline; lock digest remains unchanged. |
 | Stable branch | PROTECTED | Keep `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` unchanged; push candidate changes only to `main`. |

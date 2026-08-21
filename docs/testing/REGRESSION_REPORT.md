@@ -1322,3 +1322,19 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Full Vitest passed `465 files / 2866 tests`; `15 files / 70` PostgreSQL-only tests were explicitly skipped because `POSTGRES_TEST_DATABASE_URL` is absent. TypeScript passed, ESLint exited 0 with `0 errors / 988 historical warnings`, and production build completed `114/114` routes.
 - The donor snapshot remained read-only and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` was not modified.
 - **Verdict: LOCAL REGRESSION PASS / CLOUD PENDING.** Stage 4 is not being repeated; this is the first selective V5.8.8 absorption item.
+
+## 2026-08-21 V588-ADMIN-001 cloud API regression
+
+- The exact deployed candidate is `main@1ba98f776b0c19141a9f05343ce7bb23d0c50fb2`.
+- Authenticated administrator API verification returned HTTP 200 with explicit unavailable coverage and no model/provider rows, proving the deployed backend no longer manufactures usage health.
+- Browser installation, extension and native-host diagnostics passed, and the two pre-existing Chrome tabs were listed. Both tabs timed out when page control was requested, so no screenshot, visible empty-state assertion or Console capture was produced.
+- The no-new-tab constraint is authoritative: subsequent acceptance must refresh and reuse the existing Coze project and preview tabs only. A disconnected sandbox is refreshed on the existing project page before a hard refresh of the existing preview page.
+- **Verdict: CLOUD API PASS / CHROME UI UNVERIFIED.** Evidence: `docs/testing/evidence/v588-admin-001-cloud-api-2026-08-21.json`.
+
+## 2026-08-21 V588-ADMIN-001 cloud UI closure
+
+- Chrome control was reconnected without creating another tab. The existing Coze project page had no sandbox-disconnect dialog, and the existing preview page completed a hard refresh while preserving the administrator session.
+- Visible UI contracts passed: one model empty state, one provider empty state, zero `99%` labels and no fabricated provider status rows.
+- Fresh Console Error/Warning count after the hard refresh and dashboard navigation was zero.
+- Screenshot evidence: `docs/testing/evidence/v588-admin-001-cloud-ui-2026-08-21.png`.
+- **Verdict: V588-ADMIN-001 LOCAL + CLOUD PASS.** The item is absorbed and `V588-ADMIN-002` is now the next authorized RED test.
