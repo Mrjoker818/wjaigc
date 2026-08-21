@@ -2153,3 +2153,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Regression | RED `2 failed / 2 passed`; GREEN focused deployment/migration/protection/route suite `21/21`; full non-PostgreSQL Vitest `2898/2898` with 72 PostgreSQL-gated tests explicitly skipped; TypeScript, zero-error ESLint, Git Bash syntax and production build `115/115` pass. The prior isolated PostgreSQL full run remains `2967/2967` with zero skips. |
 | Cloud evidence | `d941384` reproduced authenticated `500`. After Coze pulled `172f38c`, unauthenticated GET returned `401`; administrator login, status and dry-run returned `200`; dry-run was non-mutating; two limited real batches completed and persisted `ready=2` with zero pending/processing/failed residue. Request IDs are retained in `docs/testing/evidence/v588-admin-003-cloud-probe-2026-08-21.json`. |
 | Status | **CLOSED LOCALLY + COZE CLOUD VERIFIED ON `172f38c`.** Canvas projection remains an ADMIN-003 acceptance item, not part of this migration-delivery defect. |
+
+### V588-BUG-004: Persisted Canvas media created a stale AssetVersion shadow mapping
+
+| Field | Detail |
+|---|---|
+| Severity | P1 asset consistency and controlled rollout |
+| Reproduction | Persist a provider-projected Canvas result from its remote URL to a controlled local URL, then replay the completed legacy migration checkpoint while the placement still points at the prior version. |
+| Expected | The persisted bytes become one child AssetVersion, the Canvas placement and checkpoint mapping advance together, replay is idempotent, and an independently advanced sibling current version is not overwritten. |
+| Actual | The completed checkpoint reused its stale version mapping. The legacy snapshot and asset graph disagreed, leaving one of six cloud projects mismatched and blocking the shadow comparison. |
+| Root cause | Completed-migration replay trusted checkpoint identity without reconciling the placement's current version and persisted file URL. Version promotion also lacked a compare-and-set guard, and the old lock order could deadlock with task projection. |
+| TDD/fix | Added a real PostgreSQL race/replay test before the minimal repair. Reconciliation now locks and validates asset, placement and version identity, appends a child version for changed persisted media, updates the placement/checkpoint atomically, uses conditional current-version promotion, preserves newer sibling branches and follows the shared lock order. |
+| Local regression | Focused unit plus real PostgreSQL passed `39/39`; the full PostgreSQL-enabled repository passed `489/489` files and `2990/2990` tests with zero skips. `pnpm validate`, TypeScript, zero-error ESLint and production build all passed. |
+| Cloud regression | Coze pulled exact `main@99d226a4`. In `shadow`, production readiness changed from historical `5/6` to `6/6` matching projects with zero mismatch, orphan, unmigrated or checkpoint errors. Six projects and 48 images remained visible; settled Chrome Console errors/warnings were `0/0`. |
+| Residual boundary | Two historical media records remain missing. This no longer causes shadow projection drift, but it correctly keeps `releaseReady=false` and `switchAuthorized=false`; `asset-v3` promotion is not authorized. |
+| Status | **FIXED / EXACT-SHA COZE GOOGLE CHROME VERIFIED IN SHADOW.** Evidence: `docs/testing/evidence/stage4-asset-shadow-reconciliation-cloud-2026-08-21.json` and `.jpg`. |

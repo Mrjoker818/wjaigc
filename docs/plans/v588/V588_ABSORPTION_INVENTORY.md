@@ -8,18 +8,20 @@ The current line owns the accepted task/accounting, asset/version, Agent runtime
 
 ## Comparison Baseline
 
-| Metric | Current `main@8490fc1` | V5.8.8 donor |
+| Metric | Current `main@99d226a4` | V5.8.8 donor |
 |---|---:|---:|
 | Package version | `4.0.0` | `5.8.8` |
-| `src` files | 1161 | 1126 |
+| `src` files | 1175 | 1126 |
 | Identical same-path files | 7 | 7 |
-| Changed same-path files | 936 | 936 |
-| Tree-only files | 218 | 183 |
-| `infinite-canvas.tsx` lines | 18189 | 10822 |
-| `canvas-*.tsx` leaf components | 1 | 24 |
-| API routes | 197 | 192 |
-| Admin API routes | 24 | 24 |
+| Changed same-path files | 939 | 939 |
+| Tree-only files | 229 | 180 |
+| `infinite-canvas.tsx` lines | 19073 | 11505 |
+| `canvas-*.tsx` leaf components | 2 | 25 |
+| API routes | 198 | 192 |
+| Admin API routes | 25 | 24 |
 | Runtime dependencies | 93 | 93 |
+
+This comparison was recomputed on 2026-08-21 against exact `main@99d226a4`. The V5.8.8 donor still contains 1126 source files / 11,549,563 bytes and its lock digest remains `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`.
 
 V5.8.8 adds `wujie-media-gateway` and `yjs`, while the current line adds `@xyflow/react` and `server-only`. V5.8.8 uses older `next`, `sharp`, `svgo`, and `eslint-config-next` versions. Dependency downgrades are prohibited.
 
@@ -35,7 +37,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-UI-004 | Empty-state, zoom, overflow-safe toolbar and editing-panel layout components | Current toolbar behavior is protected but remains embedded | **ABSORB AS PRESENTATION-ONLY EXTRACTIONS.** No entry, label, handler or feature may disappear | Desktop/mobile visual contract, every existing toolbar action callable, no clipping/overlap, reduced-motion contract | Medium |
 | V588-ADMIN-001 | `admin-dashboard-projection.ts`: no fabricated model/provider usage data | Current route fabricates zero-call provider rows and `99%` model success when database metrics are absent | **ABSORBED / CLOUD VERIFIED.** Real positive-call rows only; missing rates are nullable and coverage is explicit | Local RED/GREEN and full gates passed; authenticated Chrome and cloud API proved empty states, no fabricated `99%`, and zero fresh Console errors on `1ba98f7` | Low |
 | V588-ADMIN-002 | Repository-wide admin-route authorization contract | Current 24 admin routes use both `requireAdminUser` and explicit `getRequestUser + role` patterns; donor test recognizes only one manual exception | **ABSORBED / CLOUD VERIFIED.** The current architecture is retained; an exact 24-route manifest accepts only the reviewed shared and explicit guard forms | Local RED/GREEN and full gates passed; exact-candidate Coze returned unauthenticated 401 and authenticated Chrome refreshed the administrator dashboard with zero fresh Console errors/warnings | Medium |
-| V588-ADMIN-003 | Thumbnail backfill endpoint and idempotent worker | Current asset recovery/health subsystem is newer; donor route is absent | **BACKFILL CLOUD VERIFIED / CANVAS PROJECTION PENDING.** Migration, dry-run and two limited durable batches pass; the deployed `legacy` mode does not read variants | Controlled `asset-v3` projection, thumbnail delivery/reload, original fallback, S3 recovery and Chrome evidence remain | Medium |
+| V588-ADMIN-003 | Thumbnail backfill endpoint and idempotent worker | Current asset recovery/health subsystem is newer; donor route is absent | **BACKFILL + SHADOW RECONCILIATION CLOUD VERIFIED / THUMBNAIL PROJECTION CONDITIONAL.** Migration, dry-run, durable batches and `6/6` shadow project parity pass on `99d226a4` | Repair or explicitly retire the 2 missing historical media records before `asset-v3`; then prove thumbnail delivery/reload, original fallback and S3 recovery | Medium |
 | V588-PROVIDER-001 | New display mappings such as Nano Banana Lite, GPT Image 2 2K/4K, FLUX 2 Klein, Grok Imagine video/image, HappyHorse, Gemini Omni and Seedance/Seedream variants | Current map already contains several newer Pear/Seedance entries; blind copy would duplicate or reorder wildcard matches | **ABSORB ONLY MISSING EXACT PATTERNS.** Preserve current longest/specific-first matching and administrator display-name priority | Table-driven RED cases for each missing model and collision tests for generic patterns | Low |
 | V588-PROVIDER-002 | Explicit `providerId::modelId` catalog and ambiguous legacy-ID rejection | Current `task-core/model-catalog` is more advanced and already includes authorization migration, effective type and configured-provider snapshots | **AUDIT AND BACKFILL TESTS ONLY.** Do not replace current catalog or `/api/models` route | Duplicate model IDs across providers, disabled provider, unauthorized model, ordinary-user visibility and persisted legacy selection migration | High |
 | V588-PROVIDER-003 | Route export cleanup into `result-store.ts` / `constants.ts` | Donor extracted non-route exports for Next route-module compatibility | **ABSORB WHERE CURRENT ROUTES STILL EXPORT NON-HTTP SYMBOLS.** Pure mechanical extraction with unchanged imports | Route manifest/build contract must identify exact illegal exports before any move | Low |
@@ -126,3 +128,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Coze pulled `main@172f38c5454b7fa5a708b61392c47d99e9f46461`. Unauthenticated access returned `401`; administrator login, status and dry-run returned `200`. The dry-run discovered 10 candidates and left all counts unchanged. Two real `limit=1` runs each claimed and completed one candidate; final status was `ready=2`, `pending=0`, `processing=0`, `failed=0`.
 - Two project reads returned the same revision and `6` projects / `48` images, but exposed `assetGraphMode=legacy`, `canvasKernelMode=legacy` and zero projected thumbnails. This is an expected runtime-mode boundary, not evidence that projection failed. Chrome listed the exact existing project/preview tabs but could not claim either within the timeout; no new tab or alternate browser was used.
 - **Status: BACKFILL CLOUD VERIFIED / CANVAS PROJECTION PENDING.** Do not mark absorbed or start `V588-PROVIDER-001` until a controlled `asset-v3` run proves thumbnail delivery/reload, original fallback and S3 recovery, followed by rollback to the approved runtime mode.
+
+### V588-ADMIN-003 — 2026-08-21 shadow reconciliation acceptance
+
+- The exact deployed source is `main@99d226a4fa9a1ffe7425e241963f110ec8609055`; Coze build and port 5000 health passed, while `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged.
+- The production-readiness API returned HTTP 200 with request ID `6a330ba2-48bf-9529-af7d-16257ea64248`. The historical `5/6` drift is closed: `legacyProjects=6`, `graphProjects=6`, `matchingProjects=6`, and every mismatch/unmigrated/orphan/checkpoint-error counter is zero.
+- The deployment remains deliberately in `shadow`. The readiness result is `releaseReady=false` and `switchAuthorized=false` because two historical media records and their placements are still `missing`; these records were not hidden, deleted or relabeled as ready.
+- Authenticated Google Chrome retained six projects and 48 images, and a settled reload produced zero fresh Console errors or warnings. Evidence: `docs/testing/evidence/stage4-asset-shadow-reconciliation-cloud-2026-08-21.json` and `.jpg`.
+- **Status: SHADOW RECONCILIATION VERIFIED / ASSET-V3 PROMOTION NOT AUTHORIZED.** V588-ADMIN-003 remains conditional only for real thumbnail projection and recovery. The next unique action is to classify and repair the two missing historical media records under the current asset subsystem; do not bypass the doctor gate and do not copy the donor media subsystem.

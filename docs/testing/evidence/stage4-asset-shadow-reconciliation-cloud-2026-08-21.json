@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-21T18:06:13+08:00",
+  "environment": {
+    "surface": "Coze preview",
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "browser": "Google Chrome",
+    "profile": "用户1",
+    "authenticatedRole": "admin"
+  },
+  "deployment": {
+    "githubMainCommit": "99d226a4fa9a1ffe7425e241963f110ec8609055",
+    "cozeCheckpoint": "5ed3f19",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "assetGraphMode": "shadow",
+    "build": "passed",
+    "httpHealth": 200
+  },
+  "dashboard": {
+    "projects": 6,
+    "images": 48,
+    "users": 6,
+    "configuredProviders": 19,
+    "projectImageCounts": [7, 15, 11, 10, 5, 0]
+  },
+  "productionReadiness": {
+    "httpStatus": 200,
+    "requestId": "6a330ba2-48bf-9529-af7d-16257ea64248",
+    "status": "warn",
+    "releaseReady": false,
+    "switchAuthorized": false,
+    "blockingCurrentRelease": false,
+    "blockers": ["non-ready-current-media"],
+    "migrations": {
+      "required": 6,
+      "verified": 6,
+      "missing": [],
+      "checksumMismatches": []
+    },
+    "shadowComparison": {
+      "legacyProjects": 6,
+      "graphProjects": 6,
+      "matchingProjects": 6,
+      "mismatchedProjects": 0,
+      "unmigratedProjects": 0,
+      "orphanGraphProjects": 0,
+      "nonV3GraphProjects": 0,
+      "failedCheckpoints": 0,
+      "missingCheckpoints": 0,
+      "invalidLegacyRecords": 0
+    },
+    "media": {
+      "ready": 46,
+      "pendingPersist": 0,
+      "missing": 2,
+      "recovering": 0,
+      "unrecoverable": 0,
+      "activeAssetsMissingCurrentVersion": 0,
+      "placementPendingPersist": 0,
+      "placementMissing": 2,
+      "placementRecovering": 0,
+      "placementUnrecoverable": 0
+    },
+    "assets": {
+      "active": 48,
+      "trashed": 4
+    },
+    "queryErrorCount": 0,
+    "collectionUnavailable": false,
+    "providers": {
+      "total": 19,
+      "enabled": 17,
+      "ready": 17,
+      "warnings": 0,
+      "failures": 0
+    },
+    "taskEvents": {
+      "status": "warn",
+      "detail": "Shared task event backend is not configured; durable task polling remains active."
+    }
+  },
+  "browserEvidence": {
+    "freshConsoleErrors": 0,
+    "freshConsoleWarnings": 0,
+    "screenshot": "docs/testing/evidence/stage4-asset-shadow-reconciliation-cloud-2026-08-21.jpg"
+  },
+  "assertions": [
+    "The historical 5/6 project shadow mismatch is repaired: all 6 legacy projects match all 6 graph projects.",
+    "No manual project synchronization endpoint was invoked during acceptance.",
+    "Project and image totals remain 6 and 48 after deployment and hydration.",
+    "The shadow-projection-drift blocker is absent.",
+    "The remaining two missing media records are retained as an explicit asset-v3 rollout blocker.",
+    "The stable branch and the read-only V5.8.8 donor were not modified."
+  ],
+  "verdict": {
+    "shadowReconciliation": "passed",
+    "stage4CurrentShadowAcceptance": "passed",
+    "assetV3Promotion": "not authorized",
+    "v588Admin003": "backfill and shadow reconciliation verified; thumbnail projection remains conditional",
+    "overallRelease": "conditional"
+  }
+}

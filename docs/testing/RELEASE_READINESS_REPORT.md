@@ -1120,3 +1120,12 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Coze pulled `main@172f38c5454b7fa5a708b61392c47d99e9f46461`. Migration delivery, administrator status, a non-mutating dry-run and two bounded real backfill executions pass in cloud. Durable status ends at two ready variants with no pending, processing or failed rows.
 - Canvas project reads remain healthy and stable, but the runtime explicitly reports `assetGraphMode=legacy`; it therefore cannot provide the required thumbnail projection proof. Existing Chrome tabs could not be claimed for screenshot/Console evidence.
 - **Decision: BACKFILL CLOUD-ACCEPTED; ADMIN-003 REMAINS CONDITIONAL.** A controlled `asset-v3` projection/reload/original-fallback/S3-recovery run and approved rollback are required before `V588-PROVIDER-001`. `stable` remains unchanged.
+
+## 2026-08-21 readiness after `99d226a4` shadow reconciliation
+
+- Exact Coze source, build and runtime health are verified for `main@99d226a4fa9a1ffe7425e241963f110ec8609055`; `stable` remains `52f7c601ed150769e15d06fb435c6e360e28c9e7`.
+- Asset shadow comparison is fully aligned at `6/6`, with zero mismatch, unmigrated, orphan, invalid or failed/missing-checkpoint records. The prior projection-drift release blocker is closed.
+- Current data still contains 46 ready and two missing media records, with two missing placements. The doctor therefore correctly reports `releaseReady=false`, `switchAuthorized=false` and blocker `non-ready-current-media`.
+- All 17 enabled providers are configuration-ready, but the shared task-event backend remains unconfigured and clients use durable polling. Neither fact is converted into proof of unexecuted paid-provider workflows.
+- Authenticated Chrome retained six projects and 48 images and produced zero fresh Console Error/Warning after the deployment settled.
+- **Decision: CURRENT SHADOW ACCEPTANCE PASSED / OVERALL RELEASE REMAINS CONDITIONAL.** Do not enable `asset-v3` or start the next donor absorption item by bypassing the two-media doctor blocker. Keep V5.8.8 read-only and `stable` untouched.

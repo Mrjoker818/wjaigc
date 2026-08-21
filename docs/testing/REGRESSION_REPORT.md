@@ -1370,3 +1370,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Project synchronization was read twice with stable revision `5354`, `6` projects and `48` images. Both responses reported `assetGraphMode=legacy` and `canvasKernelMode=legacy`, so zero `thumbnailUrl` projections are expected; variant projection is intentionally active only in `asset-v3`.
 - The existing Chrome project/preview tabs were discovered, but two claim attempts timed out. No new tab or another browser was used. Screenshot, Console, controlled `asset-v3` projection, media reload/original fallback and S3 recovery remain unverified.
 - **Verdict: BACKFILL CLOUD PASS / ADMIN-003 PARTIAL.** Do not start `V588-PROVIDER-001` until the controlled projection and recovery evidence closes.
+
+## 2026-08-21 V588-ADMIN-003 shadow reconciliation cloud regression
+
+- Coze built and started exact `main@99d226a4fa9a1ffe7425e241963f110ec8609055`; `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged and the runtime stayed in `WUJIE_ASSET_GRAPH_MODE=shadow`.
+- The fresh administrator readiness request returned HTTP 200 (`requestId=6a330ba2-48bf-9529-af7d-16257ea64248`). All six legacy projects match all six graph projects; mismatch, unmigrated, orphan and checkpoint-error counters are zero.
+- Authenticated Google Chrome preserved six projects and 48 images. A settled reload produced zero fresh Console errors and zero warnings. No manual `/api/user-data/sync` mutation was used to manufacture parity.
+- The two historical missing media/placement records remain explicit. Therefore `releaseReady=false`, `switchAuthorized=false` and `asset-v3` promotion stays blocked; the current shadow-mode acceptance is not being misreported as full media readiness.
+- Evidence: `docs/testing/evidence/stage4-asset-shadow-reconciliation-cloud-2026-08-21.json` and `docs/testing/evidence/stage4-asset-shadow-reconciliation-cloud-2026-08-21.jpg`.
+- **Verdict: SHADOW RECONCILIATION PASS / ASSET-V3 PROJECTION STILL CONDITIONAL.** The prior `shadow-projection-drift` blocker is closed. The next unique verification concerns the two missing historical media records, not a repeat of the completed Stage 4 browser matrix.
