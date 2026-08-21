@@ -440,9 +440,10 @@ describe('continuous canvas shadow synchronization', () => {
     expect(placementLock).toBeGreaterThan(-1);
     expect(assetMutation).toBeGreaterThan(placementLock);
     expect(updateGraphSource).toMatch(
-      /SELECT asset_id, owner_id, project_id[\s\S]*WHERE id = \$1[\s\S]*FOR UPDATE/,
+      /SELECT asset_id, asset_version_id, owner_id, project_id[\s\S]*WHERE id = \$1[\s\S]*FOR UPDATE/,
     );
     expect(updateGraphSource).toContain('placementRow.asset_id !== mapping.assetId');
+    expect(updateGraphSource).toContain('placementRow.asset_version_id !== mapping.versionId');
     expect(updateGraphSource).toContain('placementRow.owner_id !== input.actorUserId');
     expect(updateGraphSource).toContain('placementRow.project_id !== input.projectId');
     expect(lifecycleSource.indexOf('transaction.lockAsset(')).toBeLessThan(
@@ -626,14 +627,22 @@ describe('continuous canvas shadow synchronization', () => {
       if (sql.includes('SELECT asset_id') && sql.includes('FROM wujie_workspace_placements')) {
         return {
           rows: [{
-            asset_id: 'asset-a', owner_id: 'user-1', project_id: 'project-1',
+            asset_id: 'asset-a', asset_version_id: 'version-old', owner_id: 'user-1', project_id: 'project-1',
             workspace_kind: 'canvas', workspace_id: 'project-1', entity_type: 'canvas-image', entity_id: 'retained',
           }],
           rowCount: 1,
         };
       }
       if (sql.includes('SELECT id, owner_id, project_id') && sql.includes('FROM wujie_assets')) {
-        return { rows: [{ id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
+        return {
+          rows: [{
+            id: 'asset-a',
+            owner_id: 'user-1',
+            project_id: 'project-1',
+            current_version_id: 'version-old',
+          }],
+          rowCount: 1,
+        };
       }
       if (sql.includes('UPDATE wujie_assets') && sql.includes('SET kind =')) return { rows: [], rowCount: 1 };
       if (sql.includes('FROM wujie_asset_versions') && sql.includes('FOR UPDATE')) {
@@ -737,7 +746,13 @@ describe('continuous canvas shadow synchronization', () => {
         return { rows: [{ locked_asset_id: 'asset-current' }, { locked_asset_id: 'asset-stale' }], rowCount: 2 };
       }
       if (sql.includes('SELECT id, owner_id, project_id') && sql.includes('FROM wujie_assets')) {
-        return { rows: [{ id: 'asset-current', owner_id: 'user-1', project_id: 'project-1' }], rowCount: 1 };
+        return {
+          rows: [{
+            id: 'asset-current', owner_id: 'user-1', project_id: 'project-1',
+            current_version_id: 'version-current',
+          }],
+          rowCount: 1,
+        };
       }
       if (sql.includes('FROM wujie_asset_versions') && sql.includes('FOR UPDATE')) {
         return {
@@ -748,10 +763,10 @@ describe('continuous canvas shadow synchronization', () => {
           rowCount: 1,
         };
       }
-      if (sql.includes('SELECT asset_id, owner_id, project_id') && sql.includes('FROM wujie_workspace_placements')) {
+      if (sql.includes('SELECT asset_id, asset_version_id') && sql.includes('FROM wujie_workspace_placements')) {
         return {
           rows: [{
-            asset_id: 'asset-current', owner_id: 'user-1', project_id: 'project-1',
+            asset_id: 'asset-current', asset_version_id: 'version-current', owner_id: 'user-1', project_id: 'project-1',
             workspace_kind: 'canvas', workspace_id: 'project-1', entity_type: 'canvas-image', entity_id: 'current',
           }],
           rowCount: 1,
@@ -1012,7 +1027,7 @@ describe('continuous canvas shadow synchronization', () => {
       if (sql.includes('SELECT asset_id') && sql.includes('FROM wujie_workspace_placements')) {
         return {
           rows: [{
-            asset_id: 'asset-a', owner_id: 'user-1', project_id: 'project-1',
+            asset_id: 'asset-a', asset_version_id: 'version-a', owner_id: 'user-1', project_id: 'project-1',
             workspace_kind: 'canvas', workspace_id: 'project-1', entity_type: 'canvas-image', entity_id: 'retained',
           }],
           rowCount: 1,
@@ -1020,7 +1035,9 @@ describe('continuous canvas shadow synchronization', () => {
       }
       if (sql.includes('SELECT id, owner_id, project_id') && sql.includes('FROM wujie_assets')) {
         return {
-          rows: [{ id: 'asset-a', owner_id: 'user-1', project_id: 'project-1' }],
+          rows: [{
+            id: 'asset-a', owner_id: 'user-1', project_id: 'project-1', current_version_id: 'version-a',
+          }],
           rowCount: 1,
         };
       }

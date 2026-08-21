@@ -591,18 +591,68 @@ async function existingCompletedMigration(
   });
   await lockProjectAssetsForReconciliation(client, input);
 
+  const adoptAndReconcile = async (image: CanvasImage): Promise<LegacyImageMapping | null> => {
+    const adopted = await adoptManagedCanvasMapping(client, input, image)
+      ?? await adoptTaskProjectedCanvasMapping(client, input, image);
+    if (!adopted) return null;
+    const reconciled = await updateGraphForImage(client, input, image, adopted);
+    if (!reconciled) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+    return reconciled;
+  };
+
+  const reconcileManagedUpdate = async (
+    image: CanvasImage,
+    checkpointMapping: LegacyImageMapping,
+  ): Promise<LegacyImageMapping> => {
+    if (
+      image.assetId !== checkpointMapping.assetId
+      || image.placementId !== checkpointMapping.placementId
+    ) {
+      const adopted = await adoptAndReconcile(image);
+      if (!adopted) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+      return adopted;
+    }
+    const placement = await client.query<{ asset_version_id: string }>(
+      `SELECT asset_version_id
+       FROM wujie_workspace_placements
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3
+         AND asset_id = $4
+         AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
+         AND entity_type = 'canvas-image' AND entity_id = $5 AND status = 'active'`,
+      [
+        checkpointMapping.placementId,
+        input.actorUserId,
+        input.projectId,
+        checkpointMapping.assetId,
+        image.id,
+      ],
+    );
+    const placementVersionId = placement.rows[0]?.asset_version_id;
+    if (!placementVersionId) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+    if (placementVersionId === checkpointMapping.versionId) {
+      const reconciled = await updateGraphForImage(client, input, image, checkpointMapping);
+      if (!reconciled) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+      return reconciled;
+    }
+    if (placementVersionId === image.assetVersionId) {
+      const adopted = await adoptAndReconcile(image);
+      if (!adopted) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+      return adopted;
+    }
+    throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+  };
+
   for (const { image, mapping } of plan.updates) {
-    const managed = hasCompleteManagedCanvasMapping(image)
-      ? await adoptManagedCanvasMapping(client, input, image)
+    const adopted = hasCompleteManagedCanvasMapping(image)
+      ? await reconcileManagedUpdate(image, mapping)
       : null;
-    const updated = managed ?? await updateGraphForImage(client, input, image, mapping);
+    const updated = adopted ?? await updateGraphForImage(client, input, image, mapping);
     const activeMapping = updated ?? await insertGraphForImage(client, input, image, mapping);
     plan.activeMappings[image.id] = activeMapping;
     plan.checkpointMappings[image.id] = activeMapping;
   }
   for (const { image, mapping } of plan.additions) {
-    const activeMapping = await adoptManagedCanvasMapping(client, input, image)
-      ?? await adoptTaskProjectedCanvasMapping(client, input, image)
+    const activeMapping = await adoptAndReconcile(image)
       ?? await insertGraphForImage(client, input, image, mapping);
     plan.activeMappings[image.id] = activeMapping;
     plan.checkpointMappings[image.id] = activeMapping;
@@ -731,8 +781,13 @@ async function updateGraphForImage(
 ): Promise<LegacyImageMapping | null> {
   const file = await fileForImage(input, image, mapping);
   const metadata = JSON.stringify({ legacyImageId: image.id, legacyImage: image });
-  const assetLock = await client.query<{ id: string; owner_id: string; project_id: string }>(
-    `SELECT id, owner_id, project_id
+  const assetLock = await client.query<{
+    id: string;
+    owner_id: string;
+    project_id: string;
+    current_version_id: string | null;
+  }>(
+    `SELECT id, owner_id, project_id, current_version_id
      FROM wujie_assets
      WHERE id = $1
      FOR UPDATE`,
@@ -755,6 +810,7 @@ async function updateGraphForImage(
   if (!row) throw migrationError('LEGACY_MIGRATION_FAILED');
   const lockedPlacement = await client.query<{
     asset_id: string;
+    asset_version_id: string;
     owner_id: string;
     project_id: string;
     workspace_kind: string;
@@ -762,7 +818,8 @@ async function updateGraphForImage(
     entity_type: string;
     entity_id: string;
   }>(
-    `SELECT asset_id, owner_id, project_id, workspace_kind, workspace_id, entity_type, entity_id
+    `SELECT asset_id, asset_version_id, owner_id, project_id, workspace_kind, workspace_id,
+            entity_type, entity_id
      FROM wujie_workspace_placements
      WHERE id = $1
      FOR UPDATE`,
@@ -771,6 +828,7 @@ async function updateGraphForImage(
   const placementRow = lockedPlacement.rows[0];
   if (placementRow && (
     placementRow.asset_id !== mapping.assetId
+    || placementRow.asset_version_id !== mapping.versionId
     || placementRow.owner_id !== input.actorUserId
     || placementRow.project_id !== input.projectId
     || placementRow.workspace_kind !== 'canvas'
@@ -841,11 +899,23 @@ async function updateGraphForImage(
        ) VALUES ($1, $2, $3, $4, $5, 0)`,
       [mapping.assetId, input.actorUserId, input.projectId, versionPlan.mapping.versionId, mapping.versionId],
     );
-    await client.query(
-      `UPDATE wujie_assets SET current_version_id = $4, updated_at = now()
-       WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
-      [mapping.assetId, input.actorUserId, input.projectId, versionPlan.mapping.versionId],
-    );
+    if (assetRow.current_version_id === null || assetRow.current_version_id === mapping.versionId) {
+      const promoted = await client.query(
+        `UPDATE wujie_assets SET current_version_id = $4, updated_at = now()
+         WHERE id = $1 AND owner_id = $2 AND project_id = $3
+           AND current_version_id IS NOT DISTINCT FROM $5`,
+        [
+          mapping.assetId,
+          input.actorUserId,
+          input.projectId,
+          versionPlan.mapping.versionId,
+          assetRow.current_version_id,
+        ],
+      );
+      if ((promoted.rowCount ?? 0) !== 1) {
+        throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+      }
+    }
   }
   const placement = placementRow
     ? await client.query(

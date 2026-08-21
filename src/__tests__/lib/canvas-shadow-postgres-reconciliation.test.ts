@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool, type PoolClient } from 'pg';
 
+import type { LegacyImageMapping } from '@/lib/asset-core/legacy-migration';
 import type { CanvasImage, Project } from '@/lib/user-types';
 
 const databaseUrl = process.env.TEST_POSTGRES_URL;
@@ -363,6 +364,7 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
         updatedAt: 1700000000000,
         canvasImages: [{
           ...canvasImage(imageId),
+          url: '/media/current-managed.png',
           assetId: currentAssetId,
           assetVersionId: currentVersionId,
           placementId: currentPlacementId,
@@ -477,6 +479,222 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
         currentAssetId,
         staleAssetId,
       ]]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_projects WHERE id = $1', [localProjectId]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_user_data WHERE user_id = $1 AND data_key = $2', [
+        localOwnerId,
+        'projects',
+      ]).catch(() => undefined);
+      client.release();
+    }
+  });
+
+  it('appends a local child version when a managed canvas result was persisted after task projection', async () => {
+    const localSuffix = randomUUID();
+    const localOwnerId = `shadow-persisted-owner-${localSuffix}`;
+    const localProjectId = `shadow-persisted-project-${localSuffix}`;
+    const taskId = `async-${localSuffix}`;
+    const imageId = `${taskId}:0`;
+    const assetId = `shadow-persisted-asset-${localSuffix}`;
+    const remoteVersionId = `shadow-persisted-version-${localSuffix}`;
+    const placementId = `shadow-persisted-placement-${localSuffix}`;
+    const checkpointId = `shadow-persisted-checkpoint-${localSuffix}`;
+    const remoteUrl = `https://cdn.example.test/${localSuffix}.png`;
+    const localUrl = `/api/serve-upload/uploads/${localSuffix}.png`;
+    const nextLocalUrl = `/api/serve-upload/uploads/${localSuffix}-v2.png`;
+    const siblingVersionId = `shadow-persisted-sibling-${localSuffix}`;
+    const client = await pool.connect();
+    let projectorReplay: PoolClient | undefined;
+
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO wujie_projects(id, owner_id, name, status, schema_version, metadata)
+         VALUES ($1, $2, 'Persisted task result', 'active', 3, '{}'::jsonb)`,
+        [localProjectId, localOwnerId],
+      );
+      const snapshot: Project = {
+        id: localProjectId,
+        userId: localOwnerId,
+        name: 'Persisted task result',
+        createdAt: 1700000000000,
+        updatedAt: 1700000000000,
+        schemaVersion: 3,
+        canvasImages: [{
+          ...canvasImage(imageId),
+          url: localUrl,
+          sourceUrl: remoteUrl,
+          generationTaskId: taskId,
+          assetId,
+          assetVersionId: remoteVersionId,
+          placementId,
+        }],
+        settings: {},
+      };
+      await client.query(
+        `INSERT INTO wujie_user_data(user_id, data_key, data_value, updated_at)
+         VALUES ($1, 'projects', $2::jsonb, $3)`,
+        [localOwnerId, JSON.stringify([snapshot]), Date.now()],
+      );
+      await insertAssetGraph(client, {
+        assetId,
+        versionId: remoteVersionId,
+        ownerId: localOwnerId,
+        projectId: localProjectId,
+        url: remoteUrl,
+      });
+      await insertPlacement(client, {
+        id: placementId,
+        ownerId: localOwnerId,
+        projectId: localProjectId,
+        assetId,
+        versionId: remoteVersionId,
+        workspaceId: `canvas:${localProjectId}`,
+        entityId: imageId,
+      });
+      await client.query(
+        `INSERT INTO wujie_asset_migration_checkpoints(
+           id, owner_id, project_id, legacy_project_id, status, checkpoint
+         ) VALUES ($1, $2, $3, $3, 'completed', $4::jsonb)`,
+        [
+          checkpointId,
+          localOwnerId,
+          localProjectId,
+          JSON.stringify({
+            sourceSchemaVersion: 3,
+            legacyImageMappings: {
+              [imageId]: { assetId, versionId: remoteVersionId, placementId },
+            },
+          }),
+        ],
+      );
+      await client.query('COMMIT');
+
+      projectorReplay = await pool.connect();
+      await projectorReplay.query('BEGIN');
+      await projectorReplay.query(
+        `SELECT id FROM wujie_asset_versions WHERE id = $1 FOR UPDATE`,
+        [remoteVersionId],
+      );
+      const migrationProcess = await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+      await client.query('BEGIN');
+      const migration = migrateLegacyProjectOnWriteInTransaction(client, {
+        actorUserId: localOwnerId,
+        projectId: localProjectId,
+      });
+      await waitForLockWait(migrationProcess.rows[0].pid);
+      await projectorReplay.query(
+        `SELECT id FROM wujie_workspace_placements WHERE id = $1 FOR UPDATE`,
+        [placementId],
+      );
+      await projectorReplay.query('COMMIT');
+      const result = await migration;
+      await client.query('COMMIT');
+
+      const activeMapping = result.mappings[imageId];
+      expect(activeMapping).toMatchObject({ assetId, placementId });
+      expect(activeMapping?.versionId).not.toBe(remoteVersionId);
+      await expect(pool.query<{ id: string; file_url: string; metadata: Record<string, unknown> }>(
+        `SELECT id, file_url, metadata FROM wujie_asset_versions
+         WHERE asset_id = $1 ORDER BY created_at, id`,
+        [assetId],
+      )).resolves.toMatchObject({
+        rowCount: 2,
+        rows: [
+          { id: remoteVersionId, file_url: remoteUrl, metadata: {} },
+          { id: activeMapping?.versionId, file_url: localUrl },
+        ],
+      });
+      await expect(pool.query<{ version_id: string; parent_version_id: string }>(
+        `SELECT version_id, parent_version_id
+         FROM wujie_asset_version_parents WHERE asset_id = $1`,
+        [assetId],
+      )).resolves.toMatchObject({
+        rows: [{ version_id: activeMapping?.versionId, parent_version_id: remoteVersionId }],
+      });
+      await expect(pool.query<{ current_version_id: string }>(
+        `SELECT current_version_id FROM wujie_assets WHERE id = $1`,
+        [assetId],
+      )).resolves.toMatchObject({ rows: [{ current_version_id: activeMapping?.versionId }] });
+      await expect(pool.query<{ asset_version_id: string }>(
+        `SELECT asset_version_id FROM wujie_workspace_placements WHERE id = $1`,
+        [placementId],
+      )).resolves.toMatchObject({ rows: [{ asset_version_id: activeMapping?.versionId }] });
+      const checkpoint = await pool.query<{ checkpoint: { legacyImageMappings: Record<string, LegacyImageMapping> } }>(
+        `SELECT checkpoint FROM wujie_asset_migration_checkpoints WHERE id = $1`,
+        [checkpointId],
+      );
+      expect(checkpoint.rows[0]?.checkpoint.legacyImageMappings[imageId]).toEqual(activeMapping);
+
+      await client.query('BEGIN');
+      const replay = await migrateLegacyProjectOnWriteInTransaction(client, {
+        actorUserId: localOwnerId,
+        projectId: localProjectId,
+      });
+      await client.query('COMMIT');
+      expect(replay.mappings[imageId]).toEqual(activeMapping);
+      await expect(pool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM wujie_asset_versions WHERE asset_id = $1`,
+        [assetId],
+      )).resolves.toMatchObject({ rows: [{ count: '2' }] });
+
+      await pool.query(
+        `INSERT INTO wujie_asset_versions(
+           id, asset_id, owner_id, project_id, file_url, width, height, availability, metadata
+         ) VALUES ($1, $2, $3, $4, $5, 600, 400, 'ready', '{"source":"newer-branch"}'::jsonb)`,
+        [siblingVersionId, assetId, localOwnerId, localProjectId, `/media/${localSuffix}-sibling.png`],
+      );
+      await pool.query(
+        `UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1`,
+        [assetId, siblingVersionId],
+      );
+      const changedSnapshot: Project = {
+        ...snapshot,
+        canvasImages: [{
+          ...snapshot.canvasImages[0],
+          url: nextLocalUrl,
+        }],
+      };
+      await pool.query(
+        `UPDATE wujie_user_data SET data_value = $2::jsonb, updated_at = $3
+         WHERE user_id = $1 AND data_key = 'projects'`,
+        [localOwnerId, JSON.stringify([changedSnapshot]), Date.now()],
+      );
+
+      await client.query('BEGIN');
+      const branched = await migrateLegacyProjectOnWriteInTransaction(client, {
+        actorUserId: localOwnerId,
+        projectId: localProjectId,
+      });
+      await client.query('COMMIT');
+      const branchedMapping = branched.mappings[imageId];
+      expect(branchedMapping).toMatchObject({ assetId, placementId });
+      expect(branchedMapping?.versionId).not.toBe(activeMapping?.versionId);
+      await expect(pool.query<{ current_version_id: string }>(
+        `SELECT current_version_id FROM wujie_assets WHERE id = $1`,
+        [assetId],
+      )).resolves.toMatchObject({ rows: [{ current_version_id: siblingVersionId }] });
+      await expect(pool.query<{ asset_version_id: string }>(
+        `SELECT asset_version_id FROM wujie_workspace_placements WHERE id = $1`,
+        [placementId],
+      )).resolves.toMatchObject({ rows: [{ asset_version_id: branchedMapping?.versionId }] });
+      await expect(pool.query<{ version_id: string; parent_version_id: string }>(
+        `SELECT version_id, parent_version_id
+         FROM wujie_asset_version_parents
+         WHERE asset_id = $1 AND version_id = $2`,
+        [assetId, branchedMapping?.versionId],
+      )).resolves.toMatchObject({
+        rows: [{ version_id: branchedMapping?.versionId, parent_version_id: activeMapping?.versionId }],
+      });
+    } finally {
+      await projectorReplay?.query('ROLLBACK').catch(() => undefined);
+      projectorReplay?.release();
+      await client.query('ROLLBACK').catch(() => undefined);
+      await pool.query('DELETE FROM wujie_workspace_placements WHERE id = $1', [placementId]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_asset_migration_checkpoints WHERE id = $1', [checkpointId]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_asset_version_parents WHERE asset_id = $1', [assetId]).catch(() => undefined);
+      await pool.query('UPDATE wujie_assets SET current_version_id = NULL WHERE id = $1', [assetId]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_asset_versions WHERE asset_id = $1', [assetId]).catch(() => undefined);
+      await pool.query('DELETE FROM wujie_assets WHERE id = $1', [assetId]).catch(() => undefined);
       await pool.query('DELETE FROM wujie_projects WHERE id = $1', [localProjectId]).catch(() => undefined);
       await pool.query('DELETE FROM wujie_user_data WHERE user_id = $1 AND data_key = $2', [
         localOwnerId,
