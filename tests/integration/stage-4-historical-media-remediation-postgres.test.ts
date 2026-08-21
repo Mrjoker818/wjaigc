@@ -576,6 +576,49 @@ async function readArchiveState(query: QueryFn): Promise<ArchiveState> {
   };
 }
 
+async function readNonCurrentArchiveState(query: QueryFn): Promise<Record<string, unknown>> {
+  const [
+    asset,
+    audit,
+    badPlacement,
+    badVersion,
+    healthyCurrentVersion,
+    healthyPlacement,
+    ledger,
+    project,
+    revision,
+  ] = await Promise.all([
+    query(`SELECT * FROM wujie_assets WHERE id = 'asset-non-current-broken'`),
+    query('SELECT * FROM wujie_audit_log ORDER BY id'),
+    query(`SELECT * FROM wujie_workspace_placements WHERE id = 'placement-non-current-broken'`),
+    query(`SELECT * FROM wujie_asset_versions WHERE id = 'version-non-current-broken'`),
+    query(`SELECT * FROM wujie_asset_versions WHERE id = 'version-non-current-healthy'`),
+    query(`SELECT * FROM wujie_workspace_placements WHERE id = 'placement-non-current-healthy'`),
+    query('SELECT * FROM wujie_asset_media_remediations ORDER BY id'),
+    query(
+      `SELECT * FROM wujie_user_data
+       WHERE user_id = $1 AND data_key = 'projects'`,
+      [OWNER_ID],
+    ),
+    query(
+      `SELECT * FROM wujie_user_data
+       WHERE user_id = $1 AND data_key = '__asset_graph_projects_revision'`,
+      [OWNER_ID],
+    ),
+  ]);
+  return {
+    asset: asset.rows[0],
+    audit: audit.rows,
+    badPlacement: badPlacement.rows[0],
+    badVersion: badVersion.rows[0],
+    healthyCurrentVersion: healthyCurrentVersion.rows[0],
+    healthyPlacement: healthyPlacement.rows[0],
+    ledger: ledger.rows,
+    project: project.rows[0],
+    revision: revision.rows[0],
+  };
+}
+
 async function installFailureTrigger(
   query: QueryFn,
   input: {
@@ -958,6 +1001,98 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
            (SELECT count(*)::int FROM wujie_audit_log) AS audit,
            (SELECT count(*)::int FROM wujie_workspace_placements WHERE status = 'trashed') AS trashed`,
       )).resolves.toMatchObject({ rows: [{ ledger: 0, audit: 0, trashed: 0 }] });
+    });
+  });
+
+  postgresIt('archives only a non-current broken version while preserving healthy current media', async () => {
+    await withIsolatedPostgres('historical-media-non-current-archive', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetVersionId === 'version-non-current-broken',
+      ) as HistoricalMediaCandidate;
+      const before = await readNonCurrentArchiveState(query);
+
+      const result = await service.archiveHistoricalMedia(createArchiveCommand(
+        [candidate],
+        'historical-media-non-current-archive',
+      ));
+      const after = await readNonCurrentArchiveState(query);
+
+      expect(result).toMatchObject({
+        reused: false,
+        archivedVersionCount: 1,
+        archivedPlacementCount: 1,
+        projectRevisions: { [PROJECT_ID]: 11 },
+      });
+      expect(after.asset).toEqual(before.asset);
+      expect(after.healthyCurrentVersion).toEqual(before.healthyCurrentVersion);
+      expect(after.healthyPlacement).toEqual(before.healthyPlacement);
+      expect(after.badVersion).toMatchObject({
+        ...(before.badVersion as Record<string, unknown>),
+        availability: 'unrecoverable',
+      });
+      const {
+        status: _beforeStatus,
+        deleted_at: _beforeDeletedAt,
+        metadata: beforeMetadata,
+        updated_at: beforeUpdatedAt,
+        ...beforeStableBadPlacement
+      } = before.badPlacement as Record<string, unknown>;
+      const {
+        status: afterStatus,
+        deleted_at: afterDeletedAt,
+        metadata: afterMetadata,
+        updated_at: afterUpdatedAt,
+        ...afterStableBadPlacement
+      } = after.badPlacement as Record<string, unknown>;
+      expect(_beforeStatus).toBe('active');
+      expect(_beforeDeletedAt).toBeNull();
+      expect(afterStableBadPlacement).toEqual(beforeStableBadPlacement);
+      expect(afterMetadata).toEqual({
+        ...(beforeMetadata as Record<string, unknown>),
+        canvasTrashProjectRevision: 11,
+      });
+      expect(afterStatus).toBe('trashed');
+      expect(afterDeletedAt).toBeInstanceOf(Date);
+      expect(afterUpdatedAt).toBeInstanceOf(Date);
+      expect((afterUpdatedAt as Date).getTime()).toBeGreaterThanOrEqual(
+        (beforeUpdatedAt as Date).getTime(),
+      );
+      expect((after.asset as Record<string, unknown>).current_version_id).toBe(
+        'version-non-current-healthy',
+      );
+      expect((after.project as { data_value: Array<{ canvasImages: Array<{ id: string }> }> })
+        .data_value[0]?.canvasImages.map(image => image.id)).toEqual([
+        'entity-canvas-bridge',
+        'entity-false-ready-canvas',
+        'entity-non-current-healthy',
+        'entity-managed',
+        'entity-unrelated',
+      ]);
+      expect((after.revision as { data_value: number }).data_value).toBe(11);
+      expect(after.ledger).toEqual([
+        expect.objectContaining({
+          actor_user_id: ACTOR_USER_ID,
+          idempotency_key: 'historical-media-non-current-archive',
+          before_state: expect.objectContaining({
+            candidateCount: 1,
+            placementCount: 1,
+            candidates: [expect.objectContaining({
+              assetVersionId: 'version-non-current-broken',
+              isCurrentVersion: false,
+            })],
+          }),
+        }),
+      ]);
+      expect(after.audit).toEqual([
+        expect.objectContaining({
+          user_id: ACTOR_USER_ID,
+          action: 'historical_media_archive',
+          target_type: 'asset_media_remediation',
+        }),
+      ]);
     });
   });
 
@@ -1446,7 +1581,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
     });
   }, 20_000);
 
-  postgresIt('rejects changed placements, recovered sources and non-current versions as stale', async () => {
+  postgresIt('rejects changed placements, recovered sources and current-version identity changes as stale', async () => {
     await withIsolatedPostgres('historical-media-stale-candidates', async ({ databaseUrl: isolatedUrl, query }) => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
       const service = await loadHistoricalMediaService();
@@ -1486,6 +1621,16 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       await expect(service.archiveHistoricalMedia(createArchiveCommand(
         [byAsset.get('asset-false-ready') as HistoricalMediaCandidate],
         'historical-media-stale-current-version',
+      ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_CANDIDATE_STALE' });
+
+      await query(
+        `UPDATE wujie_assets
+         SET current_version_id = 'version-non-current-broken'
+         WHERE id = 'asset-non-current-broken'`,
+      );
+      await expect(service.archiveHistoricalMedia(createArchiveCommand(
+        [byAsset.get('asset-non-current-broken') as HistoricalMediaCandidate],
+        'historical-media-stale-promoted-current-version',
       ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_CANDIDATE_STALE' });
 
       await expect(query(

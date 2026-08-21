@@ -199,6 +199,7 @@ interface HistoricalMediaBeforeCandidate {
   projectId: string;
   assetId: string;
   assetVersionId: string;
+  isCurrentVersion: boolean;
   availability: MediaAvailability;
   urlClass: 'empty' | 'ephemeral-proxy';
   candidateDigest: string;
@@ -834,7 +835,6 @@ async function lockCandidateFacts(
   if (
     row.owner_id !== selection.ownerId
     || row.asset_status !== 'active'
-    || row.current_version_id !== row.asset_version_id
     || !isAllowedBrokenCandidate(row)
   ) {
     throw remediationError('HISTORICAL_MEDIA_CANDIDATE_STALE');
@@ -881,7 +881,7 @@ async function lockCandidateFacts(
     projectId: row.project_id,
     assetId: row.asset_id,
     assetVersionId: row.asset_version_id,
-    isCurrentVersion: true,
+    isCurrentVersion: row.current_version_id === row.asset_version_id,
     availability: row.availability,
     urlClass,
     placements: placementsResult.rows.map(mapLockedPlacement),
@@ -990,6 +990,7 @@ function createBeforeCandidate(
     projectId: locked.projectId,
     assetId: locked.assetId,
     assetVersionId: locked.assetVersionId,
+    isCurrentVersion: locked.isCurrentVersion,
     availability: locked.availability,
     urlClass: locked.urlClass,
     candidateDigest: locked.candidateDigest,
