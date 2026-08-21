@@ -8,6 +8,7 @@ import type {
 
 const MAX_CANONICAL_JSON_BYTES = 64 * 1024;
 const MAX_CANDIDATES = 20;
+const MAX_CANDIDATE_PLACEMENTS = Math.floor(MAX_CANONICAL_JSON_BYTES / 64);
 const INVALID_REQUEST = 'HISTORICAL_MEDIA_REQUEST_INVALID';
 
 export interface HistoricalMediaPlacementFact {
@@ -116,12 +117,13 @@ function readBoundedString(
 }
 
 function normalizePlacement(placement: HistoricalMediaPlacementFact): HistoricalMediaPlacementFact {
+  if (!placement || typeof placement !== 'object') throw new Error(INVALID_REQUEST);
   return {
-    id: normalizeString(placement.id),
-    workspace: normalizeString(placement.workspace) as WorkspaceKind,
-    workspaceId: normalizeString(placement.workspaceId),
-    entityType: normalizeString(placement.entityType) as WorkspaceEntityType,
-    entityId: normalizeString(placement.entityId),
+    id: readBoundedString(placement.id, 1, 256),
+    workspace: readBoundedString(placement.workspace, 1, 256) as WorkspaceKind,
+    workspaceId: readBoundedString(placement.workspaceId, 1, 256),
+    entityType: readBoundedString(placement.entityType, 1, 256) as WorkspaceEntityType,
+    entityId: readBoundedString(placement.entityId, 1, 256),
   };
 }
 
@@ -129,14 +131,28 @@ function normalizeCandidateSelection(
   selection: HistoricalMediaArchiveSelection,
 ): HistoricalMediaArchiveSelection {
   return {
-    projectId: normalizeString(selection.projectId),
-    assetId: normalizeString(selection.assetId),
-    assetVersionId: normalizeString(selection.assetVersionId),
-    candidateDigest: normalizeString(selection.candidateDigest),
+    projectId: readBoundedString(selection.projectId, 1, 256),
+    assetId: readBoundedString(selection.assetId, 1, 256),
+    assetVersionId: readBoundedString(selection.assetVersionId, 1, 256),
+    candidateDigest: readBoundedString(selection.candidateDigest, 1, 256),
   };
 }
 
 function candidateCanonicalValue(candidate: HistoricalMediaCandidate): StringRecord {
+  if (!candidate || typeof candidate !== 'object' || !Array.isArray(candidate.placements)) {
+    throw new Error(INVALID_REQUEST);
+  }
+  if (candidate.placements.length > MAX_CANDIDATE_PLACEMENTS) {
+    throw new Error(INVALID_REQUEST);
+  }
+
+  const ownerId = readBoundedString(candidate.ownerId, 1, 256);
+  const projectId = readBoundedString(candidate.projectId, 1, 256);
+  const assetId = readBoundedString(candidate.assetId, 1, 256);
+  const assetVersionId = readBoundedString(candidate.assetVersionId, 1, 256);
+  const availability = readBoundedString(candidate.availability, 1, 256);
+  const urlClass = readBoundedString(candidate.urlClass, 1, 256);
+
   const placements = candidate.placements
     .map(normalizePlacement)
     .sort(compareByFields<HistoricalMediaPlacementFact>([
@@ -148,17 +164,24 @@ function candidateCanonicalValue(candidate: HistoricalMediaCandidate): StringRec
     ] as const));
 
   return {
-    ownerId: normalizeString(candidate.ownerId),
-    projectId: normalizeString(candidate.projectId),
-    assetId: normalizeString(candidate.assetId),
-    assetVersionId: normalizeString(candidate.assetVersionId),
-    availability: normalizeString(candidate.availability),
-    urlClass: normalizeString(candidate.urlClass),
+    ownerId,
+    projectId,
+    assetId,
+    assetVersionId,
+    availability,
+    urlClass,
     placements,
   };
 }
 
 function requestCanonicalValue(input: HistoricalMediaArchiveRequest): StringRecord {
+  if (!input || typeof input !== 'object' || !Array.isArray(input.candidates)) {
+    throw new Error(INVALID_REQUEST);
+  }
+  if (input.candidates.length < 1 || input.candidates.length > MAX_CANDIDATES) {
+    throw new Error(INVALID_REQUEST);
+  }
+
   const candidates = input.candidates
     .map(normalizeCandidateSelection)
     .sort(compareByFields<HistoricalMediaArchiveSelection>([
@@ -169,9 +192,9 @@ function requestCanonicalValue(input: HistoricalMediaArchiveRequest): StringReco
     ] as const));
 
   return {
-    action: normalizeString(input.action),
-    idempotencyKey: normalizeString(input.idempotencyKey),
-    reason: normalizeString(input.reason),
+    action: readBoundedString(input.action, 1, 256),
+    idempotencyKey: readBoundedString(input.idempotencyKey, 8, 128),
+    reason: readBoundedString(input.reason, 8, 512),
     candidates,
   };
 }
@@ -182,12 +205,7 @@ export function classifyHistoricalMediaUrl(
   const normalized = normalizeString(url);
   if (!normalized) return 'empty';
 
-  try {
-    const pathname = new URL(normalized, 'http://historical-media.invalid').pathname;
-    if (pathname.startsWith('/v1/images/proxy/')) return 'ephemeral-proxy';
-  } catch {
-    // A non-URL string is still durable or external unless it is empty.
-  }
+  if (normalized.startsWith('/v1/images/proxy/')) return 'ephemeral-proxy';
 
   return 'durable-or-external';
 }
