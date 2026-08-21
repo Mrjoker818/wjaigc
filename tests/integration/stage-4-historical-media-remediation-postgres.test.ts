@@ -1033,17 +1033,15 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
         await assetBarrier.query('COMMIT');
         const [archiveSettled, restoreSettled] = await Promise.allSettled([archive, restore]);
         const archiveResult = unwrapFulfilled(archiveSettled);
-        const restoreResult = unwrapFulfilled(restoreSettled);
 
         expect(archiveResult).toMatchObject({
           archivedVersionCount: 1,
           archivedPlacementCount: 1,
           projectRevisions: { [PROJECT_ID]: 11 },
         });
-        expect(restoreResult).toMatchObject({
-          placement: { id: 'placement-canvas-restore', status: 'active' },
-          asset: { id: 'asset-canvas-bridge', status: 'active' },
-          projectRevision: 12,
+        expect(restoreSettled).toMatchObject({
+          status: 'rejected',
+          reason: { code: 'ASSET_MEDIA_UNRECOVERABLE' },
         });
         const state = await query<{
           asset_status: string;
@@ -1069,17 +1067,17 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
           [OWNER_ID],
         );
         expect(state.rows[0]).toMatchObject({
-          asset_status: 'active',
+          asset_status: 'trashed',
           archived_status: 'trashed',
-          restored_status: 'active',
+          restored_status: 'trashed',
           availability: 'unrecoverable',
-          revision: '12',
+          revision: '11',
           ledger: 1,
           audit: 1,
         });
         const imageIds = state.rows[0]?.snapshot[0]?.canvasImages.map(image => image.id) ?? [];
         expect(imageIds).not.toContain('entity-canvas-bridge');
-        expect(imageIds).toContain('entity-canvas-restore');
+        expect(imageIds).not.toContain('entity-canvas-restore');
       } finally {
         await assetBarrier.query('ROLLBACK').catch(() => undefined);
         await Promise.allSettled(operations);
