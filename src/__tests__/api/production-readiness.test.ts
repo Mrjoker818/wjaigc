@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getTaskEventTransportReadinessIssue: vi.fn(),
   getApiProviders: vi.fn(),
   ensureCloudTaskTables: vi.fn(),
+  collectAssetGraphReleaseReadiness: vi.fn(),
 }));
 
 vi.mock('@/lib/server-auth', () => ({
@@ -22,6 +23,9 @@ vi.mock('@/lib/task-event-transport', () => ({
 }));
 vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.getApiProviders }));
 vi.mock('@/lib/cloud-task-storage', () => ({ ensureCloudTaskTables: mocks.ensureCloudTaskTables }));
+vi.mock('@/lib/asset-core/asset-release-readiness', () => ({
+  collectAssetGraphReleaseReadiness: mocks.collectAssetGraphReleaseReadiness,
+}));
 
 import { GET } from '@/app/api/admin/production-readiness/route';
 
@@ -33,6 +37,21 @@ describe('GET /api/admin/production-readiness', () => {
     mocks.getProductionAuthConfigurationIssues.mockReturnValue([]);
     mocks.getProductionPaymentConfigurationIssues.mockReturnValue([]);
     mocks.getTaskEventTransportReadinessIssue.mockReturnValue(null);
+    mocks.collectAssetGraphReleaseReadiness.mockResolvedValue({
+      mode: 'legacy',
+      status: 'pass',
+      releaseReady: true,
+      switchAuthorized: true,
+      blockingCurrentRelease: false,
+      blockers: [],
+      migrations: { required: 6, verified: 6, missing: [], checksumMismatches: [] },
+      shadowComparison: {},
+      media: {},
+      assets: {},
+      gc: {},
+      queryErrorCount: 0,
+      collectionUnavailable: false,
+    });
     delete process.env.COZE_PROJECT_ENV;
     delete process.env.WUJIE_AUTH_SECRET;
     delete process.env.NEXTAUTH_SECRET;
@@ -47,6 +66,7 @@ describe('GET /api/admin/production-readiness', () => {
     expect(response.status).toBe(403);
     expect(mocks.getApiProviders).not.toHaveBeenCalled();
     expect(mocks.ensureCloudTaskTables).not.toHaveBeenCalled();
+    expect(mocks.collectAssetGraphReleaseReadiness).not.toHaveBeenCalled();
   });
 
   it('reports database and enabled provider configuration without returning credentials', async () => {
@@ -124,5 +144,46 @@ describe('GET /api/admin/production-readiness', () => {
 
     expect(data.success).toBe(true);
     expect(data.taskEvents).toEqual({ status: 'warn', issue: expect.stringContaining('durable task polling') });
+  });
+
+  it('includes the sanitized asset release gate for administrators', async () => {
+    mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    mocks.ensureCloudTaskTables.mockResolvedValue(undefined);
+    mocks.getApiProviders.mockResolvedValue([]);
+
+    const data = await (await GET(request())).json();
+
+    expect(data.assetGraph).toMatchObject({ releaseReady: true, switchAuthorized: true });
+  });
+
+  it('does not fail the active legacy release when asset-v3 switching is blocked', async () => {
+    mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    mocks.ensureCloudTaskTables.mockResolvedValue(undefined);
+    mocks.getApiProviders.mockResolvedValue([]);
+    mocks.collectAssetGraphReleaseReadiness.mockResolvedValue({
+      mode: 'legacy', status: 'warn', releaseReady: false, switchAuthorized: false,
+      blockingCurrentRelease: false, blockers: ['unmigrated-projects'],
+      migrations: {}, shadowComparison: {}, media: {}, assets: {}, gc: {},
+      queryErrorCount: 0, collectionUnavailable: false,
+    });
+
+    const data = await (await GET(request())).json();
+    expect(data.success).toBe(true);
+    expect(data.assetGraph.status).toBe('warn');
+  });
+
+  it('fails readiness when the active asset-v3 path is blocked', async () => {
+    mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    mocks.ensureCloudTaskTables.mockResolvedValue(undefined);
+    mocks.getApiProviders.mockResolvedValue([]);
+    mocks.collectAssetGraphReleaseReadiness.mockResolvedValue({
+      mode: 'asset-v3', status: 'fail', releaseReady: false, switchAuthorized: false,
+      blockingCurrentRelease: true, blockers: ['non-ready-current-media'],
+      migrations: {}, shadowComparison: {}, media: {}, assets: {}, gc: {},
+      queryErrorCount: 0, collectionUnavailable: false,
+    });
+
+    const data = await (await GET(request())).json();
+    expect(data.success).toBe(false);
   });
 });

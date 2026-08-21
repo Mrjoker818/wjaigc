@@ -4,6 +4,7 @@ import { getApiProviders } from '@/lib/server-api-config';
 import { getProductionPaymentConfigurationIssues } from '@/lib/payment-config';
 import { getProductionAuthConfigurationIssues, requireAdminUser } from '@/lib/server-auth';
 import { getTaskEventTransportReadinessIssue } from '@/lib/task-event-transport';
+import { collectAssetGraphReleaseReadiness } from '@/lib/asset-core/asset-release-readiness';
 
 type CheckStatus = 'pass' | 'warn' | 'fail';
 
@@ -34,6 +35,7 @@ export async function GET(request: NextRequest) {
   if (!admin) {
     return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
   }
+  const assetGraph = await collectAssetGraphReleaseReadiness();
 
   let database: { status: CheckStatus; detail: string };
   try {
@@ -83,10 +85,11 @@ export async function GET(request: NextRequest) {
     : { status: 'pass' as const, issue: null };
 
   return NextResponse.json({
-    success: database.status !== 'fail' && security.status !== 'fail',
+    success: database.status !== 'fail' && security.status !== 'fail' && !assetGraph.blockingCurrentRelease,
     database,
     security,
     taskEvents,
+    assetGraph,
     summary,
     providers: readiness,
   });
