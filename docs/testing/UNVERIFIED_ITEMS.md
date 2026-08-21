@@ -1041,3 +1041,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Exact-SHA cloud durability gate | VERIFIED ON `e809f5c` | Authenticated Google Chrome proved one false-ready current version, two active placements, blocker `non-durable-ready-media`, and zero fresh Console errors/warnings. No further gate verification is required. |
 | Historical broken-media remediation | Three active broken asset/placement records are classified | Explicitly replace, regenerate or archive them; never silently fabricate or delete user content. |
 | Protected baseline refresh | All protected features remain present, but 16 source-drift entries exceed the older allowlist | Review against the currently authorized main baseline in a dedicated change; do not weaken the gate inside this bug fix. |
+
+## 2026-08-21 Task 6 safe-archive unresolved items
+
+| Item | Status | Required closure |
+|---|---|---|
+| Overlapping archive then Canvas restore | BLOCKED LOCALLY | Repair and prove the real PostgreSQL contract that currently throws `ASSET_MEDIA_UNRECOVERABLE`; rerun focused, affected, and full gates with zero failures. |
+| Protected baseline source drift | BLOCKED | Review the `23` current drift paths in a dedicated authorization/baseline task; do not broaden the allowlist in historical-media remediation. |
+| Cloud archive action | UNVERIFIED | No cloud POST or archive action was performed. Verify only after the local race is green and an explicit controlled target is approved. |
+| Idempotent cloud retry | UNVERIFIED | No cloud retry was exercised; local tests do not replace an exact cloud execution proof. |
+| `asset-v3` acceptance | UNVERIFIED / BLOCKED | Keep the approved runtime mode unchanged until doctor, historical media, thumbnail projection, reload, original fallback, and S3 recovery evidence all close. |
+| Remediation module size | OPEN MINOR | `src/lib/asset-core/historical-media-remediation.ts` is a mixed `1079`-line module; review decomposition separately without changing the archive behavior in this task. |
+| Broad asset ignore rule | OPEN MINOR | The repository-level `assets/` ignore rule remains broad and should receive a scoped ownership review. |
+| Self-hosted production origin documentation/readiness | OPEN MINOR | Document and verify the self-hosted production origin/readiness boundary before treating local route/build evidence as deployment acceptance. |

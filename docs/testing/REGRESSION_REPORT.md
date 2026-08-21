@@ -1391,3 +1391,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Authenticated Google Chrome returned readiness HTTP 200 with `falseReadyCurrentVersions=1`, `falseReadyActivePlacements=2` and blocker `non-durable-ready-media`. The placement count is correctly independent: the one false-ready current version is referenced by two active Canvas placements.
 - The deployment retained `6` projects, `48` Canvas images, migration `6/6` and shadow parity `6/6`. A clean reload after deployment produced zero fresh Console errors and zero fresh warnings.
 - **Verdict: LOCAL + EXACT-SHA COZE GOOGLE CHROME PASS.** Detection is closed; historical media remediation remains deliberately open, so `asset-v3` stays blocked.
+
+## 2026-08-21 Task 6 historical-media safe-archive local gates
+
+- Fresh candidate: runtime code `86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54`, verified against a new temporary PostgreSQL 18.4 cluster at loopback-only `127.0.0.1:55434/wujie_safe_archive_task6`. `POSTGRES_TEST_DATABASE_URL`, `TEST_POSTGRES_URL`, `DATABASE_URL`, and `PGDATABASE_URL` all targeted that database.
+- Focused exact command: `7` files, `96` passed / `1` failed / `0` skipped tests. Affected exact command: `9` files, `76` passed / `1` failed / `0` skipped tests. Both fail only on the overlapping Canvas restore/archive remediation case with `ASSET_MEDIA_UNRECOVERABLE`.
+- Full `pnpm test`: `491` passed + `1` failed files; `3065` passed + `1` failed tests; no skips reported. The same integration test is the sole failure. No non-PostgreSQL environment-gated skip was reported by this run.
+- `pnpm validate` passed (TypeScript plus quiet ESLint); `pnpm lint` passed with `0 errors / 988 warnings`; `pnpm build` passed with `116/116` static pages and includes `/api/admin/assets/remediation`; `git diff --check` passed.
+- `pnpm check:protected-baseline` failed with `23` unapproved source-drift blockers, while its `38` feature IDs, protected component paths, evidence contracts, and refs all passed. The allowlist was not changed.
+- This is a blocked local-evidence result. Cloud archive, idempotent retry, and `asset-v3` acceptance remain **UNVERIFIED**. Evidence: `docs/testing/evidence/v588-admin-003-safe-archive-local-2026-08-21.json`.

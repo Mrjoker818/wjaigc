@@ -2186,3 +2186,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Evidence | `docs/testing/evidence/v588-admin-003-missing-media-diagnosis-cloud-2026-08-21.json`, `v588-admin-003-missing-media-db-2026-08-21.jpg`, and `v588-admin-003-false-ready-media-2026-08-21.jpg`. |
 | Cloud regression | Coze pulled exact `main@e809f5c105d6e42d584a38ae217d7791c7864759`, kept `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` and `shadow`, built successfully and served HTTP 200. Authenticated readiness returned `falseReadyCurrentVersions=1`, `falseReadyActivePlacements=2`, blocker `non-durable-ready-media`, `releaseReady=false` and `switchAuthorized=false`. The one unsafe ready version is referenced by two active placements. Six projects and 48 images remained, and a clean Google Chrome reload produced zero fresh Console errors/warnings. |
 | Status | **FIXED / EXACT-SHA COZE GOOGLE CHROME VERIFIED.** Historical media remediation remains open and `asset-v3` is not authorized. Evidence: `docs/testing/evidence/v588-bug-005-cloud-durability-gate-2026-08-21.json` and `.png`. |
+
+### S4-HISTORICAL-MEDIA-SAFE-ARCHIVE Task 6: local completion gate failure
+
+| Field | Detail |
+|---|---|
+| Severity | P0 release blocker |
+| Candidate | Runtime code `86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54` |
+| Reproduction | Run the required focused, affected, or full Vitest command with all PostgreSQL test URL variables set to the fresh loopback PostgreSQL 18.4 database. |
+| Actual | `serializes archive before overlapping Canvas restore without deadlock or partial state` throws `ASSET_MEDIA_UNRECOVERABLE` from `src/lib/asset-core/service.ts:678`; focused `96/97`, affected `76/77`, and full `3065/3066` tests pass, each with this single failure. |
+| Expected | The overlapping restore/archive serialization contract passes with no partial state and no unrecoverable-media rejection. |
+| PostgreSQL skips | Zero. The full run reports `491 passed + 1 failed` files and `3065 passed + 1 failed` tests, with no skipped files or tests. |
+| Release decision | **BLOCKED.** No archive request, cloud POST, billing action, regeneration, replacement, delete, or runtime mode change was made. No push is authorized. |

@@ -1,0 +1,38 @@
+{
+  "item": "S4-HISTORICAL-MEDIA-SAFE-ARCHIVE-TASK-6",
+  "testedAt": "2026-08-21T23:52:50+08:00",
+  "runtimeCodeCommit": "86b8e176b2dcb88e3bf4d43ae19c64dc05dc9f54",
+  "docsEvidenceCommit": null,
+  "status": "blocked",
+  "database": {
+    "engine": "PostgreSQL",
+    "version": "18.4",
+    "isolation": "fresh temporary loopback-only cluster",
+    "host": "127.0.0.1",
+    "port": 55434,
+    "database": "wujie_safe_archive_task6"
+  },
+  "environmentVariables": ["POSTGRES_TEST_DATABASE_URL", "TEST_POSTGRES_URL", "DATABASE_URL", "PGDATABASE_URL"],
+  "migration": {
+    "file": "20260821_wj_stable_s4_historical_media_remediations.sql",
+    "sha256": "85a7981fb6d220866cc41f93c7538f211a83e3560b058a1ceecb146f728d7aad"
+  },
+  "immutableInputs": {
+    "stableBeforeAndAfter": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "donorPnPmLockSha256": "cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0"
+  },
+  "gates": {
+    "focusedVitest": {"status": "failed", "files": {"passed": 6, "failed": 1, "skipped": 0}, "tests": {"passed": 96, "failed": 1, "skipped": 0}, "durationSeconds": 17.22},
+    "affectedVitest": {"status": "failed", "files": {"passed": 8, "failed": 1, "skipped": 0}, "tests": {"passed": 76, "failed": 1, "skipped": 0}, "durationSeconds": 31.87},
+    "fullVitest": {"command": "pnpm test", "status": "failed", "files": {"passed": 491, "failed": 1, "skipped": 0}, "tests": {"passed": 3065, "failed": 1, "skipped": 0}, "durationSeconds": 391.23},
+    "validate": {"status": "passed", "exitCode": 0},
+    "lint": {"status": "passed", "exitCode": 0, "errors": 0, "warnings": 988},
+    "build": {"status": "passed", "exitCode": 0, "staticPages": 116, "remediationRoutePresent": true},
+    "protectedBaseline": {"status": "failed", "protectedFeatureIdsPresent": 38, "unapprovedSourceDriftBlockers": 23},
+    "gitDiffCheck": {"status": "passed", "exitCode": 0}
+  },
+  "failure": {"test": "serializes archive before overlapping Canvas restore without deadlock or partial state", "error": "ASSET_MEDIA_UNRECOVERABLE", "location": "src/lib/asset-core/service.ts:678"},
+  "unverified": ["cloud archive", "cloud idempotent retry", "asset-v3 acceptance"],
+  "prohibitedActionsPerformed": [],
+  "push": {"attempted": false, "originMain": "449c635702d25a2f80358043420d03500bb42bb6", "reason": "Focused, affected, full Vitest, and protected-baseline gates did not all pass."}
+}
