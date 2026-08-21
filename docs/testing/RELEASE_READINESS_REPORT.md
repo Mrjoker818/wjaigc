@@ -1101,3 +1101,10 @@ Coze validated GitHub source `main@81fe303e73ba2f50d2ca0a6ed7201c5977758231` in 
 - Local gates are green: focused `6/6`, related administrator `26/26`, full Vitest `2868` tests, TypeScript, zero-error ESLint and production build `114/114`. The `70` PostgreSQL-gated tests remain explicitly skipped; this test-only item does not alter persistence or accounting.
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` and the read-only donor remain unchanged.
 - **Decision: LOCAL CANDIDATE READY FOR `main`; CLOUD ACCEPTANCE PENDING.** The exact commit must be pulled into Coze and representative route behavior verified before `V588-ADMIN-003` starts.
+
+## 2026-08-21 V588-ADMIN-002 cloud acceptance
+
+- Coze is cleanly aligned to exact `main@d220479214a88b45fcd3a9520d220b864d19cb28`; no business rebuild or restart was needed for this test-only item, port 5000 remained HTTP 200 and `stable` remained unchanged.
+- The public credential-free administrator orphan route returned `401`. The authenticated administrator dashboard refreshed successfully in the existing Chrome preview tab and exposed the expected live summary/empty states with zero new Console Error/Warning.
+- The contract now permanently fails if an administrator route is added, removed or loses an approved guard pattern. Runtime authorization remains owned by the current shared and explicitly reviewed guards.
+- **Decision: V588-ADMIN-002 CLOUD ACCEPTED.** Evidence: `docs/testing/evidence/v588-admin-002-cloud-api-2026-08-21.json` and `docs/testing/evidence/v588-admin-002-cloud-ui-2026-08-21.png`. This authorizes `V588-ADMIN-003` only; it does not authorize a donor media subsystem replacement.

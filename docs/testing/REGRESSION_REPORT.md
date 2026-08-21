@@ -1346,3 +1346,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Representative runtime assertions now prove unauthenticated orphan scans return `401`, non-admin scans return `403`, and both paths avoid invoking the media-health service.
 - Focused tests passed `6/6`; the administrator regression group passed `26/26`. Full Vitest passed `466 files / 2868 tests`, with `15 files / 70` PostgreSQL-only tests explicitly skipped. TypeScript, ESLint (`0 errors / 988 historical warnings`) and production build (`114/114`) passed.
 - **Verdict: LOCAL REGRESSION PASS / CLOUD PENDING.** No production business code changed. Push the exact candidate to `main`, pull it into Coze and verify representative administrator and unauthenticated route behavior before closing the item.
+
+## 2026-08-21 V588-ADMIN-002 cloud closure
+
+- Coze pulled exact `main@d220479214a88b45fcd3a9520d220b864d19cb28`; its worktree was clean, port 5000 remained HTTP 200 without rebuild/restart, and `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remained unchanged.
+- A credential-free request to `/api/admin/assets/orphans` returned HTTP `401` and `{"error":"Authentication required"}`.
+- Authenticated Google Chrome reused the same two existing tabs. Refreshing the administrator operations dashboard retained visible real summary data and both expected empty-state projections. Fresh Console Error/Warning count was zero.
+- Evidence: `docs/testing/evidence/v588-admin-002-cloud-api-2026-08-21.json` and `docs/testing/evidence/v588-admin-002-cloud-ui-2026-08-21.png`.
+- **Verdict: V588-ADMIN-002 LOCAL + CLOUD PASS.** The repository-wide route contract is absorbed; `V588-ADMIN-003` is the next authorized RED item.

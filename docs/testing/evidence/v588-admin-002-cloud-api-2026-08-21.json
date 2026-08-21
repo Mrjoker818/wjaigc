@@ -1,0 +1,35 @@
+{
+  "verifiedAt": "2026-08-21T08:38:05.0142153+08:00",
+  "cloudUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "githubCommit": "d220479214a88b45fcd3a9520d220b864d19cb28",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cozeWorkspace": {
+    "head": "d220479214a88b45fcd3a9520d220b864d19cb28",
+    "originMain": "d220479214a88b45fcd3a9520d220b864d19cb28",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "clean": true,
+    "port5000HttpStatus": 200,
+    "rebuiltOrRestarted": false
+  },
+  "unauthenticatedProbe": {
+    "method": "GET",
+    "path": "/api/admin/assets/orphans",
+    "status": 401,
+    "body": {
+      "error": "Authentication required"
+    },
+    "requestId": "9907a84f-95a7-901b-b885-0bc4cca45c47"
+  },
+  "authenticatedChromeProbe": {
+    "surface": "administrator operations dashboard",
+    "action": "refresh",
+    "totalUsersVisible": true,
+    "modelEmptyStateCount": 1,
+    "providerEmptyStateCount": 1,
+    "newConsoleErrors": 0,
+    "newConsoleWarnings": 0,
+    "existingChromeTabsReused": 2,
+    "newChromeTabsCreated": 0,
+    "screenshot": "docs/testing/evidence/v588-admin-002-cloud-ui-2026-08-21.png"
+  }
+}

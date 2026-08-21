@@ -1000,7 +1000,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Representative rejection behavior | VERIFIED LOCALLY | Unauthenticated orphan scan returns `401`; non-admin returns `403`; neither path calls the protected media-health service. |
 | Full local regression | VERIFIED | Focused `6/6`, administrator `26/26`, full Vitest `2868` tests, TypeScript, ESLint with zero errors, and build `114/114` passed. |
 | PostgreSQL-only suite | NOT RUN FOR THIS ITEM | `70` tests remain gated by the absent isolated database. This item changes tests only and does not modify persistence or accounting. |
-| V588-ADMIN-002 cloud behavior | UNVERIFIED | Coze must pull the exact candidate; verify a representative unauthenticated `401` and authenticated administrator success without creating another Chrome tab. |
-| Next absorption item | BLOCKED UNTIL CLOUD ACCEPTANCE | Do not start `V588-ADMIN-003` before the exact-candidate cloud check is recorded. |
+| V588-ADMIN-002 cloud behavior | VERIFIED ON `d220479` | Credential-free orphan scan returned `401`; authenticated Chrome refreshed the administrator dashboard with expected content and zero fresh Console errors/warnings. |
+| Next absorption item | AUTHORIZED | Start `V588-ADMIN-003` with a RED dry-run/idempotency contract against the current media-health subsystem; do not import a parallel donor media source of truth. |
 | Donor snapshot | READ-ONLY VERIFIED | Lock digest remains `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`. |
 | Stable branch | PROTECTED | `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains unchanged. |
