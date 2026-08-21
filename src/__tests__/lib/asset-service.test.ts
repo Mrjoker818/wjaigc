@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -481,6 +482,14 @@ function createVersionInput(ownerId: string, projectId: string, overrides: Parti
     ...overrides,
   };
 }
+
+describe('Canvas snapshot trash storage boundary', () => {
+  it('delegates Canvas snapshot trash to the shared transaction helper', () => {
+    const storageSource = readFileSync('src/lib/asset-core/storage.ts', 'utf8');
+    expect(storageSource).toContain('trashCanvasPlacementSnapshotInTransaction(');
+    expect(storageSource).not.toContain("project.canvasImages = canvasImages.filter(candidate => candidate.id !== placement.entityId)");
+  });
+});
 
 describe('asset graph service', () => {
   it('I4 atomically creates a version and placement and replays without persisting media twice', async () => {
