@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
+import * as ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -143,6 +144,10 @@ class MemoryStorage {
       transferDigests: new Map(),
       transferSources: new Map(),
     };
+  }
+
+  async read<T>(callback: (transaction: MemoryStorage) => Promise<T>): Promise<T> {
+    return callback(this);
   }
 
   async transaction<T>(callback: (transaction: MemoryStorage) => Promise<T>): Promise<T> {
@@ -496,7 +501,113 @@ describe('Canvas snapshot trash storage boundary', () => {
   });
 });
 
+describe('Asset Graph write gate coverage', () => {
+  it('gates direct production write wrappers after BEGIN and before business work', () => {
+    const orderedContracts = new Map([
+      [
+        'src/lib/asset-core/storage.ts',
+        /async transaction<T>\([\s\S]*?return this\.runTransaction\(callback, true\);[\s\S]*?await client\.query\('BEGIN'\);\s+if \(write\) await lockAssetGraphWriteGate\(client, 'shared'\);\s+const result = await callback\(new PostgresAssetStorageTransaction\(client\)\)/,
+      ],
+      [
+        'src/lib/asset-core/canvas-project-sync.ts',
+        /await client\.query\('BEGIN'\);\s+await lockAssetGraphWriteGate\(client, 'shared'\);\s+const result = await callback\(/,
+      ],
+      [
+        'src/lib/asset-core/task-projector.ts',
+        /await client\.query\('BEGIN'\);\s+await lockAssetGraphWriteGate\(client, 'shared'\);\s+const result = await callback\(new PostgresTaskProjectionTransaction\(client\)\)/,
+      ],
+      [
+        'src/lib/asset-core/legacy-migration.ts',
+        /await client\.query\('BEGIN'\);\s+await lockAssetGraphWriteGate\(client, 'shared'\);\s+const result = await migrateLegacyProjectOnWriteInTransaction\(client, input\)/,
+      ],
+    ]);
+
+    for (const [path, contract] of orderedContracts) {
+      expect(readFileSync(path, 'utf8'), path).toMatch(contract);
+    }
+  });
+
+  it('classifies every helper transaction explicitly as read-only or shared-write', () => {
+    const expectedModes = new Map<string, string[]>([
+      ['src/lib/asset-core/historical-media-remediation.ts', ["'none'", "'none'"]],
+      ['src/lib/asset-core/media-health.ts', [
+        "dryRun?'none':'shared'",
+        "'shared'",
+        "'shared'",
+        "'none'",
+        "'shared'",
+        "'shared'",
+        "'none'",
+      ]],
+      ['src/lib/asset-core/recovery-media.ts', ["'none'"]],
+      ['src/lib/asset-core/thumbnail-backfill.ts', [
+        "dryRun?'none':'shared'",
+        "'shared'",
+        "'shared'",
+        "'shared'",
+        "'none'",
+      ]],
+    ]);
+
+    for (const [path, expected] of expectedModes) {
+      const sourceText = readFileSync(path, 'utf8');
+      const sourceFile = ts.createSourceFile(path, sourceText, ts.ScriptTarget.Latest, true);
+      const modes: string[] = [];
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isCallExpression(node)
+          && ts.isIdentifier(node.expression)
+          && node.expression.text === 'withAssetCoreTransaction'
+        ) {
+          modes.push(node.arguments[2]?.getText(sourceFile).replace(/\s+/g, '') ?? 'implicit');
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      expect(modes, path).toEqual(expected);
+    }
+  });
+});
+
 describe('asset graph service', () => {
+  it('resolves an asset reference through the read-only storage boundary', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const versionId = randomUUID();
+    const read = vi.fn(async (callback: (transaction: {
+      findProject: () => Promise<boolean>;
+      findVersion: () => Promise<AssetVersion>;
+    }) => Promise<unknown>) => callback({
+      findProject: async () => true,
+      findVersion: async () => ({
+        id: versionId,
+        assetId: 'asset-read',
+        ownerId,
+        projectId,
+        file: file('https://canonical.test/read.png'),
+        parentVersionIds: [],
+        createdAt: new Date().toISOString(),
+      }),
+    }));
+    const transaction = vi.fn(async () => {
+      throw new Error('write transaction must not serve resolveAssetReference');
+    });
+    const { createAssetService } = await loadService();
+    const service = createAssetService({ read, transaction });
+
+    await expect(service.resolveAssetReference({
+      actorUserId: ownerId,
+      projectId,
+      assetVersionId: versionId,
+    })).resolves.toMatchObject({
+      assetId: 'asset-read',
+      assetVersionId: versionId,
+      url: 'https://canonical.test/read.png',
+    });
+    expect(read).toHaveBeenCalledOnce();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it('I4 atomically creates a version and placement and replays without persisting media twice', async () => {
     const ownerId = randomUUID();
     const projectId = randomUUID();
@@ -1094,6 +1205,73 @@ describe('asset graph service', () => {
 });
 
 describe('PostgresAssetStorage transaction recovery', () => {
+  it('acquires the shared Asset Graph write gate before running business work', async () => {
+    const events: string[] = [];
+    const release = vi.fn();
+    const query = vi.fn(async (...args: [string, unknown[]?]) => {
+      const sql = args[0];
+      events.push(sql);
+      return { rows: [], rowCount: 0 };
+    });
+    const pool = {
+      connect: vi.fn(async () => ({ query, release })),
+    };
+    const { PostgresAssetStorage } = await import('@/lib/asset-core/storage');
+    const storage = new PostgresAssetStorage(pool as never);
+
+    await expect(storage.transaction(async () => {
+      events.push('BUSINESS_CALLBACK');
+      return 'ok';
+    })).resolves.toBe('ok');
+
+    expect(events).toEqual([
+      'BEGIN',
+      'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+      'BUSINESS_CALLBACK',
+      'COMMIT',
+    ]);
+    expect(query.mock.calls[1]?.[1]).toEqual(['wujie:asset-graph-write-gate:v1']);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the exclusive archive gate bounded and restores lock_timeout after acquisition', async () => {
+    const events: string[] = [];
+    const query = vi.fn(async (sql: string) => {
+      events.push(sql);
+      return { rows: [], rowCount: 0 };
+    });
+    const { lockAssetGraphWriteGate } = await import('@/lib/asset-core/storage');
+
+    await expect(lockAssetGraphWriteGate({ query } as never, 'exclusive')).resolves.toBeUndefined();
+
+    expect(events).toEqual([
+      "SET LOCAL lock_timeout = '5000ms'",
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      "SET LOCAL lock_timeout = '0'",
+    ]);
+  });
+
+  it('keeps read-only Asset Core helper transactions outside the write gate by default', async () => {
+    const events: string[] = [];
+    const release = vi.fn();
+    const query = vi.fn(async (sql: string) => {
+      events.push(sql);
+      return { rows: [], rowCount: 0 };
+    });
+    const pool = {
+      connect: vi.fn(async () => ({ query, release })),
+    };
+    const { withAssetCoreTransaction } = await import('@/lib/asset-core/storage');
+
+    await expect(withAssetCoreTransaction(async () => {
+      events.push('READ_CALLBACK');
+      return 'read';
+    }, pool as never)).resolves.toBe('read');
+
+    expect(events).toEqual(['BEGIN', 'READ_CALLBACK', 'COMMIT']);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it('destroys a client when rollback fails while preserving the original error', async () => {
     const originalError = new Error('callback failed');
     const rollbackError = new Error('rollback failed');

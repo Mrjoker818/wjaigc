@@ -2,7 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { trashCanvasPlacementSnapshotInTransaction } from './canvas-placement-snapshot';
 import {
+  AssetGraphWriteGateTimeoutError,
   type AssetCoreSqlTransaction,
+  lockAssetGraphWriteGate,
   withAssetCoreTransaction,
 } from './storage';
 import type {
@@ -669,7 +671,7 @@ export async function discoverHistoricalMediaArchiveCandidates(
   const limit = parseDiscoveryLimit(input);
   return withAssetCoreTransaction(async (client) => {
     return readHistoricalMediaDiscovery(client, limit);
-  });
+  }, undefined, 'none');
 }
 
 async function assertHistoricalMediaCoverageComplete(
@@ -684,13 +686,14 @@ async function assertHistoricalMediaCoverageComplete(
 async function lockHistoricalMediaCoverageUniverse(
   client: AssetCoreSqlTransaction,
 ): Promise<void> {
-  await client.query(
-    `LOCK TABLE
-       wujie_assets,
-       wujie_asset_versions,
-       wujie_workspace_placements
-     IN SHARE ROW EXCLUSIVE MODE`,
-  );
+  try {
+    await lockAssetGraphWriteGate(client, 'exclusive');
+  } catch (error) {
+    if (error instanceof AssetGraphWriteGateTimeoutError) {
+      throw remediationError('HISTORICAL_MEDIA_COVERAGE_INCOMPLETE');
+    }
+    throw error;
+  }
 }
 
 function timestampToIso(value: Date | string): string {
@@ -1187,5 +1190,5 @@ export async function archiveHistoricalMedia(input: {
       result,
     });
     return result;
-  });
+  }, undefined, 'none');
 }

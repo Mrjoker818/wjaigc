@@ -6,6 +6,7 @@ import { getPool } from '@/lib/db-client';
 import type { CanvasImage, Project } from '@/lib/user-types';
 
 import { readProjectSnapshot, type ProjectSchemaVersion } from './project-readers';
+import { lockAssetGraphWriteGate } from './storage';
 import type { AssetFile, AssetKind } from './types';
 
 export type LegacyMigrationErrorCode =
@@ -1183,6 +1184,7 @@ export async function migrateLegacyProjectOnWrite(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await lockAssetGraphWriteGate(client, 'shared');
     const result = await migrateLegacyProjectOnWriteInTransaction(client, input);
     await client.query('COMMIT');
     return result;

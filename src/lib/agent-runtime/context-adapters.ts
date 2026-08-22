@@ -62,7 +62,7 @@ export function resolveSelectedAgentMediaUrl(
 function defaultStorage(): AgentContextStorage {
   const storage = createPostgresAssetStorage();
   return {
-    transaction: callback => storage.transaction(transaction => callback({
+    transaction: callback => storage.read(transaction => callback({
       findProject: transaction.findProject.bind(transaction),
       findVersion: transaction.findVersion.bind(transaction),
       async findEntityPlacement(ownerId, projectId, workspace, workspaceId, entityId) {

@@ -15,6 +15,50 @@ import type {
 export type AssetCoreSqlTransaction = Pick<PoolClient, 'query'>;
 type SqlClient = AssetCoreSqlTransaction;
 
+const ASSET_GRAPH_WRITE_GATE_KEY = 'wujie:asset-graph-write-gate:v1';
+const ASSET_GRAPH_WRITE_GATE_TIMEOUT_MS = 5_000;
+
+export type AssetGraphWriteGateMode = 'shared' | 'exclusive';
+
+export class AssetGraphWriteGateTimeoutError extends Error {
+  constructor() {
+    super('ASSET_GRAPH_WRITE_GATE_TIMEOUT');
+    this.name = 'AssetGraphWriteGateTimeoutError';
+  }
+}
+
+function isPostgresLockTimeout(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === '55P03';
+}
+
+export async function lockAssetGraphWriteGate(
+  client: AssetCoreSqlTransaction,
+  mode: AssetGraphWriteGateMode,
+): Promise<void> {
+  if (mode === 'shared') {
+    await client.query(
+      'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+      [ASSET_GRAPH_WRITE_GATE_KEY],
+    );
+    return;
+  }
+
+  await client.query(`SET LOCAL lock_timeout = '${ASSET_GRAPH_WRITE_GATE_TIMEOUT_MS}ms'`);
+  try {
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [ASSET_GRAPH_WRITE_GATE_KEY],
+    );
+    await client.query("SET LOCAL lock_timeout = '0'");
+  } catch (error) {
+    if (isPostgresLockTimeout(error)) throw new AssetGraphWriteGateTimeoutError();
+    throw error;
+  }
+}
+
 export interface StoredVersion {
   version: AssetVersion;
   requestDigest: string;
@@ -100,6 +144,7 @@ export interface AssetStorageTransaction {
 }
 
 export interface AssetStorage {
+  read<T>(callback: (transaction: AssetStorageTransaction) => Promise<T>): Promise<T>;
   transaction<T>(callback: (transaction: AssetStorageTransaction) => Promise<T>): Promise<T>;
 }
 
@@ -648,11 +693,23 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
 export class PostgresAssetStorage implements AssetStorage {
   constructor(private readonly pool: Pool = getPool()) {}
 
+  async read<T>(callback: (transaction: AssetStorageTransaction) => Promise<T>): Promise<T> {
+    return this.runTransaction(callback, false);
+  }
+
   async transaction<T>(callback: (transaction: AssetStorageTransaction) => Promise<T>): Promise<T> {
+    return this.runTransaction(callback, true);
+  }
+
+  private async runTransaction<T>(
+    callback: (transaction: AssetStorageTransaction) => Promise<T>,
+    write: boolean,
+  ): Promise<T> {
     const client = await this.pool.connect();
     let released = false;
     try {
       await client.query('BEGIN');
+      if (write) await lockAssetGraphWriteGate(client, 'shared');
       const result = await callback(new PostgresAssetStorageTransaction(client));
       await client.query('COMMIT');
       return result;
@@ -681,10 +738,12 @@ export function createPostgresAssetStorage(pool?: Pool): AssetStorage {
 export async function withAssetCoreTransaction<T>(
   callback: (transaction: AssetCoreSqlTransaction) => Promise<T>,
   pool: Pool = getPool(),
+  writeGate: 'shared' | 'none' = 'none',
 ): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (writeGate === 'shared') await lockAssetGraphWriteGate(client, 'shared');
     const result = await callback(client);
     await client.query('COMMIT');
     return result;

@@ -15,6 +15,7 @@ import {
   type LegacyMigrationInput,
   type MigrationResult,
 } from './legacy-migration';
+import { lockAssetGraphWriteGate } from './storage';
 import type { MediaAvailability } from './types';
 
 export type AssetGraphMappings = Record<string, Record<string, LegacyImageMapping>>;
@@ -241,6 +242,7 @@ class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
     const client = await getPool().connect();
     try {
       await client.query('BEGIN');
+      await lockAssetGraphWriteGate(client, 'shared');
       const result = await callback({
         claimRevision: (expectedRevision) => claimProjectRevision(client, this.actorUserId, expectedRevision),
         writeProjects: (projects) => writeProjects(client, this.actorUserId, projects),

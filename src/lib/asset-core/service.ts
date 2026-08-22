@@ -177,7 +177,7 @@ export class AssetService {
   constructor(private readonly storage: AssetStorage) {}
 
   async resolveAssetReference(input: ResolveAssetReferenceInput): Promise<WorkspaceAssetReference> {
-    return this.storage.transaction(async transaction => {
+    return this.storage.read(async transaction => {
       if (!await transaction.findProject(input.actorUserId, input.projectId)) notFound();
       const version = await transaction.findVersion(
         input.actorUserId,

@@ -50,7 +50,7 @@ export async function readExactRecoveryMedia(relativePath: string): Promise<Exac
       [match[1], fileUrl],
     );
     return result.rows[0] ?? null;
-  });
+  }, undefined, 'none');
   if (!version?.mime_type) return null;
   const declaredBytes = Number(version.byte_size || 0);
   if (Number.isFinite(declaredBytes) && declaredBytes > MAX_MEDIA_BYTES) return null;

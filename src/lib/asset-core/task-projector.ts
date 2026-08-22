@@ -3,6 +3,7 @@ import type { PoolClient, QueryResultRow } from 'pg';
 
 import { getPool } from '@/lib/db-client';
 
+import { lockAssetGraphWriteGate } from './storage';
 import type {
   AssetFile,
   AssetKind,
@@ -586,6 +587,7 @@ class PostgresTaskProjectionRepository implements TaskProjectionRepository {
     const client = await getPool().connect();
     try {
       await client.query('BEGIN');
+      await lockAssetGraphWriteGate(client, 'shared');
       const result = await callback(new PostgresTaskProjectionTransaction(client));
       await client.query('COMMIT');
       return result;

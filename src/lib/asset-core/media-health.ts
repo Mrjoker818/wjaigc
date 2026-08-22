@@ -3,6 +3,7 @@ import { posix } from 'node:path';
 
 import {
   type AssetCoreSqlTransaction,
+  lockAssetGraphWriteGate,
   withAssetCoreTransaction,
 } from './storage';
 import type {
@@ -479,7 +480,7 @@ export async function scanMediaHealth(input: { dryRun?: boolean } = {}): Promise
     protected: protectedRows,
     estimatedBytes: candidates.reduce((total, candidate) => total + candidate.estimatedBytes, 0),
   };
-  });
+  }, undefined, dryRun ? 'none' : 'shared');
 }
 
 export async function markGcCandidate(input: {
@@ -510,7 +511,7 @@ export async function markGcCandidate(input: {
   );
   };
   if (transaction) return write(transaction);
-  return withAssetCoreTransaction(write);
+  return withAssetCoreTransaction(write, undefined, 'shared');
 }
 
 export async function purgeEligibleAsset(input: {
@@ -580,7 +581,7 @@ export async function purgeEligibleAsset(input: {
       [input.assetId],
     );
     return { eligible: verdict.eligible, physicalPurgeDisabled: true, reasons: verdict.reasons };
-  });
+  }, undefined, 'shared');
 }
 
 interface AssetMediaRecoveryIdentity {
@@ -623,7 +624,7 @@ export async function getAssetMediaRecoveryStatus(input: AssetMediaRecoveryIdent
       return { recovered: false, availability: 'unrecoverable', deferred: false };
     }
     return { recovered: false, availability: 'missing', deferred: false, error: 'Managed media recovery failed' };
-  });
+  }, undefined, 'none');
 }
 
 export async function recoverAssetMedia(input: AssetMediaRecoveryIdentity, dependencies: {
@@ -734,7 +735,7 @@ export async function recoverAssetMedia(input: AssetMediaRecoveryIdentity, depen
         attemptId,
       },
     } : { kind: 'unrecoverable' as const };
-  });
+  }, undefined, 'shared');
 
   if (recovery.kind === 'unrecoverable') {
     return { recovered: false, availability: 'unrecoverable', deferred: false };
@@ -841,7 +842,7 @@ export async function recoverAssetMedia(input: AssetMediaRecoveryIdentity, depen
       [attemptId, attemptStatus, detail],
     );
     return true;
-    });
+    }, undefined, 'shared');
 
     if (!applied) return { recovered: false, availability: 'recovering', deferred: true } as const;
     return execution.success
@@ -917,6 +918,7 @@ export async function recordLegacyRecoveryOutcome(
     try {
       return await withAssetCoreTransaction(async (client) => {
         await client.query('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+        await lockAssetGraphWriteGate(client, 'shared');
         await client.query(
           'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
           [`asset-media-recovery:${normalizedPath}`],
@@ -1009,7 +1011,7 @@ export async function recordLegacyRecoveryOutcome(
         }
 
         return { matchedVersions: locked.rows.length, ready, missing, unrecoverable };
-      });
+      }, undefined, 'none');
     } catch (error) {
       if (!isSerializationFailure(error) || attempt === LEGACY_RECOVERY_SERIALIZATION_ATTEMPTS) throw error;
     }

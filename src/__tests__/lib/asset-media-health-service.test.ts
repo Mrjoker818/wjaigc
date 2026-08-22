@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  lockAssetGraphWriteGate: vi.fn(),
   withAssetCoreTransaction: vi.fn(),
 }));
 
 vi.mock('@/lib/asset-core/storage', () => ({
+  lockAssetGraphWriteGate: mocks.lockAssetGraphWriteGate,
   withAssetCoreTransaction: mocks.withAssetCoreTransaction,
 }));
 
@@ -18,6 +20,13 @@ import {
 
 describe('asset media health transactional service', () => {
   beforeEach(() => {
+    mocks.lockAssetGraphWriteGate.mockReset();
+    mocks.lockAssetGraphWriteGate.mockImplementation(async (client) => {
+      await client.query(
+        'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+        ['wujie:asset-graph-write-gate:v1'],
+      );
+    });
     mocks.withAssetCoreTransaction.mockReset();
   });
 
@@ -444,7 +453,10 @@ describe('asset media health transactional service', () => {
     expect(result).toEqual({ matchedVersions: 2, ready: 2, missing: 0, unrecoverable: 0 });
     const calls = query.mock.calls.map(([sql, params]) => ({ sql: String(sql), params }));
     const serializableIndex = calls.findIndex(({ sql }) => sql.includes('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE'));
-    const advisoryIndex = calls.findIndex(({ sql }) => sql.includes('pg_advisory_xact_lock'));
+    const sharedGateIndex = calls.findIndex(({ sql }) => sql.includes('pg_advisory_xact_lock_shared'));
+    const pathLockIndex = calls.findIndex(({ sql }) => (
+      sql.includes('pg_advisory_xact_lock(') && !sql.includes('pg_advisory_xact_lock_shared')
+    ));
     const snapshotIndex = calls.findIndex(({ sql }) => sql.includes('SELECT DISTINCT version.asset_id'));
     const assetLockIndex = calls.findIndex(({ sql }) => sql.includes('FROM wujie_assets') && sql.includes('FOR UPDATE'));
     const stableRecheckIndex = calls.findLastIndex(({ sql }) => sql.includes('SELECT DISTINCT version.asset_id'));
@@ -453,16 +465,18 @@ describe('asset media health transactional service', () => {
     ));
     expect([
       serializableIndex,
-      advisoryIndex,
+      sharedGateIndex,
+      pathLockIndex,
       snapshotIndex,
       assetLockIndex,
       stableRecheckIndex,
       finalRequeryIndex,
-    ]).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(calls[1]?.params).toEqual(['asset-media-recovery:users/a/recovery.png']);
-    expect(calls[3]?.params).toEqual([['asset-a', 'asset-z']]);
-    expect(calls[5]?.sql).not.toMatch(/version\.id\s*=\s*ANY/i);
-    expect(calls[5]?.params).toEqual([
+    ]).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(calls[1]?.params).toEqual(['wujie:asset-graph-write-gate:v1']);
+    expect(calls[2]?.params).toEqual(['asset-media-recovery:users/a/recovery.png']);
+    expect(calls[4]?.params).toEqual([['asset-a', 'asset-z']]);
+    expect(calls[6]?.sql).not.toMatch(/version\.id\s*=\s*ANY/i);
+    expect(calls[6]?.params).toEqual([
       '/api/serve-upload/users/a/recovery.png',
       'users/a/recovery.png',
     ]);

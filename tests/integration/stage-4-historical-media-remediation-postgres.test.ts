@@ -76,6 +76,18 @@ interface ArchiveCommand {
 }
 
 interface AssetLifecycleService {
+  createWorkspacePlacement(input: {
+    actorUserId: string;
+    projectId: string;
+    assetVersionId: string;
+    workspace: 'canvas';
+    workspaceId: string;
+    entityType: 'canvas-image';
+    entityId: string;
+  }): Promise<{
+    placement: { id: string; status: string };
+    reused: boolean;
+  }>;
   trashPlacement(input: {
     actorUserId: string;
     projectId: string;
@@ -1108,6 +1120,10 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
 
       try {
         await writer.query('BEGIN');
+        await writer.query(
+          'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+          ['wujie:asset-graph-write-gate:v1'],
+        );
         await seedDiscoveryCandidateOverflow(writerQuery, 17);
         const expectedAfterWriter = await readArchiveState(writerQuery);
         const writerPid = Number((await writer.query('SELECT pg_backend_pid() AS pid')).rows[0]?.pid);
@@ -1118,7 +1134,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
         ));
         await expect(waitForBlockedQuery(
           monitor,
-          ['IN SHARE ROW EXCLUSIVE MODE'],
+          ['pg_advisory_xact_lock(hashtextextended($1, 0))'],
           [writerPid],
         )).resolves.toBeTruthy();
 
@@ -1173,10 +1189,16 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
 
         await writer.query('BEGIN');
         const writerPid = Number((await writer.query('SELECT pg_backend_pid() AS pid')).rows[0]?.pid);
-        writerOperation = seedDiscoveryCandidateOverflow(writerQuery, 17);
+        writerOperation = (async () => {
+          await writer.query(
+            'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+            ['wujie:asset-graph-write-gate:v1'],
+          );
+          await seedDiscoveryCandidateOverflow(writerQuery, 17);
+        })();
         const blockedWriter = await waitForBlockedQuery(
           monitor,
-          ['INSERT INTO wujie_assets'],
+          ['pg_advisory_xact_lock_shared(hashtextextended($1, 0))'],
           [barrierPid, blockedArchive.pid],
         );
         expect(blockedWriter.pid).toBe(writerPid);
@@ -1212,6 +1234,183 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       }
     });
   }, 20_000);
+
+  postgresIt('does not deadlock when a gated business transaction locks an asset before inserting a placement', async () => {
+    await withIsolatedPostgres('historical-media-business-write-gate', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const databaseUrl = bindBoundedBusinessDatabase(isolatedUrl);
+      const service = await loadHistoricalMediaService();
+      const lifecycle = await loadAssetLifecycleService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetVersionId === 'version-canvas-bridge',
+      ) as HistoricalMediaCandidate;
+      const blocker = await connectIsolatedClient(databaseUrl);
+      const monitor = await connectIsolatedClient(databaseUrl);
+      let archive: Promise<HistoricalMediaArchiveResult> | undefined;
+      let businessOperation: ReturnType<AssetLifecycleService['createWorkspacePlacement']> | undefined;
+
+      try {
+        await query(
+          `CREATE FUNCTION block_business_placement_insert() RETURNS trigger AS $$
+           BEGIN
+             IF NEW.entity_id = 'entity-canvas-business-added' THEN
+               PERFORM pg_advisory_xact_lock(7412, 9017);
+             END IF;
+             RETURN NEW;
+           END;
+           $$ LANGUAGE plpgsql`,
+        );
+        await query(
+          `CREATE TRIGGER block_business_placement_insert
+           BEFORE INSERT ON wujie_workspace_placements
+           FOR EACH ROW EXECUTE FUNCTION block_business_placement_insert()`,
+        );
+        await blocker.query('SELECT pg_advisory_lock(7412, 9017)');
+
+        businessOperation = lifecycle.createWorkspacePlacement({
+          actorUserId: OWNER_ID,
+          projectId: PROJECT_ID,
+          assetVersionId: 'version-canvas-bridge',
+          workspace: 'canvas',
+          workspaceId: PROJECT_ID,
+          entityType: 'canvas-image',
+          entityId: 'entity-canvas-business-added',
+        });
+        const businessActivity = await waitForBlockedQuery(
+          monitor,
+          ['INSERT INTO wujie_workspace_placements'],
+        );
+
+        archive = service.archiveHistoricalMedia(createArchiveCommand(
+          [candidate],
+          'historical-media-business-write-gate',
+        ));
+        await waitForBlockedQuery(
+          monitor,
+          ['pg_advisory_xact_lock(hashtextextended($1, 0))'],
+          [businessActivity.pid],
+        );
+
+        await blocker.query('SELECT pg_advisory_unlock(7412, 9017)');
+        await expect(businessOperation).resolves.toMatchObject({ reused: false });
+
+        await expect(archive).rejects.toMatchObject({
+          code: 'HISTORICAL_MEDIA_CANDIDATE_STALE',
+        });
+        await expect(query(
+          `SELECT
+             (SELECT status FROM wujie_workspace_placements
+               WHERE entity_id = 'entity-canvas-business-added') AS business_status,
+             (SELECT count(*)::int FROM wujie_asset_media_remediations) AS ledger,
+             (SELECT count(*)::int FROM wujie_audit_log) AS audit,
+             (SELECT count(*)::int FROM wujie_workspace_placements
+               WHERE status = 'trashed') AS trashed`,
+        )).resolves.toMatchObject({
+          rows: [{ business_status: 'active', ledger: 0, audit: 0, trashed: 0 }],
+        });
+      } finally {
+        await blocker.query('SELECT pg_advisory_unlock(7412, 9017)').catch(() => undefined);
+        await Promise.allSettled([
+          ...(archive ? [archive] : []),
+          ...(businessOperation ? [businessOperation] : []),
+        ]);
+        await closeTestClients([blocker, monitor]);
+      }
+    });
+  }, 20_000);
+
+  postgresIt('lets a production writer wait beyond the archive timeout instead of failing the business request', async () => {
+    await withIsolatedPostgres('historical-media-business-write-wait', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const databaseUrl = bindBoundedBusinessDatabase(isolatedUrl);
+      const lifecycle = await loadAssetLifecycleService();
+      const blocker = await connectIsolatedClient(databaseUrl);
+      const monitor = await connectIsolatedClient(databaseUrl);
+      let businessOperation: ReturnType<AssetLifecycleService['createWorkspacePlacement']> | undefined;
+      let businessSettled = false;
+
+      try {
+        await blocker.query('BEGIN');
+        await blocker.query(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          ['wujie:asset-graph-write-gate:v1'],
+        );
+
+        businessOperation = lifecycle.createWorkspacePlacement({
+          actorUserId: OWNER_ID,
+          projectId: PROJECT_ID,
+          assetVersionId: 'version-canvas-bridge',
+          workspace: 'canvas',
+          workspaceId: PROJECT_ID,
+          entityType: 'canvas-image',
+          entityId: 'entity-canvas-waits-for-archive',
+        });
+        const observedBusiness = businessOperation.then(
+          value => ({ ok: true as const, value }),
+          error => ({ ok: false as const, error }),
+        ).finally(() => {
+          businessSettled = true;
+        });
+        await waitForBlockedQuery(
+          monitor,
+          ['pg_advisory_xact_lock_shared(hashtextextended($1, 0))'],
+        );
+
+        await new Promise(resolve => setTimeout(resolve, 5_500));
+        expect(businessSettled).toBe(false);
+
+        await blocker.query('COMMIT');
+        await expect(observedBusiness).resolves.toMatchObject({
+          ok: true,
+          value: { reused: false },
+        });
+        await expect(query(
+          `SELECT status FROM wujie_workspace_placements
+           WHERE entity_id = 'entity-canvas-waits-for-archive'`,
+        )).resolves.toMatchObject({ rows: [{ status: 'active' }] });
+      } finally {
+        await blocker.query('ROLLBACK').catch(() => undefined);
+        await Promise.allSettled(businessOperation ? [businessOperation] : []);
+        await closeTestClients([blocker, monitor]);
+      }
+    });
+  }, 15_000);
+
+  postgresIt('bounds the exclusive coverage gate wait and leaves archive state unchanged', async () => {
+    await withIsolatedPostgres('historical-media-coverage-gate-timeout', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const databaseUrl = bindBoundedBusinessDatabase(isolatedUrl);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetVersionId === 'version-chat-empty',
+      ) as HistoricalMediaCandidate;
+      const blocker = await connectIsolatedClient(databaseUrl);
+      const before = await readArchiveState(query);
+
+      try {
+        await blocker.query('BEGIN');
+        await blocker.query(
+          'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+          ['wujie:asset-graph-write-gate:v1'],
+        );
+        const startedAt = Date.now();
+
+        await expect(service.archiveHistoricalMedia(createArchiveCommand(
+          [candidate],
+          'historical-media-coverage-gate-timeout',
+        ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_COVERAGE_INCOMPLETE' });
+
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(4_500);
+        expect(Date.now() - startedAt).toBeLessThan(7_000);
+        expect(await readArchiveState(query)).toEqual(before);
+      } finally {
+        await blocker.query('ROLLBACK').catch(() => undefined);
+        await closeTestClients([blocker]);
+      }
+    });
+  }, 12_000);
 
   postgresIt('archives only a non-current broken version while preserving healthy current media', async () => {
     await withIsolatedPostgres('historical-media-non-current-archive', async ({ databaseUrl: isolatedUrl, query }) => {
@@ -1564,7 +1763,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
         operations.push(trash);
         await waitForBlockedQuery(
           monitor,
-          ['pg_advisory_xact_lock(hashtext($1), hashtext($2))'],
+          ['pg_advisory_xact_lock_shared(hashtextextended($1, 0))'],
           [archiveActivity.pid],
         );
 
@@ -1666,7 +1865,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
         operations.push(restore);
         await waitForBlockedQuery(
           monitor,
-          ['pg_advisory_xact_lock(hashtext($1), hashtext($2))'],
+          ['pg_advisory_xact_lock_shared(hashtextextended($1, 0))'],
           [archiveActivity.pid],
         );
 
@@ -1771,7 +1970,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
         operations.push(secondArchive);
         await waitForBlockedQuery(
           monitor,
-          ['IN SHARE ROW EXCLUSIVE MODE'],
+          ['pg_advisory_xact_lock(hashtextextended($1, 0))'],
           [firstActivity.pid],
         );
 

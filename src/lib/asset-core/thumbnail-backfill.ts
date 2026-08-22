@@ -251,7 +251,7 @@ export function createPostgresThumbnailBackfillDependencies(): ThumbnailBackfill
         }
         const result = await transaction.query(INSERT_THUMBNAIL_VARIANTS_SQL, [limit]);
         return result.rowCount ?? 0;
-      });
+      }, undefined, dryRun ? 'none' : 'shared');
     },
     async claim({ leaseOwner, leaseExpiresAt, limit }) {
       return withAssetCoreTransaction(async (transaction) => {
@@ -263,7 +263,7 @@ export function createPostgresThumbnailBackfillDependencies(): ThumbnailBackfill
           [leaseOwner, leaseExpiresAt.toISOString(), limit],
         );
         return claimed.rows.map(toTarget);
-      });
+      }, undefined, 'shared');
     },
     execute: executeThumbnailVariant,
     async complete(target, result) {
@@ -291,7 +291,7 @@ export function createPostgresThumbnailBackfillDependencies(): ThumbnailBackfill
           ],
         );
         return (completed.rowCount ?? 0) === 1;
-      });
+      }, undefined, 'shared');
     },
     async fail(target, error) {
       return withAssetCoreTransaction(async (transaction) => {
@@ -305,7 +305,7 @@ export function createPostgresThumbnailBackfillDependencies(): ThumbnailBackfill
           [target.assetVersionId, target.size, target.leaseOwner, error.slice(0, 2000)],
         );
         return (failed.rowCount ?? 0) === 1;
-      });
+      }, undefined, 'shared');
     },
     async status() {
       return withAssetCoreTransaction(async (transaction) => {
@@ -316,7 +316,7 @@ export function createPostgresThumbnailBackfillDependencies(): ThumbnailBackfill
         const status: ThumbnailBackfillStatus = { pending: 0, processing: 0, ready: 0, failed: 0 };
         for (const row of result.rows) status[row.status] = Number(row.count);
         return status;
-      });
+      }, undefined, 'none');
     },
     createLeaseOwner: randomUUID,
     now: () => new Date(),
