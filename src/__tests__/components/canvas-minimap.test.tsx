@@ -112,6 +112,17 @@ type CanvasMinimapComponentPropsShape = Expect<ExactConcreteShape<
   CanvasMinimapProps
 >>;
 
+const canvasMinimapTypeGate: [
+  CanvasMinimapItemShape,
+  CanvasMinimapViewportShape,
+  CanvasMinimapBoundsShape,
+  CanvasMinimapProjectionShape,
+  CanvasMinimapRectShape,
+  CanvasMinimapSceneShape,
+  CanvasMinimapPropsShape,
+  CanvasMinimapComponentPropsShape,
+] = [true, true, true, true, true, true, true, true];
+
 const viewport = {
   width: 1000,
   height: 600,
@@ -133,6 +144,10 @@ afterEach(() => {
 });
 
 describe('CanvasMinimap geometry and preferences', () => {
+  it('keeps the exact minimap type gate witnesses active', () => {
+    expect(canvasMinimapTypeGate).toEqual([true, true, true, true, true, true, true, true]);
+  });
+
   it('exports the exact fixed minimap constants', () => {
     expect(CANVAS_MINIMAP_WIDTH).toBe(176);
     expect(CANVAS_MINIMAP_HEIGHT).toBe(124);
