@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const workspace = readFileSync(resolve(process.cwd(), 'src/components/canvas-workspace.tsx'), 'utf8');
 const canvas = readFileSync(resolve(process.cwd(), 'src/components/infinite-canvas.tsx'), 'utf8');
+const zoomCluster = readFileSync(resolve(process.cwd(), 'src/components/canvas/CanvasZoomCluster.tsx'), 'utf8');
 
 describe('canvas project reopen contract', () => {
   it('restores saved project viewport state on every project-load path', () => {
@@ -38,7 +39,8 @@ describe('canvas project reopen contract', () => {
     expect(canvas).toContain('const resetViewToContent = useCallback');
     expect(canvas).toContain('fitViewportContent(');
     expect(canvas).toContain('imagesRef.current.filter((image) => !image.isProcessingPlaceholder)');
-    expect(canvas).toContain('onClick={resetViewToContent}');
+    expect(canvas).toContain('onResetView={resetViewToContent}');
+    expect(zoomCluster).toContain('onClick={onResetView}');
     expect(canvas).not.toContain('onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}');
   });
 

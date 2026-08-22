@@ -26,12 +26,12 @@ import {
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Plus, Trash2, Download, ZoomIn, ZoomOut, Maximize2, Hand,
+  Plus, Trash2, Download, ZoomIn, Maximize2, Hand,
   FileText, X, ChevronDown, Eraser,
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, Upload, Sparkles,
-  RotateCcw, Minus, GitMerge, GitBranch,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck, Menu, Grip
+  RotateCcw, Minus, GitMerge,
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck, Menu
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationExecutionResult } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, computeAnnotationRegion, BRUSH_COLOR_PALETTE, applyMergedAnnotationExecutionResult } from '@/lib/canvas-annotation';
@@ -89,6 +89,7 @@ import { useCanvasSelection } from '@/components/canvas/use-canvas-selection';
 import { CanvasMediaNode } from '@/components/canvas/CanvasMediaNode';
 import { CanvasSurface } from '@/components/canvas/CanvasSurface';
 import { CanvasToolHost } from '@/components/canvas/CanvasToolHost';
+import { CanvasZoomCluster } from '@/components/canvas/CanvasZoomCluster';
 import {
   CLOSED_CANVAS_TOOL_SESSION,
   closeCanvasToolSession,
@@ -18924,67 +18925,23 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           document.body,
         )}
 
-        {/* ── Far-right: Auxiliary controls (always visible) ── */}
-        <div className={`w-px h-5 ml-1.5 ${separatorCls}`} />
-
-        {/* Zoom controls */}
-        <button
-          onClick={() => { setZoom(z => Math.max(0.1, z / 1.2)); }}
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
-          title="缩小画布"
-        >
-          <ZoomOut className={`h-3.5 w-3.5 ${mIcon.zoomOut}`} />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">缩小</span>
-        </button>
-
-        <span className={`text-xs font-mono w-10 text-center select-none shrink-0 ${isMonochrome ? 'text-gray-500' : 'text-gold'}`}>
-          {Math.round(zoom * 100)}%
-        </span>
-
-        <button
-          onClick={() => { setZoom(z => Math.min(5, z * 1.2)); }}
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
-          title="放大画布"
-        >
-          <ZoomIn className={`h-3.5 w-3.5 ${mIcon.zoomIn}`} />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">放大</span>
-        </button>
-
-        <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />
-
-        {/* Reset view */}
-        <button
-          onClick={resetViewToContent}
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
-          title="重置视图"
-        >
-          <Maximize2 className="h-4 w-4" />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">重置视图</span>
-        </button>
-
-        {/* Grid mode toggle */}
-        <button
-          onClick={() => setGridMode(prev => prev === 'dots' ? 'lines' : prev === 'lines' ? 'blank' : 'dots')}
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
-          title={`网格: ${gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}`}
-        >
-          <Grip className="h-4 w-4" />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}</span>
-        </button>
-
-        {/* Connection lines toggle */}
-        <button
-          onClick={() => setShowConnections(prev => !prev)}
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showConnections ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
-          title={showConnections ? '隐藏连线' : '显示连线'}
-        >
-          <GitMerge className="h-4 w-4" />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{showConnections ? '隐藏连线' : '显示连线'}</span>
-        </button>
-
-        {/* 图层面板按钮 */}
-        <button
-          onClick={() => {
+        <CanvasZoomCluster
+          zoom={zoom}
+          isMonochrome={isMonochrome}
+          iconClasses={{ zoomIn: mIcon.zoomIn, zoomOut: mIcon.zoomOut }}
+          separatorClassName={separatorCls}
+          gridMode={gridMode}
+          showConnections={showConnections}
+          showLayerPanel={showLayerPanel}
+          showVersionHistory={showVersionHistory}
+          isGenerating={isGenerating}
+          generationProgress={generationProgress}
+          onZoomOut={() => { setZoom(z => Math.max(0.1, z / 1.2)); }}
+          onZoomIn={() => { setZoom(z => Math.min(5, z * 1.2)); }}
+          onResetView={resetViewToContent}
+          onCycleGridMode={() => setGridMode(prev => prev === 'dots' ? 'lines' : prev === 'lines' ? 'blank' : 'dots')}
+          onToggleConnections={() => setShowConnections(prev => !prev)}
+          onToggleLayerPanel={() => {
             if (showLayerPanel) {
               closeCanvasToolPanels();
               return;
@@ -18993,16 +18950,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             setShowLayerPanel(true);
             setShowVersionHistory(false);
           }}
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showLayerPanel ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
-          title={showLayerPanel ? '关闭图层' : '打开图层'}
-        >
-          <Layers className="h-4 w-4" />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{showLayerPanel ? '关闭图层' : '图层面板'}</span>
-        </button>
-
-        {/* 版本历史按钮 */}
-        <button
-          onClick={() => {
+          onToggleVersionHistory={() => {
             if (showVersionHistory) {
               closeCanvasToolPanels();
               return;
@@ -19011,40 +18959,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             setShowVersionHistory(true);
             setShowLayerPanel(false);
           }}
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showVersionHistory ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
-          title={showVersionHistory ? '关闭版本历史' : '版本历史'}
-        >
-          <GitBranch className="h-4 w-4" />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{showVersionHistory ? '关闭历史' : '版本历史'}</span>
-        </button>
-
-        <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />
-
-        {/* AI 引擎选择 */}
-        <button
-          onClick={() => setEngineDialog('upscale')}
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
-          title="AI 引擎设置 (放大/去背景/SVG/分层)"
-        >
-          <Settings className="h-4 w-4" />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">AI引擎设置</span>
-        </button>
-
-        {/* Generating progress (always visible when active) */}
-        {isGenerating && (
-          <>
-            <div className={`w-px h-5 mx-1 ${separatorCls}`} />
-            <div className="flex items-center gap-1.5">
-              <div className="w-14 h-1.5 rounded-full overflow-hidden bg-[#333]">
-                <div className="h-full rounded-full progress-bar shimmer" style={{
-                  width: `${generationProgress ? (generationProgress.current / generationProgress.total * 100) : 0}%`,
-                  background: 'linear-gradient(90deg, #C8A45C, #E8D5A3, #C8A45C)'
-                }} />
-              </div>
-              <span className="text-xs text-gold/80">生成中</span>
-            </div>
-          </>
-        )}
+          onOpenEngineDialog={() => setEngineDialog('upscale')}
+        />
       </div>
 
       {/* AI 引擎选择对话框 */}
