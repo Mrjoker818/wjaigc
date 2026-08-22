@@ -33,7 +33,7 @@
 - Consumes: 当前 `InfiniteCanvas`、`DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER`、底部抽屉四个 section 和工具会话注册表。
 - Produces: 六个展示叶组件的文件/接线契约，以及图片、视频、3D 与底部工具栏的精确入口清单。
 
-- [ ] **Step 1: 写边界失败测试**
+- [x] **Step 1: 写边界失败测试**
 
   测试必须断言以下文件存在并由 `InfiniteCanvas` 导入：
 
@@ -50,7 +50,7 @@
 
   同时断言父组件仍持有 `fetch(`、`activateCanvasToolSession`、`requestDeleteImages`、`onForceSave`，新叶组件不得包含这些业务入口。
 
-- [ ] **Step 2: 写入口清单失败测试**
+- [x] **Step 2: 写入口清单失败测试**
 
   图片入口必须包含且只包含当前实际能力：
 
@@ -66,7 +66,7 @@
 
   底部抽屉必须继续包含 `ai-creation`、`brand-design`、`pro-tools`、`canvas-tools` 四组和全部现有 `aria-label`/`title`。
 
-- [ ] **Step 3: 运行 RED**
+- [x] **Step 3: 运行 RED**
 
   Run: `pnpm exec vitest run src/__tests__/components/canvas-presentation-boundaries.test.ts src/__tests__/components/canvas-toolbar-entry-manifest.test.ts`
 
@@ -76,7 +76,7 @@
 
   仅将六个精确路径加入 `check:protected-baseline` allow-path 和 `protected-source-authorizations.json`，sourceCommit 使用本任务实际提交 SHA；不得授权整个目录。
 
-- [ ] **Step 5: 提交 RED**
+- [x] **Step 5: 提交 RED**
 
   ```bash
   git add src/__tests__/components/canvas-presentation-boundaries.test.ts src/__tests__/components/canvas-toolbar-entry-manifest.test.ts docs/testing/baselines/protected-source-authorizations.json package.json
@@ -95,21 +95,21 @@
 - Consumes: `isMonochrome: boolean`、`onUploadClick: () => void`、`onHelpClick: () => void`。
 - Produces: `CanvasEmptyState`，容器不阻断拖放/粘贴，两个按钮区域可交互。
 
-- [ ] **Step 1: 写行为 RED**
+- [x] **Step 1: 写行为 RED**
 
   断言标题、上传、使用说明、核心快捷提示存在；点击两个按钮各调用一次回调；外层 `pointer-events-none`，按钮区 `pointer-events-auto`。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `pnpm exec vitest run src/__tests__/components/canvas-empty-state.test.tsx`
 
   Expected: FAIL，原因是组件尚未实现。
 
-- [ ] **Step 3: 最小实现并接线**
+- [x] **Step 3: 最小实现并接线**
 
   `InfiniteCanvas` 仅在 `images.length === 0` 渲染叶组件；上传回调调用 `uploadFileInputRef.current?.click()`，说明回调调用 `setShowHelpModal('instructions')`。不得改变拖放、粘贴或生成逻辑。
 
-- [ ] **Step 4: 验证 GREEN**
+- [x] **Step 4: 验证 GREEN**
 
   Run: `pnpm exec vitest run src/__tests__/components/canvas-empty-state.test.tsx src/__tests__/components/canvas-presentation-boundaries.test.ts`
 

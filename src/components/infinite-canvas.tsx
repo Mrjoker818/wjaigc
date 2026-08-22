@@ -90,6 +90,7 @@ import { CanvasMediaNode } from '@/components/canvas/CanvasMediaNode';
 import { CanvasSurface } from '@/components/canvas/CanvasSurface';
 import { CanvasToolHost } from '@/components/canvas/CanvasToolHost';
 import { CanvasZoomCluster } from '@/components/canvas/CanvasZoomCluster';
+import { CanvasEmptyState } from '@/components/canvas/CanvasEmptyState';
 import {
   CanvasMinimap,
   type CanvasMinimapItem,
@@ -11535,16 +11536,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* Empty state */}
         {images.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-center space-y-3 max-w-sm">
-              <div className={`text-2xl font-light ${isMonochrome ? 'text-gray-400' : 'text-gray-300'}`}>无限画布</div>
-              <div className={`text-xs leading-relaxed space-y-1 ${isMonochrome ? 'text-gray-400' : 'text-gray-500'}`}>
-                <p>拖入图片 / 上传图片 / AI 生成图片到画布</p>
-                <p>左键选择 · 滚轮缩放 · 空格+拖动平移 · 右键菜单</p>
-                <p>底部工具栏：图像生成 · 图转3D工厂 · 修图 · Agent编排 · 字境大师 · 精修引擎 · 品牌电商</p>
-              </div>
-            </div>
-          </div>
+          <CanvasEmptyState
+            isMonochrome={isMonochrome}
+            onUploadClick={() => uploadFileInputRef.current?.click()}
+            onHelpClick={() => setShowHelpModal('instructions')}
+          />
         )}
 
         {/* Canvas images */}

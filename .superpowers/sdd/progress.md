@@ -485,3 +485,10 @@ Protected stable branch: read-only and untouched
 - Fresh local gates pass: full Vitest `499 files total / 481 passed / 18 environment-gated skipped; 3035 tests passed / 105 skipped (3140 total)`, TypeScript, production build `116/116`, ESLint `0 errors / 988 historical warnings`, protected baseline `38/38 / 0 warnings`, governance `2 files / 8 tests`, and whitespace checks. Missing `POSTGRES_TEST_DATABASE_URL` skips remain explicitly unverified.
 - V588-UI-003 已吸收，云端验证通过；exact SHA 为 `efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2`。Coze 构建/HTTP 健康、Google Chrome 26/26 矩阵、100/300 节点、响应式、主题、导航、空闲同步与最终 Console/网络健康均已闭环；机器证据为 `docs/testing/evidence/v588-ui-003-cloud-2026-08-22.json`。
 - Final-review repair includes visible theme surfaces, inherited bottom-panel avoidance, finite inverse navigation, stable viewport memoization, the implementation-floor SHA gate, server-side unchanged graph reuse and client-side idle signature stabilization. PostgreSQL 专项仍因缺少隔离库单独未验证；下一唯一项为 V588-UI-004。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only.
+
+## 2026-08-22 V588-UI-004 画布展示层拆分
+
+- Task 1 RED 已建立并提交为 `4f63f0c`：六个展示叶均因文件/接线缺失稳定失败，图片入口清单同时发现 `横竖重组` 已存在于运行时动作但缺少默认偏好顺序；其余图片、视频、3D 和底部四组入口清单通过。
+- donor `J:/无界云端0820` 继续只读。当前底部抽屉定位、图片工具栏约束算法、偏好迁移和工具会话比 donor 更完整，只吸收展示边界，不复制 donor 控制器或旧算法。
+- Task 2 空态叶已完成 RED -> GREEN：`CanvasEmptyState` 只接收主题和上传/说明回调，父画布继续拥有上传 input 与帮助状态；外层不阻断拖放，动作区可交互，reduced-motion 和双主题受测试保护。
+- Task 2 聚焦回归为 `17/17`，TypeScript 通过，针对性 ESLint `0 errors / 19` 条 `InfiniteCanvas` 历史 warning，`git diff --check` 通过。其余五个叶继续保持 RED；下一唯一动作是 Task 3 图片浮动工具栏。
