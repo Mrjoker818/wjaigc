@@ -57,6 +57,12 @@ const historicalSourceAuthorizations = [
   ['src/app/api/assets/adopt-canvas-image/route.ts', 'c99fb72'],
   ['src/components/dashboard/admin-tabs.tsx', '1ba98f7'],
   ['src/components/canvas/CanvasCommandPalette.tsx', '8acb3c9'],
+  ['src/components/canvas/CanvasEditColorRemoveBgPanel.tsx', '2fc5c83'],
+  ['src/components/canvas/CanvasEditEraseMaskPanel.tsx', 'e3991f3'],
+  ['src/components/canvas/CanvasEditExpandCropPanel.tsx', '2fc5c83'],
+  ['src/components/canvas/CanvasEditUpscaleSvgPanel.tsx', '2fc5c83'],
+  ['src/components/canvas/CanvasEmptyState.tsx', 'feac579'],
+  ['src/components/canvas/CanvasImageActionToolbar.tsx', '69d3466'],
   ['src/components/canvas/CanvasZoomCluster.tsx', 'c808e50'],
   ['src/lib/admin-dashboard-projection.ts', '1ba98f7'],
   ['src/lib/asset-core/asset-release-readiness.ts', 'e809f5c'],
@@ -70,6 +76,9 @@ const historicalSourceAuthorizations = [
   ['src/lib/asset-core/service.ts', '9c3f52f'],
   ['src/lib/asset-core/storage.ts', '9c3f52f'],
   ['src/lib/asset-core/thumbnail-backfill.ts', '9c3f52f'],
+  ['src/lib/canvas-kernel/persistence.ts', 'efe5e4f'],
+  ['src/lib/image-toolbar-position.ts', '2fc5c83'],
+  ['src/lib/image-toolbar-preferences.ts', '69d3466'],
   ['src/lib/project-workflow.ts', '016e5d2'],
 ] as const;
 

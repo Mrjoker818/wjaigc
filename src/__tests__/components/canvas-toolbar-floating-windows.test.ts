@@ -13,6 +13,7 @@ const imageEditorSource = readSource('src/components/image-editor.tsx');
 const videoPanelSource = readSource('src/components/video-generation-panel.tsx');
 const globalsSource = readSource('src/app/globals.css');
 const imageToolbarSource = readSource('src/components/canvas/CanvasImageActionToolbar.tsx');
+const upscaleSvgPanelSource = readSource('src/components/canvas/CanvasEditUpscaleSvgPanel.tsx');
 
 describe('canvas toolbar floating windows', () => {
   it('centers the canvas generator and video utility panels when opened', () => {
@@ -136,9 +137,9 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasWorkspaceSource).not.toContain('if (currentProject?.id && images.length > 0)');
   });
 
-  it('keeps selected-image actions above the open right workspace panel', () => {
+  it('keeps image edit controls above the open right workspace panel', () => {
     expect(canvasWorkspaceSource).toContain('z-[70] flex transition-all');
-    expect(canvasSource).toContain('className="absolute z-[80] pointer-events-auto"');
+    expect(upscaleSvgPanelSource).toContain('absolute z-[80] pointer-events-auto');
   });
 
   it('keeps the right panel collapse control inside a narrow viewport', () => {

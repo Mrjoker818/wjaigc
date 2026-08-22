@@ -2,10 +2,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(
+const canvasSource = readFileSync(
   resolve(process.cwd(), 'src/components/infinite-canvas.tsx'),
   'utf8',
 );
+const upscalePanelSource = readFileSync(
+  resolve(process.cwd(), 'src/components/canvas/CanvasEditUpscaleSvgPanel.tsx'),
+  'utf8',
+);
+const source = `${canvasSource}\n${upscalePanelSource}`;
 
 describe('4K and 8K upscale toolbar wiring', () => {
   it('uses the shared target-resolution presets instead of K-labelled multipliers', () => {
