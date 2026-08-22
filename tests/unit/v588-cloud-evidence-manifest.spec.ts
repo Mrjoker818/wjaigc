@@ -21,6 +21,7 @@ const releasePath = resolve(root, 'docs/testing/RELEASE_READINESS_REPORT.md');
 const unverifiedPath = resolve(root, 'docs/testing/UNVERIFIED_ITEMS.md');
 const progressPath = resolve(root, '.superpowers/sdd/progress.md');
 const stableSha = '52f7c601ed150769e15d06fb435c6e360e28c9e7';
+const preUi003FinalReviewSha = 'b5b0b18ed1feda1f5324537f15a9645b87e4fc9d';
 
 const ui003RequiredChecks = [
   ['existing-chrome-tab', { reusedExistingTab: true }],
@@ -180,6 +181,9 @@ describe('V588 云端机器证据治理门禁', () => {
     expect(() => assertUi003CloudMatrix([
       { id: 'arbitrary-pass', pass: true },
     ])).toThrow('缺少 UI-003 云端矩阵检查项');
+    expect(() => expectGitCommitToBeAuditableHeadAncestor(preUi003FinalReviewSha)).toThrow(
+      'UI-003 Git SHA 必须包含最终审查实现基线',
+    );
   });
 
   it('拒绝任一治理文档仍为云端待验、未验证或缺少 exact SHA', () => {

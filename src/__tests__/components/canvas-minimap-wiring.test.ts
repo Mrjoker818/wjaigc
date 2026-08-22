@@ -201,6 +201,12 @@ describe('V588-UI-003 canvas minimap wiring', () => {
       /const\s+minimapBottomOffset\s*=\s*\(showLayerPanel\s*\|\|\s*showVersionHistory\)\s*\?\s*'calc\(min\(30dvh, 260px\) \+ 28px\)'\s*:\s*'76px'\s*;/,
     );
     expect(canvas).toContain("'--canvas-minimap-bottom': minimapBottomOffset");
+    expect(canvas).toMatch(
+      /<div[\s\S]*?data-canvas-minimap-host[\s\S]*?'--canvas-minimap-bottom':\s*minimapBottomOffset[\s\S]*?<CanvasMinimap/,
+    );
+    expect(canvas).not.toMatch(
+      /data-canvas-viewport[\s\S]{0,1200}'--canvas-minimap-bottom':\s*minimapBottomOffset/,
+    );
     expect(canvas).toContain('rightOffset={canvasOccupiedRight + 12}');
   });
 });
