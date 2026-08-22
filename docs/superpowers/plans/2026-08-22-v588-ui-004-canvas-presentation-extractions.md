@@ -170,11 +170,11 @@
 - Consumes: 当前块引用的精确 state/value/setter/handler；画布坐标继续由父组件提供。
 - Produces: 两个无副作用展示叶，分别覆盖放大/SVG 和擦除/蒙版。
 
-- [ ] **Step 1: 先写模式可见性、确认/取消、模型/参数与 reduced-motion RED。**
-- [ ] **Step 2: 运行 RED，确认仅因叶组件/接线缺失失败。**
-- [ ] **Step 3: 从当前 `InfiniteCanvas` 机械移动 JSX；禁止从 donor 覆盖当前业务逻辑。**
-- [ ] **Step 4: 运行两个新测试、所有放大/SVG/擦除/蒙版既有测试和 TypeScript。**
-- [ ] **Step 5: 提交 `refactor: extract primary canvas edit panels`。**
+- [x] **Step 1: 先写模式可见性、确认/取消、模型/参数与 reduced-motion RED。**
+- [x] **Step 2: 运行 RED，确认仅因叶组件/接线缺失失败。**
+- [x] **Step 3: 从当前 `InfiniteCanvas` 机械移动 JSX；禁止从 donor 覆盖当前业务逻辑。**
+- [x] **Step 4: 运行两个新测试、所有放大/SVG/擦除/蒙版既有测试和 TypeScript。**
+- [x] **Step 5: 提交 `refactor: extract primary canvas edit panels`。**
 
 ### Task 5: 提取调色/去背景与扩展/裁切展示叶
 

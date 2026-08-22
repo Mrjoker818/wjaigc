@@ -495,3 +495,6 @@ Protected stable branch: read-only and untouched
 - Task 3 图片浮动工具栏完成 RED -> GREEN：主栏固定五项，其余进入有界 `+N`，删除/设置始终可达，375px 合同不依赖主栏横向滚动，恢复默认、主题、reduced-motion 和事件隔离均由叶测试保护。
 - `横竖重组` 已补入默认偏好顺序；旧偏好迁移、媒体类型清单和底部四组入口保持不变。父画布继续持有全部动作和 handler，叶组件不包含 API、任务、删除或保存副作用。
 - Task 3 聚焦回归 `5 files / 31 tests` 通过，TypeScript 通过，针对性 ESLint 回到 `0 errors / 19 historical warnings`，新增 warning `0`。下一唯一动作是 Task 4 放大/SVG 与擦除/蒙版展示叶。
+- Task 4 已完成 RED -> GREEN：放大/SVG 与擦除/蒙版仅迁移当前 JSX，模型、任务、画布坐标、确认和取消 handler 继续由 `InfiniteCanvas` 持有。
+- 聚焦回归 `9 files / 34 tests` 通过，TypeScript 通过，目标 ESLint 为 `0 errors / 19 historical warnings`，新增 warning `0`，空白检查通过。
+- 当前未推送 `main`、未进入云端；边界总测试只剩调色/去背景与扩展/裁切两个叶保持 RED。下一唯一动作是 Task 5。
