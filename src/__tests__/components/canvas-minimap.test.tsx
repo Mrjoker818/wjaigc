@@ -4,6 +4,13 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  type CanvasMinimapBounds,
+  type CanvasMinimapItem,
+  type CanvasMinimapProjection,
+  type CanvasMinimapProps,
+  type CanvasMinimapRect,
+  type CanvasMinimapScene,
+  type CanvasMinimapViewport,
   CANVAS_MINIMAP_HEIGHT,
   CANVAS_MINIMAP_PADDING,
   CANVAS_MINIMAP_PREFERENCE_KEY,
@@ -16,15 +23,6 @@ import {
   readCanvasMinimapPreference,
   writeCanvasMinimapPreference,
 } from '@/components/canvas/CanvasMinimap';
-import type {
-  CanvasMinimapBounds,
-  CanvasMinimapItem,
-  CanvasMinimapProjection,
-  CanvasMinimapProps,
-  CanvasMinimapRect,
-  CanvasMinimapScene,
-  CanvasMinimapViewport,
-} from '@/components/canvas/CanvasMinimap';
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends
   (<Type>() => Type extends Right ? 1 : 2)
@@ -36,9 +34,25 @@ type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends
 
 type Expect<T extends true> = T;
 
+type IsAny<T> = 0 extends (1 & T) ? true : false;
+
+type IsUnknown<T> = IsAny<T> extends true
+  ? false
+  : unknown extends T
+    ? [keyof T] extends [never]
+      ? true
+      : false
+    : false;
+
 type ExactShape<Actual, Expected> = Equal<keyof Actual, keyof Expected> extends true
   ? Equal<Actual, Expected>
   : false;
+
+type ExactConcreteShape<Actual, Expected> = IsAny<Actual> extends true
+  ? false
+  : IsUnknown<Actual> extends true
+    ? false
+    : ExactShape<Actual, Expected>;
 
 type CanvasMinimapItemShape = Expect<ExactShape<CanvasMinimapItem, {
   id: string;
@@ -93,6 +107,11 @@ type CanvasMinimapPropsShape = Expect<ExactShape<CanvasMinimapProps, {
   onClose: () => void;
 }>>;
 
+type CanvasMinimapComponentPropsShape = Expect<ExactConcreteShape<
+  Parameters<typeof CanvasMinimap>[0],
+  CanvasMinimapProps
+>>;
+
 const viewport = {
   width: 1000,
   height: 600,
@@ -146,7 +165,7 @@ describe('CanvasMinimap geometry and preferences', () => {
       { id: 'infinite', x: 0, y: Number.POSITIVE_INFINITY, width: 20, height: 20 },
     ], viewport);
 
-    expect(scene.items.map(item => item.id)).toEqual(['negative', 'remote']);
+    expect(scene.items.map((item: CanvasMinimapRect) => item.id)).toEqual(['negative', 'remote']);
   });
 
   it('preserves aspect ratio with the fixed bounds-to-projection API', () => {
@@ -187,7 +206,7 @@ describe('CanvasMinimap geometry and preferences', () => {
     expect(Object.values(projection).every(Number.isFinite)).toBe(true);
     expect(Object.values(scene.projection).every(Number.isFinite)).toBe(true);
     expect(Object.values(scene.viewport).every(Number.isFinite)).toBe(true);
-    expect(scene.items.every(item => Object.values(item).filter(value => typeof value === 'number').every(Number.isFinite))).toBe(true);
+    expect(scene.items.every((item: CanvasMinimapRect) => Object.values(item).filter(value => typeof value === 'number').every(Number.isFinite))).toBe(true);
   });
 
   it('allows only the exact desktop and usable-width boundaries', () => {
@@ -275,24 +294,30 @@ describe('CanvasMinimap interaction surface', () => {
 
   it('renders only one rectangle per input item, with no image or network work', () => {
     const onClose = vi.fn();
+    const onNavigate = vi.fn();
     const fetchSpy = vi.fn();
     const imageConstructorSpy = vi.fn();
     const xhrOpenSpy = vi.fn();
     const xhrSendSpy = vi.fn();
+    const xhrConstructorSpy = vi.fn(() => ({
+      open: xhrOpenSpy,
+      send: xhrSendSpy,
+    }));
+    const webSocketConstructorSpy = vi.fn();
+    const eventSourceConstructorSpy = vi.fn();
     const rectangleItems = items300.slice(0, 3);
     vi.stubGlobal('fetch', fetchSpy);
     vi.stubGlobal('Image', imageConstructorSpy);
-    vi.stubGlobal('XMLHttpRequest', vi.fn(() => ({
-      open: xhrOpenSpy,
-      send: xhrSendSpy,
-    })));
+    vi.stubGlobal('XMLHttpRequest', xhrConstructorSpy);
+    vi.stubGlobal('WebSocket', webSocketConstructorSpy);
+    vi.stubGlobal('EventSource', eventSourceConstructorSpy);
     const { container, rerender } = render(
       <CanvasMinimap
         items={[]}
         viewport={viewport}
         theme="dark"
         rightOffset={24}
-        onNavigate={vi.fn()}
+        onNavigate={onNavigate}
         onClose={onClose}
       />,
     );
@@ -310,12 +335,31 @@ describe('CanvasMinimap interaction surface', () => {
     expect(container.querySelectorAll('svg image, canvas')).toHaveLength(0);
     expect(container.querySelectorAll('[style*="background-image"], [style*="backgroundImage"]')).toHaveLength(0);
     expect(container.innerHTML).not.toContain('background-image');
+
+    const map = screen.getByTestId('canvas-minimap-map');
+    vi.spyOn(map, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 50,
+      width: 176,
+      height: 124,
+      top: 50,
+      right: 276,
+      bottom: 174,
+      left: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+    fireEvent.click(map, { clientX: 178, clientY: 95 });
+    fireEvent.click(screen.getByRole('button', { name: '关闭小地图' }));
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(imageConstructorSpy).not.toHaveBeenCalled();
+    expect(xhrConstructorSpy).not.toHaveBeenCalled();
     expect(xhrOpenSpy).not.toHaveBeenCalled();
     expect(xhrSendSpy).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '关闭小地图' }));
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(webSocketConstructorSpy).not.toHaveBeenCalled();
+    expect(eventSourceConstructorSpy).not.toHaveBeenCalled();
 
     rerender(
       <CanvasMinimap
@@ -323,7 +367,7 @@ describe('CanvasMinimap interaction surface', () => {
         viewport={viewport}
         theme="mono"
         rightOffset={24}
-        onNavigate={vi.fn()}
+        onNavigate={onNavigate}
         onClose={onClose}
       />,
     );
@@ -336,13 +380,18 @@ describe('CanvasMinimap interaction surface', () => {
     expect(container.innerHTML).not.toContain('background-image');
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(imageConstructorSpy).not.toHaveBeenCalled();
+    expect(xhrConstructorSpy).not.toHaveBeenCalled();
     expect(xhrOpenSpy).not.toHaveBeenCalled();
     expect(xhrSendSpy).not.toHaveBeenCalled();
+    expect(webSocketConstructorSpy).not.toHaveBeenCalled();
+    expect(eventSourceConstructorSpy).not.toHaveBeenCalled();
   });
 });
 
 describe('CanvasMinimap performance budget', () => {
   it('keeps p95 projection time for 300 rectangles within 8ms', () => {
+    projectCanvasMinimapScene(items300, viewport);
+
     const samples = Array.from({ length: 100 }, () => {
       const startedAt = performance.now();
       projectCanvasMinimapScene(items300, viewport);

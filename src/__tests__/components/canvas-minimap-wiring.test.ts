@@ -78,13 +78,48 @@ const expectPublicInterfaceContract = (component: string): void => {
   expect(props).not.toMatch(/(?:^|[;,{]|\r?\n)\s*onClose\s*(?:\([^)]*\bany\b|:\s*any\s*(?=[;,\r\n}]|$))/);
 };
 
+const getUseMemoBody = (source: string, variableName: string): string => {
+  const declaration = new RegExp(
+    `const\\s+${variableName}\\s*=\\s*useMemo(?:<[^>]+>)?\\(\\(\\)\\s*=>\\s*\\{`,
+  ).exec(source);
+  expect(declaration).not.toBeNull();
+
+  const openingBraceIndex = (declaration?.index ?? 0) + (declaration?.[0].length ?? 1) - 1;
+  let depth = 0;
+
+  for (let index = openingBraceIndex; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    if (source[index] === '}') depth -= 1;
+    if (depth === 0) return source.slice(openingBraceIndex + 1, index);
+  }
+
+  throw new Error(`Unclosed ${variableName} useMemo body`);
+};
+
+const expectRectangleOnlyLeafSource = (component: string): void => {
+  const forbiddenMechanisms: Array<[string, RegExp]> = [
+    ['HTML image creation', /<\s*img\b|createElement\s*\(\s*['"]img['"]\s*\)/i],
+    ['SVG image creation', /<\s*image\b|createElementNS\s*\([\s\S]*?['"]image['"]\s*\)/i],
+    ['canvas creation', /<\s*canvas\b|createElement\s*\(\s*['"]canvas['"]\s*\)|\b(?:OffscreenCanvas|HTMLCanvasElement)\b/i],
+    ['src attributes or properties', /\bsrc\s*(?:=|:)/i],
+    ['background images', /background(?:Image|-image)/i],
+    ['fetch calls', /\bfetch\s*\(/],
+    ['Image construction', /\b(?:new\s+)?Image\s*\(/],
+    ['XMLHttpRequest', /\bXMLHttpRequest\b/],
+    ['WebSocket', /\bWebSocket\b/],
+    ['EventSource', /\bEventSource\b/],
+  ];
+
+  for (const [label, pattern] of forbiddenMechanisms) {
+    expect(component, label).not.toMatch(pattern);
+  }
+};
+
 describe('V588-UI-003 canvas minimap wiring', () => {
-  it('requires the fixed leaf API and parent-owned minimap visibility contract', () => {
+  it('requires the fixed leaf API and a rectangle-only implementation', () => {
     expect(existsSync(componentPath)).toBe(true);
 
     const component = readFileSync(componentPath, 'utf8');
-    const cluster = readFileSync(clusterPath, 'utf8');
-    const canvas = readFileSync(canvasPath, 'utf8');
 
     expect(component).toContain('export function CanvasMinimap');
     expect(component).toContain('export const CANVAS_MINIMAP_PREFERENCE_KEY');
@@ -103,6 +138,13 @@ describe('V588-UI-003 canvas minimap wiring', () => {
     expect(component).toContain('export function computeCanvasMinimapProjection');
     expect(component).toContain('export function projectCanvasMinimapScene');
     expect(component).toContain('data-canvas-minimap');
+    expectRectangleOnlyLeafSource(component);
+  });
+
+  it('requires closed and unavailable parent states to avoid minimap work', () => {
+    const cluster = readFileSync(clusterPath, 'utf8');
+    const canvas = readFileSync(canvasPath, 'utf8');
+
     expect(cluster).toContain('minimapOpen: boolean;');
     expect(cluster).toContain('minimapAvailable: boolean;');
     expect(cluster).toContain('onToggleMinimap: () => void;');
@@ -110,9 +152,24 @@ describe('V588-UI-003 canvas minimap wiring', () => {
     expect(canvas).toContain("from '@/components/canvas/CanvasMinimap';");
     expect(canvas).toContain('const [minimapOpen, setMinimapOpen] = useState(false);');
     expect(canvas).toContain('const minimapAvailable = isCanvasMinimapAvailable(');
-    expect(canvas).toMatch(/const minimapItems = useMemo(?:<CanvasMinimapItem\[\]>)?\(\(\) => \{\s*if \(!minimapOpen \|\| !minimapAvailable\) return \[\];/);
-    expect(canvas).toMatch(/\.\.\.\s*\(\s*minimapAvailable\s*\?\s*\[\{\s*id:\s*['"]toggle-minimap['"]\s*,/);
-    expect(canvas).toMatch(/\{minimapOpen && minimapAvailable && \(\s*<CanvasMinimap/);
+
+    const minimapMemo = getUseMemoBody(canvas, 'minimapItems');
+    const earlyReturnIndex = minimapMemo.search(
+      /if\s*\(\s*!minimapOpen\s*\|\|\s*!minimapAvailable\s*\)\s*return\s*\[\]\s*;/,
+    );
+    const imageTraversalIndex = minimapMemo.indexOf('images.flatMap');
+    expect(earlyReturnIndex).toBeGreaterThanOrEqual(0);
+    expect(imageTraversalIndex).toBeGreaterThan(earlyReturnIndex);
+    expect(canvas).not.toMatch(
+      /\b(?:computeCanvasMinimapBounds|computeCanvasMinimapProjection|projectCanvasMinimapScene)\b/,
+    );
+    expect(canvas.match(/\bminimapItems\b/g)).toHaveLength(2);
+    expect(canvas).toMatch(
+      /\{\s*minimapOpen\s*&&\s*minimapAvailable\s*&&\s*\(\s*<CanvasMinimap\b[\s\S]*?items=\{minimapItems\}[\s\S]*?\/>\s*\)\s*\}/,
+    );
+    expect(canvas).toMatch(
+      /\.\.\.\s*\(\s*minimapAvailable\s*\?\s*\[\{\s*id:\s*['"]toggle-minimap['"][\s\S]*?action:\s*toggleCanvasMinimap[\s\S]*?\}\]\s*:\s*\[\]\s*\)/,
+    );
     expect(canvas).toContain('onNavigate={handleMinimapNavigate}');
     expect(canvas).toContain('onClose={toggleCanvasMinimap}');
     expect(canvas).toContain('setViewOffset({');
