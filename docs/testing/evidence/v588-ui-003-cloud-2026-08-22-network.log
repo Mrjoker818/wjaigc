@@ -1,0 +1,11 @@
+V588-UI-003 Google Chrome 网络证据
+最终稳定窗口：12 秒
+请求总数：10
+失败请求：0
+非 2xx 响应：0
+主要请求：GET /api/session、GET /api/task-events，均为 200
+空闲同步窗口一：30 秒，画布/项目同步 POST 为 0
+空闲同步窗口二：30 秒，画布/项目同步 POST 为 0
+残余同步：2 个 POST /api/user-data/sync，key 均为 chat_sessions，requestId 为 27032.22370、27032.22400
+小地图导航观察窗口：网络请求 0
+结论：大型画布在没有业务变化时不再触发画布资产图重复同步。

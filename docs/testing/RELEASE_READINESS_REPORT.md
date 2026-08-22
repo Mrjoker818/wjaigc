@@ -1216,9 +1216,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 新鲜 Console Error/Warning、`[CanvasToolSession]` 错误及浏览器原生弹窗均为 `0`；截图未见裁切、错位或不可读叠加。
 - **发布判定：V588-UI-002 通过并完成吸收。** 该结论只覆盖命令面板叶组件；整体发布仍受已登记的 `asset-v3` 投影/回退等独立门禁约束。下一发布门禁为 `V588-UI-003` 的 RED 与最小接入。
 
-## 2026-08-22 V588-UI-003 小地图发布准备度
+## 2026-08-22 V588-UI-003 小地图发布判定
 
-- 实现候选 `20dd2d92951078ad04c0cb356ed66c4c20b8c350` 已完成 RED、最小接入、叶组件 `16` 个测试、扩展聚焦回归、全仓 TypeScript、零错误 ESLint、生产构建和保护基线。全仓 Vitest 为 `499` 个文件（`481` 通过、`18` 跳过）和 `3140` 个测试（`3035` 通过、`105` 跳过）；跳过项为未配置 `POSTGRES_TEST_DATABASE_URL` 的既有真实 PostgreSQL 门禁，不计为通过。
-- Next.js `16.2.11` 生产构建为 `116/116` 页面、退出码 `0`；保护基线 `38/38`、未授权源码漂移 `0`、新增 warning `0`，`git diff --check` 通过。`origin/main@e1166f8ec73e9ee5745da6f2a0fb0d875708fb69` 是候选祖先且可快进；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- 最终云端验收提交为 `main@efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2`。本地已完成 RED、最小接入、聚焦回归、全仓 TypeScript、零错误 ESLint、生产构建和保护基线；全仓 Vitest 为 `499` 个文件（`481` 通过、`18` 跳过）和 `3143` 个测试（`3038` 通过、`105` 跳过）。跳过项为未配置 `POSTGRES_TEST_DATABASE_URL` 的既有真实 PostgreSQL 门禁，不计为通过。
+- Coze 工作区与 `origin/main` 精确一致，Next.js `16.2.11` 生产构建为 `116/116` 页面、退出码 `0`，首页和鉴权健康接口 HTTP `200`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
 - 发布契约为：桌面默认关闭；偏好键 `wujie.canvas.minimap.open.v1`；宽度 `<768px` 或可用宽度 `<560px` 隐藏；关闭态零小地图遍历/投影；点击导航保持 zoom；矩形无缩略图/网络；工具按钮与命令面板入口、暗色/黑白主题和右侧面板避让均受本地回归保护。
-- **发布判定：本地候选通过 / 云端待验。** 尚无 Coze exact SHA、构建/5000/HTTP 200、Google Chrome 交互、Console/Warning/网络/dialog 或截图证据，不得将本地验证升级为云端通过或已吸收。`V588-UI-004` 及后续项保持未开始。
+- Google Chrome「用户1」复用现有标签页完成 26/26 项真实交互和响应式矩阵。300 节点真实拖动画布与小地图导航均保持节点完整、zoom 不变；最终健康窗口 Console error/warning、`[CanvasToolSession]` 错误、原生弹窗和失败网络请求均为 `0`。机器证据及截图位于 `docs/testing/evidence/v588-ui-003-cloud-2026-08-22.*`。
+- **发布判定：V588-UI-003 通过并完成吸收。** 该判定只覆盖小地图叶能力、大画布空闲同步修复和对应云端验收；整体发布仍受 PostgreSQL 专项及其他独立未验证项约束。下一唯一吸收项为 `V588-UI-004`。

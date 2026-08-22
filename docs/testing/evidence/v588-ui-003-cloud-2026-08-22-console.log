@@ -1,0 +1,10 @@
+V588-UI-003 Google Chrome 最终控制台证据
+时间：2026-08-22T22:17:01.7093274+08:00
+浏览器：Google Chrome 用户1
+页面：project_v588-ui-003-cloud-20260822-300
+采样窗口：最终稳定状态 12 秒
+Console error：0
+Console warning：0
+CanvasToolSession error：0
+原生浏览器弹窗：0
+说明：Coze 服务重启早期的外部桥接脚本 CSP 与瞬时 502 不属于最终应用健康窗口，未被隐藏，已在主证据 notes 中披露。

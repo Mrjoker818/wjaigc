@@ -145,16 +145,13 @@ describe('V588 吸收清单治理门禁', () => {
     );
   });
 
-  it('保留 UI-003 可审计的本地门禁证据', async () => {
+  it('保留 UI-003 可审计的本地与云端门禁证据', async () => {
     const inventory = await readFile(inventoryPath, 'utf8');
     const row = inventory.split(/\r?\n/).find((line) => line.startsWith('| V588-UI-003 |'));
-    const ui003 = extractSection(
-      inventory,
-      '### V588-UI-003 - 2026-08-22 小地图本地候选',
-    );
+    const ui003 = extractUi003GovernanceSection(inventory, 3);
 
     expect(row, '缺少 V588-UI-003 吸收清单行').toBeDefined();
-    expect(ui003).toMatch(/当前实现候选为 `[0-9a-f]{40}`/i);
+    expect(ui003).toContain('efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2');
     expect(ui003).toContain('52f7c601ed150769e15d06fb435c6e360e28c9e7');
     expect(ui003).toContain(
       '66B41B25CA9D5932C1894D8250EBD7960261454F3C519E583036830173BC4440',
@@ -167,9 +164,10 @@ describe('V588 吸收清单治理门禁', () => {
     expect(ui003).toContain('全仓 TypeScript 通过');
     expect(ui003).toContain('ESLint 为 `0 errors / 988` 条历史 warning');
     expect(ui003).toContain('499` 个文件（`481` 通过、`18` 跳过）');
-    expect(ui003).toContain('3140` 个测试（`3035` 通过、`105` 跳过）');
+    expect(ui003).toContain('3143` 个测试（`3038` 通过、`105` 跳过）');
     expect(ui003).toContain('Next.js `16.2.11` 生产构建生成 `116/116` 页面');
-    expect(ui003).toContain('干净 HEAD 保护基线 `38/38`');
+    expect(ui003).toContain('保护基线');
+    expect(ui003).toContain('**状态：V588-UI-003 已吸收。**');
     expect(ui003).toContain(
       'PostgreSQL 集成/并发门禁，不计为通过',
     );
@@ -183,7 +181,7 @@ describe('V588 吸收清单治理门禁', () => {
       const section = documents[name];
       expect(section, `${name} 缺少 UI-003 章节`).not.toBe('');
       expect(section).toContain('`499` 个文件（`481` 通过、`18` 跳过）');
-      expect(section).toContain('`3140` 个测试（`3035` 通过、`105` 跳过）');
+      expect(section).toContain('`3143` 个测试（`3038` 通过、`105` 跳过）');
       expect(section).toContain('PostgreSQL');
       expect(section).toContain('不计为通过');
       expect(section).not.toMatch(/PostgreSQL[^。]*(?:测试|门禁)[，、；; ]*(?:均|全部|已)?通过/);
@@ -193,10 +191,7 @@ describe('V588 吸收清单治理门禁', () => {
   it('按有效 UI-003 云端证据切换吸收状态和后续项门禁', async () => {
     const inventory = await readFile(inventoryPath, 'utf8');
     const row = inventory.split(/\r?\n/).find((line) => line.startsWith('| V588-UI-003 |'));
-    const ui003 = extractSection(
-      inventory,
-      '### V588-UI-003 - 2026-08-22 小地图本地候选',
-    );
+    const ui003 = extractUi003GovernanceSection(inventory, 3);
     const evidenceSha = await getValidUi003CloudEvidenceSha();
     const governanceDocuments = await readUi003GovernanceDocuments();
 

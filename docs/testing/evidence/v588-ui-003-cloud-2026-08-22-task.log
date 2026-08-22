@@ -1,0 +1,13 @@
+V588-UI-003 云端任务与部署证据
+main：efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2
+origin/main：efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2
+stable：52f7c601ed150769e15d06fb435c6e360e28c9e7
+Coze 工作区：clean
+Coze build exit：0
+Next.js：16.2.11
+Next build id：xXWgRpYsK6xvbQsJf0al6
+根路径 HTTP：200
+/api/auth/me：200
+WUJIE_ASSET_GRAPH_MODE：shadow（.env.local 运行时覆盖）
+任务核心模式：legacy
+stable 未修改。

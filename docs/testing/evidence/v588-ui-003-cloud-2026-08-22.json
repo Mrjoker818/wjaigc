@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "testId": "V588-UI-003-cloud",
+  "testedAt": "2026-08-22T22:17:01.7093274+08:00",
+  "result": "passed",
+  "environment": {
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_v588-ui-003-cloud-20260822-300",
+    "browser": "Google Chrome 用户1",
+    "gitCommit": "efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2",
+    "branch": "main",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "assetGraphMode": "shadow",
+    "taskCoreMode": "legacy",
+    "cozeBuildExitCode": 0,
+    "httpStatus": 200,
+    "nextBuildId": "xXWgRpYsK6xvbQsJf0al6"
+  },
+  "viewport": {
+    "width": 2048,
+    "height": 991
+  },
+  "summary": {
+    "checks": 26,
+    "passed": 26,
+    "failed": 0
+  },
+  "checks": [
+    { "id": "existing-chrome-tab", "reusedExistingTab": true, "pass": true },
+    { "id": "no-new-tab", "newTabCreated": false, "pass": true },
+    { "id": "default-closed", "visible": false, "pass": true },
+    { "id": "toolbar-open", "opened": true, "pass": true },
+    { "id": "toolbar-close", "closed": true, "pass": true },
+    { "id": "command-toggle", "opened": true, "closed": true, "pass": true },
+    { "id": "close-button", "closed": true, "pass": true },
+    { "id": "preference-restore", "restored": true, "pass": true },
+    { "id": "viewport-lt-768-hide", "viewportWidth": 767, "hidden": true, "pass": true },
+    { "id": "viewport-lt-768-restore", "viewportWidth": 768, "visible": true, "pass": true },
+    { "id": "usable-width-lt-560-hide", "usableWidth": 559, "hidden": true, "pass": true },
+    { "id": "usable-width-lt-560-restore", "usableWidth": 560, "visible": true, "pass": true },
+    { "id": "right-panel-avoidance", "gapPx": 12, "overlapObserved": false, "pass": true },
+    { "id": "dark-theme", "theme": "dark", "visible": true, "pass": true },
+    { "id": "mono-theme", "theme": "mono", "visible": true, "pass": true },
+    { "id": "empty-state", "visible": true, "nodeCount": 0, "pass": true },
+    { "id": "nodes-100", "nodeCount": 100, "pass": true },
+    { "id": "nodes-300", "nodeCount": 300, "pass": true },
+    { "id": "hand-drag-300-nodes", "deltaX": 75, "deltaY": 50, "remainingNodes": 300, "pass": true },
+    { "id": "zoom-preserving-navigation", "beforeZoom": "46%", "afterZoom": "46%", "pass": true },
+    { "id": "console-errors", "count": 0, "pass": true },
+    { "id": "console-warnings", "count": 0, "pass": true },
+    { "id": "canvas-tool-session-errors", "count": 0, "pass": true },
+    { "id": "minimap-network-requests", "count": 0, "pass": true },
+    { "id": "native-dialogs", "count": 0, "pass": true },
+    {
+      "id": "screenshot-artifact-references",
+      "screenshot": true,
+      "console": true,
+      "network": true,
+      "task": true,
+      "pass": true
+    }
+  ],
+  "console": {
+    "windowSeconds": 12,
+    "errors": 0,
+    "warnings": 0,
+    "canvasToolSessionErrors": 0,
+    "nativeDialogs": 0
+  },
+  "network": {
+    "requests": 10,
+    "failed": 0,
+    "non2xx": 0,
+    "idleCanvasSyncPosts": 0,
+    "residualChatSessionSyncPosts": 2
+  },
+  "artifacts": {
+    "screenshot": "docs/testing/evidence/v588-ui-003-cloud-2026-08-22.png",
+    "console": "docs/testing/evidence/v588-ui-003-cloud-2026-08-22-console.log",
+    "network": "docs/testing/evidence/v588-ui-003-cloud-2026-08-22-network.log",
+    "task": "docs/testing/evidence/v588-ui-003-cloud-2026-08-22-task.log"
+  },
+  "requestIds": [
+    "27032.26304",
+    "27032.26305",
+    "27032.22370",
+    "27032.22400"
+  ],
+  "notes": [
+    "仅复用 Google Chrome 用户1中的现有项目页和预览页，未新建标签页。",
+    "300 节点画布完成手形拖动、小地图导航、主题、面板避让和响应式边界验证。",
+    "连续两个 30 秒空闲窗口没有画布或项目同步 POST；仅剩 chat_sessions 心跳，与本修复无关。",
+    "最终 12 秒应用健康窗口内，网络请求全部为 200，Console error/warning 和原生弹窗均为 0。",
+    "Coze 注入桥接脚本在服务重启早期出现过外部 CSP 记录，未计入应用最终健康窗口。",
+    "PostgreSQL 专项并发门禁因缺少 POSTGRES_TEST_DATABASE_URL 仍单独列为未验证，不影响本 UI-003 吸收判定。"
+  ]
+}

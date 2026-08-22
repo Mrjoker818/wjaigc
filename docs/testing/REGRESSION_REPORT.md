@@ -1475,11 +1475,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 测试时间截点后的 Console Error/Warning 与 `[CanvasToolSession]` 错误均为 `0`。证据：`docs/testing/evidence/v588-ui-002-cloud-2026-08-22.json` 和 `.png`。
 - **结论：V588-UI-002 云端回归通过并完成吸收。** 下一项为 `V588-UI-003`，不得重复本项或跳过 RED。
 
-## 2026-08-22 V588-UI-003 小地图本地回归
+## 2026-08-22 V588-UI-003 小地图云端回归
 
 - Task 1 的 RED 证明当前代码缺少 `CanvasMinimap` 模块、父画布接线和工具簇入口，并同时执行精确 TypeScript 门禁；独立审查为 `0/0/0`。
 - Task 2 叶组件最终 `14` 个测试与 `pnpm ts-check` 通过；极端有限坐标和 `x + width` 溢出均固定为永久回归，独立审查为 `0/0/0`。Task 3 聚焦回归为 `6` 个文件、`27` 个测试通过，独立审查为 `0/0/0`。
-- 全仓 TypeScript 通过；ESLint 为 `0 errors / 988` 条历史 warning，本项新增 warning 为 `0`。全仓 Vitest 为 `499` 个文件（`481` 通过、`18` 跳过）和 `3140` 个测试（`3035` 通过、`105` 跳过）；跳过项仅为未配置 `POSTGRES_TEST_DATABASE_URL` 的既有真实 PostgreSQL 集成/并发门禁，不计为通过。
+- 全仓 TypeScript 通过；ESLint 为 `0 errors / 988` 条历史 warning，本项新增 warning 为 `0`。全仓 Vitest 为 `499` 个文件（`481` 通过、`18` 跳过）和 `3143` 个测试（`3038` 通过、`105` 跳过）；跳过项仅为未配置 `POSTGRES_TEST_DATABASE_URL` 的既有真实 PostgreSQL 集成/并发门禁，不计为通过。
 - Next.js `16.2.11` 生产构建生成 `116/116` 页面并以退出码 `0` 完成；干净 HEAD 保护基线为 `38/38`，未授权源码漂移 `0`、warning `0`；`git diff --check` 通过。
-- 当前实现候选为 `20dd2d92951078ad04c0cb356ed66c4c20b8c350`，本次进度账本基线 `67e1f85` 仅含文档；`origin/main@e1166f8ec73e9ee5745da6f2a0fb0d875708fb69` 是候选祖先且可快进。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`、donor 均未变。
-- **结论：本地候选通过 / 云端待验。** 小地图桌面默认关闭，使用偏好键 `wujie.canvas.minimap.open.v1`；窄屏或可用宽度不足隐藏，关闭态零投影，点击导航保持 zoom，矩形不渲染缩略图或发起网络请求。云端验证尚未执行，也没有云端证据文件；不得标记为已吸收或开始 `V588-UI-004`。
+- 云端验收提交为 `efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2`；Coze、`origin/main` 与本地提交精确一致，构建退出码 `0`、首页和鉴权健康接口 HTTP `200`。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`、donor 均未变。
+- 仅复用 Google Chrome「用户1」的现有标签页完成 26/26 项矩阵：默认关闭、工具按钮、命令、关闭按钮、偏好恢复、两组响应式阈值、主题、面板避让、空态、100/300 节点、真实拖动和导航保持 `46%` zoom 均通过。最终健康窗口 Console error/warning、`[CanvasToolSession]` 错误与原生弹窗均为 `0`，网络全部 `200`；两个 30 秒空闲窗口没有画布/项目同步 POST。
+- **结论：V588-UI-003 已吸收，云端验证通过。** 机器证据为 `docs/testing/evidence/v588-ui-003-cloud-2026-08-22.json`。PostgreSQL 集成门禁仍因缺少 `POSTGRES_TEST_DATABASE_URL` 单独列为未验证；下一唯一项为 `V588-UI-004`。

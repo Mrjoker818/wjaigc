@@ -2237,11 +2237,12 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Field | Detail |
 |---|---|
 | Severity | P1 项目持久化、画布稳定性与大项目可用性 |
-| Environment | Coze exact `main@ff9b001d7944a966dfe62a4fc82d88087bac6e76`，`shadow` 模式，已登录 Google Chrome，300 节点隔离验收项目，2026-08-22 |
+| Environment | Coze exact `main@efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2`，`shadow` 模式，已登录 Google Chrome「用户1」，100/300 节点隔离验收项目，2026-08-22 |
 | Reproduction | 打开 300 节点项目并保持页面活动；观察自动保存连续提交完整项目快照。客户端约 8 秒后报告 `TimeoutError: signal timed out`，服务端仍可能继续完成写入；随后旧 revision 请求返回 409，并再次触发同步。 |
 | Expected | 未变化的画布应在一个批量完整性校验后复用既有 Asset/Version/Placement 映射；同步在客户端边界内完成，不产生超时、409 循环或重复逐节点数据库工作。 |
 | Actual | `executeCanvasProjectSync()` 对每个项目、每张图片都调用 `migrateLegacyProjectOnWriteInTransaction()`；446 张账户图片需要大量逐行锁定和 SQL 往返。客户端超时后未获得已提交的新 revision，形成超时、旧 revision 冲突和重复同步。 |
-| Root cause | 同步入口没有识别“项目资产图快照未变化且映射仍完整”的路径。仅增加超时时间会掩盖问题，并不能消除重复数据库工作和 revision 竞态。 |
-| TDD/fix | 首个 RED 证明未变化的 300 节点项目仍调用逐节点 `syncProject`；第二个安全 RED 证明不能仅靠 JSON 相等跳过损坏的数据库图。修复在同一事务内读取上一版快照，要求名称和规范化图片图完全一致、当前图片均有完整映射，并通过一次 PostgreSQL 批量锁定/完整性校验后才复用映射；缺失、损坏、改名或变化项目继续走原严格协调路径。项目删除协调、两次快照写入和 revision CAS 保持不变。 |
-| Local regression | 聚焦同步矩阵 `103/103`；全仓 Vitest `499 files / 3142 tests`，其中 `481 files / 3037 tests` 通过、`18 files / 105 tests` 因未配置 `POSTGRES_TEST_DATABASE_URL` 明确跳过；TypeScript 通过，ESLint `0 error / 988` 条历史 warning，生产构建 `116/116` 通过。 |
-| Status | **FIXED LOCALLY / EXACT-SHA COZE GOOGLE CHROME RETEST REQUIRED.** 云端必须复验 100/300 节点拖动与保存，并在至少 35 秒观察窗口内确认 `/api/user-data/sync` 无超时、无 409 循环、Console `0/0`。 |
+| Root cause | 服务端同步入口没有识别“项目资产图快照未变化且映射仍完整”的路径；客户端内容签名又包含会在每次成功保存后变化的 `baseProjectRevision`，即使画布内容未变也会再次调度同步。单纯增加超时无法消除数据库工作、revision 竞态或空闲循环。 |
+| TDD/fix | 服务端修复 `e241dd8` 在同一事务中对未变化项目执行批量完整性校验并复用映射，损坏、改名或变化项目仍走严格协调路径；客户端修复 `efe5e4f` 仅从内容签名移除 `baseProjectRevision`，继续在 CAS/恢复元数据中保留 revision。两层修复均先建立失败回归，未改动项目删除、快照、任务、计费或 stable 分支。 |
+| Local regression | 聚焦回归 `82/82`；全仓 Vitest `499` 个文件、`3143` 个测试，其中 `481` 个文件、`3038` 个测试通过，`18` 个文件、`105` 个 PostgreSQL 专项因未配置 `POSTGRES_TEST_DATABASE_URL` 明确跳过；TypeScript 通过，ESLint `0 error / 988` 条历史 warning，生产构建 `116/116` 通过。 |
+| Cloud regression | exact SHA `efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2` 在 Google Chrome 现有标签页完成 100/300 节点、真实拖动、小地图导航和两个 30 秒空闲观察窗口；画布/项目同步 POST 为 `0`，没有超时或 409，最终 Console error/warning `0/0`、网络全部 `200`。 |
+| Status | **FIXED / CLOUD VERIFIED.** V588-UI-003 已吸收；证据为 `docs/testing/evidence/v588-ui-003-cloud-2026-08-22.json`。PostgreSQL 并发专项仍因缺少隔离库单独保持未验证。 |
