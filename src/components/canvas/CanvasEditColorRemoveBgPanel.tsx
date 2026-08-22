@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Check, Eraser, Loader2, Palette, X } from 'lucide-react';
 import NextImage from 'next/image';
 import type { CanvasImage, EditMode } from '@/components/infinite-canvas';
+import { getCanvasEditImageSource } from '@/lib/canvas-edit-image-source';
 
 interface CanvasEditColorRemoveBgPanelProps {
   editMode: EditMode;
@@ -102,7 +103,7 @@ export function CanvasEditColorRemoveBgPanel({
               <div className="p-4 overflow-y-auto flex flex-col gap-4" style={{ maxHeight: '60vh' }}>
                 {/* 实时预览 - 使用CSS filter即时反馈 */}
                 <div className="w-full aspect-video rounded-lg overflow-hidden bg-black/40 flex items-center justify-center border border-[#333] relative">
-                  <NextImage unoptimized width={1} height={1}                     src={editImg.url}
+                  <NextImage unoptimized width={1} height={1}                     src={getCanvasEditImageSource(editImg.url)}
                     alt="预览"
                     className="max-w-full max-h-full object-contain transition-all duration-100"
                     crossOrigin="anonymous"

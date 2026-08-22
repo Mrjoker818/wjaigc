@@ -39,4 +39,11 @@ describe('CanvasEditEraseMaskPanel', () => {
     expect(source).toContain('stopPropagation()');
     expect(source).toContain('motion-reduce:transition-none');
   });
+
+  it('远程图片经同源安全读取地址进入像素编辑器', () => {
+    const source = readComponent();
+
+    expect(source).toContain("getCanvasEditImageSource(editImg.url)");
+    expect(source).not.toContain('src={editImg.url}');
+  });
 });

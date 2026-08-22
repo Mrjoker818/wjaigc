@@ -40,4 +40,11 @@ describe('CanvasEditColorRemoveBgPanel', () => {
     expect(source).toContain('stopPropagation()');
     expect(source).toContain('motion-reduce:transition-none');
   });
+
+  it('调色预览使用同源安全读取地址，避免外部 CDN CORS 空图', () => {
+    const source = readComponent();
+
+    expect(source).toContain("getCanvasEditImageSource(editImg.url)");
+    expect(source).not.toContain('src={editImg.url}');
+  });
 });

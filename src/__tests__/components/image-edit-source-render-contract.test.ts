@@ -12,9 +12,9 @@ const eraseMaskPanelSource = readFileSync(
 );
 
 describe('image edit source rendering contract', () => {
-  it('loads the selected editing source directly instead of routing it through Next image optimization', () => {
+  it('loads the selected editing source with a native image and a same-origin safe source', () => {
     expect(eraseMaskPanelSource).toContain('<img');
-    expect(eraseMaskPanelSource).toContain('src={editImg.url}');
+    expect(eraseMaskPanelSource).toContain('src={getCanvasEditImageSource(editImg.url)}');
     expect(eraseMaskPanelSource).toContain('alt="edit"');
     expect(eraseMaskPanelSource).not.toContain('<NextImage');
   });

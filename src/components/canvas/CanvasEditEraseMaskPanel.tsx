@@ -7,6 +7,7 @@
 import * as React from 'react';
 import { Eraser, Maximize2, Minus, Paintbrush, Plus, RotateCcw, Trash2, Wand2, X } from 'lucide-react';
 import type { CanvasImage, EditMode } from '@/components/infinite-canvas';
+import { getCanvasEditImageSource } from '@/lib/canvas-edit-image-source';
 
 /** 单个笔迹点（机械拆出，与原文件内联结构一致） */
 export interface StrokePoint {
@@ -166,7 +167,7 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
                     >
                       {/* Image */}
                       <img
-                        src={editImg.url}
+                        src={getCanvasEditImageSource(editImg.url)}
                         alt="edit"
                         className="w-full h-full object-contain select-none"
                         draggable={false}
