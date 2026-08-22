@@ -31,7 +31,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 
 | ID | Donor capability | Current evidence | Absorption decision | First RED gate | Risk |
 |---|---|---|---|---|---|
-| V588-UI-001 | Leaf Canvas components: image toolbar, context menus, download popup, edit panels, generation groups, image layer, connection layer, zoom cluster and tool drawer | Current Canvas is 18189 lines but contains newer Stage 3/4 persistence, performance and task fixes | **ABSORB INCREMENTALLY.** Extract one pure rendering responsibility at a time; retain current controllers, refs, event ordering and domain state | Source-boundary test plus existing Canvas behavior matrix must fail until the selected responsibility is routed through the new leaf | High |
+| V588-UI-001 | Leaf Canvas components: image toolbar, context menus, download popup, edit panels, generation groups, image layer, connection layer, zoom cluster and tool drawer | Current Canvas contains newer Stage 3/4 persistence, performance and task fixes | **IN PROGRESS / FIRST LEAF LOCAL PASS.** Zoom and auxiliary controls now render through `CanvasZoomCluster`; current controllers, refs, event ordering and domain state remain in `InfiniteCanvas` | RED/GREEN source boundary, 64 focused assertions, 2988-test full suite, TypeScript, zero-error ESLint, build 116/116 and protected baseline pass; exact-SHA Coze Chrome interaction remains pending | High |
 | V588-UI-002 | `canvas-command-palette.tsx` | No current command-palette surface; current command executor exists | **ABSORB BEHAVIOR, REIMPLEMENT ON CURRENT COMMAND API.** Do not import donor Canvas state | Keyboard/open/search/execute/escape tests, input-focus protection, cloud Chrome action proof | Medium |
 | V588-UI-003 | `canvas-minimap.tsx` | Current Canvas has viewport/controller and spatial-index infrastructure but no leaf minimap | **ABSORB AFTER UI-001.** Bind to current viewport projection, not donor transforms | 100/300-node viewport mapping, click navigation, resize, hidden/empty state and performance budget | Medium |
 | V588-UI-004 | Empty-state, zoom, overflow-safe toolbar and editing-panel layout components | Current toolbar behavior is protected but remains embedded | **ABSORB AS PRESENTATION-ONLY EXTRACTIONS.** No entry, label, handler or feature may disappear | Desktop/mobile visual contract, every existing toolbar action callable, no clipping/overlap, reduced-motion contract | Medium |
@@ -188,3 +188,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 归档后连续两轮 remediation 均为 0，readiness 均为 `releaseReady=true`、`switchAuthorized=true`、blocker 为空；迁移 `6/6`、shadow 对账 `6/6`。
 - 当前仍为 `shadow`，没有执行 `asset-v3`。其投影、刷新恢复、原图回退、S3 恢复和回退属于独立门禁，不能从 doctor 授权状态推断为已经通过。
 - **状态：ADMIN-003 历史媒体归档闭环完成。** 正式 donor 吸收下一唯一项恢复为 `V588-UI-001`；只提取叶级 UI 责任，保留当前 Stage 3/4 控制器、任务、资产和事件顺序。证据：`docs/testing/evidence/s4-bug-014-cloud-archive-2026-08-22.json` 和 `.png`。
+
+### V588-UI-001 - 2026-08-22 首个叶组件本地候选
+
+- 选定底部工具栏的缩放与辅助控制簇作为首个最小叶子；拒绝直接复制 donor 的控制器实现，因为它会绕过当前工具会话互斥。
+- RED 先证明叶组件不存在且父组件仍内联全部控件；GREEN 后新增纯展示 `CanvasZoomCluster`，父画布继续拥有缩放边界、视图适配、网格、连线、图层/历史互斥和 AI 引擎状态。
+- 聚焦矩阵通过 `7 files / 64 tests`；全仓通过 `475 files / 2988 tests`，另有 `18 files / 105` 个 PostgreSQL 环境测试明确跳过。本项不修改持久化、账务或供应商链路。
+- TypeScript 通过，ESLint 为 `0 errors / 988` 条历史 warning，生产构建完成 `116/116`，保护基线 `38/38` 且 0 blocker，空白检查通过。
+- 精确治理前置提交为 `cf65a65`，实现提交为 `c808e50`；新增源码路径绑定来源提交，不增加目录级授权。`stable@52f7c60` 与 donor 保持只读。
+- **状态：本地通过 / GitHub main 已含实现 / Coze exact-SHA 与 Google Chrome 真实交互待验。** 未完成云端验证前不开始 `V588-UI-002`，也不把 `V588-UI-001` 标记为已吸收。

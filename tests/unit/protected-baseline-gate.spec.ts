@@ -56,6 +56,7 @@ const historicalSourceAuthorizations = [
   ['src/app/api/assets/[assetId]/restore/route.ts', '0756f71'],
   ['src/app/api/assets/adopt-canvas-image/route.ts', 'c99fb72'],
   ['src/components/dashboard/admin-tabs.tsx', '1ba98f7'],
+  ['src/components/canvas/CanvasZoomCluster.tsx', 'c808e50'],
   ['src/lib/admin-dashboard-projection.ts', '1ba98f7'],
   ['src/lib/asset-core/asset-release-readiness.ts', 'e809f5c'],
   ['src/lib/asset-core/canvas-adapter.ts', '5a35b98'],

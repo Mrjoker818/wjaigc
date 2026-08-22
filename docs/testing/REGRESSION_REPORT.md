@@ -1437,3 +1437,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - PostgreSQL 只读核验确认 ledger `1`、audit `1`、软删除 placement `4`、不可恢复版本 `4`、版本行保留 `4`；同一时间窗积分与退款事件均为 `0`。未调用供应商、未物理删除媒体。
 - 归档后连续两轮 remediation 均为 `0 candidates / 0 active placements`；readiness 均为 `releaseReady=true`、`switchAuthorized=true`、blockers `[]`，迁移 `6/6`、shadow 对账 `6/6`。运行模式仍为 `shadow`，本任务没有执行模式切换。
 - **结论：S4-BUG-014 云端软归档与幂等回归通过。** 证据：`docs/testing/evidence/s4-bug-014-cloud-archive-2026-08-22.json` 和 `.png`。`asset-v3` 投影、刷新恢复、原图回退与 S3 恢复仍是独立验收项。
+
+## 2026-08-22 V588-UI-001 首个叶组件本地回归
+
+- RED 先复现底部缩放与辅助控制仍全部内联在 `InfiniteCanvas`，且不存在受当前控制器约束的独立展示叶子。
+- 最小实现仅提取 `CanvasZoomCluster`。缩放上下限、重置视图、网格轮换、连线开关、图层/历史互斥、工具会话和 AI 引擎弹窗仍由父组件回调控制。
+- 聚焦回归通过 `7 files / 64 tests`；全仓通过 `475 files / 2988 tests`，`18 files / 105` 个 PostgreSQL 环境测试明确跳过。本项未触及持久化、任务、账务或供应商代码。
+- TypeScript 通过；ESLint `0 errors / 988 warnings`；生产构建 `116/116`；保护基线保留 `38/38` 功能且 0 blocker；`git diff --check` 通过。
+- GitHub 已依次接收治理前置 `cf65a65` 和实现 `c808e50`，`stable@52f7c60` 未变化。
+- **结论：本地回归通过，云端待验。** Coze 必须拉取包含来源记录的最终提交，并在已登录 Google Chrome 中逐项验证缩小、放大、重置、网格、连线、图层、历史和 AI 引擎，确认图层/历史互斥及新鲜 Console Error/Warning 为 0。

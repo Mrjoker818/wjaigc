@@ -1086,4 +1086,4 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | `asset-v3` 投影与回退 | 未验证，未切换 | 在保持可回退的受控窗口验证缩略图投影、刷新恢复、原图回退、S3 恢复与回退；本次授权不包含模式切换。 |
 | Coze 管理员 origin 持久化 | 待配置 | 在项目级环境变量中写入带 `-5000` 的精确预览 origin，并在正常重启后读取实际进程环境和执行管理员只读探针；`.env.local` 不能替代此项。 |
 | Coze 本地空提交 | 待自然对齐 | `7912fd9` 不含文件变化且 tree 与 `origin/main@04a7a91` 相同，不推送；后续拉取新的 `main` 文档提交时自然对齐。 |
-| 正式 V5.8.8 吸收 | 可开始首项 | 严格从 `V588-UI-001` 开始，donor 只读，先 RED，再做单一叶组件最小接入和完整回归。 |
+| 正式 V5.8.8 吸收 | `V588-UI-001` 首叶本地通过 | `CanvasZoomCluster` 已完成 RED、最小接入和本地全量回归；仍需 Coze exact-SHA 与 Google Chrome 逐按钮、互斥状态和 Console 验证，未验前不得开始下一叶。 |
