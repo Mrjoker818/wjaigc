@@ -61,6 +61,29 @@ export interface CanvasMinimapProps {
   onClose: () => void;
 }
 
+const minimapThemeStyles = {
+  dark: {
+    panelBackground: 'rgba(20, 20, 20, 0.96)',
+    panelBorder: 'rgba(212, 175, 55, 0.42)',
+    panelText: '#f7e7a9',
+    mapBackground: '#0b0b0b',
+    itemBackground: 'rgba(212, 175, 55, 0.28)',
+    itemBorder: 'rgba(212, 175, 55, 0.68)',
+    viewportBackground: 'rgba(212, 175, 55, 0.12)',
+    viewportBorder: '#d4af37',
+  },
+  mono: {
+    panelBackground: 'rgba(255, 255, 255, 0.98)',
+    panelBorder: '#d1d5db',
+    panelText: '#111827',
+    mapBackground: '#f3f4f6',
+    itemBackground: 'rgba(17, 24, 39, 0.18)',
+    itemBorder: 'rgba(17, 24, 39, 0.45)',
+    viewportBackground: 'rgba(17, 24, 39, 0.08)',
+    viewportBorder: '#111827',
+  },
+} as const;
+
 const finiteOrZero = (value: number): number => (Number.isFinite(value) ? value : 0);
 
 const safeZoom = (zoom: number): number => (
@@ -278,14 +301,21 @@ export function CanvasMinimap({
   onClose,
 }: CanvasMinimapProps): React.JSX.Element {
   const scene = useMemo(() => projectCanvasMinimapScene(items, viewport), [items, viewport]);
+  const themeStyles = minimapThemeStyles[theme];
   const handleMapClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.stopPropagation();
     const mapBounds = event.currentTarget.getBoundingClientRect();
     const miniX = event.clientX - mapBounds.left;
     const miniY = event.clientY - mapBounds.top;
     onNavigate({
-      x: (miniX - scene.projection.offsetX) / scene.projection.scale,
-      y: (miniY - scene.projection.offsetY) / scene.projection.scale,
+      x: safeDivide(
+        safeAdd(miniX, -scene.projection.offsetX),
+        scene.projection.scale,
+      ),
+      y: safeDivide(
+        safeAdd(miniY, -scene.projection.offsetY),
+        scene.projection.scale,
+      ),
     });
   }, [onNavigate, scene.projection]);
   const stopPropagation = useCallback((event: React.SyntheticEvent) => {
@@ -307,9 +337,12 @@ export function CanvasMinimap({
       onWheel={stopPropagation}
       style={{
         width: 192,
-        bottom: 76,
+        bottom: 'var(--canvas-minimap-bottom, 76px)',
         right: Math.max(12, Number.isFinite(rightOffset) ? rightOffset : 12),
         borderRadius: 8,
+        backgroundColor: themeStyles.panelBackground,
+        border: `1px solid ${themeStyles.panelBorder}`,
+        color: themeStyles.panelText,
       }}
     >
       <div className="flex items-center justify-between px-2 py-1">
@@ -322,7 +355,11 @@ export function CanvasMinimap({
         className="relative overflow-hidden"
         data-testid="canvas-minimap-map"
         onClick={handleMapClick}
-        style={{ width: CANVAS_MINIMAP_WIDTH, height: CANVAS_MINIMAP_HEIGHT }}
+        style={{
+          width: CANVAS_MINIMAP_WIDTH,
+          height: CANVAS_MINIMAP_HEIGHT,
+          backgroundColor: themeStyles.mapBackground,
+        }}
       >
         {scene.items.map((item) => (
           <div
@@ -334,6 +371,8 @@ export function CanvasMinimap({
               top: item.y,
               width: item.width,
               height: item.height,
+              backgroundColor: themeStyles.itemBackground,
+              border: `1px solid ${themeStyles.itemBorder}`,
               pointerEvents: 'none',
             }}
           />
@@ -351,6 +390,8 @@ export function CanvasMinimap({
             top: scene.viewport.y,
             width: scene.viewport.width,
             height: scene.viewport.height,
+            backgroundColor: themeStyles.viewportBackground,
+            border: `1px solid ${themeStyles.viewportBorder}`,
             pointerEvents: 'none',
           }}
         />

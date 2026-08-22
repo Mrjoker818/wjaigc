@@ -889,6 +889,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { width: canvasSize.width, height: canvasSize.height },
     { right: canvasOccupiedRight },
   ), [canvasOccupiedRight, canvasSize.height, canvasSize.width]);
+  const minimapViewport = useMemo(() => ({
+    width: usableMinimapViewport.width,
+    height: usableMinimapViewport.height,
+    zoom,
+    offsetX: viewOffset.x,
+    offsetY: viewOffset.y,
+  }), [usableMinimapViewport.height, usableMinimapViewport.width, viewOffset.x, viewOffset.y, zoom]);
+  const minimapBottomOffset = (showLayerPanel || showVersionHistory)
+    ? 'calc(min(30dvh, 260px) + 28px)'
+    : '76px';
 
   const toggleCanvasMinimap = useCallback(() => {
     if (!minimapAvailable) return;
@@ -11153,7 +11163,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         data-canvas-active-tool={canvasToolSession.toolId || ''}
         data-canvas-occupied-right={canvasOccupiedRight}
         data-project-id={projectId || brandProject?.id || ''}
-        style={{ touchAction: annotationMode ? 'none' : 'auto' }}
+        style={{
+          touchAction: annotationMode ? 'none' : 'auto',
+          '--canvas-minimap-bottom': minimapBottomOffset,
+        } as React.CSSProperties}
         className={`absolute inset-0 overflow-clip select-none data-[space-pan=true]:!cursor-grab data-[space-pan=true]:active:!cursor-grabbing ${
           annotationMode
             ? 'cursor-crosshair'
@@ -19188,13 +19201,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       {minimapOpen && minimapAvailable && (
         <CanvasMinimap
           items={minimapItems}
-          viewport={{
-            width: usableMinimapViewport.width,
-            height: usableMinimapViewport.height,
-            zoom,
-            offsetX: viewOffset.x,
-            offsetY: viewOffset.y,
-          }}
+          viewport={minimapViewport}
           theme={isMonochrome ? 'mono' : 'dark'}
           rightOffset={canvasOccupiedRight + 12}
           onNavigate={handleMinimapNavigate}
