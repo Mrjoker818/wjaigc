@@ -39,6 +39,7 @@
     "src/app/api/video/generate/route.ts",
     "src/app/api/workflow/models/route.ts",
     "src/components/canvas/CanvasMediaNode.tsx",
+    "src/components/canvas/CanvasZoomCluster.tsx",
     "src/components/canvas/CanvasSurface.tsx",
     "src/components/canvas/CanvasToolHost.tsx",
     "src/components/canvas/use-canvas-selection.ts",
