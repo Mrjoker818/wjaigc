@@ -582,6 +582,7 @@ git commit -m "test: prove historical media archive isolation"
 **文件：**
 - 修改：`docs/testing/baselines/protected-source-authorizations.json`
 - 修改：`tests/unit/protected-baseline-gate.spec.ts`
+- 修改：`package.json`
 - 修改：`docs/testing/BUG_REGISTER.md`
 - 修改：`docs/testing/REGRESSION_REPORT.md`
 - 修改：`docs/testing/RELEASE_READINESS_REPORT.md`
@@ -592,7 +593,7 @@ git commit -m "test: prove historical media archive isolation"
 - 产出：精确路径来源提交证明、中文验证结论和去敏机器证据。
 - 不修改：protected feature 数量、`stable`、V5.8.8 donor、readiness blocker 谓词。
 
-- [ ] **步骤 1：记录源码实现提交 SHA**
+- [x] **步骤 1：记录源码实现提交 SHA**
 
 ```powershell
 $remediationCommit = (git log -1 --format=%h -- src/lib/asset-core/historical-media-remediation.ts).Trim()
@@ -603,16 +604,16 @@ git diff-tree --no-commit-id --name-only -r $routeCommit -- src/app/api/admin/as
 
 预期：两个变量均为 7 位十六进制提交号；每条 `diff-tree` 只输出对应的精确源码路径。即使两条路径最后由同一提交修改，也分别从 Git 历史读取，不假设当前 `HEAD` 就是来源提交。
 
-- [ ] **步骤 2：更新两个精确路径的来源授权**
+- [x] **步骤 2：更新所有实际漂移的精确路径来源授权**
 
-在 `protected-source-authorizations.json` 与 `historicalSourceAuthorizations` 中，把以下两项的 `sourceCommit` 分别同步为步骤 1 的 `$remediationCommit` 和 `$routeCommit`：
+先运行实际保护门禁并读取 Git 历史。除以下两项同步来源提交外，若门禁发现同一受审实现提交修改了其他保护源码，只允许逐个增加精确文件路径，并在 `package.json`、`protected-source-authorizations.json` 与 `historicalSourceAuthorizations` 三处保持一致：
 
 ```text
 src/lib/asset-core/historical-media-remediation.ts
 src/app/api/admin/assets/remediation/route.ts
 ```
 
-其余历史授权条目、数量和顺序保持不变。随后运行：
+2026-08-22 RED 门禁进一步确认 `src/lib/asset-core/media-health.ts` 与 `src/lib/asset-core/recovery-media.ts` 属于同一已审实现提交 `9c3f52f` 的必要变更，因此新增这两个精确路径；禁止授权 `src/lib/asset-core/` 目录。其余未漂移历史授权保持不变。随后运行：
 
 ```powershell
 pnpm exec vitest run tests/unit/protected-baseline-gate.spec.ts
@@ -620,7 +621,7 @@ pnpm exec vitest run tests/unit/protected-baseline-gate.spec.ts
 
 预期：精确路径、来源提交和无宽泛目录授权测试通过。
 
-- [ ] **步骤 3：运行受影响测试矩阵**
+- [x] **步骤 3：运行受影响测试矩阵**
 
 ```powershell
 pnpm exec vitest run src/__tests__/lib/historical-media-remediation.test.ts src/__tests__/api/historical-media-remediation.test.ts tests/integration/stage-4-historical-media-remediation-postgres.test.ts src/__tests__/api/production-readiness.test.ts src/__tests__/lib/asset-release-readiness.test.ts tests/unit/protected-baseline-gate.spec.ts
@@ -628,7 +629,7 @@ pnpm exec vitest run src/__tests__/lib/historical-media-remediation.test.ts src/
 
 预期：全部通过，PostgreSQL 测试 0 skip。
 
-- [ ] **步骤 4：运行全量质量门禁**
+- [x] **步骤 4：运行全量质量门禁**
 
 ```powershell
 pnpm ts-check
@@ -641,7 +642,7 @@ git diff --check
 
 预期：所有命令退出码为 0；不得通过删除失败测试、关闭规则或增加任意等待时间获得绿色结果。
 
-- [ ] **步骤 5：生成中文本地证据与报告**
+- [x] **步骤 5：生成中文本地证据与报告**
 
 用运行时读取的 Git 值生成证据对象，禁止把说明文字写入结果：
 
@@ -670,7 +671,7 @@ $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath 'docs/testing/evi
 
 生成后重新读取 JSON，确认 commit 为 40 位十六进制值且 stable 前后相同；不得写入数据库 URL、密码、Cookie、Token、用户图片或完整用户标识。
 
-- [ ] **步骤 6：提交授权、证据与中文报告**
+- [x] **步骤 6：提交授权、证据与中文报告**
 
 ```powershell
 git add docs/testing/baselines/protected-source-authorizations.json tests/unit/protected-baseline-gate.spec.ts docs/testing/BUG_REGISTER.md docs/testing/REGRESSION_REPORT.md docs/testing/RELEASE_READINESS_REPORT.md docs/testing/UNVERIFIED_ITEMS.md docs/testing/evidence/s4-bug-014-local-postgres-2026-08-22.json

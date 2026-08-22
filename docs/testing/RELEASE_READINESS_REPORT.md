@@ -1162,3 +1162,11 @@ Supporting gates: validate passed; lint passed with `0 errors / 988 warnings`; b
 **LOCAL GOVERNANCE GATE PASSED / CLOUD ACCEPTANCE NOT STARTED.** The administrator approved exact-path authorization. Commit `34391fbda9ee2dfe7c32c103c1418d0b59361dcb` records 23 paths and their verified source commits, forbids broad directory grants in regression tests, and changes no business code.
 
 The focused gate test passes `7/7`; the actual protected-baseline command passes `38/38` identities with zero warnings and zero blockers. Fresh final verification passes `492/492` files and `3067/3067` tests, validate, full lint (`0` errors / `988` warnings), production build `116/116`, and whitespace checks. `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` and the donor lock digest remain unchanged. Only a normal fast-forward push to `main` remains before Coze may pull the candidate. No cloud archive POST or `asset-v3` mode change is authorized by this result.
+
+## 2026-08-22 S4-BUG-014 本地发布结论
+
+- 历史媒体候选覆盖、覆盖不完整失败关闭、健康当前版本保留、并发幂等、事务回滚和 doctor 同口径对账均在隔离 PostgreSQL 上通过。
+- 最新完整门禁为：受影响 `108/108`；全仓 `492/492` 文件、`3090/3090` 测试且 0 skip；TypeScript 通过；ESLint `0 error / 988` 条历史 warning；构建 `116/116`；保护基线和空白检查通过。
+- 授权清单现在包含 25 个实际审阅的精确路径，其中新增 `media-health.ts` 与 `recovery-media.ts`；未授权 `src/lib/asset-core/` 或其他宽泛目录。
+- `stable` 前后均为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`；V5.8.8 donor 未改动。
+- **结论：允许建立 `main` 候选并进行云端只读验收，但尚未达到发布通过。** 云端归档 POST、幂等重试、缩略图投影/回退/S3 恢复及 `asset-v3` 切换仍未获验证；归档必须在操作时再次确认。

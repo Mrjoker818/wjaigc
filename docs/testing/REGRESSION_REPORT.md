@@ -1408,3 +1408,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Commit `34391fbda9ee2dfe7c32c103c1418d0b59361dcb` adds the exact command grants, the 23-entry machine-readable provenance manifest, and a permanent Git-history regression test.
 - Focused test passes `7/7`; the fresh full PostgreSQL-enabled run passes `492/492` files and `3067/3067` tests with zero failures and zero skips. Validate, full lint (`0` errors / `988` warnings), build (`116/116`), protected baseline and whitespace checks pass.
 - This closes only the local governance blocker. Cloud archive, cloud idempotent retry and `asset-v3` acceptance remain **UNVERIFIED** and require the planned exact-SHA cloud sequence.
+
+## 2026-08-22 S4-BUG-014 历史媒体覆盖本地闭环
+
+- 真实 PostgreSQL RED 证明活动 placement 引用非当前坏版本时，旧候选发现会漏报发布 blocker；修复后当前与非当前坏版本均进入稳定候选集。
+- 归档覆盖门禁采用 PostgreSQL advisory 读写锁：归档独占等待上限为 5 秒，普通业务写入使用共享门禁并等待归档结束，不用通用 500 牺牲正常写入。
+- 并发同 key 复用同一 remediation；同 key 不同请求返回冲突；Canvas 快照或审计失败会回滚 Asset、版本、placement、revision、ledger 和 audit。
+- 精确授权测试从 25 次串行 Git 子进程改为一次批量来源查询，保持逐路径来源断言；执行时间由 13.6 秒降至 0.4 秒，没有增加测试超时。
+- 受影响矩阵通过 `6` 个文件、`108/108`；带隔离 PostgreSQL 的全仓通过 `492/492` 个文件、`3090/3090` 项测试，0 failure、0 skip。
+- TypeScript 通过；ESLint 为 `0 error / 988` 条历史 warning；生产构建完成 `116/116`；保护基线确认 38 个功能完整、25 条精确授权、0 blocker；`git diff --check` 通过。
+- **结论：本地回归通过。** 尚未推送 `main`，未执行云端归档，未切换 `asset-v3`。机器证据：`docs/testing/evidence/s4-bug-014-local-postgres-2026-08-22.json`。

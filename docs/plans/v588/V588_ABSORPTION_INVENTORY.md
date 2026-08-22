@@ -170,3 +170,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - RED exposed the absent manifest and then three inaccurate provenance proposals; corrected GREEN passes `7/7`. The real gate now passes all `38/38` contracts with zero warning and zero blocker.
 - Final PostgreSQL-enabled verification passes `492/492` files and `3067/3067` tests, validate, full lint (`0` errors / `988` warnings), build `116/116`, protected baseline and whitespace checks.
 - **Decision: LOCAL GOVERNANCE + FINAL GATES PASS / MAIN PUSH PENDING.** This approval does not authorize a cloud archive POST, billing action, physical deletion, `asset-v3` promotion or donor copying.
+
+### V588-ADMIN-003 - 2026-08-22 历史媒体覆盖闭环
+
+- PostgreSQL RED 确认非当前坏版本上的活动 placement 会被旧发现逻辑漏掉；最小修复保持现有 Asset/Version/Placement 架构，不复制 V5.8.8 媒体子系统。
+- 保护门禁进一步发现 `media-health.ts` 与 `recovery-media.ts` 是同一受审实现提交的必要改动；授权清单从 23 条纠正为 25 条精确路径，仍无任何目录级授权。
+- 最新本地证据：受影响 `108/108`，带 PostgreSQL 的全仓 `3090/3090` 且 0 skip，TypeScript、构建 `116/116`、保护基线与空白检查通过，ESLint `0 error / 988` 条历史 warning。
+- **状态：ADMIN-003 本地实现与门禁通过 / 云端只读验收待执行。** 本结果不授权归档 POST 或 `asset-v3`；完成云端步骤前不得启动 `V588-UI-001`，也不得进入供应商适配。

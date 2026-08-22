@@ -2222,8 +2222,10 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Reproduction | GET `/api/admin/assets/remediation?limit=20` twice and GET `/api/admin/production-readiness` in the same administrator session. |
 | Expected | The reviewed remediation candidate set reconciles exactly with every active non-ready or non-durable placement blocker before any archive is authorized. The approved Task 7 baseline expected three versions and four active placements. |
 | Actual | Both candidate reads are stable at three versions and three active placements, while readiness reports two missing placements plus two false-ready active placements. The candidate set therefore leaves one active blocker unexplained. |
-| Current root-cause hypothesis | Discovery requires the broken version to be the Asset's current version, while readiness counts active placements referencing matching bad versions regardless of current-version identity. An active placement on a non-current bad version would therefore block release but be absent from remediation discovery. This hypothesis is not yet promoted to a confirmed root cause without a RED PostgreSQL reproduction. |
+| 已确认根因 | 发现逻辑曾要求坏版本必须是 Asset 当前版本，而 readiness 会统计所有活动 placement 引用的坏版本；因此活动 placement 引用非当前坏版本时，会阻塞发布却不进入修复候选。真实 PostgreSQL RED 已稳定复现。 |
 | Safety decision | Archive is aborted fail-closed. No POST, deletion, billing action, physical purge or `asset-v3` switch was performed. |
 | Evidence | `docs/testing/evidence/stage-4-task-7-remediation-readonly-2026-08-22.json`; stable request IDs `56db8195-5a2c-911e-a79f-9ba91c7a13ca` and `4973b638-66ad-91f6-9f72-7d9cac2a1eb4`. |
 | Approved design | `docs/superpowers/specs/2026-08-22-historical-media-active-placement-coverage-design.md` |
-| Status | **OPEN / DESIGN APPROVED / TDD NOT STARTED.** |
+| 修复 | 候选发现覆盖当前与非当前坏版本；归档前使用 PostgreSQL 全局 advisory 独占门禁，业务写入使用共享门禁；覆盖不完整时失败关闭，终态写入、Canvas 快照、审计和幂等 ledger 保持同一事务边界。 |
+| 本地回归 | 受影响矩阵 `108/108`；带 PostgreSQL 的全仓 `492/492` 文件、`3090/3090` 测试、0 skip；TypeScript、生产构建 `116/116`、保护基线通过；ESLint `0 error / 988` 条历史 warning。 |
+| Status | **本地已关闭 / 云端只读验收待执行 / 云端归档仍需操作时确认。** |

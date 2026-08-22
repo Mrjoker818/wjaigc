@@ -1,0 +1,33 @@
+{
+  "bugId": "S4-BUG-014",
+  "date": "2026-08-22",
+  "branch": "codex/wj-stable-s4",
+  "commit": "7dc951f9a6a03de7c1750b39d25d62c3596b8d74",
+  "stableCommitBefore": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "stableCommitAfter": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "sourceAuthorizations": {
+    "exactPathCount": 25,
+    "broadDirectoryAuthorization": false,
+    "protectedFeatureCount": 38
+  },
+  "postgres": {
+    "nonCurrentDiscovery": "通过",
+    "healthyCurrentPreserved": "通过",
+    "coverageFailClosed": "通过",
+    "idempotency": "通过",
+    "rollback": "通过",
+    "focusedTests": 108,
+    "fullTestFiles": 492,
+    "fullTests": 3090,
+    "skipped": 0
+  },
+  "qualityGates": {
+    "typeScript": "通过",
+    "eslintErrors": 0,
+    "eslintHistoricalWarnings": 988,
+    "productionBuildStaticPages": 116,
+    "protectedBaseline": "通过"
+  },
+  "cloudArchive": "未执行，等待操作时确认",
+  "assetV3": "禁止切换"
+}

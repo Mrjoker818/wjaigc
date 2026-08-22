@@ -49,7 +49,7 @@ const historicalSourceAuthorizations = [
   ['scripts/coze-deploy-build.sh', '172f38c'],
   ['scripts/coze-preview-build.sh', '172f38c'],
   ['scripts/doctor-asset-status.mjs', 'e809f5c'],
-  ['src/app/api/admin/assets/remediation/route.ts', '86b8e17'],
+  ['src/app/api/admin/assets/remediation/route.ts', '9a9fb8b'],
   ['src/app/api/admin/backfill-thumbnails/route.ts', 'd941384'],
   ['src/app/api/admin/dashboard-stats/route.ts', '1ba98f7'],
   ['src/app/api/admin/production-readiness/route.ts', '05f6717'],
@@ -60,12 +60,14 @@ const historicalSourceAuthorizations = [
   ['src/lib/asset-core/asset-release-readiness.ts', 'e809f5c'],
   ['src/lib/asset-core/canvas-adapter.ts', '5a35b98'],
   ['src/lib/asset-core/canvas-placement-snapshot.ts', '69479f7'],
-  ['src/lib/asset-core/canvas-project-sync.ts', 'd941384'],
-  ['src/lib/asset-core/historical-media-remediation.ts', 'fdd7791'],
-  ['src/lib/asset-core/legacy-migration.ts', '99d226a'],
-  ['src/lib/asset-core/service.ts', '0756f71'],
-  ['src/lib/asset-core/storage.ts', '69479f7'],
-  ['src/lib/asset-core/thumbnail-backfill.ts', 'd941384'],
+  ['src/lib/asset-core/canvas-project-sync.ts', '9c3f52f'],
+  ['src/lib/asset-core/historical-media-remediation.ts', '9c3f52f'],
+  ['src/lib/asset-core/legacy-migration.ts', '9c3f52f'],
+  ['src/lib/asset-core/media-health.ts', '9c3f52f'],
+  ['src/lib/asset-core/recovery-media.ts', '9c3f52f'],
+  ['src/lib/asset-core/service.ts', '9c3f52f'],
+  ['src/lib/asset-core/storage.ts', '9c3f52f'],
+  ['src/lib/asset-core/thumbnail-backfill.ts', '9c3f52f'],
   ['src/lib/project-workflow.ts', '016e5d2'],
 ] as const;
 
@@ -116,16 +118,40 @@ describe('protected baseline release gate', () => {
       authorizations: Array<{ path: string; sourceCommit: string }>;
     };
     const command = packageJson.scripts['check:protected-baseline'];
+    const sourceCommits = [...new Set(
+      historicalSourceAuthorizations.map(([, sourceCommit]) => sourceCommit),
+    )];
+    const authorizedPaths = historicalSourceAuthorizations.map(([path]) => path);
+    const provenanceOutput = execFileSync(
+      'git',
+      [
+        'show',
+        '--format=@@%h',
+        '--name-only',
+        '--no-renames',
+        ...sourceCommits,
+        '--',
+        ...authorizedPaths,
+      ],
+      { cwd: process.cwd(), encoding: 'utf8' },
+    );
+    const pathsByCommit = new Map<string, Set<string>>();
+    let currentCommit: string | undefined;
+
+    for (const line of provenanceOutput.split(/\r?\n/)) {
+      if (line.startsWith('@@')) {
+        currentCommit = line.slice(2);
+        pathsByCommit.set(currentCommit, new Set());
+      } else if (currentCommit && line) {
+        pathsByCommit.get(currentCommit)?.add(line.replaceAll('\\', '/'));
+      }
+    }
 
     expect(provenance.authorizations).toHaveLength(historicalSourceAuthorizations.length);
     for (const [path, sourceCommit] of historicalSourceAuthorizations) {
       expect(command).toContain(`--allow-path ${path}`);
       expect(provenance.authorizations).toContainEqual({ path, sourceCommit });
-      expect(execFileSync(
-        'git',
-        ['diff-tree', '--no-commit-id', '--name-only', '-r', sourceCommit, '--', path],
-        { cwd: process.cwd(), encoding: 'utf8' },
-      ).trim()).toBe(path);
+      expect(pathsByCommit.get(sourceCommit)).toContain(path);
     }
 
     for (const broadPath of [

@@ -1064,3 +1064,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Cloud archive action | UNVERIFIED / REQUIRES ACTION-TIME CONFIRMATION | Perform no POST until a fresh read-only candidate digest is compared and the administrator confirms the exact action. |
 | Cloud idempotent retry | UNVERIFIED | After the authorized archive, replay the same idempotency key and prove one ledger/audit outcome and no duplicate mutation. |
 | `asset-v3` acceptance | UNVERIFIED / BLOCKED | Keep `shadow` until archive/readiness closes and controlled thumbnail projection, reload, original fallback and S3 recovery pass. |
+
+## 2026-08-22 S4-BUG-014 本地闭环后的未验证项
+
+| 项目 | 状态 | 关闭条件 |
+|---|---|---|
+| 精确源码授权 | 本地已验证 | 25 条精确路径来源验证和实际保护门禁均通过；禁止扩大为目录授权。 |
+| `main` 集成与 Coze 精确 SHA | 未验证 | 在干净 release worktree 重跑全门禁，普通 fast-forward 推送 `main`，证明 Coze 拉取精确 SHA。 |
+| 云端只读候选稳定性 | 未验证 | 连续两轮读取 remediation、production-readiness、auth/me，证明候选摘要、placement 数量与 coverage 稳定。 |
+| 云端归档 | 未执行，需操作时确认 | 只读候选对齐后，由管理员确认精确候选集，再执行一次 POST。 |
+| 云端幂等重试 | 未验证 | 使用同一幂等键重放，证明同一 remediationId、单一 ledger/audit 且无重复变更。 |
+| 缩略图与 `asset-v3` | 阻塞 | 保持 `shadow`；历史 blocker 关闭后仍需验证缩略图投影、刷新恢复、原图回退和 S3 恢复，doctor 授权前不得切换。 |
