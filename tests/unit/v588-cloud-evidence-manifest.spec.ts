@@ -13,6 +13,38 @@ const releasePath = resolve(root, 'docs/testing/RELEASE_READINESS_REPORT.md');
 const stableSha = '52f7c601ed150769e15d06fb435c6e360e28c9e7';
 const ui003CandidateSha = 'b5b0b18ed1feda1f5324537f15a9645b87e4fc9d';
 
+const ui003RequiredChecks = [
+  ['existing-chrome-tab', { reusedExistingTab: true }],
+  ['no-new-tab', { newTabCreated: false }],
+  ['default-closed', { visible: false }],
+  ['toolbar-open', { opened: true }],
+  ['toolbar-close', { closed: true }],
+  ['command-toggle', { opened: true, closed: true }],
+  ['close-button', { closed: true }],
+  ['preference-restore', { restored: true }],
+  ['viewport-lt-768-hide', { viewportWidth: 767, hidden: true }],
+  ['viewport-lt-768-restore', { viewportWidth: 768, visible: true }],
+  ['usable-width-lt-560-hide', { usableWidth: 559, hidden: true }],
+  ['usable-width-lt-560-restore', { usableWidth: 560, visible: true }],
+  ['right-panel-avoidance', { overlapObserved: false }],
+  ['dark-theme', { theme: 'dark', visible: true }],
+  ['mono-theme', { theme: 'mono', visible: true }],
+  ['empty-state', { visible: true }],
+  ['nodes-100', { nodeCount: 100 }],
+  ['nodes-300', { nodeCount: 300 }],
+  ['console-errors', { count: 0 }],
+  ['console-warnings', { count: 0 }],
+  ['canvas-tool-session-errors', { count: 0 }],
+  ['minimap-network-requests', { count: 0 }],
+  ['native-dialogs', { count: 0 }],
+  ['screenshot-artifact-references', {
+    screenshot: true,
+    console: true,
+    network: true,
+    task: true,
+  }],
+] as const;
+
 function asObject(value: unknown, label: string): JsonObject {
   expect(value, `${label} 必须是对象`).toBeTruthy();
   expect(Array.isArray(value), `${label} 不能是数组`).toBe(false);
@@ -85,7 +117,41 @@ function validateCompletedRecord(input: {
   });
 }
 
+function assertUi003CloudMatrix(value: unknown): void {
+  expect(Array.isArray(value), 'UI-003 检查列表必须存在').toBe(true);
+  const checks = value as unknown[];
+  const byId = new Map<string, JsonObject>();
+
+  for (const value of checks) {
+    const check = asObject(value, 'UI-003 检查项');
+    const id = asString(check.id, 'UI-003 检查项标识');
+    expect(byId.has(id), `UI-003 检查项标识重复：${id}`).toBe(false);
+    expect(check.pass, `UI-003 检查项必须通过：${id}`).toBe(true);
+    byId.set(id, check);
+  }
+
+  for (const [id, expectedFields] of ui003RequiredChecks) {
+    const check = byId.get(id);
+    expect(check, `缺少 UI-003 云端矩阵检查项：${id}`).toBeDefined();
+    for (const [field, expected] of Object.entries(expectedFields)) {
+      expect(check?.[field], `UI-003 检查项 ${id} 的 ${field}`).toEqual(expected);
+    }
+  }
+
+  const navigation = byId.get('zoom-preserving-navigation');
+  expect(navigation, '缺少 UI-003 云端矩阵检查项：zoom-preserving-navigation').toBeDefined();
+  expect(navigation?.pass, 'UI-003 检查项必须通过：zoom-preserving-navigation').toBe(true);
+  const beforeZoom = asString(navigation?.beforeZoom, '导航前缩放值');
+  expect(asString(navigation?.afterZoom, '导航后缩放值')).toBe(beforeZoom);
+}
+
 describe('V588 云端机器证据治理门禁', () => {
+  it('拒绝缺少小地图必需矩阵的任意全通过检查列表', () => {
+    expect(() => assertUi003CloudMatrix([
+      { id: 'arbitrary-pass', pass: true },
+    ])).toThrow('缺少 UI-003 云端矩阵检查项');
+  });
+
   it('按当前证据契约校验已吸收的 UI-001 与 UI-002 机器记录', async () => {
     const ui001Path = 'docs/testing/evidence/v588-ui-001-cloud-2026-08-22.json';
     const ui002Path = 'docs/testing/evidence/v588-ui-002-cloud-2026-08-22.json';
@@ -167,9 +233,10 @@ describe('V588 云端机器证据治理门禁', () => {
   });
 
   it('要求 UI-003 的云端证据状态与吸收文档保持一致', async () => {
-    const matches = (await readdir(evidenceDirectory))
-      .filter((name) => /^v588-ui-003-cloud-.*\.json$/i.test(name))
+    const artifacts = (await readdir(evidenceDirectory))
+      .filter((name) => /^v588-ui-003-cloud-.*$/i.test(name))
       .sort();
+    const matches = artifacts.filter((name) => name.endsWith('.json'));
     const inventory = await readFile(inventoryPath, 'utf8');
     const release = await readFile(releasePath, 'utf8');
     const inventorySection = extractSection(
@@ -181,7 +248,7 @@ describe('V588 云端机器证据治理门禁', () => {
       '## 2026-08-22 V588-UI-003 小地图发布准备度',
     );
 
-    if (matches.length === 0) {
+    if (artifacts.length === 0) {
       expect(inventorySection).toContain('**状态：本地候选通过 / 云端待验。**');
       expect(inventorySection).toContain('未创建任何云端证据文件');
       expect(inventorySection).toContain('未标记为已吸收');
@@ -191,12 +258,12 @@ describe('V588 云端机器证据治理门禁', () => {
       return;
     }
 
-    expect(matches, 'UI-003 云端闭环只能保留一份规范机器证据').toHaveLength(1);
+    expect(matches, '存在 UI-003 云端产物时必须有且仅有一份机器证据 JSON').toHaveLength(1);
     const relativePath = `docs/testing/evidence/${matches[0]}`;
     const evidence = await readJson(relativePath);
     const environment = asObject(evidence.environment, 'UI-003 运行环境');
     const summary = asObject(evidence.summary, 'UI-003 汇总');
-    const artifacts = asObject(evidence.artifacts, 'UI-003 产物');
+    const artifactPaths = asObject(evidence.artifacts, 'UI-003 产物');
     const consoleEvidence = asObject(evidence.console, 'UI-003 控制台');
     const requestIds = evidence.requestIds;
     const checks = evidence.checks;
@@ -207,26 +274,25 @@ describe('V588 云端机器证据治理门禁', () => {
     expect(asString(environment.stableCommit, 'UI-003 stable SHA')).toBe(stableSha);
     expect(asNumber(environment.cozeBuildExitCode, 'UI-003 构建退出码')).toBe(0);
     expect(asNumber(environment.httpStatus, 'UI-003 HTTP 状态')).toBe(200);
-    expect(asNumber(summary.checks, 'UI-003 检查总数')).toBeGreaterThan(0);
+    expect(asNumber(summary.checks, 'UI-003 检查总数')).toBeGreaterThanOrEqual(
+      ui003RequiredChecks.length + 1,
+    );
     expect(asNumber(summary.passed, 'UI-003 通过数')).toBe(
       asNumber(summary.checks, 'UI-003 检查总数'),
     );
     expect(asNumber(summary.failed, 'UI-003 失败数')).toBe(0);
-    expect(Array.isArray(checks), 'UI-003 检查列表必须存在').toBe(true);
     expect(checks).toHaveLength(asNumber(summary.checks, 'UI-003 检查总数'));
-    for (const check of checks as unknown[]) {
-      expect(asObject(check, 'UI-003 检查项').pass).toBe(true);
-    }
+    assertUi003CloudMatrix(checks);
     expect(asNumber(consoleEvidence.errors, 'UI-003 Console 错误数')).toBe(0);
     expect(asNumber(consoleEvidence.warnings, 'UI-003 Console 警告数')).toBe(0);
     expect(Array.isArray(requestIds), 'UI-003 请求标识必须存在').toBe(true);
     expect(requestIds).not.toHaveLength(0);
     expect((requestIds as unknown[]).every((id) => typeof id === 'string' && id.trim() !== '')).toBe(true);
 
-    const screenshot = asString(artifacts.screenshot, 'UI-003 截图');
-    const consolePath = asString(artifacts.console, 'UI-003 控制台文件');
-    const networkPath = asString(artifacts.network, 'UI-003 网络文件');
-    const taskPath = asString(artifacts.task, 'UI-003 任务文件');
+    const screenshot = asString(artifactPaths.screenshot, 'UI-003 截图');
+    const consolePath = asString(artifactPaths.console, 'UI-003 控制台文件');
+    const networkPath = asString(artifactPaths.network, 'UI-003 网络文件');
+    const taskPath = asString(artifactPaths.task, 'UI-003 任务文件');
     await Promise.all([
       expectArtifact(screenshot, 'UI-003 截图'),
       expectArtifact(consolePath, 'UI-003 控制台文件'),
@@ -240,7 +306,7 @@ describe('V588 云端机器证据治理门禁', () => {
       capturedAt: asString(evidence.testedAt, 'UI-003 测试时间'),
       featureId: 'V588-UI-003',
       viewport: asObject(evidence.viewport, 'UI-003 视口'),
-      artifactPaths: artifacts,
+      artifactPaths,
       requestIds: requestIds as string[],
     });
     expect(inventorySection).toContain('**状态：V588-UI-003 已吸收。**');
