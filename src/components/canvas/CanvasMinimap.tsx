@@ -57,8 +57,8 @@ export interface CanvasMinimapProps {
   viewport: CanvasMinimapViewport;
   theme?: 'dark' | 'mono';
   rightOffset: number;
-  onNavigate(point: { x: number; y: number }): void;
-  onClose(): void;
+  onNavigate: (point: { x: number; y: number }) => void;
+  onClose: () => void;
 }
 
 const finiteOrZero = (value: number): number => (Number.isFinite(value) ? value : 0);
@@ -89,6 +89,31 @@ const safeDivide = (left: number, right: number): number => {
     return value;
   }
   return left < 0 === right >= 0 ? -Number.MAX_VALUE : Number.MAX_VALUE;
+};
+
+const safeMidpoint = (left: number, right: number): number => left / 2 + right / 2;
+
+const computeAxisScale = (min: number, max: number, available: number): number => {
+  const span = Math.abs(max - min);
+  if (Number.isFinite(span)) {
+    return available / Math.max(1, span);
+  }
+
+  const halfSpan = Math.abs(max / 2 - min / 2);
+  return (available / 2) / Math.max(1, halfSpan);
+};
+
+const computeCenterScaleLimit = (center: number): number => {
+  const magnitude = Math.abs(center);
+  return magnitude > 1 ? Number.MAX_VALUE / magnitude : Number.MAX_VALUE;
+};
+
+const projectFromCenter = (value: number, center: number, mapCenter: number, scale: number): number => {
+  const difference = value - center;
+  const scaledDifference = Number.isFinite(difference)
+    ? safeMultiply(difference, scale)
+    : safeMultiply(safeMultiply(value / 2 - center / 2, scale), 2);
+  return safeAdd(mapCenter, scaledDifference);
 };
 
 const isValidRect = (rect: CanvasMinimapRect): boolean => (
@@ -179,15 +204,18 @@ export function computeCanvasMinimapProjection(
   const safePadding = Math.max(0, finiteOrZero(padding));
   const availableWidth = Math.max(1, safeWidth - safePadding * 2);
   const availableHeight = Math.max(1, safeHeight - safePadding * 2);
-  const rangeWidth = Math.max(1, Math.abs(maxX - minX));
-  const rangeHeight = Math.max(1, Math.abs(maxY - minY));
-  const scale = Math.min(availableWidth / rangeWidth, availableHeight / rangeHeight);
-  const offsetX = safePadding
-    + (availableWidth - rangeWidth * scale) / 2
-    - minX * scale;
-  const offsetY = safePadding
-    + (availableHeight - rangeHeight * scale) / 2
-    - minY * scale;
+  const centerX = safeMidpoint(minX, maxX);
+  const centerY = safeMidpoint(minY, maxY);
+  const mapCenterX = safePadding + availableWidth / 2;
+  const mapCenterY = safePadding + availableHeight / 2;
+  const scale = Math.min(
+    computeAxisScale(minX, maxX, availableWidth),
+    computeAxisScale(minY, maxY, availableHeight),
+    computeCenterScaleLimit(centerX),
+    computeCenterScaleLimit(centerY),
+  );
+  const offsetX = safeAdd(mapCenterX, -safeMultiply(centerX, scale));
+  const offsetY = safeAdd(mapCenterY, -safeMultiply(centerY, scale));
 
   return {
     scale: Number.isFinite(scale) ? scale : 1,
@@ -202,10 +230,16 @@ export function projectCanvasMinimapScene(
 ): CanvasMinimapScene {
   const bounds = computeCanvasMinimapBounds(items, viewport);
   const projection = computeCanvasMinimapProjection(bounds);
+  const centerX = safeMidpoint(bounds.minX, bounds.maxX);
+  const centerY = safeMidpoint(bounds.minY, bounds.maxY);
+  const mapCenterX = CANVAS_MINIMAP_PADDING
+    + (CANVAS_MINIMAP_WIDTH - CANVAS_MINIMAP_PADDING * 2) / 2;
+  const mapCenterY = CANVAS_MINIMAP_PADDING
+    + (CANVAS_MINIMAP_HEIGHT - CANVAS_MINIMAP_PADDING * 2) / 2;
   const projectRect = (rect: CanvasMinimapRect): CanvasMinimapRect => ({
     ...(rect.id === undefined ? {} : { id: rect.id }),
-    x: safeAdd(safeMultiply(rect.x, projection.scale), projection.offsetX),
-    y: safeAdd(safeMultiply(rect.y, projection.scale), projection.offsetY),
+    x: projectFromCenter(rect.x, centerX, mapCenterX, projection.scale),
+    y: projectFromCenter(rect.y, centerY, mapCenterY, projection.scale),
     width: safeMultiply(rect.width, projection.scale),
     height: safeMultiply(rect.height, projection.scale),
   });
@@ -225,7 +259,7 @@ export function CanvasMinimap({
   rightOffset,
   onNavigate,
   onClose,
-}: CanvasMinimapProps) {
+}: CanvasMinimapProps): React.JSX.Element {
   const scene = useMemo(() => projectCanvasMinimapScene(items, viewport), [items, viewport]);
   const handleMapClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.stopPropagation();
