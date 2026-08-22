@@ -501,3 +501,8 @@ Protected stable branch: read-only and untouched
 - Task 5 已完成 RED -> GREEN：调色/去背景与扩展/裁切的当前 JSX 已迁入展示叶；模型/引擎列表、透明蒙版选项、裁切矩形和扩展参数保持原样。
 - 既有源合同已改为同时读取父画布与对应叶，避免把展示拆分误判为功能删除；擦除面板新增的 wheel ref 参数经 TypeScript 发现并补入父级注入。
 - 聚焦 `18 files / 69 tests`、TypeScript 和目标 ESLint 通过；ESLint 为 `0 errors / 18 historical warnings`，比拆分前减少一条未使用变量 warning。下一唯一动作是 Task 6 多视口 E2E 门禁。
+- Task 6 多视口 E2E 矩阵已建立并补齐 768px 编辑面板循环，但本机缺少真实凭据与 PostgreSQL，实际运行结果为 `2 skipped`；不得把旧截图或跳过结果写成通过，必须由 Coze exact SHA 的 Google Chrome 验收关闭。
+- 抽取后的三个旧源码合同已改为跟随真实组件所有权，提交 `cf7e93f`；未修改运行时代码。最终 resize 修复后 UI004 聚焦 `65/65`、所有权回归 `14/14`，独立复审 `Critical/Important/Minor = 0/0/0`。
+- 新鲜全量门禁：Vitest `507` 文件中 `489` 通过、`18` 跳过；`3180` 项中 `3075` 通过、`105` 个 PostgreSQL 专项跳过。TypeScript、Next.js `116/116` 构建、保护基线 `38/38` 与空白检查通过，ESLint `0 errors / 987 historical warnings`。
+- 本地 E2E 因缺少凭据与 PostgreSQL未进入业务动作，故不判定布局/动作通过。下一唯一动作是独立复审、治理提交、普通快进推送 `main` 和现有 Google Chrome 标签页云端验收；`stable` 与 donor 保持只读。
+- 月度归档只读审计确认选择性吸收方向不变，但原清单偏重 UI：已补入 SVG/WASM 预算、PSD 安全输入与回退、simple-chat SSE、认证持久化、管理员真实投影和供应商能力矩阵六项 P0/P1；同时明确拒绝 donor `server-auth.ts`、`local-image-to-data-url.ts`、`cloud-task-storage.ts` 整文件替换。UI004 云端闭环后优先执行这些稳定性项。

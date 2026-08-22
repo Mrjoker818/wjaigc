@@ -217,7 +217,7 @@ test.describe('V588-UI-004 画布展示层多视口门禁', () => {
       { action: '裁切', selector: '[data-toolbar="edit-mode"]', text: '确认裁切' },
     ];
 
-    for (const viewport of [viewports[0], viewports[2]]) {
+    for (const viewport of viewports) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await setRightPanelCollapsed(page, viewport.width < 900);
       await fitCanvasContent(page);
@@ -241,5 +241,15 @@ test.describe('V588-UI-004 画布展示层多视口门禁', () => {
       }
       await attachViewportScreenshot(page, testInfo, `edit-panels-${viewport.name}`);
     }
+
+    await page.setViewportSize({ width: viewports[2].width, height: viewports[2].height });
+    await setRightPanelCollapsed(page, false);
+    await fitCanvasContent(page);
+    await openToolbarAction(page, 'SVG智能描摹');
+    const openSvgPanel = page.locator('[data-floating-panel="svg-trace"]');
+    await expectWithinViewport(openSvgPanel, page, '桌面 SVG 面板');
+    await page.setViewportSize({ width: viewports[0].width, height: viewports[0].height });
+    await expectWithinViewport(openSvgPanel, page, '保持打开并缩至 375px 的 SVG 面板');
+    await closeEditSurface(page, openSvgPanel);
   });
 });

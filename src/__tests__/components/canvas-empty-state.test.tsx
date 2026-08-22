@@ -18,8 +18,9 @@ describe('CanvasEmptyState', () => {
     );
 
     expect(screen.getByText('无限画布')).toBeTruthy();
-    expect(screen.getByText('开始新的创作')).toBeTruthy();
-    expect(screen.queryByText(/Ctrl\+K|空格\+拖动|滚轮缩放/u)).toBeNull();
+    expect(screen.getByText('拖入图片 / 上传图片 / AI 生成图片到画布')).toBeTruthy();
+    expect(screen.getByText('左键选择 · 滚轮缩放 · 空格+拖动平移 · 右键菜单')).toBeTruthy();
+    expect(screen.getByText(/底部工具栏：图像生成/u)).toBeTruthy();
     expect(container.firstElementChild?.className).toContain('pointer-events-none');
     expect(screen.getByRole('group', { name: '空画布快捷操作' }).className).toContain('pointer-events-auto');
 

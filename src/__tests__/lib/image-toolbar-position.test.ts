@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { getConstrainedImageToolbarPosition } from '@/lib/image-toolbar-position';
+import {
+  getConstrainedFixedPanelPosition,
+  getConstrainedImageToolbarPosition,
+} from '@/lib/image-toolbar-position';
 
 describe('getConstrainedImageToolbarPosition', () => {
   const viewport = { width: 1280, height: 800 };
@@ -69,5 +72,27 @@ describe('getConstrainedImageToolbarPosition', () => {
 
     expect(position.left).toBe(359);
     expect(position.transform).toBe('translate(-100%, -100%)');
+  });
+});
+
+describe('getConstrainedFixedPanelPosition', () => {
+  it('converts a centered toolbar anchor into safe fixed-panel coordinates on mobile', () => {
+    const position = getConstrainedFixedPanelPosition({
+      anchor: { left: 188, top: 260, transform: 'translate(-50%, -100%)' },
+      panel: { width: 320, height: 640 },
+      viewport: { width: 375, height: 812 },
+    });
+
+    expect(position).toEqual({ left: 28, top: 16 });
+  });
+
+  it('clamps a below-image panel upward when its preferred top would overflow', () => {
+    const position = getConstrainedFixedPanelPosition({
+      anchor: { left: 16, top: 700, transform: 'translate(0, 0)' },
+      panel: { width: 320, height: 640 },
+      viewport: { width: 375, height: 812 },
+    });
+
+    expect(position).toEqual({ left: 16, top: 156 });
   });
 });

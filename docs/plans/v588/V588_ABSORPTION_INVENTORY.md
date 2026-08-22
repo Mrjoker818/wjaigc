@@ -43,6 +43,21 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-PROVIDER-003 | Route export cleanup into `result-store.ts` / `constants.ts` | Donor extracted non-route exports for Next route-module compatibility | **ABSORB WHERE CURRENT ROUTES STILL EXPORT NON-HTTP SYMBOLS.** Pure mechanical extraction with unchanged imports | Route manifest/build contract must identify exact illegal exports before any move | Low |
 | V588-PROVIDER-004 | Unified generation tool metadata and document-tool execution | Donor executor uses localhost fetches, an internal user header, process-memory source edges and a separate poll lifecycle; current task/asset/accounting runtime is authoritative | **DO NOT ABSORB THE EXECUTOR.** Consider only declarative tool metadata after a current-runtime adapter design | Security/identity, idempotency, cancellation, task ownership, billing and asset projection contracts | Critical |
 
+### 2026-08-23 月度归档补充审计
+
+只读归档 `wujie-one-month-repair-upgrade-files-2026-08-22.tar.gz` 已完成完整性和差异审计：SHA-256 为 `778F829415EF913B698CC4CD7F08E4B92A7C0A186DD34040C6396E69EDA33495`，共 `136` 个归档条目；未发现路径穿越或链接条目。以归档相对路径对比 `origin/main@6e3a4378a1b94a47bafbd5c8d814421772d6051b`，得到 `43` 个相同文件、`32` 个真实差异文件、`53` 个当前线缺失文件。该结果证明“选择性吸收”方向不变，但原清单偏重 UI，必须补入以下运行时稳定性项目，并在后续 UI 项之前优先处理 P0/P1。
+
+| ID | 归档能力 | 调整后的吸收结论 | 强制门禁 | 优先级 |
+|---|---|---|---|---|
+| V588-STABILITY-001 | SVG/WASM 像素预算与超大输入保护 | 在当前 `/api/svg-trace` 架构内重实现预算门禁；不得复制旧路由控制器 | 边界像素、压缩炸弹、内存上限、失败终态、全仓与云端大图验证 | P0 |
+| V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | 复用当前安全媒体解析器，只吸收回退策略和预算思想；禁止引入任意本地路径读取 | 路径穿越、SSRF、MIME/字节/像素上限、VLM 超时、回退一致性 | P0 |
+| V588-CHAT-001 | `simple-chat` 严格 SSE 分块解析、重试与多行搜索结果解析 | 抽取纯解析器并接入当前聊天任务状态，不复制 donor 会话或任务所有权 | 分块边界、多行事件、重复事件、取消、超时、错误终态与真实浏览器流式回归 | P1 |
+| V588-AUTH-001 | 数据库唯一/数据库加文件两种持久化模式 | 只吸收显式持久化模式与启动诊断；继续使用当前认证密钥和密码校验 | 重部署登录、旧密钥轮换、数据库故障、普通用户/管理员隔离、禁止弱口令恢复 | P1 |
+| V588-ADMIN-004 | 用户积分、项目数和最后活动时间的真实投影 | 接入当前管理员查询和统一用户身份，不复制 donor 用户存储 | 新增用户、删除用户、批量操作、积分、项目、聊天记录与统计一致性 | P1 |
+| V588-PROVIDER-005 | 图像比例/尺寸/质量与视频时长/模式能力矩阵 | 与现有 providerId + modelId 精确目录合并，只增加缺失的精确能力，不采用宽泛模型名推断 | 五家供应商文档契约、普通用户可见性、前后端一致、拒绝不支持参数 | P1 |
+
+本次归档不能独立证明完整发布质量：它不是完整源码，不含锁定后的全量测试环境；归档声明的 donor source commit 在当前仓库不可解析；部分报告混有不同日期状态；AGENTS 对 SVG 预算写为 `256x256`，而实现/测试为 `512x512`。以上矛盾必须以 RED、当前架构实现和云端机器证据重新闭环，不能把归档报告直接当作通过证据。
+
 ## Batch B: Mobile, Media Gateway, Collaboration
 
 These remain deferred until every accepted Batch A item has focused regression, full regression and cloud evidence.
@@ -70,6 +85,9 @@ These remain deferred until every accepted Batch A item has focused regression, 
 6. Downgrading Next.js, Sharp, SVGO or ESLint configuration to donor versions.
 7. Copying donor environment files, runtime data, generated reports, build output or credentials.
 8. Any change to `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`.
+9. 整文件复制 donor `server-auth.ts`。其中“旧密钥状态下任意长度不少于 8 的密码可触发重哈希登录”属于严重认证降级，明确拒绝。
+10. 整文件复制 donor `local-image-to-data-url.ts`。其远程/本地输入缺少当前线要求的 SSRF、路径、MIME、字节和像素闭环，明确拒绝。
+11. 用 donor `cloud-task-storage.ts` 替换当前任务存储。当前线已有更严格的终态身份、原子任务创建和退款唯一性，donor 只可作为测试案例来源。
 
 ## Per-Item Execution Contract
 
@@ -236,3 +254,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 小地图契约：桌面默认关闭，偏好键为 `wujie.canvas.minimap.open.v1`；宽度 `<768px` 或可用宽度 `<560px` 时隐藏；关闭态零小地图遍历/投影；矩形渲染无缩略图/网络；点击导航保持 zoom；提供工具按钮和命令面板入口，适配暗色/黑白主题并避让右侧占用。
 - Google Chrome「用户1」复用现有标签页完成 26/26 项云端矩阵：默认关闭、工具栏与命令开关、偏好恢复、`767/768px` 与可用宽度 `559/560px` 边界、右侧面板 12px 避让、暗色/黑白主题、空态、100/300 节点、手形拖动和保持 `46%` 缩放的小地图导航全部通过。最终 12 秒健康窗口为 Console error/warning `0/0`、原生弹窗 `0`、请求全部 `200`；两个 30 秒空闲窗口的画布/项目同步 POST 为 `0`。
 - **状态：V588-UI-003 已吸收。** 机器证据：`docs/testing/evidence/v588-ui-003-cloud-2026-08-22.json`，截图和 Console/网络/任务日志位于同目录。PostgreSQL 专项仍因缺少隔离库单独保持未验证；下一唯一项为 `V588-UI-004`，必须重新从 RED 开始。
+
+## 2026-08-23 V588-UI-004 本地候选
+
+- 六个展示叶已完成：空态、图片浮动工具栏、放大/SVG、擦除/蒙版、调色/去背景、扩展/裁切；父画布继续持有模型、任务、API、状态、账务和保存副作用。
+- 抽取后旧测试读取错误所有者的问题已按真实组件边界修正，未修改运行时代码；图片、视频、3D 和底部工具入口没有减少。
+- 聚焦矩阵 `13 files / 65 tests`、修复回归 `3 files / 14 tests` 通过；独立复审为 `Critical/Important/Minor = 0/0/0`。Chromium E2E 已定义 375/768/1440、底部抽屉、图片工具栏、8 个编辑入口、面板保持打开时的桌面到 375px resize 和 reduced-motion；本机因缺少凭据与 PostgreSQL 实际结果为 `2 skipped`，不计通过。
+- 全仓 Vitest 共 `507` 个文件、`3180` 项测试，其中 `489` 个文件、`3075` 项通过；`18` 个文件、`105` 项 PostgreSQL 专项因缺少 `POSTGRES_TEST_DATABASE_URL` 明确跳过，不计为通过。TypeScript、构建 `116/116`、保护基线 `38/38`、空白检查通过；ESLint 为 `0 errors / 987` 条历史 warning。
+- 本地生产 E2E 环境没有真实登录凭据与 PostgreSQL，测试在业务动作前明确跳过；浏览器布局、动作与错误零基线必须由 Coze 云端关闭。
+- **状态：本地候选与独立审查通过 / 云端待验。** 尚未推送 `main`，不得标记为已吸收；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与 donor 保持只读。UI004 云端闭环后，执行顺序调整为先处理上述 P0/P1 稳定性项，再继续移动端、媒体网关与协作吸收。

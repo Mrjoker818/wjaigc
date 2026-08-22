@@ -1484,3 +1484,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 云端验收提交为 `efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2`；Coze、`origin/main` 与本地提交精确一致，构建退出码 `0`、首页和鉴权健康接口 HTTP `200`。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`、donor 均未变。
 - 仅复用 Google Chrome「用户1」的现有标签页完成 26/26 项矩阵：默认关闭、工具按钮、命令、关闭按钮、偏好恢复、两组响应式阈值、主题、面板避让、空态、100/300 节点、真实拖动和导航保持 `46%` zoom 均通过。最终健康窗口 Console error/warning、`[CanvasToolSession]` 错误与原生弹窗均为 `0`，网络全部 `200`；两个 30 秒空闲窗口没有画布/项目同步 POST。
 - **结论：V588-UI-003 已吸收，云端验证通过。** 机器证据为 `docs/testing/evidence/v588-ui-003-cloud-2026-08-22.json`。PostgreSQL 集成门禁仍因缺少 `POSTGRES_TEST_DATABASE_URL` 单独列为未验证；下一唯一项为 `V588-UI-004`。
+
+## 2026-08-23 V588-UI-004 本地回归
+
+- 六个展示叶及父级接线完成，抽取后的三个源码合同改为读取真实所有者；本次修复不改变运行时业务逻辑。
+- UI004 聚焦矩阵通过 `13 files / 65 tests`，所有权修复回归通过 `3 files / 14 tests`；独立复审为 `Critical/Important/Minor = 0/0/0`。
+- 全仓 Vitest 共 `507` 个文件、`3180` 项测试：`489` 个文件、`3075` 项通过；`18` 个文件、`105` 项因缺少 `POSTGRES_TEST_DATABASE_URL` 跳过。
+- TypeScript 通过；ESLint `0 errors / 987` 条历史 warning；Next.js `16.2.11` 生产构建通过；保护基线 `38/38` 且 0 warning；`git diff --check` 通过。
+- Chromium 生产 E2E 已定义 375x812、768x900、1440x900、底部抽屉、图片工具栏、8 个编辑入口和 reduced-motion；独立审查后补齐 768px 编辑面板循环。
+- 本地没有 E2E 凭据与 PostgreSQL，实际命令结果为 `2 skipped`，没有执行登录后的布局动作，也没有生成可当作通过依据的浏览器证据。该矩阵必须在 Coze exact SHA 的现有 Google Chrome 标签页执行。
+- **结论：功能与独立审查本地通过 / 发布仍有条件。** `main` 推送、Coze exact SHA 和 Google Chrome 云端矩阵完成前，V588-UI-004 不标记为已吸收。

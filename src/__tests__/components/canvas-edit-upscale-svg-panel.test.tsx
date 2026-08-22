@@ -43,4 +43,23 @@ describe('CanvasEditUpscaleSvgPanel', () => {
     expect(source).toContain('stopPropagation()');
     expect(source).toContain('motion-reduce:transition-none');
   });
+
+  it('将工具栏锚点转换为尺寸感知的固定面板坐标，避免窄视口越界', () => {
+    const source = readComponent();
+
+    expect(source).toContain('React.RefObject<FixedPanelPosition | null>');
+    expect(source).toContain('getConstrainedFixedPanelPosition({');
+    expect(source).toContain("maxHeight: 'min(640px, calc(100vh - 32px))'");
+    expect(source).toContain("overflowY: 'auto'");
+    expect(source).not.toContain('transform: pos.transform');
+  });
+
+  it('在面板保持打开时监听视口变化并重新计算固定坐标', () => {
+    const source = readComponent();
+
+    expect(source).toContain("window.addEventListener('resize', handleSvgPanelResize)");
+    expect(source).toContain("window.removeEventListener('resize', handleSvgPanelResize)");
+    expect(source).toContain('svgTraceFixedPosRef.current = null');
+    expect(source).toContain('requestSvgPanelLayout()');
+  });
 });

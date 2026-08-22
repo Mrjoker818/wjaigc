@@ -2246,3 +2246,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Local regression | 聚焦回归 `82/82`；全仓 Vitest `499` 个文件、`3143` 个测试，其中 `481` 个文件、`3038` 个测试通过，`18` 个文件、`105` 个 PostgreSQL 专项因未配置 `POSTGRES_TEST_DATABASE_URL` 明确跳过；TypeScript 通过，ESLint `0 error / 988` 条历史 warning，生产构建 `116/116` 通过。 |
 | Cloud regression | exact SHA `efe5e4f16ac3c8a0c7ed6b8fc73cba48af6fd6b2` 在 Google Chrome 现有标签页完成 100/300 节点、真实拖动、小地图导航和两个 30 秒空闲观察窗口；画布/项目同步 POST 为 `0`，没有超时或 409，最终 Console error/warning `0/0`、网络全部 `200`。 |
 | Status | **FIXED / CLOUD VERIFIED.** V588-UI-003 已吸收；证据为 `docs/testing/evidence/v588-ui-003-cloud-2026-08-22.json`。PostgreSQL 并发专项仍因缺少隔离库单独保持未验证。 |
+
+### UI004-BUG-001：展示层抽取后，三个源码合同仍读取父画布，误判功能丢失
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2 测试所有权与回归可靠性 |
+| 环境 | `codex/wj-stable-s4-release@933826f`，本地 Vitest，2026-08-23 |
+| 复现 | 运行 `canvas-toolbar-floating-windows`、`image-edit-source-render-contract` 与 `upscale-resolution-wiring`。 |
+| 预期 | 展示抽取后，测试从真实叶组件验证 z-index、擦除/蒙版和放大接线；父组件只验证控制器责任。 |
+| 实际 | 三个测试仍在 `infinite-canvas.tsx` 搜索已机械迁出的 JSX，产生错误失败；保护清单也仍只允许 27 条旧单测路径。 |
+| 根因 | 生产展示责任已迁移，但源码合同的文件所有权未同步；运行时功能本身未丢失。 |
+| 修复 | 仅调整测试读取对象与精确保护清单至 36 条现有路径，保持运行时代码不变。提交：`cf7e93f`。 |
+| 回归 | 三项修复回归 `14/14`，UI004 聚焦 `65/65`，全仓 `3075 passed / 105 PostgreSQL-gated skipped`；独立复审 `0/0/0`。 |
+| 状态 | **本地关闭 / 云端待验。** 不把缺少 PostgreSQL 的跳过项或本地 `/api/user-data/sync` 500 记为通过。 |

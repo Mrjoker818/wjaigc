@@ -1128,3 +1128,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 浏览器与视觉证据 | 已关闭 | 仅使用 Google Chrome「用户1」现有标签页；最终 Console error/warning、网络失败和原生 dialog 均为 `0`，截图和日志已落盘。 |
 | PostgreSQL 专项 | 仍未验证 | 缺少 `POSTGRES_TEST_DATABASE_URL`，18 个文件、105 个真实集成/并发测试保持跳过，不得冒充通过。 |
 | 后续吸收 | 可进入下一唯一项 | `V588-UI-004` 必须重新从 RED 开始；donor 和 stable 继续只读。 |
+
+## 2026-08-23 V588-UI-004 本地候选后的未验证项
+
+| 项目 | 状态 | 关闭条件 |
+|---|---|---|
+| 独立代码审查 | 已关闭 | 最终 `Critical/Important/Minor = 0/0/0`；桌面打开 SVG 面板后缩至 375px 的发现已完成最小修复与回归。 |
+| Coze exact SHA 与运行健康 | 未验证 | 拉取最终 `main`，证明 exact SHA、生产构建、5000 服务与 HTTP 健康，且 `stable` 未变化。 |
+| Google Chrome 多视口矩阵 | 未验证 | 仅复用现有 Chrome 标签页，验证 375/768/1440、底部抽屉、图片 `+N`、右侧面板、8 个编辑入口、主题与 reduced-motion。 |
+| 浏览器错误零基线 | 未验证 | 云端从新鲜时间截点确认 Console Error/Warning、失败网络请求和原生 dialog 均为 0。 |
+| PostgreSQL 专项 | 环境阻塞 | 本地缺少 `POSTGRES_TEST_DATABASE_URL`，18 个文件、105 项真实集成/并发测试保持跳过，不得冒充通过。 |
+| 本地同步 500 | 云端待排除 | 本地生产 E2E 的 `/api/user-data/sync?key=projects` 因无数据库返回 500；云端必须证明真实数据库环境下无同类错误。 |

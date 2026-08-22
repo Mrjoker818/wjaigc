@@ -20,6 +20,47 @@ export interface ImageToolbarPosition {
   transform: 'translate(0, -100%)' | 'translate(-50%, -100%)' | 'translate(-100%, -100%)' | 'translate(0, 0)' | 'translate(-50%, 0)' | 'translate(-100%, 0)';
 }
 
+export interface FixedPanelPosition {
+  left: number;
+  top: number;
+}
+
+export interface FixedPanelPositionInput {
+  anchor: ImageToolbarPosition;
+  panel: { width: number; height: number };
+  viewport: { width: number; height: number };
+  margin?: number;
+}
+
+export function getConstrainedFixedPanelPosition({
+  anchor,
+  panel,
+  viewport,
+  margin = 16,
+}: FixedPanelPositionInput): FixedPanelPosition {
+  const safeMargin = Math.max(0, margin);
+  const availableWidth = Math.max(0, viewport.width - safeMargin * 2);
+  const availableHeight = Math.max(0, viewport.height - safeMargin * 2);
+  const panelWidth = Math.min(Math.max(0, panel.width), availableWidth);
+  const panelHeight = Math.min(Math.max(0, panel.height), availableHeight);
+
+  const horizontalOffset = anchor.transform.startsWith('translate(-100%')
+    ? panelWidth
+    : anchor.transform.startsWith('translate(-50%')
+      ? panelWidth / 2
+      : 0;
+  const verticalOffset = anchor.transform.endsWith('-100%)') ? panelHeight : 0;
+  const preferredLeft = anchor.left - horizontalOffset;
+  const preferredTop = anchor.top - verticalOffset;
+  const maxLeft = Math.max(safeMargin, viewport.width - safeMargin - panelWidth);
+  const maxTop = Math.max(safeMargin, viewport.height - safeMargin - panelHeight);
+
+  return {
+    left: Math.round(Math.min(Math.max(preferredLeft, safeMargin), maxLeft)),
+    top: Math.round(Math.min(Math.max(preferredTop, safeMargin), maxTop)),
+  };
+}
+
 export function getConstrainedImageToolbarPosition({
   image,
   zoom,

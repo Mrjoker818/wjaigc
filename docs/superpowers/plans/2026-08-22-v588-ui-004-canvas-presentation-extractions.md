@@ -213,6 +213,8 @@
 - [ ] **Step 4: 保存 screenshot、trace、console、network；失败不得用固定长 sleep 掩盖。**
 - [ ] **Step 5: 提交 `test: cover canvas presentation layouts`。**
 
+本地矩阵文件已建立，并已补齐 768px 编辑面板循环；但本机缺少真实 E2E 凭据与 PostgreSQL，实际运行结果为 `2 skipped`，以上步骤须由 Coze exact SHA 的 Google Chrome 真实验收关闭。
+
 ### Task 7: 全量回归、云端验收与治理闭环
 
 **Files:**
@@ -225,7 +227,7 @@
 - Modify: `F:/AIGC/vault-template/无界计划/11-阶段进度看板.md`
 - Modify: `F:/AIGC/vault-template/无界计划/16-V5.8.8选择性吸收.md`
 
-- [ ] **Step 1: 本地门禁**
+- [x] **Step 1: 本地门禁**
 
   ```bash
   pnpm exec vitest run <UI-004 focused files>
@@ -237,7 +239,7 @@
   git diff --check
   ```
 
-- [ ] **Step 2: 独立审查并只修复可复现问题。**
+- [x] **Step 2: 独立审查并只修复可复现问题。** 最终复审为 `Critical/Important/Minor = 0/0/0`；面板保持打开时由桌面缩至 375px 的定位回归已由 RED/GREEN 和 E2E 契约覆盖。
 - [ ] **Step 3: 推送 `main`，确认 `origin/stable` SHA 未变化。**
 - [ ] **Step 4: Coze 拉取 exact SHA、构建并重启；只复用 Google Chrome「用户1」现有项目页和预览页，不创建标签、不使用 360。**
 - [ ] **Step 5: 云端执行桌面/移动端、全部入口、右侧面板、主题、reduced-motion、Console/网络/dialog 和截图矩阵。**

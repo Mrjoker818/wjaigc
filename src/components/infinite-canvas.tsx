@@ -9,7 +9,7 @@ import {
   isTerminalProcessingFailure,
   type VideoRetryPayload,
 } from '@/lib/video-processing-state';
-import { getConstrainedImageToolbarPosition } from '@/lib/image-toolbar-position';
+import { getConstrainedImageToolbarPosition, type FixedPanelPosition } from '@/lib/image-toolbar-position';
 import { getBottomToolbarDrawerPlacement, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import {
@@ -1823,7 +1823,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [svgTraceHierarchical, ] = useState<'stacked' | 'cutout' | null>(null);
 
   // Fixed position ref for SVG trace panel — prevents random movement on click
-  const svgTraceFixedPosRef = useRef<{top: number; left: number} | null>(null);
+  const svgTraceFixedPosRef = useRef<FixedPanelPosition | null>(null);
   useEffect(() => {
     if (!showSvgTracePanel) svgTraceFixedPosRef.current = null;
   }, [showSvgTracePanel]);

@@ -1223,3 +1223,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 发布契约为：桌面默认关闭；偏好键 `wujie.canvas.minimap.open.v1`；宽度 `<768px` 或可用宽度 `<560px` 隐藏；关闭态零小地图遍历/投影；点击导航保持 zoom；矩形无缩略图/网络；工具按钮与命令面板入口、暗色/黑白主题和右侧面板避让均受本地回归保护。
 - Google Chrome「用户1」复用现有标签页完成 26/26 项真实交互和响应式矩阵。300 节点真实拖动画布与小地图导航均保持节点完整、zoom 不变；最终健康窗口 Console error/warning、`[CanvasToolSession]` 错误、原生弹窗和失败网络请求均为 `0`。机器证据及截图位于 `docs/testing/evidence/v588-ui-003-cloud-2026-08-22.*`。
 - **发布判定：V588-UI-003 通过并完成吸收。** 该判定只覆盖小地图叶能力、大画布空闲同步修复和对应云端验收；整体发布仍受 PostgreSQL 专项及其他独立未验证项约束。下一唯一吸收项为 `V588-UI-004`。
+
+## 2026-08-23 V588-UI-004 本地发布准备度
+
+- 六个展示叶和入口完整性已完成本地 RED -> GREEN；375/768/1440 与 reduced-motion 的 E2E 矩阵已建立并补齐 768px 编辑面板循环。
+- 本地门禁：聚焦 `65/65`、全仓 `3075 passed / 105 PostgreSQL-gated skipped`、TypeScript、零错误 Lint、生产构建 `116/116`、保护基线和空白检查通过；独立复审 `0/0/0`。
+- 本地缺少 E2E 凭据与 PostgreSQL，Playwright 实际结果为 `2 skipped`；不能据此宣称布局、动作或浏览器错误门禁通过。
+- **发布判定：有条件通过。** 独立审查已为 `0/0/0`；剩余条件为 `main` 普通快进、`stable` 不变、Coze exact SHA 运行健康，以及现有 Google Chrome 标签页中的全矩阵和 Console/网络/dialog 零错误证据。

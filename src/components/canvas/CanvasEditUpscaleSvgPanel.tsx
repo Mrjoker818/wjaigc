@@ -12,7 +12,11 @@ import {
   validateUpscaleTargetDimensions,
 } from '@/lib/upscale-target';
 import type { UpscaleProductMode } from '@/lib/upscale-orchestrator';
-import type { ImageToolbarPosition } from '@/lib/image-toolbar-position';
+import {
+  getConstrainedFixedPanelPosition,
+  type FixedPanelPosition,
+  type ImageToolbarPosition,
+} from '@/lib/image-toolbar-position';
 import type { CanvasImage, ConfiguredUpscaleModel, EditMode } from '@/components/infinite-canvas';
 
 type SvgTraceQualityPreset = 'fast' | 'balanced' | 'high' | 'max' | 'print' | 'print-pro';
@@ -63,7 +67,7 @@ export interface CanvasEditUpscaleSvgPanelProps {
   setSvgTraceBwThreshold: React.Dispatch<React.SetStateAction<number>>;
   svgTraceCornerThreshold: number | null;
   setSvgTraceCornerThreshold: React.Dispatch<React.SetStateAction<number | null>>;
-  svgTraceFixedPosRef: React.RefObject<{ top: number; left: number } | null>;
+  svgTraceFixedPosRef: React.RefObject<FixedPanelPosition | null>;
   handleSvgTraceConfirm: () => void | Promise<void>;
 }
 
@@ -115,6 +119,18 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
     svgTraceFixedPosRef,
     handleSvgTraceConfirm,
   } = props;
+  const [, requestSvgPanelLayout] = React.useReducer((value: number) => value + 1, 0);
+
+  React.useEffect(() => {
+    if (!showSvgTracePanel) return;
+    const handleSvgPanelResize = () => {
+      svgTraceFixedPosRef.current = null;
+      requestSvgPanelLayout();
+    };
+    window.addEventListener('resize', handleSvgPanelResize);
+    return () => window.removeEventListener('resize', handleSvgPanelResize);
+  }, [showSvgTracePanel, svgTraceFixedPosRef]);
+
   return (
     <>
 {/* ====== UPSCALE FLOATING CONTROL BAR ====== */}
@@ -307,7 +323,11 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
           // 面板位置只在首次打开时计算，后续渲染使用固定位置，避免点击时跳动
           if (!svgTraceFixedPosRef.current) {
             const initPos = getToolbarPosition();
-            svgTraceFixedPosRef.current = { top: initPos.top, left: initPos.left };
+            svgTraceFixedPosRef.current = getConstrainedFixedPanelPosition({
+              anchor: initPos,
+              panel: { width: 320, height: 640 },
+              viewport: { width: window.innerWidth, height: window.innerHeight },
+            });
           }
           const pos = svgTraceFixedPosRef.current;
           return (
@@ -318,7 +338,9 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                 position: 'fixed',
                 left: pos.left,
                 top: pos.top,
-                width: 320,
+                width: 'min(320px, calc(100vw - 32px))',
+                maxHeight: 'min(640px, calc(100vh - 32px))',
+                overflowY: 'auto',
                 background: '#141414',
                 border: '1px solid #333',
                 borderRadius: 12,
