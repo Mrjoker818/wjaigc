@@ -209,6 +209,39 @@ describe('CanvasMinimap geometry and preferences', () => {
     expect(scene.items.every((item: CanvasMinimapRect) => Object.values(item).filter(value => typeof value === 'number').every(Number.isFinite))).toBe(true);
   });
 
+  it('fits extreme finite remote geometry inside the padded minimap', () => {
+    const scene = projectCanvasMinimapScene([
+      {
+        id: 'negative-extreme',
+        x: -Number.MAX_VALUE,
+        y: -Number.MAX_VALUE,
+        width: 1,
+        height: 1,
+      },
+      {
+        id: 'positive-extreme',
+        x: Number.MAX_VALUE,
+        y: Number.MAX_VALUE,
+        width: 1,
+        height: 1,
+      },
+    ], viewport);
+
+    for (const rect of [...scene.items, scene.viewport]) {
+      expect([rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)).toBe(true);
+      expect(rect.x).toBeGreaterThanOrEqual(CANVAS_MINIMAP_PADDING);
+      expect(rect.y).toBeGreaterThanOrEqual(CANVAS_MINIMAP_PADDING);
+      expect(rect.width).toBeGreaterThanOrEqual(0);
+      expect(rect.height).toBeGreaterThanOrEqual(0);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(
+        CANVAS_MINIMAP_WIDTH - CANVAS_MINIMAP_PADDING,
+      );
+      expect(rect.y + rect.height).toBeLessThanOrEqual(
+        CANVAS_MINIMAP_HEIGHT - CANVAS_MINIMAP_PADDING,
+      );
+    }
+  });
+
   it('allows only the exact desktop and usable-width boundaries', () => {
     expect(isCanvasMinimapAvailable(768, 208)).toBe(true);
     expect(isCanvasMinimapAvailable(767, 207)).toBe(false);

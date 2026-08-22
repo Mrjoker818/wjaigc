@@ -72,10 +72,10 @@ const expectPublicInterfaceContract = (component: string): void => {
   expectRequiredField(props, 'viewport', 'CanvasMinimapViewport');
   expectRequiredField(props, 'theme', "'dark'\\s*\\|\\s*'mono'", true);
   expectRequiredField(props, 'rightOffset', 'number');
-  expect(props).toMatch(/(?:^|[;,{]|\r?\n)\s*onNavigate\s*\(\s*point\s*:\s*\{\s*x\s*:\s*number\s*[;,\r\n]\s*y\s*:\s*number\s*(?:[;,\r\n])?\s*\}\s*\)\s*:\s*void\s*(?=[;,\r\n}]|$)/);
-  expect(props).not.toMatch(/(?:^|[;,{]|\r?\n)\s*onNavigate\s*(?:\([^)]*\bany\b|:\s*any\s*(?=[;,\r\n}]|$))/);
-  expect(props).toMatch(/(?:^|[;,{]|\r?\n)\s*onClose\s*\(\s*\)\s*:\s*void\s*(?=[;,\r\n}]|$)/);
-  expect(props).not.toMatch(/(?:^|[;,{]|\r?\n)\s*onClose\s*(?:\([^)]*\bany\b|:\s*any\s*(?=[;,\r\n}]|$))/);
+  expect(props).toMatch(/(?:^|[;,{]|\r?\n)\s*onNavigate\s*:\s*\(\s*point\s*:\s*\{\s*x\s*:\s*number\s*[;,\r\n]\s*y\s*:\s*number\s*(?:[;,\r\n])?\s*\}\s*\)\s*=>\s*void\s*(?=[;,\r\n}]|$)/);
+  expect(props).not.toMatch(/(?:^|[;,{]|\r?\n)\s*onNavigate\s*\(/);
+  expect(props).toMatch(/(?:^|[;,{]|\r?\n)\s*onClose\s*:\s*\(\s*\)\s*=>\s*void\s*(?=[;,\r\n}]|$)/);
+  expect(props).not.toMatch(/(?:^|[;,{]|\r?\n)\s*onClose\s*\(/);
 };
 
 const getUseMemoBody = (source: string, variableName: string): string => {
