@@ -363,6 +363,118 @@ describe('CanvasMinimap interaction surface', () => {
     expect(point.y).toBeCloseTo((45 - scene.projection.offsetY) / scene.projection.scale);
   });
 
+  it('keeps inverse-projected coordinates finite for extreme finite geometry', () => {
+    const onNavigate = vi.fn();
+    const extremeItems = [
+      {
+        id: 'negative-extreme',
+        x: -Number.MAX_VALUE,
+        y: -Number.MAX_VALUE,
+        width: 1,
+        height: 1,
+      },
+      {
+        id: 'positive-extreme',
+        x: Number.MAX_VALUE,
+        y: Number.MAX_VALUE,
+        width: 1,
+        height: 1,
+      },
+    ];
+
+    render(
+      <CanvasMinimap
+        items={extremeItems}
+        viewport={viewport}
+        theme="dark"
+        rightOffset={24}
+        onNavigate={onNavigate}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const map = screen.getByTestId('canvas-minimap-map');
+    vi.spyOn(map, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 50,
+      width: CANVAS_MINIMAP_WIDTH,
+      height: CANVAS_MINIMAP_HEIGHT,
+      top: 50,
+      right: 100 + CANVAS_MINIMAP_WIDTH,
+      bottom: 50 + CANVAS_MINIMAP_HEIGHT,
+      left: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.click(map, {
+      clientX: 100 + CANVAS_MINIMAP_WIDTH,
+      clientY: 50 + CANVAS_MINIMAP_HEIGHT,
+    });
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    const [point] = onNavigate.mock.calls[0] as [{ x: number; y: number }];
+    expect(Number.isFinite(point.x)).toBe(true);
+    expect(Number.isFinite(point.y)).toBe(true);
+  });
+
+  it('renders explicit visible surfaces for dark and monochrome themes', () => {
+    const items = [{ id: 'visible-item', x: 0, y: 0, width: 400, height: 200 }];
+    const { container, rerender } = render(
+      <CanvasMinimap
+        items={items}
+        viewport={viewport}
+        theme="dark"
+        rightOffset={24}
+        onNavigate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const getSurfaces = (): Record<string, HTMLElement> => ({
+      root: screen.getByTestId('canvas-minimap'),
+      map: screen.getByTestId('canvas-minimap-map'),
+      item: container.querySelector('[data-canvas-minimap-item]') as HTMLElement,
+      viewport: screen.getByTestId('canvas-minimap-viewport'),
+    });
+    const expectVisibleStyles = (surfaces: Record<string, HTMLElement>): void => {
+      expect(surfaces.root.style.backgroundColor).not.toBe('');
+      expect(surfaces.root.style.borderColor).not.toBe('');
+      expect(surfaces.root.style.color).not.toBe('');
+      expect(surfaces.map.style.backgroundColor).not.toBe('');
+      expect(surfaces.item.style.backgroundColor).not.toBe('');
+      expect(surfaces.item.style.borderColor).not.toBe('');
+      expect(surfaces.viewport.style.backgroundColor).not.toBe('');
+      expect(surfaces.viewport.style.borderColor).not.toBe('');
+    };
+
+    const darkSurfaces = getSurfaces();
+    expectVisibleStyles(darkSurfaces);
+    const darkColors = Object.fromEntries(
+      Object.entries(darkSurfaces).map(([name, element]) => [
+        name,
+        `${element.style.backgroundColor}|${element.style.borderColor}|${element.style.color}`,
+      ]),
+    );
+
+    rerender(
+      <CanvasMinimap
+        items={items}
+        viewport={viewport}
+        theme="mono"
+        rightOffset={24}
+        onNavigate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const monoSurfaces = getSurfaces();
+    expectVisibleStyles(monoSurfaces);
+    for (const [name, element] of Object.entries(monoSurfaces)) {
+      const monoColors = `${element.style.backgroundColor}|${element.style.borderColor}|${element.style.color}`;
+      expect(monoColors).not.toBe(darkColors[name]);
+    }
+  });
+
   it('renders only one rectangle per input item, with no image or network work', () => {
     const onClose = vi.fn();
     const onNavigate = vi.fn();

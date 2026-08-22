@@ -1,17 +1,26 @@
+import { spawnSync } from 'node:child_process';
 import { access, readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { validateEvidenceManifest } from '../helpers/evidence-manifest';
+import {
+  extractUi003GovernanceSection,
+  findUi003AbsorptionGovernanceIssues,
+  UI003_GOVERNANCE_DOCUMENT_NAMES,
+  type Ui003GovernanceDocuments,
+} from '../helpers/v588-ui003-governance';
 
 type JsonObject = Record<string, unknown>;
 
 const root = process.cwd();
 const evidenceDirectory = resolve(root, 'docs/testing/evidence');
 const inventoryPath = resolve(root, 'docs/plans/v588/V588_ABSORPTION_INVENTORY.md');
+const regressionPath = resolve(root, 'docs/testing/REGRESSION_REPORT.md');
 const releasePath = resolve(root, 'docs/testing/RELEASE_READINESS_REPORT.md');
+const unverifiedPath = resolve(root, 'docs/testing/UNVERIFIED_ITEMS.md');
+const progressPath = resolve(root, '.superpowers/sdd/progress.md');
 const stableSha = '52f7c601ed150769e15d06fb435c6e360e28c9e7';
-const ui003CandidateSha = 'b5b0b18ed1feda1f5324537f15a9645b87e4fc9d';
 
 const ui003RequiredChecks = [
   ['existing-chrome-tab', { reusedExistingTab: true }],
@@ -61,17 +70,6 @@ function asString(value: unknown, label: string): string {
 function asNumber(value: unknown, label: string): number {
   expect(typeof value, `${label} 必须是数字`).toBe('number');
   return value as number;
-}
-
-function extractSection(document: string, heading: string): string {
-  const start = document.indexOf(heading);
-  expect(start, `缺少治理章节：${heading}`).toBeGreaterThanOrEqual(0);
-
-  const following = document.slice(start + heading.length);
-  const nextHeading = following.search(/\n## /);
-  return nextHeading === -1
-    ? document.slice(start)
-    : document.slice(start, start + heading.length + nextHeading);
 }
 
 async function readJson(relativePath: string): Promise<JsonObject> {
@@ -145,11 +143,77 @@ function assertUi003CloudMatrix(value: unknown): void {
   expect(asString(navigation?.afterZoom, '导航后缩放值')).toBe(beforeZoom);
 }
 
+function expectGitCommitToBeAuditableHeadAncestor(commit: string): void {
+  const exists = spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  expect(exists.status, `UI-003 Git SHA 在当前仓库中不存在：${exists.stderr}`).toBe(0);
+
+  const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  expect(ancestor.status, 'UI-003 Git SHA 必须是当前 HEAD 的祖先').toBe(0);
+}
+
+async function readUi003GovernanceDocuments(): Promise<Ui003GovernanceDocuments> {
+  const [inventory, regression, release, unverified, progress] = await Promise.all([
+    readFile(inventoryPath, 'utf8'),
+    readFile(regressionPath, 'utf8'),
+    readFile(releasePath, 'utf8'),
+    readFile(unverifiedPath, 'utf8'),
+    readFile(progressPath, 'utf8'),
+  ]);
+
+  return {
+    inventory: extractUi003GovernanceSection(inventory, 3),
+    regression: extractUi003GovernanceSection(regression, 2),
+    release: extractUi003GovernanceSection(release, 2),
+    unverified: extractUi003GovernanceSection(unverified, 2),
+    progress: extractUi003GovernanceSection(progress, 2),
+  };
+}
+
 describe('V588 云端机器证据治理门禁', () => {
   it('拒绝缺少小地图必需矩阵的任意全通过检查列表', () => {
     expect(() => assertUi003CloudMatrix([
       { id: 'arbitrary-pass', pass: true },
     ])).toThrow('缺少 UI-003 云端矩阵检查项');
+  });
+
+  it('拒绝任一治理文档仍为云端待验、未验证或缺少 exact SHA', () => {
+    const evidenceSha = 'a'.repeat(40);
+    const absorbedDocuments = Object.fromEntries(
+      UI003_GOVERNANCE_DOCUMENT_NAMES.map((name) => [
+        name,
+        `V588-UI-003 已吸收，云端验证通过，exact SHA ${evidenceSha}`,
+      ]),
+    ) as Ui003GovernanceDocuments;
+
+    expect(findUi003AbsorptionGovernanceIssues(absorbedDocuments, evidenceSha)).toEqual([]);
+
+    for (const name of UI003_GOVERNANCE_DOCUMENT_NAMES) {
+      const staleDocuments = {
+        ...absorbedDocuments,
+        [name]: `V588-UI-003 本地候选通过 / 云端待验，exact SHA ${evidenceSha}`,
+      };
+      expect(findUi003AbsorptionGovernanceIssues(staleDocuments, evidenceSha)).toContain(
+        `${name}: still pending cloud verification`,
+      );
+
+      const missingShaDocuments = {
+        ...absorbedDocuments,
+        [name]: 'V588-UI-003 已吸收，云端验证通过',
+      };
+      expect(findUi003AbsorptionGovernanceIssues(missingShaDocuments, evidenceSha)).toContain(
+        `${name}: missing exact evidence SHA`,
+      );
+    }
+
+    expect(findUi003AbsorptionGovernanceIssues(absorbedDocuments, 'abc')).toContain(
+      'evidence: gitCommit must be a 40-character SHA',
+    );
   });
 
   it('按当前证据契约校验已吸收的 UI-001 与 UI-002 机器记录', async () => {
@@ -237,16 +301,9 @@ describe('V588 云端机器证据治理门禁', () => {
       .filter((name) => /^v588-ui-003-cloud-.*$/i.test(name))
       .sort();
     const matches = artifacts.filter((name) => name.endsWith('.json'));
-    const inventory = await readFile(inventoryPath, 'utf8');
-    const release = await readFile(releasePath, 'utf8');
-    const inventorySection = extractSection(
-      inventory,
-      '### V588-UI-003 - 2026-08-22 小地图本地候选',
-    );
-    const releaseSection = extractSection(
-      release,
-      '## 2026-08-22 V588-UI-003 小地图发布准备度',
-    );
+    const governanceDocuments = await readUi003GovernanceDocuments();
+    const inventorySection = governanceDocuments.inventory;
+    const releaseSection = governanceDocuments.release;
 
     if (artifacts.length === 0) {
       expect(inventorySection).toContain('**状态：本地候选通过 / 云端待验。**');
@@ -255,6 +312,9 @@ describe('V588 云端机器证据治理门禁', () => {
       expect(releaseSection).toContain('**发布判定：本地候选通过 / 云端待验。**');
       expect(releaseSection).toContain('尚无 Coze exact SHA');
       expect(releaseSection).toContain('不得将本地验证升级为云端通过或已吸收');
+      for (const section of Object.values(governanceDocuments)) {
+        expect(section).toMatch(/(?:本地候选|云端待验|待验项)/u);
+      }
       return;
     }
 
@@ -267,10 +327,12 @@ describe('V588 云端机器证据治理门禁', () => {
     const consoleEvidence = asObject(evidence.console, 'UI-003 控制台');
     const requestIds = evidence.requestIds;
     const checks = evidence.checks;
+    const evidenceSha = asString(environment.gitCommit, 'UI-003 Git SHA');
 
     expect(asString(evidence.testId, 'UI-003 测试标识')).toBe('V588-UI-003-cloud');
     expect(asString(evidence.result, 'UI-003 结果')).toBe('passed');
-    expect(asString(environment.gitCommit, 'UI-003 Git SHA')).toBe(ui003CandidateSha);
+    expect(evidenceSha).toMatch(/^[0-9a-f]{40}$/i);
+    expectGitCommitToBeAuditableHeadAncestor(evidenceSha);
     expect(asString(environment.stableCommit, 'UI-003 stable SHA')).toBe(stableSha);
     expect(asNumber(environment.cozeBuildExitCode, 'UI-003 构建退出码')).toBe(0);
     expect(asNumber(environment.httpStatus, 'UI-003 HTTP 状态')).toBe(200);
@@ -300,7 +362,7 @@ describe('V588 云端机器证据治理门禁', () => {
       expectArtifact(taskPath, 'UI-003 任务文件'),
     ]);
     validateCompletedRecord({
-      commit: asString(environment.gitCommit, 'UI-003 Git SHA'),
+      commit: evidenceSha,
       deploymentUrl: asString(environment.url, 'UI-003 运行地址'),
       browser: asString(environment.browser, 'UI-003 浏览器'),
       capturedAt: asString(evidence.testedAt, 'UI-003 测试时间'),
@@ -309,6 +371,7 @@ describe('V588 云端机器证据治理门禁', () => {
       artifactPaths,
       requestIds: requestIds as string[],
     });
+    expect(findUi003AbsorptionGovernanceIssues(governanceDocuments, evidenceSha)).toEqual([]);
     expect(inventorySection).toContain('**状态：V588-UI-003 已吸收。**');
     expect(releaseSection).toContain('**发布判定：V588-UI-003 通过并完成吸收。**');
   });

@@ -180,4 +180,27 @@ describe('V588-UI-003 canvas minimap wiring', () => {
     expect(canvas).toContain('onClose={toggleCanvasMinimap}');
     expect(canvas).toContain('setViewOffset({');
   });
+
+  it('keeps the viewport prop stable across unrelated parent renders', () => {
+    const canvas = readFileSync(canvasPath, 'utf8');
+
+    expect(canvas).toContain('const minimapViewport = useMemo(() => ({');
+    expect(canvas).toMatch(
+      /const\s+minimapViewport\s*=\s*useMemo\(\(\)\s*=>\s*\(\{[\s\S]*?width:\s*usableMinimapViewport\.width,[\s\S]*?height:\s*usableMinimapViewport\.height,[\s\S]*?zoom,[\s\S]*?offsetX:\s*viewOffset\.x,[\s\S]*?offsetY:\s*viewOffset\.y,[\s\S]*?\}\),\s*\[\s*usableMinimapViewport\.height,\s*usableMinimapViewport\.width,\s*viewOffset\.x,\s*viewOffset\.y,\s*zoom\s*\]\s*\);/,
+    );
+    expect(canvas).toContain('viewport={minimapViewport}');
+    expect(canvas).not.toContain('viewport={{');
+  });
+
+  it('inherits a bottom offset that clears either bottom panel', () => {
+    const component = readFileSync(componentPath, 'utf8');
+    const canvas = readFileSync(canvasPath, 'utf8');
+
+    expect(component).toContain("bottom: 'var(--canvas-minimap-bottom, 76px)'");
+    expect(canvas).toMatch(
+      /const\s+minimapBottomOffset\s*=\s*\(showLayerPanel\s*\|\|\s*showVersionHistory\)\s*\?\s*'calc\(min\(30dvh, 260px\) \+ 28px\)'\s*:\s*'76px'\s*;/,
+    );
+    expect(canvas).toContain("'--canvas-minimap-bottom': minimapBottomOffset");
+    expect(canvas).toContain('rightOffset={canvasOccupiedRight + 12}');
+  });
 });
