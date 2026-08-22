@@ -262,4 +262,4 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 聚焦矩阵 `13 files / 65 tests`、修复回归 `3 files / 14 tests` 通过；独立复审为 `Critical/Important/Minor = 0/0/0`。Chromium E2E 已定义 375/768/1440、底部抽屉、图片工具栏、8 个编辑入口、面板保持打开时的桌面到 375px resize 和 reduced-motion；本机因缺少凭据与 PostgreSQL 实际结果为 `2 skipped`，不计通过。
 - 全仓 Vitest 共 `507` 个文件、`3180` 项测试，其中 `489` 个文件、`3075` 项通过；`18` 个文件、`105` 项 PostgreSQL 专项因缺少 `POSTGRES_TEST_DATABASE_URL` 明确跳过，不计为通过。TypeScript、构建 `116/116`、保护基线 `38/38`、空白检查通过；ESLint 为 `0 errors / 987` 条历史 warning。
 - 本地生产 E2E 环境没有真实登录凭据与 PostgreSQL，测试在业务动作前明确跳过；浏览器布局、动作与错误零基线必须由 Coze 云端关闭。
-- **状态：本地候选与独立审查通过 / 云端待验。** 尚未推送 `main`，不得标记为已吸收；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与 donor 保持只读。UI004 云端闭环后，执行顺序调整为先处理上述 P0/P1 稳定性项，再继续移动端、媒体网关与协作吸收。
+- **状态：本地候选、独立审查与 GitHub main 推送通过 / 云端待验。** 实现候选已普通快进到 `main@be96c59d2d4dec6bbe510c3b7fd0de59ef092e0b`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与 donor 保持只读。Google Chrome 能列出正确的现有项目页和预览页，但接管任一标签连续超时，因此 Coze 拉取、运行健康和浏览器矩阵仍未验证，V588-UI-004 不标记为已吸收。云端闭环后先处理上述 P0/P1 稳定性项，再继续移动端、媒体网关与协作吸收。

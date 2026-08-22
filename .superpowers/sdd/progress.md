@@ -506,3 +506,4 @@ Protected stable branch: read-only and untouched
 - 新鲜全量门禁：Vitest `507` 文件中 `489` 通过、`18` 跳过；`3180` 项中 `3075` 通过、`105` 个 PostgreSQL 专项跳过。TypeScript、Next.js `116/116` 构建、保护基线 `38/38` 与空白检查通过，ESLint `0 errors / 987 historical warnings`。
 - 本地 E2E 因缺少凭据与 PostgreSQL未进入业务动作，故不判定布局/动作通过。下一唯一动作是独立复审、治理提交、普通快进推送 `main` 和现有 Google Chrome 标签页云端验收；`stable` 与 donor 保持只读。
 - 月度归档只读审计确认选择性吸收方向不变，但原清单偏重 UI：已补入 SVG/WASM 预算、PSD 安全输入与回退、simple-chat SSE、认证持久化、管理员真实投影和供应商能力矩阵六项 P0/P1；同时明确拒绝 donor `server-auth.ts`、`local-image-to-data-url.ts`、`cloud-task-storage.ts` 整文件替换。UI004 云端闭环后优先执行这些稳定性项。
+- UI004 实现候选已普通快进到 `main@be96c59d2d4dec6bbe510c3b7fd0de59ef092e0b`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。Google Chrome 仅发现正确的三个现有标签，但项目页和预览页接管均在连接层超时；未创建标签、未使用 360。Coze 拉取与云端矩阵保持未验证。

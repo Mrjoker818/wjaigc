@@ -1134,7 +1134,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 项目 | 状态 | 关闭条件 |
 |---|---|---|
 | 独立代码审查 | 已关闭 | 最终 `Critical/Important/Minor = 0/0/0`；桌面打开 SVG 面板后缩至 375px 的发现已完成最小修复与回归。 |
-| Coze exact SHA 与运行健康 | 未验证 | 拉取最终 `main`，证明 exact SHA、生产构建、5000 服务与 HTTP 健康，且 `stable` 未变化。 |
+| Coze exact SHA 与运行健康 | 未验证，Chrome 控制阻塞 | GitHub 实现候选为 `be96c59d2d4dec6bbe510c3b7fd0de59ef092e0b` 且 `stable` 未变；Chrome 能列出正确现有标签，但项目页/预览页接管均超时。恢复控制后拉取最终 `main`，证明 exact SHA、生产构建、5000 服务与 HTTP 健康。 |
 | Google Chrome 多视口矩阵 | 未验证 | 仅复用现有 Chrome 标签页，验证 375/768/1440、底部抽屉、图片 `+N`、右侧面板、8 个编辑入口、主题与 reduced-motion。 |
 | 浏览器错误零基线 | 未验证 | 云端从新鲜时间截点确认 Console Error/Warning、失败网络请求和原生 dialog 均为 0。 |
 | PostgreSQL 专项 | 环境阻塞 | 本地缺少 `POSTGRES_TEST_DATABASE_URL`，18 个文件、105 项真实集成/并发测试保持跳过，不得冒充通过。 |

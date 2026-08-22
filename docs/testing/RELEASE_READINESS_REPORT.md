@@ -1229,4 +1229,5 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 六个展示叶和入口完整性已完成本地 RED -> GREEN；375/768/1440 与 reduced-motion 的 E2E 矩阵已建立并补齐 768px 编辑面板循环。
 - 本地门禁：聚焦 `65/65`、全仓 `3075 passed / 105 PostgreSQL-gated skipped`、TypeScript、零错误 Lint、生产构建 `116/116`、保护基线和空白检查通过；独立复审 `0/0/0`。
 - 本地缺少 E2E 凭据与 PostgreSQL，Playwright 实际结果为 `2 skipped`；不能据此宣称布局、动作或浏览器错误门禁通过。
-- **发布判定：有条件通过。** 独立审查已为 `0/0/0`；剩余条件为 `main` 普通快进、`stable` 不变、Coze exact SHA 运行健康，以及现有 Google Chrome 标签页中的全矩阵和 Console/网络/dialog 零错误证据。
+- **发布判定：有条件通过。** 独立审查已为 `0/0/0`，`main` 普通快进且 `stable` 未变；剩余条件为 Coze exact SHA 运行健康，以及现有 Google Chrome 标签页中的全矩阵和 Console/网络/dialog 零错误证据。
+- `main` 普通快进和 `stable` 不变已关闭；当前唯一 UI004 阻塞为 Coze 拉取/运行健康与 Google Chrome 云端矩阵。Chrome 能发现正确现有标签，但接管项目页和预览页均超时，不能据此宣称云端通过。
