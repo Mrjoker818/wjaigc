@@ -681,6 +681,18 @@ async function assertHistoricalMediaCoverageComplete(
   }
 }
 
+async function lockHistoricalMediaCoverageUniverse(
+  client: AssetCoreSqlTransaction,
+): Promise<void> {
+  await client.query(
+    `LOCK TABLE
+       wujie_assets,
+       wujie_asset_versions,
+       wujie_workspace_placements
+     IN SHARE ROW EXCLUSIVE MODE`,
+  );
+}
+
 function timestampToIso(value: Date | string): string {
   if (value instanceof Date) return value.toISOString();
   return new Date(value).toISOString();
@@ -1114,6 +1126,7 @@ export async function archiveHistoricalMedia(input: {
       return resolveExistingOrConflict(existing, normalized.requestDigest);
     }
 
+    await lockHistoricalMediaCoverageUniverse(client);
     await assertHistoricalMediaCoverageComplete(client);
 
     const sortedSelections = await resolveArchiveSelections(

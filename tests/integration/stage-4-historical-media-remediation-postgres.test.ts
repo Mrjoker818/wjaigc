@@ -1092,6 +1092,127 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
     });
   });
 
+  postgresIt('waits for an earlier eligible writer and then rejects incomplete coverage without side effects', async () => {
+    await withIsolatedPostgres('historical-media-coverage-writer-first', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const databaseUrl = bindBoundedBusinessDatabase(isolatedUrl);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetVersionId === 'version-chat-empty',
+      ) as HistoricalMediaCandidate;
+      const writer = await connectIsolatedClient(databaseUrl);
+      const monitor = await connectIsolatedClient(databaseUrl);
+      const writerQuery: QueryFn = (text, values) => writer.query(text, values);
+      let archive: Promise<HistoricalMediaArchiveResult> | undefined;
+
+      try {
+        await writer.query('BEGIN');
+        await seedDiscoveryCandidateOverflow(writerQuery, 17);
+        const expectedAfterWriter = await readArchiveState(writerQuery);
+        const writerPid = Number((await writer.query('SELECT pg_backend_pid() AS pid')).rows[0]?.pid);
+
+        archive = service.archiveHistoricalMedia(createArchiveCommand(
+          [candidate],
+          'historical-media-coverage-writer-first',
+        ));
+        await expect(waitForBlockedQuery(
+          monitor,
+          ['IN SHARE ROW EXCLUSIVE MODE'],
+          [writerPid],
+        )).resolves.toBeTruthy();
+
+        await writer.query('COMMIT');
+        await expect(archive).rejects.toMatchObject({
+          code: 'HISTORICAL_MEDIA_COVERAGE_INCOMPLETE',
+        });
+        expect(await readArchiveState(query)).toEqual(expectedAfterWriter);
+      } finally {
+        await writer.query('ROLLBACK').catch(() => undefined);
+        if (archive) await Promise.allSettled([archive]);
+        await closeTestClients([writer, monitor]);
+      }
+    });
+  }, 20_000);
+
+  postgresIt('blocks later eligible writers until an archive with complete coverage commits', async () => {
+    await withIsolatedPostgres('historical-media-coverage-archive-first', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const databaseUrl = bindBoundedBusinessDatabase(isolatedUrl);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetVersionId === 'version-canvas-bridge',
+      ) as HistoricalMediaCandidate;
+      const assetBarrier = await connectIsolatedClient(databaseUrl);
+      const writer = await connectIsolatedClient(databaseUrl);
+      const monitor = await connectIsolatedClient(databaseUrl);
+      const writerQuery: QueryFn = (text, values) => writer.query(text, values);
+      let archive: Promise<HistoricalMediaArchiveResult> | undefined;
+      let writerOperation: Promise<void> | undefined;
+
+      try {
+        await assetBarrier.query('BEGIN');
+        const barrierPid = Number(
+          (await assetBarrier.query('SELECT pg_backend_pid() AS pid')).rows[0]?.pid,
+        );
+        await assetBarrier.query(
+          `SELECT id FROM wujie_assets
+           WHERE id = 'asset-canvas-bridge' FOR UPDATE`,
+        );
+
+        archive = service.archiveHistoricalMedia(createArchiveCommand(
+          [candidate],
+          'historical-media-coverage-archive-first',
+        ));
+        const blockedArchive = await waitForBlockedQuery(
+          monitor,
+          ['FOR UPDATE OF asset, version'],
+          [barrierPid],
+        );
+
+        await writer.query('BEGIN');
+        const writerPid = Number((await writer.query('SELECT pg_backend_pid() AS pid')).rows[0]?.pid);
+        writerOperation = seedDiscoveryCandidateOverflow(writerQuery, 17);
+        const blockedWriter = await waitForBlockedQuery(
+          monitor,
+          ['INSERT INTO wujie_assets'],
+          [barrierPid, blockedArchive.pid],
+        );
+        expect(blockedWriter.pid).toBe(writerPid);
+
+        await assetBarrier.query('COMMIT');
+        const archived = await archive;
+        await writerOperation;
+        await writer.query('COMMIT');
+
+        expect(archived).toMatchObject({
+          reused: false,
+          archivedVersionCount: 1,
+          archivedPlacementCount: 1,
+          projectRevisions: { [PROJECT_ID]: 11 },
+        });
+        await expect(query(
+          `SELECT
+             (SELECT count(*)::int FROM wujie_asset_media_remediations) AS ledger,
+             (SELECT count(*)::int FROM wujie_audit_log) AS audit,
+             (SELECT count(*)::int FROM wujie_workspace_placements
+               WHERE id LIKE 'placement-limit-%' AND status = 'active') AS inserted` ,
+        )).resolves.toMatchObject({ rows: [{ ledger: 1, audit: 1, inserted: 17 }] });
+      } finally {
+        await Promise.all([
+          assetBarrier.query('ROLLBACK').catch(() => undefined),
+          writer.query('ROLLBACK').catch(() => undefined),
+        ]);
+        await Promise.allSettled([
+          ...(archive ? [archive] : []),
+          ...(writerOperation ? [writerOperation] : []),
+        ]);
+        await closeTestClients([assetBarrier, writer, monitor]);
+      }
+    });
+  }, 20_000);
+
   postgresIt('archives only a non-current broken version while preserving healthy current media', async () => {
     await withIsolatedPostgres('historical-media-non-current-archive', async ({ databaseUrl: isolatedUrl, query }) => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
@@ -1650,10 +1771,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
         operations.push(secondArchive);
         await waitForBlockedQuery(
           monitor,
-          [
-            'FOR UPDATE OF asset, version',
-            'pg_advisory_xact_lock(hashtext($1), hashtext($2))',
-          ],
+          ['IN SHARE ROW EXCLUSIVE MODE'],
           [firstActivity.pid],
         );
 
