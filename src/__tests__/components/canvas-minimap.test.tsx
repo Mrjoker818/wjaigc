@@ -4,7 +4,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  CANVAS_MINIMAP_HEIGHT,
+  CANVAS_MINIMAP_PADDING,
   CANVAS_MINIMAP_PREFERENCE_KEY,
+  CANVAS_MINIMAP_WIDTH,
   CanvasMinimap,
   computeCanvasMinimapBounds,
   computeCanvasMinimapProjection,
@@ -35,6 +38,13 @@ afterEach(() => {
 });
 
 describe('CanvasMinimap geometry and preferences', () => {
+  it('exports the exact fixed minimap constants', () => {
+    expect(CANVAS_MINIMAP_WIDTH).toBe(176);
+    expect(CANVAS_MINIMAP_HEIGHT).toBe(124);
+    expect(CANVAS_MINIMAP_PADDING).toBe(10);
+    expect(CANVAS_MINIMAP_PREFERENCE_KEY).toBe('wujie.canvas.minimap.open.v1');
+  });
+
   it('computes visible world bounds from the canvas viewport', () => {
     expect(computeCanvasMinimapBounds([], viewport)).toEqual({
       minX: 200,
@@ -108,6 +118,9 @@ describe('CanvasMinimap geometry and preferences', () => {
     expect(isCanvasMinimapAvailable(768, 208)).toBe(true);
     expect(isCanvasMinimapAvailable(767, 207)).toBe(false);
     expect(isCanvasMinimapAvailable(768, 209)).toBe(false);
+    expect(isCanvasMinimapAvailable(1200, 480)).toBe(true);
+    expect(isCanvasMinimapAvailable(767, 20)).toBe(false);
+    expect(isCanvasMinimapAvailable(1000, 480)).toBe(false);
   });
 
   it('uses the exact preference key and fails closed on invalid storage', () => {
@@ -184,9 +197,10 @@ describe('CanvasMinimap interaction surface', () => {
     expect(point.y).toBeCloseTo((45 - scene.projection.offsetY) / scene.projection.scale);
   });
 
-  it('renders dark and mono output with no thumbnails or network work', () => {
+  it('renders only one rectangle per input item, with no image or network work', () => {
     const onClose = vi.fn();
     const fetchSpy = vi.fn();
+    const rectangleItems = items300.slice(0, 3);
     vi.stubGlobal('fetch', fetchSpy);
     const { container, rerender } = render(
       <CanvasMinimap
@@ -215,7 +229,7 @@ describe('CanvasMinimap interaction surface', () => {
 
     rerender(
       <CanvasMinimap
-        items={items300.slice(0, 1)}
+        items={rectangleItems}
         viewport={viewport}
         theme="mono"
         rightOffset={24}
@@ -225,8 +239,10 @@ describe('CanvasMinimap interaction surface', () => {
     );
 
     expect(container.querySelector('[data-canvas-minimap]')?.getAttribute('data-theme')).toBe('mono');
-    expect(container.querySelectorAll('img')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-canvas-minimap-item]')).toHaveLength(rectangleItems.length);
+    expect(container.querySelectorAll('img, image, canvas')).toHaveLength(0);
     expect(container.querySelectorAll('[src]')).toHaveLength(0);
+    expect(container.innerHTML).not.toContain('background-image');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
