@@ -16,6 +16,82 @@ import {
   readCanvasMinimapPreference,
   writeCanvasMinimapPreference,
 } from '@/components/canvas/CanvasMinimap';
+import type {
+  CanvasMinimapBounds,
+  CanvasMinimapItem,
+  CanvasMinimapProjection,
+  CanvasMinimapProps,
+  CanvasMinimapRect,
+  CanvasMinimapScene,
+  CanvasMinimapViewport,
+} from '@/components/canvas/CanvasMinimap';
+
+type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends
+  (<Type>() => Type extends Right ? 1 : 2)
+  ? (<Type>() => Type extends Right ? 1 : 2) extends
+      (<Type>() => Type extends Left ? 1 : 2)
+    ? true
+    : false
+  : false;
+
+type Expect<T extends true> = T;
+
+type ExactShape<Actual, Expected> = Equal<keyof Actual, keyof Expected> extends true
+  ? Equal<Actual, Expected>
+  : false;
+
+type CanvasMinimapItemShape = Expect<ExactShape<CanvasMinimapItem, {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}>>;
+
+type CanvasMinimapViewportShape = Expect<ExactShape<CanvasMinimapViewport, {
+  width: number;
+  height: number;
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+}>>;
+
+type CanvasMinimapBoundsShape = Expect<ExactShape<CanvasMinimapBounds, {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}>>;
+
+type CanvasMinimapProjectionShape = Expect<ExactShape<CanvasMinimapProjection, {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+}>>;
+
+type CanvasMinimapRectShape = Expect<ExactShape<CanvasMinimapRect, {
+  id?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}>>;
+
+type CanvasMinimapSceneShape = Expect<ExactShape<CanvasMinimapScene, {
+  items: CanvasMinimapRect[];
+  viewport: CanvasMinimapRect;
+  bounds: CanvasMinimapBounds;
+  projection: CanvasMinimapProjection;
+}>>;
+
+type CanvasMinimapPropsShape = Expect<ExactShape<CanvasMinimapProps, {
+  items: CanvasMinimapItem[];
+  viewport: CanvasMinimapViewport;
+  theme?: 'dark' | 'mono';
+  rightOffset: number;
+  onNavigate: (point: { x: number; y: number }) => void;
+  onClose: () => void;
+}>>;
 
 const viewport = {
   width: 1000,
@@ -200,8 +276,16 @@ describe('CanvasMinimap interaction surface', () => {
   it('renders only one rectangle per input item, with no image or network work', () => {
     const onClose = vi.fn();
     const fetchSpy = vi.fn();
+    const imageConstructorSpy = vi.fn();
+    const xhrOpenSpy = vi.fn();
+    const xhrSendSpy = vi.fn();
     const rectangleItems = items300.slice(0, 3);
     vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('Image', imageConstructorSpy);
+    vi.stubGlobal('XMLHttpRequest', vi.fn(() => ({
+      open: xhrOpenSpy,
+      send: xhrSendSpy,
+    })));
     const { container, rerender } = render(
       <CanvasMinimap
         items={[]}
@@ -223,7 +307,13 @@ describe('CanvasMinimap interaction surface', () => {
     expect(viewportStyle).not.toContain('Infinity');
     expect(container.querySelectorAll('img')).toHaveLength(0);
     expect(container.querySelectorAll('[src]')).toHaveLength(0);
+    expect(container.querySelectorAll('svg image, canvas')).toHaveLength(0);
+    expect(container.querySelectorAll('[style*="background-image"], [style*="backgroundImage"]')).toHaveLength(0);
+    expect(container.innerHTML).not.toContain('background-image');
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(imageConstructorSpy).not.toHaveBeenCalled();
+    expect(xhrOpenSpy).not.toHaveBeenCalled();
+    expect(xhrSendSpy).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '关闭小地图' }));
     expect(onClose).toHaveBeenCalledTimes(1);
 
@@ -242,8 +332,12 @@ describe('CanvasMinimap interaction surface', () => {
     expect(container.querySelectorAll('[data-canvas-minimap-item]')).toHaveLength(rectangleItems.length);
     expect(container.querySelectorAll('img, image, canvas')).toHaveLength(0);
     expect(container.querySelectorAll('[src]')).toHaveLength(0);
+    expect(container.querySelectorAll('[style*="background-image"], [style*="backgroundImage"]')).toHaveLength(0);
     expect(container.innerHTML).not.toContain('background-image');
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(imageConstructorSpy).not.toHaveBeenCalled();
+    expect(xhrOpenSpy).not.toHaveBeenCalled();
+    expect(xhrSendSpy).not.toHaveBeenCalled();
   });
 });
 
