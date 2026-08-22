@@ -1,5 +1,5 @@
 {
-  "authorizationId": "stage-4-v588-ui-002-2026-08-22",
+  "authorizationId": "stage-4-v588-ui-004-2026-08-22",
   "approvedAt": "2026-08-22",
   "scope": "Exact paths only; directory-prefix authorization is prohibited.",
   "stableBranchMutationAllowed": false,
@@ -17,6 +17,12 @@
     { "path": "src/app/api/assets/adopt-canvas-image/route.ts", "sourceCommit": "c99fb72" },
     { "path": "src/components/dashboard/admin-tabs.tsx", "sourceCommit": "1ba98f7" },
     { "path": "src/components/canvas/CanvasCommandPalette.tsx", "sourceCommit": "8acb3c9" },
+    { "path": "src/components/canvas/CanvasEditColorRemoveBgPanel.tsx", "sourceCommit": "2fc5c83" },
+    { "path": "src/components/canvas/CanvasEditEraseMaskPanel.tsx", "sourceCommit": "e3991f3" },
+    { "path": "src/components/canvas/CanvasEditExpandCropPanel.tsx", "sourceCommit": "2fc5c83" },
+    { "path": "src/components/canvas/CanvasEditUpscaleSvgPanel.tsx", "sourceCommit": "2fc5c83" },
+    { "path": "src/components/canvas/CanvasEmptyState.tsx", "sourceCommit": "feac579" },
+    { "path": "src/components/canvas/CanvasImageActionToolbar.tsx", "sourceCommit": "69d3466" },
     { "path": "src/components/canvas/CanvasZoomCluster.tsx", "sourceCommit": "c808e50" },
     { "path": "src/lib/admin-dashboard-projection.ts", "sourceCommit": "1ba98f7" },
     { "path": "src/lib/asset-core/asset-release-readiness.ts", "sourceCommit": "e809f5c" },
@@ -30,6 +36,9 @@
     { "path": "src/lib/asset-core/service.ts", "sourceCommit": "9c3f52f" },
     { "path": "src/lib/asset-core/storage.ts", "sourceCommit": "9c3f52f" },
     { "path": "src/lib/asset-core/thumbnail-backfill.ts", "sourceCommit": "9c3f52f" },
+    { "path": "src/lib/canvas-kernel/persistence.ts", "sourceCommit": "efe5e4f" },
+    { "path": "src/lib/image-toolbar-position.ts", "sourceCommit": "2fc5c83" },
+    { "path": "src/lib/image-toolbar-preferences.ts", "sourceCommit": "69d3466" },
     { "path": "src/lib/project-workflow.ts", "sourceCommit": "016e5d2" }
   ]
 }

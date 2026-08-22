@@ -72,7 +72,7 @@
 
   Expected: FAIL，原因仅为六个叶组件尚不存在、父组件尚未接线或入口清单尚未集中导出；不得因语法或环境错误失败。
 
-- [ ] **Step 4: 将新路径加入保护门禁授权**
+- [x] **Step 4: 将新路径加入保护门禁授权**
 
   仅将六个精确路径加入 `check:protected-baseline` allow-path 和 `protected-source-authorizations.json`，sourceCommit 使用本任务实际提交 SHA；不得授权整个目录。
 
