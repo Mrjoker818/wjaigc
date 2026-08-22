@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  CANVAS_MINIMAP_PREFERENCE_KEY,
   CanvasMinimap,
   computeCanvasMinimapBounds,
   computeCanvasMinimapProjection,
+  isCanvasMinimapAvailable,
   projectCanvasMinimapScene,
   readCanvasMinimapPreference,
   writeCanvasMinimapPreference,
-  isCanvasMinimapAvailable,
 } from '@/components/canvas/CanvasMinimap';
 
 const viewport = {
@@ -29,8 +30,12 @@ const items300 = Array.from({ length: 300 }, (_, index) => ({
   height: 120,
 }));
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('CanvasMinimap geometry and preferences', () => {
-  it('computes the visible world bounds from the canvas viewport', () => {
+  it('computes visible world bounds from the canvas viewport', () => {
     expect(computeCanvasMinimapBounds([], viewport)).toEqual({
       minX: 200,
       minY: 150,
@@ -39,22 +44,15 @@ describe('CanvasMinimap geometry and preferences', () => {
     });
   });
 
-  it('projects a large scene and keeps the viewport projection finite', () => {
-    const projected = projectCanvasMinimapScene(items300, viewport);
+  it('projects 300 rectangles and keeps the projected viewport finite', () => {
+    const scene = projectCanvasMinimapScene(items300, viewport);
 
-    expect(projected.items).toHaveLength(300);
-    expect(Object.values(projected.viewport).every(Number.isFinite)).toBe(true);
+    expect(scene.items).toHaveLength(300);
+    expect(Object.values(scene.viewport).every(Number.isFinite)).toBe(true);
   });
 
-  it('handles empty, negative, remote, invalid, and degenerate geometry', () => {
-    expect(computeCanvasMinimapBounds([], viewport)).toEqual({
-      minX: 200,
-      minY: 150,
-      maxX: 700,
-      maxY: 450,
-    });
-
-    const projected = projectCanvasMinimapScene([
+  it('filters invalid geometry while retaining negative and remote rectangles', () => {
+    const scene = projectCanvasMinimapScene([
       { id: 'negative', x: -300, y: -200, width: 80, height: 40 },
       { id: 'remote', x: 100000, y: 100000, width: 80, height: 40 },
       { id: 'zero-area', x: 0, y: 0, width: 0, height: 20 },
@@ -62,46 +60,71 @@ describe('CanvasMinimap geometry and preferences', () => {
       { id: 'infinite', x: 0, y: Number.POSITIVE_INFINITY, width: 20, height: 20 },
     ], viewport);
 
-    expect(projected.items.map(item => item.id)).toEqual(['negative', 'remote']);
-    expect(Object.values(projected.viewport).every(Number.isFinite)).toBe(true);
-    expect(computeCanvasMinimapProjection([{ id: 'flat', x: 0, y: 0, width: 1, height: 1 }], {
-      ...viewport,
+    expect(scene.items.map(item => item.id)).toEqual(['negative', 'remote']);
+  });
+
+  it('preserves aspect ratio with the fixed bounds-to-projection API', () => {
+    const projection = computeCanvasMinimapProjection({
+      minX: 0,
+      minY: 0,
+      maxX: 400,
+      maxY: 200,
+    });
+
+    expect(projection).toEqual({
+      scale: expect.any(Number),
+      offsetX: expect.any(Number),
+      offsetY: expect.any(Number),
+    });
+    expect(projection.scale).toBeCloseTo(0.39);
+    expect(projection.offsetX).toBeCloseTo(10);
+    expect(projection.offsetY).toBeCloseTo(23);
+  });
+
+  it('keeps degenerate projection and scene coordinates finite', () => {
+    const projection = computeCanvasMinimapProjection({
+      minX: 20,
+      minY: -10,
+      maxX: 20,
+      maxY: -10,
+    }, 0, 0, 0);
+    const scene = projectCanvasMinimapScene([
+      { id: 'point-like', x: 20, y: -10, width: 1, height: 1 },
+    ], {
       width: 0,
       height: 0,
-    }).items).toHaveLength(1);
+      zoom: 0,
+      offsetX: Number.NaN,
+      offsetY: Number.POSITIVE_INFINITY,
+    });
+
+    expect(Object.values(projection).every(Number.isFinite)).toBe(true);
+    expect(Object.values(scene.projection).every(Number.isFinite)).toBe(true);
+    expect(Object.values(scene.viewport).every(Number.isFinite)).toBe(true);
+    expect(scene.items.every(item => Object.values(item).filter(value => typeof value === 'number').every(Number.isFinite))).toBe(true);
   });
 
-  it('preserves aspect ratio and supports click inverse projection', () => {
-    const projected = computeCanvasMinimapProjection([
-      { id: 'wide', x: 0, y: 0, width: 400, height: 200 },
-    ], viewport);
-
-    expect(projected.scaleX).toBe(projected.scaleY);
-    const canvasPoint = projected.toCanvasPoint({ x: projected.viewport.x, y: projected.viewport.y });
-    expect(canvasPoint.x).toBeCloseTo(viewport.offsetX);
-    expect(canvasPoint.y).toBeCloseTo(viewport.offsetY);
+  it('allows only the exact desktop and usable-width boundaries', () => {
+    expect(isCanvasMinimapAvailable(768, 208)).toBe(true);
+    expect(isCanvasMinimapAvailable(767, 207)).toBe(false);
+    expect(isCanvasMinimapAvailable(768, 209)).toBe(false);
   });
 
-  it('supports responsive availability thresholds', () => {
-    expect(isCanvasMinimapAvailable(1200, 480)).toBe(true);
-    expect(isCanvasMinimapAvailable(767, 20)).toBe(false);
-    expect(isCanvasMinimapAvailable(1000, 480)).toBe(false);
-  });
-
-  it('restores only the exact true preference and fails closed on bad storage', () => {
+  it('uses the exact preference key and fails closed on invalid storage', () => {
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => storage.set(key, value),
     });
 
+    expect(CANVAS_MINIMAP_PREFERENCE_KEY).toBe('wujie.canvas.minimap.open.v1');
     expect(readCanvasMinimapPreference()).toBe(false);
     writeCanvasMinimapPreference(true);
-    expect(storage.get('wujie_canvas_minimap')).toBe('true');
+    expect(storage.get('wujie.canvas.minimap.open.v1')).toBe('true');
     expect(readCanvasMinimapPreference()).toBe(true);
-    storage.set('wujie_canvas_minimap', 'TRUE');
+    storage.set('wujie.canvas.minimap.open.v1', 'TRUE');
     expect(readCanvasMinimapPreference()).toBe(false);
-    storage.set('wujie_canvas_minimap', 'damaged');
+    storage.set('wujie.canvas.minimap.open.v1', 'damaged');
     expect(readCanvasMinimapPreference()).toBe(false);
 
     vi.stubGlobal('localStorage', {
@@ -114,38 +137,92 @@ describe('CanvasMinimap geometry and preferences', () => {
 });
 
 describe('CanvasMinimap interaction surface', () => {
-  it('supports dark and monochrome themes, empty state, close, and event isolation', () => {
+  it('inverse-projects a real map click and isolates map interactions', () => {
+    const onNavigate = vi.fn();
+    const onParentClick = vi.fn();
+    const onParentPointerDown = vi.fn();
+    const onParentWheel = vi.fn();
+    const items = [{ id: 'focus', x: 0, y: 0, width: 400, height: 200 }];
+    const scene = projectCanvasMinimapScene(items, viewport);
+
+    render(
+      <div onClick={onParentClick} onPointerDown={onParentPointerDown} onWheel={onParentWheel}>
+        <CanvasMinimap
+          items={items}
+          viewport={viewport}
+          theme="dark"
+          rightOffset={24}
+          onNavigate={onNavigate}
+          onClose={vi.fn()}
+        />
+      </div>,
+    );
+
+    const map = screen.getByTestId('canvas-minimap-map');
+    vi.spyOn(map, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 50,
+      width: 176,
+      height: 124,
+      top: 50,
+      right: 276,
+      bottom: 174,
+      left: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.pointerDown(map);
+    fireEvent.wheel(map);
+    fireEvent.click(map, { clientX: 178, clientY: 95 });
+
+    expect(onParentPointerDown).not.toHaveBeenCalled();
+    expect(onParentWheel).not.toHaveBeenCalled();
+    expect(onParentClick).not.toHaveBeenCalled();
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    const [point] = onNavigate.mock.calls[0] as [{ x: number; y: number }];
+    expect(point.x).toBeCloseTo((78 - scene.projection.offsetX) / scene.projection.scale);
+    expect(point.y).toBeCloseTo((45 - scene.projection.offsetY) / scene.projection.scale);
+  });
+
+  it('renders dark and mono output with no thumbnails or network work', () => {
     const onClose = vi.fn();
-    const onCanvasClick = vi.fn();
-    const { rerender } = render(
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const { container, rerender } = render(
       <CanvasMinimap
         items={[]}
         viewport={viewport}
-        open
         theme="dark"
+        rightOffset={24}
+        onNavigate={vi.fn()}
         onClose={onClose}
-        onCanvasClick={onCanvasClick}
       />,
     );
 
-    expect(screen.getByTestId('canvas-minimap')).toHaveAttribute('data-canvas-minimap');
+    const darkRoot = container.querySelector('[data-canvas-minimap]');
+    expect(darkRoot?.getAttribute('data-theme')).toBe('dark');
     expect(screen.getByText('画布为空')).toBeTruthy();
+    expect(container.querySelectorAll('img')).toHaveLength(0);
+    expect(container.querySelectorAll('[src]')).toHaveLength(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '关闭小地图' }));
     expect(onClose).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByTestId('canvas-minimap'));
-    expect(onCanvasClick).not.toHaveBeenCalled();
 
     rerender(
       <CanvasMinimap
         items={items300.slice(0, 1)}
         viewport={viewport}
-        open
         theme="mono"
+        rightOffset={24}
+        onNavigate={vi.fn()}
         onClose={onClose}
-        onCanvasClick={onCanvasClick}
       />,
     );
-    expect(screen.getByTestId('canvas-minimap')).toHaveAttribute('data-theme', 'mono');
+
+    expect(container.querySelector('[data-canvas-minimap]')?.getAttribute('data-theme')).toBe('mono');
+    expect(container.querySelectorAll('img')).toHaveLength(0);
+    expect(container.querySelectorAll('[src]')).toHaveLength(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
