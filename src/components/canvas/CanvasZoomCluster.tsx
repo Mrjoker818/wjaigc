@@ -6,6 +6,7 @@ import {
   GitMerge,
   Grip,
   Layers,
+  Map as MapIcon,
   Maximize2,
   Settings,
   ZoomIn,
@@ -21,11 +22,14 @@ export interface CanvasZoomClusterProps {
   showConnections: boolean;
   showLayerPanel: boolean;
   showVersionHistory: boolean;
+  minimapOpen: boolean;
+  minimapAvailable: boolean;
   isGenerating: boolean;
   generationProgress?: { current: number; total: number };
   onZoomOut: () => void;
   onZoomIn: () => void;
   onResetView: () => void;
+  onToggleMinimap: () => void;
   onOpenCommandPalette: () => void;
   onCycleGridMode: () => void;
   onToggleConnections: () => void;
@@ -46,11 +50,14 @@ export function CanvasZoomCluster({
   showConnections,
   showLayerPanel,
   showVersionHistory,
+  minimapOpen,
+  minimapAvailable,
   isGenerating,
   generationProgress,
   onZoomOut,
   onZoomIn,
   onResetView,
+  onToggleMinimap,
   onOpenCommandPalette,
   onCycleGridMode,
   onToggleConnections,
@@ -92,6 +99,19 @@ export function CanvasZoomCluster({
         <Maximize2 className="h-4 w-4" />
         <span className={tooltipClassName}>重置视图</span>
       </button>
+
+      {minimapAvailable && (
+        <button
+          type="button"
+          onClick={onToggleMinimap}
+          aria-pressed={minimapOpen}
+          className={`${buttonClassName} ${minimapOpen ? activeToggleClassName : inactiveToggleClassName}`}
+          title={minimapOpen ? '关闭小地图' : '打开小地图'}
+        >
+          <MapIcon className="h-4 w-4" />
+          <span className={tooltipClassName}>{minimapOpen ? '关闭小地图' : '打开小地图'}</span>
+        </button>
+      )}
 
       <button
         type="button"

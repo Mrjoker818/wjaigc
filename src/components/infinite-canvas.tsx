@@ -91,6 +91,13 @@ import { CanvasSurface } from '@/components/canvas/CanvasSurface';
 import { CanvasToolHost } from '@/components/canvas/CanvasToolHost';
 import { CanvasZoomCluster } from '@/components/canvas/CanvasZoomCluster';
 import {
+  CanvasMinimap,
+  type CanvasMinimapItem,
+  isCanvasMinimapAvailable,
+  readCanvasMinimapPreference,
+  writeCanvasMinimapPreference,
+} from '@/components/canvas/CanvasMinimap';
+import {
   CanvasCommandPalette,
   shouldToggleCanvasCommandPalette,
   type CanvasCommandItem,
@@ -710,6 +717,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [gridMode, setGridMode] = useState<'dots' | 'lines' | 'blank'>('dots');
   const [showConnections, setShowConnections] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [minimapOpen, setMinimapOpen] = useState(false);
+
+  useEffect(() => {
+    setMinimapOpen(readCanvasMinimapPreference());
+  }, []);
 
   // Hover toolbar: shown when hovering over an image (separate from visionHoverImage)
   const [hoverToolbarImageId, setHoverToolbarImageId] = useState<string | null>(null);
@@ -872,6 +884,43 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     return index;
   }, [images, spatialIndexProjectKey]);
   const canvasOccupiedRight = isPanelCollapsed ? 20 : 480;
+  const minimapAvailable = isCanvasMinimapAvailable(canvasSize.width, canvasOccupiedRight);
+  const usableMinimapViewport = useMemo(() => resolveCanvasUsableViewportSize(
+    { width: canvasSize.width, height: canvasSize.height },
+    { right: canvasOccupiedRight },
+  ), [canvasOccupiedRight, canvasSize.height, canvasSize.width]);
+
+  const toggleCanvasMinimap = useCallback(() => {
+    if (!minimapAvailable) return;
+    setMinimapOpen(current => {
+      const next = !current;
+      writeCanvasMinimapPreference(next);
+      return next;
+    });
+  }, [minimapAvailable]);
+
+  const minimapItems = useMemo<CanvasMinimapItem[]>(() => {
+    if (!minimapOpen || !minimapAvailable) return [];
+    return images.flatMap(image => (
+      !image.isProcessingPlaceholder
+      && Number.isFinite(image.x)
+      && Number.isFinite(image.y)
+      && Number.isFinite(image.width)
+      && Number.isFinite(image.height)
+      && image.width > 0
+      && image.height > 0
+        ? [{ id: image.id, x: image.x, y: image.y, width: image.width, height: image.height }]
+        : []
+    ));
+  }, [images, minimapAvailable, minimapOpen]);
+
+  const handleMinimapNavigate = useCallback((point: { x: number; y: number }) => {
+    setViewOffset({
+      x: usableMinimapViewport.width / 2 - point.x * zoom,
+      y: usableMinimapViewport.height / 2 - point.y * zoom,
+    });
+  }, [setViewOffset, usableMinimapViewport.height, usableMinimapViewport.width, zoom]);
+
   const cullingBounds = useMemo(() => resolveViewportCullingBounds(
     canvasSize.width,
     canvasSize.height,
@@ -3105,6 +3154,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       keywords: 'reset view fit center 适配 居中',
       action: resetViewToContent,
     },
+    ...(minimapAvailable ? [{
+      id: 'toggle-minimap',
+      label: minimapOpen ? '关闭小地图' : '打开小地图',
+      hint: '查看画布缩略导航',
+      section: '视图',
+      keywords: 'minimap overview navigation 小地图 导航 总览',
+      action: toggleCanvasMinimap,
+    }] : []),
     {
       id: 'zoom-in',
       label: '放大画布',
@@ -3189,6 +3246,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     cycleGridMode,
     handleZoomIn,
     handleZoomOut,
+    minimapAvailable,
+    minimapOpen,
     resetViewToContent,
     selectImage,
     selectedIds.size,
@@ -3197,6 +3256,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     showLayerPanel,
     showVersionHistory,
     toggleLayerPanel,
+    toggleCanvasMinimap,
     toggleVersionHistory,
   ]);
 
@@ -19086,11 +19146,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           showConnections={showConnections}
           showLayerPanel={showLayerPanel}
           showVersionHistory={showVersionHistory}
+          minimapOpen={minimapOpen}
+          minimapAvailable={minimapAvailable}
           isGenerating={isGenerating}
           generationProgress={generationProgress}
           onZoomOut={handleZoomOut}
           onZoomIn={handleZoomIn}
           onResetView={resetViewToContent}
+          onToggleMinimap={toggleCanvasMinimap}
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
           onCycleGridMode={cycleGridMode}
           onToggleConnections={() => setShowConnections(prev => !prev)}
@@ -19121,6 +19184,23 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }}
         onClose={() => setEngineDialog(null)}
       />
+
+      {minimapOpen && minimapAvailable && (
+        <CanvasMinimap
+          items={minimapItems}
+          viewport={{
+            width: usableMinimapViewport.width,
+            height: usableMinimapViewport.height,
+            zoom,
+            offsetX: viewOffset.x,
+            offsetY: viewOffset.y,
+          }}
+          theme={isMonochrome ? 'mono' : 'dark'}
+          rightOffset={canvasOccupiedRight + 12}
+          onNavigate={handleMinimapNavigate}
+          onClose={toggleCanvasMinimap}
+        />
+      )}
 
       {commandPaletteOpen && (
         <CanvasCommandPalette
