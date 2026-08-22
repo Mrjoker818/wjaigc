@@ -1464,3 +1464,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - TypeScript 通过；ESLint 退出 0，保持 `0 errors / 988 historical warnings`；生产构建完成 `116/116`；保护基线保留 `38/38` 功能且 0 blocker；`git diff --check` 通过。
 - 精确源码来源为 `8acb3c9`；`CanvasCommandPalette.tsx` 已加入逐文件授权和来源校验，不存在目录级放行。`stable@52f7c601` 与 donor 未变化。
 - **结论：本地回归通过，云端未验证。** Coze 必须拉取最终 `main`，并在现有 Google Chrome 标签页验证入口、快捷键、搜索、导航、执行、关闭、输入保护、命令动作、图层/历史互斥和新鲜 Console。
+
+## 2026-08-22 V588-UI-002 云端缺陷修复与全量复验
+
+- Coze 首轮真实测试复现命令面板“打开图层面板”和“打开版本历史”关闭弹层但不打开目标面板，Console 出现 `CANVAS_TOOL_ENTRY_POINT_UNSUPPORTED:*:shortcut`；根因是两个工具未在注册表声明 `shortcut` 入口。
+- 新增注册表失败测试后，仅补充两个入口声明。RED 精确失败于 `layer-order:shortcut`；GREEN 聚焦套件通过 `4 files / 26 tests`。
+- 修复后全仓 Vitest 通过 `477 files / 3005 tests`；`18 files / 105 tests` 因本机缺少 `POSTGRES_TEST_DATABASE_URL` 明确跳过。本项不触及持久化或账务。
+- TypeScript、ESLint、生产构建 `116/116`、保护基线 `38/38` 和 `git diff --check` 均通过。候选已推送为 `main@1681b2b80a5afdbb23c710616a3b9cd99fd47e71`，`stable@52f7c601` 未变。
+- Coze exact-SHA 构建退出码 `0`，5000 端口监听，首页 HTTP `200`；Google Chrome 最终 SHA 交互矩阵 `30/30` 通过，图层/历史互斥正确，最终状态已恢复。
+- 测试时间截点后的 Console Error/Warning 与 `[CanvasToolSession]` 错误均为 `0`。证据：`docs/testing/evidence/v588-ui-002-cloud-2026-08-22.json` 和 `.png`。
+- **结论：V588-UI-002 云端回归通过并完成吸收。** 下一项为 `V588-UI-003`，不得重复本项或跳过 RED。

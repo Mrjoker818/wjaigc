@@ -1208,3 +1208,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `18` 个 PostgreSQL 文件共 `105` 项测试因本机未配置隔离库而明确跳过；本项不涉及持久化与账务，仍保留该环境事实。
 - 实现来源提交为 `8acb3c9`，新增路径已精确授权；`stable@52f7c601`、donor 和 `shadow` 边界未改变。
 - **发布判定：有条件通过。** 条件是 Coze exact-tree、生产构建/HTTP 健康及已登录 Google Chrome 全交互和 Console 验收；通过前不得标记吸收或进入 `V588-UI-003`。
+
+## 2026-08-22 V588-UI-002 云端发布判定
+
+- 最终候选 `main@1681b2b80a5afdbb23c710616a3b9cd99fd47e71` 已由 Coze 精确拉取；构建退出码 `0`、5000 端口监听、首页 HTTP `200`，`stable@52f7c601` 与 `WUJIE_ASSET_GRAPH_MODE=shadow` 未变化。
+- 命令面板在最终 SHA 上完成 Google Chrome `30/30` 项真实交互，包含最终修复的图层与版本历史入口、面板互斥、输入保护、状态恢复和视觉检查。
+- 新鲜 Console Error/Warning、`[CanvasToolSession]` 错误及浏览器原生弹窗均为 `0`；截图未见裁切、错位或不可读叠加。
+- **发布判定：V588-UI-002 通过并完成吸收。** 该结论只覆盖命令面板叶组件；整体发布仍受已登记的 `asset-v3` 投影/回退等独立门禁约束。下一发布门禁为 `V588-UI-003` 的 RED 与最小接入。

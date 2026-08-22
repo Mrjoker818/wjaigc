@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "testId": "V588-UI-002-cloud",
+  "testedAt": "2026-08-22T06:45:21.891Z",
+  "startedAt": "2026-08-22T06:39:57.507Z",
+  "result": "passed",
+  "environment": {
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_1786500304299_8vix1z45f&build=1681b2b",
+    "browser": "Google Chrome 用户1",
+    "gitCommit": "1681b2b80a5afdbb23c710616a3b9cd99fd47e71",
+    "branch": "main",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "assetGraphMode": "shadow",
+    "cozeBuildExitCode": 0,
+    "httpStatus": 200
+  },
+  "summary": {
+    "checks": 30,
+    "passed": 30,
+    "failed": 0
+  },
+  "checks": [
+    {
+      "id": "button-open",
+      "pass": true
+    },
+    {
+      "id": "autofocus",
+      "pass": true
+    },
+    {
+      "id": "command-count",
+      "value": 10,
+      "pass": true
+    },
+    {
+      "id": "label-search",
+      "query": "重置视图",
+      "value": 1,
+      "pass": true
+    },
+    {
+      "id": "hint-search",
+      "query": "适配画布中的全部内容",
+      "value": 1,
+      "pass": true
+    },
+    {
+      "id": "section-search",
+      "query": "视图",
+      "value": 5,
+      "pass": true
+    },
+    {
+      "id": "keyword-search",
+      "query": "zoom",
+      "value": 2,
+      "pass": true
+    },
+    {
+      "id": "empty-result",
+      "pass": true
+    },
+    {
+      "id": "escape-close",
+      "pass": true
+    },
+    {
+      "id": "shortcut-open",
+      "pass": true
+    },
+    {
+      "id": "shortcut-close",
+      "pass": true
+    },
+    {
+      "id": "backdrop-close",
+      "pass": true
+    },
+    {
+      "id": "arrow-wrap",
+      "initial": "0",
+      "up": "9",
+      "down": "0",
+      "pass": true
+    },
+    {
+      "id": "enter-execute-zoom",
+      "before": "90%",
+      "after": "109%",
+      "pass": true
+    },
+    {
+      "id": "reset-view",
+      "value": "90%",
+      "pass": true
+    },
+    {
+      "id": "grid-cycle",
+      "states": [
+        "点阵",
+        "线条",
+        "空白",
+        "点阵"
+      ],
+      "pass": true
+    },
+    {
+      "id": "connection-toggle-restore",
+      "states": [
+        "显示连线",
+        "隐藏连线",
+        "显示连线"
+      ],
+      "pass": true
+    },
+    {
+      "id": "hand-tool",
+      "pass": true
+    },
+    {
+      "id": "select-tool-restore",
+      "pass": true
+    },
+    {
+      "id": "clear-selection-empty",
+      "pass": true
+    },
+    {
+      "id": "textarea-shortcut-protection",
+      "pass": true
+    },
+    {
+      "id": "select-shortcut-protection",
+      "pass": true
+    },
+    {
+      "id": "layer-panel-shortcut",
+      "pass": true
+    },
+    {
+      "id": "version-history-shortcut",
+      "pass": true
+    },
+    {
+      "id": "panel-mutual-exclusion",
+      "pass": true
+    },
+    {
+      "id": "visual-layout",
+      "pass": true
+    },
+    {
+      "id": "console-errors",
+      "value": 0,
+      "pass": true
+    },
+    {
+      "id": "console-warnings",
+      "value": 0,
+      "pass": true
+    },
+    {
+      "id": "canvas-tool-session-errors",
+      "value": 0,
+      "pass": true
+    },
+    {
+      "id": "state-restored",
+      "pass": true
+    }
+  ],
+  "console": {
+    "entriesAfterStart": 100,
+    "errors": 0,
+    "warnings": 0,
+    "canvasToolSessionErrors": 0
+  },
+  "artifacts": {
+    "screenshot": "docs/testing/evidence/v588-ui-002-cloud-2026-08-22.png"
+  },
+  "notes": [
+    "复用现有 Chrome 标签页，未创建新标签页",
+    "首次刷新发生在 Coze 重启窗口，完整刷新后恢复已登录画布",
+    "图层与版本历史动作最初暴露 shortcut 注册缺失；TDD 修复后在最终 SHA 完整复验"
+  ]
+}
