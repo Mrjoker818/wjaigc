@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-22T02:36:12.934Z",
+  "candidate": {
+    "githubMain": "04a7a9104a96ae74325a76776e831c0e567e362b",
+    "cozeHead": "04a7a9104a96ae74325a76776e831c0e567e362b",
+    "cozeProjectVersion": "f9fa6e1",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "assetGraphMode": "shadow",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/"
+  },
+  "browser": {
+    "family": "Google Chrome",
+    "profile": "用户1",
+    "authenticatedUserId": "admin_mr_joker",
+    "authenticatedRole": "admin",
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "screenshot": "docs/testing/evidence/s4-bug-014-cloud-readonly-2026-08-22.png"
+  },
+  "rounds": [
+    {
+      "capturedAt": "2026-08-22T02:35:59.938Z",
+      "requestIds": {
+        "auth": "4cfd7bd0-8f4e-95a3-badd-6c35651f3fa1",
+        "remediation": "a6a52079-7404-9c0e-9fd5-78a096538363",
+        "readiness": "f1a995c7-b129-9420-b3db-d2a723d6c782"
+      }
+    },
+    {
+      "capturedAt": "2026-08-22T02:36:12.934Z",
+      "requestIds": {
+        "auth": "ef938a40-689f-9316-82de-e7af9fda6c6f",
+        "remediation": "b03d5dd9-96d2-942b-8da9-31073d9f9fd9",
+        "readiness": "0d67a3da-1ebd-916c-bfa1-9b81308493d1"
+      }
+    }
+  ],
+  "identicalAcrossRounds": true,
+  "remediation": {
+    "counts": {
+      "versions": 4,
+      "currentVersions": 3,
+      "nonCurrentVersions": 1,
+      "activePlacements": 4
+    },
+    "coverage": {
+      "candidatePlacements": 4,
+      "eligibleBlockingPlacements": 4,
+      "uncoveredBlockingPlacements": 0,
+      "complete": true
+    },
+    "candidates": [
+      {
+        "assetVersionId": "013cb0de-335b-54ca-86d8-60375e1f092e",
+        "candidateDigest": "8a5765618ca6d00dc489c47fe962f2dbbf9582523e4e7346b5ab33bcaaf5d510",
+        "isCurrentVersion": true,
+        "placementIds": ["c674f49f-1d08-4d81-9f1a-d4d07e2ffa01"]
+      },
+      {
+        "assetVersionId": "7d8e8acc-50d3-5c7e-935b-414f2093defd",
+        "candidateDigest": "b09ec8b232c1584b3303ba0442a6f9f811d705f8e6d3d6d2e10438c20b3455df",
+        "isCurrentVersion": true,
+        "placementIds": ["b59508d3-fb53-59c4-a6d6-d199b5c5c04f"]
+      },
+      {
+        "assetVersionId": "c57d0763-bf92-5cac-ab79-ab7761747dd5",
+        "candidateDigest": "caa83ed85c9ce5372e3ae602c652067b385981f68ff1a34d74d9efc662381680",
+        "isCurrentVersion": true,
+        "placementIds": ["4eedec25-c00d-4d52-be8f-6da287a08332"]
+      },
+      {
+        "assetVersionId": "cc5b4cf7-a8fd-468e-996a-8cd62607428b",
+        "candidateDigest": "48293b48740ce742b0917b92f13490a638fb9b3839adb716e1a79892d58d55b3",
+        "isCurrentVersion": false,
+        "placementIds": ["787b8369-060f-42dc-a385-817eb786498f"]
+      }
+    ]
+  },
+  "readiness": {
+    "mode": "shadow",
+    "releaseReady": false,
+    "switchAuthorized": false,
+    "blockers": ["non-ready-current-media", "non-durable-ready-media"],
+    "migrations": {"required": 6, "verified": 6},
+    "shadowComparison": {"legacyProjects": 6, "graphProjects": 6, "matchingProjects": 6, "mismatchedProjects": 0},
+    "media": {"missing": 2, "placementMissing": 2, "falseReadyCurrentVersions": 1, "falseReadyActivePlacements": 2}
+  },
+  "decision": "TASK7_READ_ONLY_PASS_ARCHIVE_NOT_AUTHORIZED"
+}

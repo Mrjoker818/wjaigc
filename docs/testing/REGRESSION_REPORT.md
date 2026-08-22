@@ -1418,3 +1418,22 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 受影响矩阵通过 `6` 个文件、`108/108`；带隔离 PostgreSQL 的全仓通过 `492/492` 个文件、`3090/3090` 项测试，0 failure、0 skip。
 - TypeScript 通过；ESLint 为 `0 error / 988` 条历史 warning；生产构建完成 `116/116`；保护基线确认 38 个功能完整、25 条精确授权、0 blocker；`git diff --check` 通过。
 - **结论：本地回归通过。** 尚未推送 `main`，未执行云端归档，未切换 `asset-v3`。机器证据：`docs/testing/evidence/s4-bug-014-local-postgres-2026-08-22.json`。
+
+## 2026-08-22 S4-BUG-014 云端只读闭环
+
+- Coze 项目页证明 `HEAD/origin/main=04a7a9104a96ae74325a76776e831c0e567e362b`、`origin/stable=52f7c601ed150769e15d06fb435c6e360e28c9e7`、构建成功、5000 端口 HTTP 200，资产模式保持 `shadow`。
+- Google Chrome 管理员会话连续两轮读取 auth、remediation 和 production readiness；两轮候选 ID、摘要、placement ID、数量与 readiness 子集逐字段完全一致。
+- remediation 为 `4 versions / 4 active placements / 3 current / 1 non-current`，覆盖为 `4/4`、`complete=true`、`uncovered=0`。这直接证明 S4-BUG-014 的非当前坏版本覆盖缺口已在云端关闭。
+- readiness 仍保留 `releaseReady=false`、`switchAuthorized=false`、两个媒体 blocker、迁移 `6/6` 和影子项目 `6/6`；修复没有削弱 doctor 或偷偷启用 `asset-v3`。
+- 新鲜 Console Error/Warning 为 `0/0`。机器证据：`docs/testing/evidence/s4-bug-014-cloud-readonly-2026-08-22.json`，截图同名 `.png`。
+- **结论：Task 7 云端只读验收通过。** 未执行归档 POST；Task 8 仍需管理员针对这 4 个精确候选进行操作时确认。
+
+## 2026-08-22 S4-BUG-014 云端软归档闭环
+
+- 操作前重新确认的候选集与 Task 7 完全一致：`4 versions / 4 active placements / 3 current / 1 non-current`，覆盖 `4/4` 且无未覆盖 blocker。
+- Coze 进程最初继承了缺少 `-5000` 的 `COZE_PROJECT_DOMAIN_DEFAULT`，安全路由按设计两次返回 `403 ADMINISTRATOR_ORIGIN_INVALID`，数据库无写入。修正当前进程的精确预览 origin 后，管理员会话恢复为合法同源写入。
+- 首次归档请求返回 HTTP 200，requestId `12314534-c08e-90b8-ae25-5d3a59de9f0f`，remediationId `remediation_d0af6963-97ed-4ebf-9da3-a5d63dbcf603`，归档 4 个版本与 4 个 placement。
+- 使用相同请求体和幂等键 `4fafacab-7aaa-45e0-a34e-1f1637fec300` 重放，requestId `c473242a-f3c9-95f7-85ee-cc315cc36c53`，返回相同 remediationId、`reused=true`，项目 revision 保持 `5718`。
+- PostgreSQL 只读核验确认 ledger `1`、audit `1`、软删除 placement `4`、不可恢复版本 `4`、版本行保留 `4`；同一时间窗积分与退款事件均为 `0`。未调用供应商、未物理删除媒体。
+- 归档后连续两轮 remediation 均为 `0 candidates / 0 active placements`；readiness 均为 `releaseReady=true`、`switchAuthorized=true`、blockers `[]`，迁移 `6/6`、shadow 对账 `6/6`。运行模式仍为 `shadow`，本任务没有执行模式切换。
+- **结论：S4-BUG-014 云端软归档与幂等回归通过。** 证据：`docs/testing/evidence/s4-bug-014-cloud-archive-2026-08-22.json` 和 `.png`。`asset-v3` 投影、刷新恢复、原图回退与 S3 恢复仍是独立验收项。

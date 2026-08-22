@@ -2228,4 +2228,6 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Approved design | `docs/superpowers/specs/2026-08-22-historical-media-active-placement-coverage-design.md` |
 | 修复 | 候选发现覆盖当前与非当前坏版本；归档前使用 PostgreSQL 全局 advisory 独占门禁，业务写入使用共享门禁；覆盖不完整时失败关闭，终态写入、Canvas 快照、审计和幂等 ledger 保持同一事务边界。 |
 | 本地回归 | 受影响矩阵 `108/108`；带 PostgreSQL 的全仓 `492/492` 文件、`3090/3090` 测试、0 skip；TypeScript、生产构建 `116/116`、保护基线通过；ESLint `0 error / 988` 条历史 warning。 |
-| Status | **本地已关闭 / 云端只读验收待执行 / 云端归档仍需操作时确认。** |
+| 云端只读回归 | Coze exact `04a7a91`；Google Chrome 两轮候选与 readiness 逐字段一致，`4 versions / 4 active placements`，`coverage.complete=true`，`uncoveredBlockingPlacements=0`，Console `0/0`。 |
+| 云端归档回归 | 管理员确认后，对 4 个精确候选执行一次 `archive-unrecoverable`，HTTP 200，归档 `4 versions / 4 placements`；字节级相同请求重放返回相同 remediationId 且 `reused=true`。只读 PostgreSQL 核验为 ledger `1`、audit `1`、trashed placements `4`、unrecoverable versions `4`、保留版本行 `4`、积分/退款事件 `0/0`。归档后两轮候选均为 0，readiness 均无 blocker。 |
+| Status | **CLOSED LOCALLY + COZE CLOUD SOFT-ARCHIVE VERIFIED.** 运行模式仍为 `shadow`，未执行物理删除、供应商任务、扣费、退款或 `asset-v3` 切换。证据：`docs/testing/evidence/s4-bug-014-cloud-archive-2026-08-22.json` 和 `.png`。 |

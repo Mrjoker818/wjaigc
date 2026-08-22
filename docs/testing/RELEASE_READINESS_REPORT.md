@@ -1170,3 +1170,19 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 授权清单现在包含 25 个实际审阅的精确路径，其中新增 `media-health.ts` 与 `recovery-media.ts`；未授权 `src/lib/asset-core/` 或其他宽泛目录。
 - `stable` 前后均为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`；V5.8.8 donor 未改动。
 - **结论：允许建立 `main` 候选并进行云端只读验收，但尚未达到发布通过。** 云端归档 POST、幂等重试、缩略图投影/回退/S3 恢复及 `asset-v3` 切换仍未获验证；归档必须在操作时再次确认。
+
+## 2026-08-22 S4-BUG-014 云端只读发布门禁
+
+- Coze 已精确运行 `main@04a7a9104a96ae74325a76776e831c0e567e362b`，`stable` 未变化，构建与端口健康通过，运行模式为 `shadow`。
+- 管理员 Chrome 两轮只读验收完全一致：`4` 个版本、`4` 个活跃 placement、`coverage.complete=true`、`uncoveredBlockingPlacements=0`；其中明确包含 `1` 个非当前坏版本。
+- readiness 保持 `releaseReady=false`、`switchAuthorized=false`，迁移和影子对账均为 `6/6`，媒体 blocker 未被隐藏；Console Error/Warning 为 `0/0`。
+- **结论：Task 7 通过，但整体仍不具备发布通过条件。** 必须先获得操作时确认，执行一次受控软归档和同 key 幂等重试，再验证 doctor、缩略图投影、刷新恢复、原图回退和 S3 恢复；当前禁止切换 `asset-v3`。
+
+## 2026-08-22 S4-BUG-014 软归档发布门禁
+
+- 管理员已对 Task 7 的 4 个精确候选授权软归档。首次请求成功归档 `4 versions / 4 placements`，同 key 字节级重放复用同一 remediationId；数据库只存在 1 条 ledger 与 1 条 audit。
+- 四个版本行均保留并标记不可恢复，四个 placement 为软删除；积分和退款事件均为 0，未创建供应商任务，未发生物理删除。
+- 归档后两轮 readiness 均为 `releaseReady=true`、`switchAuthorized=true`、blockers `[]`；候选发现均为 0，迁移和 shadow 项目对账均为 `6/6`。
+- Coze 当前进程的管理员 origin 已纠正为带 `-5000` 的精确预览域名，但项目级持久化环境变量仍需在 Coze 设置中修正；仅写 `.env.local` 无法覆盖继承的进程环境。该项属于部署配置风险。
+- Coze 工作区存在空提交 `7912fd92948dce96852b6ba57046391ff2386932`，其 tree 与 `origin/main@04a7a9104a96ae74325a76776e831c0e567e362b` 完全一致，不得推送；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- **结论：历史媒体软归档门禁通过，但本任务没有启用 `asset-v3`。** 下一独立发布门禁仍是受控的缩略图投影、刷新恢复、原图回退、S3 恢复和回退验证；正式 V5.8.8 选择性吸收可按既定顺序从 `V588-UI-001` 开始，不得跳到供应商或覆盖当前控制器。

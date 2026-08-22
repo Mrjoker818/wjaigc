@@ -1070,8 +1070,20 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 项目 | 状态 | 关闭条件 |
 |---|---|---|
 | 精确源码授权 | 本地已验证 | 25 条精确路径来源验证和实际保护门禁均通过；禁止扩大为目录授权。 |
-| `main` 集成与 Coze 精确 SHA | 未验证 | 在干净 release worktree 重跑全门禁，普通 fast-forward 推送 `main`，证明 Coze 拉取精确 SHA。 |
-| 云端只读候选稳定性 | 未验证 | 连续两轮读取 remediation、production-readiness、auth/me，证明候选摘要、placement 数量与 coverage 稳定。 |
+| `main` 集成与 Coze 精确 SHA | 已验证 | 干净 release worktree 全门禁通过；GitHub 和 Coze 项目页均为 `04a7a9104a96ae74325a76776e831c0e567e362b`，`stable` 未变化。 |
+| 云端只读候选稳定性 | 已验证 | Chrome 两轮逐字段一致：`4 versions / 4 placements`，`coverage.complete=true`，`uncovered=0`，readiness 保持 fail-closed。 |
 | 云端归档 | 未执行，需操作时确认 | 只读候选对齐后，由管理员确认精确候选集，再执行一次 POST。 |
 | 云端幂等重试 | 未验证 | 使用同一幂等键重放，证明同一 remediationId、单一 ledger/audit 且无重复变更。 |
 | 缩略图与 `asset-v3` | 阻塞 | 保持 `shadow`；历史 blocker 关闭后仍需验证缩略图投影、刷新恢复、原图回退和 S3 恢复，doctor 授权前不得切换。 |
+
+## 2026-08-22 S4-BUG-014 软归档后的未验证项
+
+| 项目 | 状态 | 关闭条件 |
+|---|---|---|
+| 云端软归档 | 已验证 | 4 个版本和 4 个 placement 完成软归档；版本行保留，无物理删除、供应商调用或账务事件。 |
+| 云端幂等重试 | 已验证 | 同一请求体与幂等键返回相同 remediationId，`reused=true`；ledger/audit 均为 1。 |
+| 归档后候选与 readiness | 已验证 | 连续两轮候选均为 0；`releaseReady=true`、`switchAuthorized=true`、blocker 为空，迁移与 shadow 对账均为 `6/6`。 |
+| `asset-v3` 投影与回退 | 未验证，未切换 | 在保持可回退的受控窗口验证缩略图投影、刷新恢复、原图回退、S3 恢复与回退；本次授权不包含模式切换。 |
+| Coze 管理员 origin 持久化 | 待配置 | 在项目级环境变量中写入带 `-5000` 的精确预览 origin，并在正常重启后读取实际进程环境和执行管理员只读探针；`.env.local` 不能替代此项。 |
+| Coze 本地空提交 | 待自然对齐 | `7912fd9` 不含文件变化且 tree 与 `origin/main@04a7a91` 相同，不推送；后续拉取新的 `main` 文档提交时自然对齐。 |
+| 正式 V5.8.8 吸收 | 可开始首项 | 严格从 `V588-UI-001` 开始，donor 只读，先 RED，再做单一叶组件最小接入和完整回归。 |

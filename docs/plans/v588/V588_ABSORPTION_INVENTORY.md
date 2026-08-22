@@ -176,4 +176,15 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - PostgreSQL RED 确认非当前坏版本上的活动 placement 会被旧发现逻辑漏掉；最小修复保持现有 Asset/Version/Placement 架构，不复制 V5.8.8 媒体子系统。
 - 保护门禁进一步发现 `media-health.ts` 与 `recovery-media.ts` 是同一受审实现提交的必要改动；授权清单从 23 条纠正为 25 条精确路径，仍无任何目录级授权。
 - 最新本地证据：受影响 `108/108`，带 PostgreSQL 的全仓 `3090/3090` 且 0 skip，TypeScript、构建 `116/116`、保护基线与空白检查通过，ESLint `0 error / 988` 条历史 warning。
-- **状态：ADMIN-003 本地实现与门禁通过 / 云端只读验收待执行。** 本结果不授权归档 POST 或 `asset-v3`；完成云端步骤前不得启动 `V588-UI-001`，也不得进入供应商适配。
+- GitHub 与 Coze 项目页均证明精确候选为 `main@04a7a9104a96ae74325a76776e831c0e567e362b`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`、donor 和 `shadow` 未变化。
+- 已登录 Google Chrome 连续两轮只读结果逐字段一致：`4` 个坏版本、`4` 个活跃 placement、其中 `1` 个非当前版本；`coverage.complete=true`、`uncoveredBlockingPlacements=0`。
+- readiness 仍为 `releaseReady=false`、`switchAuthorized=false`，保留 `non-ready-current-media` 与 `non-durable-ready-media` blocker；Console Error/Warning 为 `0/0`。
+- **状态：ADMIN-003 本地、main 与云端只读验收通过 / 云端归档仍需操作时确认。** 证据：`docs/testing/evidence/s4-bug-014-cloud-readonly-2026-08-22.json` 和 `.png`。本结果不授权归档 POST 或 `asset-v3`，也不允许提前启动 `V588-UI-001`。
+
+### V588-ADMIN-003 - 2026-08-22 云端软归档闭环
+
+- 管理员对 Task 7 的 4 个精确候选完成操作时确认；首次归档和同 key 幂等重放均为 HTTP 200，重放复用同一 remediationId。
+- 数据库只读核验：ledger `1`、audit `1`、软删除 placement `4`、不可恢复版本 `4`、版本行保留 `4`，积分/退款 `0/0`；无物理删除或供应商任务。
+- 归档后连续两轮 remediation 均为 0，readiness 均为 `releaseReady=true`、`switchAuthorized=true`、blocker 为空；迁移 `6/6`、shadow 对账 `6/6`。
+- 当前仍为 `shadow`，没有执行 `asset-v3`。其投影、刷新恢复、原图回退、S3 恢复和回退属于独立门禁，不能从 doctor 授权状态推断为已经通过。
+- **状态：ADMIN-003 历史媒体归档闭环完成。** 正式 donor 吸收下一唯一项恢复为 `V588-UI-001`；只提取叶级 UI 责任，保留当前 Stage 3/4 控制器、任务、资产和事件顺序。证据：`docs/testing/evidence/s4-bug-014-cloud-archive-2026-08-22.json` 和 `.png`。
