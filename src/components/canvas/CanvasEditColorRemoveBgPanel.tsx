@@ -79,7 +79,11 @@ export function CanvasEditColorRemoveBgPanel({
             <div
               data-floating-panel="color-adjust"
               className="fixed bg-[#1a1a1a] text-white rounded-2xl shadow-2xl overflow-hidden z-[180] border border-[#333] flex flex-col motion-reduce:transition-none"
-              style={{ top: '120px', right: 'max(24px, env(safe-area-inset-right))', width: '360px' }}
+              style={{
+                top: '120px',
+                right: 'max(24px, env(safe-area-inset-right))',
+                width: 'min(360px, calc(100vw - 48px))',
+              }}
               onMouseDown={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-5 py-3 border-b border-[#333] bg-[#111]">
@@ -195,7 +199,7 @@ export function CanvasEditColorRemoveBgPanel({
           return (
             <div data-floating-panel="remove-bg" className="fixed inset-0 z-[200] flex items-center justify-center" onMouseDown={(e) => e.stopPropagation()}>
               <div className="absolute inset-0 bg-black/40" onClick={() => setShowRemoveBgPicker(false)} />
-              <div className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#444]'}`} style={{ width: 420, maxHeight: '80vh' }}>
+              <div className={`relative rounded-2xl border shadow-2xl overflow-hidden motion-reduce:transition-none ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#444]'}`} style={{ width: 420, maxHeight: '80vh' }}>
                 {/* Title */}
                 <div className={`flex items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#444] bg-[#222]'}`}>
                   <div className="flex items-center gap-2">

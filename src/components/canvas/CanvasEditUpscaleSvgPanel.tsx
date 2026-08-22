@@ -141,13 +141,13 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
 
           return (
             <div
-              className="absolute z-[80] pointer-events-auto motion-reduce:transition-none"
+              className="absolute z-[80] pointer-events-auto motion-reduce:transition-none max-[640px]:!fixed max-[640px]:!inset-x-3 max-[640px]:!bottom-20 max-[640px]:!top-auto max-[640px]:!transform-none"
               data-toolbar="edit-mode"
               style={{ left: panelX, top: panelY, transform: 'translate(-50%, -100%)' }}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              <div className={`${panelBaseClass} gap-2`} onMouseDown={(e) => e.stopPropagation()}>
+              <div className={`${panelBaseClass} gap-2 max-[640px]:w-full max-[640px]:flex-wrap max-[640px]:justify-center`} onMouseDown={(e) => e.stopPropagation()}>
                 <ZoomIn size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                 <span className={panelLabelClass}>HD 高清放大</span>
                 <div className={panelDividerClass} />

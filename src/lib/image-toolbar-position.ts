@@ -36,9 +36,15 @@ export function getConstrainedImageToolbarPosition({
   const screenWidth = image.width * zoom;
   const screenHeight = image.height * zoom;
   const preferredLeft = screenX + screenWidth / 2;
-  const availableRight = Math.max(safeMargin, viewport.width - Math.max(0, occupiedRight) - safeMargin);
+  const normalizedToolbarWidth = Math.max(0, toolbar.width);
+  const maxReservableRight = Math.max(
+    0,
+    viewport.width - safeMargin * 2 - normalizedToolbarWidth,
+  );
+  const reservedRight = Math.min(Math.max(0, occupiedRight), maxReservableRight);
+  const availableRight = Math.max(safeMargin, viewport.width - reservedRight - safeMargin);
   const effectiveToolbarWidth = Math.min(
-    Math.max(0, toolbar.width),
+    normalizedToolbarWidth,
     Math.max(0, availableRight - safeMargin),
   );
   const halfWidth = effectiveToolbarWidth / 2;

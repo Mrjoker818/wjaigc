@@ -56,4 +56,18 @@ describe('getConstrainedImageToolbarPosition', () => {
     expect(position.top).toBe(248);
     expect(position.transform).toBe('translate(-50%, 0)');
   });
+
+  it('does not reserve a side panel wider than a mobile viewport', () => {
+    const position = getConstrainedImageToolbarPosition({
+      image: { x: 200, y: 260, width: 100, height: 100 },
+      zoom: 1,
+      offset: { x: 0, y: 0 },
+      toolbar: { width: 343, height: 44 },
+      viewport: { width: 375, height: 812 },
+      occupiedRight: 480,
+    });
+
+    expect(position.left).toBe(359);
+    expect(position.transform).toBe('translate(-100%, -100%)');
+  });
 });

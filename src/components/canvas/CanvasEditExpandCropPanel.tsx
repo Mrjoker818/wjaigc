@@ -374,14 +374,18 @@ export function CanvasEditExpandCropPanel({
           return (
             <div
               data-floating-panel="multi-angle"
-              className="absolute z-50 pointer-events-auto"
+              className="absolute z-50 pointer-events-auto motion-reduce:transition-none max-[640px]:!fixed max-[640px]:!inset-x-3 max-[640px]:!bottom-20 max-[640px]:!top-auto max-[640px]:!transform-none"
               data-toolbar="edit-mode"
               style={{ left: panelX, top: panelY, transform: 'translate(-50%, -100%)' }}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
               {editMode === 'expand' && (
-                <div className={panelBaseClass} style={{ minWidth: 360 }} onMouseDown={(e) => e.stopPropagation()}>
+                <div
+                  className={`${panelBaseClass} max-[640px]:w-full max-[640px]:flex-wrap max-[640px]:justify-center`}
+                  style={{ minWidth: 'min(360px, calc(100vw - 24px))' }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
                   <Expand size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                   <span className={panelLabelClass}>扩图</span>
                   <div className={panelDividerClass} />
@@ -460,7 +464,11 @@ export function CanvasEditExpandCropPanel({
 
               {/* CROP toolbar */}
               {editMode === 'crop' && (
-                <div className={panelBaseClass} style={{ minWidth: 480 }} onMouseDown={(e) => e.stopPropagation()}>
+                <div
+                  className={`${panelBaseClass} max-[640px]:w-full max-[640px]:flex-wrap max-[640px]:justify-center`}
+                  style={{ minWidth: 'min(480px, calc(100vw - 24px))' }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
                   <Scissors size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                   <span className={panelLabelClass}>裁切</span>
                   <div className={panelDividerClass} />
@@ -548,4 +556,3 @@ export function CanvasEditExpandCropPanel({
     </>
   );
 }
-
