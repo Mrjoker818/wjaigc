@@ -201,7 +201,7 @@ describe('CanvasMinimap interaction surface', () => {
 
     const darkRoot = container.querySelector('[data-canvas-minimap]');
     expect(darkRoot?.getAttribute('data-theme')).toBe('dark');
-    expect(screen.getByText('画布为空')).toBeTruthy();
+    expect(screen.getByText('暂无画布内容')).toBeTruthy();
     expect(container.querySelectorAll('img')).toHaveLength(0);
     expect(container.querySelectorAll('[src]')).toHaveLength(0);
     expect(fetchSpy).not.toHaveBeenCalled();

@@ -183,3 +183,63 @@ Received: "<div class="w-px h-5 ml-1.5 separator-theme"></div><button type="butt
 
 - 由于 Task 2 的生产组件仍不存在，几何、交互、主题和性能测试在模块解析阶段无法执行；这是本任务预期的唯一阻塞项。
 - 父画布和工具簇尚未接入小地图，因此对应 RED 断言也保持失败，供 Task 2/3 转绿时使用。
+
+## V588-UI-003 Task 1 RED Contract Fixes (2026-08-22)
+
+### Changed Files
+
+- `src/__tests__/components/canvas-minimap.test.tsx` — changed the empty-state assertion to the exact Task 2 copy `暂无画布内容`.
+- `src/__tests__/components/canvas-minimap-wiring.test.ts` — replaced the unconstrained `toggle-minimap` presence check with a source regex requiring the entry to be inside `...(minimapAvailable ? [{ id: 'toggle-minimap', ...`.
+- `.superpowers/sdd/v588-ui-003-task-1-report.md` — appended this verification record.
+
+No production files were created or modified. No push was performed.
+
+### Exact RED Command
+
+```powershell
+pnpm exec vitest run src/__tests__/components/canvas-minimap.test.tsx src/__tests__/components/canvas-minimap-wiring.test.ts src/__tests__/components/canvas-zoom-cluster.test.tsx
+```
+
+### Exact RED Output
+
+```text
+EXIT_CODE=1
+
+ RUN  v3.2.4 J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s4-release
+
+ ❯ src/__tests__/components/canvas-zoom-cluster.test.tsx (3 tests | 2 failed)
+   × CanvasZoomCluster > preserves every current auxiliary-toolbar command and zoom readout
+     → expected ... to contain 'title="打开小地图"'
+   × CanvasZoomCluster > projects active panel state and generation progress without owning controller state
+     → expected ... to contain 'title="关闭小地图"'
+   ✓ CanvasZoomCluster > hides the minimap command when the viewport is unavailable
+ ❯ src/__tests__/components/canvas-minimap-wiring.test.ts (1 test | 1 failed)
+   × V588-UI-003 canvas minimap wiring > requires the fixed leaf API and parent-owned minimap visibility contract
+     → expected false to be true // Object.is equality
+
+ FAIL  src/__tests__/components/canvas-minimap.test.tsx
+ Error: Failed to resolve import "@/components/canvas/CanvasMinimap" from "src/__tests__/components/canvas-minimap.test.tsx". Does the file exist?
+
+ FAIL  src/__tests__/components/canvas-minimap-wiring.test.ts
+ AssertionError: expected false to be true // Object.is equality
+ at src/__tests__/components/canvas-minimap-wiring.test.ts:11:39
+   expect(existsSync(componentPath)).toBe(true)
+
+ Test Files  3 failed (3)
+ Tests  3 failed | 1 passed (4)
+ Start at 16:43:46
+ Duration 3.22s (transform 71ms, setup 0ms, collect 222ms, tests 59ms, environment 1.54s, prepare 500ms)
+```
+
+### Self-Review
+
+- Confirmed the empty-state assertion is the exact `暂无画布内容` string.
+- Confirmed the wiring contract requires `minimapAvailable` in the conditional spread immediately before the `toggle-minimap` command object; a standalone `id` occurrence cannot satisfy it.
+- Confirmed the focused run remains RED only on absent production minimap behavior/wiring: missing `CanvasMinimap` import/component, missing open/close toolbar titles, and the expected first existence assertion.
+- Confirmed no production files changed and no unrelated tests or APIs were edited.
+- Confirmed the working tree diff contains only the two requested test changes plus this report append; unrelated pre-existing untracked artifacts were left untouched.
+
+### Concerns
+
+- The component test cannot execute until Task 2 adds `src/components/canvas/CanvasMinimap.tsx`.
+- The toolbar and parent wiring failures remain intentionally reserved for the production implementation tasks.

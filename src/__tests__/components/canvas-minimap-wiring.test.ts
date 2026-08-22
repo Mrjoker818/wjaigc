@@ -27,7 +27,7 @@ describe('V588-UI-003 canvas minimap wiring', () => {
     expect(canvas).toContain('const [minimapOpen, setMinimapOpen] = useState(false);');
     expect(canvas).toContain('const minimapAvailable = isCanvasMinimapAvailable(');
     expect(canvas).toMatch(/const minimapItems = useMemo(?:<CanvasMinimapItem\[\]>)?\(\(\) => \{\s*if \(!minimapOpen \|\| !minimapAvailable\) return \[\];/);
-    expect(canvas).toContain("id: 'toggle-minimap'");
+    expect(canvas).toMatch(/\.\.\.\s*\(\s*minimapAvailable\s*\?\s*\[\{\s*id:\s*['"]toggle-minimap['"]\s*,/);
     expect(canvas).toMatch(/\{minimapOpen && minimapAvailable && \(\s*<CanvasMinimap/);
     expect(canvas).toContain('onNavigate={handleMinimapNavigate}');
     expect(canvas).toContain('onClose={toggleCanvasMinimap}');
