@@ -205,6 +205,23 @@ describe('CanvasPersistenceScheduler', () => {
     expect(writer).toHaveBeenCalledTimes(1);
   });
 
+  it('does not write unchanged canvas content when only the server base revision advances', async () => {
+    const writer = vi.fn(async () => undefined);
+    const scheduler = new CanvasPersistenceScheduler({ writer });
+    const unchanged = snapshot(1);
+
+    scheduler.schedule(unchanged);
+    await scheduler.flush('idle');
+    scheduler.schedule({
+      ...unchanged,
+      baseProjectRevision: unchanged.baseProjectRevision + 1,
+      revision: 2,
+    });
+    await scheduler.flush('idle');
+
+    expect(writer).toHaveBeenCalledTimes(1);
+  });
+
   it('writes a later immediate revision when content cycles back to a server-flushed signature', async () => {
     const writer = vi.fn(async (
       _snapshot: CanvasPreparedPersistenceSnapshot,

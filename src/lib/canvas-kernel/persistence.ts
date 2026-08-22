@@ -67,7 +67,6 @@ export function prepareCanvasPersistenceSnapshot(
   const signature = JSON.stringify({
     ownerId: snapshot.ownerId,
     projectId: snapshot.projectId,
-    baseProjectRevision: snapshot.baseProjectRevision,
     images: snapshot.images,
     metadata: snapshot.metadata,
   });
