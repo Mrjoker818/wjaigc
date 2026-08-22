@@ -2231,3 +2231,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 云端只读回归 | Coze exact `04a7a91`；Google Chrome 两轮候选与 readiness 逐字段一致，`4 versions / 4 active placements`，`coverage.complete=true`，`uncoveredBlockingPlacements=0`，Console `0/0`。 |
 | 云端归档回归 | 管理员确认后，对 4 个精确候选执行一次 `archive-unrecoverable`，HTTP 200，归档 `4 versions / 4 placements`；字节级相同请求重放返回相同 remediationId 且 `reused=true`。只读 PostgreSQL 核验为 ledger `1`、audit `1`、trashed placements `4`、unrecoverable versions `4`、保留版本行 `4`、积分/退款事件 `0/0`。归档后两轮候选均为 0，readiness 均无 blocker。 |
 | Status | **CLOSED LOCALLY + COZE CLOUD SOFT-ARCHIVE VERIFIED.** 运行模式仍为 `shadow`，未执行物理删除、供应商任务、扣费、退款或 `asset-v3` 切换。证据：`docs/testing/evidence/s4-bug-014-cloud-archive-2026-08-22.json` 和 `.png`。 |
+
+### S4-BUG-015: 未变化的大型画布仍逐节点重建资产图，导致同步超时与 revision 冲突循环
+
+| Field | Detail |
+|---|---|
+| Severity | P1 项目持久化、画布稳定性与大项目可用性 |
+| Environment | Coze exact `main@ff9b001d7944a966dfe62a4fc82d88087bac6e76`，`shadow` 模式，已登录 Google Chrome，300 节点隔离验收项目，2026-08-22 |
+| Reproduction | 打开 300 节点项目并保持页面活动；观察自动保存连续提交完整项目快照。客户端约 8 秒后报告 `TimeoutError: signal timed out`，服务端仍可能继续完成写入；随后旧 revision 请求返回 409，并再次触发同步。 |
+| Expected | 未变化的画布应在一个批量完整性校验后复用既有 Asset/Version/Placement 映射；同步在客户端边界内完成，不产生超时、409 循环或重复逐节点数据库工作。 |
+| Actual | `executeCanvasProjectSync()` 对每个项目、每张图片都调用 `migrateLegacyProjectOnWriteInTransaction()`；446 张账户图片需要大量逐行锁定和 SQL 往返。客户端超时后未获得已提交的新 revision，形成超时、旧 revision 冲突和重复同步。 |
+| Root cause | 同步入口没有识别“项目资产图快照未变化且映射仍完整”的路径。仅增加超时时间会掩盖问题，并不能消除重复数据库工作和 revision 竞态。 |
+| TDD/fix | 首个 RED 证明未变化的 300 节点项目仍调用逐节点 `syncProject`；第二个安全 RED 证明不能仅靠 JSON 相等跳过损坏的数据库图。修复在同一事务内读取上一版快照，要求名称和规范化图片图完全一致、当前图片均有完整映射，并通过一次 PostgreSQL 批量锁定/完整性校验后才复用映射；缺失、损坏、改名或变化项目继续走原严格协调路径。项目删除协调、两次快照写入和 revision CAS 保持不变。 |
+| Local regression | 聚焦同步矩阵 `103/103`；全仓 Vitest `499 files / 3142 tests`，其中 `481 files / 3037 tests` 通过、`18 files / 105 tests` 因未配置 `POSTGRES_TEST_DATABASE_URL` 明确跳过；TypeScript 通过，ESLint `0 error / 988` 条历史 warning，生产构建 `116/116` 通过。 |
+| Status | **FIXED LOCALLY / EXACT-SHA COZE GOOGLE CHROME RETEST REQUIRED.** 云端必须复验 100/300 节点拖动与保存，并在至少 35 秒观察窗口内确认 `/api/user-data/sync` 无超时、无 409 循环、Console `0/0`。 |

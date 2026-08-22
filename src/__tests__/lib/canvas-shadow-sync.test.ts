@@ -416,6 +416,90 @@ describe('continuous canvas shadow synchronization', () => {
     ]);
   });
 
+  it('skips unchanged 300-node graph reconciliation while retaining complete mappings', async () => {
+    const images = Array.from({ length: 300 }, (_, index) => image(`node-${index}`, {
+      assetId: `asset-${index}`,
+      assetVersionId: `version-${index}`,
+      placementId: `placement-${index}`,
+      x: 80 + (index % 20) * 132,
+      y: 80 + Math.floor(index / 20) * 132,
+    }));
+    const unchangedProject = project(images);
+    const syncProject = vi.fn(async () => {
+      throw new Error('unchanged graph must not be reconciled node by node');
+    });
+    const writeProjects = vi.fn(async () => undefined);
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        return callback({
+          claimRevision: async expectedRevision => expectedRevision + 1,
+          readProjects: async () => structuredClone([unchangedProject]),
+          verifyProjectMappings: async () => true,
+          writeProjects,
+          syncProject,
+          reconcileDeletedProjects: async () => undefined,
+        });
+      },
+    };
+
+    const result = await executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [structuredClone(unchangedProject)],
+      expectedRevision: 7,
+    }, storage);
+
+    expect(syncProject).not.toHaveBeenCalled();
+    expect(writeProjects).toHaveBeenCalledTimes(2);
+    expect(Object.keys(result.mappings['project-1'] ?? {})).toHaveLength(300);
+    expect(result.mappings['project-1']?.['node-299']).toEqual({
+      assetId: 'asset-299',
+      versionId: 'version-299',
+      placementId: 'placement-299',
+    });
+  });
+
+  it('reconciles an unchanged snapshot when the batch graph integrity check fails', async () => {
+    const retained = image('retained', {
+      assetId: 'asset-retained',
+      assetVersionId: 'version-retained',
+      placementId: 'placement-retained',
+    });
+    const unchangedProject = project([retained]);
+    const syncProject = vi.fn(async (nextProject: Project) => ({
+      project: nextProject,
+      sourceSchemaVersion: 3 as const,
+      migrated: false,
+      reused: true,
+      mappings: {
+        retained: {
+          assetId: 'asset-retained',
+          versionId: 'version-retained',
+          placementId: 'placement-retained',
+        },
+      },
+    }));
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        return callback({
+          claimRevision: async expectedRevision => expectedRevision + 1,
+          readProjects: async () => structuredClone([unchangedProject]),
+          verifyProjectMappings: async () => false,
+          writeProjects: async () => undefined,
+          syncProject,
+          reconcileDeletedProjects: async () => undefined,
+        });
+      },
+    };
+
+    await executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [structuredClone(unchangedProject)],
+      expectedRevision: 11,
+    }, storage);
+
+    expect(syncProject).toHaveBeenCalledOnce();
+  });
+
   it('uses asset-version-placement lock order shared with task projection', () => {
     const migrationSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),

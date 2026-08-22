@@ -29,6 +29,11 @@ export {
 
 export interface CanvasProjectSyncTransaction {
   claimRevision?(expectedRevision: number): Promise<number>;
+  readProjects?(): Promise<Project[]>;
+  verifyProjectMappings?(
+    project: Project,
+    mappings: Record<string, LegacyImageMapping>,
+  ): Promise<boolean>;
   writeProjects(projects: Project[]): Promise<void>;
   syncProject(project: Project): Promise<MigrationResult>;
   reconcileDeletedProjects?(activeProjectIds: string[]): Promise<void>;
@@ -143,6 +148,104 @@ function applyMappings(projects: Project[], mappings: AssetGraphMappings): Proje
   }));
 }
 
+function canonicalizeGraphSnapshot(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeGraphSnapshot);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalizeGraphSnapshot(entry)]),
+    );
+  }
+  return value;
+}
+
+function completeProjectMappings(project: Project): Record<string, LegacyImageMapping> | null {
+  const mappings: Record<string, LegacyImageMapping> = {};
+  for (const image of selectCanvasImagesForAssetGraph(project.canvasImages)) {
+    if (!image.assetId || !image.assetVersionId || !image.placementId) return null;
+    mappings[image.id] = {
+      assetId: image.assetId,
+      versionId: image.assetVersionId,
+      placementId: image.placementId,
+    };
+  }
+  return mappings;
+}
+
+function hasUnchangedProjectGraph(previous: Project, next: Project): boolean {
+  if (previous.name !== next.name) return false;
+  const previousImages = selectCanvasImagesForAssetGraph(previous.canvasImages);
+  const nextImages = selectCanvasImagesForAssetGraph(next.canvasImages);
+  return JSON.stringify(canonicalizeGraphSnapshot(previousImages))
+    === JSON.stringify(canonicalizeGraphSnapshot(nextImages));
+}
+
+async function readProjects(client: PoolClient, actorUserId: string): Promise<Project[]> {
+  const result = await client.query<ProjectRevisionRow>(
+    `SELECT data_value
+       FROM wujie_user_data
+      WHERE user_id = $1 AND data_key = 'projects'
+      FOR UPDATE`,
+    [actorUserId],
+  );
+  let value = result.rows[0]?.data_value;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(value) ? value as Project[] : [];
+}
+
+interface ProjectMappingRow extends QueryResultRow {
+  entity_id: string;
+  asset_id: string;
+  asset_version_id: string;
+  placement_id: string;
+}
+
+async function verifyProjectMappings(
+  client: PoolClient,
+  actorUserId: string,
+  project: Project,
+  mappings: Record<string, LegacyImageMapping>,
+): Promise<boolean> {
+  const result = await client.query<ProjectMappingRow>(
+    `SELECT placement.entity_id, placement.asset_id, placement.asset_version_id,
+            placement.id AS placement_id
+       FROM wujie_workspace_placements placement
+       JOIN wujie_assets asset
+         ON asset.id = placement.asset_id
+        AND asset.owner_id = placement.owner_id
+        AND asset.project_id = placement.project_id
+        AND asset.status = 'active'
+       JOIN wujie_asset_versions version
+         ON version.id = placement.asset_version_id
+        AND version.asset_id = placement.asset_id
+        AND version.owner_id = placement.owner_id
+        AND version.project_id = placement.project_id
+      WHERE placement.owner_id = $1 AND placement.project_id = $2
+        AND placement.workspace_kind = 'canvas'
+        AND placement.workspace_id IN ($2, 'canvas:' || $2)
+        AND placement.entity_type = 'canvas-image'
+        AND placement.status = 'active'
+      ORDER BY asset.id, version.id, placement.id
+      FOR UPDATE OF asset, version, placement`,
+    [actorUserId, project.id],
+  );
+  if (result.rows.length !== Object.keys(mappings).length) return false;
+  const rowsByEntity = new Map(result.rows.map((row) => [row.entity_id, row]));
+  return Object.entries(mappings).every(([entityId, mapping]) => {
+    const row = rowsByEntity.get(entityId);
+    return row?.asset_id === mapping.assetId
+      && row.asset_version_id === mapping.versionId
+      && row.placement_id === mapping.placementId;
+  });
+}
+
 async function writeProjects(client: PoolClient, actorUserId: string, projects: Project[]): Promise<void> {
   await client.query(
     `INSERT INTO wujie_user_data (user_id, data_key, data_value, updated_at)
@@ -245,6 +348,13 @@ class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
       await lockAssetGraphWriteGate(client, 'shared');
       const result = await callback({
         claimRevision: (expectedRevision) => claimProjectRevision(client, this.actorUserId, expectedRevision),
+        readProjects: () => readProjects(client, this.actorUserId),
+        verifyProjectMappings: (project, mappings) => verifyProjectMappings(
+          client,
+          this.actorUserId,
+          project,
+          mappings,
+        ),
         writeProjects: (projects) => writeProjects(client, this.actorUserId, projects),
         syncProject: (project) => migrateLegacyProjectOnWriteInTransaction(client, {
           actorUserId: this.actorUserId,
@@ -280,9 +390,26 @@ export async function executeCanvasProjectSync(
       }
       revision = await transaction.claimRevision(input.expectedRevision);
     }
+    const previousProjects = transaction.readProjects
+      ? await transaction.readProjects()
+      : [];
+    const previousById = new Map(previousProjects.map((project) => [project.id, project]));
     await transaction.writeProjects(persistedProjects);
     const mappings: AssetGraphMappings = {};
     for (const project of persistedProjects) {
+      const previous = previousById.get(project.id);
+      const reusableMappings = completeProjectMappings(project);
+      const graphIsUnchanged = previous
+        && reusableMappings
+        && hasUnchangedProjectGraph(previous, project);
+      const mappingsAreCurrent = graphIsUnchanged
+        && transaction.verifyProjectMappings
+        ? await transaction.verifyProjectMappings(project, reusableMappings)
+        : false;
+      if (mappingsAreCurrent && reusableMappings) {
+        mappings[project.id] = reusableMappings;
+        continue;
+      }
       const result = await transaction.syncProject(project);
       mappings[project.id] = result.mappings;
     }
