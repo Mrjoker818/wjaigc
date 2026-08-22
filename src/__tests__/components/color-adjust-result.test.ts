@@ -3,14 +3,18 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/components/infinite-canvas.tsx'), 'utf8');
+const panelSource = readFileSync(
+  resolve(process.cwd(), 'src/components/canvas/CanvasEditColorRemoveBgPanel.tsx'),
+  'utf8',
+);
 
 describe('color adjustment canvas result', () => {
   it('uses the full documented hue range', () => {
-    expect(source).toMatch(/min=\{-180\}\s+max=\{180\}\s+value=\{colorHue\}/);
+    expect(panelSource).toMatch(/min=\{-180\}\s+max=\{180\}\s+value=\{colorHue\}/);
   });
 
   it('labels the CSS rendering as an approximate preview', () => {
-    expect(source).toContain('近似预览');
+    expect(panelSource).toContain('近似预览');
   });
 
   it('creates a separate processing result instead of replacing the source image', () => {
@@ -36,9 +40,9 @@ describe('color adjustment canvas result', () => {
   });
 
   it('places the panel above workspace sidebars with a viewport-safe right edge', () => {
-    const panelStart = source.indexOf('{/* ====== COLOR ADJUST PANEL');
-    const panelEnd = source.indexOf('{/* ====== REMOVE BACKGROUND MODEL PICKER', panelStart);
-    const panel = source.slice(panelStart, panelEnd);
+    const panelStart = panelSource.indexOf('{/* ====== COLOR ADJUST PANEL');
+    const panelEnd = panelSource.indexOf('{/* ====== REMOVE BACKGROUND MODEL PICKER', panelStart);
+    const panel = panelSource.slice(panelStart, panelEnd);
 
     expect(panel).toContain('z-[180]');
     expect(panel).toContain("right: 'max(24px, env(safe-area-inset-right))'");

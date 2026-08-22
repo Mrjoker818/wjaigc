@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const routeSource = readFileSync(resolve(process.cwd(), 'src/app/api/image-edit/route.ts'), 'utf8');
 const scriptSource = readFileSync(resolve(process.cwd(), 'scripts/rembg_remove_background.py'), 'utf8');
 const canvasSource = readFileSync(resolve(process.cwd(), 'src/components/infinite-canvas.tsx'), 'utf8');
+const removeBgPanelSource = readFileSync(resolve(process.cwd(), 'src/components/canvas/CanvasEditColorRemoveBgPanel.tsx'), 'utf8');
 const healthSource = readFileSync(resolve(process.cwd(), 'src/app/api/image/health/route.ts'), 'utf8');
 
 describe('CPU rembg remove-background wiring', () => {
@@ -26,10 +27,10 @@ describe('CPU rembg remove-background wiring', () => {
 
   it('offers the lite default and full CPU BiRefNet choices in the image toolbar', () => {
     expect(canvasSource).toContain("useState<string>('birefnet-general-lite')");
-    expect(canvasSource).toContain("id: 'birefnet-general-lite'");
-    expect(canvasSource).toContain("id: 'birefnet-general'");
-    expect(canvasSource).toContain("id: 'birefnet-portrait'");
-    expect(canvasSource).not.toContain("id: 'u2net'");
+    expect(removeBgPanelSource).toContain("id: 'birefnet-general-lite'");
+    expect(removeBgPanelSource).toContain("id: 'birefnet-general'");
+    expect(removeBgPanelSource).toContain("id: 'birefnet-portrait'");
+    expect(removeBgPanelSource).not.toContain("id: 'u2net'");
   });
 
   it('reports local erase engines that do not require a downloadable model file', () => {

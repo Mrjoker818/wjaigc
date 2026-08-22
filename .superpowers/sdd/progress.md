@@ -498,3 +498,6 @@ Protected stable branch: read-only and untouched
 - Task 4 已完成 RED -> GREEN：放大/SVG 与擦除/蒙版仅迁移当前 JSX，模型、任务、画布坐标、确认和取消 handler 继续由 `InfiniteCanvas` 持有。
 - 聚焦回归 `9 files / 34 tests` 通过，TypeScript 通过，目标 ESLint 为 `0 errors / 19 historical warnings`，新增 warning `0`，空白检查通过。
 - 当前未推送 `main`、未进入云端；边界总测试只剩调色/去背景与扩展/裁切两个叶保持 RED。下一唯一动作是 Task 5。
+- Task 5 已完成 RED -> GREEN：调色/去背景与扩展/裁切的当前 JSX 已迁入展示叶；模型/引擎列表、透明蒙版选项、裁切矩形和扩展参数保持原样。
+- 既有源合同已改为同时读取父画布与对应叶，避免把展示拆分误判为功能删除；擦除面板新增的 wheel ref 参数经 TypeScript 发现并补入父级注入。
+- 聚焦 `18 files / 69 tests`、TypeScript 和目标 ESLint 通过；ESLint 为 `0 errors / 18 historical warnings`，比拆分前减少一条未使用变量 warning。下一唯一动作是 Task 6 多视口 E2E 门禁。

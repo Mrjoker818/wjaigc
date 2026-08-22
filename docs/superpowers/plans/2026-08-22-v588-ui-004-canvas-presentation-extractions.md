@@ -190,11 +190,11 @@
 - Consumes: 当前调色、去背景、扩展、裁切的精确 state/setter/handler 与画布几何数据。
 - Produces: 两个无副作用展示叶；当前模型、引擎、透明 PNG、蒙版、裁切和扩图参数行为保持不变。
 
-- [ ] **Step 1: 写模式可见性、确认/取消、参数传递、处理态与 reduced-motion RED。**
-- [ ] **Step 2: 运行 RED。**
-- [ ] **Step 3: 机械移动当前 JSX 并接线，不采用 donor 中可能过时的模型/引擎列表。**
-- [ ] **Step 4: 运行新测试、去背景/调色/扩展/裁切既有回归和 TypeScript。**
-- [ ] **Step 5: 提交 `refactor: extract secondary canvas edit panels`。**
+- [x] **Step 1: 写模式可见性、确认/取消、参数传递、处理态与 reduced-motion RED。**
+- [x] **Step 2: 运行 RED。**
+- [x] **Step 3: 机械移动当前 JSX 并接线，不采用 donor 中可能过时的模型/引擎列表。**
+- [x] **Step 4: 运行新测试、去背景/调色/扩展/裁切既有回归和 TypeScript。**
+- [x] **Step 5: 提交 `refactor: extract secondary canvas edit panels`。**
 
 ### Task 6: 桌面/移动端视觉和动作完整性门禁
 

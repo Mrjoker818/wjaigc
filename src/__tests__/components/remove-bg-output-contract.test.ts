@@ -6,6 +6,10 @@ const canvasSource = readFileSync(
   resolve(process.cwd(), 'src/components/infinite-canvas.tsx'),
   'utf8',
 );
+const removeBgPanelSource = readFileSync(
+  resolve(process.cwd(), 'src/components/canvas/CanvasEditColorRemoveBgPanel.tsx'),
+  'utf8',
+);
 
 describe('remove-background canvas output contract', () => {
   it('does not add the black-and-white mask to the canvas by default', () => {
@@ -18,7 +22,7 @@ describe('remove-background canvas output contract', () => {
   });
 
   it('offers an accessible explicit mask-output control', () => {
-    expect(canvasSource).toContain('aria-label="同时将黑白蒙版加入画布"');
-    expect(canvasSource).toContain('checked={addRemoveBgMaskToCanvas}');
+    expect(removeBgPanelSource).toContain('aria-label="同时将黑白蒙版加入画布"');
+    expect(removeBgPanelSource).toContain('checked={addRemoveBgMaskToCanvas}');
   });
 });

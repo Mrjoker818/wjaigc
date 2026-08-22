@@ -46,6 +46,7 @@ export interface CanvasEditEraseMaskPanelProps {
   setEditCanvasPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   editSourceLoadState: 'idle' | 'loading' | 'loaded' | 'error';
   setEditSourceLoadState: React.Dispatch<React.SetStateAction<'idle' | 'loading' | 'loaded' | 'error'>>;
+  bindEditCanvasWheelElement: (element: HTMLDivElement | null) => void;
 }
 
 /** M7-0：擦除/蒙版编辑浮动窗口（机械拆自 infinite-canvas.tsx，零行为变化） */
@@ -81,6 +82,7 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
     setEditCanvasPan,
     editSourceLoadState,
     setEditSourceLoadState,
+    bindEditCanvasWheelElement,
   } = props;
   return (
     <>
