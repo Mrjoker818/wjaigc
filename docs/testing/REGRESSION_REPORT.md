@@ -1455,3 +1455,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 图层打开后版本历史保持关闭；打开版本历史会关闭图层；重新打开图层会关闭版本历史。两个面板都能回到关闭状态。AI 引擎设置显示“放大引擎选择”，并能通过关闭按钮退出。
 - 最终回归时间截点 `2026-08-22T04:31:52.874Z` 后的新鲜 Console Error/Warning 为 `0`，无浏览器原生弹窗。视觉截图确认工具栏未被右侧面板遮挡，也没有错位、裁切或叠加。
 - **结论：V588-UI-001 云端回归通过。** 证据：`docs/testing/evidence/v588-ui-001-cloud-2026-08-22.json` 和 `.png`。
+
+## 2026-08-22 V588-UI-002 命令面板本地回归
+
+- 按 TDD 先得到预期 RED：组件、工具簇入口、父画布接线和输入焦点保护缺失；最小 GREEN 后，聚焦套件为 `3 files / 18 tests` 全部通过。
+- 新组件只负责过滤、焦点、键盘/鼠标交互和渲染；画布状态、视图动作、选择、工具会话及图层/历史互斥仍归当前 `InfiniteCanvas`。
+- 全仓 Vitest 通过 `477 files / 3004 tests`；`18 files / 105 tests` 因 `POSTGRES_TEST_DATABASE_URL` 未配置而明确跳过。本项不改变持久化或账务，因此不以跳过结果冒充 PostgreSQL 通过。
+- TypeScript 通过；ESLint 退出 0，保持 `0 errors / 988 historical warnings`；生产构建完成 `116/116`；保护基线保留 `38/38` 功能且 0 blocker；`git diff --check` 通过。
+- 精确源码来源为 `8acb3c9`；`CanvasCommandPalette.tsx` 已加入逐文件授权和来源校验，不存在目录级放行。`stable@52f7c601` 与 donor 未变化。
+- **结论：本地回归通过，云端未验证。** Coze 必须拉取最终 `main`，并在现有 Google Chrome 标签页验证入口、快捷键、搜索、导航、执行、关闭、输入保护、命令动作、图层/历史互斥和新鲜 Console。

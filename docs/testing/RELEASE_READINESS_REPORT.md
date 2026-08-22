@@ -1200,3 +1200,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 已登录 Google Chrome 真实验证缩放、重置、三态网格、连线显隐、图层、版本历史、面板互斥和 AI 引擎弹窗；所有状态转换符合当前控制器契约。
 - 新鲜 Console Error/Warning 为 0，无原生弹窗；视觉证据未发现工具栏错位、遮挡、裁切或叠加。
 - **发布判定：V588-UI-001 通过并完成吸收。** 该判定只覆盖首个叶组件，不代表整个 V5.8.8 UI 批次完成，也不授权 `asset-v3` 切换。下一发布门禁为 `V588-UI-002` 的 RED、最小接入、本地全量回归和云端验收。
+
+## 2026-08-22 V588-UI-002 本地发布准备度
+
+- 命令面板已完成 RED、最小接入、聚焦回归和全量本地门禁；没有替换当前 Canvas 控制器，也没有删改既有入口。
+- 本地证据：聚焦 `18/18`、全仓 `3004/3004`；TypeScript 通过；Lint `0 error / 988` 条历史 warning；构建 `116/116`；保护基线 `38/38`、0 blocker。
+- `18` 个 PostgreSQL 文件共 `105` 项测试因本机未配置隔离库而明确跳过；本项不涉及持久化与账务，仍保留该环境事实。
+- 实现来源提交为 `8acb3c9`，新增路径已精确授权；`stable@52f7c601`、donor 和 `shadow` 边界未改变。
+- **发布判定：有条件通过。** 条件是 Coze exact-tree、生产构建/HTTP 健康及已登录 Google Chrome 全交互和 Console 验收；通过前不得标记吸收或进入 `V588-UI-003`。
