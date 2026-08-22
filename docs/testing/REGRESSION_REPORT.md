@@ -1481,5 +1481,5 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Task 2 叶组件最终 `14` 个测试与 `pnpm ts-check` 通过；极端有限坐标和 `x + width` 溢出均固定为永久回归，独立审查为 `0/0/0`。Task 3 聚焦回归为 `6` 个文件、`27` 个测试通过，独立审查为 `0/0/0`。
 - 全仓 TypeScript 通过；ESLint 为 `0 errors / 988` 条历史 warning，本项新增 warning 为 `0`。全仓 Vitest 为 `499` 个文件（`481` 通过、`18` 跳过）和 `3140` 个测试（`3035` 通过、`105` 跳过）；跳过项仅为未配置 `POSTGRES_TEST_DATABASE_URL` 的既有真实 PostgreSQL 集成/并发门禁，不计为通过。
 - Next.js `16.2.11` 生产构建生成 `116/116` 页面并以退出码 `0` 完成；干净 HEAD 保护基线为 `38/38`，未授权源码漂移 `0`、warning `0`；`git diff --check` 通过。
-- 当前实现候选为 `de7c8e337bb1aa5618ab3928a71bd0a2d1280c80`，本次进度账本基线 `67e1f85` 仅含文档；`origin/main@e1166f8ec73e9ee5745da6f2a0fb0d875708fb69` 是候选祖先且可快进。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`、donor 均未变。
+- 当前实现候选为 `20dd2d92951078ad04c0cb356ed66c4c20b8c350`，本次进度账本基线 `67e1f85` 仅含文档；`origin/main@e1166f8ec73e9ee5745da6f2a0fb0d875708fb69` 是候选祖先且可快进。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`、donor 均未变。
 - **结论：本地候选通过 / 云端待验。** 小地图桌面默认关闭，使用偏好键 `wujie.canvas.minimap.open.v1`；窄屏或可用宽度不足隐藏，关闭态零投影，点击导航保持 zoom，矩形不渲染缩略图或发起网络请求。云端验证尚未执行，也没有云端证据文件；不得标记为已吸收或开始 `V588-UI-004`。

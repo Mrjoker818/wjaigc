@@ -22,7 +22,7 @@ const unverifiedPath = resolve(root, 'docs/testing/UNVERIFIED_ITEMS.md');
 const progressPath = resolve(root, '.superpowers/sdd/progress.md');
 const stableSha = '52f7c601ed150769e15d06fb435c6e360e28c9e7';
 const preUi003FinalReviewSha = 'b5b0b18ed1feda1f5324537f15a9645b87e4fc9d';
-const ui003FinalReviewImplementationFloorSha = 'de7c8e337bb1aa5618ab3928a71bd0a2d1280c80';
+const ui003FinalReviewImplementationFloorSha = '20dd2d92951078ad04c0cb356ed66c4c20b8c350';
 
 const ui003RequiredChecks = [
   ['existing-chrome-tab', { reusedExistingTab: true }],

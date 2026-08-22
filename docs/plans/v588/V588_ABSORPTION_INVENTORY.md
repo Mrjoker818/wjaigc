@@ -228,9 +228,9 @@ No item is “absorbed” merely because its source file exists or a unit test p
 
 ### V588-UI-003 - 2026-08-22 小地图本地候选
 
-- 当前实现候选为 `de7c8e337bb1aa5618ab3928a71bd0a2d1280c80`；本次进度账本基线 `67e1f85` 仅含文档。`origin/main@e1166f8ec73e9ee5745da6f2a0fb0d875708fb69` 是当前候选祖先，分支可快进。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读且未变化。
+- 当前实现候选为 `20dd2d92951078ad04c0cb356ed66c4c20b8c350`；本次进度账本基线 `67e1f85` 仅含文档。`origin/main@e1166f8ec73e9ee5745da6f2a0fb0d875708fb69` 是当前候选祖先，分支可快进。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读且未变化。
 - donor 保持只读：`J:/无界云端0820/src/components/canvas-minimap.tsx` 的 SHA-256 为 `66B41B25CA9D5932C1894D8250EBD7960261454F3C519E583036830173BC4440`，`J:/无界云端0820/src/__tests__/components/canvas-minimap.test.ts` 的 SHA-256 为 `3D2E9005A471399421C060B6CDB996B4850573F1ACE0714C1D4811C5BE1D3754`。
-- 当前实现 SHA-256：`CanvasMinimap.tsx` 为 `320AAD7E9F9B643686CB19F5CF6FAC86AFAFBFD5934DE897AB267E3C16DDA1F6`；叶测试为 `701808DE318A4A8EB3BE7F0DE5443B75A520041D7C2C406075B4319D19BF07D8`；接线测试为 `3FE5F0CBF2369BF7EB843A07B47C27FD50537244310B4B19D33749C053FF683D`；缩放工具簇测试为 `437A9C71DAE7EC5CD0BAF2C2CF2348F9F4524E6F538E3B1286E27822926BFB99`。
+- 当前实现 SHA-256：`CanvasMinimap.tsx` 为 `320AAD7E9F9B643686CB19F5CF6FAC86AFAFBFD5934DE897AB267E3C16DDA1F6`；叶测试为 `701808DE318A4A8EB3BE7F0DE5443B75A520041D7C2C406075B4319D19BF07D8`；接线测试为 `1227ED785A6EB856BB2DAD772BB58A5F0A66E528617865ED3E7C2A78766CDD49`；缩放工具簇测试为 `437A9C71DAE7EC5CD0BAF2C2CF2348F9F4524E6F538E3B1286E27822926BFB99`。
 - Task 1 RED 证明缺少 `CanvasMinimap` 模块、父画布接线和工具簇入口，并同时执行精确 TypeScript 门禁；独立审查为 `0/0/0`。Task 2 叶组件最终 `14` 个测试和 `pnpm ts-check` 通过，极端有限坐标及 `x + width` 溢出均纳入永久回归，独立审查为 `0/0/0`。Task 3 聚焦回归为 `6` 个文件、`27` 个测试通过，独立审查为 `0/0/0`。
 - 本地完整门禁记录：全仓 TypeScript 通过；ESLint 为 `0 errors / 988` 条历史 warning，新增 warning 为 `0`；全仓 Vitest 为 `499` 个文件（`481` 通过、`18` 跳过）和 `3140` 个测试（`3035` 通过、`105` 跳过）；跳过项是未配置 `POSTGRES_TEST_DATABASE_URL` 的既有真实 PostgreSQL 集成/并发门禁，不计为通过。Next.js `16.2.11` 生产构建生成 `116/116` 页面并以退出码 `0` 完成；干净 HEAD 保护基线 `38/38`，未授权源码漂移 `0`、warning `0`；`git diff --check` 通过。
 - 小地图契约：桌面默认关闭，偏好键为 `wujie.canvas.minimap.open.v1`；宽度 `<768px` 或可用宽度 `<560px` 时隐藏；关闭态零小地图遍历/投影；矩形渲染无缩略图/网络；点击导航保持 zoom；提供工具按钮和命令面板入口，适配暗色/黑白主题并避让右侧占用。
