@@ -12,6 +12,7 @@ const versionHistorySource = readSource('src/components/version-history-panel.ts
 const imageEditorSource = readSource('src/components/image-editor.tsx');
 const videoPanelSource = readSource('src/components/video-generation-panel.tsx');
 const globalsSource = readSource('src/app/globals.css');
+const imageToolbarSource = readSource('src/components/canvas/CanvasImageActionToolbar.tsx');
 
 describe('canvas toolbar floating windows', () => {
   it('centers the canvas generator and video utility panels when opened', () => {
@@ -91,11 +92,13 @@ describe('canvas toolbar floating windows', () => {
   });
 
   it('uses a bounded +N popover instead of expanding the selected-image toolbar', () => {
-    expect(canvasSource).toContain('data-image-toolbar-overflow');
-    expect(canvasSource).toContain('max-h-[min(50vh,420px)]');
-    expect(canvasSource).toContain('visibleImageActions.slice(5)');
-    expect(canvasSource).toContain("toolbarExpanded ? 'block' : 'hidden'");
-    expect(canvasSource).toContain('onWheel={(e) => e.stopPropagation()}');
+    expect(canvasSource).toContain('<CanvasImageActionToolbar');
+    expect(canvasSource).toContain('overflowActions={overflowImageActions}');
+    expect(imageToolbarSource).toContain('data-image-toolbar-overflow');
+    expect(imageToolbarSource).toContain('max-h-[min(50vh,420px)]');
+    expect(imageToolbarSource).toContain('overflowActions.map');
+    expect(imageToolbarSource).toContain("expanded ? 'block' : 'hidden'");
+    expect(imageToolbarSource).toContain('onWheel={(event) => event.stopPropagation()}');
   });
 
   it('keeps bottom and selected-image tool menus mutually exclusive', () => {
@@ -103,7 +106,10 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('setShowToolbarCustomize(false);');
     expect(canvasSource).toContain('setBottomToolbarDrawerOpen(false);');
     expect(canvasSource).toMatch(/aria-controls="canvas-bottom-toolbar-drawer"[\s\S]*?setToolbarExpanded\(false\);[\s\S]*?setShowToolbarCustomize\(false\);[\s\S]*?setBottomToolbarDrawerOpen\(\(open\) => !open\)/);
-    expect(canvasSource).toMatch(/aria-controls="selected-image-toolbar-overflow"[\s\S]*?setBottomToolbarDrawerOpen\(false\);[\s\S]*?setShowToolbarCustomize\(false\);[\s\S]*?setToolbarExpanded\(\(open\) => !open\)/);
+    expect(imageToolbarSource).toContain('aria-controls="selected-image-toolbar-overflow"');
+    expect(imageToolbarSource).toContain("onBeforeOpenOverlay('overflow')");
+    expect(imageToolbarSource).toContain("onBeforeOpenOverlay('customize')");
+    expect(canvasSource).toMatch(/onBeforeOpenOverlay=\{\(overlay\) => \{[\s\S]*?setBottomToolbarDrawerOpen\(false\);[\s\S]*?setShowToolbarCustomize\(false\);[\s\S]*?setToolbarExpanded\(false\);/);
     expect(canvasSource).toMatch(/event\.key === 'Escape'[\s\S]*?setBottomToolbarDrawerOpen\(false\);[\s\S]*?setToolbarExpanded\(false\);[\s\S]*?setShowToolbarCustomize\(false\);/);
   });
 
@@ -112,7 +118,8 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('data-toolbar="image-hover-toolbar"');
     expect(canvasSource).toContain("className={`absolute group z-10 ${isSelected ? 'z-[60]' : ''}");
     expect(canvasSource).toContain("hoverToolbarImageId === image.id && editMode === 'none' && !isSelected &&");
-    expect(canvasSource).toContain('data-testid="selected-image-delete"');
+    expect(imageToolbarSource).toContain('data-testid="selected-image-delete"');
+    expect(canvasSource).toContain('onDelete={deleteSelectedImages}');
     expect(canvasSource).toContain('const requestDeleteImages = useCallback');
     expect(canvasSource).toContain('void requestDeleteImages([...selectedIds]);');
     expect(canvasSource).toContain('title="删除"');

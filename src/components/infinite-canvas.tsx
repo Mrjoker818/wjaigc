@@ -31,7 +31,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, Upload, Sparkles,
   RotateCcw, Minus, GitMerge,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck, Menu
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Settings2, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck, Menu
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationExecutionResult } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, computeAnnotationRegion, BRUSH_COLOR_PALETTE, applyMergedAnnotationExecutionResult } from '@/lib/canvas-annotation';
@@ -91,6 +91,7 @@ import { CanvasSurface } from '@/components/canvas/CanvasSurface';
 import { CanvasToolHost } from '@/components/canvas/CanvasToolHost';
 import { CanvasZoomCluster } from '@/components/canvas/CanvasZoomCluster';
 import { CanvasEmptyState } from '@/components/canvas/CanvasEmptyState';
+import { CanvasImageActionToolbar } from '@/components/canvas/CanvasImageActionToolbar';
 import {
   CanvasMinimap,
   type CanvasMinimapItem,
@@ -10793,8 +10794,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // 折叠时仅显示前5个
   const displayedActions = visibleImageActions.slice(0, 5);
   const overflowImageActions = visibleImageActions.slice(5);
-  const hasMoreActions = visibleImageActions.length > 5;
-
   // Canvas right-click menu items
   const canvasMenuItems = [
     { label: '粘贴', shortcut: 'Ctrl+V', action: () => {} },
@@ -17878,189 +17877,39 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         })}
 
         {/* ====== IMAGE ACTION TOOLBAR (follows selected image) ====== */}
-        {selectedIds.size === 1 && editMode === 'none' && activeTool === 'none' && !showDownloadPopup && !anyPanelOpen && (() => {
-          const img = selectedImageData;
-          if (!img) return null;
-          const pos = getToolbarPosition();
-          return (
-            <div
-              ref={imageToolbarRef}
-              className="absolute z-50 pointer-events-auto"
-              data-toolbar="image-action-toolbar"
-              style={{ left: pos.left, top: pos.top, transform: pos.transform }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
-            >
-              <div className={`max-w-[calc(100vw-2rem)] overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden`}>
-              <div className={`flex w-max items-center gap-0.5 px-1 py-1 rounded-full border shadow-xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/[0.12]'}`}>
-                {displayedActions.map((action, idx) => (
-                  <div key={action.label} className="relative">
-                    <button
-                      data-testid={action.testId}
-                      onClick={(e) => { e.stopPropagation(); action.action(); }}
-                      className={`flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-medium transition-all ${
-                        isMonochrome
-                          ? 'text-blue-600 hover:bg-blue-50'
-                          : 'text-gold-muted hover:text-text-bright hover:bg-white/10'
-                      }`}
-                      title={action.desc || action.label}
-                    >
-                      <span className={`${
-                        isMonochrome
-                          ? action.label === '放大' ? 'text-blue-500' : action.label === '移除背景' ? 'text-violet-500' : action.label === 'SVG智能描摹' || action.label === 'SVG描摹' ? 'text-pink-500' : action.label === '擦除' ? 'text-orange-500' : action.label === '蒙版' ? 'text-cyan-500' : action.label === '编辑元素' ? 'text-amber-500' : action.label === '扩展' ? 'text-blue-500' : action.label === '裁切' ? 'text-rose-500' : action.label === '精修引擎' ? 'text-violet-500' : action.label === '下载' ? 'text-teal-500' : action.label === 'Agent编排' ? 'text-purple-500' : action.label === '语言修图' ? 'text-fuchsia-500' : 'text-blue-500'
-                          : ''
-                      }`}>{action.icon}</span>
-                      <span>{action.label}</span>
-                    </button>
-                    {idx < displayedActions.length - 1 && <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} style={{ right: '-1px' }} />}
-                  </div>
-                ))}
-                {/* 折叠/展开按钮 */}
-                <div className={`w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
-                <button
-                  type="button"
-                  data-testid="selected-image-delete"
-                  aria-label="删除"
-                  title="删除"
-                  onClick={(e) => { e.stopPropagation(); deleteSelectedImages(); }}
-                  className={`flex items-center justify-center p-1.5 rounded-full transition-all ${
-                    isMonochrome
-                      ? 'text-red-500 hover:bg-red-50'
-                      : 'text-red-400 hover:bg-red-900/30 hover:text-red-300'
-                  }`}
-                >
-                  <Trash2 size={14} />
-                </button>
-                {hasMoreActions && (
-                  <button
-                    type="button"
-                    aria-expanded={toolbarExpanded}
-                    aria-controls="selected-image-toolbar-overflow"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setBottomToolbarDrawerOpen(false);
-                      setShowToolbarCustomize(false);
-                      setToolbarExpanded((open) => !open);
-                    }}
-                    className={`flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-medium transition-all ${
-                      isMonochrome
-                        ? 'text-blue-500 hover:text-blue-700 hover:bg-blue-50'
-                        : 'text-gold-muted hover:text-gold hover:bg-white/10'
-                    }`}
-                    title={toolbarExpanded ? '收起工具栏' : '展开更多工具'}
-                  >
-                    {toolbarExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    <span className="text-[10px]">{toolbarExpanded ? '收起' : `+${overflowImageActions.length}`}</span>
-                  </button>
-                )}
-                {/* 自定义按钮 */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setBottomToolbarDrawerOpen(false);
-                    setToolbarExpanded(false);
-                    setShowToolbarCustomize(true);
-                  }}
-                  className={`flex items-center px-1.5 py-1.5 rounded-full text-xs font-medium transition-all ${
-                    isMonochrome
-                      ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                      : 'text-gold-muted/60 hover:text-gold-muted hover:bg-white/10'
-                  }`}
-                  title="自定义工具栏"
-                >
-                  <Settings2 size={12} />
-                </button>
-              </div>
-              </div>
-
-              {hasMoreActions && (
-                <div
-                  id="selected-image-toolbar-overflow"
-                  data-image-toolbar-overflow
-                  className={`absolute left-1/2 top-full z-50 mt-2 w-56 -translate-x-1/2 overflow-y-auto rounded-lg border p-1 shadow-2xl max-h-[min(50vh,420px)] ${toolbarExpanded ? 'block' : 'hidden'} ${isMonochrome ? 'border-gray-200 bg-white' : 'border-white/[0.12] bg-[#141418]'}`}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onWheel={(e) => e.stopPropagation()}
-                >
-                  {visibleImageActions.slice(5).map((action) => (
-                    <button
-                      key={action.label}
-                      type="button"
-                      data-testid={action.testId}
-                      onClick={(e) => { e.stopPropagation(); setToolbarExpanded(false); action.action(); }}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs ${isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
-                      title={action.desc || action.label}
-                    >
-                      {action.icon}<span>{action.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* 工具栏自定义弹窗 */}
-              {showToolbarCustomize && (
-                <div
-                  className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-72 p-3 rounded-xl border shadow-2xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#141418] border-white/[0.12]'}`}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  data-popup="toolbar-customize"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <span className={`text-xs font-semibold ${isMonochrome ? 'text-blue-600' : 'text-gold'}`}>自定义工具栏</span>
-                    <button onClick={() => setShowToolbarCustomize(false)} className={`p-1 rounded-lg ${isMonochrome ? 'text-blue-400 hover:text-blue-600' : 'text-gold-muted/70 hover:text-white'}`}><X size={14} /></button>
-                  </div>
-                  <div className="space-y-1 max-h-60 overflow-y-auto">
-                    {toolbarItemOrder.filter(label => allActionLabels.includes(label)).map(label => {
-                      const isHidden = toolbarHiddenItems.has(label);
-                      return (
-                        <div key={label} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all ${isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-[#252525]'}`}>
-                          <button
-                            onClick={() => {
-                              const newHidden = new Set(toolbarHiddenItems);
-                              if (isHidden) newHidden.delete(label); else newHidden.add(label);
-                              setToolbarHiddenItems(newHidden);
-                            }}
-                            className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${isHidden ? (isMonochrome ? 'border-gray-300' : 'border-white/[0.14]') : isMonochrome ? 'bg-blue-500 border-blue-500' : 'bg-gold border-gold'}`}
-                          >
-                            {!isHidden && <Check size={10} className="text-white" />}
-                          </button>
-                          <span className={`text-xs flex-1 ${isHidden ? (isMonochrome ? 'text-gray-400 line-through' : 'text-gold-muted/50 line-through') : (isMonochrome ? 'text-gray-700' : 'text-text-bright')}`}>{label}</span>
-                          <div className="flex gap-0.5">
-                            <button
-                              onClick={() => {
-                                const idx = toolbarItemOrder.indexOf(label);
-                                if (idx > 0) {
-                                  const newOrder = [...toolbarItemOrder];
-                                  [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
-                                  setToolbarItemOrder(newOrder);
-                                }
-                              }}
-                              className={`p-0.5 rounded ${isMonochrome ? 'text-blue-400 hover:text-blue-600' : 'text-gold-muted/70 hover:text-white'}`}
-                              title="上移"
-                            ><ChevronUp size={12} /></button>
-                            <button
-                              onClick={() => {
-                                const idx = toolbarItemOrder.indexOf(label);
-                                if (idx < toolbarItemOrder.length - 1) {
-                                  const newOrder = [...toolbarItemOrder];
-                                  [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
-                                  setToolbarItemOrder(newOrder);
-                                }
-                              }}
-                              className={`p-0.5 rounded ${isMonochrome ? 'text-blue-400 hover:text-blue-600' : 'text-gold-muted/70 hover:text-white'}`}
-                              title="下移"
-                            ><ChevronDown size={12} /></button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
+        {selectedIds.size === 1
+          && editMode === 'none'
+          && activeTool === 'none'
+          && !showDownloadPopup
+          && !anyPanelOpen
+          && selectedImageData && (
+            <CanvasImageActionToolbar
+              toolbarRef={imageToolbarRef}
+              position={getToolbarPosition()}
+              isMonochrome={isMonochrome}
+              displayedActions={displayedActions}
+              overflowActions={overflowImageActions}
+              expanded={toolbarExpanded}
+              onExpandedChange={setToolbarExpanded}
+              onBeforeOpenOverlay={(overlay) => {
+                setBottomToolbarDrawerOpen(false);
+                if (overlay === 'overflow') setShowToolbarCustomize(false);
+                else setToolbarExpanded(false);
+              }}
+              onDelete={deleteSelectedImages}
+              customizeOpen={showToolbarCustomize}
+              onCustomizeOpenChange={setShowToolbarCustomize}
+              toolbarItemOrder={toolbarItemOrder}
+              onToolbarItemOrderChange={setToolbarItemOrder}
+              toolbarHiddenItems={toolbarHiddenItems}
+              onToolbarHiddenItemsChange={setToolbarHiddenItems}
+              allActionLabels={allActionLabels}
+              onResetPreferences={() => {
+                setToolbarItemOrder([...allActionLabels]);
+                setToolbarHiddenItems(new Set());
+              }}
+            />
+          )}
         {/* 元素拆解面板 — 独立 fixed 浮层，不依赖 toolbar 条件 */}
         {(showDisplayDecomposePanel || elementDecomposeTask) && (
           <div

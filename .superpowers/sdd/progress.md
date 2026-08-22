@@ -492,3 +492,6 @@ Protected stable branch: read-only and untouched
 - donor `J:/无界云端0820` 继续只读。当前底部抽屉定位、图片工具栏约束算法、偏好迁移和工具会话比 donor 更完整，只吸收展示边界，不复制 donor 控制器或旧算法。
 - Task 2 空态叶已完成 RED -> GREEN：`CanvasEmptyState` 只接收主题和上传/说明回调，父画布继续拥有上传 input 与帮助状态；外层不阻断拖放，动作区可交互，reduced-motion 和双主题受测试保护。
 - Task 2 聚焦回归为 `17/17`，TypeScript 通过，针对性 ESLint `0 errors / 19` 条 `InfiniteCanvas` 历史 warning，`git diff --check` 通过。其余五个叶继续保持 RED；下一唯一动作是 Task 3 图片浮动工具栏。
+- Task 3 图片浮动工具栏完成 RED -> GREEN：主栏固定五项，其余进入有界 `+N`，删除/设置始终可达，375px 合同不依赖主栏横向滚动，恢复默认、主题、reduced-motion 和事件隔离均由叶测试保护。
+- `横竖重组` 已补入默认偏好顺序；旧偏好迁移、媒体类型清单和底部四组入口保持不变。父画布继续持有全部动作和 handler，叶组件不包含 API、任务、删除或保存副作用。
+- Task 3 聚焦回归 `5 files / 31 tests` 通过，TypeScript 通过，针对性 ESLint 回到 `0 errors / 19 historical warnings`，新增 warning `0`。下一唯一动作是 Task 4 放大/SVG 与擦除/蒙版展示叶。

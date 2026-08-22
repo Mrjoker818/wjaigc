@@ -113,7 +113,7 @@
 
   Run: `pnpm exec vitest run src/__tests__/components/canvas-empty-state.test.tsx src/__tests__/components/canvas-presentation-boundaries.test.ts`
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
   ```bash
   git add src/components/canvas/CanvasEmptyState.tsx src/components/infinite-canvas.tsx src/__tests__/components/canvas-empty-state.test.tsx src/__tests__/components/canvas-presentation-boundaries.test.ts
@@ -134,23 +134,23 @@
 - Consumes: 父组件构建的 `CanvasImageToolbarAction[]`、约束后位置、显示/溢出数组、删除/展开/设置回调和偏好状态 setter。
 - Produces: `CanvasImageActionToolbar`；不包含模型选择、任务或 API 逻辑。
 
-- [ ] **Step 1: 写行为 RED**
+- [x] **Step 1: 写行为 RED**
 
   验证前五项显示、其余仅在 `+N` 弹层、删除始终可达、设置可恢复默认、wheel/pointer 不穿透、暗色/黑白与 reduced-motion 类存在。验证 375px 合同依赖 `max-w-[calc(100vw-24px)]` 与有界溢出层，而不是横向滚动主工具栏。
 
-- [ ] **Step 2: 写入口迁移 RED**
+- [x] **Step 2: 写入口迁移 RED**
 
   将 `横竖重组` 纳入 `DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER`，并证明旧 localStorage 顺序会在 `元素拆解` 后补入，旧隐藏列表不能误隐藏新入口。
 
-- [ ] **Step 3: 运行 RED**
+- [x] **Step 3: 运行 RED**
 
   Run: `pnpm exec vitest run src/__tests__/components/canvas-image-action-toolbar.test.tsx src/__tests__/lib/image-toolbar-preferences.test.ts src/__tests__/components/canvas-toolbar-entry-manifest.test.ts`
 
-- [ ] **Step 4: 最小实现与接线**
+- [x] **Step 4: 最小实现与接线**
 
   父组件继续构建 `imageActions`、媒体过滤和所有回调；叶组件仅渲染。沿用 `getConstrainedImageToolbarPosition()`，不得复制 donor 的旧定位函数。
 
-- [ ] **Step 5: 验证 GREEN 并提交**
+- [x] **Step 5: 验证 GREEN 并提交**
 
   Run: `pnpm exec vitest run src/__tests__/components/canvas-image-action-toolbar.test.tsx src/__tests__/lib/image-toolbar-position.test.ts src/__tests__/lib/image-toolbar-preferences.test.ts src/__tests__/components/canvas-toolbar-floating-windows.test.ts src/__tests__/components/canvas-toolbar-entry-manifest.test.ts src/__tests__/components/canvas-presentation-boundaries.test.ts`
 
