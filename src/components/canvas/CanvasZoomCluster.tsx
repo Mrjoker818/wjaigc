@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Command,
   GitBranch,
   GitMerge,
   Grip,
@@ -25,6 +26,7 @@ export interface CanvasZoomClusterProps {
   onZoomOut: () => void;
   onZoomIn: () => void;
   onResetView: () => void;
+  onOpenCommandPalette: () => void;
   onCycleGridMode: () => void;
   onToggleConnections: () => void;
   onToggleLayerPanel: () => void;
@@ -49,6 +51,7 @@ export function CanvasZoomCluster({
   onZoomOut,
   onZoomIn,
   onResetView,
+  onOpenCommandPalette,
   onCycleGridMode,
   onToggleConnections,
   onToggleLayerPanel,
@@ -88,6 +91,16 @@ export function CanvasZoomCluster({
       <button type="button" onClick={onResetView} className={`${buttonClassName} ${idleClassName}`} title="重置视图">
         <Maximize2 className="h-4 w-4" />
         <span className={tooltipClassName}>重置视图</span>
+      </button>
+
+      <button
+        type="button"
+        onClick={onOpenCommandPalette}
+        className={`${buttonClassName} ${idleClassName}`}
+        title="命令面板 (Ctrl+K / Cmd+K)"
+      >
+        <Command className="h-4 w-4" />
+        <span className={tooltipClassName}>命令面板 Ctrl+K</span>
       </button>
 
       <button

@@ -20,6 +20,7 @@ const renderCluster = (overrides: Partial<Parameters<typeof CanvasZoomCluster>[0
     onZoomOut: vi.fn(),
     onZoomIn: vi.fn(),
     onResetView: vi.fn(),
+    onOpenCommandPalette: vi.fn(),
     onCycleGridMode: vi.fn(),
     onToggleConnections: vi.fn(),
     onToggleLayerPanel: vi.fn(),
@@ -37,6 +38,7 @@ describe('CanvasZoomCluster', () => {
     expect(markup).toContain('title="缩小画布"');
     expect(markup).toContain('title="放大画布"');
     expect(markup).toContain('title="重置视图"');
+    expect(markup).toContain('title="命令面板 (Ctrl+K / Cmd+K)"');
     expect(markup).toContain('title="网格: 点阵"');
     expect(markup).toContain('title="显示连线"');
     expect(markup).toContain('title="打开图层"');

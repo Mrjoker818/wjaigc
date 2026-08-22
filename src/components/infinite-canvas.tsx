@@ -91,6 +91,11 @@ import { CanvasSurface } from '@/components/canvas/CanvasSurface';
 import { CanvasToolHost } from '@/components/canvas/CanvasToolHost';
 import { CanvasZoomCluster } from '@/components/canvas/CanvasZoomCluster';
 import {
+  CanvasCommandPalette,
+  shouldToggleCanvasCommandPalette,
+  type CanvasCommandItem,
+} from '@/components/canvas/CanvasCommandPalette';
+import {
   CLOSED_CANVAS_TOOL_SESSION,
   closeCanvasToolSession,
   openCanvasToolSession,
@@ -704,6 +709,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Canvas grid background mode: dots / lines / blank
   const [gridMode, setGridMode] = useState<'dots' | 'lines' | 'blank'>('dots');
   const [showConnections, setShowConnections] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
   // Hover toolbar: shown when hovering over an image (separate from visionHoverImage)
   const [hoverToolbarImageId, setHoverToolbarImageId] = useState<string | null>(null);
@@ -3042,6 +3048,158 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
   }, [images, onSelectImage, agentSelectingImage]);
 
+  const activateSelectPointerTool = useCallback(() => {
+    if (viewportPanPointerIdRef.current !== null) {
+      cancelViewportPan({ pointerId: viewportPanPointerIdRef.current });
+    }
+    viewportPanPointerIdRef.current = null;
+    directPanPointerIdRef.current = null;
+    activePointerToolRef.current = 'select';
+    setActivePointerTool('select');
+    setIsPanning(false);
+  }, [cancelViewportPan]);
+
+  const activateHandPointerTool = useCallback(() => {
+    activePointerToolRef.current = 'hand';
+    setActivePointerTool('hand');
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setZoom(current => Math.max(0.1, current / 1.2));
+  }, [setZoom]);
+
+  const handleZoomIn = useCallback(() => {
+    setZoom(current => Math.min(5, current * 1.2));
+  }, [setZoom]);
+
+  const cycleGridMode = useCallback(() => {
+    setGridMode(current => current === 'dots' ? 'lines' : current === 'lines' ? 'blank' : 'dots');
+  }, []);
+
+  const toggleLayerPanel = useCallback((entryPoint: CanvasToolEntryPoint = 'bottom-toolbar') => {
+    if (showLayerPanel) {
+      closeCanvasToolPanels();
+      return;
+    }
+    if (!activateCanvasToolSession('layer-order', entryPoint, [])) return;
+    setShowLayerPanel(true);
+    setShowVersionHistory(false);
+  }, [activateCanvasToolSession, closeCanvasToolPanels, showLayerPanel]);
+
+  const toggleVersionHistory = useCallback((entryPoint: CanvasToolEntryPoint = 'bottom-toolbar') => {
+    if (showVersionHistory) {
+      closeCanvasToolPanels();
+      return;
+    }
+    if (!activateCanvasToolSession('version-history', entryPoint, [])) return;
+    setShowVersionHistory(true);
+    setShowLayerPanel(false);
+  }, [activateCanvasToolSession, closeCanvasToolPanels, showVersionHistory]);
+
+  const commandPaletteCommands = useMemo<CanvasCommandItem[]>(() => [
+    {
+      id: 'reset-view',
+      label: '重置视图',
+      hint: '适配画布中的全部内容',
+      section: '视图',
+      keywords: 'reset view fit center 适配 居中',
+      action: resetViewToContent,
+    },
+    {
+      id: 'zoom-in',
+      label: '放大画布',
+      hint: '提高当前画布缩放比例',
+      shortcut: 'Ctrl + +',
+      section: '视图',
+      keywords: 'zoom in magnify bigger 放大',
+      action: handleZoomIn,
+    },
+    {
+      id: 'zoom-out',
+      label: '缩小画布',
+      hint: '降低当前画布缩放比例',
+      shortcut: 'Ctrl + -',
+      section: '视图',
+      keywords: 'zoom out shrink smaller 缩小',
+      action: handleZoomOut,
+    },
+    {
+      id: 'cycle-grid',
+      label: '切换网格背景',
+      hint: '在点阵、线条与空白之间循环',
+      section: '视图',
+      keywords: 'grid dots lines blank background 网格 点阵 线条 空白',
+      action: cycleGridMode,
+    },
+    {
+      id: 'toggle-connections',
+      label: showConnections ? '隐藏画布连线' : '显示画布连线',
+      hint: '切换图片之间的关系连线',
+      section: '视图',
+      keywords: 'connection link edge 连接 连线 关系',
+      action: () => setShowConnections(current => !current),
+    },
+    {
+      id: 'select-tool',
+      label: '选择工具',
+      hint: activePointerTool === 'select' ? '当前正在使用' : '切换到选择与框选',
+      section: '工具',
+      keywords: 'select pointer cursor 选择 鼠标 框选',
+      action: activateSelectPointerTool,
+    },
+    {
+      id: 'hand-tool',
+      label: '抓手工具',
+      hint: activePointerTool === 'hand' ? '当前正在使用' : '拖动画布视口',
+      section: '工具',
+      keywords: 'hand pan move viewport 抓手 平移 拖动',
+      action: activateHandPointerTool,
+    },
+    {
+      id: 'clear-selection',
+      label: '取消全部选择',
+      hint: selectedIds.size > 0 ? `当前选中 ${selectedIds.size} 项` : '当前没有选中内容',
+      section: '选择',
+      keywords: 'clear deselect selection 取消 清空 选择',
+      action: () => {
+        setSelectedIds(new Set());
+        selectImage(null);
+      },
+    },
+    {
+      id: 'toggle-layers',
+      label: showLayerPanel ? '关闭图层面板' : '打开图层面板',
+      hint: '管理图片层级与顺序',
+      section: '面板',
+      keywords: 'layer order z-index 图层 层级 顺序',
+      action: () => toggleLayerPanel('shortcut'),
+    },
+    {
+      id: 'toggle-history',
+      label: showVersionHistory ? '关闭版本历史' : '打开版本历史',
+      hint: '查看和恢复项目版本',
+      section: '面板',
+      keywords: 'history version restore 历史 版本 恢复',
+      action: () => toggleVersionHistory('shortcut'),
+    },
+  ], [
+    activateHandPointerTool,
+    activateSelectPointerTool,
+    activePointerTool,
+    cycleGridMode,
+    handleZoomIn,
+    handleZoomOut,
+    resetViewToContent,
+    selectImage,
+    selectedIds.size,
+    setSelectedIds,
+    showConnections,
+    showLayerPanel,
+    showVersionHistory,
+    toggleLayerPanel,
+    toggleVersionHistory,
+  ]);
+
   const requestDeleteImages = useCallback(async (imageIds: string[]) => {
     if (isHistoryTransitionPending) return [];
     const uniqueIds = [...new Set(imageIds)]
@@ -3172,11 +3330,18 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Keyboard events: keep the latest behavior available without replacing DOM listeners.
   useLayoutEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Skip if event originates from dialog/modal/overlay
-      if (isKeyboardEventFromOverlay(e)) return;
       // Skip if user is typing in an input field (unified check)
       const inputFocused = isInputFocused(e);
       const textEditingTarget = isTextEditingTarget(e);
+
+      if (shouldToggleCanvasCommandPalette(e)) {
+        e.preventDefault();
+        setCommandPaletteOpen(current => !current);
+        return;
+      }
+
+      // Skip if event originates from dialog/modal/overlay
+      if (isKeyboardEventFromOverlay(e)) return;
 
       // Ctrl+Z / Cmd+Z: Undo
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !e.shiftKey) {
@@ -3558,7 +3723,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       keyup: handleKeyUp,
       paste: handlePaste,
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isKeyboardEventFromOverlay, isInputFocused, isTextEditingTarget, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoPanel]);
+  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isKeyboardEventFromOverlay, isInputFocused, isTextEditingTarget, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoPanel, commandPaletteOpen]);
 
   // Stable Canvas keyboard listeners remain attached for the component lifetime. React commits only
   // refresh the ref above, so delete/restore renders cannot create an input gap.
@@ -18556,17 +18721,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         {/* ── Center: Main function buttons (always visible) ── */}
         <button
           aria-label="选择工具"
-          onClick={() => {
-            // 退出抓手/平移模式，回到默认选择模式
-            if (viewportPanPointerIdRef.current !== null) {
-              cancelViewportPan({ pointerId: viewportPanPointerIdRef.current });
-            }
-            viewportPanPointerIdRef.current = null;
-            directPanPointerIdRef.current = null;
-            activePointerToolRef.current = 'select';
-            setActivePointerTool('select');
-            setIsPanning(false);
-          }}
+          onClick={activateSelectPointerTool}
           data-testid="canvas-select-tool"
           aria-pressed={activePointerTool === 'select'}
           className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 ${
@@ -18590,10 +18745,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               : (isMonochrome ? `text-gray-500 hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10')
           }`}
           title="抓手工具"
-          onClick={() => {
-            activePointerToolRef.current = 'hand';
-            setActivePointerTool('hand');
-          }}
+          onClick={activateHandPointerTool}
         >
           <Hand className={`h-4 w-4 ${mIcon.hand}`} />
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">抓手工具</span>
@@ -18936,29 +19088,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           showVersionHistory={showVersionHistory}
           isGenerating={isGenerating}
           generationProgress={generationProgress}
-          onZoomOut={() => { setZoom(z => Math.max(0.1, z / 1.2)); }}
-          onZoomIn={() => { setZoom(z => Math.min(5, z * 1.2)); }}
+          onZoomOut={handleZoomOut}
+          onZoomIn={handleZoomIn}
           onResetView={resetViewToContent}
-          onCycleGridMode={() => setGridMode(prev => prev === 'dots' ? 'lines' : prev === 'lines' ? 'blank' : 'dots')}
+          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+          onCycleGridMode={cycleGridMode}
           onToggleConnections={() => setShowConnections(prev => !prev)}
-          onToggleLayerPanel={() => {
-            if (showLayerPanel) {
-              closeCanvasToolPanels();
-              return;
-            }
-            if (!activateCanvasToolSession('layer-order', 'bottom-toolbar', [])) return;
-            setShowLayerPanel(true);
-            setShowVersionHistory(false);
-          }}
-          onToggleVersionHistory={() => {
-            if (showVersionHistory) {
-              closeCanvasToolPanels();
-              return;
-            }
-            if (!activateCanvasToolSession('version-history', 'bottom-toolbar', [])) return;
-            setShowVersionHistory(true);
-            setShowLayerPanel(false);
-          }}
+          onToggleLayerPanel={() => toggleLayerPanel('bottom-toolbar')}
+          onToggleVersionHistory={() => toggleVersionHistory('bottom-toolbar')}
           onOpenEngineDialog={() => setEngineDialog('upscale')}
         />
       </div>
@@ -18984,6 +19121,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }}
         onClose={() => setEngineDialog(null)}
       />
+
+      {commandPaletteOpen && (
+        <CanvasCommandPalette
+          commands={commandPaletteCommands}
+          theme={isMonochrome ? 'mono' : 'dark'}
+          onClose={() => setCommandPaletteOpen(false)}
+        />
+      )}
     </div>
   );
 }
