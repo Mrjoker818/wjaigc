@@ -151,7 +151,10 @@ describe('V588-UI-003 canvas minimap wiring', () => {
     expect(cluster).toContain("title={minimapOpen ? '关闭小地图' : '打开小地图'}");
     expect(canvas).toContain("from '@/components/canvas/CanvasMinimap';");
     expect(canvas).toContain('const [minimapOpen, setMinimapOpen] = useState(false);');
-    expect(canvas).toContain('const minimapAvailable = isCanvasMinimapAvailable(');
+    expect(canvas.match(/\bisCanvasMinimapAvailable\s*\(/g)).toHaveLength(1);
+    expect(canvas).toMatch(
+      /const\s+minimapAvailable\s*=\s*isCanvasMinimapAvailable\(\s*canvasSize\.width\s*,\s*canvasOccupiedRight\s*,?\s*\)\s*;/,
+    );
 
     const minimapMemo = getUseMemoBody(canvas, 'minimapItems');
     const earlyReturnIndex = minimapMemo.search(
@@ -160,6 +163,9 @@ describe('V588-UI-003 canvas minimap wiring', () => {
     const imageTraversalIndex = minimapMemo.indexOf('images.flatMap');
     expect(earlyReturnIndex).toBeGreaterThanOrEqual(0);
     expect(imageTraversalIndex).toBeGreaterThan(earlyReturnIndex);
+    expect(canvas).toMatch(
+      /const\s+minimapItems\s*=\s*useMemo(?:<CanvasMinimapItem\[\]>)?\(\(\)\s*=>\s*\{[\s\S]*?\}\s*,\s*\[\s*images\s*,\s*minimapAvailable\s*,\s*minimapOpen\s*\]\s*\)\s*;/,
+    );
     expect(canvas).not.toMatch(
       /\b(?:computeCanvasMinimapBounds|computeCanvasMinimapProjection|projectCanvasMinimapScene)\b/,
     );
