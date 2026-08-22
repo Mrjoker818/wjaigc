@@ -11165,7 +11165,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         data-project-id={projectId || brandProject?.id || ''}
         style={{
           touchAction: annotationMode ? 'none' : 'auto',
-          '--canvas-minimap-bottom': minimapBottomOffset,
         } as React.CSSProperties}
         className={`absolute inset-0 overflow-clip select-none data-[space-pan=true]:!cursor-grab data-[space-pan=true]:active:!cursor-grabbing ${
           annotationMode
@@ -19199,14 +19198,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       />
 
       {minimapOpen && minimapAvailable && (
-        <CanvasMinimap
-          items={minimapItems}
-          viewport={minimapViewport}
-          theme={isMonochrome ? 'mono' : 'dark'}
-          rightOffset={canvasOccupiedRight + 12}
-          onNavigate={handleMinimapNavigate}
-          onClose={toggleCanvasMinimap}
-        />
+        <div
+          data-canvas-minimap-host
+          style={{ '--canvas-minimap-bottom': minimapBottomOffset } as React.CSSProperties}
+        >
+          <CanvasMinimap
+            items={minimapItems}
+            viewport={minimapViewport}
+            theme={isMonochrome ? 'mono' : 'dark'}
+            rightOffset={canvasOccupiedRight + 12}
+            onNavigate={handleMinimapNavigate}
+            onClose={toggleCanvasMinimap}
+          />
+        </div>
       )}
 
       {commandPaletteOpen && (

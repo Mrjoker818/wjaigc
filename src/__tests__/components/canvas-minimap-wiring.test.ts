@@ -171,7 +171,7 @@ describe('V588-UI-003 canvas minimap wiring', () => {
     );
     expect(canvas.match(/\bminimapItems\b/g)).toHaveLength(2);
     expect(canvas).toMatch(
-      /\{\s*minimapOpen\s*&&\s*minimapAvailable\s*&&\s*\(\s*<CanvasMinimap\b[\s\S]*?items=\{minimapItems\}[\s\S]*?\/>\s*\)\s*\}/,
+      /\{\s*minimapOpen\s*&&\s*minimapAvailable\s*&&\s*\(\s*<div\b[\s\S]*?data-canvas-minimap-host[\s\S]*?<CanvasMinimap\b[\s\S]*?items=\{minimapItems\}[\s\S]*?\/>[\s\S]*?<\/div>\s*\)\s*\}/,
     );
     expect(canvas).toMatch(
       /\.\.\.\s*\(\s*minimapAvailable\s*\?\s*\[\{\s*id:\s*['"]toggle-minimap['"][\s\S]*?action:\s*toggleCanvasMinimap[\s\S]*?\}\]\s*:\s*\[\]\s*\)/,
