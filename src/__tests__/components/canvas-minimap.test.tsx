@@ -242,6 +242,29 @@ describe('CanvasMinimap geometry and preferences', () => {
     }
   });
 
+  it('fits a valid overflow-sum rectangle inside the padded minimap', () => {
+    const scene = projectCanvasMinimapScene([{
+      id: 'overflow-sum',
+      x: Number.MAX_VALUE,
+      y: Number.MAX_VALUE,
+      width: Number.MAX_VALUE,
+      height: Number.MAX_VALUE,
+    }], viewport);
+    const [rect] = scene.items;
+    const right = rect.x + rect.width;
+    const bottom = rect.y + rect.height;
+
+    expect([rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)).toBe(true);
+    expect(rect.x).toBeGreaterThanOrEqual(CANVAS_MINIMAP_PADDING);
+    expect(rect.y).toBeGreaterThanOrEqual(CANVAS_MINIMAP_PADDING);
+    expect(rect.width).toBeGreaterThanOrEqual(0);
+    expect(rect.height).toBeGreaterThanOrEqual(0);
+    expect(right).toBeGreaterThanOrEqual(CANVAS_MINIMAP_PADDING);
+    expect(right).toBeLessThanOrEqual(CANVAS_MINIMAP_WIDTH - CANVAS_MINIMAP_PADDING);
+    expect(bottom).toBeGreaterThanOrEqual(CANVAS_MINIMAP_PADDING);
+    expect(bottom).toBeLessThanOrEqual(CANVAS_MINIMAP_HEIGHT - CANVAS_MINIMAP_PADDING);
+  });
+
   it('allows only the exact desktop and usable-width boundaries', () => {
     expect(isCanvasMinimapAvailable(768, 208)).toBe(true);
     expect(isCanvasMinimapAvailable(767, 207)).toBe(false);
