@@ -180,8 +180,8 @@ const definitions: readonly CanvasToolDefinition[] = Object.freeze([
   tool(annotation, 'annotation-submit', '提交批注', ['bottom-toolbar'], 'annotation', 'floating'),
   tool(annotation, 'annotation-progress', '查看进度', ['bottom-toolbar'], 'annotation', 'floating'),
 
-  tool(layers, 'layer-order', '调整层级', ['bottom-toolbar', 'context-menu'], 'command', 'floating'),
-  tool(layers, 'version-history', '查看版本', ['bottom-toolbar'], 'command', 'floating'),
+  tool(layers, 'layer-order', '调整层级', ['bottom-toolbar', 'context-menu', 'shortcut'], 'command', 'floating'),
+  tool(layers, 'version-history', '查看版本', ['bottom-toolbar', 'shortcut'], 'command', 'floating'),
   tool(layers, 'version-restore', '恢复版本', ['bottom-toolbar'], 'command', 'floating'),
   tool(layers, 'export-png', '导出 PNG', ['image-toolbar', 'context-menu'], 'export', 'floating', true),
   tool(layers, 'export-svg', '导出 SVG', ['image-toolbar', 'context-menu'], 'export', 'floating', true),

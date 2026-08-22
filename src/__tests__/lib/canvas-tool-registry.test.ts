@@ -50,6 +50,20 @@ describe('canvas tool registry', () => {
     ]));
   });
 
+  it('opens layers and version history from the command palette shortcut', () => {
+    for (const toolId of ['layer-order', 'version-history']) {
+      expect(openCanvasToolSession(CLOSED_CANVAS_TOOL_SESSION, toolId, {
+        projectId: 'project-a',
+        sourceImageIds: [],
+        entryPoint: 'shortcut',
+      })).toMatchObject({
+        toolId,
+        status: 'open',
+        entryPoint: 'shortcut',
+      });
+    }
+  });
+
   it('maps every protected Canvas action to an explicit registered capability', () => {
     for (const feature of protectedCanvasFeatures.filter(item => item.workspace === 'canvas')) {
       expect(canvasToolRegistry.capabilities(feature.featureId)).toEqual(
