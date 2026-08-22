@@ -31,7 +31,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 
 | ID | Donor capability | Current evidence | Absorption decision | First RED gate | Risk |
 |---|---|---|---|---|---|
-| V588-UI-001 | Leaf Canvas components: image toolbar, context menus, download popup, edit panels, generation groups, image layer, connection layer, zoom cluster and tool drawer | Current Canvas contains newer Stage 3/4 persistence, performance and task fixes | **IN PROGRESS / FIRST LEAF LOCAL PASS.** Zoom and auxiliary controls now render through `CanvasZoomCluster`; current controllers, refs, event ordering and domain state remain in `InfiniteCanvas` | RED/GREEN source boundary, 64 focused assertions, 2988-test full suite, TypeScript, zero-error ESLint, build 116/116 and protected baseline pass; exact-SHA Coze Chrome interaction remains pending | High |
+| V588-UI-001 | Leaf Canvas components: image toolbar, context menus, download popup, edit panels, generation groups, image layer, connection layer, zoom cluster and tool drawer | Current Canvas contains newer Stage 3/4 persistence, performance and task fixes | **FIRST LEAF ABSORBED.** Zoom and auxiliary controls render through `CanvasZoomCluster`; current controllers, refs, event ordering and domain state remain in `InfiniteCanvas` | RED/GREEN source boundary, 64 focused assertions, 2988-test full suite, TypeScript, zero-error ESLint, build 116/116, protected baseline and exact-tree Coze Google Chrome interaction pass | High |
 | V588-UI-002 | `canvas-command-palette.tsx` | No current command-palette surface; current command executor exists | **ABSORB BEHAVIOR, REIMPLEMENT ON CURRENT COMMAND API.** Do not import donor Canvas state | Keyboard/open/search/execute/escape tests, input-focus protection, cloud Chrome action proof | Medium |
 | V588-UI-003 | `canvas-minimap.tsx` | Current Canvas has viewport/controller and spatial-index infrastructure but no leaf minimap | **ABSORB AFTER UI-001.** Bind to current viewport projection, not donor transforms | 100/300-node viewport mapping, click navigation, resize, hidden/empty state and performance budget | Medium |
 | V588-UI-004 | Empty-state, zoom, overflow-safe toolbar and editing-panel layout components | Current toolbar behavior is protected but remains embedded | **ABSORB AS PRESENTATION-ONLY EXTRACTIONS.** No entry, label, handler or feature may disappear | Desktop/mobile visual contract, every existing toolbar action callable, no clipping/overlap, reduced-motion contract | Medium |
@@ -197,3 +197,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - TypeScript 通过，ESLint 为 `0 errors / 988` 条历史 warning，生产构建完成 `116/116`，保护基线 `38/38` 且 0 blocker，空白检查通过。
 - 精确治理前置提交为 `cf65a65`，实现提交为 `c808e50`；新增源码路径绑定来源提交，不增加目录级授权。`stable@52f7c60` 与 donor 保持只读。
 - **状态：本地通过 / GitHub main 已含实现 / Coze exact-SHA 与 Google Chrome 真实交互待验。** 未完成云端验证前不开始 `V588-UI-002`，也不把 `V588-UI-001` 标记为已吸收。
+
+### V588-UI-001 - 2026-08-22 云端吸收闭环
+
+- Coze 运行 HEAD 为环境配置空提交 `0e16ea0a29365c2c179c0624059e8a8e0fa263e1`；其父提交与 `origin/main` 均为 `986f128006c246b400f116da7fb3a5b4c02f0a6c`，代码树逐字节一致且工作树干净。云端生产构建返回 `BUILD_EXIT=0`，根路径 HTTP 200。
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化；本项没有启用 `asset-v3`，没有修改 donor、任务、账务、供应商或持久化链路。
+- Google Chrome“用户1”复用现有标签页完成管理员真实验收，没有创建新标签页。Coze 内嵌 iframe 的第三方 Cookie 上下文不能持久化登录，切换到同一现有标签页的第一方预览后，会话正常进入 6 项目、48 图片的管理员工作台；未发现业务登录回归。
+- 交互证据通过：缩放 `90% -> 75% -> 90%`；重置视图 `69% -> 90%`；网格 `点阵 -> 线条 -> 空白 -> 点阵`；连线 `显示 -> 隐藏 -> 显示`；图层与版本历史双向互斥；AI 引擎弹窗可打开并关闭。
+- 最终时间截点后的 Console Error/Warning 为 `0`，浏览器原生弹窗为 `0`。截图确认工具栏贴合画布，无错位、遮挡、裁切或叠加。
+- **状态：V588-UI-001 已吸收。** 机器证据：`docs/testing/evidence/v588-ui-001-cloud-2026-08-22.json`，截图同名 `.png`。下一项可以进入 `V588-UI-002`，仍须从 RED 开始且只进入 `main`。

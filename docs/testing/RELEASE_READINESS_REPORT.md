@@ -1193,3 +1193,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 新叶子只接收状态和命令回调，不拥有画布控制器或工具会话；当前三大工作区、任务、账务、Asset Graph 和供应商适配均未改变。
 - 本地证据为 `2988` 项全仓测试通过、TypeScript 通过、Lint `0 error / 988` 条历史 warning、构建 `116/116`、保护基线 0 blocker。
 - **发布判定：有条件通过。** 条件是 Coze 拉取最终 exact SHA 后完成 Google Chrome 真实交互与 Console 验证；在此之前不进入下一 UI 项。
+
+## 2026-08-22 V588-UI-001 云端发布判定
+
+- Coze 代码树、生产构建和 HTTP 健康均对应 `main@986f128006c246b400f116da7fb3a5b4c02f0a6c`；本地环境空提交没有代码差异，`stable` 未变化。
+- 已登录 Google Chrome 真实验证缩放、重置、三态网格、连线显隐、图层、版本历史、面板互斥和 AI 引擎弹窗；所有状态转换符合当前控制器契约。
+- 新鲜 Console Error/Warning 为 0，无原生弹窗；视觉证据未发现工具栏错位、遮挡、裁切或叠加。
+- **发布判定：V588-UI-001 通过并完成吸收。** 该判定只覆盖首个叶组件，不代表整个 V5.8.8 UI 批次完成，也不授权 `asset-v3` 切换。下一发布门禁为 `V588-UI-002` 的 RED、最小接入、本地全量回归和云端验收。

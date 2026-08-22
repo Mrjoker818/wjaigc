@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-22T04:32:02.000Z",
+  "item": "V588-UI-001",
+  "candidate": {
+    "githubMain": "986f128006c246b400f116da7fb3a5b4c02f0a6c",
+    "cozeHead": "0e16ea0a29365c2c179c0624059e8a8e0fa263e1",
+    "cozeHeadParent": "986f128006c246b400f116da7fb3a5b4c02f0a6c",
+    "cozeOriginMain": "986f128006c246b400f116da7fb3a5b4c02f0a6c",
+    "cozeTreeEqualsOriginMain": true,
+    "cozeWorktreeClean": true,
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "cozeBuildExit": 0,
+    "cozeRootHttpStatus": 200,
+    "runtimeAdministratorOrigin": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site"
+  },
+  "browser": {
+    "family": "Google Chrome",
+    "profile": "用户1",
+    "authenticatedUser": "Mr.joker",
+    "authenticatedRole": "管理员",
+    "newTabCreated": false,
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_1786500304299_8vix1z45f",
+    "screenshot": "docs/testing/evidence/v588-ui-001-cloud-2026-08-22.png"
+  },
+  "authenticationBoundary": {
+    "cozeEmbeddedIframePersistedSession": false,
+    "firstPartyPreviewPersistedSession": true,
+    "classification": "Coze embedded third-party iframe cookie boundary; first-party preview authenticated successfully and opened the administrator project dashboard",
+    "businessLoginRegressionObserved": false
+  },
+  "interactionEvidence": {
+    "zoom": {
+      "before": "90%",
+      "afterZoomOut": "75%",
+      "afterZoomIn": "90%",
+      "resetEarlierInRun": {
+        "before": "69%",
+        "after": "90%"
+      }
+    },
+    "gridCycle": [
+      "网格: 点阵",
+      "网格: 线条",
+      "网格: 空白",
+      "网格: 点阵"
+    ],
+    "connections": [
+      "显示连线",
+      "隐藏连线",
+      "显示连线"
+    ],
+    "panels": [
+      {
+        "phase": "initial",
+        "layer": "打开图层",
+        "history": "版本历史"
+      },
+      {
+        "phase": "layer-open",
+        "layer": "关闭图层",
+        "history": "版本历史"
+      },
+      {
+        "phase": "history-open",
+        "layer": "打开图层",
+        "history": "关闭版本历史"
+      },
+      {
+        "phase": "closed",
+        "layer": "打开图层",
+        "history": "版本历史"
+      }
+    ],
+    "engineDialog": {
+      "opened": true,
+      "closed": true,
+      "heading": "放大引擎选择"
+    }
+  },
+  "browserHealth": {
+    "freshConsoleCutoff": "2026-08-22T04:31:52.874Z",
+    "freshConsoleErrorsOrWarnings": 0,
+    "nativeDialog": null
+  },
+  "visualReview": {
+    "toolbarAttachedToCanvas": true,
+    "overlapObserved": false,
+    "clippingObserved": false,
+    "rightPanelObscuresCluster": false
+  },
+  "decision": "V588_UI_001_CLOUD_PASS"
+}
