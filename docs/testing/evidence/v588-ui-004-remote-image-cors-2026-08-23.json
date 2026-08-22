@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-23T03:30:00+08:00",
+  "stage": "V588-UI-004",
+  "bugId": "UI004-BUG-002",
+  "environment": {
+    "browser": "Google Chrome",
+    "cloudUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "reproductionCommit": "362d350ecbb552f27ad51be0782f228f49fd2391",
+    "fixCommit": "3becee8b54d9cc6320b137c4070e129cbed06ffe",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "sourceImage": {
+    "canvasImageId": "1786293094747-2-0",
+    "assetId": "fa74e90a-0c99-5c2a-a209-5303676ae8a0",
+    "assetVersionId": "d1283de6-1880-5f2c-9e7c-a89dd9052ad4",
+    "placementId": "09bf3a5f-d65c-5830-a93f-d766c8e64943",
+    "url": "https://cdn.pearapi.ai/apiservers/cache/images/2026-08-10/3a013e6d-cf33-4259-9936-c122c0be5d86.png",
+    "canvasNaturalSize": [1536, 1024]
+  },
+  "reproduction": {
+    "upscalePanel": "pass",
+    "svgPanel": "pass",
+    "erasePanel": "failed-source-load",
+    "maskPanel": "failed-source-load",
+    "colorPanelNaturalSize": [0, 0],
+    "removeBackgroundPanel": "pass",
+    "expandPanel": "pass",
+    "cropPanel": "pass",
+    "canvasCrossOrigin": null,
+    "editorCrossOrigin": "anonymous",
+    "rootCause": "Pear CDN does not provide the CORS headers required by anonymous pixel-readable image elements."
+  },
+  "fix": {
+    "route": "/api/image/source",
+    "authentication": "required",
+    "downloader": "downloadPublicImage",
+    "ssrfPolicy": "DNS-resolved public IP validation, no redirects, MIME/byte/timeout limits",
+    "maxBytes": 26214400,
+    "changedPanels": ["erase", "mask", "color-preview"],
+    "businessTaskOrBillingChanged": false
+  },
+  "localVerification": {
+    "focused": "50/50",
+    "sourceContract": "19/19",
+    "typecheck": "pass",
+    "eslint": "0 errors / 987 historical warnings",
+    "vitest": "491 files passed / 3086 tests passed / 105 PostgreSQL-gated skipped",
+    "build": "pass / 116 routes",
+    "diffCheck": "pass"
+  },
+  "postFixCloudVerification": {
+    "status": "blocked",
+    "reason": "Google Chrome extension can list the existing project and preview tabs but cannot interact with either tab; the second detected browser instance is 360 Browser and was not used."
+  }
+}

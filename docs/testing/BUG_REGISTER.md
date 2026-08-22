@@ -2260,3 +2260,19 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 修复 | 仅调整测试读取对象与精确保护清单至 36 条现有路径，保持运行时代码不变。提交：`cf7e93f`。 |
 | 回归 | 三项修复回归 `14/14`，UI004 聚焦 `65/65`，全仓 `3075 passed / 105 PostgreSQL-gated skipped`；独立复审 `0/0/0`。 |
 | 状态 | **本地关闭 / 云端待验。** 不把缺少 PostgreSQL 的跳过项或本地 `/api/user-data/sync` 500 记为通过。 |
+
+### UI004-BUG-002：远程供应商图片在擦除、蒙版和调色面板中被 CORS 阻断
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 图片编辑核心入口不可用 |
+| 发现环境 | Coze exact `main@362d350ecbb552f27ad51be0782f228f49fd2391`，已登录 Google Chrome，Pear CDN 真实项目图片，2026-08-23 |
+| 精确复现 | 选择画布中可正常显示的 Pear 图片，依次打开擦除、蒙版和调色；擦除/蒙版显示“图片加载失败，无法进行编辑”，调色预览 `naturalWidth/naturalHeight=0/0`。 |
+| 预期 | 同一张已授权项目图片应在像素编辑器和调色预览中加载，擦除/蒙版在图片加载完成后允许绘制与提交。 |
+| 根因 | 画布图片未设置 `crossOrigin`，所以可显示；三个编辑入口直接对 Pear CDN URL 设置 `crossOrigin=anonymous`，但 CDN 不返回允许匿名读取的 CORS Header，浏览器拒绝加载可供像素读取的图片。Asset Graph 当前也持久化同一远程 URL，无法自动提供同源副本。 |
+| RED | 新增图片源解析器、鉴权路由和两个叶面板合同；首次 `17` 项中仅新增 `4` 项按预期失败。全仓随后暴露一个要求直接使用外部 URL 的旧合同。 |
+| 修复 | `main@3becee8b54d9cc6320b137c4070e129cbed06ffe` 新增鉴权的 `/api/image/source`，复用 `downloadPublicImage` 的 DNS/IP、重定向、MIME、25MB 和超时安全边界；仅擦除/蒙版原生图片和调色预览改用同源地址。任务提交仍使用原始 URL，未改供应商、任务、积分或退款逻辑。 |
+| 本地回归 | 聚焦安全/面板矩阵 `50/50`，源图合同 `19/19`；TypeScript 通过；ESLint `0 error / 987` 条历史 warning；全仓 `491 files / 3086 tests` 通过，`105` 个 PostgreSQL 专项明确跳过；生产构建通过并生成 `/api/image/source`。 |
+| 云端状态 | 修复前云端复现与根因已闭环；修复后 exact SHA 尚未部署复验。Google Chrome 主实例能列出项目页和预览页但无法交互，另一实例已确认是 360 并未使用。 |
+| 证据 | `docs/testing/evidence/v588-ui-004-remote-image-cors-2026-08-23.json` |
+| 状态 | **本地已修复并推送 / 修复后云端待验。** 不得把修复前诊断或本地通过写成云端通过。 |

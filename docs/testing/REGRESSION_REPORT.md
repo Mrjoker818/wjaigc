@@ -1495,3 +1495,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 本地没有 E2E 凭据与 PostgreSQL，实际命令结果为 `2 skipped`，没有执行登录后的布局动作，也没有生成可当作通过依据的浏览器证据。该矩阵必须在 Coze exact SHA 的现有 Google Chrome 标签页执行。
 - **结论：功能、独立审查与 `main` 推送通过 / 发布仍有条件。** Coze exact SHA 和 Google Chrome 云端矩阵完成前，V588-UI-004 不标记为已吸收。
 - GitHub 已普通快进到实现候选 `be96c59d2d4dec6bbe510c3b7fd0de59ef092e0b`，`stable` 未变。Google Chrome 正确列出 Coze 项目页和云端预览页，但接管两个现有标签均超时；未使用 360、未新建标签，故 Coze exact SHA 与云端矩阵仍保持未验证。
+
+## 2026-08-23 V588-UI-004 云端首轮与远程图片 CORS 修复
+
+- Coze 已精确运行 `main@362d350ecbb552f27ad51be0782f228f49fd2391`，生产构建和 HTTP 健康通过；已登录 Google Chrome 在真实五图项目完成 UI004 首轮矩阵。
+- 1440x900 底部抽屉和 375x812 图片紧凑工具栏可用；放大、SVG、去背景配置、扩展和裁切面板可打开。擦除、蒙版明确显示源图加载失败，调色预览自然尺寸为 `0x0`。
+- 同一 Pear CDN 图片在画布中自然尺寸为 `1536x1024`、`crossOrigin=null`；三个失败入口使用 `crossOrigin=anonymous`。Asset API 返回相同远程 URL，根因确认是上游无 CORS Header，不是图片不存在、选择错图或模型不可用。
+- TDD 新增鉴权同源图片读取端点，复用现有 SSRF 安全下载器；只改变擦除/蒙版与调色预览的展示源，不改变任务、供应商和账务。候选已推送为 `main@3becee8b54d9cc6320b137c4070e129cbed06ffe`，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
+- 本地最终门禁：聚焦 `50/50`、源图合同 `19/19`、全仓 `491 files / 3086 tests` 通过；`105` 个 PostgreSQL 专项因缺少隔离库跳过；TypeScript、零错误 ESLint、生产构建 `116` 路由和空白检查通过。
+- **结论：修复前云端问题与根因已确认，修复候选本地回归通过；修复后云端仍未验证。** Google Chrome 主实例当前可发现但无法交互，360 实例已识别并排除。证据：`docs/testing/evidence/v588-ui-004-remote-image-cors-2026-08-23.json`。

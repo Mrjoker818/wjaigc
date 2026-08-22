@@ -1231,3 +1231,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 本地缺少 E2E 凭据与 PostgreSQL，Playwright 实际结果为 `2 skipped`；不能据此宣称布局、动作或浏览器错误门禁通过。
 - **发布判定：有条件通过。** 独立审查已为 `0/0/0`，`main` 普通快进且 `stable` 未变；剩余条件为 Coze exact SHA 运行健康，以及现有 Google Chrome 标签页中的全矩阵和 Console/网络/dialog 零错误证据。
 - `main` 普通快进和 `stable` 不变已关闭；当前唯一 UI004 阻塞为 Coze 拉取/运行健康与 Google Chrome 云端矩阵。Chrome 能发现正确现有标签，但接管项目页和预览页均超时，不能据此宣称云端通过。
+
+## 2026-08-23 V588-UI-004 远程图片编辑修复发布判定
+
+- 修复前 Coze `362d350` 的真实 Google Chrome 证据确认擦除、蒙版和调色无法读取 Pear CDN 图片；这是 UI004 云端矩阵中的 P1，不是模型不可用或错误选择素材。
+- 修复候选 `main@3becee8b54d9cc6320b137c4070e129cbed06ffe` 已通过安全下载、图片源、编辑面板、全仓 TypeScript、全仓零错误 ESLint、`3086` 项 Vitest 和生产构建；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
+- 105 个 PostgreSQL 集成/并发用例仍因本机无隔离库跳过；本次改动不触及数据库或账务，但跳过事实不计为通过。
+- **发布判定：有条件通过，仅允许作为 `main` 云端验收候选。** 必须由 Coze 拉取 exact `3becee8`，重新构建并在同一 Google Chrome 项目图片上证明 `/api/image/source` HTTP 200、三处图片自然尺寸非零、擦除/蒙版可绘制、调色预览可见、其余五个面板无回归，并确认新鲜 Console/网络/dialog 门禁后，才能关闭 UI004。
