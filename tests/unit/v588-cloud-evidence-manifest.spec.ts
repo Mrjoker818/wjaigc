@@ -193,6 +193,26 @@ describe('V588 云端机器证据治理门禁', () => {
 
     expect(findUi003AbsorptionGovernanceIssues(absorbedDocuments, evidenceSha)).toEqual([]);
 
+    const absorbedWithPostgresGap = Object.fromEntries(
+      UI003_GOVERNANCE_DOCUMENT_NAMES.map((name) => [
+        name,
+        `V588-UI-003 已吸收，云端验证通过，exact SHA ${evidenceSha}\nPostgreSQL 集成门禁仍未验证（UNVERIFIED），不计为通过。`,
+      ]),
+    ) as Ui003GovernanceDocuments;
+    expect(findUi003AbsorptionGovernanceIssues(absorbedWithPostgresGap, evidenceSha)).toEqual([]);
+
+    const postgresOnlyDocuments = Object.fromEntries(
+      UI003_GOVERNANCE_DOCUMENT_NAMES.map((name) => [
+        name,
+        `V588-UI-003 exact SHA ${evidenceSha}\nPostgreSQL 集成门禁仍为 UNVERIFIED。`,
+      ]),
+    ) as Ui003GovernanceDocuments;
+    for (const name of UI003_GOVERNANCE_DOCUMENT_NAMES) {
+      expect(findUi003AbsorptionGovernanceIssues(postgresOnlyDocuments, evidenceSha)).toContain(
+        `${name}: missing absorbed status`,
+      );
+    }
+
     for (const name of UI003_GOVERNANCE_DOCUMENT_NAMES) {
       const staleDocuments = {
         ...absorbedDocuments,

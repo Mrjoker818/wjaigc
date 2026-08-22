@@ -15,8 +15,15 @@ export const UI003_GOVERNANCE_DOCUMENT_NAMES: Ui003GovernanceDocumentName[] = [
   'progress',
 ];
 
-const absorbedPattern = /(?:已吸收|完成吸收|云端(?:回归|验收|验证)?通过|已验证|VERIFIED)/iu;
-const pendingPattern = /(?:本地候选通过|云端待验|未验证|尚无 Coze exact SHA)/iu;
+const ui003StatusPrefix = '(?:V588-UI-003|状态|发布判定)';
+const absorbedPattern = new RegExp(
+  `${ui003StatusPrefix}[^\\r\\n]*(?:已吸收|完成吸收|云端(?:回归|验收|验证)?通过|ABSORBED|CLOUD VERIFIED)`,
+  'iu',
+);
+const pendingPattern = new RegExp(
+  `${ui003StatusPrefix}[^\\r\\n]*(?:本地候选通过|云端待验|尚无 Coze exact SHA)`,
+  'iu',
+);
 
 export function extractUi003GovernanceSection(
   document: string,
