@@ -468,3 +468,16 @@ Protected stable branch: read-only and untouched
 - S4-BUG-010 is locally repaired by projecting React Flow node/pane clicks into the workflow domain selection. The real integration test now opens the property panel while preserving drag-end-only commits.
 - Gates pass: focused `8/8`, expanded `87/87`, full Vitest `2857 passed / 70 PostgreSQL-gated skipped`, TypeScript, production build `114` pages, whitespace and ESLint `0 errors / 988 historical warnings`.
 - Next unique action is main-only commit/push, Coze exact-SHA pull, then Google Chrome historical-image adoption/round-trip and `react-flow-v2` click/edit/save/reload/rollback. `stable` remains untouched and Stage 5 remains prohibited.
+
+## 2026-08-22 V588-UI-003 Canvas Minimap
+
+- V588-UI-003 Task 1: complete (commits `217a9df..427e32a`, independent review clean, Critical/Important/Minor `0/0/0`).
+- The RED gate is limited to `canvas-minimap.test.tsx`, `canvas-minimap-wiring.test.ts`, and `canvas-zoom-cluster.test.tsx`; focused Vitest and `pnpm ts-check` fail only because the production minimap leaf and parent wiring do not exist yet.
+- Next unique action is Task 2 only: create `src/components/canvas/CanvasMinimap.tsx`, make the leaf tests and TypeScript contract green, and leave parent wiring/toolbar tests RED for Task 3.
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` remains read-only; no Task 1 commit has been pushed.
+- V588-UI-003 Task 2: complete (commits `427e32a..68a7693`, independent review clean, Critical/Important/Minor `0/0/0`).
+- `CanvasMinimap` now has the exact public API, finite-safe ordinary/extreme/overflow-sum projection, rectangle-only rendering, inverse navigation, preference handling, themes and event isolation. Leaf tests pass `13/13`; `pnpm ts-check` passes.
+- Next unique action is Task 3 only: connect the leaf to `InfiniteCanvas`, `CanvasZoomCluster`, the command palette and the exact protected-baseline path; parent/toolbar RED tests must turn green without changing existing tool order or Canvas behavior.
+- V588-UI-003 Task 3: complete (commits `68a7693..ef9261e`, independent review clean, Critical/Important/Minor `0/0/0`).
+- Six focused files pass `27/27`; TypeScript passes; targeted ESLint exits `0` with 19 pre-existing `infinite-canvas.tsx` warnings; the committed protected-baseline check passes with zero warnings.
+- Next unique action is the final V588-UI-003 gate: fresh full regression/build/protection checks, broad branch review, `main`-only fast-forward push, then exact-SHA Google Chrome cloud acceptance using existing tabs. No new browser tab may be created.
