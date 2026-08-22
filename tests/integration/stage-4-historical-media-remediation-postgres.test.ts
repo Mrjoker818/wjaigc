@@ -120,6 +120,11 @@ interface ArchiveState {
   versions: unknown[];
 }
 
+interface DoctorReadinessState {
+  activePlacementAvailability: Record<string, number>;
+  falseReadyActivePlacements: number;
+}
+
 if (!databaseUrl) {
   console.warn(
     'BLOCKED: POSTGRES_TEST_DATABASE_URL is not configured; historical media remediation PostgreSQL tests skipped.',
@@ -633,6 +638,45 @@ async function readArchiveState(query: QueryFn): Promise<ArchiveState> {
     projects: projects.rows,
     revision: revision.rows,
     versions: versions.rows,
+  };
+}
+
+async function readDoctorReadinessState(query: QueryFn): Promise<DoctorReadinessState> {
+  const [availability, falseReady] = await Promise.all([
+    query<{ availability: string; count: number }>(
+      `SELECT version.availability, COUNT(*)::int AS count
+       FROM wujie_workspace_placements placement
+       JOIN wujie_asset_versions version
+         ON version.id = placement.asset_version_id
+        AND version.asset_id = placement.asset_id
+        AND version.owner_id = placement.owner_id
+        AND version.project_id = placement.project_id
+       WHERE placement.status = 'active'
+       GROUP BY version.availability`,
+    ),
+    query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count
+       FROM wujie_workspace_placements placement
+       JOIN wujie_asset_versions version
+         ON version.id = placement.asset_version_id
+        AND version.asset_id = placement.asset_id
+        AND version.owner_id = placement.owner_id
+        AND version.project_id = placement.project_id
+       WHERE placement.status = 'active'
+         AND version.availability = 'ready'
+         AND (
+           btrim(coalesce(version.file_url, '')) = ''
+           OR version.file_url LIKE '/v1/images/proxy/%'
+         )
+         AND nullif(btrim(coalesce(version.storage_key, '')), '') IS NULL
+         AND nullif(btrim(coalesce(version.recovery_source_url, '')), '') IS NULL`,
+    ),
+  ]);
+  return {
+    activePlacementAvailability: Object.fromEntries(
+      availability.rows.map(row => [row.availability, row.count]),
+    ),
+    falseReadyActivePlacements: falseReady.rows[0]?.count ?? 0,
   };
 }
 
@@ -1548,6 +1592,91 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
     });
   });
 
+  postgresIt('serializes concurrent non-current archives and rejects a changed idempotent request', async () => {
+    await withIsolatedPostgres('historical-media-non-current-idempotency', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetVersionId === 'version-non-current-broken',
+      ) as HistoricalMediaCandidate;
+      expect(candidate).toMatchObject({ isCurrentVersion: false });
+      const command = createArchiveCommand(
+        [candidate],
+        'historical-media-non-current-idempotency',
+      );
+
+      const concurrent = await Promise.all([
+        service.archiveHistoricalMedia(command),
+        service.archiveHistoricalMedia(command),
+      ]);
+
+      expect(concurrent.map(result => result.reused).sort()).toEqual([false, true]);
+      expect(new Set(concurrent.map(result => result.remediationId)).size).toBe(1);
+      await expect(service.archiveHistoricalMedia({
+        ...command,
+        request: { ...command.request, reason: 'Changed non-current review reason' },
+      })).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_IDEMPOTENCY_CONFLICT' });
+      await expect(query(
+        `SELECT
+           (SELECT count(*)::int FROM wujie_asset_media_remediations) AS ledger,
+           (SELECT count(*)::int FROM wujie_audit_log) AS audit,
+           (SELECT status FROM wujie_workspace_placements
+             WHERE id = 'placement-non-current-broken') AS bad_placement_status,
+           (SELECT availability FROM wujie_asset_versions
+             WHERE id = 'version-non-current-broken') AS bad_version_availability,
+           (SELECT status FROM wujie_workspace_placements
+             WHERE id = 'placement-non-current-healthy') AS healthy_placement_status,
+           (SELECT availability FROM wujie_asset_versions
+             WHERE id = 'version-non-current-healthy') AS healthy_version_availability`,
+      )).resolves.toMatchObject({
+        rows: [{
+          ledger: 1,
+          audit: 1,
+          bad_placement_status: 'trashed',
+          bad_version_availability: 'unrecoverable',
+          healthy_placement_status: 'active',
+          healthy_version_availability: 'ready',
+        }],
+      });
+    });
+  });
+
+  postgresIt('reconciles doctor readiness blockers after archiving the exact reviewed set', async () => {
+    await withIsolatedPostgres('historical-media-readiness-reconciliation', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const before = await readDoctorReadinessState(query);
+
+      expect(before.activePlacementAvailability.missing).toBe(3);
+      expect(before.falseReadyActivePlacements).toBe(2);
+      await expect(service.archiveHistoricalMedia(createArchiveCommand(
+        discovery.candidates,
+        'historical-media-readiness-reconciliation',
+      ))).resolves.toMatchObject({
+        archivedVersionCount: 4,
+        archivedPlacementCount: 5,
+      });
+
+      const after = await readDoctorReadinessState(query);
+      expect(after.activePlacementAvailability.missing ?? 0).toBe(0);
+      expect(after.activePlacementAvailability.unrecoverable ?? 0).toBe(0);
+      expect(after.falseReadyActivePlacements).toBe(0);
+      await expect(query(
+        `SELECT version.availability, placement.status
+         FROM wujie_assets asset
+         JOIN wujie_asset_versions version ON version.id = asset.current_version_id
+         JOIN wujie_workspace_placements placement
+           ON placement.asset_id = asset.id AND placement.asset_version_id = version.id
+         WHERE asset.id = 'asset-non-current-broken'
+           AND placement.id = 'placement-non-current-healthy'`,
+      )).resolves.toMatchObject({
+        rows: [{ availability: 'ready', status: 'active' }],
+      });
+    });
+  });
+
   postgresIt('serializes identical archives, reuses one result and rejects a changed request', async () => {
     await withIsolatedPostgres('historical-media-concurrent-archive', async ({ databaseUrl: isolatedUrl, query }) => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
@@ -2112,6 +2241,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
       const service = await loadHistoricalMediaService();
       const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      expect(discovery.candidates.some(candidate => !candidate.isCurrentVersion)).toBe(true);
       const before = await readArchiveState(query);
       await installFailureTrigger(query, {
         functionName: 'fail_historical_media_snapshot',
@@ -2134,6 +2264,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
       const service = await loadHistoricalMediaService();
       const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      expect(discovery.candidates.some(candidate => !candidate.isCurrentVersion)).toBe(true);
       const before = await readArchiveState(query);
       await installFailureTrigger(query, {
         functionName: 'fail_historical_media_audit',
@@ -2143,7 +2274,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       });
 
       await expect(service.archiveHistoricalMedia(createArchiveCommand(
-        discovery.candidates.filter(candidate => candidate.isCurrentVersion),
+        discovery.candidates,
         'historical-media-audit-rollback',
       ))).rejects.toThrow('injected audit failure');
 
