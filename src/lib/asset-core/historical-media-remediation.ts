@@ -54,7 +54,8 @@ export type HistoricalMediaRemediationErrorCode =
   | 'HISTORICAL_MEDIA_REQUEST_INVALID'
   | 'HISTORICAL_MEDIA_NOT_FOUND'
   | 'HISTORICAL_MEDIA_CANDIDATE_STALE'
-  | 'HISTORICAL_MEDIA_IDEMPOTENCY_CONFLICT';
+  | 'HISTORICAL_MEDIA_IDEMPOTENCY_CONFLICT'
+  | 'HISTORICAL_MEDIA_COVERAGE_INCOMPLETE';
 
 export class HistoricalMediaRemediationError extends Error {
   constructor(readonly code: HistoricalMediaRemediationErrorCode) {
@@ -537,11 +538,10 @@ function mapDiscoveryCandidates(rows: DiscoveryRow[]): HistoricalMediaCandidate[
   return mapped;
 }
 
-export async function discoverHistoricalMediaArchiveCandidates(
-  input?: { limit?: number },
+async function readHistoricalMediaDiscovery(
+  client: AssetCoreSqlTransaction,
+  limit: number,
 ): Promise<HistoricalMediaDiscovery> {
-  const limit = parseDiscoveryLimit(input);
-  return withAssetCoreTransaction(async (client) => {
     const result = await client.query<DiscoverySnapshotRow>(
       `WITH eligible_placements AS MATERIALIZED (
          SELECT
@@ -661,7 +661,24 @@ export async function discoverHistoricalMediaArchiveCandidates(
         complete: uncoveredBlockingPlacements === 0,
       },
     };
+}
+
+export async function discoverHistoricalMediaArchiveCandidates(
+  input?: { limit?: number },
+): Promise<HistoricalMediaDiscovery> {
+  const limit = parseDiscoveryLimit(input);
+  return withAssetCoreTransaction(async (client) => {
+    return readHistoricalMediaDiscovery(client, limit);
   });
+}
+
+async function assertHistoricalMediaCoverageComplete(
+  client: AssetCoreSqlTransaction,
+): Promise<void> {
+  const discovery = await readHistoricalMediaDiscovery(client, MAX_CANDIDATES);
+  if (!discovery.coverage.complete) {
+    throw remediationError('HISTORICAL_MEDIA_COVERAGE_INCOMPLETE');
+  }
 }
 
 function timestampToIso(value: Date | string): string {
@@ -1096,6 +1113,8 @@ export async function archiveHistoricalMedia(input: {
     if (existing) {
       return resolveExistingOrConflict(existing, normalized.requestDigest);
     }
+
+    await assertHistoricalMediaCoverageComplete(client);
 
     const sortedSelections = await resolveArchiveSelections(
       client,

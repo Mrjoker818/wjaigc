@@ -296,6 +296,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (
         error.code === 'HISTORICAL_MEDIA_CANDIDATE_STALE'
         || error.code === 'HISTORICAL_MEDIA_IDEMPOTENCY_CONFLICT'
+        || error.code === 'HISTORICAL_MEDIA_COVERAGE_INCOMPLETE'
       ) {
         return errorResponse(409, error.code, 'Historical media archive conflict', requestId);
       }

@@ -154,7 +154,18 @@ describe('historical media remediation admin API', () => {
     mocks.getRequestUser.mockResolvedValue(adminAuth());
     mocks.discover.mockResolvedValue({
       candidates: [{ assetVersionId: 'version-a' }],
-      counts: { versions: 1, activePlacements: 2 },
+      counts: {
+        versions: 1,
+        activePlacements: 2,
+        currentVersions: 1,
+        nonCurrentVersions: 0,
+      },
+      coverage: {
+        eligibleBlockingPlacements: 2,
+        candidatePlacements: 2,
+        uncoveredBlockingPlacements: 0,
+        complete: true,
+      },
     });
 
     const response = await GET(new NextRequest(
@@ -165,7 +176,18 @@ describe('historical media remediation admin API', () => {
     expect(mocks.discover).toHaveBeenCalledWith({ limit: 20 });
     expect(await expectRequestId(response)).toEqual(expect.objectContaining({
       success: true,
-      counts: { versions: 1, activePlacements: 2 },
+      counts: {
+        versions: 1,
+        activePlacements: 2,
+        currentVersions: 1,
+        nonCurrentVersions: 0,
+      },
+      coverage: {
+        eligibleBlockingPlacements: 2,
+        candidatePlacements: 2,
+        uncoveredBlockingPlacements: 0,
+        complete: true,
+      },
     }));
   });
 
@@ -509,6 +531,7 @@ describe('historical media remediation admin API', () => {
     ['HISTORICAL_MEDIA_NOT_FOUND', 404],
     ['HISTORICAL_MEDIA_CANDIDATE_STALE', 409],
     ['HISTORICAL_MEDIA_IDEMPOTENCY_CONFLICT', 409],
+    ['HISTORICAL_MEDIA_COVERAGE_INCOMPLETE', 409],
   ] as const)('maps %s to HTTP %i', async (code, status) => {
     mocks.getRequestUser.mockResolvedValue(adminAuth());
     mocks.archive.mockRejectedValue(new MockHistoricalMediaRemediationError(code));

@@ -406,6 +406,59 @@ async function seedOversizedDiscoveryCandidate(
   );
 }
 
+async function seedDiscoveryCandidateOverflow(
+  query: QueryFn,
+  candidateCount: number,
+): Promise<void> {
+  await query(
+    `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+     SELECT 'asset-limit-' || lpad(index::text, 3, '0'), $1, $2, 'image', 'active'
+     FROM generate_series(1, $3::int) AS index`,
+    [OWNER_ID, PROJECT_ID, candidateCount],
+  );
+  await query(
+    `INSERT INTO wujie_asset_versions(
+       id, asset_id, owner_id, project_id, file_url, storage_key,
+       availability, recovery_source_url, metadata
+     )
+     SELECT
+       'version-limit-' || lpad(index::text, 3, '0'),
+       'asset-limit-' || lpad(index::text, 3, '0'),
+       $1,
+       $2,
+       '/v1/images/proxy/limit-' || lpad(index::text, 3, '0'),
+       NULL,
+       'missing',
+       NULL,
+       '{}'::jsonb
+     FROM generate_series(1, $3::int) AS index`,
+    [OWNER_ID, PROJECT_ID, candidateCount],
+  );
+  await query(
+    `UPDATE wujie_assets
+     SET current_version_id = replace(id, 'asset-limit-', 'version-limit-')
+     WHERE id LIKE 'asset-limit-%'`,
+  );
+  await query(
+    `INSERT INTO wujie_workspace_placements(
+       id, owner_id, project_id, asset_id, asset_version_id,
+       workspace_kind, workspace_id, entity_type, entity_id
+     )
+     SELECT
+       'placement-limit-' || lpad(index::text, 3, '0'),
+       $1,
+       $2,
+       'asset-limit-' || lpad(index::text, 3, '0'),
+       'version-limit-' || lpad(index::text, 3, '0'),
+       'chat',
+       'chat-limit-' || lpad(index::text, 3, '0'),
+       'chat-result',
+       'entity-limit-' || lpad(index::text, 3, '0')
+     FROM generate_series(1, $3::int) AS index`,
+    [OWNER_ID, PROJECT_ID, candidateCount],
+  );
+}
+
 async function growCandidatePlacements(
   query: QueryFn,
   placementCount: number,
@@ -975,7 +1028,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
     });
   });
 
-  postgresIt('fails stale when locked placement facts grow beyond the reviewed canonical bound', async () => {
+  postgresIt('fails closed when placement facts grow beyond the reviewed canonical bound', async () => {
     await withIsolatedPostgres('historical-media-oversized-stale', async ({ databaseUrl: isolatedUrl, query }) => {
       await prepareHistoricalMediaDatabase(isolatedUrl, query);
       const service = await loadHistoricalMediaService();
@@ -988,7 +1041,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       await expect(service.archiveHistoricalMedia(createArchiveCommand(
         [candidate],
         'historical-media-oversized-stale',
-      ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_CANDIDATE_STALE' });
+      ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_COVERAGE_INCOMPLETE' });
 
       await expect(query(
         `SELECT
@@ -996,6 +1049,46 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
            (SELECT count(*)::int FROM wujie_audit_log) AS audit,
            (SELECT count(*)::int FROM wujie_workspace_placements WHERE status = 'trashed') AS trashed`,
       )).resolves.toMatchObject({ rows: [{ ledger: 0, audit: 0, trashed: 0 }] });
+    });
+  });
+
+  postgresIt('rejects archive without side effects when the global candidate limit makes coverage incomplete', async () => {
+    await withIsolatedPostgres('historical-media-coverage-incomplete-limit', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      await seedDiscoveryCandidateOverflow(query, 17);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetVersionId === 'version-chat-empty',
+      ) as HistoricalMediaCandidate;
+      const before = await readArchiveState(query);
+
+      expect(discovery.coverage.complete).toBe(false);
+      await expect(service.archiveHistoricalMedia(createArchiveCommand(
+        [candidate],
+        'historical-media-coverage-incomplete-limit',
+      ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_COVERAGE_INCOMPLETE' });
+      expect(await readArchiveState(query)).toEqual(before);
+    });
+  });
+
+  postgresIt('rejects archive without side effects when an oversized candidate makes coverage incomplete', async () => {
+    await withIsolatedPostgres('historical-media-coverage-incomplete-oversized', async ({ databaseUrl: isolatedUrl, query }) => {
+      await prepareHistoricalMediaDatabase(isolatedUrl, query);
+      await seedOversizedDiscoveryCandidate(query, 100);
+      const service = await loadHistoricalMediaService();
+      const discovery = await service.discoverHistoricalMediaArchiveCandidates({ limit: 20 });
+      const candidate = discovery.candidates.find(
+        item => item.assetVersionId === 'version-chat-empty',
+      ) as HistoricalMediaCandidate;
+      const before = await readArchiveState(query);
+
+      expect(discovery.coverage.complete).toBe(false);
+      await expect(service.archiveHistoricalMedia(createArchiveCommand(
+        [candidate],
+        'historical-media-coverage-incomplete-oversized',
+      ))).rejects.toMatchObject({ code: 'HISTORICAL_MEDIA_COVERAGE_INCOMPLETE' });
+      expect(await readArchiveState(query)).toEqual(before);
     });
   });
 
@@ -1174,6 +1267,14 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
       });
       expect(normalizedRetry).toEqual({ ...created, reused: true });
 
+      await seedDiscoveryCandidateOverflow(query, 20);
+      await expect(service.discoverHistoricalMediaArchiveCandidates({ limit: 20 }))
+        .resolves.toMatchObject({ coverage: { complete: false } });
+      await expect(service.archiveHistoricalMedia(command)).resolves.toEqual({
+        ...created,
+        reused: true,
+      });
+
       await expect(service.archiveHistoricalMedia({
         ...command,
         request: { ...command.request, reason: 'Different reviewed reason' },
@@ -1295,7 +1396,7 @@ describe('historical media remediation ledger on real PostgreSQL', () => {
            (SELECT count(*)::int FROM wujie_asset_media_remediations) AS request_results,
            (SELECT count(*)::int FROM wujie_audit_log) AS audits`,
       )).resolves.toMatchObject({
-        rows: [{ assets: 6, versions: 8, placements: 8, request_results: 1, audits: 1 }],
+        rows: [{ assets: 26, versions: 28, placements: 28, request_results: 1, audits: 1 }],
       });
     });
   });
