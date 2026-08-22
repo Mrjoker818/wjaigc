@@ -243,3 +243,58 @@ EXIT_CODE=1
 
 - The component test cannot execute until Task 2 adds `src/components/canvas/CanvasMinimap.tsx`.
 - The toolbar and parent wiring failures remain intentionally reserved for the production implementation tasks.
+
+## V588-UI-003 Task 1 Empty-State Viewport Fix (2026-08-22)
+
+### Changed Files
+
+- `src/__tests__/components/canvas-minimap.test.tsx` — required the empty-state viewport frame with `data-testid="canvas-minimap-viewport"`, a present `style` attribute, and no `NaN` or `Infinity` tokens.
+- `.superpowers/sdd/v588-ui-003-task-1-report.md` — appended this verification record.
+
+No production files were created or modified. No push was performed.
+
+### Exact RED Command
+
+```powershell
+pnpm exec vitest run src/__tests__/components/canvas-minimap.test.tsx src/__tests__/components/canvas-minimap-wiring.test.ts src/__tests__/components/canvas-zoom-cluster.test.tsx
+```
+
+### Exact RED Output
+
+```text
+EXIT_CODE=1
+
+ RUN  v3.2.4 J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s4-release
+
+ ❯ src/__tests__/components/canvas-zoom-cluster.test.tsx (3 tests | 2 failed)
+   × CanvasZoomCluster > preserves every current auxiliary-toolbar command and zoom readout
+     → expected ... to contain 'title="打开小地图"'
+   × CanvasZoomCluster > projects active panel state and generation progress without owning controller state
+     → expected ... to contain 'title="关闭小地图"'
+   ✓ CanvasZoomCluster > hides the minimap command when the viewport is unavailable
+ ❯ src/__tests__/components/canvas-minimap-wiring.test.ts (1 test | 1 failed)
+   × V588-UI-003 canvas minimap wiring > requires the fixed leaf API and parent-owned minimap visibility contract
+     → expected false to be true // Object.is equality
+
+ FAIL  src/__tests__/components/canvas-minimap.test.tsx
+ Error: Failed to resolve import "@/components/canvas/CanvasMinimap" from "src/__tests__/components/canvas-minimap.test.tsx". Does the file exist?
+  Plugin: vite:import-analysis
+
+ Test Files  3 failed (3)
+ Tests  3 failed | 1 passed (4)
+ Start at 16:47:48
+ Duration 4.68s (transform 111ms, setup 301ms, tests 86ms, environment 2.30s, prepare 782ms)
+```
+
+### Self-Review
+
+- Confirmed the exact empty copy `暂无画布内容` remains unchanged.
+- Confirmed the new assertion requires `canvas-minimap-viewport`, a non-empty style attribute, and rejects both `NaN` and `Infinity`.
+- Confirmed all existing empty-state contracts remain unchanged: no thumbnails, no `src` attributes, no fetch work, close behavior, and theme rerender coverage.
+- Confirmed the focused command remains RED only for absent minimap production behavior and wiring; no production implementation was added.
+- Confirmed no push was performed.
+
+### Concerns
+
+- The minimap component test remains uncollectable until the production `CanvasMinimap` module exists.
+- The expected toolbar and parent wiring failures remain for the production implementation tasks.

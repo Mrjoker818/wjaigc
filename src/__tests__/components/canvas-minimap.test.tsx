@@ -202,6 +202,11 @@ describe('CanvasMinimap interaction surface', () => {
     const darkRoot = container.querySelector('[data-canvas-minimap]');
     expect(darkRoot?.getAttribute('data-theme')).toBe('dark');
     expect(screen.getByText('暂无画布内容')).toBeTruthy();
+    const viewportFrame = screen.getByTestId('canvas-minimap-viewport');
+    const viewportStyle = viewportFrame.getAttribute('style');
+    expect(viewportStyle).toBeTruthy();
+    expect(viewportStyle).not.toContain('NaN');
+    expect(viewportStyle).not.toContain('Infinity');
     expect(container.querySelectorAll('img')).toHaveLength(0);
     expect(container.querySelectorAll('[src]')).toHaveLength(0);
     expect(fetchSpy).not.toHaveBeenCalled();
