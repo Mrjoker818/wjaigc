@@ -236,13 +236,30 @@ export function projectCanvasMinimapScene(
     + (CANVAS_MINIMAP_WIDTH - CANVAS_MINIMAP_PADDING * 2) / 2;
   const mapCenterY = CANVAS_MINIMAP_PADDING
     + (CANVAS_MINIMAP_HEIGHT - CANVAS_MINIMAP_PADDING * 2) / 2;
-  const projectRect = (rect: CanvasMinimapRect): CanvasMinimapRect => ({
-    ...(rect.id === undefined ? {} : { id: rect.id }),
-    x: projectFromCenter(rect.x, centerX, mapCenterX, projection.scale),
-    y: projectFromCenter(rect.y, centerY, mapCenterY, projection.scale),
-    width: safeMultiply(rect.width, projection.scale),
-    height: safeMultiply(rect.height, projection.scale),
-  });
+  const projectRect = (rect: CanvasMinimapRect): CanvasMinimapRect => {
+    const x = projectFromCenter(rect.x, centerX, mapCenterX, projection.scale);
+    const y = projectFromCenter(rect.y, centerY, mapCenterY, projection.scale);
+    const right = projectFromCenter(
+      safeAdd(rect.x, rect.width),
+      centerX,
+      mapCenterX,
+      projection.scale,
+    );
+    const bottom = projectFromCenter(
+      safeAdd(rect.y, rect.height),
+      centerY,
+      mapCenterY,
+      projection.scale,
+    );
+
+    return {
+      ...(rect.id === undefined ? {} : { id: rect.id }),
+      x,
+      y,
+      width: Math.max(0, right - x),
+      height: Math.max(0, bottom - y),
+    };
+  };
 
   return {
     items: items.filter(isValidRect).map((item) => projectRect(item)),
