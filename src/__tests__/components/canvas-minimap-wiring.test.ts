@@ -15,6 +15,17 @@ describe('V588-UI-003 canvas minimap wiring', () => {
     const canvas = readFileSync(canvasPath, 'utf8');
 
     expect(component).toContain('export function CanvasMinimap');
+    expect(component).toContain('export const CANVAS_MINIMAP_PREFERENCE_KEY');
+    expect(component).toContain('export const CANVAS_MINIMAP_WIDTH');
+    expect(component).toContain('export const CANVAS_MINIMAP_HEIGHT');
+    expect(component).toContain('export const CANVAS_MINIMAP_PADDING');
+    expect(component).toContain('export interface CanvasMinimapItem');
+    expect(component).toContain('export interface CanvasMinimapViewport');
+    expect(component).toContain('export interface CanvasMinimapBounds');
+    expect(component).toContain('export interface CanvasMinimapProjection');
+    expect(component).toContain('export interface CanvasMinimapRect');
+    expect(component).toContain('export interface CanvasMinimapScene');
+    expect(component).toContain('export interface CanvasMinimapProps');
     expect(component).toContain('export function computeCanvasMinimapBounds');
     expect(component).toContain('export function computeCanvasMinimapProjection');
     expect(component).toContain('export function projectCanvasMinimapScene');

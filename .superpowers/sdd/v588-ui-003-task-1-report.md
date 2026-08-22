@@ -298,3 +298,67 @@ EXIT_CODE=1
 
 - The minimap component test remains uncollectable until the production `CanvasMinimap` module exists.
 - The expected toolbar and parent wiring failures remain for the production implementation tasks.
+
+## V588-UI-003 Task 1 TypeScript Surface Contract (2026-08-22)
+
+### Changed Files
+
+- `src/__tests__/components/canvas-minimap-wiring.test.ts` — added source-contract assertions for all Task 2 public constants and interfaces.
+- `.superpowers/sdd/v588-ui-003-task-1-report.md` — appended this verification record.
+
+No production files were created or modified. No push was performed.
+
+### Exact RED Command
+
+```powershell
+pnpm exec vitest run src/__tests__/components/canvas-minimap.test.tsx src/__tests__/components/canvas-minimap-wiring.test.ts src/__tests__/components/canvas-zoom-cluster.test.tsx
+```
+
+### Exact RED Output
+
+```text
+EXIT_CODE=1
+
+ RUN  v3.2.4 J:/无界本地版/projects/_upstream-wjaigc-restore/.worktrees/wj-stable-s4-release
+
+ ❯ src/__tests__/components/canvas-zoom-cluster.test.tsx (3 tests | 2 failed) 69ms
+   × CanvasZoomCluster > preserves every current auxiliary-toolbar command and zoom readout 38ms
+     → expected '<div class="w-px h-5 ml-1.5 separator…' to contain 'title="打开小地图"'
+   × CanvasZoomCluster > projects active panel state and generation progress without owning controller state 21ms
+     → expected ... to contain 'title="关闭小地图"'
+   ✓ CanvasZoomCluster > hides the minimap command when the viewport is unavailable 9ms
+ ❯ src/__tests__/components/canvas-minimap-wiring.test.ts (1 test | 1 failed) 11ms
+   × V588-UI-003 canvas minimap wiring > requires the fixed leaf API and parent-owned minimap visibility contract 10ms
+     → expected false to be true // Object.is equality
+
+ FAIL  src/__tests__/components/canvas-minimap.test.tsx [ src/__tests__/components/canvas-minimap.test.tsx ]
+ Error: Failed to resolve import "@/components/canvas/CanvasMinimap" from "src/__tests__/components/canvas-minimap.test.tsx". Does the file exist?
+  Plugin: vite:import-analysis
+
+ FAIL  src/__tests__/components/canvas-minimap-wiring.test.ts > V588-UI-003 canvas minimap wiring > requires the fixed leaf API and parent-owned minimap visibility contract
+ AssertionError: expected false to be true // Object.is equality
+ at src/__tests__/components/canvas-minimap-wiring.test.ts:11:39
+
+ FAIL  src/__tests__/components/canvas-zoom-cluster.test.tsx > CanvasZoomCluster > preserves every current auxiliary-toolbar command and zoom readout
+ AssertionError: expected ... to contain 'title="打开小地图"'
+
+ FAIL  src/__tests__/components/canvas-zoom-cluster.test.tsx > CanvasZoomCluster > projects active panel state and generation progress without owning controller state
+ AssertionError: expected ... to contain 'title="关闭小地图"'
+
+ Test Files  3 failed (3)
+ Tests  3 failed | 1 passed (4)
+ Start at  16:51:53
+ Duration 4.14s (transform 94ms, setup 301ms, tests 81ms, environment 2.00s, prepare 654ms)
+```
+
+### Self-Review
+
+- Confirmed all requested exports are asserted: four constants and seven interfaces, with existing behavioral and wiring assertions unchanged.
+- Confirmed the RED run remains limited to the absent production `CanvasMinimap` module and missing minimap toolbar/parent wiring; the viewport-unavailable guard remains passing.
+- Confirmed no production files were modified and no push was performed.
+- Confirmed unrelated pre-existing untracked review artifacts remain untouched.
+
+### Concerns
+
+- The new export assertions cannot execute until Task 2 adds `src/components/canvas/CanvasMinimap.tsx`.
+- The focused command is intentionally RED for the production implementation handoff.
