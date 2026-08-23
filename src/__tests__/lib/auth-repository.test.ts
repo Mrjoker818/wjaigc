@@ -64,6 +64,91 @@ beforeEach(() => {
 });
 
 describe('strict authentication repository reads', () => {
+  it.each(['DB_ONLY', 'DB_PLUS_FILE'] as const)(
+    'keeps a legacy DB session valid in %s before the first post-upgrade login migrates the secret ring',
+    async persistenceMode => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const ordinaryUserId = 'legacy-session-user';
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ key: 'auth_secret', value: legacySecret }],
+      rowCount: 1,
+    });
+    const client = useClient(query);
+    mocks.execSql.mockResolvedValue({
+      rows: [{
+        id: ordinaryUserId,
+        name: 'legacy-session-user-name',
+        password_hash: 'unused-session-password-hash',
+        credential_hash: null,
+        role: 'user',
+        status: 'active',
+        product_type: null,
+        group_id: null,
+        chat_models: null,
+        image_models: null,
+        daily_token_limit: null,
+        monthly_token_limit: null,
+        daily_image_limit: null,
+        avatar: null,
+        nickname: null,
+        api_permissions: {},
+        storage_folder: `data/users/${ordinaryUserId}`,
+        email: null,
+        created_at: 1,
+        updated_at: 1,
+      }],
+      rowCount: 1,
+    });
+
+    const originalEnvironment = { ...process.env };
+    process.env.COZE_PROJECT_ENV = 'DEV';
+    process.env.WUJIE_AUTH_PERSISTENCE_MODE = persistenceMode;
+    process.env.WUJIE_ADMIN_USERNAME = 'missing-default-administrator';
+    delete process.env.WUJIE_AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+    vi.resetModules();
+
+    try {
+      const { getSessionUser, WUJIE_SESSION_COOKIE } = await import('@/lib/server-auth');
+      const encoded = Buffer.from(JSON.stringify({
+        sub: ordinaryUserId,
+        role: 'user',
+        name: 'legacy-session-user-name',
+        exp: now + 60_000,
+      }), 'utf8').toString('base64url');
+      const signature = createHmac('sha256', legacySecret).update(encoded).digest('base64url');
+      const request = {
+        cookies: {
+          get: (name: string) => name === WUJIE_SESSION_COOKIE
+            ? { value: `${encoded}.${signature}` }
+            : undefined,
+        },
+      } as unknown as NextRequest;
+
+      await expect(getSessionUser(request)).resolves.toMatchObject({ id: ordinaryUserId });
+
+      expect(client.query).toHaveBeenCalledOnce();
+      expect(sqlCalls(client)).toEqual([
+        'SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[])',
+      ]);
+      expect(client.query).toHaveBeenCalledWith(
+        expect.any(String),
+        [['auth_secret_ring_v1', 'auth_secret']],
+      );
+      expect(sqlCalls(client).join(' ')).not.toMatch(/BEGIN|FOR UPDATE|INSERT|UPDATE|COMMIT/);
+      expect(mocks.execSql).toHaveBeenCalledOnce();
+      expect(client.release).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+      for (const key of Object.keys(process.env)) {
+        if (!(key in originalEnvironment)) delete process.env[key];
+      }
+      Object.assign(process.env, originalEnvironment);
+    }
+    },
+  );
+
   it('keeps reachable active and previous DB session reads on the real read-only repository path', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
@@ -84,7 +169,10 @@ describe('strict authentication repository reads', () => {
       },
       updatedAt: now - 1_000,
     };
-    const query = vi.fn().mockResolvedValue({ rows: [{ value: ring }], rowCount: 1 });
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ key: 'auth_secret_ring_v1', value: ring }],
+      rowCount: 1,
+    });
     const client = useClient(query);
     mocks.execSql.mockResolvedValue({
       rows: [{
@@ -150,8 +238,8 @@ describe('strict authentication repository reads', () => {
       ))).resolves.toMatchObject({ id: ordinaryUserId });
 
       expect(sqlCalls(client)).toEqual([
-        'SELECT value FROM wujie_system_settings WHERE key = $1',
-        'SELECT value FROM wujie_system_settings WHERE key = $1',
+        'SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[])',
+        'SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[])',
       ]);
       expect(mocks.execSql).toHaveBeenCalledTimes(2);
       expect(mocks.execSql).toHaveBeenCalledWith(
@@ -177,16 +265,19 @@ describe('strict authentication repository reads', () => {
       },
       updatedAt: now,
     };
-    const query = vi.fn().mockResolvedValue({ rows: [{ value: ring }], rowCount: 1 });
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ key: 'auth_secret_ring_v1', value: ring }],
+      rowCount: 1,
+    });
     const client = useClient(query);
     await expect(readDatabaseSecretRing()).resolves.toEqual(ring);
 
     expect(sqlCalls(client)).toEqual([
-      'SELECT value FROM wujie_system_settings WHERE key = $1',
+      'SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[])',
     ]);
     expect(client.query).toHaveBeenCalledWith(
-      'SELECT value FROM wujie_system_settings WHERE key = $1',
-      ['auth_secret_ring_v1'],
+      expect.any(String),
+      [['auth_secret_ring_v1', 'auth_secret']],
     );
     expect(sqlCalls(client).join(' ')).not.toMatch(/BEGIN|FOR UPDATE|INSERT|UPDATE|COMMIT/);
     expect(client.release).toHaveBeenCalledOnce();
@@ -198,12 +289,51 @@ describe('strict authentication repository reads', () => {
     expect(client.release).toHaveBeenCalledOnce();
 
     client = useClient(vi.fn().mockResolvedValue({
-      rows: [{ value: { version: 1, active: null, updatedAt: now } }],
+      rows: [{
+        key: 'auth_secret_ring_v1',
+        value: { version: 1, active: null, updatedAt: now },
+      }],
       rowCount: 1,
     }));
     await expect(readDatabaseSecretRing()).rejects.toMatchObject({
       code: 'AUTH_CONFIGURATION_UNAVAILABLE',
     });
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('uses the caller timestamp when adapting a legacy secret into a read-only ring', async () => {
+    const client = useClient(vi.fn().mockResolvedValue({
+      rows: [{ key: 'auth_secret', value: legacySecret }],
+      rowCount: 1,
+    }));
+
+    await expect(readDatabaseSecretRing(now)).resolves.toMatchObject({
+      active: { activatedAt: now },
+      updatedAt: now,
+    });
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('prefers a persisted ring when the same snapshot also contains a different legacy secret', async () => {
+    const ring: AuthSecretRingV1 = {
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(configuredSecret),
+        secret: configuredSecret,
+        activatedAt: now - 1,
+      },
+      updatedAt: now - 1,
+    };
+    const client = useClient(vi.fn().mockResolvedValue({
+      rows: [
+        { key: 'auth_secret', value: legacySecret },
+        { key: 'auth_secret_ring_v1', value: ring },
+      ],
+      rowCount: 2,
+    }));
+
+    await expect(readDatabaseSecretRing(now)).resolves.toEqual(ring);
+    expect(client.query).toHaveBeenCalledOnce();
     expect(client.release).toHaveBeenCalledOnce();
   });
 

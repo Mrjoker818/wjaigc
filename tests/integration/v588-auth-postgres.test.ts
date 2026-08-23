@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { join, resolve } from 'node:path';
@@ -647,6 +647,124 @@ describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
         value: legacySecret,
         updated_at: String(now - 1),
       }]);
+    });
+  });
+
+  postgresIt('accepts a legacy DB session before login migration without writing the ring', async () => {
+    await withAuthPostgres('v588-auth-legacy-session-read', async ({ query }) => {
+      await createAuthTables(query);
+      await query(
+        'INSERT INTO wujie_system_settings(key, value, updated_at) VALUES ($1, $2::jsonb, $3)',
+        ['auth_secret', JSON.stringify(legacySecret), now - 1],
+      );
+      await query(
+        `INSERT INTO wujie_users(
+           id, name, password_hash, role, status, api_permissions,
+           storage_folder, created_at, updated_at
+         ) VALUES ($1, $2, $3, 'user', 'active', '{}'::jsonb, $4, $5, $5)`,
+        [
+          'legacy-session-user',
+          'Legacy Session User',
+          'a'.repeat(64),
+          'data/users/legacy-session-user',
+          now,
+        ],
+      );
+
+      const dataRoot = await mkdtemp(join(os.tmpdir(), 'wujie-auth-legacy-session-'));
+      const systemDir = join(dataRoot, 'system');
+      const previous = {
+        COZE_PROJECT_ENV: process.env.COZE_PROJECT_ENV,
+        WUJIE_AUTH_PERSISTENCE_MODE: process.env.WUJIE_AUTH_PERSISTENCE_MODE,
+        WUJIE_AUTH_SECRET: process.env.WUJIE_AUTH_SECRET,
+        NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
+        WUJIE_DATA_DIR: process.env.WUJIE_DATA_DIR,
+      };
+      let closeIsolatedPool: (() => Promise<void>) | undefined;
+      try {
+        process.env.COZE_PROJECT_ENV = 'DEV';
+        process.env.WUJIE_DATA_DIR = dataRoot;
+        delete process.env.WUJIE_AUTH_SECRET;
+        delete process.env.NEXTAUTH_SECRET;
+
+        const readOptionalFile = async (filename: string): Promise<string | null> => {
+          try {
+            return await readFile(join(systemDir, filename), 'utf8');
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+            throw error;
+          }
+        };
+        const filesBefore = {
+          secret: await readOptionalFile('auth-secret'),
+          users: await readOptionalFile('users.json'),
+        };
+
+        vi.resetModules();
+        const { getSessionUser, WUJIE_SESSION_COOKIE } = await import('@/lib/server-auth');
+        const { getServerSystemDir } = await import('@/lib/server-data-root');
+        closeIsolatedPool = (await import('@/lib/db-client')).closePool;
+        expect(resolve(getServerSystemDir())).toBe(resolve(systemDir));
+        const encoded = Buffer.from(JSON.stringify({
+          sub: 'legacy-session-user',
+          role: 'user',
+          name: 'Legacy Session User',
+          exp: Date.now() + 60_000,
+        }), 'utf8').toString('base64url');
+        const signature = createHmac('sha256', legacySecret)
+          .update(encoded)
+          .digest('base64url');
+        const request = {
+          cookies: {
+            get: (name: string) => name === WUJIE_SESSION_COOKIE
+              ? { value: `${encoded}.${signature}` }
+              : undefined,
+          },
+        } as Parameters<typeof getSessionUser>[0];
+
+        const settingsBefore = await query(
+          'SELECT key, value, updated_at FROM wujie_system_settings ORDER BY key',
+        );
+        const userBefore = await query(
+          'SELECT * FROM wujie_users WHERE id = $1',
+          ['legacy-session-user'],
+        );
+        for (const persistenceMode of ['DB_ONLY', 'DB_PLUS_FILE'] as const) {
+          process.env.WUJIE_AUTH_PERSISTENCE_MODE = persistenceMode;
+          await expect(getSessionUser(request)).resolves.toMatchObject({
+            id: 'legacy-session-user',
+            name: 'Legacy Session User',
+          });
+        }
+
+        const settingsAfter = await query(
+          'SELECT key, value, updated_at FROM wujie_system_settings ORDER BY key',
+        );
+        const userAfter = await query(
+          'SELECT * FROM wujie_users WHERE id = $1',
+          ['legacy-session-user'],
+        );
+        expect(settingsAfter.rows).toEqual(settingsBefore.rows);
+        expect(userAfter.rows).toEqual(userBefore.rows);
+        expect(settingsAfter.rows).not.toEqual(expect.arrayContaining([
+          expect.objectContaining({ key: 'auth_secret_ring_v1' }),
+        ]));
+        await expect(readOptionalFile('auth-secret')).resolves.toBe(filesBefore.secret);
+        await expect(readOptionalFile('users.json')).resolves.toBe(filesBefore.users);
+      } finally {
+        try {
+          await closeIsolatedPool?.();
+        } finally {
+          try {
+            for (const [key, value] of Object.entries(previous)) {
+              if (value === undefined) delete process.env[key];
+              else process.env[key] = value;
+            }
+          } finally {
+            await rm(dataRoot, { recursive: true, force: true });
+          }
+        }
+      }
     });
   });
 });

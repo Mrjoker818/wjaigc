@@ -148,13 +148,35 @@ export async function readSystemSettingStrict(key: string): Promise<StrictSettin
   }
 }
 
-export async function readDatabaseSecretRing(): Promise<AuthSecretRingV1 | null> {
-  const setting = await readSystemSettingStrict(AUTH_SECRET_RING_KEY);
-  if (!setting.found) return null;
+export async function readDatabaseSecretRing(
+  now: number = Date.now(),
+): Promise<AuthSecretRingV1 | null> {
+  let client: PoolClient | undefined;
+  try {
+    client = await getPool().connect();
+    const result = await client.query<{ key: string; value: unknown }>(
+      `SELECT key, value
+       FROM wujie_system_settings
+       WHERE key = ANY($1::text[])`,
+      [[AUTH_SECRET_RING_KEY, LEGACY_AUTH_SECRET_KEY]],
+    );
+    const values = new Map(result.rows.map(row => [row.key, row.value]));
 
-  const ring = parseAuthSecretRing(setting.value);
-  if (!ring) throw configurationUnavailable();
-  return ring;
+    if (values.has(AUTH_SECRET_RING_KEY)) {
+      const ring = parseAuthSecretRing(values.get(AUTH_SECRET_RING_KEY));
+      if (!ring) throw configurationUnavailable();
+      return ring;
+    }
+
+    if (!values.has(LEGACY_AUTH_SECRET_KEY)) return null;
+    const legacySecret = values.get(LEGACY_AUTH_SECRET_KEY);
+    if (!isValidSecret(legacySecret)) throw configurationUnavailable();
+    return createInitialRing(legacySecret, now);
+  } catch (error) {
+    throw wrapPersistenceError(error);
+  } finally {
+    client?.release();
+  }
 }
 
 export async function resolveDatabaseSecretRing(input: {

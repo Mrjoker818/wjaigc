@@ -357,7 +357,7 @@ async function readSessionSecretRing(now: number): Promise<AuthSecretRingV1 | nu
   const mode = getAuthPersistenceMode();
   const ring = mode === 'FILE_ONLY'
     ? await readFileSecretRingForSession(now)
-    : await readDatabaseSecretRing();
+    : await readDatabaseSecretRing(now);
   if (ring === null) return null;
 
   const parsed = parseAuthSecretRing(ring);
