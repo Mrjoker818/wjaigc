@@ -47,4 +47,11 @@ describe('CanvasEditColorRemoveBgPanel', () => {
     expect(source).toContain("getCanvasEditImageSource(editImg.url)");
     expect(source).not.toContain('src={editImg.url}');
   });
+
+  it('调色预览填满预览容器，不应被 NextImage 的 1x1 内在尺寸压缩', () => {
+    const source = readComponent();
+
+    expect(source).toContain('<NextImage unoptimized fill');
+    expect(source).not.toMatch(/<NextImage\s+unoptimized\s+width=\{1\}\s+height=\{1\}/);
+  });
 });
