@@ -169,16 +169,18 @@ describe.sequential('stable-compatible authentication credential migration', () 
       password: 'legacy-contract-password',
       productType: 'canvas',
     })).resolves.toMatchObject({ id: 'user-contract-1' });
-    expect(warning.mock.calls).toEqual([
-      [expect.objectContaining({
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning.mock.calls).toEqual([[
+      {
         code: 'AUTH_CREDENTIAL_MIGRATION_DEFERRED',
         userId: 'user-contract-1',
-      })],
-    ]);
+      },
+    ]]);
     const emittedAuthenticationLogs = JSON.stringify([
       ...warning.mock.calls,
       ...log.mock.calls,
     ]);
+    expect(emittedAuthenticationLogs).not.toContain(activeSecret);
     expect(emittedAuthenticationLogs).not.toContain(legacySecret);
     expect(emittedAuthenticationLogs).not.toContain(originalLegacyHash);
     expect(emittedAuthenticationLogs).not.toContain('contract-user');
