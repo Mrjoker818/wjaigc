@@ -16,6 +16,10 @@ import { analyzeWithSharp } from '@/lib/vectorize-analyzer';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import {
+  computeWasmTraceBudget,
+  WASM_TRACER_MAX_PIXELS,
+} from './wasm-budget';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -445,7 +449,25 @@ async function runWasmVTracer(
   // Decode image to raw RGBA pixels using sharp
   const image = sharp(inputBuffer);
   const metadata = await image.metadata();
-  const { data, info } = await image
+  const budget = computeWasmTraceBudget(
+    metadata.width ?? 0,
+    metadata.height ?? 0,
+  );
+
+  if (budget.scale < 1) {
+    console.log(
+      `[svg-trace] WASM budget: ${metadata.width}x${metadata.height} exceeds ${WASM_TRACER_MAX_PIXELS}px, downscaling to ${budget.width}x${budget.height}`,
+    );
+  }
+
+  const wasmImage = budget.scale < 1
+    ? image.resize(budget.width, budget.height, {
+        fit: 'fill',
+        kernel: 'lanczos3',
+      })
+    : image;
+
+  const { data, info } = await wasmImage
     .raw()
     .ensureAlpha()
     .toBuffer({ resolveWithObject: true });
