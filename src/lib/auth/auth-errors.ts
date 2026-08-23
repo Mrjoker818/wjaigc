@@ -5,22 +5,22 @@ export type AuthErrorCode =
   | 'AUTH_CREDENTIAL_FORMAT_INVALID'
   | 'AUTH_CREDENTIAL_MIGRATION_DEFERRED';
 
-function toSafeAuthErrorMessage(message: string): string {
-  if (/\b(?:password|secret|hash|token|api[ _-]?key)\b|[a-z][a-z0-9+.-]*:\/\//i.test(message)) {
-    return 'Authentication service request failed.';
-  }
-
-  return message;
-}
+const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
+  AUTH_CONFIGURATION_UNAVAILABLE: 'Authentication configuration is unavailable.',
+  AUTH_PERSISTENCE_UNAVAILABLE: 'Authentication persistence is unavailable.',
+  AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS: 'Authentication credential rotation is unavailable.',
+  AUTH_CREDENTIAL_FORMAT_INVALID: 'Authentication credential format is invalid.',
+  AUTH_CREDENTIAL_MIGRATION_DEFERRED: 'Authentication credential migration is deferred.',
+};
 
 export class AuthServiceError extends Error {
   constructor(
     public readonly code: AuthErrorCode,
-    message: string,
+    _message: string,
     public readonly httpStatus: 409 | 503,
     public readonly retryable: boolean,
   ) {
-    super(toSafeAuthErrorMessage(message));
+    super(AUTH_ERROR_MESSAGES[code]);
     this.name = 'AuthServiceError';
   }
 }
