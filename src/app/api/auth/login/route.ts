@@ -6,6 +6,7 @@ import {
   WUJIE_SESSION_COOKIE,
   WUJIE_SESSION_TTL_SECONDS,
 } from '@/lib/server-auth';
+import { AuthServiceError } from '@/lib/auth/auth-errors';
 import type { User } from '@/lib/user-types';
 import { validateApiInputs } from '@/lib/api-validator';
 
@@ -23,23 +24,45 @@ const RATE_LIMIT_LOCK_MS = 60 * 1000;
 const RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
-const AUTH_SERVICE_PUBLIC_MESSAGES = {
-  AUTH_CONFIGURATION_UNAVAILABLE: 'Authentication configuration is unavailable.',
-  AUTH_PERSISTENCE_UNAVAILABLE: 'Authentication persistence is unavailable.',
-  AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS: 'Authentication credential rotation is unavailable.',
-  AUTH_CREDENTIAL_FORMAT_INVALID: 'Authentication credential format is invalid.',
-  AUTH_CREDENTIAL_MIGRATION_DEFERRED: 'Authentication credential migration is deferred.',
-} as const;
-
-type AuthServiceCode = keyof typeof AUTH_SERVICE_PUBLIC_MESSAGES;
+type RouteAuthServiceCode =
+  | 'AUTH_CONFIGURATION_UNAVAILABLE'
+  | 'AUTH_PERSISTENCE_UNAVAILABLE'
+  | 'AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS'
+  | 'AUTH_CREDENTIAL_FORMAT_INVALID';
 type AuthPersistenceMode = 'DB_ONLY' | 'DB_PLUS_FILE' | 'FILE_ONLY';
 type FormError = 'invalid_credentials' | 'too_many_attempts' | 'configuration' | 'temporarily_unavailable';
 
-interface AuthServiceErrorShape {
-  code: AuthServiceCode;
-  httpStatus: 409 | 503;
+interface RouteAuthErrorContract {
+  status: 409 | 503;
   retryable: boolean;
+  message: string;
 }
+
+const AUTH_ROUTE_ERROR_CONTRACTS = Object.assign(
+  Object.create(null) as Record<RouteAuthServiceCode, RouteAuthErrorContract>,
+  {
+    AUTH_CONFIGURATION_UNAVAILABLE: {
+      status: 503,
+      retryable: true,
+      message: 'Authentication configuration is unavailable.',
+    },
+    AUTH_PERSISTENCE_UNAVAILABLE: {
+      status: 503,
+      retryable: true,
+      message: 'Authentication persistence is unavailable.',
+    },
+    AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS: {
+      status: 409,
+      retryable: false,
+      message: 'Authentication credential rotation is unavailable.',
+    },
+    AUTH_CREDENTIAL_FORMAT_INVALID: {
+      status: 503,
+      retryable: false,
+      message: 'Authentication credential format is invalid.',
+    },
+  } satisfies Record<RouteAuthServiceCode, RouteAuthErrorContract>,
+);
 
 interface AuthResultLog {
   requestId: string;
@@ -127,13 +150,16 @@ function getPersistenceModeForLog(): AuthPersistenceMode | undefined {
   return process.env.DATABASE_URL || process.env.PGDATABASE_URL ? 'DB_ONLY' : 'FILE_ONLY';
 }
 
-function isAuthServiceError(error: unknown): error is AuthServiceErrorShape {
-  if (typeof error !== 'object' || error === null) return false;
-  const candidate = error as Partial<AuthServiceErrorShape>;
-  return typeof candidate.code === 'string'
-    && candidate.code in AUTH_SERVICE_PUBLIC_MESSAGES
-    && (candidate.httpStatus === 409 || candidate.httpStatus === 503)
-    && typeof candidate.retryable === 'boolean';
+function getRouteAuthError(
+  error: unknown,
+): (RouteAuthErrorContract & { code: RouteAuthServiceCode }) | null {
+  if (!(error instanceof AuthServiceError)) return null;
+  const code = error.code as string;
+  if (!Object.hasOwn(AUTH_ROUTE_ERROR_CONTRACTS, code)) return null;
+  return {
+    code: code as RouteAuthServiceCode,
+    ...AUTH_ROUTE_ERROR_CONTRACTS[code as RouteAuthServiceCode],
+  };
 }
 
 function getPublicOrigin(request: NextRequest): string {
@@ -159,7 +185,11 @@ function logResult(log: AuthResultLog): void {
   const entry: AuthResultLog = { ...log };
   const persistenceMode = getPersistenceModeForLog();
   if (persistenceMode) entry.persistenceMode = persistenceMode;
-  console.info(entry);
+  try {
+    console.info(entry);
+  } catch {
+    // Authentication responses must not depend on the runtime logger.
+  }
 }
 
 function finishResponse(
@@ -190,7 +220,7 @@ function jsonError(
   );
 }
 
-function formErrorForServiceCode(code: AuthServiceCode): FormError {
+function formErrorForServiceCode(code: RouteAuthServiceCode): FormError {
   return code === 'AUTH_CONFIGURATION_UNAVAILABLE' || code === 'AUTH_CREDENTIAL_FORMAT_INVALID'
     ? 'configuration'
     : 'temporarily_unavailable';
@@ -315,7 +345,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       startedAt,
     });
   } catch (error) {
-    const serviceError = isAuthServiceError(error) ? error : null;
+    const serviceError = getRouteAuthError(error);
     const legacyConfigurationError = !serviceError && error instanceof AuthConfigurationError;
     const errorCode = serviceError?.code
       || (legacyConfigurationError ? 'AUTH_CONFIGURATION_UNAVAILABLE' : 'AUTH_LOGIN_FAILED');
@@ -334,9 +364,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     if (serviceError) {
       return finishResponse(jsonError(
-        serviceError.httpStatus,
+        serviceError.status,
         serviceError.code,
-        AUTH_SERVICE_PUBLIC_MESSAGES[serviceError.code],
+        serviceError.message,
         serviceError.retryable,
       ), { requestId, errorCode, result: 'failure', startedAt });
     }
@@ -344,7 +374,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return finishResponse(jsonError(
         503,
         'AUTH_CONFIGURATION_UNAVAILABLE',
-        AUTH_SERVICE_PUBLIC_MESSAGES.AUTH_CONFIGURATION_UNAVAILABLE,
+        AUTH_ROUTE_ERROR_CONTRACTS.AUTH_CONFIGURATION_UNAVAILABLE.message,
         true,
       ), { requestId, errorCode, result: 'failure', startedAt });
     }

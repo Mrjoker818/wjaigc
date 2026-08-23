@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { AuthServiceError, type AuthErrorCode } from '@/lib/auth/auth-errors';
 
 const mocks = vi.hoisted(() => {
   class AuthConfigurationError extends Error {}
@@ -32,12 +33,6 @@ interface LoginBody {
   productType?: string;
   next?: string;
   profile?: Record<string, unknown>;
-}
-
-interface MockAuthServiceError extends Error {
-  code: string;
-  httpStatus: 409 | 503;
-  retryable: boolean;
 }
 
 const validUser = {
@@ -98,16 +93,109 @@ function meRequest(headers: Record<string, string> = {}): NextRequest {
 }
 
 function authServiceError(
-  code: string,
+  code: AuthErrorCode,
   httpStatus: 409 | 503,
   retryable: boolean,
   message = 'SENSITIVE_INTERNAL_AUTH_ERROR_MESSAGE',
-): MockAuthServiceError {
-  return Object.assign(new Error(message), { code, httpStatus, retryable });
+): AuthServiceError {
+  return new AuthServiceError(code, message, httpStatus, retryable);
 }
 
-function consoleOutput(): string {
-  return JSON.stringify(consoleCalls);
+function authServiceErrorWithRuntimeCode(code: string): AuthServiceError {
+  const error = authServiceError('AUTH_CONFIGURATION_UNAVAILABLE', 503, true);
+  Object.defineProperty(error, 'code', { configurable: true, value: code });
+  return error;
+}
+
+const ALLOWED_AUTH_LOG_FIELDS = new Set([
+  'requestId',
+  'userId',
+  'errorCode',
+  'persistenceMode',
+  'kid',
+  'durationMs',
+  'result',
+]);
+
+function inspectOwnValues(value: unknown): string[] {
+  const inspected: string[] = [];
+  const seen = new Set<object>();
+
+  const visit = (candidate: unknown): void => {
+    if (typeof candidate === 'string') {
+      inspected.push(candidate);
+      return;
+    }
+    if (typeof candidate === 'symbol') {
+      inspected.push(String(candidate));
+      return;
+    }
+    if ((typeof candidate !== 'object' || candidate === null) && typeof candidate !== 'function') {
+      return;
+    }
+
+    const inspectable = candidate as object;
+    if (seen.has(inspectable)) return;
+    seen.add(inspectable);
+
+    if (typeof candidate === 'function') {
+      inspected.push(Function.prototype.toString.call(candidate));
+    }
+    if (candidate instanceof Error) {
+      visit(candidate.name);
+      visit(candidate.message);
+      visit(candidate.stack);
+      visit(candidate.cause);
+    }
+
+    let propertyNames: string[];
+    let propertySymbols: symbol[];
+    try {
+      propertyNames = Object.getOwnPropertyNames(inspectable);
+      propertySymbols = Object.getOwnPropertySymbols(inspectable);
+    } catch {
+      throw new Error('Unable to inspect a console argument safely.');
+    }
+
+    for (const key of [...propertyNames, ...propertySymbols]) {
+      visit(key);
+      const descriptor = Object.getOwnPropertyDescriptor(inspectable, key);
+      if (!descriptor) continue;
+      if ('value' in descriptor) visit(descriptor.value);
+      else {
+        visit(descriptor.get);
+        visit(descriptor.set);
+      }
+    }
+  };
+
+  visit(value);
+  return inspected;
+}
+
+function assertNoSensitiveValues(value: unknown, sentinels: readonly string[]): void {
+  const inspected = inspectOwnValues(value);
+  for (const sentinel of sentinels) {
+    if (inspected.some(fragment => fragment.includes(sentinel))) {
+      throw new Error(`Sensitive sentinel detected: ${sentinel}`);
+    }
+  }
+}
+
+function assertStructuredAuthLogs(calls: readonly unknown[][]): void {
+  for (const call of calls) {
+    if (call.length !== 1 || typeof call[0] !== 'object' || call[0] === null || Array.isArray(call[0])) {
+      throw new Error('Authentication result logs must contain exactly one structured object.');
+    }
+    if (Object.getOwnPropertySymbols(call[0]).length > 0) {
+      throw new Error('Authentication result logs must not contain symbol fields.');
+    }
+    for (const field of Object.getOwnPropertyNames(call[0])) {
+      if (!ALLOWED_AUTH_LOG_FIELDS.has(field)) {
+        throw new Error(`Authentication result log contains disallowed field: ${field}`);
+      }
+    }
+  }
 }
 
 function expectRequestId(response: Response, expected?: string): string {
@@ -133,6 +221,7 @@ describe('authentication route contracts', () => {
   });
 
   afterEach(() => {
+    assertStructuredAuthLogs(vi.mocked(console.info).mock.calls);
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
@@ -206,7 +295,7 @@ describe('authentication route contracts', () => {
 
   it.each([
     {
-      error: authServiceError('AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS', 409, false),
+      error: authServiceError('AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS', 503, true),
       expected: {
         status: 409,
         code: 'AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS',
@@ -215,7 +304,7 @@ describe('authentication route contracts', () => {
       },
     },
     {
-      error: authServiceError('AUTH_CONFIGURATION_UNAVAILABLE', 503, true),
+      error: authServiceError('AUTH_CONFIGURATION_UNAVAILABLE', 409, false),
       expected: {
         status: 503,
         code: 'AUTH_CONFIGURATION_UNAVAILABLE',
@@ -224,7 +313,7 @@ describe('authentication route contracts', () => {
       },
     },
     {
-      error: authServiceError('AUTH_PERSISTENCE_UNAVAILABLE', 503, true),
+      error: authServiceError('AUTH_PERSISTENCE_UNAVAILABLE', 409, false),
       expected: {
         status: 503,
         code: 'AUTH_PERSISTENCE_UNAVAILABLE',
@@ -233,7 +322,7 @@ describe('authentication route contracts', () => {
       },
     },
     {
-      error: authServiceError('AUTH_CREDENTIAL_FORMAT_INVALID', 503, false),
+      error: authServiceError('AUTH_CREDENTIAL_FORMAT_INVALID', 409, true),
       expected: {
         status: 503,
         code: 'AUTH_CREDENTIAL_FORMAT_INVALID',
@@ -241,7 +330,7 @@ describe('authentication route contracts', () => {
         retryable: false,
       },
     },
-  ])('preserves the AuthServiceError JSON contract for $expected.code', async ({ error, expected }) => {
+  ])('derives the fixed route contract for real AuthServiceError $expected.code', async ({ error, expected }) => {
     mocks.authenticateUser.mockRejectedValue(error);
 
     const response = await POST(jsonRequest());
@@ -252,6 +341,39 @@ describe('authentication route contracts', () => {
       code: expected.code,
       error: expected.message,
       retryable: expected.retryable,
+    });
+    expectRequestId(response);
+  });
+
+  it.each([
+    {
+      label: 'plain object with a valid code',
+      error: {
+        code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+        httpStatus: 503,
+        retryable: true,
+        message: 'SENSITIVE_FAKE_SERVICE_ERROR',
+      },
+    },
+    { label: 'Object.prototype toString key', error: authServiceErrorWithRuntimeCode('toString') },
+    { label: 'Object.prototype constructor key', error: authServiceErrorWithRuntimeCode('constructor') },
+    { label: 'Object.prototype __proto__ key', error: authServiceErrorWithRuntimeCode('__proto__') },
+    { label: 'unknown code', error: authServiceErrorWithRuntimeCode('AUTH_UNKNOWN_SERVICE_ERROR') },
+    {
+      label: 'deferred migration crossing the route boundary',
+      error: authServiceError('AUTH_CREDENTIAL_MIGRATION_DEFERRED', 503, true),
+    },
+  ])('treats $label as a fixed unknown login failure', async ({ error }) => {
+    mocks.authenticateUser.mockRejectedValue(error);
+
+    const response = await POST(jsonRequest());
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      code: 'AUTH_LOGIN_FAILED',
+      error: 'Authentication login is unavailable.',
+      retryable: true,
     });
     expectRequestId(response);
   });
@@ -324,6 +446,12 @@ describe('authentication route contracts', () => {
       label: 'persistence service error',
       body: { name: 'persistence-form-user', password: 'password' },
       rejection: authServiceError('AUTH_PERSISTENCE_UNAVAILABLE', 503, true),
+      expected: 'temporarily_unavailable',
+    },
+    {
+      label: 'deferred migration crossing the route boundary',
+      body: { name: 'deferred-form-user', password: 'password' },
+      rejection: authServiceError('AUTH_CREDENTIAL_MIGRATION_DEFERRED', 503, true),
       expected: 'temporarily_unavailable',
     },
     {
@@ -457,6 +585,131 @@ describe('authentication route contracts', () => {
     expect(mocks.ensureUserDataDirs).not.toHaveBeenCalled();
   });
 
+  it('preserves every critical response contract when console.info throws', async () => {
+    vi.mocked(console.info).mockImplementation(() => {
+      throw new Error('SENSITIVE_LOGGER_FAILURE');
+    });
+
+    mocks.authenticateUser.mockResolvedValue(validUser);
+    const jsonSuccess = await POST(jsonRequest(undefined, { 'x-request-id': 'logger.json-success:1' }));
+    expect(jsonSuccess.status).toBe(200);
+    expect(await jsonSuccess.json()).toEqual({ success: true, user: validUser });
+    expect(jsonSuccess.cookies.get('wujie_session')?.value).toBe('session-token');
+    expectRequestId(jsonSuccess, 'logger.json-success:1');
+
+    const formSuccess = await POST(formRequest({
+      name: 'logger-form-user',
+      password: 'password',
+      productType: 'canvas',
+      next: '/',
+    }, { 'x-request-id': 'logger.form-success:1' }));
+    expect(formSuccess.status).toBe(303);
+    expect(formSuccess.headers.get('location')).toBe('http://localhost:5000/?loginMode=canvas');
+    expect(formSuccess.cookies.get('wujie_session')?.value).toBe('session-token');
+    expectRequestId(formSuccess, 'logger.form-success:1');
+
+    mocks.authenticateUser.mockResolvedValue(null);
+    const invalidCredentials = await POST(jsonRequest({
+      name: 'logger-invalid-user',
+      password: 'wrong',
+    }, { 'x-request-id': 'logger.invalid:1' }));
+    expect(invalidCredentials.status).toBe(401);
+    expect(await invalidCredentials.json()).toEqual({
+      success: false,
+      code: 'AUTH_INVALID_CREDENTIALS',
+      error: 'Invalid username or password.',
+      retryable: false,
+    });
+    expectRequestId(invalidCredentials, 'logger.invalid:1');
+
+    const rateIdentity = nextIdentity('logger-rate-user');
+    const buildRateRequest = () => jsonRequest({
+      name: rateIdentity.name,
+      password: 'wrong',
+    }, {
+      'x-forwarded-for': rateIdentity.ip,
+      'x-request-id': 'logger.rate-limit:1',
+    });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect((await POST(buildRateRequest())).status).toBe(401);
+    }
+    const rateLimited = await POST(buildRateRequest());
+    expect(rateLimited.status).toBe(429);
+    expect(await rateLimited.json()).toEqual({
+      success: false,
+      code: 'AUTH_TOO_MANY_ATTEMPTS',
+      error: 'Too many login attempts. Please try again later.',
+      retryable: true,
+    });
+    expect(Number(rateLimited.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(rateLimited.headers.get('x-ratelimit-limit')).toBe('5');
+    expectRequestId(rateLimited, 'logger.rate-limit:1');
+
+    mocks.authenticateUser.mockRejectedValue(authServiceError(
+      'AUTH_CONFIGURATION_UNAVAILABLE',
+      409,
+      false,
+    ));
+    const serviceFailure = await POST(jsonRequest(undefined, {
+      'x-request-id': 'logger.service-failure:1',
+    }));
+    expect(serviceFailure.status).toBe(503);
+    expect(await serviceFailure.json()).toEqual({
+      success: false,
+      code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+      error: 'Authentication configuration is unavailable.',
+      retryable: true,
+    });
+    expectRequestId(serviceFailure, 'logger.service-failure:1');
+
+    mocks.getSessionUser.mockResolvedValue(null);
+    const anonymousSession = await GET(meRequest({ 'x-request-id': 'logger.session-anonymous:1' }));
+    expect(anonymousSession.status).toBe(200);
+    expect(await anonymousSession.json()).toEqual({ success: true, user: null });
+    expectRequestId(anonymousSession, 'logger.session-anonymous:1');
+
+    mocks.getSessionUser.mockRejectedValue(authServiceError(
+      'AUTH_PERSISTENCE_UNAVAILABLE',
+      409,
+      false,
+    ));
+    const sessionFailure = await GET(meRequest({ 'x-request-id': 'logger.session-failure:1' }));
+    expect(sessionFailure.status).toBe(503);
+    expect(await sessionFailure.json()).toEqual({
+      success: false,
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+      error: 'Authentication persistence is unavailable.',
+      retryable: true,
+    });
+    expectRequestId(sessionFailure, 'logger.session-failure:1');
+
+    expect(console.debug).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
+    expect(console.log).not.toHaveBeenCalled();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('self-validates the console auditor against hidden Error fields, causes, symbols, functions, and strings', () => {
+    const hiddenMessage = new Error('SENSITIVE_AUDIT_MESSAGE');
+    Object.defineProperty(hiddenMessage, 'stack', { value: 'benign stack' });
+    const hiddenStack = new Error('benign message');
+    Object.defineProperty(hiddenStack, 'stack', { value: 'SENSITIVE_AUDIT_STACK' });
+    const hiddenCause = new Error('benign message', {
+      cause: { nested: 'SENSITIVE_AUDIT_CAUSE' },
+    });
+    Object.defineProperty(hiddenCause, 'stack', { value: 'benign stack' });
+    const symbolValue = {};
+    Object.defineProperty(symbolValue, Symbol('SENSITIVE_AUDIT_SYMBOL'), { value: 'benign' });
+    const sensitiveFunction = function SENSITIVE_AUDIT_FUNCTION(): void {};
+
+    expect(() => assertNoSensitiveValues(hiddenMessage, ['SENSITIVE_AUDIT_MESSAGE'])).toThrow();
+    expect(() => assertNoSensitiveValues(hiddenStack, ['SENSITIVE_AUDIT_STACK'])).toThrow();
+    expect(() => assertNoSensitiveValues(hiddenCause, ['SENSITIVE_AUDIT_CAUSE'])).toThrow();
+    expect(() => assertNoSensitiveValues(symbolValue, ['SENSITIVE_AUDIT_SYMBOL'])).toThrow();
+    expect(() => assertNoSensitiveValues(sensitiveFunction, ['SENSITIVE_AUDIT_FUNCTION'])).toThrow();
+    expect(() => assertNoSensitiveValues('SENSITIVE_AUDIT_STRING', ['SENSITIVE_AUDIT_STRING'])).toThrow();
+  });
+
   it('never emits request secrets, profiles, internal errors, tokens, hashes, or connection strings', async () => {
     const sentinels = [
       'SENSITIVE_USERNAME_SENTINEL',
@@ -469,19 +722,27 @@ describe('authentication route contracts', () => {
     vi.stubEnv('DATABASE_URL', sentinels[5]);
     mocks.authenticateUser.mockRejectedValue(new Error(sentinels.join('|')));
 
-    const response = await POST(jsonRequest({
+    const jsonResponse = await POST(jsonRequest({
       name: sentinels[0],
       password: sentinels[1],
       profile: { biography: sentinels[2], token: sentinels[3], hash: sentinels[4] },
     }, { 'x-request-id': 'safe.failure:1' }));
-    const body = await response.text();
-    const surfaces = JSON.stringify({
-      body,
-      headers: Object.fromEntries(response.headers.entries()),
-      console: consoleOutput(),
-    });
+    const formResponse = await POST(formRequest({
+      name: sentinels[0],
+      password: sentinels[1],
+      productType: 'canvas',
+    }, { 'x-request-id': 'safe.form-failure:1' }));
 
-    for (const sentinel of sentinels) expect(surfaces).not.toContain(sentinel);
+    const responseSurfaces = [
+      await jsonResponse.text(),
+      [...jsonResponse.headers.entries()],
+      jsonResponse.headers.get('location'),
+      await formResponse.text(),
+      [...formResponse.headers.entries()],
+      formResponse.headers.get('location'),
+    ];
+    expect(() => assertNoSensitiveValues(responseSurfaces, sentinels)).not.toThrow();
+    expect(() => assertNoSensitiveValues(consoleCalls, sentinels)).not.toThrow();
   });
 
   it('writes one structured result log using only the approved authentication fields', async () => {
@@ -527,8 +788,8 @@ describe('authentication route contracts', () => {
   it('maps /api/auth/me AuthServiceError to its fixed 503 JSON contract', async () => {
     mocks.getSessionUser.mockRejectedValue(authServiceError(
       'AUTH_PERSISTENCE_UNAVAILABLE',
-      503,
-      true,
+      409,
+      false,
       'SENSITIVE_SESSION_PERSISTENCE_MESSAGE',
     ));
 
@@ -542,7 +803,42 @@ describe('authentication route contracts', () => {
       retryable: true,
     });
     expectRequestId(response);
-    expect(consoleOutput()).not.toContain('SENSITIVE_SESSION_PERSISTENCE_MESSAGE');
+    expect(() => assertNoSensitiveValues(
+      consoleCalls,
+      ['SENSITIVE_SESSION_PERSISTENCE_MESSAGE'],
+    )).not.toThrow();
+  });
+
+  it.each([
+    {
+      label: 'a fake service error object',
+      error: {
+        code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+        httpStatus: 503,
+        retryable: true,
+      },
+    },
+    {
+      label: 'a prototype-chain code',
+      error: authServiceErrorWithRuntimeCode('constructor'),
+    },
+    {
+      label: 'deferred migration crossing the session boundary',
+      error: authServiceError('AUTH_CREDENTIAL_MIGRATION_DEFERRED', 503, true),
+    },
+  ])('maps $label to the fixed unknown session contract', async ({ error }) => {
+    mocks.getSessionUser.mockRejectedValue(error);
+
+    const response = await GET(meRequest());
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      code: 'AUTH_SESSION_UNAVAILABLE',
+      error: 'Authentication session is unavailable.',
+      retryable: true,
+    });
+    expectRequestId(response);
   });
 
   it('maps unknown /api/auth/me errors to a fixed safe 500 contract', async () => {
@@ -559,8 +855,9 @@ describe('authentication route contracts', () => {
       retryable: true,
     });
     expectRequestId(response, 'session.failure:1');
-    expect(JSON.stringify({ body, console: consoleOutput() })).not.toContain(
-      'SENSITIVE_SESSION_UNKNOWN_MESSAGE',
-    );
+    expect(() => assertNoSensitiveValues(
+      [body, [...response.headers.entries()], response.headers.get('location'), consoleCalls],
+      ['SENSITIVE_SESSION_UNKNOWN_MESSAGE'],
+    )).not.toThrow();
   });
 });
