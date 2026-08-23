@@ -12,6 +12,9 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 import { selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
 import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getDefaultParamValue, getProviderAspectRatios, getProviderPixelSizingOption, shouldPreserveProviderAutoSize, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
+import { GenerationBackgroundControl } from '@/components/generation-background-control';
+import type { ImageBackgroundMode, ImageOutputFormat, ImageOutputPreference } from '@/lib/image-generation-output';
+import { readImageOutputPreference, writeImageOutputPreference } from '@/lib/image-generation-output-preference';
 
 export interface GenerationParams {
     prompt: string;
@@ -28,6 +31,8 @@ export interface GenerationParams {
     providerId?: string;  // 服务端API提供商ID，从复合键 providerId::modelId 中拆解
     quality?: string;
     resolution?: string; // GPT-Image系列分辨率档位参数（1K/2K/4K）
+    background?: ImageBackgroundMode;
+    outputFormat?: ImageOutputFormat;
     apiKey?: string;
     estimatedTime?: number;
     universalBaseUrl?: string;
@@ -384,6 +389,10 @@ export function GenerationPanel(
     const [quality, setQuality] = useState("auto");
     const [resolution, setResolution] = useState("2K"); // GPT-Image系列分辨率档位
     const [outputCount, setOutputCount] = useState(1);
+    const [imageOutputPreference, setImageOutputPreference] = useState<ImageOutputPreference>({
+        background: 'auto',
+        outputFormat: 'png',
+    });
     const [stylePreset, setStylePreset] = useState("auto");
     const [productCategory, setProductCategory] = useState("none");
     const [designType, setDesignType] = useState("none");
@@ -549,6 +558,16 @@ export function GenerationPanel(
     const selectedProviderId = model.includes('::') ? model.split('::')[0] : '';
     const selectedProviderName = discoveredModels.find(item => item.id === pureModelId && item.providerId === selectedProviderId)?.providerName || '';
     const selectedProviderHint = `${selectedProviderId} ${selectedProviderName}`;
+
+    useEffect(() => {
+        if (!pureModelId) return;
+        setImageOutputPreference(readImageOutputPreference(pureModelId));
+    }, [pureModelId]);
+
+    const handleImageOutputPreferenceChange = useCallback((next: ImageOutputPreference) => {
+        setImageOutputPreference(next);
+        if (pureModelId) writeImageOutputPreference(pureModelId, next);
+    }, [pureModelId]);
     const getSupportedAspectRatios = useCallback(() => {
         return getProviderAspectRatios(pureModelId, selectedProviderHint);
     }, [pureModelId, selectedProviderHint]);
@@ -655,6 +674,8 @@ export function GenerationPanel(
             outputCount,
             quality,
             resolution: getModelParamType(pureModelId, selectedProviderHint) === 'both' ? resolution : undefined, // GPT-Image系列分辨率档位
+            background: imageOutputPreference.background,
+            outputFormat: imageOutputPreference.outputFormat,
             model: pureModelId,
             providerId: compositeProviderId,
             referenceCategories: Object.fromEntries(
@@ -1868,6 +1889,13 @@ export function GenerationPanel(
                         </>
                     );
                 })()}
+
+                <GenerationBackgroundControl
+                    modelId={pureModelId}
+                    value={imageOutputPreference}
+                    onChange={handleImageOutputPreferenceChange}
+                    themeStyle={themeStyle}
+                />
 
                 {/* 生图数量 */}
                 <div className="space-y-1">
