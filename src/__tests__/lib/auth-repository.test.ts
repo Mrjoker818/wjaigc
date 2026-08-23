@@ -14,7 +14,12 @@ import {
   updateUserCredentialSidecar,
 } from '@/lib/auth/auth-repository';
 import { deriveAuthSecretKid } from '@/lib/auth/auth-secret-ring';
-import { dbReadUsers, dbWriteUsers, ensureCoreTables } from '@/lib/db-storage';
+import {
+  dbReadUsers,
+  dbUpsertUser,
+  dbWriteUsers,
+  ensureCoreTables,
+} from '@/lib/db-storage';
 
 const now = 1_724_601_600_000;
 const legacySecret = 'legacy-repository-secret-0123456789abcdef';
@@ -211,6 +216,36 @@ describe('transactional authentication secret ring resolution', () => {
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
+
+  it('evicts the client when rollback fails without replacing the sanitized operation error', async () => {
+    const operationError = new Error(`operation failed for ${configuredSecret}`);
+    const rollbackError = new Error('rollback transport exposed private database details');
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT key, value')) {
+        return { rows: [{ key: 'auth_secret', value: legacySecret }], rowCount: 1 };
+      }
+      if (sql.includes('INSERT INTO')) throw operationError;
+      if (sql === 'ROLLBACK') throw rollbackError;
+      return { rows: [], rowCount: 0 };
+    });
+    const client = useClient(query);
+
+    let caught: unknown;
+    try {
+      await resolveDatabaseSecretRing({ configuredSecret, now });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+      message: 'Authentication persistence is unavailable.',
+    });
+    expect(String((caught as Error).message)).not.toContain('rollback transport');
+    expect(String((caught as Error).message)).not.toContain(configuredSecret);
+    expect(client.release.mock.calls).toEqual([[rollbackError]]);
+    expect(sqlCalls(client).at(-1)).toBe('ROLLBACK');
+  });
 });
 
 describe('credential sidecar repository', () => {
@@ -316,5 +351,28 @@ describe('database credential sidecar mappings', () => {
       'credential_hash = COALESCE(EXCLUDED.credential_hash, wujie_users.credential_hash)',
     );
     expect(params).toContain(null);
+  });
+
+  it('passes an omitted dbUpsertUser sidecar as null into the preserving COALESCE contract', async () => {
+    mocks.execSql.mockResolvedValue({ rows: [], rowCount: 1 });
+    const userWithoutSidecar: Parameters<typeof dbUpsertUser>[0] = {
+      id: 'legacy-upsert-user',
+      name: 'Legacy Upsert User',
+      password_hash: 'legacy-password-hash',
+      role: 'user',
+      status: 'active',
+      api_permissions: { image: true },
+      storage_folder: 'users/legacy-upsert-user',
+      created_at: now,
+      updated_at: now + 1,
+    };
+
+    await expect(dbUpsertUser(userWithoutSidecar)).resolves.toBe(true);
+
+    const [sql, params] = mocks.execSql.mock.calls.at(-1) ?? [];
+    expect(String(sql).replace(/\s+/g, ' ')).toContain(
+      'credential_hash = COALESCE(EXCLUDED.credential_hash, wujie_users.credential_hash)',
+    );
+    expect(params?.[3]).toBeNull();
   });
 });

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -5,11 +6,16 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   countLegacyCredentialUsers,
+  readSystemSettingStrict,
   resolveDatabaseSecretRing,
   updateUserCredentialSidecar,
 } from '@/lib/auth/auth-repository';
-import { dbWriteUsers } from '@/lib/db-storage';
-import { withIsolatedPostgres } from '../helpers/postgres-test-database';
+import { closePool } from '@/lib/db-client';
+import { dbUpsertUser, dbWriteUsers } from '@/lib/db-storage';
+import {
+  type QueryFn,
+  withIsolatedPostgres,
+} from '../helpers/postgres-test-database';
 
 vi.mock('server-only', () => ({}));
 
@@ -94,6 +100,66 @@ async function createAuthTables(
   `);
 }
 
+function withApplicationName(databaseUrl: string, applicationName: string): string {
+  const parsed = new URL(databaseUrl);
+  parsed.searchParams.set('application_name', applicationName);
+  return parsed.toString();
+}
+
+interface ResolverBarrierFacts {
+  active: number;
+  blocked: number;
+  advisory_holders: number;
+  advisory_waiters: number;
+}
+
+async function waitForResolverBarrier(
+  query: QueryFn,
+  applicationName: string,
+): Promise<ResolverBarrierFacts> {
+  let latest: ResolverBarrierFacts | undefined;
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const result = await query<ResolverBarrierFacts>(
+      `SELECT count(*)::int AS active,
+              count(*) FILTER (
+                WHERE cardinality(pg_blocking_pids(activity.pid)) > 0
+              )::int AS blocked,
+              count(*) FILTER (
+                WHERE EXISTS (
+                  SELECT 1 FROM pg_locks held
+                  WHERE held.pid = activity.pid
+                    AND held.locktype = 'advisory'
+                    AND held.granted
+                )
+              )::int AS advisory_holders,
+              count(*) FILTER (
+                WHERE EXISTS (
+                  SELECT 1 FROM pg_locks waiting
+                  WHERE waiting.pid = activity.pid
+                    AND waiting.locktype = 'advisory'
+                    AND NOT waiting.granted
+                )
+              )::int AS advisory_waiters
+       FROM pg_stat_activity activity
+       WHERE activity.datname = current_database()
+         AND activity.application_name = $1`,
+      [applicationName],
+    );
+    latest = result.rows[0];
+    if (latest
+      && latest.active >= 5
+      && latest.blocked >= 5
+      && latest.advisory_holders === 1
+      && latest.advisory_waiters >= 1) {
+      return latest;
+    }
+    await new Promise(resolveWait => setTimeout(resolveWait, 25));
+  }
+  throw new Error(
+    `authentication resolver advisory-lock readiness not observed: ${JSON.stringify(latest)}`,
+  );
+}
+
 describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
   postgresIt('applies only the nullable additive sidecar migration', async () => {
     await withAuthPostgres('v588-auth-migration', async ({ query }) => {
@@ -138,7 +204,7 @@ describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
   });
 
   postgresIt('serializes twenty ring resolvers to one compatible active/previous result', async () => {
-    await withAuthPostgres('v588-auth-ring-concurrency', async ({ query }) => {
+    await withAuthPostgres('v588-auth-ring-concurrency', async ({ databaseUrl, query }) => {
       await createAuthTables(query);
       await query(
         'INSERT INTO wujie_system_settings(key, value, updated_at) VALUES ($1, $2::jsonb, $3)',
@@ -150,21 +216,56 @@ describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
          ) VALUES ($1, $2, $3, 'user', 'active', $4, $4)`,
         ['legacy-user', 'Legacy User', 'a'.repeat(64), now],
       );
+      const applicationName = `v588_auth_resolver_${randomUUID()}`;
+      const businessDatabaseUrl = withApplicationName(databaseUrl, applicationName);
+      await closePool();
+      process.env.DATABASE_URL = businessDatabaseUrl;
+      process.env.PGDATABASE_URL = businessDatabaseUrl;
 
-      const rings = await Promise.all(Array.from({ length: 20 }, () => (
-        resolveDatabaseSecretRing({ configuredSecret, now })
-      )));
+      let controllerTransactionOpen = false;
+      let resolverPromise: Promise<Awaited<ReturnType<typeof resolveDatabaseSecretRing>>[]> | undefined;
+      try {
+        await query('BEGIN');
+        controllerTransactionOpen = true;
+        await query('LOCK TABLE wujie_system_settings IN ACCESS EXCLUSIVE MODE');
 
-      expect(new Set(rings.map(ring => JSON.stringify(ring))).size).toBe(1);
-      expect(rings[0]?.active.secret).toBe(configuredSecret);
-      expect(rings[0]?.previous?.secret).toBe(legacySecret);
-      const stored = await query<{ value: unknown }>(
-        'SELECT value FROM wujie_system_settings WHERE key = $1',
-        ['auth_secret_ring_v1'],
-      );
-      expect(stored.rows).toEqual([{ value: rings[0] }]);
+        let started = 0;
+        const callerTimes = Array.from({ length: 20 }, (_, index) => now + index + 1);
+        resolverPromise = Promise.all(callerTimes.map(callerNow => {
+          started += 1;
+          return resolveDatabaseSecretRing({ configuredSecret, now: callerNow });
+        }));
+        expect(started).toBe(20);
+
+        const barrier = await waitForResolverBarrier(query, applicationName);
+        expect(barrier).toMatchObject({
+          active: 5,
+          blocked: 5,
+          advisory_holders: 1,
+        });
+        expect(barrier.advisory_waiters).toBeGreaterThanOrEqual(1);
+
+        await query('COMMIT');
+        controllerTransactionOpen = false;
+        const rings = await resolverPromise;
+        const stored = await query<{ value: Awaited<ReturnType<typeof resolveDatabaseSecretRing>> }>(
+          'SELECT value FROM wujie_system_settings WHERE key = $1',
+          ['auth_secret_ring_v1'],
+        );
+        const persistedRing = stored.rows[0]?.value;
+
+        expect(persistedRing).toBeDefined();
+        expect(callerTimes).toContain(persistedRing?.updatedAt);
+        expect(rings).toEqual(Array.from({ length: 20 }, () => persistedRing));
+        expect(new Set(rings.map(ring => ring.updatedAt)).size).toBe(1);
+        expect(persistedRing?.active.secret).toBe(configuredSecret);
+        expect(persistedRing?.previous?.secret).toBe(legacySecret);
+      } finally {
+        if (controllerTransactionOpen) await query('ROLLBACK').catch(() => undefined);
+        await resolverPromise?.catch(() => undefined);
+      }
     });
-  }, 15_000);
+  }, 30_000);
 
   postgresIt('fails a database read without creating a random or partial ring', async () => {
     await withAuthPostgres('v588-auth-read-failure', async ({ query }) => {
@@ -242,8 +343,13 @@ describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
       await query(
         `INSERT INTO wujie_users(
            id, name, password_hash, credential_hash, role, status, created_at, updated_at
-         ) VALUES ($1, $2, $3, $4, 'user', 'active', $5, $5)`,
-        ['stable-user', 'Stable User', 'c'.repeat(64), credentialHash, now],
+         ) VALUES
+           ($1, $2, $3, $4, 'user', 'active', $5, $5),
+           ($6, $7, $3, $4, 'user', 'active', $5, $5)`,
+        [
+          'stable-user', 'Stable User', 'c'.repeat(64), credentialHash, now,
+          'direct-upsert-user', 'Direct Upsert User',
+        ],
       );
       await query(
         `INSERT INTO wujie_users(
@@ -266,12 +372,29 @@ describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
         createdAt: now,
         updatedAt: now + 1,
       }])).resolves.toBe(true);
+      await expect(dbUpsertUser({
+        id: 'direct-upsert-user',
+        name: 'Direct Upsert User Updated',
+        password_hash: 'f'.repeat(64),
+        role: 'admin',
+        status: 'disabled',
+        api_permissions: { image: true },
+        storage_folder: 'direct-upsert-folder',
+        created_at: now,
+        updated_at: now + 1,
+      })).resolves.toBe(true);
 
-      const row = await query<{ credential_hash: string }>(
-        'SELECT credential_hash FROM wujie_users WHERE id = $1',
-        ['stable-user'],
+      const rows = await query<{ id: string; credential_hash: string }>(
+        `SELECT id, credential_hash
+         FROM wujie_users
+         WHERE id = ANY($1::text[])
+         ORDER BY id`,
+        [['stable-user', 'direct-upsert-user']],
       );
-      expect(row.rows).toEqual([{ credential_hash: credentialHash }]);
+      expect(rows.rows).toEqual([
+        { id: 'direct-upsert-user', credential_hash: credentialHash },
+        { id: 'stable-user', credential_hash: credentialHash },
+      ]);
       await expect(countLegacyCredentialUsers()).resolves.toBe(2);
     });
   });
@@ -285,11 +408,32 @@ describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
           credential_hash TEXT
         )
       `);
+      await query('CREATE SEQUENCE auth_repository_write_attempts');
+      await query('CREATE TABLE auth_repository_faults(enabled BOOLEAN NOT NULL)');
+      await query('INSERT INTO auth_repository_faults(enabled) VALUES (TRUE)');
+      await query(`
+        CREATE FUNCTION allow_auth_ring_write(candidate_key TEXT)
+        RETURNS BOOLEAN
+        LANGUAGE plpgsql
+        VOLATILE
+        AS $$
+        DECLARE
+          fault_enabled BOOLEAN;
+        BEGIN
+          IF candidate_key = 'auth_secret_ring_v1' THEN
+            PERFORM nextval('auth_repository_write_attempts');
+          END IF;
+          SELECT enabled INTO fault_enabled FROM auth_repository_faults LIMIT 1;
+          RETURN NOT (candidate_key = 'auth_secret_ring_v1' AND fault_enabled);
+        END;
+        $$
+      `);
       await query(`
         CREATE TABLE wujie_system_settings (
-          key TEXT PRIMARY KEY CHECK (key <> 'auth_secret_ring_v1'),
+          key TEXT PRIMARY KEY,
           value JSONB,
-          updated_at BIGINT NOT NULL
+          updated_at BIGINT NOT NULL,
+          CONSTRAINT reject_auth_ring_write CHECK (allow_auth_ring_write(key))
         )
       `);
       await query(
@@ -300,6 +444,13 @@ describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
       await expect(resolveDatabaseSecretRing({ configuredSecret, now })).rejects.toMatchObject({
         code: 'AUTH_PERSISTENCE_UNAVAILABLE',
       });
+
+      const attempts = await query<{ attempts: number }>(
+        'SELECT last_value::int AS attempts FROM auth_repository_write_attempts',
+      );
+      expect(attempts.rows).toEqual([{ attempts: 1 }]);
+      await query('UPDATE auth_repository_faults SET enabled = FALSE');
+      await expect(readSystemSettingStrict('auth_secret_ring_v1')).resolves.toEqual({ found: false });
 
       const rows = await query('SELECT key, value, updated_at FROM wujie_system_settings');
       expect(rows.rows).toEqual([{

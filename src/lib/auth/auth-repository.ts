@@ -110,6 +110,7 @@ export async function resolveDatabaseSecretRing(input: {
   now: number;
 }): Promise<AuthSecretRingV1> {
   let client: PoolClient | undefined;
+  let clientReleased = false;
   try {
     client = await getPool().connect();
     await client.query('BEGIN');
@@ -172,11 +173,23 @@ export async function resolveDatabaseSecretRing(input: {
     return ring;
   } catch (error) {
     if (client) {
-      await client.query('ROLLBACK').catch(() => undefined);
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        const releaseError = rollbackError instanceof Error
+          ? rollbackError
+          : new Error(String(rollbackError));
+        try {
+          client.release(releaseError);
+        } catch {
+          // Preserve the sanitized repository operation error.
+        }
+        clientReleased = true;
+      }
     }
     throw wrapPersistenceError(error);
   } finally {
-    client?.release();
+    if (client && !clientReleased) client.release();
   }
 }
 

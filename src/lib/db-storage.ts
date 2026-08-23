@@ -21,6 +21,10 @@ interface DbUser {
   updated_at: number;
 }
 
+type DbUserUpsert = Omit<DbUser, 'credential_hash'> & {
+  credential_hash?: string | null;
+};
+
 interface DbApiProvider {
   id: string;
   name: string;
@@ -333,7 +337,7 @@ export async function dbGetUserById(id: string): Promise<DbUser | null> {
   }
 }
 
-export async function dbUpsertUser(user: DbUser): Promise<boolean> {
+export async function dbUpsertUser(user: DbUserUpsert): Promise<boolean> {
   try {
     await execSql(`
       INSERT INTO wujie_users (id, name, password_hash, credential_hash, role, status, api_permissions, storage_folder, created_at, updated_at)
@@ -348,7 +352,7 @@ export async function dbUpsertUser(user: DbUser): Promise<boolean> {
         storage_folder = EXCLUDED.storage_folder,
         updated_at = EXCLUDED.updated_at
     `, [
-      user.id, user.name, user.password_hash, user.credential_hash, user.role, user.status,
+      user.id, user.name, user.password_hash, user.credential_hash ?? null, user.role, user.status,
       JSON.stringify(user.api_permissions), user.storage_folder,
       user.created_at, user.updated_at
     ]);
