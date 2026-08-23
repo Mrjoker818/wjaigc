@@ -126,6 +126,27 @@ async function initializeCoreTables(): Promise<void> {
       )
     `);
 
+    // 电商模板表
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_ecom_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        icon TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        prompt_template TEXT NOT NULL,
+        negative_prompt TEXT DEFAULT '',
+        aspect_ratio TEXT DEFAULT '1:1',
+        category TEXT DEFAULT 'general',
+        fidelity_anchor TEXT DEFAULT '',
+        sort_order INTEGER DEFAULT 0,
+        is_enabled BOOLEAN DEFAULT true,
+        is_builtin BOOLEAN DEFAULT false,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+    await execSql(`CREATE INDEX IF NOT EXISTS idx_ecom_templates_enabled_order ON wujie_ecom_templates(is_enabled, sort_order)`);
+
     // 充值订单表
     await execSql(`
       CREATE TABLE IF NOT EXISTS wujie_recharge_orders (
