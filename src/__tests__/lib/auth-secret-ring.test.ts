@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { AuthServiceError } from '@/lib/auth/auth-errors';
+
 type AuthSecretEntry = {
   kid: string;
   secret: string;
@@ -53,12 +55,26 @@ describe('authentication secret ring', () => {
 
     expect(deriveAuthSecretKid(activeSecret)).toHaveLength(16);
     expect(deriveAuthSecretKid(activeSecret)).not.toContain(activeSecret);
-    expect(parseAuthSecretRing(ring)).toEqual(ring);
+    const parsed = parseAuthSecretRing(ring);
+
+    expect(parsed).toEqual(ring);
+    expect(parsed).not.toBe(ring);
+    expect(parsed?.active).not.toBe(ring.active);
+
+    ring.active.secret = nextSecret;
+    expect(parsed?.active.secret).toBe(activeSecret);
   });
 
-  it('rejects malformed rings instead of accepting a mismatched kid or unknown version', async () => {
-    const { parseAuthSecretRing } = await loadAuthSecretRing();
+  it('rejects malformed, unsafe, and internally inconsistent rings', async () => {
+    const { deriveAuthSecretKid, parseAuthSecretRing } = await loadAuthSecretRing();
+    const validActive = {
+      kid: deriveAuthSecretKid(activeSecret),
+      secret: activeSecret,
+      activatedAt: now,
+    };
 
+    expect(parseAuthSecretRing(null)).toBeNull();
+    expect(parseAuthSecretRing([])).toBeNull();
     expect(parseAuthSecretRing({
       version: 2,
       active: { kid: 'not-a-valid-kid', secret: activeSecret, activatedAt: now },
@@ -67,6 +83,101 @@ describe('authentication secret ring', () => {
     expect(parseAuthSecretRing({
       version: 1,
       active: { kid: 'mismatched-kid', secret: activeSecret, activatedAt: now },
+      updatedAt: now,
+    })).toBeNull();
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: validActive,
+      updatedAt: now,
+      unexpected: true,
+    })).toBeNull();
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: { ...validActive, unexpected: true },
+      updatedAt: now,
+    })).toBeNull();
+    const accessorRing: Record<string, unknown> = { version: 1, active: validActive };
+    Object.defineProperty(accessorRing, 'updatedAt', {
+      enumerable: true,
+      get: () => now,
+    });
+    expect(parseAuthSecretRing(accessorRing)).toBeNull();
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: { ...validActive, secret: 'too-short' },
+      updatedAt: now,
+    })).toBeNull();
+
+    for (const invalidTimestamp of [NaN, Infinity, 1.5, 0, -1]) {
+      expect(parseAuthSecretRing({
+        version: 1,
+        active: { ...validActive, activatedAt: invalidTimestamp },
+        updatedAt: now,
+      })).toBeNull();
+    }
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: validActive,
+      updatedAt: Number.POSITIVE_INFINITY,
+    })).toBeNull();
+
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: { ...validActive, activatedAt: now + 1 },
+      updatedAt: now,
+    })).toBeNull();
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: validActive,
+      previous: {
+        kid: 'mismatched-kid',
+        secret: nextSecret,
+        activatedAt: now - 1,
+        retiredAt: now,
+      },
+      updatedAt: now,
+    })).toBeNull();
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: validActive,
+      previous: {
+        kid: deriveAuthSecretKid(nextSecret),
+        secret: nextSecret,
+        activatedAt: now - 1,
+      },
+      updatedAt: now,
+    })).toBeNull();
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: validActive,
+      previous: {
+        kid: deriveAuthSecretKid(nextSecret),
+        secret: nextSecret,
+        activatedAt: now,
+        retiredAt: now - 1,
+      },
+      updatedAt: now,
+    })).toBeNull();
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: validActive,
+      previous: {
+        kid: deriveAuthSecretKid(nextSecret),
+        secret: nextSecret,
+        activatedAt: now - 1,
+        retiredAt: now + 1,
+      },
+      updatedAt: now,
+    })).toBeNull();
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: validActive,
+      previous: {
+        kid: validActive.kid,
+        secret: activeSecret,
+        activatedAt: now - 1,
+        retiredAt: now,
+      },
       updatedAt: now,
     })).toBeNull();
   });
@@ -84,6 +195,34 @@ describe('authentication secret ring', () => {
     expect(rotated.active.secret).toBe(nextSecret);
     expect(rotated.previous?.secret).toBe(existingRing.active.secret);
     expect(rotated.previous?.retiredAt).toBe(now + 1);
+    expect(rotated.active).toEqual({
+      kid: deriveAuthSecretKid(nextSecret),
+      secret: nextSecret,
+      activatedAt: now + 1,
+    });
+    expect(rotated.updatedAt).toBe(now + 1);
+  });
+
+  it('returns the existing ring object unchanged when rotating to the active secret', async () => {
+    const { deriveAuthSecretKid, planSecretRingRotation } = await loadAuthSecretRing();
+    const existingRing: AuthSecretRingV1 = {
+      version: 1,
+      active: { kid: deriveAuthSecretKid(activeSecret), secret: activeSecret, activatedAt: now },
+      updatedAt: now,
+    };
+
+    expect(planSecretRingRotation(existingRing, activeSecret, now + 1, false)).toBe(existingRing);
+  });
+
+  it('rejects a new secret that does not meet the minimum length', async () => {
+    const { deriveAuthSecretKid, planSecretRingRotation } = await loadAuthSecretRing();
+    const existingRing: AuthSecretRingV1 = {
+      version: 1,
+      active: { kid: deriveAuthSecretKid(activeSecret), secret: activeSecret, activatedAt: now },
+      updatedAt: now,
+    };
+
+    expect(() => planSecretRingRotation(existingRing, 'too-short', now + 1, false)).toThrow();
   });
 
   it('blocks a second rotation that would discard an active legacy credential verifier', async () => {
@@ -95,9 +234,13 @@ describe('authentication secret ring', () => {
     };
     const rotated = planSecretRingRotation(existingRing, nextSecret, now + 1, false);
 
-    expect(() => planSecretRingRotation(rotated, thirdSecret, now + 2, true)).toThrow(
-      'AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS',
-    );
+    try {
+      planSecretRingRotation(rotated, thirdSecret, now + 2, true);
+      throw new Error('Expected rotation to be blocked.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AuthServiceError);
+      expect((error as AuthServiceError).code).toBe('AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS');
+    }
   });
 
   it('uses the previous entry only during the configured seven-day session window', async () => {
@@ -127,6 +270,29 @@ describe('authentication secret ring', () => {
     expect(sessionVerificationEntries(ring, {
       now: now + 60_000,
       acceptPrevious: false,
+      ttlSeconds: 7 * 24 * 60 * 60,
+    })).toEqual([ring.active]);
+    expect(sessionVerificationEntries(ring, {
+      now: now - 1,
+      acceptPrevious: true,
+      ttlSeconds: 7 * 24 * 60 * 60,
+    })).toEqual([ring.active]);
+    expect(sessionVerificationEntries(ring, {
+      now: now + 60_000,
+      acceptPrevious: true,
+      ttlSeconds: 0,
+    })).toEqual([ring.active]);
+    expect(sessionVerificationEntries(ring, {
+      now: Number.NaN,
+      acceptPrevious: true,
+      ttlSeconds: 7 * 24 * 60 * 60,
+    })).toEqual([ring.active]);
+    expect(sessionVerificationEntries({
+      ...ring,
+      previous: { ...ring.previous!, retiredAt: Number.POSITIVE_INFINITY },
+    }, {
+      now: now + 60_000,
+      acceptPrevious: true,
       ttlSeconds: 7 * 24 * 60 * 60,
     })).toEqual([ring.active]);
   });
