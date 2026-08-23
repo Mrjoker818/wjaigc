@@ -1,21 +1,27 @@
+import { createHmac } from 'node:crypto';
+
+import type { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   execSql: vi.fn(),
   getPool: vi.fn(),
+  isDatabaseConfigured: vi.fn(),
 }));
 
 vi.mock('@/lib/db-client', () => mocks);
+vi.mock('server-only', () => ({}));
 
 import {
   countLegacyCredentialUsers,
+  readDatabaseSecretRing,
   readSystemSettingStrict,
   resolveDatabaseSecretRing,
   updateUserCredentials,
   updateUserCredentialSidecar,
   updateUserProfileFields,
 } from '@/lib/auth/auth-repository';
-import { deriveAuthSecretKid } from '@/lib/auth/auth-secret-ring';
+import { deriveAuthSecretKid, type AuthSecretRingV1 } from '@/lib/auth/auth-secret-ring';
 import {
   dbReadUsers,
   dbUpsertUser,
@@ -53,10 +59,154 @@ function sqlCalls(client: ControlledClient): string[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isDatabaseConfigured.mockReturnValue(true);
   mocks.execSql.mockResolvedValue({ rows: [], rowCount: 0 });
 });
 
 describe('strict authentication repository reads', () => {
+  it('keeps reachable active and previous DB session reads on the real read-only repository path', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const previousSecret = 'previous-reachable-session-secret-0123456789abcdef';
+    const ordinaryUserId = 'ordinary-session-user';
+    const ring: AuthSecretRingV1 = {
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(configuredSecret),
+        secret: configuredSecret,
+        activatedAt: now - 1_000,
+      },
+      previous: {
+        kid: deriveAuthSecretKid(previousSecret),
+        secret: previousSecret,
+        activatedAt: now - 2_000,
+        retiredAt: now - 1_000,
+      },
+      updatedAt: now - 1_000,
+    };
+    const query = vi.fn().mockResolvedValue({ rows: [{ value: ring }], rowCount: 1 });
+    const client = useClient(query);
+    mocks.execSql.mockResolvedValue({
+      rows: [{
+        id: ordinaryUserId,
+        name: 'ordinary-session-user-name',
+        password_hash: 'unused-session-password-hash',
+        credential_hash: null,
+        role: 'user',
+        status: 'active',
+        product_type: null,
+        group_id: null,
+        chat_models: null,
+        image_models: null,
+        daily_token_limit: null,
+        monthly_token_limit: null,
+        daily_image_limit: null,
+        avatar: null,
+        nickname: null,
+        api_permissions: {},
+        storage_folder: `data/users/${ordinaryUserId}`,
+        email: null,
+        created_at: 1,
+        updated_at: 1,
+      }],
+      rowCount: 1,
+    });
+
+    const originalEnvironment = { ...process.env };
+    process.env.COZE_PROJECT_ENV = 'DEV';
+    process.env.WUJIE_AUTH_PERSISTENCE_MODE = 'DB_ONLY';
+    process.env.WUJIE_ADMIN_USERNAME = 'missing-default-administrator';
+    delete process.env.WUJIE_AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+    vi.resetModules();
+
+    try {
+      const { getSessionUser, WUJIE_SESSION_COOKIE } = await import('@/lib/server-auth');
+      const request = (secret: string, kid: string): NextRequest => {
+        const encoded = Buffer.from(JSON.stringify({
+          sub: ordinaryUserId,
+          role: 'user',
+          name: 'ordinary-session-user-name',
+          exp: now + 60_000,
+          kid,
+        }), 'utf8').toString('base64url');
+        const signature = createHmac('sha256', secret).update(encoded).digest('base64url');
+        return {
+          cookies: {
+            get: (name: string) => name === WUJIE_SESSION_COOKIE
+              ? { value: `${encoded}.${signature}` }
+              : undefined,
+          },
+        } as unknown as NextRequest;
+      };
+
+      await expect(getSessionUser(request(
+        configuredSecret,
+        ring.active.kid,
+      ))).resolves.toMatchObject({ id: ordinaryUserId });
+      await expect(getSessionUser(request(
+        previousSecret,
+        ring.previous?.kid ?? '',
+      ))).resolves.toMatchObject({ id: ordinaryUserId });
+
+      expect(sqlCalls(client)).toEqual([
+        'SELECT value FROM wujie_system_settings WHERE key = $1',
+        'SELECT value FROM wujie_system_settings WHERE key = $1',
+      ]);
+      expect(mocks.execSql).toHaveBeenCalledTimes(2);
+      expect(mocks.execSql).toHaveBeenCalledWith(
+        'SELECT * FROM wujie_users ORDER BY created_at ASC',
+      );
+      expect(sqlCalls(client).join(' ')).not.toMatch(/BEGIN|FOR UPDATE|INSERT|UPDATE|COMMIT/);
+    } finally {
+      vi.useRealTimers();
+      for (const key of Object.keys(process.env)) {
+        if (!(key in originalEnvironment)) delete process.env[key];
+      }
+      Object.assign(process.env, originalEnvironment);
+    }
+  });
+
+  it('reads a persisted secret ring without locks, rotation, or writes', async () => {
+    const ring: AuthSecretRingV1 = {
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(configuredSecret),
+        secret: configuredSecret,
+        activatedAt: now,
+      },
+      updatedAt: now,
+    };
+    const query = vi.fn().mockResolvedValue({ rows: [{ value: ring }], rowCount: 1 });
+    const client = useClient(query);
+    await expect(readDatabaseSecretRing()).resolves.toEqual(ring);
+
+    expect(sqlCalls(client)).toEqual([
+      'SELECT value FROM wujie_system_settings WHERE key = $1',
+    ]);
+    expect(client.query).toHaveBeenCalledWith(
+      'SELECT value FROM wujie_system_settings WHERE key = $1',
+      ['auth_secret_ring_v1'],
+    );
+    expect(sqlCalls(client).join(' ')).not.toMatch(/BEGIN|FOR UPDATE|INSERT|UPDATE|COMMIT/);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('returns null for a missing read-only ring and rejects malformed persisted data', async () => {
+    let client = useClient(vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }));
+    await expect(readDatabaseSecretRing()).resolves.toBeNull();
+    expect(client.release).toHaveBeenCalledOnce();
+
+    client = useClient(vi.fn().mockResolvedValue({
+      rows: [{ value: { version: 1, active: null, updatedAt: now } }],
+      rowCount: 1,
+    }));
+    await expect(readDatabaseSecretRing()).rejects.toMatchObject({
+      code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+    });
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
   it('distinguishes a missing setting from a stored JSON value', async () => {
     const query = vi.fn()
       .mockResolvedValueOnce({ rows: [], rowCount: 0 })

@@ -1,4 +1,7 @@
 import { createHmac } from 'node:crypto';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import type { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -19,6 +22,7 @@ const serverAuthMocks = vi.hoisted(() => ({
   dbReadUsers: vi.fn(),
   dbWriteUsers: vi.fn(),
   getRuntimeSettings: vi.fn(),
+  readDatabaseSecretRing: vi.fn(),
   resolveDatabaseSecretRing: vi.fn(),
   updateUserCredentialSidecar: vi.fn(),
   updateUserCredentials: vi.fn(),
@@ -35,6 +39,7 @@ vi.mock('@/lib/db-storage', () => ({
   dbWriteUsers: serverAuthMocks.dbWriteUsers,
 }));
 vi.mock('@/lib/auth/auth-repository', () => ({
+  readDatabaseSecretRing: serverAuthMocks.readDatabaseSecretRing,
   resolveDatabaseSecretRing: serverAuthMocks.resolveDatabaseSecretRing,
   updateUserCredentialSidecar: serverAuthMocks.updateUserCredentialSidecar,
   updateUserCredentials: serverAuthMocks.updateUserCredentials,
@@ -56,6 +61,7 @@ const sessionNow = 1_800_000_000_000;
 const sessionTtlSeconds = 7 * 24 * 60 * 60;
 const activeSecret = 'task-seven-active-session-secret-0123456789abcdef';
 const previousSecret = 'task-seven-previous-session-secret-0123456789abcd';
+let temporaryDataDirectory: string | null = null;
 const sessionUser = {
   id: 'session-contract-user',
   name: 'session-contract-admin',
@@ -83,12 +89,28 @@ function createSecretRing(retiredAt = sessionNow - 60_000): AuthSecretRingV1 {
   };
 }
 
-function configureServerAuth(ring = createSecretRing()): void {
+function configureServerAuth(
+  ring = createSecretRing(),
+  options: {
+    mode?: 'DB_ONLY' | 'DB_PLUS_FILE' | 'FILE_ONLY';
+    defaultAdminName?: string;
+    configuredSecret?: string | null;
+  } = {},
+): void {
   process.env.COZE_PROJECT_ENV = 'DEV';
-  process.env.WUJIE_AUTH_PERSISTENCE_MODE = 'DB_ONLY';
-  process.env.WUJIE_ADMIN_USERNAME = sessionUser.name;
+  process.env.WUJIE_AUTH_PERSISTENCE_MODE = options.mode ?? 'DB_ONLY';
+  process.env.WUJIE_ADMIN_USERNAME = options.defaultAdminName ?? sessionUser.name;
+  process.env.WUJIE_ADMIN_PASSWORD = 'session-read-only-bootstrap-password';
+  if (options.configuredSecret === undefined || options.configuredSecret === null) {
+    delete process.env.WUJIE_AUTH_SECRET;
+  } else {
+    process.env.WUJIE_AUTH_SECRET = options.configuredSecret;
+  }
+  delete process.env.NEXTAUTH_SECRET;
   delete process.env.WUJIE_AUTH_ACCEPT_PREVIOUS_SESSIONS;
+  serverAuthMocks.readDatabaseSecretRing.mockResolvedValue(ring);
   serverAuthMocks.resolveDatabaseSecretRing.mockResolvedValue(ring);
+  serverAuthMocks.dbWriteUsers.mockResolvedValue(true);
   serverAuthMocks.dbReadUsers.mockResolvedValue([{
     id: sessionUser.id,
     name: sessionUser.name,
@@ -114,6 +136,70 @@ function configureServerAuth(ring = createSecretRing()): void {
   serverAuthMocks.getRuntimeSettings.mockResolvedValue({ initialCredits: 0 });
 }
 
+function storedFileUser(): Record<string, unknown> {
+  return {
+    id: sessionUser.id,
+    name: sessionUser.name,
+    passwordHash: 'unused-session-contract-password-hash',
+    role: sessionUser.role,
+    status: sessionUser.status,
+    productType: 'canvas,chat',
+    apiPermissions: { image: true, chat: true },
+    storageFolder: `data/users/${sessionUser.id}`,
+    createdAt: sessionUser.createdAt,
+    updatedAt: sessionUser.updatedAt,
+  };
+}
+
+async function configureFileSessionFixture(input: {
+  secretFile?: string;
+  includeUsers?: boolean;
+  configuredSecret?: string | null;
+}): Promise<{ ringPath: string; usersPath: string }> {
+  temporaryDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'wujie-session-read-only-'));
+  const systemDirectory = path.join(temporaryDataDirectory, 'system');
+  const ringPath = path.join(systemDirectory, 'auth-secret');
+  const usersPath = path.join(systemDirectory, 'users.json');
+  await mkdir(systemDirectory, { recursive: true });
+  if (input.secretFile !== undefined) {
+    await writeFile(ringPath, input.secretFile, 'utf8');
+  }
+  if (input.includeUsers !== false) {
+    await writeFile(usersPath, JSON.stringify({
+      users: [storedFileUser()],
+      updatedAt: 1,
+    }), 'utf8');
+  }
+  process.env.WUJIE_DATA_DIR = temporaryDataDirectory;
+  configureServerAuth(createSecretRing(), {
+    mode: 'FILE_ONLY',
+    defaultAdminName: 'missing-default-administrator',
+    configuredSecret: input.configuredSecret,
+  });
+  vi.resetModules();
+  return { ringPath, usersPath };
+}
+
+function sessionPayload(input: { kid?: string; exp?: number } = {}): Record<string, unknown> {
+  return {
+    sub: sessionUser.id,
+    role: sessionUser.role,
+    name: sessionUser.name,
+    exp: input.exp ?? sessionNow + 60_000,
+    ...(input.kid === undefined ? {} : { kid: input.kid }),
+  };
+}
+
+function expectNoSessionWrites(): void {
+  expect(serverAuthMocks.dbInitCredits).not.toHaveBeenCalled();
+  expect(serverAuthMocks.dbWriteUsers).not.toHaveBeenCalled();
+  expect(serverAuthMocks.resolveDatabaseSecretRing).not.toHaveBeenCalled();
+  expect(serverAuthMocks.updateUserCredentialSidecar).not.toHaveBeenCalled();
+  expect(serverAuthMocks.updateUserCredentials).not.toHaveBeenCalled();
+  expect(serverAuthMocks.updateUserProfileFields).not.toHaveBeenCalled();
+  expect(serverAuthMocks.writeAuthJsonFileAtomic).not.toHaveBeenCalled();
+}
+
 function signEncodedPayload(encoded: string, secret: string): string {
   const signature = createHmac('sha256', secret).update(encoded).digest('base64url');
   return `${encoded}.${signature}`;
@@ -134,8 +220,12 @@ function requestWithSession(token: string): NextRequest {
   } as unknown as NextRequest;
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
+  if (temporaryDataDirectory) {
+    await rm(temporaryDataDirectory, { recursive: true, force: true });
+    temporaryDataDirectory = null;
+  }
   for (const key of Object.keys(process.env)) {
     if (!(key in originalEnvironment)) delete process.env[key];
   }
@@ -328,12 +418,48 @@ describe.sequential('server authentication sessions', () => {
     expect(serverAuthMocks.dbReadUsers).not.toHaveBeenCalled();
   });
 
-  it('rejects previous sessions retired beyond seven days or in the future', async () => {
+  it('rejects exp equal to now, accepts now plus one, and captures verification time once', async () => {
+    configureServerAuth();
+    const { getSessionUser } = await import('@/lib/server-auth');
+    let nowSpy = vi.spyOn(Date, 'now').mockReturnValue(sessionNow);
+
+    await expect(getSessionUser(requestWithSession(signSessionPayload(
+      sessionPayload({ kid: deriveAuthSecretKid(activeSecret), exp: sessionNow }),
+      activeSecret,
+    )))).resolves.toBeNull();
+    expect(nowSpy).toHaveBeenCalledOnce();
+
+    vi.resetModules();
+    configureServerAuth();
+    const freshServerAuth = await import('@/lib/server-auth');
+    nowSpy.mockRestore();
+    nowSpy = vi.spyOn(Date, 'now').mockReturnValue(sessionNow);
+    await expect(freshServerAuth.getSessionUser(requestWithSession(signSessionPayload(
+      sessionPayload({ kid: deriveAuthSecretKid(activeSecret), exp: sessionNow + 1 }),
+      activeSecret,
+    )))).resolves.toMatchObject({ id: sessionUser.id });
+    expect(nowSpy).toHaveBeenCalledOnce();
+  });
+
+  it('accepts the exact previous-session TTL boundary and rejects one millisecond beyond or future retirement', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(sessionNow);
-    const expiredRing = createSecretRing(sessionNow - sessionTtlSeconds * 1_000 - 1);
-    configureServerAuth(expiredRing);
+    const boundaryRing = createSecretRing(sessionNow - sessionTtlSeconds * 1_000);
+    configureServerAuth(boundaryRing);
     let serverAuth = await import('@/lib/server-auth');
+    const boundaryToken = signSessionPayload({
+      sub: sessionUser.id,
+      role: sessionUser.role,
+      name: sessionUser.name,
+      exp: sessionNow + 60_000,
+      kid: boundaryRing.previous?.kid,
+    }, previousSecret);
+    await expect(serverAuth.getSessionUser(
+      requestWithSession(boundaryToken),
+    )).resolves.toMatchObject({ id: sessionUser.id });
+
+    const expiredRing = createSecretRing(sessionNow - sessionTtlSeconds * 1_000 - 1);
+    serverAuthMocks.readDatabaseSecretRing.mockResolvedValue(expiredRing);
     const expiredWindowToken = signSessionPayload({
       sub: sessionUser.id,
       role: sessionUser.role,
@@ -422,11 +548,182 @@ describe.sequential('server authentication sessions', () => {
     await expect(getSessionUser(requestWithSession(token))).resolves.toMatchObject({
       id: sessionUser.id,
     });
-    expect(serverAuthMocks.dbWriteUsers).not.toHaveBeenCalled();
-    expect(serverAuthMocks.updateUserCredentialSidecar).not.toHaveBeenCalled();
-    expect(serverAuthMocks.updateUserCredentials).not.toHaveBeenCalled();
-    expect(serverAuthMocks.updateUserProfileFields).not.toHaveBeenCalled();
-    expect(serverAuthMocks.writeAuthJsonFileAtomic).not.toHaveBeenCalled();
+    expectNoSessionWrites();
+  });
+
+  it.each(['DB_ONLY', 'DB_PLUS_FILE'] as const)(
+    'keeps active and previous session reads strictly read-only in %s',
+    async mode => {
+      vi.useFakeTimers();
+      vi.setSystemTime(sessionNow);
+      const ring = createSecretRing();
+      configureServerAuth(ring, {
+        mode,
+        defaultAdminName: 'missing-default-administrator',
+      });
+      const { getSessionUser } = await import('@/lib/server-auth');
+
+      await expect(getSessionUser(requestWithSession(signSessionPayload(
+        sessionPayload({ kid: ring.active.kid }),
+        activeSecret,
+      )))).resolves.toMatchObject({ id: sessionUser.id });
+      await expect(getSessionUser(requestWithSession(signSessionPayload(
+        sessionPayload({ kid: ring.previous?.kid }),
+        previousSecret,
+      )))).resolves.toMatchObject({ id: sessionUser.id });
+
+      expect(serverAuthMocks.readDatabaseSecretRing).toHaveBeenCalledTimes(2);
+      expect(serverAuthMocks.resolveDatabaseSecretRing).not.toHaveBeenCalled();
+      expectNoSessionWrites();
+    },
+  );
+
+  it.each(['DB_ONLY', 'DB_PLUS_FILE'] as const)(
+    'returns null for a missing persisted ring in %s without fallback or writes',
+    async mode => {
+      configureServerAuth(createSecretRing(), {
+        mode,
+        defaultAdminName: 'missing-default-administrator',
+      });
+      serverAuthMocks.readDatabaseSecretRing.mockResolvedValue(null);
+      const { getSessionUser } = await import('@/lib/server-auth');
+
+      await expect(getSessionUser(requestWithSession(signSessionPayload(
+        sessionPayload({ kid: deriveAuthSecretKid(activeSecret) }),
+        activeSecret,
+      )))).resolves.toBeNull();
+
+      expect(serverAuthMocks.dbReadUsers).not.toHaveBeenCalled();
+      expectNoSessionWrites();
+    },
+  );
+
+  it('reads FILE_ONLY active and previous sessions without bootstrapping or rewriting files', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(sessionNow);
+    const ring = createSecretRing();
+    const { ringPath, usersPath } = await configureFileSessionFixture({
+      secretFile: JSON.stringify(ring),
+    });
+    const ringBefore = await readFile(ringPath, 'utf8');
+    const usersBefore = await readFile(usersPath, 'utf8');
+    const { getSessionUser } = await import('@/lib/server-auth');
+
+    await expect(getSessionUser(requestWithSession(signSessionPayload(
+      sessionPayload({ kid: ring.active.kid }),
+      activeSecret,
+    )))).resolves.toMatchObject({ id: sessionUser.id });
+    await expect(getSessionUser(requestWithSession(signSessionPayload(
+      sessionPayload({ kid: ring.previous?.kid }),
+      previousSecret,
+    )))).resolves.toMatchObject({ id: sessionUser.id });
+
+    await expect(readFile(ringPath, 'utf8')).resolves.toBe(ringBefore);
+    await expect(readFile(usersPath, 'utf8')).resolves.toBe(usersBefore);
+    expect(serverAuthMocks.resolveDatabaseSecretRing).not.toHaveBeenCalled();
+    expectNoSessionWrites();
+  });
+
+  it('uses an environment secret with a legacy FILE_ONLY secret in memory without persisting rotation', async () => {
+    const { ringPath, usersPath } = await configureFileSessionFixture({
+      secretFile: previousSecret,
+      configuredSecret: activeSecret,
+    });
+    const usersBefore = await readFile(usersPath, 'utf8');
+    const { getSessionUser } = await import('@/lib/server-auth');
+
+    await expect(getSessionUser(requestWithSession(signSessionPayload(
+      sessionPayload({ kid: deriveAuthSecretKid(previousSecret) }),
+      previousSecret,
+    )))).resolves.toMatchObject({ id: sessionUser.id });
+
+    await expect(readFile(ringPath, 'utf8')).resolves.toBe(previousSecret);
+    await expect(readFile(usersPath, 'utf8')).resolves.toBe(usersBefore);
+    expectNoSessionWrites();
+  });
+
+  it('uses a FILE_ONLY environment secret in memory when the ring file is missing', async () => {
+    const { ringPath } = await configureFileSessionFixture({
+      configuredSecret: activeSecret,
+    });
+    const { getSessionUser } = await import('@/lib/server-auth');
+
+    await expect(getSessionUser(requestWithSession(signSessionPayload(
+      sessionPayload({ kid: deriveAuthSecretKid(activeSecret) }),
+      activeSecret,
+    )))).resolves.toMatchObject({ id: sessionUser.id });
+
+    await expect(readFile(ringPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expectNoSessionWrites();
+  });
+
+  it('fails closed for a damaged FILE_ONLY ring without changing users or secrets', async () => {
+    const { ringPath, usersPath } = await configureFileSessionFixture({
+      secretFile: '{"version":1,"active":',
+    });
+    const ringBefore = await readFile(ringPath, 'utf8');
+    const usersBefore = await readFile(usersPath, 'utf8');
+    const { getSessionUser } = await import('@/lib/server-auth');
+
+    await expect(getSessionUser(requestWithSession(signSessionPayload(
+      sessionPayload({ kid: deriveAuthSecretKid(activeSecret) }),
+      activeSecret,
+    )))).rejects.toMatchObject({ code: 'AUTH_CONFIGURATION_UNAVAILABLE' });
+
+    await expect(readFile(ringPath, 'utf8')).resolves.toBe(ringBefore);
+    await expect(readFile(usersPath, 'utf8')).resolves.toBe(usersBefore);
+    expectNoSessionWrites();
+  });
+
+  it('returns null for a missing FILE_ONLY user file without bootstrapping an administrator', async () => {
+    const ring = createSecretRing();
+    const { usersPath } = await configureFileSessionFixture({
+      secretFile: JSON.stringify(ring),
+      includeUsers: false,
+    });
+    const { getSessionUser } = await import('@/lib/server-auth');
+
+    await expect(getSessionUser(requestWithSession(signSessionPayload(
+      sessionPayload({ kid: ring.active.kid }),
+      activeSecret,
+    )))).resolves.toBeNull();
+    await expect(readFile(usersPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expectNoSessionWrites();
+  });
+
+  it('does not let a read-only session ring populate the normal rotation cache', async () => {
+    const readOnlyRing = createSecretRing();
+    const nextActiveSecret = 'task-seven-next-active-session-secret-0123456789abc';
+    const nextRing: AuthSecretRingV1 = {
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(nextActiveSecret),
+        secret: nextActiveSecret,
+        activatedAt: sessionNow,
+      },
+      previous: {
+        ...readOnlyRing.active,
+        retiredAt: sessionNow,
+      },
+      updatedAt: sessionNow,
+    };
+    configureServerAuth(readOnlyRing);
+    serverAuthMocks.readDatabaseSecretRing.mockResolvedValue(readOnlyRing);
+    serverAuthMocks.resolveDatabaseSecretRing.mockResolvedValue(nextRing);
+    const { createSessionToken, getSessionUser } = await import('@/lib/server-auth');
+
+    await expect(getSessionUser(requestWithSession(signSessionPayload(
+      sessionPayload({ kid: readOnlyRing.active.kid }),
+      activeSecret,
+    )))).resolves.toMatchObject({ id: sessionUser.id });
+    const newToken = await createSessionToken(sessionUser as User);
+    const newPayload = JSON.parse(Buffer.from(newToken.split('.')[0], 'base64url').toString('utf8')) as {
+      kid?: string;
+    };
+
+    expect(serverAuthMocks.readDatabaseSecretRing).toHaveBeenCalledOnce();
+    expect(serverAuthMocks.resolveDatabaseSecretRing).toHaveBeenCalledOnce();
+    expect(newPayload.kid).toBe(nextRing.active.kid);
   });
 
   it('keeps internal request authentication active-only after rotation', async () => {

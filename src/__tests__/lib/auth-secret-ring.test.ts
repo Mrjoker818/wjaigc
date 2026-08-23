@@ -283,6 +283,16 @@ describe('authentication secret ring', () => {
       ttlSeconds: 7 * 24 * 60 * 60,
     })).toEqual([ring.active, ring.previous]);
     expect(sessionVerificationEntries(ring, {
+      now: now + 7 * 24 * 60 * 60 * 1000,
+      acceptPrevious: true,
+      ttlSeconds: 7 * 24 * 60 * 60,
+    })).toEqual([ring.active, ring.previous]);
+    expect(sessionVerificationEntries(ring, {
+      now: now + 7 * 24 * 60 * 60 * 1000 + 1,
+      acceptPrevious: true,
+      ttlSeconds: 7 * 24 * 60 * 60,
+    })).toEqual([ring.active]);
+    expect(sessionVerificationEntries(ring, {
       now: now + 8 * 24 * 60 * 60 * 1000,
       acceptPrevious: true,
       ttlSeconds: 7 * 24 * 60 * 60,

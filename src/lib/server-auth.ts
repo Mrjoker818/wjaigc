@@ -27,6 +27,7 @@ import {
   type AuthSecretRingV1,
 } from './auth/auth-secret-ring';
 import {
+  readDatabaseSecretRing,
   resolveDatabaseSecretRing,
   updateUserCredentials,
   updateUserCredentialSidecar,
@@ -335,6 +336,43 @@ async function resolveFileSecretRing(
   return ring;
 }
 
+async function readFileSecretRingForSession(now: number): Promise<AuthSecretRingV1 | null> {
+  const configuredSecret = configuredAuthSecret();
+  const raw = await readAuthSecretFileRaw();
+  if (raw === null) {
+    return configuredSecret ? createInitialSecretRing(configuredSecret, now) : null;
+  }
+
+  const parsed = parseFileSecretRing(raw, now);
+  let ring = parsed.ring;
+  if (configuredSecret && configuredSecret !== ring.active.secret) {
+    try {
+      ring = planSecretRingRotation(
+        ring,
+        configuredSecret,
+        now,
+        ring.previous !== undefined,
+      );
+    } catch (error) {
+      if (error instanceof AuthServiceError) throw error;
+      throw configurationUnavailable();
+    }
+  }
+  return ring;
+}
+
+async function readSessionSecretRing(now: number): Promise<AuthSecretRingV1 | null> {
+  const mode = getAuthPersistenceMode();
+  const ring = mode === 'FILE_ONLY'
+    ? await readFileSecretRingForSession(now)
+    : await readDatabaseSecretRing();
+  if (ring === null) return null;
+
+  const parsed = parseAuthSecretRing(ring);
+  if (!parsed) throw configurationUnavailable();
+  return parsed;
+}
+
 async function resolveAuthSecretRing(): Promise<AuthSecretRingV1> {
   const mode = getAuthPersistenceMode();
   const now = Date.now();
@@ -511,6 +549,10 @@ function publicUser(user: StoredUser): User {
 }
 
 function normalizeStoredUser(user: StoredUser): StoredUser {
+  return normalizeStoredUserAt(user, Date.now());
+}
+
+function normalizeStoredUserAt(user: StoredUser, now: number): StoredUser {
   return {
     ...user,
     role: user.role || 'user',
@@ -526,14 +568,18 @@ function normalizeStoredUser(user: StoredUser): StoredUser {
     nickname: user.nickname || undefined,
     apiPermissions: user.apiPermissions || defaultApiPermissions(),
     storageFolder: storageFolder(user.id),
-    updatedAt: user.updatedAt || Date.now(),
+    updatedAt: user.updatedAt || now,
   };
 }
 
 type DbStoredUserRow = Awaited<ReturnType<typeof dbReadUsers>>[number];
 
 function storedUserFromDatabase(user: DbStoredUserRow): StoredUser {
-  return normalizeStoredUser({
+  return storedUserFromDatabaseAt(user, Date.now());
+}
+
+function storedUserFromDatabaseAt(user: DbStoredUserRow, now: number): StoredUser {
+  return normalizeStoredUserAt({
     id: user.id,
     name: user.name,
     passwordHash: user.password_hash,
@@ -558,7 +604,7 @@ function storedUserFromDatabase(user: DbStoredUserRow): StoredUser {
     email: user.email || undefined,
     createdAt: user.created_at,
     updatedAt: user.updated_at,
-  });
+  }, now);
 }
 
 function userForDatabase(user: StoredUser): Parameters<typeof dbWriteUsers>[0][number] {
@@ -648,6 +694,50 @@ async function readDatabaseStore(): Promise<StoredUsersFile> {
       users: dbUsers.map(storedUserFromDatabase),
       updatedAt: Date.now(),
     };
+  } catch (error) {
+    throw error instanceof AuthServiceError ? error : persistenceUnavailable();
+  }
+}
+
+function isStoredUserRecord(value: unknown): value is StoredUser {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (Object.getPrototypeOf(value) !== Object.prototype) return false;
+
+  const record = value as Record<string, unknown>;
+  return Object.hasOwn(record, 'id')
+    && typeof record.id === 'string'
+    && Object.hasOwn(record, 'name')
+    && typeof record.name === 'string'
+    && Object.hasOwn(record, 'passwordHash')
+    && typeof record.passwordHash === 'string';
+}
+
+async function readSessionUser(userId: string, now: number): Promise<StoredUser | null> {
+  const mode = getAuthPersistenceMode();
+  if (mode === 'FILE_ONLY') {
+    try {
+      const parsed = await readAuthJsonFile<unknown>(USERS_PATH);
+      if (parsed === null) return null;
+      if (typeof parsed !== 'object'
+        || Array.isArray(parsed)
+        || !Object.hasOwn(parsed, 'users')) {
+        throw persistenceUnavailable();
+      }
+
+      const users = (parsed as { users?: unknown }).users;
+      if (!Array.isArray(users)) throw persistenceUnavailable();
+      const candidate = users.find(value => (
+        isStoredUserRecord(value) && value.id === userId
+      ));
+      return candidate ? normalizeStoredUserAt(candidate, now) : null;
+    } catch (error) {
+      throw error instanceof AuthServiceError ? error : persistenceUnavailable();
+    }
+  }
+
+  try {
+    const candidate = (await dbReadUsers()).find(user => user.id === userId);
+    return candidate ? storedUserFromDatabaseAt(candidate, now) : null;
   } catch (error) {
     throw error instanceof AuthServiceError ? error : persistenceUnavailable();
   }
@@ -1323,9 +1413,9 @@ export async function getSessionUser(request: NextRequest): Promise<User | null>
 
   const payload = parseSessionPayload(encoded);
   const now = Date.now();
-  if (!payload || payload.exp < now) return null;
+  if (!payload || payload.exp <= now) return null;
 
-  const ring = parseAuthSecretRing(await authSecretRing());
+  const ring = await readSessionSecretRing(now);
   if (!ring) return null;
   const entries = sessionVerificationEntries(ring, {
     now,
@@ -1335,8 +1425,7 @@ export async function getSessionUser(request: NextRequest): Promise<User | null>
   });
   if (!verifySessionSignature(encoded, signature, entries)) return null;
 
-  const file = await readStore();
-  const user = file.users.find(item => item.id === payload.sub);
+  const user = await readSessionUser(payload.sub, now);
   if (!user || user.status === 'disabled') return null;
   return publicUser(user);
 }

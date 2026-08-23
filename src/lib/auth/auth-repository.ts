@@ -124,6 +124,15 @@ export async function readSystemSettingStrict(key: string): Promise<StrictSettin
   }
 }
 
+export async function readDatabaseSecretRing(): Promise<AuthSecretRingV1 | null> {
+  const setting = await readSystemSettingStrict(AUTH_SECRET_RING_KEY);
+  if (!setting.found) return null;
+
+  const ring = parseAuthSecretRing(setting.value);
+  if (!ring) throw configurationUnavailable();
+  return ring;
+}
+
 export async function resolveDatabaseSecretRing(input: {
   configuredSecret: string | null;
   now: number;
