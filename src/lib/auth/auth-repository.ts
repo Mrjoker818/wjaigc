@@ -115,6 +115,18 @@ function createInitialRing(secret: string, now: number): AuthSecretRingV1 {
   };
 }
 
+function parsePersistedSecretRing(value: unknown): AuthSecretRingV1 | null {
+  let candidate = value;
+  if (typeof candidate === 'string') {
+    try {
+      candidate = JSON.parse(candidate) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  return parseAuthSecretRing(candidate);
+}
+
 async function countLegacyCredentialUsersWithClient(client: PoolClient): Promise<number> {
   const result = await client.query<{ count: string }>(`
     SELECT count(*)::text AS count
@@ -163,7 +175,7 @@ export async function readDatabaseSecretRing(
     const values = new Map(result.rows.map(row => [row.key, row.value]));
 
     if (values.has(AUTH_SECRET_RING_KEY)) {
-      const ring = parseAuthSecretRing(values.get(AUTH_SECRET_RING_KEY));
+      const ring = parsePersistedSecretRing(values.get(AUTH_SECRET_RING_KEY));
       if (!ring) throw configurationUnavailable();
       return ring;
     }
@@ -199,7 +211,7 @@ export async function resolveDatabaseSecretRing(input: {
       [[AUTH_SECRET_RING_KEY, LEGACY_AUTH_SECRET_KEY]],
     );
     const values = new Map(settings.rows.map(row => [row.key, row.value]));
-    const existingRing = parseAuthSecretRing(values.get(AUTH_SECRET_RING_KEY));
+    const existingRing = parsePersistedSecretRing(values.get(AUTH_SECRET_RING_KEY));
     const legacySecretValue = values.get(LEGACY_AUTH_SECRET_KEY);
     const legacySecret = isValidSecret(legacySecretValue) ? legacySecretValue : null;
 
