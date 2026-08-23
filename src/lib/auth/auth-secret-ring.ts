@@ -141,6 +141,9 @@ export function parseAuthSecretRing(value: unknown): AuthSecretRingV1 | null {
       || previousRetiredAt > ring.updatedAt) {
       return null;
     }
+    if (previousRetiredAt > active.activatedAt) {
+      return null;
+    }
 
     return { version: 1, active, previous, updatedAt: ring.updatedAt };
   } catch {

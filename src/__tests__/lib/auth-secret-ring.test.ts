@@ -182,6 +182,26 @@ describe('authentication secret ring', () => {
     })).toBeNull();
   });
 
+  it('rejects a previous entry retired after the active entry was activated', async () => {
+    const { deriveAuthSecretKid, parseAuthSecretRing } = await loadAuthSecretRing();
+
+    expect(parseAuthSecretRing({
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(nextSecret),
+        secret: nextSecret,
+        activatedAt: now,
+      },
+      previous: {
+        kid: deriveAuthSecretKid(activeSecret),
+        secret: activeSecret,
+        activatedAt: now - 2,
+        retiredAt: now + 1,
+      },
+      updatedAt: now + 1,
+    })).toBeNull();
+  });
+
   it('moves the active entry to previous on the first rotation', async () => {
     const { deriveAuthSecretKid, planSecretRingRotation } = await loadAuthSecretRing();
     const existingRing: AuthSecretRingV1 = {
