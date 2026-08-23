@@ -1,15 +1,27 @@
 import { expect, test } from '@playwright/test';
 import { collectBrowserEvidence, saveBrowserEvidence } from '../helpers/evidence';
+import { waitForAuthenticatedSessionForAction, type ExpectedPrincipal } from '../helpers/v588-auth-task-9';
 
 const username = process.env.E2E_TEST_USERNAME;
 const password = process.env.E2E_TEST_PASSWORD;
+const userId = process.env.E2E_TEST_ID;
+const userRole = process.env.E2E_TEST_ROLE;
 
 function requireTestAccount(): void {
   const missing = [
     ['E2E_TEST_USERNAME', username],
     ['E2E_TEST_PASSWORD', password],
+    ['E2E_TEST_ID', userId],
+    ['E2E_TEST_ROLE', userRole],
   ].filter(([, value]) => !value).map(([name]) => name);
   if (missing.length > 0) throw new Error(`A real test account is required. Missing: ${missing.join(', ')}`);
+  if (userRole !== 'admin' && userRole !== 'user') {
+    throw new Error('E2E_TEST_ROLE must be admin or user');
+  }
+}
+
+function expectedPrincipal(): ExpectedPrincipal {
+  return { id: userId!, name: username!, role: userRole as 'admin' | 'user' };
 }
 
 test.describe('P0 authenticated session', () => {
@@ -28,31 +40,36 @@ test.describe('P0 authenticated session', () => {
       await page.getByPlaceholder('请输入用户名').fill(username!);
       await page.getByPlaceholder('请输入密码').fill(password!);
       const loginResponse = page.waitForResponse((response) => response.url().includes('/api/auth/login') && response.request().method() === 'POST');
-      await page.getByRole('button', { name: '登录' }).click();
-      const response = await loginResponse;
+      const [response] = await Promise.all([
+        loginResponse,
+        waitForAuthenticatedSessionForAction(
+          page,
+          expectedPrincipal(),
+          'p0-correct-login',
+          () => page.getByRole('button', { name: '登录' }).click(),
+        ),
+      ]);
       expect(response.ok(), `Login request failed with ${response.status()}`).toBeTruthy();
-      // WebKit may discard response body after navigation; parse defensively
-      let payload: { success?: boolean; user?: { id?: string } } = {};
-      try {
-        payload = await response.json() as { success?: boolean; user?: { id?: string } };
-      } catch {
-        // Body was discarded by browser — verify via UI state instead
-      }
-      const loginVerified = payload.success && payload.user?.id;
-      if (!loginVerified) {
-        // Fallback: verify login succeeded by checking if dashboard appears
-        await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 15_000 });
-      } else {
-        await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 15_000 });
-      }
+      await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 15_000 });
 
-      // Use domcontentloaded (not networkidle — SSE connections prevent networkidle)
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      // A refresh must restore the authenticated dashboard without another login.
+      await waitForAuthenticatedSessionForAction(
+        page,
+        expectedPrincipal(),
+        'p0-dashboard-refresh',
+        () => page.reload({ waitUntil: 'domcontentloaded' }),
+      );
       await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 20_000 });
 
       await page.getByTitle('查看用户信息').click();
-      await page.getByRole('button', { name: '退出登录' }).click();
+      const logoutResponse = page.waitForResponse(response => (
+        new URL(response.url()).pathname === '/api/auth/logout'
+        && response.request().method() === 'POST'
+      ));
+      const [logout] = await Promise.all([
+        logoutResponse,
+        page.getByRole('button', { name: '退出登录' }).click(),
+      ]);
+      expect(logout.status()).toBe(200);
       await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
       await expect.poll(
         () => evidence.network.some((entry) => entry.url.includes('/api/activity') && (entry.status || 0) >= 400),

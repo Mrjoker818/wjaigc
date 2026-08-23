@@ -1,51 +1,157 @@
 {
-  "schemaVersion": 1,
-  "task": "V588-AUTH-001 Task 9",
-  "status": "DONE_WITH_CONCERNS",
-  "startedAt": "2026-08-23T15:41:32.0823940+08:00",
-  "completedAt": "2026-08-23T16:35:00+08:00",
+  "schemaVersion": 2,
+  "task": "V588-AUTH-001 Task 9 independent review hardening",
+  "status": "IMPLEMENTATION_COMPLETE_GATE_FAILED",
+  "startedAt": "2026-08-23T16:47:00+08:00",
+  "completedAt": "2026-08-23T17:41:00+08:00",
   "baseCommit": "9c693b1d57ecf027ae3d9787a279b3b14dba3b0e",
+  "reviewedTask9Commit": "2167f73d6397635109136df0f7ee12798847826d",
   "commitCandidate": {
-    "message": "test: verify authentication migration across browsers",
-    "state": "committed-via-final-amend"
+    "message": "test: harden authentication acceptance evidence",
+    "state": "pending"
   },
   "stableSha": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
   "baseUrl": "http://127.0.0.1:5011",
   "server": {
-    "command": "pnpm exec next start -H 127.0.0.1 -p 5011",
-    "shellPid": 8128,
-    "nextPid": 30380,
+    "buildCommand": "pnpm build",
+    "startCommand": "pnpm exec next start -H 127.0.0.1 -p 5011",
+    "shellPid": 1904,
     "ready": true,
-    "stoppedByTask": true,
+    "readyMs": 593,
+    "stoppedByTaskWithCtrlC": true,
     "portReleased": true,
-    "log": "test-results/gates/server-5011-rerun.log"
+    "log": "test-results/gates/server-5011-authoritative.log",
+    "stopLog": "task-owned server session received Ctrl+C; port release verified"
   },
   "isolation": {
+    "runId": "v588-auth-1787477717655-f894e058",
     "persistenceMode": "FILE_ONLY",
-    "dataDirectory": "C:/Users/ADMINI~1/AppData/Local/Temp/wujie-v588-auth-task9-mt5i1713/data",
+    "fixtureType": "one-time controlled temporary file fixture",
+    "fixtureCreatedForFinalRun": true,
+    "fixtureDestroyedAfterArtifactAndStableChecks": true,
+    "fixtureDirectoryStillExists": false,
+    "credentialSource": "environment variables only",
+    "credentialsPresentInEvidence": false,
+    "credentialVariantScan": [
+      "raw",
+      "URL-encoded",
+      "form-encoded",
+      "JSON-escaped",
+      "base64",
+      "base64url"
+    ],
     "databaseUrlRemovedBeforeEveryIsolatedCommand": true,
     "pgdatabaseUrlRemovedBeforeEveryIsolatedCommand": true,
     "databaseConnectionAttempted": false,
     "productionDatabaseUsed": false,
-    "fixtureType": "controlled temporary file fixture",
-    "credentialSource": "environment variables only",
-    "credentialsPresentInEvidence": false,
     "roles": [
       "admin",
       "user"
-    ]
+    ],
+    "prepareLog": "test-results/gates/v588-auth-fixture-authoritative-prepare.log",
+    "destroyLog": "test-results/gates/v588-auth-fixture-destroy-authoritative.log"
   },
   "tdd": {
-    "red": {
-      "command": "pnpm exec playwright test tests/e2e/v588-auth-001-session.spec.ts --project=chromium --list",
-      "exitCode": 1,
-      "result": "FAIL_EXPECTED",
-      "reason": "No tests found; the Task 9 spec did not exist"
-    },
-    "discoveryAfterCreation": {
+    "red": [
+      {
+        "command": "pnpm exec vitest run src/__tests__/helpers/v588-auth-task-9-hardening.test.ts",
+        "exitCode": 1,
+        "result": "FAIL_EXPECTED",
+        "reason": "Dedicated Task 9 hardening helper did not exist"
+      },
+      {
+        "command": "node scripts/verify-v588-auth-stable-contract.mjs",
+        "exitCode": 1,
+        "result": "FAIL_EXPECTED",
+        "reason": "Replayable stable helper did not exist"
+      },
+      {
+        "command": "pnpm exec playwright test tests/e2e/v588-auth-001-session.spec.ts --project=chromium",
+        "exitCode": 1,
+        "result": "DIAGNOSTIC_RED",
+        "reason": "An old in-flight session response could be selected at canvas refresh before action-time request binding was added"
+      }
+    ],
+    "green": {
+      "command": "pnpm exec vitest run src/__tests__/helpers/v588-auth-task-9-hardening.test.ts",
       "exitCode": 0,
-      "tests": 2,
-      "result": "PASS"
+      "result": "PASS",
+      "tests": 9
+    }
+  },
+  "reviewFixes": {
+    "I-1": {
+      "result": "PASS",
+      "evidence": "Every correct login and reload registers page.waitForResponse before the triggering action, binds responses to requests started at or after that action, asserts HTTP 200, parses JSON, and validates fixture id/name/role before UI assertions.",
+      "strictAuthenticatedSessionAssertions": 40,
+      "p0AuthenticatedSessionAssertions": 8,
+      "sessionNon200Responses": 0,
+      "sessionRequestFailuresRetainedAsUnexpected": 31
+    },
+    "I-2": {
+      "result": "PASS",
+      "evidence": "Expected failures are matched once by concrete Playwright Request identity and per-step UUID token. Console exemptions require the same stage, URL, status, and one available token. Authentication request failures are never navigation-abort exemptions.",
+      "exactExpectedResponseTokens": 16,
+      "expectedResponsesPerStrictFlow": 2,
+      "unexpectedAuthRequestFailuresRetained": 35,
+      "unexpectedSync500ResponsesRetained": 80,
+      "controlledNavigationAborts": 38
+    },
+    "I-3": {
+      "result": "PASS",
+      "sourceTraceArchivesSanitized": 8,
+      "htmlReportTraceArchivesSanitized": 8,
+      "traceArchivesReadableAfterSanitization": true,
+      "currentRunTraceAndTextJsonLeakScan": "PASS",
+      "credentialsPresentInEvidence": false,
+      "fixtureDestroyed": true,
+      "log": "test-results/gates/v588-auth-artifact-collection-authoritative.log"
+    },
+    "I-4": {
+      "result": "PASS",
+      "evidenceType": "non-browser/file-only/read-only stable legacy credential contract",
+      "browserEvidence": false,
+      "databaseEvidence": false,
+      "helper": "scripts/verify-v588-auth-stable-contract.mjs",
+      "command": "node scripts/verify-v588-auth-stable-contract.mjs",
+      "helperSha256": "3a5a3c97e1e93db74220944aede86f1bc0704ef659b3549be549af6c02a8858d",
+      "stableBlob": "839455ef7a9d5f0362bdcc1dbd4ff6bb7dbdeb6e",
+      "stableSourceSha256": "4a5b8fa16a323303bdb7d17c65ba44fe3a8bd66a373503446bcac07313e976ee",
+      "fixtureBeforeSha256": "d8c0c7c52c282872d1a45a8ceb3b2fb9ae40c2c29695b38db113e7b6306cb41c",
+      "fixtureAfterSha256": "d8c0c7c52c282872d1a45a8ceb3b2fb9ae40c2c29695b38db113e7b6306cb41c",
+      "fixtureUnchanged": true,
+      "roles": [
+        {
+          "role": "admin",
+          "legacyPasswordHashVerified": true,
+          "credentialHashStillPresent": true
+        },
+        {
+          "role": "user",
+          "legacyPasswordHashVerified": true,
+          "credentialHashStillPresent": true
+        }
+      ],
+      "resultFile": "test-results/gates/stable-readonly-contract-authoritative.json"
+    },
+    "I-5": {
+      "result": "PASS",
+      "topLevelStatus": "IMPLEMENTATION_COMPLETE_GATE_FAILED"
+    },
+    "M-1": {
+      "result": "PASS",
+      "finalRunOnly": true,
+      "manifest": "test-results/manifests/v588-auth-1787477717655-f894e058.json",
+      "manifestFields": [
+        "project",
+        "role",
+        "retry",
+        "path",
+        "size",
+        "mtime",
+        "checksum"
+      ],
+      "artifactCount": 72
     }
   },
   "browserGate": {
@@ -60,23 +166,24 @@
         "firefox",
         "webkit",
         "mobile-chromium"
-      ]
+      ],
+      "serverSessionPrincipalAssertions": "PASS_8_OF_8"
     },
     "strict": {
       "passed": 0,
       "failed": 8,
       "functionalFlowsCompleted": 8,
       "runtimeGateFailures": 8,
-      "commonFailure": "GET /api/user-data/sync returned 500 in production FILE_ONLY mode without PostgreSQL",
-      "webkitAdditionalFailure": "pageerror events from cancelled fetches during navigation",
-      "log": "test-results/gates/playwright-auth-matrix-classified.log"
+      "serverSessionPrincipalAssertions": "PASS_40_OF_40",
+      "log": "test-results/gates/playwright-auth-matrix-authoritative.log"
     },
     "functionalSteps": {
       "realFormLoginForBothRoles": "PASS_8_OF_8",
-      "wrongPassword401ThenCorrectLogin": "PASS_8_OF_8",
+      "wrongPasswordThenCorrectLogin": "PASS_8_OF_8",
+      "serverSessionIdNameRoleAfterCorrectLogin": "PASS_16_OF_16",
+      "serverSessionIdNameRoleAfterReload": "PASS_24_OF_24",
       "legacyPasswordHashPreservedAndCredentialHashCreated": "PASS_8_OF_8",
       "entrySelectionToCanvasDashboardAndStandaloneChat": "PASS_8_OF_8",
-      "dashboardAndCanvasAndChatRefreshPersistence": "PASS_8_OF_8",
       "logoutReturnsToEntrySelection": "PASS_8_OF_8",
       "postLogoutSessionAnonymous": "PASS_8_OF_8",
       "postLogoutProtectedUserData401": "PASS_8_OF_8",
@@ -88,10 +195,13 @@
         "role": "admin",
         "functionalFlow": "PASS",
         "runtimeGate": "FAIL",
-        "expected401Or429": 2,
-        "unexpectedNetwork": 10,
-        "navigationAborted": 42,
-        "unexpectedConsole": 20,
+        "expectedResponseTokens": 2,
+        "unexpectedNetwork": 33,
+        "unexpectedAuthRequestFailures": 7,
+        "sessionRequestFailures": 6,
+        "sync500": 9,
+        "navigationAborted": 8,
+        "unexpectedConsole": 22,
         "pageErrors": 0,
         "unhandledRejections": 0,
         "dialogs": 0
@@ -101,9 +211,12 @@
         "role": "user",
         "functionalFlow": "PASS",
         "runtimeGate": "FAIL",
-        "expected401Or429": 2,
-        "unexpectedNetwork": 10,
-        "navigationAborted": 36,
+        "expectedResponseTokens": 2,
+        "unexpectedNetwork": 23,
+        "unexpectedAuthRequestFailures": 4,
+        "sessionRequestFailures": 3,
+        "sync500": 10,
+        "navigationAborted": 6,
         "unexpectedConsole": 21,
         "pageErrors": 0,
         "unhandledRejections": 0,
@@ -114,10 +227,13 @@
         "role": "admin",
         "functionalFlow": "PASS",
         "runtimeGate": "FAIL",
-        "expected401Or429": 2,
-        "unexpectedNetwork": 11,
-        "navigationAborted": 18,
-        "unexpectedConsole": 10,
+        "expectedResponseTokens": 2,
+        "unexpectedNetwork": 32,
+        "unexpectedAuthRequestFailures": 4,
+        "sessionRequestFailures": 4,
+        "sync500": 8,
+        "navigationAborted": 4,
+        "unexpectedConsole": 9,
         "pageErrors": 0,
         "unhandledRejections": 0,
         "dialogs": 0
@@ -127,9 +243,12 @@
         "role": "user",
         "functionalFlow": "PASS",
         "runtimeGate": "FAIL",
-        "expected401Or429": 2,
-        "unexpectedNetwork": 10,
-        "navigationAborted": 28,
+        "expectedResponseTokens": 2,
+        "unexpectedNetwork": 20,
+        "unexpectedAuthRequestFailures": 2,
+        "sessionRequestFailures": 2,
+        "sync500": 11,
+        "navigationAborted": 2,
         "unexpectedConsole": 9,
         "pageErrors": 0,
         "unhandledRejections": 0,
@@ -140,11 +259,14 @@
         "role": "admin",
         "functionalFlow": "PASS",
         "runtimeGate": "FAIL",
-        "expected401Or429": 2,
-        "unexpectedNetwork": 11,
-        "navigationAborted": 20,
+        "expectedResponseTokens": 2,
+        "unexpectedNetwork": 20,
+        "unexpectedAuthRequestFailures": 2,
+        "sessionRequestFailures": 2,
+        "sync500": 11,
+        "navigationAborted": 4,
         "unexpectedConsole": 22,
-        "pageErrors": 13,
+        "pageErrors": 3,
         "unhandledRejections": 0,
         "dialogs": 0
       },
@@ -153,11 +275,14 @@
         "role": "user",
         "functionalFlow": "PASS",
         "runtimeGate": "FAIL",
-        "expected401Or429": 2,
-        "unexpectedNetwork": 11,
-        "navigationAborted": 24,
-        "unexpectedConsole": 21,
-        "pageErrors": 3,
+        "expectedResponseTokens": 2,
+        "unexpectedNetwork": 13,
+        "unexpectedAuthRequestFailures": 0,
+        "sessionRequestFailures": 0,
+        "sync500": 11,
+        "navigationAborted": 3,
+        "unexpectedConsole": 22,
+        "pageErrors": 7,
         "unhandledRejections": 0,
         "dialogs": 0
       },
@@ -166,9 +291,12 @@
         "role": "admin",
         "functionalFlow": "PASS",
         "runtimeGate": "FAIL",
-        "expected401Or429": 2,
-        "unexpectedNetwork": 10,
-        "navigationAborted": 46,
+        "expectedResponseTokens": 2,
+        "unexpectedNetwork": 35,
+        "unexpectedAuthRequestFailures": 9,
+        "sessionRequestFailures": 8,
+        "sync500": 10,
+        "navigationAborted": 5,
         "unexpectedConsole": 24,
         "pageErrors": 0,
         "unhandledRejections": 0,
@@ -179,138 +307,160 @@
         "role": "user",
         "functionalFlow": "PASS",
         "runtimeGate": "FAIL",
-        "expected401Or429": 2,
-        "unexpectedNetwork": 9,
-        "navigationAborted": 40,
-        "unexpectedConsole": 21,
+        "expectedResponseTokens": 2,
+        "unexpectedNetwork": 30,
+        "unexpectedAuthRequestFailures": 7,
+        "sessionRequestFailures": 6,
+        "sync500": 10,
+        "navigationAborted": 6,
+        "unexpectedConsole": 22,
         "pageErrors": 0,
         "unhandledRejections": 0,
         "dialogs": 0
       }
     ]
   },
-  "stableRollback": {
-    "result": "PASS",
-    "evidenceType": "non-browser read-only stable-compatible credential verifier",
-    "browserEvidence": false,
-    "fixedStableSourceReadWithGitShow": true,
-    "legacyPasswordHashVerifiedForRoles": [
-      "admin",
-      "user"
-    ],
-    "credentialHashStillPresentForRoles": [
-      "admin",
-      "user"
-    ],
-    "fixtureChecksumUnchanged": true,
-    "stableWorktreeModified": false,
-    "log": "test-results/gates/stable-readonly-contract.log"
-  },
-  "gates": [
+  "gatesRunForReviewFix": [
     {
-      "command": "node scripts/doctor.mjs --production",
-      "exitCode": 1,
-      "result": "FAIL",
-      "summary": "26 passed, 6 warnings, 7 failed, 3 blocked",
-      "log": "test-results/gates/doctor-production-real.log"
+      "command": "pnpm build",
+      "exitCode": 0,
+      "result": "PASS",
+      "summary": "116 static pages generated; all 11 page-data workers used the isolated temporary data directory",
+      "log": "test-results/gates/build-review-final.log"
     },
     {
-      "command": "node scripts/doctor.mjs --production --url=http://127.0.0.1:5011",
+      "command": "final four-project Playwright matrix",
       "exitCode": 1,
       "result": "FAIL",
-      "summary": "32 passed, 5 warnings, 2 failed, 3 blocked; configured auth secret, internal secret, payment secret, admin password and mandatory API auth passed, but production FILE_ONLY is rejected by the existing doctor contract",
-      "log": "test-results/gates/doctor-production-isolated.log"
+      "summary": "P0 4/4 PASS; strict 0/8 PASS, with all eight functional flows reaching the runtime gate",
+      "log": "test-results/gates/playwright-auth-matrix-authoritative.log"
+    },
+    {
+      "command": "node scripts/verify-v588-auth-stable-contract.mjs",
+      "exitCode": 0,
+      "result": "PASS",
+      "attempts": [
+        {
+          "exitCode": 1,
+          "result": "ENV_INPUT_FAIL",
+          "reason": "Initial invocation mapped WUJIE_DATA_DIR only and omitted the required WUJIE_AUTH_SECRET environment input"
+        },
+        {
+          "exitCode": 0,
+          "result": "PASS",
+          "reason": "Replay loaded all required values from the protected run environment without printing them"
+        }
+      ],
+      "log": "test-results/gates/v588-auth-stable-contract-authoritative.log"
+    },
+    {
+      "command": "pnpm exec tsx scripts/collect-v588-auth-artifacts.ts",
+      "exitCode": 0,
+      "result": "PASS",
+      "summary": "8 source traces and 8 HTML-report trace copies sanitized; 32 Playwright artifacts copied; current-run credential scan passed",
+      "log": "test-results/gates/v588-auth-artifact-collection-authoritative.log"
+    },
+    {
+      "command": "pnpm exec vitest run src/__tests__/helpers/v588-auth-task-9-hardening.test.ts",
+      "exitCode": 0,
+      "result": "PASS",
+      "summary": "9 tests passed"
     },
     {
       "command": "pnpm ts-check",
       "exitCode": 0,
       "result": "PASS",
-      "log": "test-results/gates/ts-check-final.log"
+      "log": "test-results/gates/ts-check-review-final.log"
+    },
+    {
+      "command": "related eslint",
+      "exitCode": 0,
+      "result": "PASS",
+      "summary": "0 errors, 0 warnings",
+      "log": "test-results/gates/eslint-auth-review-final.log"
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0,
+      "result": "PASS",
+      "log": "test-results/gates/git-diff-check-review-final.log"
+    }
+  ],
+  "fullRepositoryGatesReusedFromReviewedCommit": [
+    {
+      "command": "node scripts/doctor.mjs --production",
+      "exitCode": 1,
+      "result": "FAIL",
+      "summary": "26 passed, 6 warnings, 7 failed, 3 blocked",
+      "rerunForReviewFix": false
+    },
+    {
+      "command": "isolated node scripts/doctor.mjs --production --url=http://127.0.0.1:5011",
+      "exitCode": 1,
+      "result": "FAIL",
+      "summary": "32 passed, 5 warnings, 2 failed, 3 blocked; production FILE_ONLY remains rejected by the existing doctor contract",
+      "rerunForReviewFix": false
     },
     {
       "command": "pnpm lint",
       "exitCode": 0,
       "result": "PASS_WITH_WARNINGS",
       "summary": "0 errors, 987 warnings",
-      "log": "test-results/gates/lint.log"
+      "rerunForReviewFix": false
     },
     {
       "command": "pnpm test",
       "exitCode": 0,
       "result": "PASS_WITH_SKIPS",
-      "summary": "498 files passed, 19 files skipped; 3256 tests passed, 111 skipped",
-      "attempts": [
-        {
-          "exitCode": 1,
-          "reason": "Task 9 run environment accidentally supplied generic E2E_TEST credentials; one Stage 4 fixture unit test failed",
-          "log": "test-results/gates/test.log"
-        },
-        {
-          "exitCode": 0,
-          "reason": "Rerun after explicitly removing E2E_TEST_USERNAME and E2E_TEST_PASSWORD",
-          "log": "test-results/gates/test-clean-env.log"
-        }
-      ]
+      "summary": "3256 passed, 111 skipped",
+      "rerunForReviewFix": false
     },
     {
       "command": "pnpm test:api",
       "exitCode": 0,
       "result": "PASS_WITH_SKIPS",
-      "summary": "123 files passed, 2 files skipped; 701 tests passed, 3 skipped",
-      "log": "test-results/gates/test-api.log"
+      "summary": "701 passed, 3 skipped",
+      "rerunForReviewFix": false
     },
     {
       "command": "pnpm test:regression",
       "exitCode": 0,
       "result": "PASS_WITH_SKIPS",
-      "summary": "346 files passed, 2 files skipped; 2316 tests passed, 8 skipped",
-      "log": "test-results/gates/test-regression.log"
-    },
-    {
-      "command": "pnpm build",
-      "exitCode": 0,
-      "result": "PASS",
-      "summary": "116 static pages generated; all 11 page-data workers used the isolated data directory",
-      "log": "test-results/gates/build-final.log"
-    },
-    {
-      "command": "git diff --check",
-      "exitCode": 0,
-      "result": "PASS",
-      "log": "test-results/gates/git-diff-check.log"
+      "summary": "2316 passed, 8 skipped",
+      "rerunForReviewFix": false
     },
     {
       "command": "node scripts/check-protected-baseline.mjs --base 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b [fixed Task 9 allow paths]",
       "exitCode": 1,
       "result": "FAIL",
-      "summary": "38 feature IDs, protected component paths, evidence contracts and refs passed; 130 pre-existing unapproved source drifts from the fixed base to baseline HEAD blocked the command",
-      "log": "test-results/gates/protected-baseline-post-commit.log"
+      "summary": "130 pre-existing unapproved source drifts remain",
+      "rerunForReviewFix": false
     },
     {
-      "command": "git rev-parse origin/stable && git diff origin/stable --name-only",
+      "command": "git rev-parse origin/stable",
       "exitCode": 0,
       "result": "PASS_AUDIT",
-      "summary": "origin/stable remained fixed; 698 changed paths were read-only audited after the Task 9 commit",
-      "log": "test-results/gates/origin-stable-audit-post-commit.log"
+      "summary": "origin/stable remains 52f7c601ed150769e15d06fb435c6e360e28c9e7",
+      "rerunForReviewFix": false
     }
   ],
   "skips": {
     "fullTest": {
       "testCount": 111,
       "fileCount": 19,
-      "reason": "POSTGRES_TEST_DATABASE_URL or another explicitly isolated PostgreSQL test target was not configured",
+      "reason": "No explicitly isolated PostgreSQL target was configured",
       "countedAsPass": false
     },
     "api": {
       "testCount": 3,
       "fileCount": 2,
-      "reason": "real PostgreSQL concurrency target was not configured",
+      "reason": "Real PostgreSQL concurrency target was not configured",
       "countedAsPass": false
     },
     "regression": {
       "testCount": 8,
       "fileCount": 2,
-      "reason": "real PostgreSQL concurrency/reconciliation target was not configured",
+      "reason": "Real PostgreSQL concurrency/reconciliation target was not configured",
       "countedAsPass": false
     }
   },
@@ -318,7 +468,7 @@
     {
       "area": "Task 5 real isolated PostgreSQL",
       "count": 6,
-      "reason": "POSTGRES_TEST_DATABASE_URL and TEST_POSTGRES_URL were not configured; DATABASE_URL and PGDATABASE_URL were intentionally never used",
+      "reason": "POSTGRES_TEST_DATABASE_URL and TEST_POSTGRES_URL were not configured; production DATABASE_URL and PGDATABASE_URL were intentionally never used",
       "items": [
         "nullable additive sidecar migration",
         "twenty concurrent ring resolvers",
@@ -330,40 +480,94 @@
     }
   ],
   "artifacts": {
+    "finalRunId": "v588-auth-1787477717655-f894e058",
+    "manifest": "test-results/manifests/v588-auth-1787477717655-f894e058.json",
+    "manifestArtifactCount": 72,
     "screenshots": {
-      "path": "test-results/screenshots",
-      "files": 37
+      "path": "test-results/screenshots/v588-auth-1787477717655-f894e058",
+      "files": 28
     },
     "videos": {
-      "path": "test-results/videos",
-      "files": 14
+      "path": "test-results/videos/v588-auth-1787477717655-f894e058",
+      "files": 8
     },
     "traces": {
-      "path": "test-results/traces",
-      "files": 14
+      "path": "test-results/traces/v588-auth-1787477717655-f894e058",
+      "files": 8,
+      "sanitized": true,
+      "readable": true
     },
     "network": {
-      "path": "test-results/network",
-      "files": 17
+      "path": "test-results/network/v588-auth-1787477717655-f894e058",
+      "files": 12
     },
     "console": {
-      "path": "test-results/console",
-      "files": 19
+      "path": "test-results/console/v588-auth-1787477717655-f894e058",
+      "files": 16
     },
-    "htmlReport": "playwright-report/index.html",
-    "junit": "test-results/junit.xml",
-    "collector": {
-      "result": "PASS",
-      "collectedOnFinalRun": 32,
-      "log": "test-results/gates/playwright-artifact-collection-classified.log"
+    "htmlReport": {
+      "path": "playwright-report/index.html",
+      "size": 588004,
+      "traceCopiesSanitized": 8
+    },
+    "junit": {
+      "path": "test-results/junit.xml",
+      "size": 59062
+    },
+    "historicalExcludedFromCounts": [
+      "pre-review cumulative test-results artifact directories",
+      "diagnostic run v588-auth-1787476248699-3035fd2a",
+      "superseded final run v588-auth-1787476992592-686f7fed"
+    ]
+  },
+  "externalBlockers": [
+    {
+      "id": 1,
+      "area": "production FILE_ONLY project sync",
+      "status": "BLOCKING",
+      "evidence": "GET /api/user-data/sync returned 500 and remained unexpected in all eight strict flows"
+    },
+    {
+      "id": 2,
+      "area": "WebKit pageerror",
+      "status": "BLOCKING",
+      "evidence": "WebKit retained 3 admin and 7 user pageerror events; no pageerror exemption was added"
+    },
+    {
+      "id": 3,
+      "area": "isolated PostgreSQL",
+      "status": "UNVERIFIED",
+      "evidence": "Task 5 six PostgreSQL checks remain unexecuted"
+    },
+    {
+      "id": 4,
+      "area": "real production doctor environment",
+      "status": "BLOCKING",
+      "evidence": "Previously recorded production doctor remains 7 failed and 3 blocked"
     }
+  ],
+  "planContradictions": [
+    {
+      "id": 1,
+      "status": "UNRESOLVED",
+      "description": "Task 9 requires production FILE_ONLY while the existing production doctor contract rejects FILE_ONLY"
+    },
+    {
+      "id": 2,
+      "status": "UNRESOLVED",
+      "description": "The fixed protected-baseline command uses an old base and reports 130 pre-existing drifts"
+    }
+  ],
+  "stableProtection": {
+    "stableWorktreeCheckedOutOrModified": false,
+    "originStableBefore": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "originStableAfter": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
   },
   "concerns": [
-    "The strict browser release gate is red because authenticated project sync returns 500 in production FILE_ONLY mode without PostgreSQL.",
-    "WebKit reports pageerror events for fetches cancelled during navigation.",
-    "The isolated production doctor cannot pass its auth-persistence item because the existing doctor contract rejects FILE_ONLY in production.",
-    "The fixed protected-baseline command reports 130 pre-existing unapproved drifts between its old base and the reviewed baseline HEAD.",
-    "Task 5 real PostgreSQL checks remain unverified by design because no isolated PostgreSQL target was available.",
-    "An initial parallel build exposed a shared data-root writability-probe race; the final build rerun kept all 11 workers in the isolated directory."
+    "The strict browser release gate remains red at 0/8 because real runtime failures were retained.",
+    "Production FILE_ONLY project sync returns 500.",
+    "WebKit pageerror remains reproducible.",
+    "No isolated PostgreSQL target is configured, leaving Task 5 six checks unverified.",
+    "The production FILE_ONLY doctor and old protected baseline contradictions require controller decisions."
   ]
 }

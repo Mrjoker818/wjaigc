@@ -1,13 +1,23 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
-import { expect, test, type Page, type Response, type TestInfo } from '@playwright/test';
+import { expect, test, type Page, type Request, type Response, type TestInfo } from '@playwright/test';
 
-type TestRole = 'admin' | 'user';
+import {
+  classifyFailedRequest,
+  createExpectedResponseRegistry,
+  redactCredentialMaterial,
+  runArtifactPath,
+  waitForAuthenticatedSessionForAction,
+  type AuthFixtureRole,
+  type ExpectedPrincipal,
+  type ExpectedResponseRecord,
+} from '../helpers/v588-auth-task-9';
 
-interface TestAccount {
-  name: string;
+type TestRole = AuthFixtureRole;
+
+interface TestAccount extends ExpectedPrincipal {
   password: string;
 }
 
@@ -15,6 +25,8 @@ interface ConsoleEntry {
   type: 'error' | 'warning';
   text: string;
   location: string;
+  locationPath: string | null;
+  stage: string | null;
 }
 
 interface NetworkEntry {
@@ -22,6 +34,19 @@ interface NetworkEntry {
   path: string;
   status?: number;
   failure?: string;
+  stage?: string | null;
+  expectedToken?: string;
+}
+
+interface CapturedHttpFailure {
+  request: Request;
+  entry: NetworkEntry;
+}
+
+interface NetworkPartition {
+  expected: NetworkEntry[];
+  navigationAborted: NetworkEntry[];
+  unexpected: NetworkEntry[];
 }
 
 interface RuntimeEvidence {
@@ -29,10 +54,13 @@ interface RuntimeEvidence {
   pageErrors: string[];
   unhandledRejections: string[];
   dialogs: Array<{ type: string; message: string }>;
-  httpFailures: NetworkEntry[];
+  httpFailures: CapturedHttpFailure[];
   requestFailures: NetworkEntry[];
   navigationAborts: NetworkEntry[];
-  expectedNetworkSignatures: Set<string>;
+  expectedResponses: ReturnType<typeof createExpectedResponseRegistry<Request>>;
+  currentStage: string | null;
+  navigationStage: string | null;
+  partition?: NetworkPartition;
 }
 
 const UNHANDLED_REJECTION_PREFIX = '[E2E_UNHANDLED_REJECTION]';
@@ -46,25 +74,50 @@ function requireEnvironment(name: string): string {
 function accountForRole(role: TestRole): TestAccount {
   const prefix = role === 'admin' ? 'E2E_ADMIN' : 'E2E_USER';
   return {
+    id: requireEnvironment(`${prefix}_ID`),
     name: requireEnvironment(`${prefix}_USERNAME`),
     password: requireEnvironment(`${prefix}_PASSWORD`),
+    role,
   };
 }
 
 function redact(value: string, secrets: readonly string[]): string {
-  return secrets.reduce((result, secret) => (
-    secret ? result.replaceAll(secret, '[REDACTED]') : result
-  ), value);
+  return redactCredentialMaterial(Buffer.from(value, 'utf8'), secrets).toString('utf8');
 }
 
-function responseSignature(response: Response): string {
-  return `${response.request().method()} ${new URL(response.url()).pathname} ${response.status()}`;
+function urlPath(value: string): string | null {
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return null;
+  }
 }
 
-async function collectRuntimeEvidence(
-  page: Page,
-  secrets: readonly string[],
-): Promise<RuntimeEvidence> {
+async function runStage<T>(evidence: RuntimeEvidence, stage: string, action: () => Promise<T>): Promise<T> {
+  const previous = evidence.currentStage;
+  evidence.currentStage = stage;
+  try {
+    return await action();
+  } finally {
+    evidence.currentStage = previous;
+  }
+}
+
+async function runNavigationStage<T>(
+  evidence: RuntimeEvidence,
+  stage: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  const previous = evidence.navigationStage;
+  evidence.navigationStage = stage;
+  try {
+    return await runStage(evidence, stage, action);
+  } finally {
+    evidence.navigationStage = previous;
+  }
+}
+
+async function collectRuntimeEvidence(page: Page, secrets: readonly string[]): Promise<RuntimeEvidence> {
   const evidence: RuntimeEvidence = {
     console: [],
     pageErrors: [],
@@ -73,11 +126,13 @@ async function collectRuntimeEvidence(
     httpFailures: [],
     requestFailures: [],
     navigationAborts: [],
-    expectedNetworkSignatures: new Set<string>(),
+    expectedResponses: createExpectedResponseRegistry<Request>(),
+    currentStage: null,
+    navigationStage: null,
   };
 
   await page.addInitScript((prefix: string) => {
-    window.addEventListener('unhandledrejection', (event) => {
+    window.addEventListener('unhandledrejection', event => {
       const reason = event.reason instanceof Error ? event.reason.message : String(event.reason);
       console.error(`${prefix}${reason}`);
     });
@@ -95,6 +150,8 @@ async function collectRuntimeEvidence(
       type: message.type() as 'error' | 'warning',
       text,
       location: `${location.url}:${location.lineNumber}:${location.columnNumber}`,
+      locationPath: urlPath(location.url),
+      stage: evidence.currentStage,
     });
   });
   page.on('pageerror', error => {
@@ -105,59 +162,95 @@ async function collectRuntimeEvidence(
     void dialog.dismiss();
   });
   page.on('requestfailed', request => {
-    const entry = {
+    const entry: NetworkEntry = {
       method: request.method(),
       path: new URL(request.url()).pathname,
       failure: redact(request.failure()?.errorText || 'unknown failure', secrets),
+      stage: evidence.currentStage,
     };
-    if (/ERR_ABORTED|NS_BINDING_ABORTED|NS_ERROR_ABORT|Load request cancelled/i.test(entry.failure)) {
-      evidence.navigationAborts.push(entry);
-    }
+    const classification = classifyFailedRequest({
+      path: entry.path,
+      failure: entry.failure || '',
+      navigationStage: evidence.navigationStage,
+    });
+    if (classification === 'navigation-abort') evidence.navigationAborts.push(entry);
     else evidence.requestFailures.push(entry);
   });
   page.on('response', response => {
     if (response.status() < 400) return;
     evidence.httpFailures.push({
-      method: response.request().method(),
-      path: new URL(response.url()).pathname,
-      status: response.status(),
+      request: response.request(),
+      entry: {
+        method: response.request().method(),
+        path: new URL(response.url()).pathname,
+        status: response.status(),
+        stage: evidence.currentStage,
+      },
     });
   });
   return evidence;
 }
 
-function markExpectedNetwork(evidence: RuntimeEvidence, response: Response): void {
-  evidence.expectedNetworkSignatures.add(responseSignature(response));
+function markExpectedResponse(evidence: RuntimeEvidence, response: Response, stage: string): string {
+  return evidence.expectedResponses.expect(response.request(), {
+    method: response.request().method(),
+    path: new URL(response.url()).pathname,
+    status: response.status(),
+    stage,
+  });
 }
 
-function partitionNetwork(evidence: RuntimeEvidence): {
-  expected: NetworkEntry[];
-  navigationAborted: NetworkEntry[];
-  unexpected: NetworkEntry[];
-} {
+function partitionNetwork(evidence: RuntimeEvidence): NetworkPartition {
+  if (evidence.partition) return evidence.partition;
   const expected: NetworkEntry[] = [];
   const unexpected: NetworkEntry[] = [...evidence.requestFailures];
-  for (const entry of evidence.httpFailures) {
-    const signature = `${entry.method} ${entry.path} ${entry.status}`;
-    if (evidence.expectedNetworkSignatures.has(signature)) expected.push(entry);
-    else unexpected.push(entry);
+  for (const captured of evidence.httpFailures) {
+    const match = evidence.expectedResponses.consume(captured.request);
+    if (
+      match
+      && match.method === captured.entry.method
+      && match.path === captured.entry.path
+      && match.status === captured.entry.status
+    ) {
+      expected.push({ ...captured.entry, stage: match.stage, expectedToken: match.token });
+    } else {
+      unexpected.push(captured.entry);
+    }
   }
-  return { expected, navigationAborted: evidence.navigationAborts, unexpected };
+  unexpected.push(...evidence.expectedResponses.remaining().map(record => ({
+    method: record.method,
+    path: record.path,
+    status: record.status,
+    stage: record.stage,
+    failure: 'Expected response identity was not captured exactly once',
+    expectedToken: record.token,
+  })));
+  evidence.partition = { expected, navigationAborted: evidence.navigationAborts, unexpected };
+  return evidence.partition;
 }
 
 function unexpectedConsoleEntries(
   evidence: RuntimeEvidence,
-  expectedNetwork: readonly NetworkEntry[],
+  expectedNetwork: readonly ExpectedResponseRecord[],
 ): ConsoleEntry[] {
-  const expectedAuthenticationStatus = expectedNetwork.some(entry => (
-    entry.status === 401 || entry.status === 429
-  ));
-  return evidence.console.filter(entry => !(
-    expectedAuthenticationStatus
-    && entry.type === 'error'
-    && /^Failed to load resource/.test(entry.text)
-    && /(?:401|429)/.test(entry.text)
-  ));
+  const available = new Map<string, string[]>();
+  for (const entry of expectedNetwork) {
+    if (entry.status !== 401 && entry.status !== 429) continue;
+    const key = `${entry.stage}|${entry.path}|${entry.status}`;
+    available.set(key, [...(available.get(key) || []), entry.token]);
+  }
+  return evidence.console.filter(entry => {
+    if (entry.type !== 'error' || !entry.stage || !entry.locationPath || !/^Failed to load resource/.test(entry.text)) {
+      return true;
+    }
+    const status = /(?:^|\D)(401|429)(?:\D|$)/.exec(entry.text)?.[1];
+    if (!status) return true;
+    const key = `${entry.stage}|${entry.locationPath}|${status}`;
+    const tokens = available.get(key);
+    if (!tokens?.length) return true;
+    tokens.shift();
+    return false;
+  });
 }
 
 async function saveEvidence(
@@ -166,11 +259,10 @@ async function saveEvidence(
   role: TestRole,
   evidence: RuntimeEvidence,
 ): Promise<void> {
-  const root = join(process.cwd(), 'test-results');
-  const label = `v588-auth-001-${role}-${testInfo.project.name}`;
-  const consolePath = join(root, 'console', `${label}.json`);
-  const networkPath = join(root, 'network', `${label}.json`);
-  const screenshotPath = join(root, 'screenshots', `${label}.png`);
+  const runId = requireEnvironment('E2E_AUTH_RUN_ID');
+  const consolePath = runArtifactPath('console', runId, testInfo.project.name, role, testInfo.retry, 'runtime.json');
+  const networkPath = runArtifactPath('network', runId, testInfo.project.name, role, testInfo.retry, 'runtime.json');
+  const screenshotPath = runArtifactPath('screenshots', runId, testInfo.project.name, role, testInfo.retry, 'logged-out-selection.png');
   const { expected, unexpected } = partitionNetwork(evidence);
   const consolePayload = {
     console: evidence.console,
@@ -183,18 +275,19 @@ async function saveEvidence(
     navigationAborted: evidence.navigationAborts,
     unexpected,
   };
+  const identityPath = testInfo.outputPath('v588-artifact-identity.json');
 
-  await Promise.all([
-    mkdir(join(root, 'console'), { recursive: true }),
-    mkdir(join(root, 'network'), { recursive: true }),
-    mkdir(join(root, 'screenshots'), { recursive: true }),
-    mkdir(join(root, 'videos'), { recursive: true }),
-    mkdir(join(root, 'traces'), { recursive: true }),
-  ]);
+  await Promise.all([consolePath, networkPath, screenshotPath, identityPath].map(path => mkdir(dirname(path), { recursive: true })));
   await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
   await Promise.all([
     writeFile(consolePath, `${JSON.stringify(consolePayload, null, 2)}\n`, 'utf8'),
     writeFile(networkPath, `${JSON.stringify(networkPayload, null, 2)}\n`, 'utf8'),
+    writeFile(identityPath, `${JSON.stringify({
+      runId,
+      project: testInfo.project.name,
+      role,
+      retry: testInfo.retry,
+    }, null, 2)}\n`, 'utf8'),
   ]);
   await Promise.all([
     testInfo.attach('runtime-console.json', { path: consolePath, contentType: 'application/json' }),
@@ -203,11 +296,10 @@ async function saveEvidence(
   ]);
 }
 
-async function resetBrowserState(page: Page): Promise<void> {
+async function resetBrowserState(page: Page, evidence: RuntimeEvidence): Promise<void> {
   await page.context().clearCookies();
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await runNavigationStage(evidence, 'initial-entry-navigation', () => page.goto('/', { waitUntil: 'domcontentloaded' }));
   await page.evaluate(() => localStorage.clear());
-  await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
 }
 
@@ -217,30 +309,82 @@ async function openLoginForm(page: Page, mode: 'canvas' | 'chat'): Promise<void>
   await expect(page.getByRole('heading', { name: '登录', exact: true })).toBeVisible();
 }
 
-async function submitLogin(
-  page: Page,
-  account: TestAccount,
-  password: string,
-): Promise<Response> {
+async function fillLogin(page: Page, account: TestAccount, password: string): Promise<void> {
   await page.getByPlaceholder('请输入用户名').fill(account.name);
   await page.getByPlaceholder('请输入密码').fill(password);
-  const responsePromise = page.waitForResponse(response => (
-    new URL(response.url()).pathname === '/api/auth/login'
-    && response.request().method() === 'POST'
-  ));
-  await page.getByRole('button', { name: '登录', exact: true }).click();
-  return await responsePromise;
+}
+
+async function submitRejectedLogin(
+  page: Page,
+  evidence: RuntimeEvidence,
+  account: TestAccount,
+  stage: string,
+): Promise<Response> {
+  await fillLogin(page, account, `${account.password}-incorrect`);
+  const response = await runStage(evidence, stage, async () => {
+    const responsePromise = page.waitForResponse(candidate => (
+      new URL(candidate.url()).pathname === '/api/auth/login'
+      && candidate.request().method() === 'POST'
+    ));
+    const [result] = await Promise.all([
+      responsePromise,
+      page.getByRole('button', { name: '登录', exact: true }).click(),
+    ]);
+    return result;
+  });
+  markExpectedResponse(evidence, response, stage);
+  return response;
+}
+
+async function submitAcceptedLogin(
+  page: Page,
+  evidence: RuntimeEvidence,
+  account: TestAccount,
+  stage: string,
+): Promise<Response> {
+  await fillLogin(page, account, account.password);
+  return await runNavigationStage(evidence, stage, async () => {
+    const loginResponse = page.waitForResponse(candidate => (
+      new URL(candidate.url()).pathname === '/api/auth/login'
+      && candidate.request().method() === 'POST'
+    ));
+    const [response] = await Promise.all([
+      loginResponse,
+      waitForAuthenticatedSessionForAction(
+        page,
+        account,
+        stage,
+        () => page.getByRole('button', { name: '登录', exact: true }).click(),
+      ),
+    ]);
+    return response;
+  });
+}
+
+async function reloadWithAuthenticatedSession(
+  page: Page,
+  evidence: RuntimeEvidence,
+  account: TestAccount,
+  stage: string,
+): Promise<void> {
+  await runNavigationStage(evidence, stage, () => waitForAuthenticatedSessionForAction(
+    page,
+    account,
+    stage,
+    () => page.reload({ waitUntil: 'domcontentloaded' }),
+  )).then(() => undefined);
 }
 
 async function assertMigratedCredential(role: TestRole, account: TestAccount): Promise<void> {
   const usersPath = join(requireEnvironment('WUJIE_DATA_DIR'), 'system', 'users.json');
   const parsed = JSON.parse(await readFile(usersPath, 'utf8')) as {
-    users?: Array<{ name?: string; role?: string; passwordHash?: string; credentialHash?: string }>;
+    users?: Array<{ id?: string; name?: string; role?: string; passwordHash?: string; credentialHash?: string }>;
   };
-  const user = parsed.users?.find(candidate => candidate.name === account.name);
+  const user = parsed.users?.find(candidate => candidate.id === account.id);
   const secret = requireEnvironment('WUJIE_AUTH_SECRET');
   const legacyHash = createHash('sha256').update(`${secret}:${account.password}`).digest('hex');
   expect(Boolean(user), `${role} fixture must remain present after browser login`).toBe(true);
+  expect(user?.name === account.name, `${role} fixture name must remain unchanged`).toBe(true);
   expect(user?.role, `${role} fixture must retain its role`).toBe(role);
   expect(user?.passwordHash === legacyHash, `${role} legacy password hash must remain byte-compatible`).toBe(true);
   expect(
@@ -250,88 +394,120 @@ async function assertMigratedCredential(role: TestRole, account: TestAccount): P
 }
 
 async function verifyPostLogoutIsolation(page: Page, evidence: RuntimeEvidence): Promise<void> {
-  const result = await page.evaluate(async () => {
-    const [session, protectedData] = await Promise.all([
-      fetch('/api/session', { credentials: 'include' }),
-      fetch('/api/user-data/sync?key=projects', { credentials: 'include' }),
+  const stage = 'post-logout-isolation';
+  const sessionPromise = page.waitForResponse(response => (
+    new URL(response.url()).pathname === '/api/session'
+    && response.request().method() === 'GET'
+  ));
+  const protectedPromise = page.waitForResponse(response => (
+    new URL(response.url()).pathname === '/api/user-data/sync'
+    && response.request().method() === 'GET'
+  ));
+  const [session, protectedData] = await runStage(evidence, stage, async () => {
+    const [sessionResponse, protectedResponse] = await Promise.all([
+      sessionPromise,
+      protectedPromise,
+      page.evaluate(async () => {
+        await Promise.all([
+          fetch('/api/session', { credentials: 'include' }),
+          fetch('/api/user-data/sync?key=projects', { credentials: 'include' }),
+        ]);
+      }),
     ]);
-    return {
-      sessionStatus: session.status,
-      sessionBody: await session.json() as { success?: boolean; user?: unknown },
-      protectedStatus: protectedData.status,
-    };
+    return [sessionResponse, protectedResponse] as const;
   });
-  evidence.expectedNetworkSignatures.add('GET /api/user-data/sync 401');
-  expect(result.sessionStatus).toBe(200);
-  expect(result.sessionBody).toEqual({ success: true, user: null });
-  expect(result.protectedStatus).toBe(401);
+  markExpectedResponse(evidence, protectedData, stage);
+  expect(session.status()).toBe(200);
+  expect(await session.json()).toEqual({ success: true, user: null });
+  expect(protectedData.status()).toBe(401);
 }
 
-async function exerciseRole(
-  page: Page,
-  testInfo: TestInfo,
-  role: TestRole,
-): Promise<void> {
+function expectedConsoleRecords(entries: readonly NetworkEntry[]): ExpectedResponseRecord[] {
+  return entries.flatMap(entry => (
+    entry.expectedToken && entry.stage && entry.status !== undefined
+      ? [{
+        token: entry.expectedToken,
+        method: entry.method,
+        path: entry.path,
+        status: entry.status,
+        stage: entry.stage,
+      }]
+      : []
+  ));
+}
+
+async function exerciseRole(page: Page, testInfo: TestInfo, role: TestRole): Promise<void> {
   const account = accountForRole(role);
   const allAccounts = [accountForRole('admin'), accountForRole('user')];
   const evidence = await collectRuntimeEvidence(
     page,
-    allAccounts.flatMap(candidate => [candidate.name, candidate.password]),
+    allAccounts.flatMap(candidate => [
+      candidate.name,
+      candidate.password,
+      `${candidate.password}-incorrect`,
+    ]),
   );
 
   try {
-    await resetBrowserState(page);
+    await resetBrowserState(page, evidence);
     await openLoginForm(page, 'canvas');
 
-    const rejected = await submitLogin(page, account, `${account.password}-incorrect`);
+    const rejected = await submitRejectedLogin(page, evidence, account, 'canvas-wrong-password');
     expect(rejected.status()).toBe(401);
-    markExpectedNetwork(evidence, rejected);
     await expect(page.getByText('登录失败，请检查用户名、密码或授权')).toBeVisible();
 
-    const accepted = await submitLogin(page, account, account.password);
+    const accepted = await submitAcceptedLogin(page, evidence, account, 'canvas-correct-login');
     expect(accepted.status()).toBe(200);
     await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 20_000 });
     await assertMigratedCredential(role, account);
 
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await reloadWithAuthenticatedSession(page, evidence, account, 'dashboard-refresh');
     await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 20_000 });
 
-    await page.goto('/?loginMode=canvas', { waitUntil: 'domcontentloaded' });
+    await runNavigationStage(evidence, 'canvas-navigation', () => page.goto('/?loginMode=canvas', { waitUntil: 'domcontentloaded' }));
     await expect(page.getByRole('group', { name: '空画布快捷操作' })).toBeVisible({ timeout: 30_000 });
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await reloadWithAuthenticatedSession(page, evidence, account, 'canvas-refresh');
     await expect(page.getByRole('group', { name: '空画布快捷操作' })).toBeVisible({ timeout: 30_000 });
 
-    await page.goto('/?view=dashboard', { waitUntil: 'domcontentloaded' });
+    await runNavigationStage(evidence, 'dashboard-navigation', () => page.goto('/?view=dashboard', { waitUntil: 'domcontentloaded' }));
     await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 20_000 });
     await page.getByTitle('查看用户信息').click();
     const logoutResponsePromise = page.waitForResponse(response => (
       new URL(response.url()).pathname === '/api/auth/logout'
       && response.request().method() === 'POST'
     ));
-    await page.getByRole('button', { name: '退出登录', exact: true }).click();
-    expect((await logoutResponsePromise).status()).toBe(200);
+    const [logoutResponse] = await Promise.all([
+      logoutResponsePromise,
+      page.getByRole('button', { name: '退出登录', exact: true }).click(),
+    ]);
+    expect(logoutResponse.status()).toBe(200);
     await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible({ timeout: 20_000 });
     await verifyPostLogoutIsolation(page, evidence);
 
     await openLoginForm(page, 'chat');
-    const chatLogin = await submitLogin(page, account, account.password);
+    const chatLogin = await submitAcceptedLogin(page, evidence, account, 'chat-correct-login');
     expect(chatLogin.status()).toBe(200);
     await expect(page).toHaveURL(/\/simple-chat/);
     await expect(page.getByRole('heading', { name: '智能对话', exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByPlaceholder(/输入消息/)).toBeVisible({ timeout: 20_000 });
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await reloadWithAuthenticatedSession(page, evidence, account, 'chat-refresh');
     await expect(page.getByPlaceholder(/输入消息/)).toBeVisible({ timeout: 20_000 });
 
-    const finalLogoutStatus = await page.evaluate(async () => (
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
-    ).status);
-    expect(finalLogoutStatus).toBe(200);
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const finalLogoutPromise = page.waitForResponse(response => (
+      new URL(response.url()).pathname === '/api/auth/logout'
+      && response.request().method() === 'POST'
+    ));
+    const [finalLogout] = await Promise.all([
+      finalLogoutPromise,
+      page.evaluate(() => fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })),
+    ]);
+    expect(finalLogout.status()).toBe(200);
+    await runNavigationStage(evidence, 'final-entry-navigation', () => page.goto('/', { waitUntil: 'domcontentloaded' }));
     await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible({ timeout: 20_000 });
 
     const network = partitionNetwork(evidence);
-    const unexpectedConsole = unexpectedConsoleEntries(evidence, network.expected);
-    expect(network.expected.some(entry => entry.status === 401)).toBe(true);
+    const unexpectedConsole = unexpectedConsoleEntries(evidence, expectedConsoleRecords(network.expected));
+    expect(network.expected.filter(entry => entry.status === 401)).toHaveLength(2);
     expect({
       unexpectedNetwork: network.unexpected.length,
       unexpectedConsole: unexpectedConsole.length,
