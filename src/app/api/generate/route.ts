@@ -48,6 +48,10 @@ import {
 } from '@/lib/reference-constraint-compiler';
 import { kickoffDurableGenerationTasks } from '@/lib/task-core/durable-generation-kickoff';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
+import {
+  normalizeImageOutputRequestBody,
+  UnsupportedTransparentBackgroundError,
+} from '@/lib/image-generation-output';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -1225,6 +1229,23 @@ export async function POST(request: NextRequest) {
     
     const providerHint = `${provider?.id || effectiveProviderId} ${provider?.displayName || provider?.name || ''} ${provider?.baseUrl || apiBaseUrl}`;
     let modelConfig = inferModelConfig(model, initialProfile, provider?.displayName, providerHint);
+    try {
+      const normalizedOutputBody = normalizeImageOutputRequestBody(body, model);
+      for (const key of ['background', 'backgroundMode', 'output_format', 'outputFormat']) {
+        delete body[key];
+      }
+      Object.assign(body, normalizedOutputBody);
+    } catch (error) {
+      if (error instanceof UnsupportedTransparentBackgroundError) {
+        return NextResponse.json({
+          success: false,
+          code: 'TRANSPARENT_BACKGROUND_UNSUPPORTED',
+          error: error.message,
+          retryable: false,
+        }, { status: 400 });
+      }
+      throw error;
+    }
     const requestedRoute = {
       providerId: effectiveProviderId || provider?.id || 'unresolved-provider',
       providerName: provider?.displayName || provider?.name || effectiveProviderId || '未匹配提供商',

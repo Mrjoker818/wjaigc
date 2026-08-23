@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   UnsupportedTransparentBackgroundError,
   detectTransparentBackgroundIntent,
+  normalizeImageOutputRequestBody,
   resolveImageOutputPreference,
   withImageOutputPreference,
 } from '@/lib/image-generation-output';
@@ -42,6 +43,26 @@ describe('image-generation-output', () => {
       'dall-e-3',
       { background: 'transparent', outputFormat: 'png' },
     )).toThrow(UnsupportedTransparentBackgroundError);
+  });
+
+  it('normalizes legacy camelCase request fields to the HTTP contract', () => {
+    expect(normalizeImageOutputRequestBody({
+      prompt: 'isolated icon',
+      background: 'transparent',
+      outputFormat: 'webp',
+    }, 'gpt-image-2')).toEqual({
+      prompt: 'isolated icon',
+      background: 'transparent',
+      output_format: 'png',
+    });
+  });
+
+  it('removes automatic output aliases to preserve the legacy provider payload', () => {
+    expect(normalizeImageOutputRequestBody({
+      prompt: 'mountain',
+      background: 'auto',
+      output_format: 'png',
+    }, 'gpt-image-2')).toEqual({ prompt: 'mountain' });
   });
 
   it.each([

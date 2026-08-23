@@ -54,6 +54,32 @@ export function withImageOutputPreference<T extends Record<string, unknown>>(
   };
 }
 
+export function normalizeImageOutputRequestBody<T extends Record<string, unknown>>(
+  body: T,
+  modelId: string,
+): Omit<T, 'background' | 'backgroundMode' | 'output_format' | 'outputFormat'> & {
+  background?: ImageBackgroundMode;
+  output_format?: ImageOutputFormat;
+} {
+  const rawBackground = body.background ?? body.backgroundMode;
+  const background: ImageBackgroundMode = ['transparent', 'opaque'].includes(String(rawBackground))
+    ? rawBackground as ImageBackgroundMode
+    : 'auto';
+  const rawOutputFormat = body.output_format ?? body.outputFormat;
+  const outputFormat: ImageOutputFormat = ['png', 'jpeg', 'webp'].includes(String(rawOutputFormat))
+    ? rawOutputFormat as ImageOutputFormat
+    : 'png';
+  const {
+    background: _background,
+    backgroundMode: _backgroundMode,
+    output_format: _outputFormat,
+    outputFormat: _outputFormatAlias,
+    ...base
+  } = body;
+
+  return withImageOutputPreference(base, modelId, { background, outputFormat });
+}
+
 export function detectTransparentBackgroundIntent(text: string): 'transparent' | undefined {
   const normalized = text.trim().toLowerCase();
   if (!normalized) return undefined;
