@@ -344,21 +344,10 @@ async function readFileSecretRingForSession(now: number): Promise<AuthSecretRing
   }
 
   const parsed = parseFileSecretRing(raw, now);
-  let ring = parsed.ring;
-  if (configuredSecret && configuredSecret !== ring.active.secret) {
-    try {
-      ring = planSecretRingRotation(
-        ring,
-        configuredSecret,
-        now,
-        ring.previous !== undefined,
-      );
-    } catch (error) {
-      if (error instanceof AuthServiceError) throw error;
-      throw configurationUnavailable();
-    }
+  if (configuredSecret && configuredSecret !== parsed.ring.active.secret) {
+    return null;
   }
-  return ring;
+  return parsed.ring;
 }
 
 async function readSessionSecretRing(now: number): Promise<AuthSecretRingV1 | null> {

@@ -97,6 +97,7 @@ function configureServerAuth(
     configuredSecret?: string | null;
   } = {},
 ): void {
+  serverAuthMocks.writeAuthJsonFileAtomic.mockReset();
   process.env.COZE_PROJECT_ENV = 'DEV';
   process.env.WUJIE_AUTH_PERSISTENCE_MODE = options.mode ?? 'DB_ONLY';
   process.env.WUJIE_ADMIN_USERNAME = options.defaultAdminName ?? sessionUser.name;
@@ -598,12 +599,19 @@ describe.sequential('server authentication sessions', () => {
     },
   );
 
-  it('reads FILE_ONLY active and previous sessions without bootstrapping or rewriting files', async () => {
+  it.each([
+    ['absent', undefined],
+    ['matching', activeSecret],
+  ] as const)('reads FILE_ONLY active and previous sessions when env is %s without writes', async (
+    _label,
+    configuredSecret,
+  ) => {
     vi.useFakeTimers();
     vi.setSystemTime(sessionNow);
     const ring = createSecretRing();
     const { ringPath, usersPath } = await configureFileSessionFixture({
       secretFile: JSON.stringify(ring),
+      configuredSecret,
     });
     const ringBefore = await readFile(ringPath, 'utf8');
     const usersBefore = await readFile(usersPath, 'utf8');
@@ -624,22 +632,122 @@ describe.sequential('server authentication sessions', () => {
     expectNoSessionWrites();
   });
 
-  it('uses an environment secret with a legacy FILE_ONLY secret in memory without persisting rotation', async () => {
+  it('rejects a legacy FILE_ONLY secret with a differing environment secret at every observation time', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(sessionNow);
     const { ringPath, usersPath } = await configureFileSessionFixture({
       secretFile: previousSecret,
       configuredSecret: activeSecret,
     });
+    const ringBefore = await readFile(ringPath, 'utf8');
     const usersBefore = await readFile(usersPath, 'utf8');
     const { getSessionUser } = await import('@/lib/server-auth');
+    const token = signSessionPayload(sessionPayload({
+      kid: deriveAuthSecretKid(previousSecret),
+      exp: sessionNow + sessionTtlSeconds * 1_000 + 60_000,
+    }), previousSecret);
 
-    await expect(getSessionUser(requestWithSession(signSessionPayload(
-      sessionPayload({ kid: deriveAuthSecretKid(previousSecret) }),
-      previousSecret,
-    )))).resolves.toMatchObject({ id: sessionUser.id });
+    await expect(getSessionUser(requestWithSession(token))).resolves.toBeNull();
+    vi.setSystemTime(sessionNow + sessionTtlSeconds * 1_000);
+    await expect(getSessionUser(requestWithSession(token))).resolves.toBeNull();
+    vi.setSystemTime(sessionNow + sessionTtlSeconds * 1_000 + 1);
+    await expect(getSessionUser(requestWithSession(token))).resolves.toBeNull();
 
-    await expect(readFile(ringPath, 'utf8')).resolves.toBe(previousSecret);
+    await expect(readFile(ringPath, 'utf8')).resolves.toBe(ringBefore);
     await expect(readFile(usersPath, 'utf8')).resolves.toBe(usersBefore);
     expectNoSessionWrites();
+  });
+
+  it('rejects a persisted JSON active secret that differs from the environment without synthesizing retirement', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(sessionNow);
+    const persistedRing: AuthSecretRingV1 = {
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(previousSecret),
+        secret: previousSecret,
+        activatedAt: sessionNow - 60_000,
+      },
+      updatedAt: sessionNow - 60_000,
+    };
+    const { ringPath, usersPath } = await configureFileSessionFixture({
+      secretFile: JSON.stringify(persistedRing),
+      configuredSecret: activeSecret,
+    });
+    const ringBefore = await readFile(ringPath, 'utf8');
+    const usersBefore = await readFile(usersPath, 'utf8');
+    const { getSessionUser } = await import('@/lib/server-auth');
+    const token = signSessionPayload(sessionPayload({
+      kid: persistedRing.active.kid,
+      exp: sessionNow + sessionTtlSeconds * 1_000 + 60_000,
+    }), previousSecret);
+
+    await expect(getSessionUser(requestWithSession(token))).resolves.toBeNull();
+    vi.setSystemTime(sessionNow + sessionTtlSeconds * 1_000);
+    await expect(getSessionUser(requestWithSession(token))).resolves.toBeNull();
+
+    await expect(readFile(ringPath, 'utf8')).resolves.toBe(ringBefore);
+    await expect(readFile(usersPath, 'utf8')).resolves.toBe(usersBefore);
+    expectNoSessionWrites();
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['matching', previousSecret],
+  ] as const)(
+    'uses a legacy FILE_ONLY secret as the single active entry when env is %s',
+    async (_label, configuredSecret) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(sessionNow);
+      const { ringPath } = await configureFileSessionFixture({
+        secretFile: previousSecret,
+        configuredSecret,
+      });
+      const ringBefore = await readFile(ringPath, 'utf8');
+      const { getSessionUser } = await import('@/lib/server-auth');
+
+      await expect(getSessionUser(requestWithSession(signSessionPayload(
+        sessionPayload({ kid: deriveAuthSecretKid(previousSecret) }),
+        previousSecret,
+      )))).resolves.toMatchObject({ id: sessionUser.id });
+
+      await expect(readFile(ringPath, 'utf8')).resolves.toBe(ringBefore);
+      expectNoSessionWrites();
+    },
+  );
+
+  it('uses the persisted Task 6 rotation retiredAt for the previous-session TTL boundary', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(sessionNow);
+    const { ringPath } = await configureFileSessionFixture({
+      secretFile: previousSecret,
+      configuredSecret: activeSecret,
+    });
+    serverAuthMocks.writeAuthJsonFileAtomic.mockImplementation(async (filePath, value) => {
+      await writeFile(filePath, JSON.stringify(value), 'utf8');
+    });
+    const { createSessionToken, getSessionUser } = await import('@/lib/server-auth');
+
+    await createSessionToken(sessionUser as User);
+    const persistedRing = JSON.parse(await readFile(ringPath, 'utf8')) as AuthSecretRingV1;
+    expect(persistedRing.active.secret).toBe(activeSecret);
+    expect(persistedRing.previous?.secret).toBe(previousSecret);
+    expect(persistedRing.previous?.retiredAt).toBe(sessionNow);
+    const ringAfterRotation = await readFile(ringPath, 'utf8');
+    const previousToken = signSessionPayload(sessionPayload({
+      kid: persistedRing.previous?.kid,
+      exp: sessionNow + sessionTtlSeconds * 1_000 + 60_000,
+    }), previousSecret);
+
+    vi.setSystemTime(sessionNow + sessionTtlSeconds * 1_000);
+    await expect(getSessionUser(requestWithSession(previousToken))).resolves.toMatchObject({
+      id: sessionUser.id,
+    });
+    vi.setSystemTime(sessionNow + sessionTtlSeconds * 1_000 + 1);
+    await expect(getSessionUser(requestWithSession(previousToken))).resolves.toBeNull();
+
+    await expect(readFile(ringPath, 'utf8')).resolves.toBe(ringAfterRotation);
+    expect(serverAuthMocks.writeAuthJsonFileAtomic).toHaveBeenCalledOnce();
   });
 
   it('uses a FILE_ONLY environment secret in memory when the ring file is missing', async () => {
