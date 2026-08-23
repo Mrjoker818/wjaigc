@@ -6,6 +6,7 @@ import { expect, test, type Page, type Request, type Response, type TestInfo } f
 
 import {
   classifyFailedRequest,
+  createExpectedConsoleRegistry,
   createExpectedResponseRegistry,
   redactCredentialMaterial,
   runArtifactPath,
@@ -233,24 +234,8 @@ function unexpectedConsoleEntries(
   evidence: RuntimeEvidence,
   expectedNetwork: readonly ExpectedResponseRecord[],
 ): ConsoleEntry[] {
-  const available = new Map<string, string[]>();
-  for (const entry of expectedNetwork) {
-    if (entry.status !== 401 && entry.status !== 429) continue;
-    const key = `${entry.stage}|${entry.path}|${entry.status}`;
-    available.set(key, [...(available.get(key) || []), entry.token]);
-  }
-  return evidence.console.filter(entry => {
-    if (entry.type !== 'error' || !entry.stage || !entry.locationPath || !/^Failed to load resource/.test(entry.text)) {
-      return true;
-    }
-    const status = /(?:^|\D)(401|429)(?:\D|$)/.exec(entry.text)?.[1];
-    if (!status) return true;
-    const key = `${entry.stage}|${entry.locationPath}|${status}`;
-    const tokens = available.get(key);
-    if (!tokens?.length) return true;
-    tokens.shift();
-    return false;
-  });
+  const expectedConsole = createExpectedConsoleRegistry(expectedNetwork);
+  return evidence.console.filter(entry => expectedConsole.consume(entry) === null);
 }
 
 async function saveEvidence(

@@ -24,6 +24,12 @@ export interface ExpectedResponseRecord extends ExpectedResponseDetails {
   token: string;
 }
 
+export interface ConsoleHttpFailureEntry {
+  type: string;
+  text: string;
+  locationPath: string | null;
+}
+
 export interface ArtifactManifestEntry {
   project: string;
   role: string;
@@ -191,6 +197,29 @@ export function createExpectedResponseRegistry<T extends object>(): {
     },
     remaining() {
       return [...expected.values()];
+    },
+  };
+}
+
+export function createExpectedConsoleRegistry(expectedResponses: readonly ExpectedResponseRecord[]): {
+  consume(entry: ConsoleHttpFailureEntry): string | null;
+  remainingTokens(): string[];
+} {
+  const available = expectedResponses.filter(record => record.status === 401 || record.status === 429);
+  return {
+    consume(entry) {
+      if (entry.type !== 'error' || !entry.locationPath || !/^Failed to load resource/.test(entry.text)) {
+        return null;
+      }
+      const status = Number(/(?:^|\D)(401|429)(?:\D|$)/.exec(entry.text)?.[1]);
+      const matchIndex = available.findIndex(record => (
+        record.path === entry.locationPath && record.status === status
+      ));
+      if (matchIndex === -1) return null;
+      return available.splice(matchIndex, 1)[0].token;
+    },
+    remainingTokens() {
+      return available.map(record => record.token);
     },
   };
 }

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   classifyFailedRequest,
+  createExpectedConsoleRegistry,
   createExpectedResponseRegistry,
   createRunArtifactManifest,
   sanitizePlaywrightTrace,
@@ -62,6 +63,26 @@ describe('V588-AUTH-001 Task 9 hardening contracts', () => {
     expect(registry.consume(expectedRequest)?.token).toBe(token);
     expect(registry.consume(expectedRequest)).toBeNull();
     expect(registry.consume(duplicateSignatureRequest)).toBeNull();
+  });
+
+  it('consumes one late stage-less 401 console entry per expected response token', () => {
+    const registry = createExpectedConsoleRegistry([{
+      method: 'POST',
+      path: '/api/auth/login',
+      status: 401,
+      stage: 'wrong-password',
+      token: 'expected-response-token',
+    }]);
+    const lateConsole = {
+      type: 'error',
+      text: 'Failed to load resource: the server responded with a status of 401 (Unauthorized)',
+      locationPath: '/api/auth/login',
+      stage: null,
+    } as const;
+
+    expect(registry.consume(lateConsole)).toBe('expected-response-token');
+    expect(registry.consume(lateConsole)).toBeNull();
+    expect(registry.remainingTokens()).toEqual([]);
   });
 
   it('never classifies an authentication request failure as a navigation abort', () => {
