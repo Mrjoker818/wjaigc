@@ -196,26 +196,28 @@ export function planSecretRingRotation(
 
 export function sessionVerificationEntries(
   ring: AuthSecretRingV1,
-  input: { now: number; acceptPrevious: boolean; ttlSeconds: number },
+  input: { now: number; acceptPrevious: boolean; ttlSeconds: number; kid?: string },
 ): AuthSecretEntry[] {
   const activeOnly = [ring.active];
+  let allowedEntries = activeOnly;
   if (input.acceptPrevious !== true
     || !isPositiveTimestamp(input.now)
     || !isPositiveTimestamp(input.ttlSeconds)) {
-    return activeOnly;
+    allowedEntries = activeOnly;
+  } else {
+    const ttlMilliseconds = input.ttlSeconds * MILLISECONDS_PER_SECOND;
+    const previous = ring.previous;
+    const retiredAt = previous?.retiredAt;
+    if (Number.isSafeInteger(ttlMilliseconds)
+      && previous
+      && isPositiveTimestamp(retiredAt)
+      && input.now >= retiredAt
+      && input.now - retiredAt <= ttlMilliseconds) {
+      allowedEntries = [ring.active, previous];
+    }
   }
 
-  const ttlMilliseconds = input.ttlSeconds * MILLISECONDS_PER_SECOND;
-  const previous = ring.previous;
-  if (!Number.isSafeInteger(ttlMilliseconds) || !previous) {
-    return activeOnly;
-  }
-  const retiredAt = previous.retiredAt;
-  if (!isPositiveTimestamp(retiredAt) || input.now < retiredAt) {
-    return activeOnly;
-  }
-
-  return input.now - retiredAt <= ttlMilliseconds
-    ? [ring.active, previous]
-    : activeOnly;
+  if (input.kid === undefined) return allowedEntries;
+  const selected = allowedEntries.find(entry => entry.kid === input.kid);
+  return selected ? [selected] : [];
 }

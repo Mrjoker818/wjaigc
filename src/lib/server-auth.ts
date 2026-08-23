@@ -22,6 +22,8 @@ import {
   deriveAuthSecretKid,
   parseAuthSecretRing,
   planSecretRingRotation,
+  sessionVerificationEntries,
+  type AuthSecretEntry,
   type AuthSecretRingV1,
 } from './auth/auth-secret-ring';
 import {
@@ -148,6 +150,7 @@ interface SessionPayload {
   role: 'admin' | 'user';
   name: string;
   exp: number;
+  kid?: string;
 }
 
 function defaultApiPermissions() {
@@ -364,10 +367,6 @@ async function authSecretRing(): Promise<AuthSecretRingV1> {
   return _authSecretRingPromise;
 }
 
-async function authSecret(): Promise<string> {
-  return (await authSecretRing()).active.secret;
-}
-
 /**
  * Returns the same secret used to sign sessions so internal API calls remain
  * authenticated when a preview deployment restores its secret from storage.
@@ -393,8 +392,85 @@ function legacyCredentialSecrets(ring: AuthSecretRingV1): string[] {
   ])];
 }
 
-async function hmac(value: string): Promise<string> {
-  return crypto.createHmac('sha256', await authSecret()).update(value).digest('base64url');
+function hmac(value: string, secret: string): string {
+  return crypto.createHmac('sha256', secret).update(value).digest('base64url');
+}
+
+function parseSessionPayload(encoded: string): SessionPayload | null {
+  try {
+    const decoded = Buffer.from(encoded, 'base64url');
+    if (decoded.length === 0 || decoded.toString('base64url') !== encoded) return null;
+
+    const value: unknown = JSON.parse(decoded.toString('utf8'));
+    if (value === null
+      || typeof value !== 'object'
+      || Array.isArray(value)
+      || Object.getPrototypeOf(value) !== Object.prototype) {
+      return null;
+    }
+
+    const requiredKeys = ['sub', 'role', 'name', 'exp'] as const;
+    const allowedKeys = new Set<string>([...requiredKeys, 'kid']);
+    const keys = Reflect.ownKeys(value);
+    if (keys.length < requiredKeys.length || keys.length > allowedKeys.size) return null;
+
+    const payload: Record<string, unknown> = {};
+    for (const key of keys) {
+      if (typeof key !== 'string' || !allowedKeys.has(key)) return null;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) return null;
+      payload[key] = descriptor.value;
+    }
+    if (!requiredKeys.every(key => Object.hasOwn(payload, key))) return null;
+
+    if (typeof payload.sub !== 'string'
+      || payload.sub.length === 0
+      || (payload.role !== 'admin' && payload.role !== 'user')
+      || typeof payload.name !== 'string'
+      || payload.name.length === 0
+      || !Number.isSafeInteger(payload.exp)
+      || (payload.exp as number) <= 0) {
+      return null;
+    }
+
+    const hasKid = Object.hasOwn(payload, 'kid');
+    if (hasKid && (
+      typeof payload.kid !== 'string'
+      || !/^[A-Za-z0-9_-]{16}$/.test(payload.kid)
+    )) {
+      return null;
+    }
+
+    return {
+      sub: payload.sub,
+      role: payload.role,
+      name: payload.name,
+      exp: payload.exp as number,
+      ...(hasKid ? { kid: payload.kid as string } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function signaturesMatch(actual: string, expected: string): boolean {
+  const actualBytes = Buffer.from(actual, 'utf8');
+  const expectedBytes = Buffer.from(expected, 'utf8');
+  if (actualBytes.length !== expectedBytes.length) return false;
+  return crypto.timingSafeEqual(actualBytes, expectedBytes);
+}
+
+function verifySessionSignature(
+  encoded: string,
+  signature: string,
+  entries: AuthSecretEntry[],
+): boolean {
+  let verified = false;
+  for (const entry of entries) {
+    const matches = signaturesMatch(signature, hmac(encoded, entry.secret));
+    verified = matches || verified;
+  }
+  return verified;
 }
 
 function storageFolder(userId: string): string {
@@ -1223,30 +1299,41 @@ export async function deleteManagedUser(userId: string): Promise<boolean> {
 }
 
 export async function createSessionToken(user: User): Promise<string> {
+  const ring = parseAuthSecretRing(await authSecretRing());
+  if (!ring) throw configurationUnavailable();
   const payload: SessionPayload = {
     sub: user.id,
     role: user.role === 'admin' ? 'admin' : 'user',
     name: user.name,
     exp: Date.now() + WUJIE_SESSION_TTL_SECONDS * 1000,
+    kid: ring.active.kid,
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-  return `${encoded}.${await hmac(encoded)}`;
+  return `${encoded}.${hmac(encoded, ring.active.secret)}`;
 }
 
 export async function getSessionUser(request: NextRequest): Promise<User | null> {
   const token = request.cookies.get(WUJIE_SESSION_COOKIE)?.value;
   if (!token) return null;
 
-  const [encoded, signature] = token.split('.');
-  if (!encoded || !signature || await hmac(encoded) !== signature) return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [encoded, signature] = parts;
+  if (!encoded || !signature) return null;
 
-  let payload: SessionPayload;
-  try {
-    payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as SessionPayload;
-  } catch {
-    return null;
-  }
-  if (!payload.sub || payload.exp < Date.now()) return null;
+  const payload = parseSessionPayload(encoded);
+  const now = Date.now();
+  if (!payload || payload.exp < now) return null;
+
+  const ring = parseAuthSecretRing(await authSecretRing());
+  if (!ring) return null;
+  const entries = sessionVerificationEntries(ring, {
+    now,
+    acceptPrevious: process.env.WUJIE_AUTH_ACCEPT_PREVIOUS_SESSIONS !== 'false',
+    ttlSeconds: WUJIE_SESSION_TTL_SECONDS,
+    kid: payload.kid,
+  });
+  if (!verifySessionSignature(encoded, signature, entries)) return null;
 
   const file = await readStore();
   const user = file.users.find(item => item.id === payload.sub);

@@ -27,7 +27,7 @@ type AuthSecretRingContract = {
   ): AuthSecretRingV1;
   sessionVerificationEntries(
     ring: AuthSecretRingV1,
-    input: { now: number; acceptPrevious: boolean; ttlSeconds: number },
+    input: { now: number; acceptPrevious: boolean; ttlSeconds: number; kid?: string },
   ): AuthSecretEntry[];
 };
 
@@ -315,5 +315,40 @@ describe('authentication secret ring', () => {
       acceptPrevious: true,
       ttlSeconds: 7 * 24 * 60 * 60,
     })).toEqual([ring.active]);
+  });
+
+  it('selects only the exact allowed kid while preserving active-then-previous legacy order', async () => {
+    const { deriveAuthSecretKid, sessionVerificationEntries } = await loadAuthSecretRing();
+    const previous = {
+      kid: deriveAuthSecretKid(activeSecret),
+      secret: activeSecret,
+      activatedAt: now - 1,
+      retiredAt: now,
+    };
+    const ring: AuthSecretRingV1 = {
+      version: 1,
+      active: { kid: deriveAuthSecretKid(nextSecret), secret: nextSecret, activatedAt: now },
+      previous,
+      updatedAt: now,
+    };
+    const input = {
+      now: now + 60_000,
+      acceptPrevious: true,
+      ttlSeconds: 7 * 24 * 60 * 60,
+    };
+
+    expect(sessionVerificationEntries(ring, input)).toEqual([ring.active, ring.previous]);
+    expect(sessionVerificationEntries(ring, { ...input, kid: ring.active.kid })).toEqual([
+      ring.active,
+    ]);
+    expect(sessionVerificationEntries(ring, { ...input, kid: previous.kid })).toEqual([
+      previous,
+    ]);
+    expect(sessionVerificationEntries(ring, { ...input, kid: 'unknown-kid-0000' })).toEqual([]);
+    expect(sessionVerificationEntries(ring, {
+      ...input,
+      acceptPrevious: false,
+      kid: previous.kid,
+    })).toEqual([]);
   });
 });
