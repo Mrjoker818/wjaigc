@@ -151,6 +151,7 @@ import {
 } from '@/lib/canvas-autosave-guard';
 import { shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
 import { sendUserDataRecord } from '@/lib/user-data-record-client';
+import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 
 import { LoginPanel } from '@/components/dashboard/login-panel';
 
@@ -2354,7 +2355,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         response = await fetch(apiEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...params, userId: currentUserRef.current?.id, projectId: currentProject?.id, submitOnly: true }),
+          body: JSON.stringify(withClientImageOutputPreference(
+            { ...params, userId: currentUserRef.current?.id, projectId: currentProject?.id, submitOnly: true },
+            params.model,
+            { background: params.background, outputFormat: params.outputFormat },
+          )),
           signal: submitController.signal,
         });
       } finally {
@@ -3739,7 +3744,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           const response = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...params, userId: currentUserRef.current?.id, submitOnly: true }),      });
+            body: JSON.stringify(withClientImageOutputPreference(
+              { ...params, userId: currentUserRef.current?.id, submitOnly: true },
+              params.model,
+              { background: params.background, outputFormat: params.outputFormat },
+            )),
+          });
 
           const data = await response.json();
 
@@ -4602,7 +4612,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(withClientImageOutputPreference({
           prompt: fullPrompt,
           size,
           model: fusionModel,
@@ -4616,7 +4626,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           outputCount: params.count,
           submitOnly: true,
           userId: currentUser?.id,
-        }),
+        }, fusionModel || '')),
       });
 
       const data = await response.json();

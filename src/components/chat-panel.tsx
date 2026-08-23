@@ -7,6 +7,7 @@ import { AgentBuilderDialog, type AgentDefinition, type AgentRecipe } from '@/co
 import { toast } from 'sonner';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { normalizeGenerationSubmitSlots } from '@/lib/task-core/generation-batch';
+import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
 import { collectChatGenerationSlotResults, getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, mergeRecoveredImages, settleChatGenerationSlots, updateChatSessionMessage, upsertChatGenerationSlotImage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
 import { normalizePersistedChatSessions } from '@/lib/chat-session-persistence';
@@ -4633,7 +4634,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 const generateRes = await fetch('/api/generate', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
+                  body: JSON.stringify(withClientImageOutputPreference({
                     prompt: rawPrompt,
                     model: imageModelInfo.model,
                     providerId: imageModelInfo.providerId,
@@ -4648,7 +4649,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     assetWorkspaceId: `embedded-chat:${taskSessionId}`,
                     assetSourceEntityId: assistantMessageId,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
-                  }),
+                  }, imageModelInfo.model)),
                 });
                 const generateData = await generateRes.json();
                 if (!generateData.success) { continue; }
@@ -4802,7 +4803,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 const generateRes = await fetch('/api/generate', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
+                  body: JSON.stringify(withClientImageOutputPreference({
                     prompt: optimizedPrompt, model: imageModelInfo.model, providerId: imageModelInfo.providerId,
                     aspectRatio, quality, outputCount, submitOnly: true,
                     projectId,
@@ -4812,7 +4813,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     assetWorkspaceId: `embedded-chat:${taskSessionId}`,
                     assetSourceEntityId: assistantMessageId,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
-                  }),
+                  }, imageModelInfo.model)),
                 });
                 const generateData = await generateRes.json();
                 if (!generateData.success) {

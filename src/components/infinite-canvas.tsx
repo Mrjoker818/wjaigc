@@ -1,5 +1,6 @@
 'use client';
 import NextImage from 'next/image';
+import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 import { toast } from 'sonner';
 import { } from '@/lib/canvas-mode-handlers';
 import { findClosestStandardRatio, STANDARD_RATIOS, type StandardRatio } from '@/lib/canvas-utils';
@@ -5878,7 +5879,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body: JSON.stringify(withClientImageOutputPreference({
             prompt: fullPrompt,
             negativePrompt: toolbar.negativePrompt,
             model,
@@ -5895,7 +5896,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           ...(referenceMeta.referenceCategories ? { referenceCategories: Object.fromEntries(succeededIndices.map((originalIndex, newIndex) => [String(newIndex), referenceMeta.referenceCategories?.[String(originalIndex)] || []]).filter(([, value]) => value.length > 0)) } : {}),
           ...(referenceMeta.referenceCategoryStrengths ? { referenceCategoryStrengths: Object.fromEntries(succeededIndices.map((originalIndex, newIndex) => [String(newIndex), referenceMeta.referenceCategoryStrengths?.[String(originalIndex)] || {}])) } : {}),
           ...(referenceMeta.referenceStrengths?.length ? { referenceStrengths: succeededIndices.map(index => referenceMeta.referenceStrengths?.[index] || 0) } : {}),
-        }),
+        }, model)),
         signal: genController.signal,
       });
       } finally {
@@ -7524,7 +7525,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body: JSON.stringify(withClientImageOutputPreference({
             prompt: canvasGenPrompt,
             negativePrompt: canvasGenNegativePrompt || undefined,
             model: canvasGenPureModel,
@@ -7538,7 +7539,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             submitOnly: true,
             projectId: effectiveProjectId,
             referenceImages: canvasGenRefImages.length > 0 ? canvasGenRefImages : undefined,
-          }),
+          }, canvasGenPureModel || '')),
           signal: canvasGenController.signal,
         });
       } finally {
@@ -9967,14 +9968,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(withClientImageOutputPreference({
           prompt,
           aspectRatio: '2:1',  // 全景图2:1等距圆柱投影比例
           imageUrl: sourceImg.url, // 作为参考图
           model: modelInfo.model,
           apiKey: 'server-managed',
           submitOnly: true,
-        }),
+        }, modelInfo.model)),
       });
       if (!res.ok) throw new Error('全景生成失败');
       const data = await res.json();
@@ -16388,7 +16389,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                               res = await fetch('/api/generate', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
+                                body: JSON.stringify(withClientImageOutputPreference({
                                   ...hexCubeInput,
                                   model: hcg.toolbar.model,
                                   providerId: hcg.toolbar.providerId,
@@ -16397,7 +16398,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                   quality: hcg.toolbar.quality || 'auto',
                                   n: hcg.toolbar.outputCount,
                                   submitOnly: true,
-                                }),
+                                }, hcg.toolbar.model)),
                                 signal: hexCubeController.signal,
                               });
                             } finally {
@@ -16843,7 +16844,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             const resp = await fetch('/api/generate', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
+                              body: JSON.stringify(withClientImageOutputPreference({
                                 prompt: canvasGenPrompt,
                                 negative: canvasGenNegativePrompt,
                                 model: canvasGenModel,
@@ -16851,7 +16852,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                 resolution: canvasGenResolution,
                                 quality: canvasGenQuality,
                                 n: missing,
-                              }),
+                              }, canvasGenModel.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel)),
                             });
                             if (!resp.ok) throw new Error(`生成失败: ${resp.status}`);
                             const data = await resp.json();

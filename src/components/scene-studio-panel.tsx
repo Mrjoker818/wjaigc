@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { Canvas, useThree, ThreeEvent, extend } from '@react-three/fiber';
 import { OrbitControls, TransformControls, Grid, GizmoHelper, GizmoViewport, useGLTF, Html } from '@react-three/drei';
 import * as THREE from 'three';
+import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 
 // Register Three.js classes with R3F to avoid React 19 "incorrect casing" warnings
 extend({
@@ -1793,7 +1794,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
         const fallbackRes = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body: JSON.stringify(withClientImageOutputPreference({
             prompt: fullPrompt,
             aspectRatio,
             quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : '2K'; } catch { return '2K'; } })(),
@@ -1803,7 +1804,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
             model: currentImageModel.model,
             providerId: currentImageModel.providerId,
             submitOnly: true,
-          }),
+          }, currentImageModel.model || '')),
         });
 
         if (fallbackRes.ok) {

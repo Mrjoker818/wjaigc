@@ -1,4 +1,8 @@
-import type { ImageOutputPreference } from '@/lib/image-generation-output';
+import {
+  UnsupportedTransparentBackgroundError,
+  withImageOutputPreference,
+  type ImageOutputPreference,
+} from '@/lib/image-generation-output';
 
 const STORAGE_KEY = 'wujie_image_output_preferences';
 const DEFAULT_PREFERENCE: ImageOutputPreference = {
@@ -52,5 +56,26 @@ export function writeImageOutputPreference(
     }));
   } catch {
     // Storage can be unavailable in private mode; generation still works in-memory.
+  }
+}
+
+export function withClientImageOutputPreference<T extends Record<string, unknown>>(
+  body: T,
+  modelId: string,
+  explicit?: Partial<ImageOutputPreference>,
+): T & { background?: ImageOutputPreference['background']; output_format?: ImageOutputPreference['outputFormat'] } {
+  const stored = readImageOutputPreference(modelId);
+  const preference: ImageOutputPreference = {
+    background: explicit?.background || stored.background,
+    outputFormat: explicit?.outputFormat || stored.outputFormat,
+  };
+
+  try {
+    return withImageOutputPreference(body, modelId, preference);
+  } catch (error) {
+    if (explicit?.background === 'transparent' || !(error instanceof UnsupportedTransparentBackgroundError)) {
+      throw error;
+    }
+    return { ...body };
   }
 }

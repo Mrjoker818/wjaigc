@@ -6,6 +6,7 @@ import JSZip from 'jszip';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getStickerModelLoadDiagnosticMessage } from '@/lib/sticker-model-load-state';
 import { getStickerFailureMessage } from '@/lib/sticker-failure-message';
+import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 
 
 /* ──────────────────── 主题色 ──────────────────── */
@@ -1058,7 +1059,10 @@ ${themeDesc}
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify(withClientImageOutputPreference(
+        requestBody,
+        String(requestBody.model || ''),
+      )),
     });
     const data = await res.json();
     if (!res.ok || data.success === false) {
