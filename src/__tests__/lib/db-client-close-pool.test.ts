@@ -36,6 +36,8 @@ describe('db-client closePool', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = originalDatabaseUrl;
     if (originalPgDatabaseUrl === undefined) delete process.env.PGDATABASE_URL;
@@ -56,5 +58,49 @@ describe('db-client closePool', () => {
     const secondPool = dbClient.getPool();
     expect(secondPool).not.toBe(firstPool);
     expect(pgMocks.Pool).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs only a stable code when a real execSql query catch rethrows', async () => {
+    const dbClient = await import('@/lib/db-client');
+    dbClient.getPool();
+    const privateError = new Error(
+      'postgresql://private-user:private-password@example.test user=private-name hash=scrypt-secret',
+    );
+    pgMocks.instances[0].query.mockRejectedValueOnce(privateError);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(dbClient.execSql(
+      'SELECT * FROM wujie_users WHERE name = $1',
+      ['private-name'],
+    )).rejects.toBe(privateError);
+
+    expect(consoleError.mock.calls).toEqual([[{ code: 'DB_SQL_QUERY_FAILED' }]]);
+    const serializedLogs = JSON.stringify(consoleError.mock.calls);
+    expect(serializedLogs).not.toContain('private');
+    expect(serializedLogs).not.toContain('scrypt');
+    expect(serializedLogs).not.toContain('SELECT');
+  });
+
+  it('does not include a transient driver error in retry warnings', async () => {
+    vi.useFakeTimers();
+    const dbClient = await import('@/lib/db-client');
+    const client = dbClient.getPool();
+    const privateError = new Error(
+      'Connection terminated postgresql://private-user:private-password@example.test',
+    );
+    pgMocks.instances[0].query
+      .mockRejectedValueOnce(privateError)
+      .mockResolvedValueOnce({ rows: [{ ok: true }], rowCount: 1 });
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const result = dbClient.execSql('SELECT $1', ['private-value']);
+    await vi.runAllTimersAsync();
+    await expect(result).resolves.toEqual({ rows: [{ ok: true }], rowCount: 1 });
+
+    expect(consoleWarn.mock.calls).toEqual([[
+      { code: 'DB_SQL_TRANSIENT_RETRY', attempt: 1, maxAttempts: 3 },
+    ]]);
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain('private');
+    expect(client).toBe(pgMocks.instances[0]);
   });
 });

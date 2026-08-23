@@ -806,6 +806,97 @@ describe.sequential('concurrency-safe authentication persistence', () => {
     )).resolves.toBe(true);
   });
 
+  it('keeps consecutive DB profile and password CAS versions safe when rows contain OID20 strings', async () => {
+    const initialUpdatedAt = 1_724_601_600_000;
+    let row = databaseUser({
+      created_at: '1724601599000',
+      updated_at: String(initialUpdatedAt),
+    });
+    const expectedVersions: number[] = [];
+    const writtenVersions: number[] = [];
+    const updateUserProfileFields = vi.fn(async (input: {
+      expectedUpdatedAt: number;
+      updatedAt: number;
+      profile: { email: string | null };
+    }) => {
+      expectedVersions.push(input.expectedUpdatedAt);
+      writtenVersions.push(input.updatedAt);
+      if (Number(row.updated_at) !== input.expectedUpdatedAt) return 'conflict' as const;
+      row = { ...row, email: input.profile.email, updated_at: String(input.updatedAt) };
+      return 'updated' as const;
+    });
+    const updateUserCredentials = vi.fn(async (input: {
+      expectedUpdatedAt: number;
+      expectedPasswordHash: string;
+      passwordHash: string;
+      credentialHash: string;
+      updatedAt: number;
+      profile: { email: string | null };
+    }) => {
+      expectedVersions.push(input.expectedUpdatedAt);
+      writtenVersions.push(input.updatedAt);
+      if (Number(row.updated_at) !== input.expectedUpdatedAt
+        || row.password_hash !== input.expectedPasswordHash) return 'conflict' as const;
+      row = {
+        ...row,
+        email: input.profile.email,
+        password_hash: input.passwordHash,
+        credential_hash: input.credentialHash,
+        updated_at: String(input.updatedAt),
+      };
+      return 'updated' as const;
+    });
+    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => true }));
+    vi.doMock('@/lib/auth/auth-repository', () => ({
+      countLegacyCredentialUsers: vi.fn(),
+      resolveDatabaseSecretRing: vi.fn().mockResolvedValue({
+        version: 1,
+        active: { kid: 'active-kid', secret: activeSecret, activatedAt: 1 },
+        updatedAt: 1,
+      }),
+      updateUserCredentialSidecar: vi.fn(),
+      updateUserCredentials,
+      updateUserProfileFields,
+    }));
+    vi.doMock('@/lib/db-storage', () => ({
+      dbDeleteUser: vi.fn(),
+      dbDeleteUserData: vi.fn(),
+      dbInitCredits: vi.fn(),
+      dbReadUsers: vi.fn(async () => {
+        expect(typeof row.updated_at).toBe('string');
+        return [
+          databaseUser({ id: 'db-admin', name: adminName, role: 'admin' }),
+          {
+            ...row,
+            created_at: Number(row.created_at),
+            updated_at: Number(row.updated_at),
+          },
+        ];
+      }),
+      dbWriteUsers: vi.fn(),
+    }));
+    configureDatabaseMode();
+    vi.resetModules();
+    const { updateManagedUser } = await loadServerAuth();
+
+    await expect(updateManagedUser('db-user-1', {
+      email: 'first-profile@example.test',
+    })).resolves.toMatchObject({ email: 'first-profile@example.test' });
+    await expect(updateManagedUser('db-user-1', {
+      password: 'next-db-password',
+    })).resolves.toMatchObject({ id: 'db-user-1' });
+    await expect(updateManagedUser('db-user-1', {
+      email: 'second-profile@example.test',
+    })).resolves.toMatchObject({ email: 'second-profile@example.test' });
+
+    expect(expectedVersions[0]).toBe(initialUpdatedAt);
+    expect(expectedVersions.slice(1)).toEqual(writtenVersions.slice(0, -1));
+    expect(writtenVersions).toHaveLength(3);
+    expect(writtenVersions.every(value => Number.isSafeInteger(value))).toBe(true);
+    expect(writtenVersions.every(value => value > initialUpdatedAt)).toBe(true);
+    expect(String(row.updated_at)).toBe(String(writtenVersions.at(-1)));
+  });
+
   it('keeps a DB password update when a delayed sidecar migration returns already-set', async () => {
     let row = databaseUser();
     const migrationStarted = deferred();

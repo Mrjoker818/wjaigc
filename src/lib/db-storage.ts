@@ -611,8 +611,23 @@ interface DbUserReadRow {
   storage_folder: string;
   email?: string;
   group_id?: string | null;
+  created_at: string | number;
+  updated_at: string | number;
+}
+
+type DbUserRecord = Omit<DbUserReadRow, 'created_at' | 'updated_at'> & {
   created_at: number;
   updated_at: number;
+};
+
+function parseDatabaseUserTimestamp(value: string | number): number {
+  const parsed = typeof value === 'number'
+    ? value
+    : /^-?(?:0|[1-9]\d*)$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error('Invalid database user timestamp.');
+  }
+  return parsed;
 }
 
 function parseJsonField(val: unknown): Record<string, boolean> {
@@ -636,7 +651,7 @@ function parseJsonArrayField(val: unknown): string[] | undefined {
   return undefined;
 }
 
-export async function dbReadUsers(): Promise<DbUserReadRow[]> {
+export async function dbReadUsers(): Promise<DbUserRecord[]> {
   try {
     const result = await execSql('SELECT * FROM wujie_users ORDER BY created_at ASC');
     return (result.rows as unknown as DbUserReadRow[]).map(row => ({
@@ -647,6 +662,8 @@ export async function dbReadUsers(): Promise<DbUserReadRow[]> {
       image_models: parseJsonArrayField(row.image_models),
       api_permissions: parseJsonField(row.api_permissions),
       group_id: row.group_id || null,
+      created_at: parseDatabaseUserTimestamp(row.created_at),
+      updated_at: parseDatabaseUserTimestamp(row.updated_at),
     }));
   } catch (e) {
     console.error({ code: 'DB_READ_USERS_FAILED' });

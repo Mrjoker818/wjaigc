@@ -28,7 +28,17 @@ delete process.env.PGDATABASE_URL;
 delete process.env.DATABASE_URL;
 let temporaryDataDir: string | null = null;
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 afterEach(async () => {
+  vi.doUnmock('fs/promises');
+  vi.doUnmock('@/lib/auth/auth-persistence');
   if (temporaryDataDir) {
     await rm(temporaryDataDir, { recursive: true, force: true });
     temporaryDataDir = null;
@@ -67,6 +77,63 @@ describe.sequential('server authentication production security', () => {
       httpStatus: 503,
       retryable: true,
     });
+  });
+
+  it('single-flights 20 concurrent FILE_ONLY secret creations to one persisted active secret', async () => {
+    temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
+    const ringPath = path.join(temporaryDataDir, 'system', 'auth-secret');
+    const readStarted = deferred();
+    const releaseRead = deferred();
+    let secretReads = 0;
+    let secretWrites = 0;
+
+    vi.doMock('fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof import('fs/promises')>();
+      return {
+        ...actual,
+        readFile: async (...args: unknown[]) => {
+          if (String(args[0]) === ringPath) {
+            secretReads += 1;
+            readStarted.resolve();
+            await releaseRead.promise;
+          }
+          return Reflect.apply(actual.readFile, actual, args);
+        },
+      };
+    });
+    vi.doMock('@/lib/auth/auth-persistence', async importOriginal => {
+      const actual = await importOriginal<typeof import('@/lib/auth/auth-persistence')>();
+      return {
+        ...actual,
+        writeAuthJsonFileAtomic: async (filePath: string, value: unknown) => {
+          if (filePath === ringPath) secretWrites += 1;
+          return actual.writeAuthJsonFileAtomic(filePath, value);
+        },
+      };
+    });
+    process.env.COZE_PROJECT_ENV = 'DEV';
+    process.env.WUJIE_DATA_DIR = temporaryDataDir;
+    process.env.WUJIE_AUTH_PERSISTENCE_MODE = 'FILE_ONLY';
+    delete process.env.WUJIE_AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+    vi.resetModules();
+    const { getAuthSecretForInternalRequests } = await import('@/lib/server-auth');
+
+    const resolutions = Array.from(
+      { length: 20 },
+      () => getAuthSecretForInternalRequests(),
+    );
+    await readStarted.promise;
+    const readsBeforeRelease = secretReads;
+    releaseRead.resolve();
+    const secrets = await Promise.all(resolutions);
+    const persistedRing = parseAuthSecretRing(JSON.parse(await readFile(ringPath, 'utf8')) as unknown);
+
+    expect(readsBeforeRelease).toBe(1);
+    expect(secretWrites).toBe(1);
+    expect(new Set(secrets).size).toBe(1);
+    expect(persistedRing?.active.secret).toBe(secrets[0]);
+    await expect(getAuthSecretForInternalRequests()).resolves.toBe(secrets[0]);
   });
 
   it('fails closed instead of treating damaged JSON as a legacy file secret', async () => {

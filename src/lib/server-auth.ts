@@ -276,6 +276,7 @@ async function countFileLegacyCredentialUsers(): Promise<number> {
 }
 
 let _authSecretRingCache: AuthSecretRingV1 | null = null;
+let _authSecretRingPromise: Promise<AuthSecretRingV1> | null = null;
 const emittedReplicaWarnings = new Set<string>();
 
 function warnReplicaWriteOnce(code: string): void {
@@ -331,9 +332,7 @@ async function resolveFileSecretRing(
   return ring;
 }
 
-async function authSecretRing(): Promise<AuthSecretRingV1> {
-  if (_authSecretRingCache) return _authSecretRingCache;
-
+async function resolveAuthSecretRing(): Promise<AuthSecretRingV1> {
   const mode = getAuthPersistenceMode();
   const now = Date.now();
   const envSecret = configuredAuthSecret();
@@ -344,8 +343,25 @@ async function authSecretRing(): Promise<AuthSecretRingV1> {
   if (mode === 'DB_PLUS_FILE') {
     await writeSecretRingReplicaBestEffort(ring);
   }
-  _authSecretRingCache = ring;
   return ring;
+}
+
+async function authSecretRing(): Promise<AuthSecretRingV1> {
+  if (_authSecretRingCache) return _authSecretRingCache;
+  if (_authSecretRingPromise) return _authSecretRingPromise;
+
+  _authSecretRingPromise = resolveAuthSecretRing().then(
+    ring => {
+      _authSecretRingCache = ring;
+      _authSecretRingPromise = null;
+      return ring;
+    },
+    error => {
+      _authSecretRingPromise = null;
+      throw error;
+    },
+  );
+  return _authSecretRingPromise;
 }
 
 async function authSecret(): Promise<string> {

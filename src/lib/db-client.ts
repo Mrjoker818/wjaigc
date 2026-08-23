@@ -45,8 +45,8 @@ export function getPool(): Pool {
     };
     pool = new Pool(config);
 
-    pool.on('error', (err) => {
-      console.error('[db-client] Unexpected pool error:', err);
+    pool.on('error', () => {
+      console.error({ code: 'DB_POOL_ERROR' });
     });
   }
   return pool;
@@ -76,7 +76,11 @@ export async function execSql(query: string, params?: unknown[]): Promise<SqlRes
         || errMsg.includes('connection is closed');
 
       if (isTransient && attempt < maxRetries) {
-        console.warn(`[db-client] Transient SQL error (attempt ${attempt + 1}/${maxRetries + 1}), retrying...`, errMsg.substring(0, 100));
+        console.warn({
+          code: 'DB_SQL_TRANSIENT_RETRY',
+          attempt: attempt + 1,
+          maxAttempts: maxRetries + 1,
+        });
         // Don't destroy the entire pool — pg handles bad connections internally.
         // Only reset pool if it's completely unusable (null check on next attempt).
         // Previously pool.end() here caused cascading failures for concurrent queries.
@@ -84,7 +88,7 @@ export async function execSql(query: string, params?: unknown[]): Promise<SqlRes
         continue;
       }
 
-      console.error('[db-client] SQL error:', e);
+      console.error({ code: 'DB_SQL_QUERY_FAILED' });
       throw e;
     }
   }

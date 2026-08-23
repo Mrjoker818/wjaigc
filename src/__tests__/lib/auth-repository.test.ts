@@ -467,6 +467,57 @@ describe('database credential sidecar mappings', () => {
     expect(params).toContain(null);
   });
 
+  it('normalizes PostgreSQL BIGINT user timestamps from strings at the database boundary', async () => {
+    mocks.execSql.mockResolvedValueOnce({
+      rows: [{
+        id: 'string-timestamp-user',
+        name: 'String Timestamp User',
+        password_hash: 'legacy',
+        credential_hash: null,
+        role: 'user',
+        status: 'active',
+        api_permissions: {},
+        storage_folder: 'users/string-timestamp-user',
+        created_at: '1724601600000',
+        updated_at: '1724601600001',
+      }],
+      rowCount: 1,
+    });
+
+    await expect(dbReadUsers()).resolves.toEqual([
+      expect.objectContaining({
+        created_at: 1_724_601_600_000,
+        updated_at: 1_724_601_600_001,
+      }),
+    ]);
+  });
+
+  it.each([
+    ['not-an-integer', '1724601600000.5'],
+    ['outside the safe integer range', '9007199254740992'],
+  ])('fails closed when a PostgreSQL BIGINT timestamp is %s', async (_label, updatedAt) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.execSql.mockResolvedValueOnce({
+      rows: [{
+        id: 'invalid-timestamp-user',
+        name: 'Invalid Timestamp User',
+        password_hash: 'legacy',
+        credential_hash: null,
+        role: 'user',
+        status: 'active',
+        api_permissions: {},
+        storage_folder: 'users/invalid-timestamp-user',
+        created_at: '1724601600000',
+        updated_at: updatedAt,
+      }],
+      rowCount: 1,
+    });
+
+    await expect(dbReadUsers()).rejects.toThrow('Invalid database user timestamp');
+    expect(consoleError).toHaveBeenCalledWith({ code: 'DB_READ_USERS_FAILED' });
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(updatedAt);
+  });
+
   it('passes an omitted dbUpsertUser sidecar as null into the preserving COALESCE contract', async () => {
     mocks.execSql.mockResolvedValue({ rows: [], rowCount: 1 });
     const userWithoutSidecar: Parameters<typeof dbUpsertUser>[0] = {
