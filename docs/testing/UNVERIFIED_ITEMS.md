@@ -1151,3 +1151,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 其余五个编辑入口 | 待复验 | 放大、SVG、去背景、扩展、裁切继续可打开、关闭且位置不越界，证明最小修复未引入功能丢失。 |
 | Google Chrome 控制 | 当前阻塞 | 主实例能列出项目页与预览页，但标签读取/交互超时；另一实例仅有 360 导航页，已排除且不会使用。恢复连接后只复用现有 Google Chrome 标签，不新建标签。 |
 | PostgreSQL 专项 | 环境阻塞 | 本机仍缺少 `POSTGRES_TEST_DATABASE_URL`，105 项真实集成/并发测试保持跳过。 |
+
+## 2026-08-23 UI004-BUG-002 云端关闭更新
+
+| 项目 | 状态 | 证据/剩余边界 |
+|---|---|---|
+| Coze exact SHA | 已验证 | `HEAD=origin/main=8c936cac777f5b05cfb381c73e929c13a5341efd`，`origin/stable=52f7c601ed150769e15d06fb435c6e360e28c9e7`。 |
+| 同源安全图片端点 | 已验证 | 生产构建包含 `/api/image/source`；未登录请求返回 401 JSON，已登录面板加载 Pear 图片 `1536x1024`。 |
+| 擦除与蒙版源图 | 已验证 | 两个面板均自然尺寸非零，真实笔迹使提交按钮可用。 |
+| 调色预览 | 已验证 | 自然尺寸 `1536x1024`，渲染尺寸 `291x162.8125`，滑杆立即更新 filter。 |
+| Google Chrome 控制 | 已恢复 | 只复用现有 Google Chrome 标签，未使用 360，未新建标签。 |
+| PostgreSQL 专项 | 仍未验证 | 本地仍缺少 `POSTGRES_TEST_DATABASE_URL`，105 项跳过不计为通过。 |

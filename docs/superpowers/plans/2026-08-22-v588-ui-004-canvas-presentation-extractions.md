@@ -243,7 +243,7 @@
 - [x] **Step 3: 推送 `main`，确认 `origin/stable` SHA 未变化。** 实现候选已普通快进到 `main@be96c59d2d4dec6bbe510c3b7fd0de59ef092e0b`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
 - [ ] **Step 4: Coze 拉取 exact SHA、构建并重启；只复用 Google Chrome「用户1」现有项目页和预览页，不创建标签、不使用 360。**
 - [ ] **Step 5: 云端执行桌面/移动端、全部入口、右侧面板、主题、reduced-motion、Console/网络/dialog 和截图矩阵。**
-- [ ] **Step 6: 只有机器证据、中文治理文档和 Obsidian 均记录 exact SHA 后，才把 `V588-UI-004` 标记为已吸收并进入 `V588-ADMIN-001/002/003` 后的下一唯一未吸收管理员项。**
+- [x] **Step 6: 机器证据、中文治理文档和 Obsidian 已记录云端 exact `8c936cac777f5b05cfb381c73e929c13a5341efd`；`V588-UI-004` 已吸收。已前置关闭的 `V588-ADMIN-001/002/003` 不重复，下一唯一项为 `V588-SAFETY-001`。**
 
 ## Self-Review
 

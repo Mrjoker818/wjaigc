@@ -1504,3 +1504,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - TDD 新增鉴权同源图片读取端点，复用现有 SSRF 安全下载器；只改变擦除/蒙版与调色预览的展示源，不改变任务、供应商和账务。候选已推送为 `main@3becee8b54d9cc6320b137c4070e129cbed06ffe`，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
 - 本地最终门禁：聚焦 `50/50`、源图合同 `19/19`、全仓 `491 files / 3086 tests` 通过；`105` 个 PostgreSQL 专项因缺少隔离库跳过；TypeScript、零错误 ESLint、生产构建 `116` 路由和空白检查通过。
 - **结论：修复前云端问题与根因已确认，修复候选本地回归通过；修复后云端仍未验证。** Google Chrome 主实例当前可发现但无法交互，360 实例已识别并排除。证据：`docs/testing/evidence/v588-ui-004-remote-image-cors-2026-08-23.json`。
+
+## 2026-08-23 V588-UI-004 云端最终回归
+
+- Coze 已精确运行 `main@8c936cac777f5b05cfb381c73e929c13a5341efd`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变；干净生产构建确认 `/api/image/source` 进入路由清单，5000 端口 PID `1774`，根路由 HTTP 200，未登录图片代理正确返回 401 JSON。
+- 同一 Pear CDN 真实图片在擦除与蒙版面板均加载为 `1536x1024`，真实笔迹可将提交按钮从禁用切换为可用。
+- 首次代理修复后又稳定复现调色预览渲染框只有 `1x0.66px`；根因是 `NextImage width={1} height={1}` 与 `max-w/max-h` 的组合不会放大布局框。RED 用例先失败，然后仅改为相对预览容器内 `NextImage fill`。
+- 最终云端调色预览自然尺寸 `1536x1024`，渲染尺寸 `291x162.8125`；亮度滑杆从 0 调到 2 后计算样式立即变为 `brightness(1.01)`。新鲜 Console error/warning 为 0，JavaScript dialog 为 0。
+- 本地最终门禁：相关 `14/14`，TypeScript 通过，ESLint 零错误，全仓 `491 files / 3087 tests` 通过，`105` 项 PostgreSQL 专项因无隔离库跳过，生产构建 `116` 页面/路由通过。
+- **结论：V588-UI-004 远程图片编辑与调色预览已在云端关闭，可标记为已吸收。** PostgreSQL 隔离库门禁仍是独立未验证项，不因本结论改成通过。

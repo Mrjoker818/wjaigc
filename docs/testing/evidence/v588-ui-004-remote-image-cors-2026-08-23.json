@@ -1,13 +1,14 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-08-23T03:30:00+08:00",
+  "recordedAt": "2026-08-23T08:08:56+08:00",
   "stage": "V588-UI-004",
   "bugId": "UI004-BUG-002",
   "environment": {
     "browser": "Google Chrome",
     "cloudUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
     "reproductionCommit": "362d350ecbb552f27ad51be0782f228f49fd2391",
-    "fixCommit": "3becee8b54d9cc6320b137c4070e129cbed06ffe",
+    "proxyFixCommit": "3becee8b54d9cc6320b137c4070e129cbed06ffe",
+    "verifiedFixCommit": "8c936cac777f5b05cfb381c73e929c13a5341efd",
     "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
   },
   "sourceImage": {
@@ -38,19 +39,47 @@
     "ssrfPolicy": "DNS-resolved public IP validation, no redirects, MIME/byte/timeout limits",
     "maxBytes": 26214400,
     "changedPanels": ["erase", "mask", "color-preview"],
-    "businessTaskOrBillingChanged": false
+    "businessTaskOrBillingChanged": false,
+    "followUpRootCause": "The color preview used NextImage width={1} height={1}; max-width/max-height do not enlarge a 1x1 intrinsic layout box.",
+    "followUpFix": "Use NextImage fill inside the existing relative aspect-ratio preview container."
   },
   "localVerification": {
-    "focused": "50/50",
+    "focused": "14/14 final follow-up; 50/50 proxy matrix",
     "sourceContract": "19/19",
     "typecheck": "pass",
-    "eslint": "0 errors / 987 historical warnings",
-    "vitest": "491 files passed / 3086 tests passed / 105 PostgreSQL-gated skipped",
+    "eslint": "pass, zero errors",
+    "vitest": "491 files passed / 3087 tests passed / 105 PostgreSQL-gated skipped",
     "build": "pass / 116 routes",
     "diffCheck": "pass"
   },
   "postFixCloudVerification": {
-    "status": "blocked",
-    "reason": "Google Chrome extension can list the existing project and preview tabs but cannot interact with either tab; the second detected browser instance is 360 Browser and was not used."
+    "status": "pass",
+    "cloudHead": "8c936cac777f5b05cfb381c73e929c13a5341efd",
+    "originMain": "8c936cac777f5b05cfb381c73e929c13a5341efd",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "build": "clean production build; /api/image/source present in app-paths manifest",
+    "server": {
+      "pid": 1774,
+      "rootHttp": 200,
+      "unauthenticatedImageSourceHttp": 401
+    },
+    "erase": {
+      "naturalSize": [1536, 1024],
+      "brushStrokeEnabledSubmit": true
+    },
+    "mask": {
+      "naturalSize": [1536, 1024],
+      "brushStrokeEnabledSubmit": true
+    },
+    "colorPreview": {
+      "naturalSize": [1536, 1024],
+      "renderedSize": [291, 162.8125],
+      "brightnessSliderValue": 2,
+      "computedFilter": "brightness(1.01) contrast(1) saturate(1) hue-rotate(0deg)"
+    },
+    "consoleErrorsOrWarnings": 0,
+    "javascriptDialog": false,
+    "usedExistingChromeTabsOnly": true,
+    "used360Browser": false
   }
 }

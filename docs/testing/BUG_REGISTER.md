@@ -2276,3 +2276,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 云端状态 | 修复前云端复现与根因已闭环；修复后 exact SHA 尚未部署复验。Google Chrome 主实例能列出项目页和预览页但无法交互，另一实例已确认是 360 并未使用。 |
 | 证据 | `docs/testing/evidence/v588-ui-004-remote-image-cors-2026-08-23.json` |
 | 状态 | **本地已修复并推送 / 修复后云端待验。** 不得把修复前诊断或本地通过写成云端通过。 |
+
+### UI004-BUG-002 云端关闭补充（2026-08-23）
+
+| 字段 | 内容 |
+|---|---|
+| 中间候选剩余缺陷 | `/api/image/source` 使调色图片自然尺寸恢复后，预览布局框仍只有 `1x0.66px`，视觉上仍是黑屏。 |
+| 补充根因 | 调色叶组件使用 `NextImage width={1} height={1}`；`max-w-full/max-h-full` 只限制上限，不会将 1x1 布局框放大。 |
+| RED | 新增“调色预览填满预览容器”合同，首次运行按预期失败。 |
+| 最小修复 | `main@8c936cac777f5b05cfb381c73e929c13a5341efd` 仅将调色预览改为相对容器内 `NextImage fill`，不改参数、提交、供应商、任务和账务。 |
+| 本地回归 | 相关 `14/14`；TypeScript 通过；ESLint 零错误；全仓 `491 files / 3087 tests` 通过，`105` 项 PostgreSQL 门禁跳过；生产构建 `116` 页面/路由通过。 |
+| 云端回归 | Coze exact SHA 、干净构建和路由清单通过；擦除/蒙版图片 `1536x1024` 且笔迹可用；调色渲染框 `291x162.8125`，滑杆实时生效；Console error/warning 与 dialog 均为 0。 |
+| 证据 | `docs/testing/evidence/v588-ui-004-remote-image-cors-2026-08-23.json` |
+| 状态 | **已修复 / 已云端关闭。** PostgreSQL 隔离库专项仍单独保持未验证。 |

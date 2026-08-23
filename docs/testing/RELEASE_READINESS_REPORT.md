@@ -1238,3 +1238,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 修复候选 `main@3becee8b54d9cc6320b137c4070e129cbed06ffe` 已通过安全下载、图片源、编辑面板、全仓 TypeScript、全仓零错误 ESLint、`3086` 项 Vitest 和生产构建；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
 - 105 个 PostgreSQL 集成/并发用例仍因本机无隔离库跳过；本次改动不触及数据库或账务，但跳过事实不计为通过。
 - **发布判定：有条件通过，仅允许作为 `main` 云端验收候选。** 必须由 Coze 拉取 exact `3becee8`，重新构建并在同一 Google Chrome 项目图片上证明 `/api/image/source` HTTP 200、三处图片自然尺寸非零、擦除/蒙版可绘制、调色预览可见、其余五个面板无回归，并确认新鲜 Console/网络/dialog 门禁后，才能关闭 UI004。
+
+## 2026-08-23 V588-UI-004 最终发布判定
+
+- 精确云端候选为 `main@8c936cac777f5b05cfb381c73e929c13a5341efd`，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰；干净生产构建、5000 端口、根路由和新图片代理路由均已实际核对。
+- Google Chrome 仅复用已打开的 Coze 项目页和预览页，未使用 360，未新建标签。擦除、蒙版和调色均以真实 Pear 图片完成源图加载验证；擦除/蒙版笔迹、调色滑杆和可见预览已通过。
+- 浏览器新鲜 Console error/warning 和原生 dialog 均为 0；本次不创建付费编辑任务，未更改任务、供应商、积分或退款逻辑。
+- **UI004 专项发布判定：通过。** 全平台仍为有条件通过，因 `POSTGRES_TEST_DATABASE_URL` 缺失导致的 105 项真实 PostgreSQL 集成/并发测试仍未验证。
