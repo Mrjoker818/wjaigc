@@ -34,6 +34,29 @@ describe('login panel native form contract', () => {
     );
   });
 
+  it('routes chat without briefly mounting the canvas workspace', () => {
+    const chatBranchStart = homePageSource.indexOf("if (productType === 'chat')");
+    const chatBranchEnd = homePageSource.indexOf('// Canvas mode:', chatBranchStart);
+    const chatBranch = homePageSource.slice(chatBranchStart, chatBranchEnd);
+
+    expect(chatBranchStart).toBeGreaterThan(-1);
+    expect(chatBranchEnd).toBeGreaterThan(chatBranchStart);
+    expect(chatBranch).toContain("window.location.href = '/simple-chat';");
+    expect(chatBranch).not.toContain('setCurrentUser(user);');
+  });
+
+  it('does not start canvas project hydration before a chat redirect', () => {
+    expect(loginPanelSource).toMatch(
+      /if \(productType === 'chat'\) \{[\s\S]*?onLogin\(data\.user, productType\);[\s\S]*?return;[\s\S]*?\}/,
+    );
+    expect(loginPanelSource).toMatch(
+      /if \(productType === 'chat'\)[\s\S]*?return;[\s\S]*?const loggedIn = await userManager\.upsertUserFromServer/,
+    );
+    expect(loginPanelSource).toMatch(
+      /if \(selectedMode === 'chat'\) \{[\s\S]*?onLogin\(data\.user, selectedMode\);[\s\S]*?return;[\s\S]*?\}/,
+    );
+  });
+
   it('toggles password visibility without submitting the login form', () => {
     expect(loginPanelSource).toContain('const [showLoginPassword, setShowLoginPassword] = useState(false);');
     expect(loginPanelSource).toContain("type={showLoginPassword ? 'text' : 'password'}");

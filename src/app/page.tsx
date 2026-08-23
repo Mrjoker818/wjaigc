@@ -71,7 +71,6 @@ function HomeContent() {
   const handleLogin = useCallback(async (user: User, productType?: string) => {
     // Chat mode: redirect to /simple-chat
     if (productType === 'chat') {
-      setCurrentUser(user);
       window.location.href = '/simple-chat';
       return;
     }

@@ -59,6 +59,8 @@ interface RuntimeEvidence {
   requestFailures: NetworkEntry[];
   navigationAborts: NetworkEntry[];
   expectedResponses: ReturnType<typeof createExpectedResponseRegistry<Request>>;
+  activePageRequests: Map<Request, NetworkEntry>;
+  lastRequestActivityAt: number;
   currentStage: string | null;
   navigationStage: string | null;
   partition?: NetworkPartition;
@@ -128,6 +130,8 @@ async function collectRuntimeEvidence(page: Page, secrets: readonly string[]): P
     requestFailures: [],
     navigationAborts: [],
     expectedResponses: createExpectedResponseRegistry<Request>(),
+    activePageRequests: new Map<Request, NetworkEntry>(),
+    lastRequestActivityAt: Date.now(),
     currentStage: null,
     navigationStage: null,
   };
@@ -162,7 +166,21 @@ async function collectRuntimeEvidence(page: Page, secrets: readonly string[]): P
     evidence.dialogs.push({ type: dialog.type(), message: redact(dialog.message(), secrets) });
     void dialog.dismiss();
   });
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/task-events' || request.resourceType() === 'eventsource') return;
+    evidence.lastRequestActivityAt = Date.now();
+    evidence.activePageRequests.set(request, {
+      method: request.method(),
+      path,
+      stage: evidence.currentStage,
+    });
+  });
+  page.on('requestfinished', request => {
+    if (evidence.activePageRequests.delete(request)) evidence.lastRequestActivityAt = Date.now();
+  });
   page.on('requestfailed', request => {
+    if (evidence.activePageRequests.delete(request)) evidence.lastRequestActivityAt = Date.now();
     const entry: NetworkEntry = {
       method: request.method(),
       path: new URL(request.url()).pathname,
@@ -190,6 +208,27 @@ async function collectRuntimeEvidence(page: Page, secrets: readonly string[]): P
     });
   });
   return evidence;
+}
+
+async function waitForApplicationRequestsToSettle(
+  page: Page,
+  evidence: RuntimeEvidence,
+  label: string,
+): Promise<void> {
+  await page.waitForLoadState('load');
+  await expect.poll(
+    () => {
+      const active = Array.from(evidence.activePageRequests.values()).map(entry => `${entry.method} ${entry.path}`);
+      return {
+        active,
+        quiet: active.length === 0 && Date.now() - evidence.lastRequestActivityAt >= 300,
+      };
+    },
+    {
+      message: `${label}: application requests did not settle`,
+      timeout: 15_000,
+    },
+  ).toEqual({ active: [], quiet: true });
 }
 
 function markExpectedResponse(evidence: RuntimeEvidence, response: Response, stage: string): string {
@@ -445,29 +484,38 @@ async function exerciseRole(page: Page, testInfo: TestInfo, role: TestRole): Pro
     expect(accepted.status()).toBe(200);
     await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 20_000 });
     await assertMigratedCredential(role, account);
+    await waitForApplicationRequestsToSettle(page, evidence, 'initial dashboard');
 
     await reloadWithAuthenticatedSession(page, evidence, account, 'dashboard-refresh');
     await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 20_000 });
+    await waitForApplicationRequestsToSettle(page, evidence, 'reloaded dashboard');
 
     await runNavigationStage(evidence, 'canvas-navigation', () => page.goto('/?loginMode=canvas', { waitUntil: 'domcontentloaded' }));
     await expect(page.getByRole('group', { name: '空画布快捷操作' })).toBeVisible({ timeout: 30_000 });
+    await waitForApplicationRequestsToSettle(page, evidence, 'initial canvas');
     await reloadWithAuthenticatedSession(page, evidence, account, 'canvas-refresh');
     await expect(page.getByRole('group', { name: '空画布快捷操作' })).toBeVisible({ timeout: 30_000 });
+    await waitForApplicationRequestsToSettle(page, evidence, 'reloaded canvas');
 
     await runNavigationStage(evidence, 'dashboard-navigation', () => page.goto('/?view=dashboard', { waitUntil: 'domcontentloaded' }));
     await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 20_000 });
+    await waitForApplicationRequestsToSettle(page, evidence, 'dashboard before logout');
     await page.getByTitle('查看用户信息').click();
     const logoutResponsePromise = page.waitForResponse(response => (
       new URL(response.url()).pathname === '/api/auth/logout'
       && response.request().method() === 'POST'
     ));
-    const [logoutResponse] = await Promise.all([
-      logoutResponsePromise,
-      page.getByRole('button', { name: '退出登录', exact: true }).click(),
-    ]);
+    const logoutResponse = await runNavigationStage(evidence, 'dashboard-logout', async () => {
+      const [response] = await Promise.all([
+        logoutResponsePromise,
+        page.getByRole('button', { name: '退出登录', exact: true }).click(),
+      ]);
+      await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible({ timeout: 20_000 });
+      return response;
+    });
     expect(logoutResponse.status()).toBe(200);
-    await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible({ timeout: 20_000 });
     await verifyPostLogoutIsolation(page, evidence);
+    await waitForApplicationRequestsToSettle(page, evidence, 'logged-out entry');
 
     await openLoginForm(page, 'chat');
     const chatLogin = await submitAcceptedLogin(page, evidence, account, 'chat-correct-login');
@@ -475,18 +523,26 @@ async function exerciseRole(page: Page, testInfo: TestInfo, role: TestRole): Pro
     await expect(page).toHaveURL(/\/simple-chat/);
     await expect(page.getByRole('heading', { name: '智能对话', exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByPlaceholder(/输入消息/)).toBeVisible({ timeout: 20_000 });
+    await waitForApplicationRequestsToSettle(page, evidence, 'initial chat');
     await reloadWithAuthenticatedSession(page, evidence, account, 'chat-refresh');
     await expect(page.getByPlaceholder(/输入消息/)).toBeVisible({ timeout: 20_000 });
+    await waitForApplicationRequestsToSettle(page, evidence, 'reloaded chat');
 
     const finalLogoutPromise = page.waitForResponse(response => (
       new URL(response.url()).pathname === '/api/auth/logout'
       && response.request().method() === 'POST'
     ));
-    const [finalLogout] = await Promise.all([
+    const [finalLogout, finalLogoutStatus] = await Promise.all([
       finalLogoutPromise,
-      page.evaluate(() => fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })),
+      page.evaluate(async () => {
+        const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+        await response.text();
+        return response.status;
+      }),
     ]);
     expect(finalLogout.status()).toBe(200);
+    expect(finalLogoutStatus).toBe(200);
+    await waitForApplicationRequestsToSettle(page, evidence, 'final logout');
     await runNavigationStage(evidence, 'final-entry-navigation', () => page.goto('/', { waitUntil: 'domcontentloaded' }));
     await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible({ timeout: 20_000 });
 

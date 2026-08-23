@@ -79,6 +79,10 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
         return;
       }
 
+      if (productType === 'chat') {
+        onLogin(data.user, productType);
+        return;
+      }
       const loggedIn = await userManager.upsertUserFromServer(data.user);
       onLogin(loggedIn, productType);
     } catch {
@@ -149,6 +153,10 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
         return;
       }
       // 注册成功，自动登录
+      if (selectedMode === 'chat') {
+        onLogin(data.user, selectedMode);
+        return;
+      }
       const loggedIn = await userManager.upsertUserFromServer(data.user);
       onLogin(loggedIn, selectedMode);
     } catch {
