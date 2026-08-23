@@ -18,6 +18,7 @@ vi.mock('@/lib/server-auth', () => ({
 
 import {
   resolveTaskModel,
+  resolveTaskModelForUser,
   resolveTaskModelCatalogResult,
   taskModelKey,
 } from '@/lib/task-core/model-catalog';
@@ -323,6 +324,20 @@ describe('task model catalog', () => {
       }),
       createUser({ id: 'admin-a', role: 'admin' }),
     ]);
+  });
+
+  it('resolves with an authenticated user object without querying managed users again', async () => {
+    mocks.listManagedUsers.mockClear();
+
+    await expect(resolveTaskModelForUser(
+      'provider-a',
+      'gpt-image-1',
+      createUser({ id: 'admin-direct', role: 'admin' }),
+    )).resolves.toMatchObject({
+      providerId: 'provider-a',
+      modelId: 'gpt-image-1',
+    });
+    expect(mocks.listManagedUsers).not.toHaveBeenCalled();
   });
 
   it('uses existing image inference and only applies explicit per-model admin overrides', async () => {

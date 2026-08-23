@@ -4,6 +4,7 @@ import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
 import {
+  CAPABILITY_CATALOG_VERSION,
   matchesRequestedModelType,
   resolveTaskModelCatalogResultFromSnapshot,
   serializeModelAuthorizationMigration,
@@ -63,6 +64,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
+    capabilityCatalogVersion: CAPABILITY_CATALOG_VERSION,
     providers: snapshot.providers,
     models: responseModels,
     taskModelCatalog: catalogResult.taskModelCatalog.filter(model => {

@@ -3,6 +3,7 @@ import { getPublicModelCatalogSnapshot } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import {
+  CAPABILITY_CATALOG_VERSION,
   matchesRequestedModelType,
   resolveTaskModelCatalogResultFromSnapshot,
   serializeModelAuthorizationMigration,
@@ -47,6 +48,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
+    capabilityCatalogVersion: CAPABILITY_CATALOG_VERSION,
     models: filteredModels.map(model => {
       const key = taskModelKey(model.providerId, model.id);
       const effectiveType = catalogResult.effectiveModelTypes.get(key);

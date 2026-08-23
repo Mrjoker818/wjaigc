@@ -33,6 +33,7 @@ import {
   mergeCapabilityLayers,
   readModelCapabilityOverride,
 } from './model-capability-resolution';
+import { resolveProviderCapabilityAdapter } from './provider-capability-adapters';
 
 export {
   CAPABILITY_CATALOG_VERSION,
@@ -245,6 +246,50 @@ function descriptorCapabilityLayer(descriptor: TaskModelDescriptor): CapabilityL
   return result;
 }
 
+function createDiscoveryCapabilities(model: ModelInfo): CapabilityLayer {
+  const layer: CapabilityLayer = {};
+  if (Object.prototype.hasOwnProperty.call(model, 'supportedAspectRatios')) {
+    layer.allowedRatios = [...(model.supportedAspectRatios || [])];
+  }
+  if (Object.prototype.hasOwnProperty.call(model, 'supportedQualities')) {
+    layer.qualityOptions = [...(model.supportedQualities || [])];
+  }
+  if (Object.prototype.hasOwnProperty.call(model, 'maxImages') && model.maxImages !== undefined) {
+    layer.maxOutputs = model.maxImages;
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(model, 'maxReferenceImages')
+    && model.maxReferenceImages !== undefined
+  ) {
+    layer.maxReferenceImages = model.maxReferenceImages;
+    layer.supportsReferenceImages = model.maxReferenceImages > 0;
+  }
+  if (Object.prototype.hasOwnProperty.call(model, 'allowedDurationsSeconds')) {
+    layer.allowedDurationsSeconds = [...(model.allowedDurationsSeconds || [])];
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(model, 'maxDurationSeconds')
+    && model.maxDurationSeconds !== undefined
+  ) {
+    layer.maxDurationSeconds = model.maxDurationSeconds;
+  }
+  if (Object.prototype.hasOwnProperty.call(model, 'supportedOperations')) {
+    layer.supportedOperations = [...(model.supportedOperations || [])];
+    if (model.supportedOperations?.some(operation => (
+      operation === 'image-to-image'
+      || operation === 'image-to-video'
+      || operation === 'first-last-frame'
+      || operation === 'multi-reference'
+    ))) {
+      layer.supportsReferenceImages = true;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(model, 'outputKinds')) {
+    layer.outputKinds = [...(model.outputKinds || [])];
+  }
+  return layer;
+}
+
 function getVideoSupportedOperations(
   info: ReturnType<typeof getVideoModelInfo>,
 ): SupportedOperation[] {
@@ -427,6 +472,8 @@ function describeConfiguredModel(
 
   const merged = mergeCapabilityLayers({
     fallback: descriptorCapabilityLayer(descriptor),
+    discovery: createDiscoveryCapabilities(model),
+    adapter: resolveProviderCapabilityAdapter(provider, model),
     admin: readTaskModelOverride(provider, model.id),
   });
   return {
@@ -608,12 +655,12 @@ function buildTaskModelCatalogResult(
   };
 }
 
-export async function resolveTaskModel(
+function resolveTaskModelFromProviders(
+  providers: ApiProvider[],
   providerId: string,
   modelId: string,
-  userId: string,
-): Promise<TaskModelDescriptor> {
-  const [providers, users] = await Promise.all([getApiProviders(), listManagedUsers()]);
+  user: User,
+): TaskModelDescriptor {
   const provider = providers.find(candidate => candidate.id === providerId);
   const canonicalModelId = provider
     ? canonicalizeConfiguredModelId(provider, modelId)
@@ -623,9 +670,8 @@ export async function resolveTaskModel(
     throw new Error(`Task model ${taskModelKey(providerId, modelId)} is not configured`);
   }
 
-  const user = users.find(candidate => candidate.id === userId) || null;
-  if (!user || user.status === 'disabled') {
-    throw new Error(`User ${userId} is not authorized for ${taskModelKey(providerId, modelId)}`);
+  if (user.status === 'disabled') {
+    throw new Error(`User ${user.id} is not authorized for ${taskModelKey(providerId, modelId)}`);
   }
 
   const result = buildTaskModelCatalogResult(
@@ -643,7 +689,7 @@ export async function resolveTaskModel(
         `Model authorization migration required for ${canonicalModelId}: ${migrationRequired.reason}`,
       );
     }
-    throw new Error(`User ${userId} is not authorized for ${key}`);
+    throw new Error(`User ${user.id} is not authorized for ${key}`);
   }
 
   const descriptor = result.taskModelCatalog.find(candidate => (
@@ -653,6 +699,28 @@ export async function resolveTaskModel(
     throw new Error(`Task model ${taskModelKey(providerId, modelId)} is not supported`);
   }
   return descriptor;
+}
+
+export async function resolveTaskModelForUser(
+  providerId: string,
+  modelId: string,
+  user: User,
+): Promise<TaskModelDescriptor> {
+  const providers = await getApiProviders();
+  return resolveTaskModelFromProviders(providers, providerId, modelId, user);
+}
+
+export async function resolveTaskModel(
+  providerId: string,
+  modelId: string,
+  userId: string,
+): Promise<TaskModelDescriptor> {
+  const [providers, users] = await Promise.all([getApiProviders(), listManagedUsers()]);
+  const user = users.find(candidate => candidate.id === userId);
+  if (!user) {
+    throw new Error(`User ${userId} is not authorized for ${taskModelKey(providerId, modelId)}`);
+  }
+  return resolveTaskModelFromProviders(providers, providerId, modelId, user);
 }
 
 export async function resolveTaskModelCatalog(
