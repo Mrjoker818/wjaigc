@@ -29,7 +29,10 @@ import {
   type SupportedOperation,
   type TaskModelDescriptor,
 } from './model-capability-contract';
-import { mergeCapabilityLayers } from './model-capability-resolution';
+import {
+  mergeCapabilityLayers,
+  readModelCapabilityOverride,
+} from './model-capability-resolution';
 
 export {
   CAPABILITY_CATALOG_VERSION,
@@ -86,13 +89,6 @@ export interface TaskModelCatalogResult {
 type TaskModelKind = TaskModelDescriptor['kind'];
 type TaskModelOverride = CapabilityLayer;
 
-const EXECUTION_MODES = new Set<TaskModelDescriptor['executionMode']>(['sync', 'async']);
-const MAX_OVERRIDE_ARRAY_ITEMS = 32;
-const MAX_OVERRIDE_ARRAY_ITEM_LENGTH = 128;
-const MAX_OVERRIDE_PROTOCOL_LENGTH = 128;
-const MAX_OVERRIDE_OUTPUTS = 4;
-const MAX_OVERRIDE_DURATION_SECONDS = 3600;
-
 interface CatalogEntry {
   provider: ApiProvider;
   model: ModelInfo;
@@ -139,10 +135,6 @@ export function serializeModelAuthorizationMigration(
       count: item.candidates.length,
     })),
   };
-}
-
-function hasOwn(value: object, key: PropertyKey): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function findConfiguredModel(provider: ApiProvider, modelId: string): ModelInfo | null {
@@ -410,109 +402,20 @@ function createBaseDescriptor(
   }
 }
 
-function readStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-
-  const result: string[] = [];
-  const seen = new Set<string>();
-  for (const item of value) {
-    if (typeof item !== 'string') return undefined;
-    const normalized = item.trim();
-    if (!normalized || seen.has(normalized)) continue;
-    if (normalized.length > MAX_OVERRIDE_ARRAY_ITEM_LENGTH) return undefined;
-    seen.add(normalized);
-    result.push(normalized);
-    if (result.length > MAX_OVERRIDE_ARRAY_ITEMS) return undefined;
-  }
-  if (value.length > 0 && result.length === 0) return undefined;
-  return result;
-}
-
 function readTaskModelOverride(provider: ApiProvider, modelId: string): TaskModelOverride {
-  const advancedParams = provider.advancedParams;
   if (
-    !advancedParams
-    || !hasOwn(advancedParams, 'taskModelCapabilities')
+    !provider.advancedParams
+    || !Object.prototype.hasOwnProperty.call(
+      provider.advancedParams,
+      'taskModelCapabilities',
+    )
   ) {
     return {};
   }
-  const raw = advancedParams.taskModelCapabilities;
-  if (typeof raw !== 'string' || !raw) return {};
-
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    if (!hasOwn(parsed, modelId)) return {};
-    const candidate = (parsed as Record<string, unknown>)[modelId];
-    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return {};
-    const value = candidate as Record<string, unknown>;
-    const override: TaskModelOverride = {};
-
-    if (hasOwn(value, 'protocol') && typeof value.protocol === 'string') {
-      const protocol = value.protocol.trim();
-      if (protocol && protocol.length <= MAX_OVERRIDE_PROTOCOL_LENGTH) {
-        override.protocol = protocol;
-      }
-    }
-    if (
-      hasOwn(value, 'executionMode')
-      && typeof value.executionMode === 'string'
-      && EXECUTION_MODES.has(value.executionMode as TaskModelDescriptor['executionMode'])
-    ) {
-      override.executionMode = value.executionMode as TaskModelDescriptor['executionMode'];
-    }
-
-    const allowedRatios = hasOwn(value, 'allowedRatios')
-      ? readStringArray(value.allowedRatios)
-      : undefined;
-    if (allowedRatios !== undefined) override.allowedRatios = allowedRatios;
-    const allowedSizes = hasOwn(value, 'allowedSizes')
-      ? readStringArray(value.allowedSizes)
-      : undefined;
-    if (allowedSizes !== undefined) override.allowedSizes = allowedSizes;
-    const qualityOptions = hasOwn(value, 'qualityOptions')
-      ? readStringArray(value.qualityOptions)
-      : undefined;
-    if (qualityOptions !== undefined) override.qualityOptions = qualityOptions;
-    const outputKinds = hasOwn(value, 'outputKinds')
-      ? readStringArray(value.outputKinds)
-      : undefined;
-    if (outputKinds !== undefined) override.outputKinds = outputKinds;
-
-    if (
-      hasOwn(value, 'maxOutputs')
-      && typeof value.maxOutputs === 'number'
-      && Number.isFinite(value.maxOutputs)
-      && Number.isInteger(value.maxOutputs)
-      && value.maxOutputs >= 1
-      && value.maxOutputs <= MAX_OVERRIDE_OUTPUTS
-    ) {
-      override.maxOutputs = value.maxOutputs;
-    }
-    if (
-      hasOwn(value, 'maxDurationSeconds')
-      && typeof value.maxDurationSeconds === 'number'
-      && Number.isFinite(value.maxDurationSeconds)
-      && Number.isInteger(value.maxDurationSeconds)
-      && value.maxDurationSeconds >= 1
-      && value.maxDurationSeconds <= MAX_OVERRIDE_DURATION_SECONDS
-    ) {
-      override.maxDurationSeconds = value.maxDurationSeconds;
-    }
-    if (
-      hasOwn(value, 'supportsReferenceImages')
-      && typeof value.supportsReferenceImages === 'boolean'
-    ) {
-      override.supportsReferenceImages = value.supportsReferenceImages;
-    }
-    if (hasOwn(value, 'supportsMask') && typeof value.supportsMask === 'boolean') {
-      override.supportsMask = value.supportsMask;
-    }
-
-    return override;
-  } catch {
-    return {};
-  }
+  return readModelCapabilityOverride(
+    provider.advancedParams.taskModelCapabilities,
+    modelId,
+  );
 }
 
 function describeConfiguredModel(

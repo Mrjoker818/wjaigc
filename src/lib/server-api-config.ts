@@ -64,7 +64,21 @@ function normalizeAdvancedParams(raw: unknown): Record<string, string> {
     return result;
   }
   if (typeof raw === 'object') {
-    return raw as Record<string, string>;
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      const normalizedKey = key.trim();
+      if (!normalizedKey) continue;
+      if (typeof value === 'string') {
+        result[normalizedKey] = value;
+      } else if (value !== undefined) {
+        try {
+          result[normalizedKey] = JSON.stringify(value);
+        } catch {
+          // Ignore values that cannot cross the JSONB/string boundary safely.
+        }
+      }
+    }
+    return result;
   }
   return {};
 }
@@ -177,8 +191,46 @@ function normalizeSelectedModels(val: unknown): string[] {
 
 /** Normalize discovered_models from DB: handle JSON string or array */
 function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: string): ModelInfo[] {
-  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm', 'upscaler', 'removebg', 'audio'] as const;
+  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm', 'upscaler', 'removebg', 'general', 'universal', 'imageEdit', 'audio'] as const;
   type ModelType = typeof validTypes[number];
+  const readStringList = (value: unknown): string[] | undefined => {
+    if (!Array.isArray(value) || value.length > 32) return undefined;
+    const result: string[] = [];
+    const seen = new Set<string>();
+    for (const item of value) {
+      if (typeof item !== 'string') return undefined;
+      const normalized = item.trim();
+      if (!normalized || normalized.length > 128) return undefined;
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        result.push(normalized);
+      }
+    }
+    return result;
+  };
+  const readDurationList = (value: unknown): number[] | undefined => {
+    if (!Array.isArray(value) || value.length > 32) return undefined;
+    const result: number[] = [];
+    const seen = new Set<number>();
+    for (const item of value) {
+      if (typeof item !== 'number' || !Number.isInteger(item) || item < 1 || item > 3600) {
+        return undefined;
+      }
+      if (!seen.has(item)) {
+        seen.add(item);
+        result.push(item);
+      }
+    }
+    return result;
+  };
+  const readInteger = (value: unknown, minimum: number, maximum: number): number | undefined => (
+    typeof value === 'number'
+      && Number.isInteger(value)
+      && value >= minimum
+      && value <= maximum
+      ? value
+      : undefined
+  );
   const resolveType = (t: unknown): ModelType => {
     if (typeof t === 'string' && validTypes.includes(t as ModelType)) return t as ModelType;
     if (validTypes.includes(modelType as ModelType)) return modelType as ModelType;
@@ -199,6 +251,20 @@ function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: 
     if (m && typeof m === 'object' && !Array.isArray(m)) {
       const rec = m as Record<string, unknown>;
       const displayName = rec.displayName as string | undefined;
+      const supportedAspectRatios = readStringList(rec.supportedAspectRatios);
+      const supportedQualities = readStringList(rec.supportedQualities);
+      const capabilities = readStringList(rec.capabilities);
+      const outputKinds = readStringList(rec.outputKinds);
+      const supportedOperations = readStringList(rec.supportedOperations)?.filter(operation => (
+        [
+          'text-to-image', 'image-to-image', 'text-to-video', 'image-to-video',
+          'first-last-frame', 'multi-reference', 'video-extend',
+        ].includes(operation)
+      )) as ModelInfo['supportedOperations'] | undefined;
+      const allowedDurationsSeconds = readDurationList(rec.allowedDurationsSeconds);
+      const maxImages = readInteger(rec.maxImages, 1, 4);
+      const maxReferenceImages = readInteger(rec.maxReferenceImages, 0, 16);
+      const maxDurationSeconds = readInteger(rec.maxDurationSeconds, 1, 3600);
       return {
         id: (rec.id as string) || '',
         name: (rec.name as string) || (rec.id as string) || '',
@@ -206,9 +272,19 @@ function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: 
         providerId,
         type: resolveType(rec.type) as ModelInfo['type'],
         ...(rec.description ? { description: rec.description as string } : {}),
-        ...(rec.contextWindow ? { contextWindow: rec.contextWindow as number } : {}),
+        ...(readInteger(rec.contextWindow, 1, 10_000_000) !== undefined
+          ? { contextWindow: readInteger(rec.contextWindow, 1, 10_000_000) }
+          : {}),
         ...(rec.owned_by ? { owned_by: rec.owned_by as string } : {}),
-        ...(rec.capabilities ? { capabilities: rec.capabilities as string[] } : {}),
+        ...(supportedAspectRatios !== undefined ? { supportedAspectRatios } : {}),
+        ...(supportedQualities !== undefined ? { supportedQualities } : {}),
+        ...(maxImages !== undefined ? { maxImages } : {}),
+        ...(maxReferenceImages !== undefined ? { maxReferenceImages } : {}),
+        ...(allowedDurationsSeconds !== undefined ? { allowedDurationsSeconds } : {}),
+        ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
+        ...(supportedOperations !== undefined ? { supportedOperations } : {}),
+        ...(outputKinds !== undefined ? { outputKinds } : {}),
+        ...(capabilities !== undefined ? { capabilities } : {}),
       } as ModelInfo;
     }
     if (typeof m === 'string') {

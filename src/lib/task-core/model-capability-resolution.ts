@@ -6,9 +6,29 @@ import {
   type CapabilityMismatch,
   type CapabilitySource,
   type CapabilityValidationResult,
+  type ProviderCapabilityOverridesV1,
+  type SupportedOperation,
   type TaskModelDescriptor,
   type TaskModelSelection,
 } from './model-capability-contract';
+
+const MAX_CAPABILITY_MODELS = 512;
+const MAX_MODEL_ID_LENGTH = 256;
+const MAX_ARRAY_ITEMS = 32;
+const MAX_STRING_ITEM_LENGTH = 128;
+const MAX_PROTOCOL_LENGTH = 128;
+const MAX_OUTPUTS = 4;
+const MAX_REFERENCE_IMAGES = 16;
+const MAX_DURATION_SECONDS = 3600;
+const SUPPORTED_OPERATIONS = new Set<SupportedOperation>([
+  'text-to-image',
+  'image-to-image',
+  'text-to-video',
+  'image-to-video',
+  'first-last-frame',
+  'multi-reference',
+  'video-extend',
+]);
 
 function hasOwn(value: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
@@ -16,6 +36,193 @@ function hasOwn(value: object, key: PropertyKey): boolean {
 
 function cloneCapabilityValue<T>(value: T): T {
   return (Array.isArray(value) ? [...value] : value) as T;
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > MAX_ARRAY_ITEMS) return undefined;
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'string') return undefined;
+    const normalized = item.trim();
+    if (!normalized || normalized.length > MAX_STRING_ITEM_LENGTH) return undefined;
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
+function readDurationArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value) || value.length > MAX_ARRAY_ITEMS) return undefined;
+  const result: number[] = [];
+  const seen = new Set<number>();
+  for (const item of value) {
+    if (
+      typeof item !== 'number'
+      || !Number.isInteger(item)
+      || item < 1
+      || item > MAX_DURATION_SECONDS
+    ) {
+      return undefined;
+    }
+    if (!seen.has(item)) {
+      seen.add(item);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+function readOperations(value: unknown): SupportedOperation[] | undefined {
+  const operations = readStringArray(value);
+  if (!operations || operations.some(item => !SUPPORTED_OPERATIONS.has(item as SupportedOperation))) {
+    return undefined;
+  }
+  return operations as SupportedOperation[];
+}
+
+function readBoundedInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): number | undefined {
+  return typeof value === 'number'
+    && Number.isInteger(value)
+    && value >= minimum
+    && value <= maximum
+    ? value
+    : undefined;
+}
+
+export function readCapabilityOverride(value: unknown): CapabilityLayer {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const candidate = value as Record<string, unknown>;
+  const result: CapabilityLayer = {};
+
+  if (hasOwn(candidate, 'protocol') && typeof candidate.protocol === 'string') {
+    const protocol = candidate.protocol.trim();
+    if (protocol && protocol.length <= MAX_PROTOCOL_LENGTH) result.protocol = protocol;
+  }
+  if (
+    hasOwn(candidate, 'executionMode')
+    && (candidate.executionMode === 'sync' || candidate.executionMode === 'async')
+  ) {
+    result.executionMode = candidate.executionMode;
+  }
+
+  for (const field of ['allowedRatios', 'allowedSizes', 'qualityOptions', 'outputKinds'] as const) {
+    if (!hasOwn(candidate, field)) continue;
+    const parsed = readStringArray(candidate[field]);
+    if (parsed !== undefined) Object.assign(result, { [field]: parsed });
+  }
+
+  if (hasOwn(candidate, 'allowedDurationsSeconds')) {
+    const durations = readDurationArray(candidate.allowedDurationsSeconds);
+    if (durations !== undefined) result.allowedDurationsSeconds = durations;
+  }
+  if (hasOwn(candidate, 'supportedOperations')) {
+    const operations = readOperations(candidate.supportedOperations);
+    if (operations !== undefined) result.supportedOperations = operations;
+  }
+
+  const maxOutputs = readBoundedInteger(candidate.maxOutputs, 1, MAX_OUTPUTS);
+  if (hasOwn(candidate, 'maxOutputs') && maxOutputs !== undefined) result.maxOutputs = maxOutputs;
+  const maxReferenceImages = readBoundedInteger(
+    candidate.maxReferenceImages,
+    0,
+    MAX_REFERENCE_IMAGES,
+  );
+  if (hasOwn(candidate, 'maxReferenceImages') && maxReferenceImages !== undefined) {
+    result.maxReferenceImages = maxReferenceImages;
+  }
+  const maxDurationSeconds = readBoundedInteger(
+    candidate.maxDurationSeconds,
+    1,
+    MAX_DURATION_SECONDS,
+  );
+  if (hasOwn(candidate, 'maxDurationSeconds') && maxDurationSeconds !== undefined) {
+    result.maxDurationSeconds = maxDurationSeconds;
+  }
+
+  if (
+    hasOwn(candidate, 'supportsReferenceImages')
+    && typeof candidate.supportsReferenceImages === 'boolean'
+  ) {
+    result.supportsReferenceImages = candidate.supportsReferenceImages;
+  }
+  if (hasOwn(candidate, 'supportsMask') && typeof candidate.supportsMask === 'boolean') {
+    result.supportsMask = candidate.supportsMask;
+  }
+
+  return result;
+}
+
+function readLegacyCapabilityOverride(value: unknown): CapabilityLayer {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const candidate = value as Record<string, unknown>;
+  const normalized: Record<string, unknown> = {};
+  for (const key of Object.keys(candidate)) normalized[key] = candidate[key];
+
+  for (const field of ['allowedRatios', 'allowedSizes', 'qualityOptions', 'outputKinds'] as const) {
+    const raw = normalized[field];
+    if (!Array.isArray(raw) || raw.some(item => typeof item !== 'string')) continue;
+    const values = Array.from(new Set(
+      raw.map(item => (item as string).trim()).filter(Boolean),
+    ));
+    if (raw.length > 0 && values.length === 0) {
+      delete normalized[field];
+    } else {
+      normalized[field] = values;
+    }
+  }
+  return readCapabilityOverride(normalized);
+}
+
+function parseJsonValue(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+export function readProviderCapabilityOverrides(raw: unknown): ProviderCapabilityOverridesV1 {
+  const parsed = parseJsonValue(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { version: 1, models: {} };
+  }
+  const root = parsed as Record<string, unknown>;
+  const isVersioned = hasOwn(root, 'version') || hasOwn(root, 'models');
+  if (isVersioned && (root.version !== 1 || !root.models || typeof root.models !== 'object' || Array.isArray(root.models))) {
+    return { version: 1, models: {} };
+  }
+  const rawModels = (isVersioned ? root.models : root) as Record<string, unknown>;
+  const models: ProviderCapabilityOverridesV1['models'] = {};
+  const modelIds = Object.keys(rawModels).slice(0, MAX_CAPABILITY_MODELS).sort();
+  for (const modelId of modelIds) {
+    if (!modelId || modelId.length > MAX_MODEL_ID_LENGTH) continue;
+    const candidate = rawModels[modelId];
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+    models[modelId] = isVersioned
+      ? readCapabilityOverride(candidate)
+      : readLegacyCapabilityOverride(candidate);
+  }
+  return { version: 1, models };
+}
+
+export function readModelCapabilityOverride(raw: unknown, modelId: string): CapabilityLayer {
+  return readProviderCapabilityOverrides(raw).models[modelId] || {};
+}
+
+export function serializeProviderCapabilityOverrides(
+  value: ProviderCapabilityOverridesV1,
+): string {
+  return JSON.stringify(readProviderCapabilityOverrides(value));
 }
 
 export function mergeCapabilityLayers(input: {

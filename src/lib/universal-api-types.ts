@@ -50,6 +50,19 @@ export interface ModelInfo {
   supportedAspectRatios?: string[];
   supportedQualities?: string[];
   maxImages?: number;
+  maxReferenceImages?: number;
+  allowedDurationsSeconds?: number[];
+  maxDurationSeconds?: number;
+  supportedOperations?: Array<
+    | 'text-to-image'
+    | 'image-to-image'
+    | 'text-to-video'
+    | 'image-to-video'
+    | 'first-last-frame'
+    | 'multi-reference'
+    | 'video-extend'
+  >;
+  outputKinds?: string[];
   capabilities?: string[];
   owned_by?: string;
 }
