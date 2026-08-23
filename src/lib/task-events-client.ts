@@ -29,8 +29,29 @@ export class TaskEventsClient {
   private connected = false;
   private connecting = false;
   private connectionGeneration = 0;
+  private connectionRequested = false;
+  private suspendedForPageTransition = false;
+  private lifecycleListenersAttached = false;
+
+  private readonly handlePageTransition = (): void => {
+    this.suspendedForPageTransition = true;
+    this.closeConnection();
+  };
+
+  private readonly handlePageRestore = (): void => {
+    if (!this.suspendedForPageTransition) return;
+    this.suspendedForPageTransition = false;
+    if (this.connectionRequested) this.startConnection();
+  };
 
   connect(): void {
+    this.connectionRequested = true;
+    this.attachPageLifecycleListeners();
+    this.startConnection();
+  }
+
+  private startConnection(): void {
+    if (this.suspendedForPageTransition || !this.connectionRequested) return;
     if (this.eventSource || this.reconnectTimer || this.connecting) return;
 
     this.connecting = true;
@@ -39,6 +60,14 @@ export class TaskEventsClient {
   }
 
   disconnect(): void {
+    this.connectionRequested = false;
+    this.suspendedForPageTransition = false;
+    this.detachPageLifecycleListeners();
+    this.closeConnection();
+    this.reconnectAttempts = 0;
+  }
+
+  private closeConnection(): void {
     this.connectionGeneration++;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -48,7 +77,22 @@ export class TaskEventsClient {
     this.eventSource = null;
     this.connected = false;
     this.connecting = false;
-    this.reconnectAttempts = 0;
+  }
+
+  private attachPageLifecycleListeners(): void {
+    if (this.lifecycleListenersAttached || typeof window === 'undefined') return;
+    window.addEventListener('beforeunload', this.handlePageTransition);
+    window.addEventListener('pagehide', this.handlePageTransition);
+    window.addEventListener('pageshow', this.handlePageRestore);
+    this.lifecycleListenersAttached = true;
+  }
+
+  private detachPageLifecycleListeners(): void {
+    if (!this.lifecycleListenersAttached || typeof window === 'undefined') return;
+    window.removeEventListener('beforeunload', this.handlePageTransition);
+    window.removeEventListener('pagehide', this.handlePageTransition);
+    window.removeEventListener('pageshow', this.handlePageRestore);
+    this.lifecycleListenersAttached = false;
   }
 
   isConnected(): boolean {
@@ -94,7 +138,12 @@ export class TaskEventsClient {
     const authenticated = await this.hasAuthenticatedSession();
     this.connecting = false;
 
-    if (generation !== this.connectionGeneration || this.eventSource) return;
+    if (
+      generation !== this.connectionGeneration
+      || this.eventSource
+      || !this.connectionRequested
+      || this.suspendedForPageTransition
+    ) return;
     if (!authenticated) return;
 
     try {
@@ -146,12 +195,17 @@ export class TaskEventsClient {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts || this.reconnectTimer) return;
+    if (
+      !this.connectionRequested
+      || this.suspendedForPageTransition
+      || this.reconnectAttempts >= this.maxReconnectAttempts
+      || this.reconnectTimer
+    ) return;
     const delay = Math.min(2_000 * 2 ** this.reconnectAttempts, 30_000);
     this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      this.startConnection();
     }, delay);
   }
 }

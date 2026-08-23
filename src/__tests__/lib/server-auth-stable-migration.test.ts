@@ -1070,14 +1070,14 @@ describe.sequential('concurrency-safe authentication persistence', () => {
 
   it('warns once with a sanitized object when DB_PLUS_FILE user replica writes fail', async () => {
     let row = databaseUser({ credential_hash: 'scrypt-v1$32768$8$1$AQEBAQEBAQEBAQEBAQEBAQ$AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI' });
-    const writeAuthJsonFileAtomic = vi.fn(async (filePath: string): Promise<void> => {
+    const refreshAuthJsonFileAtomic = vi.fn(async (filePath: string): Promise<void> => {
       if (filePath.endsWith('users.json')) throw new Error('replica contains private values');
     });
     vi.doMock('@/lib/auth/auth-persistence', async () => {
       const actual = await vi.importActual<typeof import('@/lib/auth/auth-persistence')>(
         '@/lib/auth/auth-persistence',
       );
-      return { ...actual, writeAuthJsonFileAtomic };
+      return { ...actual, refreshAuthJsonFileAtomic };
     });
     const updateUserProfileFields = vi.fn(async (input: {
       updatedAt: number;

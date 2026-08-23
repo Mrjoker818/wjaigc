@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   readFile: vi.fn(),
   writeFileSync: vi.fn(),
   writeAuthJsonFileAtomic: vi.fn(),
+  refreshAuthJsonFileAtomic: vi.fn(),
+  withDatabaseAuthReplicaLock: vi.fn(),
 }));
 
 vi.mock('@/lib/db-client', () => ({
@@ -14,6 +16,10 @@ vi.mock('@/lib/db-client', () => ({
 
 vi.mock('@/lib/server-data-root', () => ({
   getServerSystemDir: () => '/fixture/system',
+}));
+
+vi.mock('@/lib/auth/auth-repository', () => ({
+  withDatabaseAuthReplicaLock: mocks.withDatabaseAuthReplicaLock,
 }));
 
 vi.mock('fs/promises', async (importOriginal) => {
@@ -29,6 +35,7 @@ vi.mock('@/lib/auth/auth-persistence', async (importOriginal) => {
   return {
     ...original,
     writeAuthJsonFileAtomic: mocks.writeAuthJsonFileAtomic,
+    refreshAuthJsonFileAtomic: mocks.refreshAuthJsonFileAtomic,
   };
 });
 
@@ -52,6 +59,10 @@ const originalPersistenceMode = process.env.WUJIE_AUTH_PERSISTENCE_MODE;
 describe('file to database user migration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.refreshAuthJsonFileAtomic.mockImplementation(async (_filePath, loadValue) => await loadValue());
+    mocks.withDatabaseAuthReplicaLock.mockImplementation(async (work) => (
+      await work({ query: mocks.execSql })
+    ));
     process.env.WUJIE_AUTH_PERSISTENCE_MODE = 'DB_PLUS_FILE';
     mocks.execSql.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT * FROM wujie_users')) {
@@ -174,11 +185,11 @@ describe('file to database user migration', () => {
 
     await migrateFileDataToDb();
 
-    expect(mocks.writeAuthJsonFileAtomic).toHaveBeenCalledTimes(1);
-    const [, replica] = mocks.writeAuthJsonFileAtomic.mock.calls[0] as [string, {
+    expect(mocks.refreshAuthJsonFileAtomic).toHaveBeenCalledTimes(1);
+    const replica = await mocks.refreshAuthJsonFileAtomic.mock.results[0].value as {
       users: Array<Record<string, unknown>>;
       updatedAt: number;
-    }];
+    };
     expect(Number.isSafeInteger(replica.updatedAt)).toBe(true);
     expect(replica.users).toEqual([{
       id: 'database-only-user',
@@ -202,6 +213,33 @@ describe('file to database user migration', () => {
       createdAt: 1_700_000_000_010,
       updatedAt: 1_700_000_000_011,
     }]);
+  });
+
+  it('loads the authoritative database snapshot from inside the serialized refresh source', async () => {
+    mocks.readFile.mockRejectedValue(missingFile);
+    mocks.execSql.mockImplementation(async (sql: string) => (
+      sql.includes('SELECT * FROM wujie_users')
+        ? { rows: [], rowCount: 0 }
+        : { rows: [], rowCount: 0 }
+    ));
+    let loadReplica: (() => Promise<unknown>) | undefined;
+    mocks.refreshAuthJsonFileAtomic.mockImplementation(async (_filePath, loadValue) => {
+      loadReplica = loadValue;
+      return { users: [], updatedAt: Date.now() };
+    });
+
+    await migrateFileDataToDb();
+    const readsBeforeRefresh = mocks.execSql.mock.calls.filter(([sql]) => (
+      String(sql).includes('SELECT * FROM wujie_users')
+    )).length;
+    expect(loadReplica).toBeTypeOf('function');
+
+    await loadReplica!();
+
+    const readsAfterRefresh = mocks.execSql.mock.calls.filter(([sql]) => (
+      String(sql).includes('SELECT * FROM wujie_users')
+    )).length;
+    expect(readsAfterRefresh).toBe(readsBeforeRefresh + 1);
   });
 
   it('replaces stale file rows with the database-authoritative replica', async () => {
@@ -244,8 +282,8 @@ describe('file to database user migration', () => {
 
     await migrateFileDataToDb();
 
-    expect(mocks.writeAuthJsonFileAtomic).toHaveBeenCalledTimes(1);
-    const replica = mocks.writeAuthJsonFileAtomic.mock.calls[0]?.[1] as {
+    expect(mocks.refreshAuthJsonFileAtomic).toHaveBeenCalledTimes(1);
+    const replica = await mocks.refreshAuthJsonFileAtomic.mock.results[0].value as {
       users: Array<Record<string, unknown>>;
     };
     expect(replica.users).toEqual([expect.objectContaining({
@@ -283,6 +321,7 @@ describe('file to database user migration', () => {
 
     await migrateFileDataToDb();
 
+    expect(mocks.refreshAuthJsonFileAtomic).not.toHaveBeenCalled();
     expect(mocks.writeAuthJsonFileAtomic).not.toHaveBeenCalled();
     expect(mocks.writeFileSync).not.toHaveBeenCalled();
   });
@@ -321,6 +360,7 @@ describe('file to database user migration', () => {
 
     await migrateFileDataToDb();
 
+    expect(mocks.refreshAuthJsonFileAtomic).not.toHaveBeenCalled();
     expect(mocks.writeAuthJsonFileAtomic).not.toHaveBeenCalled();
     expect(mocks.writeFileSync).not.toHaveBeenCalled();
   });

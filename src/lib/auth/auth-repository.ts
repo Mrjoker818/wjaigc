@@ -18,6 +18,8 @@ export type StrictSettingRead = { found: false } | { found: true; value: unknown
 export type CredentialSidecarUpdateStatus = 'updated' | 'already-set' | 'user-missing';
 export type AtomicUserUpdateStatus = 'updated' | 'conflict' | 'user-missing';
 
+const AUTH_FILE_REPLICA_LOCK_KEY = 'wujie:auth-file-replica:v1';
+
 export interface AuthUserProfileFields {
   name: string;
   role: 'admin' | 'user';
@@ -65,6 +67,28 @@ function credentialFormatInvalid(): AuthServiceError {
 
 function wrapPersistenceError(error: unknown): AuthServiceError {
   return error instanceof AuthServiceError ? error : persistenceUnavailable();
+}
+
+export async function withDatabaseAuthReplicaLock<T>(
+  work: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [AUTH_FILE_REPLICA_LOCK_KEY]);
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Preserve the original replica failure.
+    }
+    throw wrapPersistenceError(error);
+  } finally {
+    client.release();
+  }
 }
 
 function isValidSecret(secret: unknown): secret is string {

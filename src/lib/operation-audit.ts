@@ -24,6 +24,7 @@ export function shouldAuditClientRequest(pathname: string, method: string): bool
     pathname === '/api/activity'
     || pathname.startsWith('/api/auth/')
     || pathname.startsWith('/api/connector/auth/')
+    || pathname === '/api/user-data/sync'
     || pathname.startsWith('/api/task-events')
     || pathname.startsWith('/api/poll-')
   ) return false;

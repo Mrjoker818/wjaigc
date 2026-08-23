@@ -532,23 +532,21 @@ async function exerciseRole(page: Page, testInfo: TestInfo, role: TestRole): Pro
       new URL(response.url()).pathname === '/api/auth/logout'
       && response.request().method() === 'POST'
     ));
-    const [finalLogout, finalLogoutStatus] = await Promise.all([
+    const [finalLogout] = await Promise.all([
       finalLogoutPromise,
-      page.evaluate(async () => {
-        const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-        await response.text();
-        return response.status;
-      }),
+      page.getByTitle('退出登录').click(),
     ]);
     expect(finalLogout.status()).toBe(200);
-    expect(finalLogoutStatus).toBe(200);
+    await verifyPostLogoutIsolation(page, evidence);
     await waitForApplicationRequestsToSettle(page, evidence, 'final logout');
     await runNavigationStage(evidence, 'final-entry-navigation', () => page.goto('/', { waitUntil: 'domcontentloaded' }));
+    await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible({ timeout: 20_000 });
+    await waitForApplicationRequestsToSettle(page, evidence, 'final entry');
     await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible({ timeout: 20_000 });
 
     const network = partitionNetwork(evidence);
     const unexpectedConsole = unexpectedConsoleEntries(evidence, expectedConsoleRecords(network.expected));
-    expect(network.expected.filter(entry => entry.status === 401)).toHaveLength(2);
+    expect(network.expected.filter(entry => entry.status === 401)).toHaveLength(3);
     expect({
       unexpectedNetwork: network.unexpected.length,
       unexpectedConsole: unexpectedConsole.length,

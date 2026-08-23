@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 import { AuthServiceError } from './auth-errors';
@@ -64,10 +64,27 @@ export async function readAuthJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
-export async function writeAuthJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
+const authFileWriteTails = new Map<string, Promise<void>>();
+
+async function withAuthFileWriteLock<T>(filePath: string, work: () => Promise<T>): Promise<T> {
+  const previous = authFileWriteTails.get(filePath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>(resolve => { release = resolve; });
+  authFileWriteTails.set(filePath, current);
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (authFileWriteTails.get(filePath) === current) authFileWriteTails.delete(filePath);
+  }
+}
+
+async function writeAuthJsonFileAtomicUnlocked(filePath: string, value: unknown): Promise<void> {
   const temporaryPath = join(dirname(filePath), `.${basename(filePath)}.${randomUUID()}.tmp`);
 
   try {
+    await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
     await writeFile(temporaryPath, JSON.stringify(value), {
       encoding: 'utf8',
       flag: 'wx',
@@ -82,4 +99,19 @@ export async function writeAuthJsonFileAtomic(filePath: string, value: unknown):
     }
     throw persistenceUnavailable();
   }
+}
+
+export async function writeAuthJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
+  await withAuthFileWriteLock(filePath, () => writeAuthJsonFileAtomicUnlocked(filePath, value));
+}
+
+export async function refreshAuthJsonFileAtomic<T>(
+  filePath: string,
+  loadValue: () => Promise<T>,
+): Promise<T> {
+  return await withAuthFileWriteLock(filePath, async () => {
+    const value = await loadValue();
+    await writeAuthJsonFileAtomicUnlocked(filePath, value);
+    return value;
+  });
 }

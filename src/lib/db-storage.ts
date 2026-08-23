@@ -5,7 +5,9 @@
  */
 
 import { execSql, getPool } from './db-client';
-import { writeAuthJsonFileAtomic } from './auth/auth-persistence';
+import { refreshAuthJsonFileAtomic } from './auth/auth-persistence';
+import { withDatabaseAuthReplicaLock } from './auth/auth-repository';
+import type { PoolClient } from 'pg';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -689,20 +691,34 @@ function parseJsonArrayField(val: unknown): string[] | undefined {
 export async function dbReadUsers(): Promise<DbUserRecord[]> {
   try {
     const result = await execSql('SELECT * FROM wujie_users ORDER BY created_at ASC');
-    return (result.rows as unknown as DbUserReadRow[]).map(row => ({
-      ...row,
-      credential_hash: row.credential_hash ?? null,
-      product_type: row.product_type || undefined,
-      chat_models: parseJsonArrayField(row.chat_models),
-      image_models: parseJsonArrayField(row.image_models),
-      api_permissions: parseJsonField(row.api_permissions),
-      group_id: row.group_id || null,
-      created_at: parseDatabaseUserTimestamp(row.created_at),
-      updated_at: parseDatabaseUserTimestamp(row.updated_at),
-    }));
+    return mapDatabaseUsers(result.rows as unknown as DbUserReadRow[]);
   } catch (e) {
     console.error({ code: 'DB_READ_USERS_FAILED' });
     throw e;
+  }
+}
+
+function mapDatabaseUsers(rows: DbUserReadRow[]): DbUserRecord[] {
+  return rows.map(row => ({
+    ...row,
+    credential_hash: row.credential_hash ?? null,
+    product_type: row.product_type || undefined,
+    chat_models: parseJsonArrayField(row.chat_models),
+    image_models: parseJsonArrayField(row.image_models),
+    api_permissions: parseJsonField(row.api_permissions),
+    group_id: row.group_id || null,
+    created_at: parseDatabaseUserTimestamp(row.created_at),
+    updated_at: parseDatabaseUserTimestamp(row.updated_at),
+  }));
+}
+
+export async function dbReadUsersWithClient(client: PoolClient): Promise<DbUserRecord[]> {
+  try {
+    const result = await client.query('SELECT * FROM wujie_users ORDER BY created_at ASC');
+    return mapDatabaseUsers(result.rows as DbUserReadRow[]);
+  } catch (error) {
+    console.error({ code: 'DB_READ_USERS_FAILED' });
+    throw error;
   }
 }
 
@@ -928,34 +944,37 @@ export async function migrateFileDataToDb(): Promise<void> {
   // In DB_PLUS_FILE mode the database is authoritative and the file is an atomic rollback replica.
   if (process.env.WUJIE_AUTH_PERSISTENCE_MODE === 'DB_PLUS_FILE' && !userMigrationHadFailures) {
     try {
-      const allDbUsers = await dbReadUsers();
       const usersFilePath = path.join(getServerSystemDir(), 'users.json');
-      const replica = {
-        users: allDbUsers.map(dbu => ({
-            id: dbu.id,
-            name: dbu.name,
-            passwordHash: dbu.password_hash,
-            credentialHash: dbu.credential_hash ?? undefined,
-            role: dbu.role,
-            status: dbu.status,
-            productType: dbu.product_type || undefined,
-            groupId: dbu.group_id || undefined,
-            chatModels: parseJsonArrayField(dbu.chat_models),
-            imageModels: parseJsonArrayField(dbu.image_models),
-            dailyTokenLimit: dbu.daily_token_limit ?? undefined,
-            monthlyTokenLimit: dbu.monthly_token_limit ?? undefined,
-            dailyImageLimit: dbu.daily_image_limit ?? undefined,
-            avatar: dbu.avatar || undefined,
-            nickname: dbu.nickname || undefined,
-            apiPermissions: parseJsonField(dbu.api_permissions),
-            storageFolder: dbu.storage_folder,
-            email: dbu.email || undefined,
-            createdAt: parseDatabaseUserTimestamp(dbu.created_at),
-            updatedAt: parseDatabaseUserTimestamp(dbu.updated_at),
-        })),
-        updatedAt: Date.now(),
-      };
-      await writeAuthJsonFileAtomic(usersFilePath, replica);
+      const replica = await withDatabaseAuthReplicaLock(async client => {
+        return await refreshAuthJsonFileAtomic(usersFilePath, async () => {
+          const allDbUsers = await dbReadUsersWithClient(client);
+          return {
+            users: allDbUsers.map(dbu => ({
+              id: dbu.id,
+              name: dbu.name,
+              passwordHash: dbu.password_hash,
+              credentialHash: dbu.credential_hash ?? undefined,
+              role: dbu.role,
+              status: dbu.status,
+              productType: dbu.product_type || undefined,
+              groupId: dbu.group_id || undefined,
+              chatModels: parseJsonArrayField(dbu.chat_models),
+              imageModels: parseJsonArrayField(dbu.image_models),
+              dailyTokenLimit: dbu.daily_token_limit ?? undefined,
+              monthlyTokenLimit: dbu.monthly_token_limit ?? undefined,
+              dailyImageLimit: dbu.daily_image_limit ?? undefined,
+              avatar: dbu.avatar || undefined,
+              nickname: dbu.nickname || undefined,
+              apiPermissions: parseJsonField(dbu.api_permissions),
+              storageFolder: dbu.storage_folder,
+              email: dbu.email || undefined,
+              createdAt: parseDatabaseUserTimestamp(dbu.created_at),
+              updatedAt: parseDatabaseUserTimestamp(dbu.updated_at),
+            })),
+            updatedAt: Date.now(),
+          };
+        });
+      });
       console.log(`[Migration] Refreshed ${replica.users.length} DB users in the rollback file replica`);
     } catch (revErr) {
       console.warn('[Migration] Reverse sync users DB→file failed:', (revErr as Error).message);

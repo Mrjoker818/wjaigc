@@ -49,6 +49,26 @@ describe('TaskEventsClient', () => {
     expect(MockEventSource.instances[0].url).toBe('/api/task-events');
   });
 
+  it('closes the SSE stream before the document unloads', async () => {
+    const windowTarget = new EventTarget() as EventTarget & { location: { protocol: string; host: string } };
+    windowTarget.location = { protocol: 'http:', host: 'localhost' };
+    vi.stubGlobal('window', windowTarget);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, user: { id: 'admin-1' } }),
+    }));
+    vi.stubGlobal('EventSource', MockEventSource);
+
+    const client = new TaskEventsClient();
+    client.connect();
+
+    await vi.waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    window.dispatchEvent(new Event('beforeunload'));
+
+    expect(MockEventSource.instances[0].close).toHaveBeenCalledTimes(1);
+    expect(client.isConnected()).toBe(false);
+  });
+
   it('preserves a server cancellation error so the canvas can show the real rejection reason', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       success: false,

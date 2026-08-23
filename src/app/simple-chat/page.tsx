@@ -13,6 +13,7 @@ import {
 import { selectInitialSimpleChatProject } from "@/components/simple-chat/simple-chat-types";
 import { User } from "@/lib/user-types";
 import { fetchSessionPayload } from "@/lib/auth-session";
+import { logoutSimpleChatSession } from "@/lib/simple-chat-logout";
 
 function generateId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 
@@ -37,6 +38,8 @@ export default function SimpleChatPage() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [showLogin, setShowLogin] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+  const logoutInFlight = useRef(false);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const projectsRef = useRef<Project[]>([]);
@@ -208,6 +211,30 @@ export default function SimpleChatPage() {
     if (!response.ok) throw new Error(`Chat task persistence failed (${response.status})`);
   }, []);
 
+  const handleLogout = useCallback(async () => {
+    if (logoutInFlight.current) return;
+    logoutInFlight.current = true;
+    setLogoutError(null);
+    if (chatProjectsSyncTimer.current) {
+      clearTimeout(chatProjectsSyncTimer.current);
+      chatProjectsSyncTimer.current = null;
+    }
+
+    const snapshot = projectsRef.current;
+    saveProjects(snapshot);
+    try {
+      const result = await logoutSimpleChatSession({ projects: snapshot });
+      if (result.loggedOut) {
+        setUser(null);
+        setShowLogin(true);
+      } else {
+        setLogoutError('退出登录失败，请检查网络后重试');
+      }
+    } finally {
+      logoutInFlight.current = false;
+    }
+  }, []);
+
   // Agent ops
   const handleCreateAgent = useCallback((projectId: string, agent: SimpleChatAgent) => {
     setProjects(prev => prev.map(p => p.id === projectId ? {
@@ -258,6 +285,14 @@ export default function SimpleChatPage() {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
+      {logoutError && (
+        <div
+          role="alert"
+          className="fixed left-1/2 top-4 z-[100] -translate-x-1/2 border border-red-500/40 bg-background px-4 py-2 text-sm text-red-400 shadow-lg"
+        >
+          {logoutError}
+        </div>
+      )}
       <Sidebar
         user={user}
         projects={projects}
@@ -273,7 +308,7 @@ export default function SimpleChatPage() {
         onCreateTask={handleCreateTask}
         onDeleteTask={handleDeleteTask}
         onRenameTask={handleRenameTask}
-        onLogout={() => { setUser(null); setShowLogin(true); }}
+        onLogout={() => { void handleLogout(); }}
       />
       <div className="flex-1 flex flex-col min-w-0">
         <ChatArea
@@ -288,7 +323,7 @@ export default function SimpleChatPage() {
           onUpdateAgent={(agent) => activeProject && handleUpdateAgent(activeProject.id, agent)}
           onDeleteAgent={(agentId) => activeProject && handleDeleteAgent(activeProject.id, agentId)}
           onSkillToAgent={(skill) => activeProject && handleSkillToAgent(activeProject.id, skill)}
-          onLogout={() => { setUser(null); setShowLogin(true); }}
+          onLogout={() => { void handleLogout(); }}
           onBackToWorkspace={() => router.replace('/?view=dashboard')}
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}

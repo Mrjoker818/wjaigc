@@ -2369,7 +2369,7 @@ export class UserManager {
     const sampleImages: Project['canvasImages'] = [
       {
         id: 'demo-1',
-        url: 'https://images.unsplash.com/photo-1682687220742-aba13b6e50ba?w=800&q=80',
+        url: '/gallery/cat-0/g1.jpg',
         prompt: '美丽的山景，日落时分',
         x: 100, y: 100, width: 400, height: 300,
         originalWidth: 400, originalHeight: 300, rotation: 0, zIndex: 1,
@@ -2378,7 +2378,7 @@ export class UserManager {
       },
       {
         id: 'demo-2',
-        url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
+        url: '/gallery/cat-0/g2.jpg',
         prompt: '阿尔卑斯山脉，雪峰',
         x: 550, y: 200, width: 400, height: 267,
         originalWidth: 400, originalHeight: 267, rotation: 0, zIndex: 2,

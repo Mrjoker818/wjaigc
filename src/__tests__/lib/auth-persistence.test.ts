@@ -16,6 +16,7 @@ type AuthPersistenceContract = {
   }): AuthPersistenceMode;
   readAuthJsonFile<T>(filePath: string): Promise<T | null>;
   writeAuthJsonFileAtomic(filePath: string, value: unknown): Promise<void>;
+  refreshAuthJsonFileAtomic<T>(filePath: string, loadValue: () => Promise<T>): Promise<T>;
 };
 
 async function loadAuthPersistence(): Promise<AuthPersistenceContract> {
@@ -93,6 +94,38 @@ describe('authentication persistence modes', () => {
 
     await expect(readAuthJsonFile<typeof expected>(targetPath)).resolves.toEqual(expected);
     await expect(readFile(targetPath, 'utf8')).resolves.toContain('contract-only');
+  });
+
+  it('creates a missing parent directory before the first atomic write', async () => {
+    const { readAuthJsonFile, writeAuthJsonFileAtomic } = await loadAuthPersistence();
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-persistence-'));
+    const targetPath = path.join(temporaryDirectory, 'system', 'auth.json');
+
+    await writeAuthJsonFileAtomic(targetPath, { marker: 'first-replica' });
+
+    await expect(readAuthJsonFile(targetPath)).resolves.toEqual({ marker: 'first-replica' });
+  });
+
+  it('serializes a database-backed refresh with direct replica writes', async () => {
+    const { readAuthJsonFile, refreshAuthJsonFileAtomic, writeAuthJsonFileAtomic } = await loadAuthPersistence();
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-persistence-'));
+    const targetPath = path.join(temporaryDirectory, 'system', 'users.json');
+    let releaseSource!: () => void;
+    let sourceStarted!: () => void;
+    const sourceGate = new Promise<void>(resolve => { releaseSource = resolve; });
+    const sourceEntered = new Promise<void>(resolve => { sourceStarted = resolve; });
+
+    const staleRefresh = refreshAuthJsonFileAtomic(targetPath, async () => {
+      sourceStarted();
+      await sourceGate;
+      return { users: [{ id: 'stale-user' }] };
+    });
+    await sourceEntered;
+    const newerWrite = writeAuthJsonFileAtomic(targetPath, { users: [{ id: 'new-user' }] });
+    releaseSource();
+    await Promise.all([staleRefresh, newerWrite]);
+
+    await expect(readAuthJsonFile(targetPath)).resolves.toEqual({ users: [{ id: 'new-user' }] });
   });
 
   it('returns null only when the JSON file does not exist', async () => {

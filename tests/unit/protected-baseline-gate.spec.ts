@@ -132,12 +132,19 @@ describe('protected baseline release gate', () => {
     const sourceCommits = [...new Set(
       historicalSourceAuthorizations.map(([, sourceCommit]) => sourceCommit),
     )];
+    const resolvedSourceCommits = execFileSync('git', ['rev-parse', ...sourceCommits], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    }).trim().split(/\r?\n/);
+    const fullSourceCommits = new Map(
+      sourceCommits.map((sourceCommit, index) => [sourceCommit, resolvedSourceCommits[index]]),
+    );
     const authorizedPaths = historicalSourceAuthorizations.map(([path]) => path);
     const provenanceOutput = execFileSync(
       'git',
       [
         'show',
-        '--format=@@%h',
+        '--format=@@%H',
         '--name-only',
         '--no-renames',
         ...sourceCommits,
@@ -162,7 +169,7 @@ describe('protected baseline release gate', () => {
     for (const [path, sourceCommit] of historicalSourceAuthorizations) {
       expect(command).toContain(`--allow-path ${path}`);
       expect(provenance.authorizations).toContainEqual({ path, sourceCommit });
-      expect(pathsByCommit.get(sourceCommit)).toContain(path);
+      expect(pathsByCommit.get(fullSourceCommits.get(sourceCommit)!)).toContain(path);
     }
 
     for (const broadPath of [

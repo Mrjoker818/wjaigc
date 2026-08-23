@@ -12,6 +12,7 @@ describe('operation audit routing', () => {
     expect(shouldAuditClientRequest('/api/activity', 'POST')).toBe(false);
     expect(shouldAuditClientRequest('/api/task-events?taskId=abc', 'GET')).toBe(false);
     expect(shouldAuditClientRequest('/api/auth/logout', 'POST')).toBe(false);
+    expect(shouldAuditClientRequest('/api/user-data/sync', 'POST')).toBe(false);
     expect(shouldAuditClientRequest('/api/generate', 'POST')).toBe(true);
     expect(shouldAuditClientRequest('/api/generate', 'GET')).toBe(false);
   });

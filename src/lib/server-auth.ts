@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { mkdir, readFile, rm } from 'fs/promises';
 import path from 'path';
 import type { NextRequest } from 'next/server';
+import type { PoolClient } from 'pg';
 import { AuthServiceError } from './auth/auth-errors';
 import {
   createLegacyPasswordHash,
@@ -14,6 +15,7 @@ import {
 } from './auth/auth-password';
 import {
   readAuthJsonFile,
+  refreshAuthJsonFileAtomic,
   resolveAuthPersistenceMode,
   writeAuthJsonFileAtomic,
   type AuthPersistenceMode,
@@ -32,13 +34,14 @@ import {
   updateUserCredentials,
   updateUserCredentialSidecar,
   updateUserProfileFields,
+  withDatabaseAuthReplicaLock,
   type AuthUserProfileFields,
 } from './auth/auth-repository';
 import type { User } from './user-types';
 import { ensureUserDataDirs, getUserDataDir } from './server-user-storage';
 import { getServerSystemDir, getServerUsersDir } from './server-data-root';
 import { isDatabaseConfigured } from './db-client';
-import { dbReadUsers, dbWriteUsers, dbDeleteUser, dbDeleteUserData, dbInitCredits } from './db-storage';
+import { dbReadUsers, dbReadUsersWithClient, dbWriteUsers, dbDeleteUser, dbDeleteUserData, dbInitCredits } from './db-storage';
 import { getRuntimeSettings } from './runtime-settings';
 
 /** Normalize api_permissions: PostgreSQL JSONB may return as string or object */
@@ -676,9 +679,9 @@ async function readFileStore(): Promise<StoredUsersFile> {
   }
 }
 
-async function readDatabaseStore(): Promise<StoredUsersFile> {
+async function readDatabaseStore(client?: PoolClient): Promise<StoredUsersFile> {
   try {
-    const dbUsers = await dbReadUsers();
+    const dbUsers = client ? await dbReadUsersWithClient(client) : await dbReadUsers();
     return {
       users: dbUsers.map(storedUserFromDatabase),
       updatedAt: Date.now(),
@@ -792,8 +795,12 @@ function normalizeDefaultAdministrator(file: StoredUsersFile): void {
 async function refreshUserFileReplicaBestEffort(): Promise<void> {
   if (getAuthPersistenceMode() !== 'DB_PLUS_FILE') return;
   try {
-    const file = await readDatabaseStore();
-    await writeUsersFile({ ...file, updatedAt: Date.now() });
+    await withDatabaseAuthReplicaLock(async client => {
+      await refreshAuthJsonFileAtomic(USERS_PATH, async () => {
+        const file = await readDatabaseStore(client);
+        return { ...file, updatedAt: Date.now() };
+      });
+    });
   } catch {
     warnReplicaWriteOnce('AUTH_USER_STORE_FILE_REPLICA_DEFERRED');
   }

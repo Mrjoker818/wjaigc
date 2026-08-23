@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -9,9 +10,11 @@ import {
   readSystemSettingStrict,
   resolveDatabaseSecretRing,
   updateUserCredentialSidecar,
+  withDatabaseAuthReplicaLock,
 } from '@/lib/auth/auth-repository';
+import { refreshAuthJsonFileAtomic } from '@/lib/auth/auth-persistence';
 import { closePool } from '@/lib/db-client';
-import { dbUpsertUser, dbWriteUsers } from '@/lib/db-storage';
+import { dbUpsertUser, dbWriteUsers, migrateFileDataToDb } from '@/lib/db-storage';
 import {
   type QueryFn,
   withIsolatedPostgres,
@@ -162,6 +165,191 @@ async function waitForResolverBarrier(
 }
 
 describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
+  postgresIt('serializes rollback replica refreshes across PostgreSQL connections', async () => {
+    await withAuthPostgres('v588-auth-replica-lock', async ({ databaseUrl }) => {
+      const previous = {
+        DATABASE_URL: process.env.DATABASE_URL,
+        PGDATABASE_URL: process.env.PGDATABASE_URL,
+      };
+      const dataRoot = await mkdtemp(join(os.tmpdir(), 'wujie-auth-replica-lock-'));
+      const replicaPath = join(dataRoot, 'system', 'users.json');
+      let releaseFirst!: () => void;
+      let markFirstEntered!: () => void;
+      const firstGate = new Promise<void>(resolveGate => { releaseFirst = resolveGate; });
+      const firstEntered = new Promise<void>(resolveEntered => { markFirstEntered = resolveEntered; });
+      let secondEntered = false;
+
+      try {
+        await closePool();
+        process.env.DATABASE_URL = databaseUrl;
+        process.env.PGDATABASE_URL = databaseUrl;
+
+        const first = withDatabaseAuthReplicaLock(async () => {
+          markFirstEntered();
+          await firstGate;
+          await refreshAuthJsonFileAtomic(replicaPath, async () => ({ marker: 'first' }));
+        });
+        await firstEntered;
+        const second = withDatabaseAuthReplicaLock(async () => {
+          secondEntered = true;
+          await refreshAuthJsonFileAtomic(replicaPath, async () => ({ marker: 'second' }));
+        });
+
+        await new Promise(resolveWait => setTimeout(resolveWait, 100));
+        expect(secondEntered).toBe(false);
+        releaseFirst();
+        await Promise.all([first, second]);
+        await expect(readFile(replicaPath, 'utf8')).resolves.toContain('"marker":"second"');
+      } finally {
+        await closePool();
+        for (const [key, value] of Object.entries(previous)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+        await rm(dataRoot, { recursive: true, force: true });
+      }
+    });
+  });
+
+  postgresIt('creates a fresh rollback replica and preserves a real insert-race winner', async () => {
+    await withAuthPostgres('v588-auth-rollback-replica', async ({ databaseUrl, query }) => {
+      await createAuthTables(query);
+      await query(`
+        CREATE TABLE wujie_api_providers (
+          id TEXT PRIMARY KEY,
+          sort_order INTEGER,
+          created_at BIGINT NOT NULL
+        )
+      `);
+      await query(
+        `INSERT INTO wujie_users(
+           id, name, password_hash, credential_hash, role, status, product_type,
+           chat_models, image_models, api_permissions, storage_folder, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, 'admin', 'active', 'canvas,chat', $5, $6, $7::jsonb, $8, $9, $10)`,
+        [
+          'rollback-user',
+          'Rollback User',
+          'a'.repeat(64),
+          credentialHash,
+          ['chat-model'],
+          ['image-model'],
+          JSON.stringify({ image: true, chat: true }),
+          'data/users/rollback-user',
+          now,
+          now + 1,
+        ],
+      );
+
+      const dataRoot = await mkdtemp(join(os.tmpdir(), 'wujie-auth-rollback-'));
+      const previous = {
+        DATABASE_URL: process.env.DATABASE_URL,
+        PGDATABASE_URL: process.env.PGDATABASE_URL,
+        WUJIE_AUTH_PERSISTENCE_MODE: process.env.WUJIE_AUTH_PERSISTENCE_MODE,
+        WUJIE_DATA_DIR: process.env.WUJIE_DATA_DIR,
+      };
+      try {
+        await closePool();
+        process.env.DATABASE_URL = databaseUrl;
+        process.env.PGDATABASE_URL = databaseUrl;
+        process.env.WUJIE_AUTH_PERSISTENCE_MODE = 'DB_PLUS_FILE';
+        process.env.WUJIE_DATA_DIR = dataRoot;
+
+        await migrateFileDataToDb();
+
+        const replica = JSON.parse(await readFile(join(dataRoot, 'system', 'users.json'), 'utf8')) as {
+          users: Array<Record<string, unknown>>;
+          updatedAt: number;
+        };
+        expect(Number.isSafeInteger(replica.updatedAt)).toBe(true);
+        expect(replica.users).toEqual([expect.objectContaining({
+          id: 'rollback-user',
+          name: 'Rollback User',
+          passwordHash: 'a'.repeat(64),
+          credentialHash,
+          role: 'admin',
+          productType: 'canvas,chat',
+          chatModels: ['chat-model'],
+          imageModels: ['image-model'],
+          apiPermissions: { image: true, chat: true },
+        })]);
+
+        await query(`
+          CREATE OR REPLACE FUNCTION preserve_auth_race_winner() RETURNS trigger AS $$
+          BEGIN
+            IF NEW.id = 'race-user' AND pg_trigger_depth() = 1 THEN
+              INSERT INTO wujie_users(
+                id, name, password_hash, credential_hash, role, status,
+                api_permissions, storage_folder, created_at, updated_at
+              ) VALUES (
+                'race-user', 'Database Winner', repeat('d', 64), NULL,
+                'admin', 'active', '{"chat":true}'::jsonb,
+                'data/users/race-user', 1724601600000, 1724601600050
+              ) ON CONFLICT (id) DO NOTHING;
+            END IF;
+            RETURN NEW;
+          END;
+          $$ LANGUAGE plpgsql
+        `);
+        await query(`
+          CREATE TRIGGER preserve_auth_race_winner_trigger
+          BEFORE INSERT ON wujie_users
+          FOR EACH ROW EXECUTE FUNCTION preserve_auth_race_winner()
+        `);
+        await writeFile(join(dataRoot, 'system', 'users.json'), JSON.stringify({
+          users: [{
+            id: 'race-user',
+            name: 'Stale File User',
+            passwordHash: 'f'.repeat(64),
+            credentialHash,
+            role: 'user',
+            status: 'active',
+            productType: 'canvas,chat',
+            chatModels: ['chat-model'],
+            imageModels: ['image-model'],
+            apiPermissions: { image: true },
+            storageFolder: 'data/users/race-user',
+            createdAt: now,
+            updatedAt: now,
+          }],
+        }), 'utf8');
+
+        await migrateFileDataToDb();
+
+        const winner = await query<{
+          name: string;
+          password_hash: string;
+          role: string;
+          api_permissions: Record<string, boolean>;
+        }>('SELECT name, password_hash, role, api_permissions FROM wujie_users WHERE id = $1', ['race-user']);
+        expect(winner.rows).toEqual([{
+          name: 'Database Winner',
+          password_hash: 'd'.repeat(64),
+          role: 'admin',
+          api_permissions: { chat: true },
+        }]);
+        const updatedReplica = JSON.parse(
+          await readFile(join(dataRoot, 'system', 'users.json'), 'utf8'),
+        ) as { users: Array<Record<string, unknown>> };
+        expect(updatedReplica.users).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: 'rollback-user', name: 'Rollback User' }),
+          expect.objectContaining({
+            id: 'race-user',
+            name: 'Database Winner',
+            passwordHash: 'd'.repeat(64),
+            role: 'admin',
+          }),
+        ]));
+      } finally {
+        await closePool();
+        for (const [key, value] of Object.entries(previous)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+        await rm(dataRoot, { recursive: true, force: true });
+      }
+    });
+  });
+
   postgresIt('applies only the nullable additive sidecar migration', async () => {
     await withAuthPostgres('v588-auth-migration', async ({ query }) => {
       await query(`
