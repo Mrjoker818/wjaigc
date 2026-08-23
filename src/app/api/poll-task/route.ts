@@ -27,7 +27,7 @@ import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
-import { getFontDesignResult } from '@/app/api/font-design/generate-image/route';
+import { getFontDesignResult } from '@/lib/font-design-task-store';
 import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
 import { isPendingLocalAsyncGenerateTask, isRecoverableSubmitOnlySubmission, shouldPollRemoteAsyncGenerateTask } from '@/lib/async-generate-task';
 import { enhanceViaAI } from '@/lib/quality-enhance';

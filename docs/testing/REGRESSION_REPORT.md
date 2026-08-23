@@ -1533,3 +1533,14 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 最终生产构建浏览器矩阵 `10/10` 通过，覆盖 Chromium、Firefox、WebKit、1080p 和移动端下管理员/普通用户的错误密码、正确登录、刷新保持、画布/仪表盘/独立聊天导航、注销及注销后数据隔离。
 - 两轮独立复审最终均为 `Critical/Important/Minor = 0/0/0`。首轮浏览器 503 来自测试夹具错误继承 `FILE_ONLY`，改用规定的 `DB_PLUS_FILE` 环境后同一代码通过，没有用业务代码绕过配置错误。
 - **结论：V588-AUTH-001 本地回归通过。** Coze 尚未拉取精确提交并重复云端会话矩阵，因此不能标记为云端通过；付费生成、取消和退款链路也不在本项验收范围。
+
+## 2026-08-24 GPT Image 2 原生透明 PNG 本地回归
+
+- 基线为 `origin/main@6102572bc6ff90e20ef522c79bc5c0b846f7cde7`，在隔离分支 `feat/native-transparent-generation` 实施，未修改 `stable`。
+- 所有主要生图入口已使用统一背景输出合同：主图像生成面板、快速创作、参考图组、融图组、图生图、场景、贴纸、全景、六面体、工作流图像节点、聊天与 Agent。透明模式固定输出 PNG，不支持透明输出的模型会在扣费和供应商提交前返回明确错误，不静默换模型或自动发起第二次去背景任务。
+- 完成结果会逐张解码检查真实 Alpha 通道；棋盘格背景不会被视为透明。供应商返回不透明图片时保留原图，并给出“用户确认后另行去背景、单独计费”的下一步提示。
+- 新增和相关聚焦回归均通过；全仓 Vitest 为 `532` 个文件，其中 `513` 个通过、`19` 个跳过；共 `3451` 项测试，其中 `3337` 项通过、`114` 项跳过，失败数为 0。跳过项均保持为隔离 PostgreSQL 环境门禁，不计为通过。
+- `pnpm ts-check` 通过；`pnpm lint` 退出码为 0，结果为 `0 errors / 991 historical warnings`；Next.js `16.2.11` 生产构建成功并生成完整路由表；`git diff --check` 通过。
+- 构建阶段复现字境生成路由非法导出 `getFontDesignResult`。根因是 Next.js Route Handler 不允许导出辅助函数；任务缓存已最小迁移到 `src/lib/font-design-task-store.ts`，轮询回归 `2/2` 和生产构建均通过，字境任务行为未改变。
+- Playwright 真实付费用例已建立，并确认可被 Chromium、Chromium 1080p、Firefox、WebKit、移动 Chromium 五个项目发现。由于本地未配置真实登录凭据、精确 `providerId::gpt-image-2` 和付费开关，本轮没有调用真实供应商，也没有生成可作为云端 Alpha 验收的截图、下载文件或任务证据。
+- **结论：代码与本地回归通过，发布判定为有条件通过。** 关闭条件是部署精确候选后，使用真实 GPT Image 2 完成透明请求、任务终态、画布结果、下载文件 Alpha 字节与单次扣费验证。

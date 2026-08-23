@@ -10,27 +10,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
-
-// ★ 字境大师任务结果独立存储（防HMR丢失task-registry状态）
-const fontDesignResults = new Map<string, {
-  status: 'completed' | 'failed';
-  result?: unknown;
-  error?: string;
-  updatedAt: number;
-}>();
-
-// 10分钟自动清理
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of fontDesignResults) {
-    if (now - val.updatedAt > 10 * 60 * 1000) fontDesignResults.delete(key);
-  }
-}, 60 * 1000);
-
-/** Get font-design task result from local cache (used by poll-task) */
-export function getFontDesignResult(taskId: string) {
-  return fontDesignResults.get(taskId) || null;
-}
+import { setFontDesignResult } from '@/lib/font-design-task-store';
 
 export const maxDuration = 600;
 export const dynamic = 'force-dynamic';
@@ -333,7 +313,7 @@ export async function POST(request: NextRequest) {
                     status: 'completed', progress: 100,
                     result: completedResult,
                   });
-                  fontDesignResults.set(taskId, { status: 'completed', result: completedResult, updatedAt: Date.now() });
+                  setFontDesignResult(taskId, { status: 'completed', result: completedResult, updatedAt: Date.now() });
                   return;
                 }
               } catch (chatErr) {
@@ -363,7 +343,7 @@ export async function POST(request: NextRequest) {
               status: 'completed', progress: 100,
               result: completedResult,
             });
-            fontDesignResults.set(taskId, { status: 'completed', result: completedResult, updatedAt: Date.now() });
+            setFontDesignResult(taskId, { status: 'completed', result: completedResult, updatedAt: Date.now() });
           } else if (parsed.taskIds && parsed.taskIds.length > 0) {
             const asyncResult = {
               remoteTaskId: parsed.taskIds[0],
@@ -374,7 +354,7 @@ export async function POST(request: NextRequest) {
               label: '图片生成中，等待远程API返回...',
               result: asyncResult,
             });
-            fontDesignResults.set(taskId, { status: 'completed' as const, result: asyncResult, updatedAt: Date.now() });
+            setFontDesignResult(taskId, { status: 'completed' as const, result: asyncResult, updatedAt: Date.now() });
           } else {
             // API返回200但无有效结果，尝试下一个提供商
             lastError = 'API未返回有效结果';
@@ -398,7 +378,7 @@ export async function POST(request: NextRequest) {
             }
             // 最后一个提供商也超时，整体失败
             updateTaskProgress(taskId, { status: 'failed', error: '所有提供商均超时不可达' });
-            fontDesignResults.set(taskId, { status: 'failed' as const, error: '所有提供商均超时不可达', updatedAt: Date.now() });
+            setFontDesignResult(taskId, { status: 'failed' as const, error: '所有提供商均超时不可达', updatedAt: Date.now() });
             return;
           }
 
@@ -411,7 +391,7 @@ export async function POST(request: NextRequest) {
           if (!isTaskCancelled(taskId)) {
             const failErr = `所有提供商均失败，最后错误: ${lastError}`;
             updateTaskProgress(taskId, { status: 'failed', error: failErr });
-            fontDesignResults.set(taskId, { status: 'failed' as const, error: failErr, updatedAt: Date.now() });
+            setFontDesignResult(taskId, { status: 'failed' as const, error: failErr, updatedAt: Date.now() });
           }
         }
       }
@@ -420,7 +400,7 @@ export async function POST(request: NextRequest) {
       if (!isTaskCancelled(taskId)) {
         const failErr = `所有 ${MAX_PROVIDERS_TO_TRY} 个提供商均失败: ${lastError}`;
         updateTaskProgress(taskId, { status: 'failed', error: failErr });
-        fontDesignResults.set(taskId, { status: 'failed' as const, error: failErr, updatedAt: Date.now() });
+        setFontDesignResult(taskId, { status: 'failed' as const, error: failErr, updatedAt: Date.now() });
       }
     });
 
