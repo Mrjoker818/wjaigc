@@ -48,13 +48,7 @@ test.describe('P0 authenticated session', () => {
 
       // Use domcontentloaded (not networkidle — SSE connections prevent networkidle)
       await page.reload({ waitUntil: 'domcontentloaded' });
-      // Wait for the app to either show dashboard (session restored) or entry selection
-      await page.waitForTimeout(3000);
-      // If the app shows the entry-selection page, click "无限画布" to proceed to dashboard
-      const entryBtn = page.getByRole('button', { name: /无限画布/ }).first();
-      if (await entryBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await entryBtn.click();
-      }
+      // A refresh must restore the authenticated dashboard without another login.
       await expect(page.getByRole('heading', { name: '我的项目' })).toBeVisible({ timeout: 20_000 });
 
       await page.getByTitle('查看用户信息').click();
