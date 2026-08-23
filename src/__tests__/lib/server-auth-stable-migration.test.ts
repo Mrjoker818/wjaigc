@@ -203,4 +203,64 @@ describe.sequential('stable-compatible authentication credential migration', () 
       productType: 'canvas',
     })).resolves.toMatchObject({ name: adminName, role: 'admin' });
   });
+
+  it('consumes WUJIE_AUTH_PERSISTENCE_MODE from the real server-auth persistence path', async () => {
+    const resolveAuthPersistenceMode = vi.fn(() => 'DB_PLUS_FILE' as const);
+    vi.doMock('@/lib/auth/auth-persistence', () => ({ resolveAuthPersistenceMode }));
+    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => true }));
+    const activeSecret = 'persistence-wiring-contract-secret-0123456789';
+    const password = 'persistence-wiring-contract-password';
+    const passwordHash = createHash('sha256').update(`${activeSecret}:${password}`).digest('hex');
+    const adminPassword = 'persistence-admin-contract-password';
+    const adminPasswordHash = createHash('sha256').update(`${activeSecret}:${adminPassword}`).digest('hex');
+    vi.doMock('@/lib/db-storage', () => ({
+      dbDeleteUser: vi.fn(),
+      dbDeleteUserData: vi.fn(),
+      dbGetSystemSetting: vi.fn().mockResolvedValue(null),
+      dbInitCredits: vi.fn(),
+      dbReadUsers: vi.fn().mockResolvedValue([{
+        id: 'persistence-contract-admin',
+        name: 'persistence-contract-admin',
+        password_hash: adminPasswordHash,
+        role: 'admin',
+        status: 'active',
+        product_type: 'canvas,chat',
+        api_permissions: { image: true, chat: true },
+        storage_folder: 'data/users/persistence-contract-admin',
+        created_at: 1,
+        updated_at: 1,
+      }, {
+        id: 'persistence-contract-user',
+        name: 'persistence-contract-user',
+        password_hash: passwordHash,
+        role: 'user',
+        status: 'active',
+        product_type: 'canvas,chat',
+        api_permissions: { image: true, chat: true },
+        storage_folder: 'data/users/persistence-contract-user',
+        created_at: 1,
+        updated_at: 1,
+      }]),
+      dbSetSystemSetting: vi.fn().mockResolvedValue(undefined),
+      dbWriteUsers: vi.fn().mockResolvedValue(undefined),
+    }));
+    process.env.COZE_PROJECT_ENV = 'DEV';
+    process.env.WUJIE_AUTH_SECRET = activeSecret;
+    process.env.WUJIE_ADMIN_USERNAME = 'persistence-contract-admin';
+    process.env.WUJIE_ADMIN_PASSWORD = adminPassword;
+    process.env.WUJIE_AUTH_PERSISTENCE_MODE = 'DB_PLUS_FILE';
+    vi.resetModules();
+    const { authenticateUser } = await import('@/lib/server-auth');
+
+    await expect(authenticateUser({
+      name: 'persistence-contract-user',
+      password,
+      productType: 'canvas',
+    })).resolves.toMatchObject({ id: 'persistence-contract-user' });
+    expect(resolveAuthPersistenceMode).toHaveBeenCalledWith({
+      databaseConfigured: true,
+      rawMode: 'DB_PLUS_FILE',
+      production: false,
+    });
+  });
 });

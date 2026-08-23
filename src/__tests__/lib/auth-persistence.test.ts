@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -28,8 +27,6 @@ const originalEnvironment = { ...process.env };
 
 afterEach(async () => {
   vi.doUnmock('@/lib/auth/auth-persistence');
-  vi.doUnmock('@/lib/db-client');
-  vi.doUnmock('@/lib/db-storage');
   vi.doUnmock('fs/promises');
   vi.doUnmock('node:fs/promises');
   vi.resetModules();
@@ -67,16 +64,20 @@ describe('authentication persistence modes', () => {
     expect(() => resolveAuthPersistenceMode({
       databaseConfigured: true,
       rawMode: 'invalid',
-    })).toThrow('AUTH_CONFIGURATION_UNAVAILABLE');
+    })).toThrowError(expect.objectContaining({ code: 'AUTH_CONFIGURATION_UNAVAILABLE' }));
+    expect(() => resolveAuthPersistenceMode({
+      databaseConfigured: false,
+      rawMode: 'DB_PLUS_FILE',
+    })).toThrowError(expect.objectContaining({ code: 'AUTH_CONFIGURATION_UNAVAILABLE' }));
     expect(() => resolveAuthPersistenceMode({
       databaseConfigured: false,
       rawMode: 'DB_ONLY',
-    })).toThrow('AUTH_CONFIGURATION_UNAVAILABLE');
+    })).toThrowError(expect.objectContaining({ code: 'AUTH_CONFIGURATION_UNAVAILABLE' }));
     expect(() => resolveAuthPersistenceMode({
       databaseConfigured: true,
       rawMode: 'FILE_ONLY',
       production: true,
-    })).toThrow('AUTH_CONFIGURATION_UNAVAILABLE');
+    })).toThrowError(expect.objectContaining({ code: 'AUTH_CONFIGURATION_UNAVAILABLE' }));
   });
 
   it('writes and reads file-only JSON through an atomic persistence boundary', async () => {
@@ -91,13 +92,71 @@ describe('authentication persistence modes', () => {
     await expect(readFile(targetPath, 'utf8')).resolves.toContain('contract-only');
   });
 
+  it('returns null only when the JSON file does not exist', async () => {
+    const { readAuthJsonFile } = await loadAuthPersistence();
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-persistence-'));
+    const missingPath = path.join(temporaryDirectory, 'missing-auth.json');
+
+    await expect(readAuthJsonFile(missingPath)).resolves.toBeNull();
+  });
+
+  it('fails closed when persisted JSON is malformed', async () => {
+    const { readAuthJsonFile } = await loadAuthPersistence();
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-persistence-'));
+    const targetPath = path.join(temporaryDirectory, 'auth.json');
+    await writeFile(targetPath, '{not valid JSON', 'utf8');
+
+    await expect(readAuthJsonFile(targetPath)).rejects.toMatchObject({
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+    });
+  });
+
+  it('fails closed when reading persisted JSON is denied', async () => {
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-persistence-'));
+    const targetPath = path.join(temporaryDirectory, 'auth.json');
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    const readFileDenied = vi.fn(async () => {
+      const error = Object.assign(new Error('synthetic read denial'), { code: 'EACCES' });
+      throw error;
+    });
+    const deniedFileSystem = { ...actualFs, readFile: readFileDenied };
+    vi.doMock('fs/promises', () => deniedFileSystem);
+    vi.doMock('node:fs/promises', () => deniedFileSystem);
+    vi.resetModules();
+    const { readAuthJsonFile } = await loadAuthPersistence();
+
+    await expect(readAuthJsonFile(targetPath)).rejects.toMatchObject({
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+    });
+  });
+
+  it('creates its same-directory temporary file with restrictive permissions', async () => {
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-persistence-'));
+    const targetPath = path.join(temporaryDirectory, 'auth.json');
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    const writeFileWithPermissions = vi.fn(actualFs.writeFile);
+    const permissionedFileSystem = { ...actualFs, writeFile: writeFileWithPermissions };
+    vi.doMock('fs/promises', () => permissionedFileSystem);
+    vi.doMock('node:fs/promises', () => permissionedFileSystem);
+    vi.resetModules();
+    const { writeAuthJsonFileAtomic } = await loadAuthPersistence();
+
+    await writeAuthJsonFileAtomic(targetPath, { marker: 'permission-contract-value' });
+
+    expect(writeFileWithPermissions).toHaveBeenCalledWith(
+      expect.stringMatching(new RegExp(`^${temporaryDirectory.replace(/\\/g, '\\\\')}`)),
+      expect.any(String),
+      expect.objectContaining({ flag: 'wx', mode: 0o600 }),
+    );
+  });
+
   it('preserves the existing target when rename interrupts an atomic file write', async () => {
     temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-persistence-'));
     const targetPath = path.join(temporaryDirectory, 'auth.json');
     const previousContent = JSON.stringify({ marker: 'previous-contract-value' });
     await writeFile(targetPath, previousContent, 'utf8');
     const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-    const rename = vi.fn(async () => {
+    const rename = vi.fn(async (..._args: Parameters<typeof actualFs.rename>) => {
       throw new Error('synthetic rename interruption');
     });
     const interruptedFileSystem = { ...actualFs, rename };
@@ -106,74 +165,36 @@ describe('authentication persistence modes', () => {
     vi.resetModules();
     const { writeAuthJsonFileAtomic } = await loadAuthPersistence();
 
-    await expect(writeAuthJsonFileAtomic(targetPath, { marker: 'next-contract-value' })).rejects.toThrow(
-      'AUTH_PERSISTENCE_UNAVAILABLE',
-    );
+    await expect(writeAuthJsonFileAtomic(targetPath, { marker: 'next-contract-value' })).rejects.toMatchObject({
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+    });
     expect(rename).toHaveBeenCalledTimes(1);
     const [temporaryPath, renameTarget] = rename.mock.calls[0] ?? [];
     expect(temporaryPath).not.toBe(targetPath);
     expect(path.dirname(String(temporaryPath))).toBe(temporaryDirectory);
     expect(renameTarget).toBe(targetPath);
     await expect(readFile(targetPath, 'utf8')).resolves.toBe(previousContent);
+    await expect(readdir(temporaryDirectory)).resolves.toEqual(['auth.json']);
   });
 
-  it('consumes WUJIE_AUTH_PERSISTENCE_MODE from the real server-auth persistence path', async () => {
-    const resolveAuthPersistenceMode = vi.fn(() => 'DB_PLUS_FILE' as const);
-    vi.doMock('@/lib/auth/auth-persistence', () => ({ resolveAuthPersistenceMode }));
-    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => true }));
-    const activeSecret = 'persistence-wiring-contract-secret-0123456789';
-    const password = 'persistence-wiring-contract-password';
-    const passwordHash = createHash('sha256').update(`${activeSecret}:${password}`).digest('hex');
-    const adminPassword = 'persistence-admin-contract-password';
-    const adminPasswordHash = createHash('sha256').update(`${activeSecret}:${adminPassword}`).digest('hex');
-    vi.doMock('@/lib/db-storage', () => ({
-      dbDeleteUser: vi.fn(),
-      dbDeleteUserData: vi.fn(),
-      dbGetSystemSetting: vi.fn().mockResolvedValue(null),
-      dbInitCredits: vi.fn(),
-      dbReadUsers: vi.fn().mockResolvedValue([{
-        id: 'persistence-contract-admin',
-        name: 'persistence-contract-admin',
-        password_hash: adminPasswordHash,
-        role: 'admin',
-        status: 'active',
-        product_type: 'canvas,chat',
-        api_permissions: { image: true, chat: true },
-        storage_folder: 'data/users/persistence-contract-admin',
-        created_at: 1,
-        updated_at: 1,
-      }, {
-        id: 'persistence-contract-user',
-        name: 'persistence-contract-user',
-        password_hash: passwordHash,
-        role: 'user',
-        status: 'active',
-        product_type: 'canvas,chat',
-        api_permissions: { image: true, chat: true },
-        storage_folder: 'data/users/persistence-contract-user',
-        created_at: 1,
-        updated_at: 1,
-      }]),
-      dbSetSystemSetting: vi.fn().mockResolvedValue(undefined),
-      dbWriteUsers: vi.fn().mockResolvedValue(undefined),
-    }));
-    process.env.COZE_PROJECT_ENV = 'DEV';
-    process.env.WUJIE_AUTH_SECRET = activeSecret;
-    process.env.WUJIE_ADMIN_USERNAME = 'persistence-contract-admin';
-    process.env.WUJIE_ADMIN_PASSWORD = adminPassword;
-    process.env.WUJIE_AUTH_PERSISTENCE_MODE = 'DB_PLUS_FILE';
-    vi.resetModules();
-    const { authenticateUser } = await import('@/lib/server-auth');
-
-    await expect(authenticateUser({
-      name: 'persistence-contract-user',
-      password,
-      productType: 'canvas',
-    })).resolves.toMatchObject({ id: 'persistence-contract-user' });
-    expect(resolveAuthPersistenceMode).toHaveBeenCalledWith({
-      databaseConfigured: true,
-      rawMode: 'DB_PLUS_FILE',
-      production: false,
+  it('cleans up its temporary file when writing fails before rename', async () => {
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-persistence-'));
+    const targetPath = path.join(temporaryDirectory, 'auth.json');
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    const writeFileInterrupted = vi.fn(async (...args: Parameters<typeof actualFs.writeFile>) => {
+      await actualFs.writeFile(...args);
+      throw new Error('synthetic write interruption');
     });
+    const interruptedFileSystem = { ...actualFs, writeFile: writeFileInterrupted };
+    vi.doMock('fs/promises', () => interruptedFileSystem);
+    vi.doMock('node:fs/promises', () => interruptedFileSystem);
+    vi.resetModules();
+    const { writeAuthJsonFileAtomic } = await loadAuthPersistence();
+
+    await expect(writeAuthJsonFileAtomic(targetPath, { marker: 'next-contract-value' })).rejects.toMatchObject({
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+    });
+    await expect(readdir(temporaryDirectory)).resolves.toEqual([]);
   });
+
 });
