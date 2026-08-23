@@ -1260,3 +1260,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 全仓仍有 `113` 项非认证 PostgreSQL 环境测试跳过；API 有 `3` 项、回归有 `8` 项环境测试跳过，这些不计为通过。隔离夹具没有真实付费供应商配置，因此图像/视频生成、取消、积分扣除与退款一致性不能由本次认证矩阵替代。
 - **专项发布判定：本地通过，云端有条件通过。** 必须先把最终 main 精确 SHA 拉取到 Coze，在现有 Google Chrome 标签页复验管理员和普通用户登录、刷新、三个工作区、退出及退出后数据隔离，且确认新鲜 Console/网络错误门禁，才能将 `V588-AUTH-001` 标记为已吸收。
 - **全平台发布判定仍为有条件通过。** 本次关闭本地认证 P0，不代表其余 PostgreSQL、付费供应商、任务取消和账务终态门禁已经关闭。
+
+## 2026-08-24 V588-AUTH-001 云端发布判定
+
+- exact candidate：`main@42e540bd5aa552f10af0e12240546993bda3e91a`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- Coze 生产构建退出码 0，5000 端口由 `next start` 提供服务，根路由与 12/12 静态脚本均 HTTP 200。
+- 冷启动后已存在管理员 session 保持有效，项目 8 个、图片 447 张正常恢复；认证、管理员用户、项目读取与项目写同步接口均业务成功，未再出现 `AUTH_CONFIGURATION_UNAVAILABLE`。
+- 本次缺陷所需本地 TDD、真实 PostgreSQL 和全仓门禁通过；非认证 PostgreSQL 默认跳过项、普通用户云端重复矩阵和真实 secret 轮换仍保留为独立边界。
+- **发布结论：有条件通过。** V588-AUTH-001 可标为“已吸收（同 secret 云端冷启动已验证）”，但不得声称真实 secret 轮换或整个产品发布门禁全部通过。
