@@ -21,6 +21,8 @@ const persistence = vi.hoisted(() => ({
   registerTask: vi.fn(),
   updateTaskProgress: vi.fn(),
   requireApiAuthOrReject: vi.fn(),
+  consumeCredits: vi.fn(),
+  resolveTaskModelForUser: vi.fn(),
 }));
 
 vi.mock('@/lib/api-auth', () => ({
@@ -46,7 +48,10 @@ vi.mock('@/lib/server-user-storage', () => ({ appendUserJsonl: vi.fn() }));
 vi.mock('@/lib/credits', () => ({
   calculateConfiguredCreditCost: vi.fn().mockResolvedValue(0),
   checkCredits: vi.fn().mockResolvedValue({ sufficient: true, balance: 100 }),
-  consumeCredits: vi.fn().mockResolvedValue({ success: true, cost: 0 }),
+  consumeCredits: persistence.consumeCredits,
+}));
+vi.mock('@/lib/task-core/model-catalog', () => ({
+  resolveTaskModelForUser: persistence.resolveTaskModelForUser,
 }));
 vi.mock('@/lib/cloud-task-persistence', () => ({
   recordImageTaskSubmitted: persistence.recordImageTaskSubmitted,
@@ -72,6 +77,27 @@ import { submitStrictAgentGeneration } from '@/lib/agent-runtime/generate-image-
 describe('real Agent generate_image provider path', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    persistence.consumeCredits.mockResolvedValue({ success: true, cost: 0 });
+    persistence.resolveTaskModelForUser.mockImplementation(async (
+      providerId: string,
+      modelId: string,
+    ) => ({
+      providerId,
+      modelId,
+      kind: 'image',
+      sourceType: 'image',
+      protocol: 'openai',
+      executionMode: 'sync',
+      allowedRatios: ['1:1'],
+      allowedSizes: [],
+      qualityOptions: ['high'],
+      maxOutputs: 1,
+      supportsReferenceImages: false,
+      supportsMask: false,
+      supportedOperations: ['text-to-image'],
+      outputKinds: ['png'],
+      capabilitySources: {},
+    }));
     persistence.requireApiAuthOrReject.mockResolvedValue({
       authenticated: true,
       userId: 'user-1',
@@ -79,6 +105,38 @@ describe('real Agent generate_image provider path', () => {
       source: 'internal',
       user: { id: 'user-1', role: 'admin' },
     });
+  });
+
+  it('rejects unsupported capability selections before billing, persistence, or provider fetch', async () => {
+    const externalSubmit = vi.fn();
+    vi.stubGlobal('fetch', externalSubmit);
+
+    const result = await submitStrictAgentGeneration({
+      userId: 'user-1',
+      userRole: 'admin',
+      prompt: 'Unsupported wide image',
+      aspectRatio: '16:9',
+      model: 'Exact::Model',
+      providerId: 'provider-exact',
+      idempotencyKey: 'agent-provider:stable:unsupported-ratio',
+      fetchImpl: async (_url, init) => generate(new Request('http://localhost/api/generate', init) as never),
+      extraBody: { _skipCredits: true, _skipCloudTaskPersistence: true },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'MODEL_CAPABILITY_MISMATCH',
+      retryable: false,
+      details: {
+        providerId: 'provider-exact',
+        modelId: 'Exact::Model',
+        field: 'aspectRatio',
+      },
+    });
+    expect(persistence.consumeCredits).not.toHaveBeenCalled();
+    expect(persistence.recordImageTaskSubmitted).not.toHaveBeenCalled();
+    expect(persistence.registerTask).not.toHaveBeenCalled();
+    expect(externalSubmit).not.toHaveBeenCalled();
   });
 
   it('preserves the exact model and one stable idempotency key through /api/generate', async () => {

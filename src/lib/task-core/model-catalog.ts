@@ -23,6 +23,7 @@ import type { User } from '@/lib/user-types';
 import { getVideoModelInfo, resolveVideoCompatProfile } from '@/lib/video-api';
 import {
   CAPABILITY_FIELDS,
+  ModelCapabilityError,
   taskModelKey,
   type CapabilityField,
   type CapabilityLayer,
@@ -667,11 +668,19 @@ function resolveTaskModelFromProviders(
     : modelId;
   const model = provider ? findConfiguredModel(provider, canonicalModelId) : null;
   if (!provider || !model) {
-    throw new Error(`Task model ${taskModelKey(providerId, modelId)} is not configured`);
+    throw new ModelCapabilityError(
+      'MODEL_NOT_CONFIGURED',
+      `Task model ${taskModelKey(providerId, modelId)} is not configured`,
+      { providerId, modelId },
+    );
   }
 
   if (user.status === 'disabled') {
-    throw new Error(`User ${user.id} is not authorized for ${taskModelKey(providerId, modelId)}`);
+    throw new ModelCapabilityError(
+      'MODEL_NOT_AUTHORIZED',
+      `User ${user.id} is not authorized for ${taskModelKey(providerId, modelId)}`,
+      { providerId, modelId, userId: user.id },
+    );
   }
 
   const result = buildTaskModelCatalogResult(
@@ -685,18 +694,28 @@ function resolveTaskModelFromProviders(
   ));
   if (!result.authorizedModelKeys.has(key)) {
     if (migrationRequired) {
-      throw new Error(
+      throw new ModelCapabilityError(
+        'MODEL_NOT_AUTHORIZED',
         `Model authorization migration required for ${canonicalModelId}: ${migrationRequired.reason}`,
+        { providerId, modelId: canonicalModelId, reason: migrationRequired.reason },
       );
     }
-    throw new Error(`User ${user.id} is not authorized for ${key}`);
+    throw new ModelCapabilityError(
+      'MODEL_NOT_AUTHORIZED',
+      `User ${user.id} is not authorized for ${key}`,
+      { providerId, modelId: canonicalModelId, userId: user.id },
+    );
   }
 
   const descriptor = result.taskModelCatalog.find(candidate => (
     candidate.providerId === providerId && candidate.modelId === canonicalModelId
   ));
   if (!descriptor) {
-    throw new Error(`Task model ${taskModelKey(providerId, modelId)} is not supported`);
+    throw new ModelCapabilityError(
+      'MODEL_CAPABILITY_UNAVAILABLE',
+      `Task model ${taskModelKey(providerId, modelId)} is not supported`,
+      { providerId, modelId: canonicalModelId },
+    );
   }
   return descriptor;
 }
@@ -718,7 +737,11 @@ export async function resolveTaskModel(
   const [providers, users] = await Promise.all([getApiProviders(), listManagedUsers()]);
   const user = users.find(candidate => candidate.id === userId);
   if (!user) {
-    throw new Error(`User ${userId} is not authorized for ${taskModelKey(providerId, modelId)}`);
+    throw new ModelCapabilityError(
+      'MODEL_NOT_AUTHORIZED',
+      `User ${userId} is not authorized for ${taskModelKey(providerId, modelId)}`,
+      { providerId, modelId, userId },
+    );
   }
   return resolveTaskModelFromProviders(providers, providerId, modelId, user);
 }

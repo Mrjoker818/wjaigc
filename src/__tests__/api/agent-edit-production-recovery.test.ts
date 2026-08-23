@@ -119,6 +119,17 @@ vi.mock('@/lib/task-core/model-catalog', () => ({
     allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
     supportsReferenceImages: false, supportsMask: false, outputKinds: ['png'],
   })),
+  resolveTaskModelForUser: vi.fn(async (providerId: string, modelId: string) => ({
+    providerId,
+    modelId,
+    kind: 'image',
+    sourceType: 'image',
+    protocol: 'images',
+    executionMode: 'async',
+    allowedRatios: ['1:1'], allowedSizes: [], qualityOptions: ['high'], maxOutputs: 4,
+    supportsReferenceImages: false, supportsMask: false, outputKinds: ['png'],
+    supportedOperations: ['text-to-image'],
+  })),
 }));
 vi.mock('@/lib/agent-runtime/context-adapters', () => ({
   authorizeAgentContext: vi.fn(async ({ request }: { request: Record<string, unknown> }) => request.context),

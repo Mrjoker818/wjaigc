@@ -52,6 +52,9 @@ import {
   normalizeImageOutputRequestBody,
   UnsupportedTransparentBackgroundError,
 } from '@/lib/image-generation-output';
+import { resolveTaskModelForUser } from '@/lib/task-core/model-catalog';
+import { validateTaskModelSelection } from '@/lib/task-core/model-capability-resolution';
+import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -131,6 +134,39 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
   };
 }
 
+function modelCapabilityConfigurationErrorResponse(
+  error: ModelCapabilityError,
+  providerId: string,
+  modelId: string,
+): NextResponse {
+  const details = { providerId, modelId };
+  if (error.code === 'MODEL_NOT_CONFIGURED') {
+    return NextResponse.json({
+      success: false,
+      code: 'MODEL_NOT_CONFIGURED',
+      error: '所选供应商或模型当前未配置，请刷新模型列表后重试',
+      retryable: false,
+      details,
+    }, { status: 400 });
+  }
+  if (error.code === 'MODEL_NOT_AUTHORIZED') {
+    return NextResponse.json({
+      success: false,
+      code: 'MODEL_NOT_AUTHORIZED',
+      error: '当前账号无权使用所选供应商模型',
+      retryable: false,
+      details,
+    }, { status: 403 });
+  }
+  return NextResponse.json({
+    success: false,
+    code: 'MODEL_CAPABILITY_UNAVAILABLE',
+    error: '所选模型尚无可用的能力目录，请联系管理员完成配置',
+    retryable: false,
+    details,
+  }, { status: 400 });
+}
+
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   const authResult = await requireApiAuthOrReject(request);
@@ -181,7 +217,8 @@ export async function POST(request: NextRequest) {
     // Canvas-era callers use `n`; the current panels use `outputCount`.
     // Normalize them before task fan-out so every entry point has identical behavior.
     const requestedOutputCount = outputCount ?? requestedN;
-    let quality: string = typeof body.quality === 'string' ? body.quality : '1K';
+    const requestedQuality = typeof body.quality === 'string' ? body.quality : undefined;
+    let quality: string = requestedQuality || '1K';
     // resolution 默认值 '2K'（仅GPT-Image系列使用）
     let resolutionTier: string = resolution || '2K';
     // 诊断日志：显示接收到的参考图参数
@@ -396,6 +433,56 @@ export async function POST(request: NextRequest) {
         if (url) accessibleReferenceImages.push(url);
       }
       console.log(`[generate] 解析参考图完成: ${referenceImages.length} 张输入 → ${accessibleReferenceImages.length} 张可访问`);
+    }
+
+    const normalizedRequestedOutputCount = requestedOutputCount === undefined
+      ? 1
+      : Number(requestedOutputCount);
+    const modelCapabilityAdmission = effectiveProviderId
+      ? await (async () => {
+          try {
+            const descriptor = await resolveTaskModelForUser(
+              effectiveProviderId,
+              model,
+              sessionUser,
+            );
+            return validateTaskModelSelection(descriptor, {
+              operation: accessibleReferenceImages.length > 0 ? 'image-to-image' : 'text-to-image',
+              aspectRatio,
+              size: typeof requestedPixelSize === 'string' ? requestedPixelSize : undefined,
+              quality: requestedQuality,
+              outputCount: normalizedRequestedOutputCount,
+              referenceImageCount: accessibleReferenceImages.length,
+              usesMask: false,
+            });
+          } catch (error) {
+            if (error instanceof ModelCapabilityError) return error;
+            throw error;
+          }
+        })()
+      : null;
+
+    if (modelCapabilityAdmission instanceof ModelCapabilityError) {
+      return modelCapabilityConfigurationErrorResponse(
+        modelCapabilityAdmission,
+        effectiveProviderId,
+        model,
+      );
+    }
+    if (modelCapabilityAdmission && !modelCapabilityAdmission.ok) {
+      return NextResponse.json({
+        success: false,
+        code: 'MODEL_CAPABILITY_MISMATCH',
+        error: `所选模型不支持当前参数：${modelCapabilityAdmission.error.field}`,
+        retryable: false,
+        details: {
+          providerId: effectiveProviderId,
+          modelId: model,
+          field: modelCapabilityAdmission.error.field,
+          received: modelCapabilityAdmission.error.received,
+          allowed: modelCapabilityAdmission.error.allowed,
+        },
+      }, { status: 400 });
     }
 
     // ★ submitOnly 模式：立即注册任务并返回 taskId，后台执行实际生成

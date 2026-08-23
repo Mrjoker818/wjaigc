@@ -15,7 +15,7 @@ const EXACT_MODEL_CAPABILITIES: Readonly<Record<string, CapabilityLayer>> = {
     protocol: 'apimart',
     executionMode: 'async',
     allowedRatios: [...APIMART_GPT_IMAGE_2_RATIOS],
-    qualityOptions: ['1k', '2k', '4k'],
+    qualityOptions: ['1K', '2K', '4K'],
     supportsReferenceImages: true,
     maxReferenceImages: 16,
     supportedOperations: ['text-to-image', 'image-to-image'],

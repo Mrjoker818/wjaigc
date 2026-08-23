@@ -71,7 +71,7 @@ describe('provider capability adapters', () => {
         '5:4', '4:5', '16:9', '9:16', '2:1',
         '1:2', '3:1', '1:3', '21:9', '9:21',
       ],
-      qualityOptions: ['1k', '2k', '4k'],
+      qualityOptions: ['1K', '2K', '4K'],
       supportsReferenceImages: true,
       maxReferenceImages: 16,
       supportedOperations: ['text-to-image', 'image-to-image'],
