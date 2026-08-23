@@ -43,6 +43,41 @@ function secretCheckAny(area, names, strict = production) {
   else add(strict ? 'FAIL' : 'WARN', area, strict ? `missing or placeholder value (${names.join(' or ')})` : 'not configured for this runtime');
 }
 
+function checkAuthPersistenceMode() {
+  const databaseConfigured = Boolean(resolveDoctorDatabaseUrl(process.env));
+  const rawMode = process.env.WUJIE_AUTH_PERSISTENCE_MODE;
+  const mode = rawMode === undefined
+    ? databaseConfigured ? 'DB_ONLY' : 'FILE_ONLY'
+    : rawMode;
+
+  if (!['DB_ONLY', 'DB_PLUS_FILE', 'FILE_ONLY'].includes(mode)) {
+    add('FAIL', 'auth-persistence-mode', 'unsupported value');
+    return;
+  }
+  if ((mode === 'DB_ONLY' || mode === 'DB_PLUS_FILE') && !databaseConfigured) {
+    add('FAIL', 'auth-persistence-mode', 'database URL is required for the configured mode');
+    return;
+  }
+  if (production && mode === 'FILE_ONLY') {
+    add('FAIL', 'auth-persistence-mode', 'file persistence is not allowed in production');
+    return;
+  }
+  add('PASS', 'auth-persistence-mode', mode);
+}
+
+function checkPreviousSessionSetting() {
+  const value = process.env.WUJIE_AUTH_ACCEPT_PREVIOUS_SESSIONS;
+  if (value === undefined) {
+    add('PASS', 'auth-previous-sessions', 'default');
+    return;
+  }
+  if (value === 'true' || value === 'false') {
+    add('PASS', 'auth-previous-sessions', 'configured');
+    return;
+  }
+  add('FAIL', 'auth-previous-sessions', 'value must be exactly true or false');
+}
+
 function normalizePostgresConnectionString(connectionString) {
   try {
     const parsed = new URL(connectionString);
@@ -556,6 +591,8 @@ async function main() {
   checkStage4Modes();
   const strictCredentials = production && !startup;
   secretCheckAny('authentication-secret', ['WUJIE_AUTH_SECRET', 'NEXTAUTH_SECRET'], strictCredentials);
+  checkAuthPersistenceMode();
+  checkPreviousSessionSetting();
   secretCheck('INTERNAL_API_SECRET', strictCredentials);
   secretCheck('PAYMENT_TOKEN_SECRET', strictCredentials);
   if (configured('WUJIE_ADMIN_PASSWORD', 12)) add('PASS', 'WUJIE_ADMIN_PASSWORD', 'configured');
