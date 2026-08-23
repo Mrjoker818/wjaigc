@@ -15,6 +15,7 @@ import { SHARED_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation
 
 /** getModelParamType: 判断模型的参数类型（resolution/quality/both/none） */
 import { getModelParamType } from './canvas-generation-group';
+import { withImageOutputPreference, type ImageBackgroundMode } from './image-generation-output';
 
 // ==================== 节点类型 ====================
 
@@ -707,6 +708,11 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
       { label: '1K', value: '1K' }, { label: '2K', value: '2K' }, { label: '4K', value: '4K' },
       { label: '标准 standard', value: 'standard' }, { label: '高清 hd', value: 'hd' },
     ], defaultValue: '1K' });
+    fields.push({ key: 'background', label: '背景', type: 'select', options: [
+      { label: '自动', value: 'auto' },
+      { label: '透明 PNG', value: 'transparent' },
+      { label: '不透明', value: 'opaque' },
+    ], defaultValue: 'auto', hint: '透明模式仅对支持原生透明背景的模型生效' });
     fields.push({ key: 'seed', label: '随机种子', type: 'number', min: -1, max: 2147483647, defaultValue: -1, placeholder: '-1为随机' });
     fields.push({ key: 'n', label: '生成数量', type: 'number', min: 1, max: 4, defaultValue: 1 });
     // 参考图/图生图相关字段（当有图片输入连接时生效）
@@ -1775,10 +1781,17 @@ export function buildNodeExecutionRequest(
         body.referenceCategories = [['风格', '构图', '场景', '色彩', '主体', '细节']];
         body.referenceStrengths = [[refStrength, refStrength, refStrength, refStrength, refStrength, refStrength]];
       }
+      const background = ['auto', 'transparent', 'opaque'].includes(String(config.background))
+        ? config.background as ImageBackgroundMode
+        : 'auto';
+      const outputBody = withImageOutputPreference(body, pureModelId, {
+        background,
+        outputFormat: 'png',
+      });
       return {
         endpoint: '/api/generate',
         method: 'POST',
-        body,
+        body: outputBody,
       };
     }
 

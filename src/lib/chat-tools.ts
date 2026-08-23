@@ -2,6 +2,11 @@ import { calculateActualPixels } from './canvas-generation-group';
 import { getInternalRequestHeaders } from './api-auth';
 import { fetchWithV1Retry } from './api-helpers';
 import { STRICT_AGENT_GENERATE_HEADER } from './agent-runtime/generate-image-adapter';
+import {
+  detectTransparentBackgroundIntent,
+  withImageOutputPreference,
+  type ImageBackgroundMode,
+} from './image-generation-output';
 
 // 服务器端口，所有服务器间 fetch 调用统一使用 localhost + 此端口
 const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
@@ -46,6 +51,11 @@ export const CHAT_TOOLS = [
           negative_prompt: {
             type: 'string',
             description: '反向提示词，描述不希望出现的内容',
+          },
+          background: {
+            type: 'string',
+            description: '输出背景。仅当用户明确要求透明背景时使用 transparent',
+            enum: ['auto', 'transparent', 'opaque'],
           },
         },
         required: ['prompt'],
@@ -460,6 +470,10 @@ async function executeGenerateImage(
     // 强制 count=1：系统提示词要求每次只生成1张，多张时应多次调用工具
     const count = 1;
     const negativePrompt = args.negative_prompt as string | undefined;
+    const explicitBackground = typeof args.background === 'string'
+      ? args.background as ImageBackgroundMode
+      : undefined;
+    const background = explicitBackground || detectTransparentBackgroundIntent(prompt) || 'auto';
 
     // 从 args 或 context 获取 model 和 providerId
     const model = context.deferAgentExecution
@@ -487,7 +501,7 @@ async function executeGenerateImage(
           [STRICT_AGENT_GENERATE_HEADER]: 'true',
         } : {}),
       },
-      body: JSON.stringify({
+      body: JSON.stringify(withImageOutputPreference({
         prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,
         model,
         providerId,
@@ -501,7 +515,7 @@ async function executeGenerateImage(
         assetWorkspace: 'chat',
         assetWorkspaceId: embeddedChatWorkspaceId(context),
         assetSourceEntityId: context.messageId,
-      }),
+      }, model, { background, outputFormat: 'png' })),
       signal: AbortSignal.timeout(30000),
     });
 
