@@ -1174,3 +1174,15 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 其他 SVG 引擎 | 仍未验证 | Python VTracer、AI/Vectorizer、ImageTracer 和 Potrace 需要分别取得真实云端终态与下载证据。 |
 | PostgreSQL 专项 | 仍未验证 | 105 项因缺少隔离库跳过；本路由不触及持久化或账务，但跳过项仍不计通过。 |
 | 后续吸收 | 可进入下一唯一项 | `V588-AUTH-001` 必须从认证安全 RED 开始；donor 与 `stable` 继续只读。 |
+
+## 2026-08-23 V588-AUTH-001 本地闭环后的未验证项
+
+| 项目 | 状态 | 关闭条件 |
+|---|---|---|
+| 本地认证实现与真实 PostgreSQL | 已验证 | `b0cd946f` 的聚焦 `63/63`，其中 8 项真实 PostgreSQL 集成/并发测试；独立复审 `0/0/0`。 |
+| 本地多浏览器会话矩阵 | 已验证 | Chromium、Firefox、WebKit、1080p 与移动 Chromium，管理员/普通用户合计 `10/10`。 |
+| GitHub main 精确提交 | 待推送核验 | 仅普通快进推送 `main`，记录远端最终 SHA；禁止修改或强推 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`。 |
+| Coze 精确 SHA 与会话矩阵 | 未验证 | Coze 拉取最终 main 后，在现有 Google Chrome 标签页验证登录、刷新、三个工作区、注销和注销后数据隔离，并检查新鲜 Console/网络错误。 |
+| 非认证 PostgreSQL 全库门禁 | 部分未验证 | 全仓仍有 `19 files / 113 tests` 因缺少其他模块完整隔离数据库跳过；认证专项的 8 项真实数据库测试不能替代它们。 |
+| 真实付费供应商与账务 | 未验证 | 隔离夹具无真实 provider 配置；图像/视频生成、取消、超时、单次扣费与一次退款仍需独立云端证据。 |
+| 下一 donor 吸收项 | 暂停 | 先完成 Coze 认证 exact-SHA 闭环，再按优先级选择 `V588-ADMIN-004` 或 `V588-PROVIDER-005`；不得重复 AUTH 或跳过 RED。 |

@@ -1523,3 +1523,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 同期每 500ms 的首页健康探针共 `80` 次，全部 HTTP 200，平均 `6.002ms`、P95 `8.163ms`、最大 `13.152ms`；浏览器 Console error/warning 与原生 dialog 均为 0。
 - SVG 下载弹层可选择 SVG 并确认。自动化的 download 事件监听超时，但本地实际文件为 `4726` 字节，SHA-256 为 `B9AE35800CADD344850D13ADB890517C7312B8FB4BB3C9073D17785A132B8B95`，逻辑尺寸 `1536x1024`、内部 `viewBox=0 0 627 418`。
 - **结论：V588-SAFETY-001 云端回归通过并完成吸收。** 本结论只覆盖同步 WASM 大图预算；Python VTracer、其他矢量引擎和 PostgreSQL 专项不随本项自动通过。下一唯一项为 `V588-AUTH-001`。
+
+## 2026-08-23 V588-AUTH-001 本地回归
+
+- TDD 先复现认证密钥读取失败与缺失值混淆、跨进程副本覆盖、`simple-chat` 假注销及退出同步无限等待；实现提交 `b0cd946f` 只修改认证持久化、退出边界、SSE 卸载和默认媒体依赖。
+- 真实 PostgreSQL 聚焦通过 `7 files / 63 tests`，包含 `8` 项实际数据库集成/并发用例，覆盖事务锁竞争、新数据目录副本、旧文件迁移、`ON CONFLICT DO NOTHING` 胜者保持及密钥环并发。
+- 全仓 Vitest 通过 `503 files / 3286 tests`，明确跳过 `19 files / 113 tests`；API 回归 `123 files / 701 tests`，另有 `2 files / 3 tests` 跳过；业务回归 `350 files / 2336 tests`，另有 `2 files / 8 tests` 跳过。所有已执行测试失败数均为 0。
+- `pnpm doctor`、`pnpm ts-check`、`pnpm lint:build` 和 `pnpm build` 均通过；Next.js `16.2.11` 完成 `116/116` 页面生成。目标 ESLint 为 `0 errors`，保留 `9` 条既有 warning。
+- 最终生产构建浏览器矩阵 `10/10` 通过，覆盖 Chromium、Firefox、WebKit、1080p 和移动端下管理员/普通用户的错误密码、正确登录、刷新保持、画布/仪表盘/独立聊天导航、注销及注销后数据隔离。
+- 两轮独立复审最终均为 `Critical/Important/Minor = 0/0/0`。首轮浏览器 503 来自测试夹具错误继承 `FILE_ONLY`，改用规定的 `DB_PLUS_FILE` 环境后同一代码通过，没有用业务代码绕过配置错误。
+- **结论：V588-AUTH-001 本地回归通过。** Coze 尚未拉取精确提交并重复云端会话矩阵，因此不能标记为云端通过；付费生成、取消和退款链路也不在本项验收范围。
