@@ -144,8 +144,9 @@ describe.sequential('stable-compatible authentication credential migration', () 
   });
 
   it('permits a verified legacy login when sidecar migration is deferred and logs only the stable code', async () => {
+    const originalLegacyHash = legacyHash('legacy-contract-password', legacySecret);
     const { usersPath } = await createFixture([storedUser({
-      passwordHash: legacyHash('legacy-contract-password', legacySecret),
+      passwordHash: originalLegacyHash,
     })]);
     const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
     const actualWriteFile = actualFs.writeFile;
@@ -160,6 +161,7 @@ describe.sequential('stable-compatible authentication credential migration', () 
     }));
     vi.resetModules();
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const { authenticateUser } = await loadServerAuth();
 
     await expect(authenticateUser({
@@ -167,9 +169,21 @@ describe.sequential('stable-compatible authentication credential migration', () 
       password: 'legacy-contract-password',
       productType: 'canvas',
     })).resolves.toMatchObject({ id: 'user-contract-1' });
-    expect(warning).toHaveBeenCalledWith(expect.stringContaining('AUTH_CREDENTIAL_MIGRATION_DEFERRED'));
-    expect(JSON.stringify(warning.mock.calls)).not.toContain('legacy-contract-password');
-    expect(JSON.stringify(warning.mock.calls)).not.toContain(activeSecret);
+    expect(warning.mock.calls).toEqual([
+      [expect.objectContaining({
+        code: 'AUTH_CREDENTIAL_MIGRATION_DEFERRED',
+        userId: 'user-contract-1',
+      })],
+    ]);
+    const emittedAuthenticationLogs = JSON.stringify([
+      ...warning.mock.calls,
+      ...log.mock.calls,
+    ]);
+    expect(emittedAuthenticationLogs).not.toContain(legacySecret);
+    expect(emittedAuthenticationLogs).not.toContain(originalLegacyHash);
+    expect(emittedAuthenticationLogs).not.toContain('contract-user');
+    expect(emittedAuthenticationLogs).not.toContain('legacy-contract-password');
+    expect(emittedAuthenticationLogs).not.toContain('Auto-migrated password hash');
   });
 
   it('allows administrator recovery only for the exact configured bootstrap password', async () => {

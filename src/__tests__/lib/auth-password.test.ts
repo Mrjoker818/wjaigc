@@ -12,6 +12,12 @@ type ScryptExecutorInput = {
   maxmem: number;
 };
 
+type ScryptExecutor = (input: ScryptExecutorInput) => Promise<Buffer>;
+
+type AuthPasswordService = {
+  verifyScryptCredential(password: string, credential: string): Promise<boolean>;
+};
+
 type AuthPasswordContract = {
   createScryptCredential(password: string): Promise<string>;
   verifyScryptCredential(password: string, credential: string): Promise<boolean>;
@@ -22,21 +28,15 @@ type AuthPasswordContract = {
     storedHash: string,
     secrets: readonly string[],
   ): { matched: boolean; matchedIndex?: number };
-  setScryptExecutorForTests(executor: (input: ScryptExecutorInput) => Promise<Buffer>): void;
-  resetScryptConcurrencyForTests(): void;
+  createAuthPasswordService(input: {
+    scryptExecutor: ScryptExecutor;
+    maxConcurrency: number;
+  }): AuthPasswordService;
 };
 
 async function loadAuthPassword(): Promise<AuthPasswordContract> {
   return await import('@/lib/auth/auth-password') as AuthPasswordContract;
 }
-
-afterEach(async () => {
-  try {
-    (await loadAuthPassword()).resetScryptConcurrencyForTests();
-  } catch {
-    // The RED baseline deliberately has no auth-password module yet.
-  }
-});
 
 describe('versioned scrypt credentials', () => {
   it('creates the fixed v1 format with a 16-byte salt and 32-byte derived key', async () => {
@@ -94,9 +94,7 @@ describe('versioned scrypt credentials', () => {
 
   it('keeps no more than four injected scrypt executions active at once', async () => {
     const {
-      resetScryptConcurrencyForTests,
-      setScryptExecutorForTests,
-      verifyScryptCredential,
+      createAuthPasswordService,
     } = await loadAuthPassword();
     let active = 0;
     let peak = 0;
@@ -104,17 +102,19 @@ describe('versioned scrypt credentials', () => {
     const derivedKey = Buffer.alloc(32, 7);
     const credential = `scrypt-v1$32768$8$1$${salt.toString('base64url')}$${derivedKey.toString('base64url')}`;
 
-    resetScryptConcurrencyForTests();
-    setScryptExecutorForTests(async ({ keyLength }) => {
+    const service = createAuthPasswordService({
+      maxConcurrency: 4,
+      scryptExecutor: async ({ keyLength }) => {
       active += 1;
       peak = Math.max(peak, active);
       await new Promise(resolve => setTimeout(resolve, 10));
       active -= 1;
       return Buffer.alloc(keyLength, 7);
+      },
     });
 
     await expect(Promise.all(Array.from({ length: 12 }, () => (
-      verifyScryptCredential('bounded-contract-password', credential)
+      service.verifyScryptCredential('bounded-contract-password', credential)
     )))).resolves.toEqual(Array.from({ length: 12 }, () => true));
     expect(peak).toBeLessThanOrEqual(4);
   });
