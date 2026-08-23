@@ -7,10 +7,15 @@ const source = readFileSync(resolve(process.cwd(), 'src/app/api/generate/route.t
 describe('generate transparent output contract', () => {
   it('normalizes output fields after provider model resolution and before billing', () => {
     const normalization = source.indexOf('normalizeImageOutputRequestBody(');
-    const billing = source.indexOf('consumeCredits(', normalization);
+    const billing = source.indexOf('consumeCredits(');
 
     expect(normalization).toBeGreaterThan(-1);
-    expect(billing).toBeGreaterThan(normalization);
+    expect(normalization).toBeLessThan(billing);
+  });
+
+  it('persists transparent output fields in the resumable submission payload', () => {
+    expect(source).toContain('background: body.background');
+    expect(source).toContain('output_format: body.output_format');
   });
 
   it('returns a stable unsupported capability code instead of silently falling back', () => {

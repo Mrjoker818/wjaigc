@@ -234,6 +234,23 @@ export async function POST(request: NextRequest) {
     // ★ 模型别名规范化：延迟到找到 provider 后再做精确匹配；初始仅推断 quality/resolution 后缀
     // 保留原始 modelId 用于 provider 匹配和精确比对
     const rawModelId = model;
+    try {
+      const normalizedOutputBody = normalizeImageOutputRequestBody(body, rawModelId);
+      for (const key of ['background', 'backgroundMode', 'output_format', 'outputFormat']) {
+        delete body[key];
+      }
+      Object.assign(body, normalizedOutputBody);
+    } catch (error) {
+      if (error instanceof UnsupportedTransparentBackgroundError) {
+        return NextResponse.json({
+          success: false,
+          code: 'TRANSPARENT_BACKGROUND_UNSUPPORTED',
+          error: error.message,
+          retryable: false,
+        }, { status: 400 });
+      }
+      throw error;
+    }
     // 初次调用仅提取 quality/resolution 等信息，不剥离后缀（传空 providerModels 防止误剥离）
     let normalized = normalizeModelForApi(model, { providerModels: [] });
 
@@ -433,6 +450,8 @@ export async function POST(request: NextRequest) {
         strength,
         quality,
         resolution: resolutionTier,
+        background: body.background,
+        output_format: body.output_format,
         projectId,
         sessionId,
         messageId,
@@ -1229,23 +1248,6 @@ export async function POST(request: NextRequest) {
     
     const providerHint = `${provider?.id || effectiveProviderId} ${provider?.displayName || provider?.name || ''} ${provider?.baseUrl || apiBaseUrl}`;
     let modelConfig = inferModelConfig(model, initialProfile, provider?.displayName, providerHint);
-    try {
-      const normalizedOutputBody = normalizeImageOutputRequestBody(body, model);
-      for (const key of ['background', 'backgroundMode', 'output_format', 'outputFormat']) {
-        delete body[key];
-      }
-      Object.assign(body, normalizedOutputBody);
-    } catch (error) {
-      if (error instanceof UnsupportedTransparentBackgroundError) {
-        return NextResponse.json({
-          success: false,
-          code: 'TRANSPARENT_BACKGROUND_UNSUPPORTED',
-          error: error.message,
-          retryable: false,
-        }, { status: 400 });
-      }
-      throw error;
-    }
     const requestedRoute = {
       providerId: effectiveProviderId || provider?.id || 'unresolved-provider',
       providerName: provider?.displayName || provider?.name || effectiveProviderId || '未匹配提供商',
