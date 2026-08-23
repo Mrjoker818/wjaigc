@@ -17,6 +17,16 @@ interface DbUser {
   status: string;
   api_permissions: Record<string, boolean>;
   storage_folder: string;
+  product_type?: string | null;
+  group_id?: string | null;
+  chat_models?: string[] | string | null;
+  image_models?: string[] | string | null;
+  daily_token_limit?: number | null;
+  monthly_token_limit?: number | null;
+  daily_image_limit?: number | null;
+  avatar?: string | null;
+  nickname?: string | null;
+  email?: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -854,19 +864,44 @@ export async function migrateFileDataToDb(): Promise<void> {
       let migrated = 0;
       for (const user of users) {
         if (!existingIds.has(user.id)) {
-          await dbUpsertUser({
-            id: user.id,
-            name: user.name,
-            password_hash: user.passwordHash || user.password_hash || '',
-            credential_hash: user.credentialHash || user.credential_hash || null,
-            role: user.role || 'user',
-            status: user.status || 'active',
-            api_permissions: user.apiPermissions || user.api_permissions || { image: true, chat: true, threeD: true, imageEdit: true, vectorize: true, layer: true, upscaler: true, removebg: true, audio: true },
-            storage_folder: user.storageFolder || user.storage_folder || `data/users/${user.id}`,
-            created_at: user.createdAt || user.created_at || Date.now(),
-            updated_at: user.updatedAt || user.updated_at || Date.now(),
-          });
-          migrated++;
+          const result = await execSql(`
+            INSERT INTO wujie_users (
+              id, name, password_hash, credential_hash, role, status,
+              product_type, chat_models, image_models,
+              daily_token_limit, monthly_token_limit, daily_image_limit,
+              avatar, nickname, api_permissions, storage_folder, email, group_id,
+              created_at, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6,
+              $7, $8, $9,
+              $10, $11, $12,
+              $13, $14, $15, $16, $17, $18,
+              $19, $20
+            )
+            ON CONFLICT (id) DO NOTHING
+          `, [
+            user.id,
+            user.name,
+            user.passwordHash ?? user.password_hash ?? '',
+            user.credentialHash ?? user.credential_hash ?? null,
+            user.role || 'user',
+            user.status || 'active',
+            user.productType ?? user.product_type ?? null,
+            parseJsonArrayField(user.chatModels ?? user.chat_models) ?? null,
+            parseJsonArrayField(user.imageModels ?? user.image_models) ?? null,
+            user.dailyTokenLimit ?? user.daily_token_limit ?? null,
+            user.monthlyTokenLimit ?? user.monthly_token_limit ?? null,
+            user.dailyImageLimit ?? user.daily_image_limit ?? null,
+            user.avatar ?? null,
+            user.nickname ?? null,
+            JSON.stringify(parseJsonField(user.apiPermissions ?? user.api_permissions)),
+            user.storageFolder ?? user.storage_folder ?? `data/users/${user.id}`,
+            user.email ?? null,
+            user.groupId ?? user.group_id ?? null,
+            user.createdAt ?? user.created_at ?? Date.now(),
+            user.updatedAt ?? user.updated_at ?? Date.now(),
+          ]);
+          if (result.rowCount > 0) migrated++;
         }
       }
       console.log(`[db-storage] Migrated ${migrated} new users (${existingDbUsers.length} already in DB)`);
@@ -892,7 +927,28 @@ export async function migrateFileDataToDb(): Promise<void> {
       if (missingInFile.length > 0) {
         console.log(`[Migration] Syncing ${missingInFile.length} DB users back to file: ${usersFilePath}`);
         for (const dbu of missingInFile) {
-          fileUsers.push(dbu as unknown as Record<string, unknown>);
+          fileUsers.push({
+            id: dbu.id,
+            name: dbu.name,
+            passwordHash: dbu.password_hash,
+            credentialHash: dbu.credential_hash ?? undefined,
+            role: dbu.role,
+            status: dbu.status,
+            productType: dbu.product_type || undefined,
+            groupId: dbu.group_id || undefined,
+            chatModels: parseJsonArrayField(dbu.chat_models),
+            imageModels: parseJsonArrayField(dbu.image_models),
+            dailyTokenLimit: dbu.daily_token_limit ?? undefined,
+            monthlyTokenLimit: dbu.monthly_token_limit ?? undefined,
+            dailyImageLimit: dbu.daily_image_limit ?? undefined,
+            avatar: dbu.avatar || undefined,
+            nickname: dbu.nickname || undefined,
+            apiPermissions: parseJsonField(dbu.api_permissions),
+            storageFolder: dbu.storage_folder,
+            email: dbu.email || undefined,
+            createdAt: parseDatabaseUserTimestamp(dbu.created_at),
+            updatedAt: parseDatabaseUserTimestamp(dbu.updated_at),
+          });
         }
         fileUsersData.users = fileUsers;
         const fsSync = await import('fs');
