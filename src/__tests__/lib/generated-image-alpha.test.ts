@@ -1,6 +1,9 @@
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { verifyGeneratedImageAlpha } from '@/lib/generated-image-alpha';
+import {
+  verifyGeneratedImageAlpha,
+  verifyGeneratedImageAlphaSet,
+} from '@/lib/generated-image-alpha';
 
 async function transparentPng(): Promise<Buffer> {
   return sharp(Buffer.from([
@@ -45,5 +48,18 @@ describe('generated image alpha verification', () => {
     await expect(verifyGeneratedImageAlpha(Buffer.from('not-an-image'))).resolves.toMatchObject({
       status: 'invalid',
     });
+  });
+
+  it('aggregates multiple transparent outputs without hiding an opaque result', async () => {
+    const opaque = await sharp({
+      create: { width: 1, height: 1, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
+    }).png().toBuffer();
+    const result = await verifyGeneratedImageAlphaSet([
+      await transparentPng(),
+      opaque,
+    ]);
+
+    expect(result.status).toBe('opaque');
+    expect(result.items).toHaveLength(2);
   });
 });

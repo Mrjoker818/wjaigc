@@ -27,9 +27,8 @@ import {
   projectAgentResultToWorkspace,
 } from '@/lib/agent-runtime/workspace-results';
 import {
-  verifyGeneratedImageAlpha,
-  type AlphaVerificationStatus,
-  type GeneratedImageAlphaVerification,
+  verifyGeneratedImageAlphaSet,
+  type GeneratedImageAlphaSetVerification,
 } from '@/lib/generated-image-alpha';
 
 interface ImageTaskSubmission {
@@ -69,11 +68,7 @@ interface ImageTaskTerminal {
   modelName?: string;
   providerId?: string;
   providerName?: string;
-  alphaVerification?: {
-    requested: true;
-    status: AlphaVerificationStatus;
-    items: Array<GeneratedImageAlphaVerification & { imageUrl: string }>;
-  };
+  alphaVerification?: GeneratedImageAlphaSetVerification;
   persist?: boolean;
 }
 
@@ -373,21 +368,23 @@ export async function recordImageTaskTerminal(
   const submissionPayload = currentTask?.result?.submissionPayload as Record<string, unknown> | undefined;
   let alphaVerification = input.alphaVerification;
   if (!alphaVerification && submissionPayload?.background === 'transparent') {
-    const items = await Promise.all(imageUrls.map(async (imageUrl) => ({
-      imageUrl,
-      ...await verifyGeneratedImageAlpha(imageUrl),
-    })));
-    const statuses = items.map(item => item.status);
-    const status: AlphaVerificationStatus = statuses.every(value => value === 'verified')
-      ? 'verified'
-      : statuses.includes('opaque')
-        ? 'opaque'
-        : statuses.includes('invalid')
-          ? 'invalid'
-          : 'unverified';
-    alphaVerification = { requested: true, status, items };
+    alphaVerification = await verifyGeneratedImageAlphaSet(imageUrls);
   }
   const hasResultMetadata = Boolean(input.gridImageUrl) || Boolean(input.buttons?.length);
+  const transparentResultWarning = alphaVerification
+    && ['opaque', 'invalid'].includes(alphaVerification.status)
+    ? {
+        warning: {
+          code: 'TRANSPARENT_RESULT_NOT_ALPHA',
+          message: '模型未返回真实透明背景，原始结果已保留。可在图片工具栏中主动选择“移除背景”。',
+        },
+        nextAction: {
+          type: 'remove-background',
+          requiresConfirmation: true,
+          separatelyBilled: true,
+        },
+      }
+    : {};
   const result = imageUrls.length > 0 || hasResultMetadata
     ? {
         imageUrl: imageUrls[0] || '',
@@ -402,6 +399,7 @@ export async function recordImageTaskTerminal(
         ...(input.providerId ? { providerId: input.providerId } : {}),
         ...(input.providerName ? { providerName: input.providerName } : {}),
         ...(alphaVerification ? { alphaVerification } : {}),
+        ...transparentResultWarning,
       }
     : undefined;
 

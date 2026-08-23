@@ -14,6 +14,12 @@ export interface GeneratedImageAlphaVerification {
   height?: number;
 }
 
+export interface GeneratedImageAlphaSetVerification {
+  requested: true;
+  status: AlphaVerificationStatus;
+  items: Array<GeneratedImageAlphaVerification & { imageUrl: string }>;
+}
+
 async function loadInput(input: Buffer | string): Promise<Buffer> {
   if (Buffer.isBuffer(input)) return input;
   const controller = new AbortController();
@@ -77,4 +83,22 @@ export async function verifyGeneratedImageAlpha(
         : 'invalid',
     };
   }
+}
+
+export async function verifyGeneratedImageAlphaSet(
+  imageInputs: Array<Buffer | string>,
+): Promise<GeneratedImageAlphaSetVerification> {
+  const items = await Promise.all(imageInputs.map(async (imageInput, index) => ({
+    imageUrl: typeof imageInput === 'string' ? imageInput : `buffer:${index}`,
+    ...await verifyGeneratedImageAlpha(imageInput),
+  })));
+  const statuses = items.map(item => item.status);
+  const status: AlphaVerificationStatus = statuses.length > 0 && statuses.every(value => value === 'verified')
+    ? 'verified'
+    : statuses.includes('opaque')
+      ? 'opaque'
+      : statuses.includes('invalid')
+        ? 'invalid'
+        : 'unverified';
+  return { requested: true, status, items };
 }

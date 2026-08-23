@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   UnsupportedTransparentBackgroundError,
   detectTransparentBackgroundIntent,
+  getTransparentOutputWarning,
   normalizeImageOutputRequestBody,
   resolveImageOutputPreference,
   withImageOutputPreference,
@@ -57,6 +58,27 @@ describe('image-generation-output', () => {
     });
   });
 
+  it('infers transparent PNG when a legacy entry only provides explicit prompt intent', () => {
+    expect(normalizeImageOutputRequestBody({
+      prompt: '生成一个无背景的产品图标',
+    }, 'gpt-image-2')).toEqual({
+      prompt: '生成一个无背景的产品图标',
+      background: 'transparent',
+      output_format: 'png',
+    });
+  });
+
+  it('does not override an explicit opaque mode from prompt wording', () => {
+    expect(normalizeImageOutputRequestBody({
+      prompt: '透明背景图标，但本次请输出白底',
+      background: 'opaque',
+    }, 'gpt-image-2')).toEqual({
+      prompt: '透明背景图标，但本次请输出白底',
+      background: 'opaque',
+      output_format: 'png',
+    });
+  });
+
   it('removes automatic output aliases to preserve the legacy provider payload', () => {
     expect(normalizeImageOutputRequestBody({
       prompt: 'mountain',
@@ -80,5 +102,14 @@ describe('image-generation-output', () => {
     '生成一个山水海报',
   ])('does not invent transparent intent for %s', (prompt) => {
     expect(detectTransparentBackgroundIntent(prompt)).toBeUndefined();
+  });
+
+  it('returns a user warning only for a requested but non-transparent result', () => {
+    expect(getTransparentOutputWarning({
+      alphaVerification: { requested: true, status: 'opaque' },
+    })).toContain('未返回真实透明背景');
+    expect(getTransparentOutputWarning({
+      alphaVerification: { requested: true, status: 'verified' },
+    })).toBeUndefined();
   });
 });

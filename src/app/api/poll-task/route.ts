@@ -117,18 +117,24 @@ function withGenerationSlotMetadata<T extends Record<string, unknown>>(
   taskResult: Record<string, unknown> | undefined,
   taskId: string,
 ): T {
+  const enrichedPayload = {
+    ...payload,
+    ...(taskResult?.alphaVerification ? { alphaVerification: taskResult.alphaVerification } : {}),
+    ...(taskResult?.warning ? { warning: taskResult.warning } : {}),
+    ...(taskResult?.nextAction ? { nextAction: taskResult.nextAction } : {}),
+  };
   const canonical = projectCanonicalGenerationSlot({
     taskId,
-    status: typeof payload.status === 'string' ? payload.status : 'processing',
+    status: typeof enrichedPayload.status === 'string' ? enrichedPayload.status : 'processing',
     result: taskResult,
-    ...(typeof payload.error === 'string'
-      ? { error: { code: 'TASK_FAILED', message: payload.error } }
+    ...(typeof enrichedPayload.error === 'string'
+      ? { error: { code: 'TASK_FAILED', message: enrichedPayload.error } }
       : {}),
   });
-  if (!canonical) return payload;
+  if (!canonical) return enrichedPayload;
 
   return {
-    ...payload,
+    ...enrichedPayload,
     batchId: canonical.batchId,
     slotId: canonical.slotId,
     slotIndex: canonical.slotIndex,

@@ -152,6 +152,7 @@ import {
 import { shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
 import { sendUserDataRecord } from '@/lib/user-data-record-client';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
+import { getTransparentOutputWarning } from '@/lib/image-generation-output';
 
 import { LoginPanel } from '@/components/dashboard/login-panel';
 
@@ -291,6 +292,11 @@ function extractGeneratedImageUrls(payload: Record<string, unknown>): string[] {
   pushValue(result?.output);
   pushValue(payload.imageUrl || result?.imageUrl || result?.image);
   return Array.from(new Set(urls));
+}
+
+function notifyTransparentOutputWarning(payload: Record<string, unknown>): void {
+  const message = getTransparentOutputWarning(payload);
+  if (message) toast.warning('透明 PNG 校验未通过', { description: message });
 }
 
 function recordUserData(input: {
@@ -2797,6 +2803,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
               const completedImageUrls = extractGeneratedImageUrls(pollData as Record<string, unknown>);
               if (pollData.status === 'completed' && completedImageUrls.length > 0) {
+                notifyTransparentOutputWarning(pollData as Record<string, unknown>);
                 const completedSlotIndex = resolveGenerationSlotIndex(
                   submittedSlot,
                   pollData as Record<string, unknown>,
@@ -3821,6 +3828,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
                   const completedImageUrls = extractGeneratedImageUrls(pollData as Record<string, unknown>);
                   if (pollData.status === 'completed' && completedImageUrls.length > 0) {
+                    notifyTransparentOutputWarning(pollData as Record<string, unknown>);
                     completedImageUrls.forEach((imageUrl, imageIdx) => {
                       completedImages.push({
                         id: `${Date.now()}-${taskIdx}-${imageIdx}`,
@@ -4664,6 +4672,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             if (pollData.status === 'completed') {
               const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || pollData.result?.image?.url || (pollData.result?.images && pollData.result.images[0]?.url) || (pollData.images && pollData.images[0]?.url);
               if (resultUrl) {
+                notifyTransparentOutputWarning(pollData as Record<string, unknown>);
                 newImageUrls.push(resultUrl);
               }
               break;

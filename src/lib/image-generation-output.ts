@@ -61,7 +61,11 @@ export function normalizeImageOutputRequestBody<T extends Record<string, unknown
   background?: ImageBackgroundMode;
   output_format?: ImageOutputFormat;
 } {
-  const rawBackground = body.background ?? body.backgroundMode;
+  const hasExplicitBackground = body.background !== undefined || body.backgroundMode !== undefined;
+  const inferredBackground = !hasExplicitBackground && typeof body.prompt === 'string'
+    ? detectTransparentBackgroundIntent(body.prompt)
+    : undefined;
+  const rawBackground = body.background ?? body.backgroundMode ?? inferredBackground;
   const background: ImageBackgroundMode = ['transparent', 'opaque'].includes(String(rawBackground))
     ? rawBackground as ImageBackgroundMode
     : 'auto';
@@ -98,4 +102,17 @@ export function detectTransparentBackgroundIntent(text: string): 'transparent' |
   return transparentPatterns.some((pattern) => pattern.test(normalized))
     ? 'transparent'
     : undefined;
+}
+
+export function getTransparentOutputWarning(payload: Record<string, unknown>): string | undefined {
+  const nestedResult = payload.result && typeof payload.result === 'object'
+    ? payload.result as Record<string, unknown>
+    : undefined;
+  const verification = (payload.alphaVerification || nestedResult?.alphaVerification) as
+    | Record<string, unknown>
+    | undefined;
+  if (!verification || !['opaque', 'invalid'].includes(String(verification.status))) {
+    return undefined;
+  }
+  return '模型未返回真实透明背景，原始图片已保留。需要时请选中图片并使用“移除背景”；该操作会单独创建任务并计费。';
 }

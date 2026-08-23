@@ -1,6 +1,7 @@
 'use client';
 import NextImage from 'next/image';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
+import { getTransparentOutputWarning } from '@/lib/image-generation-output';
 import { toast } from 'sonner';
 import { } from '@/lib/canvas-mode-handlers';
 import { findClosestStandardRatio, STANDARD_RATIOS, type StandardRatio } from '@/lib/canvas-utils';
@@ -7408,6 +7409,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }
 
         if (data.status === 'completed' && data.imageUrl) {
+          const transparentWarning = getTransparentOutputWarning(data as Record<string, unknown>);
+          if (transparentWarning) {
+            toast.warning('透明 PNG 校验未通过', { description: transparentWarning });
+          }
           onProgress?.(95, '生成完成，正在处理图片...');
           // ★ 视频任务：将视频元数据暂存到全局变量，供调用方使用
           if (data.taskType === 'video' && data.videoUrl) {
@@ -16425,6 +16430,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                       ? pollData.result.imageUrls.filter((url: unknown): url is string => typeof url === 'string' && url.length > 0)
                                       : [pollData.imageUrl || pollData.result?.imageUrl || pollData.result?.url].filter((url): url is string => typeof url === 'string' && url.length > 0);
                                     if (pollData.status === 'completed' && resultUrls.length > 0) {
+                                      const transparentWarning = getTransparentOutputWarning(pollData as Record<string, unknown>);
+                                      if (transparentWarning) {
+                                        toast.warning('透明 PNG 校验未通过', { description: transparentWarning });
+                                      }
                                       if (onAddImages) onAddImages(resultUrls, undefined, { modelName: hcg.toolbar.model, apiProvider: modelProviderMap.get(hcg.toolbar.providerId || '') || hcg.toolbar.providerId });
                                       setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: resultUrls[0], progress: 100 } : g));
                                       return;

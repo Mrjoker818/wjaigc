@@ -6,6 +6,11 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile 
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
+import {
+  normalizeImageOutputRequestBody,
+  UnsupportedTransparentBackgroundError,
+} from '@/lib/image-generation-output';
+import { verifyGeneratedImageAlphaSet } from '@/lib/generated-image-alpha';
 
 // 通用API生成路由 - 支持第三方OpenAI兼容API的图像生成
 // 当用户使用非 APIMart 管理的第三方模型时，图像生成请求会被路由到这里
@@ -23,6 +28,33 @@ interface UniversalGenerateRequest {
   referenceImageUrl?: string;
   userId?: string;
   providerId?: string;
+  background?: string;
+  backgroundMode?: string;
+  output_format?: string;
+  outputFormat?: string;
+}
+
+async function getTransparentResultMetadata(
+  imageUrls: string[],
+  background: unknown,
+): Promise<Record<string, unknown>> {
+  if (background !== 'transparent') return {};
+  const alphaVerification = await verifyGeneratedImageAlphaSet(imageUrls);
+  if (!['opaque', 'invalid'].includes(alphaVerification.status)) {
+    return { alphaVerification };
+  }
+  return {
+    alphaVerification,
+    warning: {
+      code: 'TRANSPARENT_RESULT_NOT_ALPHA',
+      message: '模型未返回真实透明背景，原始结果已保留。可在图片工具栏中主动选择“移除背景”。',
+    },
+    nextAction: {
+      type: 'remove-background',
+      requiresConfirmation: true,
+      separatelyBilled: true,
+    },
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -65,6 +97,23 @@ export async function POST(request: NextRequest) {
     if (resolvedModel !== rawResolvedModel) {
       console.log(`[universal-generate] Model normalized: ${rawResolvedModel} → ${resolvedModel}`);
     }
+    let normalizedBody: Record<string, unknown>;
+    try {
+      normalizedBody = normalizeImageOutputRequestBody(
+        body as unknown as Record<string, unknown>,
+        resolvedModel,
+      );
+    } catch (error) {
+      if (error instanceof UnsupportedTransparentBackgroundError) {
+        return NextResponse.json({
+          success: false,
+          code: 'TRANSPARENT_BACKGROUND_UNSUPPORTED',
+          error: error.message,
+          retryable: false,
+        }, { status: 400 });
+      }
+      throw error;
+    }
     // 优先使用 providerId 精确匹配提供商
     let provider = providerId ? await findProviderById(providerId) : null;
     if (!provider) {
@@ -89,6 +138,8 @@ export async function POST(request: NextRequest) {
       prompt,
       size: aspectRatio,
       n,
+      background: normalizedBody.background,
+      output_format: normalizedBody.output_format,
     };
     if (quality && quality !== 'standard') {
       rawBody.quality = quality;
@@ -145,7 +196,11 @@ export async function POST(request: NextRequest) {
         originalPrompt: prompt,
         model: resolvedModel,
       }));
-      return NextResponse.json({ success: true, images });
+      const transparentResult = await getTransparentResultMetadata(
+        parsed.directImageUrls,
+        normalizedBody.background,
+      );
+      return NextResponse.json({ success: true, images, ...transparentResult });
     }
 
     // 异步任务模式
@@ -202,7 +257,11 @@ export async function POST(request: NextRequest) {
 
           if (images.length > 0) {
             console.log(`[Universal API] 任务完成: ${taskId}, 图片数: ${images.length}`);
-            return NextResponse.json({ success: true, images });
+            const transparentResult = await getTransparentResultMetadata(
+              images.map((image: { url: string }) => image.url),
+              normalizedBody.background,
+            );
+            return NextResponse.json({ success: true, images, ...transparentResult });
           }
 
           return NextResponse.json({
