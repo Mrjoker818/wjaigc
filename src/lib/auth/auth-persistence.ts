@@ -17,7 +17,7 @@ function configurationUnavailable(): AuthServiceError {
     'AUTH_CONFIGURATION_UNAVAILABLE',
     'Authentication persistence configuration is unavailable.',
     503,
-    false,
+    true,
   );
 }
 

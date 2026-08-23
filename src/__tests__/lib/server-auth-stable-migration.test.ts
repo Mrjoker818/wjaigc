@@ -33,6 +33,39 @@ function legacyHash(password: string, secret = activeSecret): string {
   return createHash('sha256').update(`${secret}:${password}`).digest('hex');
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function databaseUser(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'db-user-1',
+    name: 'db-user-1',
+    password_hash: legacyHash('db-user-password'),
+    credential_hash: null,
+    role: 'user',
+    status: 'active',
+    product_type: 'canvas,chat',
+    api_permissions: { image: true, chat: true },
+    storage_folder: 'data/users/db-user-1',
+    created_at: 1,
+    updated_at: 1,
+    ...overrides,
+  };
+}
+
+function configureDatabaseMode(mode: 'DB_ONLY' | 'DB_PLUS_FILE' = 'DB_ONLY'): void {
+  process.env.COZE_PROJECT_ENV = 'DEV';
+  process.env.WUJIE_AUTH_SECRET = activeSecret;
+  process.env.WUJIE_ADMIN_USERNAME = adminName;
+  process.env.WUJIE_ADMIN_PASSWORD = 'configured-admin-contract-password';
+  process.env.WUJIE_AUTH_PERSISTENCE_MODE = mode;
+}
+
 async function createFixture(
   users: Record<string, unknown>[],
   includeConfiguredAdmin = true,
@@ -559,5 +592,447 @@ describe.sequential('stable-compatible authentication credential migration', () 
       httpStatus: 503,
     });
     expect(dbWriteUsers).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe.sequential('concurrency-safe authentication persistence', () => {
+  it('serializes FILE_ONLY profile and password writes and merges after the lock is acquired', async () => {
+    const { createScryptCredential, verifyScryptCredential } = await import('@/lib/auth/auth-password');
+    const oldCredentialHash = await createScryptCredential('legacy-contract-password');
+    const { usersPath } = await createFixture([storedUser({ credentialHash: oldCredentialHash })]);
+    const firstWriteStarted = deferred();
+    const releaseFirstWrite = deferred();
+    const secondWriteFinished = deferred();
+    let userWriteCount = 0;
+    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => false }));
+    vi.doMock('@/lib/db-storage', () => mocks);
+    vi.doMock('@/lib/auth/auth-persistence', async () => {
+      const actual = await vi.importActual<typeof import('@/lib/auth/auth-persistence')>(
+        '@/lib/auth/auth-persistence',
+      );
+      return {
+        ...actual,
+        writeAuthJsonFileAtomic: async (filePath: string, value: unknown): Promise<void> => {
+          if (filePath === usersPath) {
+            userWriteCount += 1;
+            if (userWriteCount === 1) {
+              firstWriteStarted.resolve();
+              await releaseFirstWrite.promise;
+            }
+          }
+          await actual.writeAuthJsonFileAtomic(filePath, value);
+          if (filePath === usersPath && userWriteCount === 2) secondWriteFinished.resolve();
+        },
+      };
+    });
+    vi.resetModules();
+    const { updateManagedUser } = await loadServerAuth();
+
+    const profileUpdate = updateManagedUser('user-contract-1', {
+      email: 'concurrent-profile@example.test',
+    });
+    await firstWriteStarted.promise;
+    const passwordUpdate = updateManagedUser('user-contract-1', {
+      password: 'concurrent-replacement-password',
+    });
+    const secondEscapedLock = await Promise.race([
+      secondWriteFinished.promise.then(() => true),
+      new Promise<false>(resolve => setTimeout(() => resolve(false), 750)),
+    ]);
+    releaseFirstWrite.resolve();
+
+    await expect(Promise.all([profileUpdate, passwordUpdate])).resolves.toHaveLength(2);
+    expect(secondEscapedLock).toBe(false);
+    const persisted = JSON.parse(await readFile(usersPath, 'utf8')) as {
+      users: Array<{
+        id: string;
+        email?: string;
+        passwordHash: string;
+        credentialHash?: string;
+      }>;
+    };
+    const stored = persisted.users.find(user => user.id === 'user-contract-1');
+    expect(stored?.email).toBe('concurrent-profile@example.test');
+    expect(stored?.passwordHash).toBe(legacyHash('concurrent-replacement-password'));
+    await expect(verifyScryptCredential(
+      'concurrent-replacement-password',
+      stored?.credentialHash || '',
+    )).resolves.toBe(true);
+  });
+
+  it('does not let a delayed FILE_ONLY legacy migration restore credentials after a password change', async () => {
+    const { usersPath } = await createFixture([storedUser()]);
+    const actualPassword = await vi.importActual<typeof import('@/lib/auth/auth-password')>(
+      '@/lib/auth/auth-password',
+    );
+    const migrationHashStarted = deferred();
+    const releaseMigrationHash = deferred();
+    let createCalls = 0;
+    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => false }));
+    vi.doMock('@/lib/db-storage', () => mocks);
+    vi.doMock('@/lib/auth/auth-password', async () => ({
+      ...actualPassword,
+      createScryptCredential: async (password: string): Promise<string> => {
+        createCalls += 1;
+        if (createCalls === 1) {
+          migrationHashStarted.resolve();
+          await releaseMigrationHash.promise;
+        }
+        return await actualPassword.createScryptCredential(password);
+      },
+    }));
+    vi.resetModules();
+    const { authenticateUser, updateManagedUser } = await loadServerAuth();
+
+    const login = authenticateUser({
+      name: 'contract-user',
+      password: 'legacy-contract-password',
+      productType: 'canvas',
+    });
+    await migrationHashStarted.promise;
+    await expect(updateManagedUser('user-contract-1', {
+      password: 'migration-race-replacement-password',
+    })).resolves.toMatchObject({ id: 'user-contract-1' });
+    releaseMigrationHash.resolve();
+    await expect(login).resolves.toMatchObject({ id: 'user-contract-1' });
+
+    const persisted = JSON.parse(await readFile(usersPath, 'utf8')) as {
+      users: Array<{ id: string; passwordHash: string; credentialHash?: string }>;
+    };
+    const stored = persisted.users.find(user => user.id === 'user-contract-1');
+    expect(stored?.passwordHash).toBe(legacyHash('migration-race-replacement-password'));
+    await expect(actualPassword.verifyScryptCredential(
+      'migration-race-replacement-password',
+      stored?.credentialHash || '',
+    )).resolves.toBe(true);
+  });
+
+  it('retries a DB profile CAS after a concurrent atomic dual-credential password update', async () => {
+    const { createScryptCredential, verifyScryptCredential } = await import('@/lib/auth/auth-password');
+    const oldCredentialHash = await createScryptCredential('db-user-password');
+    let row = databaseUser({ credential_hash: oldCredentialHash });
+    const profileWriteStarted = deferred();
+    const releaseProfileWrite = deferred();
+    let profileCalls = 0;
+    const updateUserProfileFields = vi.fn(async (input: {
+      expectedUpdatedAt: number;
+      updatedAt: number;
+      profile: { email: string | null };
+    }) => {
+      profileCalls += 1;
+      if (profileCalls === 1) {
+        profileWriteStarted.resolve();
+        await releaseProfileWrite.promise;
+      }
+      if (row.updated_at !== input.expectedUpdatedAt) return 'conflict' as const;
+      row = { ...row, email: input.profile.email, updated_at: input.updatedAt };
+      return 'updated' as const;
+    });
+    const updateUserCredentials = vi.fn(async (input: {
+      expectedUpdatedAt: number;
+      expectedPasswordHash: string;
+      passwordHash: string;
+      credentialHash: string;
+      updatedAt: number;
+      profile: { email: string | null };
+    }) => {
+      if (row.updated_at !== input.expectedUpdatedAt
+        || row.password_hash !== input.expectedPasswordHash) return 'conflict' as const;
+      row = {
+        ...row,
+        email: input.profile.email,
+        password_hash: input.passwordHash,
+        credential_hash: input.credentialHash,
+        updated_at: input.updatedAt,
+      };
+      return 'updated' as const;
+    });
+    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => true }));
+    vi.doMock('@/lib/auth/auth-repository', () => ({
+      countLegacyCredentialUsers: vi.fn(),
+      resolveDatabaseSecretRing: vi.fn().mockResolvedValue({
+        version: 1,
+        active: { kid: 'active-kid', secret: activeSecret, activatedAt: 1 },
+        updatedAt: 1,
+      }),
+      updateUserCredentialSidecar: vi.fn(),
+      updateUserCredentials,
+      updateUserProfileFields,
+    }));
+    const dbReadUsers = vi.fn(async () => [
+      databaseUser({ id: 'db-admin', name: adminName, role: 'admin' }),
+      { ...row },
+    ]);
+    const dbWriteUsers = vi.fn().mockResolvedValue(false);
+    vi.doMock('@/lib/db-storage', () => ({
+      dbDeleteUser: vi.fn(),
+      dbDeleteUserData: vi.fn(),
+      dbInitCredits: vi.fn(),
+      dbReadUsers,
+      dbWriteUsers,
+    }));
+    configureDatabaseMode();
+    vi.resetModules();
+    const { updateManagedUser } = await loadServerAuth();
+
+    const profileUpdate = updateManagedUser('db-user-1', {
+      email: 'db-concurrent-profile@example.test',
+    });
+    await profileWriteStarted.promise;
+    await expect(updateManagedUser('db-user-1', {
+      password: 'db-concurrent-replacement-password',
+    })).resolves.toMatchObject({ id: 'db-user-1' });
+    releaseProfileWrite.resolve();
+    await expect(profileUpdate).resolves.toMatchObject({
+      email: 'db-concurrent-profile@example.test',
+    });
+
+    expect(updateUserProfileFields).toHaveBeenCalledTimes(2);
+    expect(updateUserProfileFields.mock.calls.every(([input]) => (
+      !('passwordHash' in input) && !('credentialHash' in input)
+    ))).toBe(true);
+    expect(updateUserCredentials).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'db-user-1',
+      expectedPasswordHash: legacyHash('db-user-password'),
+      passwordHash: legacyHash('db-concurrent-replacement-password'),
+      credentialHash: expect.stringMatching(/^scrypt-v1\$32768\$8\$1\$/),
+    }));
+    expect(dbWriteUsers).not.toHaveBeenCalled();
+    expect(row.email).toBe('db-concurrent-profile@example.test');
+    expect(row.password_hash).toBe(legacyHash('db-concurrent-replacement-password'));
+    await expect(verifyScryptCredential(
+      'db-concurrent-replacement-password',
+      String(row.credential_hash),
+    )).resolves.toBe(true);
+  });
+
+  it('keeps a DB password update when a delayed sidecar migration returns already-set', async () => {
+    let row = databaseUser();
+    const migrationStarted = deferred();
+    const releaseMigration = deferred();
+    let migrationStatus: string | null = null;
+    const updateUserCredentialSidecar = vi.fn(async (_userId: string, credentialHash: string) => {
+      migrationStarted.resolve();
+      await releaseMigration.promise;
+      if (row.credential_hash !== null) {
+        migrationStatus = 'already-set';
+        return 'already-set' as const;
+      }
+      row = { ...row, credential_hash: credentialHash, updated_at: Number(row.updated_at) + 1 };
+      migrationStatus = 'updated';
+      return 'updated' as const;
+    });
+    const updateUserCredentials = vi.fn(async (input: {
+      passwordHash: string;
+      credentialHash: string;
+      updatedAt: number;
+      profile: { email: string | null };
+    }) => {
+      row = {
+        ...row,
+        email: input.profile.email,
+        password_hash: input.passwordHash,
+        credential_hash: input.credentialHash,
+        updated_at: input.updatedAt,
+      };
+      return 'updated' as const;
+    });
+    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => true }));
+    vi.doMock('@/lib/auth/auth-repository', () => ({
+      countLegacyCredentialUsers: vi.fn(),
+      resolveDatabaseSecretRing: vi.fn().mockResolvedValue({
+        version: 1,
+        active: { kid: 'active-kid', secret: activeSecret, activatedAt: 1 },
+        updatedAt: 1,
+      }),
+      updateUserCredentialSidecar,
+      updateUserCredentials,
+      updateUserProfileFields: vi.fn(),
+    }));
+    const dbWriteUsers = vi.fn(async (users: Array<{
+      id: string;
+      passwordHash: string;
+      credentialHash?: string;
+      updatedAt: number;
+    }>) => {
+      const target = users.find(user => user.id === 'db-user-1');
+      if (target) {
+        row = {
+          ...row,
+          password_hash: target.passwordHash,
+          credential_hash: target.credentialHash ?? null,
+          updated_at: target.updatedAt,
+        };
+      }
+      return true;
+    });
+    vi.doMock('@/lib/db-storage', () => ({
+      dbDeleteUser: vi.fn(),
+      dbDeleteUserData: vi.fn(),
+      dbInitCredits: vi.fn(),
+      dbReadUsers: vi.fn(async () => [
+        databaseUser({ id: 'db-admin', name: adminName, role: 'admin' }),
+        { ...row },
+      ]),
+      dbWriteUsers,
+    }));
+    configureDatabaseMode();
+    vi.resetModules();
+    const { authenticateUser, updateManagedUser } = await loadServerAuth();
+
+    const login = authenticateUser({
+      name: 'db-user-1',
+      password: 'db-user-password',
+      productType: 'canvas',
+    });
+    await migrationStarted.promise;
+    await expect(updateManagedUser('db-user-1', {
+      password: 'db-migration-race-replacement',
+    })).resolves.toMatchObject({ id: 'db-user-1' });
+    releaseMigration.resolve();
+    await expect(login).resolves.toMatchObject({ id: 'db-user-1' });
+
+    expect(migrationStatus).toBe('already-set');
+    expect(dbWriteUsers).not.toHaveBeenCalled();
+    expect(row.password_hash).toBe(legacyHash('db-migration-race-replacement'));
+    expect(row.credential_hash).not.toBeNull();
+  });
+
+  it('fails DB reads closed without calling either file persistence API', async () => {
+    const readAuthJsonFile = vi.fn();
+    const writeAuthJsonFileAtomic = vi.fn();
+    vi.doMock('@/lib/auth/auth-persistence', async () => {
+      const actual = await vi.importActual<typeof import('@/lib/auth/auth-persistence')>(
+        '@/lib/auth/auth-persistence',
+      );
+      return { ...actual, readAuthJsonFile, writeAuthJsonFileAtomic };
+    });
+    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => true }));
+    vi.doMock('@/lib/db-storage', () => ({
+      dbDeleteUser: vi.fn(),
+      dbDeleteUserData: vi.fn(),
+      dbInitCredits: vi.fn(),
+      dbReadUsers: vi.fn().mockRejectedValue(new Error('private database endpoint')),
+      dbWriteUsers: vi.fn(),
+    }));
+    configureDatabaseMode();
+    vi.resetModules();
+    const { listManagedUsers } = await loadServerAuth();
+
+    await expect(listManagedUsers()).rejects.toMatchObject({
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+      httpStatus: 503,
+    });
+    expect(readAuthJsonFile).not.toHaveBeenCalled();
+    expect(writeAuthJsonFileAtomic).not.toHaveBeenCalled();
+  });
+
+  it('treats a non-true DB user write as an authoritative create failure', async () => {
+    const readAuthJsonFile = vi.fn();
+    const writeAuthJsonFileAtomic = vi.fn();
+    vi.doMock('@/lib/auth/auth-persistence', async () => {
+      const actual = await vi.importActual<typeof import('@/lib/auth/auth-persistence')>(
+        '@/lib/auth/auth-persistence',
+      );
+      return { ...actual, readAuthJsonFile, writeAuthJsonFileAtomic };
+    });
+    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => true }));
+    vi.doMock('@/lib/auth/auth-repository', () => ({
+      countLegacyCredentialUsers: vi.fn(),
+      resolveDatabaseSecretRing: vi.fn().mockResolvedValue({
+        version: 1,
+        active: { kid: 'active-kid', secret: activeSecret, activatedAt: 1 },
+        updatedAt: 1,
+      }),
+      updateUserCredentialSidecar: vi.fn(),
+      updateUserCredentials: vi.fn(),
+      updateUserProfileFields: vi.fn(),
+    }));
+    const dbWriteUsers = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('@/lib/db-storage', () => ({
+      dbDeleteUser: vi.fn(),
+      dbDeleteUserData: vi.fn(),
+      dbInitCredits: vi.fn(),
+      dbReadUsers: vi.fn().mockResolvedValue([
+        databaseUser({ id: 'db-admin', name: adminName, role: 'admin' }),
+      ]),
+      dbWriteUsers,
+    }));
+    configureDatabaseMode();
+    vi.resetModules();
+    const { createManagedUser } = await loadServerAuth();
+
+    await expect(createManagedUser({
+      name: 'db-create-failure-user',
+      password: 'db-create-failure-password',
+    })).rejects.toMatchObject({ code: 'AUTH_PERSISTENCE_UNAVAILABLE' });
+    expect(dbWriteUsers).toHaveBeenCalledWith([
+      expect.objectContaining({
+        name: 'db-create-failure-user',
+        passwordHash: legacyHash('db-create-failure-password'),
+        credentialHash: expect.stringMatching(/^scrypt-v1\$32768\$8\$1\$/),
+      }),
+    ]);
+    expect(readAuthJsonFile).not.toHaveBeenCalled();
+    expect(writeAuthJsonFileAtomic).not.toHaveBeenCalled();
+  });
+
+  it('warns once with a sanitized object when DB_PLUS_FILE user replica writes fail', async () => {
+    let row = databaseUser({ credential_hash: 'scrypt-v1$32768$8$1$AQEBAQEBAQEBAQEBAQEBAQ$AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI' });
+    const writeAuthJsonFileAtomic = vi.fn(async (filePath: string): Promise<void> => {
+      if (filePath.endsWith('users.json')) throw new Error('replica contains private values');
+    });
+    vi.doMock('@/lib/auth/auth-persistence', async () => {
+      const actual = await vi.importActual<typeof import('@/lib/auth/auth-persistence')>(
+        '@/lib/auth/auth-persistence',
+      );
+      return { ...actual, writeAuthJsonFileAtomic };
+    });
+    const updateUserProfileFields = vi.fn(async (input: {
+      updatedAt: number;
+      profile: { email: string | null };
+    }) => {
+      row = { ...row, email: input.profile.email, updated_at: input.updatedAt };
+      return 'updated' as const;
+    });
+    vi.doMock('@/lib/db-client', () => ({ isDatabaseConfigured: () => true }));
+    vi.doMock('@/lib/auth/auth-repository', () => ({
+      countLegacyCredentialUsers: vi.fn(),
+      resolveDatabaseSecretRing: vi.fn(),
+      updateUserCredentialSidecar: vi.fn(),
+      updateUserCredentials: vi.fn(),
+      updateUserProfileFields,
+    }));
+    vi.doMock('@/lib/db-storage', () => ({
+      dbDeleteUser: vi.fn(),
+      dbDeleteUserData: vi.fn(),
+      dbInitCredits: vi.fn(),
+      dbReadUsers: vi.fn(async () => [
+        databaseUser({ id: 'db-admin', name: adminName, role: 'admin' }),
+        { ...row },
+      ]),
+      dbWriteUsers: vi.fn(),
+    }));
+    configureDatabaseMode('DB_PLUS_FILE');
+    vi.resetModules();
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { updateManagedUser } = await loadServerAuth();
+
+    await expect(updateManagedUser('db-user-1', {
+      email: 'first-replica-failure@example.test',
+    })).resolves.toMatchObject({ email: 'first-replica-failure@example.test' });
+    await expect(updateManagedUser('db-user-1', {
+      email: 'second-replica-failure@example.test',
+    })).resolves.toMatchObject({ email: 'second-replica-failure@example.test' });
+
+    expect(warning.mock.calls).toEqual([[{
+      code: 'AUTH_USER_STORE_FILE_REPLICA_DEFERRED',
+    }]]);
+    const emitted = JSON.stringify(warning.mock.calls);
+    expect(emitted).not.toContain('db-user-1');
+    expect(emitted).not.toContain('replica contains private values');
+    expect(emitted).not.toContain(activeSecret);
+    expect(emitted).not.toContain('scrypt-v1');
+    expect(updateUserProfileFields).toHaveBeenCalledTimes(2);
   });
 });

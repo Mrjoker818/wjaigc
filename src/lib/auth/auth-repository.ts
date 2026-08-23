@@ -16,13 +16,32 @@ const MIN_SECRET_LENGTH = 32;
 
 export type StrictSettingRead = { found: false } | { found: true; value: unknown };
 export type CredentialSidecarUpdateStatus = 'updated' | 'already-set' | 'user-missing';
+export type AtomicUserUpdateStatus = 'updated' | 'conflict' | 'user-missing';
+
+export interface AuthUserProfileFields {
+  name: string;
+  role: 'admin' | 'user';
+  status: 'active' | 'disabled';
+  productType: string | null;
+  groupId: string | null;
+  chatModels: string[] | null;
+  imageModels: string[] | null;
+  dailyTokenLimit: number | null;
+  monthlyTokenLimit: number | null;
+  dailyImageLimit: number | null;
+  avatar: string | null;
+  nickname: string | null;
+  apiPermissions: Record<string, boolean>;
+  storageFolder: string;
+  email: string | null;
+}
 
 function configurationUnavailable(): AuthServiceError {
   return new AuthServiceError(
     'AUTH_CONFIGURATION_UNAVAILABLE',
     'Authentication configuration is unavailable.',
     503,
-    false,
+    true,
   );
 }
 
@@ -206,7 +225,7 @@ export async function updateUserCredentialSidecar(
     client = await getPool().connect();
     const updated = await client.query<{ id: string }>(
       `UPDATE wujie_users
-       SET credential_hash = $2, updated_at = $3
+       SET credential_hash = $2, updated_at = GREATEST(updated_at + 1, $3)
        WHERE id = $1 AND credential_hash IS NULL
        RETURNING id`,
       [userId, credentialHash, Date.now()],
@@ -220,6 +239,139 @@ export async function updateUserCredentialSidecar(
       [userId],
     );
     return existing.rows[0]?.exists === true ? 'already-set' : 'user-missing';
+  } catch (error) {
+    throw wrapPersistenceError(error);
+  } finally {
+    client?.release();
+  }
+}
+
+async function atomicUpdateStatus(
+  client: PoolClient,
+  userId: string,
+  updatedRows: number,
+): Promise<AtomicUserUpdateStatus> {
+  if (updatedRows > 0) return 'updated';
+  const existing = await client.query<{ exists: boolean }>(
+    'SELECT EXISTS(SELECT 1 FROM wujie_users WHERE id = $1) AS exists',
+    [userId],
+  );
+  return existing.rows[0]?.exists === true ? 'conflict' : 'user-missing';
+}
+
+function profileParameters(profile: AuthUserProfileFields): unknown[] {
+  return [
+    profile.name,
+    profile.role,
+    profile.status,
+    profile.productType,
+    profile.groupId,
+    profile.chatModels,
+    profile.imageModels,
+    profile.dailyTokenLimit,
+    profile.monthlyTokenLimit,
+    profile.dailyImageLimit,
+    profile.avatar,
+    profile.nickname,
+    JSON.stringify(profile.apiPermissions),
+    profile.storageFolder,
+    profile.email,
+  ];
+}
+
+export async function updateUserProfileFields(input: {
+  userId: string;
+  expectedUpdatedAt: number;
+  updatedAt: number;
+  profile: AuthUserProfileFields;
+}): Promise<AtomicUserUpdateStatus> {
+  let client: PoolClient | undefined;
+  try {
+    client = await getPool().connect();
+    const updated = await client.query<{ id: string }>(
+      `UPDATE wujie_users
+       SET name = $3,
+           role = $4,
+           status = $5,
+           product_type = $6,
+           group_id = $7,
+           chat_models = $8,
+           image_models = $9,
+           daily_token_limit = $10,
+           monthly_token_limit = $11,
+           daily_image_limit = $12,
+           avatar = $13,
+           nickname = $14,
+           api_permissions = $15,
+           storage_folder = $16,
+           email = $17,
+           updated_at = $18
+       WHERE id = $1 AND updated_at = $2
+       RETURNING id`,
+      [
+        input.userId,
+        input.expectedUpdatedAt,
+        ...profileParameters(input.profile),
+        input.updatedAt,
+      ],
+    );
+    return await atomicUpdateStatus(client, input.userId, updated.rows.length);
+  } catch (error) {
+    throw wrapPersistenceError(error);
+  } finally {
+    client?.release();
+  }
+}
+
+export async function updateUserCredentials(input: {
+  userId: string;
+  expectedUpdatedAt: number;
+  expectedPasswordHash: string;
+  passwordHash: string;
+  credentialHash: string;
+  updatedAt: number;
+  profile: AuthUserProfileFields;
+}): Promise<AtomicUserUpdateStatus> {
+  if (!isValidScryptCredential(input.credentialHash)) {
+    throw credentialFormatInvalid();
+  }
+
+  let client: PoolClient | undefined;
+  try {
+    client = await getPool().connect();
+    const updated = await client.query<{ id: string }>(
+      `UPDATE wujie_users
+       SET password_hash = $3,
+           credential_hash = $4,
+           name = $6,
+           role = $7,
+           status = $8,
+           product_type = $9,
+           group_id = $10,
+           chat_models = $11,
+           image_models = $12,
+           daily_token_limit = $13,
+           monthly_token_limit = $14,
+           daily_image_limit = $15,
+           avatar = $16,
+           nickname = $17,
+           api_permissions = $18,
+           storage_folder = $19,
+           email = $20,
+           updated_at = $21
+       WHERE id = $1 AND updated_at = $2 AND password_hash = $5
+       RETURNING id`,
+      [
+        input.userId,
+        input.expectedUpdatedAt,
+        input.passwordHash,
+        input.credentialHash,
+        input.expectedPasswordHash,
+        ...profileParameters(input.profile),
+        input.updatedAt,
+      ],
+    );
+    return await atomicUpdateStatus(client, input.userId, updated.rows.length);
   } catch (error) {
     throw wrapPersistenceError(error);
   } finally {

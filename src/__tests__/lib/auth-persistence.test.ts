@@ -64,7 +64,10 @@ describe('authentication persistence modes', () => {
     expect(() => resolveAuthPersistenceMode({
       databaseConfigured: true,
       rawMode: 'invalid',
-    })).toThrowError(expect.objectContaining({ code: 'AUTH_CONFIGURATION_UNAVAILABLE' }));
+    })).toThrowError(expect.objectContaining({
+      code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+      retryable: true,
+    }));
     expect(() => resolveAuthPersistenceMode({
       databaseConfigured: false,
       rawMode: 'DB_PLUS_FILE',

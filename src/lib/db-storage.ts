@@ -649,7 +649,7 @@ export async function dbReadUsers(): Promise<DbUserReadRow[]> {
       group_id: row.group_id || null,
     }));
   } catch (e) {
-    console.error('[db-storage] dbReadUsers error:', e);
+    console.error({ code: 'DB_READ_USERS_FAILED' });
     throw e;
   }
 }
@@ -717,8 +717,8 @@ export async function dbWriteUsers(users: Array<{
       ]);
     }
     return true;
-  } catch (e) {
-    console.error('[db-storage] dbWriteUsers error:', e);
+  } catch {
+    console.error({ code: 'DB_WRITE_USERS_FAILED' });
     return false;
   }
 }

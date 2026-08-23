@@ -11,7 +11,9 @@ import {
   countLegacyCredentialUsers,
   readSystemSettingStrict,
   resolveDatabaseSecretRing,
+  updateUserCredentials,
   updateUserCredentialSidecar,
+  updateUserProfileFields,
 } from '@/lib/auth/auth-repository';
 import { deriveAuthSecretKid } from '@/lib/auth/auth-secret-ring';
 import {
@@ -183,6 +185,7 @@ describe('transactional authentication secret ring resolution', () => {
 
     await expect(resolveDatabaseSecretRing({ configuredSecret: null, now })).rejects.toMatchObject({
       code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+      retryable: true,
     });
 
     expect(sqlCalls(client)).toEqual([
@@ -298,6 +301,117 @@ describe('credential sidecar repository', () => {
   });
 });
 
+describe('atomic managed-user repository updates', () => {
+  const profile = {
+    name: 'User One',
+    role: 'user' as const,
+    status: 'active' as const,
+    productType: 'canvas,chat',
+    groupId: null,
+    chatModels: ['chat-model'],
+    imageModels: ['image-model'],
+    dailyTokenLimit: 10,
+    monthlyTokenLimit: 20,
+    dailyImageLimit: 30,
+    avatar: null,
+    nickname: 'One',
+    apiPermissions: { image: true, chat: false },
+    storageFolder: 'data/users/user-1',
+    email: 'user-1@example.test',
+  };
+
+  it('updates only non-credential fields with an updated_at CAS', async () => {
+    const client = useClient(vi.fn().mockResolvedValue({
+      rows: [{ id: 'user-1' }],
+      rowCount: 1,
+    }));
+
+    await expect(updateUserProfileFields({
+      userId: 'user-1',
+      expectedUpdatedAt: now,
+      updatedAt: now + 1,
+      profile,
+    })).resolves.toBe('updated');
+
+    const sql = sqlCalls(client)[0] || '';
+    expect(sql).toContain('WHERE id = $1 AND updated_at = $2 RETURNING id');
+    expect(sql).not.toContain('password_hash');
+    expect(sql).not.toContain('credential_hash');
+    expect(client.query.mock.calls[0]?.[1]).toEqual([
+      'user-1',
+      now,
+      profile.name,
+      profile.role,
+      profile.status,
+      profile.productType,
+      profile.groupId,
+      profile.chatModels,
+      profile.imageModels,
+      profile.dailyTokenLimit,
+      profile.monthlyTokenLimit,
+      profile.dailyImageLimit,
+      profile.avatar,
+      profile.nickname,
+      JSON.stringify(profile.apiPermissions),
+      profile.storageFolder,
+      profile.email,
+      now + 1,
+    ]);
+  });
+
+  it('atomically writes both credentials with password and version CAS conditions', async () => {
+    const client = useClient(vi.fn().mockResolvedValue({
+      rows: [{ id: 'user-1' }],
+      rowCount: 1,
+    }));
+    const passwordHash = 'a'.repeat(64);
+
+    await expect(updateUserCredentials({
+      userId: 'user-1',
+      expectedUpdatedAt: now,
+      expectedPasswordHash: 'b'.repeat(64),
+      passwordHash,
+      credentialHash,
+      updatedAt: now + 1,
+      profile,
+    })).resolves.toBe('updated');
+
+    const sql = sqlCalls(client)[0] || '';
+    expect(sql).toContain('password_hash = $3');
+    expect(sql).toContain('credential_hash = $4');
+    expect(sql).toContain(
+      'WHERE id = $1 AND updated_at = $2 AND password_hash = $5 RETURNING id',
+    );
+    expect(client.query.mock.calls[0]?.[1]?.slice(0, 5)).toEqual([
+      'user-1',
+      now,
+      passwordHash,
+      credentialHash,
+      'b'.repeat(64),
+    ]);
+  });
+
+  it.each([
+    [{ rows: [], rowCount: 0 }, { rows: [{ exists: true }], rowCount: 1 }, 'conflict'],
+    [{ rows: [], rowCount: 0 }, { rows: [{ exists: false }], rowCount: 1 }, 'user-missing'],
+  ] as const)('distinguishes a CAS conflict from a missing user', async (
+    updateResult,
+    existsResult,
+    expected,
+  ) => {
+    useClient(vi.fn()
+      .mockResolvedValueOnce(updateResult)
+      .mockResolvedValueOnce(existsResult));
+
+    await expect(updateUserProfileFields({
+      userId: 'user-1',
+      expectedUpdatedAt: now,
+      updatedAt: now + 1,
+      profile,
+    })).resolves.toBe(expected);
+  });
+});
+
 describe('database credential sidecar mappings', () => {
   it('adds the nullable sidecar to fresh schemas and additive initialization', async () => {
     const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -374,5 +488,34 @@ describe('database credential sidecar mappings', () => {
       'credential_hash = COALESCE(EXCLUDED.credential_hash, wujie_users.credential_hash)',
     );
     expect(params?.[3]).toBeNull();
+  });
+
+  it('does not log database errors containing user or credential material', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const privateError = new Error(
+      'postgresql://private-user:private-password@example.test hash=scrypt-secret',
+    );
+    mocks.execSql.mockRejectedValue(privateError);
+
+    await expect(dbReadUsers()).rejects.toBe(privateError);
+    await expect(dbWriteUsers([{
+      id: 'private-user',
+      name: 'private-name',
+      passwordHash: 'private-password-hash',
+      credentialHash,
+      role: 'user',
+      status: 'active',
+      apiPermissions: {},
+      storageFolder: 'users/private-user',
+      createdAt: now,
+      updatedAt: now,
+    }])).resolves.toBe(false);
+
+    expect(consoleError.mock.calls).toEqual([
+      [{ code: 'DB_READ_USERS_FAILED' }],
+      [{ code: 'DB_WRITE_USERS_FAILED' }],
+    ]);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain('private');
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain('scrypt');
   });
 });

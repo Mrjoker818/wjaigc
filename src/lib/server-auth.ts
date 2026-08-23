@@ -26,7 +26,10 @@ import {
 } from './auth/auth-secret-ring';
 import {
   resolveDatabaseSecretRing,
+  updateUserCredentials,
   updateUserCredentialSidecar,
+  updateUserProfileFields,
+  type AuthUserProfileFields,
 } from './auth/auth-repository';
 import type { User } from './user-types';
 import { ensureUserDataDirs, getUserDataDir } from './server-user-storage';
@@ -168,7 +171,7 @@ function configurationUnavailable(): AuthServiceError {
     'AUTH_CONFIGURATION_UNAVAILABLE',
     'Authentication configuration is unavailable.',
     503,
-    false,
+    true,
   );
 }
 
@@ -466,8 +469,8 @@ function storedUserFromDatabase(user: DbStoredUserRow): StoredUser {
   });
 }
 
-function usersForDatabase(file: StoredUsersFile): Parameters<typeof dbWriteUsers>[0] {
-  return file.users.map(user => ({
+function userForDatabase(user: StoredUser): Parameters<typeof dbWriteUsers>[0][number] {
+  return {
     id: user.id,
     name: user.name,
     passwordHash: user.passwordHash,
@@ -488,138 +491,340 @@ function usersForDatabase(file: StoredUsersFile): Parameters<typeof dbWriteUsers
     email: user.email || null,
     createdAt: user.createdAt || Date.now(),
     updatedAt: user.updatedAt || Date.now(),
-  }));
+  };
+}
+
+function profileFields(user: StoredUser): AuthUserProfileFields {
+  return {
+    name: user.name,
+    role: user.role === 'admin' ? 'admin' : 'user',
+    status: user.status === 'disabled' ? 'disabled' : 'active',
+    productType: user.productType || null,
+    groupId: user.groupId || null,
+    chatModels: user.chatModels || null,
+    imageModels: user.imageModels || null,
+    dailyTokenLimit: user.dailyTokenLimit ?? null,
+    monthlyTokenLimit: user.monthlyTokenLimit ?? null,
+    dailyImageLimit: user.dailyImageLimit ?? null,
+    avatar: user.avatar || null,
+    nickname: user.nickname || null,
+    apiPermissions: user.apiPermissions || defaultApiPermissions(),
+    storageFolder: user.storageFolder || storageFolder(user.id),
+    email: user.email || null,
+  };
+}
+
+function nextUpdatedAt(previous: number): number {
+  return Math.max(Date.now(), previous + 1);
 }
 
 async function writeUsersFile(data: StoredUsersFile): Promise<void> {
   await writeAuthFile(USERS_PATH, data);
 }
 
-async function writeUsersFileReplicaBestEffort(data: StoredUsersFile): Promise<void> {
+async function writeDatabaseUsers(users: StoredUser[]): Promise<void> {
   try {
-    await writeUsersFile(data);
+    const written = await dbWriteUsers(users.map(userForDatabase));
+    if (written !== true) throw persistenceUnavailable();
+  } catch (error) {
+    throw error instanceof AuthServiceError ? error : persistenceUnavailable();
+  }
+}
+
+async function readFileStore(): Promise<StoredUsersFile> {
+  try {
+    const parsed = await readAuthJsonFile<StoredUsersFile>(USERS_PATH);
+    if (parsed === null) {
+      return { users: [], updatedAt: Date.now() };
+    }
+    if (typeof parsed !== 'object' || !Array.isArray(parsed.users)) {
+      throw persistenceUnavailable();
+    }
+    return {
+      users: parsed.users.map(normalizeStoredUser),
+      updatedAt: parsed.updatedAt || Date.now(),
+    };
+  } catch (error) {
+    throw error instanceof AuthServiceError ? error : persistenceUnavailable();
+  }
+}
+
+async function readDatabaseStore(): Promise<StoredUsersFile> {
+  try {
+    const dbUsers = await dbReadUsers();
+    return {
+      users: dbUsers.map(storedUserFromDatabase),
+      updatedAt: Date.now(),
+    };
+  } catch (error) {
+    throw error instanceof AuthServiceError ? error : persistenceUnavailable();
+  }
+}
+
+let userFileMutationTail: Promise<void> = Promise.resolve();
+
+async function withUserFileMutationLock<T>(work: () => Promise<T>): Promise<T> {
+  const previous = userFileMutationTail;
+  let release!: () => void;
+  userFileMutationTail = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+  }
+}
+
+async function writeFileStoreLocked(file: StoredUsersFile): Promise<void> {
+  try {
+    await writeUsersFile({ ...file, updatedAt: Date.now() });
+  } catch (error) {
+    throw error instanceof AuthServiceError ? error : persistenceUnavailable();
+  }
+}
+
+async function createDefaultAdministrator(): Promise<StoredUser> {
+  const now = Date.now();
+  const password = requireAdminBootstrapPassword();
+  const ring = await authSecretRing();
+  return {
+    id: 'admin_mr_joker',
+    name: DEFAULT_ADMIN_NAME,
+    passwordHash: createLegacyPasswordHash(password, ring.active.secret),
+    credentialHash: await createScryptCredential(password),
+    role: 'admin',
+    status: 'active',
+    productType: 'canvas,chat',
+    apiPermissions: defaultApiPermissions(),
+    storageFolder: storageFolder('admin_mr_joker'),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function normalizeDefaultAdministrator(file: StoredUsersFile): void {
+  const adminIndex = file.users.findIndex(user => user.name === DEFAULT_ADMIN_NAME);
+  if (adminIndex === -1) return;
+  const admin = file.users[adminIndex];
+  file.users[adminIndex] = {
+    ...admin,
+    role: 'admin',
+    status: admin.status || 'active',
+    productType: admin.productType || 'canvas,chat',
+    apiPermissions: admin.apiPermissions || defaultApiPermissions(),
+    storageFolder: storageFolder(admin.id),
+  };
+}
+
+async function refreshUserFileReplicaBestEffort(): Promise<void> {
+  if (getAuthPersistenceMode() !== 'DB_PLUS_FILE') return;
+  try {
+    const file = await readDatabaseStore();
+    await writeUsersFile({ ...file, updatedAt: Date.now() });
   } catch {
     warnReplicaWriteOnce('AUTH_USER_STORE_FILE_REPLICA_DEFERRED');
   }
 }
 
-async function writeStore(file: StoredUsersFile): Promise<void> {
-  const data: StoredUsersFile = { ...file, updatedAt: Date.now() };
-  const mode = getAuthPersistenceMode();
-  if (mode === 'FILE_ONLY') {
-    try {
-      await writeUsersFile(data);
-    } catch (error) {
-      throw error instanceof AuthServiceError ? error : persistenceUnavailable();
-    }
-    return;
-  }
-
-  try {
-    const written = await dbWriteUsers(usersForDatabase(data));
-    if (written !== true) throw persistenceUnavailable();
-  } catch (error) {
-    throw error instanceof AuthServiceError ? error : persistenceUnavailable();
-  }
-  if (mode === 'DB_PLUS_FILE') {
-    await writeUsersFileReplicaBestEffort(data);
-  }
-}
-
 async function readStore(): Promise<StoredUsersFile> {
   const mode = getAuthPersistenceMode();
-  let file: StoredUsersFile;
   if (mode === 'FILE_ONLY') {
-    const parsed = await readAuthJsonFile<StoredUsersFile>(USERS_PATH);
-    if (parsed === null) {
-      file = { users: [], updatedAt: Date.now() };
-    } else {
-      if (typeof parsed !== 'object' || !Array.isArray(parsed.users)) {
-        throw persistenceUnavailable();
+    return await withUserFileMutationLock(async () => {
+      const file = await readFileStore();
+      if (!file.users.some(user => user.name === DEFAULT_ADMIN_NAME)) {
+        file.users.unshift(await createDefaultAdministrator());
+        await writeFileStoreLocked(file);
+      } else {
+        normalizeDefaultAdministrator(file);
       }
-      file = {
-        users: parsed.users.map(normalizeStoredUser),
-        updatedAt: parsed.updatedAt || Date.now(),
-      };
-    }
-  } else {
-    try {
-      const dbUsers = await dbReadUsers();
-      file = {
-        users: dbUsers.map(storedUserFromDatabase),
-        updatedAt: Date.now(),
-      };
-    } catch (error) {
-      throw error instanceof AuthServiceError ? error : persistenceUnavailable();
-    }
+      return file;
+    });
   }
 
-  const now = Date.now();
+  const file = await readDatabaseStore();
   const adminIndex = file.users.findIndex(user => user.name === DEFAULT_ADMIN_NAME);
   if (adminIndex === -1) {
-    const password = requireAdminBootstrapPassword();
-    const ring = await authSecretRing();
-    file.users.unshift({
-      id: 'admin_mr_joker',
-      name: DEFAULT_ADMIN_NAME,
-      passwordHash: createLegacyPasswordHash(password, ring.active.secret),
-      credentialHash: await createScryptCredential(password),
-      role: 'admin',
-      status: 'active',
-      productType: 'canvas,chat',
-      apiPermissions: defaultApiPermissions(),
-      storageFolder: storageFolder('admin_mr_joker'),
-      createdAt: now,
-      updatedAt: now,
-    });
-    await writeStore(file);
+    const admin = await createDefaultAdministrator();
+    await writeDatabaseUsers([admin]);
+    file.users.unshift(admin);
+    await refreshUserFileReplicaBestEffort();
   } else {
-    const admin = file.users[adminIndex];
-    file.users[adminIndex] = {
-      ...admin,
-      role: 'admin',
-      status: admin.status || 'active',
-      productType: admin.productType || 'canvas,chat',
-      apiPermissions: admin.apiPermissions || defaultApiPermissions(),
-      storageFolder: storageFolder(admin.id),
-    };
+    normalizeDefaultAdministrator(file);
   }
 
   return file;
 }
 
 async function persistCredentialMigration(
-  file: StoredUsersFile,
-  userIndex: number,
+  user: StoredUser,
   credentialHash: string,
 ): Promise<StoredUser> {
-  const user = file.users[userIndex];
-  const nextUser: StoredUser = {
-    ...user,
-    credentialHash,
-    updatedAt: Date.now(),
-  };
   const mode = getAuthPersistenceMode();
   if (mode === 'FILE_ONLY') {
-    const nextFile: StoredUsersFile = {
-      ...file,
-      users: file.users.map((storedUser, index) => index === userIndex ? nextUser : storedUser),
-    };
-    await writeStore(nextFile);
-    file.users[userIndex] = nextUser;
-    return nextUser;
+    return await withUserFileMutationLock(async () => {
+      const file = await readFileStore();
+      const index = file.users.findIndex(storedUser => storedUser.id === user.id);
+      if (index === -1) throw persistenceUnavailable();
+      const current = file.users[index];
+      if (current.credentialHash !== undefined) return current;
+      if (current.passwordHash !== user.passwordHash) throw persistenceUnavailable();
+      const nextUser: StoredUser = {
+        ...current,
+        credentialHash,
+        updatedAt: nextUpdatedAt(current.updatedAt),
+      };
+      file.users[index] = nextUser;
+      await writeFileStoreLocked(file);
+      return nextUser;
+    });
   }
 
   const status = await updateUserCredentialSidecar(user.id, credentialHash);
   if (status === 'user-missing') throw persistenceUnavailable();
-  file.users[userIndex] = nextUser;
-  if (mode === 'DB_PLUS_FILE') {
-    await writeUsersFileReplicaBestEffort({
-      ...file,
-      updatedAt: Date.now(),
+  await refreshUserFileReplicaBestEffort();
+  return status === 'updated'
+    ? { ...user, credentialHash, updatedAt: nextUpdatedAt(user.updatedAt) }
+    : user;
+}
+
+type StoredUserProfilePatch = Partial<Pick<StoredUser,
+  'name'
+  | 'role'
+  | 'status'
+  | 'productType'
+  | 'groupId'
+  | 'chatModels'
+  | 'imageModels'
+  | 'dailyTokenLimit'
+  | 'monthlyTokenLimit'
+  | 'dailyImageLimit'
+  | 'avatar'
+  | 'nickname'
+  | 'apiPermissions'
+  | 'storageFolder'
+  | 'email'
+>>;
+
+function mergeUserProfile(current: StoredUser, patch: StoredUserProfilePatch): StoredUser {
+  return {
+    ...current,
+    ...patch,
+    storageFolder: patch.storageFolder ?? storageFolder(current.id),
+    updatedAt: nextUpdatedAt(current.updatedAt),
+  };
+}
+
+async function readDatabaseUser(userId: string): Promise<StoredUser | null> {
+  const file = await readDatabaseStore();
+  return file.users.find(user => user.id === userId) || null;
+}
+
+async function persistUserProfile(
+  currentUser: StoredUser,
+  patch: StoredUserProfilePatch,
+): Promise<StoredUser> {
+  if (getAuthPersistenceMode() === 'FILE_ONLY') {
+    return await withUserFileMutationLock(async () => {
+      const file = await readFileStore();
+      const index = file.users.findIndex(user => user.id === currentUser.id);
+      if (index === -1) throw persistenceUnavailable();
+      const next = mergeUserProfile(file.users[index], patch);
+      file.users[index] = next;
+      await writeFileStoreLocked(file);
+      return next;
     });
   }
-  return nextUser;
+
+  let expected = currentUser;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const next = mergeUserProfile(expected, patch);
+    const status = await updateUserProfileFields({
+      userId: expected.id,
+      expectedUpdatedAt: expected.updatedAt,
+      updatedAt: next.updatedAt,
+      profile: profileFields(next),
+    });
+    if (status === 'updated') {
+      await refreshUserFileReplicaBestEffort();
+      return next;
+    }
+    if (status === 'user-missing') throw persistenceUnavailable();
+    const latest = await readDatabaseUser(expected.id);
+    if (!latest) throw persistenceUnavailable();
+    expected = latest;
+  }
+  throw persistenceUnavailable();
+}
+
+async function persistUserCredentials(
+  currentUser: StoredUser,
+  patch: StoredUserProfilePatch,
+  credentials: { passwordHash: string; credentialHash: string },
+): Promise<StoredUser> {
+  if (getAuthPersistenceMode() === 'FILE_ONLY') {
+    return await withUserFileMutationLock(async () => {
+      const file = await readFileStore();
+      const index = file.users.findIndex(user => user.id === currentUser.id);
+      if (index === -1) throw persistenceUnavailable();
+      const latest = file.users[index];
+      if (latest.passwordHash !== currentUser.passwordHash) throw persistenceUnavailable();
+      const next = {
+        ...mergeUserProfile(latest, patch),
+        ...credentials,
+      };
+      file.users[index] = next;
+      await writeFileStoreLocked(file);
+      return next;
+    });
+  }
+
+  const expectedPasswordHash = currentUser.passwordHash;
+  let expected = currentUser;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (expected.passwordHash !== expectedPasswordHash) throw persistenceUnavailable();
+    const next = {
+      ...mergeUserProfile(expected, patch),
+      ...credentials,
+    };
+    const status = await updateUserCredentials({
+      userId: expected.id,
+      expectedUpdatedAt: expected.updatedAt,
+      expectedPasswordHash,
+      passwordHash: credentials.passwordHash,
+      credentialHash: credentials.credentialHash,
+      updatedAt: next.updatedAt,
+      profile: profileFields(next),
+    });
+    if (status === 'updated') {
+      await refreshUserFileReplicaBestEffort();
+      return next;
+    }
+    if (status === 'user-missing') throw persistenceUnavailable();
+    const latest = await readDatabaseUser(expected.id);
+    if (!latest || latest.passwordHash !== expectedPasswordHash) {
+      throw persistenceUnavailable();
+    }
+    expected = latest;
+  }
+  throw persistenceUnavailable();
+}
+
+async function persistNewUser(user: StoredUser): Promise<void> {
+  if (getAuthPersistenceMode() === 'FILE_ONLY') {
+    await withUserFileMutationLock(async () => {
+      const file = await readFileStore();
+      if (file.users.some(existing => existing.name === user.name)) {
+        throw new Error('User already exists');
+      }
+      file.users.unshift(user);
+      await writeFileStoreLocked(file);
+    });
+    return;
+  }
+  await writeDatabaseUsers([user]);
+  await refreshUserFileReplicaBestEffort();
 }
 
 export async function authenticateUser(input: {
@@ -656,8 +861,7 @@ export async function authenticateUser(input: {
       createdAt: input.profile?.createdAt || now,
       updatedAt: now,
     };
-    file.users.unshift(user);
-    await writeStore(file);
+    await persistNewUser(user);
     return publicUser(user);
   }
 
@@ -697,27 +901,24 @@ export async function authenticateUser(input: {
     const recoveryPassword = configuredAdminBootstrapPassword();
     if (!isDefaultAdmin || !recoveryPassword || password !== recoveryPassword) return null;
 
-    const recovered: StoredUser = {
-      ...user,
+    const recovered = await persistUserCredentials(user, {
       name,
       role: 'admin',
       status: user.status || 'active',
       productType: user.productType || 'canvas,chat',
       apiPermissions: user.apiPermissions || defaultApiPermissions(),
       storageFolder: storageFolder(user.id),
+    }, {
       passwordHash: createLegacyPasswordHash(password, ring.active.secret),
       credentialHash: await createScryptCredential(password),
-      updatedAt: now,
-    };
-    file.users[index] = recovered;
-    await writeStore(file);
+    });
     return publicUser(recovered);
   }
 
   let authenticatedUser = user;
   if (migrationCredential) {
     try {
-      authenticatedUser = await persistCredentialMigration(file, index, migrationCredential);
+      authenticatedUser = await persistCredentialMigration(user, migrationCredential);
     } catch {
       console.warn({
         code: 'AUTH_CREDENTIAL_MIGRATION_DEFERRED',
@@ -741,18 +942,14 @@ export async function authenticateUser(input: {
 
   if (!shouldPersist) return publicUser(authenticatedUser);
 
-  const next: StoredUser = {
-    ...authenticatedUser,
+  const next = await persistUserProfile(authenticatedUser, {
     name,
     role: nextRole,
     status: nextStatus,
     apiPermissions: nextApiPermissions,
     storageFolder: nextStorageFolder,
     email: nextEmail,
-    updatedAt: now,
-  };
-  file.users[index] = next;
-  await writeStore(file);
+  });
   return publicUser(next);
 }
 
@@ -766,57 +963,65 @@ export async function listManagedUsers(): Promise<User[]> {
 }
 
 export async function repairDuplicateUserIds(): Promise<{ repaired: number; users: User[] }> {
-  const file = await readStore();
-  const usersById = new Map<string, StoredUser[]>();
-  for (const user of file.users) {
-    const users = usersById.get(user.id) || [];
-    users.push(user);
-    usersById.set(user.id, users);
-  }
-
-  const duplicateIds = [...usersById.entries()]
-    .filter(([, users]) => users.length > 1)
-    .map(([id]) => id);
-  if (duplicateIds.length === 0) {
-    return { repaired: 0, users: file.users.map(publicUser) };
-  }
-
-  const assignedIds = new Set(file.users.map(user => user.id));
-  const now = Date.now();
-  let sequence = 0;
-  let repaired = 0;
-
-  for (const duplicateId of duplicateIds) {
-    const users = usersById.get(duplicateId) || [];
-    // Preserve the root administrator ID so existing administrator data remains attached.
-    const retained = users.find(user => user.name === DEFAULT_ADMIN_NAME) || users[0];
-    for (const user of users) {
-      if (user === retained) continue;
-
-      let nextId = safeId(`repaired_${user.name}_${now}_${++sequence}`, user.name);
-      while (assignedIds.has(nextId)) {
-        nextId = safeId(`repaired_${user.name}_${now}_${++sequence}`, user.name);
-      }
-      assignedIds.add(nextId);
-      user.id = nextId;
-      user.storageFolder = storageFolder(nextId);
-      user.updatedAt = now;
-      repaired += 1;
+  const repair = (file: StoredUsersFile): {
+    repaired: number;
+    duplicateIds: string[];
+    affectedUsers: StoredUser[];
+  } => {
+    const usersById = new Map<string, StoredUser[]>();
+    for (const user of file.users) {
+      const users = usersById.get(user.id) || [];
+      users.push(user);
+      usersById.set(user.id, users);
     }
-  }
-
-  // Old IDs may have been duplicated in legacy databases without a unique constraint.
-  if (getAuthPersistenceMode() !== 'FILE_ONLY') {
+    const duplicateIds = [...usersById.entries()]
+      .filter(([, users]) => users.length > 1)
+      .map(([id]) => id);
+    const affectedUsers = duplicateIds.flatMap(id => usersById.get(id) || []);
+    const assignedIds = new Set(file.users.map(user => user.id));
+    const now = Date.now();
+    let sequence = 0;
+    let repaired = 0;
     for (const duplicateId of duplicateIds) {
-      const deleted = await dbDeleteUser(duplicateId);
-      if (!deleted) {
-        throw new Error(`Failed to remove duplicate user ID: ${duplicateId}`);
+      const users = usersById.get(duplicateId) || [];
+      const retained = users.find(user => user.name === DEFAULT_ADMIN_NAME) || users[0];
+      for (const user of users) {
+        if (user === retained) continue;
+        let nextId = safeId(`repaired_${user.name}_${now}_${++sequence}`, user.name);
+        while (assignedIds.has(nextId)) {
+          nextId = safeId(`repaired_${user.name}_${now}_${++sequence}`, user.name);
+        }
+        assignedIds.add(nextId);
+        user.id = nextId;
+        user.storageFolder = storageFolder(nextId);
+        user.updatedAt = nextUpdatedAt(user.updatedAt);
+        repaired += 1;
       }
     }
-  }
-  await writeStore(file);
+    return { repaired, duplicateIds, affectedUsers };
+  };
 
-  return { repaired, users: file.users.map(publicUser) };
+  if (getAuthPersistenceMode() === 'FILE_ONLY') {
+    await readStore();
+    return await withUserFileMutationLock(async () => {
+      const file = await readFileStore();
+      const result = repair(file);
+      if (result.repaired > 0) await writeFileStoreLocked(file);
+      return { repaired: result.repaired, users: file.users.map(publicUser) };
+    });
+  }
+
+  const file = await readStore();
+  const result = repair(file);
+  if (result.repaired === 0) return { repaired: 0, users: file.users.map(publicUser) };
+  for (const duplicateId of result.duplicateIds) {
+    if (!await dbDeleteUser(duplicateId)) {
+      throw new Error(`Failed to remove duplicate user ID: ${duplicateId}`);
+    }
+  }
+  await writeDatabaseUsers(result.affectedUsers);
+  await refreshUserFileReplicaBestEffort();
+  return { repaired: result.repaired, users: file.users.map(publicUser) };
 }
 
 export async function createManagedUser(input: {
@@ -871,8 +1076,7 @@ export async function createManagedUser(input: {
     updatedAt: now,
   };
 
-  file.users.unshift(user);
-  await writeStore(file);
+  await persistNewUser(user);
   await ensureUserDataDirs(user.id);
   const runtimeSettings = await getRuntimeSettings();
   await dbInitCredits(user.id, runtimeSettings.initialCredits);
@@ -896,7 +1100,7 @@ export async function updateManagedUser(userId: string, updates: ManagedUserUpda
     throw new Error('User already exists');
   }
 
-  let credentialUpdates: Pick<StoredUser, 'passwordHash' | 'credentialHash'> | null = null;
+  let credentialUpdates: { passwordHash: string; credentialHash: string } | null = null;
   if (updates.password) {
     const ring = await authSecretRing();
     credentialUpdates = {
@@ -905,8 +1109,7 @@ export async function updateManagedUser(userId: string, updates: ManagedUserUpda
     };
   }
 
-  const next: StoredUser = {
-    ...current,
+  const profilePatch: StoredUserProfilePatch = {
     ...(updates.name ? { name: updates.name.trim() } : {}),
     ...(updates.email !== undefined ? { email: updates.email.trim() || undefined } : {}),
     ...(updates.status ? { status: updates.status } : {}),
@@ -920,13 +1123,12 @@ export async function updateManagedUser(userId: string, updates: ManagedUserUpda
     ...(updates.avatar !== undefined ? { avatar: updates.avatar } : {}),
     ...(updates.nickname !== undefined ? { nickname: updates.nickname } : {}),
     ...(updates.apiPermissions ? { apiPermissions: updates.apiPermissions } : {}),
-    ...(credentialUpdates || {}),
     storageFolder: storageFolder(current.id),
-    updatedAt: Date.now(),
   };
 
-  file.users[index] = next;
-  await writeStore(file);
+  const next = credentialUpdates
+    ? await persistUserCredentials(current, profilePatch, credentialUpdates)
+    : await persistUserProfile(current, profilePatch);
   await ensureUserDataDirs(next.id);
   return publicUser(next);
 }
@@ -936,39 +1138,52 @@ export async function deleteManagedUsers(userIds: string[]): Promise<{
   skippedIds: string[];
 }> {
   const requestedIds = [...new Set(userIds.map(id => id.trim()).filter(Boolean))];
-  const file = await readStore();
-  const usersById = new Map(file.users.map(user => [user.id, user]));
-  const skippedIds: string[] = [];
-  const deletableIds = requestedIds.filter(userId => {
-    const user = usersById.get(userId);
-    if (!user || user.role === 'admin' || user.name === DEFAULT_ADMIN_NAME) {
-      skippedIds.push(userId);
-      return false;
-    }
-    return true;
-  });
+  const classify = (file: StoredUsersFile): {
+    deletableIds: string[];
+    skippedIds: string[];
+  } => {
+    const usersById = new Map(file.users.map(user => [user.id, user]));
+    const skippedIds: string[] = [];
+    const deletableIds = requestedIds.filter(userId => {
+      const user = usersById.get(userId);
+      if (!user || user.role === 'admin' || user.name === DEFAULT_ADMIN_NAME) {
+        skippedIds.push(userId);
+        return false;
+      }
+      return true;
+    });
+    return { deletableIds, skippedIds };
+  };
 
-  if (deletableIds.length === 0) {
-    return { deletedIds: [], skippedIds };
-  }
-
-  const deletedIds: string[] = [];
   const persistenceMode = getAuthPersistenceMode();
-  if (persistenceMode !== 'FILE_ONLY') {
-    for (const userId of deletableIds) {
+  const deletedIds: string[] = [];
+  let skippedIds: string[] = [];
+  if (persistenceMode === 'FILE_ONLY') {
+    await readStore();
+    const result = await withUserFileMutationLock(async () => {
+      const file = await readFileStore();
+      const classified = classify(file);
+      if (classified.deletableIds.length === 0) return classified;
+      const deletedSet = new Set(classified.deletableIds);
+      file.users = file.users.filter(user => !deletedSet.has(user.id));
+      await writeFileStoreLocked(file);
+      return classified;
+    });
+    deletedIds.push(...result.deletableIds);
+    skippedIds = result.skippedIds;
+  } else {
+    const file = await readStore();
+    const classified = classify(file);
+    skippedIds = classified.skippedIds;
+    for (const userId of classified.deletableIds) {
       if (await dbDeleteUser(userId)) {
         deletedIds.push(userId);
       } else {
         skippedIds.push(userId);
       }
     }
-  } else {
-    deletedIds.push(...deletableIds);
+    if (deletedIds.length > 0) await refreshUserFileReplicaBestEffort();
   }
-
-  const deletedSet = new Set(deletedIds);
-  file.users = file.users.filter(user => !deletedSet.has(user.id));
-  await writeStore(file);
 
   await Promise.all(deletedIds.map(async userId => {
     if (persistenceMode !== 'FILE_ONLY') {

@@ -65,7 +65,7 @@ describe.sequential('server authentication production security', () => {
     })).rejects.toMatchObject({
       code: 'AUTH_CONFIGURATION_UNAVAILABLE',
       httpStatus: 503,
-      retryable: false,
+      retryable: true,
     });
   });
 
