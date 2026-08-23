@@ -119,6 +119,7 @@ async function waitForResolverBarrier(
 ): Promise<ResolverBarrierFacts> {
   let latest: ResolverBarrierFacts | undefined;
   for (let attempt = 0; attempt < 400; attempt += 1) {
+    await query('SELECT pg_stat_clear_snapshot()');
     const result = await query<ResolverBarrierFacts>(
       `SELECT count(*)::int AS active,
               count(*) FILTER (
