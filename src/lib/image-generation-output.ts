@@ -73,15 +73,17 @@ export function normalizeImageOutputRequestBody<T extends Record<string, unknown
   const outputFormat: ImageOutputFormat = ['png', 'jpeg', 'webp'].includes(String(rawOutputFormat))
     ? rawOutputFormat as ImageOutputFormat
     : 'png';
-  const {
-    background: _background,
-    backgroundMode: _backgroundMode,
-    output_format: _outputFormat,
-    outputFormat: _outputFormatAlias,
-    ...base
-  } = body;
+  const base = { ...body } as Record<string, unknown>;
+  delete base.background;
+  delete base.backgroundMode;
+  delete base.output_format;
+  delete base.outputFormat;
 
-  return withImageOutputPreference(base, modelId, { background, outputFormat });
+  return withImageOutputPreference(base, modelId, { background, outputFormat }) as
+    Omit<T, 'background' | 'backgroundMode' | 'output_format' | 'outputFormat'> & {
+      background?: ImageBackgroundMode;
+      output_format?: ImageOutputFormat;
+    };
 }
 
 export function detectTransparentBackgroundIntent(text: string): 'transparent' | undefined {

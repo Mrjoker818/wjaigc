@@ -129,6 +129,8 @@ interface PersistTerminalTaskInput {
   result?: Record<string, unknown>;
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
+  currentResult?: Record<string, unknown>;
+  currentResultLoaded?: boolean;
 }
 
 const FAILURE_TERMINAL_FROM: DurableTaskStatus[] = [
@@ -143,7 +145,9 @@ async function persistTerminalTask(
   taskId: string,
   input: PersistTerminalTaskInput,
 ): Promise<TransitionTaskResult> {
-  const current = await getCloudTaskById(taskId);
+  const currentResult = input.currentResultLoaded
+    ? input.currentResult
+    : (await getCloudTaskById(taskId))?.result;
   const creditStatus = input.creditStatus || 'pending';
   const error = input.error
     ? normalizeTaskError(
@@ -163,8 +167,8 @@ async function persistTerminalTask(
       : FAILURE_TERMINAL_FROM,
     to: input.status,
     result: input.result === undefined
-      ? current?.result
-      : { ...(current?.result || {}), ...input.result },
+      ? currentResult
+      : { ...(currentResult || {}), ...input.result },
     error,
     creditStatus,
   });
@@ -365,6 +369,7 @@ export async function recordImageTaskTerminal(
   const currentTask = input.status === 'completed' && imageUrls.length > 0
     ? await getCloudTaskById(taskId)
     : null;
+  const currentResultLoaded = input.status === 'completed' && imageUrls.length > 0;
   const submissionPayload = currentTask?.result?.submissionPayload as Record<string, unknown> | undefined;
   let alphaVerification = input.alphaVerification;
   if (!alphaVerification && submissionPayload?.background === 'transparent') {
@@ -408,6 +413,8 @@ export async function recordImageTaskTerminal(
     result,
     error: input.error,
     creditStatus: input.creditStatus,
+    currentResult: currentTask?.result,
+    currentResultLoaded,
   });
   if (input.status === 'completed') {
     await reconcileCompletedProjection(terminal, imageUrls);
