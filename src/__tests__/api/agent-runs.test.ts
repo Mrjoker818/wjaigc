@@ -97,6 +97,7 @@ function serviceDependencies() {
       supportsReferenceImages: false,
       supportsMask: false,
       outputKinds: ['png'],
+      capabilitySources: {},
     })),
     authorizeContext: vi.fn<AgentRuntimeDependencies['authorizeContext']>(async ({ request: input }) => ({
       snapshot: input.context, mediaByVersionId: {}, selectedEntityVersionIds: {},
@@ -284,6 +285,7 @@ describe('Agent runtime service', () => {
       supportsReferenceImages: false,
       supportsMask: false,
       outputKinds: ['text'],
+      capabilitySources: {},
     });
     const service = agentRuntime.createAgentRuntimeService(dependencies);
 
@@ -329,6 +331,7 @@ describe('Agent runtime service', () => {
       supportsReferenceImages: true,
       supportsMask: false,
       outputKinds: ['png'],
+      capabilitySources: {},
     });
     const service = agentRuntime.createAgentRuntimeService(dependencies);
 
@@ -358,6 +361,7 @@ describe('Agent runtime service', () => {
       supportsReferenceImages: true,
       supportsMask: false,
       outputKinds: ['text'],
+      capabilitySources: {},
     });
     const service = agentRuntime.createAgentRuntimeService(dependencies);
 

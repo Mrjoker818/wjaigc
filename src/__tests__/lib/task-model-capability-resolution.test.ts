@@ -4,8 +4,13 @@ vi.mock('server-only', () => ({}));
 import {
   resolveTaskModelCatalogResultFromSnapshot,
 } from '@/lib/task-core/model-catalog';
+import {
+  mergeCapabilityLayers,
+  validateTaskModelSelection,
+} from '@/lib/task-core/model-capability-resolution';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import type { User } from '@/lib/user-types';
+import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 
 function createProvider(input: {
   id: string;
@@ -46,6 +51,81 @@ const admin: User = {
 };
 
 describe('unified task model capability resolution', () => {
+  it('merges every field independently and treats an admin empty array as explicit denial', () => {
+    const merged = mergeCapabilityLayers({
+      fallback: {
+        allowedRatios: ['1:1'],
+        allowedSizes: ['1K'],
+        maxOutputs: 1,
+      },
+      discovery: {
+        allowedRatios: ['1:1', '16:9'],
+      },
+      adapter: {
+        allowedSizes: ['1K', '2K'],
+        maxOutputs: 2,
+      },
+      admin: {
+        allowedRatios: [],
+        maxOutputs: 4,
+      },
+    });
+
+    expect(merged).toEqual({
+      value: {
+        allowedRatios: [],
+        allowedSizes: ['1K', '2K'],
+        maxOutputs: 4,
+      },
+      sources: {
+        allowedRatios: 'admin',
+        allowedSizes: 'adapter',
+        maxOutputs: 'admin',
+      },
+    });
+  });
+
+  it('returns one stable mismatch contract for unsupported task selections', () => {
+    const descriptor: TaskModelDescriptor = {
+      providerId: 'provider-a',
+      modelId: 'image-a',
+      kind: 'image' as const,
+      sourceType: 'image' as const,
+      protocol: 'openai',
+      executionMode: 'sync' as const,
+      allowedRatios: ['1:1'],
+      allowedSizes: ['1024x1024'],
+      qualityOptions: ['standard'],
+      maxOutputs: 2,
+      supportsReferenceImages: true,
+      maxReferenceImages: 1,
+      supportsMask: false,
+      allowedDurationsSeconds: [],
+      supportedOperations: ['text-to-image', 'image-to-image'],
+      outputKinds: ['png'],
+      capabilitySources: {},
+    };
+
+    expect(validateTaskModelSelection(descriptor, {
+      aspectRatio: '16:9',
+      outputCount: 3,
+    })).toEqual({
+      ok: false,
+      error: {
+        code: 'MODEL_CAPABILITY_MISMATCH',
+        field: 'aspectRatio',
+        received: '16:9',
+        allowed: ['1:1'],
+      },
+    });
+    expect(validateTaskModelSelection(descriptor, {
+      referenceImageCount: 2,
+    })).toMatchObject({
+      ok: false,
+      error: { field: 'referenceImages', allowed: [0, 1] },
+    });
+  });
+
   it('keeps provider-specific capabilities and field sources for the same model id', () => {
     const pearModel: ModelInfo = {
       id: 'shared-image',

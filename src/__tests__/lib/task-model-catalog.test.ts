@@ -340,8 +340,23 @@ describe('task model catalog', () => {
       qualityOptions: ['auto', 'low', 'medium', 'high'],
       maxOutputs: 2,
       supportsReferenceImages: true,
+      maxReferenceImages: 1,
       supportsMask: false,
+      supportedOperations: ['text-to-image', 'image-to-image'],
       outputKinds: ['png', 'jpeg', 'webp'],
+      capabilitySources: {
+        protocol: 'fallback',
+        executionMode: 'fallback',
+        allowedRatios: 'admin',
+        allowedSizes: 'fallback',
+        qualityOptions: 'fallback',
+        maxOutputs: 'admin',
+        supportsReferenceImages: 'fallback',
+        maxReferenceImages: 'fallback',
+        supportsMask: 'admin',
+        supportedOperations: 'fallback',
+        outputKinds: 'fallback',
+      },
     });
   });
 
@@ -361,7 +376,20 @@ describe('task model catalog', () => {
       maxOutputs: 1,
       supportsReferenceImages: false,
       supportsMask: false,
+      supportedOperations: ['text-to-image'],
       outputKinds: ['png'],
+      capabilitySources: {
+        protocol: 'fallback',
+        executionMode: 'fallback',
+        allowedRatios: 'fallback',
+        allowedSizes: 'fallback',
+        qualityOptions: 'fallback',
+        maxOutputs: 'fallback',
+        supportsReferenceImages: 'fallback',
+        supportsMask: 'fallback',
+        supportedOperations: 'fallback',
+        outputKinds: 'fallback',
+      },
     });
   });
 

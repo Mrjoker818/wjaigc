@@ -21,23 +21,31 @@ import { listManagedUsers } from '@/lib/server-auth';
 import type { ApiKind, ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import type { User } from '@/lib/user-types';
 import { getVideoModelInfo, resolveVideoCompatProfile } from '@/lib/video-api';
+import {
+  CAPABILITY_FIELDS,
+  taskModelKey,
+  type CapabilityField,
+  type CapabilityLayer,
+  type SupportedOperation,
+  type TaskModelDescriptor,
+} from './model-capability-contract';
+import { mergeCapabilityLayers } from './model-capability-resolution';
 
-export interface TaskModelDescriptor {
-  providerId: string;
-  modelId: string;
-  kind: 'image' | 'video' | 'chat' | 'edit' | 'upscale' | 'layer' | '3d';
-  sourceType: ApiKind;
-  protocol: string;
-  executionMode: 'sync' | 'async';
-  allowedRatios: string[];
-  allowedSizes: string[];
-  qualityOptions: string[];
-  maxOutputs: number;
-  maxDurationSeconds?: number;
-  supportsReferenceImages: boolean;
-  supportsMask: boolean;
-  outputKinds: string[];
-}
+export {
+  CAPABILITY_CATALOG_VERSION,
+  createTaskModelCatalogIndex,
+  taskModelKey,
+} from './model-capability-contract';
+export type {
+  CapabilityField,
+  CapabilityLayer,
+  CapabilityOverrideV1,
+  CapabilitySource,
+  ProviderCapabilityOverridesV1,
+  SupportedOperation,
+  TaskModelDescriptor,
+  TaskModelSelection,
+} from './model-capability-contract';
 
 export interface ModelAuthorizationMigration {
   resolved: Array<{
@@ -76,10 +84,7 @@ export interface TaskModelCatalogResult {
 }
 
 type TaskModelKind = TaskModelDescriptor['kind'];
-type TaskModelOverride = Partial<Omit<
-  TaskModelDescriptor,
-  'providerId' | 'modelId' | 'kind' | 'sourceType'
->>;
+type TaskModelOverride = CapabilityLayer;
 
 const EXECUTION_MODES = new Set<TaskModelDescriptor['executionMode']>(['sync', 'async']);
 const MAX_OVERRIDE_ARRAY_ITEMS = 32;
@@ -99,10 +104,6 @@ interface AssignmentResolution {
   unrestricted: boolean;
   exactModelIds: Set<string>;
   migration: ModelAuthorizationMigration;
-}
-
-export function taskModelKey(providerId: string, modelId: string): string {
-  return `${providerId}::${modelId}`;
 }
 
 export function matchesRequestedModelType(
@@ -229,6 +230,42 @@ function providerHint(provider: ApiProvider): string {
   ].filter(Boolean).join(' ');
 }
 
+type DescriptorWithoutSources = Omit<TaskModelDescriptor, 'capabilitySources'>;
+
+function withFallbackSources(descriptor: DescriptorWithoutSources): TaskModelDescriptor {
+  const capabilitySources: Partial<Record<CapabilityField, 'fallback'>> = {};
+  for (const field of CAPABILITY_FIELDS) {
+    if (descriptor[field] !== undefined) capabilitySources[field] = 'fallback';
+  }
+  return { ...descriptor, capabilitySources };
+}
+
+function descriptorCapabilityLayer(descriptor: TaskModelDescriptor): CapabilityLayer {
+  const result: CapabilityLayer = {};
+  for (const field of CAPABILITY_FIELDS) {
+    if (descriptor[field] === undefined) continue;
+    Object.assign(result, {
+      [field]: Array.isArray(descriptor[field])
+        ? [...descriptor[field]]
+        : descriptor[field],
+    });
+  }
+  return result;
+}
+
+function getVideoSupportedOperations(
+  info: ReturnType<typeof getVideoModelInfo>,
+): SupportedOperation[] {
+  const operations: SupportedOperation[] = ['text-to-video'];
+  if (info?.features.firstLastFrame || info?.features.multiReference) {
+    operations.push('image-to-video');
+  }
+  if (info?.features.firstLastFrame) operations.push('first-last-frame');
+  if (info?.features.multiReference) operations.push('multi-reference');
+  if (info?.features.videoExtend) operations.push('video-extend');
+  return operations;
+}
+
 function createImageDescriptor(
   provider: ApiProvider,
   model: ModelInfo,
@@ -240,7 +277,10 @@ function createImageDescriptor(
   const hint = providerHint(provider);
   const inferredQualityOptions = getQualityLevelOptions(model.id, hint);
 
-  return {
+  const supportsReferenceImages = kind === 'image'
+    ? defaults.supportsReferenceImages
+    : true;
+  return withFallbackSources({
     providerId: provider.id,
     modelId: model.id,
     kind,
@@ -259,16 +299,21 @@ function createImageDescriptor(
           ? inferredQualityOptions
           : [...defaults.qualityOptions]),
     maxOutputs: model.maxImages ?? defaults.maxOutputs,
-    supportsReferenceImages: kind === 'image'
-      ? defaults.supportsReferenceImages
-      : true,
+    supportsReferenceImages,
+    maxReferenceImages: supportsReferenceImages ? 1 : undefined,
     supportsMask: sourceType === 'imageEdit' || (kind === 'image' && defaults.supportsMask),
+    supportedOperations: kind === 'image'
+      ? [
+          'text-to-image',
+          ...(supportsReferenceImages ? ['image-to-image' as const] : []),
+        ]
+      : undefined,
     outputKinds: sourceType === 'vectorize'
       ? ['svg', 'png']
       : kind === 'upscale'
         ? ['png', 'jpeg', 'webp']
         : [...defaults.outputKinds],
-  };
+  });
 }
 
 function createBaseDescriptor(
@@ -290,7 +335,10 @@ function createBaseDescriptor(
       provider.advancedParams?.compatProfile,
       provider.baseUrl,
     );
-    return {
+    const supportsReferenceImages = Boolean(
+      info?.features.firstLastFrame || info?.features.multiReference,
+    );
+    return withFallbackSources({
       providerId: provider.id,
       modelId: model.id,
       kind,
@@ -306,12 +354,17 @@ function createBaseDescriptor(
         : ['std', 'pro'],
       maxOutputs: model.maxImages ?? 1,
       maxDurationSeconds: info?.features.maxDuration,
-      supportsReferenceImages: Boolean(
-        info?.features.firstLastFrame || info?.features.multiReference,
-      ),
+      allowedDurationsSeconds: [...(info?.features.durations || [])],
+      supportsReferenceImages,
+      maxReferenceImages: info?.features.multiReference
+        ? 4
+        : info?.features.firstLastFrame
+          ? 2
+          : undefined,
       supportsMask: false,
+      supportedOperations: getVideoSupportedOperations(info),
       outputKinds: ['mp4'],
-    };
+    });
   }
 
   const protocol = provider.requestStyle
@@ -331,29 +384,29 @@ function createBaseDescriptor(
 
   switch (kind) {
     case 'chat':
-      return {
+      return withFallbackSources({
         ...shared,
         kind,
         executionMode: 'sync',
         supportsReferenceImages: sourceType === 'vlm',
         outputKinds: ['text'],
-      };
+      });
     case 'layer':
-      return {
+      return withFallbackSources({
         ...shared,
         kind,
         executionMode: 'async',
         supportsReferenceImages: true,
         outputKinds: ['png', 'psd', 'json'],
-      };
+      });
     case '3d':
-      return {
+      return withFallbackSources({
         ...shared,
         kind,
         executionMode: 'async',
         supportsReferenceImages: true,
         outputKinds: ['glb', 'obj', 'fbx', 'usdz', 'stl'],
-      };
+      });
   }
 }
 
@@ -469,11 +522,16 @@ function describeConfiguredModel(
   const descriptor = createBaseDescriptor(provider, model);
   if (!descriptor) return null;
 
+  const merged = mergeCapabilityLayers({
+    fallback: descriptorCapabilityLayer(descriptor),
+    admin: readTaskModelOverride(provider, model.id),
+  });
   return {
     ...descriptor,
-    ...readTaskModelOverride(provider, model.id),
+    ...merged.value,
     providerId: provider.id,
     modelId: model.id,
+    capabilitySources: merged.sources,
   };
 }
 
