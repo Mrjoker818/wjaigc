@@ -12,6 +12,7 @@ interface DbUser {
   id: string;
   name: string;
   password_hash: string;
+  credential_hash: string | null;
   role: string;
   status: string;
   api_permissions: Record<string, boolean>;
@@ -64,6 +65,7 @@ async function initializeCoreTables(): Promise<void> {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         password_hash TEXT NOT NULL,
+        credential_hash TEXT,
         role TEXT NOT NULL DEFAULT 'user',
         status TEXT NOT NULL DEFAULT 'active',
         api_permissions JSONB DEFAULT '{}',
@@ -245,6 +247,7 @@ async function initializeCoreTables(): Promise<void> {
     const migrations: [string, string, string][] = [
       ['wujie_users', 'credits', 'INTEGER DEFAULT 0'],
       ['wujie_users', 'email', 'TEXT DEFAULT \'\''],
+      ['wujie_users', 'credential_hash', 'TEXT DEFAULT NULL'],
       ['wujie_users', 'group_id', 'TEXT DEFAULT NULL'],
       ['wujie_users', 'product_type', 'TEXT DEFAULT NULL'],
       ['wujie_users', 'chat_models', 'TEXT[] DEFAULT NULL'],
@@ -333,18 +336,19 @@ export async function dbGetUserById(id: string): Promise<DbUser | null> {
 export async function dbUpsertUser(user: DbUser): Promise<boolean> {
   try {
     await execSql(`
-      INSERT INTO wujie_users (id, name, password_hash, role, status, api_permissions, storage_folder, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      INSERT INTO wujie_users (id, name, password_hash, credential_hash, role, status, api_permissions, storage_folder, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         password_hash = EXCLUDED.password_hash,
+        credential_hash = COALESCE(EXCLUDED.credential_hash, wujie_users.credential_hash),
         role = EXCLUDED.role,
         status = EXCLUDED.status,
         api_permissions = EXCLUDED.api_permissions,
         storage_folder = EXCLUDED.storage_folder,
         updated_at = EXCLUDED.updated_at
     `, [
-      user.id, user.name, user.password_hash, user.role, user.status,
+      user.id, user.name, user.password_hash, user.credential_hash, user.role, user.status,
       JSON.stringify(user.api_permissions), user.storage_folder,
       user.created_at, user.updated_at
     ]);
@@ -588,6 +592,7 @@ interface DbUserReadRow {
   id: string;
   name: string;
   password_hash: string;
+  credential_hash: string | null;
   role: string;
   status: string;
   product_type?: string | null;
@@ -632,6 +637,7 @@ export async function dbReadUsers(): Promise<DbUserReadRow[]> {
     const result = await execSql('SELECT * FROM wujie_users ORDER BY created_at ASC');
     return (result.rows as unknown as DbUserReadRow[]).map(row => ({
       ...row,
+      credential_hash: row.credential_hash ?? null,
       product_type: row.product_type || undefined,
       chat_models: parseJsonArrayField(row.chat_models),
       image_models: parseJsonArrayField(row.image_models),
@@ -648,6 +654,7 @@ export async function dbWriteUsers(users: Array<{
   id: string;
   name: string;
   passwordHash: string;
+  credentialHash?: string | null;
   role: string;
   status: string;
   productType?: string | null;
@@ -668,11 +675,12 @@ export async function dbWriteUsers(users: Array<{
   try {
     for (const u of users) {
       await execSql(`
-        INSERT INTO wujie_users (id, name, password_hash, role, status, product_type, chat_models, image_models, daily_token_limit, monthly_token_limit, daily_image_limit, avatar, nickname, api_permissions, storage_folder, email, group_id, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        INSERT INTO wujie_users (id, name, password_hash, credential_hash, role, status, product_type, chat_models, image_models, daily_token_limit, monthly_token_limit, daily_image_limit, avatar, nickname, api_permissions, storage_folder, email, group_id, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           password_hash = EXCLUDED.password_hash,
+          credential_hash = COALESCE(EXCLUDED.credential_hash, wujie_users.credential_hash),
           role = EXCLUDED.role,
           status = EXCLUDED.status,
           product_type = EXCLUDED.product_type,
@@ -689,7 +697,7 @@ export async function dbWriteUsers(users: Array<{
           group_id = EXCLUDED.group_id,
           updated_at = EXCLUDED.updated_at
       `, [
-        u.id, u.name, u.passwordHash, u.role, u.status,
+        u.id, u.name, u.passwordHash, u.credentialHash ?? null, u.role, u.status,
         u.productType || null,
         u.chatModels ? JSON.stringify(u.chatModels) : null,
         u.imageModels ? JSON.stringify(u.imageModels) : null,
@@ -808,6 +816,7 @@ export async function migrateFileDataToDb(): Promise<void> {
             id: user.id,
             name: user.name,
             password_hash: user.passwordHash || user.password_hash || '',
+            credential_hash: user.credentialHash || user.credential_hash || null,
             role: user.role || 'user',
             status: user.status || 'active',
             api_permissions: user.apiPermissions || user.api_permissions || { image: true, chat: true, threeD: true, imageEdit: true, vectorize: true, layer: true, upscaler: true, removebg: true, audio: true },

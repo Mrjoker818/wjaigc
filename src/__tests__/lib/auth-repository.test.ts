@@ -1,0 +1,320 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  execSql: vi.fn(),
+  getPool: vi.fn(),
+}));
+
+vi.mock('@/lib/db-client', () => mocks);
+
+import {
+  countLegacyCredentialUsers,
+  readSystemSettingStrict,
+  resolveDatabaseSecretRing,
+  updateUserCredentialSidecar,
+} from '@/lib/auth/auth-repository';
+import { deriveAuthSecretKid } from '@/lib/auth/auth-secret-ring';
+import { dbReadUsers, dbWriteUsers, ensureCoreTables } from '@/lib/db-storage';
+
+const now = 1_724_601_600_000;
+const legacySecret = 'legacy-repository-secret-0123456789abcdef';
+const configuredSecret = 'configured-repository-secret-0123456789abcdef';
+const thirdSecret = 'third-repository-secret-0123456789abcdef12';
+const credentialHash = [
+  'scrypt-v1',
+  '32768',
+  '8',
+  '1',
+  Buffer.alloc(16, 1).toString('base64url'),
+  Buffer.alloc(32, 2).toString('base64url'),
+].join('$');
+
+interface ControlledClient {
+  query: ReturnType<typeof vi.fn>;
+  release: ReturnType<typeof vi.fn>;
+}
+
+function useClient(query: ControlledClient['query']): ControlledClient {
+  const client = { query, release: vi.fn() };
+  mocks.getPool.mockReturnValue({ connect: vi.fn().mockResolvedValue(client) });
+  return client;
+}
+
+function sqlCalls(client: ControlledClient): string[] {
+  return client.query.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' ').trim());
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.execSql.mockResolvedValue({ rows: [], rowCount: 0 });
+});
+
+describe('strict authentication repository reads', () => {
+  it('distinguishes a missing setting from a stored JSON value', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [{ value: false }], rowCount: 1 });
+    const client = useClient(query);
+
+    await expect(readSystemSettingStrict('missing')).resolves.toEqual({ found: false });
+    await expect(readSystemSettingStrict('stored-false')).resolves.toEqual({
+      found: true,
+      value: false,
+    });
+
+    expect(mocks.execSql).not.toHaveBeenCalled();
+    expect(client.release).toHaveBeenCalledTimes(2);
+  });
+
+  it('wraps connection and query failures without logging keys or database details', async () => {
+    const consoleSpies = [
+      vi.spyOn(console, 'error').mockImplementation(() => undefined),
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined),
+      vi.spyOn(console, 'log').mockImplementation(() => undefined),
+    ];
+    const query = vi.fn().mockRejectedValue(
+      new Error('postgresql://secret-user:secret-password@example.test/private'),
+    );
+    const client = useClient(query);
+
+    await expect(readSystemSettingStrict('secret-setting-key')).rejects.toMatchObject({
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+    });
+
+    expect(client.release).toHaveBeenCalledOnce();
+    expect(JSON.stringify(consoleSpies.flatMap(spy => spy.mock.calls))).not.toContain('secret');
+    consoleSpies.forEach(spy => spy.mockRestore());
+  });
+});
+
+describe('transactional authentication secret ring resolution', () => {
+  it('locks, preserves the legacy verifier, upserts one JSON ring, and commits in order', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT key, value')) {
+        return { rows: [{ key: 'auth_secret', value: legacySecret }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const client = useClient(query);
+
+    const ring = await resolveDatabaseSecretRing({ configuredSecret, now });
+
+    expect(ring).toEqual({
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(configuredSecret),
+        secret: configuredSecret,
+        activatedAt: now,
+      },
+      previous: {
+        kid: deriveAuthSecretKid(legacySecret),
+        secret: legacySecret,
+        activatedAt: now,
+        retiredAt: now,
+      },
+      updatedAt: now,
+    });
+    expect(sqlCalls(client)).toEqual([
+      'BEGIN',
+      "SELECT pg_advisory_xact_lock(hashtext('wujie:auth-secret-ring:v1'))",
+      'SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[]) FOR UPDATE',
+      expect.stringContaining('INSERT INTO wujie_system_settings'),
+      'COMMIT',
+    ]);
+    const upserts = client.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO'));
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]?.[1]?.[1]).toBe(JSON.stringify(ring));
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('counts legacy credentials on the same client before blocking a second rotation', async () => {
+    const existingRing = {
+      version: 1 as const,
+      active: {
+        kid: deriveAuthSecretKid(configuredSecret),
+        secret: configuredSecret,
+        activatedAt: now - 1,
+      },
+      previous: {
+        kid: deriveAuthSecretKid(legacySecret),
+        secret: legacySecret,
+        activatedAt: now - 2,
+        retiredAt: now - 1,
+      },
+      updatedAt: now - 1,
+    };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT key, value')) {
+        return {
+          rows: [{ key: 'auth_secret_ring_v1', value: existingRing }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('count(*)')) {
+        return { rows: [{ count: '1' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const client = useClient(query);
+
+    await expect(resolveDatabaseSecretRing({
+      configuredSecret: thirdSecret,
+      now,
+    })).rejects.toMatchObject({ code: 'AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS' });
+
+    expect(sqlCalls(client)).toEqual([
+      'BEGIN',
+      "SELECT pg_advisory_xact_lock(hashtext('wujie:auth-secret-ring:v1'))",
+      'SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[]) FOR UPDATE',
+      expect.stringContaining('SELECT count(*)::text AS count FROM wujie_users'),
+      'ROLLBACK',
+    ]);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed without generating or persisting a secret when no valid source exists', async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 0 });
+    const client = useClient(query);
+
+    await expect(resolveDatabaseSecretRing({ configuredSecret: null, now })).rejects.toMatchObject({
+      code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+    });
+
+    expect(sqlCalls(client)).toEqual([
+      'BEGIN',
+      "SELECT pg_advisory_xact_lock(hashtext('wujie:auth-secret-ring:v1'))",
+      'SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[]) FOR UPDATE',
+      'ROLLBACK',
+    ]);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('rolls back before release and wraps an upsert failure without leaking secrets', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT key, value')) {
+        return { rows: [{ key: 'auth_secret', value: legacySecret }], rowCount: 1 };
+      }
+      if (sql.includes('INSERT INTO')) {
+        throw new Error(`write failed for ${configuredSecret}`);
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const client = useClient(query);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(resolveDatabaseSecretRing({ configuredSecret, now })).rejects.toMatchObject({
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+    });
+
+    expect(sqlCalls(client).at(-1)).toBe('ROLLBACK');
+    expect(client.release).toHaveBeenCalledOnce();
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+});
+
+describe('credential sidecar repository', () => {
+  it('validates the credential before connecting', async () => {
+    await expect(updateUserCredentialSidecar('user-secret', 'not-a-credential')).rejects.toMatchObject({
+      code: 'AUTH_CREDENTIAL_FORMAT_INVALID',
+    });
+    expect(mocks.getPool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ rows: [{ id: 'user-1' }], rowCount: 1 }, undefined, 'updated'],
+    [{ rows: [], rowCount: 0 }, { rows: [{ exists: true }], rowCount: 1 }, 'already-set'],
+    [{ rows: [], rowCount: 0 }, { rows: [{ exists: false }], rowCount: 1 }, 'user-missing'],
+  ] as const)('returns a narrow non-disclosing %s status', async (updateResult, existsResult, status) => {
+    const query = existsResult
+      ? vi.fn().mockResolvedValueOnce(updateResult).mockResolvedValueOnce(existsResult)
+      : vi.fn().mockResolvedValueOnce(updateResult);
+    const client = useClient(query);
+
+    await expect(updateUserCredentialSidecar('user-1', credentialHash)).resolves.toBe(status);
+
+    expect(sqlCalls(client)[0]).toContain('WHERE id = $1 AND credential_hash IS NULL RETURNING id');
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('wraps sidecar write failures and does not log the user or credential', async () => {
+    const client = useClient(vi.fn().mockRejectedValue(new Error('synthetic write failure')));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(updateUserCredentialSidecar('sensitive-user', credentialHash)).rejects.toMatchObject({
+      code: 'AUTH_PERSISTENCE_UNAVAILABLE',
+    });
+
+    expect(client.release).toHaveBeenCalledOnce();
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain('sensitive-user');
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(credentialHash);
+    consoleError.mockRestore();
+  });
+
+  it('counts every non-empty legacy password with a null sidecar', async () => {
+    const client = useClient(vi.fn().mockResolvedValue({ rows: [{ count: '7' }], rowCount: 1 }));
+
+    await expect(countLegacyCredentialUsers()).resolves.toBe(7);
+
+    expect(sqlCalls(client)).toEqual([
+      expect.stringContaining("credential_hash IS NULL AND btrim(password_hash) <> ''"),
+    ]);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+});
+
+describe('database credential sidecar mappings', () => {
+  it('adds the nullable sidecar to fresh schemas and additive initialization', async () => {
+    const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await ensureCoreTables();
+    consoleLog.mockRestore();
+
+    const statements = mocks.execSql.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' ').trim());
+    const createUsers = statements.find(sql => sql.includes('CREATE TABLE IF NOT EXISTS wujie_users'));
+    expect(createUsers).toContain('credential_hash TEXT');
+    expect(statements).toContain(
+      'ALTER TABLE wujie_users ADD COLUMN IF NOT EXISTS credential_hash TEXT DEFAULT NULL',
+    );
+  });
+
+  it('maps null sidecars on reads and preserves an existing sidecar when a caller omits it', async () => {
+    mocks.execSql.mockResolvedValueOnce({
+      rows: [{
+        id: 'user-1',
+        name: 'User',
+        password_hash: 'legacy',
+        credential_hash: null,
+        role: 'user',
+        status: 'active',
+        api_permissions: {},
+        storage_folder: 'users/user-1',
+        created_at: now,
+        updated_at: now,
+      }],
+      rowCount: 1,
+    });
+    await expect(dbReadUsers()).resolves.toEqual([
+      expect.objectContaining({ credential_hash: null }),
+    ]);
+
+    mocks.execSql.mockClear();
+    mocks.execSql.mockResolvedValue({ rows: [], rowCount: 1 });
+    await expect(dbWriteUsers([{
+      id: 'user-1',
+      name: 'User',
+      passwordHash: 'legacy',
+      role: 'user',
+      status: 'active',
+      apiPermissions: {},
+      storageFolder: 'users/user-1',
+      createdAt: now,
+      updatedAt: now,
+    }])).resolves.toBe(true);
+
+    const [sql, params] = mocks.execSql.mock.calls[0] ?? [];
+    expect(String(sql).replace(/\s+/g, ' ')).toContain(
+      'credential_hash = COALESCE(EXCLUDED.credential_hash, wujie_users.credential_hash)',
+    );
+    expect(params).toContain(null);
+  });
+});
