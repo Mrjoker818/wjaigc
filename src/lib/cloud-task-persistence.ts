@@ -26,6 +26,11 @@ import {
   agentWorkspaceProjectionIdempotencyKey,
   projectAgentResultToWorkspace,
 } from '@/lib/agent-runtime/workspace-results';
+import {
+  verifyGeneratedImageAlpha,
+  type AlphaVerificationStatus,
+  type GeneratedImageAlphaVerification,
+} from '@/lib/generated-image-alpha';
 
 interface ImageTaskSubmission {
   taskId: string;
@@ -64,6 +69,11 @@ interface ImageTaskTerminal {
   modelName?: string;
   providerId?: string;
   providerName?: string;
+  alphaVerification?: {
+    requested: true;
+    status: AlphaVerificationStatus;
+    items: Array<GeneratedImageAlphaVerification & { imageUrl: string }>;
+  };
   persist?: boolean;
 }
 
@@ -357,6 +367,26 @@ export async function recordImageTaskTerminal(
     ...(input.maskUrls || []),
     ...(input.maskUrl ? [input.maskUrl] : []),
   ].filter((url): url is string => typeof url === 'string' && url.length > 0)));
+  const currentTask = input.status === 'completed' && imageUrls.length > 0
+    ? await getCloudTaskById(taskId)
+    : null;
+  const submissionPayload = currentTask?.result?.submissionPayload as Record<string, unknown> | undefined;
+  let alphaVerification = input.alphaVerification;
+  if (!alphaVerification && submissionPayload?.background === 'transparent') {
+    const items = await Promise.all(imageUrls.map(async (imageUrl) => ({
+      imageUrl,
+      ...await verifyGeneratedImageAlpha(imageUrl),
+    })));
+    const statuses = items.map(item => item.status);
+    const status: AlphaVerificationStatus = statuses.every(value => value === 'verified')
+      ? 'verified'
+      : statuses.includes('opaque')
+        ? 'opaque'
+        : statuses.includes('invalid')
+          ? 'invalid'
+          : 'unverified';
+    alphaVerification = { requested: true, status, items };
+  }
   const hasResultMetadata = Boolean(input.gridImageUrl) || Boolean(input.buttons?.length);
   const result = imageUrls.length > 0 || hasResultMetadata
     ? {
@@ -371,6 +401,7 @@ export async function recordImageTaskTerminal(
         ...(input.modelName ? { modelName: input.modelName } : {}),
         ...(input.providerId ? { providerId: input.providerId } : {}),
         ...(input.providerName ? { providerName: input.providerName } : {}),
+        ...(alphaVerification ? { alphaVerification } : {}),
       }
     : undefined;
 

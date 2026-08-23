@@ -1009,6 +1009,8 @@ export async function POST(request: NextRequest) {
         strength,
         quality,
         resolution: resolutionTier,
+        background: body.background,
+        output_format: body.output_format,
         projectId,
       })).digest('hex');
       const childCreditCost = sessionUser && !_skipCredits
@@ -1052,6 +1054,8 @@ export async function POST(request: NextRequest) {
         strength,
         quality,
         resolution: resolutionTier,
+        background: body.background,
+        output_format: body.output_format,
         projectId,
         sessionId,
         messageId,
