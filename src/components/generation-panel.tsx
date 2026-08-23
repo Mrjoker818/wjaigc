@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap, FileText } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,10 +11,11 @@ import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
-import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getDefaultParamValue, getProviderAspectRatios, getProviderPixelSizingOption, shouldPreserveProviderAutoSize, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
+import { QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
 import { GenerationBackgroundControl } from '@/components/generation-background-control';
 import type { ImageBackgroundMode, ImageOutputFormat, ImageOutputPreference } from '@/lib/image-generation-output';
 import { readImageOutputPreference, writeImageOutputPreference } from '@/lib/image-generation-output-preference';
+import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 
 export interface GenerationParams {
     prompt: string;
@@ -237,24 +238,9 @@ const getQuickTags = (category: string, designType: string): string[] => {
     return [...COMMON_QUICK_TAGS, ...categoryTags, ...designTags];
 };
 
-// 使用共享的模型配置映射
-const MODEL_ASPECT_RATIOS = SHARED_MODEL_ASPECT_RATIOS;
-
-// 使用共享的画面比例像素映射
-const ASPECT_RATIO_TO_PIXELS = SHARED_ASPECT_RATIO_TO_PIXELS;
-
-// 使用共享的质量尺寸映射
-const QUALITY_TO_SIZE = SHARED_QUALITY_TO_SIZE;
-
-// 使用共享的模型质量配置
-const MODEL_QUALITIES = SHARED_MODEL_QUALITIES;
-
 // 模型列表仅从管理员/用户配置的服务器端加载，无内置默认模型
 
 // 风格预设现在通过 getStylePresets(designType) 动态获取
-
-// 使用共享的模糊匹配函数
-const findModelConfig = sharedFindModelConfig;
 
 export function GenerationPanel(
     {
@@ -372,8 +358,6 @@ export function GenerationPanel(
     const [referenceDescriptions, setReferenceDescriptions] = useState<string[]>([]);
     const [referenceSelectedCategories, setReferenceSelectedCategories] = useState<Record<number, Set<string>>>({}); // per-image category selection
     const [referenceStrengths, setReferenceStrengths] = useState<number[]>([]);
-    const MAX_REF_IMAGES = 10;
-
     // Reference category labels
     const REF_CATEGORIES = [
         { key: 'style', label: '风格' },
@@ -387,7 +371,7 @@ export function GenerationPanel(
     const MAX_REF_CATEGORIES = 2;
     const [aspectRatio, setAspectRatio] = useState("1:1");
     const [quality, setQuality] = useState("auto");
-    const [resolution, setResolution] = useState("2K"); // GPT-Image系列分辨率档位
+    const [selectedSize, setSelectedSize] = useState("");
     const [outputCount, setOutputCount] = useState(1);
     const [imageOutputPreference, setImageOutputPreference] = useState<ImageOutputPreference>({
         background: 'auto',
@@ -398,6 +382,12 @@ export function GenerationPanel(
     const [designType, setDesignType] = useState("none");
     const [model, setModel] = useState("");
     const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[]>([]);
+    const {
+        models: catalogModels,
+        descriptorsByKey,
+        loading: catalogLoading,
+        error: catalogError,
+    } = useTaskModelCatalog('image');
     const [showThirdPartyDialog, setShowThirdPartyDialog] = useState(false);
     const [thirdPartyDefaultType, setThirdPartyDefaultType] = useState<'image' | 'chat'>('image');
     const [universalApiName, setUniversalApiName] = useState('');
@@ -459,45 +449,6 @@ export function GenerationPanel(
         }
     }, []);
 
-    // 模型切换时自动重置分辨率/质量/比例默认值（后缀驱动动态识别）
-    useEffect(() => {
-        if (!model) return;
-        const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
-        if (!pureModelId) return;
-
-        const providerId = model.includes('::') ? model.split('::')[0] : '';
-        const providerName = discoveredModels.find(item => item.id === pureModelId && item.providerId === providerId)?.providerName || '';
-        const providerHint = `${providerId} ${providerName}`;
-        const lower = pureModelId.toLowerCase();
-        const paramType = getModelParamType(pureModelId, providerHint);
-        const resolutionTiers = getResolutionTierOptions(pureModelId, providerHint);
-        const qualityLevels = getQualityLevelOptions(pureModelId, providerHint);
-
-        // 分辨率默认值：优先按后缀推断
-        let defaultResolution = resolutionTiers[0] || '2K';
-        if (lower.includes('-4k') || lower.includes('-4k-omni')) {
-            if (resolutionTiers.includes('4K')) defaultResolution = '4K';
-        } else if (lower.includes('-2k') || lower.includes('-2k-omni') || lower.includes('-hd')) {
-            if (resolutionTiers.includes('2K')) defaultResolution = '2K';
-        }
-        setResolution(defaultResolution);
-
-        // 质量默认值：优先按后缀推断
-        let defaultQuality = qualityLevels[0] || 'auto';
-        if (lower.includes('-4k') || lower.includes('-2k')) {
-            defaultQuality = qualityLevels.includes('high') ? 'high' : defaultQuality;
-        } else if (lower.includes('-hd') || lower.includes('-high')) {
-            defaultQuality = qualityLevels.includes('high') ? 'high' : defaultQuality;
-        }
-        setQuality(defaultQuality);
-
-        // 画面比例：重置为新模型支持的首个比例
-        const supportedRatios = getProviderAspectRatios(pureModelId, providerHint);
-        if (supportedRatios.length > 0 && !supportedRatios.includes(aspectRatio)) {
-            setAspectRatio(supportedRatios[0]);
-        }
-    }, [model, discoveredModels]); // eslint-disable-line react-hooks/exhaustive-deps
-
     // Load initial model selection from localStorage
     const [pendingModelMigration, setPendingModelMigration] = useState<string | null>(null);
 
@@ -553,11 +504,30 @@ export function GenerationPanel(
         persistSelectedModel(model);
     }, [model, discoveredModels, persistSelectedModel]);
 
-    // 获取当前模型支持的比例
     const pureModelId = model ? (model.includes('::') ? model.split('::').pop()! : model) : '';
-    const selectedProviderId = model.includes('::') ? model.split('::')[0] : '';
-    const selectedProviderName = discoveredModels.find(item => item.id === pureModelId && item.providerId === selectedProviderId)?.providerName || '';
-    const selectedProviderHint = `${selectedProviderId} ${selectedProviderName}`;
+    const selectedDescriptor = descriptorsByKey.get(model);
+    const supportedRatios = useMemo(
+        () => selectedDescriptor?.allowedRatios ?? [],
+        [selectedDescriptor],
+    );
+    const qualityOptions = useMemo(
+        () => selectedDescriptor?.qualityOptions ?? [],
+        [selectedDescriptor],
+    );
+    const sizeOptions = useMemo(
+        () => selectedDescriptor?.allowedSizes ?? [],
+        [selectedDescriptor],
+    );
+    const countOptions = useMemo(
+        () => selectedDescriptor
+            ? Array.from({ length: selectedDescriptor.maxOutputs }, (_, index) => index + 1)
+            : [],
+        [selectedDescriptor],
+    );
+    const maxReferenceImages = selectedDescriptor?.supportsReferenceImages
+        ? (selectedDescriptor.maxReferenceImages ?? 1)
+        : 0;
+    const capabilityReady = Boolean(selectedDescriptor) && !catalogLoading && !catalogError;
 
     useEffect(() => {
         if (!pureModelId) return;
@@ -568,47 +538,21 @@ export function GenerationPanel(
         setImageOutputPreference(next);
         if (pureModelId) writeImageOutputPreference(pureModelId, next);
     }, [pureModelId]);
-    const getSupportedAspectRatios = useCallback(() => {
-        return getProviderAspectRatios(pureModelId, selectedProviderHint);
-    }, [pureModelId, selectedProviderHint]);
 
-    // 获取当前模型支持的质量
-    const getSupportedQualities = useCallback(() => {
-        const paramType = getModelParamType(pureModelId, selectedProviderHint);
-        if (paramType === 'quality') {
-            return getQualityLevelOptions(pureModelId, selectedProviderHint);
-        }
-        // 'resolution' or 'both': return resolution tier options
-        return getResolutionTierOptions(pureModelId, selectedProviderHint);
-    }, [pureModelId, selectedProviderHint]);
-
-    // 尺寸映射 — 使用 calculateActualPixels 综合考虑模型+比例+质量
-    const getModelSize = useCallback((ratio: string): string => {
-        if (ratio === 'auto' && shouldPreserveProviderAutoSize(pureModelId, selectedProviderHint)) return 'auto';
-        const sizingOption = getProviderPixelSizingOption(selectedProviderHint, quality, resolution);
-        const modelSize = sharedCalculateActualPixels(ratio, sizingOption, pureModelId);
-        if (modelSize) return modelSize.replace('×', 'x');
-        // 通用回退
-        if (SHARED_ASPECT_RATIO_TO_PIXELS[ratio]) return SHARED_ASPECT_RATIO_TO_PIXELS[ratio];
-        const fallback: Record<string, string> = {
-            "1:1": "1024x1024", "4:3": "1536x1024", "3:4": "1024x1536",
-            "16:9": "2048x1152", "9:16": "1152x2048", "3:2": "1536x1024",
-            "2:3": "1024x1536", "21:9": "2048x878", "9:21": "878x2048",
-        };
-        return fallback[ratio] || "1024x1024";
-    }, [quality, resolution, pureModelId, selectedProviderHint]);
-
-    // 质量对应的尺寸提示 — 显示该质量+当前比例的实际像素
-    const getQualitySizeHint = useCallback((q: string): string => {
-        const actualSize = sharedCalculateActualPixels(aspectRatio, q, pureModelId);
-        if (actualSize) return actualSize.replace('×', 'x');
-        const qMap = findModelConfig(QUALITY_TO_SIZE, pureModelId);
-        if (qMap && qMap[q]) return qMap[q];
-        return q;
-    }, [aspectRatio, pureModelId]);
+    useEffect(() => {
+        if (!selectedDescriptor) return;
+        setAspectRatio(value => supportedRatios.includes(value) ? value : (supportedRatios[0] || value));
+        setQuality(value => qualityOptions.includes(value) ? value : (qualityOptions[0] || value));
+        setSelectedSize(value => sizeOptions.includes(value) ? value : (sizeOptions[0] || ''));
+        setOutputCount(value => Math.min(Math.max(value, 1), selectedDescriptor.maxOutputs));
+    }, [selectedDescriptor, qualityOptions, sizeOptions, supportedRatios]);
 
     // 生成
     const handleGenerate = () => {
+        if (!capabilityReady) {
+            onError?.(catalogError?.message || '模型能力尚未加载');
+            return;
+        }
         if (!prompt.trim() && selectedTags.length === 0 && altRefMarkers.length === 0) return;
         
         // Build alt reference marker prefix
@@ -663,7 +607,7 @@ export function GenerationPanel(
         
         onGenerate({
             prompt: fullPrompt,
-            size: getModelSize(aspectRatio) || "1024x1024",
+            size: selectedSize,
             referenceImages,
             referenceDescriptions,
             referenceMode: 'style',
@@ -672,8 +616,10 @@ export function GenerationPanel(
             aspectRatio,
             stylePreset,
             outputCount,
-            quality,
-            resolution: getModelParamType(pureModelId, selectedProviderHint) === 'both' ? resolution : undefined, // GPT-Image系列分辨率档位
+            quality: qualityOptions.length > 0 ? quality : undefined,
+            resolution: qualityOptions.length > 0 && /^\d+K$/i.test(quality)
+                ? quality.toUpperCase()
+                : undefined,
             background: imageOutputPreference.background,
             outputFormat: imageOutputPreference.outputFormat,
             model: pureModelId,
@@ -787,7 +733,7 @@ export function GenerationPanel(
                 }
             } else {
                 // Upload to any available slot
-                const remaining = MAX_REF_IMAGES - referenceImages.filter(Boolean).length;
+                const remaining = maxReferenceImages - referenceImages.filter(Boolean).length;
                 Array.from(files).slice(0, remaining).forEach(file => {
                     const reader = new FileReader();
                     reader.onload = event => {
@@ -799,7 +745,7 @@ export function GenerationPanel(
                                 const emptyIdx = newImages.findIndex(img => !img);
                                 if (emptyIdx >= 0) {
                                     newImages[emptyIdx] = result;
-                                } else if (newImages.length < MAX_REF_IMAGES) {
+                                } else if (newImages.length < maxReferenceImages) {
                                     newImages.push(result);
                                 }
                                 return newImages;
@@ -919,67 +865,25 @@ export function GenerationPanel(
         return modelId;
     };
 
-    // 从服务器加载管理员配置的图像模型
-    const loadServerModels = useCallback(async (signal?: AbortSignal) => {
-        try {
-            const res = await fetch('/api/models?type=image', { signal });
-            if (res.ok) {
-                const data = await res.json();
-                const serverModels: {id: string, providerId: string, providerName: string, isDefault?: boolean, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[] = [];
-                const providerMap = new Map<string, string>();
-                if (data.providers && Array.isArray(data.providers)) {
-                    for (const p of data.providers) {
-                        providerMap.set(p.id, p.name || p.displayName || '');
-                    }
-                }
-                // 优先从顶层 models 数组读取（已由服务端按 selectedModels + type 过滤）
-                if (data.models && Array.isArray(data.models)) {
-                    for (const m of data.models) {
-                        const is3D = m.id?.toLowerCase().includes('3d') || m.name?.toLowerCase().includes('3d');
-                        serverModels.push({
-                            id: m.id || m.name,
-                            providerId: m.providerId || '',
-                            providerName: providerMap.get(m.providerId) || m.providerId || '',
-                            isDefault: Boolean(m.isDefault),
-                            is3DProvider: is3D,
-                            displayLabel: is3D ? get3DModelLabel(m.id || m.name) : undefined,
-                            apiDisplayName: m.name || '',
-                        });
-                    }
-                }
-                if (serverModels.length > 0) {
-                    // 完整替换模型列表，确保管理员更新后自动同步
-                    setDiscoveredModels(serverModels);
-                    // 保留有效选择；管理员删除/迁移模型后，过期的本地复合键必须回退。
-                    // 否则原生 select 会视觉上显示第一项，实际请求仍携带已失效的旧模型。
-                    setModel(prev => {
-                        return selectInitialModel(prev, serverModels.map(entry => ({
-                            id: `${entry.providerId}::${entry.id}`,
-                            isDefault: entry.isDefault,
-                        })));
-                    });
-                }
-            }
-        } catch {
-            // 静默失败
-        }
-    }, []);
-
     useEffect(() => {
-        const ac = new AbortController();
-        loadServerModels(ac.signal);
-        // 页面重新可见时刷新模型列表（用户可能刚从管理面板切回）
-        const handleVisibility = () => {
-            if (document.visibilityState === 'visible') {
-                loadServerModels(ac.signal);
-            }
-        };
-        document.addEventListener('visibilitychange', handleVisibility);
-        return () => {
-            ac.abort();
-            document.removeEventListener('visibilitychange', handleVisibility);
-        };
-    }, [loadServerModels]);
+        const serverModels = catalogModels.map(entry => {
+            const is3D = entry.id.toLowerCase().includes('3d') || entry.name.toLowerCase().includes('3d');
+            return {
+                id: entry.id,
+                providerId: entry.providerId,
+                providerName: entry.providerName || entry.providerId,
+                isDefault: Boolean(entry.isDefault),
+                is3DProvider: is3D,
+                displayLabel: is3D ? get3DModelLabel(entry.id) : undefined,
+                apiDisplayName: entry.name,
+            };
+        });
+        setDiscoveredModels(serverModels);
+        setModel(prev => selectInitialModel(prev, serverModels.map(entry => ({
+            id: `${entry.providerId}::${entry.id}`,
+            isDefault: entry.isDefault,
+        }))));
+    }, [catalogModels]);
 
     const handleAddUniversalApi = async () => {
         if (!universalApiManager || !universalApiName.trim() || !universalApiUrl.trim() || !universalApiKey.trim()) {
@@ -1086,7 +990,7 @@ export function GenerationPanel(
 
     // 动态槽位 - 根据已有图片数量决定显示哪些槽位
     const filledCount = referenceImages.filter(Boolean).length;
-    const imageSlots = referenceImages.length < MAX_REF_IMAGES
+    const imageSlots = referenceImages.length < maxReferenceImages
         ? [...referenceImages.keys(), referenceImages.length] // existing + one empty add slot
         : [...referenceImages.keys()]; // max reached, no add slot
 
@@ -1111,7 +1015,7 @@ export function GenerationPanel(
 
     // 添加新参考图槽位
     const addRefSlot = () => {
-        if (referenceImages.length >= MAX_REF_IMAGES) return;
+        if (referenceImages.length >= maxReferenceImages) return;
         setReferenceImages(prev => [...prev, '']);
         setReferenceDescriptions(prev => [...prev, '']);
         setReferenceStrengths(prev => [...prev, 0]);
@@ -1178,35 +1082,6 @@ export function GenerationPanel(
                                 aspectRatio: aspectRatio,
                               }));
                             } catch {}
-                            // Extract pure modelId for ratio/quality lookup
-                            const newPureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
-                            const newProviderId = compositeKey.includes('::') ? compositeKey.split('::')[0] : '';
-                            // 动态获取模型支持的画面比例列表
-                            const newProviderName = discoveredModels.find(item => item.id === newPureModelId && item.providerId === newProviderId)?.providerName || '';
-                            const supportedRatios = getProviderAspectRatios(newPureModelId, `${newProviderId} ${newProviderName}`);
-                            setAspectRatio(supportedRatios[0]);
-                            // 动态获取模型支持的分辨率/质量选项
-                            const providerHint = `${newProviderId} ${newProviderName}`;
-                            const paramType = getModelParamType(newPureModelId, providerHint);
-                            const resolutionTiers = getResolutionTierOptions(newPureModelId, providerHint);
-                            const qualityLevels = getQualityLevelOptions(newPureModelId, providerHint);
-                            const mlower = newPureModelId.toLowerCase();
-                            // 按后缀推断默认分辨率
-                            let defaultResolution = resolutionTiers[0] || '1K';
-                            if (/-4k(?:-omni)?$/.test(mlower)) defaultResolution = '4K';
-                            else if (/-2k$/.test(mlower)) defaultResolution = '2K';
-                            // 按后缀推断默认质量
-                            let defaultQuality = qualityLevels[0] || 'auto';
-                            if (/-4k(?:-omni)?$/.test(mlower) || /-2k$/.test(mlower) || /-hd$|[-_]high$/.test(mlower)) {
-                                defaultQuality = 'high';
-                            }
-                            // 根据 paramType 设置对应 state
-                            if (paramType === 'both' || paramType === 'resolution') {
-                                setResolution(resolutionTiers.includes(defaultResolution) ? defaultResolution : resolutionTiers[0] || '1K');
-                            }
-                            if (paramType === 'both' || paramType === 'quality') {
-                                setQuality(qualityLevels.includes(defaultQuality) ? defaultQuality : qualityLevels[0] || 'auto');
-                            }
                         }}
                         className={`${inputStl} appearance-none cursor-pointer`}
                     >
@@ -1246,6 +1121,11 @@ export function GenerationPanel(
                         if (discoveredModel) return <p className={`text-xs mt-0.5 ${mc ? 'text-gray-400' : 'text-gold-muted/70'}`}>{discoveredModel.is3DProvider ? `${discoveredModel.displayLabel || discoveredModel.apiDisplayName || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}` : `${discoveredModel.apiDisplayName || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}`}</p>;
                         return null;
                     })()}
+                    {!capabilityReady && (
+                        <p className={`text-xs mt-1 ${mc ? 'text-amber-600' : 'text-amber-300'}`}>
+                            {catalogError?.message || '模型能力尚未加载'}
+                        </p>
+                    )}
                 </div>
 
                 {/* 创意描述 - 可拖动调整高度，支持参考图标记 */}
@@ -1585,13 +1465,13 @@ export function GenerationPanel(
                     <div className="flex items-center gap-2">
                         <label className={stl}>{dot}参考图片</label>
                         <span className={`text-xs px-1.5 py-0.5 rounded-md ${mc ? 'bg-gray-100 text-gray-500' : 'bg-white/5 text-gold-muted/70'}`}>
-                            {filledCount}/{MAX_REF_IMAGES}
+                            {filledCount}/{maxReferenceImages}
                         </span>
                     </div>
                     <div className="space-y-1.5">
                         {imageSlots.map(i => {
                             // Last slot is the "add" button if under max
-                            if (i === referenceImages.length && i < MAX_REF_IMAGES) {
+                            if (i === referenceImages.length && i < maxReferenceImages) {
                                 return (
                                     <button
                                         key="add-ref"
@@ -1780,7 +1660,7 @@ export function GenerationPanel(
                 <div className="space-y-1">
                     <label className={stl}>{dot}图像比例</label>
                     <div className="grid grid-cols-5 gap-1.5">
-                        {getSupportedAspectRatios().map(ratio => (
+                        {supportedRatios.map(ratio => (
                             <button
                                 key={ratio}
                                 onClick={() => setAspectRatio(ratio)}
@@ -1816,79 +1696,47 @@ export function GenerationPanel(
                     </div>
                 </div>
 
-                {/* 输出参数：根据模型类型显示分辨率档位或质量级别 */}
-                {/* ★ 关键修复：paramType === 'both' 时显示分辨率档位 + 生成质量两个独立行 */}
-                {(() => {
-                    const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
-                    const paramType = getModelParamType(pureModelId, selectedProviderHint);
-                    const resolutionTiers = getResolutionTierOptions(pureModelId, selectedProviderHint);
-                    const qualityLevels = getQualityLevelOptions(pureModelId, selectedProviderHint);
-                    const showResolutions = resolutionTiers.length > 1;
-                    const showQuality = qualityLevels.length > 1;
+                {qualityOptions.length > 0 && (
+                    <div className="space-y-1">
+                        <label className={stl}>{dot}生图质量</label>
+                        <div className="grid grid-cols-4 gap-1.5">
+                            {qualityOptions.map(option => (
+                                <button
+                                    key={option}
+                                    onClick={() => setQuality(option)}
+                                    className={`${gridBtnBase} ${quality === option ? gridBtnOn : gridBtnOff}`}
+                                >
+                                    <span className="text-xs">
+                                        {option === 'auto' ? '自动' :
+                                         option === 'low' ? '快速' :
+                                         option === 'medium' ? '中等' :
+                                         option === 'standard' ? '标准' :
+                                         option === 'high' || option === 'hd' ? '高清' :
+                                         option === 'ultra' ? '超清' :
+                                         (QUALITY_LEVEL_DISPLAY_NAMES[option] || option)}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
-                    if (!showResolutions && !showQuality) return null;
-
-                    return (
-                        <>
-                            {/* 分辨率档位行（both/resolution 类型显示） */}
-                            {(paramType === 'both' || paramType === 'resolution') && showResolutions && (
-                                <div className="space-y-1">
-                                    <label className={stl}>{dot}分辨率</label>
-                                    <div className="grid grid-cols-4 gap-1.5">
-                                        {resolutionTiers.map(q => (
-                                            <button
-                                                key={q}
-                                                onClick={() => {
-                                                    if (paramType === 'both') {
-                                                        setResolution(q);
-                                                    } else {
-                                                        setQuality(q);
-                                                    }
-                                                }}
-                                                className={`${gridBtnBase} ${(paramType === 'both' ? resolution : quality) === q ? gridBtnOn : gridBtnOff}`}
-                                            >
-                                                <div className="flex flex-col items-center leading-none">
-                                                    <span className="text-xs">
-                                                        {RESOLUTION_TIER_DISPLAY_NAMES[q] || q}
-                                                    </span>
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* 质量级别行（both/quality 类型显示） */}
-                            {(paramType === 'both' || paramType === 'quality') && showQuality && (
-                                <div className="space-y-1">
-                                    <label className={stl}>{dot}{paramType === 'both' ? '生成质量' : '图片质量'}</label>
-                                    <div className="grid grid-cols-4 gap-1.5">
-                                        {qualityLevels.map(q => (
-                                            <button
-                                                key={q}
-                                                onClick={() => setQuality(q)}
-                                                className={`${gridBtnBase} ${quality === q ? gridBtnOn : gridBtnOff}`}
-                                            >
-                                                <div className="flex flex-col items-center leading-none">
-                                                    <span className="text-xs">
-                                                        {q === 'auto' ? '自动' : 
-                                                         q === 'low' ? '快速' : 
-                                                         q === 'medium' ? '中等' : 
-                                                         q === 'standard' ? '标准' : 
-                                                         q === 'high' ? '高清' : 
-                                                         q === 'hd' ? '高清' : 
-                                                         q === 'ultra' ? '超清' : 
-                                                         (QUALITY_LEVEL_DISPLAY_NAMES[q] || q)}
-                                                    </span>
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </>
-                    );
-                })()}
+                {sizeOptions.length > 0 && (
+                    <div className="space-y-1">
+                        <label className={stl}>{dot}输出尺寸</label>
+                        <div className="grid grid-cols-3 gap-1.5">
+                            {sizeOptions.map(option => (
+                                <button
+                                    key={option}
+                                    onClick={() => setSelectedSize(option)}
+                                    className={`${gridBtnBase} ${selectedSize === option ? gridBtnOn : gridBtnOff}`}
+                                >
+                                    {option}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 <GenerationBackgroundControl
                     modelId={pureModelId}
@@ -1901,7 +1749,7 @@ export function GenerationPanel(
                 <div className="space-y-1">
                     <label className={stl}>{dot}生图数量</label>
                     <div className="grid grid-cols-4 gap-1.5">
-                        {[1, 2, 3, 4].map(n => (
+                        {countOptions.map(n => (
                             <button
                                 key={n}
                                 onClick={() => setOutputCount(n)}

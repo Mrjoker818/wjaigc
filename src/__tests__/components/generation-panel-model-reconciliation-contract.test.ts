@@ -10,16 +10,17 @@ const source = readFileSync(
 
 describe('generation panel server model reconciliation contract', () => {
   it('reconciles a persisted stale model against the refreshed provider catalog', () => {
-    const loadModelsStart = source.indexOf('const loadServerModels');
-    const discoveredModelsUpdate = source.indexOf('setDiscoveredModels(serverModels);', loadModelsStart);
-    const nextEffect = source.indexOf('}, [loadServerModels]);', discoveredModelsUpdate);
+    const catalogStart = source.indexOf("useTaskModelCatalog('image')");
+    const discoveredModelsUpdate = source.indexOf('setDiscoveredModels(serverModels);', catalogStart);
+    const nextEffect = source.indexOf('}, [catalogModels]);', discoveredModelsUpdate);
     const loadModelsBlock = source.slice(discoveredModelsUpdate, nextEffect);
 
-    expect(loadModelsStart).toBeGreaterThan(-1);
-    expect(discoveredModelsUpdate).toBeGreaterThan(loadModelsStart);
+    expect(catalogStart).toBeGreaterThan(-1);
+    expect(discoveredModelsUpdate).toBeGreaterThan(catalogStart);
     expect(nextEffect).toBeGreaterThan(discoveredModelsUpdate);
     expect(loadModelsBlock).toContain('selectInitialModel(prev, serverModels.map(entry => ({');
     expect(loadModelsBlock).not.toContain('即使模型已不存在于列表中');
+    expect(source).not.toContain('const loadServerModels');
   });
 
   it('persists a reconciled composite key so the stale model cannot return after refresh', () => {
