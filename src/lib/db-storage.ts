@@ -5,6 +5,7 @@
  */
 
 import { execSql, getPool } from './db-client';
+import { writeAuthJsonFileAtomic } from './auth/auth-persistence';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -663,20 +664,23 @@ function parseDatabaseUserTimestamp(value: string | number): number {
 
 function parseJsonField(val: unknown): Record<string, boolean> {
   if (!val) return {};
-  if (typeof val === 'object' && !Array.isArray(val)) return val as Record<string, boolean>;
   if (typeof val === 'string') {
-    try { return JSON.parse(val); } catch { return {}; }
+    try { return parseJsonField(JSON.parse(val)); } catch { return {}; }
+  }
+  if (typeof val === 'object' && !Array.isArray(val)) {
+    return Object.fromEntries(
+      Object.entries(val).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'),
+    );
   }
   return {};
 }
 
 function parseJsonArrayField(val: unknown): string[] | undefined {
   if (!val) return undefined;
-  if (Array.isArray(val)) return val as string[];
+  if (Array.isArray(val)) return val.every(item => typeof item === 'string') ? val : undefined;
   if (typeof val === 'string') {
     try {
-      const parsed = JSON.parse(val);
-      if (Array.isArray(parsed)) return parsed as string[];
+      return parseJsonArrayField(JSON.parse(val));
     } catch { /* ignore */ }
   }
   return undefined;
@@ -848,6 +852,8 @@ export async function migrateFileDataToDb(): Promise<void> {
   const fs = await import('fs/promises');
   const path = await import('path');
 
+  let userMigrationHadFailures = false;
+
   // Migrate users
   try {
     const usersFile = path.join(getServerSystemDir(), 'users.json');
@@ -858,76 +864,74 @@ export async function migrateFileDataToDb(): Promise<void> {
     if (Array.isArray(users)) {
       // Only migrate users that don't already exist in DB
       // (prevent stale file data from overwriting newer DB records)
-      const existingDbUsers = await dbGetUsers();
+      const existingDbUsers = await dbReadUsers();
       const existingIds = new Set(existingDbUsers.map(u => u.id));
       
       let migrated = 0;
-      for (const user of users) {
+      for (const [userIndex, user] of users.entries()) {
         if (!existingIds.has(user.id)) {
-          const result = await execSql(`
-            INSERT INTO wujie_users (
-              id, name, password_hash, credential_hash, role, status,
-              product_type, chat_models, image_models,
-              daily_token_limit, monthly_token_limit, daily_image_limit,
-              avatar, nickname, api_permissions, storage_folder, email, group_id,
-              created_at, updated_at
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6,
-              $7, $8, $9,
-              $10, $11, $12,
-              $13, $14, $15, $16, $17, $18,
-              $19, $20
-            )
-            ON CONFLICT (id) DO NOTHING
-          `, [
-            user.id,
-            user.name,
-            user.passwordHash ?? user.password_hash ?? '',
-            user.credentialHash ?? user.credential_hash ?? null,
-            user.role || 'user',
-            user.status || 'active',
-            user.productType ?? user.product_type ?? null,
-            parseJsonArrayField(user.chatModels ?? user.chat_models) ?? null,
-            parseJsonArrayField(user.imageModels ?? user.image_models) ?? null,
-            user.dailyTokenLimit ?? user.daily_token_limit ?? null,
-            user.monthlyTokenLimit ?? user.monthly_token_limit ?? null,
-            user.dailyImageLimit ?? user.daily_image_limit ?? null,
-            user.avatar ?? null,
-            user.nickname ?? null,
-            JSON.stringify(parseJsonField(user.apiPermissions ?? user.api_permissions)),
-            user.storageFolder ?? user.storage_folder ?? `data/users/${user.id}`,
-            user.email ?? null,
-            user.groupId ?? user.group_id ?? null,
-            user.createdAt ?? user.created_at ?? Date.now(),
-            user.updatedAt ?? user.updated_at ?? Date.now(),
-          ]);
-          if (result.rowCount > 0) migrated++;
+          try {
+            const result = await execSql(`
+              INSERT INTO wujie_users (
+                id, name, password_hash, credential_hash, role, status,
+                product_type, chat_models, image_models,
+                daily_token_limit, monthly_token_limit, daily_image_limit,
+                avatar, nickname, api_permissions, storage_folder, email, group_id,
+                created_at, updated_at
+              ) VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9,
+                $10, $11, $12,
+                $13, $14, $15, $16, $17, $18,
+                $19, $20
+              )
+              ON CONFLICT (id) DO NOTHING
+            `, [
+              user.id,
+              user.name,
+              user.passwordHash ?? user.password_hash ?? '',
+              user.credentialHash ?? user.credential_hash ?? null,
+              user.role || 'user',
+              user.status || 'active',
+              user.productType ?? user.product_type ?? null,
+              parseJsonArrayField(user.chatModels ?? user.chat_models) ?? null,
+              parseJsonArrayField(user.imageModels ?? user.image_models) ?? null,
+              user.dailyTokenLimit ?? user.daily_token_limit ?? null,
+              user.monthlyTokenLimit ?? user.monthly_token_limit ?? null,
+              user.dailyImageLimit ?? user.daily_image_limit ?? null,
+              user.avatar ?? null,
+              user.nickname ?? null,
+              JSON.stringify(parseJsonField(user.apiPermissions ?? user.api_permissions)),
+              user.storageFolder ?? user.storage_folder ?? `data/users/${user.id}`,
+              user.email ?? null,
+              user.groupId ?? user.group_id ?? null,
+              user.createdAt ?? user.created_at ?? Date.now(),
+              user.updatedAt ?? user.updated_at ?? Date.now(),
+            ]);
+            if (result.rowCount > 0) migrated++;
+          } catch {
+            userMigrationHadFailures = true;
+            console.warn(`[db-storage] Skipped invalid user migration row at index ${userIndex}`);
+          }
         }
       }
       console.log(`[db-storage] Migrated ${migrated} new users (${existingDbUsers.length} already in DB)`);
     }
-  } catch {
-    // File may not exist, that's OK
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      userMigrationHadFailures = true;
+      console.warn('[db-storage] User file migration could not be read or parsed');
+    }
   }
 
 
-  // Reverse sync: write DB users back to persistent file if file is missing any
-  try {
-    const allDbUsers = await dbGetUsers();
-    if (allDbUsers.length > 0) {
+  // In DB_PLUS_FILE mode the database is authoritative and the file is an atomic rollback replica.
+  if (process.env.WUJIE_AUTH_PERSISTENCE_MODE === 'DB_PLUS_FILE' && !userMigrationHadFailures) {
+    try {
+      const allDbUsers = await dbReadUsers();
       const usersFilePath = path.join(getServerSystemDir(), 'users.json');
-      let fileUsersData: { users: Record<string, unknown>[] } = { users: [] };
-      try {
-        const existingContent = await fs.readFile(usersFilePath, 'utf-8');
-        fileUsersData = JSON.parse(existingContent);
-      } catch { /* file may not exist yet */ }
-      const fileUsers = fileUsersData.users || [];
-      const fileUserIds = new Set(fileUsers.map((u) => String(u.id)));
-      const missingInFile = allDbUsers.filter((u) => !fileUserIds.has(String(u.id)));
-      if (missingInFile.length > 0) {
-        console.log(`[Migration] Syncing ${missingInFile.length} DB users back to file: ${usersFilePath}`);
-        for (const dbu of missingInFile) {
-          fileUsers.push({
+      const replica = {
+        users: allDbUsers.map(dbu => ({
             id: dbu.id,
             name: dbu.name,
             passwordHash: dbu.password_hash,
@@ -948,15 +952,14 @@ export async function migrateFileDataToDb(): Promise<void> {
             email: dbu.email || undefined,
             createdAt: parseDatabaseUserTimestamp(dbu.created_at),
             updatedAt: parseDatabaseUserTimestamp(dbu.updated_at),
-          });
-        }
-        fileUsersData.users = fileUsers;
-        const fsSync = await import('fs');
-        fsSync.writeFileSync(usersFilePath, JSON.stringify(fileUsersData, null, 2));
-      }
+        })),
+        updatedAt: Date.now(),
+      };
+      await writeAuthJsonFileAtomic(usersFilePath, replica);
+      console.log(`[Migration] Refreshed ${replica.users.length} DB users in the rollback file replica`);
+    } catch (revErr) {
+      console.warn('[Migration] Reverse sync users DB→file failed:', (revErr as Error).message);
     }
-  } catch (revErr) {
-    console.warn('[Migration] Reverse sync users DB→file failed:', (revErr as Error).message);
   }
 
   // Migrate API providers

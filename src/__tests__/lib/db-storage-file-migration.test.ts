@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   execSql: vi.fn(),
   readFile: vi.fn(),
   writeFileSync: vi.fn(),
+  writeAuthJsonFileAtomic: vi.fn(),
 }));
 
 vi.mock('@/lib/db-client', () => ({
@@ -23,6 +24,14 @@ vi.mock('fs/promises', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/auth/auth-persistence', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/auth/auth-persistence')>();
+  return {
+    ...original,
+    writeAuthJsonFileAtomic: mocks.writeAuthJsonFileAtomic,
+  };
+});
+
 vi.mock('fs', async (importOriginal) => {
   const original = await importOriginal<typeof import('fs')>();
   return {
@@ -38,10 +47,12 @@ vi.mock('fs', async (importOriginal) => {
 import { migrateFileDataToDb } from '@/lib/db-storage';
 
 const missingFile = Object.assign(new Error('missing fixture file'), { code: 'ENOENT' });
+const originalPersistenceMode = process.env.WUJIE_AUTH_PERSISTENCE_MODE;
 
 describe('file to database user migration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.WUJIE_AUTH_PERSISTENCE_MODE = 'DB_PLUS_FILE';
     mocks.execSql.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT * FROM wujie_users')) {
         return { rows: [], rowCount: 0 };
@@ -75,6 +86,11 @@ describe('file to database user migration', () => {
         }],
       });
     });
+  });
+
+  afterAll(() => {
+    if (originalPersistenceMode === undefined) delete process.env.WUJIE_AUTH_PERSISTENCE_MODE;
+    else process.env.WUJIE_AUTH_PERSISTENCE_MODE = originalPersistenceMode;
   });
 
   it('preserves the complete user profile without overwriting a concurrent database row', async () => {
@@ -158,9 +174,12 @@ describe('file to database user migration', () => {
 
     await migrateFileDataToDb();
 
-    expect(mocks.writeFileSync).toHaveBeenCalledTimes(1);
-    const [, serialized] = mocks.writeFileSync.mock.calls[0] as [string, string];
-    const replica = JSON.parse(serialized) as { users: Array<Record<string, unknown>> };
+    expect(mocks.writeAuthJsonFileAtomic).toHaveBeenCalledTimes(1);
+    const [, replica] = mocks.writeAuthJsonFileAtomic.mock.calls[0] as [string, {
+      users: Array<Record<string, unknown>>;
+      updatedAt: number;
+    }];
+    expect(Number.isSafeInteger(replica.updatedAt)).toBe(true);
     expect(replica.users).toEqual([{
       id: 'database-only-user',
       name: 'Database Only User',
@@ -183,5 +202,150 @@ describe('file to database user migration', () => {
       createdAt: 1_700_000_000_010,
       updatedAt: 1_700_000_000_011,
     }]);
+  });
+
+  it('replaces stale file rows with the database-authoritative replica', async () => {
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (!filePath.endsWith('users.json')) throw missingFile;
+      return JSON.stringify({
+        users: [{
+          id: 'shared-user',
+          name: 'Stale File Name',
+          passwordHash: 'c'.repeat(64),
+          role: 'admin',
+          status: 'active',
+          productType: 'canvas',
+          createdAt: 1,
+          updatedAt: 1,
+        }],
+      });
+    });
+    mocks.execSql.mockImplementation(async (sql: string) => {
+      if (!sql.includes('SELECT * FROM wujie_users')) return { rows: [], rowCount: 0 };
+      return {
+        rows: [{
+          id: 'shared-user',
+          name: 'Database Name',
+          password_hash: 'd'.repeat(64),
+          credential_hash: null,
+          role: 'user',
+          status: 'disabled',
+          product_type: 'canvas,chat',
+          chat_models: [],
+          image_models: [],
+          api_permissions: { image: false, chat: true },
+          storage_folder: 'data/users/shared-user',
+          created_at: 10,
+          updated_at: 20,
+        }],
+        rowCount: 1,
+      };
+    });
+
+    await migrateFileDataToDb();
+
+    expect(mocks.writeAuthJsonFileAtomic).toHaveBeenCalledTimes(1);
+    const replica = mocks.writeAuthJsonFileAtomic.mock.calls[0]?.[1] as {
+      users: Array<Record<string, unknown>>;
+    };
+    expect(replica.users).toEqual([expect.objectContaining({
+      id: 'shared-user',
+      name: 'Database Name',
+      passwordHash: 'd'.repeat(64),
+      role: 'user',
+      status: 'disabled',
+      productType: 'canvas,chat',
+    })]);
+  });
+
+  it('does not write an authentication file replica in DB_ONLY mode', async () => {
+    process.env.WUJIE_AUTH_PERSISTENCE_MODE = 'DB_ONLY';
+    mocks.readFile.mockRejectedValue(missingFile);
+    mocks.execSql.mockImplementation(async (sql: string) => (
+      sql.includes('SELECT * FROM wujie_users')
+        ? { rows: [{
+          id: 'database-only-user',
+          name: 'Database Only User',
+          password_hash: 'e'.repeat(64),
+          credential_hash: null,
+          role: 'user',
+          status: 'active',
+          product_type: 'canvas,chat',
+          chat_models: [],
+          image_models: [],
+          api_permissions: {},
+          storage_folder: 'data/users/database-only-user',
+          created_at: 10,
+          updated_at: 20,
+        }], rowCount: 1 }
+        : { rows: [], rowCount: 0 }
+    ));
+
+    await migrateFileDataToDb();
+
+    expect(mocks.writeAuthJsonFileAtomic).not.toHaveBeenCalled();
+    expect(mocks.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it('continues migrating later users when one file row is invalid', async () => {
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (!filePath.endsWith('users.json')) throw missingFile;
+      return JSON.stringify({
+        users: [
+          { id: 'invalid-user', name: 'Invalid', passwordHash: 'x' },
+          { id: 'valid-user', name: 'Valid', passwordHash: 'f'.repeat(64) },
+        ],
+      });
+    });
+    mocks.execSql.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (sql.includes('SELECT * FROM wujie_users')) return { rows: [], rowCount: 0 };
+      if (sql.includes('INSERT INTO wujie_users') && params?.[0] === 'invalid-user') {
+        throw new Error('invalid fixture row');
+      }
+      return { rows: [], rowCount: 1 };
+    });
+
+    await migrateFileDataToDb();
+
+    const insertedIds = mocks.execSql.mock.calls
+      .filter(([sql]) => String(sql).includes('INSERT INTO wujie_users'))
+      .map(([, params]) => (params as unknown[])[0]);
+    expect(insertedIds).toEqual(['invalid-user', 'valid-user']);
+  });
+
+  it('preserves the existing rollback file when the database read fails', async () => {
+    mocks.execSql.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT * FROM wujie_users')) throw new Error('database unavailable');
+      return { rows: [], rowCount: 0 };
+    });
+
+    await migrateFileDataToDb();
+
+    expect(mocks.writeAuthJsonFileAtomic).not.toHaveBeenCalled();
+    expect(mocks.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed model arrays and removes non-boolean permission values', async () => {
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (!filePath.endsWith('users.json')) throw missingFile;
+      return JSON.stringify({
+        users: [{
+          id: 'dirty-profile-user',
+          name: 'Dirty Profile',
+          passwordHash: 'f'.repeat(64),
+          chatModels: ['chat-valid', 42],
+          imageModels: ['image-valid'],
+          apiPermissions: { image: 'yes', chat: true, video: false },
+        }],
+      });
+    });
+
+    await migrateFileDataToDb();
+
+    const insert = mocks.execSql.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO wujie_users'));
+    const params = insert?.[1] as unknown[];
+    expect(params[7]).toBeNull();
+    expect(params[8]).toEqual(['image-valid']);
+    expect(params[14]).toBe(JSON.stringify({ chat: true, video: false }));
   });
 });
