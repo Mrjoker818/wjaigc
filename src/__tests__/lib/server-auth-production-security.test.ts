@@ -4,7 +4,21 @@ import { createHash } from 'crypto';
 import os from 'os';
 import path from 'path';
 
+import { deriveAuthSecretKid, parseAuthSecretRing } from '@/lib/auth/auth-secret-ring';
+import { verifyScryptCredential } from '@/lib/auth/auth-password';
+
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/db-client', () => ({ isDatabaseConfigured: () => false }));
+vi.mock('@/lib/db-storage', () => ({
+  dbDeleteUser: vi.fn(),
+  dbDeleteUserData: vi.fn(),
+  dbInitCredits: vi.fn(),
+  dbReadUsers: vi.fn(),
+  dbWriteUsers: vi.fn(),
+}));
+vi.mock('@/lib/runtime-settings', () => ({
+  getRuntimeSettings: vi.fn().mockResolvedValue({ initialCredits: 0 }),
+}));
 
 const originalEnvironment = { ...process.env };
 // 立即隔离数据库：authSecret() 回退链为 env → DB → 文件，
@@ -48,7 +62,109 @@ describe.sequential('server authentication production security', () => {
       status: 'active',
       createdAt: 1,
       updatedAt: 1,
-    })).rejects.toThrow('Production authentication secret is not configured');
+    })).rejects.toMatchObject({
+      code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+      httpStatus: 503,
+      retryable: false,
+    });
+  });
+
+  it('fails closed instead of treating damaged JSON as a legacy file secret', async () => {
+    temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
+    const systemDir = path.join(temporaryDataDir, 'system');
+    await mkdir(systemDir, { recursive: true });
+    await writeFile(path.join(systemDir, 'auth-secret'), '{"version":1', 'utf8');
+    process.env.COZE_PROJECT_ENV = 'PROD';
+    process.env.WUJIE_DATA_DIR = temporaryDataDir;
+    delete process.env.WUJIE_AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+
+    const { createSessionToken } = await import('@/lib/server-auth');
+
+    await expect(createSessionToken({
+      id: 'admin-1',
+      name: 'admin',
+      role: 'admin',
+      status: 'active',
+      createdAt: 1,
+      updatedAt: 1,
+    })).rejects.toMatchObject({ code: 'AUTH_CONFIGURATION_UNAVAILABLE' });
+  });
+
+  it('rotates a legacy file secret to the configured secret while retaining the legacy active entry', async () => {
+    temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
+    const systemDir = path.join(temporaryDataDir, 'system');
+    const legacySecret = 'legacy-file-auth-secret-0123456789abcdef';
+    const configuredSecret = 'configured-file-auth-secret-0123456789abcd';
+    await mkdir(systemDir, { recursive: true });
+    await writeFile(path.join(systemDir, 'auth-secret'), legacySecret, 'utf8');
+    await writeFile(path.join(systemDir, 'users.json'), JSON.stringify({
+      users: [{
+        id: 'legacy-rotation-user',
+        name: 'legacy-rotation-user',
+        passwordHash: createHash('sha256').update(`${legacySecret}:password`).digest('hex'),
+      }],
+      updatedAt: 1,
+    }), 'utf8');
+    process.env.COZE_PROJECT_ENV = 'PROD';
+    process.env.WUJIE_DATA_DIR = temporaryDataDir;
+    process.env.WUJIE_AUTH_SECRET = configuredSecret;
+    delete process.env.NEXTAUTH_SECRET;
+
+    const { getAuthSecretForInternalRequests } = await import('@/lib/server-auth');
+
+    await expect(getAuthSecretForInternalRequests()).resolves.toBe(configuredSecret);
+    const ring = parseAuthSecretRing(JSON.parse(
+      await readFile(path.join(systemDir, 'auth-secret'), 'utf8'),
+    ) as unknown);
+    expect(ring?.active.secret).toBe(configuredSecret);
+    expect(ring?.previous?.secret).toBe(legacySecret);
+  });
+
+  it('blocks a second file-secret rotation while legacy credentials still need the previous entry', async () => {
+    temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
+    const systemDir = path.join(temporaryDataDir, 'system');
+    const oldestSecret = 'oldest-file-auth-secret-0123456789abcdef';
+    const activeSecret = 'active-file-auth-secret-0123456789abcdef0';
+    const nextSecret = 'next-file-auth-secret-0123456789abcdefgh';
+    const ringPath = path.join(systemDir, 'auth-secret');
+    const originalRing = JSON.stringify({
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(activeSecret),
+        secret: activeSecret,
+        activatedAt: 2,
+      },
+      previous: {
+        kid: deriveAuthSecretKid(oldestSecret),
+        secret: oldestSecret,
+        activatedAt: 1,
+        retiredAt: 2,
+      },
+      updatedAt: 2,
+    });
+    await mkdir(systemDir, { recursive: true });
+    await writeFile(ringPath, originalRing, 'utf8');
+    await writeFile(path.join(systemDir, 'users.json'), JSON.stringify({
+      users: [{
+        id: 'legacy-rotation-user',
+        name: 'legacy-rotation-user',
+        passwordHash: createHash('sha256').update(`${activeSecret}:password`).digest('hex'),
+      }],
+      updatedAt: 1,
+    }), 'utf8');
+    process.env.COZE_PROJECT_ENV = 'PROD';
+    process.env.WUJIE_DATA_DIR = temporaryDataDir;
+    process.env.WUJIE_AUTH_SECRET = nextSecret;
+    delete process.env.NEXTAUTH_SECRET;
+
+    const { getAuthSecretForInternalRequests } = await import('@/lib/server-auth');
+
+    await expect(getAuthSecretForInternalRequests()).rejects.toMatchObject({
+      code: 'AUTH_ROTATION_BLOCKED_LEGACY_CREDENTIALS',
+      httpStatus: 409,
+    });
+    await expect(readFile(ringPath, 'utf8')).resolves.toBe(originalRing);
   });
 
   it('refuses to bootstrap an administrator without an explicit production password', async () => {
@@ -110,8 +226,6 @@ describe.sequential('server authentication production security', () => {
     delete process.env.WUJIE_ADMIN_PASSWORD;
 
     const { authenticateUser } = await import('@/lib/server-auth');
-    const usersBeforeLogin = await readFile(usersFile, 'utf8');
-
     await expect(authenticateUser({
       name: 'Mr.joker',
       password,
@@ -121,7 +235,21 @@ describe.sequential('server authentication production security', () => {
       name: 'Mr.joker',
       role: 'admin',
     });
-    await expect(readFile(usersFile, 'utf8')).resolves.toBe(usersBeforeLogin);
+
+    const migratedSecretFile = JSON.parse(
+      await readFile(path.join(systemDir, 'auth-secret'), 'utf8'),
+    ) as unknown;
+    const ring = parseAuthSecretRing(migratedSecretFile);
+    expect(ring?.active.secret).toBe(persistedSecret);
+
+    const migratedUsers = JSON.parse(await readFile(usersFile, 'utf8')) as {
+      users: Array<{ id: string; passwordHash: string; credentialHash?: string }>;
+    };
+    const migratedAdmin = migratedUsers.users.find(user => user.id === 'admin_mr_joker');
+    expect(migratedAdmin?.passwordHash).toBe(
+      createHash('sha256').update(`${persistedSecret}:${password}`).digest('hex'),
+    );
+    expect(migratedAdmin?.credentialHash).toMatch(/^scrypt-v1\$32768\$8\$1\$/);
   });
 
   it('authorizes a newly bootstrapped administrator for the canvas product', async () => {
@@ -143,6 +271,18 @@ describe.sequential('server authentication production security', () => {
       role: 'admin',
       productType: 'canvas,chat',
     });
+
+    const persisted = JSON.parse(
+      await readFile(path.join(temporaryDataDir, 'system', 'users.json'), 'utf8'),
+    ) as { users: Array<{ name: string; passwordHash: string; credentialHash?: string }> };
+    const admin = persisted.users.find(user => user.name === 'bootstrap-admin');
+    expect(admin?.passwordHash).toBe(
+      createHash('sha256')
+        .update('test-production-auth-secret-at-least-32-characters:bootstrap-password')
+        .digest('hex'),
+    );
+    await expect(verifyScryptCredential('bootstrap-password', admin?.credentialHash || ''))
+      .resolves.toBe(true);
   });
 
   it('authorizes a newly created managed user for the canvas product by default', async () => {
@@ -154,7 +294,7 @@ describe.sequential('server authentication production security', () => {
     process.env.WUJIE_ADMIN_PASSWORD = 'bootstrap-password';
 
     const { authenticateUser, createManagedUser } = await import('@/lib/server-auth');
-    await createManagedUser({
+    const created = await createManagedUser({
       name: 'canvas-user',
       password: 'canvas-user-password',
     });
@@ -168,5 +308,17 @@ describe.sequential('server authentication production security', () => {
       role: 'user',
       productType: 'canvas,chat',
     });
+
+    const persisted = JSON.parse(
+      await readFile(path.join(temporaryDataDir, 'system', 'users.json'), 'utf8'),
+    ) as { users: Array<{ id: string; passwordHash: string; credentialHash?: string }> };
+    const managedUser = persisted.users.find(user => user.id === created.id);
+    expect(managedUser?.passwordHash).toBe(
+      createHash('sha256')
+        .update('test-development-auth-secret-at-least-32-characters:canvas-user-password')
+        .digest('hex'),
+    );
+    await expect(verifyScryptCredential('canvas-user-password', managedUser?.credentialHash || ''))
+      .resolves.toBe(true);
   });
 });

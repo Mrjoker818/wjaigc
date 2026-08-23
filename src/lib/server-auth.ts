@@ -1,9 +1,33 @@
 import 'server-only';
 
 import crypto from 'crypto';
-import { mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, readFile, rm } from 'fs/promises';
 import path from 'path';
 import type { NextRequest } from 'next/server';
+import { AuthServiceError } from './auth/auth-errors';
+import {
+  createLegacyPasswordHash,
+  createScryptCredential,
+  isValidScryptCredential,
+  verifyLegacyCredential,
+  verifyScryptCredential,
+} from './auth/auth-password';
+import {
+  readAuthJsonFile,
+  resolveAuthPersistenceMode,
+  writeAuthJsonFileAtomic,
+  type AuthPersistenceMode,
+} from './auth/auth-persistence';
+import {
+  deriveAuthSecretKid,
+  parseAuthSecretRing,
+  planSecretRingRotation,
+  type AuthSecretRingV1,
+} from './auth/auth-secret-ring';
+import {
+  resolveDatabaseSecretRing,
+  updateUserCredentialSidecar,
+} from './auth/auth-repository';
 import type { User } from './user-types';
 import { ensureUserDataDirs, getUserDataDir } from './server-user-storage';
 import { getServerSystemDir, getServerUsersDir } from './server-data-root';
@@ -99,6 +123,7 @@ function requireAdminBootstrapPassword(): string {
 
 type StoredUser = Omit<User, 'password'> & {
   passwordHash: string;
+  credentialHash?: string;
   productType?: string;
   groupId?: string;
   chatModels?: string[];
@@ -138,74 +163,190 @@ function defaultApiPermissions() {
   };
 }
 
-let _authSecretCache: { value: string; warned: boolean } | null = null;
+function configurationUnavailable(): AuthServiceError {
+  return new AuthServiceError(
+    'AUTH_CONFIGURATION_UNAVAILABLE',
+    'Authentication configuration is unavailable.',
+    503,
+    false,
+  );
+}
+
+function persistenceUnavailable(): AuthServiceError {
+  return new AuthServiceError(
+    'AUTH_PERSISTENCE_UNAVAILABLE',
+    'Authentication persistence is unavailable.',
+    503,
+    true,
+  );
+}
+
+function credentialFormatInvalid(): AuthServiceError {
+  return new AuthServiceError(
+    'AUTH_CREDENTIAL_FORMAT_INVALID',
+    'Stored authentication credential is invalid.',
+    503,
+    false,
+  );
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'ENOENT';
+}
+
+function getAuthPersistenceMode(): AuthPersistenceMode {
+  return resolveAuthPersistenceMode({
+    databaseConfigured: isDatabaseConfigured(),
+    rawMode: process.env.WUJIE_AUTH_PERSISTENCE_MODE,
+    production: isProductionRuntime(),
+  });
+}
+
+function createInitialSecretRing(secret: string, now: number): AuthSecretRingV1 {
+  if (secret.length < 32 || !Number.isSafeInteger(now) || now <= 0) {
+    throw configurationUnavailable();
+  }
+  return {
+    version: 1,
+    active: {
+      kid: deriveAuthSecretKid(secret),
+      secret,
+      activatedAt: now,
+    },
+    updatedAt: now,
+  };
+}
+
+async function writeAuthFile(filePath: string, value: unknown): Promise<void> {
+  try {
+    await mkdir(SYSTEM_DIR, { recursive: true });
+    await writeAuthJsonFileAtomic(filePath, value);
+  } catch (error) {
+    throw error instanceof AuthServiceError ? error : persistenceUnavailable();
+  }
+}
+
+async function readAuthSecretFileRaw(): Promise<string | null> {
+  try {
+    return await readFile(AUTH_SECRET_PATH, 'utf8');
+  } catch (error) {
+    if (isMissingFileError(error)) return null;
+    throw persistenceUnavailable();
+  }
+}
+
+function parseFileSecretRing(raw: string, now: number): {
+  ring: AuthSecretRingV1;
+  migratedLegacySecret: boolean;
+} {
+  const trimmed = raw.trim();
+  try {
+    const ring = parseAuthSecretRing(JSON.parse(trimmed) as unknown);
+    if (!ring) throw configurationUnavailable();
+    return { ring, migratedLegacySecret: false };
+  } catch (error) {
+    if (error instanceof AuthServiceError) throw error;
+    const looksLikeJson = trimmed.startsWith('{')
+      || trimmed.startsWith('[')
+      || trimmed.startsWith('"');
+    if (looksLikeJson || trimmed.length < 32) {
+      throw configurationUnavailable();
+    }
+    return {
+      ring: createInitialSecretRing(trimmed, now),
+      migratedLegacySecret: true,
+    };
+  }
+}
+
+async function countFileLegacyCredentialUsers(): Promise<number> {
+  const file = await readAuthJsonFile<StoredUsersFile>(USERS_PATH);
+  if (!file || !Array.isArray(file.users)) return 0;
+  return file.users.filter(user => (
+    user.credentialHash === undefined
+    && typeof user.passwordHash === 'string'
+    && user.passwordHash.trim().length > 0
+  )).length;
+}
+
+let _authSecretRingCache: AuthSecretRingV1 | null = null;
+const emittedReplicaWarnings = new Set<string>();
+
+function warnReplicaWriteOnce(code: string): void {
+  if (emittedReplicaWarnings.has(code)) return;
+  emittedReplicaWarnings.add(code);
+  console.warn({ code });
+}
+
+async function writeSecretRingReplicaBestEffort(ring: AuthSecretRingV1): Promise<void> {
+  try {
+    await writeAuthFile(AUTH_SECRET_PATH, ring);
+  } catch {
+    warnReplicaWriteOnce('AUTH_SECRET_RING_FILE_REPLICA_DEFERRED');
+  }
+}
+
+async function resolveFileSecretRing(
+  configuredSecret: string | null,
+  now: number,
+): Promise<AuthSecretRingV1> {
+  const raw = await readAuthSecretFileRaw();
+  if (raw === null) {
+    if (!configuredSecret && isProductionRuntime()) {
+      throw configurationUnavailable();
+    }
+    const initialSecret = configuredSecret ?? crypto.randomBytes(48).toString('base64url');
+    const ring = createInitialSecretRing(initialSecret, now);
+    await writeAuthFile(AUTH_SECRET_PATH, ring);
+    return ring;
+  }
+
+  const parsed = parseFileSecretRing(raw, now);
+  let ring = parsed.ring;
+  let shouldWrite = parsed.migratedLegacySecret;
+  if (configuredSecret && configuredSecret !== ring.active.secret) {
+    const legacyCredentialCount = await countFileLegacyCredentialUsers();
+    try {
+      ring = planSecretRingRotation(
+        ring,
+        configuredSecret,
+        now,
+        legacyCredentialCount > 0,
+      );
+    } catch (error) {
+      if (error instanceof AuthServiceError) throw error;
+      throw configurationUnavailable();
+    }
+    shouldWrite = true;
+  }
+  if (shouldWrite) {
+    await writeAuthFile(AUTH_SECRET_PATH, ring);
+  }
+  return ring;
+}
+
+async function authSecretRing(): Promise<AuthSecretRingV1> {
+  if (_authSecretRingCache) return _authSecretRingCache;
+
+  const mode = getAuthPersistenceMode();
+  const now = Date.now();
+  const envSecret = configuredAuthSecret();
+  const ring = mode === 'FILE_ONLY'
+    ? await resolveFileSecretRing(envSecret, now)
+    : await resolveDatabaseSecretRing({ configuredSecret: envSecret, now });
+
+  if (mode === 'DB_PLUS_FILE') {
+    await writeSecretRingReplicaBestEffort(ring);
+  }
+  _authSecretRingCache = ring;
+  return ring;
+}
 
 async function authSecret(): Promise<string> {
-  if (_authSecretCache) return _authSecretCache.value;
-
-  // Priority: env var → DB stored secret → hardcoded fallback
-  const envSecret = configuredAuthSecret();
-  if (envSecret) {
-    _authSecretCache = { value: envSecret, warned: false };
-    // Persist to DB so future deployments can recover even without env var.
-    // Also upgrade a legacy built-in secret stored in DB to the env secret.
-    try {
-      const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
-      const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
-      if (!dbSecret || dbSecret === LEGACY_STABLE_AUTH_SECRET) {
-        await dbSetSystemSetting('auth_secret', envSecret);
-      }
-    } catch { /* non-critical */ }
-    return envSecret;
-  }
-
-  // Recover a previously generated secret before rejecting a redeploy. New
-  // production instances still require an explicit secret when no persisted
-  // credential exists.
-  try {
-    const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
-    const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
-    if (dbSecret && dbSecret.length >= 32) {
-      if (dbSecret === LEGACY_STABLE_AUTH_SECRET) {
-        const rotatedSecret = crypto.randomBytes(48).toString('base64url');
-        await dbSetSystemSetting('auth_secret', rotatedSecret);
-        _authSecretCache = { value: rotatedSecret, warned: false };
-        console.warn('[SECURITY] Rotated the persisted legacy authentication secret. Existing password hashes migrate on next successful login.');
-        return rotatedSecret;
-      }
-      _authSecretCache = { value: dbSecret, warned: false };
-      if (isProductionRuntime()) {
-        console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set; recovered auth secret from database. Set the env var to silence this warning.');
-      }
-      return dbSecret;
-    }
-    if (!isProductionRuntime()) {
-      const fallback = crypto.randomBytes(48).toString('base64url');
-      await dbSetSystemSetting('auth_secret', fallback);
-      _authSecretCache = { value: fallback, warned: false };
-      return fallback;
-    }
-  } catch {
-    // DB not available, use fallback
-  }
-
-  try {
-    const fileSecret = (await readFile(AUTH_SECRET_PATH, 'utf8')).trim();
-    if (fileSecret.length >= 32) {
-      _authSecretCache = { value: fileSecret, warned: false };
-      return fileSecret;
-    }
-  } catch { /* create a local secret below */ }
-
-  if (isProductionRuntime()) {
-    throw new AuthConfigurationError('Production authentication secret is not configured. Set WUJIE_AUTH_SECRET or NEXTAUTH_SECRET to at least 32 random characters.');
-  }
-
-  const fallback = crypto.randomBytes(48).toString('base64url');
-  _authSecretCache = { value: fallback, warned: false };
-  await mkdir(SYSTEM_DIR, { recursive: true });
-  await writeFile(AUTH_SECRET_PATH, fallback, { encoding: 'utf8', mode: 0o600 });
-  return fallback;
+  return (await authSecretRing()).active.secret;
 }
 
 /**
@@ -213,47 +354,24 @@ async function authSecret(): Promise<string> {
  * authenticated when a preview deployment restores its secret from storage.
  */
 export async function getAuthSecretForInternalRequests(): Promise<string> {
-  return authSecret();
+  return (await authSecretRing()).active.secret;
 }
 
 /**
- * Legacy auth secrets used in previous deployments.
- * When a user's password hash doesn't match the current secret,
- * we try these legacy secrets. If matched, the hash is auto-migrated
- * to the current secret so subsequent logins use the fast path.
+ * Fixed legacy candidates remain verification-only inputs while a successful
+ * legacy login adds the independent scrypt sidecar.
  */
 const LEGACY_AUTH_SECRETS = [
   'wujie-local-session-secret', // Original fallback (pre-v3.0)
   LEGACY_STABLE_AUTH_SECRET,
 ];
 
-function hashPasswordWithSecret(password: string, secret: string): string {
-  return crypto.createHash('sha256').update(`${secret}:${password}`).digest('hex');
-}
-
-async function hashPassword(password: string): Promise<string> {
-  return hashPasswordWithSecret(password, await authSecret());
-}
-
-/**
- * Verify a password against a stored hash, trying the current secret first
- * and then falling back to legacy secrets.
- * Returns { matched, needsMigration } - if needsMigration is true,
- * the password hash should be re-hashed with the current secret.
- * Must be called after authSecret() has been called at least once (cache populated).
- */
-function verifyPassword(password: string, storedHash: string, currentSecret: string): { matched: boolean; needsMigration: boolean } {
-  // Fast path: current secret
-  if (hashPasswordWithSecret(password, currentSecret) === storedHash) {
-    return { matched: true, needsMigration: false };
-  }
-  // Legacy secrets: try each one
-  for (const legacySecret of LEGACY_AUTH_SECRETS) {
-    if (hashPasswordWithSecret(password, legacySecret) === storedHash) {
-      return { matched: true, needsMigration: true };
-    }
-  }
-  return { matched: false, needsMigration: false };
+function legacyCredentialSecrets(ring: AuthSecretRingV1): string[] {
+  return [...new Set([
+    ring.active.secret,
+    ...(ring.previous ? [ring.previous.secret] : []),
+    ...LEGACY_AUTH_SECRETS,
+  ])];
 }
 
 async function hmac(value: string): Promise<string> {
@@ -317,185 +435,135 @@ function normalizeStoredUser(user: StoredUser): StoredUser {
   };
 }
 
-async function writeStore(file: StoredUsersFile): Promise<void> {
-  const data = { ...file, updatedAt: Date.now() };
-  // Write to file (backward compatible) — file system failures should not block DB writes
+type DbStoredUserRow = Awaited<ReturnType<typeof dbReadUsers>>[number];
+
+function storedUserFromDatabase(user: DbStoredUserRow): StoredUser {
+  return normalizeStoredUser({
+    id: user.id,
+    name: user.name,
+    passwordHash: user.password_hash,
+    credentialHash: user.credential_hash === null ? undefined : user.credential_hash,
+    role: (user.role || 'user') as 'admin' | 'user',
+    status: (user.status || 'active') as 'active' | 'disabled',
+    productType: user.product_type || undefined,
+    groupId: user.group_id || undefined,
+    chatModels: user.chat_models
+      ? (Array.isArray(user.chat_models) ? user.chat_models : parseJsonArray(user.chat_models))
+      : undefined,
+    imageModels: user.image_models
+      ? (Array.isArray(user.image_models) ? user.image_models : parseJsonArray(user.image_models))
+      : undefined,
+    dailyTokenLimit: user.daily_token_limit ?? undefined,
+    monthlyTokenLimit: user.monthly_token_limit ?? undefined,
+    dailyImageLimit: user.daily_image_limit ?? undefined,
+    avatar: user.avatar || undefined,
+    nickname: user.nickname || undefined,
+    apiPermissions: normalizeApiPermissions(user.api_permissions),
+    storageFolder: user.storage_folder || storageFolder(user.id),
+    email: user.email || undefined,
+    createdAt: user.created_at,
+    updatedAt: user.updated_at,
+  });
+}
+
+function usersForDatabase(file: StoredUsersFile): Parameters<typeof dbWriteUsers>[0] {
+  return file.users.map(user => ({
+    id: user.id,
+    name: user.name,
+    passwordHash: user.passwordHash,
+    credentialHash: user.credentialHash,
+    role: user.role || 'user',
+    status: user.status || 'active',
+    productType: user.productType || null,
+    groupId: user.groupId || null,
+    chatModels: user.chatModels || null,
+    imageModels: user.imageModels || null,
+    dailyTokenLimit: user.dailyTokenLimit ?? null,
+    monthlyTokenLimit: user.monthlyTokenLimit ?? null,
+    dailyImageLimit: user.dailyImageLimit ?? null,
+    avatar: user.avatar || null,
+    nickname: user.nickname || null,
+    apiPermissions: user.apiPermissions || defaultApiPermissions(),
+    storageFolder: user.storageFolder || storageFolder(user.id),
+    email: user.email || null,
+    createdAt: user.createdAt || Date.now(),
+    updatedAt: user.updatedAt || Date.now(),
+  }));
+}
+
+async function writeUsersFile(data: StoredUsersFile): Promise<void> {
+  await writeAuthFile(USERS_PATH, data);
+}
+
+async function writeUsersFileReplicaBestEffort(data: StoredUsersFile): Promise<void> {
   try {
-    await mkdir(SYSTEM_DIR, { recursive: true });
-    await writeFile(USERS_PATH, JSON.stringify(data, null, 2), 'utf8');
-  } catch (fsErr) {
-    console.warn('[auth] File system write failed (non-critical if DB is configured):', fsErr instanceof Error ? fsErr.message : fsErr);
+    await writeUsersFile(data);
+  } catch {
+    warnReplicaWriteOnce('AUTH_USER_STORE_FILE_REPLICA_DEFERRED');
   }
-  if (isDatabaseConfigured()) {
-    // Safety: ensure we don't lose DB users that aren't in the current write list
+}
+
+async function writeStore(file: StoredUsersFile): Promise<void> {
+  const data: StoredUsersFile = { ...file, updatedAt: Date.now() };
+  const mode = getAuthPersistenceMode();
+  if (mode === 'FILE_ONLY') {
     try {
-    const dbUsers = await dbReadUsers();
-    const writeUserIds = new Set(data.users.map(u => u.id));
-    const missingFromWrite = (dbUsers || []).filter(u => !writeUserIds.has(u.id) && u.name !== DEFAULT_ADMIN_NAME);
-    if (missingFromWrite.length > 0) {
-      console.warn(`[auth] ⚠️ writeStore: ${missingFromWrite.length} DB user(s) not in write list, preserving:`,
-        missingFromWrite.map(u => `${u.id}(${u.name})`).join(', '));
-      for (const u of missingFromWrite) {
-        data.users.push(normalizeStoredUser({
-          id: u.id, name: u.name, passwordHash: u.password_hash,
-          role: (u.role || 'user') as 'admin' | 'user',
-          status: (u.status || 'active') as 'active' | 'disabled',
-          productType: u.product_type || undefined,
-          groupId: u.group_id || undefined,
-          chatModels: u.chat_models ? (Array.isArray(u.chat_models) ? u.chat_models : parseJsonArray(u.chat_models)) : undefined,
-          imageModels: u.image_models ? (Array.isArray(u.image_models) ? u.image_models : parseJsonArray(u.image_models)) : undefined,
-          dailyTokenLimit: u.daily_token_limit ?? undefined,
-          monthlyTokenLimit: u.monthly_token_limit ?? undefined,
-          dailyImageLimit: u.daily_image_limit ?? undefined,
-          avatar: u.avatar || undefined,
-          nickname: u.nickname || undefined,
-          apiPermissions: normalizeApiPermissions(u.api_permissions),
-          storageFolder: u.storage_folder || storageFolder(u.id),
-          email: u.email || undefined,
-          createdAt: u.created_at, updatedAt: u.updated_at,
-        }));
-      }
-      // Re-write file with supplemented users to keep persistent storage in sync
-      try {
-        await writeFile(USERS_PATH, JSON.stringify(data, null, 2), 'utf8');
-      } catch (rewriteErr) {
-        console.error('[auth] Failed to re-write users file after DB supplement:', rewriteErr);
-      }
+      await writeUsersFile(data);
+    } catch (error) {
+      throw error instanceof AuthServiceError ? error : persistenceUnavailable();
     }
-    } catch {
-      // DB check failed, proceed with write (UPSERT is safe)
-    }
-    // Write to database (persistent) - uses UPSERT to prevent data loss
-    await dbWriteUsers(data.users.map(u => ({
-    id: u.id,
-    name: u.name,
-    passwordHash: u.passwordHash,
-    role: u.role || 'user',
-    status: u.status || 'active',
-    productType: u.productType || null,
-    groupId: u.groupId || null,
-    chatModels: u.chatModels || null,
-    imageModels: u.imageModels || null,
-    dailyTokenLimit: u.dailyTokenLimit ?? null,
-    monthlyTokenLimit: u.monthlyTokenLimit ?? null,
-    dailyImageLimit: u.dailyImageLimit ?? null,
-    avatar: u.avatar || null,
-    nickname: u.nickname || null,
-    apiPermissions: u.apiPermissions || defaultApiPermissions(),
-    storageFolder: u.storageFolder || storageFolder(u.id),
-    email: u.email || null,
-    createdAt: u.createdAt || Date.now(),
-    updatedAt: u.updatedAt || Date.now(),
-    })));
+    return;
+  }
+
+  try {
+    const written = await dbWriteUsers(usersForDatabase(data));
+    if (written !== true) throw persistenceUnavailable();
+  } catch (error) {
+    throw error instanceof AuthServiceError ? error : persistenceUnavailable();
+  }
+  if (mode === 'DB_PLUS_FILE') {
+    await writeUsersFileReplicaBestEffort(data);
   }
 }
 
 async function readStore(): Promise<StoredUsersFile> {
+  const mode = getAuthPersistenceMode();
   let file: StoredUsersFile;
-  let usedFallback = false;
-
-  if (!isDatabaseConfigured()) {
-    try {
-      const raw = await readFile(USERS_PATH, 'utf8');
-      const parsed = JSON.parse(raw) as StoredUsersFile;
+  if (mode === 'FILE_ONLY') {
+    const parsed = await readAuthJsonFile<StoredUsersFile>(USERS_PATH);
+    if (parsed === null) {
+      file = { users: [], updatedAt: Date.now() };
+    } else {
+      if (typeof parsed !== 'object' || !Array.isArray(parsed.users)) {
+        throw persistenceUnavailable();
+      }
       file = {
-        users: Array.isArray(parsed.users) ? parsed.users.map(normalizeStoredUser) : [],
+        users: parsed.users.map(normalizeStoredUser),
         updatedAt: parsed.updatedAt || Date.now(),
       };
-    } catch {
-      file = { users: [], updatedAt: Date.now() };
     }
   } else {
-    // Try database first (persistent across deployments)
-    try {
-    const dbUsers = await dbReadUsers();
-    if (dbUsers && dbUsers.length > 0) {
-      file = {
-        users: dbUsers.map(u => normalizeStoredUser({
-          id: u.id,
-          name: u.name,
-          passwordHash: u.password_hash,
-          role: (u.role || 'user') as 'admin' | 'user',
-          status: (u.status || 'active') as 'active' | 'disabled',
-          productType: u.product_type || undefined,
-          chatModels: u.chat_models ? (Array.isArray(u.chat_models) ? u.chat_models : parseJsonArray(u.chat_models)) : undefined,
-          imageModels: u.image_models ? (Array.isArray(u.image_models) ? u.image_models : parseJsonArray(u.image_models)) : undefined,
-          dailyTokenLimit: u.daily_token_limit ?? undefined,
-          monthlyTokenLimit: u.monthly_token_limit ?? undefined,
-          dailyImageLimit: u.daily_image_limit ?? undefined,
-          avatar: u.avatar || undefined,
-          nickname: u.nickname || undefined,
-          apiPermissions: normalizeApiPermissions(u.api_permissions),
-          storageFolder: u.storage_folder || storageFolder(u.id),
-          email: u.email || undefined,
-          createdAt: u.created_at,
-          updatedAt: u.updated_at,
-        })),
-        updatedAt: Date.now(),
-      };
-    } else {
-      throw new Error('No users in DB');
-    }
-    } catch (dbError) {
-    // Fallback to file system
-    usedFallback = true;
-    console.warn('[auth] DB read failed, falling back to file system:', dbError instanceof Error ? dbError.message : dbError);
-    try {
-      const raw = await readFile(USERS_PATH, 'utf8');
-      const parsed = JSON.parse(raw) as StoredUsersFile;
-      file = {
-        users: Array.isArray(parsed.users) ? parsed.users.map(normalizeStoredUser) : [],
-        updatedAt: parsed.updatedAt || Date.now(),
-      };
-    } catch {
-      file = { users: [], updatedAt: Date.now() };
-    }
-
-    // Critical safety: merge DB users into file users to prevent data loss
-    // When we fall back to file system, the file may have fewer users than the DB
-    // We should NOT lose DB users just because we couldn't read from DB this time
     try {
       const dbUsers = await dbReadUsers();
-      if (dbUsers && dbUsers.length > 0) {
-        const fileUserIds = new Set(file.users.map(u => u.id));
-        for (const dbUser of dbUsers) {
-          if (!fileUserIds.has(dbUser.id)) {
-            file.users.push(normalizeStoredUser({
-              id: dbUser.id,
-              name: dbUser.name,
-              passwordHash: dbUser.password_hash,
-              role: (dbUser.role || 'user') as 'admin' | 'user',
-              status: (dbUser.status || 'active') as 'active' | 'disabled',
-              productType: dbUser.product_type || undefined,
-              chatModels: dbUser.chat_models ? (Array.isArray(dbUser.chat_models) ? dbUser.chat_models : parseJsonArray(dbUser.chat_models)) : undefined,
-              imageModels: dbUser.image_models ? (Array.isArray(dbUser.image_models) ? dbUser.image_models : parseJsonArray(dbUser.image_models)) : undefined,
-              dailyTokenLimit: dbUser.daily_token_limit ?? undefined,
-              monthlyTokenLimit: dbUser.monthly_token_limit ?? undefined,
-              dailyImageLimit: dbUser.daily_image_limit ?? undefined,
-              avatar: dbUser.avatar || undefined,
-              nickname: dbUser.nickname || undefined,
-              apiPermissions: normalizeApiPermissions(dbUser.api_permissions),
-              storageFolder: dbUser.storage_folder || storageFolder(dbUser.id),
-              email: dbUser.email || undefined,
-              createdAt: dbUser.created_at,
-              updatedAt: dbUser.updated_at,
-            }));
-          }
-        }
-      }
-    } catch {
-      // DB retry also failed, proceed with file system data only
+      file = {
+        users: dbUsers.map(storedUserFromDatabase),
+        updatedAt: Date.now(),
+      };
+    } catch (error) {
+      throw error instanceof AuthServiceError ? error : persistenceUnavailable();
     }
-  }
   }
 
   const now = Date.now();
   const adminIndex = file.users.findIndex(user => user.name === DEFAULT_ADMIN_NAME);
   if (adminIndex === -1) {
+    const password = requireAdminBootstrapPassword();
+    const ring = await authSecretRing();
     file.users.unshift({
       id: 'admin_mr_joker',
       name: DEFAULT_ADMIN_NAME,
-      passwordHash: await hashPassword(requireAdminBootstrapPassword()),
+      passwordHash: createLegacyPasswordHash(password, ring.active.secret),
+      credentialHash: await createScryptCredential(password),
       role: 'admin',
       status: 'active',
       productType: 'canvas,chat',
@@ -504,11 +572,7 @@ async function readStore(): Promise<StoredUsersFile> {
       createdAt: now,
       updatedAt: now,
     });
-    try {
-      await writeStore(file);
-    } catch (writeErr) {
-      console.warn('[auth] writeStore failed during admin bootstrap (non-critical, proceeding with in-memory data):', writeErr instanceof Error ? writeErr.message : writeErr);
-    }
+    await writeStore(file);
   } else {
     const admin = file.users[adminIndex];
     file.users[adminIndex] = {
@@ -522,6 +586,40 @@ async function readStore(): Promise<StoredUsersFile> {
   }
 
   return file;
+}
+
+async function persistCredentialMigration(
+  file: StoredUsersFile,
+  userIndex: number,
+  credentialHash: string,
+): Promise<StoredUser> {
+  const user = file.users[userIndex];
+  const nextUser: StoredUser = {
+    ...user,
+    credentialHash,
+    updatedAt: Date.now(),
+  };
+  const mode = getAuthPersistenceMode();
+  if (mode === 'FILE_ONLY') {
+    const nextFile: StoredUsersFile = {
+      ...file,
+      users: file.users.map((storedUser, index) => index === userIndex ? nextUser : storedUser),
+    };
+    await writeStore(nextFile);
+    file.users[userIndex] = nextUser;
+    return nextUser;
+  }
+
+  const status = await updateUserCredentialSidecar(user.id, credentialHash);
+  if (status === 'user-missing') throw persistenceUnavailable();
+  file.users[userIndex] = nextUser;
+  if (mode === 'DB_PLUS_FILE') {
+    await writeUsersFileReplicaBestEffort({
+      ...file,
+      updatedAt: Date.now(),
+    });
+  }
+  return nextUser;
 }
 
 export async function authenticateUser(input: {
@@ -542,13 +640,14 @@ export async function authenticateUser(input: {
   if (index === -1) {
     if (!isDefaultAdmin || password !== requireAdminBootstrapPassword()) return null;
 
-    const role: 'admin' | 'user' = isDefaultAdmin ? 'admin' : 'user';
-    const id = safeId(input.profile?.id, isDefaultAdmin ? 'admin_mr_joker' : name);
+    const ring = await authSecretRing();
+    const id = safeId(input.profile?.id, 'admin_mr_joker');
     const user: StoredUser = {
       id,
       name,
-      passwordHash: await hashPassword(password),
-      role,
+      passwordHash: createLegacyPasswordHash(password, ring.active.secret),
+      credentialHash: await createScryptCredential(password),
+      role: 'admin',
       status: input.profile?.status || 'active',
       productType: 'canvas,chat', // default admin has all access
       apiPermissions: input.profile?.apiPermissions || defaultApiPermissions(),
@@ -569,48 +668,91 @@ export async function authenticateUser(input: {
   if (input.productType) {
     const userProductTypes = (user.productType || '').split(',').map(s => s.trim()).filter(Boolean);
     if (!userProductTypes.includes(input.productType)) {
-      console.log(`[auth] User "${name}" tried to login as "${input.productType}" but only has [${userProductTypes.join(',')}]`);
       return null;
     }
   }
 
-  const currentSecret = await authSecret();
-  const { matched: passwordMatches, needsMigration } = verifyPassword(password, user.passwordHash, currentSecret);
-  if (!passwordMatches) return null;
+  const ring = await authSecretRing();
+  let passwordMatches = false;
+  let migrationCredential: string | undefined;
+  if (user.credentialHash !== undefined) {
+    if (typeof user.credentialHash !== 'string'
+      || !isValidScryptCredential(user.credentialHash)) {
+      throw credentialFormatInvalid();
+    }
+    passwordMatches = await verifyScryptCredential(password, user.credentialHash);
+  } else {
+    const legacy = verifyLegacyCredential(
+      password,
+      user.passwordHash,
+      legacyCredentialSecrets(ring),
+    );
+    passwordMatches = legacy.matched;
+    if (legacy.matched) {
+      migrationCredential = await createScryptCredential(password);
+    }
+  }
 
-  // If password matched via a legacy secret, re-hash with current secret (auto-migration)
-  const newPasswordHash = needsMigration ? await hashPassword(password) : (passwordMatches ? user.passwordHash : await hashPassword(password));
+  if (!passwordMatches) {
+    const recoveryPassword = configuredAdminBootstrapPassword();
+    if (!isDefaultAdmin || !recoveryPassword || password !== recoveryPassword) return null;
 
-  const nextRole = isDefaultAdmin ? 'admin' : user.role || 'user';
-  const nextStatus = input.profile?.status || user.status || 'active';
-  const nextApiPermissions = input.profile?.apiPermissions || user.apiPermissions || defaultApiPermissions();
-  const nextStorageFolder = storageFolder(user.id);
-  const nextEmail = input.profile?.email ?? user.email;
-  const shouldPersist = needsMigration
-    || nextRole !== user.role
-    || nextStatus !== user.status
-    || nextApiPermissions !== user.apiPermissions
-    || nextStorageFolder !== user.storageFolder
-    || nextEmail !== user.email;
+    const recovered: StoredUser = {
+      ...user,
+      name,
+      role: 'admin',
+      status: user.status || 'active',
+      productType: user.productType || 'canvas,chat',
+      apiPermissions: user.apiPermissions || defaultApiPermissions(),
+      storageFolder: storageFolder(user.id),
+      passwordHash: createLegacyPasswordHash(password, ring.active.secret),
+      credentialHash: await createScryptCredential(password),
+      updatedAt: now,
+    };
+    file.users[index] = recovered;
+    await writeStore(file);
+    return publicUser(recovered);
+  }
 
-  if (!shouldPersist) return publicUser(user);
+  let authenticatedUser = user;
+  if (migrationCredential) {
+    try {
+      authenticatedUser = await persistCredentialMigration(file, index, migrationCredential);
+    } catch {
+      console.warn({
+        code: 'AUTH_CREDENTIAL_MIGRATION_DEFERRED',
+        userId: user.id,
+      });
+    }
+  }
+
+  const nextRole = isDefaultAdmin ? 'admin' : authenticatedUser.role || 'user';
+  const nextStatus = input.profile?.status || authenticatedUser.status || 'active';
+  const nextApiPermissions = input.profile?.apiPermissions
+    || authenticatedUser.apiPermissions
+    || defaultApiPermissions();
+  const nextStorageFolder = storageFolder(authenticatedUser.id);
+  const nextEmail = input.profile?.email ?? authenticatedUser.email;
+  const shouldPersist = nextRole !== authenticatedUser.role
+    || nextStatus !== authenticatedUser.status
+    || nextApiPermissions !== authenticatedUser.apiPermissions
+    || nextStorageFolder !== authenticatedUser.storageFolder
+    || nextEmail !== authenticatedUser.email;
+
+  if (!shouldPersist) return publicUser(authenticatedUser);
 
   const next: StoredUser = {
-    ...user,
+    ...authenticatedUser,
     name,
     role: nextRole,
     status: nextStatus,
     apiPermissions: nextApiPermissions,
     storageFolder: nextStorageFolder,
     email: nextEmail,
-    passwordHash: newPasswordHash,
     updatedAt: now,
   };
   file.users[index] = next;
   await writeStore(file);
-  if (needsMigration) {
-    console.log(`[auth] Auto-migrated password hash for user "${name}" from legacy secret to current secret`);
-  }
   return publicUser(next);
 }
 
@@ -664,7 +806,7 @@ export async function repairDuplicateUserIds(): Promise<{ repaired: number; user
   }
 
   // Old IDs may have been duplicated in legacy databases without a unique constraint.
-  if (isDatabaseConfigured()) {
+  if (getAuthPersistenceMode() !== 'FILE_ONLY') {
     for (const duplicateId of duplicateIds) {
       const deleted = await dbDeleteUser(duplicateId);
       if (!deleted) {
@@ -704,11 +846,13 @@ export async function createManagedUser(input: {
   }
 
   const now = Date.now();
+  const ring = await authSecretRing();
   const id = safeId(`user_${now}_${Math.random().toString(36).slice(2, 8)}`, name);
   const user: StoredUser = {
     id,
     name,
-    passwordHash: await hashPassword(password),
+    passwordHash: createLegacyPasswordHash(password, ring.active.secret),
+    credentialHash: await createScryptCredential(password),
     role: 'user',
     status: 'active',
     productType: input.productType === undefined ? 'canvas,chat' : input.productType || undefined,
@@ -752,6 +896,15 @@ export async function updateManagedUser(userId: string, updates: ManagedUserUpda
     throw new Error('User already exists');
   }
 
+  let credentialUpdates: Pick<StoredUser, 'passwordHash' | 'credentialHash'> | null = null;
+  if (updates.password) {
+    const ring = await authSecretRing();
+    credentialUpdates = {
+      passwordHash: createLegacyPasswordHash(updates.password, ring.active.secret),
+      credentialHash: await createScryptCredential(updates.password),
+    };
+  }
+
   const next: StoredUser = {
     ...current,
     ...(updates.name ? { name: updates.name.trim() } : {}),
@@ -767,7 +920,7 @@ export async function updateManagedUser(userId: string, updates: ManagedUserUpda
     ...(updates.avatar !== undefined ? { avatar: updates.avatar } : {}),
     ...(updates.nickname !== undefined ? { nickname: updates.nickname } : {}),
     ...(updates.apiPermissions ? { apiPermissions: updates.apiPermissions } : {}),
-    ...(updates.password ? { passwordHash: await hashPassword(updates.password) } : {}),
+    ...(credentialUpdates || {}),
     storageFolder: storageFolder(current.id),
     updatedAt: Date.now(),
   };
@@ -800,7 +953,8 @@ export async function deleteManagedUsers(userIds: string[]): Promise<{
   }
 
   const deletedIds: string[] = [];
-  if (isDatabaseConfigured()) {
+  const persistenceMode = getAuthPersistenceMode();
+  if (persistenceMode !== 'FILE_ONLY') {
     for (const userId of deletableIds) {
       if (await dbDeleteUser(userId)) {
         deletedIds.push(userId);
@@ -817,7 +971,7 @@ export async function deleteManagedUsers(userIds: string[]): Promise<{
   await writeStore(file);
 
   await Promise.all(deletedIds.map(async userId => {
-    if (isDatabaseConfigured()) {
+    if (persistenceMode !== 'FILE_ONLY') {
       await dbDeleteUserData(userId);
     }
 
