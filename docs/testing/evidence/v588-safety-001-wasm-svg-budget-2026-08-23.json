@@ -1,0 +1,98 @@
+{
+  "itemId": "V588-SAFETY-001",
+  "title": "同步 WASM SVG 描摹大图像素预算",
+  "status": "cloud-verified",
+  "candidateCommit": "d968ad3448c9a3202f462959baaa89dab5f471cd",
+  "cloudCommit": "d968ad3448c9a3202f462959baaa89dab5f471cd",
+  "originMainCommit": "d968ad3448c9a3202f462959baaa89dab5f471cd",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cloudUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_1786292967408_hvsznuh5k",
+  "cozeProjectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+  "build": {
+    "framework": "Next.js 16.2.11",
+    "exitCode": 0,
+    "routesGenerated": 116,
+    "rootHttpStatus": 200,
+    "authMeHttpStatus": 200,
+    "referencedAssetsChecked": 8,
+    "referencedAssetFailures": 0
+  },
+  "browser": {
+    "name": "Google Chrome",
+    "existingTabsOnly": true,
+    "newTabsCreated": false,
+    "loggedIn": true,
+    "consoleErrors": [],
+    "consoleWarnings": [],
+    "dialogs": []
+  },
+  "input": {
+    "imageUrl": "https://cdn.pearapi.ai/apiservers/cache/images/2026-08-10/3a013e6d-cf33-4259-9936-c122c0be5d86.png",
+    "naturalWidth": 1536,
+    "naturalHeight": 1024
+  },
+  "trace": {
+    "engine": "wasm",
+    "mode": "color",
+    "preset": "fast",
+    "fallbackTriggered": true,
+    "startedAt": "2026-08-23T01:09:16.625Z",
+    "terminalAt": "2026-08-23T01:09:26.870Z",
+    "durationMs": 10245,
+    "taskTerminalState": "completed",
+    "sourceDimensions": {
+      "width": 1536,
+      "height": 1024
+    },
+    "wasmDimensions": {
+      "width": 627,
+      "height": 418,
+      "pixels": 262086
+    },
+    "maxPixels": 262144,
+    "outputCanvasDimensions": {
+      "width": 1536,
+      "height": 1024
+    },
+    "serverLogLines": [
+      "[svg-trace] mode=color, preset=fast, imageUrl=https://cdn.pearapi.ai/apiservers/cache/images/2026-08-10/3a013e6d-cf33-4259-9936-c122c0be5d86.png",
+      "[svg-trace] Entering P1 local engine, pipelineFallbackWarning=none",
+      "[svg-trace] WASM vtracer initialized successfully",
+      "[svg-trace] WASM budget: 1536x1024 exceeds 262144px, downscaling to 627x418",
+      "[svg-trace] WASM vtracer: 627x418, colorPrecision=64, filterSpeckle=4",
+      "[svg-trace] WASM vtracer 成功, 路径数: 16",
+      "[svg-trace] Color merge: 16 -> 14 colors merged, 2 replacements",
+      "[svg-trace] SVGO optimized: 10614 -> 4685 bytes (56% reduction)"
+    ]
+  },
+  "concurrentHealthProbe": {
+    "endpoint": "http://127.0.0.1:5000/",
+    "intervalMs": 500,
+    "count": 80,
+    "http200Count": 80,
+    "failureCount": 0,
+    "maxMs": 13.152,
+    "p95Ms": 8.163,
+    "averageMs": 6.002
+  },
+  "download": {
+    "format": "svg",
+    "file": "C:/Users/Administrator/Downloads/wujie_20260823_252_Stage 1 real billing verification 275202.svg",
+    "bytes": 4726,
+    "sha256": "B9AE35800CADD344850D13ADB890517C7312B8FB4BB3C9073D17785A132B8B95",
+    "svgWidth": 1536,
+    "svgHeight": 1024,
+    "viewBox": "0 0 627 418",
+    "browserDownloadEventCaptured": false,
+    "filesystemArtifactVerified": true,
+    "note": "浏览器 download 事件监听超时，但下载文件已在本地文件系统落盘并完成字节数、SHA-256 与 SVG 元数据核验。"
+  },
+  "boundaries": {
+    "billingTouched": false,
+    "providerTaskCreated": false,
+    "databaseModifiedByTest": false,
+    "stableTouched": false,
+    "postgresIntegrationTests": "105 tests skipped locally because POSTGRES_TEST_DATABASE_URL was not configured; unrelated to this non-persistent route and not counted as passed"
+  },
+  "verifiedAt": "2026-08-23T01:10:49.000Z"
+}

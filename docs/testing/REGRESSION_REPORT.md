@@ -1513,3 +1513,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 最终云端调色预览自然尺寸 `1536x1024`，渲染尺寸 `291x162.8125`；亮度滑杆从 0 调到 2 后计算样式立即变为 `brightness(1.01)`。新鲜 Console error/warning 为 0，JavaScript dialog 为 0。
 - 本地最终门禁：相关 `14/14`，TypeScript 通过，ESLint 零错误，全仓 `491 files / 3087 tests` 通过，`105` 项 PostgreSQL 专项因无隔离库跳过，生产构建 `116` 页面/路由通过。
 - **结论：V588-UI-004 远程图片编辑与调色预览已在云端关闭，可标记为已吸收。** PostgreSQL 隔离库门禁仍是独立未验证项，不因本结论改成通过。
+
+## 2026-08-23 V588-SAFETY-001 WASM SVG 像素预算回归
+
+- RED 首先证明同步 WASM 路径没有独立像素预算；最小实现只在 `runWasmVTracer()` 的 raw RGBA 解码前调用纯函数，通用 3072/4096 预处理上限和其他矢量引擎保持不变。
+- 本地聚焦回归 `14/14`；全仓 `492` 个文件、`3099` 项测试通过，`105` 项 PostgreSQL 专项因未配置 `POSTGRES_TEST_DATABASE_URL` 跳过且不计通过。TypeScript、ESLint 零错误、生产构建 `116/116`、保护基线和空白检查通过。
+- Coze 工作区、`origin/main` 与 exact `d968ad3448c9a3202f462959baaa89dab5f471cd` 一致，干净生产构建退出码 `0`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- Google Chrome 仅复用现有标签页，对真实 `1536x1024` Pear 图片明确选择 `WASM / 快速 / 全彩矢量化`。服务端日志确认同步输入缩至 `627x418`，面积 `262086 <= 262144`，约 `10.245s` 完成并生成可选择的 `1536x1024` 结果节点。
+- 同期每 500ms 的首页健康探针共 `80` 次，全部 HTTP 200，平均 `6.002ms`、P95 `8.163ms`、最大 `13.152ms`；浏览器 Console error/warning 与原生 dialog 均为 0。
+- SVG 下载弹层可选择 SVG 并确认。自动化的 download 事件监听超时，但本地实际文件为 `4726` 字节，SHA-256 为 `B9AE35800CADD344850D13ADB890517C7312B8FB4BB3C9073D17785A132B8B95`，逻辑尺寸 `1536x1024`、内部 `viewBox=0 0 627 418`。
+- **结论：V588-SAFETY-001 云端回归通过并完成吸收。** 本结论只覆盖同步 WASM 大图预算；Python VTracer、其他矢量引擎和 PostgreSQL 专项不随本项自动通过。下一唯一项为 `V588-AUTH-001`。

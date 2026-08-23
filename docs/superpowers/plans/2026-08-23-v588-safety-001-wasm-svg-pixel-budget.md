@@ -30,7 +30,7 @@
 - Consumes: 尚不存在的 `computeWasmTraceBudget(width, height, maxPixels?)` 与 `WASM_TRACER_MAX_PIXELS`。
 - Produces: 预算数学边界和路由接线顺序的失败契约。
 
-- [ ] **Step 1: 写纯函数与路由接线失败测试**
+- [x] **Step 1: 写纯函数与路由接线失败测试**
 
 创建测试，覆盖以下实际断言：
 
@@ -115,7 +115,7 @@ describe('svg-trace WASM 像素预算', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试并保存 RED 证据**
+- [x] **Step 2: 运行测试并保存 RED 证据**
 
 Run:
 
@@ -125,7 +125,7 @@ pnpm exec vitest run src/__tests__/api/svg-trace-wasm-pixel-budget.test.ts
 
 Expected: FAIL；直接原因必须是 `@/app/api/svg-trace/wasm-budget` 不存在或预算导出不存在。若因环境、依赖或无关语法失败，先修正测试，不得进入生产实现。
 
-- [ ] **Step 3: 提交失败测试**
+- [x] **Step 3: 提交失败测试**
 
 ```bash
 git add src/__tests__/api/svg-trace-wasm-pixel-budget.test.ts
@@ -146,7 +146,7 @@ git commit -m "test: reproduce wasm svg pixel budget gap"
 - Consumes: Task 1 的失败契约。
 - Produces: `WASM_TRACER_MAX_PIXELS` 和 `computeWasmTraceBudget(width, height, maxPixels?)`；`runWasmVTracer()` 在同步 WASM 前应用预算。
 
-- [ ] **Step 1: 新增预算纯函数**
+- [x] **Step 1: 新增预算纯函数**
 
 创建 `src/app/api/svg-trace/wasm-budget.ts`：
 
@@ -188,7 +188,7 @@ export function computeWasmTraceBudget(
 }
 ```
 
-- [ ] **Step 2: 仅在 `runWasmVTracer()` 内接线**
+- [x] **Step 2: 仅在 `runWasmVTracer()` 内接线**
 
 在路由顶部导入：
 
@@ -230,7 +230,7 @@ const { data, info } = await wasmImage
 
 不得修改 `preprocessForVTracer()` 的 3072/4096 上限，也不得把预算后的 buffer 传给 Python fallback。
 
-- [ ] **Step 3: 将新增生产路径加入保护门禁允许清单**
+- [x] **Step 3: 将新增生产路径加入保护门禁允许清单**
 
 在 `package.json` 的 `check:protected-baseline` 命令末尾增加：
 
@@ -240,7 +240,7 @@ const { data, info } = await wasmImage
 
 测试与文档目录已由门禁默认允许，不增加多余白名单。
 
-- [ ] **Step 4: 运行聚焦测试并确认 GREEN**
+- [x] **Step 4: 运行聚焦测试并确认 GREEN**
 
 Run:
 
@@ -254,7 +254,7 @@ git diff --check
 
 Expected: 所有命令退出码 0；专项预算测试全部通过；保护门禁没有 `Unapproved source drift`。
 
-- [ ] **Step 5: 提交最小实现**
+- [x] **Step 5: 提交最小实现**
 
 ```bash
 git add package.json src/app/api/svg-trace/route.ts src/app/api/svg-trace/wasm-budget.ts
@@ -276,7 +276,7 @@ git commit -m "fix: bound synchronous wasm svg tracing"
 - Consumes: Task 2 的绿色候选。
 - Produces: 可推送的本地候选、完整门禁证据和未触碰 `stable` 的 Git 证明。
 
-- [ ] **Step 1: 运行全量本地门禁**
+- [x] **Step 1: 运行全量本地门禁**
 
 ```bash
 pnpm ts-check
@@ -289,7 +289,7 @@ git diff --check
 
 Expected: 全部退出码 0。没有配置 `POSTGRES_TEST_DATABASE_URL` 的 PostgreSQL 专项必须如实记为 skipped，不能计为通过。
 
-- [ ] **Step 2: 独立审查精确差异**
+- [x] **Step 2: 独立审查精确差异**
 
 审查范围只包含：
 
@@ -302,7 +302,7 @@ package.json
 
 必须确认：没有全链路缩图、没有新任务状态、没有账务变更、没有吞异常、没有修改前端入口、没有 donor 整文件覆盖。只修复可复现 findings，然后重跑 Task 3 Step 1。
 
-- [ ] **Step 3: 推送 `main` 并锁定 SHA**
+- [x] **Step 3: 推送 `main` 并锁定 SHA**
 
 ```bash
 git fetch origin
@@ -333,7 +333,7 @@ Expected: `main` 普通快进到候选 exact SHA；`origin/stable` 仍为 `52f7c
 - Consumes: Task 3 推送的 exact SHA。
 - Produces: 云端运行、并发健康、任务终态、浏览器日志、Git 分支与治理记录的机器可读证据。
 
-- [ ] **Step 1: 在现有 Coze 项目页拉取 exact SHA 并干净构建**
+- [x] **Step 1: 在现有 Coze 项目页拉取 exact SHA 并干净构建**
 
 只复用现有 Google Chrome 项目页。若出现沙箱断开弹窗，点击页面刷新，等待终端恢复后执行：
 
@@ -349,7 +349,7 @@ pnpm build
 
 Expected: HEAD 等于 Task 3 exact SHA；stable 等于固定 SHA；构建成功。随后按当前 Coze 启动方式重启 5000 端口，并强制刷新现有预览页。
 
-- [ ] **Step 2: 真实执行大图 SVG 描摹与并发健康探针**
+- [x] **Step 2: 真实执行大图 SVG 描摹与并发健康探针**
 
 在已登录预览页选择一张长宽均明显大于 512 的真实画布图片，执行“SVG智能描摹”，选择本地/WASM 可达路径。提交后立即从 Coze 终端每 500ms 请求一次轻量健康端点或首页，共至少 20 次，并记录每次状态码与耗时。
 
@@ -360,7 +360,7 @@ Expected: HEAD 等于 Task 3 exact SHA；stable 等于固定 SHA；构建成功�
 - 并发健康请求不得因 WASM 单次同步执行连续超时；记录最大、P95 耗时。
 - 若 AI 管线先成功而没有进入 WASM，标记“未触发 fallback”，不得冒充预算验证通过；必须使用可明确进入本地路径的请求重新验证。
 
-- [ ] **Step 3: 检查浏览器与服务端异常**
+- [x] **Step 3: 检查浏览器与服务端异常**
 
 在同一现有预览页收集：
 
@@ -372,7 +372,7 @@ Expected: HEAD 等于 Task 3 exact SHA；stable 等于固定 SHA；构建成功�
 
 Expected: 没有未处理 Console error、Promise rejection 或永久 loading；失败时必须保留明确业务错误。
 
-- [ ] **Step 4: 写入机器证据和中文报告**
+- [x] **Step 4: 写入机器证据和中文报告**
 
 证据 JSON 至少包含：
 
@@ -398,7 +398,7 @@ Expected: 没有未处理 Console error、Promise rejection 或永久 loading；
 
 在四份测试报告中登记真实结果和任何未验证项；不得把 PostgreSQL skipped、未触发 fallback 或失败任务写成通过。
 
-- [ ] **Step 5: 更新 Obsidian 并提交治理证据**
+- [x] **Step 5: 更新 Obsidian 并提交治理证据**
 
 只有 Task 4 Step 1-4 全部有证据时，才在两份 Obsidian 文档中把 `V588-SAFETY-001` 标记为“已吸收”，并把下一唯一项更新为 `V588-AUTH-001`。若云端未触发 WASM 或沙箱不可用，则保持“本地候选/云端未闭环”。
 
@@ -415,3 +415,11 @@ git push origin HEAD:main
 - 类型一致：纯函数签名、返回字段和路由变量在 Task 1、Task 2 与 Task 4 中一致。
 - 目标边界：没有任务允许修改 `stable`、donor、积分、任务状态、前端入口或整体 SVG 路由。
 - 防误判：未触发 WASM fallback、PostgreSQL skipped、明确失败终态均要求如实记录，不能冒充通过。
+
+## 完成记录（2026-08-23）
+
+- RED：`5003337`；最小实现：`d968ad3448c9a3202f462959baaa89dab5f471cd`。
+- 本地：聚焦 `14/14`，全仓 `3099 passed / 105 PostgreSQL-gated skipped`，TypeScript、零错误 ESLint、`116/116` 构建与保护基线通过。
+- 云端：Coze exact `d968ad3`，真实 `1536x1024` 图片进入 WASM 后缩至 `627x418`，约 `10.245s` 完成；并发探针 `80/80` HTTP 200，P95 `8.163ms`。
+- 结果：画布节点保持 `1536x1024`，SVG 文件实际下载并完成 SHA-256 核验；Console error/warning 与 dialog 均为 0。
+- 状态：**V588-SAFETY-001 已吸收并完成云端关闭。** 下一唯一项为 `V588-AUTH-001`。

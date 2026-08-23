@@ -65,7 +65,7 @@
 | 移除背景 | 需要IOPaint或AI API | 手动测试 |
 | 扩展画面 | 需要AI模型API配额 | 手动测试 |
 | 语言修图 | 需要OpenAI/Gemini API配额 | 手动测试 |
-| SVG智能描摹 | 需要Python vtracer环境 | 手动测试 |
+| SVG智能描摹 | 同步 WASM 大图路径已在 Coze exact `d968ad3` 真实验证；Python VTracer、AI/Vectorizer、ImageTracer 与 Potrace 路径仍未形成同等云端证据 | 按引擎分别执行真实图片、终态、下载与 Console/服务日志验证 |
 | 元素分层 | 需要分层模型API配额 | 手动测试 |
 
 ### 8. 画布高级交互
@@ -1162,3 +1162,15 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 调色预览 | 已验证 | 自然尺寸 `1536x1024`，渲染尺寸 `291x162.8125`，滑杆立即更新 filter。 |
 | Google Chrome 控制 | 已恢复 | 只复用现有 Google Chrome 标签，未使用 360，未新建标签。 |
 | PostgreSQL 专项 | 仍未验证 | 本地仍缺少 `POSTGRES_TEST_DATABASE_URL`，105 项跳过不计为通过。 |
+
+## 2026-08-23 V588-SAFETY-001 云端关闭与剩余边界
+
+| 项目 | 状态 | 证据/剩余边界 |
+|---|---|---|
+| 同步 WASM 大图像素预算 | 已验证 | Coze exact `d968ad3448c9a3202f462959baaa89dab5f471cd`；`1536x1024 -> 627x418`，面积 `262086 <= 262144`。 |
+| 服务可用性 | 已验证 | 描摹约 `10.245s` 完成；并发健康探针 `80/80` HTTP 200，P95 `8.163ms`，最大 `13.152ms`。 |
+| 结果与下载 | 已验证 | 结果节点保持 `1536x1024`；SVG 文件实际落盘，`4726` 字节且 SHA-256 已核对。下载事件监听超时属于自动化捕获限制，未掩盖。 |
+| 浏览器错误基线 | 已验证 | Google Chrome 现有标签页 Console error/warning 与原生 dialog 均为 0。 |
+| 其他 SVG 引擎 | 仍未验证 | Python VTracer、AI/Vectorizer、ImageTracer 和 Potrace 需要分别取得真实云端终态与下载证据。 |
+| PostgreSQL 专项 | 仍未验证 | 105 项因缺少隔离库跳过；本路由不触及持久化或账务，但跳过项仍不计通过。 |
+| 后续吸收 | 可进入下一唯一项 | `V588-AUTH-001` 必须从认证安全 RED 开始；donor 与 `stable` 继续只读。 |

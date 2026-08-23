@@ -1245,3 +1245,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Google Chrome 仅复用已打开的 Coze 项目页和预览页，未使用 360，未新建标签。擦除、蒙版和调色均以真实 Pear 图片完成源图加载验证；擦除/蒙版笔迹、调色滑杆和可见预览已通过。
 - 浏览器新鲜 Console error/warning 和原生 dialog 均为 0；本次不创建付费编辑任务，未更改任务、供应商、积分或退款逻辑。
 - **UI004 专项发布判定：通过。** 全平台仍为有条件通过，因 `POSTGRES_TEST_DATABASE_URL` 缺失导致的 105 项真实 PostgreSQL 集成/并发测试仍未验证。
+
+## 2026-08-23 V588-SAFETY-001 发布判定
+
+- exact 云端提交为 `main@d968ad3448c9a3202f462959baaa89dab5f471cd`，Coze 干净构建、根路由、鉴权健康和 8 个实际引用静态资源均通过；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 真实大图明确触发同步 WASM，预算日志、成功终态、结果节点、SVG 实际下载和并发健康均有机器证据；未使用 AI 管线成功结果冒充 fallback 验证。
+- 预算后的 `627x418=262086` 不超过 `262144`，输出仍保留原始逻辑尺寸 `1536x1024`。80 次并发健康探针全部 HTTP 200，浏览器新鲜 Console error/warning 和 dialog 为 0。
+- **V588-SAFETY-001 专项发布判定：通过并完成吸收。** 全平台仍为有条件通过：105 项 PostgreSQL 集成/并发测试及其他业务未验证项继续保留。下一唯一吸收项为 `V588-AUTH-001`。

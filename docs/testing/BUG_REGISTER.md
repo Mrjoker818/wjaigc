@@ -2289,3 +2289,19 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 云端回归 | Coze exact SHA 、干净构建和路由清单通过；擦除/蒙版图片 `1536x1024` 且笔迹可用；调色渲染框 `291x162.8125`，滑杆实时生效；Console error/warning 与 dialog 均为 0。 |
 | 证据 | `docs/testing/evidence/v588-ui-004-remote-image-cors-2026-08-23.json` |
 | 状态 | **已修复 / 已云端关闭。** PostgreSQL 隔离库专项仍单独保持未验证。 |
+
+### V588-SAFETY-001：大图同步 WASM SVG 描摹缺少像素预算
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 稳定性与事件循环可用性 |
+| 发现环境 | 当前 `main` 的 SVG 路由；同步 `wasm_vtracer.convertImageToSvg()` 可接收预处理后的大图 RGBA。 |
+| 复现 | 以明显大于 512 像素的真实图片进入“SVG智能描摹”，明确选择 WASM 引擎；旧实现会将最高约 3072/4096 边长的像素同步送入 WASM。 |
+| 预期 | 同步 WASM 输入面积不超过 `512 * 512 = 262144`，其他矢量引擎与输出逻辑尺寸保持原有行为，服务在处理期间仍可响应。 |
+| 根因 | 通用预处理上限兼顾高质量异步/外部引擎，却被同步 WASM 路径直接复用，缺少该执行边界专属的像素预算。 |
+| RED | 新增纯函数边界、非法输入、近边界取整和路由接线顺序测试；首次失败于预算模块不存在。提交 `5003337`。 |
+| 最小修复 | `d968ad3448c9a3202f462959baaa89dab5f471cd` 新增无运行时依赖的预算纯函数，仅在 `runWasmVTracer()` 的 raw RGBA 解码前等比缩放；未修改 Python VTracer、AI/Vectorizer、Potrace、任务、账务或前端入口。 |
+| 本地回归 | 聚焦 `14/14`；全仓 `492` 文件通过、`3099` 项通过，`105` 项 PostgreSQL 专项因无隔离库跳过；TypeScript、ESLint `0 error / 986 historical warnings`、生产构建 `116/116`、保护基线和空白检查通过。 |
+| 云端回归 | Coze exact `d968ad3`；真实 `1536x1024` 图片明确进入 WASM，日志证明缩至 `627x418`（262086 像素）；约 10.245 秒完成并进入画布。并发探针 `80/80` HTTP 200，P95 `8.163ms`、最大 `13.152ms`；Console error/warning 与 dialog 均为 0。SVG 已实际下载并完成 SHA-256 核验。 |
+| 证据 | `docs/testing/evidence/v588-safety-001-wasm-svg-budget-2026-08-23.json` |
+| 状态 | **已修复 / 已云端关闭 / 已吸收。** 浏览器下载事件监听超时已如实记录，但文件系统产物实际存在；Python VTracer 与其他引擎仍是独立验证项。 |
