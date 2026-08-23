@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "v588-auth-001-coze-2026-08-24",
+  "testedAt": "2026-08-24T00:22:42.6661151+08:00",
+  "candidate": {
+    "branch": "main",
+    "commit": "42e540bd5aa552f10af0e12240546993bda3e91a",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "environment": {
+    "platform": "Coze isolated preview",
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "browser": "Google Chrome",
+    "role": "admin",
+    "assetGraphMode": "shadow",
+    "startCommand": "next start -p 5000 -H 0.0.0.0"
+  },
+  "deployment": {
+    "headMatchesOriginMain": true,
+    "gitStatusClean": true,
+    "stableUntouched": true,
+    "buildExitCode": 0,
+    "rootStatus": 200,
+    "staticScripts": { "checked": 12, "status200": 12 }
+  },
+  "verification": {
+    "existingSessionPreservedAfterColdRestart": true,
+    "dashboardVisibleAfterReload": true,
+    "projectCount": 8,
+    "imageCount": 447,
+    "responses": [
+      { "path": "/api/session", "status": 200, "businessSuccess": true, "authenticatedRole": "admin" },
+      { "path": "/api/admin/users", "status": 200, "businessSuccess": true },
+      { "path": "/api/user-data/sync?key=projects", "status": 200, "businessSuccess": true },
+      { "path": "/api/user-data/sync", "status": 200, "businessSuccess": true }
+    ],
+    "authConfigurationUnavailableObserved": false,
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "nativeDialogs": 0
+  },
+  "localGates": {
+    "doctorExitCode": 0,
+    "typecheckExitCode": 0,
+    "lintBuildExitCode": 0,
+    "focusedAuthTests": { "passed": 141, "failed": 0 },
+    "isolatedPostgresAuthTests": { "passed": 10, "failed": 0, "skipped": 0 },
+    "fullVitest": { "filesPassed": 503, "filesSkipped": 19, "testsPassed": 3293, "testsSkipped": 115, "failed": 0 },
+    "productionBuild": { "exitCode": 0, "routes": 116 }
+  },
+  "artifacts": {
+    "screenshot": "docs/testing/evidence/v588-auth-001-coze-2026-08-24.png"
+  },
+  "limitations": [
+    "本轮未执行真实云端 auth secret 轮换；该高影响动作继续保持独立未验证。",
+    "全仓默认 Vitest 中 19 个非认证 PostgreSQL 专项文件因未注入其隔离数据库而跳过；认证专项已在真实 PostgreSQL 中 10/10 通过。",
+    "本轮复用了已存在的管理员会话；错误密码、普通用户及三浏览器矩阵沿用此前本地证据，未在本次 Coze 冷启动中重复执行。"
+  ],
+  "decision": "V588-AUTH-001 同 secret 冷启动与历史单层 JSON 密钥环兼容已在 Coze exact SHA 上通过；整体发布仍为有条件通过。"
+}

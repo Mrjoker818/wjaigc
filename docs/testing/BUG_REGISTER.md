@@ -2336,3 +2336,19 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 云端回归 | Coze exact `d968ad3`；真实 `1536x1024` 图片明确进入 WASM，日志证明缩至 `627x418`（262086 像素）；约 10.245 秒完成并进入画布。并发探针 `80/80` HTTP 200，P95 `8.163ms`、最大 `13.152ms`；Console error/warning 与 dialog 均为 0。SVG 已实际下载并完成 SHA-256 核验。 |
 | 证据 | `docs/testing/evidence/v588-safety-001-wasm-svg-budget-2026-08-23.json` |
 | 状态 | **已修复 / 已云端关闭 / 已吸收。** 浏览器下载事件监听超时已如实记录，但文件系统产物实际存在；Python VTracer 与其他引擎仍是独立验证项。 |
+
+### V588-AUTH-001-CLOUD-001：登录成功后冷启动会话读取返回 AUTH_CONFIGURATION_UNAVAILABLE
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 认证、项目同步与管理员系统可用性 |
+| 发现环境 | Coze `main@6102572bc6ff90e20ef522c79bc5c0b846f7cde7`，Google Chrome 已登录管理员会话，2026-08-24 |
+| 复现 | 登录可返回 200 并设置 Cookie；随后刷新页面。`/api/session` 返回 503 `AUTH_CONFIGURATION_UNAVAILABLE`，项目同步 500，页面退出工作台。 |
+| 预期 | 同一 Cookie 在同一持久化密钥环下完成只读验证；冷启动或跨实例不得把已登录用户降为配置不可用。 |
+| 根因 | 历史代码把密钥环作为 JSON 字符串写入 JSONB，数据库读取值为一层字符串；严格解析器仅接受对象，导致登录进程缓存可签发，而会话进程从数据库读取时失败。 |
+| RED | 单元测试稳定证明一层历史字符串被拒绝、事务解析会重建时间戳；真实 PostgreSQL 测试证明 JSONB 返回一层字符串。 |
+| 最小修复 | 仅在持久化边界允许一次 `JSON.parse`，随后继续使用严格 `AuthSecretRingV1` 解析；双重编码、畸形值和无效密钥仍失败关闭，不生成替代 secret。 |
+| 本地回归 | 聚焦认证 `141/141`；真实 PostgreSQL `10/10`；全仓 `503` 文件、`3293` 测试通过，`19` 文件/`115` 项非认证 PostgreSQL 门禁跳过；doctor、TypeScript、Lint 和 `116` 路由生产构建退出码均为 0。 |
+| 云端回归 | Coze exact `42e540bd5aa552f10af0e12240546993bda3e91a` 冷启动后刷新仍保留管理员工作台；`/api/session`、`/api/admin/users`、项目读取与同步均 HTTP 200 且业务成功；Console error/warning 为 `0/0`。 |
+| 证据 | `docs/testing/evidence/v588-auth-001-coze-2026-08-24.json` 与同名 PNG。 |
+| 状态 | **已修复 / Coze exact-SHA 冷启动验收通过。** 真实云端 secret 轮换仍是独立高影响未验证项。 |

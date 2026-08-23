@@ -7,12 +7,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   countLegacyCredentialUsers,
+  readDatabaseSecretRing,
   readSystemSettingStrict,
   resolveDatabaseSecretRing,
   updateUserCredentialSidecar,
   withDatabaseAuthReplicaLock,
 } from '@/lib/auth/auth-repository';
 import { refreshAuthJsonFileAtomic } from '@/lib/auth/auth-persistence';
+import { deriveAuthSecretKid, type AuthSecretRingV1 } from '@/lib/auth/auth-secret-ring';
 import { closePool } from '@/lib/db-client';
 import { dbUpsertUser, dbWriteUsers, migrateFileDataToDb } from '@/lib/db-storage';
 import {
@@ -765,6 +767,37 @@ describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
           }
         }
       }
+    });
+  });
+
+  postgresIt('reads one historical JSON string layer from a real JSONB secret ring row', async () => {
+    await withAuthPostgres('v588-auth-string-ring-read', async ({ query }) => {
+      await createAuthTables(query);
+      const ring: AuthSecretRingV1 = {
+        version: 1,
+        active: {
+          kid: deriveAuthSecretKid(configuredSecret),
+          secret: configuredSecret,
+          activatedAt: now - 1,
+        },
+        updatedAt: now - 1,
+      };
+      await query(
+        'INSERT INTO wujie_system_settings(key, value, updated_at) VALUES ($1, $2::jsonb, $3)',
+        ['auth_secret_ring_v1', JSON.stringify(JSON.stringify(ring)), now - 1],
+      );
+
+      const rawBefore = await query<{ value: unknown }>(
+        'SELECT value FROM wujie_system_settings WHERE key = $1',
+        ['auth_secret_ring_v1'],
+      );
+      expect(rawBefore.rows).toEqual([{ value: JSON.stringify(ring) }]);
+      await expect(readDatabaseSecretRing(now)).resolves.toEqual(ring);
+      const rawAfter = await query<{ value: unknown }>(
+        'SELECT value FROM wujie_system_settings WHERE key = $1',
+        ['auth_secret_ring_v1'],
+      );
+      expect(rawAfter.rows).toEqual(rawBefore.rows);
     });
   });
 });

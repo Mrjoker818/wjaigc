@@ -1534,6 +1534,15 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 两轮独立复审最终均为 `Critical/Important/Minor = 0/0/0`。首轮浏览器 503 来自测试夹具错误继承 `FILE_ONLY`，改用规定的 `DB_PLUS_FILE` 环境后同一代码通过，没有用业务代码绕过配置错误。
 - **结论：V588-AUTH-001 本地回归通过。** Coze 尚未拉取精确提交并重复云端会话矩阵，因此不能标记为云端通过；付费生成、取消和退款链路也不在本项验收范围。
 
+## 2026-08-24 V588-AUTH-001 历史密钥环云端闭环
+
+- Coze 旧候选真实复现：登录成功并设置 Cookie 后，冷启动只读 `/api/session` 返回 503 `AUTH_CONFIGURATION_UNAVAILABLE`，项目同步返回 500；Cookie 已发送，故不是密码、浏览器 Cookie 或登录按钮问题。
+- RED 先锁定 JSONB 中“一层历史 JSON 字符串”兼容边界，并证明双重编码与畸形输入仍必须拒绝。真实 PostgreSQL 回归确认数据库驱动返回一层字符串。
+- `main@42e540bd5aa552f10af0e12240546993bda3e91a` 只在持久化读取边界解一层 JSON，随后继续严格校验；没有修改登录宽松度、账号、Cookie、数据库内容、环境变量或 `stable`。
+- 本地新鲜门禁：认证 `141/141`、真实 PostgreSQL `10/10`、全仓 `503` 文件/`3293` 项通过、doctor、TypeScript、Lint 与 `116` 路由生产构建均退出 0；默认全仓中的 `19` 文件/`115` 项非认证 PostgreSQL 门禁保持明确跳过。
+- Coze 精确拉取并生产重启后，Google Chrome 冷刷新仍进入管理员工作台；`/api/session`、`/api/admin/users`、项目读取与项目同步均 HTTP 200 且业务成功，Console error/warning 为 `0/0`。
+- **结论：V588-AUTH-001 的同 secret 部署、历史密钥环兼容和冷启动会话保持通过。** 真实云端 secret 轮换未执行，不扩大为完全发布通过。证据：`docs/testing/evidence/v588-auth-001-coze-2026-08-24.json`。
+
 ## 2026-08-24 GPT Image 2 原生透明 PNG 本地回归
 
 - 基线为 `origin/main@6102572bc6ff90e20ef522c79bc5c0b846f7cde7`，在隔离分支 `feat/native-transparent-generation` 实施，未修改 `stable`。

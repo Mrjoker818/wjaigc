@@ -283,6 +283,59 @@ describe('strict authentication repository reads', () => {
     expect(client.release).toHaveBeenCalledOnce();
   });
 
+  it('reads a strictly valid secret ring stored as one historical JSON string layer', async () => {
+    const ring: AuthSecretRingV1 = {
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(configuredSecret),
+        secret: configuredSecret,
+        activatedAt: now,
+      },
+      updatedAt: now,
+    };
+    const client = useClient(vi.fn().mockResolvedValue({
+      rows: [{ key: 'auth_secret_ring_v1', value: JSON.stringify(ring) }],
+      rowCount: 1,
+    }));
+
+    await expect(readDatabaseSecretRing(now)).resolves.toEqual(ring);
+    expect(sqlCalls(client)).toEqual([
+      'SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[])',
+    ]);
+    expect(sqlCalls(client).join(' ')).not.toMatch(/BEGIN|FOR UPDATE|INSERT|UPDATE|COMMIT/);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('rejects nested or malformed historical secret ring strings', async () => {
+    const ring: AuthSecretRingV1 = {
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(configuredSecret),
+        secret: configuredSecret,
+        activatedAt: now,
+      },
+      updatedAt: now,
+    };
+    let client = useClient(vi.fn().mockResolvedValue({
+      rows: [{ key: 'auth_secret_ring_v1', value: JSON.stringify(JSON.stringify(ring)) }],
+      rowCount: 1,
+    }));
+
+    await expect(readDatabaseSecretRing(now)).rejects.toMatchObject({
+      code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+    });
+    expect(client.release).toHaveBeenCalledOnce();
+
+    client = useClient(vi.fn().mockResolvedValue({
+      rows: [{ key: 'auth_secret_ring_v1', value: '{"version":1' }],
+      rowCount: 1,
+    }));
+    await expect(readDatabaseSecretRing(now)).rejects.toMatchObject({
+      code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+    });
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
   it('returns null for a missing read-only ring and rejects malformed persisted data', async () => {
     let client = useClient(vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }));
     await expect(readDatabaseSecretRing()).resolves.toBeNull();
@@ -375,6 +428,34 @@ describe('strict authentication repository reads', () => {
 });
 
 describe('transactional authentication secret ring resolution', () => {
+  it('preserves a strictly valid ring stored as one historical JSON string layer', async () => {
+    const existingRing: AuthSecretRingV1 = {
+      version: 1,
+      active: {
+        kid: deriveAuthSecretKid(configuredSecret),
+        secret: configuredSecret,
+        activatedAt: now - 10,
+      },
+      updatedAt: now - 10,
+    };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT key, value')) {
+        return {
+          rows: [{ key: 'auth_secret_ring_v1', value: JSON.stringify(existingRing) }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const client = useClient(query);
+
+    await expect(resolveDatabaseSecretRing({ configuredSecret, now })).resolves.toEqual(existingRing);
+    const upserts = client.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO'));
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]?.[1]?.[1]).toBe(JSON.stringify(existingRing));
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
   it('locks, preserves the legacy verifier, upserts one JSON ring, and commits in order', async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes('SELECT key, value')) {
