@@ -117,6 +117,7 @@ describe('configured task model catalog APIs', () => {
     );
     const videoData = await videoResponse.json();
 
+    expect(videoData.capabilityCatalogVersion).toBe(1);
     expect(videoData.models).toEqual([
       expect.objectContaining({
         id: 'kling-v2-image-to-video',
@@ -139,6 +140,7 @@ describe('configured task model catalog APIs', () => {
     );
     const layerData = await layerResponse.json();
 
+    expect(layerData.capabilityCatalogVersion).toBe(1);
     expect(layerData.models).toEqual([
       expect.objectContaining({
         id: 'stale-layer',

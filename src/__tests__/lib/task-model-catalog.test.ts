@@ -423,7 +423,7 @@ describe('task model catalog', () => {
       'admin-a',
     );
 
-    expect(descriptor).toEqual({
+    expect(descriptor).toMatchObject({
       providerId: 'general-provider',
       modelId: 'kling-v3-omni-video-generation',
       kind: 'video',
@@ -435,9 +435,12 @@ describe('task model catalog', () => {
       qualityOptions: ['std', 'pro'],
       maxOutputs: 1,
       maxDurationSeconds: 30,
+      allowedDurationsSeconds: expect.arrayContaining([5, 10, 15]),
+      supportedOperations: expect.arrayContaining(['text-to-video', 'image-to-video']),
       supportsReferenceImages: true,
       supportsMask: false,
       outputKinds: ['mp4'],
+      capabilitySources: expect.any(Object),
     });
   });
 

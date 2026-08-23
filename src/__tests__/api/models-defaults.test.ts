@@ -103,6 +103,7 @@ describe('model defaults', () => {
     const response = await GET(new NextRequest('http://localhost/api/models?type=image'));
     const data = await response.json();
 
+    expect(data.capabilityCatalogVersion).toBe(1);
     expect(data.models).toEqual([
       { id: 'image-a', name: 'Image A', providerId: 'provider-a', isDefault: true },
       { id: 'image-b', name: 'Image B', providerId: 'provider-b', isDefault: false },
