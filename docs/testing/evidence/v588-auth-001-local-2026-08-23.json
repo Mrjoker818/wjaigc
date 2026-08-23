@@ -6,10 +6,19 @@
   "completedAt": "2026-08-23T18:00:00+08:00",
   "baseCommit": "9c693b1d57ecf027ae3d9787a279b3b14dba3b0e",
   "reviewedTask9Commit": "2167f73d6397635109136df0f7ee12798847826d",
-  "reviewFixCommit": {
+  "parentReviewFixCommit": {
     "sha": "02a3bd3dea28b128c21355571fe6552b01c3b809",
     "message": "test: harden authentication acceptance evidence",
     "state": "committed"
+  },
+  "finalTestRepairCommit": {
+    "sha": "2d4b4be60157392263e8b98ec94a1d29c30685fc",
+    "message": "test: finalize authentication gate evidence",
+    "state": "committed",
+    "contains": [
+      "stage-independent single-use expected console token registry",
+      "10-test Task 9 hardening result"
+    ]
   },
   "stableSha": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
   "baseUrl": "http://127.0.0.1:5011",
