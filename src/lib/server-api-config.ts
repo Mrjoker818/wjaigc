@@ -360,29 +360,37 @@ async function readConfig(): Promise<StoredApiConfig> {
 
 async function migrateProvidersToDb(providers: ApiProvider[]): Promise<void> {
   for (let i = 0; i < providers.length; i++) {
-    const p = providers[i];
-    await dbUpsertApiProvider({
-      id: p.id,
-      name: p.name,
-      display_name: p.displayName || p.name,
-      base_url: p.baseUrl,
-      api_key: p.apiKey,
-      is_enabled: p.isEnabled,
-      type: p.type || 'image',
-      model_type: p.modelType || 'image',
-      request_style: p.requestStyle || 'images-generations',
-      selected_models: p.selectedModels || [],
-      advanced_params: p.advancedParams || {},
-      is_default: p.isDefault ?? false,
-      created_at: p.createdAt || Date.now(),
-      updated_at: p.updatedAt || Date.now(),
-      connection_status: p.connectionStatus,
-      discovered_models: (p.discoveredModels || []) as unknown as Record<string, unknown>[],
-      sort_order: p.sortOrder ?? i,
-      balance_username: p.balanceUsername || '',
-      balance_password: p.balancePassword || '',
-    });
+    await persistProviderToDb(providers[i], i);
   }
+}
+
+async function persistProviderToDb(provider: ApiProvider, fallbackSortOrder: number): Promise<void> {
+  await dbUpsertApiProvider({
+    id: provider.id,
+    name: provider.name,
+    display_name: provider.displayName || provider.name,
+    base_url: provider.baseUrl,
+    api_key: provider.apiKey,
+    is_enabled: provider.isEnabled,
+    type: provider.type || 'image',
+    model_type: provider.modelType || 'image',
+    request_style: provider.requestStyle || 'images-generations',
+    selected_models: provider.selectedModels || [],
+    advanced_params: provider.advancedParams || {},
+    is_default: provider.isDefault ?? false,
+    created_at: provider.createdAt || Date.now(),
+    updated_at: provider.updatedAt || Date.now(),
+    connection_status: provider.connectionStatus,
+    discovered_models: (provider.discoveredModels || []) as unknown as Record<string, unknown>[],
+    sort_order: provider.sortOrder ?? fallbackSortOrder,
+    balance_username: provider.balanceUsername || '',
+    balance_password: provider.balancePassword || '',
+  });
+}
+
+async function writeConfigBackup(config: StoredApiConfig): Promise<void> {
+  await mkdir(SYSTEM_DIR, { recursive: true });
+  await writeFile(CONFIG_PATH, JSON.stringify({ ...config, updatedAt: Date.now() }, null, 2), 'utf8');
 }
 
 async function writeConfig(config: StoredApiConfig): Promise<void> {
@@ -401,8 +409,7 @@ async function writeConfig(config: StoredApiConfig): Promise<void> {
   } catch {}
 
   // Also write to file system as backup
-  await mkdir(SYSTEM_DIR, { recursive: true });
-  await writeFile(CONFIG_PATH, JSON.stringify({ ...config, updatedAt: Date.now() }, null, 2), 'utf8');
+  await writeConfigBackup(config);
 }
 
 export async function getApiProviders(): Promise<ApiProvider[]> {
@@ -749,14 +756,32 @@ export async function updateApiProvider(providerId: string, updates: Partial<Api
     next.discoveredModels = updates.discoveredModels;
   }
 
+  const providersToPersist = new Map<string, ApiProvider>();
+  const previousProvidersById = new Map(config.providers.map(provider => [provider.id, provider]));
   if (updates.isDefault) {
     config.providers = config.providers.map(provider =>
       provider.modelType === next.modelType ? { ...provider, isDefault: false } : provider,
     );
+    for (const provider of config.providers) {
+      if (
+        provider.id !== providerId
+        && previousProvidersById.get(provider.id)?.isDefault !== provider.isDefault
+      ) {
+        providersToPersist.set(provider.id, provider);
+      }
+    }
   }
 
   config.providers[index] = next;
-  await writeConfig(config);
+  providersToPersist.set(next.id, next);
+  try {
+    for (const provider of providersToPersist.values()) {
+      await persistProviderToDb(provider, config.providers.indexOf(provider));
+    }
+  } catch {}
+  // The database is the authoritative source. Updating only changed rows avoids
+  // stale whole-config snapshots overwriting concurrent edits to other providers.
+  await writeConfigBackup(config);
   return next;
 }
 

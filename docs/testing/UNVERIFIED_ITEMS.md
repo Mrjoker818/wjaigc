@@ -1209,3 +1209,15 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 扣费和失败边界 | 未验证 | 支持模型只扣一次；不支持模型在供应商提交和扣费前拒绝；不透明返回不会自动创建去背景任务或产生第二次扣费。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | `19` 个文件、`114` 项真实集成/并发测试因缺少隔离 PostgreSQL 配置而跳过，不得冒充通过。 |
 | 非专用模型分层 | 仅完成设计分析 | 本轮未实现。后续应以 OCR、主体/元素分割、深度估计、Alpha 蒙版、背景修复、矢量描摹和重建质量门禁组成可编辑层；不得宣称可从扁平图完美恢复原始作者图层。 |
+
+## 2026-08-24 V588-PROVIDER-005 Task 11 后的未验证项
+
+| 项目 | 状态 | 完成条件 |
+|---|---|---|
+| 隔离 PostgreSQL 能力往返 | 阻塞 / 未验证 | 设置一次性 `POSTGRES_TEST_DATABASE_URL`，验证两个供应商并发更新、重读、能力 JSON 与 `compatProfile/customHeader` 保留。当前对应测试为 1 项跳过。 |
+| 真实登录三浏览器 | 阻塞 / 未验证 | 提供隔离 `E2E_TEST_USERNAME`、`E2E_TEST_PASSWORD`，在 Chromium、Firefox、WebKit 执行生成面板、参考图组、融图组、节点和视频入口；当前运行 9 项跳过。 |
+| 同名模型跨供应商差异 | 未验证 | 真实目录中找到相同 modelId、不同 providerId 且能力不同的模型对，逐入口证明比例、尺寸、质量、数量、时长和模式不串用。 |
+| 管理员能力持久化 | 未验证 | 在 Coze 修改一个非破坏性字段，保存、刷新、重启后保持，再恢复原值；不得修改 API Key 或删除供应商。 |
+| 真实付费图像与视频 | 未验证 | 显式启用 `E2E_ENABLE_PAID_GENERATION`，完成一图一视频，记录精确模型、任务终态、积分前后和一次扣费。 |
+| 非法能力请求零副作用 | 未验证 | 在真实登录会话提交不支持参数，取得 `MODEL_CAPABILITY_MISMATCH`，并证明供应商任务数与积分均未变化。 |
+ | Coze 与稳定域名 | 未验证 | GitHub/Coze/运行树精确 SHA 一致；Google Chrome 现有标签页完成五入口与稳定域名刷新恢复，Console/Network/Trace/截图齐全。 |

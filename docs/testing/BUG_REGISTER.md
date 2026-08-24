@@ -2352,3 +2352,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 云端回归 | Coze exact `42e540bd5aa552f10af0e12240546993bda3e91a` 冷启动后刷新仍保留管理员工作台；`/api/session`、`/api/admin/users`、项目读取与同步均 HTTP 200 且业务成功；Console error/warning 为 `0/0`。 |
 | 证据 | `docs/testing/evidence/v588-auth-001-coze-2026-08-24.json` 与同名 PNG。 |
 | 状态 | **已修复 / Coze exact-SHA 冷启动验收通过。** 真实云端 secret 轮换仍是独立高影响未验证项。 |
+
+### V588-PROVIDER-005-BUG-001：更新一个供应商能力时会用陈旧快照覆盖其他供应商
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 管理员模型配置一致性与多供应商隔离 |
+| 发现环境 | `codex/wj-stable-s4-release` Task 11，本地 Vitest，2026-08-24 |
+| 稳定复现 | 读取包含供应商 A、B 的配置快照后仅更新 A；旧实现随后遍历并写回整个旧快照，B 在此期间已更新的高级参数可能被覆盖。新增回归首次得到 2 次数据库写入，预期仅 1 次。 |
+| 预期 | 单供应商修改只持久化该供应商；默认供应商变化时只额外持久化默认状态确实变化的行。数据库继续作为权威来源，文件只作为备份。 |
+| 根因 | `updateApiProvider()` 把读取时的整份配置作为后续数据库写回来源，形成跨供应商陈旧快照覆盖。 |
+| 最小修复 | 新增单行 `persistProviderToDb()` 与独立文件备份写入；普通更新只写目标行，默认切换只写目标行和默认状态实际变化的行。未修改 API Key、模型授权、任务、扣费或供应商调用。 |
+| TDD 与回归 | RED：能力持久化新用例预期一次写入、实际两次；GREEN：该文件 `7/7`。Agent/节点旧契约修正后 `47/47`。全仓 `516 files / 3372 tests` 通过，`20 files / 116 tests` 因隔离 PostgreSQL 缺失而跳过。 |
+| 状态 | **本地已修复 / 发布阻塞。** 真实 PostgreSQL 并发往返、三浏览器真实账号 E2E 与付费图像/视频链路仍未执行。 |

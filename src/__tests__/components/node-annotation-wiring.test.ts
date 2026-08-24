@@ -117,7 +117,7 @@ describe('node-mode annotation wiring', () => {
   });
 
   it('filters annotation models by spatial edit capability', () => {
-    expect(editorSource).toContain("modelSupports(model.id, 'supportsMask')");
+    expect(editorSource).toContain("modelCatalogIndex.get(taskModelKey(model.providerId || '', model.id))?.supportsMask");
   });
 
   it('passes the current canvas model into the node annotation workspace', () => {

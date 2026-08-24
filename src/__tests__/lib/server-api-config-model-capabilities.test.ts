@@ -8,8 +8,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/db-storage', () => mocks);
+vi.mock('fs/promises', () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+  readFile: vi.fn().mockRejectedValue(new Error('no file fallback in this test')),
+  writeFile: vi.fn().mockResolvedValue(undefined),
+}));
 
-import { getApiProviders } from '@/lib/server-api-config';
+import { getApiProviders, updateApiProvider } from '@/lib/server-api-config';
 import {
   parseProviderCapabilityOverridesStrict,
   readProviderCapabilityOverrides,
@@ -153,5 +158,36 @@ describe('server API model capability persistence', () => {
         models: { [modelId]: { maxOutputs: 1 } },
       }))).toMatchObject({ ok: false });
     }
+  });
+
+  it('does not overwrite untouched providers when one provider is updated', async () => {
+    const peer = {
+      ...providerRow(),
+      id: 'provider-b',
+      name: 'Provider B',
+      display_name: 'Provider B',
+      selected_models: ['video-b'],
+      advanced_params: {
+        compatProfile: 'provider-b',
+        customHeader: 'peer-value',
+      },
+    };
+    mocks.dbGetApiProviders.mockResolvedValue([providerRow(), peer]);
+
+    const result = await updateApiProvider('provider-a', {
+      advancedParams: {
+        compatProfile: 'provider-a',
+        taskModelCapabilities: serializeProviderCapabilityOverrides({
+          version: 1,
+          models: { 'video-a': { maxDurationSeconds: 30 } },
+        }),
+      },
+    });
+
+    expect(result?.advancedParams?.taskModelCapabilities).toBeTruthy();
+    expect(mocks.dbUpsertApiProvider).toHaveBeenCalledTimes(1);
+    expect(mocks.dbUpsertApiProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'provider-a' }),
+    );
   });
 });
