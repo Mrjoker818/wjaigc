@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-24T12:07:48+08:00",
+  "scope": "V588-PROVIDER-005 与 GPT Image 2 原生透明 PNG 最终候选的 Coze 构建和运行层验收",
+  "deployment": {
+    "workspace": "/workspace/projects",
+    "branch": "main",
+    "head": "0adbd5ee5b8e32e3987ddf0ccb9f09dd816f5f4d",
+    "originMain": "0adbd5ee5b8e32e3987ddf0ccb9f09dd816f5f4d",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "previousEmptySyncCommit": "87a137611bb410ab91bbb55421911ba7fba807c5",
+    "previousCommitBackupRef": "coze-backup-87a13761",
+    "businessDiffBeforeAlignment": [],
+    "assetGraphMode": "shadow"
+  },
+  "build": {
+    "command": "WUJIE_ASSET_GRAPH_MODE=shadow pnpm build",
+    "nextVersion": "16.2.11",
+    "exitCode": 0
+  },
+  "runtime": {
+    "command": "WUJIE_ASSET_GRAPH_MODE=shadow pnpm exec next start -p 5000 -H 0.0.0.0",
+    "launcherPid": 2535,
+    "listenerPid": 2547,
+    "rootHttpStatus": 200,
+    "authMeHttpStatus": 200,
+    "authMeBody": {
+      "success": true,
+      "user": null
+    },
+    "javascriptAssetsChecked": 10,
+    "cssAssetsChecked": 1,
+    "non200Assets": []
+  },
+  "browser": {
+    "family": "Google Chrome",
+    "newTabsCreated": 0,
+    "used360Browser": false,
+    "embeddedPreviewRefreshed": true,
+    "loginPageReached": true,
+    "businessAcceptanceCompleted": false,
+    "blocker": "Chrome 扩展在重新绑定两个现有标签时持续超时；没有用非浏览器结果替代真实验收。"
+  },
+  "verified": [
+    "Coze main 与 GitHub origin/main 精确一致",
+    "stable 未触碰",
+    "生产构建退出码为 0",
+    "最新服务监听 5000",
+    "根路由与认证接口为 HTTP 200",
+    "HTML 实际引用的全部 JS/CSS 均为 HTTP 200"
+  ],
+  "unverified": [
+    "管理员能力保存、刷新和重启持久化",
+    "普通用户五入口能力一致性",
+    "真实 GPT Image 2 透明 PNG Alpha",
+    "透明 n>1 逐张回填",
+    "真实图像和视频任务终态",
+    "单次扣费与失败退款一致性",
+    "非法能力请求零供应商任务和零扣费",
+    "最终 SHA 下的 Console、Network、截图和下载文件证据"
+  ],
+  "conclusion": "基础设施通过，Stage 4 业务验收未完成。"
+}

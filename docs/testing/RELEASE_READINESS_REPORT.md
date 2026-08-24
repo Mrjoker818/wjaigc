@@ -1303,3 +1303,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 新鲜本地证据：联合专项 `126/126`（另 1 项 PostgreSQL 环境跳过），全仓 `3419 passed / 116 PostgreSQL-gated skipped / 0 failed`，TypeScript、Doctor、零错误 Lint、`116/116` 构建和保护门禁通过。
 - `origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 均未变化。
 - **发布判定：有条件通过，仅允许普通快进进入 `main` 作为云端验收候选。** Coze exact-SHA、管理员保存/重启、普通用户五入口、真实 GPT Image 2 Alpha、真实图像/视频、单次扣费和非法请求零副作用仍是阻塞项；本地通过不等于云端专项通过。
+
+## 2026-08-24 Coze 最终候选运行判定
+
+- 当前发布候选已从“等待 Coze exact-SHA”推进为：Coze `main`、本地 `main` 与 GitHub `origin/main` 均精确为 `0adbd5ee5b8e32e3987ddf0ccb9f09dd816f5f4d`。
+- 云端生产构建退出码 `0`；5000 端口最新监听 PID `2547`；根路由、认证健康接口和 HTML 引用的全部 `11` 个静态资源均为 HTTP `200`。
+- `origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 未变化；没有数据库迁移、账号、供应商或业务数据变更。
+- **当前结论仍为有条件通过，不建议发布。** 原因不再是部署版本或静态资源，而是现有 Google Chrome 标签重新接管超时，导致真实 Alpha、能力矩阵、任务终态和账务证据尚未取得。不得把基础设施健康扩大解释为 Stage 4 全通过。

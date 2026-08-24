@@ -282,3 +282,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Windows 保护门禁的 166 个精确路径已迁移到 JSON 清单，避免命令行长度上限；保护范围没有扩大为目录级授权。
 - donor 只读基线保持 `1126` 个 `src` 文件、`11549563` 字节，锁文件 SHA-256 为 `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
 - **状态：本地集成候选通过，尚未标记吸收。** 关闭条件仍是 Coze 拉取最终 exact SHA，在现有 Google Chrome 标签完成管理员能力持久化、普通用户五入口、真实图像/视频、非法参数零扣费，以及 GPT Image 2 透明 PNG Alpha 与单次扣费验证。
+
+## 2026-08-24 最终候选 Coze 基础设施检查点
+
+- 最终候选已进入并运行于 Coze：`main = origin/main = 0adbd5ee5b8e32e3987ddf0ccb9f09dd816f5f4d`。本地 Coze 同步空提交已保留备份引用后安全移出运行分支，工作区无业务差异。
+- 云端生产构建退出码 `0`，服务按 `shadow` 模式启动，5000 端口 PID `2547`；根路由、认证接口和页面引用静态资源全部 HTTP `200`。
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 和 V5.8.8 donor 仍保持只读。
+- **吸收状态不变：尚未完成。** 本检查点只关闭 exact-SHA、构建和运行健康；真实浏览器能力矩阵、透明 Alpha、任务与账务关闭后，才可将 `V588-PROVIDER-005` 和原生透明 PNG 标记为已吸收并进入下一项。

@@ -1575,3 +1575,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 全仓 Vitest 为 `3419 passed / 116 PostgreSQL-gated skipped / 0 failed`；TypeScript、Doctor、ESLint `0 errors / 970 historical warnings`、Next.js `116/116` 构建、保护基线 `38/38` 和 `git diff --check` 通过。
 - PostgreSQL 跳过项未计为通过；真实 GPT Image 2、真实视频、积分与供应商任务均未在本地伪造。
 - **结论：本地代码集成与自动化回归通过，云端验收未完成。** 只有 Coze exact-SHA、真实 Alpha 文件、五入口能力一致性、真实付费任务及零副作用拒绝均取得证据后，才能把专项改为通过。
+
+## 2026-08-24 最终候选 Coze 构建与运行验收
+
+- GitHub、本地和 Coze 的 `main` 已精确对齐 `0adbd5ee5b8e32e3987ddf0ccb9f09dd816f5f4d`。Coze 原有 `87a13761` 是无文件差异的同步空提交，已先保留为 `coze-backup-87a13761`，再在干净工作区将 `main` 对齐 `origin/main`；没有覆盖业务修改。
+- `origin/stable` 仍为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`，未切换、合并、重置或推送。V5.8.8 donor 保持只读。
+- Coze 使用 `WUJIE_ASSET_GRAPH_MODE=shadow pnpm build` 完成 Next.js `16.2.11` 生产构建，退出码为 `0`。旧 PID `1614` 正常退出后，以 `WUJIE_ASSET_GRAPH_MODE=shadow pnpm exec next start -p 5000 -H 0.0.0.0` 启动；监听进程 PID 为 `2547`。
+- 环回健康检查：`/` 为 HTTP `200`，`/api/auth/me` 为 HTTP `200` 且返回匿名会话；HTML 实际引用的 `10` 个 JavaScript 与 `1` 个 CSS 静态资源全部为 HTTP `200`。
+- 现有 Google Chrome 项目页的内嵌预览已刷新到最新服务，并可进入无限画布登录页。随后扩展重新绑定两个现有标签时持续超时；没有新建标签、没有切换到 360，也没有用非浏览器结果冒充真实 UI 通过。
+- **结论：Coze exact-SHA、构建、启动、HTTP 与静态资源通过；Stage 4 业务验收仍未完成。** 管理员能力持久化、普通用户五入口、真实 GPT Image 2 Alpha、透明多图逐张回填、真实图像/视频、单次扣费及非法请求零副作用仍须在同一现有 Google Chrome 预览标签闭环。
