@@ -6,6 +6,14 @@ const source = readFileSync(
   resolve(process.cwd(), 'src/app/api/generate/route.ts'),
   'utf8',
 );
+const videoGenerateSource = readFileSync(
+  resolve(process.cwd(), 'src/app/api/video/generate/route.ts'),
+  'utf8',
+);
+const videoExtendSource = readFileSync(
+  resolve(process.cwd(), 'src/app/api/video/extend/route.ts'),
+  'utf8',
+);
 
 describe('image model capability admission', () => {
   it('resolves and validates the exact provider/model before any task or billing side effect', () => {
@@ -45,5 +53,50 @@ describe('image model capability admission', () => {
     expect(admissionBlock).toContain('quality: requestedQuality');
     expect(admissionBlock).toContain('outputCount: normalizedRequestedOutputCount');
     expect(admissionBlock).toContain('referenceImageCount: accessibleReferenceImages.length');
+  });
+});
+
+describe('video model capability admission', () => {
+  it('validates the exact provider/model before task creation, billing, or provider request construction', () => {
+    const providerResolution = videoGenerateSource.indexOf('const descriptor = await resolveTaskModelForUser(');
+    const admissionGate = videoGenerateSource.indexOf('const videoCapabilityAdmission =');
+    const billing = videoGenerateSource.indexOf('calculateConfiguredCreditCost(', admissionGate);
+    const taskCreation = videoGenerateSource.indexOf('createBillableTask(', admissionGate);
+    const providerRequest = videoGenerateSource.indexOf('buildVideoSubmitRequest(', admissionGate);
+
+    expect(videoGenerateSource).toContain('resolveTaskModelForUser(provider.id, pureModel, sessionUser)');
+    expect(videoGenerateSource).toContain('validateTaskModelSelection(descriptor, {');
+    expect(videoGenerateSource).toContain('operation: toSupportedVideoOperation(');
+    expect(videoGenerateSource).toContain('durationSeconds: parsedDuration');
+    expect(videoGenerateSource).toContain('referenceImageCount:');
+    expect(providerResolution).toBeGreaterThan(-1);
+    expect(admissionGate).toBeGreaterThan(providerResolution);
+    expect(billing).toBeGreaterThan(admissionGate);
+    expect(taskCreation).toBeGreaterThan(admissionGate);
+    expect(providerRequest).toBeGreaterThan(admissionGate);
+  });
+
+  it('requires video-extend capability before the extend route creates or charges a task', () => {
+    const admissionGate = videoExtendSource.indexOf('const videoCapabilityAdmission =');
+    const billing = videoExtendSource.indexOf('calculateConfiguredCreditCost(', admissionGate);
+    const taskRegistration = videoExtendSource.indexOf('registerTask(', admissionGate);
+    const providerRequest = videoExtendSource.indexOf('buildVideoExtendRequest(', admissionGate);
+
+    expect(videoExtendSource).toContain('resolveTaskModelForUser(provider.id, pureModel, sessionUser)');
+    expect(videoExtendSource).toContain("operation: 'video-extend'");
+    expect(videoExtendSource).toContain('durationSeconds: parsedExtendDuration');
+    expect(admissionGate).toBeGreaterThan(-1);
+    expect(billing).toBeGreaterThan(admissionGate);
+    expect(taskRegistration).toBeGreaterThan(admissionGate);
+    expect(providerRequest).toBeGreaterThan(admissionGate);
+  });
+
+  it('returns the stable non-retryable capability mismatch contract from both video routes', () => {
+    for (const routeSource of [videoGenerateSource, videoExtendSource]) {
+      expect(routeSource).toContain("code: 'MODEL_CAPABILITY_MISMATCH'");
+      expect(routeSource).toContain('retryable: false');
+      expect(routeSource).toContain('received: videoCapabilityAdmission.error.received');
+      expect(routeSource).toContain('allowed: videoCapabilityAdmission.error.allowed');
+    }
   });
 });

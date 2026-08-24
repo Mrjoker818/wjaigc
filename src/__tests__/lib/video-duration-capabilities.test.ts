@@ -15,6 +15,7 @@ describe('platform video duration capabilities', () => {
 
   it('keeps only provider-supported discrete durations below the platform limit', () => {
     expect(getPlatformVideoDurations([5, 10, 15, 30])).toEqual([5, 10, 15]);
+    expect(getPlatformVideoDurations([3, 5, 8])).toEqual([3, 5, 8]);
   });
 
   it('snaps stale or unsupported values to the nearest supported duration', () => {

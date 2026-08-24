@@ -25,7 +25,6 @@ import {
   parseVideoSubmitResponse,
   resolveVideoCompatProfile,
   getVideoModelInfo,
-  validateVideoDuration,
   type VideoGenerateParams,
 } from '@/lib/video-api';
 import { buildDirectorPrompt, type DirectorStyle } from '@/lib/video-director';
@@ -36,6 +35,10 @@ import {
   terminateCloudTaskAndRefund,
 } from '@/lib/cloud-task-storage';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
+import { getRequestId } from '@/lib/request-id';
+import { resolveTaskModelForUser } from '@/lib/task-core/model-catalog';
+import { validateTaskModelSelection } from '@/lib/task-core/model-capability-resolution';
+import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -43,8 +46,24 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+function modelCapabilityConfigurationErrorResponse(
+  error: ModelCapabilityError,
+  requestId: string,
+): NextResponse {
+  const status = error.code === 'MODEL_NOT_AUTHORIZED' ? 403 : 400;
+  return NextResponse.json({
+    success: false,
+    code: error.code,
+    error: error.message,
+    retryable: false,
+    details: error.details,
+    requestId,
+  }, { status });
+}
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+  const requestId = getRequestId(request);
   let plannedCreditCost = 0;
   let sessionUser: import('@/lib/user-types').User | null = null;
   const model = '';
@@ -101,16 +120,6 @@ export async function POST(request: NextRequest) {
     if (parsedExtendDuration > runtimeSettings.maxVideoDuration) {
       return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
     }
-    const durationValidation = validateVideoDuration(pureModel, parsedExtendDuration);
-    if (!durationValidation.valid) {
-      return NextResponse.json({
-        error: durationValidation.allowedDurations.length > 0
-          ? `Model ${pureModel} only supports ${durationValidation.allowedDurations.join('/')} second video segments`
-          : 'Video duration must be a positive integer at or below the platform limit',
-        allowedDurations: durationValidation.allowedDurations,
-      }, { status: 400 });
-    }
-
     // 1. 查找视频 API 提供商
     let provider;
     const effectiveProviderId = extractedProviderId || providerId;
@@ -128,6 +137,32 @@ export async function POST(request: NextRequest) {
         { error: '未找到可用的视频 API 提供商，请先在管理员后台添加视频模型 API' },
         { status: 404 },
       );
+    }
+
+    sessionUser = await getSessionUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ error: '请先登录后再延长视频' }, { status: 401 });
+    }
+    const descriptor = await resolveTaskModelForUser(provider.id, pureModel, sessionUser);
+    const videoCapabilityAdmission = validateTaskModelSelection(descriptor, {
+      operation: 'video-extend',
+      durationSeconds: parsedExtendDuration,
+    });
+    if (!videoCapabilityAdmission.ok) {
+      return NextResponse.json({
+        success: false,
+        code: 'MODEL_CAPABILITY_MISMATCH',
+        error: `所选视频模型不支持当前参数：${videoCapabilityAdmission.error.field}`,
+        retryable: false,
+        details: {
+          providerId: provider.id,
+          modelId: pureModel,
+          field: videoCapabilityAdmission.error.field,
+          received: videoCapabilityAdmission.error.received,
+          allowed: videoCapabilityAdmission.error.allowed,
+        },
+        requestId,
+      }, { status: 400 });
     }
 
     const apiKey = provider.apiKey;
@@ -238,7 +273,6 @@ export async function POST(request: NextRequest) {
 
     // 4.5 只在持久化任务存在后原子扣费，避免提交失败或重启造成
     // 无关联扣费、重复退款或重复调用供应商。
-    sessionUser = await getSessionUser(request);
     plannedCreditCost = sessionUser
       ? await calculateConfiguredCreditCost('video_extend', pureModel, {
           durationSeconds: Number(extendDuration),
@@ -465,6 +499,9 @@ export async function POST(request: NextRequest) {
       } : null,
     });
   } catch (err: unknown) {
+    if (err instanceof ModelCapabilityError) {
+      return modelCapabilityConfigurationErrorResponse(err, requestId);
+    }
     console.error('[video/extend] Error:', err);
     // 操作日志记录错误
     logError(OP_ACTIONS.VIDEO_EXTEND, err, {

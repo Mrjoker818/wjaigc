@@ -22,7 +22,6 @@ import {
   resolveVideoCompatProfile,
   getVideoModelInfo,
   ratioToSize,
-  validateVideoDuration,
   type VideoGenerateParams,
 } from '@/lib/video-api';
 import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
@@ -49,11 +48,47 @@ import {
 import { createBillableTask } from '@/lib/task-core/billing-service';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import { getRequestId } from '@/lib/request-id';
+import { resolveTaskModelForUser } from '@/lib/task-core/model-catalog';
+import { validateTaskModelSelection } from '@/lib/task-core/model-capability-resolution';
+import {
+  ModelCapabilityError,
+  type SupportedOperation,
+} from '@/lib/task-core/model-capability-contract';
 
 export const maxDuration = 300; // 5 min timeout
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function toSupportedVideoOperation(
+  imageUrl: unknown,
+  lastFrameImageUrl: unknown,
+  referenceImages: unknown,
+  characterReferences: unknown,
+): SupportedOperation {
+  if (typeof lastFrameImageUrl === 'string' && lastFrameImageUrl.trim()) return 'first-last-frame';
+  if (
+    (Array.isArray(referenceImages) && referenceImages.length > 0)
+    || (Array.isArray(characterReferences) && characterReferences.length > 0)
+  ) return 'multi-reference';
+  if (typeof imageUrl === 'string' && imageUrl.trim()) return 'image-to-video';
+  return 'text-to-video';
+}
+
+function modelCapabilityConfigurationErrorResponse(
+  error: ModelCapabilityError,
+  requestId: string,
+): NextResponse {
+  const status = error.code === 'MODEL_NOT_AUTHORIZED' ? 403 : 400;
+  return NextResponse.json({
+    success: false,
+    code: error.code,
+    error: error.message,
+    retryable: false,
+    details: error.details,
+    requestId,
+  }, { status });
 }
 
 export async function POST(request: NextRequest) {
@@ -87,6 +122,7 @@ export async function POST(request: NextRequest) {
       lastFrameImageUrl,
       referenceImages,
       aspectRatio = '16:9',
+      resolution,
       duration = 5,
       mode = 'std',
       generateAudio = false,
@@ -126,20 +162,13 @@ export async function POST(request: NextRequest) {
     if (parsedDuration > runtimeSettings.maxVideoDuration) {
       return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
     }
-    const durationValidation = validateVideoDuration(pureModel, parsedDuration);
-    if (!durationValidation.valid) {
-      const allowed = durationValidation.allowedDurations;
-      return NextResponse.json({
-        error: allowed.length > 0
-          ? `模型 ${pureModel} 仅支持单段 ${allowed.join('/')} 秒视频`
-          : '视频时长必须是大于 0 的整数秒',
-        allowedDurations: allowed,
-      }, { status: 400 });
-    }
 
     // 仅确认用户身份。积分在持久化任务创建后以数据库原子语句扣除，
     // 防止任务未落库或并发请求时产生不可追溯的重复扣费。
     sessionUser = await getSessionUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ error: '请先登录后再生成视频' }, { status: 401 });
+    }
 
     // 1. 查找视频 API 提供商
     let provider;
@@ -163,6 +192,42 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const descriptor = await resolveTaskModelForUser(provider.id, pureModel, sessionUser);
+    const referenceImageCount = [
+      imageUrl,
+      lastFrameImageUrl,
+      ...(Array.isArray(referenceImages) ? referenceImages : []),
+      ...(Array.isArray(characterReferences) ? characterReferences : []),
+    ].filter(value => typeof value === 'string' && value.trim()).length;
+    const videoCapabilityAdmission = validateTaskModelSelection(descriptor, {
+      operation: toSupportedVideoOperation(
+        imageUrl,
+        lastFrameImageUrl,
+        referenceImages,
+        characterReferences,
+      ),
+      aspectRatio,
+      size: typeof resolution === 'string' && resolution.trim() ? resolution : undefined,
+      durationSeconds: parsedDuration,
+      referenceImageCount: referenceImageCount,
+    });
+    if (!videoCapabilityAdmission.ok) {
+      return NextResponse.json({
+        success: false,
+        code: 'MODEL_CAPABILITY_MISMATCH',
+        error: `所选视频模型不支持当前参数：${videoCapabilityAdmission.error.field}`,
+        retryable: false,
+        details: {
+          providerId: provider.id,
+          modelId: pureModel,
+          field: videoCapabilityAdmission.error.field,
+          received: videoCapabilityAdmission.error.received,
+          allowed: videoCapabilityAdmission.error.allowed,
+        },
+        requestId,
+      }, { status: 400 });
+    }
+
     const apiKey = provider.apiKey;
     const baseUrl = provider.baseUrl;
     let advancedParams = provider.advancedParams 
@@ -173,6 +238,9 @@ export async function POST(request: NextRequest) {
     // 管理员后台标记了 requestStyle=images-generations 表示该提供商应使用 images 端点
     if (provider.requestStyle === 'images-generations') {
       advancedParams = { ...advancedParams, videoEndpoint: 'images' };
+    }
+    if (typeof resolution === 'string' && resolution.trim()) {
+      advancedParams = { ...advancedParams, resolution };
     }
 
     // 2. 推断视频协议
@@ -663,6 +731,9 @@ export async function POST(request: NextRequest) {
       handlerVersion: taskEntryAudit.handlerVersion,
     });
   } catch (err: unknown) {
+    if (err instanceof ModelCapabilityError) {
+      return modelCapabilityConfigurationErrorResponse(err, requestId);
+    }
     console.error('[video/generate] Error:', err);
     // 记录操作日志 - 视频生成失败
     logError(OP_ACTIONS.VIDEO_GENERATE, err, {

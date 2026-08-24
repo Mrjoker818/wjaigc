@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle, type ReactNode } from 'react';
 import * as React from 'react';
 import {
   Play, Video, ImagePlus, Settings2,
@@ -10,7 +10,7 @@ import {
   Clapperboard, SlidersHorizontal, Mountain, ImageIcon, User, RefreshCw, Package
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
-import { clampVideoDurationToAllowed, getPlatformVideoDurations, inferVideoModelFeatures, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
+import { clampVideoDurationToAllowed, getPlatformVideoDurations, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
 import {
   buildContinuationPrompt,
   parseShotPlanCharacters,
@@ -24,6 +24,8 @@ import type {
 } from '@/lib/video-director/continuity';
 import type { DirectorStyle, VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 import { selectInitialModel } from '@/lib/model-defaults';
+import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
+import { taskModelKey } from '@/lib/task-core/model-capability-contract';
 
 // === 生成历史 ===
 interface VideoHistoryEntry {
@@ -246,6 +248,7 @@ type VideoModelOption = {
   name: string;
   providerId: string;
   providerName: string;
+  isDefault?: boolean;
   region: 'cn' | 'global';
   features: VideoModelInfo['features'];
 };
@@ -336,13 +339,18 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   themeStyle = 'gold',
   selectedImageUrl,
   selectedVideoUrl,
-  serverVideoModels,
   floating = false,
   onClose,
   externalPrompt,
   externalPromptMode = 'generate',
   onExternalPromptConsumed,
 }: VideoGenerationPanelProps, ref) {
+  const {
+    models: catalogModels,
+    descriptorsByKey,
+    loading: modelCatalogLoading,
+    error: modelCatalogError,
+  } = useTaskModelCatalog('video');
   // === 状态 ===
   const [mode, setMode] = useState<'text2video' | 'image2video-first' | 'image2video-ref' | 'video-extend' | 'multi-shot' | 'image2video-firstlast'>('text2video');
   const [prompt, setPrompt] = useState('');
@@ -536,8 +544,37 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
     }
   };
 
-  // 合并服务器模型与内置注册表
-  const [videoModels, setVideoModels] = useState<VideoModelOption[]>([]);
+  const videoModels = useMemo<VideoModelOption[]>(() => catalogModels.map(catalogModel => {
+    const descriptor = descriptorsByKey.get(taskModelKey(catalogModel.providerId, catalogModel.id));
+    const registry = VIDEO_MODEL_REGISTRY[catalogModel.id as keyof typeof VIDEO_MODEL_REGISTRY];
+    const operations = descriptor?.supportedOperations ?? [];
+    return {
+      id: `${catalogModel.providerId}::${catalogModel.id}`,
+      modelId: catalogModel.id,
+      name: catalogModel.displayName || catalogModel.name || registry?.name || catalogModel.id,
+      providerId: catalogModel.providerId,
+      providerName: catalogModel.providerName || registry?.provider || catalogModel.providerId,
+      isDefault: catalogModel.isDefault,
+      region: registry?.features.region || 'cn',
+      features: {
+        firstLastFrame: operations.includes('first-last-frame'),
+        multiReference: operations.includes('multi-reference'),
+        videoEdit: registry?.features.videoEdit || false,
+        videoExtend: operations.includes('video-extend'),
+        audio: registry?.features.audio || false,
+        cameraControl: registry?.features.cameraControl || false,
+        motionBrush: registry?.features.motionBrush || false,
+        characterConsistency: registry?.features.characterConsistency || false,
+        multiShot: registry?.features.multiShot || false,
+        maxDuration: descriptor?.maxDurationSeconds
+          || descriptor?.allowedDurationsSeconds?.at(-1)
+          || 0,
+        durations: descriptor?.allowedDurationsSeconds || [],
+        aspectRatios: descriptor?.allowedRatios || [],
+        resolutions: descriptor?.allowedSizes || [],
+      },
+    };
+  }), [catalogModels, descriptorsByKey]);
 
   // ref 保持最新 shotPlans，供异步循环读取不被闭包冻结
   const shotPlansRef = useRef<VideoShotPlan[]>(shotPlans);
@@ -609,123 +646,29 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
     });
   }, [shotPlans, autoDiagnoseOnFail]);
 
-  // 自动从服务器加载视频模型（如果未通过 props 传入）
   useEffect(() => {
-    // 关键词推断模型能力（供未在注册表中硬编码的自定义模型使用）
-    const inferFallbackFeatures = (modelId: string): VideoModelInfo['features'] => {
-      const inferred = inferVideoModelFeatures(modelId);
-      if (inferred) {
-        return {
-          firstLastFrame: inferred.firstLastFrame,
-          multiReference: inferred.multiReference,
-          videoEdit: inferred.videoEdit,
-          videoExtend: inferred.videoExtend,
-          audio: inferred.audio,
-          cameraControl: inferred.cameraControl,
-          motionBrush: inferred.motionBrush,
-          characterConsistency: inferred.characterConsistency,
-          multiShot: inferred.multiShot,
-          maxDuration: inferred.maxDuration,
-          durations: inferred.durations,
-          aspectRatios: inferred.aspectRatios || inferred.ratios,
-          resolutions: inferred.resolutions,
-        };
-      }
-      return {
-        firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true,
-        audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false,
-        maxDuration: 15, durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p','4K'],
-      };
-    };
-    if (serverVideoModels && serverVideoModels.length > 0) {
-      const merged = serverVideoModels.map(sm => {
-        const modelId = sm.id.includes('::') ? sm.id.split('::').pop()! : sm.id;
-        const providerId = sm.providerId || (sm.id.includes('::') ? sm.id.split('::')[0] : '');
-        const registry = VIDEO_MODEL_REGISTRY[modelId as keyof typeof VIDEO_MODEL_REGISTRY] as unknown as {
-          name?: string; features?: string[]; maxDuration?: number; supportedRatios?: string[];
-          maxBatch?: number; audio?: boolean; provider?: string; region?: 'cn' | 'global';
-        } | undefined;
-        return {
-          id: providerId ? `${providerId}::${modelId}` : modelId,
-          modelId,
-          name: sm.name || registry?.name || modelId,
-          providerId,
-          providerName: sm.providerName || registry?.provider || '',
-          isDefault: Boolean(sm.isDefault),
-          region: (registry?.region || 'cn') as 'cn' | 'global',
-          features: Array.isArray(registry?.features) ? inferFallbackFeatures(sm.id) : inferFallbackFeatures(sm.id),
-        };
-      });
-      setVideoModels(merged);
-      if (merged.length > 0 && !model) {
-        setModel(current => selectInitialModel(current, merged));
-      }
+    if (videoModels.length === 0) {
+      if (model) setModel('');
       return;
     }
-    // 自动加载
-    (async () => {
-      try {
-        const res = await fetch('/api/models?type=video');
-        if (res.ok) {
-          const data = await res.json();
-          const vModels: Array<{ id: string; name: string; providerId: string; providerName: string; isDefault?: boolean }> = [];
-          const providerMap = new Map<string, string>();
-          if (data.providers && Array.isArray(data.providers)) {
-            for (const p of data.providers) {
-              providerMap.set(p.id, p.name || p.displayName || '');
-            }
-          }
-          if (data.models && Array.isArray(data.models)) {
-            for (const m of data.models) {
-              const modelId = m.id || m.name;
-              vModels.push({
-                id: modelId,
-                name: m.name || m.id || '',
-                providerId: m.providerId || '',
-                providerName: providerMap.get(m.providerId) || m.providerId || '',
-                isDefault: Boolean(m.isDefault),
-              });
-            }
-          }
-          const merged = vModels.map(sm => {
-            const modelId = sm.id.includes('::') ? sm.id.split('::').pop()! : sm.id;
-            const providerId = sm.providerId || (sm.id.includes('::') ? sm.id.split('::')[0] : '');
-            const registry = VIDEO_MODEL_REGISTRY[modelId as keyof typeof VIDEO_MODEL_REGISTRY];
-            return {
-              id: providerId ? `${providerId}::${modelId}` : modelId,
-              modelId,
-              name: sm.name || registry?.name || modelId,
-              providerId,
-              providerName: sm.providerName || registry?.provider || '',
-              isDefault: Boolean(sm.isDefault),
-              region: registry?.features.region || 'cn',
-              features: {
-                ...registry?.features,
-                aspectRatios: registry?.features.aspectRatios || registry?.features.ratios,
-              },
-            };
-          });
-          setVideoModels(merged);
-          if (merged.length > 0 && !model) {
-            setModel(current => selectInitialModel(current, merged));
-          }
-        }
-      } catch {
-        // 静默失败
-      }
-    })();
-  }, [serverVideoModels, model]);
+    if (!videoModels.some(candidate => candidate.id === model)) {
+      setModel(selectInitialModel('', videoModels));
+    }
+  }, [model, videoModels]);
 
   // 当前模型信息
   const currentModel = videoModels.find(m => m.id === model);
+  const currentDescriptor = currentModel
+    ? descriptorsByKey.get(taskModelKey(currentModel.providerId, currentModel.modelId))
+    : undefined;
   const currentFeatures = currentModel?.features;
-  const currentRegistry = VIDEO_MODEL_REGISTRY[currentModel?.modelId || model];
 
   // 动态可选比例
-  const availableRatios = currentFeatures?.aspectRatios || ['1:1', '4:3', '16:9', '9:16'];
-  const platformDurations = getPlatformVideoDurations(currentFeatures?.durations || [5, 10]);
-  const availableDurations = platformDurations.length > 0 ? platformDurations : [5, 10];
-  const availableResolutions = currentFeatures?.resolutions || ['720p', '1080p'];
+  const availableRatios = currentDescriptor?.allowedRatios ?? [];
+  const platformDurations = getPlatformVideoDurations(currentDescriptor?.allowedDurationsSeconds ?? []);
+  const availableDurations = platformDurations;
+  const availableResolutions = currentDescriptor?.allowedSizes ?? [];
+  const supportedOperations = currentDescriptor?.supportedOperations ?? [];
 
   // 首尾帧开关（图生视频模式内可展开尾帧）
   const [showLastFrame, setShowLastFrame] = useState(false);
@@ -751,8 +694,10 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   // 切换模型时重置不支持的参数
   useEffect(() => {
     if (currentFeatures) {
-      if (!availableRatios.includes(aspectRatio)) setAspectRatio(availableRatios[0]);
-      if (!availableDurations.includes(duration)) setDuration(availableDurations[0]);
+      if (!availableRatios.includes(aspectRatio)) setAspectRatio(availableRatios[0] || '');
+      if (!availableDurations.includes(duration)) setDuration(availableDurations[0] || 0);
+      if (!availableResolutions.includes(resolution)) setResolution(availableResolutions[0] || '');
+      if (!availableDurations.includes(extendDuration)) setExtendDuration(availableDurations[0] || 0);
       if (!currentFeatures.firstLastFrame && showLastFrame) setShowLastFrame(false);
       if (!currentFeatures.videoExtend && mode === 'video-extend') setMode('text2video');
       if (!currentFeatures.audio && generateAudio) setGenerateAudio(false);
@@ -761,16 +706,35 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   }, [model]);
 
   // 模式切换
-  const modeOptions: { value: VideoGenerateParams['mode']; label: string; icon: ReactNode }[] = [
-    { value: 'text2video' as const, label: '文生视频', icon: <Video className="w-4 h-4" /> },
-    { value: 'image2video-first' as const, label: '图生视频', icon: <ImagePlus className="w-4 h-4" /> },
-  ];
-  // 首尾帧和多参考图已合并到图生视频模式内，不再作为独立 Tab
-  if (currentFeatures?.videoExtend) {
-    modeOptions.push({ value: 'video-extend' as const, label: '视频延长', icon: <FastForward className="w-4 h-4" /> });
-  }
-  // 多镜头叙事模式（所有模型都支持，通过串行生成实现）
-  modeOptions.push({ value: 'multi-shot' as const, label: '多镜头叙事', icon: <Film className="w-4 h-4" /> });
+  const modeOptions = useMemo<Array<{ value: VideoGenerateParams['mode']; label: string; icon: ReactNode }>>(() => {
+    const options: Array<{ value: VideoGenerateParams['mode']; label: string; icon: ReactNode }> = [];
+    if (supportedOperations.includes('text-to-video')) {
+      options.push({ value: 'text2video', label: '文生视频', icon: <Video className="w-4 h-4" /> });
+    }
+    if (
+      supportedOperations.includes('image-to-video')
+      || supportedOperations.includes('first-last-frame')
+      || supportedOperations.includes('multi-reference')
+    ) {
+      options.push({ value: 'image2video-first', label: '图生视频', icon: <ImagePlus className="w-4 h-4" /> });
+    }
+    if (supportedOperations.includes('video-extend')) {
+      options.push({ value: 'video-extend', label: '视频延长', icon: <FastForward className="w-4 h-4" /> });
+    }
+    if (supportedOperations.includes('text-to-video') || supportedOperations.includes('image-to-video')) {
+      options.push({ value: 'multi-shot', label: '多镜头叙事', icon: <Film className="w-4 h-4" /> });
+    }
+    return options;
+  }, [supportedOperations]);
+  const availableModeValues = useMemo(
+    () => modeOptions.map(option => option.value),
+    [modeOptions],
+  );
+  useEffect(() => {
+    if (availableModeValues.length > 0 && !availableModeValues.includes(mode)) {
+      setMode(availableModeValues[0]);
+    }
+  }, [availableModeValues, mode]);
 
   // === 运动笔刷处理 ===
   const motionBrushRef = useRef<MotionBrushCanvasHandle>(null);
@@ -1782,9 +1746,13 @@ Rules:
     }
   }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, multiShotScenes, chainContinuity, useGlobalReferences, batchCount, showLastFrame, onVideoGenerate, onError]);
 
-  const isPrimaryDisabled = mode === 'multi-shot'
+  const modelCapabilityUnavailable = modelCatalogLoading
+    || Boolean(modelCatalogError)
+    || !currentDescriptor
+    || availableDurations.length === 0;
+  const isPrimaryDisabled = modelCapabilityUnavailable || (mode === 'multi-shot'
     ? (isGeneratingAllShots || (shotPlans.length === 0 && multiShotScenes.every(s => !s.prompt.trim())))
-    : (mode === 'video-extend' ? (!videoUrl || isExtending) : isGenerating || !prompt.trim() || !model);
+    : (mode === 'video-extend' ? (!videoUrl || isExtending) : isGenerating || !prompt.trim() || !model));
 
   const primaryLabel = mode === 'multi-shot'
     ? (isGeneratingAllShots ? '镜头生成中...' : `生成 ${shotPlans.filter(s => s.prompt.trim()).length || multiShotScenes.filter(s => s.prompt.trim()).length} 个镜头视频`)
@@ -2058,6 +2026,7 @@ Rules:
                 <select
                   value={model}
                   onChange={e => setModel(e.target.value)}
+                  disabled={modelCatalogLoading || Boolean(modelCatalogError)}
                   className="w-full px-3 py-2 pr-8 rounded-lg text-[12px] appearance-none cursor-pointer font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors truncate"
                   style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                 >
@@ -2369,7 +2338,7 @@ Rules:
                 <div>
                   <label className={labelClass}>延长时长</label>
                   <div className="flex gap-1.5">
-                    {[3, 5, 8, 10].filter(d => availableDurations.includes(d)).map(d => (
+                    {availableDurations.map(d => (
                       <button
                         key={d}
                         onClick={() => setExtendDuration(d)}
@@ -2420,9 +2389,13 @@ Rules:
                   <input
                     aria-label="视频时长"
                     className="w-full accent-current cursor-pointer"
+                    disabled={availableDurations.length === 0}
                     max={Math.max(availableDurations.length - 1, 0)}
                     min={0}
-                    onChange={(event) => setDuration(availableDurations[Number(event.target.value)])}
+                    onChange={(event) => {
+                      const nextDuration = availableDurations[Number(event.target.value)];
+                      if (nextDuration !== undefined) setDuration(nextDuration);
+                    }}
                     step={1}
                     style={{ accentColor }}
                     type="range"
