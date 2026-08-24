@@ -177,12 +177,27 @@ function findRepeatedArguments(args, name) {
   return values;
 }
 
+async function readAllowedPathFile(root, filePath) {
+  const parsed = JSON.parse(await readFile(resolve(root, filePath), 'utf8'));
+  if (!Array.isArray(parsed) || parsed.some((path) => typeof path !== 'string' || !path.trim())) {
+    throw new Error(`Invalid protected baseline allow-path file: ${filePath}`);
+  }
+  if (new Set(parsed).size !== parsed.length) {
+    throw new Error(`Duplicate path in protected baseline allow-path file: ${filePath}`);
+  }
+  return parsed;
+}
+
 export async function runProtectedBaselineGate({
   root = process.cwd(),
   base = 'origin/main',
   candidate = 'HEAD',
   extraAllowedPaths = [],
+  allowedPathFiles = [],
 } = {}) {
+  const fileAllowedPaths = (
+    await Promise.all(allowedPathFiles.map((filePath) => readAllowedPathFile(root, filePath)))
+  ).flat();
   const baselineMetadata = JSON.parse(await readFile(
     join(root, 'docs/testing/baselines/2026-08-08-baseline.json'),
     'utf8',
@@ -245,7 +260,11 @@ export async function runProtectedBaselineGate({
     missingEvidenceContracts,
     baseResolved: Boolean(baseCommit),
     candidateResolved: Boolean(candidateCommit),
-    allowedPaths: [...DEFAULT_ALLOWED_INFRA_PATHS, ...extraAllowedPaths],
+    allowedPaths: [
+      ...DEFAULT_ALLOWED_INFRA_PATHS,
+      ...fileAllowedPaths,
+      ...extraAllowedPaths,
+    ],
   });
 
   if (baseContractFallback) {
@@ -288,6 +307,7 @@ if (invokedFile === fileURLToPath(import.meta.url)) {
       base: findArgument(args, '--base', 'origin/main'),
       candidate: findArgument(args, '--candidate', 'HEAD'),
       extraAllowedPaths: findRepeatedArguments(args, '--allow-path'),
+      allowedPathFiles: findRepeatedArguments(args, '--allow-path-file'),
     });
     printResult(result);
     if (result.block.length > 0) process.exitCode = 1;

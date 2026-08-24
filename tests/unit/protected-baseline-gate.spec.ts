@@ -138,15 +138,21 @@ describe('protected baseline release gate', () => {
       scripts: Record<string, string>;
     };
     const command = packageJson.scripts['check:protected-baseline'];
+    const allowedPaths = JSON.parse(await readFile(
+      resolve(process.cwd(), 'docs/testing/baselines/protected-baseline-allowed-paths.json'),
+      'utf8',
+    )) as string[];
 
     expect(command).toContain('--base 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b');
-    expect(command).toContain('--allow-path .superpowers/sdd/task-0-report.md');
-    expect(command).toContain('--allow-path .superpowers/sdd/task-1-report.md');
-    expect(command).toContain('--allow-path migrations/20260816_wj_stable_s4_agent_events.sql');
-    expect(command).toContain('--allow-path scripts/run-migrations.mjs');
-    expect(command).toContain('--allow-path src/app/api/agent-runs/');
-    expect(command).not.toMatch(/--allow-path src\/app\/api\/(?:\s|$)/);
-    expect(command).not.toMatch(/--allow-path src\/components\/workflow\/(?:\s|$)/);
+    expect(command).toContain('--allow-path-file docs/testing/baselines/protected-baseline-allowed-paths.json');
+    expect(command).not.toContain('--allow-path ');
+    expect(allowedPaths).toContain('.superpowers/sdd/task-0-report.md');
+    expect(allowedPaths).toContain('.superpowers/sdd/task-1-report.md');
+    expect(allowedPaths).toContain('migrations/20260816_wj_stable_s4_agent_events.sql');
+    expect(allowedPaths).toContain('scripts/run-migrations.mjs');
+    expect(allowedPaths).toContain('src/app/api/agent-runs/');
+    expect(allowedPaths).not.toContain('src/app/api/');
+    expect(allowedPaths).not.toContain('src/components/workflow/');
     for (const path of [
       'src/components/workflow/WorkflowLegacyNodeCard.tsx',
       'src/components/workflow/WorkflowLegacySurface.tsx',
@@ -154,9 +160,9 @@ describe('protected baseline release gate', () => {
       'src/components/workflow/WorkflowReactFlowSurface.tsx',
       'src/components/workflow/WorkflowShadowProbe.tsx',
     ]) {
-      expect(command).toContain(`--allow-path ${path}`);
+      expect(allowedPaths).toContain(path);
     }
-    expect(command).not.toMatch(/--allow-path src\/lib\/workflow-renderer\/(?:\s|$)/);
+    expect(allowedPaths).not.toContain('src/lib/workflow-renderer/');
     for (const path of [
       'src/lib/workflow-renderer/mode.ts',
       'src/lib/workflow-renderer/view-model.ts',
@@ -164,7 +170,7 @@ describe('protected baseline release gate', () => {
       'src/lib/workflow-renderer/shadow.ts',
       'src/lib/workflow-renderer/presentation.ts',
     ]) {
-      expect(command).toContain(`--allow-path ${path}`);
+      expect(allowedPaths).toContain(path);
     }
   });
 
@@ -179,6 +185,10 @@ describe('protected baseline release gate', () => {
       authorizations: Array<{ path: string; sourceCommit: string }>;
     };
     const command = packageJson.scripts['check:protected-baseline'];
+    const allowedPaths = JSON.parse(await readFile(
+      resolve(process.cwd(), 'docs/testing/baselines/protected-baseline-allowed-paths.json'),
+      'utf8',
+    )) as string[];
     const sourceCommits = [...new Set(
       historicalSourceAuthorizations.map(([, sourceCommit]) => sourceCommit),
     )];
@@ -217,7 +227,8 @@ describe('protected baseline release gate', () => {
 
     expect(provenance.authorizations).toHaveLength(historicalSourceAuthorizations.length);
     for (const [path, sourceCommit] of historicalSourceAuthorizations) {
-      expect(command).toContain(`--allow-path ${path}`);
+      expect(command).toContain('--allow-path-file docs/testing/baselines/protected-baseline-allowed-paths.json');
+      expect(allowedPaths).toContain(path);
       expect(provenance.authorizations).toContainEqual({ path, sourceCommit });
       expect(pathsByCommit.get(fullSourceCommits.get(sourceCommit)!)).toContain(path);
     }
@@ -231,8 +242,7 @@ describe('protected baseline release gate', () => {
       'src/lib/',
       'src/lib/asset-core/',
     ]) {
-      expect(command).not.toContain(`--allow-path ${broadPath} `);
-      expect(command).not.toMatch(new RegExp(`--allow-path ${broadPath.replaceAll('/', '\\/')}$`));
+      expect(allowedPaths).not.toContain(broadPath);
     }
   });
 
