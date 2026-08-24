@@ -289,3 +289,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 云端生产构建退出码 `0`，服务按 `shadow` 模式启动，5000 端口 PID `2547`；根路由、认证接口和页面引用静态资源全部 HTTP `200`。
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 和 V5.8.8 donor 仍保持只读。
 - **吸收状态不变：尚未完成。** 本检查点只关闭 exact-SHA、构建和运行健康；真实浏览器能力矩阵、透明 Alpha、任务与账务关闭后，才可将 `V588-PROVIDER-005` 和原生透明 PNG 标记为已吸收并进入下一项。
+
+## 2026-08-24 `4711501b` 原生透明 PNG 最终候选检查点
+
+- 功能分支已并入并清理，`main = origin/main = 4711501bdeb059a16d404184ef38c0956a57fb06`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 和 V5.8.8 donor 均未修改。
+- 新增真实 E2E 永久合同要求透明 `n=2` 生成拥有两个不同任务、逐张回填、每张独立 Alpha 字节验证和恰好两笔扣费；本地全仓为 `526 files / 3420 tests passed`，`20 files / 116 PostgreSQL-gated tests skipped`，Doctor、TypeScript、零错误 Lint 与生产构建通过。
+- 当前 Coze 预览返回 `404 instance_not_found`，现有 Chrome 标签可枚举但页面动作超时；因此新 SHA 的云端运行和业务验收均未成立。
+- **吸收状态保持未完成。** 先恢复沙箱并在 `4711501b` 上关闭 Stage 4 真实 Alpha、逐张回填、任务终态和账务；完成前不进入新的 V5.8.8 donor 吸收项。

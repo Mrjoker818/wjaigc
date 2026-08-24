@@ -1584,3 +1584,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 环回健康检查：`/` 为 HTTP `200`，`/api/auth/me` 为 HTTP `200` 且返回匿名会话；HTML 实际引用的 `10` 个 JavaScript 与 `1` 个 CSS 静态资源全部为 HTTP `200`。
 - 现有 Google Chrome 项目页的内嵌预览已刷新到最新服务，并可进入无限画布登录页。随后扩展重新绑定两个现有标签时持续超时；没有新建标签、没有切换到 360，也没有用非浏览器结果冒充真实 UI 通过。
 - **结论：Coze exact-SHA、构建、启动、HTTP 与静态资源通过；Stage 4 业务验收仍未完成。** 管理员能力持久化、普通用户五入口、真实 GPT Image 2 Alpha、透明多图逐张回填、真实图像/视频、单次扣费及非法请求零副作用仍须在同一现有 Google Chrome 预览标签闭环。
+
+## 2026-08-24 原生透明 PNG 最终候选本地门禁与云端阻塞复核
+
+- 原生透明 PNG 功能分支已进入并推送 `main@4711501bdeb059a16d404184ef38c0956a57fb06`；本地与 `origin/main` 精确一致，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- 新增真实付费 E2E 合同覆盖 `n=2` 两个独立任务、第二槽延迟时第一张先进入画布、两张 PNG 分别验证 Alpha、恰好两笔生图扣费，以及余额和累计使用量与交易成本一致。该用例未使用模拟供应商结果冒充云端通过。
+- 干净工作树本地门禁：Doctor、TypeScript、ESLint `0 errors / 970 historical warnings`、Next.js `16.2.11` 生产构建均通过；全仓 Vitest 退出码 `0`，为 `526 files / 3420 tests passed`。另有 `20 files / 116 tests` 因未配置 `POSTGRES_TEST_DATABASE_URL` 明确跳过，不计为通过。
+- 现有 Google Chrome 仅复用 Coze 项目页和预览页，没有新建标签、没有使用 360。浏览器运行、扩展安装/启用及 Native Host 清单诊断均通过，但接管、DOM 快照和刷新动作均超时。
+- 云端预览公开请求返回 HTTP `404`、`error_code=instance_not_found`、`request_id=5aa43080-27e1-9b90-8fe1-b8f9364e9529`，证明当前沙箱实例不存在；因此不能把旧候选 `0adbd5ee` 的云端运行证据继承给 `4711501b`。
+- **结论：本地候选通过，Stage 4 云端验收仍受环境阻塞。** 沙箱恢复并精确拉取 `4711501b` 后，必须重新完成透明 `n=2` 逐张回填、两份 Alpha 字节、任务终态和恰好两笔扣费验证。机器证据：`docs/testing/evidence/stage4-transparent-final-candidate-blocked-2026-08-24.json`。

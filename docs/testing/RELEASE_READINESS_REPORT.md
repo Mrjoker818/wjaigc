@@ -1310,3 +1310,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 云端生产构建退出码 `0`；5000 端口最新监听 PID `2547`；根路由、认证健康接口和 HTML 引用的全部 `11` 个静态资源均为 HTTP `200`。
 - `origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 未变化；没有数据库迁移、账号、供应商或业务数据变更。
 - **当前结论仍为有条件通过，不建议发布。** 原因不再是部署版本或静态资源，而是现有 Google Chrome 标签重新接管超时，导致真实 Alpha、能力矩阵、任务终态和账务证据尚未取得。不得把基础设施健康扩大解释为 Stage 4 全通过。
+
+## 2026-08-24 `4711501b` 发布准备度复核
+
+- GitHub 和本地 `main` 已对齐 `4711501bdeb059a16d404184ef38c0956a57fb06`，`stable` 保持 `52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+- 干净工作树完整本地门禁通过：Doctor、TypeScript、零错误 ESLint、生产构建和 `3420` 项 Vitest；`116` 项 PostgreSQL 专项因缺少隔离库跳过，继续视为未验证。
+- 当前 Coze 预览返回 `instance_not_found`，Chrome 页面控制动作超时；新候选尚未取得 exact-SHA 运行、真实 Alpha、逐张回图和账务证据。
+- **发布判定：有条件通过，仅限本地集成候选；云端发布不通过。** 不允许用旧 `0adbd5ee` 的运行证据替代 `4711501b`，也不允许在 Stage 4 关闭前把原生透明 PNG 或 `V588-PROVIDER-005` 标记为已吸收。

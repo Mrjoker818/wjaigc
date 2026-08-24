@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-24T12:47:06+08:00",
+  "candidate": {
+    "localMain": "4711501bdeb059a16d404184ef38c0956a57fb06",
+    "originMain": "4711501bdeb059a16d404184ef38c0956a57fb06",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "localVerification": {
+    "worktree": "J:/无界本地版/projects/_verify-stage4-transparent",
+    "doctor": "passed",
+    "typecheck": "passed",
+    "lint": {
+      "status": "passed",
+      "errors": 0,
+      "historicalWarnings": 970
+    },
+    "build": {
+      "status": "passed",
+      "framework": "Next.js 16.2.11"
+    },
+    "vitest": {
+      "exitCode": 0,
+      "filesPassed": 526,
+      "filesSkipped": 20,
+      "testsPassed": 3420,
+      "testsSkipped": 116,
+      "skipReason": "POSTGRES_TEST_DATABASE_URL is not configured; skipped PostgreSQL integration and concurrency gates are not counted as passed"
+    },
+    "transparentPaidE2EContract": {
+      "status": "implemented-and-discovered-not-cloud-executed",
+      "requirements": [
+        "two independent task IDs",
+        "first transparent image becomes available before the delayed second slot",
+        "each downloaded result is PNG with at least one alpha value below 255",
+        "exactly two image-generation debit transactions",
+        "balance and total-used deltas equal the two recorded transaction costs"
+      ]
+    }
+  },
+  "chrome": {
+    "family": "Google Chrome",
+    "newTabsCreated": false,
+    "otherBrowsersUsed": false,
+    "existingTabs": [
+      "https://code.coze.cn/p/7671964106919837702/preview",
+      "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/"
+    ],
+    "diagnostics": {
+      "browserRunning": true,
+      "extensionInstalled": true,
+      "extensionEnabled": true,
+      "nativeHostManifestCorrect": true
+    },
+    "controlResult": "existing tabs can be listed, but claiming, DOM snapshot and reload actions timed out"
+  },
+  "cloud": {
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "httpStatus": 404,
+    "errorCode": "instance_not_found",
+    "errorMessage": "user specified instance vefaas-6274o7rx-id4lydn2yf-da5rtm03n5snetirt7dg-sandbox not found",
+    "requestId": "5aa43080-27e1-9b90-8fe1-b8f9364e9529",
+    "candidateShaVerifiedInRuntime": false
+  },
+  "decision": "LOCAL_GATES_PASS_CLOUD_ACCEPTANCE_BLOCKED",
+  "remaining": [
+    "restart Coze sandbox and pull exact origin/main",
+    "prove runtime tree is 4711501bdeb059a16d404184ef38c0956a57fb06",
+    "execute real GPT Image 2 transparent PNG n=2 progressive acceptance",
+    "prove alpha bytes and exactly-once billing",
+    "complete provider capability and illegal-request zero-side-effect cloud matrix"
+  ]
+}
