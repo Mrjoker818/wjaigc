@@ -1593,3 +1593,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 现有 Google Chrome 仅复用 Coze 项目页和预览页，没有新建标签、没有使用 360。浏览器运行、扩展安装/启用及 Native Host 清单诊断均通过，但接管、DOM 快照和刷新动作均超时。
 - 云端预览公开请求返回 HTTP `404`、`error_code=instance_not_found`、`request_id=5aa43080-27e1-9b90-8fe1-b8f9364e9529`，证明当前沙箱实例不存在；因此不能把旧候选 `0adbd5ee` 的云端运行证据继承给 `4711501b`。
 - **结论：本地候选通过，Stage 4 云端验收仍受环境阻塞。** 沙箱恢复并精确拉取 `4711501b` 后，必须重新完成透明 `n=2` 逐张回填、两份 Alpha 字节、任务终态和恰好两笔扣费验证。机器证据：`docs/testing/evidence/stage4-transparent-final-candidate-blocked-2026-08-24.json`。
+
+## 2026-08-24 S4-BUG-016 云端复现与本地修复回归
+
+- Coze `78f9d2f6` 已恢复，Google Chrome 管理员会话、新建项目和 23 个图像模型目录均正常；精确选择 Pear `gpt-image-2`、透明 PNG 与 `x2`。
+- 首次提交和显式补选 `1:1 / 1K / x2` 后的第二次提交均被同一业务错误拦截：“尺寸格式无效”。两次都没有任务槽、供应商任务或扣费，故没有重复提交风险。
+- 数据流定位证明专业面板把目录中的 `1K` 写为 `size`，而后端只接受像素尺寸或比例；修复前 RED 明确收到 `size: "1K" / resolution: undefined`。
+- `main@4e99aa33` 最小修复后，组件回归、模型目录/能力准入联合回归 `32/32`，严格 TypeScript、改动文件零错误 ESLint、2 项真实 E2E 发现和 `116/116` 生产构建通过。
+- **结论：S4-BUG-016 本地关闭，云端未关闭。** Coze 项目标签接管本身连续超时，无法拉取并证明 exact SHA；下一次云端只提交一个 `n=2` 批次，并继续核验两张真实 Alpha PNG、逐张回填、两个唯一 taskId、恰好两笔扣费和无隐藏 RemoveBG 任务。

@@ -1317,3 +1317,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 干净工作树完整本地门禁通过：Doctor、TypeScript、零错误 ESLint、生产构建和 `3420` 项 Vitest；`116` 项 PostgreSQL 专项因缺少隔离库跳过，继续视为未验证。
 - 当前 Coze 预览返回 `instance_not_found`，Chrome 页面控制动作超时；新候选尚未取得 exact-SHA 运行、真实 Alpha、逐张回图和账务证据。
 - **发布判定：有条件通过，仅限本地集成候选；云端发布不通过。** 不允许用旧 `0adbd5ee` 的运行证据替代 `4711501b`，也不允许在 Stage 4 关闭前把原生透明 PNG 或 `V588-PROVIDER-005` 标记为已吸收。
+
+## 2026-08-24 `4e99aa33` 尺寸映射修复发布判断
+
+- 云端旧候选真实证明 Pear `gpt-image-2` 的 `1K` 被错误写入 `size`，使透明 `n=2` 在任务创建与扣费前返回 400；该问题不是供应商不可用。
+- 本地修复、TDD、严格类型检查、改动文件零错误 Lint、真实 E2E 发现和生产构建均通过；GitHub `main` 已包含 `4e99aa33`，`stable` 未变化。
+- Coze 项目标签在 Google Chrome 中可枚举，但标签接管连续超时；因此尚未拉取新提交，也没有取得 Alpha、逐张回图、任务终态和账务证据。
+- **发布判定：不通过。** 当前只能作为云端验收候选；Coze exact SHA 与真实付费闭环完成前，不得发布或宣称原生透明 PNG 已通过。

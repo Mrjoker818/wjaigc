@@ -2378,3 +2378,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | 将字符串数组直接传给 `pg`，由驱动编码为 `TEXT[]`；JSONB 的 `advanced_params` 与 `discovered_models` 保持原实现。未修改表结构或迁移数据。 |
 | GREEN | 同一 PostgreSQL 18 隔离集群重跑 `1/1` 通过，两个供应商能力、`compatProfile` 和 `customHeader` 均完成并发写入与重读。 |
 | 状态 | **本地已修复 / 真实 PostgreSQL 已验证 / 云端待验。** |
+
+### S4-BUG-016：专业生图把分辨率档位写入像素尺寸字段
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 核心图像生成提交失败 |
+| 发现环境 | Coze 运行候选 `78f9d2f63fe1e75be977c5e0304ced04083ece22`，已登录 Google Chrome，PearAPI 图像 `gpt-image-2`，透明 PNG，`n=2`，2026-08-24 |
+| 稳定复现 | 新建项目，打开右侧“图像生成 -> 专业创作”，选择 Pear `gpt-image-2`、透明、`x2` 并提交；首次直接失败。随后显式选择 `1:1`、`1K`、`x2` 再提交，仍返回“尺寸格式无效，应为 宽x高或比例格式”。两次均未创建任务、未发生供应商调用或扣费。 |
+| 预期 | `1K/2K/4K` 作为 `resolution` 提交；仅 `1024x1024` 等像素值进入 `size`。 |
+| 实际 | 组件请求为 `size: "1K"`、`resolution: undefined`，被 `/api/generate` 的尺寸格式门禁以 HTTP 400 拒绝。 |
+| 根因 | 模型能力目录允许 `allowedSizes` 同时承载像素尺寸和分辨率档位；`GenerationPanel` 未区分两类值，且错误地只从 `quality` 推导 `resolution`。 |
+| RED | 新增组件行为回归，实际收到 `size: "1K"`、`resolution: undefined`，与期望相反，稳定失败。 |
+| 最小修复 | `main@4e99aa33` 使用既有 `isResolutionTier()` 分类：分辨率档位写入 `resolution` 并清空 `size`；像素尺寸继续保留原路径；旧版把档位放入 `quality` 的配置继续兼容。同步修正真实付费 E2E，使其进入右侧“图像生成 -> 专业创作”，而不是不含透明控件的底部“图像生成器”。 |
+| 本地回归 | 聚焦 `4 files / 32 tests` 全通过；排除用户未跟踪参考仓库后的严格 TypeScript 通过；本次文件 ESLint `0 error / 20 historical warnings`；真实付费 E2E 正确发现 2 项；Next.js 生产构建 `116/116` 通过。 |
+| 状态 | **本地已修复并推送 / 云端待拉取与真实付费复验。** 不得用修复前 400 或本地测试替代真实 Alpha、逐张回图和两笔账务证据。 |
