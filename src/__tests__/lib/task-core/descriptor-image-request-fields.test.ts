@@ -3,9 +3,16 @@ import { describe, expect, it } from 'vitest';
 import {
   applyDescriptorApprovedImageFields,
   buildDescriptorImageRequestFields,
+  normalizeRequestedPixelSize,
 } from '@/lib/task-core/descriptor-image-request-fields';
 
 describe('descriptor-bound image request fields', () => {
+  it('treats a blank legacy size field as omitted before capability admission', () => {
+    expect(normalizeRequestedPixelSize('')).toBeUndefined();
+    expect(normalizeRequestedPixelSize('   ')).toBeUndefined();
+    expect(normalizeRequestedPixelSize('1024x1024')).toBe('1024x1024');
+  });
+
   it('keeps descriptor-approved explicit pixel size, quality, and resolution after legacy filtering', () => {
     const requested = buildDescriptorImageRequestFields({
       aspectRatio: '16:9',

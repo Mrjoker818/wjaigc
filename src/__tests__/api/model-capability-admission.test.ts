@@ -58,6 +58,17 @@ describe('image model capability admission', () => {
     expect(admissionBlock).toContain('referenceImageCount: accessibleReferenceImages.length');
   });
 
+  it('normalizes a blank legacy size before exact-model capability admission', () => {
+    const admissionGate = source.indexOf('const modelCapabilityAdmission =');
+    const admissionBlock = source.slice(
+      source.indexOf('const normalizedRequestedPixelSize ='),
+      admissionGate,
+    );
+
+    expect(admissionBlock).toContain('normalizeRequestedPixelSize(requestedPixelSize)');
+    expect(admissionBlock).toContain('size: normalizedRequestedPixelSize');
+  });
+
   it('admits every implicit fallback candidate before charging credits', () => {
     const candidateAdmission = source.indexOf('const admittedCandidateModels = await admitImageFallbackCandidates(');
     const billing = source.indexOf('consumeCredits(', candidateAdmission);

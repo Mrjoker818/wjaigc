@@ -1601,3 +1601,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 数据流定位证明专业面板把目录中的 `1K` 写为 `size`，而后端只接受像素尺寸或比例；修复前 RED 明确收到 `size: "1K" / resolution: undefined`。
 - `main@4e99aa33` 最小修复后，组件回归、模型目录/能力准入联合回归 `32/32`，严格 TypeScript、改动文件零错误 ESLint、2 项真实 E2E 发现和 `116/116` 生产构建通过。
 - **结论：S4-BUG-016 本地关闭，云端未关闭。** Coze 项目标签接管本身连续超时，无法拉取并证明 exact SHA；下一次云端只提交一个 `n=2` 批次，并继续核验两张真实 Alpha PNG、逐张回填、两个唯一 taskId、恰好两笔扣费和无隐藏 RemoveBG 任务。
+
+## 2026-08-24 S4-BUG-017 云端二次复现与本地回归
+
+- Coze 已通过现有 Google Chrome 项目页精确拉取并运行 `main@3c8fd1ca80947b1a81cd2f2356d0093ad70a8b59`；生产构建退出码 0，根路由与 `/api/auth/me` 均为 200，`origin/stable@52f7c601...` 未触碰。
+- 预览页强制刷新后，管理员会话和专业生成面板正常。精确选择 Pear `gpt-image-2`，设置 `1:1 / 1K / 透明 PNG / x2` 并只提交一次，业务在任务创建前返回“所选模型不支持当前参数：size”；没有任务、供应商调用或扣费。
+- 数据流证明前端已把 `1K` 正确写入 `resolution`，但同时保留 `size: ""`；后端能力准入把空字符串当作显式尺寸，形成 S4-BUG-016 之后的第二个独立根因。
+- TDD 首先得到 2 个预期 RED；统一空白尺寸归一化后，聚焦 `19/19`、严格 TypeScript、改动文件零错误 Lint、全仓 `3423/3423` 和 Next.js `116/116` 生产构建通过。`116` 项 PostgreSQL 门禁跳过继续标为未验证。
+- **结论：S4-BUG-017 本地修复通过，云端未关闭。** 必须提交并让 Coze 拉取新候选，再执行同一单次付费任务；不得重试制造重复任务，也不得用本地测试代替真实 Alpha 和账务证据。

@@ -13,6 +13,12 @@ export interface DescriptorImageRequestFields {
   resolution?: string;
 }
 
+export function normalizeRequestedPixelSize(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
 export function buildDescriptorImageRequestFields(
   input: DescriptorImageRequestFieldInput,
 ): DescriptorImageRequestFields {

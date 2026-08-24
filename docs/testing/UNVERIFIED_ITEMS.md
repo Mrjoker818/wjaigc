@@ -1267,3 +1267,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 透明 PNG `n=2` | 未验证 | 只提交一次 Pear `gpt-image-2 / 1:1 / 1K / transparent / PNG / x2`，取得两个唯一 taskId、第一张早于第二张回填、两份 PNG Alpha 像素证据。 |
 | 透明生成账务 | 未验证 | 新增交易恰好两笔图像生成扣费，余额和累计使用量变化等于成本之和；无隐藏 RemoveBG、重复任务或额外扣费。 |
 | 能力矩阵、视频与非法请求 | 未验证 | 管理员持久化、普通用户五入口、真实视频和 `MODEL_CAPABILITY_MISMATCH` 零副作用仍按原表闭环。 |
+
+## 2026-08-24 S4-BUG-017 修复后的云端剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| Coze 旧候选健康 | 已验证 | `3c8fd1ca` 构建退出码 0、5000 与根路由/鉴权接口 200，`stable` 未触碰。该证据不能继承给尚未提交的新修复。 |
+| S4-BUG-017 本地修复 | 已验证 | 两个 RED 后完成最小归一化；聚焦 `19/19`、全仓 `3423/3423`、严格 TypeScript、零错误 Lint 与 `116/116` 构建通过。 |
+| 新候选 Coze exact SHA | 未验证 | 提交并推送后由现有 Google Chrome 项目页拉取，核对运行树、构建树与 GitHub 一致；不得触碰 `stable`。 |
+| 透明 PNG `n=2` | 未验证 | 只提交一次 Pear `gpt-image-2 / 1:1 / 1K / transparent / PNG / x2`，取得两个唯一 taskId、第一张早于第二张回填和两份真实 Alpha 证据。 |
+| 透明生成账务 | 未验证 | 恰好两笔生图扣费，余额及累计使用量变化匹配两笔成本；无隐藏 RemoveBG、重复任务或重复退款。 |
+| PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 116 tests` 因未配置隔离测试库跳过，继续不得计为通过。 |

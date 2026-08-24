@@ -63,6 +63,7 @@ import { planImageOutputFanout } from '@/lib/task-core/image-output-fanout';
 import {
   applyDescriptorApprovedImageFields,
   buildDescriptorImageRequestFields,
+  normalizeRequestedPixelSize,
 } from '@/lib/task-core/descriptor-image-request-fields';
 import {
   ModelCapabilityError,
@@ -253,6 +254,7 @@ export async function POST(request: NextRequest) {
     const resolutionTier: string | undefined = typeof resolution === 'string'
       ? resolution
       : undefined;
+    const normalizedRequestedPixelSize = normalizeRequestedPixelSize(requestedPixelSize);
     // 诊断日志：显示接收到的参考图参数
     console.log(`[generate] model=${rawModel}, providerId=${providerId}, referenceImages.length=${referenceImages?.length || 0}, referenceMode=${referenceMode}`);
     // 必填参数校验
@@ -260,9 +262,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '请输入创意描述（prompt）' }, { status: 400 });
     }
     // 尺寸校验（允许像素格式 1024x1024 和宽高比格式 1:1 / 16:9）
-    if (requestedPixelSize && requestedPixelSize !== 'auto'
-      && !/^\d+x\d+$/.test(requestedPixelSize)
-      && !/^\d+:\d+$/.test(requestedPixelSize)) {
+    if (normalizedRequestedPixelSize && normalizedRequestedPixelSize !== 'auto'
+      && !/^\d+x\d+$/.test(normalizedRequestedPixelSize)
+      && !/^\d+:\d+$/.test(normalizedRequestedPixelSize)) {
       return NextResponse.json({ success: false, error: '尺寸格式无效，应为 宽x高（如 1024x1024）或比例格式（如 1:1）' }, { status: 400 });
     }
     // 参考图URL校验（过滤空字符串元素，避免前端删除后残留空元素）
@@ -456,7 +458,7 @@ export async function POST(request: NextRequest) {
     const requestedTaskModelSelection = {
       operation: accessibleReferenceImages.length > 0 ? 'image-to-image' as const : 'text-to-image' as const,
       aspectRatio,
-      size: typeof requestedPixelSize === 'string' ? requestedPixelSize : undefined,
+      size: normalizedRequestedPixelSize,
       quality: requestedQuality,
       outputCount: normalizedRequestedOutputCount,
       referenceImageCount: accessibleReferenceImages.length,
@@ -543,7 +545,7 @@ export async function POST(request: NextRequest) {
       const submissionPayload: Record<string, unknown> = {
         prompt,
         aspectRatio,
-        size: requestedPixelSize,
+        size: normalizedRequestedPixelSize,
         referenceImages: accessibleReferenceImages,
         referenceMode,
         referenceCategories,
@@ -1104,7 +1106,7 @@ export async function POST(request: NextRequest) {
       const requestDigest = createHash('sha256').update(JSON.stringify({
         prompt,
         aspectRatio,
-        size: requestedPixelSize,
+        size: normalizedRequestedPixelSize,
         referenceImages: accessibleReferenceImages,
         referenceMode,
         referenceCategories,
@@ -1147,7 +1149,7 @@ export async function POST(request: NextRequest) {
       const submissionPayload: Record<string, unknown> = {
         prompt,
         aspectRatio,
-        size: requestedPixelSize,
+        size: normalizedRequestedPixelSize,
         referenceImages: accessibleReferenceImages,
         referenceMode,
         referenceCategories,
@@ -1750,18 +1752,16 @@ export async function POST(request: NextRequest) {
 
       const descriptorRequestFields = buildDescriptorImageRequestFields({
         aspectRatio: requestedSize,
-        requestedPixelSize: typeof requestedPixelSize === 'string'
-          ? requestedPixelSize
-          : undefined,
+        requestedPixelSize: normalizedRequestedPixelSize,
         quality,
         resolution: resolutionTier,
         sizeFormat: profile.sizeFormat,
       });
       const effectiveSize = descriptorRequestFields.size;
-      const calculatedPixelSize = requestedPixelSize
+      const calculatedPixelSize = normalizedRequestedPixelSize
         ? undefined
         : calculateActualPixelsFromRatio(effectiveSize, quality || '', currentModelConfig.modelId);
-      const pixelSize = descriptorRequestFields.sizePx || requestedPixelSize || calculatedPixelSize;
+      const pixelSize = descriptorRequestFields.sizePx || normalizedRequestedPixelSize || calculatedPixelSize;
       const finalSize = descriptorRequestFields.size;
 
       const requestBody: Record<string, unknown> = {
@@ -2133,7 +2133,7 @@ export async function POST(request: NextRequest) {
         height: adjustedBody.height || undefined,
         size_px: adjustedBody.size_px || undefined,
         aspectRatio,
-        requestedPixelSize: requestedPixelSize || undefined,
+        requestedPixelSize: normalizedRequestedPixelSize,
         paramType: currentModelConfig.paramType,
         endpoint,
         profile: profile.id,

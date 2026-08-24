@@ -2393,3 +2393,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | `main@4e99aa33` 使用既有 `isResolutionTier()` 分类：分辨率档位写入 `resolution` 并清空 `size`；像素尺寸继续保留原路径；旧版把档位放入 `quality` 的配置继续兼容。同步修正真实付费 E2E，使其进入右侧“图像生成 -> 专业创作”，而不是不含透明控件的底部“图像生成器”。 |
 | 本地回归 | 聚焦 `4 files / 32 tests` 全通过；排除用户未跟踪参考仓库后的严格 TypeScript 通过；本次文件 ESLint `0 error / 20 historical warnings`；真实付费 E2E 正确发现 2 项；Next.js 生产构建 `116/116` 通过。 |
 | 状态 | **本地已修复并推送 / 云端待拉取与真实付费复验。** 不得用修复前 400 或本地测试替代真实 Alpha、逐张回图和两笔账务证据。 |
+
+### S4-BUG-017：空白兼容尺寸被能力准入误判为显式尺寸
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 核心图像生成提交失败 |
+| 发现环境 | Coze `main@3c8fd1ca80947b1a81cd2f2356d0093ad70a8b59`，已登录 Google Chrome，PearAPI 图像 `gpt-image-2`，`1:1 / 1K / 透明 PNG / x2`，2026-08-24 |
+| 稳定复现 | Coze 精确拉取 S4-BUG-016 修复并成功构建后，使用同一专业面板参数只提交一次；前端立即提示“所选模型不支持当前参数：size”。未创建任务槽、未调用供应商、未扣费。 |
+| 预期 | 前端兼容字段 `size: ""` 应被视为未提供；模型能力准入只验证真实像素尺寸，`resolution: "1K"` 独立验证和转发。 |
+| 实际 | API 格式门禁因空字符串为假值而放行，但精确模型能力准入使用 `typeof requestedPixelSize === 'string'`，把空字符串作为显式 `size` 校验并拒绝。 |
+| 根因 | 同一请求字段在格式门禁和能力门禁使用了两套“是否提供”判断，缺少统一的可选字符串归一化边界。 |
+| RED | 新增纯函数与路由接线回归；修复前分别失败为 `normalizeRequestedPixelSize is not a function` 和准入块未使用归一化尺寸。 |
+| 最小修复 | 在描述符请求字段模块新增 `normalizeRequestedPixelSize()`；仅把非空、去空白后的字符串交给格式门禁、能力准入、持久化摘要和供应商请求构建。未放宽支持尺寸、模型授权、供应商路由、任务或扣费规则。 |
+| 本地回归 | 聚焦 `4 files / 19 tests` 通过；严格 TypeScript 通过；改动文件 ESLint `0 error / 17 historical warnings`；全仓 `526 files / 3423 tests` 通过，`20 files / 116 PostgreSQL-gated tests` 跳过；排除未跟踪只读参考仓库后的 Next.js `116/116` 生产构建通过。 |
+| 状态 | **本地已修复 / 待提交、Coze 拉取和真实付费复验。** 透明 Alpha、逐张回填、两个唯一 taskId、恰好两笔扣费与无隐藏 RemoveBG 仍未闭环。 |
