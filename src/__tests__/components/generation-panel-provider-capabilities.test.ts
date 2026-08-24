@@ -14,7 +14,8 @@ describe('generation panel provider capability wiring', () => {
     expect(source).toContain('selectedDescriptor.maxOutputs');
     expect(source).toContain('selectedDescriptor.maxReferenceImages');
     expect(source).toContain('setSelectedSize');
-    expect(source).toContain('size: selectedSize');
+    expect(source).toContain("size: isResolutionTier(selectedSize) ? '' : selectedSize");
+    expect(source).toContain('resolution: selectedResolution');
     expect(source).not.toContain('[1, 2, 3, 4].map');
     expect(source).not.toContain('const MAX_REF_IMAGES = 10');
   });

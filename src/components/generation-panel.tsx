@@ -11,7 +11,7 @@ import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
-import { QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
+import { isResolutionTier, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
 import { GenerationBackgroundControl } from '@/components/generation-background-control';
 import type { ImageBackgroundMode, ImageOutputFormat, ImageOutputPreference } from '@/lib/image-generation-output';
 import { readImageOutputPreference, writeImageOutputPreference } from '@/lib/image-generation-output-preference';
@@ -605,9 +605,13 @@ export function GenerationPanel(
           }
         }
         
+        const selectedResolution = isResolutionTier(selectedSize)
+            ? selectedSize.toUpperCase()
+            : isResolutionTier(quality) ? quality.toUpperCase() : undefined;
+
         onGenerate({
             prompt: fullPrompt,
-            size: selectedSize,
+            size: isResolutionTier(selectedSize) ? '' : selectedSize,
             referenceImages,
             referenceDescriptions,
             referenceMode: 'style',
@@ -617,9 +621,7 @@ export function GenerationPanel(
             stylePreset,
             outputCount,
             quality: qualityOptions.length > 0 ? quality : undefined,
-            resolution: qualityOptions.length > 0 && /^\d+K$/i.test(quality)
-                ? quality.toUpperCase()
-                : undefined,
+            resolution: selectedResolution,
             background: imageOutputPreference.background,
             outputFormat: imageOutputPreference.outputFormat,
             model: pureModelId,

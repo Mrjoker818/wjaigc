@@ -129,4 +129,26 @@ describe('GenerationPanel exact catalog behavior', () => {
       size: '',
     }));
   });
+
+  it('sends resolution tiers as resolution instead of an invalid pixel size', async () => {
+    const onGenerate = vi.fn();
+    catalogState.current = {
+      ...catalogState.current,
+      descriptorsByKey: new Map([['pear::gpt-image-2', {
+        ...descriptor,
+        allowedSizes: ['1K', '2K', '4K'],
+        qualityOptions: ['auto', 'low', 'medium', 'high'],
+      }]]),
+    };
+    render(<GenerationPanel onGenerate={onGenerate} />);
+    await waitFor(() => expect(screen.getByText('1K')).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText('创意描述'), { target: { value: '透明 PNG 图标' } });
+    act(() => document.dispatchEvent(new Event('trigger-generate')));
+
+    expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      size: '',
+      resolution: '1K',
+    }));
+  });
 });

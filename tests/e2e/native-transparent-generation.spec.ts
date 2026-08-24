@@ -67,7 +67,13 @@ async function loginAndOpenCanvas(page: Page): Promise<void> {
   expect((await loginResponse).ok()).toBeTruthy();
   await expect(page.getByRole('heading', { name: '我的项目', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '新建项目', exact: true }).click();
-  await expect(page.getByRole('button', { name: '图像生成器' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '图像生成', exact: true })).toBeVisible();
+}
+
+async function openProfessionalGenerationPanel(page: Page): Promise<void> {
+  await page.getByRole('button', { name: '图像生成', exact: true }).click();
+  await page.getByRole('button', { name: '专业创作', exact: true }).click();
+  await expect(page.getByRole('group', { name: '生成图片背景' })).toBeVisible();
 }
 
 async function readCredits(page: Page): Promise<CreditsSnapshot> {
@@ -114,7 +120,7 @@ test.describe('GPT Image 2 native transparent PNG', () => {
     const exactModel = model!;
     await loginAndOpenCanvas(page);
 
-    await page.getByRole('button', { name: '图像生成器' }).click();
+    await openProfessionalGenerationPanel(page);
     const modelSelect = page.locator('select').filter({
       has: page.locator(`option[value="${exactModel}"]`),
     }).first();
@@ -216,7 +222,7 @@ test.describe('GPT Image 2 native transparent PNG', () => {
         terminals.set(payload.taskId, payload);
       });
 
-      await page.getByRole('button', { name: '图像生成器' }).click();
+      await openProfessionalGenerationPanel(page);
       const modelSelect = page.locator('select').filter({
         has: page.locator(`option[value="${exactModel}"]`),
       }).first();
