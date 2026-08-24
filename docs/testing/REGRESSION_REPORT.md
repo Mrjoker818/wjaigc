@@ -1567,3 +1567,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 生产构建生成 `116/116` 页面与路由；保护基线先阻断 41 条累计认证/能力源码漂移，逐文件核对来源提交后合同 `7/7`、保护门禁 `38/38` 且 0 warning/0 blocker；没有目录级授权。
 - Playwright 能识别 15 个三浏览器用例；启动本地服务后执行 Chromium/Firefox/WebKit，因缺少真实登录凭据共 9 项明确跳过。付费测试还要求 `E2E_ENABLE_PAID_GENERATION`，未以 Mock 冒充真实成功。
  - **结论：本地静态、自动化与本项 PostgreSQL 候选通过，但 V588-PROVIDER-005 发布验收仍不通过。** 阻塞项是三浏览器真实账号五入口、真实同名模型跨供应商、付费图像/视频、非法请求零扣费和 Coze exact-SHA 证据。
+
+## 2026-08-24 原生透明 PNG 与 V588-PROVIDER-005 联合集成回归
+
+- `feat/native-transparent-generation` 已进入 `main@36a986fcb74b2d16313a349600a4022c71b482e0`；`V588-PROVIDER-005` 在该基线上重新集成为候选 `93253e6f981a2c6cc4403c9c5615e7044c7db62e`，没有用旧候选覆盖透明输出链路。
+- 联合专项覆盖服务端透明输出规范化、逐图 Alpha 校验、能力准入、管理员能力编辑和五类消费端，结果为 `126 passed / 1 PostgreSQL-gated skipped / 0 failed`。
+- 全仓 Vitest 为 `3419 passed / 116 PostgreSQL-gated skipped / 0 failed`；TypeScript、Doctor、ESLint `0 errors / 970 historical warnings`、Next.js `116/116` 构建、保护基线 `38/38` 和 `git diff --check` 通过。
+- PostgreSQL 跳过项未计为通过；真实 GPT Image 2、真实视频、积分与供应商任务均未在本地伪造。
+- **结论：本地代码集成与自动化回归通过，云端验收未完成。** 只有 Coze exact-SHA、真实 Alpha 文件、五入口能力一致性、真实付费任务及零副作用拒绝均取得证据后，才能把专项改为通过。

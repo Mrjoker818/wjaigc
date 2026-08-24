@@ -1296,3 +1296,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 未形成 Coze exact-SHA、管理员重启持久化、五入口、稳定域名、Console、Network、Trace 与截图证据。
 
  只有 Task 12 全部证据闭环且 P0/P1 为 0，才可把本项改为“通过”。
+
+## 2026-08-24 原生透明 PNG 与能力矩阵合并发布判定
+
+- 原生透明 PNG 已先进入 `main@36a986fcb74b2d16313a349600a4022c71b482e0`，随后把 `V588-PROVIDER-005` 重放并解决冲突，当前本地候选为 `93253e6f981a2c6cc4403c9c5615e7044c7db62e`。透明字段、Alpha 验证、精确供应商模型路由和能力准入同时存在。
+- 新鲜本地证据：联合专项 `126/126`（另 1 项 PostgreSQL 环境跳过），全仓 `3419 passed / 116 PostgreSQL-gated skipped / 0 failed`，TypeScript、Doctor、零错误 Lint、`116/116` 构建和保护门禁通过。
+- `origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 均未变化。
+- **发布判定：有条件通过，仅允许普通快进进入 `main` 作为云端验收候选。** Coze exact-SHA、管理员保存/重启、普通用户五入口、真实 GPT Image 2 Alpha、真实图像/视频、单次扣费和非法请求零副作用仍是阻塞项；本地通过不等于云端专项通过。

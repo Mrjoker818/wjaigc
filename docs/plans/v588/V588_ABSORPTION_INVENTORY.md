@@ -273,3 +273,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 全仓 Vitest 共 `507` 个文件、`3180` 项测试，其中 `489` 个文件、`3075` 项通过；`18` 个文件、`105` 项 PostgreSQL 专项因缺少 `POSTGRES_TEST_DATABASE_URL` 明确跳过，不计为通过。TypeScript、构建 `116/116`、保护基线 `38/38`、空白检查通过；ESLint 为 `0 errors / 987` 条历史 warning。
 - 本地生产 E2E 环境没有真实登录凭据与 PostgreSQL，测试在业务动作前明确跳过；浏览器布局、动作与错误零基线必须由 Coze 云端关闭。
 - **状态：本地候选、独立审查与 GitHub main 推送通过 / 云端待验。** 实现候选已普通快进到 `main@be96c59d2d4dec6bbe510c3b7fd0de59ef092e0b`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与 donor 保持只读。Google Chrome 能列出正确的现有项目页和预览页，但接管任一标签连续超时，因此 Coze 拉取、运行健康和浏览器矩阵仍未验证，V588-UI-004 不标记为已吸收。云端闭环后先处理上述 P0/P1 稳定性项，再继续移动端、媒体网关与协作吸收。
+
+## 2026-08-24 V588-PROVIDER-005 与原生透明 PNG 集成检查点
+
+- `feat/native-transparent-generation` 的功能提交已进入 `main@36a986fcb74b2d16313a349600a4022c71b482e0`，临时功能分支已在完成合并后清理；透明请求规范化、PNG 输出约束和逐图 Alpha 校验均保留。
+- `V588-PROVIDER-005` 基于上述最新 `main` 重新集成，候选为 `93253e6f981a2c6cc4403c9c5615e7044c7db62e`。图像、参考图组、融图组、节点、视频和 Agent 继续使用精确 `providerId + modelId` 能力目录，未恢复模型名猜测。
+- 联合专项回归为 `126 passed / 1 PostgreSQL-gated skipped / 0 failed`；全仓为 `3419 passed / 116 PostgreSQL-gated skipped / 0 failed`。TypeScript、ESLint（`0 errors / 970` 条历史 warning）、Next.js `116/116` 构建、Doctor、保护基线 `38/38` 和空白检查均通过。
+- Windows 保护门禁的 166 个精确路径已迁移到 JSON 清单，避免命令行长度上限；保护范围没有扩大为目录级授权。
+- donor 只读基线保持 `1126` 个 `src` 文件、`11549563` 字节，锁文件 SHA-256 为 `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- **状态：本地集成候选通过，尚未标记吸收。** 关闭条件仍是 Coze 拉取最终 exact SHA，在现有 Google Chrome 标签完成管理员能力持久化、普通用户五入口、真实图像/视频、非法参数零扣费，以及 GPT Image 2 透明 PNG Alpha 与单次扣费验证。
