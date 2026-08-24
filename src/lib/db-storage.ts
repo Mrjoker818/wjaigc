@@ -455,7 +455,7 @@ export async function dbUpsertApiProvider(provider: DbApiProvider): Promise<bool
     `, [
       provider.id, provider.name, provider.display_name, provider.base_url,
       provider.api_key, provider.is_enabled, provider.type, provider.model_type,
-      provider.request_style, JSON.stringify(provider.selected_models),
+      provider.request_style, provider.selected_models,
       JSON.stringify(provider.advanced_params), provider.is_default,
       provider.created_at, provider.updated_at,
       provider.connection_status || null,

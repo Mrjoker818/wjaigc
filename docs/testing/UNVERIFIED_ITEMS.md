@@ -1214,7 +1214,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 | 项目 | 状态 | 完成条件 |
 |---|---|---|
-| 隔离 PostgreSQL 能力往返 | 阻塞 / 未验证 | 设置一次性 `POSTGRES_TEST_DATABASE_URL`，验证两个供应商并发更新、重读、能力 JSON 与 `compatProfile/customHeader` 保留。当前对应测试为 1 项跳过。 |
+| 隔离 PostgreSQL 能力往返 | 已验证 | PostgreSQL 18 一次性隔离集群 `1/1` 通过，覆盖两个供应商并发更新、重读、能力 JSON 与 `compatProfile/customHeader` 保留。 |
 | 真实登录三浏览器 | 阻塞 / 未验证 | 提供隔离 `E2E_TEST_USERNAME`、`E2E_TEST_PASSWORD`，在 Chromium、Firefox、WebKit 执行生成面板、参考图组、融图组、节点和视频入口；当前运行 9 项跳过。 |
 | 同名模型跨供应商差异 | 未验证 | 真实目录中找到相同 modelId、不同 providerId 且能力不同的模型对，逐入口证明比例、尺寸、质量、数量、时长和模式不串用。 |
 | 管理员能力持久化 | 未验证 | 在 Coze 修改一个非破坏性字段，保存、刷新、重启后保持，再恢复原值；不得修改 API Key 或删除供应商。 |

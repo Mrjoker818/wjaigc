@@ -1290,7 +1290,7 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 
 仍阻止发布的证据缺口：
 
-- 未提供 `POSTGRES_TEST_DATABASE_URL`，能力并发持久化及全仓 PostgreSQL 门禁存在真实跳过。
+- 本项能力并发持久化已在一次性 PostgreSQL 18 隔离集群 `1/1` 通过；全仓其他 PostgreSQL 专项的默认跳过仍保持独立未验证，不能由本项替代。
 - 未提供本地真实登录凭据，Chromium/Firefox/WebKit 的能力 E2E 共 9 项跳过。
 - 未执行真实付费图像、视频、一次扣费、非法请求零扣费和任务终态核验。
 - 未形成 Coze exact-SHA、管理员重启持久化、五入口、稳定域名、Console、Network、Trace 与截图证据。

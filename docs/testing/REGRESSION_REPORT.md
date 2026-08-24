@@ -1557,7 +1557,8 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 ## 2026-08-24 V588-PROVIDER-005 Task 11 本地回归
 
 - 统一能力目录已覆盖精确 `providerId + modelId`、管理员结构化编辑、图像/参考图组/融图组/节点/视频消费端，以及图像和视频的扣费前准入。
-- 配置持久化 RED 稳定复现“更新 A 会写回 B”的陈旧快照问题；最小修复后能力单测 `7/7`。真实 PostgreSQL 用例已建立，但因未配置 `POSTGRES_TEST_DATABASE_URL` 明确跳过，不能计为通过。
+- 配置持久化 RED 稳定复现“更新 A 会写回 B”的陈旧快照问题；最小修复后能力单测 `7/7`。
+- 随后用 PostgreSQL 18 一次性隔离集群执行真实往返。首轮先发现测试缺少 `server-only` 装配；修正后第二轮发现生产代码把 JSON 数组写入 `TEXT[]`，返回 PostgreSQL `22P02`。仅改为由 `pg` 直接编码字符串数组后，同一真实并发测试 `1/1` 通过；临时数据库服务已停止。
 - Task 10 架构拆分后，全量首次暴露 4 个旧测试契约：3 个仍把下游图像能力要求在 Agent 编排聊天模型上，1 个仍按裸模型名推断批注能力。修正测试夹具与源码合同后聚焦 `47/47`，未放宽生产授权。
 - `pnpm doctor`、`pnpm ts-check`、`pnpm lint` 均退出 0；ESLint 为 `0 error / 970` 条历史 warning。
 - `pnpm test`：`516` 文件通过、`3372` 项通过；`20` 文件、`116` 项跳过。
@@ -1565,4 +1566,4 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `pnpm test:regression`：`361` 文件通过、`2407` 项通过；`3` 文件、`9` 项 PostgreSQL 测试跳过。
 - 生产构建生成 `116/116` 页面与路由；保护基线先阻断 41 条累计认证/能力源码漂移，逐文件核对来源提交后合同 `7/7`、保护门禁 `38/38` 且 0 warning/0 blocker；没有目录级授权。
 - Playwright 能识别 15 个三浏览器用例；启动本地服务后执行 Chromium/Firefox/WebKit，因缺少真实登录凭据共 9 项明确跳过。付费测试还要求 `E2E_ENABLE_PAID_GENERATION`，未以 Mock 冒充真实成功。
- - **结论：本地静态与自动化候选通过，但 V588-PROVIDER-005 发布验收不通过。** 阻塞项是隔离 PostgreSQL、真实账号五入口、真实同名模型跨供应商、付费图像/视频、非法请求零扣费和 Coze exact-SHA 证据。
+ - **结论：本地静态、自动化与本项 PostgreSQL 候选通过，但 V588-PROVIDER-005 发布验收仍不通过。** 阻塞项是三浏览器真实账号五入口、真实同名模型跨供应商、付费图像/视频、非法请求零扣费和 Coze exact-SHA 证据。

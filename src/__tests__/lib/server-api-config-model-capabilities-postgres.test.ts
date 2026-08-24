@@ -2,9 +2,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { withIsolatedPostgres } from '../../../tests/helpers/postgres-test-database';
+
+vi.mock('server-only', () => ({}));
 
 const hasIsolatedPostgres = Boolean(process.env.POSTGRES_TEST_DATABASE_URL?.trim());
 const postgresIt = hasIsolatedPostgres ? it : it.skip;

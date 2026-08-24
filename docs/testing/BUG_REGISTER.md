@@ -2364,4 +2364,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 根因 | `updateApiProvider()` 把读取时的整份配置作为后续数据库写回来源，形成跨供应商陈旧快照覆盖。 |
 | 最小修复 | 新增单行 `persistProviderToDb()` 与独立文件备份写入；普通更新只写目标行，默认切换只写目标行和默认状态实际变化的行。未修改 API Key、模型授权、任务、扣费或供应商调用。 |
 | TDD 与回归 | RED：能力持久化新用例预期一次写入、实际两次；GREEN：该文件 `7/7`。Agent/节点旧契约修正后 `47/47`。全仓 `516 files / 3372 tests` 通过，`20 files / 116 tests` 因隔离 PostgreSQL 缺失而跳过。 |
-| 状态 | **本地已修复 / 发布阻塞。** 真实 PostgreSQL 并发往返、三浏览器真实账号 E2E 与付费图像/视频链路仍未执行。 |
+| PostgreSQL 回归 | 使用本机 PostgreSQL 18 二进制启动一次性 `trust` 隔离集群，真实 schema 往返与两个供应商并发更新 `1/1` 通过；测试后服务已停止。 |
+| 状态 | **本地已修复并通过真实 PostgreSQL。** 三浏览器真实账号 E2E 与付费图像/视频链路仍未执行。 |
+
+### V588-PROVIDER-005-BUG-002：供应商模型数组按 JSON 写入 PostgreSQL TEXT[] 导致保存失败
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 管理员供应商保存与模型目录持久化 |
+| 稳定复现 | PostgreSQL 18 隔离库调用 `dbUpsertApiProvider()` 保存 `selected_models: ['shared-image-model']`，数据库返回 `22P02 malformed array literal: ["shared-image-model"]`。 |
+| 根因 | 表字段 `selected_models` 为 `TEXT[]`，旧代码却对数组执行 `JSON.stringify()`；JSON 数组不是 PostgreSQL 数组字面量。 |
+| RED | Task 11 真实 PostgreSQL 用例穿过 `server-only` 测试边界后稳定失败，供应商写入返回 `false`。 |
+| 最小修复 | 将字符串数组直接传给 `pg`，由驱动编码为 `TEXT[]`；JSONB 的 `advanced_params` 与 `discovered_models` 保持原实现。未修改表结构或迁移数据。 |
+| GREEN | 同一 PostgreSQL 18 隔离集群重跑 `1/1` 通过，两个供应商能力、`compatProfile` 和 `customHeader` 均完成并发写入与重读。 |
+| 状态 | **本地已修复 / 真实 PostgreSQL 已验证 / 云端待验。** |
