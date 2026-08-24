@@ -2446,5 +2446,6 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 根因 | 视频轮询响应使用 `videoUrl/imageUrl`，主画布却从 `thumbnailUrl || url` 读取封面并把空 `url` 判为媒体缺失；项目读取器和画布适配器也未把“存在有效 `videoUrl`、没有封面”视为可用视频。恢复逻辑只回写图片 `url`，不能修复视频 `videoUrl`。 |
 | RED | 首轮新增无缩略图完成态、项目读取、视频渲染、轮询缩略图传播、工作区归一化和恢复字段合同，共 7 项稳定失败；首轮独立审查后又以 8 项 RED 锁定 Asset V3 视频水合、旧项目迁移主媒体 URL、完成态缩略图捷径、恢复轮询和无海报卡片；最终复审再以 4 项 RED 锁定无 `mediaType` 旧视频、持久化字段同步和坏海报降级。 |
 | 最小修复 | 建立统一视频完成态归一化器；视频文件永不冒充图片封面；有效 `videoUrl` 直接进入 `video` 渲染决策；轮询/持久化保留可选 `videoThumbnailUrl`；视频恢复回写 `videoUrl`；Asset V3 读取资产 `kind` 并分别恢复视频文件与海报；旧项目读取与迁移均从 `videoUrl` 推断视频；后台持久化原子更新视频与海报字段；坏海报自动清除并降级到真实 `<video>`。未修改供应商路由、模型能力、定价、扣费或退款语义。 |
-| 本地回归 | 最终新增聚焦 `42/42`，扩展视频回归 `87/87`；严格 TypeScript 与零错误 Lint 通过；全仓 `528 files / 3445 tests` 通过，`20 files / 117 PostgreSQL-gated tests` 跳过；Next.js 生产构建退出码 0，生成 `116/116` 页面/路由。 |
-| 状态 | **本地已修复 / 云端待拉取复验。** 必须在新 exact SHA 上证明历史卡片或新任务可播放、刷新保持、下载成功、仍只有一次扣费，才能关闭。 |
+| 本地回归 | 完成态修复聚焦 `42/42`、扩展视频回归 `87/87`。云端预验随后稳定复现播放浮层被画布指针捕获的问题，新增 RED 后以 `onPointerDown` 隔离完成最小修复；最终全仓 `528 files / 3446 tests` 通过，`20 files / 117 PostgreSQL-gated tests` 跳过；严格 TypeScript、零错误 Lint 和 Next.js `116/116` 生产构建通过。 |
+| 云端预验 | `main@ebf611ea` 已证明历史 5 秒视频真实 URL 可加载、`readyState=4`、无媒体错误、无 `MEDIA_UNAVAILABLE`；但播放浮层点击无状态变化。根因是画布根节点在 `pointerdown` 时捕获指针，导致浮层 `click` 被重定向。修复提交为 `main@fb6741853272b43a4e36e046511900f031ab758f`。 |
+| 状态 | **媒体恢复已取得云端正向证据；播放修复已本地闭环并推送，云端最终验收待执行。** 必须在 `fb674185` 上证明播放时间推进、刷新/重开保持、下载成功且无重复扣费，才能关闭。 |

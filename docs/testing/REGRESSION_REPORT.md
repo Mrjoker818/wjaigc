@@ -1633,3 +1633,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 首轮 RED 共 7 项；首轮独立代码审查后再新增 8 项 RED，覆盖 Asset V3 视频类型水合、旧项目迁移主媒体 URL、完成态缩略图捷径、恢复轮询和无海报可播放卡片。最终复审又稳定复现无 `mediaType` 旧视频、持久化地址不同步和坏海报不降级 3 个边界，并以 4 项 RED 固化。
 - 最终聚焦 `42/42`、扩展视频回归 `87/87`；全仓 Vitest `528 files / 3445 tests` 通过，`20 files / 117 tests` 因缺少 `POSTGRES_TEST_DATABASE_URL` 跳过；TypeScript、Lint `0 errors / 970 historical warnings`、`git diff --check` 与 Next.js `116/116` 生产构建通过。
 - 当前只能判定“本地回归通过”。Coze 拉取新 exact SHA 后仍须证明真实视频可播放、刷新恢复、下载成功及一次扣费；旧部署失败证据不能替代修复后云端通过。
+
+## 2026-08-25 S4-BUG-018 播放交互补充回归
+
+- Coze `main@ebf611ea` 的历史 5 秒视频已真实恢复为 `<video>`：媒体 URL 可访问，`readyState=4`、`duration=5`、`error=null`，页面不存在 `MEDIA_UNAVAILABLE`。该证据关闭“视频被当作缺失媒体”的展示分支，但不自动证明播放交互通过。
+- Google Chrome 稳定复现可见播放浮层点击后 `playingVideoId` 不变化。事件追踪确认画布根节点在浮层 `pointerdown` 时启动图片拖动并捕获指针，后续 `click` 被重定向到画布；视频浮层缺少其他工具按钮已有的指针隔离。
+- 新增回归先 RED，随后仅在播放浮层增加 `onPointerDown={(e) => e.stopPropagation()}`，提交并推送 `main@fb6741853272b43a4e36e046511900f031ab758f`。没有改动视频 URL、供应商、能力、任务、扣费或图片拖动逻辑。
+- 聚焦画布/视频矩阵 `47/47`；最终全仓 `528 files / 3446 tests` 通过，`20 files / 117 tests` 因缺少完整 `POSTGRES_TEST_DATABASE_URL` 跳过；TypeScript、改动文件零错误 Lint、Next.js `116/116` 构建和 `git diff --check` 通过。
+- **结论：本地回归通过 / 云端最终验收待执行。** Coze 尚未拉取 `fb674185`；Chrome 扩展仍可枚举正确“用户1”的现有项目页和预览页，但旧控制会话占用导致接管超时。不得把本地结果或 `ebf611ea` 的静态媒体加载结果扩大为播放、下载和账务通过。
