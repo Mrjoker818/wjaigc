@@ -28,7 +28,9 @@ describe('image generation provider-model mismatch contract', () => {
   });
 
   it('never builds or retries cross-provider candidates for an explicit provider request', () => {
-    expect(source).toContain('if (!effectiveProviderId) {\n      for (const p of allImageProviders)');
+    expect(source).toMatch(
+      /if \(!effectiveProviderId\)\s*{\s*for \(const p of allImageProviders\)/,
+    );
     expect(source).toContain('if (!strictAgentRouting && !effectiveProviderId && !submitted && isRetryable');
   });
 });
