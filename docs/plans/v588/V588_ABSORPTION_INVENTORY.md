@@ -302,3 +302,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Coze `a2705680` 的 Pear `gpt-image-2` 透明 PNG `n=2` 已完成两个独立任务、逐张回填、两份 Alpha 字节和恰好两笔扣费验证；原生透明输出子项可标记为已云端吸收。
 - 管理员能力保存发现历史 JSONB 表兼容缺陷。`d56844b4` 仅增加 `selected_models` 双结构编码与失败传播，已通过真实 PostgreSQL 18、全仓测试、TypeScript、Lint、构建和保护门禁。
 - **V588-PROVIDER-005 整体仍未吸收。** 下一唯一动作是部署新 main，完成管理员保存/刷新/重启/恢复原值；随后继续普通用户五入口、非法能力零副作用与真实视频，不能跳到新的 donor 功能。
+
+## 2026-08-24 视频完成态修复后的唯一继续点
+
+- 当前本地与 GitHub 精确为 `main@97634feb31d0429579c6f43b8f949bf0e540507e`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读且未变化。
+- `S4-BUG-018` 已完成失败测试、最小修复、两轮边界补强和独立复审。本地聚焦 `42/42`、视频扩展回归 `87/87`、全仓 `3445` 项测试、TypeScript、零错误 Lint 与 Next.js `116/116` 构建通过；`117` 项 PostgreSQL 门禁因未配置完整隔离库继续明确标记为未验证。
+- V5.8.8 donor 再次只读核验：`src` 为 `1126` 个文件、`11549563` 字节，`pnpm-lock.yaml` SHA-256 仍为 `cc9e5e848bdb4cec6aeb394b086f8fe3015be9888787d350815c8b06b62f00e0`，没有重新定义或扩大吸收范围。
+- 当前 Coze 预览公开请求返回 `404 instance_not_found`；Google Chrome 能枚举原有项目页和预览页，但接管两个标签均超时。该环境事实不能解释为代码失败，也不能作为云端通过证据。
+- **下一唯一动作保持不变：** 恢复现有 Coze 沙箱，拉取精确 `97634feb`，只使用 PearAPI 或 APIMART 验证视频可播放、刷新/重开保持、非空下载和单次扣费；随后完成普通用户五入口及非法能力零副作用。上述 Stage 4 门禁关闭前，不开始新的 V5.8.8 donor 功能吸收，也不重复管理员能力持久化或透明 PNG `n=2` 已通过项目。
