@@ -296,3 +296,9 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 新增真实 E2E 永久合同要求透明 `n=2` 生成拥有两个不同任务、逐张回填、每张独立 Alpha 字节验证和恰好两笔扣费；本地全仓为 `526 files / 3420 tests passed`，`20 files / 116 PostgreSQL-gated tests skipped`，Doctor、TypeScript、零错误 Lint 与生产构建通过。
 - 当前 Coze 预览返回 `404 instance_not_found`，现有 Chrome 标签可枚举但页面动作超时；因此新 SHA 的云端运行和业务验收均未成立。
 - **吸收状态保持未完成。** 先恢复沙箱并在 `4711501b` 上关闭 Stage 4 真实 Alpha、逐张回填、任务终态和账务；完成前不进入新的 V5.8.8 donor 吸收项。
+
+## 2026-08-24 Stage 4 透明生成关闭与能力持久化检查点
+
+- Coze `a2705680` 的 Pear `gpt-image-2` 透明 PNG `n=2` 已完成两个独立任务、逐张回填、两份 Alpha 字节和恰好两笔扣费验证；原生透明输出子项可标记为已云端吸收。
+- 管理员能力保存发现历史 JSONB 表兼容缺陷。`d56844b4` 仅增加 `selected_models` 双结构编码与失败传播，已通过真实 PostgreSQL 18、全仓测试、TypeScript、Lint、构建和保护门禁。
+- **V588-PROVIDER-005 整体仍未吸收。** 下一唯一动作是部署新 main，完成管理员保存/刷新/重启/恢复原值；随后继续普通用户五入口、非法能力零副作用与真实视频，不能跳到新的 donor 功能。

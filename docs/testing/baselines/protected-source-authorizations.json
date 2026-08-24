@@ -71,6 +71,7 @@
     { "path": "src/lib/auth/auth-secret-ring.ts", "sourceCommit": "865559d3" },
     { "path": "src/lib/db-client.ts", "sourceCommit": "608ae930" },
     { "path": "src/lib/db-storage.ts", "sourceCommit": "b0cd946f" },
+    { "path": "src/lib/api-provider-selected-models-storage.ts", "sourceCommit": "d56844b4" },
     { "path": "src/lib/font-design-task-store.ts", "sourceCommit": "27d16726" },
     { "path": "src/lib/generated-image-alpha.ts", "sourceCommit": "536882aa" },
     { "path": "src/lib/image-generation-output-preference.ts", "sourceCommit": "d7ffe827" },

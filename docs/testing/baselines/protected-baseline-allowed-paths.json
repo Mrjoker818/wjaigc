@@ -141,6 +141,7 @@
   "src/lib/auth/auth-secret-ring.ts",
   "src/lib/db-client.ts",
   "src/lib/db-storage.ts",
+  "src/lib/api-provider-selected-models-storage.ts",
   "src/lib/operation-audit.ts",
   "src/lib/server-api-config.ts",
   "src/lib/server-auth.ts",

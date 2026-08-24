@@ -1,0 +1,93 @@
+{
+  "date": "2026-08-24",
+  "baselineCommit": "a2705680c9f41e9153782bafe4455f304491ede8",
+  "fixCommit": "d56844b499cf35bf16710619e5faa681a65627da",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "transparentGeneration": {
+    "status": "verified-in-cloud",
+    "providerId": "api_1780630178347_rjqlmam",
+    "provider": "PearAPI 图像",
+    "model": "gpt-image-2",
+    "request": {
+      "aspectRatio": "1:1",
+      "resolution": "1K",
+      "background": "transparent",
+      "outputFormat": "png",
+      "count": 2
+    },
+    "batchId": "batch-1787566552227-smxcmm",
+    "taskIds": [
+      "async-1787566552227-0-brzmqh",
+      "async-1787566552227-1-t6cmzu"
+    ],
+    "progressiveReturnObserved": true,
+    "billing": {
+      "balanceBefore": 273,
+      "balanceAfter": 153,
+      "usedBefore": 3547,
+      "usedAfter": 3667,
+      "newTransactions": 2,
+      "creditsPerTransaction": 60,
+      "hiddenRemoveBgTransactions": 0
+    },
+    "outputs": [
+      {
+        "file": "stage4-transparent-n2-20260824/slot-1.png",
+        "width": 1254,
+        "height": 1254,
+        "minAlpha": 0,
+        "maxAlpha": 255,
+        "transparentPixels": 990672,
+        "partialAlphaPixels": 581463,
+        "opaquePixels": 381,
+        "sha256": "3490a3e188bf60c13274e61095fff294c9a51705efec15705eaf89e5822a0098"
+      },
+      {
+        "file": "stage4-transparent-n2-20260824/slot-2.png",
+        "width": 1254,
+        "height": 1254,
+        "minAlpha": 0,
+        "maxAlpha": 255,
+        "transparentPixels": 1032337,
+        "partialAlphaPixels": 539899,
+        "opaquePixels": 280,
+        "sha256": "573cb06a40bd403015ce51cbba8c0f83a172de7a7e681b2cfbaf915b3648d72c"
+      }
+    ]
+  },
+  "providerCapabilityPersistence": {
+    "status": "fixed-locally-cloud-recheck-required",
+    "providerId": "api_1782185653250_5i3bdx2",
+    "model": "gpt-image-2",
+    "reproductionCount": 3,
+    "cloudSqlState": "22P02",
+    "rootCause": "Historical selected_models JSONB columns received PostgreSQL array literals, and the failed authoritative write was swallowed while the API returned success.",
+    "localPostgres": {
+      "version": 18,
+      "textArraySchemaTests": 1,
+      "historicalJsonbSchemaTests": 1,
+      "passed": 2
+    },
+    "focusedTests": {
+      "files": 3,
+      "passed": 12,
+      "failed": 0
+    },
+    "fullTests": {
+      "filesPassed": 527,
+      "filesSkipped": 20,
+      "testsPassed": 3426,
+      "testsSkipped": 117,
+      "failed": 0
+    },
+    "productionBuild": {
+      "exitCode": 0,
+      "routes": 116
+    },
+    "lint": {
+      "exitCode": 0,
+      "errors": 0,
+      "historicalWarnings": 970
+    }
+  }
+}

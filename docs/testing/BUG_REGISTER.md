@@ -2408,3 +2408,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | 在描述符请求字段模块新增 `normalizeRequestedPixelSize()`；仅把非空、去空白后的字符串交给格式门禁、能力准入、持久化摘要和供应商请求构建。未放宽支持尺寸、模型授权、供应商路由、任务或扣费规则。 |
 | 本地回归 | 聚焦 `4 files / 19 tests` 通过；严格 TypeScript 通过；改动文件 ESLint `0 error / 17 historical warnings`；全仓 `526 files / 3423 tests` 通过，`20 files / 116 PostgreSQL-gated tests` 跳过；排除未跟踪只读参考仓库后的 Next.js `116/116` 生产构建通过。 |
 | 状态 | **本地已修复 / 待提交、Coze 拉取和真实付费复验。** 透明 Alpha、逐张回填、两个唯一 taskId、恰好两笔扣费与无隐藏 RemoveBG 仍未闭环。 |
+
+### V588-PROVIDER-005-BUG-003：历史 JSONB 供应商表保存能力时假成功
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 管理员供应商配置持久化与模型能力一致性 |
+| 发现环境 | Coze `main@a2705680c9f41e9153782bafe4455f304491ede8`，管理员 API 管理，2026-08-24 |
+| 稳定复现 | 在已禁用的“虚宝图像”供应商中把 `gpt-image-2` 最大输出数改为 3 并保存，共复现 3 次。POST 返回 `success:true`，但紧随其后的 GET 和刷新均恢复为空。 |
+| 真实错误 | 云端 PostgreSQL 三次记录 SQLSTATE `22P02`：`invalid input syntax for type json`，详情为 `Expected ":", but found "}"`。 |
+| 根因 | 新表的 `selected_models` 是 `TEXT[]`，历史云端表是 `JSONB`；把 JavaScript 数组直接交给 `pg` 时会编码为 PostgreSQL 数组字面量，历史 JSONB 无法解析。`dbUpsertApiProvider()` 返回 `false` 后又被上层忽略，导致接口错误返回成功。 |
+| RED | 新增存储类型编解码测试与“权威数据库写入为 false 时更新必须失败”测试；历史 JSONB PostgreSQL 用例在修复前拒绝数组。 |
+| 最小修复 | 运行时读取 `information_schema.columns`，仅针对 `selected_models` 在 JSONB 与 `TEXT[]` 间选择编码；数据库写入失败继续抛至管理员 API，由接口返回 500，不再写备份并伪装成功。未迁移表、未修改 API Key、供应商启停、任务或账务。 |
+| 本地回归 | PostgreSQL 18 新 `TEXT[]` 与历史 `JSONB` 两种表 `2/2`；聚焦 `12/12`；干净全仓 `3426 passed / 117 skipped / 0 failed`；TypeScript、生产构建 `116/116`、保护门禁与 Lint `0 errors / 970 historical warnings` 通过。 |
+| 状态 | **修复已提交 `d56844b4` / 云端待拉取复验。** 必须在 Coze 保存、刷新、重启后仍保留，再恢复原值，才能关闭。 |

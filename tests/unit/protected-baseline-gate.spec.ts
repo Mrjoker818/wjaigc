@@ -111,6 +111,7 @@ const historicalSourceAuthorizations = [
   ['src/lib/auth/auth-secret-ring.ts', '865559d3'],
   ['src/lib/db-client.ts', '608ae930'],
   ['src/lib/db-storage.ts', 'b0cd946f'],
+  ['src/lib/api-provider-selected-models-storage.ts', 'd56844b4'],
   ['src/lib/font-design-task-store.ts', '27d16726'],
   ['src/lib/generated-image-alpha.ts', '536882aa'],
   ['src/lib/image-generation-output-preference.ts', 'd7ffe827'],
