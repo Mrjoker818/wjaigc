@@ -424,6 +424,12 @@ function inferAssetKind(image: CanvasImage): AssetKind {
   return 'image';
 }
 
+export function selectLegacyCanvasMediaUrl(image: CanvasImage): string {
+  return inferAssetKind(image) === 'video' && image.videoUrl
+    ? image.videoUrl
+    : image.url;
+}
+
 function imageTransform(image: CanvasImage): Record<string, unknown> {
   return {
     x: image.x,
@@ -512,9 +518,10 @@ async function fileForImage(
   mapping: LegacyImageMapping,
 ): Promise<AssetFile> {
   const availability = image.mediaAvailability ?? 'ready';
-  if (!image.url.startsWith('data:')) {
+  const mediaUrl = selectLegacyCanvasMediaUrl(image);
+  if (!mediaUrl.startsWith('data:')) {
     return {
-      url: image.url,
+      url: mediaUrl,
       availability,
       ...(image.sourceUrl ? { recoverySourceUrl: image.sourceUrl } : {}),
       ...(image.originalWidth >= 0 ? { width: image.originalWidth } : {}),
@@ -530,7 +537,7 @@ async function fileForImage(
       projectId: input.projectId,
       legacyImageId: image.id,
       mapping,
-      dataUrl: image.url,
+      dataUrl: mediaUrl,
     });
   } catch (error) {
     throw migrationError('LEGACY_MEDIA_PERSIST_FAILED', error);

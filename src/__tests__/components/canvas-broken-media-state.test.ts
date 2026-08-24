@@ -66,6 +66,59 @@ describe('canvas broken managed media state', () => {
     expect(canvasAdapter.shouldPersistCanvasPlacement(image)).toBe(true);
   });
 
+  it('renders a video without a poster as video instead of broken image media', () => {
+    const video = {
+      ...missingImage(''),
+      mediaType: 'video' as const,
+      videoUrl: '/api/serve-upload/video/task-1/result.mp4',
+    };
+
+    const [hydrated] = canvasAdapter.hydrateCanvasPlacements([video]);
+    expect(hydrated.mediaAvailability).toBe('ready');
+    expect(canvasAdapter.getCanvasMediaRenderDecision(hydrated)).toBe('video');
+    expect(canvasAdapter.getCanvasMediaFilename(hydrated)).toBe('result.mp4');
+  });
+
+  it('writes recovered video media to videoUrl instead of the poster field', () => {
+    const recovered = canvasAdapter.applyRecoveredCanvasMedia({
+      ...missingImage(''),
+      mediaType: 'video' as const,
+      videoUrl: '/expired.mp4',
+      mediaAvailability: 'missing',
+    }, {
+      url: '/api/serve-upload/recovery/version-a/recovered.mp4',
+      availability: 'ready',
+      recovered: true,
+    });
+
+    expect(recovered).toMatchObject({
+      url: '',
+      videoUrl: '/api/serve-upload/recovery/version-a/recovered.mp4',
+      mediaAvailability: 'ready',
+    });
+  });
+
+  it('falls back from a broken optional poster to the playable video', () => {
+    const video = {
+      ...missingImage('/expired-poster.jpg'),
+      thumbnailUrl: '/expired-poster.jpg',
+      videoThumbnailUrl: '/expired-poster.jpg',
+      mediaType: 'video' as const,
+      videoUrl: '/api/serve-upload/video/task-1/result.mp4',
+    };
+
+    expect(canvasAdapter.getCanvasMediaFailureAction(video, {
+      failedSource: 'thumbnail',
+      legacyRetryAttempted: false,
+    })).toBe('fallback-video');
+    expect(canvasAdapter.clearFailedCanvasVideoPoster(video)).toMatchObject({
+      url: '',
+      thumbnailUrl: undefined,
+      videoThumbnailUrl: undefined,
+      videoUrl: '/api/serve-upload/video/task-1/result.mp4',
+    });
+  });
+
   it('does not persist a cancelled generation placeholder as broken media', () => {
     const image: CanvasImage = {
       ...missingImage(''),
@@ -216,8 +269,8 @@ describe('canvas broken managed media state', () => {
 
   it('does not allow the Canvas retry action to promote media directly to ready', () => {
     const source = fs.readFileSync(path.join(process.cwd(), 'src/components/infinite-canvas.tsx'), 'utf8');
-    const brokenStart = source.indexOf("getCanvasMediaRenderDecision(image) === 'broken-media'");
-    const brokenEnd = source.indexOf(') : image.url ?', brokenStart);
+    const brokenStart = source.indexOf("mediaRenderDecision === 'broken-media'");
+    const brokenEnd = source.indexOf("mediaRenderDecision === 'image'", brokenStart);
     const brokenMediaUi = source.slice(brokenStart, brokenEnd);
 
     expect(source).not.toContain('const retryMissingMedia');

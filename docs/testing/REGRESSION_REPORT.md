@@ -1618,3 +1618,18 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 后续管理员持久化验收稳定发现独立 P1：云端历史 `selected_models JSONB` 表无法接受 `pg` 的数组字面量，且失败被上层吞掉。修复 `d56844b4` 同时兼容新 `TEXT[]` 与历史 `JSONB`，并使权威写入失败返回真实错误。
 - 新鲜本地证据：真实 PostgreSQL 18 双结构 `2/2`、聚焦 `12/12`、干净全仓 `3426/3426`、TypeScript、`116/116` 生产构建、保护门禁及零错误 Lint 均通过；`117` 项其余 PostgreSQL 门禁仍明确跳过。
 - **结论：透明双图、逐张回填和账务已云端通过；管理员能力持久化仅本地修复，仍须部署 `d56844b4` 后完成保存、刷新、重启和恢复原值。**
+
+## 2026-08-24 管理员供应商能力持久化云端回归
+
+- Coze、本地与 GitHub 已精确运行 `main@22a24c0fa2b837957c98469985c17af4b15e91ef`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 历史 `selected_models JSONB` 路径使用不调用模型的禁用供应商完成 `maxOutputs: 空 -> 3`；保存、整页刷新和沙箱重启后均回读 `3`，随后恢复为空并重新读取确认。
+- 稳定供应商补充覆盖 `PearAPI 图像` 与 `Apimart视频`：前者 `maxOutputs: 空 -> 3`，后者最大时长 `空 -> 12`；两者均在整页刷新后保持，并已恢复原值。
+- 三个临时字段最终均为空；未改 API Key、供应商启停、模型授权、任务或积分。重启后 Console error/warning 为 `0/0`，无浏览器原生错误弹窗。
+- **结论：V588-PROVIDER-005-BUG-003 云端回归通过。** Stage 4 仍由普通用户五入口、非法能力请求零副作用与真实视频任务/账务证据阻塞。
+
+## 2026-08-24 S4-BUG-018 视频终态本地回归
+
+- 真实 Pear `doubao-seedance-2-0-mini-260615` 5 秒任务约 6 分钟完成，余额 `653 -> 403`，仅新增一笔 `-250` 已完成扣费；旧部署却把结果卡标成 `MEDIA_UNAVAILABLE`，且恢复按钮无可见效果。
+- 首轮 RED 共 7 项；首轮独立代码审查后再新增 8 项 RED，覆盖 Asset V3 视频类型水合、旧项目迁移主媒体 URL、完成态缩略图捷径、恢复轮询和无海报可播放卡片。最终复审又稳定复现无 `mediaType` 旧视频、持久化地址不同步和坏海报不降级 3 个边界，并以 4 项 RED 固化。
+- 最终聚焦 `42/42`、扩展视频回归 `87/87`；全仓 Vitest `528 files / 3445 tests` 通过，`20 files / 117 tests` 因缺少 `POSTGRES_TEST_DATABASE_URL` 跳过；TypeScript、Lint `0 errors / 970 historical warnings`、`git diff --check` 与 Next.js `116/116` 生产构建通过。
+- 当前只能判定“本地回归通过”。Coze 拉取新 exact SHA 后仍须证明真实视频可播放、刷新恢复、下载成功及一次扣费；旧部署失败证据不能替代修复后云端通过。

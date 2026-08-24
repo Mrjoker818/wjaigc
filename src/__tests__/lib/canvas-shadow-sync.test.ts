@@ -1452,6 +1452,7 @@ describe('continuous canvas shadow synchronization', () => {
         assetId: 'asset-graph',
         assetVersionId: 'version-graph',
         placementId: 'placement-graph',
+        kind: 'image',
         fileUrl: '',
         thumbnailUrl: '/media/thumbnails/version-graph/512.webp',
         availability: 'missing',
@@ -1490,6 +1491,7 @@ describe('continuous canvas shadow synchronization', () => {
         assetId: 'asset-graph',
         assetVersionId: 'version-graph',
         placementId: 'placement-graph',
+        kind: 'image',
         fileUrl: '/media/graph-image.png',
         availability: 'ready',
         transform: { x: 10, y: 20, width: 300, height: 200 },
@@ -1498,6 +1500,90 @@ describe('continuous canvas shadow synchronization', () => {
     });
 
     expect(hydrated.canvasImages[0].thumbnailUrl).toBe('/media/thumbnails/legacy.webp');
+  });
+
+  it('hydrates an asset-v3 video with separate playable and poster URLs', () => {
+    const [hydrated] = hydrateAssetV3Projects([project([])], {
+      'project-1': [{
+        entityId: 'graph-video',
+        assetId: 'asset-video',
+        assetVersionId: 'version-video',
+        placementId: 'placement-video',
+        kind: 'video',
+        fileUrl: '/media/video/result.mp4',
+        thumbnailUrl: '/media/video/poster.jpg',
+        availability: 'ready',
+        transform: { x: 10, y: 20, width: 640, height: 360 },
+        metadata: {},
+      }],
+    });
+
+    expect(hydrated.canvasImages[0]).toEqual(expect.objectContaining({
+      mediaType: 'video',
+      videoUrl: '/media/video/result.mp4',
+      videoThumbnailUrl: '/media/video/poster.jpg',
+      url: '/media/video/poster.jpg',
+      mediaAvailability: 'ready',
+    }));
+  });
+
+  it('keeps a posterless asset-v3 video ready without treating the MP4 as an image', () => {
+    const [hydrated] = hydrateAssetV3Projects([project([])], {
+      'project-1': [{
+        entityId: 'graph-video',
+        assetId: 'asset-video',
+        assetVersionId: 'version-video',
+        placementId: 'placement-video',
+        kind: 'video',
+        fileUrl: '/media/video/result.mp4',
+        availability: 'ready',
+        transform: { x: 10, y: 20, width: 640, height: 360 },
+        metadata: {},
+      }],
+    });
+
+    expect(hydrated.canvasImages[0]).toEqual(expect.objectContaining({
+      mediaType: 'video',
+      videoUrl: '/media/video/result.mp4',
+      url: '',
+      mediaAvailability: 'ready',
+    }));
+  });
+
+  it('reads the asset kind when hydrating graph placements', () => {
+    const syncSource = readFileSync(
+      resolve(process.cwd(), 'src/lib/asset-core/canvas-project-sync.ts'),
+      'utf8',
+    );
+
+    expect(syncSource).toContain('asset.kind AS asset_kind');
+    expect(syncSource).toContain('JOIN wujie_assets asset');
+    expect(syncSource).toContain('kind: row.asset_kind');
+  });
+
+  it('stores the playable video URL during legacy graph migration instead of its poster', () => {
+    const selectLegacyCanvasMediaUrl = (
+      legacyMigration as typeof legacyMigration & {
+        selectLegacyCanvasMediaUrl?: (candidate: CanvasImage) => string;
+      }
+    ).selectLegacyCanvasMediaUrl;
+    const migrationSource = readFileSync(
+      resolve(process.cwd(), 'src/lib/asset-core/legacy-migration.ts'),
+      'utf8',
+    );
+    const fileStart = migrationSource.indexOf('async function fileForImage');
+    const fileEnd = migrationSource.indexOf('function readCompletedProject', fileStart);
+    const fileSource = migrationSource.slice(fileStart, fileEnd);
+
+    expect(selectLegacyCanvasMediaUrl).toBeTypeOf('function');
+    if (!selectLegacyCanvasMediaUrl) return;
+    expect(selectLegacyCanvasMediaUrl(image('legacy-video', {
+      url: '/media/video/poster.jpg',
+      videoUrl: '/media/video/result.mp4',
+      mediaType: undefined,
+    }))).toBe('/media/video/result.mp4');
+    expect(fileSource).toContain('selectLegacyCanvasMediaUrl(image)');
+    expect(fileSource).toContain('url: mediaUrl');
   });
 
   it('keeps an unmigrated legacy project readable until its first copy-on-write save', () => {

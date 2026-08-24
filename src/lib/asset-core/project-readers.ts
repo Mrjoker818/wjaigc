@@ -128,6 +128,9 @@ function quarantine(
 }
 
 function availabilityFor(image: CanvasImage): MediaAvailability {
+  if (image.videoUrl && image.mediaAvailability !== 'unrecoverable') {
+    return 'ready';
+  }
   if (image.url.startsWith('data:')) return 'pending-persist';
   if (image.url.startsWith('blob:') || image.url.length === 0) return 'missing';
   return image.mediaAvailability ?? 'ready';
@@ -145,7 +148,10 @@ function prepareImages(
     if (imageIds.has(value.id)) return null;
     imageIds.add(value.id);
 
-    const image = normalizeImageUrls(value) as unknown as CanvasImage;
+    const normalizedImage = normalizeImageUrls(value) as unknown as CanvasImage;
+    const image: CanvasImage = normalizedImage.videoUrl && !normalizedImage.mediaType
+      ? { ...normalizedImage, mediaType: 'video' }
+      : normalizedImage;
     const availability = availabilityFor(image);
     const marked: CanvasImage = {
       ...image,

@@ -69,6 +69,57 @@ export interface VideoProcessingState {
   retryPayload?: VideoRetryPayload;
 }
 
+export interface CompletedVideoCanvasMedia {
+  url: string;
+  videoUrl: string;
+  videoThumbnailUrl?: string;
+  mediaAvailability: 'ready';
+  mediaErrorCode: undefined;
+}
+
+export function buildCompletedVideoCanvasMedia(input: {
+  videoUrl: string;
+  thumbnailUrl?: string;
+}): CompletedVideoCanvasMedia {
+  const thumbnailUrl = input.thumbnailUrl && input.thumbnailUrl !== input.videoUrl
+    ? input.thumbnailUrl
+    : undefined;
+  return {
+    url: thumbnailUrl || '',
+    videoUrl: input.videoUrl,
+    videoThumbnailUrl: thumbnailUrl,
+    mediaAvailability: 'ready',
+    mediaErrorCode: undefined,
+  };
+}
+
+interface PersistableVideoMedia {
+  url: string;
+  mediaType?: 'image' | 'video';
+  videoUrl?: string;
+  videoThumbnailUrl?: string;
+  thumbnailUrl?: string;
+}
+
+export function applyPersistedVideoMediaUrl<TMedia extends PersistableVideoMedia>(
+  media: TMedia,
+  originalUrl: string,
+  localUrl: string,
+): TMedia {
+  const isVideo = media.mediaType === 'video' || Boolean(media.videoUrl);
+  const videoMatches = media.videoUrl === originalUrl;
+  return {
+    ...media,
+    ...(isVideo ? { mediaType: 'video' as const } : {}),
+    ...(media.url === originalUrl
+      ? { url: isVideo && videoMatches ? '' : localUrl }
+      : {}),
+    ...(videoMatches ? { videoUrl: localUrl } : {}),
+    ...(media.videoThumbnailUrl === originalUrl ? { videoThumbnailUrl: localUrl } : {}),
+    ...(media.thumbnailUrl === originalUrl ? { thumbnailUrl: localUrl } : {}),
+  };
+}
+
 function copyStringArray(value: string[] | undefined): string[] | undefined {
   return value?.length ? [...value] : undefined;
 }

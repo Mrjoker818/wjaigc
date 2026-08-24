@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS, shouldStartResumedTaskPolling } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
 import {
+  buildCompletedVideoCanvasMedia,
   buildVideoFailureProcessing,
   createVideoRetryPayload,
 } from '@/lib/video-processing-state';
@@ -1836,8 +1837,18 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             });
             const data = await response.json();
             const videoUrl = data.videoUrl || data.result?.videoUrl;
+            const videoThumbnailUrl = data.videoThumbnailUrl
+              || data.thumbnailUrl
+              || data.result?.videoThumbnailUrl
+              || data.result?.thumbnailUrl;
             const imageUrl = data.imageUrl || data.result?.imageUrl;
             if (data.status === 'completed' && (videoUrl || imageUrl)) {
+              const completedVideoMedia = videoUrl
+                ? buildCompletedVideoCanvasMedia({
+                  videoUrl,
+                  thumbnailUrl: videoThumbnailUrl || undefined,
+                })
+                : undefined;
               projectWorkspaceTaskEvent({
                 taskId,
                 outputIndex: image.processing?.outputIndex ?? 0,
@@ -1849,10 +1860,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 providerName: data.providerName,
                 modelName: data.modelName,
                 result: {
-                  url: videoUrl || imageUrl,
+                  url: completedVideoMedia
+                    ? completedVideoMedia.url || completedVideoMedia.videoUrl
+                    : imageUrl,
                   metadata: {
-                    videoUrl: videoUrl || undefined,
-                    mediaType: videoUrl ? 'video' : image.mediaType,
+                    ...(completedVideoMedia || {}),
+                    mediaType: completedVideoMedia ? 'video' : image.mediaType,
                   },
                 },
               });
@@ -4261,9 +4274,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             setImages(prev => prev.map(img =>
               img.id === phId ? {
                 ...img,
-                url: persistedUrl,
+                ...buildCompletedVideoCanvasMedia({ videoUrl: persistedUrl }),
                 mediaType: 'video' as const,
-                videoUrl: persistedUrl,
                 originalWidth: 1920,
                 originalHeight: 1080,
                 isProcessingPlaceholder: false,
@@ -4465,19 +4477,24 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           if (pollData.status === 'completed') {
             if (!isMountedRef.current) return; // 组件已卸载，停止轮询
             const rawVideoUrl = pollData.videoUrl || pollData.url;
-            const rawThumbnailUrl = pollData.thumbnailUrl || pollData.url;
+            const rawThumbnailUrl = pollData.videoThumbnailUrl || pollData.thumbnailUrl;
             if (rawVideoUrl) {
               // ★ 持久化远程URL到本地，防止过期后图片/视频消失
               const [stableThumbnail, stableVideo] = await Promise.all([
-                awaitStableImageUrl(rawThumbnailUrl, 30000, { isVideo: false }),
+                rawThumbnailUrl
+                  ? awaitStableImageUrl(rawThumbnailUrl, 30000, { isVideo: false })
+                  : Promise.resolve(''),
                 awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
               ]);
+              const completedMedia = buildCompletedVideoCanvasMedia({
+                videoUrl: stableVideo || rawVideoUrl,
+                thumbnailUrl: stableThumbnail || rawThumbnailUrl || undefined,
+              });
               if (!isMountedRef.current) return; // 持久化期间组件可能卸载
               setImages(prev => prev.map(img =>
                 img.id === phId ? {
                   ...img,
-                  url: stableThumbnail || '',
-                  videoUrl: stableVideo,
+                  ...completedMedia,
                   videoDuration: params.duration,
                   mediaType: 'video' as const,
                   originalWidth: pollData.width || 1920,

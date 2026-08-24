@@ -8,6 +8,8 @@ import { findClosestStandardRatio, STANDARD_RATIOS, type StandardRatio } from '@
 import { normalizeCanvasViewState, resolveCanvasUsableViewportSize } from '@/lib/canvas-view-state';
 import { buildFailedProcessingFrame, extractImageEditErrorMessage } from '@/lib/image-processing-state';
 import {
+  applyPersistedVideoMediaUrl,
+  buildCompletedVideoCanvasMedia,
   isTerminalProcessingFailure,
   type VideoRetryPayload,
 } from '@/lib/video-processing-state';
@@ -15,6 +17,8 @@ import { getConstrainedImageToolbarPosition, type FixedPanelPosition } from '@/l
 import { getBottomToolbarDrawerPlacement, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import {
+  applyRecoveredCanvasMedia,
+  clearFailedCanvasVideoPoster,
   getCanvasMediaFilename,
   getCanvasMediaRenderDecision,
   handleCanvasMediaElementFailure,
@@ -1091,14 +1095,14 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       const currentImages = imagesRef.current;
       let changed = false;
       const updated = currentImages.map(img => {
-        // 更新匹配的 url（缩略图）或 videoUrl（视频播放地址）
-        if (img.url === originalUrl) {
+        if (
+          img.url === originalUrl
+          || img.videoUrl === originalUrl
+          || img.videoThumbnailUrl === originalUrl
+          || img.thumbnailUrl === originalUrl
+        ) {
           changed = true;
-          return { ...img, url: localUrl };
-        }
-        if (img.videoUrl === originalUrl) {
-          changed = true;
-          return { ...img, videoUrl: localUrl };
+          return applyPersistedVideoMediaUrl(img, originalUrl, localUrl);
         }
         return img;
       });
@@ -2684,14 +2688,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       const result = await recoverCanvasMediaUntilTerminal({ projectId: effectiveProjectId, image });
       const nextImages = imagesRef.current.map((candidate) => (
         candidate.id === image.id
-          ? {
-              ...candidate,
-              url: result.url || candidate.url,
-              mediaAvailability: result.availability,
-              mediaErrorCode: result.recovered || result.availability === 'recovering'
-                ? undefined
-                : result.error || 'MEDIA_RECOVERY_FAILED',
-            }
+          ? applyRecoveredCanvasMedia(candidate, result)
           : candidate
       ));
       imagesRef.current = nextImages;
@@ -11706,8 +11703,11 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
             const draggedGenGroup = genGroupDragTarget ? genGroups.find(g => g.id === genGroupDragTarget) : null;
             const isInDraggedGenGroup = !!draggedGenGroup && (draggedGenGroup.refImages.some(r => r.imageId === image.id) || (draggedGenGroup.resultImageIds && draggedGenGroup.resultImageIds.includes(image.id)));
             const useOriginalMedia = zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) || !image.thumbnailUrl;
-            const mediaSource = useOriginalMedia ? image.url : (image.thumbnailUrl || image.url);
+            const mediaSource = image.mediaType === 'video'
+              ? image.videoThumbnailUrl || image.thumbnailUrl || (image.url !== image.videoUrl ? image.url : '')
+              : useOriginalMedia ? image.url : (image.thumbnailUrl || image.url);
             const mediaSourceKind = useOriginalMedia ? 'original' : 'thumbnail';
+            const mediaRenderDecision = getCanvasMediaRenderDecision(image);
             return (
               <div
                 key={image.id}
@@ -11902,7 +11902,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                       )}
                     </div>
                   </div>
-                ) : getCanvasMediaRenderDecision(image) === 'broken-media' ? (
+                ) : mediaRenderDecision === 'broken-media' ? (
                   <div
                     data-canvas-missing-media
                     role="status"
@@ -11935,7 +11935,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                       </button>
                     </div>}
                   </div>
-                ) : image.url ? (
+                ) : (mediaRenderDecision === 'image' || mediaRenderDecision === 'video') && mediaSource ? (
                   <CanvasMediaNode key={`${image.id}:${image.mediaAvailability || 'ready'}`}
                     imageId={image.id}
                     source={mediaSource}
@@ -11953,6 +11953,16 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                         element: img,
                         markMissing: markCanvasMediaMissing,
                       });
+                      if (action === 'fallback-video') {
+                        const nextImages = imagesRef.current.map(candidate => (
+                          candidate.id === image.id
+                            ? clearFailedCanvasVideoPoster(candidate)
+                            : candidate
+                        ));
+                        imagesRef.current = nextImages;
+                        onImagesChange(nextImages);
+                        return;
+                      }
                       if (action === 'ignore') return;
                       if (action === 'fallback-original' || action === 'mark-missing') return;
                       img.dataset.retried = '1';
@@ -11986,6 +11996,16 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                         }
                       }
                     }}
+                  />
+                ) : mediaRenderDecision === 'video' && image.videoUrl ? (
+                  <video
+                    data-canvas-video-preview
+                    src={image.videoUrl}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    aria-label={image.prompt ? `视频预览：${image.prompt.substring(0, 60)}` : '视频预览'}
+                    className="w-full h-full object-cover pointer-events-none overflow-hidden bg-black"
                   />
                 ) : null}
                 {/* Video inline playback / play button overlay */}
@@ -12100,7 +12120,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                   ) : (
                     /* ── Static thumbnail + play button ── */
                     <div
-                      className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer group/play"
+                      className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer group/play bg-black/20"
                       onClick={(e) => {
                         e.stopPropagation();
                         if (image.videoUrl) {
@@ -15388,18 +15408,21 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                         clearInterval(pollInterval);
                         activeIntervalsRef.current.delete(pollInterval);
                         const rawVideoUrl = pollData.videoUrl || resultUrl;
-                        const rawThumbUrl = pollData.videoThumbnailUrl || resultUrl;
+                        const rawThumbUrl = pollData.videoThumbnailUrl || pollData.thumbnailUrl;
                         // ★ 持久化视频URL，防止第三方URL过期消失
                         Promise.all([
-                          awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }),
+                          rawThumbUrl ? awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }) : Promise.resolve(''),
                           awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
                         ]).then(([stableThumb, stableVideo]) => {
+                          const completedMedia = buildCompletedVideoCanvasMedia({
+                            videoUrl: stableVideo || rawVideoUrl,
+                            thumbnailUrl: stableThumb || rawThumbUrl || undefined,
+                          });
                           onImagesChange(images.map((img: CanvasImage) =>
                             img.id === frameId
                               ? {
                                   ...img,
-                                  url: stableThumb || '',
-                                  videoUrl: stableVideo,
+                                  ...completedMedia,
                                   mediaType: 'video' as const,
                                   isProcessing: false,
                                   processingLabel: undefined,
@@ -15498,18 +15521,21 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                         clearInterval(pollInterval);
                         activeIntervalsRef.current.delete(pollInterval);
                         const rawVideoUrl = pollData.videoUrl || resultUrl;
-                        const rawThumbUrl = pollData.videoThumbnailUrl || resultUrl;
+                        const rawThumbUrl = pollData.videoThumbnailUrl || pollData.thumbnailUrl;
                         // ★ 持久化视频URL，防止第三方URL过期消失
                         Promise.all([
-                          awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }),
+                          rawThumbUrl ? awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }) : Promise.resolve(''),
                           awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
                         ]).then(([stableThumb, stableVideo]) => {
+                          const completedMedia = buildCompletedVideoCanvasMedia({
+                            videoUrl: stableVideo || rawVideoUrl,
+                            thumbnailUrl: stableThumb || rawThumbUrl || undefined,
+                          });
                           onImagesChange(images.map((img: CanvasImage) =>
                             img.id === frameId
                               ? {
                                   ...img,
-                                  url: stableThumb || '',
-                                  videoUrl: stableVideo,
+                                  ...completedMedia,
                                   mediaType: 'video' as const,
                                   isProcessing: false,
                                   processingLabel: undefined,

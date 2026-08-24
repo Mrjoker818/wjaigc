@@ -126,6 +126,63 @@ describe('readProjectSnapshot', () => {
     ]);
   });
 
+  it('keeps a video placement ready when it has a video URL but no poster image', () => {
+    const result = readProjectSnapshot(deepFreeze({
+      id: 'video-without-poster',
+      schemaVersion: 3,
+      settings: {},
+      canvasImages: [{
+        id: 'video-1',
+        url: '',
+        videoUrl: '/api/serve-upload/video/task-1/result.mp4',
+        mediaType: 'video',
+        x: 0,
+        y: 0,
+        width: 400,
+        height: 225,
+        originalWidth: 1920,
+        originalHeight: 1080,
+        createdAt: 1,
+      }],
+    }));
+
+    expect(result.project?.canvasImages[0]).toMatchObject({
+      mediaType: 'video',
+      videoUrl: '/api/serve-upload/video/task-1/result.mp4',
+      mediaAvailability: 'ready',
+    });
+    expect(result.unresolvedMedia).toEqual([]);
+  });
+
+  it('infers a legacy video from videoUrl before the first Asset V3 migration', () => {
+    const result = readProjectSnapshot(deepFreeze({
+      id: 'legacy-video-without-media-type',
+      name: 'Legacy video',
+      canvasImages: [{
+        id: 'legacy-video-1',
+        url: '',
+        videoUrl: '/api/serve-upload/video/task-legacy/result.mp4',
+        x: 0,
+        y: 0,
+        width: 320,
+        height: 180,
+        originalWidth: 1920,
+        originalHeight: 1080,
+        rotation: 0,
+        zIndex: 1,
+        createdAt: 1,
+      }],
+      settings: {},
+    }));
+
+    expect(result.unresolvedMedia).toEqual([]);
+    expect(result.project?.canvasImages[0]).toMatchObject({
+      mediaType: 'video',
+      mediaAvailability: 'ready',
+      videoUrl: '/api/serve-upload/video/task-legacy/result.mp4',
+    });
+  });
+
   it('normalizes only known media URL fields and preserves upload-like text', () => {
     const fixture = loadFixture('v1-video-3d-svg.json').value as Record<string, unknown>;
     const canvasImages = fixture.canvasImages as Record<string, unknown>[];

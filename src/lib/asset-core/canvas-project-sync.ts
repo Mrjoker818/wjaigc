@@ -16,7 +16,7 @@ import {
   type MigrationResult,
 } from './legacy-migration';
 import { lockAssetGraphWriteGate } from './storage';
-import type { MediaAvailability } from './types';
+import type { AssetKind, MediaAvailability } from './types';
 
 export type AssetGraphMappings = Record<string, Record<string, LegacyImageMapping>>;
 
@@ -443,6 +443,7 @@ export interface AssetV3CanvasPlacement {
   assetId: string;
   assetVersionId: string;
   placementId: string;
+  kind: AssetKind;
   fileUrl: string;
   thumbnailUrl?: string;
   availability: MediaAvailability;
@@ -457,6 +458,7 @@ interface AssetV3PlacementRow extends QueryResultRow {
   asset_id: string;
   asset_version_id: string;
   placement_id: string;
+  asset_kind: AssetKind;
   file_url: string;
   thumbnail_url: string | null;
   availability: MediaAvailability;
@@ -490,11 +492,21 @@ export function hydrateAssetV3Projects(
       const transform = asRecord(placement.transform);
       const width = numberOr(transform.width, base.width ?? 256);
       const height = numberOr(transform.height, base.height ?? 256);
+      const isVideo = placement.kind === 'video';
+      const videoPosterUrl = isVideo
+        ? placement.thumbnailUrl
+          ?? base.videoThumbnailUrl
+          ?? base.thumbnailUrl
+          ?? (base.url && base.url !== base.videoUrl ? base.url : undefined)
+        : undefined;
       return {
         ...base,
         id: placement.entityId,
-        url: placement.fileUrl,
-        thumbnailUrl: placement.thumbnailUrl ?? base.thumbnailUrl,
+        url: isVideo ? videoPosterUrl ?? '' : placement.fileUrl,
+        thumbnailUrl: isVideo ? videoPosterUrl : placement.thumbnailUrl ?? base.thumbnailUrl,
+        mediaType: isVideo ? 'video' : 'image',
+        videoUrl: isVideo ? placement.fileUrl : undefined,
+        videoThumbnailUrl: isVideo ? videoPosterUrl : undefined,
         sourceUrl: placement.recoverySourceUrl ?? base.sourceUrl,
         x: numberOr(transform.x, base.x ?? 0),
         y: numberOr(transform.y, base.y ?? 0),
@@ -533,9 +545,14 @@ function assetV3PlacementQuery(includeThumbnailVariants: boolean): string {
     : '';
   return `SELECT placement.project_id, placement.entity_id, placement.asset_id,
             placement.asset_version_id, placement.id AS placement_id,
-            version.file_url, version.availability, version.recovery_source_url,
+            asset.kind AS asset_kind, version.file_url, version.availability, version.recovery_source_url,
             ${thumbnailSelection}, placement.transform, placement.metadata
      FROM wujie_workspace_placements placement
+     JOIN wujie_assets asset
+       ON asset.id = placement.asset_id
+      AND asset.owner_id = placement.owner_id
+      AND asset.project_id = placement.project_id
+      AND asset.status = 'active'
      JOIN wujie_asset_versions version
        ON version.id = placement.asset_version_id
       AND version.owner_id = placement.owner_id
@@ -575,6 +592,7 @@ export async function readAssetV3Projects(actorUserId: string, projects: Project
       assetId: row.asset_id,
       assetVersionId: row.asset_version_id,
       placementId: row.placement_id,
+      kind: row.asset_kind,
       fileUrl: row.file_url,
       ...(row.thumbnail_url ? { thumbnailUrl: row.thumbnail_url } : {}),
       availability: row.availability,

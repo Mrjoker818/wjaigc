@@ -1223,6 +1223,7 @@ export async function POST(request: NextRequest) {
             progress: 100,
             mediaType: 'video',
             videoUrl: persistedTask.result.videoUrl,
+            videoThumbnailUrl: persistedTask.result.videoThumbnailUrl,
             imageUrl: persistedTask.result.videoUrl,
           }, { status: 200 });
         }
@@ -1679,6 +1680,7 @@ export async function POST(request: NextRequest) {
           ...(completedVideo?.videoUrl ? {
             mediaType: 'video',
             videoUrl: completedVideo.videoUrl,
+            videoThumbnailUrl: completedVideo.videoThumbnailUrl,
             imageUrl: completedVideo.videoUrl,
           } : {}),
           maskUrl: safeResult?.maskUrl as string | undefined,
@@ -1734,6 +1736,7 @@ export async function POST(request: NextRequest) {
               mediaType: 'video',
               videoUrl: current.result.videoUrl,
               imageUrl: current.result.videoUrl,
+              videoThumbnailUrl: current.result.videoThumbnailUrl,
             }, { status: 200 });
           }
           if (current && ['failed', 'cancelled', 'timeout'].includes(current.status)) {
@@ -2007,6 +2010,7 @@ export async function POST(request: NextRequest) {
                 ...regResult,
                 videoUrl: persistedVideoUrl,
                 videoDuration: videoResult.duration,
+                videoThumbnailUrl: videoResult.thumbnailUrl,
               });
               if (hasDurableVideoTask) {
                 const completed = await completeCloudTask(taskId, completedResult);
@@ -2016,6 +2020,7 @@ export async function POST(request: NextRequest) {
                 await recordVideoTaskTerminal(taskId, {
                   status: 'completed',
                   videoUrl: persistedVideoUrl,
+                  videoThumbnailUrl: videoResult.thumbnailUrl,
                 });
               }
               updateTaskProgress(taskId, {
@@ -2034,6 +2039,7 @@ export async function POST(request: NextRequest) {
                 mediaType: 'video',
                 videoUrl: persistedVideoUrl,
                 videoDuration: videoResult.duration,
+                videoThumbnailUrl: videoResult.thumbnailUrl,
                 watermarkVideoUrl: videoResult.watermarkVideoUrl,
                 modelName: videoModel || '',
               }, { status: 200 });

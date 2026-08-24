@@ -5,12 +5,15 @@ import type { CanvasImage as PersistedCanvasImage } from '@/lib/user-types';
 import type { AssetGraphMode, MediaAvailability } from './types';
 
 export type AssetGraphReadStrategy = 'legacy-authoritative' | 'asset-authoritative';
-export type CanvasMediaFailureAction = 'fallback-original' | 'mark-missing' | 'legacy-fallback' | 'ignore';
-export type CanvasMediaRenderDecision = 'broken-media' | 'image' | 'none';
+export type CanvasMediaFailureAction = 'fallback-original' | 'fallback-video' | 'mark-missing' | 'legacy-fallback' | 'ignore';
+export type CanvasMediaRenderDecision = 'broken-media' | 'image' | 'video' | 'none';
 
 type CanvasPlacementImage = PersistedCanvasImage | CanvasViewImage;
 
 function mediaAvailabilityFor(image: CanvasPlacementImage): MediaAvailability {
+  if (image.mediaType === 'video' && image.videoUrl && image.mediaAvailability !== 'unrecoverable') {
+    return 'ready';
+  }
   if (image.mediaAvailability) return image.mediaAvailability;
   if (image.url.startsWith('data:')) return 'pending-persist';
   if (image.url.startsWith('blob:') || image.url.length === 0) return 'missing';
@@ -42,6 +45,10 @@ export function isManagedCanvasMedia(image: CanvasPlacementImage): boolean {
 export function getCanvasMediaRenderDecision(
   image: CanvasPlacementImage,
 ): CanvasMediaRenderDecision {
+  if (image.mediaType === 'video') {
+    if (image.videoUrl && image.mediaAvailability !== 'unrecoverable') return 'video';
+    return 'broken-media';
+  }
   if (
     image.mediaAvailability === 'missing'
     || image.mediaAvailability === 'unrecoverable'
@@ -69,6 +76,7 @@ export function getCanvasMediaFailureAction(
   state: { failedSource: 'thumbnail' | 'original'; legacyRetryAttempted: boolean },
 ): CanvasMediaFailureAction {
   if (image.mediaAvailability === 'unrecoverable') return 'ignore';
+  if (image.mediaType === 'video' && image.videoUrl) return 'fallback-video';
   if (state.failedSource === 'thumbnail') return 'fallback-original';
   if (
     isManagedCanvasMedia(image)
@@ -97,10 +105,44 @@ export function handleCanvasMediaElementFailure(input: {
   return action;
 }
 
+export function clearFailedCanvasVideoPoster<TImage extends CanvasPlacementImage>(image: TImage): TImage {
+  if (image.mediaType !== 'video' || !image.videoUrl) return image;
+  return {
+    ...image,
+    url: '',
+    thumbnailUrl: undefined,
+    videoThumbnailUrl: undefined,
+  };
+}
+
 export function getCanvasMediaFilename(image: CanvasPlacementImage): string {
-  const source = image.sourceUrl || image.url;
+  const source = image.mediaType === 'video'
+    ? image.videoUrl || image.sourceUrl || image.url
+    : image.sourceUrl || image.url;
   const filename = source.split('/').pop()?.split('?')[0];
   return filename || 'unavailable-media';
+}
+
+export function applyRecoveredCanvasMedia<TImage extends CanvasPlacementImage>(
+  image: TImage,
+  result: {
+    recovered: boolean;
+    availability: MediaAvailability;
+    url?: string;
+    error?: string;
+  },
+): TImage {
+  const recoveredUrl = result.url || '';
+  const isVideo = image.mediaType === 'video';
+  return {
+    ...image,
+    ...(isVideo && recoveredUrl ? { videoUrl: recoveredUrl } : {}),
+    ...(!isVideo && recoveredUrl ? { url: recoveredUrl } : {}),
+    mediaAvailability: result.availability,
+    mediaErrorCode: result.recovered || result.availability === 'recovering'
+      ? undefined
+      : result.error || 'MEDIA_RECOVERY_FAILED',
+  };
 }
 
 export function hydrateCanvasPlacements(

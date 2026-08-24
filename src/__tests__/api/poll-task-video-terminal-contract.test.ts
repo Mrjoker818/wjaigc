@@ -48,4 +48,24 @@ describe('video poll terminal durability contract', () => {
     expect(recoveryBlock).toContain("recovery.type.startsWith('video')");
     expect(recoveryBlock).toContain("'video'");
   });
+
+  it('preserves a provider video thumbnail in the durable result and response', () => {
+    const videoStart = source.indexOf("if (registryTask.type === 'video')");
+    const videoEnd = source.indexOf('// Local task types', videoStart);
+    const videoSource = source.slice(videoStart, videoEnd);
+
+    expect(videoSource).toContain('videoThumbnailUrl: videoResult.thumbnailUrl');
+  });
+
+  it('returns the durable thumbnail from persisted and registry terminal shortcuts', () => {
+    const persistedStart = source.indexOf("persistedTask.status === 'completed' && persistedTask.result?.videoUrl");
+    const persistedEnd = source.indexOf("if (['failed', 'cancelled', 'timeout']", persistedStart);
+    const persistedSource = source.slice(persistedStart, persistedEnd);
+    const registryStart = source.indexOf("const completedVideo = registryTask.type === 'video'");
+    const registryEnd = source.indexOf("if (registryTask.status === 'failed')", registryStart);
+    const registrySource = source.slice(registryStart, registryEnd);
+
+    expect(persistedSource).toContain('videoThumbnailUrl: persistedTask.result.videoThumbnailUrl');
+    expect(registrySource).toContain('videoThumbnailUrl: completedVideo.videoThumbnailUrl');
+  });
 });

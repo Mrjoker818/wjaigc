@@ -56,7 +56,7 @@
     ]
   },
   "providerCapabilityPersistence": {
-    "status": "fixed-locally-cloud-recheck-required",
+    "status": "verified-in-cloud",
     "providerId": "api_1782185653250_5i3bdx2",
     "model": "gpt-image-2",
     "reproductionCount": 3,
@@ -88,6 +88,86 @@
       "exitCode": 0,
       "errors": 0,
       "historicalWarnings": 970
+    },
+    "cloudVerification": {
+      "runtimeCommit": "22a24c0fa2b837957c98469985c17af4b15e91ef",
+      "githubMainCommit": "22a24c0fa2b837957c98469985c17af4b15e91ef",
+      "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+      "browser": "Google Chrome 用户1现有预览标签",
+      "imageProvider": {
+        "provider": "PearAPI 图像",
+        "field": "maxOutputs",
+        "originalValue": "",
+        "testValue": 3,
+        "readAfterPageReload": 3,
+        "restoredValue": ""
+      },
+      "videoProvider": {
+        "provider": "Apimart视频",
+        "field": "maxDurationSeconds",
+        "originalValue": "",
+        "testValue": 12,
+        "readAfterPageReload": 12,
+        "restoredValue": ""
+      },
+      "historicalJsonbRestartProbe": {
+        "provider": "虚宝图像",
+        "modelInvoked": false,
+        "originalValue": "",
+        "testValue": 3,
+        "readAfterPageReload": 3,
+        "readAfterSandboxRestart": 3,
+        "restoredValue": ""
+      },
+      "cleanup": {
+        "pearImageValue": "",
+        "apimartVideoValue": "",
+        "aiLinkVideoValue": ""
+      },
+      "consoleErrors": 0,
+      "consoleWarnings": 0,
+      "nativeDialogs": 0
     }
+  },
+  "videoGeneration": {
+    "status": "failed-in-cloud-fixed-locally-cloud-retest-pending",
+    "runtimeCommit": "22a24c0fa2b837957c98469985c17af4b15e91ef",
+    "provider": "PearAPI 视频",
+    "model": "doubao-seedance-2-0-mini-260615",
+    "durationSeconds": 5,
+    "submittedAt": "2026-08-24T12:47:39.665Z",
+    "observedProgress": [10, 50, 100],
+    "approximateCompletionMinutes": 6,
+    "billing": {
+      "balanceBefore": 653,
+      "balanceAfter": 403,
+      "newTransactions": 1,
+      "credits": 250,
+      "transactionStatus": "completed"
+    },
+    "projectImageCount": {
+      "before": 8,
+      "after": 9
+    },
+    "actualCanvasState": {
+      "mediaAvailability": "unavailable-media",
+      "errorCode": "MEDIA_UNAVAILABLE",
+      "videoElementCount": 0,
+      "recoveryProducedVisibleChange": false
+    },
+    "rootCause": "A completed video with videoUrl but without a thumbnail was classified through the image URL path as missing media; recovery also wrote the image URL field instead of videoUrl.",
+    "localVerification": {
+      "focusedTestsPassed": 79,
+      "compatibilityTestsPassed": 68,
+      "fullTestFilesPassed": 528,
+      "fullTestsPassed": 3441,
+      "postgresFilesSkipped": 20,
+      "postgresTestsSkipped": 117,
+      "typecheckExitCode": 0,
+      "lintExitCode": 0,
+      "buildExitCode": 0,
+      "routes": 116
+    },
+    "cloudRetestRequired": true
   }
 }

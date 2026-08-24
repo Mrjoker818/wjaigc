@@ -92,6 +92,7 @@ interface VideoTaskTerminal {
   status: Extract<CloudTaskStatus, 'completed' | 'failed' | 'cancelled' | 'timeout'>;
   videoUrl?: string;
   imageUrl?: string;
+  videoThumbnailUrl?: string;
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
 }
@@ -472,7 +473,11 @@ export async function recordVideoTaskTerminal(
   input: VideoTaskTerminal,
 ): Promise<TransitionTaskResult> {
   const result = input.videoUrl
-    ? { videoUrl: input.videoUrl, imageUrl: input.imageUrl || '' }
+    ? {
+      videoUrl: input.videoUrl,
+      imageUrl: input.imageUrl || '',
+      ...(input.videoThumbnailUrl ? { videoThumbnailUrl: input.videoThumbnailUrl } : {}),
+    }
     : undefined;
 
   const terminal = await persistTerminalTask(taskId, {
