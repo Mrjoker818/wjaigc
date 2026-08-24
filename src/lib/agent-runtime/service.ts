@@ -12,7 +12,6 @@ import {
 } from '@/lib/task-core/billing-service';
 import {
   resolveTaskModel,
-  type TaskModelDescriptor,
 } from '@/lib/task-core/model-catalog';
 import { abortTaskExecution } from '@/lib/task-core/task-abort';
 import { transitionTask } from '@/lib/task-core/task-service';
@@ -37,6 +36,7 @@ import {
   type AgentToolAuthorizationResult,
   type AuthorizedAgentTool,
 } from './tool-registry';
+import { toAgentModelCapabilitySet } from './model-capability-set';
 import type {
   AgentContextSnapshot,
   AgentEvent,
@@ -302,19 +302,6 @@ function userProductTypes(user: User): string[] {
     .split(',')
     .map(value => value.trim())
     .filter(Boolean);
-}
-
-function modelCapabilities(model: TaskModelDescriptor): string[] {
-  const capabilities = new Set<string>([model.kind]);
-  if (model.kind === 'image') capabilities.add('image');
-  if (model.kind === 'edit') {
-    capabilities.add('image');
-    capabilities.add('edit');
-  }
-  if (model.supportsMask) capabilities.add('edit');
-  if (model.supportsReferenceImages) capabilities.add('reference-images');
-  if (model.sourceType === 'vlm') capabilities.add('vision');
-  return [...capabilities];
 }
 
 function taskStatusForTerminalEvent(type: AgentEventType): AgentTerminalTaskStatus | null {
@@ -589,7 +576,8 @@ export function createAgentRuntimeService(
         requestedToolIds: input.request.allowedToolIds,
         workspace: input.request.workspace,
         userProductTypes: userProductTypes(input.actor),
-        modelCapabilities: modelCapabilities(model),
+        modelCapabilities: [...toAgentModelCapabilitySet(model)],
+        capabilityScope: 'orchestrator',
       });
       if (authorization.denials.length > 0) {
         throw new AgentToolAuthorizationError(authorization.denials);

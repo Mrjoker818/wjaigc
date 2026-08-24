@@ -5,6 +5,7 @@ export interface AgentToolDefinition {
   workspaces: AgentWorkspace[];
   productTypes: string[];
   modelCapabilities: string[];
+  downstreamModelCapabilities?: string[];
 }
 
 export type AuthorizedAgentTool = AgentToolDefinition;
@@ -28,6 +29,7 @@ export interface AuthorizeAgentToolsInput {
   workspace: AgentWorkspace;
   userProductTypes: string[];
   modelCapabilities: string[];
+  capabilityScope?: 'orchestrator' | 'downstream';
   registry?: readonly AgentToolDefinition[];
 }
 
@@ -42,25 +44,29 @@ export const AGENT_TOOL_REGISTRY: readonly AgentToolDefinition[] = [
     toolId: 'generate_image',
     workspaces: ['canvas', 'workflow', 'chat'],
     productTypes: ['canvas', 'chat', 'simple-chat'],
-    modelCapabilities: ['image'],
+    modelCapabilities: ['chat'],
+    downstreamModelCapabilities: ['image'],
   },
   {
     toolId: 'edit_image',
     workspaces: ['canvas', 'workflow'],
     productTypes: ['canvas'],
-    modelCapabilities: ['image', 'edit'],
+    modelCapabilities: ['chat'],
+    downstreamModelCapabilities: ['edit', 'image'],
   },
   {
     toolId: 'analyze_image',
     workspaces: ['canvas', 'workflow', 'chat'],
     productTypes: ['canvas', 'chat', 'simple-chat'],
-    modelCapabilities: ['vision'],
+    modelCapabilities: ['chat'],
+    downstreamModelCapabilities: ['vision'],
   },
   {
     toolId: 'adjust_color',
     workspaces: ['canvas', 'workflow'],
     productTypes: ['canvas'],
-    modelCapabilities: ['image'],
+    modelCapabilities: ['chat'],
+    downstreamModelCapabilities: ['image'],
   },
 ] as const;
 
@@ -69,6 +75,7 @@ export function authorizeAgentTools({
   workspace,
   userProductTypes,
   modelCapabilities,
+  capabilityScope = 'orchestrator',
   registry = AGENT_TOOL_REGISTRY,
 }: AuthorizeAgentToolsInput): AgentToolAuthorizationResult {
   const definitions = new Map(registry.map(tool => [tool.toolId, tool]));
@@ -94,7 +101,10 @@ export function authorizeAgentTools({
       denials.push({ toolId, code: 'PRODUCT_PERMISSION_REQUIRED' });
       continue;
     }
-    if (!tool.modelCapabilities.every(capability => capabilities.has(capability))) {
+    const requiredCapabilities = capabilityScope === 'downstream'
+      ? tool.downstreamModelCapabilities || tool.modelCapabilities
+      : tool.modelCapabilities;
+    if (!requiredCapabilities.every(capability => capabilities.has(capability))) {
       denials.push({ toolId, code: 'MODEL_CAPABILITY_REQUIRED' });
       continue;
     }

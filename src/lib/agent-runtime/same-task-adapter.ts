@@ -20,6 +20,7 @@ import {
   authorizeAgentTools,
   type AuthorizedAgentTool,
 } from './tool-registry';
+import { toAgentModelCapabilitySet } from './model-capability-set';
 import type {
   AgentEvent,
   AgentEventType,
@@ -193,19 +194,6 @@ function userProductTypes(user: User): string[] {
     .filter(Boolean);
 }
 
-function modelCapabilities(model: TaskModelDescriptor): string[] {
-  const capabilities = new Set<string>([model.kind]);
-  if (model.kind === 'image') capabilities.add('image');
-  if (model.kind === 'edit') {
-    capabilities.add('image');
-    capabilities.add('edit');
-  }
-  if (model.supportsMask) capabilities.add('edit');
-  if (model.supportsReferenceImages) capabilities.add('reference-images');
-  if (model.sourceType === 'vlm') capabilities.add('vision');
-  return [...capabilities];
-}
-
 function eventId(taskId: string, suffix: string): string {
   return `agent-adopt:${taskId}:${suffix}`;
 }
@@ -282,7 +270,8 @@ export function createSameTaskAgentAdapter(
         requestedToolIds: input.request.allowedToolIds,
         workspace: input.request.workspace,
         userProductTypes: userProductTypes(input.actor),
-        modelCapabilities: modelCapabilities(model),
+        modelCapabilities: [...toAgentModelCapabilitySet(model)],
+        capabilityScope: 'downstream',
       });
       if (
         authorization.denials.length > 0

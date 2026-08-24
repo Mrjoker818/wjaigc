@@ -10,6 +10,13 @@ import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 
 const hookPath = resolve(process.cwd(), 'src/hooks/use-task-model-catalog.ts');
 const workspacePath = resolve(process.cwd(), 'src/components/canvas-workspace.tsx');
+const CAPABILITY_UI_CONSUMERS = [
+  'src/components/generation-panel.tsx',
+  'src/components/infinite-canvas.tsx',
+  'src/components/node-editor.tsx',
+  'src/components/video-generation-panel.tsx',
+];
+const LEGACY_CAPABILITY_INFERENCE = /getProviderAspectRatios|getQualityLevelOptions|getResolutionTierOptions|getVideoModelInfo/;
 
 describe('task model catalog consumers', () => {
   afterEach(() => {
@@ -31,6 +38,32 @@ describe('task model catalog consumers', () => {
     expect(source).toContain('taskModelCatalog={taskModelCatalog}');
     expect(source).toContain('taskModelOptions={catalogModels}');
     expect(source).toContain('catalogStatus={catalogStatus}');
+  });
+
+  it('keeps business capability controls on the versioned catalog and out of legacy inference tables', () => {
+    for (const file of CAPABILITY_UI_CONSUMERS) {
+      const source = readFileSync(resolve(process.cwd(), file), 'utf8');
+      expect(source).not.toMatch(LEGACY_CAPABILITY_INFERENCE);
+      expect(source).toMatch(/taskModelCatalog|useTaskModelCatalog/);
+    }
+  });
+
+  it('uses exact descriptors for image task parameters while limiting video legacy lookup to display fallback', () => {
+    const imageRoute = readFileSync(resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    expect(imageRoute).not.toMatch(LEGACY_CAPABILITY_INFERENCE);
+    expect(imageRoute).toContain('resolveTaskModelForUser');
+    expect(imageRoute).toContain('admitExactImageCandidate');
+
+    for (const [file, legacyDisplayFallbackCount] of [
+      ['src/app/api/video/generate/route.ts', 1],
+      ['src/app/api/video/extend/route.ts', 1],
+    ] as const) {
+      const source = readFileSync(resolve(process.cwd(), file), 'utf8');
+      expect(source).toContain('resolveTaskModelForUser');
+      expect(source).toContain('validateTaskModelSelection');
+      expect(source.match(/modelInfo\.features/g) || []).toHaveLength(legacyDisplayFallbackCount);
+      expect(source).not.toMatch(/if \(modelInfo.*features/);
+    }
   });
 
   it('loads the versioned catalog and indexes descriptors by exact provider/model key', async () => {

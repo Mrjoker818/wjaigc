@@ -6,6 +6,7 @@ import {
   admitAuthorizedAgentExecution,
   type AgentExecutionAdmissionDependencies,
 } from '@/lib/agent-runtime/admission-gate';
+import { buildCanvasAgentRequest } from '@/lib/agent-runtime/surface-requests';
 import type { AgentRunRequest } from '@/lib/agent-runtime/types';
 
 const actor = {
@@ -33,14 +34,48 @@ function dependencies(
     resolveTaskModel: vi.fn().mockResolvedValue({
       providerId: 'provider-image', modelId: 'model-image', kind: 'image', sourceType: 'image',
       protocol: 'images', executionMode: 'async', allowedRatios: [], allowedSizes: [],
-      qualityOptions: [], maxOutputs: 1, supportsReferenceImages: true, supportsMask: false,
-      outputKinds: ['png'],
+      qualityOptions: [], maxOutputs: 1, supportsReferenceImages: false, supportsMask: false,
+      supportedOperations: ['text-to-image'], outputKinds: ['png'], capabilitySources: {},
     }),
     ...overrides,
   };
 }
 
 describe('Agent execution admission gate', () => {
+  it('does not use an orchestrator chat model as a downstream image model', async () => {
+    const canvasRequest = buildCanvasAgentRequest({
+      projectId: 'project-1',
+      workspaceId: 'canvas-1',
+      providerId: 'provider-chat',
+      modelId: 'model-chat',
+      prompt: 'Analyze, generate, and edit an image',
+      sourceVersionIds: ['version-1'],
+      selectedEntityIds: ['canvas-image-1'],
+      mode: 'agent',
+      idempotencyKey: 'canvas-agent-default-tools',
+    });
+    const deps = dependencies({
+      resolveTaskModel: vi.fn().mockResolvedValue({
+        providerId: 'provider-chat', modelId: 'model-chat', kind: 'chat', sourceType: 'chat',
+        protocol: 'chat-completions', executionMode: 'sync', allowedRatios: [], allowedSizes: [],
+        qualityOptions: [], maxOutputs: 1, supportsReferenceImages: false, supportsMask: false,
+        outputKinds: ['text'], capabilitySources: {},
+      }),
+    });
+
+    expect(canvasRequest.allowedToolIds).toEqual([
+      'analyze_image',
+      'generate_image',
+      'edit_image',
+    ]);
+    await expect(admitAuthorizedAgentExecution({
+      actor,
+      request: canvasRequest,
+      toolId: 'generate_image',
+      admit: vi.fn().mockResolvedValue('generate_image'),
+    }, deps)).rejects.toMatchObject({ code: 'AGENT_TOOL_AUTHORIZATION_DENIED' });
+  });
+
   it('does not create a task or call a provider when Asset Graph authorization fails', async () => {
     const admit = vi.fn().mockResolvedValue('should-not-run');
     const deps = dependencies({

@@ -78,7 +78,9 @@ function dependencies(
       maxOutputs: 1,
       supportsReferenceImages: false,
       supportsMask: false,
+      supportedOperations: ['text-to-image'],
       outputKinds: ['png'],
+      capabilitySources: {},
     }),
     authorizeContext: vi.fn().mockImplementation(async ({ request: runRequest }) => (
       runRequest.context

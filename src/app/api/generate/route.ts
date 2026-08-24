@@ -33,7 +33,7 @@ import {
 } from '@/lib/cloud-task-storage';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
-import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, getProviderAspectRatios, normalizeImageGenerationSelection, ModelParamType } from '@/lib/canvas-generation-group';
+import type { ModelParamType } from '@/lib/canvas-generation-group';
 import { buildGenerationRouteAudit } from '@/lib/generation-route-audit';
 import {
   createDurableGenerationBatch,
@@ -53,8 +53,21 @@ import {
   UnsupportedTransparentBackgroundError,
 } from '@/lib/image-generation-output';
 import { resolveTaskModelForUser } from '@/lib/task-core/model-catalog';
-import { validateTaskModelSelection } from '@/lib/task-core/model-capability-resolution';
-import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
+import { resolveProviderForTask } from '@/lib/task-core/exact-provider-routing';
+import { normalizeProviderModelSelection } from '@/lib/task-core/exact-model-selection';
+import {
+  admitExactImageCandidate,
+  admitImageFallbackCandidates,
+} from '@/lib/task-core/candidate-model-admission';
+import { planImageOutputFanout } from '@/lib/task-core/image-output-fanout';
+import {
+  applyDescriptorApprovedImageFields,
+  buildDescriptorImageRequestFields,
+} from '@/lib/task-core/descriptor-image-request-fields';
+import {
+  ModelCapabilityError,
+  type TaskModelDescriptor,
+} from '@/lib/task-core/model-capability-contract';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -76,6 +89,8 @@ interface ModelConfig {
   paramType: ModelParamType;
   // 该模型支持的尺寸列表（空数组表示支持所有通用尺寸）
   supportedSizes: string[];
+  qualityOptions: string[];
+  resolutionOptions: string[];
   // 是否支持图生图
   supportsImageToImage: boolean;
   // 最大生成数量
@@ -91,17 +106,33 @@ interface ModelConfig {
  * - 根据模型名称关键词智能推断能力
  * - 所有管理员添加的 API 都可自动适配
  */
-function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerName?: string, providerHint = ''): ModelConfig {
+function modelParamTypeFromDescriptor(descriptor: TaskModelDescriptor | null): ModelParamType {
+  const resolutionOptions = descriptor?.allowedSizes.filter(size => /^\d+K$/i.test(size)) || [];
+  const hasQualityOptions = (descriptor?.qualityOptions.length || 0) > 0;
+  if (resolutionOptions.length > 0 && hasQualityOptions) return 'both';
+  if (resolutionOptions.length > 0) return 'resolution';
+  if (hasQualityOptions) return 'quality';
+  return 'none';
+}
+
+function inferModelConfig(
+  modelId: string,
+  profile: ApiCompatProfile,
+  providerName?: string,
+  descriptor: TaskModelDescriptor | null = null,
+): ModelConfig {
   const id = (modelId || '').toLowerCase();
 
   // ★ 使用核心配置中的模型列表判断参数类型（保持与 UI 一致）
   // 核心改进：不再简单依赖关键词匹配，而是使用规范化的模型能力表
-  const paramTypeFromConfig = getModelParamType(modelId, providerHint);
-  const paramType: ModelConfig['paramType'] = paramTypeFromConfig;
+  const paramType = modelParamTypeFromDescriptor(descriptor);
 
   // 根据模型名称推断是否支持图生图
   // 大多数现代图像模型都支持图生图，只有极少数纯文生图模型不支持
-  const supportsImageToImage = !id.includes('text-only') && !id.includes('txt2img-only');
+  const supportsImageToImage = descriptor
+    ? descriptor.supportsReferenceImages
+      || descriptor.supportedOperations?.includes('image-to-image') === true
+    : !id.includes('text-only') && !id.includes('txt2img-only');
 
   // 根据模型名称推断预估时间
   let estimatedTime = 30; // 默认30秒
@@ -127,9 +158,11 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
     name: providerName || modelId,
     modelId,
     paramType,
-    supportedSizes: getProviderAspectRatios(modelId, providerHint),
+    supportedSizes: descriptor?.allowedRatios || [],
+    qualityOptions: descriptor?.qualityOptions || [],
+    resolutionOptions: descriptor?.allowedSizes.filter(size => /^\d+K$/i.test(size)) || [],
     supportsImageToImage,
-    maxN: 4,
+    maxN: descriptor?.maxOutputs || 4,
     estimatedTime,
   };
 }
@@ -182,7 +215,6 @@ export async function POST(request: NextRequest) {
     let deductedCredits = 0;
     let sessionUser: import('@/lib/user-types').User | null = null;
     const body = await request.json();
-    // quality 需要在后续被模型别名的 resolutionTier 覆盖，所以单独用 let 声明
     const {
       prompt,
       aspectRatio = '1:1',
@@ -213,14 +245,14 @@ export async function POST(request: NextRequest) {
       _skipCloudTaskPersistence,
       resolution, // GPT-Image系列分辨率档位参数（1K/2K/4K）
     } = body;
-    // quality 默认值 '1K'，后续可能被模型别名 resolutionTier 覆盖
     // Canvas-era callers use `n`; the current panels use `outputCount`.
     // Normalize them before task fan-out so every entry point has identical behavior.
     const requestedOutputCount = outputCount ?? requestedN;
     const requestedQuality = typeof body.quality === 'string' ? body.quality : undefined;
-    let quality: string = requestedQuality || '1K';
-    // resolution 默认值 '2K'（仅GPT-Image系列使用）
-    let resolutionTier: string = resolution || '2K';
+    const quality: string | undefined = requestedQuality;
+    const resolutionTier: string | undefined = typeof resolution === 'string'
+      ? resolution
+      : undefined;
     // 诊断日志：显示接收到的参考图参数
     console.log(`[generate] model=${rawModel}, providerId=${providerId}, referenceImages.length=${referenceImages?.length || 0}, referenceMode=${referenceMode}`);
     // 必填参数校验
@@ -268,8 +300,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // ★ 模型别名规范化：延迟到找到 provider 后再做精确匹配；初始仅推断 quality/resolution 后缀
-    // 保留原始 modelId 用于 provider 匹配和精确比对
+    // Preserve the raw id until the provider's exact model list can normalize it.
     const rawModelId = model;
     try {
       const normalizedOutputBody = normalizeImageOutputRequestBody(body, rawModelId);
@@ -288,19 +319,7 @@ export async function POST(request: NextRequest) {
       }
       throw error;
     }
-    // 初次调用仅提取 quality/resolution 等信息，不剥离后缀（传空 providerModels 防止误剥离）
     let normalized = normalizeModelForApi(model, { providerModels: [] });
-
-    // ★ 关键修复：模型别名可能携带分辨率后缀（如 gpt-image-2-4k → resolutionTier='4k'），
-    // 需要覆盖默认 quality，否则会用 high/auto 导致分辨率只有1792而非4096
-    // 注意：resolutionTier是normalizeModelForApi返回的小写值（如'4k'），需要统一大小写比较
-    const tierUpper = normalized.resolutionTier?.toUpperCase();
-    if (tierUpper && ['1K', '2K', '4K', '8K'].includes(tierUpper)) {
-      if (quality.toUpperCase() === '1K' || quality === 'high' || quality === 'auto' || quality === 'medium' || quality === 'low') {
-        console.log(`[generate] 模型别名分辨率覆盖: quality "${quality}" → "${tierUpper}"`);
-        quality = tierUpper;
-      }
-    }
 
     // Content safety check
     const safetyResult = checkPromptSafety(prompt || '');
@@ -320,20 +339,14 @@ export async function POST(request: NextRequest) {
     let requestedProvider = null;
     if (effectiveProviderId) {
       requestedProvider = await findProviderById(effectiveProviderId);
-      const selectedProviderModels = Array.isArray(requestedProvider?.selectedModels)
-        ? requestedProvider.selectedModels
-        : [];
-      const requestedProviderModels = selectedProviderModels.length > 0
-        ? selectedProviderModels
-        : (requestedProvider?.discoveredModels || []).map(item => item.id);
-      const normalizedRequestedModel = normalizeModelForApi(rawModelId, { providerModels: requestedProviderModels });
+      const requestedModelSelection = normalizeProviderModelSelection({
+        requestedModelId: rawModelId,
+        selectedModels: requestedProvider?.selectedModels,
+        discoveredModels: requestedProvider?.discoveredModels,
+      });
       const configuredModel = strictAgentRouting
-        ? requestedProviderModels.find(configuredId => configuredId === rawModelId)
-        : requestedProviderModels.find((configuredId) => {
-            const configured = String(configuredId).toLowerCase();
-            return configured === rawModelId.toLowerCase()
-              || configured === normalizedRequestedModel.apiModelName.toLowerCase();
-          });
+        ? requestedModelSelection.availableModelIds.find(configuredId => configuredId === rawModelId)
+        : (requestedModelSelection.matched ? requestedModelSelection.modelId : undefined);
       const providerKind = requestedProvider?.modelType || requestedProvider?.type || '';
       const supportsImageGeneration = ['image', 'universal', 'general', 'imageEdit'].includes(providerKind);
 
@@ -350,7 +363,9 @@ export async function POST(request: NextRequest) {
 
       // Preserve the configured identifier's casing and accepted alias form.
       model = configuredModel;
-      normalized = normalizedRequestedModel;
+      normalized = normalizeModelForApi(model, {
+        providerModels: requestedModelSelection.availableModelIds,
+      });
     }
 
     // 图像模型权限校验：非管理员用户需检查 imageModels 授权列表
@@ -438,52 +453,60 @@ export async function POST(request: NextRequest) {
     const normalizedRequestedOutputCount = requestedOutputCount === undefined
       ? 1
       : Number(requestedOutputCount);
+    const requestedTaskModelSelection = {
+      operation: accessibleReferenceImages.length > 0 ? 'image-to-image' as const : 'text-to-image' as const,
+      aspectRatio,
+      size: typeof requestedPixelSize === 'string' ? requestedPixelSize : undefined,
+      quality: requestedQuality,
+      outputCount: normalizedRequestedOutputCount,
+      referenceImageCount: accessibleReferenceImages.length,
+      usesMask: false,
+    };
+    const admitImageCandidate = (candidateProviderId: string, candidateModelId: string) => (
+      admitExactImageCandidate({
+        providerId: candidateProviderId,
+        modelId: candidateModelId,
+        selection: requestedTaskModelSelection,
+        resolveTaskModel: (resolvedProviderId, resolvedModelId) => (
+          resolveTaskModelForUser(resolvedProviderId, resolvedModelId, sessionUser)
+        ),
+      })
+    );
+    const candidateAdmissionErrorResponse = (
+      error: ModelCapabilityError | { code: 'MODEL_CAPABILITY_MISMATCH'; field: string; received: unknown; allowed: unknown[] },
+      candidateProviderId: string,
+      candidateModelId: string,
+    ) => {
+      if (error instanceof ModelCapabilityError) {
+        return modelCapabilityConfigurationErrorResponse(error, candidateProviderId, candidateModelId);
+      }
+      return NextResponse.json({
+        success: false,
+        code: 'MODEL_CAPABILITY_MISMATCH',
+        error: `所选模型不支持当前参数：${error.field}`,
+        retryable: false,
+        details: {
+          providerId: candidateProviderId,
+          modelId: candidateModelId,
+          field: error.field,
+          received: error.received,
+          allowed: error.allowed,
+        },
+      }, { status: 400 });
+    };
+    let exactModelDescriptor: TaskModelDescriptor | null = null;
     const modelCapabilityAdmission = effectiveProviderId
-      ? await (async () => {
-          try {
-            const descriptor = await resolveTaskModelForUser(
-              effectiveProviderId,
-              model,
-              sessionUser,
-            );
-            return validateTaskModelSelection(descriptor, {
-              operation: accessibleReferenceImages.length > 0 ? 'image-to-image' : 'text-to-image',
-              aspectRatio,
-              size: typeof requestedPixelSize === 'string' ? requestedPixelSize : undefined,
-              quality: requestedQuality,
-              outputCount: normalizedRequestedOutputCount,
-              referenceImageCount: accessibleReferenceImages.length,
-              usesMask: false,
-            });
-          } catch (error) {
-            if (error instanceof ModelCapabilityError) return error;
-            throw error;
-          }
-        })()
+      ? await admitImageCandidate(effectiveProviderId, model)
       : null;
 
-    if (modelCapabilityAdmission instanceof ModelCapabilityError) {
-      return modelCapabilityConfigurationErrorResponse(
-        modelCapabilityAdmission,
+    if (modelCapabilityAdmission && !modelCapabilityAdmission.ok) {
+      return candidateAdmissionErrorResponse(
+        modelCapabilityAdmission.error,
         effectiveProviderId,
         model,
       );
     }
-    if (modelCapabilityAdmission && !modelCapabilityAdmission.ok) {
-      return NextResponse.json({
-        success: false,
-        code: 'MODEL_CAPABILITY_MISMATCH',
-        error: `所选模型不支持当前参数：${modelCapabilityAdmission.error.field}`,
-        retryable: false,
-        details: {
-          providerId: effectiveProviderId,
-          modelId: model,
-          field: modelCapabilityAdmission.error.field,
-          received: modelCapabilityAdmission.error.received,
-          allowed: modelCapabilityAdmission.error.allowed,
-        },
-      }, { status: 400 });
-    }
+    if (modelCapabilityAdmission?.ok) exactModelDescriptor = modelCapabilityAdmission.descriptor;
 
     // ★ submitOnly 模式：立即注册任务并返回 taskId，后台执行实际生成
     // 解决 chat-tools 调用 /api/generate 时因第三方 API 响应慢（2-11分钟）导致 120s 超时的问题
@@ -1317,7 +1340,11 @@ export async function POST(request: NextRequest) {
     const allImageProviders = await findAllProvidersForType('image');
     
     // 尝试找到用户指定模型对应的 provider（优先使用 providerId 精确匹配）
-    let provider = requestedProvider || await findProviderForModel(model, 'image', effectiveProviderId || undefined);
+    let provider = await resolveProviderForTask({
+      providerId: effectiveProviderId || undefined,
+      findById: findProviderById,
+      findByModel: () => findProviderForModel(model, 'image'),
+    });
     let serverApiKey = provider?.apiKey;
     let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
     
@@ -1330,15 +1357,31 @@ export async function POST(request: NextRequest) {
     // ★ 二次精确规范化：使用 provider.selectedModels 列表做精确匹配
     // 关键修复：PearAPI 有独立的 gpt-image-2/gpt-image-2-2k/gpt-image-2-4k 模型，不能统一替换成 gpt-image-2
     // 只有当 provider 模型列表中不存在 exact 模型时，才使用别名映射
-    const providerModels = Array.isArray(provider?.selectedModels) ? provider.selectedModels : [];
+    const providerModelSelection = normalizeProviderModelSelection({
+      requestedModelId: rawModelId,
+      selectedModels: provider?.selectedModels,
+      discoveredModels: provider?.discoveredModels,
+    });
+    const providerModels = providerModelSelection.availableModelIds;
     normalized = normalizeModelForApi(rawModelId, { providerModels });
-    if (!strictAgentRouting) model = normalized.apiModelName;
+    if (!strictAgentRouting) model = providerModelSelection.modelId;
     if (!strictAgentRouting && normalized.wasNormalized) {
       console.log(`[generate] 模型规范化: "${rawModelId}" → "${model}" (在提供商列表中精确匹配: ${providerModels.some(m => String(m).toLowerCase() === rawModelId.toLowerCase()) ? '是' : '否'})`);
     }
     
-    const providerHint = `${provider?.id || effectiveProviderId} ${provider?.displayName || provider?.name || ''} ${provider?.baseUrl || apiBaseUrl}`;
-    let modelConfig = inferModelConfig(model, initialProfile, provider?.displayName, providerHint);
+    if (provider && !exactModelDescriptor) {
+      const implicitAdmission = await admitImageCandidate(provider.id, model);
+      if (!implicitAdmission.ok) {
+        return candidateAdmissionErrorResponse(implicitAdmission.error, provider.id, model);
+      }
+      exactModelDescriptor = implicitAdmission.descriptor;
+    }
+    let modelConfig = inferModelConfig(
+      model,
+      initialProfile,
+      provider?.displayName,
+      exactModelDescriptor,
+    );
     const requestedRoute = {
       providerId: effectiveProviderId || provider?.id || 'unresolved-provider',
       providerName: provider?.displayName || provider?.name || effectiveProviderId || '未匹配提供商',
@@ -1348,21 +1391,28 @@ export async function POST(request: NextRequest) {
     let fallbackReason: string | undefined;
 
     // 构建备选模型列表（排除当前模型，优先管理员配置的模型）
-    const candidateModels: { modelId: string; apiKey: string; baseUrl: string; providerId: string; displayName: string; advancedParams?: Record<string, string> }[] = [];
-    for (const p of allImageProviders) {
-      for (const m of p.models) {
-        if (m !== model) {
-          candidateModels.push({
-            modelId: m,
-            apiKey: p.provider.apiKey,
-            baseUrl: normalizeApiBaseUrl(p.provider.baseUrl),
-            providerId: p.provider.id || 'unknown',
-            displayName: p.provider.displayName || m,
-            advancedParams: p.provider.advancedParams,
-          });
+    const rawCandidateModels: { modelId: string; apiKey: string; baseUrl: string; providerId: string; displayName: string; advancedParams?: Record<string, string> }[] = [];
+    if (!effectiveProviderId) {
+      for (const p of allImageProviders) {
+        for (const m of p.models) {
+          if (m !== model) {
+            rawCandidateModels.push({
+              modelId: m,
+              apiKey: p.provider.apiKey,
+              baseUrl: normalizeApiBaseUrl(p.provider.baseUrl),
+              providerId: p.provider.id || 'unknown',
+              displayName: p.provider.displayName || m,
+              advancedParams: p.provider.advancedParams,
+            });
+          }
         }
       }
     }
+    const admittedCandidateModels = await admitImageFallbackCandidates({
+      candidates: rawCandidateModels,
+      admit: candidate => admitImageCandidate(candidate.providerId, candidate.modelId),
+    });
+    const candidateModels = admittedCandidateModels.candidates;
 
     if (!serverApiKey || !apiBaseUrl) {
       if (effectiveProviderId) {
@@ -1382,7 +1432,12 @@ export async function POST(request: NextRequest) {
         serverApiKey = fallback.apiKey;
         apiBaseUrl = normalizeApiBaseUrl(fallback.baseUrl);
         const fallbackProfile = resolveCompatProfile({ baseUrl: fallback.baseUrl, advancedParams: fallback.advancedParams });
-        modelConfig = inferModelConfig(fallback.modelId, fallbackProfile, fallback.displayName, `${fallback.providerId} ${fallback.displayName} ${fallback.baseUrl}`);
+        modelConfig = inferModelConfig(
+          fallback.modelId,
+          fallbackProfile,
+          fallback.displayName,
+          fallback.descriptor,
+        );
         provider = {
           id: fallback.providerId,
           name: fallback.displayName,
@@ -1394,6 +1449,12 @@ export async function POST(request: NextRequest) {
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
+      } else if (admittedCandidateModels.firstRejection) {
+        return candidateAdmissionErrorResponse(
+          admittedCandidateModels.firstRejection.error,
+          admittedCandidateModels.firstRejection.candidate.providerId,
+          admittedCandidateModels.firstRejection.candidate.modelId,
+        );
       } else {
         return NextResponse.json({
           success: false,
@@ -1628,18 +1689,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 验证尺寸是否支持
-    // Normalize stale state before a request reaches the provider. This covers
-    // old browser state and workflow payloads as well as the current UI.
-    const activeProviderHint = `${provider?.id || effectiveProviderId} ${provider?.displayName || provider?.name || ''} ${provider?.baseUrl || apiBaseUrl}`;
-    const normalizedSelection = normalizeImageGenerationSelection(modelConfig.modelId, activeProviderHint, {
-      aspectRatio: aspectRatio || '1:1',
-      quality,
-      resolution: resolutionTier,
-    });
-    const requestedSize = normalizedSelection.aspectRatio;
-    quality = normalizedSelection.quality;
-    resolutionTier = normalizedSelection.resolution;
+    const requestedSize = aspectRatio || '1:1';
     
     // 设置生成数量 - 不受模型maxN限制，因为我们逐个提交任务(n=1)
     const totalCount = typeof requestedOutputCount === "number" && Number.isFinite(requestedOutputCount) && requestedOutputCount >= 1
@@ -1698,21 +1748,21 @@ export async function POST(request: NextRequest) {
       );
       const isGeminiImageRoute = profile.id === 'gemini-image';
 
-      const effectiveSize = currentModelConfig.supportedSizes.includes(requestedSize) 
-        ? requestedSize 
-        : currentModelConfig.supportedSizes[0] || '1:1';
-
-      // ★ 关键修复：优先使用后端规范表计算像素尺寸（传入 modelId），
-      // 确保与 API 官方文档一致；前端传来的 requestedPixelSize 仅作兜底
-      const calculatedPixelSize = calculateActualPixelsFromRatio(effectiveSize, quality, currentModelConfig.modelId);
-      const pixelSize = calculatedPixelSize || requestedPixelSize;
-
-      // ★ 关键修复：根据 profile.sizeFormat 决定发送哪种格式
-      // - 'aspect-ratio' → 发送宽高比格式（如 "16:9"），APImart MJ/SD等模型需要
-      // - 'pixel' → 发送像素格式（如 "1024x1024"），OpenAI等模型需要
-      const finalSize = profile.sizeFormat === 'aspect-ratio' 
-        ? effectiveSize  // MJ等模型使用宽高比
-        : (pixelSize || effectiveSize);  // OpenAI等模型使用像素
+      const descriptorRequestFields = buildDescriptorImageRequestFields({
+        aspectRatio: requestedSize,
+        requestedPixelSize: typeof requestedPixelSize === 'string'
+          ? requestedPixelSize
+          : undefined,
+        quality,
+        resolution: resolutionTier,
+        sizeFormat: profile.sizeFormat,
+      });
+      const effectiveSize = descriptorRequestFields.size;
+      const calculatedPixelSize = requestedPixelSize
+        ? undefined
+        : calculateActualPixelsFromRatio(effectiveSize, quality || '', currentModelConfig.modelId);
+      const pixelSize = descriptorRequestFields.sizePx || requestedPixelSize || calculatedPixelSize;
+      const finalSize = descriptorRequestFields.size;
 
       const requestBody: Record<string, unknown> = {
         model: currentModelConfig.modelId,
@@ -1731,39 +1781,8 @@ export async function POST(request: NextRequest) {
         requestBody.size_px = pixelSize;
       }
 
-      // quality / resolution 参数
-      if (quality) {
-        const qualityMap: Record<string, string> = {
-          '1K': 'low', '2K': 'medium', '4K': 'high',
-          'standard': 'auto', 'high': 'high', 'auto': 'auto',
-          'low': 'low', 'medium': 'medium',
-        };
-
-        // ★ resolution参数映射：统一使用大写 '1K/2K/4K' 格式
-        // APImart/PearAPI 官方文档明确要求大写（示例：{"resolution":"2K"}），禁止小写
-        const resolutionMap: Record<string, string> = {
-          'high': '2K', 'medium': '1K', 'low': '1K', 'auto': '2K',
-          '4K': '4K', '2K': '2K', '1K': '1K', 'ultra': '4K', 'hd': '4K',
-          'standard': '1K',
-        };
-
-        if (currentModelConfig.paramType === 'quality') {
-          requestBody.quality = qualityMap[quality] || quality;
-        } else if (currentModelConfig.paramType === 'resolution') {
-          // ★ 将 quality 参数转换为 API 期望的 resolution 格式（大写）
-          requestBody.resolution = resolutionMap[quality] || quality;
-          requestBody.quality = qualityMap[quality] || quality;
-        } else if (currentModelConfig.paramType === 'both') {
-          // GPT-Image系列同时支持resolution和quality两种参数
-          // resolution控制输出尺寸档位（1K/2K/4K），quality控制生成细节质量
-          // ★ 统一使用大写格式，APImart/PearAPI 文档均要求大写
-          requestBody.resolution = resolutionTier;
-          requestBody.quality = qualityMap[quality] || quality; // 使用前端传递的质量级别
-        } else {
-          // paramType === 'none' — send both for maximum compatibility
-          requestBody.quality = qualityMap[quality] || quality;
-        }
-      }
+      if (quality !== undefined) requestBody.quality = quality;
+      if (resolutionTier !== undefined) requestBody.resolution = resolutionTier;
 
       // ★ 诊断日志：记录发送给 API 的关键分辨率参数，便于排查“用户设置4K但实际生成1K”问题
       console.log(`[generate] Resolution params → model: ${currentModelConfig.modelId}, paramType: ${currentModelConfig.paramType}, quality: ${quality}, effectiveSize: ${effectiveSize}, pixelSize: ${pixelSize || 'null'}, finalSize: ${finalSize}, profile.sizeFormat: ${profile.sizeFormat}, requestBody.size: ${requestBody.size}, requestBody.resolution: ${requestBody.resolution || 'N/A'}, requestBody.width: ${requestBody.width || 'N/A'}, requestBody.height: ${requestBody.height || 'N/A'}`);
@@ -1982,14 +2001,17 @@ export async function POST(request: NextRequest) {
 
       // Filter only after reference inputs are present. The filtered object is the
       // exact payload passed to the provider compatibility layer.
-      const filteredBody = filterRequestForModel(currentModelConfig.modelId, requestBody);
+      const filteredBody = applyDescriptorApprovedImageFields(
+        filterRequestForModel(currentModelConfig.modelId, requestBody),
+        descriptorRequestFields,
+      );
 
       // ★ Gemini 图像模型专用路由：通过 /chat/completions 生图
       // 某些中转站（如4SAPI）的 Gemini 图像模型仅支持 /chat/completions 端点，
       // 不支持 /images/generations。此路由将请求转换为 chat 格式，
       // 然后从响应的 content 中提取 base64 图片数据。
       if (isGeminiImageRoute) {
-        const chatRequestBody = buildGeminiChatImageRequest(requestBody);
+        const chatRequestBody = buildGeminiChatImageRequest(filteredBody);
         if (agentProviderIdempotencyKey) chatRequestBody.idempotency_key = agentProviderIdempotencyKey;
         console.log('Gemini image route: using /chat/completions for model', currentModelConfig.modelId, 'size:', requestBody.size, 'quality:', requestBody.quality || requestBody.resolution);
         const msgs = chatRequestBody.messages as Array<Record<string, unknown>> | undefined;
@@ -2897,12 +2919,12 @@ export async function POST(request: NextRequest) {
     let usedApiBaseUrl = apiBaseUrl || '';
 
     // 提交所有生成任务（带自动重试逻辑）
-    for (let i = 0; i < totalCount; i++) {
+    for (const [i, requestN] of planImageOutputFanout(totalCount).entries()) {
       let submitted = false;
       
       // 先用当前模型尝试
       try {
-        const result = await submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || 'env', 1, provider);
+        const result = await submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || 'env', requestN, provider);
         if (result.directImageUrls && result.directImageUrls.length > 0) {
           directImageUrls.push(...result.directImageUrls);
         }
@@ -2983,13 +3005,17 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        if (!strictAgentRouting && !submitted && isRetryable && candidateModels.length > 0) {
+        if (!strictAgentRouting && !effectiveProviderId && !submitted && isRetryable && candidateModels.length > 0) {
           console.log(`模型 ${modelConfig.modelId} 不可用 (${errMsg})，尝试备选模型...`);
-          
           for (let ci = 0; ci < candidateModels.length; ci++) {
             const candidate = candidateModels[ci];
             const candidateProfile = resolveCompatProfile({ baseUrl: candidate.baseUrl, advancedParams: candidate.advancedParams });
-            const candidateConfig = inferModelConfig(candidate.modelId, candidateProfile, candidate.displayName, `${candidate.providerId} ${candidate.displayName} ${candidate.baseUrl}`);
+            const candidateConfig = inferModelConfig(
+              candidate.modelId,
+              candidateProfile,
+              candidate.displayName,
+              candidate.descriptor,
+            );
             
             try {
               console.log(`尝试备选模型 ${candidate.modelId} (${ci + 1}/${candidateModels.length})...`);

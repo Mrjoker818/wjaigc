@@ -17,7 +17,7 @@ describe('generate reference category strength contract', () => {
   it('adds the required reference image payload before capability filtering creates the submitted body', () => {
     const firstReferenceImage = source.indexOf('requestBody.image = firstRefBase64');
     const filteredBody = source.indexOf(
-      'const filteredBody = filterRequestForModel(currentModelConfig.modelId, requestBody);',
+      'filterRequestForModel(currentModelConfig.modelId, requestBody),',
     );
     const profileAdjustment = source.indexOf(
       'adjustRequestForProfile(filteredBody, profile',

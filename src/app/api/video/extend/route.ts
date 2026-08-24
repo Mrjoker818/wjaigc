@@ -38,6 +38,7 @@ import { getRuntimeSettings } from '@/lib/runtime-settings';
 import { getRequestId } from '@/lib/request-id';
 import { resolveTaskModelForUser } from '@/lib/task-core/model-catalog';
 import { validateTaskModelSelection } from '@/lib/task-core/model-capability-resolution';
+import { resolveProviderForTask } from '@/lib/task-core/exact-provider-routing';
 import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
 
 export const maxDuration = 300; // 5 min timeout
@@ -121,17 +122,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
     }
     // 1. 查找视频 API 提供商
-    let provider;
     const effectiveProviderId = extractedProviderId || providerId;
-    if (effectiveProviderId) {
-      provider = await findProviderById(effectiveProviderId);
-    }
-    if (!provider) {
-      provider = await findProviderForModel(pureModel, 'video', effectiveProviderId);
-    }
-    if (!provider) {
-      provider = await findProviderForFeature('video');
-    }
+    const provider = await resolveProviderForTask({
+      providerId: effectiveProviderId || undefined,
+      findById: findProviderById,
+      findByModel: () => findProviderForModel(pureModel, 'video'),
+      findByFeature: () => findProviderForFeature('video'),
+    });
     if (!provider) {
       return NextResponse.json(
         { error: '未找到可用的视频 API 提供商，请先在管理员后台添加视频模型 API' },
@@ -185,14 +182,6 @@ export async function POST(request: NextRequest) {
 
     // 3. 获取模型特征信息
     const modelInfo = getVideoModelInfo(pureModel);
-
-    // 检查模型是否支持延长
-    if (modelInfo && !modelInfo.features.videoExtend) {
-      return NextResponse.json(
-        { error: `模型 ${modelInfo.name} 不支持视频延长功能` },
-        { status: 400 },
-      );
-    }
 
     // 3.5 解析视频 URL（转换为第三方 API 可访问的格式）
     const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';

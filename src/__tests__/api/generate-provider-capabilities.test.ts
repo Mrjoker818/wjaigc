@@ -5,9 +5,14 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
 
 describe('generate provider capability wiring', () => {
-  it('derives server-side parameter and ratio validation from the selected provider', () => {
-    expect(source).toContain('getModelParamType(modelId, providerHint)');
-    expect(source).toContain('supportedSizes: getProviderAspectRatios(modelId, providerHint)');
+  it('derives server-side parameter and ratio validation from the exact task model descriptor', () => {
+    expect(source).toContain('modelParamTypeFromDescriptor');
+    expect(source).toContain('supportedSizes: descriptor?.allowedRatios || []');
+    expect(source).toContain('resolveTaskModelForUser');
+    expect(source).toContain('buildDescriptorImageRequestFields');
+    expect(source).toContain('applyDescriptorApprovedImageFields');
+    expect(source).not.toContain('getProviderAspectRatios');
+    expect(source).not.toContain('getModelParamType');
   });
 
   it('passes the model-filtered request through the provider compatibility layer', () => {

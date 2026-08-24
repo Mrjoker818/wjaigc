@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -9,6 +12,8 @@ import {
   authorizeAgentTools,
   type AgentToolDefinition,
 } from '@/lib/agent-runtime/tool-registry';
+import { toAgentModelCapabilitySet } from '@/lib/agent-runtime/model-capability-set';
+import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import type { AgentRunRequest } from '@/lib/agent-runtime/types';
 
 const registry: AgentToolDefinition[] = [
@@ -48,6 +53,90 @@ function request(overrides: Partial<AgentRunRequest> = {}): AgentRunRequest {
 }
 
 describe('Agent tool authorization', () => {
+  it('derives every Agent capability from one exact task model descriptor', () => {
+    const model: TaskModelDescriptor = {
+      providerId: 'provider-video',
+      modelId: 'model-video',
+      kind: 'video',
+      sourceType: 'video',
+      protocol: 'async-video',
+      executionMode: 'async',
+      allowedRatios: [],
+      allowedSizes: [],
+      qualityOptions: [],
+      maxOutputs: 1,
+      supportsReferenceImages: true,
+      supportsMask: true,
+      supportedOperations: ['image-to-video', 'video-extend'],
+      outputKinds: ['mp4'],
+      capabilitySources: {},
+    };
+
+    expect(toAgentModelCapabilitySet(model)).toEqual(new Set([
+      'video',
+      'reference-images',
+      'edit',
+      'image-to-video',
+      'video-extend',
+    ]));
+  });
+
+  it('preserves the established edit model image capability without requiring a mask', () => {
+    const model: TaskModelDescriptor = {
+      providerId: 'provider-edit',
+      modelId: 'model-edit',
+      kind: 'edit',
+      sourceType: 'imageEdit',
+      protocol: 'images-edits',
+      executionMode: 'async',
+      allowedRatios: [],
+      allowedSizes: [],
+      qualityOptions: [],
+      maxOutputs: 1,
+      supportsReferenceImages: false,
+      supportsMask: false,
+      outputKinds: ['png'],
+      capabilitySources: {},
+    };
+
+    expect(toAgentModelCapabilitySet(model)).toEqual(new Set(['edit', 'image']));
+  });
+
+  it('preserves VLM vision capability from the exact descriptor source type', () => {
+    const model: TaskModelDescriptor = {
+      providerId: 'provider-vlm',
+      modelId: 'model-vlm',
+      kind: 'chat',
+      sourceType: 'vlm',
+      protocol: 'chat-completions',
+      executionMode: 'sync',
+      allowedRatios: [],
+      allowedSizes: [],
+      qualityOptions: [],
+      maxOutputs: 1,
+      supportsReferenceImages: false,
+      supportsMask: false,
+      outputKinds: ['text'],
+      capabilitySources: {},
+    };
+
+    expect(toAgentModelCapabilitySet(model)).toEqual(new Set(['chat', 'vision']));
+  });
+
+  it('uses the shared descriptor capability set in every Agent runtime admission path', () => {
+    const runtimeFiles = [
+      'src/lib/agent-runtime/admission-gate.ts',
+      'src/lib/agent-runtime/service.ts',
+      'src/lib/agent-runtime/same-task-adapter.ts',
+    ];
+
+    for (const file of runtimeFiles) {
+      const source = readFileSync(resolve(process.cwd(), file), 'utf8');
+      expect(source).toContain('toAgentModelCapabilitySet');
+      expect(source).not.toContain('function modelCapabilities(');
+    }
+  });
+
   it('denies requested tools when the exact model lacks the required capability', () => {
     const authorization = authorizeAgentTools({
       requestedToolIds: ['generate_image', 'edit_image'],
@@ -117,6 +206,56 @@ describe('Agent tool authorization', () => {
 
     expect(authorization.tools.map(tool => tool.toolId)).toEqual(['agent_edit']);
     expect(authorization.denials).toEqual([]);
+  });
+
+  it('separates orchestrator chat admission from downstream image tool admission', () => {
+    const orchestrator = authorizeAgentTools({
+      requestedToolIds: ['generate_image'],
+      workspace: 'chat',
+      userProductTypes: ['simple-chat'],
+      modelCapabilities: ['chat'],
+      capabilityScope: 'orchestrator',
+    });
+    const downstream = authorizeAgentTools({
+      requestedToolIds: ['generate_image'],
+      workspace: 'chat',
+      userProductTypes: ['simple-chat'],
+      modelCapabilities: ['image'],
+      capabilityScope: 'downstream',
+    });
+
+    expect(orchestrator.tools.map(tool => tool.toolId)).toEqual(['generate_image']);
+    expect(downstream.tools.map(tool => tool.toolId)).toEqual(['generate_image']);
+  });
+
+  it('requires vision rather than plain chat for downstream image analysis', () => {
+    const denied = authorizeAgentTools({
+      requestedToolIds: ['analyze_image'],
+      workspace: 'chat',
+      userProductTypes: ['simple-chat'],
+      modelCapabilities: ['chat'],
+      capabilityScope: 'downstream',
+    });
+    const admitted = authorizeAgentTools({
+      requestedToolIds: ['analyze_image'],
+      workspace: 'chat',
+      userProductTypes: ['simple-chat'],
+      modelCapabilities: ['chat', 'vision'],
+      capabilityScope: 'downstream',
+    });
+
+    expect(denied.tools).toEqual([]);
+    expect(admitted.tools.map(tool => tool.toolId)).toEqual(['analyze_image']);
+  });
+
+  it('uses downstream capability scope only in per-tool admission paths', () => {
+    const admissionSource = readFileSync(resolve(process.cwd(), 'src/lib/agent-runtime/admission-gate.ts'), 'utf8');
+    const adoptionSource = readFileSync(resolve(process.cwd(), 'src/lib/agent-runtime/same-task-adapter.ts'), 'utf8');
+    const serviceSource = readFileSync(resolve(process.cwd(), 'src/lib/agent-runtime/service.ts'), 'utf8');
+
+    expect(admissionSource).toContain("capabilityScope: 'downstream'");
+    expect(adoptionSource).toContain("capabilityScope: 'downstream'");
+    expect(serviceSource).toContain("capabilityScope: 'orchestrator'");
   });
 });
 

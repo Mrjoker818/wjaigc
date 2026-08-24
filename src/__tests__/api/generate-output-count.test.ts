@@ -8,8 +8,8 @@ describe('image generation output-count contract', () => {
 
     expect(source).toContain('n: requestedN');
     expect(source).toContain('const requestedOutputCount = outputCount ?? requestedN;');
-    expect(source).toContain('for (let i = 0; i < totalCount; i++)');
-    expect(source).toContain('submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || \'env\', 1, provider)');
+    expect(source).toContain('planImageOutputFanout(totalCount).entries()');
+    expect(source).toContain('submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || \'env\', requestN, provider)');
   });
 
   it('returns one durable submitOnly child task for each requested output slot', () => {

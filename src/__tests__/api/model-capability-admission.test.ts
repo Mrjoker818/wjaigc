@@ -24,7 +24,7 @@ describe('image model capability admission', () => {
     const firstTaskRegistration = source.indexOf('registerTask(', admissionGate);
 
     expect(source).toContain('resolveTaskModelForUser');
-    expect(source).toContain('validateTaskModelSelection');
+    expect(source).toContain('admitExactImageCandidate');
     expect(referenceResolution).toBeGreaterThan(-1);
     expect(admissionGate).toBeGreaterThan(referenceResolution);
     expect(firstLegacyCharge).toBeGreaterThan(admissionGate);
@@ -44,15 +44,30 @@ describe('image model capability admission', () => {
   it('validates the requested operation, ratio, quality, count, and reference count', () => {
     const admissionGate = source.indexOf('const modelCapabilityAdmission =');
     const submitOnly = source.indexOf('if (submitOnly)', admissionGate);
-    const admissionBlock = source.slice(admissionGate, submitOnly);
+    const admissionBlock = source.slice(
+      source.indexOf('const requestedTaskModelSelection ='),
+      submitOnly,
+    );
 
     expect(admissionBlock).toContain(
-      "operation: accessibleReferenceImages.length > 0 ? 'image-to-image' : 'text-to-image'",
+      "operation: accessibleReferenceImages.length > 0 ? 'image-to-image' as const : 'text-to-image' as const",
     );
     expect(admissionBlock).toContain('aspectRatio');
     expect(admissionBlock).toContain('quality: requestedQuality');
     expect(admissionBlock).toContain('outputCount: normalizedRequestedOutputCount');
     expect(admissionBlock).toContain('referenceImageCount: accessibleReferenceImages.length');
+  });
+
+  it('admits every implicit fallback candidate before charging credits', () => {
+    const candidateAdmission = source.indexOf('const admittedCandidateModels = await admitImageFallbackCandidates(');
+    const billing = source.indexOf('consumeCredits(', candidateAdmission);
+    const retryBlockStart = source.indexOf('if (!strictAgentRouting && !effectiveProviderId && !submitted && isRetryable');
+    const retryBlockEnd = source.indexOf('if (!submitted) {', retryBlockStart);
+    const retryBlock = source.slice(retryBlockStart, retryBlockEnd);
+
+    expect(candidateAdmission).toBeGreaterThan(-1);
+    expect(billing).toBeGreaterThan(candidateAdmission);
+    expect(retryBlock).not.toContain('admitImageCandidate(');
   });
 });
 

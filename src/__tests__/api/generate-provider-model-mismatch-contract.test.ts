@@ -20,9 +20,15 @@ describe('image generation provider-model mismatch contract', () => {
     expect(mismatchGate).toBeGreaterThan(userResolution);
     expect(mismatchGate).toBeLessThan(firstBatchPersistence);
     expect(earlyRequestBlock).toContain('findProviderById(effectiveProviderId)');
-    expect(earlyRequestBlock).toContain('requestedProvider.selectedModels');
+    expect(earlyRequestBlock).toContain('selectedModels: requestedProvider?.selectedModels');
+    expect(earlyRequestBlock).toContain('discoveredModels: requestedProvider?.discoveredModels');
     expect(earlyRequestBlock).toContain(
-      'normalizeModelForApi(rawModelId, { providerModels: requestedProviderModels })',
+      'normalizeProviderModelSelection({',
     );
+  });
+
+  it('never builds or retries cross-provider candidates for an explicit provider request', () => {
+    expect(source).toContain('if (!effectiveProviderId) {\n      for (const p of allImageProviders)');
+    expect(source).toContain('if (!strictAgentRouting && !effectiveProviderId && !submitted && isRetryable');
   });
 });
