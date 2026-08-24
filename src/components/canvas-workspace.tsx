@@ -57,6 +57,7 @@ import {
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
 import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
 import type { GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
+import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 import type { VideoGenerationPanelHandle } from '@/components/video-generation-panel';
 import type { QuickCreateCompileViewState, QuickCreateRequest } from '@/components/quick-create-panel';
 import type { VectorDesignAsset } from '@/components/vector-design/vector-editor-dialog';
@@ -420,6 +421,20 @@ function rebaseCanvasImages(
 }
 
 export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspaceProps) {
+  const {
+    models: catalogModels,
+    descriptorsByKey: taskModelCatalogIndex,
+    loading: taskModelCatalogLoading,
+    error: taskModelCatalogError,
+  } = useTaskModelCatalog('all');
+  const taskModelCatalog = useMemo(
+    () => Array.from(taskModelCatalogIndex.values()),
+    [taskModelCatalogIndex],
+  );
+  const catalogStatus = useMemo(() => ({
+    loading: taskModelCatalogLoading,
+    error: taskModelCatalogError?.message || null,
+  }), [taskModelCatalogError, taskModelCatalogLoading]);
   const requestCanvasTaskPoll = useCallback(
     (payload: Record<string, unknown>, options?: { signal?: AbortSignal }) => fetch('/api/poll-task', {
       method: 'POST',
@@ -5635,6 +5650,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         : currentAnnotationModel.model;
     return (
       <NodeEditor
+        taskModelCatalog={taskModelCatalog}
+        taskModelOptions={catalogModels}
+        catalogStatus={catalogStatus}
         workflow={nodeWorkflow}
         userId={currentUser?.id}
         projectId={currentProject?.id}
@@ -5937,6 +5955,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       {/* Canvas - 全屏 */}
       <div className="absolute inset-0">
         <InfiniteCanvas
+          taskModelCatalog={taskModelCatalog}
+          taskModelOptions={catalogModels}
+          catalogStatus={catalogStatus}
           key={currentProject?.id || 'canvas-local'}
           images={images}
           onImagesChange={setImages}

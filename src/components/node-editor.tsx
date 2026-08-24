@@ -34,11 +34,11 @@ import { WorkflowShadowProbe } from '@/components/workflow/WorkflowShadowProbe';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { computePortPosition } from '@/lib/node-port-position';
 import {
-  getProviderAspectRatios,
-  getQualityLevelOptions,
-  getResolutionTierOptions,
-} from '@/lib/canvas-generation-group';
-import { modelSupports } from '@/lib/model-capabilities';
+  createTaskModelCatalogIndex,
+  taskModelKey,
+  type TaskModelDescriptor,
+} from '@/lib/task-core/model-capability-contract';
+import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
 import { getPromptTemplates, addPromptTemplate, type PromptTemplate } from '@/lib/prompt-templates';
 import {
   getVisibleWorkflowNodeIds,
@@ -99,30 +99,7 @@ function getNodeIcon(type: NodeType, size = 14, className = '') {
   return <IconComp size={size} className={className} />;
 }
 
-// ==================== 模型列表 Hook ====================
-
 interface ModelOption { id: string; name: string; type: string; provider: string; providerId?: string; apiDisplayName?: string; }
-
-
-function useModelList() {
-  const [models, setModels] = useState<ModelOption[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const fetchModels = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/workflow/models?type=all');
-      if (res.ok) {
-        const data = await res.json();
-        setModels((data.models || []) as ModelOption[]);
-      }
-    } catch (e) { console.error('[NodeEditor] 模型列表加载失败:', e); }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { fetchModels(); }, [fetchModels]);
-  return { models, loading, fetchModels };
-}
 
 // ==================== 连线临时状态 ====================
 
@@ -656,6 +633,9 @@ const WORKFLOW_PRESETS: WorkflowPreset[] = [
 // ==================== 主组件 ====================
 
 interface NodeEditorProps {
+  taskModelCatalog?: TaskModelDescriptor[];
+  taskModelOptions?: TaskModelCatalogModel[];
+  catalogStatus?: { loading: boolean; error: string | null };
   workflow?: WorkflowData | null;
   userId?: string;
   projectId?: string;
@@ -869,7 +849,7 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 
-export default function NodeEditor({ workflow, userId, projectId, onBack, onWorkflowChange, onWorkflowSaved, onBeforeWorkflowChatNavigation, canvasImages, onCanvasImageAssetReferenceAdopted, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
+export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, workflow, userId, projectId, onBack, onWorkflowChange, onWorkflowSaved, onBeforeWorkflowChatNavigation, canvasImages, onCanvasImageAssetReferenceAdopted, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
@@ -1442,15 +1422,27 @@ ${contextInfo}
     if (nodeWheelRafRef.current !== null) cancelAnimationFrame(nodeWheelRafRef.current);
   }, []);
 
-  const { models, loading: modelsLoading } = useModelList();
+  const modelCatalogIndex = useMemo(
+    () => createTaskModelCatalogIndex(taskModelCatalog),
+    [taskModelCatalog],
+  );
+  const models = useMemo<ModelOption[]>(() => taskModelOptions.map(model => ({
+    id: model.id,
+    name: model.name,
+    type: model.type,
+    provider: model.providerName || model.providerId,
+    providerId: model.providerId,
+    apiDisplayName: model.displayName || model.name,
+  })), [taskModelOptions]);
+  const modelsLoading = catalogStatus.loading || Boolean(catalogStatus.error);
   const chatModels = useMemo(() => models.filter(m => m.type === 'chat'), [models]);
   const imageModels = useMemo(() => models.filter(m => m.type === 'image'), [models]);
   const annotationModels = useMemo(() => imageModels
-    .filter((model) => modelSupports(model.id, 'supportsMask'))
+    .filter((model) => modelCatalogIndex.get(taskModelKey(model.providerId || '', model.id))?.supportsMask)
     .map((model) => ({
       id: model.providerId ? `${model.providerId}::${model.id}` : model.id,
       label: `${model.apiDisplayName || model.name || model.id}${model.provider ? ` · ${model.provider}` : ''}`,
-    })), [imageModels]);
+    })), [imageModels, modelCatalogIndex]);
 
   // 工作流节点图片列表 (用于 @mention 引用和输入引用阻断)
   // 合并: 画布传入的图片 + 工作流内节点输出的图片
@@ -3475,6 +3467,7 @@ ${contextInfo}
             <PropertyPanel
               node={selectedNode}
               models={models}
+              modelCatalogIndex={modelCatalogIndex}
               modelsLoading={modelsLoading}
               onUpdate={handleNodeUpdate}
               onDelete={handleDeleteNode}
@@ -3859,6 +3852,7 @@ ${contextInfo}
 interface PropertyPanelProps {
   node: WorkflowNode | null;
   models: ModelOption[];
+  modelCatalogIndex: Map<string, TaskModelDescriptor>;
   modelsLoading: boolean;
   onUpdate: (nodeId: string, updates: Partial<WorkflowNode>) => void;
   onDelete: (nodeId: string) => void;
@@ -3868,7 +3862,7 @@ interface PropertyPanelProps {
   onCanvasImageSelect: (nodeId: string, image: CanvasImageRef) => Promise<void>;
 }
 
-function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect }: PropertyPanelProps) {
+function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect }: PropertyPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [localTextValues, setLocalTextValues] = useState<Record<string, string>>({});
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -3889,6 +3883,15 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
   const color = NODE_TYPE_COLORS[cat];
   const fields = getNodePropertyFields(node.type);
   const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
+  const configuredModel = String(node.config?.model || '');
+  const configuredModelSeparator = configuredModel.indexOf('::');
+  const configuredProviderId = configuredModelSeparator >= 0
+    ? configuredModel.slice(0, configuredModelSeparator)
+    : String(node.config?.providerId || '');
+  const configuredModelId = configuredModelSeparator >= 0
+    ? configuredModel.slice(configuredModelSeparator + 2)
+    : configuredModel;
+  const configuredDescriptor = modelCatalogIndex.get(taskModelKey(configuredProviderId, configuredModelId));
 
   const renderField = (field: PropertyField) => {
     const externalValue = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
@@ -4044,7 +4047,9 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             value={externalValue !== undefined && externalValue !== '' ? Number(externalValue) : (field.defaultValue != null ? Number(field.defaultValue) : '')}
             onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value === '' ? '' : Number(e.target.value) } })}
             min={field.min}
-            max={field.max}
+            max={field.key === 'count' || field.key === 'n'
+              ? configuredDescriptor?.maxOutputs || field.max
+              : field.max}
             step={field.step || 1}
             placeholder={field.placeholder}
             className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
@@ -4052,31 +4057,30 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         );
 
       case 'select': {
-        // 动态解析 quality 和 aspectRatio 选项
         let dynamicOptions = field.options;
-        const selectedModelId = String(node.config?.model || '');
-        const selectedProviderId = String(node.config?.providerId || '');
-        const selectedModel = models.find(model =>
-          model.id === selectedModelId && (!selectedProviderId || model.providerId === selectedProviderId),
-        );
-        const providerHint = `${selectedProviderId} ${selectedModel?.provider || ''}`;
-        if (field.key === 'quality' && node.config?.model) {
-          const qualities = getQualityLevelOptions(selectedModelId, providerHint);
-          if (qualities.length > 0) {
-            dynamicOptions = qualities.map(q => ({ value: q, label: q }));
-          }
+        const configuredModel = String(node.config?.model || '');
+        const separatorIndex = configuredModel.indexOf('::');
+        const selectedProviderId = separatorIndex >= 0
+          ? configuredModel.slice(0, separatorIndex)
+          : String(node.config?.providerId || '');
+        const selectedModelId = separatorIndex >= 0
+          ? configuredModel.slice(separatorIndex + 2)
+          : configuredModel;
+        const selectedDescriptor = modelCatalogIndex.get(taskModelKey(selectedProviderId, selectedModelId));
+        if (selectedDescriptor && field.key === 'quality') {
+          dynamicOptions = selectedDescriptor.qualityOptions.map(value => ({ value, label: value }));
         }
-        if (field.key === 'resolution' && node.config?.model) {
-          const resolutionTiers = getResolutionTierOptions(selectedModelId, providerHint);
-          if (resolutionTiers.length > 0) {
-            dynamicOptions = resolutionTiers.map(tier => ({ value: tier, label: tier }));
-          }
+        if (selectedDescriptor && field.key === 'resolution') {
+          dynamicOptions = selectedDescriptor.allowedSizes.map(value => ({ value, label: value }));
         }
-        if (field.key === 'aspectRatio' && node.config?.model) {
-          const ratios = getProviderAspectRatios(selectedModelId, providerHint);
-          if (ratios.length > 0) {
-            dynamicOptions = ratios.map(r => ({ value: r, label: r }));
-          }
+        if (selectedDescriptor && field.key === 'aspectRatio') {
+          dynamicOptions = selectedDescriptor.allowedRatios.map(value => ({ value, label: value }));
+        }
+        if (selectedDescriptor && (field.key === 'duration' || field.key === 'durationSeconds')) {
+          dynamicOptions = (selectedDescriptor.allowedDurationsSeconds || []).map(value => ({
+            value: String(value),
+            label: `${value} 秒`,
+          }));
         }
         return (
           <select
@@ -4127,6 +4131,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
         const currentModelId = String(externalValue || '');
         const currentCompositeValue = (() => {
           if (!currentModelId) return '';
+          if (currentModelId.includes('::')) return currentModelId;
           // 如果config中有providerId，用复合键匹配
           const cfgProviderId = node.config?.providerId as string | undefined;
           if (cfgProviderId) return `${cfgProviderId}::${currentModelId}`;
@@ -4143,28 +4148,45 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
               const sepIdx = selectedValue.indexOf('::');
               const selectedModelId = sepIdx >= 0 ? selectedValue.slice(sepIdx + 2) : selectedValue;
               const selectedProviderId = sepIdx >= 0 ? selectedValue.slice(0, sepIdx) : '';
-              const configUpdate: Record<string, string> = { [field.key]: selectedModelId };
+              const configUpdate: Record<string, string | number> = {};
+              configUpdate[field.key] = selectedValue;
               // 保存providerId到节点config
               if (selectedProviderId) {
                 configUpdate.providerId = selectedProviderId;
               }
-              // 模型变更时，动态更新 quality 和 aspectRatio 为新模型的默认值
+              // 只在旧值不受新模型支持时归一化，保留仍然合法的用户选择。
               if (selectedModelId) {
-                const selectedModel = models.find(model =>
-                  model.id === selectedModelId && (!selectedProviderId || model.providerId === selectedProviderId),
-                );
-                const providerHint = `${selectedProviderId} ${selectedModel?.provider || ''}`;
-                const qualities = getQualityLevelOptions(selectedModelId, providerHint);
-                if (qualities.length > 0) {
-                  configUpdate.quality = qualities[0];
-                }
-                const resolutionTiers = getResolutionTierOptions(selectedModelId, providerHint);
-                if (resolutionTiers.length > 0) {
-                  configUpdate.resolution = resolutionTiers[0];
-                }
-                const ratios = getProviderAspectRatios(selectedModelId, providerHint);
-                if (ratios.length > 0) {
-                  configUpdate.aspectRatio = ratios[0];
+                const selectedDescriptor = modelCatalogIndex.get(taskModelKey(selectedProviderId, selectedModelId));
+                if (selectedDescriptor) {
+                  if (
+                    selectedDescriptor.qualityOptions.length > 0
+                    && !selectedDescriptor.qualityOptions.includes(String(node.config?.quality || ''))
+                  ) {
+                    configUpdate.quality = selectedDescriptor.qualityOptions[0];
+                  }
+                  if (
+                    selectedDescriptor.allowedSizes.length > 0
+                    && !selectedDescriptor.allowedSizes.includes(String(node.config?.resolution || ''))
+                  ) {
+                    configUpdate.resolution = selectedDescriptor.allowedSizes[0];
+                  }
+                  if (
+                    selectedDescriptor.allowedRatios.length > 0
+                    && !selectedDescriptor.allowedRatios.includes(String(node.config?.aspectRatio || ''))
+                  ) {
+                    configUpdate.aspectRatio = selectedDescriptor.allowedRatios[0];
+                  }
+                  const durations = selectedDescriptor.allowedDurationsSeconds || [];
+                  if (
+                    durations.length > 0
+                    && !durations.includes(Number(node.config?.duration ?? node.config?.durationSeconds))
+                  ) {
+                    configUpdate.duration = durations[0];
+                  }
+                  const currentCount = Number(node.config?.count ?? node.config?.n ?? 1);
+                  if (currentCount > selectedDescriptor.maxOutputs) {
+                    configUpdate.count = selectedDescriptor.maxOutputs;
+                  }
                 }
               }
               onUpdate(node.id, { config: configUpdate });
@@ -4282,7 +4304,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
           {field.key === 'aspectRatio' ? (
             /* 比例选择器 — 与原型对齐: 4列grid + ratio-btn样式 */
             <div className="grid grid-cols-4 gap-2">
-              {(field.options || [{ value: '1:1', label: '1:1' }, { value: '4:3', label: '4:3' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }]).map(opt => {
+              {(configuredDescriptor?.allowedRatios.map(value => ({ value, label: value })) || field.options || []).map(opt => {
                 const isActive = String(node.config?.aspectRatio ?? field.defaultValue ?? '1:1') === opt.value;
                 const ratioMap: Record<string, { w: number; h: number }> = { '1:1': { w: 20, h: 20 }, '4:3': { w: 24, h: 18 }, '16:9': { w: 28, h: 16 }, '9:16': { w: 14, h: 24 }, '3:4': { w: 18, h: 24 }, '3:2': { w: 24, h: 16 }, '2:3': { w: 16, h: 24 } };
                 const dim = ratioMap[opt.value] || { w: 20, h: 20 };
@@ -4297,7 +4319,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
           ) : field.key === 'quality' ? (
             /* 质量选择器 — 与原型对齐: 3按钮横排 */
             <div className="flex gap-2">
-              {(field.options || [{ value: 'standard', label: '标准' }, { value: 'hd', label: '高清' }, { value: 'ultra', label: '极致' }]).map(opt => {
+              {(configuredDescriptor?.qualityOptions.map(value => ({ value, label: value })) || field.options || []).map(opt => {
                 const isActive = String(node.config?.quality ?? field.defaultValue ?? 'hd') === opt.value;
                 return (
                   <button key={opt.value} className={`quality-btn flex-1 ${isActive ? 'active' : ''}`} onClick={() => onUpdate(node.id, { config: { quality: opt.value } })}>

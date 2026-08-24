@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 
 const hookPath = resolve(process.cwd(), 'src/hooks/use-task-model-catalog.ts');
+const workspacePath = resolve(process.cwd(), 'src/components/canvas-workspace.tsx');
 
 describe('task model catalog consumers', () => {
   afterEach(() => {
@@ -22,6 +23,14 @@ describe('task model catalog consumers', () => {
 
     const source = readFileSync(hookPath, 'utf8');
     expect(source).toContain('export function useTaskModelCatalog');
+  });
+
+  it('loads one all-model snapshot in the workspace and injects it into canvas and node modes', () => {
+    const source = readFileSync(workspacePath, 'utf8');
+    expect(source).toContain("useTaskModelCatalog('all')");
+    expect(source).toContain('taskModelCatalog={taskModelCatalog}');
+    expect(source).toContain('taskModelOptions={catalogModels}');
+    expect(source).toContain('catalogStatus={catalogStatus}');
   });
 
   it('loads the versioned catalog and indexes descriptors by exact provider/model key', async () => {

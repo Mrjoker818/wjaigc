@@ -55,11 +55,17 @@ import {
   useAnnotationController,
 } from '@/features/annotations/use-annotation-controller';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
-import { buildGroupReferenceRequestControls, calculateActualPixels, captureGenerationGroupSourcePositions, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, QUALITY_DISPLAY_NAMES, getProviderAspectRatios, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, reconcileGenerationGroupPositions } from '@/lib/canvas-generation-group';
+import { buildGroupReferenceRequestControls, calculateActualPixels, captureGenerationGroupSourcePositions, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, QUALITY_DISPLAY_NAMES, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, reconcileGenerationGroupPositions } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
+import {
+  createTaskModelCatalogIndex,
+  taskModelKey,
+  type TaskModelDescriptor,
+} from '@/lib/task-core/model-capability-contract';
+import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
 import {
   applyCanvasTaskEventToProcessingPlaceholders,
   shouldPreserveProjectedCanvasCompletion,
@@ -439,6 +445,9 @@ function parseImageEditResponse(value: unknown): ImageEditResponse {
 }
 
 interface InfiniteCanvasProps {
+  taskModelCatalog?: TaskModelDescriptor[];
+  taskModelOptions?: TaskModelCatalogModel[];
+  catalogStatus?: { loading: boolean; error: string | null };
   images: CanvasImage[];
   onImagesChange: (images: CanvasImage[], options?: { history?: 'record' | 'skip' }) => void;
   selectedImage: CanvasImage | null;
@@ -702,8 +711,12 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, onRequestTaskPoll }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, onRequestTaskPoll }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
+  const taskModelCatalogIndex = useMemo(
+    () => createTaskModelCatalogIndex(taskModelCatalog),
+    [taskModelCatalog],
+  );
 
   // Stable refs for callbacks used in effects (avoid stale closures)
   const onSelectImageRef = useRef(onSelectImage);
@@ -1413,7 +1426,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [canvasGenCount, setCanvasGenCount] = useState(1);
   const [canvasGenPartialFailCount, setCanvasGenPartialFailCount] = useState(0); // B3: 部分失败计数
   const [canvasGenRefImages, setCanvasGenRefImages] = useState<string[]>([]);
-  const [canvasGenModels, setCanvasGenModels] = useState<{id: string, providerId: string, providerName: string, apiDisplayName?: string}[]>([]);
+  const canvasGenModels = useMemo(
+    () => taskModelOptions
+      .filter(model => model.type === 'image')
+      .map(model => ({
+        id: model.id,
+        providerId: model.providerId,
+        providerName: model.providerName || model.providerId,
+        apiDisplayName: model.name && model.name !== model.id ? model.name : undefined,
+      })),
+    [taskModelOptions],
+  );
   // 模型ID → 提供商名称 映射（用于历史图片 apiProvider 回填）
   const modelProviderMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -2707,12 +2730,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const raw = localStorage.getItem('wujie_selected_model');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed.model) return {
-          model: parsed.model,
-          providerId: parsed.providerId,
-          apiDisplayName: parsed.apiDisplayName || '',
-          providerName: parsed.providerName || '',
-        };
+        if (parsed.model) {
+          const selectedModel = String(parsed.model);
+          const separatorIndex = selectedModel.indexOf('::');
+          return {
+            model: separatorIndex >= 0 ? selectedModel.slice(separatorIndex + 2) : selectedModel,
+            providerId: parsed.providerId || (separatorIndex >= 0 ? selectedModel.slice(0, separatorIndex) : undefined),
+            apiDisplayName: parsed.apiDisplayName || '',
+            providerName: parsed.providerName || '',
+          };
+        }
       }
       // 兜底：从 unbounded_ai_user_data 读取
       const userId = localStorage.getItem('unbounded_ai_current_user');
@@ -5406,14 +5433,15 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const resultW = firstImage.width;
     const resultH = firstImage.height;
     const resultPos = findNonOverlappingPosition(defaultResultX, defaultResultY, resultW, resultH, [firstImage.id]);
-    const { model: currentModel, providerId: currentProviderId, providerName: currentProviderName } = getCurrentModel();
-    // 根据当前模型获取支持的参数
-    const currentProviderHint = `${currentProviderId || ''} ${currentProviderName || ''}`;
-    const initSupportedRatios = getProviderAspectRatios(currentModel, currentProviderHint);
-    const initSupportedQualities = getResolutionTierOptions(currentModel, currentProviderHint);
+    const { model: currentModel, providerId: currentProviderId } = getCurrentModel();
+    const currentDescriptor = taskModelCatalogIndex.get(taskModelKey(currentProviderId || '', currentModel));
+    const initSupportedRatios = currentDescriptor?.allowedRatios ?? [];
+    const initSupportedQualities = currentDescriptor?.allowedSizes ?? [];
     const initAspectRatio = initSupportedRatios.includes('1:1') ? '1:1' : initSupportedRatios[0];
-    const initQuality = initSupportedQualities[0] || '1K';
-    const initSize = calculateActualPixels(initAspectRatio, initQuality, currentModel);
+    const initQuality = initSupportedQualities[0] || '';
+    const initSize = /^\d+x\d+$/i.test(initQuality)
+      ? initQuality
+      : calculateActualPixels(initAspectRatio, initQuality, currentModel);
     const group: CanvasGenGroup = {
       id: groupId,
       type: groupType,
@@ -5435,7 +5463,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         aspectRatio: initAspectRatio,
         size: initSize,
         resolution: initQuality,
-        quality: 'auto',
+        quality: currentDescriptor?.qualityOptions[0] || '',
         outputCount: 1,
         n: 1,
         prompt: '',
@@ -5456,7 +5484,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       createdAt: Date.now(),
     };
     return group;
-  }, [getCurrentModel, findNonOverlappingPosition]);
+  }, [findNonOverlappingPosition, getCurrentModel, taskModelCatalogIndex]);
 
   /** Alt+Click: 追加到参考图组或创建新组 */
   const handleAltClickAddToGroup = useCallback((image: CanvasImage) => {
@@ -5832,6 +5860,32 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }));
         return;
       }
+      const descriptor = taskModelCatalogIndex.get(taskModelKey(providerId, model));
+      if (!descriptor) {
+        setGenGroups(prev => prev.map(g => g.id === group.id ? {
+          ...g,
+          resultPlaceholder: {
+            ...g.resultPlaceholder,
+            isProcessing: false,
+            progress: 0,
+            errorMsg: '模型能力目录不可用，请重新选择模型后重试',
+          },
+        } : g));
+        return;
+      }
+      const requestedOutputCount = toolbar.outputCount || toolbar.n || 1;
+      if (requestedOutputCount > descriptor.maxOutputs) {
+        setGenGroups(prev => prev.map(g => g.id === group.id ? {
+          ...g,
+          resultPlaceholder: {
+            ...g.resultPlaceholder,
+            isProcessing: false,
+            progress: 0,
+            errorMsg: `当前模型最多生成 ${descriptor.maxOutputs} 张图片`,
+          },
+        } : g));
+        return;
+      }
 
       // 将 data: URL 参考图先上传到服务器，避免请求体过大 (base64 图片会触发 413 Request Entity Too Large)
       const rawRefUrls = group.refImages.map(r => r.url);
@@ -5885,10 +5939,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             negativePrompt: toolbar.negativePrompt,
             model,
             providerId,
-            aspectRatio: toolbar.aspectRatio,
-            resolution: toolbar.resolution || '2K',
-            quality: toolbar.quality || 'auto',
-          outputCount: toolbar.outputCount,
+            ...(toolbar.aspectRatio ? { aspectRatio: toolbar.aspectRatio } : {}),
+            ...(toolbar.resolution ? { resolution: toolbar.resolution } : {}),
+            ...(toolbar.quality ? { quality: toolbar.quality } : {}),
+          outputCount: requestedOutputCount,
           referenceImages,
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
           submitOnly: true,
@@ -6241,7 +6295,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: `生成失败: ${error instanceof Error ? error.message : String(error)}` } };
       }));
     }
-  }, [images, modelProviderMap, onImagesChange, setViewOffset, setZoom, zoom]);
+  }, [images, modelProviderMap, onImagesChange, setViewOffset, setZoom, taskModelCatalogIndex, zoom]);
 
   // handleGenGroupGenerate: 通过groupId查找组并调用handleGroupGenerate
   const handleGenGroupGenerate = useCallback((groupId: string) => {
@@ -6736,67 +6790,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
     };
     loadAdmin3DModels();
-  }, []);
-
-  // Load image models for canvas generator
-  useEffect(() => {
-    const loadImageModels = async () => {
-      try {
-        const res = await fetch('/api/models?type=image');
-        if (res.ok) {
-          const data = await res.json();
-          const models: {id: string, providerId: string, providerName: string, apiDisplayName?: string}[] = [];
-          const providerMap = new Map<string, string>();
-          if (data.providers && Array.isArray(data.providers)) {
-            for (const p of data.providers) {
-              providerMap.set(p.id, p.name || p.displayName || '');
-            }
-          }
-          // 从顶层 models 数组读取（已由服务端按 selectedModels + type 过滤）
-          if (data.models && Array.isArray(data.models)) {
-            for (const m of data.models) {
-              models.push({
-                id: m.id || m.name,
-                providerId: m.providerId || '',
-                providerName: providerMap.get(m.providerId) || m.providerId || '',
-                apiDisplayName: (m.name && m.name !== m.id) ? m.name : '',
-              });
-            }
-          }
-          setCanvasGenModels(models);
-        }
-      } catch { /* silent */ }
-      // Also load user third-party APIs
-      try {
-        const stored = localStorage.getItem('unbounded_ai_universal_apis');
-        if (stored) {
-          const providers = JSON.parse(stored) as Array<{ id: string; name: string; displayName?: string; baseUrl: string; apiKey: string; isEnabled: boolean; modelType?: string; type?: string; selectedModel?: string; selectedModels?: string[] }>;
-          const userModels: {id: string, providerId: string, providerName: string}[] = [];
-          for (const p of providers) {
-            if (!p.isEnabled) continue;
-            if (p.modelType?.includes('image') || p.modelType === 'general' || p.type === 'general' || (!p.modelType && p.type === 'universal')) {
-              const displayName = p.displayName || p.name;
-              if (p.selectedModels && p.selectedModels.length > 0) {
-                for (const m of p.selectedModels) {
-                  userModels.push({ id: m, providerId: p.id, providerName: displayName });
-                }
-              }
-            }
-          }
-          setCanvasGenModels(prev => {
-            const existingKeys = new Set(prev.map(m => `${m.providerId}::${m.id}`));
-            const newOnes = userModels.filter(m => !existingKeys.has(`${m.providerId}::${m.id}`));
-            return [...prev, ...newOnes];
-          });
-        }
-      } catch { /* silent */ }
-    };
-    loadImageModels();
-
-    // Auto-refresh when page becomes visible (admin may have updated models)
-    const handleVisibility = () => { if (document.visibilityState === 'visible') loadImageModels(); };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => { document.removeEventListener('visibilitychange', handleVisibility); };
   }, []);
 
   const getThreeDProviders = useCallback((): Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; advancedParams?: Record<string, string>; providerName?: string }> => {
@@ -7499,12 +7492,44 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setCanvasGenRefImages([]);
     // Auto-select first model if none selected
     if (!canvasGenModel && canvasGenModels.length > 0) {
-      setCanvasGenModel(`${canvasGenModels[0].providerId}::${canvasGenModels[0].id}`);
+      const firstModel = canvasGenModels[0];
+      const firstDescriptor = taskModelCatalogIndex.get(taskModelKey(firstModel.providerId, firstModel.id));
+      setCanvasGenModel(`${firstModel.providerId}::${firstModel.id}`);
+      if (firstDescriptor) {
+        setCanvasGenAspectRatio(firstDescriptor.allowedRatios.includes('1:1')
+          ? '1:1'
+          : firstDescriptor.allowedRatios[0] || '');
+        setCanvasGenResolution(firstDescriptor.allowedSizes[0] || '');
+        setCanvasGenQuality(firstDescriptor.qualityOptions[0] || '');
+        setCanvasGenCount(previous => Math.min(previous, firstDescriptor.maxOutputs));
+        setCanvasGenRefImages(previous => previous.slice(0, firstDescriptor.maxReferenceImages || 0));
+      }
     }
-  }, [activateCanvasToolSession, showCanvasGenerator, canvasGenFrameId, closeCanvasToolPanels, onImagesChange, canvasGenModel, canvasGenModels]);
+  }, [activateCanvasToolSession, showCanvasGenerator, canvasGenFrameId, closeCanvasToolPanels, onImagesChange, canvasGenModel, canvasGenModels, taskModelCatalogIndex]);
 
   const handleCanvasGenerate = useCallback(async () => {
     if (!canvasGenPrompt.trim() || canvasGenGenerating) return;
+    const canvasGenPureModel = canvasGenModel?.includes('::')
+      ? canvasGenModel.split('::')[1]
+      : canvasGenModel || undefined;
+    const canvasGenProviderId = canvasGenModel?.includes('::')
+      ? canvasGenModel.split('::')[0]
+      : undefined;
+    const descriptor = canvasGenProviderId && canvasGenPureModel
+      ? taskModelCatalogIndex.get(taskModelKey(canvasGenProviderId, canvasGenPureModel))
+      : undefined;
+    if (!descriptor) {
+      toast.error('模型能力目录不可用，请重新选择模型');
+      return;
+    }
+    if (canvasGenCount > descriptor.maxOutputs) {
+      toast.error(`当前模型最多生成 ${descriptor.maxOutputs} 张图片`);
+      return;
+    }
+    if (canvasGenRefImages.length > (descriptor.maxReferenceImages || 0)) {
+      toast.error(`当前模型最多支持 ${descriptor.maxReferenceImages || 0} 张参考图`);
+      return;
+    }
 
     const canvasGenerationSlots: Array<{ taskId: string; frameId: string; slotIndex: number }> = [];
     setCanvasGenGenerating(true);
@@ -7512,12 +7537,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setCanvasGenProgress(0);
 
     try {
-      const canvasGenPureModel = canvasGenModel?.includes('::')
-        ? canvasGenModel.split('::')[1]
-        : canvasGenModel || undefined;
-      const canvasGenProviderId = canvasGenModel?.includes('::')
-        ? canvasGenModel.split('::')[0]
-        : undefined;
       const selectedProviderName = canvasGenModels.find(
         candidate => candidate.providerId === canvasGenProviderId && candidate.id === canvasGenPureModel,
       )?.providerName;
@@ -7535,9 +7554,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             negativePrompt: canvasGenNegativePrompt || undefined,
             model: canvasGenPureModel,
             providerId: canvasGenProviderId,
-            aspectRatio: canvasGenAspectRatio,
-            resolution: canvasGenResolution,
-            quality: canvasGenQuality,
+            ...(canvasGenAspectRatio ? { aspectRatio: canvasGenAspectRatio } : {}),
+            ...(canvasGenResolution ? { resolution: canvasGenResolution } : {}),
+            ...(canvasGenQuality ? { quality: canvasGenQuality } : {}),
             n: canvasGenCount,
             outputCount: canvasGenCount,
             generationChannel: 'canvas-direct',
@@ -7845,7 +7864,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     } finally {
       setCanvasGenGenerating(false);
     }
-  }, [canvasGenPrompt, canvasGenGenerating, canvasGenModel, canvasGenModels, canvasGenNegativePrompt, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages, viewOffset.x, viewOffset.y, zoom, onImagesChange, completeProcessingFrame, projectProcessingFrameEvent, updateProcessingFrame, projectId, brandProject?.id]);
+  }, [canvasGenPrompt, canvasGenGenerating, canvasGenModel, canvasGenModels, canvasGenNegativePrompt, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages, viewOffset.x, viewOffset.y, zoom, onImagesChange, completeProcessingFrame, projectProcessingFrameEvent, updateProcessingFrame, projectId, brandProject?.id, taskModelCatalogIndex]);
 
   // Update frame position when images change
   useEffect(() => {
@@ -13153,15 +13172,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  // 获取新模型支持的参数，重置质量和比例
-                                  const providerHint = `${m.providerId || ''} ${m.providerName || ''}`;
-                                  const newSupportedRatios = getProviderAspectRatios(m.id, providerHint);
-                                  const newResolutions = getResolutionTierOptions(m.id, providerHint);
-                                  const newQualityLevels = getQualityLevelOptions(m.id, providerHint);
+                                  const selectedDescriptor = taskModelCatalogIndex.get(taskModelKey(m.providerId, m.id));
+                                  if (!selectedDescriptor) return;
+                                  const newSupportedRatios = selectedDescriptor.allowedRatios;
+                                  const newResolutions = selectedDescriptor.allowedSizes;
+                                  const newQualityLevels = selectedDescriptor.qualityOptions;
                                   const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
-                                  const newResolution = newResolutions[0] || '2K';
-                                  const newQualityLevel = newQualityLevels[0] || 'auto';
-                                  const newSize = calculateActualPixels(newAspectRatio, newResolution, m.id);
+                                  const newResolution = newResolutions[0] || '';
+                                  const newQualityLevel = newQualityLevels[0] || '';
+                                  const newSize = /^\d+x\d+$/i.test(newResolution)
+                                    ? newResolution
+                                    : calculateActualPixels(newAspectRatio, newResolution, m.id);
                                   setGenGroups(prev => prev.map(g =>
                                     g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, resolution: newResolution, quality: newQualityLevel, size: newSize } } : g
                                   ));
@@ -13179,15 +13200,18 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
                     {/* Row 2: Aspect ratio + Resolution + Quality + Count */}
                     {(() => {
-                      const groupProviderHint = `${group.toolbar.providerId || ''} ${group.toolbar.providerName || ''}`;
-                      const supportedRatios = getProviderAspectRatios(group.toolbar.model, groupProviderHint);
-                      const supportedResolutions = getResolutionTierOptions(group.toolbar.model, groupProviderHint);
-                      const supportedQualityLevels = getQualityLevelOptions(group.toolbar.model, groupProviderHint);
-                      const paramType = getModelParamType(group.toolbar.model, groupProviderHint);
-                      const showResolution = paramType === 'resolution' || paramType === 'both';
-                      const showQuality = paramType === 'quality' || paramType === 'both';
-                      const currentResolution = group.toolbar.resolution || supportedResolutions[0] || '2K';
-                      const currentQuality = group.toolbar.quality || supportedQualityLevels[0] || 'auto';
+                      if (!group.toolbar.providerId) return null;
+                      const groupDescriptor = taskModelCatalogIndex.get(
+                        taskModelKey(group.toolbar.providerId, group.toolbar.model),
+                      );
+                      const supportedRatios = groupDescriptor?.allowedRatios ?? [];
+                      const supportedQualityLevels = groupDescriptor?.qualityOptions ?? [];
+                      const supportedResolutions = groupDescriptor?.allowedSizes ?? [];
+                      const showResolution = supportedResolutions.length > 0;
+                      const showQuality = supportedQualityLevels.length > 0;
+                      const currentResolution = group.toolbar.resolution || supportedResolutions[0] || '';
+                      const currentQuality = group.toolbar.quality || supportedQualityLevels[0] || '';
+                      const maxOutputs = groupDescriptor ? groupDescriptor.maxOutputs : 1;
                       return (
                     <div className="flex items-center gap-2 flex-wrap">
                       {/* 图像比例 */}
@@ -13202,7 +13226,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                           setOpenGroupConfigDropdown(open ? { groupId: group.id, field: 'aspectRatio' } : null);
                         }}
                         onValueChange={(newAr) => {
-                          const newSize = calculateActualPixels(newAr, currentResolution, group.toolbar.model);
+                          const newSize = /^\d+x\d+$/i.test(currentResolution)
+                            ? currentResolution
+                            : calculateActualPixels(newAr, currentResolution, group.toolbar.model);
                           setGenGroups(prev => prev.map(g =>
                             g.id === group.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g
                           ));
@@ -13224,7 +13250,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                           setOpenGroupConfigDropdown(open ? { groupId: group.id, field: 'resolution' } : null);
                         }}
                         onValueChange={(newRes) => {
-                          const newSize = calculateActualPixels(group.toolbar.aspectRatio, newRes, group.toolbar.model);
+                          const newSize = /^\d+x\d+$/i.test(newRes)
+                            ? newRes
+                            : calculateActualPixels(group.toolbar.aspectRatio, newRes, group.toolbar.model);
                           setGenGroups(prev => prev.map(g =>
                             g.id === group.id ? { ...g, toolbar: { ...g.toolbar, resolution: newRes, size: newSize } } : g
                           ));
@@ -13257,7 +13285,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       <CanvasScaledMenuSelect
                         label="出图数量"
                         value={String(group.toolbar.outputCount || group.toolbar.n || 1)}
-                        options={[1, 2, 3, 4].map(value => ({ value: String(value), label: `${value}张` }))}
+                        options={Array.from({ length: maxOutputs }, (_, index) => index + 1).map(value => ({ value: String(value), label: `${value}张` }))}
                         open={openGroupConfigDropdown?.groupId === group.id && openGroupConfigDropdown.field === 'outputCount'}
                         isMonochrome={isMonochrome}
                         onOpenChange={(open) => {
@@ -13322,7 +13350,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         className="flex-1 py-2.5 rounded-lg text-sm font-bold text-black transition-all hover:brightness-110 active:scale-[0.98]"
                         style={{ background: isRef ? 'linear-gradient(135deg, #d4af37, #f0d060)' : 'linear-gradient(135deg, #4ecdc4, #45b7d1)' }}
                         onClick={() => handleGenGroupGenerate(group.id)}
-                        disabled={group.resultPlaceholder.isProcessing || !group.toolbar.model}
+                        disabled={group.resultPlaceholder.isProcessing || !group.toolbar.model || !group.toolbar.providerId || catalogStatus.loading || Boolean(catalogStatus.error) || !taskModelCatalogIndex.has(taskModelKey(group.toolbar.providerId, group.toolbar.model))}
                       >
                         {group.resultPlaceholder.isProcessing ? '生成中...' : '生成'}
                       </button>
@@ -16224,15 +16252,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                 onMouseEnter={(e) => { (e.target as HTMLElement).style.background = isMonochrome ? '#f3f4f6' : 'rgba(34,34,34,0.80)'; }}
                                 onMouseLeave={(e) => { (e.target as HTMLElement).style.background = hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId ? (isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.2)') : 'transparent'; }}
                                 onClick={() => {
-                                  // 获取新模型支持的参数，重置质量和比例
-                                  const providerHint = `${m.providerId || ''} ${m.providerName || ''}`;
-                                  const newSupportedRatios = getProviderAspectRatios(m.id, providerHint);
-                                  const newResolutions = getResolutionTierOptions(m.id, providerHint);
-                                  const newQualityLevels = getQualityLevelOptions(m.id, providerHint);
+                                  const selectedDescriptor = taskModelCatalogIndex.get(taskModelKey(m.providerId, m.id));
+                                  if (!selectedDescriptor) return;
+                                  const newSupportedRatios = selectedDescriptor.allowedRatios;
+                                  const newResolutions = selectedDescriptor.allowedSizes;
+                                  const newQualityLevels = selectedDescriptor.qualityOptions;
                                   const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
-                                  const newResolution = newResolutions[0] || '2K';
-                                  const newQuality = newQualityLevels[0] || 'auto';
-                                  const newSize = calculateActualPixels(newAspectRatio, newResolution, m.id);
+                                  const newResolution = newResolutions[0] || '';
+                                  const newQuality = newQualityLevels[0] || '';
+                                  const newSize = /^\d+x\d+$/i.test(newResolution)
+                                    ? newResolution
+                                    : calculateActualPixels(newAspectRatio, newResolution, m.id);
                                   setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, resolution: newResolution, quality: newQuality, size: newSize } } : g));
                                   setOpenModelDropdownGroupId(null);
                                 }}
@@ -16248,13 +16278,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       </div>
                       {/* 图像比例 + 分辨率/质量 */}
                       {(() => {
-                        const hcgProviderHint = `${hcg.toolbar.providerId || ''} ${hcg.toolbar.providerName || ''}`;
-                        const hcgRatios = getProviderAspectRatios(hcg.toolbar.model, hcgProviderHint);
-                        const hcgResolutions = getResolutionTierOptions(hcg.toolbar.model, hcgProviderHint);
-                        const hcgQualityLevels = getQualityLevelOptions(hcg.toolbar.model, hcgProviderHint);
-                        const paramType = getModelParamType(hcg.toolbar.model, hcgProviderHint);
-                        const curResolution = hcg.toolbar.resolution || hcgResolutions[0] || '2K';
-                        const curQuality = hcg.toolbar.quality || hcgQualityLevels[0] || 'auto';
+                        const hcgDescriptor = taskModelCatalogIndex.get(taskModelKey(hcg.toolbar.providerId, hcg.toolbar.model));
+                        const hcgRatios = hcgDescriptor?.allowedRatios ?? [];
+                        const hcgResolutions = hcgDescriptor?.allowedSizes ?? [];
+                        const hcgQualityLevels = hcgDescriptor?.qualityOptions ?? [];
+                        const curResolution = hcg.toolbar.resolution || hcgResolutions[0] || '';
+                        const curQuality = hcg.toolbar.quality || hcgQualityLevels[0] || '';
                         return (<>
                       {/* 图像比例 */}
                       <div className="flex items-center gap-1">
@@ -16265,14 +16294,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                           value={hcg.toolbar.aspectRatio}
                           onChange={(e) => {
                             const newAr = e.target.value;
-                            const newSize = calculateActualPixels(newAr, curResolution, hcg.toolbar.model);
+                            const newSize = /^\d+x\d+$/i.test(curResolution)
+                              ? curResolution
+                              : calculateActualPixels(newAr, curResolution, hcg.toolbar.model);
                             setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g));
                           }}
                         >
                           {hcgRatios.map(r => <option key={r} value={r}>{r}</option>)}
                         </select>
                       </div>
-                      {(paramType === 'both' || paramType === 'resolution') && (
+                      {hcgResolutions.length > 0 && (
                         <div className="flex items-center gap-1">
                           <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>分辨率</span>
                           <select
@@ -16281,7 +16312,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             value={curResolution}
                             onChange={(e) => {
                               const newRes = e.target.value;
-                              const newSize = calculateActualPixels(hcg.toolbar.aspectRatio, newRes, hcg.toolbar.model);
+                              const newSize = /^\d+x\d+$/i.test(newRes)
+                                ? newRes
+                                : calculateActualPixels(hcg.toolbar.aspectRatio, newRes, hcg.toolbar.model);
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, resolution: newRes, size: newSize } } : g));
                             }}
                           >
@@ -16289,7 +16322,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                           </select>
                         </div>
                       )}
-                      {(paramType === 'both' || paramType === 'quality') && (
+                      {hcgQualityLevels.length > 0 && (
                         <div className="flex items-center gap-1">
                           <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>质量</span>
                           <select
@@ -16314,7 +16347,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         value={hcg.toolbar.outputCount}
                         onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, outputCount: parseInt(e.target.value) } } : g))}
                       >
-                        {[1,2,3,4].map(n => <option key={n} value={n}>{n}张</option>)}
+                        {Array.from({ length: taskModelCatalogIndex.get(taskModelKey(hcg.toolbar.providerId, hcg.toolbar.model))?.maxOutputs || 1 }, (_, index) => index + 1).map(n => <option key={n} value={n}>{n}张</option>)}
                       </select>
                     </div>
                     {/* 提示词 */}
@@ -16371,6 +16404,15 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         style={{ background: isMonochrome ? 'linear-gradient(135deg, #3b82f6, #60a5fa)' : 'linear-gradient(135deg, #d4af37, #f0d060)' }}
                         onClick={async () => {
                           if (!hcg.toolbar.model || !hcg.toolbar.prompt.trim()) return;
+                          const hcgDescriptor = taskModelCatalogIndex.get(taskModelKey(hcg.toolbar.providerId, hcg.toolbar.model));
+                          if (!hcgDescriptor) {
+                            toast.error('模型能力目录不可用，请重新选择模型');
+                            return;
+                          }
+                          if (hcg.toolbar.outputCount > hcgDescriptor.maxOutputs) {
+                            toast.error(`当前模型最多生成 ${hcgDescriptor.maxOutputs} 张图片`);
+                            return;
+                          }
                           let hexCubeInput;
                           try {
                             hexCubeInput = buildHexCubeGenerationInput({
@@ -16398,9 +16440,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                   ...hexCubeInput,
                                   model: hcg.toolbar.model,
                                   providerId: hcg.toolbar.providerId,
-                                  aspectRatio: hcg.toolbar.aspectRatio,
-                                  resolution: hcg.toolbar.resolution || '2K',
-                                  quality: hcg.toolbar.quality || 'auto',
+                                  ...(hcg.toolbar.aspectRatio ? { aspectRatio: hcg.toolbar.aspectRatio } : {}),
+                                  ...(hcg.toolbar.resolution ? { resolution: hcg.toolbar.resolution } : {}),
+                                  ...(hcg.toolbar.quality ? { quality: hcg.toolbar.quality } : {}),
                                   n: hcg.toolbar.outputCount,
                                   submitOnly: true,
                                 }, hcg.toolbar.model)),
@@ -16918,37 +16960,29 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     const newModelKey = e.target.value;
                     const newModelId = newModelKey ? newModelKey.split('::').pop() || '' : '';
                     const newProviderId = newModelKey ? newModelKey.split('::')[0] || '' : '';
-                    const selectedModel = canvasGenModels.find(model =>
-                      model.id === newModelId && model.providerId === newProviderId,
-                    );
-                    const providerHint = `${newProviderId} ${selectedModel?.providerName || ''}`;
                     setCanvasGenModel(newModelKey);
                     if (newModelId) {
-                      // 模型切换时重置参数为新模型支持的默认值
-                      const newSupportedRatios = getProviderAspectRatios(newModelId, providerHint);
-                      const newResolutionTiers = getResolutionTierOptions(newModelId, providerHint);
-                      const newQualityLevels = getQualityLevelOptions(newModelId, providerHint);
-                      // 根据模型名后缀自动选择默认分辨率/质量
-                      const lower = newModelId.toLowerCase();
-                      let defaultResolution = newResolutionTiers[0] || '2K';
-                      let defaultQuality = newQualityLevels[0] || 'auto';
-                      if (lower.includes('-4k') && newResolutionTiers.includes('4K')) defaultResolution = '4K';
-                      else if (lower.includes('-2k') && newResolutionTiers.includes('2K')) defaultResolution = '2K';
-                      if (lower.includes('-hd') || lower.includes('-high')) {
-                        if (newQualityLevels.includes('high')) defaultQuality = 'high';
-                      } else if (lower.includes('-4k') || lower.includes('-2k')) {
-                        defaultQuality = newQualityLevels.includes('high') ? 'high' : defaultQuality;
-                      }
+                      const selectedDescriptor = taskModelCatalogIndex.get(taskModelKey(newProviderId, newModelId));
+                      if (!selectedDescriptor) return;
+                      const newSupportedRatios = selectedDescriptor.allowedRatios;
+                      const newResolutionTiers = selectedDescriptor.allowedSizes;
+                      const newQualityLevels = selectedDescriptor.qualityOptions;
                       // 优先保留当前值，如果当前值不被支持则使用推导的默认值
                       if (!newSupportedRatios.includes(canvasGenAspectRatio)) {
-                        const defaultRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
+                        const defaultRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0] || '';
                         setCanvasGenAspectRatio(defaultRatio);
                       }
                       if (!newResolutionTiers.includes(canvasGenResolution)) {
-                        setCanvasGenResolution(defaultResolution);
+                        setCanvasGenResolution(newResolutionTiers[0] || '');
                       }
                       if (!newQualityLevels.includes(canvasGenQuality)) {
-                        setCanvasGenQuality(defaultQuality);
+                        setCanvasGenQuality(newQualityLevels[0] || '');
+                      }
+                      if (canvasGenCount > selectedDescriptor.maxOutputs) {
+                        setCanvasGenCount(selectedDescriptor.maxOutputs);
+                      }
+                      if (canvasGenRefImages.length > (selectedDescriptor.maxReferenceImages || 0)) {
+                        setCanvasGenRefImages(previous => previous.slice(0, selectedDescriptor.maxReferenceImages || 0));
                       }
                     }
                   }}
@@ -16971,12 +17005,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 // 解析当前选中的模型ID
                 const modelId = canvasGenModel ? canvasGenModel.split('::').pop() || '' : '';
                 const providerId = canvasGenModel ? canvasGenModel.split('::')[0] || '' : '';
-                const selectedModel = canvasGenModels.find(model => model.id === modelId && model.providerId === providerId);
-                const providerHint = `${providerId} ${selectedModel?.providerName || ''}`;
-                const paramType = modelId ? getModelParamType(modelId, providerHint) : 'both';
-                const modelRatios = modelId ? getProviderAspectRatios(modelId, providerHint) : ['1:1'];
-                const modelResolutions = modelId ? getResolutionTierOptions(modelId, providerHint) : [];
-                const modelQualities = modelId ? getQualityLevelOptions(modelId, providerHint) : [];
+                const descriptor = taskModelCatalogIndex.get(taskModelKey(providerId, modelId));
+                const modelRatios = descriptor?.allowedRatios ?? [];
+                const modelResolutions = descriptor?.allowedSizes ?? [];
+                const modelQualities = descriptor?.qualityOptions ?? [];
                 return (
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>图像比例</label>
@@ -16993,11 +17025,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     }`}
                   >
                     {modelRatios.map(r => {
-                      const px = calculateActualPixels(r, canvasGenResolution, modelId);
+                      const px = /^\d+x\d+$/i.test(canvasGenResolution)
+                        ? canvasGenResolution
+                        : calculateActualPixels(r, canvasGenResolution, modelId);
                       return <option key={r} value={r}>{r} ({px})</option>;
                     })}
                   </select>
-                  {(paramType === 'both' || paramType === 'resolution') && (
+                  {modelResolutions.length > 0 && (
                     <>
                       <label className={`text-xs font-medium min-w-[30px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>分辨率</label>
                       <select
@@ -17013,7 +17047,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       </select>
                     </>
                   )}
-                  {(paramType === 'both' || paramType === 'quality') && (
+                  {modelQualities.length > 0 && (
                     <>
                       <label className={`text-xs font-medium min-w-[30px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>质量</label>
                       <select
@@ -17036,7 +17070,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               <div className="flex items-center gap-2.5">
                 <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>数量</label>
                 <div className="flex items-center gap-1.5">
-                  {[1, 2, 4].map(n => (
+                  {Array.from({ length: taskModelCatalogIndex.get(taskModelKey(canvasGenModel.split('::')[0] || '', canvasGenModel.split('::')[1] || ''))?.maxOutputs || 1 }, (_, index) => index + 1).map(n => (
                     <button
                       key={n}
                       onClick={() => setCanvasGenCount(n)}
@@ -17122,7 +17156,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               {/* Generate button */}
               <button
                 onClick={handleCanvasGenerate}
-                disabled={canvasGenGenerating || !canvasGenPrompt.trim()}
+                disabled={canvasGenGenerating || !canvasGenPrompt.trim() || catalogStatus.loading || Boolean(catalogStatus.error) || !taskModelCatalogIndex.has(taskModelKey(canvasGenModel.split('::')[0] || '', canvasGenModel.split('::')[1] || ''))}
                 className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
                   canvasGenGenerating || !canvasGenPrompt.trim()
                     ? isMonochrome

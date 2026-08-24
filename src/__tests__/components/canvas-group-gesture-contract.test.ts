@@ -39,7 +39,8 @@ describe('canvas group gesture contract', () => {
 
   it('keeps reference and fusion groups usable when the user has not typed a prompt yet', () => {
     expect(source).toContain("const effectivePrompt = toolbar.prompt.trim() || 'Generate a creative variation of the reference image(s).';");
-    expect(source).toContain('disabled={group.resultPlaceholder.isProcessing || !group.toolbar.model}');
+    expect(source).toContain('disabled={group.resultPlaceholder.isProcessing || !group.toolbar.model || !group.toolbar.providerId');
+    expect(source).toContain('taskModelCatalogIndex.has(taskModelKey(group.toolbar.providerId, group.toolbar.model))');
   });
 
   it('uses reference category controls as the grouped image-to-image fidelity input', () => {

@@ -41,7 +41,7 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-export function useTaskModelCatalog(type: ApiKind) {
+export function useTaskModelCatalog(type: ApiKind | 'all') {
   const [state, setState] = useState<TaskModelCatalogState>(INITIAL_STATE);
   const reload = useCallback(async (signal?: AbortSignal) => {
     setState(previous => ({ ...previous, loading: true, error: null }));
