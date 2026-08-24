@@ -71,6 +71,7 @@ describe('server API model capability persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.dbGetApiProviders.mockResolvedValue([providerRow()]);
+    mocks.dbUpsertApiProvider.mockResolvedValue(true);
   });
 
   it('restores every persisted discovery capability field from a database row', async () => {
@@ -189,5 +190,18 @@ describe('server API model capability persistence', () => {
     expect(mocks.dbUpsertApiProvider).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'provider-a' }),
     );
+  });
+
+  it('fails the update when the authoritative database write fails', async () => {
+    mocks.dbUpsertApiProvider.mockResolvedValue(false);
+
+    await expect(updateApiProvider('provider-a', {
+      advancedParams: {
+        taskModelCapabilities: serializeProviderCapabilityOverrides({
+          version: 1,
+          models: { 'video-a': { maxDurationSeconds: 30 } },
+        }),
+      },
+    })).rejects.toThrow(/persist API provider provider-a/i);
   });
 });

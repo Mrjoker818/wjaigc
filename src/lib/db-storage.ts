@@ -7,6 +7,10 @@
 import { execSql, getPool } from './db-client';
 import { refreshAuthJsonFileAtomic } from './auth/auth-persistence';
 import { withDatabaseAuthReplicaLock } from './auth/auth-repository';
+import {
+  encodeSelectedModelsForStorage,
+  resolveSelectedModelsStorageKind,
+} from './api-provider-selected-models-storage';
 import type { PoolClient } from 'pg';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -431,6 +435,14 @@ export async function dbGetApiProviderById(id: string): Promise<DbApiProvider | 
 
 export async function dbUpsertApiProvider(provider: DbApiProvider): Promise<boolean> {
   try {
+    const selectedModelsColumn = await execSql(`
+      SELECT column_name, data_type, udt_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'wujie_api_providers'
+        AND column_name = 'selected_models'
+    `);
+    const selectedModelsStorage = resolveSelectedModelsStorageKind(selectedModelsColumn.rows);
     await execSql(`
       INSERT INTO wujie_api_providers (id, name, display_name, base_url, api_key, is_enabled, type, model_type, request_style, selected_models, advanced_params, is_default, created_at, updated_at, connection_status, discovered_models, sort_order, balance_username, balance_password)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
@@ -455,7 +467,7 @@ export async function dbUpsertApiProvider(provider: DbApiProvider): Promise<bool
     `, [
       provider.id, provider.name, provider.display_name, provider.base_url,
       provider.api_key, provider.is_enabled, provider.type, provider.model_type,
-      provider.request_style, provider.selected_models,
+      provider.request_style, encodeSelectedModelsForStorage(provider.selected_models, selectedModelsStorage),
       JSON.stringify(provider.advanced_params), provider.is_default,
       provider.created_at, provider.updated_at,
       provider.connection_status || null,

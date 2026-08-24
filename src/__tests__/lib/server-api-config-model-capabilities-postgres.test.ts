@@ -150,4 +150,70 @@ describe('server API model capability PostgreSQL persistence', () => {
       )).toEqual(JSON.parse(capabilityB));
     });
   }, 60_000);
+
+  postgresIt('updates historical provider tables whose selected_models column is JSONB', async () => {
+    await withIsolatedPostgres('provider_model_capabilities_legacy_jsonb', async ({ query }) => {
+      await query(`
+        CREATE TABLE wujie_api_providers (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          display_name TEXT DEFAULT '',
+          base_url TEXT NOT NULL,
+          api_key TEXT NOT NULL,
+          is_enabled BOOLEAN DEFAULT true,
+          type TEXT NOT NULL DEFAULT 'image',
+          model_type TEXT DEFAULT 'image',
+          request_style TEXT DEFAULT 'images-generations',
+          selected_models JSONB DEFAULT '[]'::jsonb,
+          advanced_params JSONB DEFAULT '{}'::jsonb,
+          is_default BOOLEAN DEFAULT false,
+          created_at BIGINT NOT NULL,
+          updated_at BIGINT NOT NULL,
+          connection_status TEXT DEFAULT 'unknown',
+          discovered_models JSONB DEFAULT '[]'::jsonb,
+          sort_order INTEGER DEFAULT 9999,
+          balance_username TEXT DEFAULT '',
+          balance_password TEXT DEFAULT ''
+        )
+      `);
+      const { dbUpsertApiProvider } = await import('@/lib/db-storage');
+
+      const stored = await dbUpsertApiProvider({
+        id: 'legacy-jsonb-provider',
+        name: 'Legacy JSONB provider',
+        display_name: 'Legacy JSONB provider',
+        base_url: 'https://api.example.test/v1',
+        api_key: 'isolated-test-secret',
+        is_enabled: false,
+        type: 'image',
+        model_type: 'image',
+        request_style: 'images-generations',
+        selected_models: ['gpt-image-2'],
+        advanced_params: {
+          taskModelCapabilities: JSON.stringify({
+            version: 1,
+            models: { 'gpt-image-2': { maxOutputs: 3 } },
+          }),
+        },
+        is_default: false,
+        created_at: 1_700_000_000_000,
+        updated_at: 1_700_000_000_001,
+        connection_status: 'success',
+        discovered_models: [],
+        sort_order: 0,
+      });
+
+      expect(stored).toBe(true);
+      const result = await query<{
+        selected_models: string[];
+        advanced_params: Record<string, string>;
+      }>(`
+        SELECT selected_models, advanced_params
+        FROM wujie_api_providers
+        WHERE id = 'legacy-jsonb-provider'
+      `);
+      expect(result.rows[0]?.selected_models).toEqual(['gpt-image-2']);
+      expect(result.rows[0]?.advanced_params.taskModelCapabilities).toContain('maxOutputs');
+    });
+  }, 60_000);
 });

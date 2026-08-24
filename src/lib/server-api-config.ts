@@ -365,7 +365,7 @@ async function migrateProvidersToDb(providers: ApiProvider[]): Promise<void> {
 }
 
 async function persistProviderToDb(provider: ApiProvider, fallbackSortOrder: number): Promise<void> {
-  await dbUpsertApiProvider({
+  const persisted = await dbUpsertApiProvider({
     id: provider.id,
     name: provider.name,
     display_name: provider.displayName || provider.name,
@@ -386,6 +386,9 @@ async function persistProviderToDb(provider: ApiProvider, fallbackSortOrder: num
     balance_username: provider.balanceUsername || '',
     balance_password: provider.balancePassword || '',
   });
+  if (!persisted) {
+    throw new Error(`Failed to persist API provider ${provider.id}`);
+  }
 }
 
 async function writeConfigBackup(config: StoredApiConfig): Promise<void> {
@@ -774,11 +777,9 @@ export async function updateApiProvider(providerId: string, updates: Partial<Api
 
   config.providers[index] = next;
   providersToPersist.set(next.id, next);
-  try {
-    for (const provider of providersToPersist.values()) {
-      await persistProviderToDb(provider, config.providers.indexOf(provider));
-    }
-  } catch {}
+  for (const provider of providersToPersist.values()) {
+    await persistProviderToDb(provider, config.providers.indexOf(provider));
+  }
   // The database is the authoritative source. Updating only changed rows avoids
   // stale whole-config snapshots overwriting concurrent edits to other providers.
   await writeConfigBackup(config);
