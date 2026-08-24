@@ -12121,6 +12121,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                     /* ── Static thumbnail + play button ── */
                     <div
                       className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer group/play bg-black/20"
+                      onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (image.videoUrl) {

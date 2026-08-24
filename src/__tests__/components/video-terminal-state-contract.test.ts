@@ -66,6 +66,15 @@ describe('video terminal state contract', () => {
     expect(canvasSource).toContain('group/play bg-black');
   });
 
+  it('keeps the inline video play control outside the canvas drag pointer capture', () => {
+    const overlayStart = canvasSource.indexOf('group/play bg-black');
+    const overlaySource = canvasSource.slice(overlayStart, overlayStart + 900);
+
+    expect(overlayStart).toBeGreaterThan(-1);
+    expect(overlaySource).toContain('onPointerDown={(e) => e.stopPropagation()}');
+    expect(overlaySource).toContain('setPlayingVideoId(image.id)');
+  });
+
   it('clears a failed optional poster so rendering falls through to the video preview', () => {
     expect(canvasSource).toContain("action === 'fallback-video'");
     expect(canvasSource).toContain('clearFailedCanvasVideoPoster(candidate)');
