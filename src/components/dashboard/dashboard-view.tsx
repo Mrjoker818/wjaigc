@@ -38,6 +38,14 @@ import {
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { loadProjects as loadSimpleChatProjects } from '@/components/simple-chat/simple-chat-types';
 import { reconcileImageBatchDeletion } from '@/lib/asset-core/batch-placement-delete';
+import {
+  buildCapabilityEditorModels,
+  ModelCapabilityEditor,
+  getVisibleAdvancedParams,
+  mergeAdvancedParamsWithCapabilities,
+} from './model-capability-editor';
+import type { ProviderCapabilityOverridesV1 } from '@/lib/task-core/model-capability-contract';
+import { readProviderCapabilityOverrides } from '@/lib/task-core/model-capability-resolution';
 import JSZip from 'jszip';
 
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin' | 'groups' | 'chat';
@@ -351,6 +359,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [advancedParams, setAdvancedParams] = useState<Array<{ key: string; value: string }>>([]);
+  const [taskModelCapabilities, setTaskModelCapabilities] = useState<ProviderCapabilityOverridesV1>({ version: 1, models: {} });
   
   // ─── Admin: Group management state ───
   const [adminGroups, setAdminGroups] = useState<Array<{ id: string; name: string; product_types: string[]; credit_quota: number; is_active: boolean; created_at: number; updated_at: number }>>([]);
@@ -1201,6 +1210,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setApiKind('image'); setApiName(''); setApiDisplayName(''); setApiBaseUrl(''); setApiKey(''); setApiModel('');
     setCompatProfile('auto'); setDiscoveredModels([]); setSelectedModels([]);
     setAdvancedParams([]); setShowAdvancedParams(false); setShowApiKey(false);
+    setTaskModelCapabilities({ version: 1, models: {} });
     setBalanceUsername(''); setBalancePassword('');
     setTestNewResult(null); setDrawerVerifyResult(null); setDrawerBalanceResult(null);
     setEditingProviderId(null);
@@ -1214,11 +1224,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setApiKey(''); // Don't pre-fill key for security; user can enter new key to update
     setApiModel('');
     setApiKind((p.modelType as ApiKind) || 'image');
-    setCompatProfile(p.compatProfile || 'auto');
+    setCompatProfile(p.advancedParams?.compatProfile || 'auto');
     setSelectedModels(p.selectedModels || []);
     setDiscoveredModels(p.discoveredModels || []);
-    setAdvancedParams(p.advancedParams ? Object.entries(p.advancedParams).map(([key, value]) => ({ key, value: String(value) })) : []);
-    setShowAdvancedParams(!!p.advancedParams && Object.keys(p.advancedParams).length > 0);
+    const visibleAdvancedParams = getVisibleAdvancedParams(p.advancedParams);
+    setAdvancedParams(Object.entries(visibleAdvancedParams).map(([key, value]) => ({ key, value })));
+    setTaskModelCapabilities(readProviderCapabilityOverrides(p.advancedParams?.taskModelCapabilities));
+    setShowAdvancedParams(Object.keys(visibleAdvancedParams).length > 0);
     setTestNewResult(null); setDrawerVerifyResult(null); setDrawerBalanceResult(null);
     setShowApiKey(false);
     setShowApiDrawer(true);
@@ -1232,8 +1244,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setIsVerifyingDrawer(true);
     setDrawerVerifyResult(null);
     try {
-      const advParams: Record<string, string> = {};
-      advancedParams.forEach(p => { if (p.key.trim()) advParams[p.key.trim()] = p.value; });
+      const advParams = getVisibleAdvancedParams(advancedParams);
       if (compatProfile !== 'auto') advParams.compatProfile = compatProfile;
       const res = await fetch('/api/verify-protocol', {
         method: 'POST',
@@ -1274,8 +1285,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setIsQueryingBalanceDrawer(true);
     setDrawerBalanceResult(null);
     try {
-      const advParams: Record<string, string> = {};
-      advancedParams.forEach(p => { if (p.key.trim()) advParams[p.key.trim()] = p.value; });
+      const advParams = getVisibleAdvancedParams(advancedParams);
       // 先尝试用临时配置查询
       const tempRes = await fetch('/api/admin/api-balance', {
         method: 'POST',
@@ -1615,8 +1625,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         modelType: apiKind,
       };
       // Pass advanced params including compatProfile
-      const advParams: Record<string, string> = {};
-      advancedParams.filter(p => p.key.trim()).forEach(p => { advParams[p.key.trim()] = p.value; });
+      const advParams = getVisibleAdvancedParams(advancedParams);
       if (compatProfile !== 'auto') advParams.compatProfile = compatProfile;
       if (Object.keys(advParams).length > 0) requestBody.advancedParams = advParams;
 
@@ -1689,7 +1698,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           selectedModels: models,
           discoveredModels: discoveredModels.length > 0 ? discoveredModels : undefined,
           requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' || apiKind === 'upscaler' || apiKind === 'removebg' ? 'images-generations' : apiKind === 'video' ? 'images-generations' : 'images-generations',
-          advancedParams: [...advancedParams.filter(p => p.key.trim()), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])],
+          advancedParams: mergeAdvancedParamsWithCapabilities(
+            [...advancedParams.filter(p => p.key.trim() && p.key !== 'compatProfile'), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])],
+            taskModelCapabilities,
+          ),
           balanceUsername: balanceUsername.trim(), balancePassword: balancePassword.trim(),
         }),
       });
@@ -1711,13 +1723,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setApiKey(editingProviderId ? '' : '');
     setApiKind((provider.modelType || 'image') as ApiKind);
     const savedProfile = provider.advancedParams?.compatProfile || 'auto';
-    setCompatProfile(['apimart', 'openai', 'openai-async', 'auto'].includes(savedProfile) ? savedProfile : 'auto');
+    setCompatProfile(['apimart', 'openai', 'openai-async', 'gemini-image', 'pearapi', 'auto', 'custom'].includes(savedProfile) ? savedProfile : 'auto');
     const providerModels = provider.discoveredModels || [];
     if (providerModels.length > 0) { setDiscoveredModels(providerModels); setSelectedModels(provider.selectedModels || []); setModelSearchQuery(''); }
     else { setDiscoveredModels([]); setSelectedModels([]); }
     setApiModel('');
     setBalanceUsername((provider as unknown as Record<string, unknown>).balanceUsername as string || '');
     setBalancePassword((provider as unknown as Record<string, unknown>).balancePassword as string || '');
+    const visibleAdvancedParams = getVisibleAdvancedParams(provider.advancedParams);
+    setAdvancedParams(Object.entries(visibleAdvancedParams).map(([key, value]) => ({ key, value })));
+    setTaskModelCapabilities(readProviderCapabilityOverrides(provider.advancedParams?.taskModelCapabilities));
   };
 
   const quickUpdateProvider = async (providerId: string, updates: Record<string, unknown>) => {
@@ -1744,9 +1759,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       if (models) updates.selectedModels = models;
       // 发送discoveredModels（包含用户手动编辑的displayName）
       if (discoveredModels.length > 0) updates.discoveredModels = discoveredModels;
-      const filteredParams = advancedParams.filter(p => p.key.trim());
-      const paramsWithCompat = [...filteredParams.filter(p => p.key !== 'compatProfile'), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])];
-      if (paramsWithCompat.length > 0) updates.advancedParams = paramsWithCompat;
+      const paramsWithCompat = [...advancedParams.filter(p => p.key.trim() && p.key !== 'compatProfile'), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])];
+      updates.advancedParams = mergeAdvancedParamsWithCapabilities(paramsWithCompat, taskModelCapabilities);
       if (balanceUsername.trim()) updates.balanceUsername = balanceUsername.trim();
       if (balancePassword.trim()) updates.balancePassword = balancePassword.trim();
       const res = await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', providerId: editingProviderId, updates }) });
@@ -3438,10 +3452,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           {/* 请求风格 */}
                           <div>
                             <label className="text-sm font-medium text-foreground mb-1.5 block">请求风格</label>
-                            <select className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors cursor-pointer" value={compatProfile} onChange={e => setCompatProfile(e.target.value as 'auto' | 'openai' | 'apimart' | 'custom')}>
+                            <select className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors cursor-pointer" value={compatProfile} onChange={e => setCompatProfile(e.target.value)}>
                               <option value="auto">自动推断（推荐）</option>
                               <option value="openai">OpenAI 标准格式</option>
+                              <option value="openai-async">OpenAI 异步轮询</option>
                               <option value="apimart">APIMart 代理格式</option>
+                              <option value="pearapi">PearAPI 宽高比格式</option>
+                              <option value="gemini-image">Gemini 图像对话格式</option>
                               <option value="custom">自定义</option>
                             </select>
                             <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
@@ -3647,6 +3664,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       </div>
                     </div>
                   </div>
+                  <ModelCapabilityEditor
+                    models={buildCapabilityEditorModels(
+                      discoveredModels,
+                      selectedModels,
+                      editingProviderId || 'new-provider',
+                      apiKind,
+                    )}
+                    value={taskModelCapabilities}
+                    onChange={setTaskModelCapabilities}
+                  />
                   {/* 抽屉底部按钮区 */}
                   <div className="px-6 py-4 border-t border-border bg-muted/20 flex items-center justify-between gap-3">
                     <p className="text-xs text-muted-foreground">

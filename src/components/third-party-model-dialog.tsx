@@ -3,7 +3,15 @@
 import React, { useState, useEffect } from 'react';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import { ApiProvider, PROVIDER_PRESETS, REQUEST_STYLES } from '@/lib/universal-api-types';
-import { X, Key, RefreshCw, Plus, Trash2, Eye, EyeOff, Check, AlertCircle, Link2, ChevronDown, ChevronUp, Image, MessageSquare, Settings, Box } from 'lucide-react';
+import { X, Key, RefreshCw, Plus, Trash2, Eye, EyeOff, Check, AlertCircle, Link2, ChevronDown, ChevronUp, Image, MessageSquare, Settings, Box, Film } from 'lucide-react';
+import {
+  buildCapabilityEditorModels,
+  ModelCapabilityEditor,
+  getVisibleAdvancedParams,
+  mergeAdvancedParamsWithCapabilities,
+} from './dashboard/model-capability-editor';
+import type { ProviderCapabilityOverridesV1 } from '@/lib/task-core/model-capability-contract';
+import { readProviderCapabilityOverrides } from '@/lib/task-core/model-capability-resolution';
 
 interface ThirdPartyModelDialogProps {
   isOpen: boolean;
@@ -13,7 +21,7 @@ interface ThirdPartyModelDialogProps {
   onProviderDeleted?: (providerId: string) => void;
   onProviderUpdated?: (provider: ApiProvider) => void;
   /** 打开时默认显示哪个类型 */
-  defaultType?: 'image' | 'chat' | '3d';
+  defaultType?: 'image' | 'chat' | '3d' | 'video';
 }
 
 export function ThirdPartyModelDialog({
@@ -27,7 +35,7 @@ export function ThirdPartyModelDialog({
 }: ThirdPartyModelDialogProps) {
   const [manager] = useState(() => UniversalApiManager.getInstance());
   const [providers, setProviders] = useState<ApiProvider[]>([]);
-  const [activeTab, setActiveTab] = useState<'image' | 'chat' | '3d'>(defaultType);
+  const [activeTab, setActiveTab] = useState<'image' | 'chat' | '3d' | 'video'>(defaultType);
 
   // 添加表单状态
   const [showAddForm, setShowAddForm] = useState(false);
@@ -40,6 +48,7 @@ export function ThirdPartyModelDialog({
   // 多选模型
   const [formSelectedModels, setFormSelectedModels] = useState<string[]>([]);
   const [formAdvancedParams, setFormAdvancedParams] = useState<Record<string, string>>({});
+  const [formTaskModelCapabilities, setFormTaskModelCapabilities] = useState<ProviderCapabilityOverridesV1>({ version: 1, models: {} });
   const [showApiKey, setShowApiKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
@@ -80,6 +89,7 @@ export function ThirdPartyModelDialog({
     setFormRequestStyle(activeTab === 'chat' ? 'chat-completions' : 'images-generations');
     setFormSelectedModels([]);
     setFormAdvancedParams({});
+    setFormTaskModelCapabilities({ version: 1, models: {} });
     setShowApiKey(false);
     setShowAdvanced(false);
     setDiscoveredModels([]);
@@ -169,7 +179,7 @@ export function ThirdPartyModelDialog({
         requestStyle: formRequestStyle,
         selectedModel: primaryModel || undefined,
         selectedModels: formSelectedModels,
-        advancedParams: formAdvancedParams,
+        advancedParams: mergeAdvancedParamsWithCapabilities(formAdvancedParams, formTaskModelCapabilities),
         isRelay: formProvider === 'custom',
       });
       if (updated && onProviderUpdated) onProviderUpdated(updated);
@@ -187,7 +197,7 @@ export function ThirdPartyModelDialog({
           requestStyle: formRequestStyle,
           selectedModel: primaryModel || undefined,
           selectedModels: formSelectedModels,
-          advancedParams: formAdvancedParams,
+          advancedParams: mergeAdvancedParamsWithCapabilities(formAdvancedParams, formTaskModelCapabilities),
           isRelay: formProvider === 'custom',
         }
       );
@@ -225,7 +235,8 @@ export function ThirdPartyModelDialog({
         : (provider.requestStyle || (provider.modelType === 'chat' ? 'chat-completions' : 'images-generations'))
     );
     setFormSelectedModels(provider.selectedModels || (provider.selectedModel ? [provider.selectedModel] : []));
-    setFormAdvancedParams(provider.advancedParams || {});
+    setFormAdvancedParams(getVisibleAdvancedParams(provider.advancedParams));
+    setFormTaskModelCapabilities(readProviderCapabilityOverrides(provider.advancedParams?.taskModelCapabilities));
     setShowAddForm(true);
     setTestResult(null);
     setDiscoveredModels([]);
@@ -246,6 +257,7 @@ export function ThirdPartyModelDialog({
   };
 
   const handleParamKeyChange = (oldKey: string, newKey: string) => {
+    if (newKey.trim() === 'taskModelCapabilities') return;
     setFormAdvancedParams(prev => {
       const next: Record<string, string> = {};
       for (const [k, v] of Object.entries(prev)) {
@@ -302,7 +314,7 @@ export function ThirdPartyModelDialog({
           {!showAddForm ? (
             <>
               {/* Tab 选择 */}
-              <div className={`px-4 pt-3 pb-2 flex gap-2`}>
+              <div className="grid grid-cols-2 gap-2 px-4 pt-3 pb-2">
                 <button
                   onClick={() => setActiveTab('image')}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
@@ -348,6 +360,21 @@ export function ThirdPartyModelDialog({
                   <Box className="w-3.5 h-3.5" />
                   3D 模型
                 </button>
+                <button
+                  onClick={() => setActiveTab('video')}
+                  className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                    activeTab === 'video'
+                      ? isGold
+                        ? 'bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/30'
+                        : 'bg-gray-100 text-gray-900 border border-gray-200'
+                      : isGold
+                        ? 'text-[#888] hover:text-[#d4af37] hover:bg-[#1a1a1a]'
+                        : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                >
+                  <Film className="w-3.5 h-3.5" />
+                  视频模型
+                </button>
               </div>
 
               {/* 已添加的模型列表 */}
@@ -372,6 +399,12 @@ export function ThirdPartyModelDialog({
                               }`} />
                             ) : activeTab === '3d' ? (
                               <Box className={`w-3.5 h-3.5 ${
+                                provider.connectionStatus === 'success' ? 'text-green-400'
+                                : provider.connectionStatus === 'failed' ? 'text-red-400'
+                                : isGold ? 'text-[#d4af37]' : 'text-gray-500'
+                              }`} />
+                            ) : activeTab === 'video' ? (
+                              <Film className={`w-3.5 h-3.5 ${
                                 provider.connectionStatus === 'success' ? 'text-green-400'
                                 : provider.connectionStatus === 'failed' ? 'text-red-400'
                                 : isGold ? 'text-[#d4af37]' : 'text-gray-500'
@@ -435,11 +468,13 @@ export function ThirdPartyModelDialog({
                       <Image className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
                     ) : activeTab === '3d' ? (
                       <Box className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
+                    ) : activeTab === 'video' ? (
+                      <Film className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
                     ) : (
                       <MessageSquare className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
                     )}
                     <p className={`text-xs font-medium ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
-                      还没有{activeTab === 'image' ? '图像' : activeTab === '3d' ? '3D' : '对话'}模型
+                      还没有{activeTab === 'image' ? '图像' : activeTab === '3d' ? '3D' : activeTab === 'video' ? '视频' : '对话'}模型
                     </p>
                     <p className={`text-xs mt-1 ${isGold ? 'text-[#444]' : 'text-gray-300'}`}>
                       点击下方按钮添加第三方模型
@@ -457,7 +492,7 @@ export function ThirdPartyModelDialog({
                   }`}
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  添加{activeTab === 'image' ? '图像' : activeTab === '3d' ? '3D' : '对话'}模型
+                  添加{activeTab === 'image' ? '图像' : activeTab === '3d' ? '3D' : activeTab === 'video' ? '视频' : '对话'}模型
                 </button>
               </div>
             </>
@@ -705,6 +740,17 @@ export function ThirdPartyModelDialog({
                   </div>
                 )}
               </div>
+
+              <ModelCapabilityEditor
+                models={buildCapabilityEditorModels(
+                  [],
+                  formSelectedModels,
+                  editingProviderId || 'new-provider',
+                  activeTab,
+                )}
+                value={formTaskModelCapabilities}
+                onChange={setFormTaskModelCapabilities}
+              />
 
               {/* 高级参数 */}
               <div className="space-y-2">

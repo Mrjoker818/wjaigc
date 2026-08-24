@@ -105,6 +105,10 @@ export type PublicApiProvider = Omit<ApiProvider,
   'apiKey' | 'balanceUsername' | 'balancePassword' | 'advancedParams' | 'balance'
 >;
 
+export type AdminApiProvider = Omit<ApiProvider,
+  'apiKey' | 'balanceUsername' | 'balancePassword' | 'balance'
+>;
+
 export function sanitizeProvider(provider: ApiProvider): PublicApiProvider {
   // This object is returned by unauthenticated model discovery endpoints.
   // An allow-list prevents future credential fields leaking through a rest spread.
@@ -133,6 +137,13 @@ export function sanitizeProvider(provider: ApiProvider): PublicApiProvider {
 
 export function sanitizeProviders(providers: ApiProvider[]): PublicApiProvider[] {
   return providers.map(sanitizeProvider);
+}
+
+export function sanitizeAdminProvider(provider: ApiProvider): AdminApiProvider {
+  return {
+    ...sanitizeProvider(provider),
+    advancedParams: { ...(provider.advancedParams || {}) },
+  };
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

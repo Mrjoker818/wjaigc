@@ -11,6 +11,7 @@ vi.mock('@/lib/db-storage', () => mocks);
 
 import { getApiProviders } from '@/lib/server-api-config';
 import {
+  parseProviderCapabilityOverridesStrict,
   readProviderCapabilityOverrides,
   serializeProviderCapabilityOverrides,
 } from '@/lib/task-core/model-capability-resolution';
@@ -133,5 +134,24 @@ describe('server API model capability persistence', () => {
       version: 1,
       models: { unsafe: inherited },
     }))).toEqual({ version: 1, models: { unsafe: {} } });
+  });
+
+  it('strictly rejects invalid submitted v1 capabilities instead of silently dropping fields', () => {
+    expect(parseProviderCapabilityOverridesStrict(JSON.stringify({
+      version: 1,
+      models: { 'gpt-image-2': { maxOutputs: 99 } },
+    }))).toEqual({
+      ok: false,
+      error: expect.stringContaining('maxOutputs'),
+    });
+  });
+
+  it('strictly rejects blank-after-trim and prototype-sensitive model ids', () => {
+    for (const modelId of ['  ', '__proto__', 'prototype', 'constructor']) {
+      expect(parseProviderCapabilityOverridesStrict(JSON.stringify({
+        version: 1,
+        models: { [modelId]: { maxOutputs: 1 } },
+      }))).toMatchObject({ ok: false });
+    }
   });
 });

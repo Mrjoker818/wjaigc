@@ -20,6 +20,7 @@ const MAX_PROTOCOL_LENGTH = 128;
 const MAX_OUTPUTS = 4;
 const MAX_REFERENCE_IMAGES = 16;
 const MAX_DURATION_SECONDS = 3600;
+const DANGEROUS_MODEL_IDS = new Set(['__proto__', 'prototype', 'constructor']);
 const SUPPORTED_OPERATIONS = new Set<SupportedOperation>([
   'text-to-image',
   'image-to-image',
@@ -189,6 +190,72 @@ function parseJsonValue(raw: unknown): unknown {
   } catch {
     return null;
   }
+}
+
+export type StrictProviderCapabilityOverridesResult =
+  | { ok: true; value: ProviderCapabilityOverridesV1 }
+  | { ok: false; error: string };
+
+export function parseProviderCapabilityOverridesStrict(
+  raw: unknown,
+): StrictProviderCapabilityOverridesResult {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return { ok: false, error: 'taskModelCapabilities must be a non-empty JSON string' };
+  }
+  const parsed = parseJsonValue(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: 'taskModelCapabilities must be a JSON object' };
+  }
+  const root = parsed as Record<string, unknown>;
+  if (
+    Object.keys(root).some(key => key !== 'version' && key !== 'models')
+    || root.version !== 1
+    || !hasOwn(root, 'models')
+    || !root.models
+    || typeof root.models !== 'object'
+    || Array.isArray(root.models)
+  ) {
+    return { ok: false, error: 'taskModelCapabilities must use the version 1 wrapper' };
+  }
+
+  const rawModels = root.models as Record<string, unknown>;
+  const modelIds = Object.keys(rawModels);
+  if (modelIds.length > MAX_CAPABILITY_MODELS) {
+    return { ok: false, error: 'taskModelCapabilities contains too many models' };
+  }
+
+  const models: ProviderCapabilityOverridesV1['models'] = {};
+  for (const modelId of modelIds.sort()) {
+    if (
+      !modelId
+      || modelId !== modelId.trim()
+      || modelId.length > MAX_MODEL_ID_LENGTH
+      || DANGEROUS_MODEL_IDS.has(modelId)
+    ) {
+      return { ok: false, error: 'taskModelCapabilities contains an invalid model id' };
+    }
+    const candidate = rawModels[modelId];
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      return { ok: false, error: `taskModelCapabilities.${modelId} must be an object` };
+    }
+    const unknownField = Object.keys(candidate).find(field => !CAPABILITY_FIELDS.includes(field as CapabilityField));
+    if (unknownField) {
+      return { ok: false, error: `taskModelCapabilities.${modelId}.${unknownField} is not supported` };
+    }
+    const override = readCapabilityOverride(candidate);
+    for (const field of Object.keys(candidate) as CapabilityField[]) {
+      if (!hasOwn(override, field)) {
+        return { ok: false, error: `taskModelCapabilities.${modelId}.${field} is invalid` };
+      }
+    }
+    Object.defineProperty(models, modelId, {
+      value: override,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return { ok: true, value: { version: 1, models } };
 }
 
 export function readProviderCapabilityOverrides(raw: unknown): ProviderCapabilityOverridesV1 {

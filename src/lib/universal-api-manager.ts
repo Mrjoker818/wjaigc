@@ -249,10 +249,10 @@ export class UniversalApiManager {
     name: string,
     baseUrl: string,
     apiKey: string,
-    type: 'image' | 'chat' | 'universal' = 'universal',
+    type: 'image' | 'chat' | 'universal' | 'video' = 'universal',
     options?: {
       displayName?: string;
-      modelType?: 'image' | 'chat' | '3d';
+      modelType?: 'image' | 'chat' | '3d' | 'video';
       providerPreset?: string;
       requestStyle?: 'chat-completions' | 'images-generations' | 'auto';
       selectedModel?: string;
@@ -271,7 +271,7 @@ export class UniversalApiManager {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       displayName: options?.displayName || name,
-      modelType: options?.modelType || (type === 'chat' ? 'chat' : type === 'image' ? 'image' : 'universal'),
+      modelType: options?.modelType || (type === 'chat' ? 'chat' : type === 'image' ? 'image' : type === 'video' ? 'video' : 'universal'),
       providerPreset: options?.providerPreset,
       requestStyle: options?.requestStyle,
       selectedModel: options?.selectedModel,
