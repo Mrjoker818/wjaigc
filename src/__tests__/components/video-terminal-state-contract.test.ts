@@ -75,6 +75,16 @@ describe('video terminal state contract', () => {
     expect(overlaySource).toContain('setPlayingVideoId(image.id)');
   });
 
+  it('selects an unselected canvas item before opening download from its hover toolbar', () => {
+    const hoverToolbarStart = canvasSource.indexOf('data-toolbar="image-hover-toolbar"');
+    const hoverToolbarSource = canvasSource.slice(hoverToolbarStart, hoverToolbarStart + 3_000);
+
+    expect(hoverToolbarStart).toBeGreaterThan(-1);
+    expect(hoverToolbarSource).toContain(
+      'selectImage(image.id); handleOpenDownload(); hideHoverToolbar();',
+    );
+  });
+
   it('clears a failed optional poster so rendering falls through to the video preview', () => {
     expect(canvasSource).toContain("action === 'fallback-video'");
     expect(canvasSource).toContain('clearFailedCanvasVideoPoster(candidate)');
