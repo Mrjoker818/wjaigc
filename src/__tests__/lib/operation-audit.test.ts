@@ -10,6 +10,7 @@ describe('operation audit routing', () => {
 
   it('avoids self-logging and high-frequency read polling', () => {
     expect(shouldAuditClientRequest('/api/activity', 'POST')).toBe(false);
+    expect(shouldAuditClientRequest('/api/client-error', 'POST')).toBe(false);
     expect(shouldAuditClientRequest('/api/task-events?taskId=abc', 'GET')).toBe(false);
     expect(shouldAuditClientRequest('/api/auth/logout', 'POST')).toBe(false);
     expect(shouldAuditClientRequest('/api/user-data/sync', 'POST')).toBe(false);

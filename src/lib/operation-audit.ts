@@ -22,6 +22,7 @@ export function shouldAuditClientRequest(pathname: string, method: string): bool
   const normalizedMethod = method.toUpperCase();
   if (
     pathname === '/api/activity'
+    || pathname === '/api/client-error'
     || pathname.startsWith('/api/auth/')
     || pathname.startsWith('/api/connector/auth/')
     || pathname === '/api/user-data/sync'

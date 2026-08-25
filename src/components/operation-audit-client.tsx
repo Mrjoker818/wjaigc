@@ -37,7 +37,7 @@ export function OperationAuditClient() {
               status: response.status,
               durationMs: Date.now() - startedAt,
             }),
-          });
+          }).catch(() => {});
         }
         return response;
       } catch (error) {
@@ -54,7 +54,7 @@ export function OperationAuditClient() {
               durationMs: Date.now() - startedAt,
               error: error instanceof Error ? error.message.slice(0, 300) : 'Network request failed',
             }),
-          });
+          }).catch(() => {});
         }
         throw error;
       }
