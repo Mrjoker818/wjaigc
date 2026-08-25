@@ -1412,3 +1412,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 应用内同一消息 ID、同一响应 ID、同一附件引用和同一幂等键已由自动化验证；API 会向上游透传稳定键，但不能据此承诺所有第三方文本供应商执行严格 exactly-once。
 - 聚焦 `71/71`、全仓已执行断言 `3531/3531`、TypeScript、零错误 ESLint 和 Next.js `116/116` 构建通过；`117` 项 PostgreSQL 专项因缺少隔离测试库继续未验证。
 - **专项判定：本地有条件通过，云端尚未验收。全平台仍为有条件通过。** Coze 必须完成真实可控失败、原位重试、刷新恢复、Deep Research 单 Artifact、CanvasEditor 单成功版本及 Console/网络证据后，才能把 V588-CHAT-002 标记为已吸收。
+
+## 2026-08-25 V588-CHAT-002 首轮云端故障注入判断
+
+- Coze 已运行包含 `origin/main@7bf1cc3c` 的干净 `main@8096833c`，生产构建、116 个静态页、5000 进程和三个健康路由均通过；`stable` 未触碰。
+- 短时离线可稳定得到单一失败消息和专用重试入口。修复前会放大的遥测递归已在最终候选上消失：`/api/client-error=0`，只有聊天、审计、用户同步各 1 次失败尝试，本次控制台时间窗为 `0 error / 0 warning`。
+- 普通原位重试在上一候选已有同消息成功、单请求与幂等 Header 证据；本次最终候选已点击重试，但 Chrome 控制连接在供应商等待期间超时，未取得完成 UI 和请求快照，因此不能用代码等价推断代替最终候选实测。
+- **专项判定：部分云端通过，全平台仍为有条件通过。** `V588-CHAT-002-BUG-002` 可关闭；`V588-CHAT-002-BUG-001` 仍需补齐普通终态、Deep Research 单 Artifact、CanvasEditor 单版本和刷新中断恢复，完成前不得进入 `V588-CHAT-003`。

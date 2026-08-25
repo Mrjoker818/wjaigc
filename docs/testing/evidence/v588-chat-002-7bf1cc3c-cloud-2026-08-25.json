@@ -1,0 +1,49 @@
+{
+  "testId": "V588-CHAT-002",
+  "testedAt": "2026-08-25T15:42:56.698Z",
+  "browser": "Google Chrome 用户1",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat?validation=7bf1cc3c",
+  "sourceCommit": "7bf1cc3c70088090bf04a42036112fff61696359",
+  "cozeMergeCommit": "8096833c9a2b56871e35fe44475ffcea7f34cd6d",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "build": {
+    "exitCode": 0,
+    "buildId": "tdM5XK103XE0zLAP7oe4X",
+    "staticPages": "116/116",
+    "pid": 1218,
+    "http": {
+      "/": 200,
+      "/simple-chat": 200,
+      "/api/auth/me": 200
+    }
+  },
+  "ordinaryRetryFailureInjection": {
+    "marker": "V588_CHAT_002_TELEMETRY_1787672576698",
+    "providerLabel": "APImartLLM",
+    "modelLabel": "Deepseek V4 Flash",
+    "providerId": "api_1778428130626_2qpg71v",
+    "modelId": "deepseek-v4-flash",
+    "failureUi": "抱歉，请求失败，请重试。",
+    "retryButtonVisible": true,
+    "network": {
+      "totalEvents": 6,
+      "requests": 3,
+      "loadingFailures": 3,
+      "simpleChatRequests": 1,
+      "activityRequests": 1,
+      "userDataSyncRequests": 1,
+      "clientErrorRequests": 0
+    },
+    "consoleInTestWindow": {
+      "errors": 0,
+      "warnings": 0
+    }
+  },
+  "retryCompletion": {
+    "clickIssued": true,
+    "finalUiCaptured": false,
+    "status": "unverified",
+    "reason": "Google Chrome control session timed out while waiting for the provider response; no duplicate retry was issued after losing the evidence cursor."
+  },
+  "conclusion": "The offline telemetry recursion is closed on the deployed commit. The failed-message UI and retry entry are verified. The final response, retry request snapshot, Deep Research, CanvasEditor and refresh-interruption scenarios remain unverified."
+}

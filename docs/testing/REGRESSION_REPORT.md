@@ -1722,3 +1722,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 聚焦套件 `7 files / 71 tests` 全通过；`pnpm ts-check` 通过；`pnpm lint` 为 `0 errors / 967 warnings`；第三次全仓回归为 `540 passed / 20 skipped files`、`3531 passed / 117 skipped tests`；`pnpm build` 退出 0 并生成 `116/116` 页面。
 - `117` 项跳过均因未配置 `POSTGRES_TEST_DATABASE_URL` 或 `TEST_POSTGRES_URL`，没有记为通过。第二次全量中的 `stage-3-source-state` 超时经聚焦计时确认是 Windows/Git 同步操作预算过紧，测试预算调整为 45 秒；第三次全量实际用时约 11.1 秒并通过，没有修改业务超时。
 - **回归结论：本地通过 / Coze 故障注入与刷新恢复待验。** 应用级确定性重试成立；第三方文本供应商严格 exactly-once 不作保证，全平台继续保持有条件通过。
+
+## 2026-08-25 V588-CHAT-002 云端离线故障注入补充
+
+- `origin/main@7bf1cc3c` 已合并到 Coze `main@8096833c`；生产构建退出 0、静态页 `116/116`、Build ID `tdM5XK103XE0zLAP7oe4X`，5000 服务 PID `1218`，`/`、`/simple-chat`、`/api/auth/me` 均为 200；`stable@52f7c601` 未变化。
+- Google Chrome“用户1”在新对话中选择 `Deepseek V4 Flash · APImartLLM`，对唯一标记执行短时离线注入。界面只生成一组用户/助手消息，助手进入明确失败态并显示专用“重试”按钮。
+- 本次网络窗口共 6 个事件、3 个请求尝试：聊天 1、操作审计 1、用户数据同步 1；三者均按预期离线失败。`/api/client-error` 为 0，没有再形成 `/api/client-error <-> /api/activity` 递归；同一时间窗 Console error/warning 为 `0/0`。
+- 在线“重试”点击已经发出，但等待 APIMart 终态时 Chrome 控制连接超时，最终 UI 与本次请求快照未重新取得。为避免重复调用，没有再次点击或伪写通过；上一候选 `b76f62af` 已证明普通原位重试可在同一消息成功并携带单一应用幂等键，但最终候选仍需补齐终态证据。
+- **回归结论：遥测递归云端通过；V588-CHAT-002 整体仍为部分通过。** Deep Research、CanvasEditor、刷新中断和最终候选普通重试仍未关闭。证据见 `docs/testing/evidence/v588-chat-002-7bf1cc3c-cloud-2026-08-25.json`。

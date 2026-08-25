@@ -2538,3 +2538,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 本地结果 | 聚焦 `7 files / 71 tests`；全仓 `540 files / 3531 tests` 通过，`20 files / 117 tests` 因无隔离 PostgreSQL 库跳过；TypeScript、ESLint `0 errors`、Next.js `116/116` 构建通过。 |
 | 证据边界 | 应用内原位重试与幂等 Header 透传已验证；第三方文本供应商是否执行严格 exactly-once 取决于供应商能力，不能由本地测试保证。 |
 | 状态 | **本地已修复 / Coze 云端故障注入待验。** 云端需证明普通/联网、Deep Research、CanvasEditor 失败后原位恢复，且消息、Artifact、版本、请求和 Console 均无重复或污染。 |
+
+### V588-CHAT-002-BUG-002 - 离线错误上报与操作审计形成遥测递归（2026-08-25）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：网络离线或弱网时可产生密集的错误上报与审计请求，放大前端负载并污染可观测性。 |
+| 发现环境 | Coze `main`，Google Chrome“用户1”，独立智能对话页 `/simple-chat`；对普通对话提交执行短时离线故障注入。 |
+| 稳定复现 | 旧版本离线后，`/api/client-error` 被操作审计包装器再次记录到 `/api/activity`；审计请求失败产生未处理 Promise，触发全局错误上报，再次进入 `/api/client-error`，形成往复请求和大量 `Failed to fetch`。 |
+| 根因 | `shouldAuditClientRequest()` 未排除错误上报端点；`operation-audit-client.tsx` 两处 fire-and-forget 审计请求没有消费拒绝态。 |
+| RED | `operation-audit.test.ts` 证明 `/api/client-error` 仍被审计；新组件测试证明审计 Promise 没有注册 `.catch()`，修复前为 `2 failed`。 |
+| 最小修复 | `main@7bf1cc3c70088090bf04a42036112fff61696359` 排除 `/api/client-error`，并在成功与失败审计分支消费网络拒绝；没有吞掉业务请求错误，也没有修改聊天、供应商、模型或积分语义。 |
+| 本地回归 | 聚焦 `3 files / 6 tests`；全仓 `541 passed / 20 skipped files`、`3532 passed / 117 skipped tests`；TypeScript、ESLint、Next.js `116/116` 构建与空白检查通过。117 项跳过仍为缺少隔离 PostgreSQL 测试库。 |
+| 云端回归 | Coze 合并提交 `8096833c` 包含 `origin/main@7bf1cc3c`，构建退出码 0、Build ID `tdM5XK103XE0zLAP7oe4X`、PID `1218`，三个健康路由均为 200。离线时间窗只有 1 次聊天、1 次审计和 1 次用户同步尝试，`/api/client-error=0`，Console error/warning=`0/0`；界面得到唯一失败卡和“重试”入口。 |
+| 状态 | **已修复 / Coze 云端关闭。** 该结论只关闭遥测递归；普通重试完成态、Deep Research、CanvasEditor 和刷新中断仍属于 V588-CHAT-002-BUG-001 的未完成验收。机器证据：`docs/testing/evidence/v588-chat-002-7bf1cc3c-cloud-2026-08-25.json`。 |
