@@ -1669,3 +1669,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Google Chrome 普通用户真实目录断言 `5/5` 通过：Pear `gpt-image-2-4k`、Pear `nano-banana-2-lite`、APIMART `kling-v3-omni`、AIlink `happyhorse-1.0`、APIMART Grok Imagine 1.5 视频别名均显示为各自精确名称；管理员/供应商名称优先级仍保持。
 - 干净重载后的 10 秒观察窗口 Console error/warning 为 `0/0`，原生弹窗为 `0`。本轮没有提交生成或扣除积分。
 - **回归结论：V588-PROVIDER-001 通过。** 证据位于 `docs/testing/evidence/v588-provider-001-*cloud-2026-08-25.*`。
+
+## 2026-08-25 V588-CHAT-001 严格 SSE 本地回归
+
+- 运行时代码提交为 `717f3eab`（共享严格 SSE 解析器）和 `29ef29b4`（普通对话、CanvasEditor 修图、Deep Research 三入口接线）。V5.8.8 donor、`stable` 和会话/任务所有权均未修改。
+- RED 证据包括解析器目标模块缺失的 1 个预期失败套件，以及三入口仍使用手写解析逻辑的 `2/2` 接线合同失败；GREEN 后解析器 `9/9`、解析器与接线合同 `11/11`、关联回归 `56/56` 通过。
+- 解析器覆盖 LF/CR/CRLF、任意网络分块、分裂 UTF-8、多行 `data`、尾事件、注释、`event/id`、`[DONE]`、回调异常、旧请求取消和严格畸形 JSON。非空、非 `[DONE]` 的错误 JSON 会返回稳定协议错误，不再静默跳过。
+- 接线回归修复 CanvasEditor 参数角色错位，并兼容服务端实际发送的 `text` 正文事件；保留现有 AssetVersion 传输、业务事件分支和旧请求取消边界。
+- 全仓为 `532` 个文件通过、`20` 个 PostgreSQL 文件因缺少 `POSTGRES_TEST_DATABASE_URL` 跳过；`3485` 项断言通过、`117` 项跳过。TypeScript、零错误 ESLint、Next.js `116/116` 构建、`git diff --check` 和 `38/38` 受保护基线门禁通过。
+- **回归结论：本地通过 / 云端未验证。** Coze 仍需在精确新 `main` 上完成普通对话流式、CanvasEditor 定点替换、Deep Research 阶段/引用、严格错误态、Console、网络和重复请求检查；当前不得写为云端通过。

@@ -51,7 +51,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 |---|---|---|---|---|
 | V588-STABILITY-001 | SVG/WASM 像素预算与超大输入保护 | 在当前 `/api/svg-trace` 架构内重实现预算门禁；不得复制旧路由控制器 | 边界像素、压缩炸弹、内存上限、失败终态、全仓与云端大图验证 | P0 |
 | V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | 复用当前安全媒体解析器，只吸收回退策略和预算思想；禁止引入任意本地路径读取 | 路径穿越、SSRF、MIME/字节/像素上限、VLM 超时、回退一致性 | P0 |
-| V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **待吸收。** 在当前三条流式链路内抽取共用纯解析器，支持 CRLF、任意分块、多行事件、尾事件和 `[DONE]`；不复制 donor 会话或任务所有权 | 分块边界、多行事件、畸形事件、尾事件、取消、超时、三入口真实浏览器流式回归 | P1 |
+| V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **本地已吸收 / 云端待验。** 三条流式链路已接入共享严格解析器；同时修正 CanvasEditor 参数错位和正文事件名不匹配。未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、关联与全仓回归已通过；Coze 三入口真实流式、错误态、Console 与网络证据待验 | P1 |
 | V588-CHAT-002 | 失败消息状态与原位确定性重试 | **待吸收。** 为当前消息增加 `streaming/completed/failed` 状态和冻结的重试上下文；重试不得重复插入用户消息，必须复用原模型、供应商、模式、附件和幂等键 | 普通对话、联网、Deep Research、画布修图失败与重试；同一消息原位恢复且不重复提交/扣费 | P1 |
 | V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **待吸收。** 以远端同 ID 数据为权威合并本地项目/任务，补齐离页与用户切换前同步；保留当前登录、注销和用户数据 API，不复制 donor 存储所有权 | 多标签页、跨设备、离页、切换用户、同步失败、恢复后继续编辑和用户数据隔离 | P1 |
 | V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **待吸收且必须适配当前架构。** 保留当前 `AssetVersion -> /api/assets/transfer` 画布链路；补齐消息、项目、模型、供应商和任务来源，以及文本/图片发送到工作流节点。禁止复制 donor 的原始 URL `localStorage` 桥接 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
@@ -341,4 +341,13 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 新进程稳定后重新加载并建立干净观察窗口，Console error/warning 为 `0/0`，原生浏览器弹窗为 `0`。服务切换瞬间的一条项目同步 `502` 历史 warning 与干净窗口分开保存，未被隐藏。
 - **状态：V588-PROVIDER-001 已吸收。** 本轮是目录和显示回归，没有调用付费模型，不能扩大为供应商生成任务通过。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 未修改。
 - 证据：`docs/testing/evidence/v588-provider-001-model-labels-cloud-2026-08-25.json`、`v588-provider-001-image-model-cloud-2026-08-25.jpg` 和 `v588-provider-001-deployment-cloud-2026-08-25.jpg`。
-- 下一项不是模糊的“simple-chat 优化”，而是清单中已拆分的 `V588-CHAT-001` 至 `V588-CHAT-004`；四项当前均为待吸收，必须分别从失败测试开始。
+- 下一项不是模糊的“simple-chat 优化”，而是先完成 `V588-CHAT-001` 的 Coze 三入口验收；未关闭前不得进入 `V588-CHAT-002`。其余三项仍为待吸收，必须分别从失败测试开始。
+
+## 2026-08-25 V588-CHAT-001 本地吸收检查点
+
+- 设计与实施边界分别记录在 `docs/superpowers/specs/2026-08-25-v588-simple-chat-strict-sse-design.md` 和 `docs/superpowers/plans/2026-08-25-v588-simple-chat-strict-sse.md`；V5.8.8 donor 保持只读，未复制其会话、任务、同步或原始 URL `localStorage` 桥接。
+- TDD 首轮解析器因目标模块不存在得到 1 个预期失败套件，三入口接线合同得到 `2/2` 预期失败；实现后解析器 `9/9`、解析器与接线合同 `11/11`、关联回归 `56/56` 通过。
+- 接线审计额外发现并修复两个当前分支缺陷：CanvasEditor 的旧内联回调把 `instruction/content/selection` 参数角色传错；画布修图流只读取 `content`，而服务端正文事件实际使用 `text`。
+- 全仓结果为 `532` 个文件通过、`20` 个 PostgreSQL 文件因缺少隔离数据库跳过；业务断言 `3485` 项通过、`117` 项跳过。TypeScript、零错误 ESLint、Next.js `116/116` 构建和 `38/38` 受保护基线门禁通过。
+- 受保护基线白名单只补录 8 个已经过审的路径，并保留来源提交：`97634feb`、`f19ab164`、`3c597cd9`、`717f3eab`；没有把未审改动静默加入允许范围。
+- **当前状态：本地已吸收 / 云端待验。** 必须在 Coze 精确拉取新 `main` 后验证普通对话、CanvasEditor 修图、Deep Research、严格错误态和浏览器健康；通过前不进入 `V588-CHAT-002`。

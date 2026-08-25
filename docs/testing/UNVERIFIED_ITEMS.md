@@ -1334,7 +1334,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 普通用户管理员入口命名 | P3 待优化 | 点击“用户管理”只返回普通项目仪表盘，没有越权；后续 UI 阶段应改为不误导的入口名称或按角色隐藏。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | 既有 `20 files / 117 tests` 仍需完整隔离 `POSTGRES_TEST_DATABASE_URL` 才能执行；本轮云端只读计数不能替代并发/退款专项。 |
 | V588-PROVIDER-001 | 已云端验证 | 精确映射、最长匹配、管理员名称优先、本地全量门禁和 Coze 普通用户图像/视频目录均已取得证据。 |
-| V588-CHAT-001 | 未开始 | 普通对话、画布修图和 Deep Research 尚未共用严格 SSE 解析器；需覆盖 CRLF、任意分块、多行、尾事件、畸形事件和取消。 |
+| V588-CHAT-001 | 本地已吸收 / 云端待验 | 三入口已共用严格 SSE 解析器，本地覆盖 CRLF、任意分块、UTF-8、多行、尾事件、畸形事件和取消；仍需 Coze 真实普通对话、CanvasEditor 修图、Deep Research 及错误态证据。 |
 | V588-CHAT-002 | 未开始 | 当前消息模型尚无统一 `streaming/completed/failed` 状态和冻结重试上下文；不得把重复发送当作重试。 |
 | V588-CHAT-003 | 部分现有能力 / 未吸收 | 当前已有服务器同步和 800ms 防抖，但远端权威按 ID 合并、离页/切换用户冲刷和可诊断失败尚未闭环。 |
 | V588-CHAT-004 | 部分现有能力 / 未吸收 | 无限画布已有更安全的 `AssetVersion -> /api/assets/transfer` 链路；来源追踪和发送到节点模式仍缺失，禁止复制 donor 的原始 URL `localStorage` 桥接。 |

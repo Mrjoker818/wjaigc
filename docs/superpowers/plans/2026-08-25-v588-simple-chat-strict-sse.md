@@ -350,13 +350,13 @@ Record passed, failed and environment-gated skipped counts exactly.
 
 ```powershell
 pnpm ts-check
-pnpm exec eslint src/lib/simple-chat-sse.ts src/components/simple-chat/chat-area.tsx src/__tests__/lib/simple-chat-sse.test.ts src/__tests__/components/simple-chat-sse-integration.test.ts --max-warnings=0
+pnpm exec eslint src/lib/simple-chat-sse.ts src/components/simple-chat/chat-area.tsx src/__tests__/lib/simple-chat-sse.test.ts src/__tests__/components/simple-chat-sse-integration.test.ts --quiet
 pnpm build
 node scripts/check-protected-baseline.mjs --base 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b --allow-path-file docs/testing/baselines/protected-baseline-allowed-paths.json
 git diff --check
 ```
 
-All commands must exit 0. If any fail, fix the concrete cause and rerun both focused and full gates.
+所有命令都必须以退出码 `0` 完成。`chat-area.tsx` 的既有 warning 单独计数并记录，新增文件不得产生 warning；本项强制门禁为零 error、零新增 warning，不能借机修改无关历史代码。任何命令失败时，修复具体原因并重新执行聚焦与全量门禁。
 
 - [ ] **Step 3: Update Chinese local evidence**
 

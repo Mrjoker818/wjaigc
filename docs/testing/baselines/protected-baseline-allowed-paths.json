@@ -165,5 +165,13 @@
   "src/lib/font-design-task-store.ts",
   "src/lib/generated-image-alpha.ts",
   "src/lib/image-generation-output-preference.ts",
-  "src/lib/image-generation-output.ts"
+  "src/lib/image-generation-output.ts",
+  "eslint.config.mjs",
+  "src/app/api/video/download/route.ts",
+  "src/lib/asset-core/project-readers.ts",
+  "src/lib/model-name-map.ts",
+  "src/lib/simple-chat-sse.ts",
+  "src/lib/video-processing-state.ts",
+  "src/lib/video-task-result.ts",
+  "tsconfig.json"
 ]
