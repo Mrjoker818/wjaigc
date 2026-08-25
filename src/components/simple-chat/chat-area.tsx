@@ -1222,100 +1222,176 @@ export default function ChatArea({
   // 供消息编辑后重新生成调用
   handleSendRef.current = handleSend;
 
-  // Deep Research
-  const handleDeepResearch = useCallback(async () => {
-    const requestModelSelection = readSimpleChatModelSelection(task);
-    if (!input.trim() || isStreaming) return;
-    if (!project || !task) return;
-    if (!requestModelSelection.modelId || !requestModelSelection.providerId) {
-      setSearchStatus('请先选择可用的对话模型。');
-      return;
-    }
-    const requestProjectId = project.id;
-    const requestTaskId = task.id;
+  const executeDeepResearchRequest = useCallback(async (
+    context: SimpleChatRetryContextV1,
+  ): Promise<void> => {
     const requestScopeIsCurrent = () => (
-      isWorkspaceResultScopeCurrent(requestProjectId, projectIdRef.current)
-      && requestTaskId === taskIdRef.current
+      isWorkspaceResultScopeCurrent(context.projectId, projectIdRef.current)
+      && context.taskId === taskIdRef.current
     );
-    setIsStreaming(true);
-    const query = input;
-    setInput("");
+    if (!requestScopeIsCurrent() || context.kind !== 'deep-research' || !context.query) return;
 
-    const userMsg: SimpleChatMessage = { id: `msg_${Date.now()}`, role: 'user', content: `🔬 Deep Research: ${query}`, createdAt: Date.now() };
-    const aiMsg: SimpleChatMessage = {
-      id: `msg_${Date.now() + 1}`,
-      role: 'assistant',
-      content: '',
-      model: requestModelSelection.modelId,
-      providerId: requestModelSelection.providerId,
-      createdAt: Date.now() + 1,
-    };
-    setMessages(prev => [...prev, userMsg, aiMsg]);
+    setIsStreaming(true);
+    setMessages(previous => previous.map(message => message.id === context.assistantMessageId
+      ? {
+        ...message,
+        content: '',
+        status: 'streaming',
+        error: undefined,
+        retryContext: context,
+        model: context.modelId,
+        providerId: context.providerId,
+      }
+      : message));
 
     try {
-      const res = await fetch('/api/simple-chat/deep-research', {
+      const response = await fetch('/api/simple-chat/deep-research', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': context.idempotencyKey,
+        },
         body: JSON.stringify({
-          query,
-          model: requestModelSelection.modelId,
-          providerId: requestModelSelection.providerId,
-          depth: 'standard',
+          query: context.query,
+          model: context.modelId,
+          providerId: context.providerId,
+          depth: context.depth || 'standard',
+          idempotencyKey: context.idempotencyKey,
         }),
       });
       if (!requestScopeIsCurrent()) return;
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      if (!res.body) throw new Error('No body');
-      let fullContent = "", phaseLabel = "";
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.body) throw new Error('No body');
+      let fullContent = '';
       let streamError: string | null = null;
 
-      const streamResult = await consumeSimpleChatJsonStream(res.body, {
+      const streamResult = await consumeSimpleChatJsonStream(response.body, {
         isActive: requestScopeIsCurrent,
         onEvent(value) {
-          if (!requestScopeIsCurrent()) return;
-          if (streamError) return;
+          if (!requestScopeIsCurrent() || streamError) return;
           const parsed = readSimpleChatStreamPayload(value);
           if (!parsed) return;
-            if (parsed.type === 'phase') {
-              phaseLabel = parsed.label || '';
-              setMessages(prev => prev.map(message => (
-                message.id === aiMsg.id ? { ...message, content: `*${phaseLabel}*` } : message
-              )));
-            } else if (parsed.type === 'text' && typeof parsed.content === 'string') {
-              fullContent += parsed.content;
-              setMessages(prev => prev.map(message => (
-                message.id === aiMsg.id ? { ...message, content: fullContent } : message
-              )));
-            } else if (parsed.type === 'citations') {
-              // Save as artifact
-              const artId = `art_${Date.now()}`;
-              setArtifacts(prev => [...prev, { id: artId, type: 'document', title: `研究: ${query.slice(0, 30)}`, content: fullContent }]);
-            } else if (parsed.type === 'error') {
-              streamError = typeof parsed.error === 'string' && parsed.error.trim()
-                ? parsed.error.trim()
-                : '未知错误';
-              setMessages(prev => prev.map(message => (
-                message.id === aiMsg.id
-                  ? { ...message, content: `Deep Research 失败：${streamError}` }
-                  : message
-              )));
-            }
+          if (parsed.type === 'phase') {
+            const phaseLabel = parsed.label || '';
+            setMessages(previous => previous.map(message => (
+              message.id === context.assistantMessageId
+                ? { ...message, content: `*${phaseLabel}*` }
+                : message
+            )));
+          } else if (parsed.type === 'text' && typeof parsed.content === 'string') {
+            fullContent += parsed.content;
+            setMessages(previous => previous.map(message => (
+              message.id === context.assistantMessageId
+                ? { ...message, content: fullContent }
+                : message
+            )));
+          } else if (parsed.type === 'citations') {
+            const artifact = {
+              id: `${context.assistantMessageId}-research`,
+              type: 'document' as const,
+              title: `研究: ${context.query!.slice(0, 30)}`,
+              content: fullContent,
+            };
+            setArtifacts(previous => previous.some(item => item.id === artifact.id)
+              ? previous.map(item => item.id === artifact.id ? artifact : item)
+              : [...previous, artifact]);
+          } else if (parsed.type === 'error') {
+            streamError = typeof parsed.error === 'string' && parsed.error.trim()
+              ? parsed.error.trim()
+              : '未知错误';
+            setMessages(previous => previous.map(message => (
+              message.id === context.assistantMessageId
+                ? {
+                  ...message,
+                  content: `Deep Research 失败：${streamError}`,
+                  status: 'failed',
+                  error: { message: streamError!, retryable: true },
+                  retryContext: context,
+                }
+                : message
+            )));
+          }
         },
       });
-      if (streamResult === 'cancelled') return;
+      if (streamResult === 'cancelled' || !requestScopeIsCurrent()) return;
+      if (!streamError) {
+        setMessages(previous => previous.map(message => (
+          message.id === context.assistantMessageId
+            ? { ...message, status: 'completed', error: undefined, retryContext: context }
+            : message
+        )));
+      }
     } catch (error) {
       if (!requestScopeIsCurrent()) return;
-      const errorContent = error instanceof SimpleChatSseProtocolError
+      const errorMessage = error instanceof SimpleChatSseProtocolError
         ? error.message
         : 'Deep Research 失败，请重试。';
-      setMessages(prev => prev.map(message => (
-        message.id === aiMsg.id ? { ...message, content: errorContent } : message
+      setMessages(previous => previous.map(message => (
+        message.id === context.assistantMessageId
+          ? {
+            ...message,
+            content: errorMessage,
+            status: 'failed',
+            error: { message: errorMessage, retryable: true },
+            retryContext: context,
+          }
+          : message
       )));
     } finally {
       if (requestScopeIsCurrent()) setIsStreaming(false);
     }
-  }, [input, isStreaming, project, task]);
+  }, []);
+
+  // Deep Research
+  const handleDeepResearch = useCallback(async () => {
+    const requestModelSelection = readSimpleChatModelSelection(task);
+    const query = input.trim();
+    if (!query || isStreaming || !project || !task) return;
+    if (!requestModelSelection.modelId || !requestModelSelection.providerId) {
+      setSearchStatus('请先选择可用的对话模型。');
+      return;
+    }
+    const userMessageId = `msg_${Date.now()}`;
+    const assistantMessageId = `msg_${Date.now() + 1}`;
+    const retryContext = createSimpleChatRetryContext({
+      kind: 'deep-research',
+      projectId: project.id,
+      taskId: task.id,
+      userMessageId,
+      assistantMessageId,
+      idempotencyKey: `simple-chat-research:${task.id}:${assistantMessageId}`,
+      modelId: requestModelSelection.modelId,
+      providerId: requestModelSelection.providerId,
+      webSearch: true,
+      sourceVersionIds: [],
+      selectedEntityIds: [],
+      historyMessageIds: messages.map(message => message.id),
+      systemMessages: [],
+      knowledgeItems: [],
+      memories: [],
+      query,
+      depth: 'standard',
+    });
+    const userMessage: SimpleChatMessage = {
+      id: userMessageId,
+      role: 'user',
+      content: `🔬 Deep Research: ${query}`,
+      createdAt: Date.now(),
+    };
+    const assistantMessage: SimpleChatMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      model: retryContext.modelId,
+      providerId: retryContext.providerId,
+      status: 'streaming',
+      retryContext,
+      createdAt: Date.now() + 1,
+    };
+    setMessages(previous => [...previous, userMessage, assistantMessage]);
+    setInput('');
+    await executeDeepResearchRequest(retryContext);
+  }, [executeDeepResearchRequest, input, isStreaming, messages, project, task]);
 
   // Branch from message
   const branchFromMessage = useCallback((msgId: string) => {
@@ -1585,7 +1661,7 @@ export default function ChatArea({
       projectId: projectIdRef.current,
       taskId: taskIdRef.current,
     });
-    if (!assistantMessage || !context || context.kind !== 'chat') {
+    if (!assistantMessage || !context) {
       setMessages(previous => previous.map(message => message.id === messageId
         ? {
           ...message,
@@ -1606,8 +1682,12 @@ export default function ChatArea({
         : message));
       return;
     }
+    if (context.kind === 'deep-research') {
+      await executeDeepResearchRequest(context);
+      return;
+    }
     await executeChatRequest(context, userMessage);
-  }, [executeChatRequest, isStreaming]);
+  }, [executeChatRequest, executeDeepResearchRequest, isStreaming]);
   const regenerateLast = () => { if (messages.length < 2) return; const lastUser = [...messages].reverse().find(m => m.role === 'user'); if (lastUser) { setMessages(prev => prev.slice(0, -2)); setInput(lastUser.content); setTimeout(() => { const btn = document.getElementById('send-btn') as HTMLButtonElement; btn?.click(); }, 50); } };
   const continueConversation = (msg: SimpleChatMessage) => { setInput('继续'); };
   const makeShorter = (msg: SimpleChatMessage) => {

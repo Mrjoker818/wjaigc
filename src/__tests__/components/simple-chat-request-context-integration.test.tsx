@@ -871,6 +871,67 @@ describe('simple-chat request context integration', () => {
     )).toBe(true));
   });
 
+  it('retries Deep Research on the same messages with its frozen provider pair', async () => {
+    const onUpdateTask = vi.fn();
+    const firstResponse = createDeferredSseResponse();
+    const retryResponse = createDeferredSseResponse();
+    const task = createTask();
+    task.model = 'research-model';
+    task.providerId = 'research-provider';
+    mockStartupRequests(streamResponse(), [
+      { id: 'research-model', name: 'Research model', providerId: 'research-provider' },
+      { id: 'next-model', name: 'Next model', providerId: 'next-provider' },
+    ], [firstResponse.response, retryResponse.response]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    fireEvent.change(screen.getByPlaceholderText(/输入消息/u), { target: { value: 'research retry' } });
+    fireEvent.click(screen.getByTitle('Deep Research - 深度研究'));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/deep-research')).toHaveLength(1));
+    await act(async () => {
+      firstResponse.emit({ type: 'phase', label: '规划中' });
+      firstResponse.emit({ type: 'error', error: 'research failed' });
+      firstResponse.close();
+    });
+
+    const retryButton = await screen.findByRole('button', { name: '重试' });
+    const failedTask = onUpdateTask.mock.calls
+      .map(([updatedTask]) => updatedTask as SimpleChatTask)
+      .findLast(updatedTask => updatedTask.messages.some(message => message.status === 'failed'));
+    const originalIds = failedTask?.messages.map(message => message.id);
+
+    fireEvent.click(screen.getByRole('button', { name: /Research model/u }));
+    fireEvent.click(screen.getByRole('option', { name: /Next model/u }));
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/deep-research')).toHaveLength(2));
+
+    const [firstPayload, retryPayload] = requestPayloads('/api/simple-chat/deep-research');
+    expect(retryPayload).toMatchObject({
+      query: firstPayload.query,
+      model: firstPayload.model,
+      providerId: firstPayload.providerId,
+      depth: firstPayload.depth,
+      idempotencyKey: firstPayload.idempotencyKey,
+    });
+    expect(firstPayload.idempotencyKey).toEqual(expect.any(String));
+    await waitFor(() => {
+      const latestTask = onUpdateTask.mock.calls.at(-1)?.[0] as SimpleChatTask;
+      expect(latestTask.messages.map(message => message.id)).toEqual(originalIds);
+    });
+
+    await act(async () => {
+      retryResponse.emit({ type: 'phase', label: '写作中' });
+      retryResponse.emit({ type: 'text', content: 'research recovered' });
+      retryResponse.emit({ type: 'citations' });
+      retryResponse.emit({ type: 'done' });
+      retryResponse.close();
+    });
+    await waitFor(() => expect(document.body.textContent).toContain('research recovered'));
+  });
+
   it('isolates a stale Deep Research stream from a newer task request', async () => {
     const onUpdateTask = vi.fn();
     const taskA = createTask();

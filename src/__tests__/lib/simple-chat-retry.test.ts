@@ -101,4 +101,17 @@ describe('simple-chat deterministic retry contract', () => {
 
     expect(readSimpleChatRetryContext(context)).toBeNull();
   });
+
+  it('requires a bounded query for Deep Research contexts', () => {
+    expect(readSimpleChatRetryContext({
+      ...validContext(),
+      kind: 'deep-research',
+    })).toBeNull();
+    expect(readSimpleChatRetryContext({
+      ...validContext(),
+      kind: 'deep-research',
+      query: 'research this',
+      depth: 'standard',
+    })).toMatchObject({ query: 'research this', depth: 'standard' });
+  });
 });

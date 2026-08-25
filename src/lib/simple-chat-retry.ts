@@ -45,6 +45,7 @@ export interface SimpleChatRetryContextV1 {
   systemMessages: SimpleChatRetrySystemMessage[];
   knowledgeItems: SimpleChatRetryKnowledgeItem[];
   memories: SimpleChatRetryMemory[];
+  query?: string;
   deepAnalysis?: boolean;
   depth?: 'quick' | 'standard' | 'deep';
 }
@@ -172,6 +173,7 @@ export function readSimpleChatRetryContext(
   const systemMessages = readSystemMessages(value.systemMessages);
   const knowledgeItems = readKnowledgeItems(value.knowledgeItems);
   const memories = readMemories(value.memories);
+  const query = readOptionalBoundedString(value.query, MAX_TEXT_LENGTH);
 
   if (
     !projectId || !taskId || !userMessageId || !assistantMessageId || !idempotencyKey
@@ -179,6 +181,7 @@ export function readSimpleChatRetryContext(
     || imageModelId === null || imageProviderId === null || reasoningEffort === null
     || responseSpeed === null || canvasProjectId === null || !sourceVersionIds
     || !selectedEntityIds || !historyMessageIds || !systemMessages || !knowledgeItems || !memories
+    || query === null || (value.kind === 'deep-research' && !query)
     || typeof value.webSearch !== 'boolean'
   ) return null;
 
@@ -215,6 +218,7 @@ export function readSimpleChatRetryContext(
     systemMessages,
     knowledgeItems,
     memories,
+    ...(query ? { query } : {}),
     ...(typeof value.deepAnalysis === 'boolean' ? { deepAnalysis: value.deepAnalysis } : {}),
     ...(depth ? { depth } : {}),
   };
