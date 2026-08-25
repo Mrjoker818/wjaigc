@@ -10,6 +10,11 @@ export interface SimpleChatModelSelection {
   providerId: string;
 }
 
+export interface SimpleChatModelCatalogEntry {
+  modelId: string;
+  providerId: string;
+}
+
 export interface SimpleChatHistoryMessage {
   id: string;
   role: string;
@@ -49,6 +54,26 @@ export function applySimpleChatModelSelection<T extends { model: string; provide
     model: selection.modelId.trim(),
     providerId: selection.providerId.trim(),
   };
+}
+
+export function resolveSimpleChatModelSelection(
+  task: { model?: string; providerId?: string } | null | undefined,
+  catalog: readonly SimpleChatModelCatalogEntry[],
+): SimpleChatModelSelection {
+  const current = readSimpleChatModelSelection(task);
+  const exact = catalog.find(entry => (
+    entry.modelId === current.modelId && entry.providerId === current.providerId
+  ));
+  if (exact) return { modelId: exact.modelId, providerId: exact.providerId };
+
+  const modelMatch = catalog.find(entry => entry.modelId === current.modelId);
+  if (modelMatch) return { modelId: modelMatch.modelId, providerId: modelMatch.providerId };
+
+  const providerMatch = catalog.find(entry => entry.providerId === current.providerId);
+  const fallback = providerMatch || catalog[0];
+  return fallback
+    ? { modelId: fallback.modelId, providerId: fallback.providerId }
+    : { modelId: '', providerId: '' };
 }
 
 function decodeStrictDataImage(value: string): boolean {

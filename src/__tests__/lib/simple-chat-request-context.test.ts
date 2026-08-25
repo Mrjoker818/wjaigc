@@ -4,6 +4,7 @@ import {
   buildSimpleChatHistoryRequestContext,
   filterSimpleChatImageInputs,
   readSimpleChatModelSelection,
+  resolveSimpleChatModelSelection,
 } from '@/lib/simple-chat-request-context';
 
 const PNG_1PX =
@@ -49,6 +50,31 @@ describe('simple-chat model selection', () => {
 
     expectTypeOf(next.model).toEqualTypeOf<string>();
     expectTypeOf(next.providerId).toEqualTypeOf<string>();
+  });
+
+  it('repairs incomplete or stale selections to an exact catalog pair', () => {
+    const catalog = [
+      { modelId: 'shared-model', providerId: 'provider-a' },
+      { modelId: 'shared-model', providerId: 'provider-b' },
+      { modelId: 'other-model', providerId: 'provider-b' },
+    ];
+
+    expect(resolveSimpleChatModelSelection({ model: 'shared-model', providerId: '' }, catalog)).toEqual({
+      modelId: 'shared-model',
+      providerId: 'provider-a',
+    });
+    expect(resolveSimpleChatModelSelection({ model: '', providerId: 'provider-b' }, catalog)).toEqual({
+      modelId: 'shared-model',
+      providerId: 'provider-b',
+    });
+    expect(resolveSimpleChatModelSelection({ model: 'missing', providerId: 'missing' }, catalog)).toEqual({
+      modelId: 'shared-model',
+      providerId: 'provider-a',
+    });
+    expect(resolveSimpleChatModelSelection({ model: 'other-model', providerId: 'provider-b' }, catalog)).toEqual({
+      modelId: 'other-model',
+      providerId: 'provider-b',
+    });
   });
 });
 

@@ -41,6 +41,7 @@ import {
   buildSimpleChatHistoryRequestContext,
   filterSimpleChatImageInputs,
   readSimpleChatModelSelection,
+  resolveSimpleChatModelSelection,
   type SimpleChatModelSelection,
 } from '@/lib/simple-chat-request-context';
 
@@ -311,6 +312,7 @@ export default function ChatArea({
 
   // Messages: sync from task
   const [messages, setMessages] = useState<SimpleChatMessage[]>((task?.messages || []).filter(Boolean));
+  const [messagesTaskId, setMessagesTaskId] = useState(task?.id);
   const projectIdRef = useRef(project?.id);
   const taskIdRef = useRef(task?.id);
   const latestTaskRef = useRef(task);
@@ -371,6 +373,7 @@ export default function ChatArea({
     if (task) {
       setIsStreaming(false);
       setMessages((task.messages || []).filter(Boolean));
+      setMessagesTaskId(task.id);
       setReasoningEffort(task.reasoningEffort || 'medium');
       setResponseSpeed(task.responseSpeed || 'balanced');
       setAppliedChatControls(task.appliedChatControls);
@@ -430,12 +433,12 @@ export default function ChatArea({
   useEffect(() => {
     if (!task || chatModels.length === 0) return;
     const currentSelection = readSimpleChatModelSelection(task);
-    if (currentSelection.modelId || currentSelection.providerId) return;
-    const firstModel = chatModels[0];
-    onUpdateTask(applySimpleChatModelSelection(task, {
-      modelId: firstModel.modelId,
-      providerId: firstModel.providerId,
-    }));
+    const resolvedSelection = resolveSimpleChatModelSelection(task, chatModels);
+    if (
+      currentSelection.modelId === resolvedSelection.modelId
+      && currentSelection.providerId === resolvedSelection.providerId
+    ) return;
+    onUpdateTask(applySimpleChatModelSelection(task, resolvedSelection));
   }, [chatModels, onUpdateTask, task]);
 
   useEffect(() => {
@@ -573,9 +576,9 @@ export default function ChatArea({
 
   // Sync task to parent（临时聊天模式下跳过保存）
   useEffect(() => {
-    if (!task || !project || tempChat) return;
+    if (!task || !project || tempChat || messagesTaskId !== task.id) return;
     onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, reasoningEffort, responseSpeed, appliedChatControls, updatedAt: Date.now() });
-  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId, reasoningEffort, responseSpeed, appliedChatControls, tempChat]);
+  }, [messages, messagesTaskId, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId, reasoningEffort, responseSpeed, appliedChatControls, tempChat]);
 
   // Sync knowledge
   useEffect(() => {
@@ -688,9 +691,15 @@ export default function ChatArea({
   // Canvas AI 协同编辑
   async function canvasAiEdit(instruction: string, currentContent: string, selectedText: string): Promise<string> {
     const requestModelSelection = readSimpleChatModelSelection(task);
-    if (!requestModelSelection.modelId || !requestModelSelection.providerId) {
+    if (!task || !requestModelSelection.modelId || !requestModelSelection.providerId) {
       throw new Error('请先选择可用的对话模型。');
     }
+    const requestProjectId = project?.id;
+    const requestTaskId = task.id;
+    const requestScopeIsCurrent = () => (
+      isWorkspaceResultScopeCurrent(requestProjectId, projectIdRef.current)
+      && requestTaskId === taskIdRef.current
+    );
     const target = selectedText || currentContent;
     const res = await fetch('/api/simple-chat/chat', {
       method: 'POST',
@@ -708,7 +717,9 @@ export default function ChatArea({
     if (!res.body) throw new Error('No response body');
     let result = '';
     await consumeSimpleChatJsonStream(res.body, {
+      isActive: requestScopeIsCurrent,
       onEvent(value) {
+        if (!requestScopeIsCurrent()) return;
         const parsed = readSimpleChatStreamPayload(value);
         if (!parsed) return;
         if (
@@ -719,6 +730,9 @@ export default function ChatArea({
         }
       },
     });
+    if (!requestScopeIsCurrent()) {
+      throw new Error('会话已切换，本次 AI 编辑结果已忽略。');
+    }
     if (!result.trim()) throw new Error('AI 未返回内容');
     return selectedText ? currentContent.replace(selectedText, result.trim()) : result.trim();
   }
@@ -1498,7 +1512,7 @@ export default function ChatArea({
             <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.providerId === selectedProviderId && m.modelId === selectedModel)?.name || selectedModel || '选择模型'}</span>
             <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${openModelMenu === 'chat' ? 'rotate-180' : ''}`} />
           </button>
-          <div className={`absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-[100] max-h-96 overflow-y-auto p-1 transition-opacity ${openModelMenu === 'chat' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} role="listbox">
+          <div className={`absolute right-0 top-full mt-1 w-[min(20rem,calc(100vw-1.5rem))] bg-card border border-border rounded-xl shadow-xl z-[100] max-h-96 overflow-y-auto p-1 transition-opacity ${openModelMenu === 'chat' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} role="listbox">
             {chatModels.map(m => (
               <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedProviderId && m.modelId === selectedModel} onClick={() => handleChatModelSelect({ modelId: m.modelId, providerId: m.providerId })}
                 className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
@@ -1541,7 +1555,7 @@ export default function ChatArea({
             <span className="font-medium max-w-[100px] truncate">{imageModels.find(m => m.providerId === selectedImageProviderId && m.modelId === selectedImageModel)?.name || selectedImageModel || '图像模型'}</span>
             <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${openModelMenu === 'image' ? 'rotate-180' : ''}`} />
           </button>
-          <div className={`absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-[100] max-h-96 overflow-y-auto p-1 transition-opacity ${openModelMenu === 'image' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} role="listbox">
+          <div className={`absolute right-0 top-full mt-1 w-[min(20rem,calc(100vw-1.5rem))] bg-card border border-border rounded-xl shadow-xl z-[100] max-h-96 overflow-y-auto p-1 transition-opacity ${openModelMenu === 'image' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} role="listbox">
             <div className="px-3 py-1.5 text-[11px] text-muted-foreground/60 font-medium">图像生成模型</div>
             {imageModels.map(m => (
               <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedImageProviderId && m.modelId === selectedImageModel} onClick={() => { setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); setOpenModelMenu(null); }}

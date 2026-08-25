@@ -169,6 +169,32 @@ async function readChatProjectsSnapshot(page: Page): Promise<ChatProjectsSnapsho
   return { value: structuredClone(payload.value ?? null) };
 }
 
+async function blockBrowserChatProjectWrites(page: Page): Promise<void> {
+  await page.route('**/api/user-data/sync', async route => {
+    const request = route.request();
+    if (request.method() !== 'POST') {
+      await route.continue();
+      return;
+    }
+    let payload: { key?: unknown } | null = null;
+    try {
+      const parsed = request.postDataJSON();
+      payload = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as { key?: unknown }
+        : null;
+    } catch {}
+    if (payload?.key === CHAT_PROJECTS_SYNC_KEY) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, code: 'CHAT_PROJECT_WRITE_BLOCKED_FOR_E2E' }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+}
+
 async function seedChatProjects(
   page: Page,
   testInfo: TestInfo,
@@ -177,6 +203,7 @@ async function seedChatProjects(
   if (chatProjectSnapshotsByTest.has(testInfo.testId)) {
     throw new Error('Each Stage 5 gate may seed chat projects only once so its exact original value can be restored.');
   }
+  await blockBrowserChatProjectWrites(page);
   const snapshot = await readChatProjectsSnapshot(page);
   chatProjectSnapshotsByTest.set(testInfo.testId, snapshot);
   const existing = Array.isArray(snapshot.value) ? snapshot.value as Array<{ id?: unknown }> : [];
@@ -523,6 +550,44 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
       await openFixtureProject(page, project.id);
       await expect(page.getByText(`消息 100：阶段5门禁载荷 ${runTag}`, { exact: true })).toBeVisible();
       await exerciseLongConversationMenus(page, testInfo, 'mobile');
+    });
+  });
+
+  test.describe('320px narrow mobile viewport', () => {
+    test.use({ viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true });
+
+    test('keeps both model menus inside the narrow viewport', async ({ page }, testInfo) => {
+      await login(page, testInfo);
+      const runTag = `${testInfo.workerIndex}-${Date.now()}`;
+      const project = createProject(runTag, 'mobile-320', `窄屏320-${runTag}`, [{
+        name: '窄屏长会话',
+        messages: numberedMessages(runTag, 100),
+        model: 'chat-model-01',
+        providerId: 'chat-provider-1',
+      }]);
+      await seedChatProjects(page, testInfo, [project]);
+      await installDeterministicBrowserModelMocks(page, modelFixtures('chat', 18), modelFixtures('image', 18));
+      await openFixtureProject(page, project.id);
+      await exerciseLongConversationMenus(page, testInfo, 'mobile-320');
+    });
+  });
+
+  test.describe('375px narrow mobile viewport', () => {
+    test.use({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+
+    test('keeps both model menus inside the compact viewport', async ({ page }, testInfo) => {
+      await login(page, testInfo);
+      const runTag = `${testInfo.workerIndex}-${Date.now()}`;
+      const project = createProject(runTag, 'mobile-375', `窄屏375-${runTag}`, [{
+        name: '紧凑长会话',
+        messages: numberedMessages(runTag, 100),
+        model: 'chat-model-01',
+        providerId: 'chat-provider-1',
+      }]);
+      await seedChatProjects(page, testInfo, [project]);
+      await installDeterministicBrowserModelMocks(page, modelFixtures('chat', 18), modelFixtures('image', 18));
+      await openFixtureProject(page, project.id);
+      await exerciseLongConversationMenus(page, testInfo, 'mobile-375');
     });
   });
 });

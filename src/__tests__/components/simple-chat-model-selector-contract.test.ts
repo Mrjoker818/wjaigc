@@ -29,6 +29,7 @@ describe('simple-chat model selector contract', () => {
   it('keeps both model menus above the scrolling conversation', () => {
     expect(source).toContain('<header className="relative z-50');
     expect(source.match(/role="listbox"/g)).toHaveLength(2);
+    expect(modelSelectorSource.match(/w-\[min\(20rem,calc\(100vw-1\.5rem\)\)\]/g)).toHaveLength(2);
   });
 
   it('applies the image model and provider before closing the selected menu', () => {

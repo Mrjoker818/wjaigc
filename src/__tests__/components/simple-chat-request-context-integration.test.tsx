@@ -136,17 +136,20 @@ function ChatAreaHarness({
 function TaskSwitchingChatAreaHarness({
   initialTask,
   nextTask,
+  nextProjectId,
   onUpdateTask,
 }: {
   initialTask: SimpleChatTask;
   nextTask: SimpleChatTask;
+  nextProjectId?: string;
   onUpdateTask: ReturnType<typeof vi.fn>;
 }) {
   const [task, setTask] = useState(initialTask);
   const project = useMemo(() => ({
     ...createProject(task),
+    id: task.id === nextTask.id ? (nextProjectId || 'project-1') : 'project-1',
     tasks: [initialTask, nextTask],
-  }), [initialTask, nextTask, task]);
+  }), [initialTask, nextProjectId, nextTask, task]);
 
   return (
     <>
@@ -437,6 +440,27 @@ describe('simple-chat request context integration', () => {
     expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(0);
   });
 
+  it('repairs an incomplete historical model selection from the exact catalog', async () => {
+    const onUpdateTask = vi.fn();
+    const task = createTask();
+    task.model = 'chat-model';
+    task.providerId = '';
+    mockStartupRequests(streamResponse(), [
+      { id: 'chat-model', name: 'Chat model', providerId: 'provider-1' },
+    ]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+
+    await waitFor(() => expect(onUpdateTask).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'chat-model',
+      providerId: 'provider-1',
+    })));
+  });
+
   it('keeps the ordinary chat start selection while Brand DNA is pending and uses a later selection for the next request', async () => {
     const brandDna = createDeferred<{
       loadBrandDNARegistry: () => unknown[];
@@ -523,6 +547,106 @@ describe('simple-chat request context integration', () => {
       model: 'canvas-model',
       providerId: 'canvas-provider',
     });
+  });
+
+  it('does not apply a late CanvasEditor response after switching tasks', async () => {
+    const onUpdateTask = vi.fn();
+    const taskA = createTask([{
+      id: 'task-a-message',
+      role: 'user',
+      content: 'Task A persisted message',
+      createdAt: 1,
+    }]);
+    taskA.model = 'task-a-model';
+    taskA.providerId = 'task-a-provider';
+    const taskB = createTask([{
+      id: 'task-b-message',
+      role: 'user',
+      content: 'Task B persisted message',
+      createdAt: 2,
+    }]);
+    taskB.id = 'task-2';
+    taskB.name = 'Task B';
+    taskB.model = 'task-b-model';
+    taskB.providerId = 'task-b-provider';
+    const canvasResponse = createDeferredSseResponse();
+    mockStartupRequests(canvasResponse.response, [
+      { id: 'task-a-model', name: 'Task A model', providerId: 'task-a-provider' },
+      { id: 'task-b-model', name: 'Task B model', providerId: 'task-b-provider' },
+    ]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<TaskSwitchingChatAreaHarness initialTask={taskA} nextTask={taskB} onUpdateTask={onUpdateTask} />);
+    fireEvent.click(screen.getByTitle('写作画布'));
+    const editor = screen.getByPlaceholderText('在这里编辑文案...');
+    fireEvent.change(editor, { target: { value: 'Task A draft' } });
+    fireEvent.change(screen.getByPlaceholderText('告诉 AI 如何修改全文...'), { target: { value: 'polish it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+    await act(async () => {
+      canvasResponse.emit({ type: 'text', content: 'late Task A result' });
+      canvasResponse.close();
+    });
+
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe('Task A draft'));
+    expect((editor as HTMLTextAreaElement).value).not.toContain('late Task A result');
+    const taskBUpdates = onUpdateTask.mock.calls
+      .map(([updatedTask]) => updatedTask as SimpleChatTask)
+      .filter(updatedTask => updatedTask.id === taskB.id);
+    expect(taskBUpdates.length).toBeGreaterThan(0);
+    expect(taskBUpdates.every(updatedTask => (
+      updatedTask.messages.some(message => message.id === 'task-b-message')
+      && updatedTask.messages.every(message => message.id !== 'task-a-message')
+    ))).toBe(true);
+  });
+
+  it('does not apply a late CanvasEditor response after switching projects', async () => {
+    const onUpdateTask = vi.fn();
+    const taskA = createTask();
+    taskA.model = 'task-a-model';
+    taskA.providerId = 'task-a-provider';
+    const taskB = createTask();
+    taskB.id = 'task-2';
+    taskB.projectId = 'project-2';
+    taskB.name = 'Project B task';
+    taskB.model = 'task-b-model';
+    taskB.providerId = 'task-b-provider';
+    const canvasResponse = createDeferredSseResponse();
+    mockStartupRequests(canvasResponse.response, [
+      { id: 'task-a-model', name: 'Task A model', providerId: 'task-a-provider' },
+      { id: 'task-b-model', name: 'Task B model', providerId: 'task-b-provider' },
+    ]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<TaskSwitchingChatAreaHarness
+      initialTask={taskA}
+      nextTask={taskB}
+      nextProjectId="project-2"
+      onUpdateTask={onUpdateTask}
+    />);
+    fireEvent.click(screen.getByTitle('写作画布'));
+    const editor = screen.getByPlaceholderText('在这里编辑文案...');
+    fireEvent.change(editor, { target: { value: 'Project A draft' } });
+    fireEvent.change(screen.getByPlaceholderText('告诉 AI 如何修改全文...'), { target: { value: 'polish it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+    await act(async () => {
+      canvasResponse.emit({ type: 'text', content: 'late Project A result' });
+      canvasResponse.close();
+    });
+
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe('Project A draft'));
+    expect((editor as HTMLTextAreaElement).value).not.toContain('late Project A result');
   });
 
   it('persists successful Deep Research stream content and metadata on its exact assistant message', async () => {
