@@ -1660,3 +1660,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 普通用户画布上的“用户管理”入口没有暴露管理员系统，点击后进入普通用户项目仪表盘。该入口命名仍有 P3 可理解性问题，但没有权限扩大。
 - **结论：V588-PROVIDER-005 的普通用户五入口与应用侧非法能力零副作用通过，Stage 4 该专项关闭。** 第三方供应商后台独立计数未在本轮 Google Chrome 标签中直接取证，继续按证据边界说明，不把推断写成第三方审计通过。
 - 证据：`docs/testing/evidence/s4-ordinary-five-entry-and-admission-2026-08-25.json` 与同名 PNG。
+
+## 2026-08-25 V588-PROVIDER-001 模型显示映射云端回归
+
+- 本地实现提交为 `3c597cd9a4c14dfeb851ad06670c49b3158a7d49`。新增精确模型映射并改为最长模式优先，避免 `gpt-image-2`、`nano-banana-2`、`kling-v3` 等较短模式遮蔽 4K、Lite、Omni 等更精确型号。
+- RED/GREEN 为 `26/26`，关联回归 `59/59`；全仓 `3474` 项业务断言通过，`117` 项真实 PostgreSQL 门禁因缺少完整隔离库跳过。TypeScript、改动文件零错误 ESLint、空白检查与 Next.js `116/116` 构建通过。
+- Coze 精确拉取并构建 `3c597cd9`，运行 PID `3471`、根路由 HTTP `200`、持久化模式 `DB_ONLY`。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- Google Chrome 普通用户真实目录断言 `5/5` 通过：Pear `gpt-image-2-4k`、Pear `nano-banana-2-lite`、APIMART `kling-v3-omni`、AIlink `happyhorse-1.0`、APIMART Grok Imagine 1.5 视频别名均显示为各自精确名称；管理员/供应商名称优先级仍保持。
+- 干净重载后的 10 秒观察窗口 Console error/warning 为 `0/0`，原生弹窗为 `0`。本轮没有提交生成或扣除积分。
+- **回归结论：V588-PROVIDER-001 通过。** 证据位于 `docs/testing/evidence/v588-provider-001-*cloud-2026-08-25.*`。

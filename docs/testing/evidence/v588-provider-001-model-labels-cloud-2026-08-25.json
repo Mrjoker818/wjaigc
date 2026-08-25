@@ -1,0 +1,235 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-25T02:46:27.942Z",
+  "environment": "Coze 独立沙箱预览",
+  "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "browser": {
+    "family": "Google Chrome",
+    "profile": "用户1",
+    "existingTabsOnly": true
+  },
+  "repository": {
+    "branch": "main",
+    "deployedCommit": "3c597cd9a4c14dfeb851ad06670c49b3158a7d49",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableModified": false
+  },
+  "deployment": {
+    "buildId": "x6PRiIKqawBZ5fFXbvn55",
+    "runtimePid": 3471,
+    "rootHttpStatus": 200,
+    "persistenceMode": "DB_ONLY"
+  },
+  "assertions": [
+    {
+      "id": "gpt-image-2-4k",
+      "expected": "Gpt Image 2 4k · PearAPI 图像",
+      "actual": "Gpt Image 2 4k · PearAPI 图像",
+      "passed": true
+    },
+    {
+      "id": "nano-banana-2-lite",
+      "expected": "Nano Banana 2 Lite · PearAPI 图像",
+      "actual": "Nano Banana 2 Lite · PearAPI 图像",
+      "passed": true
+    },
+    {
+      "id": "kling-v3-omni",
+      "expected": "Kling V3 Omni · Apimart视频 🌍",
+      "actual": "Kling V3 Omni · Apimart视频 🌍",
+      "passed": true
+    },
+    {
+      "id": "happyhorse-1.0",
+      "expected": "HappyHorse · AIlink视频 🌍",
+      "actual": "HappyHorse · AIlink视频 🌍",
+      "passed": true
+    },
+    {
+      "id": "grok-imagine-1.5-video-apimart",
+      "expected": "Grok Imagine 1.5 Video Apimart · Apimart视频 🌍",
+      "actual": "Grok Imagine 1.5 Video Apimart · Apimart视频 🌍",
+      "passed": true
+    }
+  ],
+  "imageOptions": [
+    {
+      "text": "系统智能匹配",
+      "value": ""
+    },
+    {
+      "text": "Gpt Image 2 · AILINK  图像",
+      "value": "api_1786180762780_r50vf4v::gpt-image-2"
+    },
+    {
+      "text": "Gpt Image 2 · FHL图像模型",
+      "value": "api_1782556839314_5zzrau2::gpt-image-2"
+    },
+    {
+      "text": "Gpt Image 2 · AI link 图像",
+      "value": "api_1780646091844_uz9gb3l::gpt-image-2"
+    },
+    {
+      "text": "Gpt Image 2 C · 4sapi 图像",
+      "value": "api_1780636172228_0mhitfd::gpt-image-2-c"
+    },
+    {
+      "text": "Gpt Image 2 · 4sapi 图像",
+      "value": "api_1780636172228_0mhitfd::gpt-image-2"
+    },
+    {
+      "text": "Gpt Image 2 4k · PearAPI 图像",
+      "value": "api_1780630178347_rjqlmam::gpt-image-2-4k"
+    },
+    {
+      "text": "Nano Banana Pro 4k · PearAPI 图像",
+      "value": "api_1780630178347_rjqlmam::nano-banana-pro-4k"
+    },
+    {
+      "text": "即梦 · PearAPI 图像",
+      "value": "api_1780630178347_rjqlmam::jimeng-5.0"
+    },
+    {
+      "text": "Nano Banana 2 4k · PearAPI 图像",
+      "value": "api_1780630178347_rjqlmam::nano-banana-2-4k"
+    },
+    {
+      "text": "Doubao Seedream 4 0 250828 · PearAPI 图像",
+      "value": "api_1780630178347_rjqlmam::doubao-seedream-4-0-250828"
+    },
+    {
+      "text": "Doubao Seedream 4 5 251128 · PearAPI 图像",
+      "value": "api_1780630178347_rjqlmam::doubao-seedream-4-5-251128"
+    },
+    {
+      "text": "Doubao Seedream 5 0 260128 · PearAPI 图像",
+      "value": "api_1780630178347_rjqlmam::doubao-seedream-5-0-260128"
+    },
+    {
+      "text": "Gpt Image 2 · PearAPI 图像",
+      "value": "api_1780630178347_rjqlmam::gpt-image-2"
+    },
+    {
+      "text": "Nano Banana 2 Lite · PearAPI 图像",
+      "value": "api_1780630178347_rjqlmam::nano-banana-2-lite"
+    },
+    {
+      "text": "Gemini 3 Pro Image Preview · APImart imgae",
+      "value": "api_1778430731224_533e09a::gemini-3-pro-image-preview"
+    },
+    {
+      "text": "Gemini 2.5 Flash Image Preview · APImart imgae",
+      "value": "api_1778430731224_533e09a::gemini-2.5-flash-image-preview"
+    },
+    {
+      "text": "Gemini 3.1 Flash Image Preview · APImart imgae",
+      "value": "api_1778430731224_533e09a::gemini-3.1-flash-image-preview"
+    },
+    {
+      "text": "Doubao Seedream 5 0 Lite · APImart imgae",
+      "value": "api_1778430731224_533e09a::doubao-seedream-5-0-lite"
+    },
+    {
+      "text": "Gpt Image 2 · APImart imgae",
+      "value": "api_1778430731224_533e09a::gpt-image-2"
+    },
+    {
+      "text": "Gpt Image 2 Official · APImart imgae",
+      "value": "api_1778430731224_533e09a::gpt-image-2-official"
+    },
+    {
+      "text": "Midjourney · APImart imgae",
+      "value": "api_1778430731224_533e09a::midjourney"
+    },
+    {
+      "text": "Doubao Seedream 5 0 Pro · APImart imgae",
+      "value": "api_1778430731224_533e09a::doubao-seedream-5-0-pro"
+    },
+    {
+      "text": "Gemini 3.1 Flash Lite Image · APImart imgae",
+      "value": "api_1778430731224_533e09a::gemini-3.1-flash-lite-image"
+    }
+  ],
+  "videoOptions": [
+    {
+      "text": "可灵 V3 · AIlink视频 🌍",
+      "value": "api_1784986701405_us45heb::kling-v3"
+    },
+    {
+      "text": "viduq3 · AIlink视频 🌍",
+      "value": "api_1784986701405_us45heb::viduq3"
+    },
+    {
+      "text": "grok-video-3 · AIlink视频 🌍",
+      "value": "api_1784986701405_us45heb::grok-video-3"
+    },
+    {
+      "text": "Seedance 2.0 · AIlink视频 🌍",
+      "value": "api_1784986701405_us45heb::doubao-seedance-2-0-260128"
+    },
+    {
+      "text": "Seedance 2.0 Fast · AIlink视频 🌍",
+      "value": "api_1784986701405_us45heb::doubao-seedance-2-0-fast-260128"
+    },
+    {
+      "text": "HappyHorse · AIlink视频 🌍",
+      "value": "api_1784986701405_us45heb::happyhorse-1.0"
+    },
+    {
+      "text": "Doubao Seedance 2.0 Face · Apimart视频 🌍",
+      "value": "api_1781141128851_jry72yo::doubao-seedance-2.0-face"
+    },
+    {
+      "text": "Doubao Seedance 2.0 Fast Face · Apimart视频 🌍",
+      "value": "api_1781141128851_jry72yo::doubao-seedance-2.0-fast-face"
+    },
+    {
+      "text": "Doubao Seedance 2.0 Mini · Apimart视频 🌍",
+      "value": "api_1781141128851_jry72yo::doubao-seedance-2.0-mini"
+    },
+    {
+      "text": "Sora 2 · Apimart视频 🌍",
+      "value": "api_1781141128851_jry72yo::sora-2"
+    },
+    {
+      "text": "Kling V3 Omni · Apimart视频 🌍",
+      "value": "api_1781141128851_jry72yo::kling-v3-omni"
+    },
+    {
+      "text": "Grok Imagine 1.5 Video Apimart · Apimart视频 🌍",
+      "value": "api_1781141128851_jry72yo::grok-imagine-1.5-video-apimart"
+    },
+    {
+      "text": "Doubao Seedance 2 0 260128 · Pear视频 🌍",
+      "value": "api_1781140778520_hmu8s39::doubao-seedance-2-0-260128"
+    },
+    {
+      "text": "Doubao Seedance 2 0 Fast 260128 · Pear视频 🌍",
+      "value": "api_1781140778520_hmu8s39::doubao-seedance-2-0-fast-260128"
+    },
+    {
+      "text": "Doubao Seedance 2 0 Mini 260615 · Pear视频 🌍",
+      "value": "api_1781140778520_hmu8s39::doubao-seedance-2-0-mini-260615"
+    },
+    {
+      "text": "Sora 2 · Pear视频 🌍",
+      "value": "api_1781140778520_hmu8s39::sora-2"
+    }
+  ],
+  "adminProviderNamePrecedencePreserved": true,
+  "cleanObservation": {
+    "startedAt": "2026-08-25T02:43:45.002Z",
+    "consoleErrorsAndWarnings": [],
+    "nativeDialog": null
+  },
+  "historicalTransitionWarning": [
+    {
+      "level": "warn",
+      "message": "[Sync] loadProjectsFromServer: server returned 502",
+      "timestamp": "2026-08-25T02:40:00.001Z",
+      "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/_next/static/chunks/9520-566f5d069b1d51a4.js"
+    }
+  ],
+  "paidGenerationPerformed": false,
+  "result": "PASS"
+}
