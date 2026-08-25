@@ -2523,3 +2523,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 证据边界 | 云端本轮验证成功路径；供应商 `type:error` 传播和跨任务迟到流隔离由本地组件回归覆盖，没有伪称本轮执行了真实供应商失败注入。 |
 | 证据 | `docs/testing/evidence/v588-chat-001-apimart-cloud-2026-08-25.json`、`docs/testing/evidence/2026-08-25-stage4-simple-chat-apimart.png`。 |
 | 状态 | **V588-CHAT-001 已修复 / 云端成功链路关闭。** 下一项可进入 `V588-CHAT-002`，仍须继续遵守 RED -> 最小接入 -> 全量回归 -> 云端验证。 |
+
+### V588-CHAT-002-BUG-001 - 失败消息缺少持久终态与确定性原位重试（2026-08-25）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：失败或刷新中断后只能重新发送，可能改变模型上下文、重复附件登记或产生第二组消息。 |
+| 发现范围 | 独立智能对话页的普通对话、联网对话、Deep Research 与 CanvasEditor。 |
+| 稳定复现 | 注入 HTTP/SSE 失败或在 `streaming` 状态持久化后重新加载；旧实现没有统一失败状态和冻结上下文，Deep Research/CanvasEditor 也没有原位重试入口。 |
+| 预期结果 | 同一助手消息原位进入 `failed`；重试复用首次请求的消息 ID、模型、供应商、模式、附件引用、响应 ID 与幂等键；刷新中断可收敛，不重复创建消息、Artifact 或编辑版本。 |
+| 根因 | 消息模型只保存正文，没有版本化请求快照；各入口分别读取当前 UI 状态，重试语义与主动“重新生成”混在一起；文本 API 没有统一校验和透传幂等键。 |
+| 最小修复 | 新增 `simple-chat-retry.ts` 领域契约；三条聊天链路原位更新状态；CanvasEditor 冻结文本选区和指令；两个 API 路由统一校验并透传幂等键。未引入数据库队列，未修改积分、供应商目录或其他工作区。 |
+| 永久回归 | 纯领域恢复与边界测试、真实组件请求上下文测试、CanvasEditor 版本唯一性测试、SSE 竞态测试及 API 幂等冲突/长度/透传测试。 |
+| 本地结果 | 聚焦 `7 files / 71 tests`；全仓 `540 files / 3531 tests` 通过，`20 files / 117 tests` 因无隔离 PostgreSQL 库跳过；TypeScript、ESLint `0 errors`、Next.js `116/116` 构建通过。 |
+| 证据边界 | 应用内原位重试与幂等 Header 透传已验证；第三方文本供应商是否执行严格 exactly-once 取决于供应商能力，不能由本地测试保证。 |
+| 状态 | **本地已修复 / Coze 云端故障注入待验。** 云端需证明普通/联网、Deep Research、CanvasEditor 失败后原位恢复，且消息、Artifact、版本、请求和 Console 均无重复或污染。 |

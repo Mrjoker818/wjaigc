@@ -1713,3 +1713,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 模型下拉在 2048x991 视口可见，`z-index=100`，采样命中菜单自身；新会话无历史 base64 污染；三链路后 Console error/warning `0`、原生弹窗 `0`、重复请求 `0`。
 - 本轮只验证真实成功路径。供应商错误传播与跨任务迟到写入由此前 RED/GREEN 和 Simple Chat `102/102` 覆盖，未冒充云端故障注入。
 - **结论：V588-CHAT-001 云端回归通过。** 证据见 `docs/testing/evidence/v588-chat-001-apimart-cloud-2026-08-25.json` 与 PNG；可按既定顺序开始 `V588-CHAT-002`，全平台仍保持有条件通过。
+
+## 2026-08-25 V588-CHAT-002 确定性原位重试本地回归
+
+- 普通/联网对话、Deep Research 和 CanvasEditor 均以失败测试建立契约：失败保留原消息或原编辑快照，重试复用冻结模型、供应商、模式、附件引用、响应消息 ID 与幂等键，不插入第二组消息，不重复登记附件。
+- CanvasEditor 以精确 `selectionStart/selectionEnd` 替换目标文本；失败不创建版本，重试成功只创建一个版本。跨任务和跨项目的迟到结果仍被拒绝。
+- API 层统一处理幂等键：可选、1-256 字符、受限字符集；Header/正文冲突返回 `409 IDEMPOTENCY_KEY_CONFLICT`，非法值返回 `400 IDEMPOTENCY_KEY_INVALID`。Deep Research 规划和报告分别使用稳定派生键。
+- 聚焦套件 `7 files / 71 tests` 全通过；`pnpm ts-check` 通过；`pnpm lint` 为 `0 errors / 967 warnings`；第三次全仓回归为 `540 passed / 20 skipped files`、`3531 passed / 117 skipped tests`；`pnpm build` 退出 0 并生成 `116/116` 页面。
+- `117` 项跳过均因未配置 `POSTGRES_TEST_DATABASE_URL` 或 `TEST_POSTGRES_URL`，没有记为通过。第二次全量中的 `stage-3-source-state` 超时经聚焦计时确认是 Windows/Git 同步操作预算过紧，测试预算调整为 45 秒；第三次全量实际用时约 11.1 秒并通过，没有修改业务超时。
+- **回归结论：本地通过 / Coze 故障注入与刷新恢复待验。** 应用级确定性重试成立；第三方文本供应商严格 exactly-once 不作保证，全平台继续保持有条件通过。

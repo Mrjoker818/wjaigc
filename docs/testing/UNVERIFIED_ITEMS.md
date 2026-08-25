@@ -1335,7 +1335,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | PostgreSQL 全仓专项 | 环境阻塞 | 既有 `20 files / 117 tests` 仍需完整隔离 `POSTGRES_TEST_DATABASE_URL` 才能执行；本轮云端只读计数不能替代并发/退款专项。 |
 | V588-PROVIDER-001 | 已云端验证 | 精确映射、最长匹配、管理员名称优先、本地全量门禁和 Coze 普通用户图像/视频目录均已取得证据。 |
 | V588-CHAT-001 | 菜单已云端验证 / 三入口待验 | 模型菜单已在 1440、412、375、320 四档关闭遮挡、裁切、滚动和点选问题；三入口已共用严格 SSE 解析器，但仍需 Coze 真实普通对话、CanvasEditor 修图、Deep Research 及错误态证据。 |
-| V588-CHAT-002 | 未开始 | 当前消息模型尚无统一 `streaming/completed/failed` 状态和冻结重试上下文；不得把重复发送当作重试。 |
+| V588-CHAT-002 | 本地已实现 / 云端待验 | 已建立统一状态、冻结上下文、刷新收敛和原位重试；仍需 Coze 故障注入证明同消息、同请求快照、无重复 Artifact/版本。 |
 | V588-CHAT-003 | 部分现有能力 / 未吸收 | 当前已有服务器同步和 800ms 防抖，但远端权威按 ID 合并、离页/切换用户冲刷和可诊断失败尚未闭环。 |
 | V588-CHAT-004 | 部分现有能力 / 未吸收 | 无限画布已有更安全的 `AssetVersion -> /api/assets/transfer` 链路；来源追踪和发送到节点模式仍缺失，禁止复制 donor 的原始 URL `localStorage` 桥接。 |
 
@@ -1366,8 +1366,19 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 |---|---|---|
 | V588-CHAT-001 成功链路 | 已云端验证 | APImart 普通对话、CanvasEditor 局部替换、Deep Research 均精确模型配对、单请求、SSE `done`；Console 和原生弹窗为 0。 |
 | V588-CHAT-001 真实供应商失败注入 | 未执行 / 非关闭阻塞 | 本轮供应商三次均成功；`type:error` 保真与迟到流所有权已有本地 RED/GREEN 覆盖，但没有把它描述成云端故障注入。 |
-| V588-CHAT-002 | 下一项 / 未开始 | 建立消息级 `streaming/completed/failed` 状态、冻结重试上下文和真正的重试语义；按 RED -> 最小接入 -> 全量回归 -> 云端验证执行。 |
+| V588-CHAT-002 | 本地已实现 / 云端待验 | 普通/联网、Deep Research 与 CanvasEditor 自动化已通过；下一步是 Coze 真实失败、原位重试、刷新恢复和浏览器健康证据。 |
 | V588-CHAT-003 | 未开始 | 远端权威按 ID 合并、离页/切换用户冲刷和可诊断同步失败仍待处理。 |
 | V588-CHAT-004 | 未开始 | 保留安全 `AssetVersion -> /api/assets/transfer` 链路，补充来源追踪与发送到节点模式，禁止复制 donor 原始 URL `localStorage` 桥接。 |
 | 部署期旧 chunk | 仍未关闭 | 首次加载连续通过与旧静态资源保留/原子切换仍需独立发布证据。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 需要独立 `POSTGRES_TEST_DATABASE_URL`，不得计为通过。 |
+
+## 2026-08-25 V588-CHAT-002 本地实现后的云端待验项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 普通/联网原位重试 | 本地通过 / 云端待验 | 制造一次可控失败，确认消息 ID、`responseMessageId`、模型、供应商、联网状态、附件引用和幂等键摘要不变；重试后同一消息完成。 |
+| Deep Research 原位重试 | 本地通过 / 云端待验 | 失败后同消息恢复阶段并完成，不新增第二组消息或第二个 Artifact；请求配对和幂等键保持不变。 |
+| CanvasEditor 原位重试 | 本地通过 / 云端待验 | 失败保留指令、正文和精确选区；重试成功只新增一个版本，选区外文本不变。 |
+| 刷新中断恢复 | 本地通过 / 云端待验 | 持久化 `streaming` 消息刷新后收敛为可解释 `failed`，不永久加载；有效上下文可重试，无效上下文失败关闭。 |
+| 第三方文本供应商 exactly-once | 能力相关 / 不保证 | 已证明应用复用并透传相同幂等键；只有供应商明确支持且云端审计证明时，才能声明供应商侧严格去重。 |
+| PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 因缺少隔离测试数据库跳过，不得使用生产库或计为通过。 |

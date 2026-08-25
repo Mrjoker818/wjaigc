@@ -52,7 +52,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-STABILITY-001 | SVG/WASM 像素预算与超大输入保护 | 在当前 `/api/svg-trace` 架构内重实现预算门禁；不得复制旧路由控制器 | 边界像素、压缩炸弹、内存上限、失败终态、全仓与云端大图验证 | P0 |
 | V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | 复用当前安全媒体解析器，只吸收回退策略和预算思想；禁止引入任意本地路径读取 | 路径穿越、SSRF、MIME/字节/像素上限、VLM 超时、回退一致性 | P0 |
 | V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **本地已吸收 / 云端待验。** 三条流式链路已接入共享严格解析器；同时修正 CanvasEditor 参数错位和正文事件名不匹配。未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、关联与全仓回归已通过；Coze 三入口真实流式、错误态、Console 与网络证据待验 | P1 |
-| V588-CHAT-002 | 失败消息状态与原位确定性重试 | **待吸收。** 为当前消息增加 `streaming/completed/failed` 状态和冻结的重试上下文；重试不得重复插入用户消息，必须复用原模型、供应商、模式、附件和幂等键 | 普通对话、联网、Deep Research、画布修图失败与重试；同一消息原位恢复且不重复提交/扣费 | P1 |
+| V588-CHAT-002 | 失败消息状态与原位确定性重试 | **本地已实现 / 云端待验。** 普通/联网对话、Deep Research 与 CanvasEditor 已接入 `streaming/completed/failed` 状态和冻结重试上下文；重试复用原消息 ID、模型、供应商、模式、附件引用、响应消息 ID 与幂等键 | 聚焦 `71/71`、全仓 `3531/3531` 已执行断言、TypeScript、零错误 Lint 与 `116/116` 生产构建通过；真实云端失败注入、刷新恢复和第三方供应商幂等能力待验 | P1 |
 | V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **待吸收。** 以远端同 ID 数据为权威合并本地项目/任务，补齐离页与用户切换前同步；保留当前登录、注销和用户数据 API，不复制 donor 存储所有权 | 多标签页、跨设备、离页、切换用户、同步失败、恢复后继续编辑和用户数据隔离 | P1 |
 | V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **待吸收且必须适配当前架构。** 保留当前 `AssetVersion -> /api/assets/transfer` 画布链路；补齐消息、项目、模型、供应商和任务来源，以及文本/图片发送到工作流节点。禁止复制 donor 的原始 URL `localStorage` 桥接 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
 | V588-AUTH-001 | 数据库唯一/数据库加文件两种持久化模式 | **本地候选已完成。** 只吸收显式持久化模式与启动诊断；继续使用当前认证密钥和密码校验，拒绝 donor 弱口令恢复 | 真实 PostgreSQL、普通用户/管理员多浏览器会话、退出后数据隔离和全量门禁已通过；Coze 精确 SHA 待验 | P1 |
@@ -359,3 +359,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 聚焦回归 `8 files / 43 tests`、全仓 `536 files / 3508 tests`、TypeScript、零错误 Lint、Next.js `116/116` 构建、保护基线和空白检查均通过。`20 files / 117 tests` PostgreSQL 专项因缺少隔离数据库明确跳过。
 - Playwright 门禁已建立桌面、412px、375px、320px 的 100 消息菜单可见性、hit-test、滚动、点选、横向溢出和请求体一致性断言，并阻断页面对真实聊天项目测试数据的延迟写回；本机缺少真实 E2E 凭据，因此实际浏览器结果保持未验证。
 - **状态：模型菜单已完成 Coze Chrome 验收 / 三入口流式仍待验。** `main@9a3fcb63` 已在 1440、412、375、320 四档验证两个菜单的视口边界、内部滚动和点选关闭；320px 二次缺陷经 RED/GREEN 修复。普通对话、CanvasEditor 与 Deep Research 的真实流式终态和错误态仍未关闭，因此 `V588-CHAT-001` 整体仍不关闭，也不进入 `V588-CHAT-002`。
+
+## 2026-08-25 V588-CHAT-002 本地实现检查点
+
+- 领域层新增版本化、有界的失败状态与重试上下文；刷新遗留的 `streaming` 消息会收敛为可解释的 `failed`，无有效上下文时失败关闭且不可重试。
+- 普通/联网对话与 Deep Research 均在原助手消息上失败和重试，不新增第二组消息；模型、供应商、联网模式、附件引用、历史消息、`responseMessageId` 和幂等键均从首次请求冻结。CanvasEditor 同样冻结指令、正文、选区起止位置和模型配对，失败不新增版本，成功只新增一个版本。
+- `/api/simple-chat/chat` 与 `/api/simple-chat/deep-research` 统一校验 1-256 字符幂等键；Header 与正文不一致返回 409。普通对话透传原键，Deep Research 分别派生 `:plan` 与 `:report`，且错误正文与日志不回显键值。
+- TDD 按 RED -> 最小实现完成；聚焦套件 `7 files / 71 tests`、全仓 `540 files / 3531 tests` 通过。另有 `20 files / 117 tests` 因缺少隔离 PostgreSQL 测试库明确跳过；TypeScript 通过，ESLint 为 `0 errors / 967 historical warnings`，Next.js 生产构建生成 `116/116` 页面。
+- 全量回归先后暴露一个过时源码字符串断言和一个 Windows/Git 同步文件系统测试的 20 秒门禁抖动；前者改为验证冻结的 `context.assistantMessageId`，后者只把同步 Git 测试预算校准为 45 秒，没有增加任何业务等待或掩盖异步状态。
+- **状态：本地已实现 / 云端待验。** 应用内原位消息与下游幂等透传已验证；不宣称不支持幂等 Header 的第三方文本供应商具有严格 exactly-once。Coze 仍需验证真实失败、原位重试、刷新恢复、单 Artifact/单版本和浏览器健康后才能标记为已吸收。

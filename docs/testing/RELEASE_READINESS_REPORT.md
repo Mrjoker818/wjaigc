@@ -1405,3 +1405,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - CanvasEditor 证明选区外文本不变；Deep Research 证明阶段提示会进入最终报告；新会话不会继续携带历史损坏图片。模型菜单不被消息遮挡，Console error/warning 和原生弹窗均为 0。
 - 云端没有人为制造供应商失败；真实错误保真和迟到流隔离仍以本地自动化证据为准。该边界已写入机器报告，不把成功路径扩大为未执行的故障注入。
 - **专项判定：V588-CHAT-001 通过并允许进入 V588-CHAT-002。全平台仍为有条件通过。** `117` 项 PostgreSQL 环境门禁、部署期旧 chunk 保留及其他既有未关闭项不因本专项通过而自动关闭；`stable` 继续只读。
+
+## 2026-08-25 V588-CHAT-002 本地发布判断
+
+- 消息级 `streaming/completed/failed`、版本化冻结上下文、刷新中断恢复、普通/联网/Deep Research 原位重试及 CanvasEditor 冻结选区重试已完成最小接入。
+- 应用内同一消息 ID、同一响应 ID、同一附件引用和同一幂等键已由自动化验证；API 会向上游透传稳定键，但不能据此承诺所有第三方文本供应商执行严格 exactly-once。
+- 聚焦 `71/71`、全仓已执行断言 `3531/3531`、TypeScript、零错误 ESLint 和 Next.js `116/116` 构建通过；`117` 项 PostgreSQL 专项因缺少隔离测试库继续未验证。
+- **专项判定：本地有条件通过，云端尚未验收。全平台仍为有条件通过。** Coze 必须完成真实可控失败、原位重试、刷新恢复、Deep Research 单 Artifact、CanvasEditor 单成功版本及 Console/网络证据后，才能把 V588-CHAT-002 标记为已吸收。
