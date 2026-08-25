@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Download, History, Loader2, Wand2, X } from "lucide-react";
+import { Check, Copy, Download, History, Loader2, RefreshCw, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 
 interface CanvasVersion {
@@ -11,14 +11,37 @@ interface CanvasVersion {
   note?: string;
 }
 
+export interface CanvasAiEditSnapshot {
+  instruction: string;
+  currentContent: string;
+  selectedText: string;
+  selectionStart: number;
+  selectionEnd: number;
+}
+
+export interface CanvasAiEditRequest extends CanvasAiEditSnapshot {
+  idempotencyKey: string;
+  modelId: string;
+  providerId: string;
+  projectId: string;
+  taskId: string;
+}
+
 interface CanvasEditorProps {
   content: string;
   onClose: () => void;
   onSave?: (content: string) => void;
-  onAiEdit?: (instruction: string, currentContent: string, selectedText: string) => Promise<string>;
+  onPrepareAiEdit?: (snapshot: CanvasAiEditSnapshot) => CanvasAiEditRequest | null;
+  onAiEdit?: (request: CanvasAiEditRequest) => Promise<string>;
 }
 
-export function CanvasEditor({ content: initialContent, onClose, onSave, onAiEdit }: CanvasEditorProps) {
+export function CanvasEditor({
+  content: initialContent,
+  onClose,
+  onSave,
+  onPrepareAiEdit,
+  onAiEdit,
+}: CanvasEditorProps) {
   const [content, setContent] = useState(initialContent);
   const [versions, setVersions] = useState<CanvasVersion[]>([
     { id: 1, content: initialContent, timestamp: Date.now(), note: "初始版本" },
@@ -27,6 +50,11 @@ export function CanvasEditor({ content: initialContent, onClose, onSave, onAiEdi
   const [aiInstruction, setAiInstruction] = useState("");
   const [isAiEditing, setIsAiEditing] = useState(false);
   const [selectedText, setSelectedText] = useState("");
+  const [selectionRange, setSelectionRange] = useState({ start: 0, end: 0 });
+  const [failedEdit, setFailedEdit] = useState<{
+    request: CanvasAiEditRequest;
+    message: string;
+  } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const versionIdRef = useRef(2);
 
@@ -36,26 +64,55 @@ export function CanvasEditor({ content: initialContent, onClose, onSave, onAiEdi
     if (!ta) return;
     const sel = ta.value.substring(ta.selectionStart, ta.selectionEnd);
     setSelectedText(sel);
+    setSelectionRange({ start: ta.selectionStart, end: ta.selectionEnd });
   };
 
   const saveVersion = (newContent: string, note?: string) => {
     setVersions(prev => [...prev, { id: versionIdRef.current++, content: newContent, timestamp: Date.now(), note }]);
   };
 
-  const handleAiEdit = async () => {
-    if (!aiInstruction.trim() || !onAiEdit) return;
+  const runAiEdit = async (request: CanvasAiEditRequest) => {
+    if (!onAiEdit) return;
     setIsAiEditing(true);
+    setFailedEdit(null);
     try {
-      const result = await onAiEdit(aiInstruction, content, selectedText);
-      saveVersion(result, selectedText ? `AI修改选中: ${aiInstruction.slice(0, 20)}` : `AI编辑: ${aiInstruction.slice(0, 20)}`);
+      const result = await onAiEdit(request);
+      saveVersion(result, request.selectedText
+        ? `AI修改选中: ${request.instruction.slice(0, 20)}`
+        : `AI编辑: ${request.instruction.slice(0, 20)}`);
       setContent(result);
       setAiInstruction("");
+      setFailedEdit(null);
       toast.success("AI 修改完成");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "AI 编辑失败");
+      const message = err instanceof Error ? err.message : "AI 编辑失败";
+      setFailedEdit({ request, message });
+      toast.error(message);
     } finally {
       setIsAiEditing(false);
     }
+  };
+
+  const handleAiEdit = async () => {
+    const instruction = aiInstruction.trim();
+    if (!instruction || !onAiEdit || !onPrepareAiEdit) return;
+    const request = onPrepareAiEdit({
+      instruction,
+      currentContent: content,
+      selectedText,
+      selectionStart: selectionRange.start,
+      selectionEnd: selectionRange.end,
+    });
+    if (!request) {
+      toast.error("当前对话模型不可用，请重新选择后再试");
+      return;
+    }
+    await runAiEdit(request);
+  };
+
+  const retryAiEdit = async () => {
+    if (!failedEdit || isAiEditing) return;
+    await runAiEdit(failedEdit.request);
   };
 
   const handleExport = () => {
@@ -134,11 +191,28 @@ export function CanvasEditor({ content: initialContent, onClose, onSave, onAiEdi
           />
 
           {/* AI 协同编辑栏 */}
-          {onAiEdit && (
+          {onAiEdit && onPrepareAiEdit && (
             <div className="border-t border-border p-3">
               {selectedText && (
                 <div className="mb-2 rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs text-primary">
                   已选中 {selectedText.length} 字：{selectedText.slice(0, 40)}{selectedText.length > 40 ? "..." : ""}
+                </div>
+              )}
+              {failedEdit && (
+                <div
+                  role="alert"
+                  className="mb-2 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
+                >
+                  <span className="text-xs text-destructive">{failedEdit.message}</span>
+                  <button
+                    type="button"
+                    onClick={() => void retryAiEdit()}
+                    disabled={isAiEditing}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <RefreshCw size={14} />
+                    重试修改
+                  </button>
                 </div>
               )}
               <div className="flex gap-2">

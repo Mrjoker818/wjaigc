@@ -279,8 +279,10 @@ describe('simple-chat request context integration', () => {
 
   it('captures a task model selection snapshot for all three request paths', () => {
     expect(chatAreaSource.match(/const requestModelSelection = readSimpleChatModelSelection\(task\);/g)).toHaveLength(3);
-    expect(chatAreaSource).toContain('model: requestModelSelection.modelId');
-    expect(chatAreaSource).toContain('providerId: requestModelSelection.providerId');
+    expect(chatAreaSource.match(/modelId: requestModelSelection\.modelId/g)).toHaveLength(3);
+    expect(chatAreaSource.match(/providerId: requestModelSelection\.providerId/g)).toHaveLength(3);
+    expect(chatAreaSource).toContain('model: request.modelId');
+    expect(chatAreaSource).toContain('providerId: request.providerId');
   });
 
   it('blocks an invalid current upload before asset registration or chat submission', async () => {
@@ -688,6 +690,60 @@ describe('simple-chat request context integration', () => {
     });
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('APIMart edit get_channel_failed'));
+  });
+
+  it('retries CanvasEditor with its frozen model pair and idempotency key', async () => {
+    const onUpdateTask = vi.fn();
+    const task = createTask();
+    task.model = 'canvas-start-model';
+    task.providerId = 'canvas-start-provider';
+    const firstResponse = createDeferredSseResponse();
+    const retryResponse = createDeferredSseResponse();
+    mockStartupRequests([firstResponse.response, retryResponse.response], [
+      { id: 'canvas-start-model', name: 'Canvas start model', providerId: 'canvas-start-provider' },
+      { id: 'canvas-next-model', name: 'Canvas next model', providerId: 'canvas-next-provider' },
+    ]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    fireEvent.click(screen.getByTitle('写作画布'));
+    fireEvent.change(screen.getByPlaceholderText('在这里编辑文案...'), { target: { value: 'frozen draft' } });
+    fireEvent.change(screen.getByPlaceholderText('告诉 AI 如何修改全文...'), { target: { value: 'frozen instruction' } });
+    fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(1));
+
+    await act(async () => {
+      firstResponse.emit({ type: 'error', error: 'canvas supplier failed' });
+      firstResponse.close();
+    });
+    expect(await screen.findByRole('alert')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Canvas start model/u }));
+    fireEvent.click(screen.getByRole('option', { name: /Canvas next model/u }));
+    fireEvent.click(screen.getByRole('button', { name: '重试修改' }));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(2));
+
+    const [firstPayload, retryPayload] = requestPayloads('/api/simple-chat/chat');
+    expect(retryPayload).toMatchObject({
+      model: firstPayload.model,
+      providerId: firstPayload.providerId,
+      idempotencyKey: firstPayload.idempotencyKey,
+    });
+    expect(firstPayload).toMatchObject({
+      model: 'canvas-start-model',
+      providerId: 'canvas-start-provider',
+      idempotencyKey: expect.any(String),
+    });
+
+    await act(async () => {
+      retryResponse.emit({ type: 'text', content: 'recovered draft' });
+      retryResponse.emit({ type: 'done' });
+      retryResponse.close();
+    });
+    await waitFor(() => expect(screen.getByDisplayValue('recovered draft')).toBeTruthy());
   });
 
   it('does not apply a late CanvasEditor response after switching tasks', async () => {

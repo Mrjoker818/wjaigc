@@ -5,7 +5,11 @@ import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, Bo
 import { MarkdownRenderer } from "./markdown-renderer";
 import { ImageLightbox } from "./image-lightbox";
 import { QuickCommands } from "./quick-commands";
-import { CanvasEditor } from "./canvas-editor";
+import {
+  CanvasEditor,
+  type CanvasAiEditRequest,
+  type CanvasAiEditSnapshot,
+} from "./canvas-editor";
 import { MemoryPanel, type MemoryItem } from "./memory-panel";
 import { GlobalSearch } from "./global-search";
 import { ShareDialog } from "./share-dialog";
@@ -732,28 +736,44 @@ export default function ChatArea({
   }
 
   // Canvas AI 协同编辑
-  async function canvasAiEdit(instruction: string, currentContent: string, selectedText: string): Promise<string> {
+  function prepareCanvasAiEdit(snapshot: CanvasAiEditSnapshot): CanvasAiEditRequest | null {
     const requestModelSelection = readSimpleChatModelSelection(task);
     if (!task || !requestModelSelection.modelId || !requestModelSelection.providerId) {
-      throw new Error('请先选择可用的对话模型。');
+      return null;
     }
-    const requestProjectId = project?.id;
-    const requestTaskId = task.id;
+    const requestProjectId = task.projectId || project?.id;
+    if (!requestProjectId) return null;
+    return {
+      ...snapshot,
+      idempotencyKey: `simple-chat-canvas-edit:${task.id}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
+      modelId: requestModelSelection.modelId,
+      providerId: requestModelSelection.providerId,
+      projectId: requestProjectId,
+      taskId: task.id,
+    };
+  }
+
+  async function canvasAiEdit(request: CanvasAiEditRequest): Promise<string> {
     const requestScopeIsCurrent = () => (
-      isWorkspaceResultScopeCurrent(requestProjectId, projectIdRef.current)
-      && requestTaskId === taskIdRef.current
+      isWorkspaceResultScopeCurrent(request.projectId, projectIdRef.current)
+      && request.taskId === taskIdRef.current
     );
-    const target = selectedText || currentContent;
+    const target = request.selectedText || request.currentContent;
     const res = await fetch('/api/simple-chat/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': request.idempotencyKey,
+      },
       body: JSON.stringify({
         messages: [
           { role: 'system', content: '你是一名专业文案编辑。根据用户的修改指令，输出修改后的完整文本。只输出修改后的文本本身，不要输出解释、不要添加引号或标记。' },
-          { role: 'user', content: `【待修改文本】\n${target}\n\n【修改指令】\n${instruction}` },
+          { role: 'user', content: `【待修改文本】\n${target}\n\n【修改指令】\n${request.instruction}` },
         ],
-        model: requestModelSelection.modelId, providerId: requestModelSelection.providerId,
+        model: request.modelId,
+        providerId: request.providerId,
         reasoningEffort, responseSpeed,
+        idempotencyKey: request.idempotencyKey,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -783,7 +803,12 @@ export default function ChatArea({
     }
     if (streamError) throw new Error(streamError);
     if (!result.trim()) throw new Error('AI 未返回内容');
-    return selectedText ? currentContent.replace(selectedText, result.trim()) : result.trim();
+    if (!request.selectedText) return result.trim();
+    return [
+      request.currentContent.slice(0, request.selectionStart),
+      result.trim(),
+      request.currentContent.slice(request.selectionEnd),
+    ].join('');
   }
 
   // 图片深度分析（文案策划专用）
@@ -2564,6 +2589,7 @@ export default function ChatArea({
           content={canvasContent}
           onClose={() => setShowCanvas(false)}
           onSave={(c) => setCanvasContent(c)}
+          onPrepareAiEdit={prepareCanvasAiEdit}
           onAiEdit={canvasAiEdit}
         />
       )}

@@ -19,13 +19,15 @@ describe('simple-chat strict SSE integration', () => {
     expect(source).not.toContain('catch { /* skip */ }');
   });
 
-  it('connects CanvasEditor to the three-argument streaming editor', () => {
+  it('connects CanvasEditor to the frozen-request streaming editor', () => {
+    expect(source).toContain('onPrepareAiEdit={prepareCanvasAiEdit}');
     expect(source).toContain('onAiEdit={canvasAiEdit}');
     expect(source).not.toContain('stream: false');
     expect(source).toContain(
-      'async function canvasAiEdit(instruction: string, currentContent: string, selectedText: string)',
+      'async function canvasAiEdit(request: CanvasAiEditRequest)',
     );
     expect(source).toContain("parsed.type === 'text' || parsed.type === 'content'");
-    expect(canvasEditorSource).toContain('onAiEdit(aiInstruction, content, selectedText)');
+    expect(canvasEditorSource).toContain('onPrepareAiEdit({');
+    expect(canvasEditorSource).toContain('onAiEdit(request)');
   });
 });
