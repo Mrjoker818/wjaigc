@@ -19,8 +19,19 @@ describe('simple-chat model selector contract', () => {
     expect(modelSelectorSource).not.toContain('group-hover:opacity-100');
   });
 
-  it('applies both model and provider before closing the selected menu', () => {
-    expect(source).toContain('setSelectedModel(m.modelId); setSelectedProviderId(m.providerId); setOpenModelMenu(null);');
+  it('uses the current task as the only chat model selection source', () => {
+    expect(source).toContain('const chatModelSelection = readSimpleChatModelSelection(task);');
+    expect(source).toContain('onUpdateTask(applySimpleChatModelSelection(task, selection));');
+    expect(source).not.toContain('const [selectedModel, setSelectedModel]');
+    expect(source).not.toContain('const [selectedProviderId, setSelectedProviderId]');
+  });
+
+  it('keeps both model menus above the scrolling conversation', () => {
+    expect(source).toContain('<header className="relative z-50');
+    expect(source.match(/role="listbox"/g)).toHaveLength(2);
+  });
+
+  it('applies the image model and provider before closing the selected menu', () => {
     expect(source).toContain('setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); setOpenModelMenu(null);');
   });
 });

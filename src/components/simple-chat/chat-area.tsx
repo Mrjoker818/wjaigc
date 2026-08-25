@@ -36,6 +36,11 @@ import {
   SimpleChatSseProtocolError,
   consumeSimpleChatJsonStream,
 } from '@/lib/simple-chat-sse';
+import {
+  applySimpleChatModelSelection,
+  readSimpleChatModelSelection,
+  type SimpleChatModelSelection,
+} from '@/lib/simple-chat-request-context';
 
 type ChatModelInfo = {
   id: string;
@@ -247,13 +252,20 @@ export default function ChatArea({
 
   // Models
   const [chatModels, setChatModels] = useState<ChatModelInfo[]>([]);
-  const [selectedModel, setSelectedModel] = useState(task?.model || "");
-  const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
+  const chatModelSelection = readSimpleChatModelSelection(task);
+  const selectedModel = chatModelSelection.modelId;
+  const selectedProviderId = chatModelSelection.providerId;
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(task?.reasoningEffort || 'medium');
   const [responseSpeed, setResponseSpeed] = useState<ResponseSpeed>(task?.responseSpeed || 'balanced');
   const [appliedChatControls, setAppliedChatControls] = useState<SimpleChatTask['appliedChatControls']>(task?.appliedChatControls);
   const [controlNotice, setControlNotice] = useState<string | null>(null);
   const [openModelMenu, setOpenModelMenu] = useState<'chat' | 'image' | null>(null);
+
+  const handleChatModelSelect = useCallback((selection: SimpleChatModelSelection) => {
+    if (!task) return;
+    onUpdateTask(applySimpleChatModelSelection(task, selection));
+    setOpenModelMenu(null);
+  }, [onUpdateTask, task]);
 
   // ===== 新增升级功能状态 =====
   // 图片灯箱预览
@@ -352,8 +364,6 @@ export default function ChatArea({
     if (task) {
       setIsStreaming(false);
       setMessages((task.messages || []).filter(Boolean));
-      setSelectedModel(task.model);
-      setSelectedProviderId(task.providerId);
       setReasoningEffort(task.reasoningEffort || 'medium');
       setResponseSpeed(task.responseSpeed || 'balanced');
       setAppliedChatControls(task.appliedChatControls);
@@ -404,13 +414,20 @@ export default function ChatArea({
           };
         });
         setChatModels(list);
-        if (!selectedModel && list.length > 0) {
-          setSelectedModel(list[0].modelId);
-          setSelectedProviderId(list[0].providerId);
-        }
       }
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!task || chatModels.length === 0) return;
+    const currentSelection = readSimpleChatModelSelection(task);
+    if (currentSelection.modelId || currentSelection.providerId) return;
+    const firstModel = chatModels[0];
+    onUpdateTask(applySimpleChatModelSelection(task, {
+      modelId: firstModel.modelId,
+      providerId: firstModel.providerId,
+    }));
+  }, [chatModels, onUpdateTask, task]);
 
   useEffect(() => {
     if (!openModelMenu) return;
@@ -1408,7 +1425,7 @@ export default function ChatArea({
   return (
     <div className="flex-1 flex flex-col h-screen bg-background">
       {/* Top Bar */}
-      <header className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
+      <header className="relative z-50 flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
         <button onClick={onToggleSidebar} className="p-2 rounded-lg hover:bg-muted transition-colors" title="切换侧边栏">
           <Menu className="w-5 h-5 text-muted-foreground" />
         </button>
@@ -1431,7 +1448,7 @@ export default function ChatArea({
           </button>
           <div className={`absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-[100] max-h-96 overflow-y-auto p-1 transition-opacity ${openModelMenu === 'chat' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} role="listbox">
             {chatModels.map(m => (
-              <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedProviderId && m.modelId === selectedModel} onClick={() => { setSelectedModel(m.modelId); setSelectedProviderId(m.providerId); setOpenModelMenu(null); }}
+              <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedProviderId && m.modelId === selectedModel} onClick={() => handleChatModelSelect({ modelId: m.modelId, providerId: m.providerId })}
                 className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-medium ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'text-primary' : ''}`}>{m.name}</span>
