@@ -1747,3 +1747,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 新增集成 RED 后，以最小改动把选区编辑提示改为“只输出修改后的选中文本片段”，全文编辑契约不变。修复提交为 `e0ec998d28a2bad0fc27981220bff42fb9a390d7`；专项 `6 files / 39 tests`、全仓 `541 files / 3533 tests`、TypeScript、零错误 Lint 和 Next.js `116/116` 构建通过。`20 files / 117` 项 PostgreSQL 专项仍因缺少隔离测试库跳过。
 - 受保护基线功能与证据合同均存在，但脚本被 4 个此前未批准漂移路径阻塞；本次新增的 `chat-area.tsx` 不在阻塞列表。未擅自扩大白名单。
 - **回归结论：CanvasEditor 确定性重试云端通过，选区输出质量已本地修复 / 新提交云端待验。** 在 Coze 拉取 `e0ec998d` 并得到精确替换结果前，不关闭 CanvasEditor 整项；刷新中断恢复和 Deep Research 完成态仍保持未验证。
+
+## 2026-08-26 CanvasEditor 选区契约修复部署确认
+
+- GitHub `origin/main@2c508bad71e423b18bfa503d6277156e344c1b36` 已合并到 Coze `main@05f1d7e73cec190827852f3300a00871bce9a475`；两者文件树一致，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- Coze 生产构建退出码为 `0`，静态页为 `116/116`，新 Build ID 为 `5v4rvNIC6-MWnYjJ5HWaz`；5000 服务已从旧 PID `283` 切换到新 PID `2266`。
+- 公网 `/` 与 `/simple-chat` 均返回 HTTP `200`。`/simple-chat` 加载的 17 个脚本中，`/_next/static/chunks/app/simple-chat/page-d9e8ae829a1f734c.js` 精确包含“只输出修改后的选中文本片段”，证明 `e0ec998d` 的契约修复已进入真实云端构建。
+- Chrome 扩展、浏览器进程和本地通信清单均正常，但沙箱重启后现有预览标签的页面级控制连续超时；因此本轮没有再次提交模型请求，也没有把部署资源证据冒充为交互通过。
+- **回归结论：部署内容通过 / 认证交互仍待验。** 仍需在同一 Google Chrome 预览标签恢复控制后，证明选区结果精确为“前缀 + 新片段 + 后缀”，并完成刷新中断恢复；在此之前 V588-CHAT-002 不关闭。

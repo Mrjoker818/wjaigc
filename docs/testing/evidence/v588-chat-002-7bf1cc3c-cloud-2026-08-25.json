@@ -130,8 +130,26 @@
       "lint": "0 errors / 967 historical warnings",
       "build": "passed, 116/116 pages",
       "protectedBaseline": "blocked by four pre-existing unapproved drift paths; the new chat-area.tsx change is not one of them",
-      "cloudRetest": "pending Coze pull"
+      "cloudRetest": "deployed asset verified; authenticated interaction pending Chrome tab-control recovery"
     }
   },
-  "conclusion": "The offline telemetry recursion and ordinary-chat retry are closed on the deployed commit. Deep Research is only partially verified. CanvasEditor failure and deterministic retry behavior passed, but the deployed selection-output contract failed and was fixed locally in e0ec998d pending Coze retest. Refresh-interruption remains unverified."
+  "selectionFixDeployment": {
+    "verifiedAt": "2026-08-26T06:46:00+08:00",
+    "githubCommit": "2c508bad71e423b18bfa503d6277156e344c1b36",
+    "implementationCommit": "e0ec998d28a2bad0fc27981220bff42fb9a390d7",
+    "cozeMergeCommit": "05f1d7e73cec190827852f3300a00871bce9a475",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "buildId": "5v4rvNIC6-MWnYjJ5HWaz",
+    "serverPid": 2266,
+    "publicHttp": {
+      "/": 200,
+      "/simple-chat": 200
+    },
+    "simpleChatScriptCount": 17,
+    "contractAsset": "/_next/static/chunks/app/simple-chat/page-d9e8ae829a1f734c.js",
+    "contractNeedle": "只输出修改后的选中文本片段",
+    "contractNeedleMatches": 1,
+    "evidenceBoundary": "This proves that the corrected prompt contract is present in the deployed public client bundle. It does not replace the pending authenticated CanvasEditor interaction and refresh-interruption tests."
+  },
+  "conclusion": "The offline telemetry recursion and ordinary-chat retry are closed. Deep Research is only partially verified. CanvasEditor failure and deterministic retry behavior passed, and the selection-output fix is now present in the deployed Coze build. Exact authenticated replacement behavior and refresh-interruption recovery remain unverified because Chrome tab-level control could not be reacquired after the sandbox restart."
 }
