@@ -14,8 +14,8 @@ const modelSelectorSource = source.slice(
 describe('simple-chat model selector contract', () => {
   it('uses click-controlled menus instead of hover-only selection', () => {
     expect(source).toContain("const [openModelMenu, setOpenModelMenu] = useState<'chat' | 'image' | null>(null);");
-    expect(modelSelectorSource).toContain("onClick={() => setOpenModelMenu(openModelMenu === 'chat' ? null : 'chat')}");
-    expect(modelSelectorSource).toContain("onClick={() => setOpenModelMenu(openModelMenu === 'image' ? null : 'image')}");
+    expect(modelSelectorSource).toContain("onClick={() => toggleModelMenu('chat')}");
+    expect(modelSelectorSource).toContain("onClick={() => toggleModelMenu('image')}");
     expect(modelSelectorSource).not.toContain('group-hover:opacity-100');
   });
 
@@ -29,7 +29,9 @@ describe('simple-chat model selector contract', () => {
   it('keeps both model menus above the scrolling conversation', () => {
     expect(source).toContain('<header className="relative z-50');
     expect(source.match(/role="listbox"/g)).toHaveLength(2);
-    expect(modelSelectorSource.match(/w-\[min\(20rem,calc\(100vw-1\.5rem\)\)\]/g)).toHaveLength(2);
+    expect(source).toContain('resolveSimpleChatModelMenuLayout');
+    expect(modelSelectorSource.match(/style=\{modelMenuStyle/g)).toHaveLength(2);
+    expect(modelSelectorSource).not.toContain('absolute right-0 top-full');
   });
 
   it('applies the image model and provider before closing the selected menu', () => {

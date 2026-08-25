@@ -44,6 +44,10 @@ import {
   resolveSimpleChatModelSelection,
   type SimpleChatModelSelection,
 } from '@/lib/simple-chat-request-context';
+import {
+  resolveSimpleChatModelMenuLayout,
+  type SimpleChatModelMenuLayout,
+} from '@/lib/simple-chat-model-menu-position';
 
 type ChatModelInfo = {
   id: string;
@@ -264,6 +268,7 @@ export default function ChatArea({
   const [controlNotice, setControlNotice] = useState<string | null>(null);
   const [historyImageNotice, setHistoryImageNotice] = useState<string | null>(null);
   const [openModelMenu, setOpenModelMenu] = useState<'chat' | 'image' | null>(null);
+  const [modelMenuLayout, setModelMenuLayout] = useState<SimpleChatModelMenuLayout | null>(null);
 
   const handleChatModelSelect = useCallback((selection: SimpleChatModelSelection) => {
     if (!task) return;
@@ -309,6 +314,8 @@ export default function ChatArea({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatModelMenuRef = useRef<HTMLDivElement>(null);
   const imageModelMenuRef = useRef<HTMLDivElement>(null);
+  const chatModelButtonRef = useRef<HTMLButtonElement>(null);
+  const imageModelButtonRef = useRef<HTMLButtonElement>(null);
 
   // Messages: sync from task
   const [messages, setMessages] = useState<SimpleChatMessage[]>((task?.messages || []).filter(Boolean));
@@ -454,6 +461,32 @@ export default function ChatArea({
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [openModelMenu]);
+
+  const updateModelMenuLayout = useCallback((menu: 'chat' | 'image') => {
+    const trigger = menu === 'chat' ? chatModelButtonRef.current : imageModelButtonRef.current;
+    if (!trigger) return;
+    setModelMenuLayout(resolveSimpleChatModelMenuLayout(
+      trigger.getBoundingClientRect(),
+      { width: window.innerWidth, height: window.innerHeight },
+    ));
+  }, []);
+
+  const toggleModelMenu = useCallback((menu: 'chat' | 'image') => {
+    if (openModelMenu === menu) {
+      setOpenModelMenu(null);
+      return;
+    }
+    updateModelMenuLayout(menu);
+    setOpenModelMenu(menu);
+  }, [openModelMenu, updateModelMenuLayout]);
+
+  useEffect(() => {
+    if (!openModelMenu) return;
+    const update = () => updateModelMenuLayout(openModelMenu);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [openModelMenu, updateModelMenuLayout]);
 
   // Fetch image models
   const fetchImageModels = useCallback(async () => {
@@ -1487,6 +1520,12 @@ export default function ChatArea({
   }
 
   const activeAgent = task.activeAgentId ? project.agents.find(a => a.id === task.activeAgentId) : null;
+  const modelMenuStyle = modelMenuLayout ? {
+    left: `${modelMenuLayout.left}px`,
+    top: `${modelMenuLayout.top}px`,
+    width: `${modelMenuLayout.width}px`,
+    maxHeight: `${modelMenuLayout.maxHeight}px`,
+  } : undefined;
 
   return (
     <div className="flex-1 flex flex-col h-screen bg-background">
@@ -1502,17 +1541,18 @@ export default function ChatArea({
         {/* Model Selector */}
         <div ref={chatModelMenuRef} className="relative">
           <button
+            ref={chatModelButtonRef}
             type="button"
             aria-haspopup="listbox"
             aria-expanded={openModelMenu === 'chat'}
-            onClick={() => setOpenModelMenu(openModelMenu === 'chat' ? null : 'chat')}
+            onClick={() => toggleModelMenu('chat')}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
             <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.providerId === selectedProviderId && m.modelId === selectedModel)?.name || selectedModel || '选择模型'}</span>
             <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${openModelMenu === 'chat' ? 'rotate-180' : ''}`} />
           </button>
-          <div className={`absolute right-0 top-full mt-1 w-[min(20rem,calc(100vw-1.5rem))] bg-card border border-border rounded-xl shadow-xl z-[100] max-h-96 overflow-y-auto p-1 transition-opacity ${openModelMenu === 'chat' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} role="listbox">
+          <div className={`absolute bg-card border border-border rounded-xl shadow-xl z-[100] overflow-y-auto p-1 transition-opacity ${openModelMenu === 'chat' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} style={modelMenuStyle} role="listbox">
             {chatModels.map(m => (
               <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedProviderId && m.modelId === selectedModel} onClick={() => handleChatModelSelect({ modelId: m.modelId, providerId: m.providerId })}
                 className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
@@ -1545,17 +1585,18 @@ export default function ChatArea({
         {/* Image Model Selector */}
         <div ref={imageModelMenuRef} className="relative">
           <button
+            ref={imageModelButtonRef}
             type="button"
             aria-haspopup="listbox"
             aria-expanded={openModelMenu === 'image'}
-            onClick={() => setOpenModelMenu(openModelMenu === 'image' ? null : 'image')}
+            onClick={() => toggleModelMenu('image')}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs cursor-pointer"
           >
             <Image className="w-3.5 h-3.5 text-purple-400" />
             <span className="font-medium max-w-[100px] truncate">{imageModels.find(m => m.providerId === selectedImageProviderId && m.modelId === selectedImageModel)?.name || selectedImageModel || '图像模型'}</span>
             <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${openModelMenu === 'image' ? 'rotate-180' : ''}`} />
           </button>
-          <div className={`absolute right-0 top-full mt-1 w-[min(20rem,calc(100vw-1.5rem))] bg-card border border-border rounded-xl shadow-xl z-[100] max-h-96 overflow-y-auto p-1 transition-opacity ${openModelMenu === 'image' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} role="listbox">
+          <div className={`absolute bg-card border border-border rounded-xl shadow-xl z-[100] overflow-y-auto p-1 transition-opacity ${openModelMenu === 'image' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} style={modelMenuStyle} role="listbox">
             <div className="px-3 py-1.5 text-[11px] text-muted-foreground/60 font-medium">图像生成模型</div>
             {imageModels.map(m => (
               <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedImageProviderId && m.modelId === selectedImageModel} onClick={() => { setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); setOpenModelMenu(null); }}

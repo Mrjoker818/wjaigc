@@ -149,6 +149,7 @@
   "src/lib/server-api-config.ts",
   "src/lib/server-auth.ts",
   "src/lib/simple-chat-logout.ts",
+  "src/lib/simple-chat-model-menu-position.ts",
   "src/lib/task-core/candidate-model-admission.ts",
   "src/lib/task-core/descriptor-image-request-fields.ts",
   "src/lib/task-core/exact-model-selection.ts",
