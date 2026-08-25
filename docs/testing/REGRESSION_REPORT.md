@@ -1641,3 +1641,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 新增回归先 RED，随后仅在播放浮层增加 `onPointerDown={(e) => e.stopPropagation()}`，提交并推送 `main@fb6741853272b43a4e36e046511900f031ab758f`。没有改动视频 URL、供应商、能力、任务、扣费或图片拖动逻辑。
 - 聚焦画布/视频矩阵 `47/47`；最终全仓 `528 files / 3446 tests` 通过，`20 files / 117 tests` 因缺少完整 `POSTGRES_TEST_DATABASE_URL` 跳过；TypeScript、改动文件零错误 Lint、Next.js `116/116` 构建和 `git diff --check` 通过。
 - **结论：本地回归通过 / 云端最终验收待执行。** Coze 尚未拉取 `fb674185`；Chrome 扩展仍可枚举正确“用户1”的现有项目页和预览页，但旧控制会话占用导致接管超时。不得把本地结果或 `ebf611ea` 的静态媒体加载结果扩大为播放、下载和账务通过。
+
+## 2026-08-25 视频播放、首次下载与托管 MP4 云端闭环
+
+- `bce42584` 与 `f1c5d386` 先后修复视频播放浮层指针隔离、未选中悬停下载首次点击的 React 选择态竞态；Coze 上已证明首次点击立即出现唯一 MP4 选项和“确认下载”。
+- 同轮真实操作发现独立 `S4-BUG-019`：下载确认请求 404。TDD 证明视频实际写入 `{dataRoot}/uploads/video/...`，下载路由只查旧目录；`f19ab164` 仅对齐托管目录候选。
+- 本地聚焦 `23/23`、全部视频 `58/58`、TypeScript、改动文件零错误 Lint 和 `116/116` 构建通过。全仓业务断言 `3447` 项通过，`117` 项 PostgreSQL 门禁跳过；既存源指纹测试发生一次 20 秒超时，未修改等待阈值。
+- Coze、GitHub 与本地精确为 `main@f19ab16441c8ef632124fb12afb1d94ad2200d2f`，`stable@52f7c601...` 未触碰；云端 PID `1309`、`shadow`，首页与 `/api/auth/me` 均 200。
+- Google Chrome 真实验证：历史视频 5 秒、`readyState=4`、播放时间推进；未选中首次悬停下载弹窗立即打开；确认后生成 783,768 字节 MP4，`ftyp/isom`，SHA-256 `30E6CF788AFE737A94EDF6F1E501DC15A16F11ECA869EBD8A1A67A56A6927B5C`；下载错误日志为 0；刷新后仍可播放。
+- **结论：S4-BUG-018 的媒体展示/播放/刷新和 S4-BUG-019 的下载链路已云端通过。** 本轮未在下载动作前单独采集积分快照，因此“不新增扣费”不作为独立账务实测关闭项；Stage 4 仍由普通用户五入口、非法能力零副作用和其余既有门禁阻塞。

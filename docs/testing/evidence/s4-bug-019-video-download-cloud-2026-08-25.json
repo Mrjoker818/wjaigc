@@ -1,0 +1,53 @@
+{
+  "bugId": "S4-BUG-019",
+  "testedAt": "2026-08-25T08:52:42+08:00",
+  "browser": "Google Chrome 用户1",
+  "cloudUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "git": {
+    "main": "f19ab16441c8ef632124fb12afb1d94ad2200d2f",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "worktreeClean": true
+  },
+  "runtime": {
+    "pid": 1309,
+    "assetGraphMode": "shadow",
+    "rootHttpStatus": 200,
+    "authHttpStatus": 200
+  },
+  "sourceVideo": {
+    "url": "/api/serve-upload/video/video_1787575662566_q1l4ho/video_video_1787575662566_q1l4ho_1787576004625_0uchzn.mp4",
+    "readyState": 4,
+    "durationSeconds": 5,
+    "mediaError": null,
+    "playbackAdvanced": true,
+    "playbackCurrentTimeSeconds": 0.838331
+  },
+  "download": {
+    "firstHoverClickOpenedPopup": true,
+    "popupMp4OptionCount": 1,
+    "popupConfirmButtonCount": 1,
+    "downloadEventObserved": false,
+    "downloadEventNote": "Blob 链接未被浏览器自动化下载事件捕获，但文件已真实落盘并通过字节校验。",
+    "filename": "wujie_20260825_588_一枚金色几何徽标在纯黑背景中缓慢旋转，稳定镜头，干净光影，无文字.mp4",
+    "byteLength": 783768,
+    "containerSignature": "ftyp",
+    "brand": "isom",
+    "sha256": "30E6CF788AFE737A94EDF6F1E501DC15A16F11ECA869EBD8A1A67A56A6927B5C",
+    "downloadFailedConsoleErrors": 0,
+    "videoDownload404ConsoleErrors": 0
+  },
+  "refreshRegression": {
+    "videoCount": 1,
+    "readyState": 4,
+    "durationSeconds": 5,
+    "mediaError": null,
+    "playbackAdvanced": true
+  },
+  "localVerification": {
+    "videoTests": "16 files / 58 tests passed",
+    "typecheck": "passed",
+    "affectedLint": "0 errors",
+    "build": "116/116 pages, exit 0",
+    "fullSuite": "528 files / 3447 tests passed; 1 existing stage-3 source identity test timed out; 20 files / 117 PostgreSQL-gated tests skipped"
+  }
+}

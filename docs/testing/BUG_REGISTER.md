@@ -2449,3 +2449,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 本地回归 | 完成态修复聚焦 `42/42`、扩展视频回归 `87/87`。云端预验随后稳定复现播放浮层被画布指针捕获的问题，新增 RED 后以 `onPointerDown` 隔离完成最小修复；最终全仓 `528 files / 3446 tests` 通过，`20 files / 117 PostgreSQL-gated tests` 跳过；严格 TypeScript、零错误 Lint 和 Next.js `116/116` 生产构建通过。 |
 | 云端预验 | `main@ebf611ea` 已证明历史 5 秒视频真实 URL 可加载、`readyState=4`、无媒体错误、无 `MEDIA_UNAVAILABLE`；但播放浮层点击无状态变化。根因是画布根节点在 `pointerdown` 时捕获指针，导致浮层 `click` 被重定向。修复提交为 `main@fb6741853272b43a4e36e046511900f031ab758f`。 |
 | 状态 | **媒体恢复已取得云端正向证据；播放修复已本地闭环并推送，云端最终验收待执行。** 必须在 `fb674185` 上证明播放时间推进、刷新/重开保持、下载成功且无重复扣费，才能关闭。 |
+
+### S4-BUG-019：托管视频可播放但下载接口返回 404
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 视频结果下载失败 |
+| 发现环境 | Coze `main@f1c5d3865c919a0061fd36182bead6add2ea238d`，已登录 Google Chrome“用户1”，历史 5 秒视频，2026-08-25。 |
+| 稳定复现 | 未选中视频时悬停，首次点击“下载”可打开 MP4 弹窗；点击“确认下载”后弹窗关闭，但没有文件落盘，Console 报 `Download failed: 视频下载失败: 404`。 |
+| 预期 | `/api/serve-upload/video/...mp4` 能播放时，同一托管媒体应由 `/api/video/download` 返回相同视频字节。 |
+| 根因 | 视频轮询把文件写入 `{dataRoot}/uploads/video/...`，播放路由会检查该目录；下载路由却只检查 `{dataRoot}/video/...`，导致同一 URL 播放 200、下载 404。 |
+| RED | 新增路由行为测试，在真实持久化目录布局中写入 MP4；修复前 GET 实际返回 404，期望 200。 |
+| 最小修复 | `main@f19ab16441c8ef632124fb12afb1d94ad2200d2f` 仅让下载路由先检查 `{dataRoot}/uploads/...`，再兼容旧 `{dataRoot}/...`；鉴权、SSRF 校验、远程 URL、供应商和账务路径均未改动。 |
+| 本地回归 | 下载/鉴权/安全/工具栏聚焦 `5 files / 23 tests`，全部视频 `16 files / 58 tests`，TypeScript、改动文件零错误 Lint、Next.js `116/116` 构建通过。全仓为 `528 files / 3447 tests` 通过、`20 files / 117` 项 PostgreSQL 门禁跳过；另有 1 项既存 Git 源指纹测试在 Windows 上超过 20 秒超时，未隐藏或放宽。 |
+| 云端回归 | Coze、GitHub 与本地精确运行 `f19ab164`，PID `1309`、`shadow`、首页/鉴权均 200。历史视频 `readyState=4`、5 秒、可播放；首次悬停下载弹窗立即打开；确认后真实落盘 783,768 字节 MP4，签名 `ftyp/isom`，SHA-256 `30E6CF78...A6927B5C`，下载 404 与 `Download failed` 日志均为 0；刷新后仍可播放。 |
+| 状态 | **已修复 / Coze 云端关闭。** 机器证据：`docs/testing/evidence/s4-bug-019-video-download-cloud-2026-08-25.json`。本结论不替代普通用户五入口、非法能力零副作用、下载前后积分独立取样或 PostgreSQL 并发门禁。 |
