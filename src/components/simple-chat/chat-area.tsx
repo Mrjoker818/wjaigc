@@ -879,6 +879,7 @@ export default function ChatArea({
         } catch {}
       }
 
+      if (!requestScopeIsCurrent()) return;
       const historyContext = buildSimpleChatHistoryRequestContext(messages);
       setHistoryImages(historyContext.images);
       setHistoryImageNotice(historyContext.rejectedCount > 0
@@ -908,6 +909,7 @@ export default function ChatArea({
       // 深度分析检测：消息包含分析框架标记且带图片时启用专业分析系统提示词
       const isDeepAnalysis = content.includes('文案策划深度分析') && (userMsg.images?.length || 0) > 0;
 
+      if (!requestScopeIsCurrent()) return;
       const res = await fetch('/api/simple-chat/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

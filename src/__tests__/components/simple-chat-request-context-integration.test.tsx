@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useMemo, useState } from 'react';
 
@@ -10,6 +10,19 @@ import type { User } from '@/lib/user-types';
 
 const INVALID_IMAGE = 'data:image/png;base64,not-valid';
 const VALID_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zr1sAAAAASUVORK5CYII=';
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 const user: User = {
   id: 'user-1',
@@ -195,6 +208,7 @@ function submitText(value: string): void {
 describe('simple-chat request context integration', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.doUnmock('@/lib/brand-dna');
     vi.restoreAllMocks();
   });
 
@@ -296,6 +310,57 @@ describe('simple-chat request context integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
     await waitFor(() => expect(document.body.textContent).not.toContain('已忽略 1 张失效历史图片，本次请求继续发送。'));
+    expect(document.body.textContent).not.toContain('将携带最近对话中的 1 张图片作为上下文');
+  });
+
+  it('abandons a stale Brand DNA continuation before it rebuilds history or sends chat', async () => {
+    const brandDna = createDeferred<{
+      loadBrandDNARegistry: () => unknown[];
+      generateBrandSystemPrompt: () => string;
+    }>();
+    const importStarted = vi.fn();
+    const loadRegistry = vi.fn(() => []);
+    vi.doMock('@/lib/brand-dna', () => {
+      importStarted();
+      return brandDna.promise;
+    });
+    const onUpdateTask = vi.fn();
+    mockStartupRequests();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const taskA = createTask([{
+      id: 'history-user',
+      role: 'user',
+      content: 'Task A historical question',
+      images: [INVALID_IMAGE, VALID_IMAGE],
+      createdAt: 1,
+    }]);
+    const taskB = createTask();
+    taskB.id = 'task-2';
+    taskB.name = 'Task B';
+
+    render(<TaskSwitchingChatAreaHarness initialTask={taskA} nextTask={taskB} onUpdateTask={onUpdateTask} />);
+    await waitFor(() => expect(onUpdateTask).toHaveBeenCalled());
+    onUpdateTask.mockClear();
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockClear();
+    fireEvent.click(screen.getByTitle('品牌DNA注入 - 将品牌规范注入对话上下文'));
+    submitText('start brand race');
+    await waitFor(() => expect(importStarted).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+    await waitFor(() => expect(document.body.textContent).not.toContain('Task A historical question'));
+    await act(async () => {
+      brandDna.resolve({
+        loadBrandDNARegistry: loadRegistry,
+        generateBrandSystemPrompt: () => '',
+      });
+    });
+    await waitFor(() => expect(loadRegistry).toHaveBeenCalledTimes(1));
+
+    expect(globalThis.fetch).not.toHaveBeenCalledWith('/api/simple-chat/chat', expect.any(Object));
+    expect(document.body.textContent).not.toContain('已忽略 1 张失效历史图片，本次请求继续发送。');
     expect(document.body.textContent).not.toContain('将携带最近对话中的 1 张图片作为上下文');
   });
 });
