@@ -27,8 +27,11 @@ async function readLocalVideoBuffer(url: string): Promise<Buffer | null> {
   const dataRoot = getServerDataRoot();
   const candidates: string[] = [];
   if (requestPath.startsWith('/api/serve-upload/')) {
-    const localPath = resolveWithinDirectory(dataRoot, requestPath.slice('/api/serve-upload/'.length));
-    if (localPath) candidates.push(localPath);
+    const relativePath = requestPath.slice('/api/serve-upload/'.length);
+    const uploadPath = resolveWithinDirectory(path.join(dataRoot, 'uploads'), relativePath);
+    const legacyPath = resolveWithinDirectory(dataRoot, relativePath);
+    if (uploadPath) candidates.push(uploadPath);
+    if (legacyPath) candidates.push(legacyPath);
   } else if (requestPath.startsWith('/uploads/')) {
     const localPath = resolveWithinDirectory(path.join(dataRoot, 'uploads'), requestPath.slice('/uploads/'.length));
     if (localPath) candidates.push(localPath);
