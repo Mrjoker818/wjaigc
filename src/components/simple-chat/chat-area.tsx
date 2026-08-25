@@ -310,9 +310,11 @@ export default function ChatArea({
   const [messages, setMessages] = useState<SimpleChatMessage[]>((task?.messages || []).filter(Boolean));
   const projectIdRef = useRef(project?.id);
   const taskIdRef = useRef(task?.id);
+  const latestTaskRef = useRef(task);
   const workflowReturnHandledRef = useRef<string | null>(null);
   projectIdRef.current = project?.id;
   taskIdRef.current = task?.id;
+  latestTaskRef.current = task;
 
   useEffect(() => {
     if (project?.id) localStorage.setItem('wujie_last_simple_chat_project', project.id);
@@ -340,10 +342,12 @@ export default function ChatArea({
         }
         if (cancelled || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
         const returned = createWorkflowChatReturnMessage(intent, reference);
-        const persistedMessages = (task.messages || []).some(message => message.id === returned.id)
-          ? task.messages
-          : [...(task.messages || []), returned];
-        await onPersistTask({ ...task, messages: persistedMessages, updatedAt: Date.now() });
+        const latestTask = latestTaskRef.current;
+        if (!latestTask || latestTask.id !== task.id) return;
+        const persistedMessages = (latestTask.messages || []).some(message => message.id === returned.id)
+          ? latestTask.messages
+          : [...(latestTask.messages || []), returned];
+        await onPersistTask({ ...latestTask, messages: persistedMessages, updatedAt: Date.now() });
         if (cancelled || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
         setMessages(persistedMessages);
         const current = new URL(window.location.href);
