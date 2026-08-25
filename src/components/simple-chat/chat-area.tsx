@@ -48,6 +48,12 @@ import {
   resolveSimpleChatModelMenuLayout,
   type SimpleChatModelMenuLayout,
 } from '@/lib/simple-chat-model-menu-position';
+import {
+  createSimpleChatRetryContext,
+  readSimpleChatRetryContext,
+  recoverInterruptedSimpleChatMessages,
+  type SimpleChatRetryContextV1,
+} from '@/lib/simple-chat-retry';
 
 type ChatModelInfo = {
   id: string;
@@ -318,8 +324,11 @@ export default function ChatArea({
   const imageModelButtonRef = useRef<HTMLButtonElement>(null);
 
   // Messages: sync from task
-  const [messages, setMessages] = useState<SimpleChatMessage[]>((task?.messages || []).filter(Boolean));
+  const [messages, setMessages] = useState<SimpleChatMessage[]>(
+    recoverInterruptedSimpleChatMessages((task?.messages || []).filter(Boolean)),
+  );
   const [messagesTaskId, setMessagesTaskId] = useState(task?.id);
+  const messagesRef = useRef(messages);
   const projectIdRef = useRef(project?.id);
   const taskIdRef = useRef(task?.id);
   const latestTaskRef = useRef(task);
@@ -327,6 +336,7 @@ export default function ChatArea({
   projectIdRef.current = project?.id;
   taskIdRef.current = task?.id;
   latestTaskRef.current = task;
+  messagesRef.current = messages;
 
   useEffect(() => {
     if (project?.id) localStorage.setItem('wujie_last_simple_chat_project', project.id);
@@ -379,7 +389,7 @@ export default function ChatArea({
   useEffect(() => {
     if (task) {
       setIsStreaming(false);
-      setMessages((task.messages || []).filter(Boolean));
+      setMessages(recoverInterruptedSimpleChatMessages((task.messages || []).filter(Boolean)));
       setMessagesTaskId(task.id);
       setReasoningEffort(task.reasoningEffort || 'medium');
       setResponseSpeed(task.responseSpeed || 'balanced');
@@ -837,6 +847,240 @@ export default function ChatArea({
     }
   }, [selectedCanvasProjectId]);
 
+  const executeChatRequest = useCallback(async (
+    context: SimpleChatRetryContextV1,
+    userMessage: SimpleChatMessage,
+  ): Promise<void> => {
+    const requestScopeIsCurrent = () => (
+      isWorkspaceResultScopeCurrent(context.projectId, projectIdRef.current)
+      && context.taskId === taskIdRef.current
+    );
+    if (!requestScopeIsCurrent()) return;
+
+    setIsStreaming(true);
+    setMessages(previous => previous.map(message => (
+      message.id === context.assistantMessageId
+        ? {
+          ...message,
+          content: '',
+          images: [],
+          imageRefs: [],
+          attachments: [],
+          status: 'streaming',
+          error: undefined,
+          retryContext: context,
+          model: context.modelId,
+          providerId: context.providerId,
+        }
+        : message
+    )));
+
+    const historyById = new Map(messagesRef.current.map(message => [message.id, message]));
+    const frozenHistory = context.historyMessageIds.flatMap(messageId => {
+      const message = historyById.get(messageId);
+      return message ? [message] : [];
+    });
+    const historyContext = buildSimpleChatHistoryRequestContext(frozenHistory);
+    setHistoryImages(historyContext.images);
+    setHistoryImageNotice(historyContext.rejectedCount > 0
+      ? `已忽略 ${historyContext.rejectedCount} 张失效历史图片，本次请求继续发送。`
+      : null);
+
+    const allMessages: Array<{ role: string; content: string; images?: string[] }> = [
+      ...context.systemMessages,
+      ...historyContext.messages.map(message => ({
+        role: message.role,
+        content: message.content,
+        ...(message.images?.length ? { images: message.images } : {}),
+      })),
+      {
+        role: 'user',
+        content: userMessage.content,
+        ...(userMessage.images?.length ? { images: userMessage.images } : {}),
+      },
+    ];
+    let fullContent = '';
+    let streamError: string | null = null;
+
+    const failMessage = (errorMessage: string, content?: string) => {
+      setMessages(previous => previous.map(message => (
+        message.id === context.assistantMessageId
+          ? {
+            ...message,
+            content: content || message.content || errorMessage,
+            status: 'failed',
+            error: { message: errorMessage, retryable: true },
+            retryContext: context,
+          }
+          : message
+      )));
+    };
+
+    try {
+      const response = await fetch('/api/simple-chat/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': context.idempotencyKey,
+        },
+        body: JSON.stringify({
+          messages: allMessages,
+          model: context.modelId,
+          providerId: context.providerId,
+          imageModel: context.imageModelId,
+          imageProviderId: context.imageProviderId,
+          webSearch: context.webSearch,
+          knowledgeItems: context.knowledgeItems,
+          projectId: context.projectId,
+          taskId: context.taskId,
+          assetProjectId: context.canvasProjectId,
+          responseMessageId: context.assistantMessageId,
+          idempotencyKey: context.idempotencyKey,
+          sourceVersionIds: context.sourceVersionIds,
+          selectedEntityIds: context.selectedEntityIds,
+          memories: context.memories,
+          deepAnalysis: context.deepAnalysis,
+          reasoningEffort: context.reasoningEffort,
+          responseSpeed: context.responseSpeed,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.body) throw new Error('No response body');
+
+      const streamResult = await consumeSimpleChatJsonStream(response.body, {
+        isActive: requestScopeIsCurrent,
+        onEvent(value) {
+          if (streamError || !requestScopeIsCurrent()) return;
+          const parsed = readSimpleChatStreamPayload(value);
+          if (!parsed) return;
+          if (parsed.type === 'generation_controls') {
+            const notices = Array.isArray(parsed.notices)
+              ? parsed.notices.filter((notice: unknown): notice is string => typeof notice === 'string')
+              : [];
+            const appliedControls: SimpleChatTask['appliedChatControls'] = {
+              appliedReasoningEffort: parsed.appliedReasoningEffort as ResolvedChatControls['appliedReasoningEffort'],
+              appliedResponseSpeed: parsed.appliedResponseSpeed as ResolvedChatControls['appliedResponseSpeed'],
+              degraded: Boolean(parsed.degraded),
+              notices,
+            };
+            setControlNotice(notices[0] || `已应用：推理 ${parsed.appliedReasoningEffort || '默认'}，速度 ${parsed.appliedResponseSpeed || '均衡'}`);
+            setAppliedChatControls(appliedControls);
+          } else if (parsed.type === 'search_status') {
+            const resultCount = typeof parsed.resultCount === 'number' ? parsed.resultCount : 0;
+            setSearchStatus(parsed.status === 'completed'
+              ? `搜索完成，找到 ${resultCount} 条结果`
+              : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
+            if (parsed.status === 'completed') {
+              const searchMessage: SimpleChatMessage = {
+                id: `${context.assistantMessageId}-search`,
+                role: resultCount > 0 ? 'search' : 'system',
+                content: resultCount > 0
+                  ? parsed.searchResults || ''
+                  : '🌐 联网搜索未找到相关结果',
+                createdAt: Date.now(),
+              };
+              setMessages(previous => {
+                const existingIndex = previous.findIndex(message => message.id === searchMessage.id);
+                if (existingIndex < 0) {
+                  const assistantIndex = previous.findIndex(message => message.id === context.assistantMessageId);
+                  const insertAt = assistantIndex < 0 ? previous.length : assistantIndex;
+                  return [...previous.slice(0, insertAt), searchMessage, ...previous.slice(insertAt)];
+                }
+                return previous.map(message => message.id === searchMessage.id ? searchMessage : message);
+              });
+            }
+          } else if (parsed.type === 'tool_status') {
+            setSearchStatus(null);
+            setMessages(previous => previous.map(message => (
+              message.id === context.assistantMessageId
+                ? {
+                  ...message,
+                  content: `*${parsed.label || '正在处理图片任务...'}*`,
+                  ...(typeof parsed.runId === 'string' ? { agentRunId: parsed.runId } : {}),
+                }
+                : message
+            )));
+          } else if (parsed.type === 'image' && typeof parsed.imageUrl === 'string') {
+            setSearchStatus(null);
+            const parsedImageUrl = parsed.imageUrl;
+            const imageRef = readWorkspaceAssetReference(parsed.imageRef);
+            setMessages(previous => previous.map(message => {
+              if (message.id !== context.assistantMessageId) return message;
+              const imageUrl = imageRef?.url || parsedImageUrl;
+              const imageIndex = message.images?.length || 0;
+              return {
+                ...message,
+                content: completedChatImageMessageContent(message.content),
+                images: [...(message.images || []), imageUrl],
+                imageRefs: [...(message.imageRefs || []), imageRef?.assetVersionId && imageRef.placementId
+                  ? imageRef
+                  : { url: imageUrl }],
+                attachments: [...(message.attachments || []), {
+                  id: `${message.id}-image-${imageIndex}`,
+                  type: 'image',
+                  name: typeof parsed.prompt === 'string' && parsed.prompt
+                    ? parsed.prompt.slice(0, 120)
+                    : `generated-${imageIndex + 1}.png`,
+                  mimeType: 'image/png',
+                  url: imageUrl,
+                  ...(imageRef?.assetId ? { assetId: imageRef.assetId } : {}),
+                  ...(imageRef?.assetVersionId ? { assetVersionId: imageRef.assetVersionId } : {}),
+                  ...(imageRef?.placementId ? { placementId: imageRef.placementId } : {}),
+                }],
+              };
+            }));
+          } else if (parsed.type === 'error') {
+            streamError = typeof parsed.error === 'string' && parsed.error.trim()
+              ? parsed.error.trim()
+              : '未知错误';
+            setSearchStatus(null);
+            failMessage(streamError, `请求失败：${streamError}\n\n建议：尝试切换模型或稍后重试。`);
+          } else if (parsed.type === 'text' && parsed.content) {
+            setSearchStatus(null);
+            fullContent += parsed.content;
+            setMessages(previous => previous.map(message => (
+              message.id === context.assistantMessageId
+                ? { ...message, content: fullContent }
+                : message
+            )));
+          }
+        },
+      });
+      if (streamResult === 'cancelled' || !requestScopeIsCurrent()) return;
+      if (!streamError) {
+        setMessages(previous => previous.map(message => (
+          message.id === context.assistantMessageId
+            ? { ...message, status: 'completed', error: undefined, retryContext: context }
+            : message
+        )));
+      }
+    } catch (error) {
+      if (!requestScopeIsCurrent()) return;
+      const errorMessage = error instanceof SimpleChatSseProtocolError
+        ? error.message
+        : error instanceof Error && /^HTTP \d+$/u.test(error.message)
+          ? `请求失败：${error.message}`
+          : '抱歉，请求失败，请重试。';
+      failMessage(errorMessage);
+    } finally {
+      if (!requestScopeIsCurrent()) return;
+      setIsStreaming(false);
+      const estimateTokens = (text: string) => {
+        const cn = (text.match(/[一-鿿]/g) || []).length;
+        const en = text.length - cn;
+        return Math.ceil(cn / 1.5 + en / 4);
+      };
+      const promptEst = allMessages.reduce((sum, message) => sum + estimateTokens(message.content || ''), 0);
+      const completionEst = estimateTokens(fullContent);
+      setTokenUsage(previous => ({
+        promptTokens: (previous?.promptTokens || 0) + promptEst,
+        completionTokens: (previous?.completionTokens || 0) + completionEst,
+        totalTokens: (previous?.totalTokens || 0) + promptEst + completionEst,
+      }));
+    }
+  }, []);
+
   // Handle send
   const handleSend = useCallback(async () => {
     const requestModelSelection = readSimpleChatModelSelection(task);
@@ -881,12 +1125,6 @@ export default function ChatArea({
       createdAt: Date.now(),
     };
 
-    const aiMsg: SimpleChatMessage = {
-      id: assistantMessageId,
-      role: 'assistant', content: '',
-      model: requestModelSelection.modelId, providerId: requestModelSelection.providerId,
-      createdAt: Date.now(),
-    };
     const requestSourceVersionIds = [...new Set(
       (userMsg.imageRefs || []).flatMap(reference => (
         reference.assetVersionId ? [reference.assetVersionId] : []
@@ -900,233 +1138,86 @@ export default function ChatArea({
       )),
     )];
 
-    setMessages(prev => [...prev, userMsg, aiMsg]);
-    setInput("");
-    setUploadedImages([]);
-
-    // 提升作用域供 finally 中统计 token 用量
-    let allMessages: Array<{ role: string; content: string; images?: string[] }> = [];
-    let fullContent = "";
-
-    try {
-      const systemMessages: Array<{ role: string; content: string }> = [];
-      const instructions = project.instructions;
-      if (instructions) {
-        const parts = [];
-        if (instructions.projectBackground) parts.push(`项目背景：${instructions.projectBackground}`);
-        if (instructions.userPreference) parts.push(`用户偏好：${instructions.userPreference}`);
-        if (instructions.outputFormat) parts.push(`输出格式：${instructions.outputFormat}`);
-        if (instructions.styleRules) parts.push(`风格规则：${instructions.styleRules}`);
-        if (instructions.forbiddenRules) parts.push(`禁止规则：${instructions.forbiddenRules}`);
-        if (parts.length > 0) systemMessages.push({ role: 'system', content: parts.join('\n') });
-      }
-      if (requestActiveAgentId) {
-        const agent = project.agents.find(a => a.id === requestActiveAgentId);
-        if (agent) systemMessages.push({ role: 'system', content: agent.systemPrompt });
-      }
-      if (webSearch) {
-        systemMessages.push({ role: 'system', content: '当前开启了联网搜索模式。请基于联网搜索结果回答用户问题，并在回答末尾列出引用来源。' });
-      }
-      // Brand DNA injection
-      if (brandActive) {
-        try {
-          const { loadBrandDNARegistry, generateBrandSystemPrompt } = await import('@/lib/brand-dna');
-          const registry = loadBrandDNARegistry();
-          const latest = registry.at(-1);
-          if (latest) {
-            const systemPrompt = generateBrandSystemPrompt(latest);
-            if (systemPrompt) {
-              systemMessages.push({ role: 'system', content: systemPrompt });
-            }
-          }
-        } catch {}
-      }
-
-      if (!requestScopeIsCurrent()) return;
-      const historyContext = buildSimpleChatHistoryRequestContext(messages);
-      setHistoryImages(historyContext.images);
-      setHistoryImageNotice(historyContext.rejectedCount > 0
-        ? `已忽略 ${historyContext.rejectedCount} 张失效历史图片，本次请求继续发送。`
-        : null);
-
-      allMessages = [
-        ...systemMessages,
-        ...historyContext.messages.map(message => ({
-          role: message.role,
-          content: message.content,
-          ...(message.images?.length ? { images: message.images } : {}),
-        })),
-        { role: 'user', content: userMsg.content, ...(userMsg.images?.length ? { images: userMsg.images } : {}) },
-      ];
-
-      const apiKnowledgeItems = knowledgeItems
-        .filter(item => item.enabled && item.type !== 'image')
-        .map(item => ({
-          id: item.id,
-          type: item.type,
-          title: item.name,
-          content: item.textContent || item.url || '',
-        }))
-        .filter(item => item.content);
-
-      // 深度分析检测：消息包含分析框架标记且带图片时启用专业分析系统提示词
-      const isDeepAnalysis = content.includes('文案策划深度分析') && (userMsg.images?.length || 0) > 0;
-
-      if (!requestScopeIsCurrent()) return;
-      const res = await fetch('/api/simple-chat/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: allMessages, model: requestModelSelection.modelId, providerId: requestModelSelection.providerId,
-          imageModel: selectedImageModel, imageProviderId: selectedImageProviderId,
-          webSearch, knowledgeItems: apiKnowledgeItems, projectId: requestProjectId, taskId: requestTaskId,
-          assetProjectId: selectedCanvasProjectId || undefined,
-          responseMessageId: assistantMessageId,
-          sourceVersionIds: requestSourceVersionIds,
-          selectedEntityIds: requestSelectedEntityIds,
-          memories: memories.map(m => ({ category: m.category, content: m.content })),
-          deepAnalysis: isDeepAnalysis,
-          reasoningEffort,
-          responseSpeed,
-        }),
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      if (!res.body) throw new Error('No response body');
-
-      const streamResult = await consumeSimpleChatJsonStream(res.body, {
-        isActive: requestScopeIsCurrent,
-        onEvent(value) {
-          const parsed = readSimpleChatStreamPayload(value);
-          if (!parsed) return;
-              if (parsed.type === 'generation_controls') {
-                const notices = Array.isArray(parsed.notices) ? parsed.notices.filter((notice: unknown): notice is string => typeof notice === 'string') : [];
-                const appliedControls: SimpleChatTask['appliedChatControls'] = {
-                  appliedReasoningEffort: parsed.appliedReasoningEffort as ResolvedChatControls['appliedReasoningEffort'],
-                  appliedResponseSpeed: parsed.appliedResponseSpeed as ResolvedChatControls['appliedResponseSpeed'],
-                  degraded: Boolean(parsed.degraded),
-                  notices,
-                };
-                setControlNotice(notices[0] || `已应用：推理 ${parsed.appliedReasoningEffort || '默认'}，速度 ${parsed.appliedResponseSpeed || '均衡'}`);
-                setAppliedChatControls(appliedControls);
-              } else if (parsed.type === 'search_status') {
-                const resultCount = typeof parsed.resultCount === 'number' ? parsed.resultCount : 0;
-                setSearchStatus(parsed.status === 'completed' ? `搜索完成，找到 ${resultCount} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
-                // 搜索完成后，添加一条系统消息展示搜索结果
-                if (parsed.status === 'completed' && resultCount > 0) {
-                  const searchMsg = {
-                    id: 'search-' + Math.random().toString(36).slice(2, 8),
-                    role: 'search' as const,
-                    content: parsed.searchResults || '',
-                    createdAt: Date.now(),
-                  };
-                  setMessages(prev => [...prev, searchMsg]);
-                } else if (parsed.status === 'completed' && resultCount === 0) {
-                  // 搜索无结果 — 显式失败
-                  setMessages(prev => {
-                    const updated = [...prev];
-                    updated.splice(updated.length - 1, 0, {
-                      id: 'search-' + Math.random().toString(36).slice(2, 8),
-                      role: 'system',
-                      content: `🌐 联网搜索未找到相关结果`,
-                      createdAt: Date.now(),
-                    });
-                    return updated;
-                  });
-                }
-              } else if (parsed.type === 'tool_status') {
-                setSearchStatus(null);
-                setMessages(prev => prev.map(message => (
-                  message.id === assistantMessageId
-                    ? {
-                      ...message,
-                      content: `*${parsed.label || '正在处理图片任务...'}*`,
-                      ...(typeof parsed.runId === 'string' ? { agentRunId: parsed.runId } : {}),
-                    }
-                    : message
-                )));
-              } else if (parsed.type === 'image' && typeof parsed.imageUrl === 'string') {
-                setSearchStatus(null);
-                const parsedImageUrl = parsed.imageUrl;
-                const imageRef = readWorkspaceAssetReference(parsed.imageRef);
-                setMessages(prev => prev.map(message => {
-                  if (message.id === assistantMessageId) {
-                    const imageUrl = imageRef?.url || parsedImageUrl;
-                    const imageIndex = message.images?.length || 0;
-                    return {
-                      ...message,
-                      content: completedChatImageMessageContent(message.content),
-                      images: [...(message.images || []), imageUrl],
-                      imageRefs: [...(message.imageRefs || []), imageRef?.assetVersionId && imageRef.placementId
-                        ? imageRef
-                        : { url: imageUrl }],
-                      attachments: [...(message.attachments || []), {
-                        id: `${message.id}-image-${imageIndex}`,
-                        type: 'image',
-                        name: typeof parsed.prompt === 'string' && parsed.prompt
-                          ? parsed.prompt.slice(0, 120)
-                          : `generated-${imageIndex + 1}.png`,
-                        mimeType: 'image/png',
-                        url: imageUrl,
-                        ...(imageRef?.assetId ? { assetId: imageRef.assetId } : {}),
-                        ...(imageRef?.assetVersionId ? { assetVersionId: imageRef.assetVersionId } : {}),
-                        ...(imageRef?.placementId ? { placementId: imageRef.placementId } : {}),
-                      }],
-                    };
-                  }
-                  return message;
-                }));
-              } else if (parsed.type === 'error') {
-                setSearchStatus(null);
-                setMessages(prev => prev.map(message => (
-                  message.id === assistantMessageId
-                    ? {
-                      ...message,
-                      content: `请求失败：${parsed.error || '未知错误'}\n\n建议：尝试切换模型或稍后重试。`,
-                    }
-                    : message
-                )));
-              } else if (parsed.type === 'text' && parsed.content) {
-                setSearchStatus(null);
-                fullContent += parsed.content;
-                setMessages(prev => prev.map(message => (
-                  message.id === assistantMessageId
-                    ? { ...message, content: fullContent }
-                    : message
-                )));
-              }
-        },
-      });
-      if (streamResult === 'cancelled') return;
-    } catch (error) {
-      if (!requestScopeIsCurrent()) return;
-      const errorContent = error instanceof SimpleChatSseProtocolError
-        ? error.message
-        : '抱歉，请求失败，请重试。';
-      setMessages(prev => prev.map(message => (
-        message.id === assistantMessageId
-          ? { ...message, content: errorContent }
-          : message
-      )));
-    } finally {
-      if (!requestScopeIsCurrent()) return;
-      setIsStreaming(false);
-      // 估算 token 用量（中文≈1.5字/token，英文≈4字符/token，取近似值）
-      const estimateTokens = (text: string) => {
-        const cn = (text.match(/[一-鿿]/g) || []).length;
-        const en = text.length - cn;
-        return Math.ceil(cn / 1.5 + en / 4);
-      };
-      const promptEst = allMessages.reduce((sum, m) => sum + estimateTokens(m.content || ''), 0);
-      const completionEst = estimateTokens(fullContent);
-      setTokenUsage(prev => ({
-        promptTokens: (prev?.promptTokens || 0) + promptEst,
-        completionTokens: (prev?.completionTokens || 0) + completionEst,
-        totalTokens: (prev?.totalTokens || 0) + promptEst + completionEst,
-      }));
+    const systemMessages: Array<{ role: 'system'; content: string }> = [];
+    const instructions = project.instructions;
+    if (instructions) {
+      const parts = [];
+      if (instructions.projectBackground) parts.push(`项目背景：${instructions.projectBackground}`);
+      if (instructions.userPreference) parts.push(`用户偏好：${instructions.userPreference}`);
+      if (instructions.outputFormat) parts.push(`输出格式：${instructions.outputFormat}`);
+      if (instructions.styleRules) parts.push(`风格规则：${instructions.styleRules}`);
+      if (instructions.forbiddenRules) parts.push(`禁止规则：${instructions.forbiddenRules}`);
+      if (parts.length > 0) systemMessages.push({ role: 'system', content: parts.join('\n') });
     }
-  }, [input, isStreaming, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment]);
+    if (requestActiveAgentId) {
+      const agent = project.agents.find(candidate => candidate.id === requestActiveAgentId);
+      if (agent) systemMessages.push({ role: 'system', content: agent.systemPrompt });
+    }
+    if (webSearch) {
+      systemMessages.push({
+        role: 'system',
+        content: '当前开启了联网搜索模式。请基于联网搜索结果回答用户问题，并在回答末尾列出引用来源。',
+      });
+    }
+    if (brandActive) {
+      try {
+        const { loadBrandDNARegistry, generateBrandSystemPrompt } = await import('@/lib/brand-dna');
+        const latest = loadBrandDNARegistry().at(-1);
+        const systemPrompt = latest ? generateBrandSystemPrompt(latest) : '';
+        if (systemPrompt) systemMessages.push({ role: 'system', content: systemPrompt });
+      } catch {}
+    }
+    if (!requestScopeIsCurrent()) return;
+
+    const apiKnowledgeItems = knowledgeItems
+      .filter(item => item.enabled && item.type !== 'image')
+      .map(item => ({
+        id: item.id,
+        type: item.type,
+        title: item.name,
+        content: item.textContent || item.url || '',
+      }))
+      .filter(item => item.content);
+    const isDeepAnalysis = content.includes('文案策划深度分析') && (userMsg.images?.length || 0) > 0;
+    const retryContext = createSimpleChatRetryContext({
+      kind: 'chat',
+      projectId: requestProjectId,
+      taskId: requestTaskId,
+      userMessageId,
+      assistantMessageId,
+      idempotencyKey: `simple-chat-retry:${requestTaskId}:${assistantMessageId}`,
+      modelId: requestModelSelection.modelId,
+      providerId: requestModelSelection.providerId,
+      imageModelId: selectedImageModel || undefined,
+      imageProviderId: selectedImageProviderId || undefined,
+      webSearch,
+      reasoningEffort,
+      responseSpeed,
+      canvasProjectId: selectedCanvasProjectId || undefined,
+      sourceVersionIds: requestSourceVersionIds,
+      selectedEntityIds: requestSelectedEntityIds,
+      historyMessageIds: messages.map(message => message.id),
+      systemMessages,
+      knowledgeItems: apiKnowledgeItems,
+      memories: memories.map(memory => ({ category: memory.category, content: memory.content })),
+      deepAnalysis: isDeepAnalysis,
+    });
+    const aiMsg: SimpleChatMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      model: retryContext.modelId,
+      providerId: retryContext.providerId,
+      status: 'streaming',
+      retryContext,
+      createdAt: Date.now(),
+    };
+
+    setMessages(previous => [...previous, userMsg, aiMsg]);
+    setInput('');
+    setUploadedImages([]);
+    await executeChatRequest(retryContext, userMsg);
+  }, [input, isStreaming, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment, executeChatRequest, knowledgeItems, reasoningEffort, responseSpeed]);
 
   // 供消息编辑后重新生成调用
   handleSendRef.current = handleSend;
@@ -1486,6 +1577,37 @@ export default function ChatArea({
 
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
+  const retryFailedMessage = useCallback(async (messageId: string) => {
+    if (isStreaming) return;
+    const assistantMessage = messagesRef.current.find(message => message.id === messageId);
+    const context = readSimpleChatRetryContext(assistantMessage?.retryContext, {
+      assistantMessageId: messageId,
+      projectId: projectIdRef.current,
+      taskId: taskIdRef.current,
+    });
+    if (!assistantMessage || !context || context.kind !== 'chat') {
+      setMessages(previous => previous.map(message => message.id === messageId
+        ? {
+          ...message,
+          status: 'failed',
+          error: { message: '该请求缺少可恢复信息，无法重试。', retryable: false },
+        }
+        : message));
+      return;
+    }
+    const userMessage = messagesRef.current.find(message => message.id === context.userMessageId);
+    if (!userMessage || userMessage.role !== 'user') {
+      setMessages(previous => previous.map(message => message.id === messageId
+        ? {
+          ...message,
+          status: 'failed',
+          error: { message: '原始用户消息不存在，无法重试。', retryable: false },
+        }
+        : message));
+      return;
+    }
+    await executeChatRequest(context, userMessage);
+  }, [executeChatRequest, isStreaming]);
   const regenerateLast = () => { if (messages.length < 2) return; const lastUser = [...messages].reverse().find(m => m.role === 'user'); if (lastUser) { setMessages(prev => prev.slice(0, -2)); setInput(lastUser.content); setTimeout(() => { const btn = document.getElementById('send-btn') as HTMLButtonElement; btn?.click(); }, 50); } };
   const continueConversation = (msg: SimpleChatMessage) => { setInput('继续'); };
   const makeShorter = (msg: SimpleChatMessage) => {
@@ -1765,7 +1887,7 @@ export default function ChatArea({
                     ? 'bg-primary text-primary-foreground rounded-br-md'
                     : 'bg-card border border-border rounded-bl-md'
                 }`}>
-                  {msg.role === 'assistant' && !msg.content && isStreaming && idx === messages.length - 1 ? (
+                  {msg.role === 'assistant' && !msg.content && msg.status === 'streaming' ? (
                     <div className="flex items-center gap-1 py-1">
                       <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '0ms' }} />
                       <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -1794,6 +1916,25 @@ export default function ChatArea({
                       <AgentRunMessageProgress runId={msg.agentRunId} />
                     </div>
                   )}
+                  {msg.role === 'assistant' && msg.status === 'failed' && (
+                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-destructive/20 pt-2">
+                      <span className="text-xs text-destructive">
+                        {msg.error?.message || '请求失败'}
+                      </span>
+                      {msg.error?.retryable && msg.retryContext && (
+                        <button
+                          type="button"
+                          onClick={() => void retryFailedMessage(msg.id)}
+                          disabled={isStreaming}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="重试失败请求"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          重试
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {msg.images && msg.images.length > 0 && (
                     <div className="flex gap-2 mt-2 flex-wrap">
                       {msg.images.map((url, i) => (
@@ -1804,7 +1945,7 @@ export default function ChatArea({
                   )}
                 </div>
                 {/* Message Operations */}
-                {msg.role === 'assistant' && msg.content && !isStreaming && (
+                {msg.role === 'assistant' && msg.content && !isStreaming && msg.status !== 'failed' && (
                   <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity flex-wrap">
                     <button onClick={() => copyMessage(msg.content)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
                     <button onClick={regenerateLast} className="p-1 rounded hover:bg-muted text-muted-foreground" title="重新生成"><RefreshCw className="w-3 h-3" /></button>

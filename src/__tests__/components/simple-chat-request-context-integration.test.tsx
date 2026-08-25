@@ -210,7 +210,7 @@ function installLocalStorage(): void {
 }
 
 function mockStartupRequests(
-  chatResponse = streamResponse(),
+  chatResponse: Response | Response[] = streamResponse(),
   models = [{ id: 'chat-model', name: 'Chat model', providerId: 'provider-1' }],
   deepResearchResponses: Response[] = [streamResponse()],
 ): void {
@@ -243,6 +243,9 @@ function mockStartupRequests(
           placementId: 'placement-current',
           entityId: payload.entityId,
         }));
+      }
+      if (Array.isArray(chatResponse)) {
+        return Promise.resolve(chatResponse.shift() || streamResponse());
       }
       return Promise.resolve(chatResponse);
     }
@@ -530,6 +533,109 @@ describe('simple-chat request context integration', () => {
     expect(requestPayloads('/api/simple-chat/chat')[1]).toMatchObject({
       model: 'next-model',
       providerId: 'next-provider',
+    });
+  });
+
+  it('retries a failed assistant in place with its frozen model and web-search context', async () => {
+    const onUpdateTask = vi.fn();
+    const firstResponse = createDeferredSseResponse();
+    const retryResponse = createDeferredSseResponse();
+    mockStartupRequests([firstResponse.response, retryResponse.response], [
+      { id: 'start-model', name: 'Start model', providerId: 'start-provider' },
+      { id: 'next-model', name: 'Next model', providerId: 'next-provider' },
+    ]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const task = createTask();
+    task.model = 'start-model';
+    task.providerId = 'start-provider';
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+
+    fireEvent.click(screen.getByTitle('联网搜索'));
+    submitText('frozen request');
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(1));
+    await act(async () => {
+      firstResponse.emit({ type: 'error', error: 'supplier failed' });
+      firstResponse.close();
+    });
+
+    const retryButton = await screen.findByRole('button', { name: '重试' });
+    const failedTask = onUpdateTask.mock.calls
+      .map(([updatedTask]) => updatedTask as SimpleChatTask)
+      .findLast(updatedTask => updatedTask.messages.some(message => message.status === 'failed'));
+    const originalIds = failedTask?.messages.map(message => message.id);
+
+    fireEvent.click(screen.getByRole('button', { name: /Start model/u }));
+    fireEvent.click(screen.getByRole('option', { name: /Next model/u }));
+    fireEvent.click(screen.getByTitle('联网搜索'));
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(2));
+
+    const [firstPayload, retryPayload] = requestPayloads('/api/simple-chat/chat');
+    expect(retryPayload).toMatchObject({
+      model: firstPayload.model,
+      providerId: firstPayload.providerId,
+      webSearch: true,
+      responseMessageId: firstPayload.responseMessageId,
+      idempotencyKey: firstPayload.idempotencyKey,
+    });
+    expect(firstPayload.idempotencyKey).toEqual(expect.any(String));
+    await waitFor(() => {
+      const latestTask = onUpdateTask.mock.calls.at(-1)?.[0] as SimpleChatTask;
+      expect(latestTask.messages.map(message => message.id)).toEqual(originalIds);
+    });
+
+    await act(async () => {
+      retryResponse.emit({ type: 'text', content: 'recovered' });
+      retryResponse.emit({ type: 'done' });
+      retryResponse.close();
+    });
+    await waitFor(() => expect(document.body.textContent).toContain('recovered'));
+  });
+
+  it('reuses managed attachment references without registering them again during retry', async () => {
+    const onUpdateTask = vi.fn();
+    const firstResponse = createDeferredSseResponse();
+    const retryResponse = createDeferredSseResponse();
+    mockStartupRequests([firstResponse.response, retryResponse.response]);
+    vi.stubGlobal('FileReader', class {
+      result = VALID_IMAGE;
+      onload: ((event: ProgressEvent<FileReader>) => void) | null = null;
+
+      readAsDataURL(): void {
+        this.onload?.({ target: this } as unknown as ProgressEvent<FileReader>);
+      }
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    const { container } = render(<ChatAreaHarness initialTask={createTask()} onUpdateTask={onUpdateTask} />);
+    const upload = container.querySelector<HTMLInputElement>('#chat-file-upload');
+    fireEvent.change(upload!, { target: { files: [new File(['valid'], 'valid.png', { type: 'image/png' })] } });
+    await waitFor(() => expect(container.querySelectorAll('img')).toHaveLength(1));
+    submitText('describe this image');
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(2));
+
+    await act(async () => {
+      firstResponse.emit({ type: 'error', error: 'supplier failed' });
+      firstResponse.close();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(3));
+
+    const payloads = requestPayloads('/api/simple-chat/chat');
+    expect(payloads.filter(payload => payload.assetAction === 'register')).toHaveLength(1);
+    const requests = payloads.filter(payload => payload.assetAction !== 'register');
+    expect((requests[1].messages as Array<{ images?: string[] }>).at(-1)?.images).toEqual(['/managed/current.png']);
+
+    await act(async () => {
+      retryResponse.emit({ type: 'text', content: 'image recovered' });
+      retryResponse.emit({ type: 'done' });
+      retryResponse.close();
     });
   });
 
