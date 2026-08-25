@@ -16,7 +16,7 @@ interface ModelNameEntry {
 
 /**
  * Mapping rules: key is a lowercase substring to match against model ID.
- * First match wins, so more specific patterns should come first.
+ * The longest matching pattern wins; ties preserve declaration order.
  */
 const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   // ===== Image Models =====
@@ -31,6 +31,7 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   // PearAPI nano-banana models (display names per PearAPI website convention)
   { pattern: 'nano-banana-pro-4k', entry: { name: 'Nano Banana Pro 4K', short: 'NB Pro 4K', type: 'image', provider: 'PearAPI' } },
   { pattern: 'nano-banana-2-4k', entry: { name: 'Nano Banana 2 4K', short: 'NB2 4K', type: 'image', provider: 'PearAPI' } },
+  { pattern: 'nano-banana-2-lite', entry: { name: 'Nano Banana 2 Lite', short: 'NB2 Lite', type: 'image', provider: 'PearAPI' } },
   { pattern: 'nano-banana-pro', entry: { name: 'Nano Banana Pro', short: 'NB Pro', type: 'image', provider: 'PearAPI' } },
   { pattern: 'nano-banana-2', entry: { name: 'Nano Banana 2', short: 'NB2', type: 'image', provider: 'PearAPI' } },
   { pattern: 'nano-banana', entry: { name: 'Nano Banana', short: 'NB', type: 'image', provider: 'PearAPI' } },
@@ -53,6 +54,8 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'gpt-4o-image', entry: { name: 'GPT-4o 图像', type: 'image', provider: 'OpenAI' } },
   // OpenAI GPT-image
   { pattern: 'gpt-image-2-c', entry: { name: 'GPT Image 2 Chat', type: 'image', provider: 'OpenAI' } },
+  { pattern: 'gpt-image-2-4k', entry: { name: 'GPT Image 2 4K', short: 'GPT Image 2 4K', type: 'image', provider: 'OpenAI' } },
+  { pattern: 'gpt-image-2-2k', entry: { name: 'GPT Image 2 2K', short: 'GPT Image 2 2K', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-2', entry: { name: 'GPT Image 2', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-1.5', entry: { name: 'GPT Image 1.5', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-1', entry: { name: 'GPT Image 1', type: 'image', provider: 'OpenAI' } },
@@ -74,6 +77,7 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'sdxl', entry: { name: 'SDXL', type: 'image', provider: 'Stability AI' } },
   { pattern: 'stable-diffusion', entry: { name: 'Stable Diffusion', short: 'SD', type: 'image', provider: 'Stability AI' } },
   // FLUX
+  { pattern: 'flux2-klein', entry: { name: 'FLUX 2 Klein', short: 'FLUX 2 Klein', type: 'image', provider: 'Black Forest Labs' } },
   { pattern: 'flux-2-pro', entry: { name: 'FLUX 2 Pro', type: 'image', provider: 'Black Forest Labs' } },
   { pattern: 'flux-2-flex', entry: { name: 'FLUX 2 Flex', type: 'image', provider: 'Black Forest Labs' } },
   { pattern: 'flux-kontext-max', entry: { name: 'FLUX Kontext Max', type: 'image', provider: 'Black Forest Labs' } },
@@ -100,13 +104,20 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   // Jimeng
   { pattern: 'jimeng', entry: { name: '即梦', type: 'image', provider: 'ByteDance' } },
   // 可灵
+  { pattern: 'kling-v3-omni', entry: { name: '可灵 V3 Omni 视频', short: 'Kling V3 Omni', type: 'video', provider: 'Kuaishou' } },
   { pattern: 'kling-v3', entry: { name: '可灵 V3', type: 'image', provider: 'Kuaishou' } },
   { pattern: 'kling-v2', entry: { name: '可灵 V2', type: 'image', provider: 'Kuaishou' } },
   { pattern: 'kling', entry: { name: '可灵', type: 'image', provider: 'Kuaishou' } },
   // HiDream
   { pattern: 'hidream', entry: { name: 'HiDream', type: 'image', provider: 'HiDream AI' } },
   // Grok Imagine
+  { pattern: 'grok-imagine-video-1.5', entry: { name: 'Grok Imagine Video 1.5', short: 'GIV 1.5', type: 'video', provider: 'xAI' } },
+  { pattern: 'grok-imagine-1.5-video', entry: { name: 'Grok Imagine Video 1.5', short: 'GIV 1.5', type: 'video', provider: 'xAI' } },
+  { pattern: 'grok-imagine-video', entry: { name: 'Grok Imagine Video', short: 'GIV', type: 'video', provider: 'xAI' } },
+  { pattern: 'grok-imagine-image', entry: { name: 'Grok Imagine Image', short: 'GII', type: 'image', provider: 'xAI' } },
   { pattern: 'grok-imagine', entry: { name: 'Grok Imagine', type: 'image', provider: 'xAI' } },
+  { pattern: 'happyhorse', entry: { name: 'HappyHorse', short: 'HappyHorse', type: 'video', provider: 'HappyHorse' } },
+  { pattern: 'gemini-omni', entry: { name: 'Gemini Omni', short: 'Gemini Omni', type: 'video', provider: 'Google' } },
   // Sora (视频模型为主，sora-2/sora-2-pro为新版本)
   { pattern: 'sora-2-pro', entry: { name: 'Sora 2 Pro', type: 'video', provider: 'OpenAI' } },
   { pattern: 'sora-2', entry: { name: 'Sora 2', type: 'video', provider: 'OpenAI' } },
@@ -118,9 +129,15 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'wan2.7-image', entry: { name: '万相 2.7', type: 'image', provider: 'Alibaba' } },
   { pattern: 'wan2.7', entry: { name: '万相 2.7', type: 'image', provider: 'Alibaba' } },
   // Seedance (字节视频)
+  { pattern: 'seedance-2-5', entry: { name: 'Seedance 2.5', short: 'Seedance 2.5', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'seedance-2.5', entry: { name: 'Seedance 2.5', short: 'Seedance 2.5', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'seedance-1.5', entry: { name: 'Seedance 1.5 Pro', short: 'Seedance 1.5 Pro', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'seedance-1.0', entry: { name: 'Seedance 1.0 Pro', short: 'Seedance 1.0 Pro', type: 'video', provider: 'ByteDance' } },
   { pattern: 'seedance', entry: { name: 'Seedance', type: 'video', provider: 'ByteDance' } },
   // Seedream (字节)
   { pattern: 'seedream-5', entry: { name: 'Seedream 5', type: 'image', provider: 'ByteDance' } },
+  { pattern: 'seedream-4-5', entry: { name: 'Seedream 4.5', short: 'Seedream 4.5', type: 'image', provider: 'ByteDance' } },
+  { pattern: 'seedream-4-0', entry: { name: 'Seedream 4.0', short: 'Seedream 4.0', type: 'image', provider: 'ByteDance' } },
   // Veo (Google视频)
   { pattern: 'veo3.1', entry: { name: 'Veo 3.1', type: 'video', provider: 'Google' } },
   // Imagen 4
@@ -255,6 +272,11 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'meshy', entry: { name: 'Meshy', type: '3d', provider: 'Meshy' } },
 
   // ===== Image Edit Models =====
+  { pattern: 'seedvr2-upscaler', entry: { name: 'SeedVR2 Upscaler', short: 'SeedVR2 Upscaler', type: 'image', provider: 'ByteDance' } },
+  { pattern: 'seedvr2', entry: { name: 'SeedVR2 Upscaler', short: 'SeedVR2 Upscaler', type: 'image', provider: 'ByteDance' } },
+  { pattern: 'seedvr-upscaler', entry: { name: 'SeedVR', short: 'SeedVR', type: 'image', provider: 'ByteDance' } },
+  { pattern: 'seedvr', entry: { name: 'SeedVR', short: 'SeedVR', type: 'image', provider: 'ByteDance' } },
+  { pattern: 'real-esrgan', entry: { name: 'Real-ESRGAN', short: 'Real-ESRGAN', type: 'image', provider: 'AI' } },
   { pattern: 'inpainting', entry: { name: '图像修复', type: 'imageEdit' } },
   { pattern: 'outpainting', entry: { name: '图像扩展', type: 'imageEdit' } },
   { pattern: 'upscale', entry: { name: '图像放大', type: 'imageEdit' } },
@@ -301,19 +323,26 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'yolo', entry: { name: 'YOLO', type: 'layer' } },
 ];
 
+function findModelNameEntry(modelId: string): ModelNameEntry | undefined {
+  const lower = modelId.toLowerCase();
+  let bestMatch: { patternLength: number; entry: ModelNameEntry } | undefined;
+
+  for (const { pattern, entry } of MODEL_NAME_MAP) {
+    if (lower.includes(pattern) && pattern.length > (bestMatch?.patternLength ?? -1)) {
+      bestMatch = { patternLength: pattern.length, entry };
+    }
+  }
+
+  return bestMatch?.entry;
+}
+
 /**
  * Get the market common name for a model ID.
  * Returns the original ID if no mapping is found.
  */
 export function getModelDisplayName(modelId: string): string {
   if (!modelId) return modelId;
-  const lower = modelId.toLowerCase();
-  for (const { pattern, entry } of MODEL_NAME_MAP) {
-    if (lower.includes(pattern)) {
-      return entry.name;
-    }
-  }
-  return modelId;
+  return findModelNameEntry(modelId)?.name ?? modelId;
 }
 
 /**
@@ -322,13 +351,8 @@ export function getModelDisplayName(modelId: string): string {
  */
 export function getModelShortName(modelId: string): string {
   if (!modelId) return modelId;
-  const lower = modelId.toLowerCase();
-  for (const { pattern, entry } of MODEL_NAME_MAP) {
-    if (lower.includes(pattern)) {
-      return entry.short || entry.name;
-    }
-  }
-  return modelId;
+  const entry = findModelNameEntry(modelId);
+  return entry?.short ?? entry?.name ?? modelId;
 }
 
 /**
@@ -336,13 +360,7 @@ export function getModelShortName(modelId: string): string {
  */
 export function getModelProvider(modelId: string): string | undefined {
   if (!modelId) return undefined;
-  const lower = modelId.toLowerCase();
-  for (const { pattern, entry } of MODEL_NAME_MAP) {
-    if (lower.includes(pattern)) {
-      return entry.provider;
-    }
-  }
-  return undefined;
+  return findModelNameEntry(modelId)?.provider;
 }
 
 /**
@@ -350,16 +368,14 @@ export function getModelProvider(modelId: string): string | undefined {
  */
 export function getModelInfo(modelId: string): { name: string; short: string; provider?: string; type: string } {
   if (!modelId) return { name: modelId, short: modelId, type: 'unknown' };
-  const lower = modelId.toLowerCase();
-  for (const { pattern, entry } of MODEL_NAME_MAP) {
-    if (lower.includes(pattern)) {
-      return {
-        name: entry.name,
-        short: entry.short || entry.name,
-        provider: entry.provider,
-        type: entry.type,
-      };
-    }
+  const entry = findModelNameEntry(modelId);
+  if (entry) {
+    return {
+      name: entry.name,
+      short: entry.short || entry.name,
+      provider: entry.provider,
+      type: entry.type,
+    };
   }
   return { name: modelId, short: modelId, type: 'unknown' };
 }
