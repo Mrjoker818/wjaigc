@@ -1730,3 +1730,20 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 本次网络窗口共 6 个事件、3 个请求尝试：聊天 1、操作审计 1、用户数据同步 1；三者均按预期离线失败。`/api/client-error` 为 0，没有再形成 `/api/client-error <-> /api/activity` 递归；同一时间窗 Console error/warning 为 `0/0`。
 - 在线“重试”点击已经发出，但等待 APIMart 终态时 Chrome 控制连接超时，最终 UI 与本次请求快照未重新取得。为避免重复调用，没有再次点击或伪写通过；上一候选 `b76f62af` 已证明普通原位重试可在同一消息成功并携带单一应用幂等键，但最终候选仍需补齐终态证据。
 - **回归结论：遥测递归云端通过；V588-CHAT-002 整体仍为部分通过。** Deep Research、CanvasEditor、刷新中断和最终候选普通重试仍未关闭。证据见 `docs/testing/evidence/v588-chat-002-7bf1cc3c-cloud-2026-08-25.json`。
+
+## 2026-08-26 V588-CHAT-002 最终候选补充验收
+
+- Google Chrome“用户1”在同一 `7bf1cc3c` 云端构建中新建对话并选择 `Deepseek V4 Flash · APImartLLM`。普通对话使用标记 `V588_CHAT_002_FINAL_1787676333063` 执行短时离线注入，失败态只有 1 条用户消息、1 条失败助手消息和 1 个专用“重试”按钮。
+- 恢复在线后只点击一次“重试”。CDP 记录只有 1 个 `POST /api/simple-chat/chat`，请求固定为 `providerId=api_1778428130626_2qpg71v`、`modelId=deepseek-v4-flash`，Header 与正文复用同一 `simple-chat-retry:iji5m7v5mt8wbh6b:ig5aj1bs` 幂等键。最终界面只有 1 条用户消息和 1 条精确标记答案，失败文本与重试按钮均消失。
+- **普通对话原位重试云端通过。** 这关闭了最终候选的完成 UI、请求快照、冻结模型配对和单请求证据缺口；不扩大为第三方供应商严格 exactly-once 保证。
+- Deep Research 使用标记 `V588_RESEARCH_RETRY_1787676416161` 重复相同故障注入：先得到 1 条失败助手消息和 1 个“重试”按钮，再单击一次重试并在同一消息位置真实流出研究报告。长流期间 Chrome 标签控制锁未释放，未能取得明确完成态、请求快照和 Artifact 数量；随后服务器同步探针返回 200，但标记尚未进入 `chat_simple_projects` 权威快照。
+- **Deep Research 仍为部分通过。** 不把部分正文当作完成，不重复提交；CanvasEditor、刷新中断恢复及单一 Artifact/版本仍未关闭。证据已增补至 `docs/testing/evidence/v588-chat-002-7bf1cc3c-cloud-2026-08-25.json`。
+
+## 2026-08-26 V588-CHAT-002 CanvasEditor 云端失败重试与选区契约修复
+
+- Google Chrome“用户1”在现有 `/simple-chat` 标签打开写作画布，正文为“前缀原文后缀”，只选中“原文”。短时离线提交后，行内错误精确显示 `Failed to fetch`，选区、修改指令和正文均保留，版本仍为 `1`，专用“重试修改”按钮只有 `1` 个。
+- 恢复网络后只点击一次重试。浏览器记录只有 `1` 个 `POST /api/simple-chat/chat`，HTTP `200`，精确使用 `api_1778428130626_2qpg71v + deepseek-v4-flash` 和同一 `simple-chat-canvas-edit:*` 幂等键；版本只增加到 `2`，错误与重试入口消失，Console error/warning 为 `0/0`。因此失败快照、冻结模型配对、单请求和单成功版本成立。
+- 云端结果实际为“前缀原文 + 新标记 + 后缀”，未严格替换旧选区。根因不是重试状态，而是选区请求只发送片段，系统提示却仍要求“输出修改后的完整文本”，契约互相矛盾。
+- 新增集成 RED 后，以最小改动把选区编辑提示改为“只输出修改后的选中文本片段”，全文编辑契约不变。修复提交为 `e0ec998d28a2bad0fc27981220bff42fb9a390d7`；专项 `6 files / 39 tests`、全仓 `541 files / 3533 tests`、TypeScript、零错误 Lint 和 Next.js `116/116` 构建通过。`20 files / 117` 项 PostgreSQL 专项仍因缺少隔离测试库跳过。
+- 受保护基线功能与证据合同均存在，但脚本被 4 个此前未批准漂移路径阻塞；本次新增的 `chat-area.tsx` 不在阻塞列表。未擅自扩大白名单。
+- **回归结论：CanvasEditor 确定性重试云端通过，选区输出质量已本地修复 / 新提交云端待验。** 在 Coze 拉取 `e0ec998d` 并得到精确替换结果前，不关闭 CanvasEditor 整项；刷新中断恢复和 Deep Research 完成态仍保持未验证。

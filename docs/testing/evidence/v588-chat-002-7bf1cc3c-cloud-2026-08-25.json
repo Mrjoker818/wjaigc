@@ -41,9 +41,97 @@
   },
   "retryCompletion": {
     "clickIssued": true,
-    "finalUiCaptured": false,
-    "status": "unverified",
-    "reason": "Google Chrome control session timed out while waiting for the provider response; no duplicate retry was issued after losing the evidence cursor."
+    "recheckedAt": "2026-08-26T00:41:00+08:00",
+    "marker": "V588_CHAT_002_FINAL_1787676333063",
+    "finalUiCaptured": true,
+    "status": "passed",
+    "failureState": {
+      "userMessageCount": 1,
+      "retryButtonCount": 1,
+      "assistantFailureMessageCount": 1,
+      "renderedFailureTextCount": 2
+    },
+    "retryRequest": {
+      "count": 1,
+      "endpoint": "/api/simple-chat/chat",
+      "method": "POST",
+      "providerId": "api_1778428130626_2qpg71v",
+      "modelId": "deepseek-v4-flash",
+      "taskId": "iji5m7v5mt8wbh6b",
+      "responseMessageId": "ig5aj1bs",
+      "idempotencyKey": "simple-chat-retry:iji5m7v5mt8wbh6b:ig5aj1bs"
+    },
+    "finalState": {
+      "userMessageCount": 1,
+      "answerCount": 1,
+      "retryButtonCount": 0,
+      "failureTextCount": 0,
+      "answer": "V588_CHAT_002_FINAL_1787676333063"
+    }
   },
-  "conclusion": "The offline telemetry recursion is closed on the deployed commit. The failed-message UI and retry entry are verified. The final response, retry request snapshot, Deep Research, CanvasEditor and refresh-interruption scenarios remain unverified."
+  "deepResearchRetry": {
+    "marker": "V588_RESEARCH_RETRY_1787676416161",
+    "status": "partially_verified",
+    "failureState": {
+      "userMessageCount": 1,
+      "retryButtonCount": 1,
+      "assistantFailureMessageCount": 1,
+      "renderedFailureTextCount": 2,
+      "message": "Deep Research 失败，请重试。"
+    },
+    "retryClickCount": 1,
+    "partialStreamingResultObserved": true,
+    "finalUiCaptured": false,
+    "artifactCountVerified": false,
+    "serverPersistenceProbe": {
+      "endpoint": "/api/user-data/sync?key=chat_simple_projects",
+      "httpStatus": 200,
+      "markerMatches": 0,
+      "recheckedAt": "2026-08-26T01:00:00+08:00",
+      "projectCount": 1,
+      "taskCount": 4
+    },
+    "reason": "The same failed message resumed and streamed a real report, but the long-lived Chrome stream retained the tab control lock before a completed UI state, request snapshot, and single-Artifact count could be captured. No second retry was issued."
+  },
+  "canvasEditorRetry": {
+    "marker": "V588_CANVAS_RETRY_OK_1787677800",
+    "testedOnDeployedSourceCommit": "7bf1cc3c70088090bf04a42036112fff61696359",
+    "status": "retry_contract_passed_but_selection_output_failed",
+    "failureInjection": {
+      "error": "Failed to fetch",
+      "selection": "原文",
+      "instructionPreserved": true,
+      "contentPreserved": true,
+      "versionBeforeRetry": 1,
+      "retryButtonCount": 1
+    },
+    "retry": {
+      "clickCount": 1,
+      "requestCount": 1,
+      "httpStatus": 200,
+      "endpoint": "/api/simple-chat/chat",
+      "providerId": "api_1778428130626_2qpg71v",
+      "modelId": "deepseek-v4-flash",
+      "idempotencyKey": "simple-chat-canvas-edit:2p7wgmygmsoo15gz:mt97hb67:w0n888ru",
+      "versionAfterRetry": 2,
+      "retryButtonCountAfterSuccess": 0,
+      "consoleErrors": 0,
+      "consoleWarnings": 0
+    },
+    "expectedContent": "前缀V588_CANVAS_RETRY_OK_1787677800后缀",
+    "actualContent": "前缀原文\nV588_CANVAS_RETRY_OK_1787677800后缀",
+    "rootCause": "Selection requests sent only the selected fragment while the system prompt still required a complete document, so the provider could repeat the original fragment before the replacement.",
+    "localFix": {
+      "commit": "e0ec998d28a2bad0fc27981220bff42fb9a390d7",
+      "behavior": "Selection edits now request only the replacement fragment; whole-document edits retain the complete-document contract.",
+      "focusedRegression": "6 files / 39 tests passed",
+      "fullRegression": "541 files / 3533 tests passed; 20 files / 117 PostgreSQL tests skipped because no isolated test database was configured",
+      "typecheck": "passed",
+      "lint": "0 errors / 967 historical warnings",
+      "build": "passed, 116/116 pages",
+      "protectedBaseline": "blocked by four pre-existing unapproved drift paths; the new chat-area.tsx change is not one of them",
+      "cloudRetest": "pending Coze pull"
+    }
+  },
+  "conclusion": "The offline telemetry recursion and ordinary-chat retry are closed on the deployed commit. Deep Research is only partially verified. CanvasEditor failure and deterministic retry behavior passed, but the deployed selection-output contract failed and was fixed locally in e0ec998d pending Coze retest. Refresh-interruption remains unverified."
 }

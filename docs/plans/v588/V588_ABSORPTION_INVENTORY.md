@@ -368,3 +368,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - TDD 按 RED -> 最小实现完成；聚焦套件 `7 files / 71 tests`、全仓 `540 files / 3531 tests` 通过。另有 `20 files / 117 tests` 因缺少隔离 PostgreSQL 测试库明确跳过；TypeScript 通过，ESLint 为 `0 errors / 967 historical warnings`，Next.js 生产构建生成 `116/116` 页面。
 - 全量回归先后暴露一个过时源码字符串断言和一个 Windows/Git 同步文件系统测试的 20 秒门禁抖动；前者改为验证冻结的 `context.assistantMessageId`，后者只把同步 Git 测试预算校准为 45 秒，没有增加任何业务等待或掩盖异步状态。
 - **状态：本地已实现 / 云端待验。** 应用内原位消息与下游幂等透传已验证；不宣称不支持幂等 Header 的第三方文本供应商具有严格 exactly-once。Coze 仍需验证真实失败、原位重试、刷新恢复、单 Artifact/单版本和浏览器健康后才能标记为已吸收。
+
+## 2026-08-26 V588-CHAT-002 CanvasEditor 补充检查点
+
+- 旧云端 `7bf1cc3c` 已真实证明 CanvasEditor 离线失败保留正文、选区和指令；恢复在线后只发送一个重试请求、只新增一个版本，并复用冻结的 APIMart 模型配对和应用幂等键。
+- 同一验收发现当前分支自身的选区提示契约缺陷：只发送选区片段，却要求供应商返回完整文本。该问题不是 V5.8.8 donor 迁移项，也未通过复制 donor 代码处理。
+- 按 RED -> 最小修复新增选区提示合同，提交 `e0ec998d28a2bad0fc27981220bff42fb9a390d7`。全文编辑行为、会话所有权、模型选择、幂等键、`stable` 和 V5.8.8 donor 均未改动。
+- 专项 `39/39`、全仓 `3533` 项业务断言、TypeScript、零错误 Lint 和 `116/116` 构建通过；`117` 项 PostgreSQL 测试仍因缺少隔离库跳过。保护门禁的 4 个既有未批准漂移继续单列，不静默加入白名单。
+- **状态：CanvasEditor 重试机制云端通过 / 选区输出修复待 Coze 验收。** 在精确替换、单版本和浏览器健康再次取得真实证据前，不把 V588-CHAT-002 标记为完整吸收，也不进入下一吸收项。
