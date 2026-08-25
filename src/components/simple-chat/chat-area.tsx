@@ -38,6 +38,8 @@ import {
 } from '@/lib/simple-chat-sse';
 import {
   applySimpleChatModelSelection,
+  buildSimpleChatHistoryRequestContext,
+  filterSimpleChatImageInputs,
   readSimpleChatModelSelection,
   type SimpleChatModelSelection,
 } from '@/lib/simple-chat-request-context';
@@ -259,6 +261,7 @@ export default function ChatArea({
   const [responseSpeed, setResponseSpeed] = useState<ResponseSpeed>(task?.responseSpeed || 'balanced');
   const [appliedChatControls, setAppliedChatControls] = useState<SimpleChatTask['appliedChatControls']>(task?.appliedChatControls);
   const [controlNotice, setControlNotice] = useState<string | null>(null);
+  const [historyImageNotice, setHistoryImageNotice] = useState<string | null>(null);
   const [openModelMenu, setOpenModelMenu] = useState<'chat' | 'image' | null>(null);
 
   const handleChatModelSelect = useCallback((selection: SimpleChatModelSelection) => {
@@ -781,6 +784,14 @@ export default function ChatArea({
     if (!content && uploadedImages.length === 0) return;
     if (isStreaming || !project || !task) return;
 
+    const currentImages = filterSimpleChatImageInputs(
+      uploadedImages.map(attachment => attachment.url || ''),
+    );
+    if (currentImages.rejectedCount > 0) {
+      setSearchStatus('当前上传图片无效，请重新选择图片后发送。');
+      return;
+    }
+
     setIsStreaming(true);
     const requestProjectId = project.id;
     const requestTaskId = task.id;
@@ -866,24 +877,20 @@ export default function ChatArea({
         } catch {}
       }
 
-      // 多轮图片上下文：仅保留最近 3 轮用户消息的图片（更早的图片会消耗大量 token）
-      const historyMsgs = messages.filter(m => m.role !== 'search');
-      const recentUserImageIds = new Set(
-        historyMsgs.filter(m => m.role === 'user' && m.images && m.images.length > 0).slice(-3).map(m => m.id)
-      );
-      const collectedHistoryImages = historyMsgs
-        .filter(m => recentUserImageIds.has(m.id))
-        .flatMap(m => m.images || []);
-      setHistoryImages(collectedHistoryImages);
+      const historyContext = buildSimpleChatHistoryRequestContext(messages);
+      setHistoryImages(historyContext.images);
+      setHistoryImageNotice(historyContext.rejectedCount > 0
+        ? `已忽略 ${historyContext.rejectedCount} 张失效历史图片，本次请求继续发送。`
+        : null);
 
       allMessages = [
         ...systemMessages,
-        ...historyMsgs.map(m => ({
-          role: m.role,
-          content: m.content,
-          images: m.role === 'user' && recentUserImageIds.has(m.id) ? m.images : undefined,
+        ...historyContext.messages.map(message => ({
+          role: message.role,
+          content: message.content,
+          ...(message.images?.length ? { images: message.images } : {}),
         })),
-        { role: 'user', content: userMsg.content, images: userMsg.images },
+        { role: 'user', content: userMsg.content, ...(userMsg.images?.length ? { images: userMsg.images } : {}) },
       ];
 
       const apiKnowledgeItems = knowledgeItems
@@ -1582,6 +1589,7 @@ export default function ChatArea({
           <Bot className="w-4 h-4 text-muted-foreground" />
           <span className="text-xs text-muted-foreground">Agent:</span>
           {controlNotice && <span className="max-w-[360px] truncate text-[11px] text-muted-foreground" title={controlNotice}>· {controlNotice}</span>}
+          {historyImageNotice && <span className="max-w-[360px] truncate text-[11px] text-muted-foreground" title={historyImageNotice}>· {historyImageNotice}</span>}
           {activeAgent ? (
             <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full flex items-center gap-1">
               {activeAgent.emoji || '🤖'} {activeAgent.name}
