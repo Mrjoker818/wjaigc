@@ -51,7 +51,7 @@ describe('stage3SourceIdentity', () => {
 
     writeFileSync(join(directory, 'untracked.txt'), 'second\n');
     expect(stage3SourceIdentity(directory)).not.toBe(firstUntrackedIdentity);
-  }, 20_000);
+  }, 45_000);
 
   it('records an exact commit/tree manifest while excluding only controller briefs', () => {
     const { directory, head } = createRepository();

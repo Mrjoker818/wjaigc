@@ -42,7 +42,7 @@ describe('Agent runtime surface boundaries', () => {
     expect(canvas).toContain('selectedEntityIds: chatSelectedEntityIds');
     expect(standalone).toContain('sourceVersionIds: requestSourceVersionIds');
     expect(standalone).toContain('selectedEntityIds: requestSelectedEntityIds');
-    expect(standalone).toContain('message.id === assistantMessageId');
+    expect(standalone).toContain('message.id === context.assistantMessageId');
     expect(editor).toContain('selectedEntityId');
   });
 
