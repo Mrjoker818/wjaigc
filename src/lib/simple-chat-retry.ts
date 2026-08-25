@@ -74,6 +74,39 @@ const MAX_ARRAY_ITEMS = 64;
 const MAX_CONTEXT_BYTES = 128 * 1024;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9:._-]+$/;
 
+export type SimpleChatIdempotencyKeyResolution =
+  | { ok: true; key?: string }
+  | { ok: false; status: 400 | 409; code: 'IDEMPOTENCY_KEY_INVALID' | 'IDEMPOTENCY_KEY_CONFLICT' };
+
+function normalizeRequestIdempotencyKey(value: unknown, provided: boolean): string | null | undefined {
+  if (!provided) return undefined;
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (
+    !normalized
+    || normalized.length > MAX_IDENTIFIER_LENGTH
+    || !IDEMPOTENCY_KEY_PATTERN.test(normalized)
+  ) return null;
+  return normalized;
+}
+
+export function resolveSimpleChatRequestIdempotencyKey(
+  headers: Pick<Headers, 'get'>,
+  bodyValue: unknown,
+): SimpleChatIdempotencyKeyResolution {
+  const rawHeader = headers.get('idempotency-key');
+  const bodyKey = normalizeRequestIdempotencyKey(bodyValue, bodyValue !== undefined);
+  const headerKey = normalizeRequestIdempotencyKey(rawHeader, rawHeader !== null);
+  if (bodyKey === null || headerKey === null) {
+    return { ok: false, status: 400, code: 'IDEMPOTENCY_KEY_INVALID' };
+  }
+  if (bodyKey && headerKey && bodyKey !== headerKey) {
+    return { ok: false, status: 409, code: 'IDEMPOTENCY_KEY_CONFLICT' };
+  }
+  const key = bodyKey || headerKey;
+  return key ? { ok: true, key } : { ok: true };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

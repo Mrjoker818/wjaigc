@@ -31,6 +31,7 @@ import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gat
 import { executeAdmittedToolCall } from '@/lib/chat-tools';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
+import { resolveSimpleChatRequestIdempotencyKey } from '@/lib/simple-chat-retry';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -342,6 +343,18 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const idempotencyKeyResolution = resolveSimpleChatRequestIdempotencyKey(
+    request.headers,
+    body.idempotencyKey,
+  );
+  if (!idempotencyKeyResolution.ok) {
+    return Response.json(
+      { error: idempotencyKeyResolution.code },
+      { status: idempotencyKeyResolution.status },
+    );
+  }
+  const requestIdempotencyKey = idempotencyKeyResolution.key;
+
   // 查找提供商
   let provider;
   if (agentRuntimeMode === 'agent-v2') {
@@ -380,7 +393,7 @@ export async function POST(request: NextRequest) {
           selectedEntityIds,
           mode: 'vision',
           conversationId: body.projectId,
-          idempotencyKey: body.idempotencyKey,
+          idempotencyKey: requestIdempotencyKey,
         }),
       });
       canonicalSourceUrls = sourceVersionIds.map(versionId => authorized.mediaByVersionId[versionId]);
@@ -630,6 +643,7 @@ export async function POST(request: NextRequest) {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${apiKey}`,
+            ...(requestIdempotencyKey ? { 'Idempotency-Key': requestIdempotencyKey } : {}),
           },
           body: JSON.stringify({
             model,

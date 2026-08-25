@@ -3,6 +3,7 @@ import { findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { resolveSimpleChatRequestIdempotencyKey } from '@/lib/simple-chat-retry';
 
 interface ResearchStep {
   step: number;
@@ -18,7 +19,19 @@ export async function POST(request: NextRequest) {
     model?: string;
     providerId?: string;
     depth?: 'quick' | 'standard' | 'deep';
+    idempotencyKey?: string;
   };
+  const idempotencyKeyResolution = resolveSimpleChatRequestIdempotencyKey(
+    request.headers,
+    body.idempotencyKey,
+  );
+  if (!idempotencyKeyResolution.ok) {
+    return Response.json(
+      { error: idempotencyKeyResolution.code },
+      { status: idempotencyKeyResolution.status },
+    );
+  }
+  const requestIdempotencyKey = idempotencyKeyResolution.key;
   const query = body.query || '';
   const model = body.model || 'gpt-4o-mini';
   const providerId = body.providerId || '';
@@ -57,7 +70,11 @@ export async function POST(request: NextRequest) {
 
         const planRes = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+            ...(requestIdempotencyKey ? { 'Idempotency-Key': `${requestIdempotencyKey}:plan` } : {}),
+          },
           body: JSON.stringify({ model, messages: [{ role: 'user', content: planPrompt }], stream: false }),
         });
 
@@ -129,7 +146,11 @@ ${searchContext}
 
         const reportRes = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+            ...(requestIdempotencyKey ? { 'Idempotency-Key': `${requestIdempotencyKey}:report` } : {}),
+          },
           body: JSON.stringify({
             model,
             messages: [{ role: 'user', content: reportPrompt }],
