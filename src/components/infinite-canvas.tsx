@@ -10162,8 +10162,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   }, [activateCanvasToolSession, getActiveImageData]);
 
   // 8. DOWNLOAD - popup with PNG/SVG/PSD
-  const handleOpenDownload = useCallback(() => {
-    const img = getActiveImageData();
+  const handleOpenDownload = useCallback((targetImage?: CanvasImage) => {
+    const img = targetImage ?? getActiveImageData();
     if (!img || !activateCanvasToolSession('download', 'image-toolbar', [img.id])) return;
     setDownloadFormat(img.mediaType === 'video' ? 'video' : 'png');
     setShowDownloadPopup(true);
@@ -12270,7 +12270,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                     </button>
                     <button
                       className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white/80 border border-white/10'}`}
-                      onClick={(e) => { e.stopPropagation(); selectImage(image.id); handleOpenDownload(); hideHoverToolbar(); }}
+                      onClick={(e) => { e.stopPropagation(); selectImage(image.id); handleOpenDownload(image); hideHoverToolbar(); }}
                       onMouseDown={(e) => e.stopPropagation()}
                       title="下载"
                     >
