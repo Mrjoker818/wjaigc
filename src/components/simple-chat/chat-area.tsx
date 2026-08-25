@@ -32,6 +32,10 @@ import {
   createWorkflowChatReturnMessage,
   parseWorkflowChatReturnIntent,
 } from "@/lib/asset-core/workflow-chat-return";
+import {
+  SimpleChatSseProtocolError,
+  consumeSimpleChatJsonStream,
+} from '@/lib/simple-chat-sse';
 
 type ChatModelInfo = {
   id: string;
@@ -47,6 +51,29 @@ type CanvasProjectOption = {
   id: string;
   name: string;
 };
+
+type SimpleChatStreamPayload = {
+  type?: string;
+  content?: string;
+  notices?: unknown;
+  appliedReasoningEffort?: unknown;
+  appliedResponseSpeed?: unknown;
+  degraded?: unknown;
+  status?: string;
+  resultCount?: number;
+  searchResults?: string;
+  label?: string;
+  runId?: string;
+  imageUrl?: string;
+  imageRef?: unknown;
+  prompt?: string;
+  error?: string;
+};
+
+function readSimpleChatStreamPayload(value: unknown): SimpleChatStreamPayload | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as SimpleChatStreamPayload;
+}
 
 function AgentRunMessageProgress({ runId }: { runId: string }) {
   const run = useAgentRunEvents(runId);
@@ -648,28 +675,20 @@ export default function ChatArea({
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('No response body');
-    const decoder = new TextDecoder();
-    let buffer = '';
+    if (!res.body) throw new Error('No response body');
     let result = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6).trim();
-          if (data === '[DONE]' || data === '') continue;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.type === 'content') result += parsed.content || '';
-          } catch {}
+    await consumeSimpleChatJsonStream(res.body, {
+      onEvent(value) {
+        const parsed = readSimpleChatStreamPayload(value);
+        if (!parsed) return;
+        if (
+          (parsed.type === 'text' || parsed.type === 'content')
+          && typeof parsed.content === 'string'
+        ) {
+          result += parsed.content;
         }
-      }
-    }
+      },
+    });
     if (!result.trim()) throw new Error('AI 未返回内容');
     return selectedText ? currentContent.replace(selectedText, result.trim()) : result.trim();
   }
@@ -879,28 +898,13 @@ export default function ChatArea({
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('No response body');
+      if (!res.body) throw new Error('No response body');
 
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!requestScopeIsCurrent()) {
-          await reader.cancel();
-          return;
-        }
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
-            if (data === '[DONE]' || data === '') continue;
-            try {
-              const parsed = JSON.parse(data);
+      const streamResult = await consumeSimpleChatJsonStream(res.body, {
+        isActive: requestScopeIsCurrent,
+        onEvent(value) {
+          const parsed = readSimpleChatStreamPayload(value);
+          if (!parsed) return;
               if (parsed.type === 'generation_controls') {
                 const notices = Array.isArray(parsed.notices) ? parsed.notices.filter((notice: unknown): notice is string => typeof notice === 'string') : [];
                 const appliedControls: SimpleChatTask['appliedChatControls'] = {
@@ -912,9 +916,10 @@ export default function ChatArea({
                 setControlNotice(notices[0] || `已应用：推理 ${parsed.appliedReasoningEffort || '默认'}，速度 ${parsed.appliedResponseSpeed || '均衡'}`);
                 setAppliedChatControls(appliedControls);
               } else if (parsed.type === 'search_status') {
-                setSearchStatus(parsed.status === 'completed' ? `搜索完成，找到 ${parsed.resultCount || 0} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
+                const resultCount = typeof parsed.resultCount === 'number' ? parsed.resultCount : 0;
+                setSearchStatus(parsed.status === 'completed' ? `搜索完成，找到 ${resultCount} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
                 // 搜索完成后，添加一条系统消息展示搜索结果
-                if (parsed.status === 'completed' && parsed.resultCount > 0) {
+                if (parsed.status === 'completed' && resultCount > 0) {
                   const searchMsg = {
                     id: 'search-' + Math.random().toString(36).slice(2, 8),
                     role: 'search' as const,
@@ -922,7 +927,7 @@ export default function ChatArea({
                     createdAt: Date.now(),
                   };
                   setMessages(prev => [...prev, searchMsg]);
-                } else if (parsed.status === 'completed' && parsed.resultCount === 0) {
+                } else if (parsed.status === 'completed' && resultCount === 0) {
                   // 搜索无结果 — 显式失败
                   setMessages(prev => {
                     const updated = [...prev];
@@ -946,12 +951,13 @@ export default function ChatArea({
                     }
                     : message
                 )));
-              } else if (parsed.type === 'image' && parsed.imageUrl) {
+              } else if (parsed.type === 'image' && typeof parsed.imageUrl === 'string') {
                 setSearchStatus(null);
+                const parsedImageUrl = parsed.imageUrl;
                 const imageRef = readWorkspaceAssetReference(parsed.imageRef);
                 setMessages(prev => prev.map(message => {
                   if (message.id === assistantMessageId) {
-                    const imageUrl = imageRef?.url || parsed.imageUrl;
+                    const imageUrl = imageRef?.url || parsedImageUrl;
                     const imageIndex = message.images?.length || 0;
                     return {
                       ...message,
@@ -995,15 +1001,17 @@ export default function ChatArea({
                     : message
                 )));
               }
-            } catch { /* skip */ }
-          }
-        }
-      }
-    } catch {
+        },
+      });
+      if (streamResult === 'cancelled') return;
+    } catch (error) {
       if (!requestScopeIsCurrent()) return;
+      const errorContent = error instanceof SimpleChatSseProtocolError
+        ? error.message
+        : '抱歉，请求失败，请重试。';
       setMessages(prev => prev.map(message => (
         message.id === assistantMessageId
-          ? { ...message, content: '抱歉，请求失败，请重试。' }
+          ? { ...message, content: errorContent }
           : message
       )));
     } finally {
@@ -1047,23 +1055,13 @@ export default function ChatArea({
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('No body');
-      const decoder = new TextDecoder();
-      let buffer = "", fullContent = "", phaseLabel = "";
+      if (!res.body) throw new Error('No body');
+      let fullContent = "", phaseLabel = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (!data || data === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(data);
+      await consumeSimpleChatJsonStream(res.body, {
+        onEvent(value) {
+          const parsed = readSimpleChatStreamPayload(value);
+          if (!parsed) return;
             if (parsed.type === 'phase') {
               phaseLabel = parsed.label || '';
               setMessages(prev => {
@@ -1072,7 +1070,7 @@ export default function ChatArea({
                 if (last?.role === 'assistant') updated[updated.length - 1] = { ...last, content: `*${phaseLabel}*` };
                 return updated;
               });
-            } else if (parsed.type === 'text') {
+            } else if (parsed.type === 'text' && typeof parsed.content === 'string') {
               fullContent += parsed.content;
               setMessages(prev => {
                 const updated = [...prev];
@@ -1085,11 +1083,13 @@ export default function ChatArea({
               const artId = `art_${Date.now()}`;
               setArtifacts(prev => [...prev, { id: artId, type: 'document', title: `研究: ${query.slice(0, 30)}`, content: fullContent }]);
             }
-          } catch { /* skip */ }
-        }
-      }
-    } catch {
-      setMessages(prev => { const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], content: 'Deep Research 失败，请重试。' }; return u; });
+        },
+      });
+    } catch (error) {
+      const errorContent = error instanceof SimpleChatSseProtocolError
+        ? error.message
+        : 'Deep Research 失败，请重试。';
+      setMessages(prev => { const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], content: errorContent }; return u; });
     } finally { setIsStreaming(false); }
   }, [input, isStreaming, selectedModel, selectedProviderId]);
 
@@ -2201,21 +2201,7 @@ export default function ChatArea({
           content={canvasContent}
           onClose={() => setShowCanvas(false)}
           onSave={(c) => setCanvasContent(c)}
-          onAiEdit={async (selected, instruction) => {
-            const res = await fetch('/api/simple-chat/chat', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                providerId: selectedProviderId, model: selectedModel,
-                reasoningEffort, responseSpeed,
-                systemPrompt: '你是专业文案编辑助手。根据用户指令改写选中文本，只返回改写后的文本，不要解释。',
-                messages: [{ role: 'user', content: `原文：\n${selected}\n\n改写指令：${instruction}` }],
-                stream: false,
-              }),
-            });
-            const data = await res.json();
-            return data.content || data.choices?.[0]?.message?.content || selected;
-          }}
+          onAiEdit={canvasAiEdit}
         />
       )}
 
