@@ -9,6 +9,7 @@ import type { SimpleChatProject, SimpleChatTask } from '@/components/simple-chat
 import type { User } from '@/lib/user-types';
 
 const INVALID_IMAGE = 'data:image/png;base64,not-valid';
+const VALID_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zr1sAAAAASUVORK5CYII=';
 
 const user: User = {
   id: 'user-1',
@@ -83,6 +84,48 @@ function ChatAreaHarness({
   );
 }
 
+function TaskSwitchingChatAreaHarness({
+  initialTask,
+  nextTask,
+  onUpdateTask,
+}: {
+  initialTask: SimpleChatTask;
+  nextTask: SimpleChatTask;
+  onUpdateTask: ReturnType<typeof vi.fn>;
+}) {
+  const [task, setTask] = useState(initialTask);
+  const project = useMemo(() => ({
+    ...createProject(task),
+    tasks: [initialTask, nextTask],
+  }), [initialTask, nextTask, task]);
+
+  return (
+    <>
+      <button type="button" onClick={() => setTask(nextTask)}>切换任务</button>
+      <ChatArea
+        user={user}
+        project={project}
+        task={task}
+        onUpdateTask={(updatedTask) => {
+          onUpdateTask(updatedTask);
+          setTask(updatedTask);
+        }}
+        onPersistTask={async () => {}}
+        onUpdateProject={vi.fn()}
+        onCreateTask={vi.fn()}
+        onSelectTask={vi.fn()}
+        onUpdateAgent={vi.fn()}
+        onDeleteAgent={vi.fn()}
+        onSkillToAgent={vi.fn()}
+        onLogout={vi.fn()}
+        onBackToWorkspace={vi.fn()}
+        sidebarOpen={true}
+        onToggleSidebar={vi.fn()}
+      />
+    </>
+  );
+}
+
 function createTask(messages: SimpleChatTask['messages'] = []): SimpleChatTask {
   return {
     id: 'task-1',
@@ -108,7 +151,7 @@ function installLocalStorage(): void {
 
 function mockStartupRequests(chatResponse = streamResponse()): void {
   installLocalStorage();
-  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, options?: RequestInit) => {
     const url = String(input);
     if (url === '/api/models?type=chat') {
       return Promise.resolve(jsonResponse({
@@ -124,7 +167,21 @@ function mockStartupRequests(chatResponse = streamResponse()): void {
       }));
     }
     if (url === '/api/simple-chat/memory') return Promise.resolve(jsonResponse({ memories: [] }));
-    if (url === '/api/simple-chat/chat') return Promise.resolve(chatResponse);
+    if (url === '/api/simple-chat/chat') {
+      const payload = options && typeof options === 'object' && 'body' in options
+        ? JSON.parse(String(options.body))
+        : null;
+      if (payload?.assetAction === 'register') {
+        return Promise.resolve(jsonResponse({
+          url: '/managed/current.png',
+          assetId: 'asset-current',
+          assetVersionId: 'version-current',
+          placementId: 'placement-current',
+          entityId: payload.entityId,
+        }));
+      }
+      return Promise.resolve(chatResponse);
+    }
     return Promise.resolve(jsonResponse({}));
   }));
 }
@@ -144,8 +201,9 @@ describe('simple-chat request context integration', () => {
   it('blocks an invalid current upload before asset registration or chat submission', async () => {
     const onUpdateTask = vi.fn();
     mockStartupRequests();
+    let uploadedImage = INVALID_IMAGE;
     vi.stubGlobal('FileReader', class {
-      result = INVALID_IMAGE;
+      result = uploadedImage;
       onload: ((event: ProgressEvent<FileReader>) => void) | null = null;
 
       readAsDataURL(): void {
@@ -168,6 +226,26 @@ describe('simple-chat request context integration', () => {
 
     expect(await screen.findByText('当前上传图片无效，请重新选择图片后发送。')).toBeTruthy();
     expect(globalThis.fetch).not.toHaveBeenCalledWith('/api/simple-chat/chat', expect.anything());
+    expect((screen.getByTitle('Deep Research - 深度研究') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.relative.group button')!);
+    await waitFor(() => expect(container.querySelectorAll('img')).toHaveLength(0));
+    uploadedImage = VALID_IMAGE;
+    fireEvent.change(upload!, { target: { files: [new File(['valid'], 'valid.png', { type: 'image/png' })] } });
+    await waitFor(() => expect(container.querySelectorAll('img')).toHaveLength(1));
+    submitText('describe this');
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/api/simple-chat/chat', expect.any(Object)));
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([url]) => url === '/api/simple-chat/chat');
+    const registration = calls.find(([, options]) => JSON.parse(String(options.body)).assetAction === 'register');
+    const request = calls.find(([, options]) => !JSON.parse(String(options.body)).assetAction);
+    expect(registration).toBeTruthy();
+    expect(request).toBeTruthy();
+    const requestPayload = JSON.parse(String(request![1].body));
+    expect(requestPayload.messages.at(-1).images).toEqual(['/managed/current.png']);
+    expect(requestPayload.sourceVersionIds).toEqual(['version-current']);
+    expect(requestPayload.selectedEntityIds).toEqual([expect.stringContaining(':0')]);
   });
 
   it('omits invalid historical images from the request while preserving persisted history', async () => {
@@ -175,7 +253,7 @@ describe('simple-chat request context integration', () => {
       id: 'history-user',
       role: 'user' as const,
       content: 'historical question',
-      images: [INVALID_IMAGE],
+      images: [INVALID_IMAGE, VALID_IMAGE],
       createdAt: 1,
     };
     const onUpdateTask = vi.fn();
@@ -185,7 +263,14 @@ describe('simple-chat request context integration', () => {
       value: vi.fn(),
     });
 
-    render(<ChatAreaHarness initialTask={createTask([historicalMessage])} onUpdateTask={onUpdateTask} />);
+    const nextTask = createTask();
+    nextTask.id = 'task-2';
+    nextTask.name = 'Task two';
+    render(<TaskSwitchingChatAreaHarness
+      initialTask={createTask([historicalMessage])}
+      nextTask={nextTask}
+      onUpdateTask={onUpdateTask}
+    />);
     await waitFor(() => expect(onUpdateTask).toHaveBeenCalled());
     onUpdateTask.mockClear();
     submitText('continue the discussion');
@@ -200,11 +285,17 @@ describe('simple-chat request context integration', () => {
       expect.objectContaining({ role: 'user', content: 'historical question' }),
       expect.objectContaining({ role: 'user', content: 'continue the discussion' }),
     ]));
-    expect(payload.messages.find((message: { content: string }) => message.content === 'historical question').images).toBeUndefined();
+    expect(payload.messages.find((message: { content: string }) => message.content === 'historical question').images).toEqual([VALID_IMAGE]);
     await waitFor(() => expect(document.body.textContent).toContain('已忽略 1 张失效历史图片，本次请求继续发送。'));
+    expect(document.body.textContent?.match(/已忽略 1 张失效历史图片，本次请求继续发送。/gu)).toHaveLength(1);
+    expect(await screen.findByText('将携带最近对话中的 1 张图片作为上下文')).toBeTruthy();
 
     await waitFor(() => expect(onUpdateTask).toHaveBeenCalled());
     const updatedTask = onUpdateTask.mock.calls.at(-1)![0] as SimpleChatTask;
-    expect(updatedTask.messages.find(message => message.id === historicalMessage.id)?.images).toEqual([INVALID_IMAGE]);
+    expect(updatedTask.messages.find(message => message.id === historicalMessage.id)?.images).toEqual([INVALID_IMAGE, VALID_IMAGE]);
+
+    fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+    await waitFor(() => expect(document.body.textContent).not.toContain('已忽略 1 张失效历史图片，本次请求继续发送。'));
+    expect(document.body.textContent).not.toContain('将携带最近对话中的 1 张图片作为上下文');
   });
 });

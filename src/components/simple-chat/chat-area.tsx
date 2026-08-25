@@ -375,6 +375,8 @@ export default function ChatArea({
       setResponseSpeed(task.responseSpeed || 'balanced');
       setAppliedChatControls(task.appliedChatControls);
       setControlNotice(task.appliedChatControls?.notices[0] || null);
+      setHistoryImages([]);
+      setHistoryImageNotice(null);
       setInput("");
     }
   }, [task?.id]);
