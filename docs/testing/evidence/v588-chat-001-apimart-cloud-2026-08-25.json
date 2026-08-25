@@ -1,0 +1,126 @@
+{
+  "testedAt": "2026-08-25T13:04:33.449Z",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat?validation=e0c091dd",
+  "gitCommit": "e0c091dddb729d7a7569971c0c29b5e0391f2f13",
+  "browser": "Google Chrome 用户1",
+  "account": "canvas-user",
+  "provider": {
+    "name": "APImartLLM",
+    "id": "api_1778428130626_2qpg71v",
+    "model": "deepseek-v4-flash"
+  },
+  "preflight": {
+    "modelDropdown": {
+      "position": "absolute",
+      "zIndex": "100",
+      "opacity": "1",
+      "visibility": "visible",
+      "rect": {
+        "x": 832.7000122070312,
+        "y": 43.98749923706055,
+        "width": 320,
+        "height": 247.6000061035156,
+        "bottom": 291.5875053405762
+      },
+      "viewport": {
+        "width": 2048,
+        "height": 991
+      },
+      "sampledTopElementsBelongToMenu": true,
+      "passed": true
+    },
+    "historyIsolation": {
+      "oldDecodeErrorPresent": false,
+      "oldMarkerPresent": false,
+      "emptyStatePresent": true
+    }
+  },
+  "ordinaryChat": {
+    "marker": "V588_CHAT_001_1787662837500",
+    "request": {
+      "url": "/api/simple-chat/chat",
+      "requestId": "39628.91",
+      "count": 1,
+      "providerId": "api_1778428130626_2qpg71v",
+      "model": "deepseek-v4-flash",
+      "containedHistoricalImage": false
+    },
+    "response": {
+      "status": 200,
+      "mimeType": "text/event-stream",
+      "doneEvent": true,
+      "exactMarkerRendered": true
+    },
+    "passed": true
+  },
+  "canvasEditor": {
+    "selection": {
+      "start": 5,
+      "end": 13,
+      "text": "CHAT_001"
+    },
+    "original": "V588_CHAT_001_1787662837500",
+    "expected": "V588_CANVAS_OK_1787662837500",
+    "actual": "V588_CANVAS_OK_1787662837500",
+    "request": {
+      "url": "/api/simple-chat/chat",
+      "requestId": "39628.95",
+      "count": 1,
+      "providerId": "api_1778428130626_2qpg71v",
+      "model": "deepseek-v4-flash",
+      "sentOnlySelectedText": true
+    },
+    "response": {
+      "status": 200,
+      "mimeType": "text/event-stream",
+      "doneEvent": true,
+      "outsideSelectionPreserved": true
+    },
+    "durationMilliseconds": 7433,
+    "passed": true
+  },
+  "deepResearch": {
+    "marker": "V588_DEEP_1787662970285",
+    "request": {
+      "url": "/api/simple-chat/deep-research",
+      "requestId": "39628.97",
+      "count": 1,
+      "providerId": "api_1778428130626_2qpg71v",
+      "model": "deepseek-v4-flash",
+      "depth": "standard"
+    },
+    "response": {
+      "status": 200,
+      "mimeType": "text/event-stream",
+      "phases": [
+        "planning",
+        "planning_complete",
+        "searching",
+        "searching_complete",
+        "writing"
+      ],
+      "doneEvent": true,
+      "markerRendered": true,
+      "terminalKind": "completed"
+    },
+    "durationMilliseconds": 40808,
+    "passed": true
+  },
+  "runtime": {
+    "consoleErrorWarningCount": 0,
+    "nativeDialog": null,
+    "duplicateRequestCount": 0
+  },
+  "localErrorAndRaceCoverage": {
+    "focusedTests": "14/14",
+    "simpleChatTests": "102/102",
+    "fullRepositoryTests": "3513/3513 executed, 117 PostgreSQL-gated skipped",
+    "supplierErrorPropagation": "covered locally",
+    "lateStreamOwnership": "covered locally",
+    "notClaimedAsCloudFailureInjection": true
+  },
+  "artifacts": {
+    "screenshot": "docs/testing/evidence/2026-08-25-stage4-simple-chat-apimart.png"
+  },
+  "verdict": "PASS_FOR_V588_CHAT_001_SUCCESS_PATH"
+}

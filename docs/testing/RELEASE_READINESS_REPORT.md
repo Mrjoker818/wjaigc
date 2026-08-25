@@ -1398,3 +1398,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - CanvasEditor 与 Deep Research 丢失供应商 `type:error` 的问题已按 RED/GREEN 最小修复；普通对话逻辑、精确 `providerId + modelId`、会话所有权和账务均未改变。
 - 本地聚焦 `14/14`、Simple Chat 相关 `102/102`、全仓 `3513/3513` 已执行测试、TypeScript、零错误 Lint、Next.js `116/116` 构建和保护基线 `38/38` 通过；`117` 项 PostgreSQL 专项仍因缺少隔离数据库未执行。
 - **专项判定仍为本地有条件通过，V588-CHAT-001 不关闭。** 必须先将新提交部署到 Coze，并完成普通对话、CanvasEditor、Deep Research 三条真实 APIMart 链路及浏览器健康证据。全平台继续维持有条件通过。
+
+## 2026-08-25 V588-CHAT-001 云端发布判断
+
+- Coze `main@e0c091dd` 已由 Google Chrome 普通账号完成 APImart 真实验收；普通对话、CanvasEditor 局部修改、Deep Research 均使用精确 `providerId + modelId`，各只有一次请求并取得 HTTP 200、SSE `done` 与真实 UI 终态。
+- CanvasEditor 证明选区外文本不变；Deep Research 证明阶段提示会进入最终报告；新会话不会继续携带历史损坏图片。模型菜单不被消息遮挡，Console error/warning 和原生弹窗均为 0。
+- 云端没有人为制造供应商失败；真实错误保真和迟到流隔离仍以本地自动化证据为准。该边界已写入机器报告，不把成功路径扩大为未执行的故障注入。
+- **专项判定：V588-CHAT-001 通过并允许进入 V588-CHAT-002。全平台仍为有条件通过。** `117` 项 PostgreSQL 环境门禁、部署期旧 chunk 保留及其他既有未关闭项不因本专项通过而自动关闭；`stable` 继续只读。

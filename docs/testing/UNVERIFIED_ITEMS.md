@@ -1359,3 +1359,15 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 普通对话模型配对 | 云端待验 | 切换 APIMart 模型后只产生一次 `/api/simple-chat/chat`，请求中的 `providerId + modelId` 与选中项一致，并得到真实终态。 |
 | 三入口浏览器健康 | 云端待验 | 三条链路均无重复请求、浏览器原生错误弹窗、未处理 Promise 或新增 Console Error；网络日志保留精确终态证据。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 需要独立 `POSTGRES_TEST_DATABASE_URL`，不能使用生产库代替。 |
+
+## 2026-08-25 V588-CHAT-001 云端关闭后的剩余项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| V588-CHAT-001 成功链路 | 已云端验证 | APImart 普通对话、CanvasEditor 局部替换、Deep Research 均精确模型配对、单请求、SSE `done`；Console 和原生弹窗为 0。 |
+| V588-CHAT-001 真实供应商失败注入 | 未执行 / 非关闭阻塞 | 本轮供应商三次均成功；`type:error` 保真与迟到流所有权已有本地 RED/GREEN 覆盖，但没有把它描述成云端故障注入。 |
+| V588-CHAT-002 | 下一项 / 未开始 | 建立消息级 `streaming/completed/failed` 状态、冻结重试上下文和真正的重试语义；按 RED -> 最小接入 -> 全量回归 -> 云端验证执行。 |
+| V588-CHAT-003 | 未开始 | 远端权威按 ID 合并、离页/切换用户冲刷和可诊断同步失败仍待处理。 |
+| V588-CHAT-004 | 未开始 | 保留安全 `AssetVersion -> /api/assets/transfer` 链路，补充来源追踪与发送到节点模式，禁止复制 donor 原始 URL `localStorage` 桥接。 |
+| 部署期旧 chunk | 仍未关闭 | 首次加载连续通过与旧静态资源保留/原子切换仍需独立发布证据。 |
+| PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 需要独立 `POSTGRES_TEST_DATABASE_URL`，不得计为通过。 |

@@ -2510,3 +2510,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | CanvasEditor 保存首个流式错误并在消费结束后抛给既有 toast；Deep Research 把首个流式错误写入当前助手消息并停止消费后续事件。未修改普通对话、供应商选择、模型参数、会话所有权、任务或积分。 |
 | 本地回归 | 聚焦文件 `14/14`；Simple Chat 相关矩阵 `16 files / 102 tests`；全仓 `537 files / 3513 tests` 通过，`20 files / 117` 项 PostgreSQL 专项因缺少隔离库明确跳过。TypeScript、零错误 Lint、Next.js `116/116` 生产构建、保护基线 `38/38` 和空白检查通过。 |
 | 状态 | **本地已修复 / Coze 真实 APIMart 待验。** 普通对话、CanvasEditor、Deep Research 必须各取得一次真实终态或如实供应商错误，并证明请求模型配对、请求次数、Console 和原生弹窗正常后，才能关闭 V588-CHAT-001。 |
+
+### V588-CHAT-001 云端关闭补充（2026-08-25）
+
+| 字段 | 内容 |
+|---|---|
+| 云端版本 | Coze 预览运行 `main@e0c091dddb729d7a7569971c0c29b5e0391f2f13`；本地与 `origin/main` 同 SHA，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 普通对话 | Google Chrome 普通账号 `canvas-user` 选择 `Deepseek V4 Flash · APImartLLM`；只产生 1 次 `/api/simple-chat/chat`，请求为 `providerId=api_1778428130626_2qpg71v`、`model=deepseek-v4-flash`，不含历史损坏图片；SSE 返回精确标记并以 `done` 结束。 |
+| CanvasEditor | 在 `V588_CHAT_001_1787662837500` 中只选中索引 `5-13` 的 `CHAT_001`；请求正文仅包含选区，结果精确为 `V588_CANVAS_OK_1787662837500`，选区外前后文本保持不变；只产生 1 次请求并正常 `done`。 |
+| Deep Research | 只产生 1 次 `/api/simple-chat/deep-research`；请求使用同一 APImart 模型配对，依次出现 `planning -> planning_complete -> searching -> searching_complete -> writing -> done`，约 40.8 秒进入完成终态并显示测试标记。 |
+| 浏览器健康 | 三条链路结束后 Console error/warning 为 `0`，原生弹窗为 `0`，没有重复请求；模型菜单 `z-index=100` 且三个可见采样点均命中菜单自身。新对话未继承历史 base64 解码错误。 |
+| 证据边界 | 云端本轮验证成功路径；供应商 `type:error` 传播和跨任务迟到流隔离由本地组件回归覆盖，没有伪称本轮执行了真实供应商失败注入。 |
+| 证据 | `docs/testing/evidence/v588-chat-001-apimart-cloud-2026-08-25.json`、`docs/testing/evidence/2026-08-25-stage4-simple-chat-apimart.png`。 |
+| 状态 | **V588-CHAT-001 已修复 / 云端成功链路关闭。** 下一项可进入 `V588-CHAT-002`，仍须继续遵守 RED -> 最小接入 -> 全量回归 -> 云端验证。 |
