@@ -1082,10 +1082,17 @@ export default function ChatArea({
   const handleDeepResearch = useCallback(async () => {
     const requestModelSelection = readSimpleChatModelSelection(task);
     if (!input.trim() || isStreaming) return;
+    if (!project || !task) return;
     if (!requestModelSelection.modelId || !requestModelSelection.providerId) {
       setSearchStatus('请先选择可用的对话模型。');
       return;
     }
+    const requestProjectId = project.id;
+    const requestTaskId = task.id;
+    const requestScopeIsCurrent = () => (
+      isWorkspaceResultScopeCurrent(requestProjectId, projectIdRef.current)
+      && requestTaskId === taskIdRef.current
+    );
     setIsStreaming(true);
     const query = input;
     setInput("");
@@ -1112,31 +1119,28 @@ export default function ChatArea({
           depth: 'standard',
         }),
       });
+      if (!requestScopeIsCurrent()) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       if (!res.body) throw new Error('No body');
       let fullContent = "", phaseLabel = "";
 
-      await consumeSimpleChatJsonStream(res.body, {
+      const streamResult = await consumeSimpleChatJsonStream(res.body, {
+        isActive: requestScopeIsCurrent,
         onEvent(value) {
+          if (!requestScopeIsCurrent()) return;
           const parsed = readSimpleChatStreamPayload(value);
           if (!parsed) return;
             if (parsed.type === 'phase') {
               phaseLabel = parsed.label || '';
-              setMessages(prev => {
-                const updated = [...prev];
-                const last = updated[updated.length - 1];
-                if (last?.role === 'assistant') updated[updated.length - 1] = { ...last, content: `*${phaseLabel}*` };
-                return updated;
-              });
+              setMessages(prev => prev.map(message => (
+                message.id === aiMsg.id ? { ...message, content: `*${phaseLabel}*` } : message
+              )));
             } else if (parsed.type === 'text' && typeof parsed.content === 'string') {
               fullContent += parsed.content;
-              setMessages(prev => {
-                const updated = [...prev];
-                const last = updated[updated.length - 1];
-                if (last?.role === 'assistant') updated[updated.length - 1] = { ...last, content: fullContent };
-                return updated;
-              });
+              setMessages(prev => prev.map(message => (
+                message.id === aiMsg.id ? { ...message, content: fullContent } : message
+              )));
             } else if (parsed.type === 'citations') {
               // Save as artifact
               const artId = `art_${Date.now()}`;
@@ -1144,13 +1148,19 @@ export default function ChatArea({
             }
         },
       });
+      if (streamResult === 'cancelled') return;
     } catch (error) {
+      if (!requestScopeIsCurrent()) return;
       const errorContent = error instanceof SimpleChatSseProtocolError
         ? error.message
         : 'Deep Research 失败，请重试。';
-      setMessages(prev => { const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], content: errorContent }; return u; });
-    } finally { setIsStreaming(false); }
-  }, [input, isStreaming, task]);
+      setMessages(prev => prev.map(message => (
+        message.id === aiMsg.id ? { ...message, content: errorContent } : message
+      )));
+    } finally {
+      if (requestScopeIsCurrent()) setIsStreaming(false);
+    }
+  }, [input, isStreaming, project, task]);
 
   // Branch from message
   const branchFromMessage = useCallback((msgId: string) => {

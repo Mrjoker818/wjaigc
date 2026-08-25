@@ -58,6 +58,35 @@ function streamResponse(): Response {
   } as Response;
 }
 
+interface DeferredSseResponse {
+  response: Response;
+  emit: (event: Record<string, unknown>) => void;
+  close: () => void;
+}
+
+function createDeferredSseResponse(): DeferredSseResponse {
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const response = {
+    ok: true,
+    body: new ReadableStream<Uint8Array>({
+      start(nextController) {
+        controller = nextController;
+      },
+    }),
+  } as Response;
+
+  return {
+    response,
+    emit(event) {
+      controller?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+    },
+    close() {
+      controller?.close();
+    },
+  };
+}
+
 function createProject(task: SimpleChatTask): SimpleChatProject {
   return {
     id: 'project-1',
@@ -172,6 +201,7 @@ function installLocalStorage(): void {
 function mockStartupRequests(
   chatResponse = streamResponse(),
   models = [{ id: 'chat-model', name: 'Chat model', providerId: 'provider-1' }],
+  deepResearchResponses: Response[] = [streamResponse()],
 ): void {
   installLocalStorage();
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, options?: RequestInit) => {
@@ -204,6 +234,9 @@ function mockStartupRequests(
         }));
       }
       return Promise.resolve(chatResponse);
+    }
+    if (url === '/api/simple-chat/deep-research') {
+      return Promise.resolve(deepResearchResponses.shift() || streamResponse());
     }
     return Promise.resolve(jsonResponse({}));
   }));
@@ -492,14 +525,15 @@ describe('simple-chat request context integration', () => {
     });
   });
 
-  it('sends Deep Research with the selected task model pair and persists that pair on its assistant message', async () => {
+  it('persists successful Deep Research stream content and metadata on its exact assistant message', async () => {
     const onUpdateTask = vi.fn();
     const task = createTask();
     task.model = 'research-model';
     task.providerId = 'research-provider';
+    const researchResponse = createDeferredSseResponse();
     mockStartupRequests(streamResponse(), [
       { id: 'research-model', name: 'Research model', providerId: 'research-provider' },
-    ]);
+    ], [researchResponse.response]);
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
       value: vi.fn(),
@@ -516,12 +550,90 @@ describe('simple-chat request context integration', () => {
       model: 'research-model',
       providerId: 'research-provider',
     });
+    const assistantId = await waitFor(() => {
+      const updatedTask = onUpdateTask.mock.calls
+        .map(([nextTask]) => nextTask as SimpleChatTask)
+        .find(nextTask => nextTask.messages.some(message => message.role === 'assistant'));
+      const assistant = updatedTask?.messages.find(message => message.role === 'assistant');
+      expect(assistant).toMatchObject({
+        model: 'research-model',
+        providerId: 'research-provider',
+      });
+      return assistant?.id;
+    });
+
+    await act(async () => {
+      researchResponse.emit({ type: 'phase', label: '检索中' });
+      researchResponse.emit({ type: 'text', content: 'final research' });
+      researchResponse.emit({ type: 'citations' });
+      researchResponse.close();
+    });
     await waitFor(() => expect(onUpdateTask.mock.calls.map(([updatedTask]) => updatedTask as SimpleChatTask).some(
       updatedTask => updatedTask.messages.some(message => (
-        message.role === 'assistant'
+        message.id === assistantId
+        && message.content === 'final research'
         && message.model === 'research-model'
         && message.providerId === 'research-provider'
       )),
     )).toBe(true));
+  });
+
+  it('isolates a stale Deep Research stream from a newer task request', async () => {
+    const onUpdateTask = vi.fn();
+    const taskA = createTask();
+    taskA.model = 'task-a-model';
+    taskA.providerId = 'task-a-provider';
+    const taskB = createTask([{
+      id: 'task-b-existing-assistant',
+      role: 'assistant',
+      content: 'Task B preserved',
+      model: 'task-b-model',
+      providerId: 'task-b-provider',
+      createdAt: 1,
+    }]);
+    taskB.id = 'task-2';
+    taskB.name = 'Task B';
+    taskB.model = 'task-b-model';
+    taskB.providerId = 'task-b-provider';
+    const taskAResponse = createDeferredSseResponse();
+    const taskBResponse = createDeferredSseResponse();
+    mockStartupRequests(streamResponse(), [
+      { id: 'task-a-model', name: 'Task A model', providerId: 'task-a-provider' },
+      { id: 'task-b-model', name: 'Task B model', providerId: 'task-b-provider' },
+    ], [taskAResponse.response, taskBResponse.response]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<TaskSwitchingChatAreaHarness initialTask={taskA} nextTask={taskB} onUpdateTask={onUpdateTask} />);
+    fireEvent.change(screen.getByPlaceholderText(/输入消息/u), { target: { value: 'Task A research' } });
+    fireEvent.click(screen.getByTitle('Deep Research - 深度研究'));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/deep-research')).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+    await waitFor(() => expect(document.body.textContent).toContain('Task B preserved'));
+    fireEvent.change(screen.getByPlaceholderText(/输入消息/u), { target: { value: 'Task B research' } });
+    fireEvent.click(screen.getByTitle('Deep Research - 深度研究'));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/deep-research')).toHaveLength(2));
+    fireEvent.change(screen.getByPlaceholderText(/输入消息/u), { target: { value: 'Task B follow-up' } });
+    expect((screen.getByTitle('Deep Research - 深度研究') as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      taskAResponse.emit({ type: 'phase', label: 'Task A phase' });
+      taskAResponse.emit({ type: 'text', content: 'Task A result' });
+      taskAResponse.emit({ type: 'citations' });
+      taskAResponse.close();
+    });
+    await waitFor(() => expect((screen.getByTitle('Deep Research - 深度研究') as HTMLButtonElement).disabled).toBe(true));
+    expect(document.body.textContent).toContain('Task B preserved');
+    expect(document.body.textContent).not.toContain('Task A result');
+    expect(onUpdateTask.mock.calls.map(([updatedTask]) => updatedTask as SimpleChatTask).filter(
+      updatedTask => updatedTask.id === 'task-2',
+    ).some(updatedTask => updatedTask.messages.some(message => message.content.includes('Task A result')))).toBe(false);
+
+    await act(async () => {
+      taskBResponse.close();
+    });
   });
 });

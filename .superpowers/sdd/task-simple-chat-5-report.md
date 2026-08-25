@@ -43,3 +43,15 @@ No open test handles were reported by Vitest.
 
 - Targeted ESLint remains warning-only because `chat-area.tsx` has 40 existing warnings, none introduced by this task.
 - The repository had pre-existing modified/untracked `.superpowers` and `.playwright-cli` files; they were left untouched.
+
+## Fix Review
+
+### Review Findings Addressed
+
+- **P1:** Deep Research now captures request project/task scope before side effects, supplies that scope to the shared SSE consumer, and checks the scope before every stream event, citation artifact, error update, and streaming-state cleanup. All assistant updates target the captured `aiMsg.id` rather than the last message in local state.
+- **P2:** The request-context integration harness now supports deterministic deferred Deep Research SSE responses. Successful-stream coverage verifies the final streamed content plus model/provider metadata on the exact assistant message. A task-switch race starts a second Deep Research request in Task B, emits and closes Task A's stale stream, and verifies Task B content remains untouched while Task B's streaming state remains active.
+
+### TDD Evidence
+
+- RED against `f9b2d3aeb8cd7fcc6c783579f84913bc28501011`: `isolates a stale Deep Research stream from a newer task request` failed because Task A's `finally` cleared Task B's active stream state.
+- GREEN: the focused suite passed with 5 files and 29 tests. The deterministic streams are closed in every test; Vitest reported no open handles.
