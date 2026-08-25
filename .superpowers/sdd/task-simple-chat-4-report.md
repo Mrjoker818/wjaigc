@@ -100,3 +100,41 @@ exit 0; 40 existing warnings in chat-area.tsx, 0 errors
 - RTL 覆盖通过真实文件输入、附件删除按钮、目标画布选择、资产登记响应、聊天请求与父级任务切换验证行为。
 - 复查未重新引入本地聊天模型状态，未触碰 provider fallback、stable、V5.8.8 donor 或无关文件。
 - 所有 Vitest 命令均在限定等待内正常退出；未发现 Node/Vitest 开放句柄。
+
+## Fix Review 2（2026-08-25）
+
+### TDD RED
+
+新增确定性 RTL 回归：启用 Brand DNA 后启动 Task A 发送，在动态 `@/lib/brand-dna` mock 保持 deferred 时切换至 Task B，再解析该 import。测试使用真实 `handleSend` 的“附件登记完成后、历史上下文构建前”异步边界，不使用 sleep。
+
+对 `f5c5551` 运行：
+
+```text
+pnpm exec vitest run src/__tests__/components/simple-chat-request-context-integration.test.tsx
+3 tests: 2 passed, 1 failed
+```
+
+精确失败为：断言 `fetch` 不应调用 `/api/simple-chat/chat`，但收到 Task A 的主请求，其 payload 包含 `taskId: "task-1"`、`content: "Task A historical question"` 和已接受的有效历史图片。该失败证明 Task A 在 Brand DNA import 恢复后越过了 Task B 切换，继续构建历史并提交请求。
+
+### 修复与 GREEN
+
+代码提交：`fd56ddc34e01c15caad7f900a6a001e600351fdd`。
+
+在 Brand DNA `await import()` 块后、以及主聊天 `fetch` 构建前分别加入 `if (!requestScopeIsCurrent()) return;`。这两个 guard 保持 Task 3 的任务派生模型选择与既有依赖数组，不引入延迟、任务对象依赖或 provider 行为变化。
+
+```text
+pnpm exec vitest run src/__tests__/lib/simple-chat-request-context.test.ts src/__tests__/components/simple-chat-request-context-integration.test.tsx src/__tests__/components/simple-chat-model-selector-contract.test.ts src/__tests__/components/simple-chat-workflow-return-race.test.tsx
+4 files passed, 13 tests passed
+
+pnpm ts-check
+exit 0
+
+pnpm exec eslint src/components/simple-chat/chat-area.tsx src/__tests__/components/simple-chat-request-context-integration.test.tsx
+exit 0; 40 existing warnings in chat-area.tsx, 0 errors
+```
+
+### 自检
+
+- 测试确认 stale continuation 不发送 Task A 主请求，且 Task B 不出现 Task A 的历史失效提示或上下文指示器。
+- dynamic mock 在测试结束时通过 `vi.doUnmock()` 清理；focused Vitest 正常退出，未发现开放句柄。
+- 改动仅覆盖 ChatArea 的请求范围防护、同文件 RTL 测试和本报告；未触碰 stable、donor、provider fallback 或其他路径。
