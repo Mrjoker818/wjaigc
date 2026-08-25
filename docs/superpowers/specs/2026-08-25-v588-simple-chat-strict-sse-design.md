@@ -70,11 +70,18 @@ CRLF、多行 `data`、任意网络分块、UTF-8 跨块字符和无结尾换行
 
 ### 4.2 三个业务入口
 
-仅替换 `src/components/simple-chat/chat-area.tsx` 中三处手写 reader 循环：
+当前文件中存在三套相关实现，但画布实现有一层额外的接线缺陷：
+`canvasAiEdit(instruction, currentContent, selectedText)` 包含流式读取却没有被界面调用；
+`CanvasEditor` 实际连接的是另一段 `stream: false` 的内联请求，而且两参数回调会把
+组件传入的“修改指令、完整原文、选中文本”错误解释为“原文、修改指令”。
 
-1. 画布 AI 修图；
-2. 普通对话；
-3. Deep Research。
+因此本项在 `src/components/simple-chat/chat-area.tsx` 中执行以下最小接入：
+
+1. 将 `CanvasEditor.onAiEdit` 直接连接到现有三参数 `canvasAiEdit`，删除重复且参数
+   顺序错误的非流式内联请求；
+2. 将 `canvasAiEdit` 的手写 reader 循环替换为共享解析器；
+3. 将普通对话的手写 reader 循环替换为共享解析器；
+4. 将 Deep Research 的手写 reader 循环替换为共享解析器。
 
 每个入口保留自己的事件分派和状态更新：`generation_controls`、
 `search_status`、`tool_status`、正文、图片、阶段和引用仍由现有代码处理。共享层不
@@ -126,7 +133,8 @@ CRLF、多行 `data`、任意网络分块、UTF-8 跨块字符和无结尾换行
 - reader 正常释放，回调异常不被吞掉。
 
 新增接入契约测试，证明三个入口都使用共享消费函数，且旧的
-`buffer.split('\n')` 手写解析不再存在。
+`buffer.split('\n')` 手写解析不再存在。契约还必须证明 `CanvasEditor.onAiEdit`
+接收三参数并调用 `canvasAiEdit`，不再保留 `stream: false` 的重复内联请求。
 
 ### 8.2 本地门禁
 
