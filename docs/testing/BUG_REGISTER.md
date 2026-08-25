@@ -2464,3 +2464,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 本地回归 | 下载/鉴权/安全/工具栏聚焦 `5 files / 23 tests`，全部视频 `16 files / 58 tests`，TypeScript、改动文件零错误 Lint、Next.js `116/116` 构建通过。全仓为 `528 files / 3447 tests` 通过、`20 files / 117` 项 PostgreSQL 门禁跳过；另有 1 项既存 Git 源指纹测试在 Windows 上超过 20 秒超时，未隐藏或放宽。 |
 | 云端回归 | Coze、GitHub 与本地精确运行 `f19ab164`，PID `1309`、`shadow`、首页/鉴权均 200。历史视频 `readyState=4`、5 秒、可播放；首次悬停下载弹窗立即打开；确认后真实落盘 783,768 字节 MP4，签名 `ftyp/isom`，SHA-256 `30E6CF78...A6927B5C`，下载 404 与 `Download failed` 日志均为 0；刷新后仍可播放。 |
 | 状态 | **已修复 / Coze 云端关闭。** 机器证据：`docs/testing/evidence/s4-bug-019-video-download-cloud-2026-08-25.json`。本结论不替代普通用户五入口、非法能力零副作用、下载前后积分独立取样或 PostgreSQL 并发门禁。 |
+
+### Stage 4 普通用户五入口与非法能力准入验收补充（2026-08-25）
+
+| 字段 | 内容 |
+|---|---|
+| 发现环境 | Coze `main@1ec32f49c651b8f18aa47df382435cede650523a`，运行时代码 `f19ab16441c8ef632124fb12afb1d94ad2200d2f`，Google Chrome 普通账号 `canvas-user`。 |
+| 五入口结果 | 底部图像生成器、参考图组、融图组、节点图像生成节点和视频生成器均能在 Pear/APIMART 间按精确 `providerId + modelId` 切换能力参数。 |
+| 误报排除 | “融图组出图数量无响应”复核时发现视频生成器浮层仍覆盖画布；关闭浮层后菜单正常显示 `1-4张` 并可切换为 `4张`。该项不是代码 Bug，未修改业务代码。 |
+| 非法能力请求 | 真实普通用户会话请求 Pear `gpt-image-2`、`n=5`，返回 HTTP 400、`MODEL_CAPABILITY_MISMATCH`、`field=outputCount`、允许值 `1-4`。 |
+| 零副作用 | 请求前后 `cloud_tasks=83`、`wujie_credit_transactions=108`、`SUM(total_used)=3917`，均未变化。准入分支在供应商提交前返回；本轮没有第三方后台独立计数标签，故只声明应用侧零提交路径，不冒充第三方审计。 |
+| 权限结果 | 普通用户点击画布“用户管理”后返回普通用户项目仪表盘，没有管理员用户表、API 管理、积分管理或支付配置，未形成越权。入口命名误导作为 P3 观察保留。 |
+| 状态 | **通过。** 没有新增 P0/P1；没有为测试误判修改生产代码。 |
+| 证据 | `docs/testing/evidence/s4-ordinary-five-entry-and-admission-2026-08-25.json` 与同名 PNG。 |

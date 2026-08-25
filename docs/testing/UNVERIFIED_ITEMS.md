@@ -1323,3 +1323,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 非法能力零副作用 | 未验证 | Pear/APIMART 不支持参数在供应商提交和扣费前返回 `MODEL_CAPABILITY_MISMATCH`，应用任务、供应商任务和积分均不增加。 |
 | 全仓源指纹门禁 | 未通过 | `stage-3-source-state` 在当前 Windows 环境超过自身 20 秒上限；不得通过增加等待时间隐藏，需单独定位性能原因。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 因缺少 `POSTGRES_TEST_DATABASE_URL` 跳过，不得计为通过。 |
+
+## 2026-08-25 普通用户五入口与非法能力准入关闭后的剩余项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| 普通用户五入口 | 已云端验证 | 底部图像生成器、参考图组、融图组、节点和视频均按 Pear/APIMART 精确模型能力展示；融图数量可切换 `1-4张`。 |
+| 非法能力应用侧零副作用 | 已云端验证 | Pear `gpt-image-2 / n=5` 返回 `MODEL_CAPABILITY_MISMATCH`；应用任务、积分流水和累计使用均不变化。 |
+| 供应商后台独立零任务计数 | 未验证 | 本轮授权的 Google Chrome 标签没有 Pear/APIMART 供应商任务后台；当前仅由前置返回分支和应用数据库证明未进入提交路径。需要供应商侧审计时再独立取证。 |
+| 普通用户管理员入口命名 | P3 待优化 | 点击“用户管理”只返回普通项目仪表盘，没有越权；后续 UI 阶段应改为不误导的入口名称或按角色隐藏。 |
+| PostgreSQL 全仓专项 | 环境阻塞 | 既有 `20 files / 117 tests` 仍需完整隔离 `POSTGRES_TEST_DATABASE_URL` 才能执行；本轮云端只读计数不能替代并发/退款专项。 |
+| 下一 donor 项 | 可进入 RED | `V588-PROVIDER-001`：只读比较缺失的精确模型显示映射，先写碰撞与管理员显示名优先级失败测试，不复制 donor 通配规则。 |

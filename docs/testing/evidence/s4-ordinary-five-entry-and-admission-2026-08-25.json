@@ -1,0 +1,81 @@
+{
+  "title": "Stage 4 普通用户五入口与非法能力准入云端验收",
+  "testedAt": "2026-08-25T09:46:22+08:00",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "browser": "Google Chrome 用户1",
+  "account": {
+    "name": "canvas-user",
+    "role": "user",
+    "passwordPersisted": false
+  },
+  "versions": {
+    "main": "1ec32f49c651b8f18aa47df382435cede650523a",
+    "originMain": "1ec32f49c651b8f18aa47df382435cede650523a",
+    "runtimeCode": "f19ab16441c8ef632124fb12afb1d94ad2200d2f",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "providersUsed": ["PearAPI", "APIMART"],
+  "excludedProviders": ["FHLAPI", "虚宝", "4SAPI"],
+  "surfaces": [
+    {
+      "surface": "底部图像生成器",
+      "result": "passed",
+      "details": "Pear 与 APIMART 的比例、分辨率、质量和 1-4 张数量选项随精确 providerId + modelId 切换。"
+    },
+    {
+      "surface": "参考图组",
+      "result": "passed",
+      "details": "Pear 与 APIMART 的模型和能力菜单均可切换，数量为 1-4 张。"
+    },
+    {
+      "surface": "融图组",
+      "result": "passed",
+      "details": "关闭仍在覆盖画布的视频生成器浮层后，出图数量菜单正常展开 1-4 张，并可切换为 4 张。此前无响应属于测试前置状态误判，不是业务代码缺陷。"
+    },
+    {
+      "surface": "节点模式图像生成节点",
+      "result": "passed",
+      "details": "Pear 与 APIMART 以 providerId::modelId 复合值区分；比例和最大输出数随供应商切换。"
+    },
+    {
+      "surface": "视频生成器",
+      "result": "passed",
+      "details": "Pear Seedance 最大 15 秒，APIMART Seedance 最大 10 秒；比例、质量和数量控件按目录展示。"
+    }
+  ],
+  "authorization": {
+    "result": "passed_with_ui_observation",
+    "details": "普通用户点击画布中的用户管理入口后返回普通用户我的项目页，未出现管理员用户表、API 管理、积分管理或支付配置。入口命名仍有误导性，但没有形成越权。"
+  },
+  "illegalCapabilityProbe": {
+    "providerId": "api_1780630178347_rjqlmam",
+    "modelId": "gpt-image-2",
+    "requestedOutputCount": 5,
+    "httpStatus": 400,
+    "response": {
+      "success": false,
+      "code": "MODEL_CAPABILITY_MISMATCH",
+      "retryable": false,
+      "details": {
+        "field": "outputCount",
+        "received": 5,
+        "allowed": [1, 2, 3, 4]
+      }
+    },
+    "databaseBefore": {
+      "cloudTasks": 83,
+      "creditTransactions": 108,
+      "totalUsed": 3917
+    },
+    "databaseAfter": {
+      "cloudTasks": 83,
+      "creditTransactions": 108,
+      "totalUsed": 3917
+    },
+    "applicationSideEffects": "none",
+    "providerSubmission": "rejected by the application admission branch before provider submission; no independent provider-dashboard counter was available in the authorized Chrome tabs"
+  },
+  "artifacts": [
+    "docs/testing/evidence/s4-ordinary-five-entry-and-admission-2026-08-25.png"
+  ]
+}

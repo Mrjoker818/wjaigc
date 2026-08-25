@@ -1650,3 +1650,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Coze、GitHub 与本地精确为 `main@f19ab16441c8ef632124fb12afb1d94ad2200d2f`，`stable@52f7c601...` 未触碰；云端 PID `1309`、`shadow`，首页与 `/api/auth/me` 均 200。
 - Google Chrome 真实验证：历史视频 5 秒、`readyState=4`、播放时间推进；未选中首次悬停下载弹窗立即打开；确认后生成 783,768 字节 MP4，`ftyp/isom`，SHA-256 `30E6CF788AFE737A94EDF6F1E501DC15A16F11ECA869EBD8A1A67A56A6927B5C`；下载错误日志为 0；刷新后仍可播放。
 - **结论：S4-BUG-018 的媒体展示/播放/刷新和 S4-BUG-019 的下载链路已云端通过。** 本轮未在下载动作前单独采集积分快照，因此“不新增扣费”不作为独立账务实测关闭项；Stage 4 仍由普通用户五入口、非法能力零副作用和其余既有门禁阻塞。
+
+## 2026-08-25 普通用户五入口与非法能力零副作用云端回归
+
+- 版本：Coze、本地和 `origin/main` 为 `1ec32f49c651b8f18aa47df382435cede650523a`；运行时代码为 `f19ab16441c8ef632124fb12afb1d94ad2200d2f`；`stable` 仍为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+- 普通账号 `canvas-user` 的五入口结果全部通过：底部图像生成器、参考图组、融图组、节点模式图像生成节点、视频生成器。Pear 与 APIMART 的比例、尺寸/分辨率、质量、数量及时长按精确供应商模型目录变化。
+- 融图数量菜单在关闭视频生成器覆盖浮层后正常展开 `1-4张`，并成功切换到 `4张`；此前失败是测试前置状态错误，不是生产回归。
+- 真实登录会话提交 Pear `gpt-image-2 / n=5`，收到 HTTP 400 和 `MODEL_CAPABILITY_MISMATCH`。请求前后数据库三项均未变化：任务 `83 -> 83`、积分流水 `108 -> 108`、累计使用 `3917 -> 3917`。
+- 普通用户画布上的“用户管理”入口没有暴露管理员系统，点击后进入普通用户项目仪表盘。该入口命名仍有 P3 可理解性问题，但没有权限扩大。
+- **结论：V588-PROVIDER-005 的普通用户五入口与应用侧非法能力零副作用通过，Stage 4 该专项关闭。** 第三方供应商后台独立计数未在本轮 Google Chrome 标签中直接取证，继续按证据边界说明，不把推断写成第三方审计通过。
+- 证据：`docs/testing/evidence/s4-ordinary-five-entry-and-admission-2026-08-25.json` 与同名 PNG。
