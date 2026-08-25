@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useMemo, useState } from 'react';
 
 import ChatArea from '@/components/simple-chat/chat-area';
 import type { SimpleChatProject, SimpleChatTask } from '@/components/simple-chat/simple-chat-types';
 import type { User } from '@/lib/user-types';
+
+const chatAreaSource = readFileSync(
+  resolve(process.cwd(), 'src/components/simple-chat/chat-area.tsx'),
+  'utf8',
+);
 
 const INVALID_IMAGE = 'data:image/png;base64,not-valid';
 const VALID_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zr1sAAAAASUVORK5CYII=';
@@ -162,14 +169,17 @@ function installLocalStorage(): void {
   });
 }
 
-function mockStartupRequests(chatResponse = streamResponse()): void {
+function mockStartupRequests(
+  chatResponse = streamResponse(),
+  models = [{ id: 'chat-model', name: 'Chat model', providerId: 'provider-1' }],
+): void {
   installLocalStorage();
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, options?: RequestInit) => {
     const url = String(input);
     if (url === '/api/models?type=chat') {
       return Promise.resolve(jsonResponse({
-        models: [{ id: 'chat-model', name: 'Chat model', providerId: 'provider-1' }],
-        providers: [{ id: 'provider-1', name: 'Provider' }],
+        models,
+        providers: models.map(model => ({ id: model.providerId, name: model.providerId })),
       }));
     }
     if (url === '/api/models?type=image') return Promise.resolve(jsonResponse({ models: [], providers: [] }));
@@ -205,11 +215,23 @@ function submitText(value: string): void {
   fireEvent.keyDown(textarea, { key: 'Enter' });
 }
 
+function requestPayloads(endpoint: string): Record<string, unknown>[] {
+  return (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls
+    .filter(([url]) => url === endpoint)
+    .map(([, options]) => JSON.parse(String(options?.body)) as Record<string, unknown>);
+}
+
 describe('simple-chat request context integration', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.doUnmock('@/lib/brand-dna');
     vi.restoreAllMocks();
+  });
+
+  it('captures a task model selection snapshot for all three request paths', () => {
+    expect(chatAreaSource.match(/const requestModelSelection = readSimpleChatModelSelection\(task\);/g)).toHaveLength(3);
+    expect(chatAreaSource).toContain('model: requestModelSelection.modelId');
+    expect(chatAreaSource).toContain('providerId: requestModelSelection.providerId');
   });
 
   it('blocks an invalid current upload before asset registration or chat submission', async () => {
@@ -362,5 +384,144 @@ describe('simple-chat request context integration', () => {
     expect(globalThis.fetch).not.toHaveBeenCalledWith('/api/simple-chat/chat', expect.any(Object));
     expect(document.body.textContent).not.toContain('已忽略 1 张失效历史图片，本次请求继续发送。');
     expect(document.body.textContent).not.toContain('将携带最近对话中的 1 张图片作为上下文');
+  });
+
+  it('rejects a normal chat request without a complete task model selection', async () => {
+    const onUpdateTask = vi.fn();
+    const task = createTask();
+    task.model = '';
+    task.providerId = '';
+    mockStartupRequests(streamResponse(), []);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    submitText('missing model');
+
+    expect(await screen.findByText('请先选择可用的对话模型。')).toBeTruthy();
+    expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(0);
+  });
+
+  it('keeps the ordinary chat start selection while Brand DNA is pending and uses a later selection for the next request', async () => {
+    const brandDna = createDeferred<{
+      loadBrandDNARegistry: () => unknown[];
+      generateBrandSystemPrompt: () => string;
+    }>();
+    const importStarted = vi.fn();
+    vi.doMock('@/lib/brand-dna', () => {
+      importStarted();
+      return brandDna.promise;
+    });
+    const onUpdateTask = vi.fn();
+    const task = createTask();
+    task.model = 'start-model';
+    task.providerId = 'start-provider';
+    mockStartupRequests(streamResponse(), [
+      { id: 'start-model', name: 'Start model', providerId: 'start-provider' },
+      { id: 'next-model', name: 'Next model', providerId: 'next-provider' },
+    ]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    fireEvent.click(screen.getByTitle('品牌DNA注入 - 将品牌规范注入对话上下文'));
+    submitText('start selection');
+    await waitFor(() => expect(importStarted).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /Start model/u }));
+    fireEvent.click(screen.getByRole('option', { name: /Next model/u }));
+    await waitFor(() => expect(onUpdateTask).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'next-model',
+      providerId: 'next-provider',
+    })));
+
+    await act(async () => {
+      brandDna.resolve({
+        loadBrandDNARegistry: () => [],
+        generateBrandSystemPrompt: () => '',
+      });
+    });
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(1));
+    expect(requestPayloads('/api/simple-chat/chat')[0]).toMatchObject({
+      model: 'start-model',
+      providerId: 'start-provider',
+    });
+    await waitFor(() => expect(onUpdateTask.mock.calls.map(([updatedTask]) => updatedTask as SimpleChatTask).some(
+      updatedTask => updatedTask.messages.some(message => (
+        message.role === 'assistant'
+        && message.model === 'start-model'
+        && message.providerId === 'start-provider'
+      )),
+    )).toBe(true));
+
+    submitText('next selection');
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(2));
+    expect(requestPayloads('/api/simple-chat/chat')[1]).toMatchObject({
+      model: 'next-model',
+      providerId: 'next-provider',
+    });
+  });
+
+  it('sends CanvasEditor edits with the selected task model pair', async () => {
+    const onUpdateTask = vi.fn();
+    const task = createTask();
+    task.model = 'canvas-model';
+    task.providerId = 'canvas-provider';
+    mockStartupRequests(streamResponse(), [
+      { id: 'canvas-model', name: 'Canvas model', providerId: 'canvas-provider' },
+    ]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    fireEvent.click(screen.getByTitle('写作画布'));
+    fireEvent.change(screen.getByPlaceholderText('在这里编辑文案...'), { target: { value: 'draft' } });
+    fireEvent.change(screen.getByPlaceholderText('告诉 AI 如何修改全文...'), { target: { value: 'polish it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }));
+
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(1));
+    expect(requestPayloads('/api/simple-chat/chat')[0]).toMatchObject({
+      model: 'canvas-model',
+      providerId: 'canvas-provider',
+    });
+  });
+
+  it('sends Deep Research with the selected task model pair and persists that pair on its assistant message', async () => {
+    const onUpdateTask = vi.fn();
+    const task = createTask();
+    task.model = 'research-model';
+    task.providerId = 'research-provider';
+    mockStartupRequests(streamResponse(), [
+      { id: 'research-model', name: 'Research model', providerId: 'research-provider' },
+    ]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    const textarea = screen.getByPlaceholderText(/输入消息/u);
+    fireEvent.change(textarea, { target: { value: 'research this' } });
+    fireEvent.click(screen.getByTitle('Deep Research - 深度研究'));
+
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/deep-research')).toHaveLength(1));
+    expect(requestPayloads('/api/simple-chat/deep-research')[0]).toMatchObject({
+      query: 'research this',
+      model: 'research-model',
+      providerId: 'research-provider',
+    });
+    await waitFor(() => expect(onUpdateTask.mock.calls.map(([updatedTask]) => updatedTask as SimpleChatTask).some(
+      updatedTask => updatedTask.messages.some(message => (
+        message.role === 'assistant'
+        && message.model === 'research-model'
+        && message.providerId === 'research-provider'
+      )),
+    )).toBe(true));
   });
 });

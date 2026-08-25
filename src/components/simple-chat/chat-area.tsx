@@ -687,6 +687,10 @@ export default function ChatArea({
 
   // Canvas AI 协同编辑
   async function canvasAiEdit(instruction: string, currentContent: string, selectedText: string): Promise<string> {
+    const requestModelSelection = readSimpleChatModelSelection(task);
+    if (!requestModelSelection.modelId || !requestModelSelection.providerId) {
+      throw new Error('请先选择可用的对话模型。');
+    }
     const target = selectedText || currentContent;
     const res = await fetch('/api/simple-chat/chat', {
       method: 'POST',
@@ -696,7 +700,7 @@ export default function ChatArea({
           { role: 'system', content: '你是一名专业文案编辑。根据用户的修改指令，输出修改后的完整文本。只输出修改后的文本本身，不要输出解释、不要添加引号或标记。' },
           { role: 'user', content: `【待修改文本】\n${target}\n\n【修改指令】\n${instruction}` },
         ],
-        model: selectedModel, providerId: selectedProviderId,
+        model: requestModelSelection.modelId, providerId: requestModelSelection.providerId,
         reasoningEffort, responseSpeed,
       }),
     });
@@ -782,9 +786,14 @@ export default function ChatArea({
 
   // Handle send
   const handleSend = useCallback(async () => {
+    const requestModelSelection = readSimpleChatModelSelection(task);
     const content = input.trim();
     if (!content && uploadedImages.length === 0) return;
     if (isStreaming || !project || !task) return;
+    if (!requestModelSelection.modelId || !requestModelSelection.providerId) {
+      setSearchStatus('请先选择可用的对话模型。');
+      return;
+    }
 
     const currentImages = filterSimpleChatImageInputs(
       uploadedImages.map(attachment => attachment.url || ''),
@@ -797,6 +806,7 @@ export default function ChatArea({
     setIsStreaming(true);
     const requestProjectId = project.id;
     const requestTaskId = task.id;
+    const requestActiveAgentId = task.activeAgentId;
     const requestScopeIsCurrent = () => (
       isWorkspaceResultScopeCurrent(requestProjectId, projectIdRef.current)
       && requestTaskId === taskIdRef.current
@@ -821,7 +831,7 @@ export default function ChatArea({
     const aiMsg: SimpleChatMessage = {
       id: assistantMessageId,
       role: 'assistant', content: '',
-      model: selectedModel, providerId: selectedProviderId,
+      model: requestModelSelection.modelId, providerId: requestModelSelection.providerId,
       createdAt: Date.now(),
     };
     const requestSourceVersionIds = [...new Set(
@@ -857,8 +867,8 @@ export default function ChatArea({
         if (instructions.forbiddenRules) parts.push(`禁止规则：${instructions.forbiddenRules}`);
         if (parts.length > 0) systemMessages.push({ role: 'system', content: parts.join('\n') });
       }
-      if (task.activeAgentId) {
-        const agent = project.agents.find(a => a.id === task.activeAgentId);
+      if (requestActiveAgentId) {
+        const agent = project.agents.find(a => a.id === requestActiveAgentId);
         if (agent) systemMessages.push({ role: 'system', content: agent.systemPrompt });
       }
       if (webSearch) {
@@ -914,9 +924,9 @@ export default function ChatArea({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: allMessages, model: selectedModel, providerId: selectedProviderId,
+          messages: allMessages, model: requestModelSelection.modelId, providerId: requestModelSelection.providerId,
           imageModel: selectedImageModel, imageProviderId: selectedImageProviderId,
-          webSearch, knowledgeItems: apiKnowledgeItems, projectId: project.id, taskId: task.id,
+          webSearch, knowledgeItems: apiKnowledgeItems, projectId: requestProjectId, taskId: requestTaskId,
           assetProjectId: selectedCanvasProjectId || undefined,
           responseMessageId: assistantMessageId,
           sourceVersionIds: requestSourceVersionIds,
@@ -1063,27 +1073,44 @@ export default function ChatArea({
         totalTokens: (prev?.totalTokens || 0) + promptEst + completionEst,
       }));
     }
-  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment]);
+  }, [input, isStreaming, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment]);
 
   // 供消息编辑后重新生成调用
   handleSendRef.current = handleSend;
 
   // Deep Research
   const handleDeepResearch = useCallback(async () => {
+    const requestModelSelection = readSimpleChatModelSelection(task);
     if (!input.trim() || isStreaming) return;
+    if (!requestModelSelection.modelId || !requestModelSelection.providerId) {
+      setSearchStatus('请先选择可用的对话模型。');
+      return;
+    }
     setIsStreaming(true);
     const query = input;
     setInput("");
 
     const userMsg: SimpleChatMessage = { id: `msg_${Date.now()}`, role: 'user', content: `🔬 Deep Research: ${query}`, createdAt: Date.now() };
-    const aiMsg: SimpleChatMessage = { id: `msg_${Date.now() + 1}`, role: 'assistant', content: '', createdAt: Date.now() + 1 };
+    const aiMsg: SimpleChatMessage = {
+      id: `msg_${Date.now() + 1}`,
+      role: 'assistant',
+      content: '',
+      model: requestModelSelection.modelId,
+      providerId: requestModelSelection.providerId,
+      createdAt: Date.now() + 1,
+    };
     setMessages(prev => [...prev, userMsg, aiMsg]);
 
     try {
       const res = await fetch('/api/simple-chat/deep-research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, model: selectedModel, providerId: selectedProviderId, depth: 'standard' }),
+        body: JSON.stringify({
+          query,
+          model: requestModelSelection.modelId,
+          providerId: requestModelSelection.providerId,
+          depth: 'standard',
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -1123,7 +1150,7 @@ export default function ChatArea({
         : 'Deep Research 失败，请重试。';
       setMessages(prev => { const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], content: errorContent }; return u; });
     } finally { setIsStreaming(false); }
-  }, [input, isStreaming, selectedModel, selectedProviderId]);
+  }, [input, isStreaming, task]);
 
   // Branch from message
   const branchFromMessage = useCallback((msgId: string) => {
