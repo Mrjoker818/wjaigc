@@ -2,6 +2,11 @@
 
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from '@/lib/chat-generation-controls';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import type {
+  SimpleChatFailure,
+  SimpleChatMessageStatus,
+  SimpleChatRetryContextV1,
+} from '@/lib/simple-chat-retry';
 
 export type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 
@@ -48,6 +53,9 @@ export interface SimpleChatMessage {
   parentMessageId?: string;
   branchId?: string;
   agentRunId?: string;
+  status?: SimpleChatMessageStatus;
+  error?: SimpleChatFailure;
+  retryContext?: SimpleChatRetryContextV1;
   createdAt: number;
 }
 
