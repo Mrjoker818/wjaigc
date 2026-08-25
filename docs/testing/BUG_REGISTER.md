@@ -1992,6 +1992,12 @@ BUG-064 is **CLOSED** on the exact Coze candidate whose runtime commit is `6965f
 | Cloud regression | Coze synchronized exact `main@9a6363f021f7197b3aa5a9cf834c0c1c0419cb67`; build reports `/` and `/simple-chat` as dynamic. Fresh authenticated Chrome tabs loaded the dashboard and independent chat with no global error boundary or `Loading chunk` text. The external root now returns `Cache-Control: no-store, must-revalidate, no-cache, max-age=0, private`; all 11 current HTML static assets return HTTP 200 and the old `5504.45a77f7f149633a6.js` is absent from the HTML. `/api/auth/me` remains 200. |
 | Status | **CLOSED ON COZE `9a6363f`.** The initial stale edge response remained visible immediately after restart, then a cache-busting request reached the dynamic origin; subsequent clean root requests and fresh Chrome tabs received the current no-store shell. This closure does not close the separately visible historical blank project thumbnail or Stage 3 Canvas/real-P0 gates. |
 
+#### 2026-08-25 服务替换期复发补充
+
+- Coze `main@9a3fcb63d732a0f8cf572be4741ec93585c8f400` 构建、启动、三个 HTTP 健康端点和 12 个当前静态资源检查均通过后，既有 Google Chrome `/simple-chat` 标签首次刷新仍进入全局错误边界：`Loading chunk 3230 failed`。
+- 失败 URL 为当前页面实际引用的 `page-b99b9c53323d5288.js`；紧随其后的独立请求返回 HTTP 200、141,461 字节，第二次刷新恢复，稳定窗口内没有新增 Console error/warning。
+- 这次现象更接近服务切换窗口中 HTML 与静态资源可用时间不一致，而不是原先一年缓存的旧壳；但用户仍会看到同样的 P1 页面不可用，因此本缺陷按复发重新打开。关闭条件是原子切换或保留旧构建资源，并以首次加载而非人工二次刷新证明连续部署安全。
+
 ### S3-BUG-033: cancelled durable generation slot accepted a late result and was not refunded
 
 | Field | Detail |
@@ -2486,8 +2492,8 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 发现范围 | 独立智能对话页面 `/simple-chat` 的聊天模型和图像模型下拉菜单。 |
 | 根因 | 旧实现只给下拉子元素设置层级，顶部栏本身没有建立高于消息滚动区的层叠上下文；消息内容可进入更高绘制层并覆盖菜单。 |
 | V5.8.8 参考 | donor 通过给顶部栏增加 `relative z-50` 修复父级层叠上下文。当前线只选择性吸收该展示边界，不复制 donor 的重复模型状态或旧会话逻辑。 |
-| 当前修复 | `src/components/simple-chat/chat-area.tsx` 的顶部栏使用 `relative z-50`，两个列表使用 `z-[100]`、有界高度、内部滚动和 `min(20rem, 100vw - 1.5rem)` 窄屏宽度；模型选择同时写入精确 `providerId + modelId`。残缺/失效历史配对会按当前目录修复，CanvasEditor 迟到流及任务切换旧消息回写均受项目和任务作用域约束。 |
+| 当前修复 | `src/components/simple-chat/chat-area.tsx` 的顶部栏使用 `relative z-50`，两个列表使用 `z-[100]`、有界高度和内部滚动；`src/lib/simple-chat-model-menu-position.ts` 根据按钮矩形与视口计算宽度、水平钳制、上下展开和最大高度，消除 320px 图像按钮偏置导致的左侧裁切。模型选择仍写入精确 `providerId + modelId`，未修改供应商、任务或积分语义。 |
 | 永久回归 | 组件契约检查父级层级和两个 `listbox`；Playwright 长对话门禁覆盖桌面、412px、375px、320px 的可见性、`elementFromPoint()` 命中、内部滚动、点选和横向溢出；RTL 覆盖残缺模型修复、跨任务/跨项目迟到流及消息所有权。 |
-| 本地结果 | Simple Chat 聚焦 `8 files / 43 tests`、全仓 `536 files / 3508 tests` 通过；TypeScript、零错误 Lint、Next.js `116/116` 构建、保护基线和空白检查通过。 |
-| 未验证 | 本机没有可用的真实 E2E 账号和运行环境，Playwright 云端实跑尚未执行；必须在 Coze exact SHA 的现有 Google Chrome 标签页完成长对话点选证据。 |
-| 状态 | **本地已修复 / 云端待验。** 不得在 Chrome 真实命中与选择证据完成前标记关闭。 |
+| 本地结果 | 首轮 Simple Chat 聚焦 `8 files / 43 tests`、全仓 `3508/3508` 通过；320px 二次修复为 3 files / 14 tests，相关回归 16 files / 100 tests，TypeScript、零错误 Lint、Next.js `116/116` 构建和保护基线 38/38 通过。第二次全仓首轮只有既有 `stage-3-source-state` 20 秒负载超时，单文件重跑 2/2 通过；未放宽超时。 |
+| 云端证据 | Coze `main@9a3fcb63d732a0f8cf572be4741ec93585c8f400`，Google Chrome 1440、412、375、320 四档。320px 图像与聊天菜单均为 `left=12/right=308/width=296`；图像列表 23 项且内部滚动，聊天列表 4 项；点选后均关闭。 |
+| 状态 | **已修复 / Coze 云端关闭。** 仅关闭模型菜单遮挡、裁切、滚动和点选子项，不替代模型请求一致性或 Simple Chat 三入口流式终态验收。 |

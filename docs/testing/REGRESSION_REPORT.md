@@ -1685,4 +1685,14 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 模型选择改为当前任务的单一数据源，精确 `providerId + modelId` 原子更新；普通对话、CanvasEditor 和 Deep Research 均在请求开始时冻结同一模型快照，延迟返回不能覆盖新任务。
 - 聚焦回归为 `8 files / 43 tests` 全通过，覆盖精确模型配对、跨任务/跨项目迟到流、任务切换消息所有权、菜单布局和浏览器门禁契约。浏览器门禁覆盖桌面、412px、375px、320px 长对话的 hit-test、滚动和点选，并拦截测试页面的真实聊天项目写回；因本机缺少真实 E2E 凭据与服务环境，真实 Playwright 执行仍属于云端待验，未写成通过。
 - 全仓 Vitest 为 `536 passed / 20 skipped files`，业务断言 `3508 passed / 117 skipped`；跳过项均为缺少 `POSTGRES_TEST_DATABASE_URL` 的真实 PostgreSQL 专项。`pnpm ts-check`、`pnpm lint:build`、Next.js `116/116` 构建、`git diff --check` 和保护基线门禁均通过。
-- **回归结论：本地通过 / Coze Google Chrome 待验。** 云端必须证明两个菜单在长对话上方可见、可滚动、可点击，并且实际请求使用所选模型组合。
+- **回归结论：本地通过 / Coze Google Chrome 菜单子项已验。** 实际请求模型组合与三入口流式终态继续独立待验。
+
+## 2026-08-25 Simple Chat 模型菜单 Coze Google Chrome 回归
+
+- 首轮 `main@912eaa46` 真实验证发现第二个缺陷：320x568 下图像模型按钮换行并右移，按钮容器的 `right-0` 使 296px 菜单左边界约为 `-26px`。该失败先保留，再增加纯布局 RED；没有用截图缩放或隐藏溢出来掩盖。
+- 最小修复提交为 `9a3fcb63d732a0f8cf572be4741ec93585c8f400`。Coze 构建退出码 0，PID 1370；`/`、`/simple-chat`、`/api/auth/me` 和 HTML 引用的 12 个静态资源均为 200；`origin/stable@52f7c601...` 未改变。
+- 真实边界：320px 两菜单均为 `left=12/right=308/width=296`；375px 为聊天 `43..363`、图像 `12..332`；412px 为聊天 `80..400`、图像 `41.3..361.3`；1440px 保持 320px 桌面宽度并位于视口内。
+- 图像列表有 23 个 option，`overflow-y:auto`，`scrollHeight=1290/clientHeight=382`；聊天列表有 4 个 option。两列表的首项可点击，点击后 `aria-expanded=false`。
+- 服务替换后的首次刷新出现一次 chunk 3230 加载失败和全局错误边界；同一 chunk 随后 HTTP 200，第二次刷新成功，之后没有新增 Console error/warning。该证据作为 `S3-BUG-032` 部署切换期复发保留。
+- 机器可读证据：`docs/testing/evidence/v588-chat-model-menu-cloud-2026-08-25.json`。
+- **回归结论：菜单遮挡、320px 裁切、内部滚动和点选关闭通过。** 模型实际请求配对、普通对话、CanvasEditor 和 Deep Research 不由本次布局验证代替。

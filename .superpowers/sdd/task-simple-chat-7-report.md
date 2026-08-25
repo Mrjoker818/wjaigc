@@ -1,4 +1,4 @@
-# Simple Chat Task 7 本地完成报告
+# Simple Chat Task 7 本地与模型菜单云端验收报告
 
 ## 范围
 
@@ -7,7 +7,7 @@
 - 已验证实现提交：`f1cf67b3fcda16d03c35a5dca5a05317b9ab6bc3`
 - 受保护分支：`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`，未修改
 - V5.8.8 donor：只读参考，未复制其会话所有权、同步逻辑或原始 URL 存储桥接
-- 云端状态：待 Coze exact SHA 的 Google Chrome 真实验收
+- 云端状态：模型菜单已在 Coze exact SHA 的 Google Chrome 关闭；三入口流式终态仍待验
 
 ## 问题与最小修复
 
@@ -47,4 +47,26 @@
 
 ## 判定
 
-本地候选通过，可进入云端验收；Simple Chat 专项尚未云端关闭，全平台仍为有条件通过。
+模型菜单子项已经云端关闭；Simple Chat 三入口流式终态尚未关闭，全平台仍为有条件通过。
+
+## 320px 复现与第二次最小修复
+
+- 首轮云端候选 `912eaa46` 在桌面、412px、375px 正常，但 320x568 下图像模型按钮位于换行后的偏置位置，`right-0` 仍以按钮容器为坐标系，296px 菜单左边界落到约 `-26px`。
+- 新增 `resolveSimpleChatModelMenuLayout()`，只根据按钮矩形与当前视口计算菜单宽度、相对 left、展开方向和最大高度；没有修改模型目录、供应商、任务、积分或聊天持久化。
+- RED 覆盖 320px 真实按钮坐标、桌面右对齐和底部空间不足时向上展开；GREEN 为 3 files / 14 tests。相关 Simple Chat 回归为 16 files / 100 tests；TypeScript、零错误 Lint、生产构建 116/116 和提交后的保护基线 38/38 均通过。
+- 全仓首轮为 3510 passed / 117 PostgreSQL-gated skipped / 1 个既有 `stage-3-source-state` 20 秒负载超时；该文件单独重跑 2/2、13.92 秒通过。没有放宽超时，也不把首轮全仓写成全绿。
+
+## Coze Google Chrome 证据
+
+| 项目 | 结果 |
+|---|---|
+| 云端提交 | `9a3fcb63d732a0f8cf572be4741ec93585c8f400`，`origin/stable@52f7c601...` 未触碰 |
+| 云端构建 | exit 0，PID 1370；`/`、`/simple-chat`、`/api/auth/me` 为 200；12 个静态资源均为 200 |
+| 320x568 | 图像菜单 `left=12/right=308/width=296/height=253.74`；聊天菜单 `left=12/right=308/width=296` |
+| 375x667 | 聊天菜单 `43..363`；图像菜单 `12..332`，无横向裁切 |
+| 412x915 | 聊天菜单 `80..400`；图像菜单 `41.3..361.3`，无横向裁切 |
+| 1440x900 | 聊天菜单 `306.7..626.7`；图像菜单 `712..1032`，保持 320px 桌面宽度 |
+| 交互 | 图像菜单 23 个 option，`overflow-y:auto`、`scrollHeight=1290/clientHeight=382`；聊天菜单 4 个 option；点选首项后两个菜单均 `aria-expanded=false` |
+| Console | 服务切换首次刷新记录一次 chunk 3230 加载失败；确认同一 chunk 已 200 后第二次刷新成功，之后没有新增 error/warning |
+
+首次刷新异常属于既有部署资源切换问题的复发证据，不影响菜单布局结论，但阻止把整个平台标记为完全通过。

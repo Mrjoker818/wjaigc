@@ -358,4 +358,4 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 当前任务成为聊天模型唯一数据源，模型与供应商原子更新；普通对话、CanvasEditor、Deep Research 固化请求快照，历史失效图片仅从请求副本排除，不改写用户历史。
 - 聚焦回归 `8 files / 43 tests`、全仓 `536 files / 3508 tests`、TypeScript、零错误 Lint、Next.js `116/116` 构建、保护基线和空白检查均通过。`20 files / 117 tests` PostgreSQL 专项因缺少隔离数据库明确跳过。
 - Playwright 门禁已建立桌面、412px、375px、320px 的 100 消息菜单可见性、hit-test、滚动、点选、横向溢出和请求体一致性断言，并阻断页面对真实聊天项目测试数据的延迟写回；本机缺少真实 E2E 凭据，因此实际浏览器结果保持未验证。
-- **状态：本地加固完成 / Coze Chrome 待验。** 云端证据完成前，`V588-CHAT-001` 仍不关闭，也不进入 `V588-CHAT-002`。
+- **状态：模型菜单已完成 Coze Chrome 验收 / 三入口流式仍待验。** `main@9a3fcb63` 已在 1440、412、375、320 四档验证两个菜单的视口边界、内部滚动和点选关闭；320px 二次缺陷经 RED/GREEN 修复。普通对话、CanvasEditor 与 Deep Research 的真实流式终态和错误态仍未关闭，因此 `V588-CHAT-001` 整体仍不关闭，也不进入 `V588-CHAT-002`。

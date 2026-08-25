@@ -1334,7 +1334,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 普通用户管理员入口命名 | P3 待优化 | 点击“用户管理”只返回普通项目仪表盘，没有越权；后续 UI 阶段应改为不误导的入口名称或按角色隐藏。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | 既有 `20 files / 117 tests` 仍需完整隔离 `POSTGRES_TEST_DATABASE_URL` 才能执行；本轮云端只读计数不能替代并发/退款专项。 |
 | V588-PROVIDER-001 | 已云端验证 | 精确映射、最长匹配、管理员名称优先、本地全量门禁和 Coze 普通用户图像/视频目录均已取得证据。 |
-| V588-CHAT-001 | 本地已吸收 / 云端待验 | 三入口已共用严格 SSE 解析器，本地覆盖 CRLF、任意分块、UTF-8、多行、尾事件、畸形事件和取消；仍需 Coze 真实普通对话、CanvasEditor 修图、Deep Research 及错误态证据。 |
+| V588-CHAT-001 | 菜单已云端验证 / 三入口待验 | 模型菜单已在 1440、412、375、320 四档关闭遮挡、裁切、滚动和点选问题；三入口已共用严格 SSE 解析器，但仍需 Coze 真实普通对话、CanvasEditor 修图、Deep Research 及错误态证据。 |
 | V588-CHAT-002 | 未开始 | 当前消息模型尚无统一 `streaming/completed/failed` 状态和冻结重试上下文；不得把重复发送当作重试。 |
 | V588-CHAT-003 | 部分现有能力 / 未吸收 | 当前已有服务器同步和 800ms 防抖，但远端权威按 ID 合并、离页/切换用户冲刷和可诊断失败尚未闭环。 |
 | V588-CHAT-004 | 部分现有能力 / 未吸收 | 无限画布已有更安全的 `AssetVersion -> /api/assets/transfer` 链路；来源追踪和发送到节点模式仍缺失，禁止复制 donor 的原始 URL `localStorage` 桥接。 |
@@ -1343,8 +1343,9 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 | 项目 | 最新状态 | 关闭条件 |
 |---|---|---|
-| 聊天模型下拉遮挡 | 本地已修复 / 云端待验 | Coze exact SHA 的 Google Chrome 长对话中，列表位于消息上方；`elementFromPoint()` 命中选项；内部滚动和非首项选择成功。需覆盖桌面、412px、375px、320px。 |
-| 图像模型下拉遮挡 | 本地已修复 / 云端待验 | 与聊天模型相同，并确认 412px、375px、320px 视口无顶部裁切和横向溢出。 |
+| 聊天模型下拉遮挡 | 已云端验证 | `main@9a3fcb63` 在桌面、412px、375px、320px 均位于视口内；4 个 option 可见，点选后菜单关闭。 |
+| 图像模型下拉遮挡 | 已云端验证 | 320px 为 `left=12/right=308/width=296`；375、412、桌面均无横向裁切；23 个 option 使用内部滚动并可点选。 |
 | 模型请求一致性 | 本地已修复 / 云端待验 | 切换 APIMart 模型后重新打开菜单显示正确 `aria-selected`，实际请求携带同一 `providerId + modelId`。 |
 | Simple Chat 三入口 | 本地已加固 / 云端待验 | 普通对话、CanvasEditor 和 Deep Research 分别得到真实终态或如实供应商错误；CanvasEditor 流式期间切换任务/项目不回写旧结果或旧消息；无重复请求、原生弹窗或未处理 Console Error。 |
+| Coze 服务替换期 chunk | 复发 / 未关闭 | `9a3fcb63` 启动后首次刷新出现 chunk 3230 加载失败；同一资源随后 200、第二次刷新恢复。需要原子发布或旧构建静态资源保留，并证明首次加载连续通过，不能把手动刷新当作发布修复。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 需要独立 `POSTGRES_TEST_DATABASE_URL`；不得使用生产数据库或把跳过项计为通过。 |

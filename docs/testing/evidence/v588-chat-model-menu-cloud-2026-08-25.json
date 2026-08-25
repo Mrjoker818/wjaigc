@@ -1,0 +1,63 @@
+{
+  "testDate": "2026-08-25",
+  "environment": "Coze isolated preview",
+  "browser": "Google Chrome 用户1",
+  "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat",
+  "candidateCommit": "9a3fcb63d732a0f8cf572be4741ec93585c8f400",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cloudHealth": {
+    "buildExitCode": 0,
+    "pid": 1370,
+    "rootStatus": 200,
+    "simpleChatStatus": 200,
+    "authMeStatus": 200,
+    "staticAssetCount": 12,
+    "staticAssetFailures": 0
+  },
+  "viewports": [
+    {
+      "width": 320,
+      "height": 568,
+      "chatMenu": { "left": 12, "right": 308, "width": 296, "height": 247.6000061035156 },
+      "imageMenu": { "left": 12, "right": 308, "width": 296, "height": 253.7375030517578 }
+    },
+    {
+      "width": 375,
+      "height": 667,
+      "chatMenu": { "left": 43, "right": 363, "width": 320 },
+      "imageMenu": { "left": 12, "right": 332, "width": 320 }
+    },
+    {
+      "width": 412,
+      "height": 915,
+      "chatMenu": { "left": 80, "right": 400, "width": 320 },
+      "imageMenu": { "left": 41.29999923706055, "right": 361.29999923706055, "width": 320 }
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "chatMenu": { "left": 306.70001220703125, "right": 626.7000122070312, "width": 320 },
+      "imageMenu": { "left": 712, "right": 1032, "width": 320 }
+    }
+  ],
+  "interaction": {
+    "chatOptionCount": 4,
+    "imageOptionCount": 23,
+    "imageMenuOverflowY": "auto",
+    "imageMenuClientHeight": 382,
+    "imageMenuScrollHeight": 1290,
+    "chatMenuClosedAfterSelection": true,
+    "imageMenuClosedAfterSelection": true
+  },
+  "deploymentRace": {
+    "firstReloadFailed": true,
+    "error": "ChunkLoadError: Loading chunk 3230 failed",
+    "chunkPath": "/_next/static/chunks/app/simple-chat/page-b99b9c53323d5288.js",
+    "subsequentChunkStatus": 200,
+    "subsequentChunkBytes": 141461,
+    "secondReloadSucceeded": true,
+    "newConsoleErrorsAfterSuccessfulReload": 0,
+    "newConsoleWarningsAfterSuccessfulReload": 0
+  },
+  "verdict": "模型菜单布局、滚动和点选通过；三入口流式与部署切换期 chunk 可靠性仍未关闭"
+}
