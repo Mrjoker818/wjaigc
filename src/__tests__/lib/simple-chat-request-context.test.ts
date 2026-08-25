@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   applySimpleChatModelSelection,
   buildSimpleChatHistoryRequestContext,
@@ -34,6 +34,21 @@ describe('simple-chat model selection', () => {
       modelId: 'gpt-5.5',
       providerId: 'provider-apimart',
     });
+  });
+
+  it('widens replaced model and provider fields from literal input types', () => {
+    const task = {
+      id: 'task-1',
+      model: 'gemini-old',
+      providerId: 'provider-old',
+    } as const;
+    const next = applySimpleChatModelSelection(task, {
+      modelId: 'gpt-5.5',
+      providerId: 'provider-apimart',
+    });
+
+    expectTypeOf(next.model).toEqualTypeOf<string>();
+    expectTypeOf(next.providerId).toEqualTypeOf<string>();
   });
 });
 

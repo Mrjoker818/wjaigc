@@ -43,7 +43,7 @@ export function readSimpleChatModelSelection(
 export function applySimpleChatModelSelection<T extends { model: string; providerId: string }>(
   task: T,
   selection: SimpleChatModelSelection,
-): T {
+): Omit<T, 'model' | 'providerId'> & { model: string; providerId: string } {
   return {
     ...task,
     model: selection.modelId.trim(),
