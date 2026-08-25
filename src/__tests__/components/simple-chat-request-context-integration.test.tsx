@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 import ChatArea from '@/components/simple-chat/chat-area';
 import type { SimpleChatProject, SimpleChatTask } from '@/components/simple-chat/simple-chat-types';
@@ -17,6 +18,13 @@ const chatAreaSource = readFileSync(
 
 const INVALID_IMAGE = 'data:image/png;base64,not-valid';
 const VALID_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zr1sAAAAASUVORK5CYII=';
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
+}));
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -261,6 +269,8 @@ describe('simple-chat request context integration', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.doUnmock('@/lib/brand-dna');
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
     vi.restoreAllMocks();
   });
 
@@ -549,6 +559,31 @@ describe('simple-chat request context integration', () => {
     });
   });
 
+  it('shows the exact CanvasEditor supplier stream error instead of reporting an empty result', async () => {
+    const onUpdateTask = vi.fn();
+    const task = createTask();
+    const canvasResponse = createDeferredSseResponse();
+    mockStartupRequests(canvasResponse.response);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    fireEvent.click(screen.getByTitle('写作画布'));
+    fireEvent.change(screen.getByPlaceholderText('在这里编辑文案...'), { target: { value: 'draft' } });
+    fireEvent.change(screen.getByPlaceholderText('告诉 AI 如何修改全文...'), { target: { value: 'polish it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(1));
+
+    await act(async () => {
+      canvasResponse.emit({ type: 'error', error: 'APIMart edit get_channel_failed' });
+      canvasResponse.close();
+    });
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('APIMart edit get_channel_failed'));
+  });
+
   it('does not apply a late CanvasEditor response after switching tasks', async () => {
     const onUpdateTask = vi.fn();
     const taskA = createTask([{
@@ -698,6 +733,34 @@ describe('simple-chat request context integration', () => {
         && message.content === 'final research'
         && message.model === 'research-model'
         && message.providerId === 'research-provider'
+      )),
+    )).toBe(true));
+  });
+
+  it('persists the exact Deep Research supplier stream error as the terminal assistant message', async () => {
+    const onUpdateTask = vi.fn();
+    const researchResponse = createDeferredSseResponse();
+    mockStartupRequests(streamResponse(), undefined, [researchResponse.response]);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={createTask()} onUpdateTask={onUpdateTask} />);
+    fireEvent.change(screen.getByPlaceholderText(/输入消息/u), { target: { value: 'research failure' } });
+    fireEvent.click(screen.getByTitle('Deep Research - 深度研究'));
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/deep-research')).toHaveLength(1));
+
+    await act(async () => {
+      researchResponse.emit({ type: 'phase', label: '正在综合分析并撰写研究报告...' });
+      researchResponse.emit({ type: 'error', error: 'APIMart research get_channel_failed' });
+      researchResponse.close();
+    });
+
+    await waitFor(() => expect(onUpdateTask.mock.calls.map(([updatedTask]) => updatedTask as SimpleChatTask).some(
+      updatedTask => updatedTask.messages.some(message => (
+        message.role === 'assistant'
+        && message.content === 'Deep Research 失败：APIMart research get_channel_failed'
       )),
     )).toBe(true));
   });

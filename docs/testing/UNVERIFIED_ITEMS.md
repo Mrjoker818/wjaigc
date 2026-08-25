@@ -1349,3 +1349,13 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Simple Chat 三入口 | 本地已加固 / 云端待验 | 普通对话、CanvasEditor 和 Deep Research 分别得到真实终态或如实供应商错误；CanvasEditor 流式期间切换任务/项目不回写旧结果或旧消息；无重复请求、原生弹窗或未处理 Console Error。 |
 | Coze 服务替换期 chunk | 复发 / 未关闭 | `9a3fcb63` 启动后首次刷新出现 chunk 3230 加载失败；同一资源随后 200、第二次刷新恢复。需要原子发布或旧构建静态资源保留，并证明首次加载连续通过，不能把手动刷新当作发布修复。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 需要独立 `POSTGRES_TEST_DATABASE_URL`；不得使用生产数据库或把跳过项计为通过。 |
+
+## 2026-08-25 Simple Chat 错误终态修复后的云端待验项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| CanvasEditor 供应商错误 | 本地已修复 / 云端待验 | APIMart 成功时只替换目标文本并保留其余内容；失败时显示供应商真实错误，不得退化为“AI 未返回内容”。 |
+| Deep Research 供应商错误 | 本地已修复 / 云端待验 | 阶段提示最终必须被真实报告或明确失败替换，不得永久停在处理中；失败消息保留供应商原因。 |
+| 普通对话模型配对 | 云端待验 | 切换 APIMart 模型后只产生一次 `/api/simple-chat/chat`，请求中的 `providerId + modelId` 与选中项一致，并得到真实终态。 |
+| 三入口浏览器健康 | 云端待验 | 三条链路均无重复请求、浏览器原生错误弹窗、未处理 Promise 或新增 Console Error；网络日志保留精确终态证据。 |
+| PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 需要独立 `POSTGRES_TEST_DATABASE_URL`，不能使用生产库代替。 |

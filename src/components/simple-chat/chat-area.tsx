@@ -749,6 +749,7 @@ export default function ChatArea({
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (!res.body) throw new Error('No response body');
     let result = '';
+    let streamError: string | null = null;
     await consumeSimpleChatJsonStream(res.body, {
       isActive: requestScopeIsCurrent,
       onEvent(value) {
@@ -760,12 +761,17 @@ export default function ChatArea({
           && typeof parsed.content === 'string'
         ) {
           result += parsed.content;
+        } else if (parsed.type === 'error') {
+          streamError = typeof parsed.error === 'string' && parsed.error.trim()
+            ? parsed.error.trim()
+            : 'AI 编辑失败';
         }
       },
     });
     if (!requestScopeIsCurrent()) {
       throw new Error('会话已切换，本次 AI 编辑结果已忽略。');
     }
+    if (streamError) throw new Error(streamError);
     if (!result.trim()) throw new Error('AI 未返回内容');
     return selectedText ? currentContent.replace(selectedText, result.trim()) : result.trim();
   }
@@ -1171,11 +1177,13 @@ export default function ChatArea({
 
       if (!res.body) throw new Error('No body');
       let fullContent = "", phaseLabel = "";
+      let streamError: string | null = null;
 
       const streamResult = await consumeSimpleChatJsonStream(res.body, {
         isActive: requestScopeIsCurrent,
         onEvent(value) {
           if (!requestScopeIsCurrent()) return;
+          if (streamError) return;
           const parsed = readSimpleChatStreamPayload(value);
           if (!parsed) return;
             if (parsed.type === 'phase') {
@@ -1192,6 +1200,15 @@ export default function ChatArea({
               // Save as artifact
               const artId = `art_${Date.now()}`;
               setArtifacts(prev => [...prev, { id: artId, type: 'document', title: `研究: ${query.slice(0, 30)}`, content: fullContent }]);
+            } else if (parsed.type === 'error') {
+              streamError = typeof parsed.error === 'string' && parsed.error.trim()
+                ? parsed.error.trim()
+                : '未知错误';
+              setMessages(prev => prev.map(message => (
+                message.id === aiMsg.id
+                  ? { ...message, content: `Deep Research 失败：${streamError}` }
+                  : message
+              )));
             }
         },
       });

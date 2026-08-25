@@ -1392,3 +1392,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 本地聚焦 `43/43`、全仓 `3508/3508` 已执行断言、TypeScript、零错误 Lint、Next.js `116/116` 构建、保护基线与空白检查均通过；`117` 项 PostgreSQL 专项因缺少隔离数据库保持未验证。独立复审确认运行时 Critical/Important 为 `0/0`，文档证据已更新为最终候选结果。
 - **专项判定：模型菜单子项已在 Coze Google Chrome 通过。** `main@9a3fcb63` 的桌面、412px、375px、320px 均证明两个列表位于视口内、可滚动和可点选；320px 二次裁切缺陷已由失败测试和最小修复关闭。模型请求一致性与三入口流式终态仍未完成，因此 `V588-CHAT-001` 整体不关闭，全平台维持有条件通过。
 - 部署切换后的首次刷新再次进入 `ChunkLoadError` 全局错误边界；确认当前 chunk 已 200 后第二次刷新恢复。该问题不推翻菜单通过结论，但 `S3-BUG-032` 应按复发证据重新保持开放，正式发布仍需原子切换或旧静态资源保留策略。
+
+## 2026-08-25 Simple Chat 错误终态加固后的发布判断
+
+- CanvasEditor 与 Deep Research 丢失供应商 `type:error` 的问题已按 RED/GREEN 最小修复；普通对话逻辑、精确 `providerId + modelId`、会话所有权和账务均未改变。
+- 本地聚焦 `14/14`、Simple Chat 相关 `102/102`、全仓 `3513/3513` 已执行测试、TypeScript、零错误 Lint、Next.js `116/116` 构建和保护基线 `38/38` 通过；`117` 项 PostgreSQL 专项仍因缺少隔离数据库未执行。
+- **专项判定仍为本地有条件通过，V588-CHAT-001 不关闭。** 必须先将新提交部署到 Coze，并完成普通对话、CanvasEditor、Deep Research 三条真实 APIMart 链路及浏览器健康证据。全平台继续维持有条件通过。

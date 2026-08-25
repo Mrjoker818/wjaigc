@@ -1696,3 +1696,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 服务替换后的首次刷新出现一次 chunk 3230 加载失败和全局错误边界；同一 chunk 随后 HTTP 200，第二次刷新成功，之后没有新增 Console error/warning。该证据作为 `S3-BUG-032` 部署切换期复发保留。
 - 机器可读证据：`docs/testing/evidence/v588-chat-model-menu-cloud-2026-08-25.json`。
 - **回归结论：菜单遮挡、320px 裁切、内部滚动和点选关闭通过。** 模型实际请求配对、普通对话、CanvasEditor 和 Deep Research 不由本次布局验证代替。
+
+## 2026-08-25 Simple Chat 三入口错误终态本地回归
+
+- 在开始真实 APIMart 验收前，以组件级真实 SSE 流稳定复现两个遗漏：CanvasEditor 丢弃 `type:error` 后误报“AI 未返回内容”，Deep Research 丢弃同一事件后把阶段提示保留为最终消息。
+- 根因位于 `chat-area.tsx` 的业务事件分派，不在共享 SSE 解析器或供应商。普通对话已有同类错误分支，因此最小修复只补齐 CanvasEditor 与 Deep Research，不改变模型路由、会话隔离、任务和账务。
+- RED 为 `2 failed / 12 passed`；GREEN 为聚焦 `14/14`、Simple Chat 相关 `16 files / 102 tests`。全仓为 `537 files / 3513 tests` 通过，`20 files / 117` 项 PostgreSQL 专项因缺少隔离测试库跳过；TypeScript、零错误 Lint、生产构建 `116/116`、保护基线 `38/38` 和空白检查通过。
+- **回归结论：本地通过 / 云端待验。** 仍须在 Coze 精确新提交上使用 Google Chrome 和 APIMart，分别验证普通对话、CanvasEditor、Deep Research 的真实请求配对、终态、请求次数、Console、网络和原生弹窗；不得仅凭本地事件注入关闭 V588-CHAT-001。

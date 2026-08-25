@@ -2497,3 +2497,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 本地结果 | 首轮 Simple Chat 聚焦 `8 files / 43 tests`、全仓 `3508/3508` 通过；320px 二次修复为 3 files / 14 tests，相关回归 16 files / 100 tests，TypeScript、零错误 Lint、Next.js `116/116` 构建和保护基线 38/38 通过。第二次全仓首轮只有既有 `stage-3-source-state` 20 秒负载超时，单文件重跑 2/2 通过；未放宽超时。 |
 | 云端证据 | Coze `main@9a3fcb63d732a0f8cf572be4741ec93585c8f400`，Google Chrome 1440、412、375、320 四档。320px 图像与聊天菜单均为 `left=12/right=308/width=296`；图像列表 23 项且内部滚动，聊天列表 4 项；点选后均关闭。 |
 | 状态 | **已修复 / Coze 云端关闭。** 仅关闭模型菜单遮挡、裁切、滚动和点选子项，不替代模型请求一致性或 Simple Chat 三入口流式终态验收。 |
+
+### V588-CHAT-001-BUG-002 - CanvasEditor 与 Deep Research 丢失供应商流式错误（2026-08-25）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：供应商已经返回失败时，界面不能如实结束任务。 |
+| 发现范围 | 独立智能对话页面 `/simple-chat` 的 CanvasEditor AI 修改与 Deep Research。普通对话已有 `type:error` 分支，不受此根因影响。 |
+| 稳定复现 | 向两条共享 SSE 消费链分别注入 `{type:"error", error:"APIMart ... get_channel_failed"}`。修复前 CanvasEditor 报“AI 未返回内容”；Deep Research 保留“正在综合分析……”阶段文本，均丢失真实供应商错误。 |
+| 根因 | 两个业务事件分派器只处理正文、阶段和引用，没有把共享解析器交付的 `type:error` 转成终态；协议层正确解析了事件，错误在组件业务分派边界被忽略。 |
+| RED | `simple-chat-request-context-integration.test.tsx` 新增两个真实组件流用例；修复前结果为 `2 failed / 12 passed`，错误内容与预期稳定不一致。 |
+| 最小修复 | CanvasEditor 保存首个流式错误并在消费结束后抛给既有 toast；Deep Research 把首个流式错误写入当前助手消息并停止消费后续事件。未修改普通对话、供应商选择、模型参数、会话所有权、任务或积分。 |
+| 本地回归 | 聚焦文件 `14/14`；Simple Chat 相关矩阵 `16 files / 102 tests`；全仓 `537 files / 3513 tests` 通过，`20 files / 117` 项 PostgreSQL 专项因缺少隔离库明确跳过。TypeScript、零错误 Lint、Next.js `116/116` 生产构建、保护基线 `38/38` 和空白检查通过。 |
+| 状态 | **本地已修复 / Coze 真实 APIMart 待验。** 普通对话、CanvasEditor、Deep Research 必须各取得一次真实终态或如实供应商错误，并证明请求模型配对、请求次数、Console 和原生弹窗正常后，才能关闭 V588-CHAT-001。 |
