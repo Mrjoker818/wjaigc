@@ -667,6 +667,35 @@ describe('simple-chat request context integration', () => {
     });
   });
 
+  it('asks selected CanvasEditor edits to return only the replacement fragment', async () => {
+    const onUpdateTask = vi.fn();
+    const task = createTask();
+    const canvasResponse = createDeferredSseResponse();
+    mockStartupRequests(canvasResponse.response);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    fireEvent.click(screen.getByTitle('写作画布'));
+    const editor = screen.getByPlaceholderText('在这里编辑文案...') as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: '前缀原文后缀' } });
+    editor.setSelectionRange(2, 4);
+    fireEvent.select(editor);
+    fireEvent.change(screen.getByPlaceholderText('告诉 AI 如何修改选中部分...'), {
+      target: { value: '替换选区' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }));
+
+    await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(1));
+    const payload = requestPayloads('/api/simple-chat/chat')[0];
+    const messages = payload.messages as Array<{ role: string; content: string }>;
+    expect(messages[0].content).toContain('只输出修改后的选中文本片段');
+    expect(messages[0].content).not.toContain('输出修改后的完整文本');
+    expect(messages[1].content).toContain('【待修改的选中文本】\n原文');
+  });
+
   it('shows the exact CanvasEditor supplier stream error instead of reporting an empty result', async () => {
     const onUpdateTask = vi.fn();
     const task = createTask();

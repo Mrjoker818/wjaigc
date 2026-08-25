@@ -758,7 +758,12 @@ export default function ChatArea({
       isWorkspaceResultScopeCurrent(request.projectId, projectIdRef.current)
       && request.taskId === taskIdRef.current
     );
+    const isSelectionEdit = Boolean(request.selectedText);
     const target = request.selectedText || request.currentContent;
+    const systemPrompt = isSelectionEdit
+      ? '你是一名专业文案编辑。根据用户的修改指令修改给定的选中文本。只输出修改后的选中文本片段，不要重复原片段、不要输出全文、不要输出解释、不要添加引号或标记。'
+      : '你是一名专业文案编辑。根据用户的修改指令，输出修改后的完整文本。只输出修改后的文本本身，不要输出解释、不要添加引号或标记。';
+    const targetLabel = isSelectionEdit ? '待修改的选中文本' : '待修改文本';
     const res = await fetch('/api/simple-chat/chat', {
       method: 'POST',
       headers: {
@@ -767,8 +772,8 @@ export default function ChatArea({
       },
       body: JSON.stringify({
         messages: [
-          { role: 'system', content: '你是一名专业文案编辑。根据用户的修改指令，输出修改后的完整文本。只输出修改后的文本本身，不要输出解释、不要添加引号或标记。' },
-          { role: 'user', content: `【待修改文本】\n${target}\n\n【修改指令】\n${request.instruction}` },
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `【${targetLabel}】\n${target}\n\n【修改指令】\n${request.instruction}` },
         ],
         model: request.modelId,
         providerId: request.providerId,
