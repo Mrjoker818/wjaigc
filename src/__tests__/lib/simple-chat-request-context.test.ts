@@ -9,6 +9,18 @@ import {
 const PNG_1PX =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zr1sAAAAASUVORK5CYII=';
 
+const LONG_VALID_PNG = (() => {
+  const pngBytes = Uint8Array.from(
+    globalThis.atob(PNG_1PX.split(',')[1]),
+    character => character.charCodeAt(0),
+  );
+  const bytes = new Uint8Array(pngBytes.length + 4096);
+  bytes.set(pngBytes);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:image/png;base64,${globalThis.btoa(binary)}`;
+})();
+
 describe('simple-chat model selection', () => {
   it('atomically applies model and provider without mutating the task', () => {
     const task = { id: 'task-1', model: 'gemini-old', providerId: 'provider-old' };
@@ -41,6 +53,7 @@ describe('simple-chat image context', () => {
       '//cdn.example.com/protocol-relative.png',
       '/api/serve-upload/../private.png',
       '/uploads/../private.png',
+      '/uploads/%2525252e%2525252e/private.png',
       `https://cdn.example.com/${'a'.repeat(4097)}`,
     ]);
     expect(result.accepted).toEqual([
@@ -49,7 +62,15 @@ describe('simple-chat image context', () => {
       '/uploads/b.webp',
       PNG_1PX,
     ]);
-    expect(result.rejectedCount).toBe(10);
+    expect(result.rejectedCount).toBe(11);
+  });
+
+  it('accepts signature-valid data images longer than the URL limit', () => {
+    expect(LONG_VALID_PNG.length).toBeGreaterThan(4096);
+    expect(filterSimpleChatImageInputs([LONG_VALID_PNG])).toEqual({
+      accepted: [LONG_VALID_PNG],
+      rejectedCount: 0,
+    });
   });
 
   it('only attaches valid images from the latest three image-bearing user rounds', () => {

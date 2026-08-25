@@ -72,22 +72,27 @@ function decodeStrictDataImage(value: string): boolean {
 
 function containsTraversal(value: string): boolean {
   let decoded = value;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  let stabilized = false;
+  for (let attempt = 0; attempt < MAX_IMAGE_URL_LENGTH; attempt += 1) {
     let next: string;
     try {
       next = decodeURIComponent(decoded);
     } catch {
       return true;
     }
-    if (next === decoded) break;
+    if (next === decoded) {
+      stabilized = true;
+      break;
+    }
     decoded = next;
   }
+  if (!stabilized) return true;
   return decoded.includes('..') || decoded.includes('\\');
 }
 
 function isAllowedSimpleChatImageInput(value: string): boolean {
-  if (!value || value.length > MAX_IMAGE_URL_LENGTH) return false;
   if (value.startsWith('data:')) return decodeStrictDataImage(value);
+  if (!value || value.length > MAX_IMAGE_URL_LENGTH) return false;
   if (containsTraversal(value)) return false;
 
   if (value.startsWith('/api/serve-upload/') || value.startsWith('/uploads/')) {
