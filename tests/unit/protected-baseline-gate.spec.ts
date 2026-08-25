@@ -151,6 +151,7 @@ describe('protected baseline release gate', () => {
     expect(allowedPaths).toContain('.superpowers/sdd/task-1-report.md');
     expect(allowedPaths).toContain('.superpowers/sdd/task-simple-chat-4-report.md');
     expect(allowedPaths).toContain('.superpowers/sdd/task-simple-chat-5-report.md');
+    expect(allowedPaths).toContain('.superpowers/sdd/task-simple-chat-7-report.md');
     expect(allowedPaths).toContain('src/lib/simple-chat-request-context.ts');
     expect(allowedPaths).toContain('migrations/20260816_wj_stable_s4_agent_events.sql');
     expect(allowedPaths).toContain('scripts/run-migrations.mjs');

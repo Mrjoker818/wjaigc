@@ -2477,3 +2477,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 权限结果 | 普通用户点击画布“用户管理”后返回普通用户项目仪表盘，没有管理员用户表、API 管理、积分管理或支付配置，未形成越权。入口命名误导作为 P3 观察保留。 |
 | 状态 | **通过。** 没有新增 P0/P1；没有为测试误判修改生产代码。 |
 | 证据 | `docs/testing/evidence/s4-ordinary-five-entry-and-admission-2026-08-25.json` 与同名 PNG。 |
+
+### V588-CHAT-MENU-001 - 智能对话模型下拉被消息内容遮挡（2026-08-25）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：长对话中模型列表不可稳定查看或点选，会阻断模型切换。 |
+| 发现范围 | 独立智能对话页面 `/simple-chat` 的聊天模型和图像模型下拉菜单。 |
+| 根因 | 旧实现只给下拉子元素设置层级，顶部栏本身没有建立高于消息滚动区的层叠上下文；消息内容可进入更高绘制层并覆盖菜单。 |
+| V5.8.8 参考 | donor 通过给顶部栏增加 `relative z-50` 修复父级层叠上下文。当前线只选择性吸收该展示边界，不复制 donor 的重复模型状态或旧会话逻辑。 |
+| 当前修复 | `src/components/simple-chat/chat-area.tsx` 的顶部栏使用 `relative z-50`，两个列表使用 `z-[100]`、有界高度、内部滚动和 `min(20rem, 100vw - 1.5rem)` 窄屏宽度；模型选择同时写入精确 `providerId + modelId`。残缺/失效历史配对会按当前目录修复，CanvasEditor 迟到流及任务切换旧消息回写均受项目和任务作用域约束。 |
+| 永久回归 | 组件契约检查父级层级和两个 `listbox`；Playwright 长对话门禁覆盖桌面、412px、375px、320px 的可见性、`elementFromPoint()` 命中、内部滚动、点选和横向溢出；RTL 覆盖残缺模型修复、跨任务/跨项目迟到流及消息所有权。 |
+| 本地结果 | Simple Chat 聚焦 `8 files / 43 tests`、全仓 `536 files / 3508 tests` 通过；TypeScript、零错误 Lint、Next.js `116/116` 构建、保护基线和空白检查通过。 |
+| 未验证 | 本机没有可用的真实 E2E 账号和运行环境，Playwright 云端实跑尚未执行；必须在 Coze exact SHA 的现有 Google Chrome 标签页完成长对话点选证据。 |
+| 状态 | **本地已修复 / 云端待验。** 不得在 Chrome 真实命中与选择证据完成前标记关闭。 |

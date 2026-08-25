@@ -1678,3 +1678,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 接线回归修复 CanvasEditor 参数角色错位，并兼容服务端实际发送的 `text` 正文事件；保留现有 AssetVersion 传输、业务事件分支和旧请求取消边界。
 - 全仓为 `532` 个文件通过、`20` 个 PostgreSQL 文件因缺少 `POSTGRES_TEST_DATABASE_URL` 跳过；`3485` 项断言通过、`117` 项跳过。TypeScript、零错误 ESLint、Next.js `116/116` 构建、`git diff --check` 和 `38/38` 受保护基线门禁通过。
 - **回归结论：本地通过 / 云端未验证。** Coze 仍需在精确新 `main` 上完成普通对话流式、CanvasEditor 定点替换、Deep Research 阶段/引用、严格错误态、Console、网络和重复请求检查；当前不得写为云端通过。
+
+## 2026-08-25 Simple Chat 模型菜单与请求上下文本地回归
+
+- V5.8.8 的有效菜单修复已选择性吸收：顶部栏建立 `relative z-50` 层叠上下文，聊天和图像模型列表保持 `z-[100]`、内部滚动和点击控制；没有引入 donor 的重复模型本地状态。
+- 模型选择改为当前任务的单一数据源，精确 `providerId + modelId` 原子更新；普通对话、CanvasEditor 和 Deep Research 均在请求开始时冻结同一模型快照，延迟返回不能覆盖新任务。
+- 聚焦回归为 `8 files / 43 tests` 全通过，覆盖精确模型配对、跨任务/跨项目迟到流、任务切换消息所有权、菜单布局和浏览器门禁契约。浏览器门禁覆盖桌面、412px、375px、320px 长对话的 hit-test、滚动和点选，并拦截测试页面的真实聊天项目写回；因本机缺少真实 E2E 凭据与服务环境，真实 Playwright 执行仍属于云端待验，未写成通过。
+- 全仓 Vitest 为 `536 passed / 20 skipped files`，业务断言 `3508 passed / 117 skipped`；跳过项均为缺少 `POSTGRES_TEST_DATABASE_URL` 的真实 PostgreSQL 专项。`pnpm ts-check`、`pnpm lint:build`、Next.js `116/116` 构建、`git diff --check` 和保护基线门禁均通过。
+- **回归结论：本地通过 / Coze Google Chrome 待验。** 云端必须证明两个菜单在长对话上方可见、可滚动、可点击，并且实际请求使用所选模型组合。

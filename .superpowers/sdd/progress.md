@@ -507,3 +507,11 @@ Protected stable branch: read-only and untouched
 - 本地 E2E 因缺少凭据与 PostgreSQL未进入业务动作，故不判定布局/动作通过。下一唯一动作是独立复审、治理提交、普通快进推送 `main` 和现有 Google Chrome 标签页云端验收；`stable` 与 donor 保持只读。
 - 月度归档只读审计确认选择性吸收方向不变，但原清单偏重 UI：已补入 SVG/WASM 预算、PSD 安全输入与回退、simple-chat SSE、认证持久化、管理员真实投影和供应商能力矩阵六项 P0/P1；同时明确拒绝 donor `server-auth.ts`、`local-image-to-data-url.ts`、`cloud-task-storage.ts` 整文件替换。UI004 云端闭环后优先执行这些稳定性项。
 - UI004 实现候选已普通快进到 `main@be96c59d2d4dec6bbe510c3b7fd0de59ef092e0b`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。Google Chrome 仅发现正确的三个现有标签，但项目页和预览页接管均在连接层超时；未创建标签、未使用 360。Coze 拉取与云端矩阵保持未验证。
+
+- Simple-chat hardening Task 1: complete (commits 81bc0eda..4303ca9f, review clean; RED missing-module evidence confirmed).
+- Simple-chat hardening Task 2: complete (commits 4303ca9f..02b47a58, review clean; focused 5/5, TypeScript and targeted ESLint green).
+- Simple-chat hardening Task 3: complete (commits 02b47a58..2f9dd4d6, review clean; deferred workflow-return race covered by RTL, focused 10/10).
+- Simple-chat hardening Task 4: complete (commits 2f9dd4d6..aa454aff, review clean; RTL covers invalid-current recovery, aligned valid upload, immutable history, task-switch cleanup and deferred Brand DNA race; focused 13/13).
+- Simple-chat hardening Task 5: complete (commits aa454aff..c0f865c5, review clean; three request snapshots plus Deep Research SSE task/message isolation; focused 29/29).
+- Simple-chat hardening Task 6: complete as browser-gate implementation (commits c0f865c5..5774894e, review clean; 6 independent cases, hard credential gate, fixture restore, desktop/mobile stacking evidence). Real Chromium execution remains pending cloud/local credentials.
+- Simple-chat hardening Task 7: 本地完成（实现提交 `f1cf67b3`；聚焦 8 files / 43 tests；全仓 Vitest 536 files / 3508 tests passed，20 files / 117 PostgreSQL tests 因缺少隔离库跳过；TypeScript、零错误 Lint、Next 116/116 构建、保护基线和空白检查通过）。复审发现并以 RED/GREEN 关闭残缺模型配对、CanvasEditor 跨任务/跨项目迟到流及旧消息回写竞态、320/375px 菜单溢出、E2E 真实账号延迟写污染风险；本轮保护清单仅增加精确报告文件，没有新增目录级授权。真实 Coze Chrome 仍待验。

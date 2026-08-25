@@ -1338,3 +1338,13 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | V588-CHAT-002 | 未开始 | 当前消息模型尚无统一 `streaming/completed/failed` 状态和冻结重试上下文；不得把重复发送当作重试。 |
 | V588-CHAT-003 | 部分现有能力 / 未吸收 | 当前已有服务器同步和 800ms 防抖，但远端权威按 ID 合并、离页/切换用户冲刷和可诊断失败尚未闭环。 |
 | V588-CHAT-004 | 部分现有能力 / 未吸收 | 无限画布已有更安全的 `AssetVersion -> /api/assets/transfer` 链路；来源追踪和发送到节点模式仍缺失，禁止复制 donor 的原始 URL `localStorage` 桥接。 |
+
+## 2026-08-25 Simple Chat 本地加固后的云端待验项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 聊天模型下拉遮挡 | 本地已修复 / 云端待验 | Coze exact SHA 的 Google Chrome 长对话中，列表位于消息上方；`elementFromPoint()` 命中选项；内部滚动和非首项选择成功。需覆盖桌面、412px、375px、320px。 |
+| 图像模型下拉遮挡 | 本地已修复 / 云端待验 | 与聊天模型相同，并确认 412px、375px、320px 视口无顶部裁切和横向溢出。 |
+| 模型请求一致性 | 本地已修复 / 云端待验 | 切换 APIMart 模型后重新打开菜单显示正确 `aria-selected`，实际请求携带同一 `providerId + modelId`。 |
+| Simple Chat 三入口 | 本地已加固 / 云端待验 | 普通对话、CanvasEditor 和 Deep Research 分别得到真实终态或如实供应商错误；CanvasEditor 流式期间切换任务/项目不回写旧结果或旧消息；无重复请求、原生弹窗或未处理 Console Error。 |
+| PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 需要独立 `POSTGRES_TEST_DATABASE_URL`；不得使用生产数据库或把跳过项计为通过。 |

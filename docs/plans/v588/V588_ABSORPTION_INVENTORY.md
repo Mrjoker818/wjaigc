@@ -351,3 +351,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 全仓结果为 `532` 个文件通过、`20` 个 PostgreSQL 文件因缺少隔离数据库跳过；业务断言 `3485` 项通过、`117` 项跳过。TypeScript、零错误 ESLint、Next.js `116/116` 构建和 `38/38` 受保护基线门禁通过。
 - 受保护基线白名单只补录 8 个已经过审的路径，并保留来源提交：`97634feb`、`f19ab164`、`3c597cd9`、`717f3eab`；没有把未审改动静默加入允许范围。
 - **当前状态：本地已吸收 / 云端待验。** 必须在 Coze 精确拉取新 `main` 后验证普通对话、CanvasEditor 修图、Deep Research、严格错误态和浏览器健康；通过前不进入 `V588-CHAT-002`。
+
+## 2026-08-25 Simple Chat 模型菜单和请求上下文本地检查点
+
+- V5.8.8 的模型菜单遮挡修复已选择性吸收：保留其顶部栏 `relative z-50` 父级层叠上下文，当前两个菜单进一步使用 `z-[100]`、有界高度与内部滚动；未复制 donor 的重复 `selectedModel/selectedProviderId` 本地状态。
+- 当前任务成为聊天模型唯一数据源，模型与供应商原子更新；普通对话、CanvasEditor、Deep Research 固化请求快照，历史失效图片仅从请求副本排除，不改写用户历史。
+- 聚焦回归 `8 files / 43 tests`、全仓 `536 files / 3508 tests`、TypeScript、零错误 Lint、Next.js `116/116` 构建、保护基线和空白检查均通过。`20 files / 117 tests` PostgreSQL 专项因缺少隔离数据库明确跳过。
+- Playwright 门禁已建立桌面、412px、375px、320px 的 100 消息菜单可见性、hit-test、滚动、点选、横向溢出和请求体一致性断言，并阻断页面对真实聊天项目测试数据的延迟写回；本机缺少真实 E2E 凭据，因此实际浏览器结果保持未验证。
+- **状态：本地加固完成 / Coze Chrome 待验。** 云端证据完成前，`V588-CHAT-001` 仍不关闭，也不进入 `V588-CHAT-002`。
