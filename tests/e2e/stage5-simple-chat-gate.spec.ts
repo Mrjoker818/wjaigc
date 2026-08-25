@@ -57,6 +57,10 @@ type ModelFixture = {
   providerId: string;
 };
 
+type ChatProjectsSnapshot = {
+  value: unknown;
+};
+
 function credentialsFor(workerIndex: number): RealCredentials {
   const workerUsername = process.env[`E2E_TEST_USERNAME_${workerIndex}`]?.trim();
   const workerPassword = process.env[`E2E_TEST_PASSWORD_${workerIndex}`]?.trim();
@@ -158,17 +162,39 @@ async function login(page: Page, testInfo: TestInfo): Promise<void> {
   await expect(page.getByRole('heading', { name: '我的项目', exact: true })).toBeVisible({ timeout: 20_000 });
 }
 
-async function seedChatProjects(page: Page, fixtures: ChatProjectFixture[]): Promise<void> {
+async function readChatProjectsSnapshot(page: Page): Promise<ChatProjectsSnapshot> {
   const current = await page.request.get(`/api/user-data/sync?key=${CHAT_PROJECTS_SYNC_KEY}`);
   expect(current.ok(), `读取 chat fixture 返回 HTTP ${current.status()}`).toBe(true);
   const payload = await current.json() as { value?: unknown };
-  const existing = Array.isArray(payload.value) ? payload.value as Array<{ id?: unknown }> : [];
+  return { value: structuredClone(payload.value ?? null) };
+}
+
+async function seedChatProjects(
+  page: Page,
+  testInfo: TestInfo,
+  fixtures: ChatProjectFixture[],
+): Promise<void> {
+  if (chatProjectSnapshotsByTest.has(testInfo.testId)) {
+    throw new Error('Each Stage 5 gate may seed chat projects only once so its exact original value can be restored.');
+  }
+  const snapshot = await readChatProjectsSnapshot(page);
+  chatProjectSnapshotsByTest.set(testInfo.testId, snapshot);
+  const existing = Array.isArray(snapshot.value) ? snapshot.value as Array<{ id?: unknown }> : [];
   const fixtureIds = new Set(fixtures.map(project => project.id));
   const merged = [...existing.filter(project => typeof project?.id !== 'string' || !fixtureIds.has(project.id)), ...fixtures];
   const persisted = await page.request.post('/api/user-data/sync', {
     data: { key: CHAT_PROJECTS_SYNC_KEY, value: merged },
   });
   expect(persisted.ok(), `写入 chat fixture 返回 HTTP ${persisted.status()}`).toBe(true);
+}
+
+async function restoreChatProjectsSnapshot(page: Page, snapshot: ChatProjectsSnapshot): Promise<void> {
+  const restored = await page.request.post('/api/user-data/sync', {
+    data: { key: CHAT_PROJECTS_SYNC_KEY, value: snapshot.value },
+  });
+  expect(restored.ok(), `恢复 chat fixture 返回 HTTP ${restored.status()}`).toBe(true);
+  const verified = await readChatProjectsSnapshot(page);
+  expect(verified.value, 'chat fixture cleanup must restore the exact original value and ordering').toEqual(snapshot.value);
 }
 
 async function openFixtureProject(page: Page, projectId: string): Promise<void> {
@@ -225,8 +251,7 @@ async function assertMenuStacksAboveConversation(page: Page, listbox: Locator): 
   expect(resolvedBox.x).toBeGreaterThanOrEqual(0);
   expect(resolvedBox.y, 'menu must not clip above the viewport').toBeGreaterThanOrEqual(0);
   expect(resolvedBox.x + resolvedBox.width).toBeLessThanOrEqual(resolvedViewport.width);
-  expect(resolvedBox.y).toBeLessThan(resolvedViewport.height);
-  expect(resolvedBox.y + resolvedBox.height).toBeGreaterThan(0);
+  expect(resolvedBox.y + resolvedBox.height, 'menu must not clip below the viewport').toBeLessThanOrEqual(resolvedViewport.height);
 
   const option = await visibleOptionIn(listbox);
   const optionBox = await option.boundingBox();
@@ -285,8 +310,9 @@ async function exerciseLongConversationMenus(page: Page, testInfo: TestInfo, lab
 }
 
 const evidenceByTest = new Map<string, ReturnType<typeof collectBrowserEvidence>>();
+const chatProjectSnapshotsByTest = new Map<string, ChatProjectsSnapshot>();
 
-test.describe.configure({ mode: 'serial', timeout: 120_000 });
+test.describe.configure({ timeout: 120_000 });
 
 test.beforeEach(({ page }, testInfo) => {
   evidenceByTest.set(testInfo.testId, collectBrowserEvidence(page));
@@ -295,9 +321,36 @@ test.beforeEach(({ page }, testInfo) => {
 
 test.afterEach(async ({ page }, testInfo) => {
   const evidence = evidenceByTest.get(testInfo.testId);
+  const snapshot = chatProjectSnapshotsByTest.get(testInfo.testId);
+  const cleanupFailures: string[] = [];
+
+  // Keep browser state intact until all evidence is captured, then unload the app before restoring.
+  // This prevents the page's 800ms project-sync timer from writing fixtures after cleanup.
+  try {
+    if (evidence) {
+      await saveBrowserEvidence(page, testInfo, evidence, `stage5-simple-chat-${testInfo.title}`);
+    }
+  } catch (error) {
+    cleanupFailures.push(`evidence: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (snapshot) {
+    try {
+      if (!page.isClosed()) await page.goto('about:blank', { waitUntil: 'commit' });
+    } catch (error) {
+      cleanupFailures.push(`stop simple-chat sync: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      await restoreChatProjectsSnapshot(page, snapshot);
+    } catch (error) {
+      cleanupFailures.push(`restore chat projects: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   evidenceByTest.delete(testInfo.testId);
-  if (evidence) {
-    await saveBrowserEvidence(page, testInfo, evidence, `stage5-simple-chat-${testInfo.title}`);
+  chatProjectSnapshotsByTest.delete(testInfo.testId);
+  if (cleanupFailures.length > 0) {
+    throw new Error(`Stage 5 cleanup failed: ${cleanupFailures.join('; ')}`);
   }
 });
 
@@ -313,7 +366,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
       name: '切换目标会话',
       messages: numberedMessages(`${runTag}-switch`, 3),
     }]);
-    await seedChatProjects(page, [firstProject, secondProject]);
+    await seedChatProjects(page, testInfo, [firstProject, secondProject]);
 
     const renderStartedAt = Date.now();
     await openFixtureProject(page, firstProject.id);
@@ -331,7 +384,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
     await login(page, testInfo);
     const runTag = `${testInfo.workerIndex}-${Date.now()}`;
     const project = createProject(runTag, 'sse-error', `SSE错误-${runTag}`, [{ name: 'SSE错误会话', messages: [] }]);
-    await seedChatProjects(page, [project]);
+    await seedChatProjects(page, testInfo, [project]);
     await installDeterministicBrowserModelMocks(page, [{ id: 'gemini-test', name: 'Gemini Test', providerId: 'provider-a' }], []);
     // DETERMINISTIC_BROWSER_PROTOCOL_MOCK: supplies an SSE error envelope only, never a supplier success.
     await page.route('**/api/simple-chat/chat', route => route.fulfill({
@@ -345,14 +398,17 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
     await composer.fill('触发断流验证');
     await composer.press('Enter');
     await expect(page.getByText('E2E 模拟供应商断流', { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator('button:has(svg.lucide-rotate-ccw)').first()).toBeVisible({ timeout: 10_000 });
+    const failedAssistantMessage = page.locator('[data-chat-message-id]').filter({
+      hasText: 'E2E 模拟供应商断流',
+    });
+    await expect(failedAssistantMessage.getByTitle('重新生成')).toBeVisible({ timeout: 10_000 });
   });
 
   test('model click updates aria-selected and submits the matching model/provider pair', async ({ page }, testInfo) => {
     await login(page, testInfo);
     const runTag = `${testInfo.workerIndex}-${Date.now()}`;
     const project = createProject(runTag, 'model', `模型选择-${runTag}`, [{ name: '模型选择会话', messages: [] }]);
-    await seedChatProjects(page, [project]);
+    await seedChatProjects(page, testInfo, [project]);
     await installDeterministicBrowserModelMocks(page, [
       { id: 'gemini-test', name: 'Gemini Test', providerId: 'provider-a' },
       { id: 'gpt-test', name: 'GPT Test', providerId: 'provider-b' },
@@ -402,7 +458,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
         createdAt: Date.now() - 1_000,
       }],
     }]);
-    await seedChatProjects(page, [project]);
+    await seedChatProjects(page, testInfo, [project]);
     await installDeterministicBrowserModelMocks(page, [{ id: 'gemini-test', name: 'Gemini Test', providerId: 'provider-a' }], []);
     let submittedBody: Record<string, unknown> | null = null;
     // DETERMINISTIC_BROWSER_PROTOCOL_MOCK: response isolates request filtering in the real browser client.
@@ -443,7 +499,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
       model: 'chat-model-01',
       providerId: 'chat-provider-1',
     }]);
-    await seedChatProjects(page, [project]);
+    await seedChatProjects(page, testInfo, [project]);
     await installDeterministicBrowserModelMocks(page, modelFixtures('chat', 18), modelFixtures('image', 18));
     await openFixtureProject(page, project.id);
     await expect(page.getByText(`消息 100：阶段5门禁载荷 ${runTag}`, { exact: true })).toBeVisible();
@@ -462,7 +518,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
         model: 'chat-model-01',
         providerId: 'chat-provider-1',
       }]);
-      await seedChatProjects(page, [project]);
+      await seedChatProjects(page, testInfo, [project]);
       await installDeterministicBrowserModelMocks(page, modelFixtures('chat', 18), modelFixtures('image', 18));
       await openFixtureProject(page, project.id);
       await expect(page.getByText(`消息 100：阶段5门禁载荷 ${runTag}`, { exact: true })).toBeVisible();
