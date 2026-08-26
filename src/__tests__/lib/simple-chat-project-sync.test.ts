@@ -2610,6 +2610,67 @@ describe('simple chat project synchronization', () => {
 });
 
 describe('simple chat sync payload validation', () => {
+  it('rejects a task reference carried both directly and in conflict audit metadata', () => {
+    const value = project('p1', [task('t1')]);
+    value.tasks[0].activeAgentId = value.agents[0].id;
+    (value.tasks[0] as unknown as Record<string, unknown>).syncConflict = {
+      operationId: 'op-conflict',
+      sourceEntityType: 'task',
+      sourceEntityId: 't1',
+      sourceProjectId: 'p1',
+      sourceTaskId: 't1',
+      sourceReferences: { activeAgentId: value.agents[0].id },
+      sourceReferenceOrigins: { activeAgentId: 'local' },
+      conflictedAt: 1,
+    };
+
+    expect(validateSimpleChatProjects([value])).toMatchObject(invalidValue());
+  });
+
+  it('rejects a message parent carried both directly and in conflict audit metadata', () => {
+    const value = project('p1', [task('t1')]);
+    const child = message('m-child');
+    child.parentMessageId = 'm-parent';
+    value.tasks[0].messages = [child, message('m-parent')];
+    (child as unknown as Record<string, unknown>).syncConflict = {
+      operationId: 'op-conflict',
+      sourceEntityType: 'message',
+      sourceEntityId: child.id,
+      sourceProjectId: 'p1',
+      sourceTaskId: 't1',
+      sourceMessageId: child.id,
+      sourceReferences: { parentMessageId: 'm-parent' },
+      sourceReferenceOrigins: { parentMessageId: 'local' },
+      conflictedAt: 1,
+    };
+
+    expect(validateSimpleChatProjects([value])).toMatchObject(invalidValue());
+  });
+
+  it.each([
+    ['an unknown key', { unexpected: 'audit' }, undefined],
+    ['an empty object', {}, undefined],
+    [
+      'an allowed key plus an unknown key',
+      { activeAgentId: 'agent-1', unexpected: 'audit' },
+      { activeAgentId: 'remote' },
+    ],
+  ])('rejects task conflict source references with $0', (_name, sourceReferences, sourceReferenceOrigins) => {
+    const value = project('p1', [task('t1')]);
+    (value.tasks[0] as unknown as Record<string, unknown>).syncConflict = {
+      operationId: 'op-conflict',
+      sourceEntityType: 'task',
+      sourceEntityId: 't1',
+      sourceProjectId: 'p1',
+      sourceTaskId: 't1',
+      sourceReferences,
+      sourceReferenceOrigins,
+      conflictedAt: 1,
+    };
+
+    expect(validateSimpleChatProjects([value])).toMatchObject(invalidValue());
+  });
+
   it('rejects a consumed conflict reference when the entire origins object is missing', () => {
     const value = project('p1', [task('t1')]);
     value.tasks[0].activeAgentId = value.agents[0].id;

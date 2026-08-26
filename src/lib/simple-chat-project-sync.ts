@@ -3892,7 +3892,7 @@ function validateConflictMetadata(
   if (sourceEntityType !== carrierType) return invalidValidation('value');
   const scopeResult = validateConflictSourceScope(value, sourceEntityType);
   if (scopeResult) return scopeResult;
-  const referenceShapeResult = validateConflictReferenceFields(references, sourceEntityType);
+  const referenceShapeResult = validateConflictReferenceFields(references, sourceEntityType, carrier);
   if (referenceShapeResult) return referenceShapeResult;
   return validateConflictSourceReferenceOrigins(
     value.sourceReferenceOrigins,
@@ -3938,18 +3938,26 @@ function validateConflictSourceScope(
 function validateConflictReferenceFields(
   value: unknown,
   sourceEntityType: SimpleChatEntityType,
+  carrier: Record<string, unknown>,
 ): SimpleChatProjectValidationResult | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) return invalidValidation('value');
-  const hasTaskReference = value.activeAgentId !== undefined;
-  const hasMessageReference = value.parentMessageId !== undefined || value.retryContext !== undefined;
   if (sourceEntityType === 'task') {
-    return hasMessageReference ? invalidValidation('value') : undefined;
+    return hasExactObjectKeys(value, ['activeAgentId'])
+      && carrier.activeAgentId === undefined
+      ? undefined
+      : invalidValidation('value');
   }
   if (sourceEntityType === 'message') {
-    return hasTaskReference ? invalidValidation('value') : undefined;
+    const keys = Object.keys(value);
+    const allowedKeys = new Set(['parentMessageId', 'retryContext']);
+    return keys.length > 0
+      && keys.every(key => allowedKeys.has(key))
+      && !(value.parentMessageId !== undefined && carrier.parentMessageId !== undefined)
+      ? undefined
+      : invalidValidation('value');
   }
-  return hasTaskReference || hasMessageReference ? invalidValidation('value') : undefined;
+  return invalidValidation('value');
 }
 
 function validateConflictSourceReferenceOrigins(
