@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   fetchSessionPayload: vi.fn(),
   globalFetch: vi.fn(),
   loginUser: { id: 'user-login', name: 'Login User', createdAt: 1, updatedAt: 1 } as User,
+  loginHandler: null as ((user: User) => Promise<void>) | null,
   logoutSimpleChatSession: vi.fn(),
   routerReplace: vi.fn(),
 }));
@@ -44,9 +45,10 @@ vi.mock('@/lib/simple-chat-logout', () => ({
 }));
 
 vi.mock('@/components/dashboard/login-panel', () => ({
-  LoginPanel: ({ onLogin }: { onLogin: (user: User) => Promise<void> }) => (
-    <button type="button" onClick={() => void onLogin(mocks.loginUser)}>登录测试用户</button>
-  ),
+  LoginPanel: ({ onLogin }: { onLogin: (user: User) => Promise<void> }) => {
+    mocks.loginHandler = onLogin;
+    return <button type="button" onClick={() => void onLogin(mocks.loginUser)}>登录测试用户</button>;
+  },
 }));
 
 vi.mock('@/components/simple-chat/sidebar', () => ({
@@ -84,6 +86,7 @@ interface CoordinatorHarness {
   emit: (snapshot: SimpleChatSyncSnapshot) => void;
   initialize: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  stageLocalProjectsForRecovery: ReturnType<typeof vi.fn>;
   flush: ReturnType<typeof vi.fn>;
   handleOnline: ReturnType<typeof vi.fn>;
   unsubscribe: ReturnType<typeof vi.fn>;
@@ -140,12 +143,14 @@ function createCoordinatorHarness(
   const unsubscribe = vi.fn();
   const initialize = vi.fn(() => Promise.resolve(initializeResult));
   const update = vi.fn();
+  const stageLocalProjectsForRecovery = vi.fn().mockResolvedValue(undefined);
   const flush = vi.fn().mockResolvedValue(undefined);
   const handleOnline = vi.fn().mockResolvedValue(undefined);
   const dispose = vi.fn().mockResolvedValue(undefined);
   const coordinator: SimpleChatSyncCoordinator = {
     initialize,
     update,
+    stageLocalProjectsForRecovery,
     flush,
     handleOnline,
     snapshot: vi.fn(() => createSnapshot('loading', [])),
@@ -163,6 +168,7 @@ function createCoordinatorHarness(
     coordinator,
     initialize,
     update,
+    stageLocalProjectsForRecovery,
     flush,
     handleOnline,
     unsubscribe,
@@ -196,6 +202,7 @@ describe('simple chat synchronization integration', () => {
     mocks.chatAreaProps = null;
     mocks.sidebarProps = null;
     mocks.loginUser = { id: 'user-login', name: 'Login User', createdAt: 1, updatedAt: 1 };
+    mocks.loginHandler = null;
     mocks.logoutSimpleChatSession.mockResolvedValue({ loggedOut: true });
     vi.stubGlobal('fetch', mocks.globalFetch);
     window.history.replaceState(null, '', '/simple-chat');
@@ -502,6 +509,138 @@ describe('simple chat synchronization integration', () => {
     expect(second.flush).toHaveBeenCalledWith('logout');
     expect(first.flush).not.toHaveBeenCalledWith('logout');
     expect(mocks.globalFetch).not.toHaveBeenCalled();
+  });
+
+  it('stages a failed-initialize candidate before logout flush and recovers it on the next initialize', async () => {
+    const first = createCoordinatorHarness(createSnapshot('failed', []));
+    const recoveredProject = createProject({ id: 'recovered-project', name: '恢复项目' });
+    const second = createCoordinatorHarness(createSnapshot('synced', [recoveredProject]));
+    mocks.fetchSessionPayload.mockResolvedValue({
+      success: true,
+      user: { id: 'recover-user', name: 'Recover User', createdAt: 1, updatedAt: 1 },
+    });
+    mocks.coordinatorFactory
+      .mockReturnValueOnce(first.coordinator)
+      .mockReturnValueOnce(second.coordinator);
+    mocks.logoutSimpleChatSession.mockImplementation(async (options: { flush: () => Promise<void> }) => {
+      await options.flush();
+      return { loggedOut: true, sync: 'completed' };
+    });
+
+    render(<SimpleChatPage />);
+    await waitFor(() => expect(first.initialize).toHaveBeenCalledWith('recover-user'));
+    fireEvent.click(screen.getByRole('button', { name: '创建测试项目' }));
+    const candidate = mocks.sidebarProps?.projects ?? [];
+    await waitFor(() => expect(first.stageLocalProjectsForRecovery).toHaveBeenCalledWith(candidate));
+    first.stageLocalProjectsForRecovery.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+    await screen.findByRole('button', { name: '登录测试用户' });
+
+    expect(first.stageLocalProjectsForRecovery).toHaveBeenCalledWith(candidate);
+    expect(first.stageLocalProjectsForRecovery.mock.invocationCallOrder[0]).toBeLessThan(
+      first.flush.mock.invocationCallOrder[0],
+    );
+    mocks.loginUser = { id: 'recover-user', name: 'Recover User', createdAt: 1, updatedAt: 1 };
+    fireEvent.click(screen.getByRole('button', { name: '登录测试用户' }));
+    await waitFor(() => expect(second.initialize).toHaveBeenCalledWith('recover-user'));
+    expect((await screen.findByTestId('sidebar-projects')).textContent).toContain('recovered-project');
+  });
+
+  it.each(['failed', 'timed-out'] as const)(
+    'shows a non-blocking recovery notice after logout sync is %s',
+    async sync => {
+      const harness = createCoordinatorHarness(createSnapshot('synced', [createProject()]));
+      mocks.logoutSimpleChatSession.mockResolvedValue({ loggedOut: true, sync });
+      await renderAuthenticatedPage(harness);
+
+      fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+
+      expect(await screen.findByText('同步未完成，将在下次登录继续同步')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '登录测试用户' })).toBeTruthy();
+    },
+  );
+
+  it('still flushes and retains the candidate when logout staging fails', async () => {
+    const first = createCoordinatorHarness(createSnapshot('failed', []));
+    const second = createCoordinatorHarness(new Promise<SimpleChatSyncSnapshot>(() => undefined));
+    mocks.coordinatorFactory
+      .mockReturnValueOnce(first.coordinator)
+      .mockReturnValueOnce(second.coordinator);
+    await renderAuthenticatedPage(first);
+    fireEvent.click(screen.getByRole('button', { name: '创建测试项目' }));
+    const candidateId = mocks.sidebarProps?.projects[0]?.id;
+    if (!candidateId) throw new Error('Expected a recovery candidate');
+    await waitFor(() => expect(first.stageLocalProjectsForRecovery).toHaveBeenCalled());
+    first.stageLocalProjectsForRecovery.mockRejectedValue(new Error('IDB unavailable'));
+    first.flush.mockClear();
+    mocks.logoutSimpleChatSession.mockImplementation(async (options: { flush: () => Promise<void> }) => {
+      try {
+        await options.flush();
+        return { loggedOut: true, sync: 'completed' as const };
+      } catch {
+        return { loggedOut: true, sync: 'failed' as const };
+      }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+    expect(await screen.findByText('同步未完成，将在下次登录继续同步')).toBeTruthy();
+    expect(first.flush).toHaveBeenCalledWith('logout');
+
+    mocks.loginUser = { id: 'user-1', name: 'Test User', createdAt: 1, updatedAt: 1 };
+    fireEvent.click(screen.getByRole('button', { name: '登录测试用户' }));
+    await waitFor(() => expect(second.initialize).toHaveBeenCalledWith('user-1'));
+    expect(mocks.sidebarProps?.projects.map(project => project.id)).toContain(candidateId);
+  });
+
+  it.each(['completed', 'skipped'] as const)(
+    'does not show a recovery notice after logout sync is %s',
+    async sync => {
+      const harness = createCoordinatorHarness(createSnapshot('synced', [createProject()]));
+      mocks.logoutSimpleChatSession.mockResolvedValue({ loggedOut: true, sync });
+      await renderAuthenticatedPage(harness);
+
+      fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+      await screen.findByRole('button', { name: '登录测试用户' });
+
+      expect(screen.queryByText('同步未完成，将在下次登录继续同步')).toBeNull();
+    },
+  );
+
+  it('disposes the old coordinator without flush before directly initializing the next user', async () => {
+    const order: string[] = [];
+    let resolveDispose!: () => void;
+    const disposeGate = new Promise<void>(resolve => { resolveDispose = resolve; });
+    const first = createCoordinatorHarness(new Promise<SimpleChatSyncSnapshot>(() => undefined));
+    first.dispose.mockImplementation(async options => {
+      order.push(`dispose:${String(options?.flush)}`);
+      await disposeGate;
+    });
+    const second = createCoordinatorHarness(createSnapshot('synced', [createProject({ id: 'project-b' })]));
+    second.initialize.mockImplementation(async userId => {
+      order.push(`initialize:${userId}`);
+      return createSnapshot('synced', [createProject({ id: 'project-b' })]);
+    });
+    mocks.fetchSessionPayload.mockResolvedValue({ success: false, user: null });
+    mocks.coordinatorFactory
+      .mockReturnValueOnce(first.coordinator)
+      .mockReturnValueOnce(second.coordinator);
+    render(<SimpleChatPage />);
+    await screen.findByRole('button', { name: '登录测试用户' });
+    mocks.loginUser = { id: 'account-a', name: 'Account A', createdAt: 1, updatedAt: 1 };
+    fireEvent.click(screen.getByRole('button', { name: '登录测试用户' }));
+    await waitFor(() => expect(first.initialize).toHaveBeenCalledWith('account-a'));
+
+    await act(async () => {
+      await mocks.loginHandler?.({ id: 'account-b', name: 'Account B', createdAt: 1, updatedAt: 1 });
+    });
+    expect(first.dispose).toHaveBeenCalledWith({ flush: false });
+    expect(first.flush).not.toHaveBeenCalled();
+    expect(second.initialize).not.toHaveBeenCalled();
+
+    resolveDispose();
+    await waitFor(() => expect(second.initialize).toHaveBeenCalledWith('account-b'));
+    expect(order).toEqual(['dispose:false', 'initialize:account-b']);
   });
 
   it('routes browser lifecycle events to the active coordinator and removes listeners on unmount', async () => {

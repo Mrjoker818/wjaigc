@@ -63,6 +63,7 @@ export default function SimpleChatPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [showLogin, setShowLogin] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [logoutSyncNotice, setLogoutSyncNotice] = useState<string | null>(null);
   const logoutInFlight = useRef(false);
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -74,6 +75,7 @@ export default function SimpleChatPage() {
   const coordinatorRef = useRef<SimpleChatSyncCoordinator | null>(null);
   const coordinatorUserIdRef = useRef<string | null>(null);
   const coordinatorReadyRef = useRef(false);
+  const coordinatorTransitionRef = useRef<Promise<void>>(Promise.resolve());
   const latestUserIdRef = useRef<string | null>(user?.id ?? null);
   latestUserIdRef.current = user?.id ?? null;
   const [syncSnapshot, setSyncSnapshot] = useState<SimpleChatSyncSnapshot>({
@@ -120,6 +122,8 @@ export default function SimpleChatPage() {
       const nextCandidate = { userId, projects: next, dirty: true };
       preReadyCandidateRef.current = nextCandidate;
       setPreReadyCandidate(nextCandidate);
+      const coordinator = coordinatorUserIdRef.current === userId ? coordinatorRef.current : null;
+      void coordinator?.stageLocalProjectsForRecovery(next).catch(() => undefined);
     }
     return next;
   }, [getCurrentUserProjects, user?.id]);
@@ -187,24 +191,12 @@ export default function SimpleChatPage() {
     if (!userId) return;
 
     let cancelled = false;
-    const previousCoordinator = coordinatorRef.current;
-    if (previousCoordinator && coordinatorUserIdRef.current !== userId) {
-      coordinatorRef.current = null;
-      coordinatorUserIdRef.current = null;
-      void previousCoordinator.dispose({ flush: false });
-    }
+    let coordinator: SimpleChatSyncCoordinator | null = null;
+    let unsubscribe: (() => void) | null = null;
     if (preReadyCandidateRef.current?.userId !== userId) {
       preReadyCandidateRef.current = null;
       setPreReadyCandidate(null);
     }
-    const coordinator = createSimpleChatSyncCoordinator({
-      store: createIndexedDbSimpleChatEnvelopeStore(),
-    });
-    coordinatorRef.current = coordinator;
-    coordinatorUserIdRef.current = userId;
-    coordinatorReadyRef.current = false;
-    setSyncSnapshot({ status: 'loading', projects: [], pendingOperations: [], error: null });
-
     const publishProjects = (loaded: Project[]): void => {
       projectsRef.current = loaded;
       setProjects(loaded);
@@ -243,12 +235,21 @@ export default function SimpleChatPage() {
       }
       preReadyCandidateRef.current = null;
       setPreReadyCandidate(null);
-      if (shouldUpdate) coordinator.update(loaded);
+      if (shouldUpdate) coordinator?.update(loaded);
       publishProjects(loaded);
     };
 
-    const unsubscribe = coordinator.subscribe(applySnapshot);
     const initialize = async (): Promise<void> => {
+      await coordinatorTransitionRef.current;
+      if (cancelled || latestUserIdRef.current !== userId) return;
+      coordinator = createSimpleChatSyncCoordinator({
+        store: createIndexedDbSimpleChatEnvelopeStore(),
+      });
+      coordinatorRef.current = coordinator;
+      coordinatorUserIdRef.current = userId;
+      coordinatorReadyRef.current = false;
+      setSyncSnapshot({ status: 'loading', projects: [], pendingOperations: [], error: null });
+      unsubscribe = coordinator.subscribe(applySnapshot);
       const initialized = await coordinator.initialize(userId);
       if (cancelled) return;
       applySnapshot(initialized);
@@ -258,7 +259,8 @@ export default function SimpleChatPage() {
     return () => {
       cancelled = true;
       coordinatorReadyRef.current = false;
-      unsubscribe();
+      unsubscribe?.();
+      if (coordinator === null) return;
       const ownsCoordinator = coordinatorRef.current === coordinator;
       if (ownsCoordinator) coordinatorRef.current = null;
       if (coordinatorUserIdRef.current === userId) coordinatorUserIdRef.current = null;
@@ -266,7 +268,8 @@ export default function SimpleChatPage() {
         void coordinator.flush('user-switch');
         void coordinator.dispose();
       } else {
-        void coordinator.dispose({ flush: false });
+        const disposal = coordinator.dispose({ flush: false });
+        coordinatorTransitionRef.current = disposal.catch(() => undefined);
       }
     };
   }, [user?.id]);
@@ -363,6 +366,7 @@ export default function SimpleChatPage() {
     if (logoutInFlight.current) return;
     logoutInFlight.current = true;
     setLogoutError(null);
+    setLogoutSyncNotice(null);
 
     const userId = user?.id;
     const coordinator = userId && coordinatorUserIdRef.current === userId
@@ -375,21 +379,43 @@ export default function SimpleChatPage() {
     }
     try {
       const result = await logoutSimpleChatSession({
-        flush: () => coordinator.flush('logout'),
+        flush: async () => {
+          const candidate = preReadyCandidateRef.current?.userId === userId
+            ? preReadyCandidateRef.current
+            : null;
+          let stagingError: unknown = null;
+          if (candidate !== null) {
+            try {
+              await coordinator.stageLocalProjectsForRecovery(candidate.projects);
+            } catch (error) {
+              stagingError = error;
+            }
+          }
+          try {
+            await coordinator.flush('logout');
+          } catch (error) {
+            throw stagingError ?? error;
+          }
+          if (stagingError !== null) throw stagingError;
+        },
       });
       if (result.loggedOut) {
+        const shouldContinueSync = result.sync === 'failed' || result.sync === 'timed-out';
+        if (shouldContinueSync) {
+          setLogoutSyncNotice('同步未完成，将在下次登录继续同步');
+        }
         await coordinator.dispose({ flush: false });
         if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
         if (coordinatorUserIdRef.current === userId) coordinatorUserIdRef.current = null;
         coordinatorReadyRef.current = false;
         projectsRef.current = [];
         dataOwnerUserIdRef.current = null;
-        preReadyCandidateRef.current = null;
+        if (!shouldContinueSync) preReadyCandidateRef.current = null;
         activeProjectIdRef.current = null;
         activeTaskIdRef.current = null;
         setProjects([]);
         setDataOwnerUserId(null);
-        setPreReadyCandidate(null);
+        if (!shouldContinueSync) setPreReadyCandidate(null);
         setActiveProjectId(null);
         setActiveTaskId(null);
         setUser(null);
@@ -445,7 +471,19 @@ export default function SimpleChatPage() {
   if (showLogin || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <LoginPanel onLogin={async (u: User) => { setUser(u); setShowLogin(false); }} />
+        {logoutSyncNotice && (
+          <div
+            role="status"
+            className="fixed left-1/2 top-4 z-[100] -translate-x-1/2 border border-amber-500/40 bg-background px-4 py-2 text-sm text-amber-500 shadow-lg"
+          >
+            {logoutSyncNotice}
+          </div>
+        )}
+        <LoginPanel onLogin={async (u: User) => {
+          setLogoutSyncNotice(null);
+          setUser(u);
+          setShowLogin(false);
+        }} />
       </div>
     );
   }

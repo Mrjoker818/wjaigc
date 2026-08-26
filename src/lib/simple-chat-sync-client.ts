@@ -46,6 +46,7 @@ export interface SimpleChatSyncSnapshot {
 export interface SimpleChatSyncCoordinator {
   initialize(userId: string): Promise<SimpleChatSyncSnapshot>;
   update(projects: SimpleChatProject[]): void;
+  stageLocalProjectsForRecovery(projects: SimpleChatProject[]): Promise<void>;
   flush(reason: SimpleChatSyncFlushReason): Promise<void>;
   handleOnline(): Promise<void>;
   snapshot(): SimpleChatSyncSnapshot;
@@ -129,7 +130,7 @@ export async function loadSimpleChatDashboardProjects(
       cache: 'no-store',
     });
     if (response.status === 401 || response.status === 403) return [];
-    if (response.status >= 500) {
+    if (response.status === 429 || response.status >= 500) {
       shouldReadLocal = true;
     } else if (!response.ok) {
       return [];
@@ -488,6 +489,61 @@ export function createSimpleChatSyncCoordinator(
     emit();
     void enqueueEnvelopePersistence();
     scheduleDebounce();
+  }
+
+  async function stageLocalProjectsForRecovery(projects: SimpleChatProject[]): Promise<void> {
+    assertUsable();
+    const userId = initializeTargetUserId;
+    if (userId === null) throw new Error('Simple chat sync recovery staging requires an initialization target');
+
+    const staging = persistenceQueue
+      .catch(() => false)
+      .then(async () => await withUserPersistenceLock(userId, undefined, async () => {
+        const stored = envelope?.userId === userId
+          ? cloneValue(envelope)
+          : await options.store.get(userId);
+        if (stored !== null && stored.userId !== userId) {
+          throw new Error('Stored simple chat data belongs to a different user');
+        }
+        const source: SimpleChatSyncEnvelopeV1 = stored ?? {
+          schemaVersion: 1,
+          userId,
+          baseRevision: 0,
+          baseProjects: [],
+          currentProjects: [],
+          pendingOperations: [],
+          updatedAt: now(),
+        };
+        const sequenceStart = source.pendingOperations.reduce(
+          (maximum, operation) => Math.max(maximum, operation.sequence + 1),
+          0,
+        );
+        const staged: SimpleChatSyncEnvelopeV1 = {
+          ...cloneValue(source),
+          currentProjects: cloneValue(projects) as SimpleChatSyncedProject[],
+          pendingOperations: compactSimpleChatOperations([
+            ...source.pendingOperations,
+            ...diffSimpleChatProjects(
+              source.currentProjects,
+              projects,
+              sequenceStart,
+              { createOperationId: createId },
+            ),
+          ]),
+          updatedAt: now(),
+        };
+
+        envelope = staged;
+        envelopeMutationVersion += 1;
+        emit();
+        await options.store.put(cloneValue(staged));
+        return true;
+      }));
+    persistenceQueue = staging.catch(() => {
+      setState('failed', localStorageError());
+      return false;
+    });
+    if (!await staging) throw new Error('Simple chat recovery staging failed');
   }
 
   function flush(reason: SimpleChatSyncFlushReason): Promise<void> {
@@ -923,6 +979,7 @@ export function createSimpleChatSyncCoordinator(
   return {
     initialize,
     update,
+    stageLocalProjectsForRecovery,
     flush,
     handleOnline,
     snapshot,
@@ -995,7 +1052,7 @@ function mergeFlushCapabilities(
 ): FlushCapabilities {
   const nextCapabilities: FlushCapabilities = {
     keepalive: next === 'pagehide',
-    lifecycle: next === 'logout' || next === 'dispose',
+    lifecycle: next === 'pagehide' || next === 'logout' || next === 'dispose',
   };
   return current === null
     ? nextCapabilities

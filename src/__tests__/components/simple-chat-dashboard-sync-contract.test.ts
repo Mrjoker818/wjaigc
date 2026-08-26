@@ -57,6 +57,7 @@ describe('simple chat dashboard synchronization contract', () => {
 
   it.each([
     ['network failure', () => Promise.reject(new Error('offline'))],
+    ['rate limit', () => Promise.resolve(new Response('{}', { status: 429 }))],
     ['server failure', () => Promise.resolve(new Response('{}', { status: 503 }))],
     ['invalid response', () => Promise.resolve(Response.json({ success: true, value: 'bad' }))],
   ])('falls back to only the current user IDB envelope after %s', async (_name, response) => {

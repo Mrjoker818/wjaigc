@@ -17,14 +17,16 @@ describe('simple chat page lifecycle contract', () => {
   });
 
   it('flushes logout through the coordinator and removes the legacy snapshot write', () => {
-    expect(pageSource).toContain("flush: () => coordinator.flush('logout')");
+    expect(pageSource).toContain('stageLocalProjectsForRecovery(candidate.projects)');
+    expect(pageSource).toContain("await coordinator.flush('logout')");
     expect(pageSource).not.toContain('saveProjects(snapshot)');
     expect(pageSource).not.toContain('projects: snapshot');
   });
 
   it('keeps cookie-changing account transitions on the no-flush isolation path', () => {
     expect(pageSource).toContain('dispose({ flush: false })');
-    expect(pageSource).toContain('coordinatorUserIdRef.current !== userId');
+    expect(pageSource).toContain('await coordinatorTransitionRef.current');
+    expect(pageSource).toContain('coordinatorTransitionRef.current = disposal.catch');
     expect(pageSource).toContain("coordinator.flush('user-switch')");
     expect(pageSource).toContain('latestUserIdRef.current === userId');
   });

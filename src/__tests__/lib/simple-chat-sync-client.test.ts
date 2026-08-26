@@ -57,6 +57,91 @@ describe('simple chat sync coordinator', () => {
     });
   });
 
+  it('stages a failed initialization candidate without networking and replays it on the next initialize', async () => {
+    const store = createMemorySimpleChatEnvelopeStore();
+    const failedFetch = vi.fn(async () => jsonResponse(503, {
+      success: false,
+      code: 'SERVICE_UNAVAILABLE',
+    }));
+    const first = createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: failedFetch,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      createId: sequentialUuid(),
+      now: () => 10,
+    });
+    await first.initialize('user-a');
+
+    await first.stageLocalProjectsForRecovery([project('offline-candidate')]);
+
+    const staged = await store.get('user-a');
+    expect(staged).toMatchObject({
+      userId: 'user-a',
+      baseRevision: 0,
+      baseProjects: [],
+      currentProjects: [project('offline-candidate')],
+      updatedAt: 10,
+    });
+    expect(staged?.pendingOperations).not.toHaveLength(0);
+    expect(countPostRequests(failedFetch)).toBe(0);
+
+    const second = createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: sequenceFetch(
+        jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+        jsonResponse(200, { success: true, syncRevision: 1 }),
+      ),
+      createId: sequentialUuid(),
+    });
+    const recovered = await second.initialize('user-a');
+    expect(recovered.projects).toEqual([project('offline-candidate')]);
+    await second.flush('manual');
+    expect(second.snapshot()).toMatchObject({ status: 'synced', pendingOperations: [] });
+  });
+
+  it('staging preserves an existing local base and pending operations', async () => {
+    const store = createMemorySimpleChatEnvelopeStore();
+    const seed = createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: sequenceFetch(
+        jsonResponse(200, { success: true, value: [project('base')], syncRevision: 7 }),
+      ),
+      createId: sequentialUuid(),
+    });
+    await seed.initialize('user-a');
+    seed.update([project('base'), project('already-pending')]);
+    await vi.waitFor(async () => {
+      expect((await store.get('user-a'))?.pendingOperations.length).toBeGreaterThan(0);
+    });
+    await seed.dispose({ flush: false });
+    const pendingIds = (await store.get('user-a'))?.pendingOperations.map(operation => operation.operationId);
+    const coordinator = createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: vi.fn(async () => jsonResponse(503, { success: false })),
+      sleep: vi.fn().mockResolvedValue(undefined),
+      createId: sequentialUuid(),
+    });
+    await coordinator.initialize('user-a');
+
+    await coordinator.stageLocalProjectsForRecovery([
+      project('base'),
+      project('already-pending'),
+      project('new-candidate'),
+    ]);
+
+    const staged = await store.get('user-a');
+    expect(staged?.baseRevision).toBe(7);
+    expect(staged?.baseProjects).toEqual([project('base')]);
+    expect(staged?.currentProjects).toEqual([
+      project('base'),
+      project('already-pending'),
+      project('new-candidate'),
+    ]);
+    expect(staged?.pendingOperations.map(operation => operation.operationId)).toEqual(
+      expect.arrayContaining(pendingIds ?? []),
+    );
+  });
+
   it('allows only one active request and does not duplicate its POST', async () => {
     const pending = deferred<Response>();
     const fetchImpl = sequenceFetch(
@@ -833,7 +918,7 @@ describe('simple chat sync coordinator', () => {
     expect(coordinator.snapshot().pendingOperations).toHaveLength(0);
   });
 
-  it.each(['logout', 'dispose'] as const)(
+  it.each(['pagehide', 'logout', 'dispose'] as const)(
     'bounds %s network waiting, aborts fetch, and keeps pending operations',
     async lifecycle => {
       vi.useFakeTimers();
@@ -855,15 +940,18 @@ describe('simple chat sync coordinator', () => {
         await coordinator.initialize('user-a');
         coordinator.update([project('pending')]);
 
-        const lifecyclePromise = lifecycle === 'logout'
-          ? coordinator.flush('logout')
-          : coordinator.dispose();
+        const lifecyclePromise = lifecycle === 'dispose'
+          ? coordinator.dispose()
+          : coordinator.flush(lifecycle);
         await vi.waitFor(() => expect(requestSignal).toBeDefined());
         await vi.advanceTimersByTimeAsync(5_000);
         await lifecyclePromise;
 
         expect(requestSignal?.aborted).toBe(true);
         expect(coordinator.snapshot().pendingOperations).not.toHaveLength(0);
+        if (lifecycle === 'pagehide') {
+          expect((vi.mocked(fetchImpl).mock.calls.at(-1)?.[1] as RequestInit | undefined)?.keepalive).toBe(true);
+        }
       } finally {
         vi.useRealTimers();
       }
