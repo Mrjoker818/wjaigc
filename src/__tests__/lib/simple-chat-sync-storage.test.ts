@@ -14,6 +14,7 @@ import {
 
 interface ScriptedIndexedDbOptions {
   blocked?: boolean;
+  existingStoreKeyPath?: unknown;
   openError?: DOMException;
   requestError?: DOMException;
   transactionAbort?: boolean;
@@ -43,18 +44,28 @@ function createScriptedIndexedDb(options: ScriptedIndexedDbOptions = {}): {
   factory: IDBFactory;
   openCalls: Array<{ name: string; version?: number }>;
   createdStores: Array<{ name: string; keyPath: string | string[] | null }>;
+  operationCalls: { delete: number; get: number; put: number };
+  closeCalls(): number;
   blockedHandlerThrew(): boolean;
 } {
   const records = new Map<string, SimpleChatSyncEnvelopeV1>();
   const openCalls: Array<{ name: string; version?: number }> = [];
   const createdStores: Array<{ name: string; keyPath: string | string[] | null }> = [];
-  let initialized = false;
+  const operationCalls = { delete: 0, get: 0, put: 0 };
+  const hasExistingStore = Object.prototype.hasOwnProperty.call(options, 'existingStoreKeyPath');
+  let initialized = hasExistingStore;
   let blockedHandlerThrew = false;
+  let closeCalls = 0;
 
   const database = {
-    close: () => undefined,
+    close: () => {
+      closeCalls += 1;
+    },
     objectStoreNames: {
-      contains: (name: string) => createdStores.some(store => store.name === name),
+      contains: (name: string) => (
+        (hasExistingStore && name === 'envelopes')
+        || createdStores.some(store => store.name === name)
+      ),
     },
     createObjectStore(name: string, parameters?: IDBObjectStoreParameters) {
       createdStores.push({ name, keyPath: parameters?.keyPath ?? null });
@@ -67,6 +78,9 @@ function createScriptedIndexedDb(options: ScriptedIndexedDbOptions = {}): {
         oncomplete: null,
         onerror: null,
         objectStore() {
+          const keyPath = hasExistingStore
+            ? options.existingStoreKeyPath
+            : createdStores.find(store => store.name === 'envelopes')?.keyPath ?? null;
           const execute = <T>(operation: () => T, allowRequestError = false): IDBRequest<T> => {
             const request: MutableRequest<T> = {
               result: undefined as T,
@@ -95,15 +109,19 @@ function createScriptedIndexedDb(options: ScriptedIndexedDbOptions = {}): {
           };
 
           return {
+            keyPath,
             get: (userId: string) => execute(() => {
+              operationCalls.get += 1;
               const value = records.get(userId);
               return value === undefined ? undefined : structuredClone(value);
             }),
             put: (value: SimpleChatSyncEnvelopeV1) => execute(() => {
+              operationCalls.put += 1;
               records.set(value.userId, structuredClone(value));
               return value.userId;
             }, true),
             delete: (userId: string) => execute(() => {
+              operationCalls.delete += 1;
               records.delete(userId);
               return undefined;
             }),
@@ -167,6 +185,8 @@ function createScriptedIndexedDb(options: ScriptedIndexedDbOptions = {}): {
     factory,
     openCalls,
     createdStores,
+    operationCalls,
+    closeCalls: () => closeCalls,
     blockedHandlerThrew: () => blockedHandlerThrew,
   };
 }
@@ -213,6 +233,40 @@ describe('simple chat sync storage', () => {
     expect(await store.get('user-b')).toMatchObject({ userId: 'user-b' });
   });
 
+  it('uses an existing envelopes store only when its key path is exactly userId', async () => {
+    const indexedDb = createScriptedIndexedDb({ existingStoreKeyPath: 'userId' });
+    const store = createIndexedDbSimpleChatEnvelopeStore(indexedDb.factory);
+
+    await store.put(envelope('user-a'));
+
+    expect(indexedDb.createdStores).toEqual([]);
+    expect(indexedDb.operationCalls).toEqual({ delete: 0, get: 0, put: 1 });
+    expect(await store.get('user-a')).toMatchObject({ userId: 'user-a' });
+  });
+
+  it.each([
+    ['a different string key path', 'projectId'],
+    ['an array key path', ['userId']],
+    ['a null key path', null],
+    ['an unexpected key path shape', { field: 'userId' }],
+  ])('fails closed for an existing envelopes store with %s', async (_label, keyPath) => {
+    const indexedDb = createScriptedIndexedDb({ existingStoreKeyPath: keyPath });
+    const store = createIndexedDbSimpleChatEnvelopeStore(indexedDb.factory);
+
+    await expect(store.get('user-a')).rejects.toMatchObject({
+      code: 'CHAT_SYNC_LOCAL_STORAGE_FAILED',
+    });
+    await expect(store.put(envelope('user-a'))).rejects.toMatchObject({
+      code: 'CHAT_SYNC_LOCAL_STORAGE_FAILED',
+    });
+    await expect(store.delete('user-a')).rejects.toMatchObject({
+      code: 'CHAT_SYNC_LOCAL_STORAGE_FAILED',
+    });
+
+    expect(indexedDb.operationCalls).toEqual({ delete: 0, get: 0, put: 0 });
+    expect(indexedDb.closeCalls()).toBe(3);
+  });
+
   it('backs up the global legacy value without assigning it to a user', () => {
     const raw = '[{"id":"legacy","name":"原始项目"}]';
     const storage = memoryLocalStorage({ wujie_chat_projects: raw });
@@ -234,6 +288,71 @@ describe('simple chat sync storage', () => {
 
     expect(backupLegacySimpleChatProjects(storage)).toEqual({ backedUp: true, invalid: false });
     expect(backupLegacySimpleChatProjects(storage)).toEqual({ backedUp: false, invalid: false });
+    expect(storage.getItem('wujie_chat_projects:legacy-backup')).toBe(raw);
+  });
+
+  it('processes a legacy source created after an earlier source-free migration check', () => {
+    const raw = '[{"id":"later-legacy"}]';
+    const storage = memoryLocalStorage();
+
+    expect(backupLegacySimpleChatProjects(storage)).toEqual({ backedUp: false, invalid: false });
+    storage.setItem('wujie_chat_projects', raw);
+    expect(backupLegacySimpleChatProjects(storage)).toEqual({ backedUp: true, invalid: false });
+
+    expect(storage.getItem('wujie_chat_projects')).toBeNull();
+    expect(storage.getItem('wujie_chat_projects:legacy-backup')).toBe(raw);
+  });
+
+  it('backs up a marker-accompanied legacy source when no backup exists', () => {
+    const raw = '[{"id":"marker-legacy"}]';
+    const storage = memoryLocalStorage({
+      wujie_chat_projects: raw,
+      'wujie_chat_projects:legacy-migrated': '1',
+    });
+
+    expect(backupLegacySimpleChatProjects(storage)).toEqual({ backedUp: true, invalid: false });
+    expect(storage.getItem('wujie_chat_projects')).toBeNull();
+    expect(storage.getItem('wujie_chat_projects:legacy-backup')).toBe(raw);
+  });
+
+  it('removes a marker-accompanied legacy source matching the existing backup', () => {
+    const raw = '[{"id":"marker-legacy"}]';
+    const storage = memoryLocalStorage({
+      wujie_chat_projects: raw,
+      'wujie_chat_projects:legacy-backup': raw,
+      'wujie_chat_projects:legacy-migrated': '1',
+    });
+
+    expect(backupLegacySimpleChatProjects(storage)).toEqual({ backedUp: false, invalid: false });
+    expect(storage.getItem('wujie_chat_projects')).toBeNull();
+    expect(storage.getItem('wujie_chat_projects:legacy-backup')).toBe(raw);
+  });
+
+  it('fails closed for a marker-accompanied source conflicting with its backup', () => {
+    const raw = '[{"id":"new-legacy"}]';
+    const backup = '[{"id":"old-legacy"}]';
+    const storage = memoryLocalStorage({
+      wujie_chat_projects: raw,
+      'wujie_chat_projects:legacy-backup': backup,
+      'wujie_chat_projects:legacy-migrated': '1',
+    });
+
+    expect(() => backupLegacySimpleChatProjects(storage)).toThrow(expect.objectContaining({
+      code: 'CHAT_SYNC_LOCAL_STORAGE_FAILED',
+    }));
+    expect(storage.getItem('wujie_chat_projects')).toBe(raw);
+    expect(storage.getItem('wujie_chat_projects:legacy-backup')).toBe(backup);
+  });
+
+  it('preserves invalid marker-accompanied legacy text when the backup was missing', () => {
+    const raw = '{not valid json';
+    const storage = memoryLocalStorage({
+      wujie_chat_projects: raw,
+      'wujie_chat_projects:legacy-migrated': 'unexpected-marker-state',
+    });
+
+    expect(backupLegacySimpleChatProjects(storage)).toEqual({ backedUp: true, invalid: true });
+    expect(storage.getItem('wujie_chat_projects')).toBeNull();
     expect(storage.getItem('wujie_chat_projects:legacy-backup')).toBe(raw);
   });
 

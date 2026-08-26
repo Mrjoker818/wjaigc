@@ -50,10 +50,6 @@ export function backupLegacySimpleChatProjects(storage: Storage): {
   invalid: boolean;
 } {
   try {
-    if (storage.getItem(LEGACY_MIGRATION_MARKER_KEY) !== null) {
-      return { backedUp: false, invalid: false };
-    }
-
     const raw = storage.getItem(LEGACY_PROJECTS_KEY);
     if (raw === null) {
       storage.setItem(LEGACY_MIGRATION_MARKER_KEY, '1');
@@ -112,6 +108,21 @@ async function openDatabase(factory: IDBFactory | undefined): Promise<IDBDatabas
         request.result.close();
         return;
       }
+
+      try {
+        const transaction = request.result.transaction(ENVELOPE_STORE_NAME, 'readonly');
+        const keyPath = transaction.objectStore(ENVELOPE_STORE_NAME).keyPath;
+        if (keyPath !== 'userId') {
+          request.result.close();
+          fail(new DOMException('Unexpected envelopes store key path', 'InvalidStateError'));
+          return;
+        }
+      } catch (error) {
+        request.result.close();
+        fail(error);
+        return;
+      }
+
       settled = true;
       resolve(request.result);
     };
