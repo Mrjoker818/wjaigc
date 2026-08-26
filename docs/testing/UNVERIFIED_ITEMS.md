@@ -1425,3 +1425,11 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | PostgreSQL 迁移与并发 | `UNVERIFIED` | 未配置 `POSTGRES_TEST_DATABASE_URL`，迁移与并发测试为 `2/2 skipped`；原行 revision 升级、原子 CAS 唯一 winner、冲突重放与最终 revision 仍需隔离 PostgreSQL 实测，不得计为通过。 |
 | Coze 云端矩阵 | 待验 | Coze 尚未拉取并运行精确候选；项目/任务 CRUD、普通对话与 Artifact 恢复、多标签合并/冲突、删除不复活、离线恢复、仪表盘计数、退出同步、浏览器健康和最终数据库快照均需真实证据。 |
 | 发布与吸收状态 | 有条件通过 / 未吸收 | `V588-CHAT-003` 仅本地候选完成，不是云端通过；云端矩阵全部关闭前不得进入 `V588-CHAT-004`，其他既有未验证项继续有效。 |
+
+## 2026-08-27 V588-CHAT-003 构建修复待验边界
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| Coze 构建阻断 | 本地已修复 / 云端未验证 | `11abb548` 已阻止 `.worktrees/` 与 `worktrees/` 进入 Git、TypeScript 和 ESLint；Coze 必须在保留现有嵌套工作树时重新构建成功。 |
+| 服务健康 | `UNVERIFIED` | 5000 旧服务在失败构建前已停止；需重新取得 PID、Build ID、`/`、`/simple-chat`、`/api/auth/me` 与全部 HTML 静态资源状态。 |
+| 业务矩阵 | 尚未开始 | 构建与服务健康未关闭前，不执行或宣称项目同步、多标签冲突、删除不复活、离线恢复、账号隔离及退出同步通过。 |

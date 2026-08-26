@@ -1809,3 +1809,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 修复专项 RED 为 `2 failed / 10 passed`；GREEN 后单元 `12/12`、Simple Chat API `28/28`，`ts-check`、目标 ESLint、保护基线 `38/38` 与 `git diff --check` 通过。PostgreSQL 迁移和并发测试因缺少 `POSTGRES_TEST_DATABASE_URL` 为 `2/2 skipped`，不计为通过。
 - 窄范围复审为 Ready to merge: Yes，Critical/Important/Minor `0/0/0`。
 - **回归结论：本地候选完成 / 云端待验 / 未吸收。** 真实浏览器、跨账号隔离、PostgreSQL 迁移和并发保持 `UNVERIFIED`。Coze 未运行精确候选，故不得将本地结果扩大为云端通过或 `V588-CHAT-003` 已吸收；全平台继续为有条件通过。
+
+## 2026-08-27 V588-CHAT-003 Coze 构建阻断修复
+
+- Coze 已把 `/workspace/projects` 精确对齐 `origin/main@e64edbbe`，源码树一致且 `stable@52f7c601` 未变化；生产构建在 TypeScript 阶段被根目录内保留的 `worktrees/main-fix` 重复源码阻断。
+- 通过本地嵌套同名脚本夹具稳定复现目录边界，再按 RED -> 最小修复统一隔离 Git、TypeScript 和 ESLint 的 `.worktrees/`、`worktrees/`。
+- 修复提交 `11abb548` 的目标契约 `6/6`、TypeScript、零错误 Lint、保护门禁 `38/38`、带嵌套夹具的生产构建 `116/116` 通过；全仓为 `3909 passed / 119 skipped / 0 failed`，PostgreSQL 跳过项不计为通过。
+- **回归结论：构建根因本地关闭 / Coze 待复验。** 在 GitHub 推送、Coze 精确拉取、构建和 5000 健康完成前，V588-CHAT-003 的浏览器业务矩阵仍未开始，状态保持未吸收。

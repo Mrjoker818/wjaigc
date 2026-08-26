@@ -423,3 +423,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 修复专项先得到 RED `2 failed / 10 passed`，GREEN 后服务端单元 `12/12`、Simple Chat API `28/28`、`ts-check`、目标 ESLint、保护基线 `38/38` 与 `git diff --check` 通过。PostgreSQL 迁移和并发测试因缺少 `POSTGRES_TEST_DATABASE_URL` 为 `2/2 skipped`，不计为通过。
 - 窄范围复审结论为 Ready to merge: Yes，Critical/Important/Minor `0/0/0`。
 - **当前状态：本地候选完成 / 云端待验 / 未吸收。** 真实浏览器矩阵、跨账号隔离、PostgreSQL 迁移与并发均为 `UNVERIFIED`；Coze 尚未拉取并运行该精确候选，也没有云端业务或证据文件。全平台继续为有条件通过，云端矩阵全部通过前不得进入 `V588-CHAT-004`。
+
+## 2026-08-27 V588-CHAT-003 Coze 构建检查点
+
+- Coze 对齐 `origin/main@e64edbbe` 后，根目录遗留 `worktrees/main-fix` 被 `**/*.ts` 重复扫描，生产构建在 TypeScript 阶段失败；该缺陷属于当前线部署边界，不是 donor 功能吸收项。
+- `11abb548` 只增加两类工作树目录的 Git/TypeScript/ESLint 隔离和永久契约测试，未修改 Simple Chat 业务逻辑、数据库、供应商、积分、`stable` 或 donor。
+- 本地门禁：目标 `6/6`、全仓 `3909 passed / 119 skipped / 0 failed`、TypeScript、零错误 Lint、保护门禁 `38/38`、嵌套夹具生产构建 `116/116`；独立复审无阻断项。
+- **当前状态：构建修复本地完成 / GitHub 与 Coze 待复验 / V588-CHAT-003 仍未吸收。** 云端构建和业务矩阵关闭前不得进入 `V588-CHAT-004`。

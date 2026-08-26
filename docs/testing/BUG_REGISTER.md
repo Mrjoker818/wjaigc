@@ -2599,3 +2599,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 窄范围复审 | Ready to merge: Yes；Critical/Important/Minor `0/0/0`。 |
 | 未验证 | `POSTGRES_TEST_DATABASE_URL` 缺失，迁移与并发测试 `2/2 skipped`，不得计为通过；真实浏览器、跨账号隔离和 PostgreSQL 行为仍为 `UNVERIFIED`。Coze 尚未拉取候选，未生成云端证据。 |
 | 状态 | **本地候选完成 / 云端待验 / 未吸收。** 本记录不是云端关闭，不改变全平台“有条件通过”及其他未关闭项；真实云端矩阵全部通过前不得标记 `V588-CHAT-003` 已吸收。 |
+
+### V588-CHAT-003-BUILD-001 - Coze 嵌套工作树污染生产构建（2026-08-27）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：云端无法完成生产构建，5000 服务中断，阻塞全部真实验收。 |
+| 稳定复现 | Coze 将 `/workspace/projects` 精确对齐 `origin/main@e64edbbe` 后保留未跟踪目录 `worktrees/main-fix`；执行 `pnpm build`，源码编译成功后 TypeScript 在 `scripts/human-ai-engine-smoke-test.ts:1` 报 `Duplicate function implementation`。 |
+| 根因 | `tsconfig.json` 的 `**/*.ts` 递归纳入嵌套 checkout；Git 仅忽略 `.worktrees/` 而未忽略 Coze 使用的 `worktrees/`；ESLint 同样未排除该目录。嵌套仓库中的同名全局脚本被第二次编译。 |
+| RED | 配置契约先得到 `2 failed / 4 passed`，分别证明 TypeScript 与 ESLint 缺少两种工作树目录边界。 |
+| 最小修复 | `11abb5482128aeba8c7008c9d5bbe159b0a6b8df` 根锚定忽略 `/worktrees/`，并让 TypeScript、ESLint 同时排除 `.worktrees` 与 `worktrees`；没有删除云端工作树、修改业务源码、数据库、账号、供应商或 `stable`。 |
+| 本地回归 | 在仓库内放置同名嵌套脚本夹具后，契约 `6/6`、TypeScript、零错误 Lint、保护门禁 `38/38` 与生产构建 `116/116` 通过；全仓 Vitest `3909 passed / 119 skipped / 0 failed`，跳过项均为缺少隔离 PostgreSQL 的显式门禁。独立复审 Critical/Important/Minor 为 `0/0/2`，无阻断项。 |
+| 状态 | **本地已修复 / GitHub 与 Coze 待更新复验。** 必须证明 Coze 在保留 `worktrees/main-fix` 的情况下构建成功、5000 健康且静态资源无失败，才能关闭。 |

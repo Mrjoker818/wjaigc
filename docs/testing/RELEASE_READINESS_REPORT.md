@@ -1464,3 +1464,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 修复专项 RED `2 failed / 10 passed`；GREEN 单元 `12/12`、Simple Chat API `28/28`，`ts-check`、目标 ESLint、保护基线 `38/38` 与 `git diff --check` 通过。PostgreSQL 迁移和并发测试 `2/2 skipped`，原因是缺少 `POSTGRES_TEST_DATABASE_URL`，不得宣称通过。
 - 窄范围复审为 Ready to merge: Yes，Critical/Important/Minor `0/0/0`。
 - **专项判定：V588-CHAT-003 本地候选完成 / 云端待验 / 未吸收；全平台仍为有条件通过。** Coze 尚未拉取和运行精确候选，真实项目/任务操作、多标签冲突、删除不复活、离线恢复、账号隔离、退出前同步及 PostgreSQL 最终快照均无云端证据。不得据此宣称云端通过，也不得提前进入 `V588-CHAT-004`；其他既有未关闭项继续保留。
+
+## 2026-08-27 V588-CHAT-003 构建修复发布判断
+
+- `e64edbbe` 在 Coze 真实构建失败，原因是云端嵌套工作树被 TypeScript 重复纳入；因此该 SHA 不具备 Coze 可部署性，不能进入业务验收。
+- `11abb548` 已用真实目录形态夹具证明 TypeScript、ESLint 和 Git 边界隔离，完整本地门禁通过且无业务源码改动。
+- **专项判定：本地构建候选通过，云端发布仍为有条件通过。** 必须先完成 GitHub/Coze 精确 SHA、构建、启动、健康与静态资源复验，再执行 V588-CHAT-003 业务矩阵；`stable` 保持只读。
