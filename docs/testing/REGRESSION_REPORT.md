@@ -1773,3 +1773,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 根因是装载边界仍把服务器项目的原始 `streaming` 写入父状态，恢复逻辑只作用于 ChatArea 展示状态。按 TDD 新增项目树装载归一化测试，旧实现 `1 failed / 4 passed`；最小新增 `recoverInterruptedSimpleChatProjects()` 并在状态写入前调用。
 - 第二轮本地门禁：目标 `12/12`，Simple Chat `18 files / 122 tests`，全仓 `541 files / 3536 tests` 全部已执行项通过；`20 files / 117 tests` 因缺少隔离 PostgreSQL 测试库跳过。TypeScript、ESLint `0 errors / 967 historical warnings` 与 Next.js `116/116` 构建通过。
 - **回归结论：首次新云端部分失败 / 第二轮本地修复通过 / 新部署待验。** 未取得 PostgreSQL `failed` 或合法 `completed` 前不得关闭 V588-CHAT-002-BUG-003。机器证据见 `docs/testing/evidence/v588-chat-002-refresh-recovery-fixed-cloud-2026-08-26.json`。
+
+## 2026-08-26 V588-CHAT-002 刷新中断第二候选云端关闭
+
+- Coze 最终运行树 `eb205aae` 与 `origin/main@3ecd2f9b` 一致，Build ID `6W73gy7XRcKPuZE8k4DQR`、PID `1308`；`/`、`/simple-chat`、`/api/auth/me` 和 12 个 HTML 引用静态资源全部返回 200，`origin/stable@52f7c601` 未触碰。
+- 先刷新首次候选遗留任务 `58r009tjmt9e9yqn`：UI 为单一“上次请求中断，可重试”，服务器 `chat_simple_projects` 同步结果为 1 条用户消息、1 条助手消息，助手已持久化为 `failed` 且 `retryable=true`，证明装载边界归一化确实回写了权威状态。
+- 再新建任务 `j1ek6ayjmt9gip4e`，选择 APImart `deepseek-v4-flash`，响应真实流出标记 `V588_REFRESH_RECOVERY_FRESH_1787710278255` 与正文后 5 秒刷新。刷新前后 URL 的 `projectId + taskId` 完全一致；刷新后部分正文保留，只出现一个重试入口，服务器仍严格为 1 条用户消息与 1 条助手消息，助手终态 `failed`。
+- 浏览器 Console error/warning 为 `0/0`，原生弹窗为 0。作为供应商对照，APImart Gemini 通道的 `get_channel_failed` 被明确展示并持久化为失败，没有被当成刷新恢复产品缺陷。
+- **回归结论：V588-CHAT-002-BUG-003 云端关闭。** 本结论不扩大到第三方 exactly-once、联网模式或 Deep Research 单 Artifact；V588-CHAT-002 整项仍为部分通过。机器证据见 `docs/testing/evidence/v588-chat-002-refresh-recovery-second-candidate-cloud-2026-08-26.json` 与 PNG。

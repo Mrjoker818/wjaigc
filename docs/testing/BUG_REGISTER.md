@@ -2566,4 +2566,6 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | URL 同步精确 `projectId + taskId`；项目装载边界在写入父状态前统一恢复所有任务消息，确保后续服务器同步持久化 `failed`。没有修改供应商、模型、消息 ID、幂等键、积分、数据库结构或 `stable`。 |
 | 本地回归 | 第二轮目标 `12/12`、Simple Chat 全套 `18 files / 122 tests`、全仓 `541 passed / 20 skipped files`、`3536 passed / 117 skipped tests`；TypeScript 通过，ESLint `0 errors / 967 historical warnings`，Next.js `116/116` 构建通过。117 项跳过仍为缺少隔离 PostgreSQL 测试库，不计为通过。 |
 | 首次新云端复验 | `da1f5c4` 的代码树已精确部署。刷新前后 URL 均保持同一 `projectId + taskId`，UI 只有一组消息并显示“上次请求中断，可重试”；审计只有 1 次聊天请求。但 PostgreSQL 仍保存助手 `status=streaming`，因此该候选只部分通过。 |
-| 状态 | **精确任务恢复云端通过 / 终态持久化本地已修复 / 第二次云端待验。** 证据：`docs/testing/evidence/v588-chat-002-refresh-recovery-fixed-cloud-2026-08-26.json` 与同名 PNG。 |
+| 第二次云端复验 | `origin/main@3ecd2f9b` 对应代码树 `eb205aae` 已在 Coze 构建运行。历史任务刷新后权威数据由 `streaming` 收敛为 `failed`；随后新建任务 `j1ek6ayjmt9gip4e`，APImart `deepseek-v4-flash` 已真实流出标记与正文，5 秒刷新前后 URL 精确保留同一 `projectId + taskId`。刷新后 UI 只有一个重试入口，服务器快照只有 1 条用户消息与 1 条助手消息，助手为 `failed`、错误 `retryable=true`，部分正文保留。Console error/warning 和原生弹窗均为 0。 |
+| 供应商对照 | APImart `Gemini 3.1 Flash Lite Preview` 同场先返回 `get_channel_failed` 和真实 request id；前端按明确失败持久化。该次不计入流式刷新通过，也不误判为产品刷新缺陷。 |
+| 状态 | **已修复 / Coze 云端关闭。** 关闭范围仅为精确任务恢复与中断终态持久化；Deep Research 单 Artifact、联网模式和第三方 exactly-once 仍属于 V588-CHAT-002 的独立未关闭项。证据：`docs/testing/evidence/v588-chat-002-refresh-recovery-second-candidate-cloud-2026-08-26.json` 与同名 PNG。 |

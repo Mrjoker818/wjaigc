@@ -1433,3 +1433,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 发布门禁仍未关闭：数据库中的助手消息继续为 `streaming`，只有页面展示层显示可重试失败。该状态违反“服务器终态必须可恢复且可审计”的验收条件。
 - 第二轮最小修复把中断恢复提前到项目装载边界；本地 `3536` 条已执行测试、类型、零错误 Lint 和 `116/116` 构建通过，`117` 条 PostgreSQL 隔离测试仍明确跳过。
 - **专项判定：不通过云端关闭门禁。** 必须部署第二轮候选，并用同一刷新场景确认 PostgreSQL 持久状态为 `failed` 或合法 `completed`、消息和请求仍各一份。全平台继续为有条件通过，`stable` 与 donor 只读。
+
+## 2026-08-26 V588-CHAT-002 刷新中断第二候选发布判断
+
+- `origin/main@3ecd2f9b` 的代码树 `eb205aae` 已在 Coze 生产构建运行，健康路由与 12 个静态资源全部通过；`stable@52f7c601` 未变化。
+- 历史遗留任务和全新 APImart `deepseek-v4-flash` 流式任务都证明：同一任务身份在刷新后保留，服务器权威助手状态收敛到 `failed`，错误可重试，部分正文、单一用户消息和单一助手消息均可恢复。
+- **专项判定：V588-CHAT-002-BUG-003 通过。全平台仍为有条件通过。** V588-CHAT-002 尚有 Deep Research 单 Artifact、联网重试和第三方 exactly-once 能力边界，不能因刷新缺陷关闭而整体宣布完成；PostgreSQL 隔离测试的 117 项跳过及部署期旧 chunk 门禁也继续保留。

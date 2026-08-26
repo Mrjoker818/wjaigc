@@ -1,0 +1,88 @@
+{
+  "testId": "V588-CHAT-002-BUG-003-cloud-recheck-2",
+  "testedAt": "2026-08-26T10:13:07.0057437+08:00",
+  "browser": "Google Chrome user profile 用户1",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "githubMain": "3ecd2f9b3b5c1efaafc6be67f2783252315f3d6d",
+  "githubMainTree": "eb205aae0dedfd9f40c2d0bef1d9092f5e1737ab",
+  "githubStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cozeHeadShort": "2dd7d4ea",
+  "cozeTreeShort": "eb205aae",
+  "buildId": "6W73gy7XRcKPuZE8k4DQR",
+  "servicePid": 1308,
+  "account": "canvas-user",
+  "provider": "APImartLLM",
+  "model": "deepseek-v4-flash",
+  "providerId": "api_1778428130626_2qpg71v",
+  "projectId": "s3zk7z3gmsoo15gz",
+  "historicalTask": {
+    "taskId": "58r009tjmt9e9yqn",
+    "marker": "V588_REFRESH_RECOVERY_FIXED_1787706573819",
+    "uiTerminalLabel": "上次请求中断，可重试。",
+    "retryButtonCount": 1,
+    "databaseUserMessages": 1,
+    "databaseAssistantMessages": 1,
+    "databaseAssistantStatus": "failed",
+    "databaseAssistantError": {
+      "message": "上次请求中断，可重试。",
+      "retryable": true
+    }
+  },
+  "freshTask": {
+    "taskId": "j1ek6ayjmt9gip4e",
+    "marker": "V588_REFRESH_RECOVERY_FRESH_1787710278255",
+    "urlBeforeRefresh": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat?projectId=s3zk7z3gmsoo15gz&taskId=j1ek6ayjmt9gip4e",
+    "urlAfterRefresh": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat?projectId=s3zk7z3gmsoo15gz&taskId=j1ek6ayjmt9gip4e",
+    "refreshDelayMs": 5000,
+    "uiBeforeRefresh": {
+      "markerVisible": true,
+      "assistantStartedStreaming": true,
+      "partialContentVisible": true
+    },
+    "uiAfterRefresh": {
+      "sameProject": true,
+      "sameTask": true,
+      "markerVisible": true,
+      "partialContentPreserved": true,
+      "terminalLabel": "上次请求中断，可重试。",
+      "retryButtonCount": 1
+    },
+    "database": {
+      "userMessages": 1,
+      "assistantMessages": 1,
+      "assistantStatus": "failed",
+      "assistantContentLength": 49,
+      "assistantError": {
+        "message": "上次请求中断，可重试。",
+        "retryable": true
+      }
+    }
+  },
+  "providerControl": {
+    "model": "gemini-3.1-flash-lite-preview",
+    "result": "PROVIDER_FAILURE_NOT_PRODUCT_FAILURE",
+    "code": "get_channel_failed",
+    "requestId": "20260826101010940912662VXkNEeas",
+    "uiPersistedFailedStateAcrossRefresh": true
+  },
+  "browserHealth": {
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "nativeDialog": false
+  },
+  "result": "PASS",
+  "passed": [
+    "the historical streaming record is normalized and persisted as retryable failed",
+    "a fresh APImart stream was visibly active before the five-second refresh",
+    "the exact projectId and taskId remain selected after refresh",
+    "only one user message and one assistant message are persisted",
+    "the fresh assistant terminal state is failed instead of streaming",
+    "the retryable error and partial content survive refresh",
+    "no browser console error, warning or native dialog was observed"
+  ],
+  "notClaimed": [
+    "third-party provider exactly-once semantics",
+    "Deep Research single Artifact completion",
+    "internet-search retry parity"
+  ]
+}
