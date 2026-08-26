@@ -10,6 +10,7 @@ import type {
   SimpleChatSyncEnvelopeV1,
   SimpleChatSyncOperation,
 } from '@/lib/simple-chat-project-sync';
+import type { SimpleChatEnvelopeStore } from '@/lib/simple-chat-sync-storage';
 
 const fetchPostCounts = new WeakMap<typeof fetch, number>();
 
@@ -183,4 +184,55 @@ export function sequenceFetch(...responses: Array<Response | Promise<Response>>)
 
 export function countPostRequests(fetchImpl: typeof fetch): number {
   return fetchPostCounts.get(fetchImpl) ?? 0;
+}
+
+export function memoryLocalStorage(
+  initial: Record<string, string> = {},
+): Storage & { keys(): string[] } {
+  const values = new Map(Object.entries(initial));
+
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: key => values.get(key) ?? null,
+    key: index => [...values.keys()][index] ?? null,
+    removeItem: key => {
+      values.delete(key);
+    },
+    setItem: (key, value) => {
+      values.set(key, value);
+    },
+    keys: () => [...values.keys()],
+  };
+}
+
+export function createMemorySimpleChatEnvelopeStore(): SimpleChatEnvelopeStore {
+  const envelopes = new Map<string, SimpleChatSyncEnvelopeV1>();
+
+  return {
+    async get(userId) {
+      const value = envelopes.get(userId);
+      return value === undefined ? null : structuredClone(value);
+    },
+    async put(value) {
+      envelopes.set(value.userId, structuredClone(value));
+    },
+    async delete(userId) {
+      envelopes.delete(userId);
+    },
+  };
+}
+
+export function createFailingEnvelopeStore(error: Error): SimpleChatEnvelopeStore {
+  const storageError = Object.assign(new Error('Simple chat local storage failed'), {
+    code: 'CHAT_SYNC_LOCAL_STORAGE_FAILED' as const,
+    cause: error,
+  });
+  return {
+    get: async () => Promise.reject(storageError),
+    put: async () => Promise.reject(storageError),
+    delete: async () => Promise.reject(storageError),
+  };
 }

@@ -433,6 +433,7 @@ export interface DeepResearchTask {
 
 const PROJECTS_KEY = 'wujie_chat_projects';
 
+/** @deprecated Migration compatibility only. New sync consumers use the user-scoped envelope store. */
 export function loadProjects(): SimpleChatProject[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -443,6 +444,7 @@ export function loadProjects(): SimpleChatProject[] {
   }
 }
 
+/** @deprecated Migration compatibility only. New sync consumers use the user-scoped envelope store. */
 export function saveProjects(projects: SimpleChatProject[]): void {
   if (typeof window === 'undefined') return;
   try {
