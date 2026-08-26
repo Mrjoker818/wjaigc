@@ -61,9 +61,9 @@ describe('simple chat server snapshots', () => {
     expect(() => parseStoredSimpleChatSnapshot(stored)).toThrow(/invalid simple chat snapshot/i);
   });
 
-  it('reads only the fixed logical key for the requested user', async () => {
+  it('reads the historical storage key for the requested user', async () => {
     const query = vi.fn(async (_sql: string, params?: unknown[]) => {
-      expect(params).toEqual(['user-b', 'simple-chat-sync:user-b:chat_simple_projects']);
+      expect(params).toEqual(['user-b', 'chat_simple_projects']);
       return {
         rows: [{ data_value: { schemaVersion: 1, revision: 3, projects: [project('b')] } }],
         rowCount: 1,
@@ -80,10 +80,13 @@ describe('simple chat server snapshots', () => {
 
   it('creates the first snapshot with revision one in one locked transaction', async () => {
     const query = vi.fn(async (sql: string, params?: unknown[]) => {
-      if (sql.includes('SELECT data_value')) return { rows: [], rowCount: 0 };
+      if (sql.includes('SELECT data_value')) {
+        expect(params).toEqual(['user-a', 'chat_simple_projects']);
+        return { rows: [], rowCount: 0 };
+      }
       if (sql.includes('INSERT INTO')) {
         expect(params?.[0]).toBe('user-a');
-        expect(params?.[1]).toBe('simple-chat-sync:user-a:chat_simple_projects');
+        expect(params?.[1]).toBe('chat_simple_projects');
         expect(JSON.parse(String(params?.[2]))).toEqual({
           schemaVersion: 1,
           revision: 1,

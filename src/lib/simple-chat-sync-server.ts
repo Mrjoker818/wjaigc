@@ -19,10 +19,10 @@ export class SimpleChatSyncConflictError extends Error {
   }
 }
 
-const DATA_KEY_SUFFIX = 'chat_simple_projects';
+const DATA_KEY = 'chat_simple_projects';
 
-function dataKeyForUser(userId: string): string {
-  return `simple-chat-sync:${userId}:${DATA_KEY_SUFFIX}`;
+function lockIdentityForUser(userId: string): string {
+  return `simple-chat-sync:${userId}:${DATA_KEY}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -73,12 +73,11 @@ export function parseStoredSimpleChatSnapshot(value: unknown): SimpleChatStoredS
 export async function readSimpleChatSnapshot(
   userId: string,
 ): Promise<SimpleChatStoredSnapshot> {
-  const dataKey = dataKeyForUser(userId);
   const result = await getPool().query<{ data_value: unknown }>(
     `SELECT data_value
      FROM wujie_user_data
      WHERE user_id = $1 AND data_key = $2`,
-    [userId, dataKey],
+    [userId, DATA_KEY],
   );
   const row = result.rows[0];
   if (!row) return { schemaVersion: 1, revision: 0, projects: [] };
@@ -94,20 +93,20 @@ export async function compareAndSetSimpleChatSnapshot(input: {
   assertExpectedRevision(input.expectedRevision);
   assertValidProjects(input.projects, 'Invalid simple chat projects');
 
-  const dataKey = dataKeyForUser(input.userId);
+  const lockIdentity = lockIdentityForUser(input.userId);
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
     await client.query(
       'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-      [dataKey],
+      [lockIdentity],
     );
     const result = await client.query<{ data_value: unknown }>(
       `SELECT data_value
        FROM wujie_user_data
        WHERE user_id = $1 AND data_key = $2
        FOR UPDATE`,
-      [input.userId, dataKey],
+      [input.userId, DATA_KEY],
     );
     const row = result.rows[0];
     const current = row
@@ -124,7 +123,7 @@ export async function compareAndSetSimpleChatSnapshot(input: {
     };
     const params = [
       input.userId,
-      dataKey,
+      DATA_KEY,
       JSON.stringify(snapshot),
       input.now ?? Date.now(),
     ];

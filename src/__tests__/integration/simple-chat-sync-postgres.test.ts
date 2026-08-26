@@ -61,4 +61,57 @@ describe('simple chat snapshot PostgreSQL CAS', () => {
       });
     });
   }, 60_000);
+
+  postgresIt('upgrades one historical legacy row in place', async () => {
+    await withIsolatedPostgres('simple_chat_snapshot_legacy_migration', async ({ query }) => {
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      const {
+        compareAndSetSimpleChatSnapshot,
+        readSimpleChatSnapshot,
+      } = await import('@/lib/simple-chat-sync-server');
+      await ensureCoreTables();
+
+      const userId = `simple-chat-legacy-${randomUUID()}`;
+      await query(
+        `INSERT INTO wujie_user_data (user_id, data_key, data_value, updated_at)
+         VALUES ($1, $2, $3::jsonb, $4)`,
+        [userId, 'chat_simple_projects', JSON.stringify([project('legacy')]), 1],
+      );
+
+      await expect(readSimpleChatSnapshot(userId)).resolves.toEqual({
+        schemaVersion: 1,
+        revision: 0,
+        projects: [project('legacy')],
+      });
+
+      await expect(compareAndSetSimpleChatSnapshot({
+        userId,
+        expectedRevision: 0,
+        projects: [project('upgraded')],
+        now: 2,
+      })).resolves.toEqual({
+        schemaVersion: 1,
+        revision: 1,
+        projects: [project('upgraded')],
+      });
+
+      const stored = await query<{
+        data_key: string;
+        data_value: unknown;
+      }>(
+        `SELECT data_key, data_value
+         FROM wujie_user_data
+         WHERE user_id = $1`,
+        [userId],
+      );
+      expect(stored.rows).toEqual([{
+        data_key: 'chat_simple_projects',
+        data_value: {
+          schemaVersion: 1,
+          revision: 1,
+          projects: [project('upgraded')],
+        },
+      }]);
+    });
+  }, 60_000);
 });
