@@ -319,6 +319,34 @@ describe('simple chat user data sync route', () => {
     expect(mocks.dbSetUserData).not.toHaveBeenCalled();
   });
 
+  it('rejects a duplicate legacy-then-chat key without bypassing the chat size boundary', async () => {
+    const body = `{"key":"settings_x","key":"${CHAT_KEY}","value":[],"expectedRevision":7,"padding":"${
+      'x'.repeat(SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES)
+    }"}`;
+    const response = await POST(postText(body));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ success: false, error: 'Duplicate key parameter' });
+    expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('applies the chat size boundary to a UTF-8 BOM split across stream chunks', async () => {
+    const body = new TextEncoder().encode(exactSizeChatBody(SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES));
+    const response = await POST(streamingRequest(
+      [new Uint8Array([0xef]), new Uint8Array([0xbb]), new Uint8Array([0xbf]), body],
+    ));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      code: 'CHAT_SYNC_PAYLOAD_TOO_LARGE',
+      retryable: false,
+    });
+    expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
   it('cancels immediately after a streamed body exceeds 20 MiB regardless of Content-Length', async () => {
     const cancel = vi.fn();
     const first = new TextEncoder().encode(exactSizeChatBody(SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES));

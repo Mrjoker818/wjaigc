@@ -54,7 +54,9 @@ class ChatSyncRequestError extends Error {
   }
 }
 
-type SyncBodyKind = 'chat' | 'legacy';
+class DuplicateSyncKeyError extends Error {}
+
+type SyncBodyKind = 'chat' | 'legacy' | 'ambiguous';
 
 // Identify only the top-level key while retaining one copy of the raw stream.
 // Fetch JSON parsing still owns the full parse after routing is known.
@@ -69,6 +71,9 @@ class SyncBodyKeySniffer {
   private expectColon = false;
   private expectKeyValue = false;
   private pendingProperty: string | null = null;
+  private keyCount = 0;
+  private keyKind: Exclude<SyncBodyKind, 'ambiguous'> = 'legacy';
+  private preambleState: 'start' | 'bom-ef' | 'bom-ef-bb' | 'done' = 'start';
   private resolved: SyncBodyKind | undefined;
 
   feed(chunk: Uint8Array): SyncBodyKind | undefined {
@@ -80,6 +85,10 @@ class SyncBodyKeySniffer {
   }
 
   private consume(byte: number): void {
+    if (this.depth === 0 && this.preambleState !== 'done' && this.consumePreamble(byte)) {
+      return;
+    }
+
     if (this.inString) {
       if (this.stringRole !== 'other' && !this.stringOverflow) {
         if (this.stringBytes.length < 128) this.stringBytes.push(byte);
@@ -109,7 +118,7 @@ class SyncBodyKeySniffer {
 
     if (this.depth === 1 && this.expectProperty) {
       if (byte === 0x7d) {
-        this.resolved = 'legacy';
+        this.resolveKeyKind();
       } else if (byte === 0x22) {
         this.openString('property');
         this.expectProperty = false;
@@ -131,7 +140,7 @@ class SyncBodyKeySniffer {
 
     if (this.depth === 1 && this.expectKeyValue) {
       if (byte === 0x22) this.openString('key-value');
-      else this.resolved = 'legacy';
+      else this.keyKind = 'legacy';
       this.expectKeyValue = false;
       return;
     }
@@ -141,12 +150,37 @@ class SyncBodyKeySniffer {
     } else if (byte === 0x7b || byte === 0x5b) {
       this.depth++;
     } else if (byte === 0x7d || byte === 0x5d) {
-      if (this.depth === 1) this.resolved = 'legacy';
+      if (this.depth === 1) this.resolveKeyKind();
       else this.depth--;
     } else if (byte === 0x2c && this.depth === 1) {
       this.expectProperty = true;
       this.pendingProperty = null;
     }
+  }
+
+  private consumePreamble(byte: number): boolean {
+    if (this.preambleState === 'start') {
+      if (byte === 0xef) {
+        this.preambleState = 'bom-ef';
+        return true;
+      }
+      this.preambleState = 'done';
+      return false;
+    }
+    if (this.preambleState === 'bom-ef' && byte === 0xbb) {
+      this.preambleState = 'bom-ef-bb';
+      return true;
+    }
+    if (this.preambleState === 'bom-ef-bb' && byte === 0xbf) {
+      this.preambleState = 'done';
+      return true;
+    }
+    this.resolved = 'legacy';
+    return true;
+  }
+
+  private resolveKeyKind(): void {
+    this.resolved = this.keyCount > 1 ? 'ambiguous' : this.keyKind;
   }
 
   private openString(role: 'property' | 'key-value' | 'other'): void {
@@ -174,9 +208,10 @@ class SyncBodyKeySniffer {
 
     if (this.stringRole === 'property') {
       this.pendingProperty = value;
+      if (value === 'key') this.keyCount++;
       this.expectColon = true;
     } else {
-      this.resolved = value === SIMPLE_CHAT_PROJECTS_KEY ? 'chat' : 'legacy';
+      this.keyKind = value === SIMPLE_CHAT_PROJECTS_KEY ? 'chat' : 'legacy';
     }
   }
 }
@@ -229,6 +264,10 @@ async function readSyncBody(request: NextRequest): Promise<UserDataSyncBody> {
     throw new ChatSyncRequestError(400, 'CHAT_SYNC_INVALID_REQUEST', 'Unable to read request body');
   } finally {
     reader.releaseLock();
+  }
+
+  if (bodyKind === 'ambiguous') {
+    throw new DuplicateSyncKeyError('Duplicate key parameter');
   }
 
   try {
@@ -536,6 +575,9 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       if (error instanceof ChatSyncRequestError) {
         return errorResponse(error.status, error.code, error.message, requestId, false);
+      }
+      if (error instanceof DuplicateSyncKeyError) {
+        return NextResponse.json({ success: false, error: error.message }, { status: 400 });
       }
       throw error;
     }

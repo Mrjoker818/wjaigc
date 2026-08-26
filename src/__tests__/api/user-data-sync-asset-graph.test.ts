@@ -225,6 +225,22 @@ describe('user-data asset graph sync route', () => {
     expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
   });
 
+  it('rejects a duplicate chat-then-legacy key without applying the chat error contract', async () => {
+    const body = `{"key":"chat_simple_projects","key":"settings_x","value":"${
+      'x'.repeat(SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES)
+    }"}`;
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ success: false, error: 'Duplicate key parameter' });
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+    expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
+  });
+
   it('uses asset graph placements for production GET hydration only in asset-v3 mode', async () => {
     process.env.WUJIE_ASSET_GRAPH_MODE = 'asset-v3';
     mocks.dbGetUserData.mockResolvedValue(projects);
