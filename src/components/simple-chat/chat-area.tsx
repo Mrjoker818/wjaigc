@@ -236,7 +236,6 @@ export default function ChatArea({
   const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
   const [deepResearch, setDeepResearch] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(false);
-  const [artifacts, setArtifacts] = useState<Array<{ id: string; type: 'document' | 'code' | 'table'; title: string; content: string }>>([]);
   const [showShare, setShowShare] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -331,6 +330,7 @@ export default function ChatArea({
   const [messages, setMessages] = useState<SimpleChatMessage[]>(
     recoverInterruptedSimpleChatMessages((task?.messages || []).filter(Boolean)),
   );
+  const artifacts = useMemo(() => messages.flatMap(message => message.artifacts || []), [messages]);
   const [messagesTaskId, setMessagesTaskId] = useState(task?.id);
   const messagesRef = useRef(messages);
   const projectIdRef = useRef(project?.id);
@@ -1316,15 +1316,30 @@ export default function ChatArea({
                 : message
             )));
           } else if (parsed.type === 'citations') {
-            const artifact = {
-              id: `${context.assistantMessageId}-research`,
-              type: 'document' as const,
-              title: `研究: ${context.query!.slice(0, 30)}`,
-              content: fullContent,
-            };
-            setArtifacts(previous => previous.some(item => item.id === artifact.id)
-              ? previous.map(item => item.id === artifact.id ? artifact : item)
-              : [...previous, artifact]);
+            setMessages(previous => previous.map(message => {
+              if (message.id !== context.assistantMessageId) return message;
+              const artifactId = `${context.assistantMessageId}-research`;
+              const existing = message.artifacts?.find(item => item.id === artifactId);
+              const now = Date.now();
+              const artifact: ChatArtifact = {
+                id: artifactId,
+                projectId: context.projectId,
+                taskId: context.taskId,
+                type: 'document',
+                title: `研究: ${context.query!.slice(0, 30)}`,
+                content: fullContent,
+                version: existing && existing.content !== fullContent ? existing.version + 1 : existing?.version || 1,
+                createdAt: existing?.createdAt || now,
+                updatedAt: now,
+              };
+              const messageArtifacts = message.artifacts || [];
+              return {
+                ...message,
+                artifacts: existing
+                  ? messageArtifacts.map(item => item.id === artifactId ? artifact : item)
+                  : [...messageArtifacts, artifact],
+              };
+            }));
           } else if (parsed.type === 'error') {
             streamError = typeof parsed.error === 'string' && parsed.error.trim()
               ? parsed.error.trim()

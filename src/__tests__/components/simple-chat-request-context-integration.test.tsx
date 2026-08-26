@@ -924,8 +924,15 @@ describe('simple-chat request context integration', () => {
         && message.content === 'final research'
         && message.model === 'research-model'
         && message.providerId === 'research-provider'
+        && message.artifacts?.length === 1
+        && message.artifacts[0]?.id === `${assistantId}-research`
+        && message.artifacts[0]?.content === 'final research'
       )),
     )).toBe(true));
+
+    fireEvent.click(screen.getByTitle('Artifacts 文档'));
+    expect(await screen.findByText('研究: research this')).toBeTruthy();
+    expect(screen.queryByText('暂无 Artifacts')).toBeNull();
   });
 
   it('persists the exact Deep Research supplier stream error as the terminal assistant message', async () => {
@@ -1014,7 +1021,18 @@ describe('simple-chat request context integration', () => {
       retryResponse.emit({ type: 'done' });
       retryResponse.close();
     });
-    await waitFor(() => expect(document.body.textContent).toContain('research recovered'));
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('research recovered');
+      const latestTask = onUpdateTask.mock.calls.at(-1)?.[0] as SimpleChatTask;
+      const assistant = latestTask.messages.find(message => message.role === 'assistant');
+      expect(assistant?.artifacts).toHaveLength(1);
+      expect(assistant?.artifacts?.[0]).toMatchObject({
+        id: `${assistant?.id}-research`,
+        content: 'research recovered',
+        projectId: task.projectId,
+        taskId: task.id,
+      });
+    });
   });
 
   it('isolates a stale Deep Research stream from a newer task request', async () => {
