@@ -870,6 +870,375 @@ describe('simple chat sync coordinator', () => {
     },
   );
 
+  it('bounds lifecycle waiting behind another coordinator mutex without posting', async () => {
+    vi.useFakeTimers();
+    const firstPost = deferred<Response>();
+    let firstFlush: Promise<void> | undefined;
+    let lifecycleFlush: Promise<void> | undefined;
+    try {
+      let postCount = 0;
+      const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+        if (requestMethod(init) === 'GET') {
+          return jsonResponse(200, { success: true, value: [], syncRevision: 0 });
+        }
+        postCount += 1;
+        return postCount === 1
+          ? await firstPost.promise
+          : jsonResponse(200, { success: true, syncRevision: 1 });
+      });
+      const first = createSimpleChatSyncCoordinator({
+        store: createMemorySimpleChatEnvelopeStore(),
+        fetchImpl,
+        lifecycleTimeoutMs: 50,
+      });
+      const second = createSimpleChatSyncCoordinator({
+        store: createMemorySimpleChatEnvelopeStore(),
+        fetchImpl,
+        lifecycleTimeoutMs: 50,
+      });
+      await Promise.all([first.initialize('shared-user'), second.initialize('shared-user')]);
+      first.update([project('first')]);
+      second.update([project('second')]);
+      firstFlush = first.flush('manual');
+      await vi.waitFor(() => expect(postCount).toBe(1));
+
+      let lifecycleSettled = false;
+      lifecycleFlush = second.flush('logout').then(() => {
+        lifecycleSettled = true;
+      });
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(lifecycleSettled).toBe(true);
+      expect(postCount).toBe(1);
+      expect(second.snapshot().pendingOperations).not.toHaveLength(0);
+
+      firstPost.resolve(jsonResponse(200, { success: true, syncRevision: 1 }));
+      await Promise.all([firstFlush, lifecycleFlush]);
+    } finally {
+      firstPost.resolve(jsonResponse(200, { success: true, syncRevision: 1 }));
+      await Promise.all([firstFlush, lifecycleFlush].filter(
+        (promise): promise is Promise<void> => promise !== undefined,
+      ));
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds lifecycle persistence waiting without acknowledging or posting', async () => {
+    vi.useFakeTimers();
+    const pendingPut = deferred<void>();
+    let lifecycleFlush: Promise<void> | undefined;
+    try {
+      const memoryStore = createMemorySimpleChatEnvelopeStore();
+      const store: SimpleChatEnvelopeStore = {
+        get: userId => memoryStore.get(userId),
+        put: async value => {
+          if (value.pendingOperations.length > 0) await pendingPut.promise;
+          await memoryStore.put(value);
+        },
+        delete: userId => memoryStore.delete(userId),
+      };
+      const fetchImpl = sequenceFetch(
+        jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+      );
+      const coordinator = createSimpleChatSyncCoordinator({
+        store,
+        fetchImpl,
+        lifecycleTimeoutMs: 50,
+      });
+      await coordinator.initialize('user-a');
+      coordinator.update([project('pending')]);
+
+      let lifecycleSettled = false;
+      lifecycleFlush = coordinator.flush('logout').then(() => {
+        lifecycleSettled = true;
+      });
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(lifecycleSettled).toBe(true);
+      expect(countPostRequests(fetchImpl)).toBe(0);
+      expect(coordinator.snapshot()).toMatchObject({
+        status: 'failed',
+        error: { code: 'CHAT_SYNC_LIFECYCLE_TIMEOUT' },
+      });
+      expect(coordinator.snapshot().pendingOperations).not.toHaveLength(0);
+
+      pendingPut.resolve();
+      await lifecycleFlush;
+    } finally {
+      pendingPut.resolve();
+      await lifecycleFlush;
+      vi.useRealTimers();
+    }
+  });
+
+  it('restores durable pending operations when an acknowledgement put finishes after timeout', async () => {
+    vi.useFakeTimers();
+    const acknowledgementPut = deferred<void>();
+    const acknowledgementFinished = deferred<void>();
+    try {
+      let stored: SimpleChatSyncEnvelopeV1 | null = null;
+      const store: SimpleChatEnvelopeStore = {
+        get: async () => structuredClone(stored),
+        put: async value => {
+          if (value.baseRevision === 1 && value.pendingOperations.length === 0) {
+            await acknowledgementPut.promise;
+            stored = structuredClone(value);
+            acknowledgementFinished.resolve();
+            return;
+          }
+          stored = structuredClone(value);
+        },
+        delete: async () => {
+          stored = null;
+        },
+      };
+      const coordinator = createSimpleChatSyncCoordinator({
+        store,
+        fetchImpl: sequenceFetch(
+          jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+          jsonResponse(200, { success: true, syncRevision: 1 }),
+        ),
+        lifecycleTimeoutMs: 50,
+      });
+      await coordinator.initialize('user-a');
+      coordinator.update([project('pending')]);
+      const lifecycleFlush = coordinator.flush('logout');
+      await vi.advanceTimersByTimeAsync(50);
+      await lifecycleFlush;
+
+      expect(coordinator.snapshot().pendingOperations).not.toHaveLength(0);
+      acknowledgementPut.resolve();
+      await acknowledgementFinished.promise;
+      await vi.waitFor(() => {
+        expect((stored as SimpleChatSyncEnvelopeV1 | null)?.pendingOperations).not.toHaveLength(0);
+      });
+      expect(coordinator.snapshot().status).toBe('failed');
+    } finally {
+      acknowledgementPut.resolve();
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels lifecycle backoff and never starts a later POST', async () => {
+    vi.useFakeTimers();
+    const pendingSleep = deferred<void>();
+    let lifecycleFlush: Promise<void> | undefined;
+    try {
+      const fetchImpl = sequenceFetch(
+        jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+        jsonResponse(503, { success: false, code: 'SERVICE_UNAVAILABLE' }),
+        jsonResponse(200, { success: true, syncRevision: 1 }),
+      );
+      const sleep = vi.fn(() => pendingSleep.promise);
+      const coordinator = createSimpleChatSyncCoordinator({
+        store: createMemorySimpleChatEnvelopeStore(),
+        fetchImpl,
+        sleep,
+        jitter: () => 0,
+        lifecycleTimeoutMs: 50,
+      });
+      await coordinator.initialize('user-a');
+      coordinator.update([project('pending')]);
+
+      let lifecycleSettled = false;
+      lifecycleFlush = coordinator.flush('logout').then(() => {
+        lifecycleSettled = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sleep).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(lifecycleSettled).toBe(true);
+      expect(countPostRequests(fetchImpl)).toBe(1);
+      expect(coordinator.snapshot().pendingOperations).not.toHaveLength(0);
+
+      pendingSleep.resolve();
+      await lifecycleFlush;
+      expect(countPostRequests(fetchImpl)).toBe(1);
+    } finally {
+      pendingSleep.resolve();
+      await lifecycleFlush;
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts a replaced initialize GET and releases its user mutex', async () => {
+    const staleRead = deferred<Response>();
+    let staleSignal: AbortSignal | undefined;
+    let requestCount = 0;
+    const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        staleSignal = init?.signal ?? undefined;
+        return await staleRead.promise;
+      }
+      return jsonResponse(200, {
+        success: true,
+        value: [project(requestCount === 2 ? 'remote-b' : 'fresh-a')],
+        syncRevision: 1,
+      });
+    });
+    const staleCoordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+    const nextCoordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+
+    const initializeA = staleCoordinator.initialize('user-a');
+    let initializeB: Promise<SimpleChatSyncSnapshot> | undefined;
+    let nextA: Promise<SimpleChatSyncSnapshot> | undefined;
+    try {
+      await vi.waitFor(() => expect(staleSignal).toBeDefined());
+      initializeB = staleCoordinator.initialize('user-b');
+      await initializeB;
+      nextA = nextCoordinator.initialize('user-a');
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(staleSignal?.aborted).toBe(true);
+      expect(await nextA).toMatchObject({ status: 'synced', projects: [project('fresh-a')] });
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      await initializeA;
+    } finally {
+      staleRead.resolve(jsonResponse(200, { success: true, value: [], syncRevision: 0 }));
+      await Promise.all([initializeA, initializeB, nextA].filter(
+        (promise): promise is Promise<SimpleChatSyncSnapshot> => promise !== undefined,
+      ));
+    }
+  });
+
+  it('does not let an invalidated candidate put overwrite newer same-user data', async () => {
+    const stalePut = deferred<void>();
+    const stored = new Map<string, SimpleChatSyncEnvelopeV1>();
+    let blockStaleCandidate = true;
+    const store: SimpleChatEnvelopeStore = {
+      get: async userId => structuredClone(stored.get(userId) ?? null),
+      put: async value => {
+        if (blockStaleCandidate && value.userId === 'user-a') {
+          blockStaleCandidate = false;
+          await stalePut.promise;
+        }
+        stored.set(value.userId, structuredClone(value));
+      },
+      delete: async userId => {
+        stored.delete(userId);
+      },
+    };
+    const staleCoordinator = createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: sequenceFetch(
+        jsonResponse(200, { success: true, value: [project('stale-a')], syncRevision: 1 }),
+        jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+      ),
+    });
+    const freshSequence = sequenceFetch(
+      jsonResponse(200, { success: true, value: [project('fresh-a')], syncRevision: 2 }),
+    );
+    const freshFetch: typeof fetch = vi.fn((input, init) => freshSequence(input, init));
+    const freshCoordinator = createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: freshFetch,
+    });
+
+    const staleInitialize = staleCoordinator.initialize('user-a');
+    let switchInitialize: Promise<SimpleChatSyncSnapshot> | undefined;
+    let freshInitialize: Promise<SimpleChatSyncSnapshot> | undefined;
+    try {
+      await vi.waitFor(() => expect(blockStaleCandidate).toBe(false));
+      switchInitialize = staleCoordinator.initialize('user-b');
+      freshInitialize = freshCoordinator.initialize('user-a');
+      await vi.waitFor(() => expect(freshFetch).toHaveBeenCalledTimes(1));
+      await new Promise(resolve => setTimeout(resolve, 0));
+      stalePut.resolve();
+      await Promise.all([staleInitialize, switchInitialize, freshInitialize]);
+
+      expect((await store.get('user-a'))?.currentProjects).toEqual([project('fresh-a')]);
+    } finally {
+      stalePut.resolve();
+      await Promise.all([staleInitialize, switchInitialize, freshInitialize].filter(
+        (promise): promise is Promise<SimpleChatSyncSnapshot> => promise !== undefined,
+      ));
+    }
+  });
+
+  it('restores the prior same-user envelope when a started candidate put becomes stale', async () => {
+    const stalePut = deferred<void>();
+    const prior = { ...envelope('user-a'), currentProjects: [project('prior-a')] };
+    const stored = new Map<string, SimpleChatSyncEnvelopeV1>([['user-a', structuredClone(prior)]]);
+    let candidateStarted = false;
+    const store: SimpleChatEnvelopeStore = {
+      get: async userId => structuredClone(stored.get(userId) ?? null),
+      put: async value => {
+        if (!candidateStarted && value.userId === 'user-a') {
+          candidateStarted = true;
+          await stalePut.promise;
+        }
+        stored.set(value.userId, structuredClone(value));
+      },
+      delete: async userId => {
+        stored.delete(userId);
+      },
+    };
+    const coordinator = createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: sequenceFetch(
+        jsonResponse(200, { success: true, value: [project('stale-a')], syncRevision: 1 }),
+        jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+      ),
+    });
+
+    const staleInitialize = coordinator.initialize('user-a');
+    await vi.waitFor(() => expect(candidateStarted).toBe(true));
+    const switchInitialize = coordinator.initialize('user-b');
+    stalePut.resolve();
+    await Promise.all([staleInitialize, switchInitialize]);
+
+    expect((await store.get('user-a'))?.currentProjects).toEqual([project('prior-a')]);
+  });
+
+  it.each(['logout', 'dispose', 'user-switch'] as const)(
+    'preserves pagehide keepalive when a queued batch also receives %s',
+    async lifecycle => {
+      const firstPost = deferred<Response>();
+      const postCalls: RequestInit[] = [];
+      const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+        if (requestMethod(init) === 'GET') {
+          return jsonResponse(200, { success: true, value: [], syncRevision: 0 });
+        }
+        postCalls.push(init ?? {});
+        return postCalls.length === 1
+          ? await firstPost.promise
+          : jsonResponse(200, { success: true, syncRevision: 2 });
+      });
+      const coordinator = createSimpleChatSyncCoordinator({
+        store: createMemorySimpleChatEnvelopeStore(),
+        fetchImpl,
+      });
+      await coordinator.initialize('user-a');
+      coordinator.update([project('first')]);
+      const firstFlush = coordinator.flush('manual');
+      await vi.waitFor(() => expect(postCalls).toHaveLength(1));
+      coordinator.update([project('first'), project('second')]);
+
+      const pagehideFlush = coordinator.flush('pagehide');
+      const lifecycleFlush = lifecycle === 'dispose'
+        ? coordinator.dispose()
+        : lifecycle === 'user-switch'
+          ? coordinator.initialize('user-b').then(() => undefined)
+          : coordinator.flush('logout');
+      firstPost.resolve(jsonResponse(200, { success: true, syncRevision: 1 }));
+      await Promise.all([firstFlush, pagehideFlush, lifecycleFlush]);
+
+      expect(postCalls).toHaveLength(2);
+      expect(postCalls[1]?.keepalive).toBe(true);
+      expect(postCalls[1]?.signal).toBeInstanceOf(AbortSignal);
+      expect(coordinator.snapshot().pendingOperations).toHaveLength(0);
+    },
+  );
+
   it('isolates mutable snapshots between subscribers', async () => {
     const coordinator = createSimpleChatSyncCoordinator({
       store: createMemorySimpleChatEnvelopeStore(),

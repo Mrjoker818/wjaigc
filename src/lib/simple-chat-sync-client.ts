@@ -96,15 +96,26 @@ interface FrozenBatch {
 
 type InternalFlushReason = SimpleChatSyncFlushReason | 'dispose';
 
+interface FlushCapabilities {
+  keepalive: boolean;
+  lifecycle: boolean;
+}
+
 interface UserNetworkLock {
   tail: Promise<void>;
   queued: number;
 }
 
 const userNetworkLocks = new Map<string, UserNetworkLock>();
+const userPersistenceLocks = new Map<string, UserNetworkLock>();
 
-async function withUserNetworkLock<T>(userId: string, request: () => Promise<T>): Promise<T> {
-  const current = userNetworkLocks.get(userId);
+async function withUserLock<T>(
+  locks: Map<string, UserNetworkLock>,
+  userId: string,
+  signal: AbortSignal | undefined,
+  request: () => Promise<T>,
+): Promise<T> {
+  const current = locks.get(userId);
   const previous = current?.tail ?? Promise.resolve();
   let release!: () => void;
   const gate = new Promise<void>(resolve => {
@@ -113,18 +124,35 @@ async function withUserNetworkLock<T>(userId: string, request: () => Promise<T>)
   const lock = current ?? { tail: Promise.resolve(), queued: 0 };
   lock.queued += 1;
   lock.tail = previous.catch(() => undefined).then(() => gate);
-  userNetworkLocks.set(userId, lock);
+  locks.set(userId, lock);
 
-  await previous.catch(() => undefined);
   try {
+    await waitWithSignal(previous.catch(() => undefined), signal);
+    throwIfAborted(signal);
     return await request();
   } finally {
     release();
     lock.queued -= 1;
-    if (lock.queued === 0 && userNetworkLocks.get(userId) === lock) {
-      userNetworkLocks.delete(userId);
+    if (lock.queued === 0 && locks.get(userId) === lock) {
+      locks.delete(userId);
     }
   }
+}
+
+function withUserNetworkLock<T>(
+  userId: string,
+  signal: AbortSignal | undefined,
+  request: () => Promise<T>,
+): Promise<T> {
+  return withUserLock(userNetworkLocks, userId, signal, request);
+}
+
+function withUserPersistenceLock<T>(
+  userId: string,
+  signal: AbortSignal | undefined,
+  request: () => Promise<T>,
+): Promise<T> {
+  return withUserLock(userPersistenceLocks, userId, signal, request);
 }
 
 export function createSimpleChatSyncCoordinator(
@@ -142,7 +170,7 @@ export function createSimpleChatSyncCoordinator(
   let error: SimpleChatSyncError | null = null;
   let envelope: SimpleChatSyncEnvelopeV1 | null = null;
   let flushDrain: Promise<void> | null = null;
-  let queuedFlushReason: InternalFlushReason | null = null;
+  let queuedFlush: FlushCapabilities | null = null;
   let persistenceQueue: Promise<boolean> = Promise.resolve(true);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
@@ -151,7 +179,9 @@ export function createSimpleChatSyncCoordinator(
   let initializeTargetUserId: string | null = null;
   let initializeInProgressGeneration: number | null = null;
   let authoritativeReadPending = false;
-  let activeRequestController: AbortController | null = null;
+  let initializeController: AbortController | null = null;
+  const activeRequestControllers = new Set<AbortController>();
+  let flushDrainController: AbortController | null = null;
   let lifecycleTimeout: ReturnType<typeof setTimeout> | null = null;
   let lifecycleTimedOut = false;
   let envelopeMutationVersion = 0;
@@ -207,14 +237,25 @@ export function createSimpleChatSyncCoordinator(
   function enqueuePersistence(
     input: SimpleChatSyncEnvelopeV1,
     shouldReportFailure: () => boolean = () => true,
+    isValid: () => boolean = () => true,
+    restoreWhenInvalid?: () => SimpleChatSyncEnvelopeV1 | null,
   ): Promise<boolean> {
     const value = cloneValue(input);
     persistenceQueue = persistenceQueue
       .catch(() => false)
       .then(async () => {
         try {
-          await options.store.put(value);
-          return true;
+          return await withUserPersistenceLock(value.userId, undefined, async () => {
+            if (!isValid()) return false;
+            await options.store.put(value);
+            if (isValid()) return true;
+            if (restoreWhenInvalid !== undefined) {
+              const fallback = restoreWhenInvalid();
+              if (fallback === null) await options.store.delete(value.userId);
+              else await options.store.put(cloneValue(fallback));
+            }
+            return false;
+          });
         } catch {
           if (shouldReportFailure()) setState('failed', localStorageError());
           return false;
@@ -223,32 +264,67 @@ export function createSimpleChatSyncCoordinator(
     return persistenceQueue;
   }
 
+  async function persistInitializationCandidate(
+    input: SimpleChatSyncEnvelopeV1,
+    fallback: SimpleChatSyncEnvelopeV1 | null,
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const value = cloneValue(input);
+    const persistence = withUserPersistenceLock(value.userId, signal, async () => {
+      if (!isCurrentInitialization(generation, value.userId) || signal.aborted) return false;
+      await options.store.put(value);
+      if (isCurrentInitialization(generation, value.userId) && !signal.aborted) return true;
+      if (fallback === null) await options.store.delete(value.userId);
+      else await options.store.put(cloneValue(fallback));
+      return false;
+    }).catch(() => false);
+    return await waitWithSignal(persistence, signal);
+  }
+
   async function initialize(userId: string): Promise<SimpleChatSyncSnapshot> {
     assertUsable();
     if (userId.length === 0) throw new Error('Simple chat sync requires a user id');
 
+    initializeController?.abort(createAbortError('Simple chat sync initialization was replaced'));
+    const controller = new AbortController();
+    initializeController = controller;
     const generation = ++initializeGeneration;
     initializeTargetUserId = userId;
     initializeInProgressGeneration = generation;
     authoritativeReadPending = true;
     clearDebounce();
     setState('loading', null, true);
-    if (envelope !== null && envelope.pendingOperations.length > 0) {
-      await queueFlush('user-switch');
-    } else if (flushDrain !== null) {
-      await flushDrain;
+    try {
+      if (envelope !== null && envelope.pendingOperations.length > 0) {
+        await waitWithSignal(queueFlush('user-switch'), controller.signal);
+      } else if (flushDrain !== null) {
+        await waitWithSignal(flushDrain, controller.signal);
+      }
+    } catch {
+      if (controller.signal.aborted) return snapshot();
+      throw new Error('Simple chat sync initialization wait failed');
     }
     if (!isCurrentInitialization(generation, userId)) return snapshot();
-    if (envelope !== null && !await enqueueEnvelopePersistence()) {
-      finishInitialization(generation, userId, 'failed', localStorageError());
-      return snapshot();
+    if (envelope !== null) {
+      try {
+        if (!await waitWithSignal(enqueueEnvelopePersistence(), controller.signal)) {
+          finishInitialization(generation, userId, 'failed', localStorageError());
+          return snapshot();
+        }
+      } catch {
+        if (controller.signal.aborted) return snapshot();
+        finishInitialization(generation, userId, 'failed', localStorageError());
+        return snapshot();
+      }
     }
     if (!isCurrentInitialization(generation, userId)) return snapshot();
 
     let localEnvelope: SimpleChatSyncEnvelopeV1 | null;
     try {
-      localEnvelope = await options.store.get(userId);
+      localEnvelope = await waitWithSignal(options.store.get(userId), controller.signal);
     } catch {
+      if (controller.signal.aborted) return snapshot();
       finishInitialization(generation, userId, 'failed', localStorageError());
       return snapshot();
     }
@@ -266,6 +342,7 @@ export function createSimpleChatSyncCoordinator(
     const remote = await readRemoteSnapshot(
       userId,
       () => isCurrentInitialization(generation, userId),
+      controller.signal,
     );
     if (!isCurrentInitialization(generation, userId)) return snapshot();
     if (!remote.ok) {
@@ -292,7 +369,19 @@ export function createSimpleChatSyncCoordinator(
       updatedAt: now(),
     };
 
-    if (!await enqueuePersistence(candidate, () => false)) {
+    try {
+      if (!await persistInitializationCandidate(
+        candidate,
+        localEnvelope,
+        generation,
+        controller.signal,
+      )) {
+        if (controller.signal.aborted) return snapshot();
+        finishInitialization(generation, userId, 'failed', localStorageError());
+        return snapshot();
+      }
+    } catch {
+      if (controller.signal.aborted) return snapshot();
       finishInitialization(generation, userId, 'failed', localStorageError());
       return snapshot();
     }
@@ -303,6 +392,7 @@ export function createSimpleChatSyncCoordinator(
     authoritativeReadPending = false;
     finishInitialization(generation, userId, pendingOperations.length === 0 ? 'synced' : 'syncing');
     if (pendingOperations.length > 0) scheduleDebounce();
+    if (initializeController === controller) initializeController = null;
     return snapshot();
   }
 
@@ -358,33 +448,47 @@ export function createSimpleChatSyncCoordinator(
   function queueFlush(reason: InternalFlushReason): Promise<void> {
     if (disposed) return Promise.resolve();
     clearDebounce();
-    queuedFlushReason = strongerFlushReason(queuedFlushReason, reason);
-    if (reason === 'logout' || reason === 'dispose') startLifecycleTimeout();
+    queuedFlush = mergeFlushCapabilities(queuedFlush, reason);
+    if (queuedFlush.lifecycle) startLifecycleTimeout();
     if (flushDrain === null) {
-      flushDrain = drainFlushQueue().finally(() => {
+      flushDrainController = new AbortController();
+      const drainController = flushDrainController;
+      flushDrain = drainFlushQueue(drainController.signal).finally(() => {
         flushDrain = null;
+        if (flushDrainController === drainController) flushDrainController = null;
         stopLifecycleTimeout();
       });
     }
     return flushDrain;
   }
 
-  async function drainFlushQueue(): Promise<void> {
-    while (queuedFlushReason !== null) {
-      const reason = queuedFlushReason;
-      queuedFlushReason = null;
+  async function drainFlushQueue(signal: AbortSignal): Promise<void> {
+    while (queuedFlush !== null && !signal.aborted) {
+      const capabilities = queuedFlush;
+      queuedFlush = null;
       const batch = envelope === null || envelope.pendingOperations.length === 0
         ? null
         : freezeBatch(envelope);
-      await performFlush(reason, batch);
+      await performFlush(capabilities, batch, signal);
     }
+    if (signal.aborted) queuedFlush = null;
   }
 
   async function performFlush(
-    reason: InternalFlushReason,
+    capabilities: FlushCapabilities,
     initialBatch: FrozenBatch | null,
+    signal: AbortSignal,
   ): Promise<void> {
-    if (!await persistenceQueue && !await enqueueEnvelopePersistence()) return;
+    try {
+      throwIfAborted(signal);
+      if (
+        !await waitWithSignal(persistenceQueue, signal)
+        && !await waitWithSignal(enqueueEnvelopePersistence(), signal)
+      ) return;
+    } catch {
+      if (signal.aborted) setState('failed', lifecycleTimeoutError());
+      return;
+    }
     if (envelope === null || initialBatch === null || envelope.userId !== initialBatch.userId) {
       if (envelope !== null && status !== 'failed') setState('synced');
       return;
@@ -395,13 +499,12 @@ export function createSimpleChatSyncCoordinator(
         message: 'Simple chat sync is waiting for a network connection',
         retryable: true,
       });
-      await enqueueEnvelopePersistence();
+      await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
       return;
     }
 
-    if (lifecycleTimedOut) {
+    if (lifecycleTimedOut || signal.aborted) {
       setState('failed', lifecycleTimeoutError());
-      await enqueueEnvelopePersistence();
       return;
     }
 
@@ -413,12 +516,16 @@ export function createSimpleChatSyncCoordinator(
     let conflictSeen = false;
 
     while (true) {
+      if (signal.aborted) {
+        setState('failed', lifecycleTimeoutError());
+        return;
+      }
       let response: Response;
-      const requestController = new AbortController();
-      activeRequestController = requestController;
+      const requestController = createLinkedAbortController([signal]);
+      activeRequestControllers.add(requestController.controller);
       try {
         postAttempts += 1;
-        response = await withUserNetworkLock(batch.userId, () => abortableFetch(
+        response = await withUserNetworkLock(batch.userId, requestController.controller.signal, () => abortableFetch(
           fetchImpl(SIMPLE_CHAT_SYNC_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -428,16 +535,14 @@ export function createSimpleChatSyncCoordinator(
               expectedRevision: batch.expectedRevision,
             }),
             credentials: 'include',
-            signal: requestController.signal,
-            ...(reason === 'pagehide' ? { keepalive: true } : {}),
+            signal: requestController.controller.signal,
+            ...(capabilities.keepalive ? { keepalive: true } : {}),
           }),
-          requestController.signal,
+          requestController.controller.signal,
         ));
       } catch {
-        if (activeRequestController === requestController) activeRequestController = null;
-        if (lifecycleTimedOut || requestController.signal.aborted) {
+        if (lifecycleTimedOut || signal.aborted) {
           setState('failed', lifecycleTimeoutError());
-          await enqueueEnvelopePersistence();
           return;
         }
         if (isOffline()) {
@@ -446,11 +551,16 @@ export function createSimpleChatSyncCoordinator(
             message: 'Simple chat sync is waiting for a network connection',
             retryable: true,
           });
-          await enqueueEnvelopePersistence();
+          await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
           return;
         }
         if (canRetryPost(postAttempts, conflictSeen, transientRetries)) {
-          await waitForRetry(transientRetries++);
+          try {
+            await waitForRetry(transientRetries++, signal);
+          } catch {
+            if (signal.aborted) setState('failed', lifecycleTimeoutError());
+            return;
+          }
           continue;
         }
         setState('failed', {
@@ -458,34 +568,55 @@ export function createSimpleChatSyncCoordinator(
           message: 'Simple chat sync network request failed',
           retryable: true,
         });
-        await enqueueEnvelopePersistence();
+        await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
         return;
       } finally {
-        if (activeRequestController === requestController) activeRequestController = null;
+        activeRequestControllers.delete(requestController.controller);
+        requestController.cleanup();
       }
 
-      const parsed = await parseJson(response);
+      let parsed: Awaited<ReturnType<typeof parseJson>>;
+      try {
+        parsed = await waitWithSignal(parseJson(response), signal);
+      } catch {
+        if (signal.aborted) {
+          void response.body?.cancel().catch(() => undefined);
+          setState('failed', lifecycleTimeoutError());
+        }
+        return;
+      }
       if (!parsed.ok) {
         setState('failed', invalidResponseError(response));
-        await enqueueEnvelopePersistence();
+        await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
         return;
       }
 
       if (response.ok) {
         if (!isWriteSuccess(parsed.value, batch.expectedRevision)) {
           setState('failed', invalidResponseError(response, parsed.value));
-          await enqueueEnvelopePersistence();
+          await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
           return;
         }
         if (envelope === null || envelope.userId !== batch.userId) return;
         const mutationVersion = envelopeMutationVersion;
+        const pendingEnvelope = cloneValue(envelope);
         let acknowledged = acknowledgeEnvelope(envelope, batch, parsed.value.syncRevision, createId, now);
-        const persisted = await enqueuePersistence(acknowledged);
+        const persisted = await awaitFlushPersistence(enqueuePersistence(
+          acknowledged,
+          () => true,
+          () => !signal.aborted,
+          () => envelope?.userId === batch.userId ? envelope : pendingEnvelope,
+        ), signal);
         if (!persisted) return;
         if (envelope === null || envelope.userId !== batch.userId) return;
         if (envelopeMutationVersion !== mutationVersion) {
           acknowledged = acknowledgeEnvelope(envelope, batch, parsed.value.syncRevision, createId, now);
-          if (!await enqueuePersistence(acknowledged)) return;
+          if (!await awaitFlushPersistence(enqueuePersistence(
+            acknowledged,
+            () => true,
+            () => !signal.aborted,
+            () => envelope?.userId === batch.userId ? envelope : pendingEnvelope,
+          ), signal)) return;
         }
         envelope = acknowledged;
         envelopeMutationVersion += 1;
@@ -500,11 +631,11 @@ export function createSimpleChatSyncCoordinator(
         conflictSeen = true;
         if (conflictReplays >= MAX_CONFLICT_REPLAYS || postAttempts >= 3) {
           setState('conflict', responseError);
-          await enqueueEnvelopePersistence();
+          await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
           return;
         }
         conflictReplays += 1;
-        const rebased = await rebaseFromRemote(batch.userId);
+        const rebased = await rebaseFromRemote(batch.userId, signal);
         if (!rebased) return;
         if (envelope === null || envelope.userId !== batch.userId) return;
         if (envelope.pendingOperations.length === 0) {
@@ -518,11 +649,16 @@ export function createSimpleChatSyncCoordinator(
 
       if (RETRYABLE_STATUSES.has(response.status)) {
         if (canRetryPost(postAttempts, conflictSeen, transientRetries)) {
-          await waitForRetry(transientRetries++);
+          try {
+            await waitForRetry(transientRetries++, signal);
+          } catch {
+            if (signal.aborted) setState('failed', lifecycleTimeoutError());
+            return;
+          }
           continue;
         }
         setState('failed', { ...responseError, retryable: true });
-        await enqueueEnvelopePersistence();
+        await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
         return;
       }
 
@@ -535,27 +671,39 @@ export function createSimpleChatSyncCoordinator(
         ...responseError,
         retryable: response.status === 401 || response.status === 403 ? false : responseError.retryable,
       });
-      await enqueueEnvelopePersistence();
+      await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
       return;
     }
   }
 
-  async function rebaseFromRemote(userId: string): Promise<boolean> {
-    const remote = await readRemoteSnapshot(userId);
+  async function awaitFlushPersistence(
+    persistence: Promise<boolean>,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    try {
+      return await waitWithSignal(persistence, signal);
+    } catch {
+      if (signal.aborted) setState('failed', lifecycleTimeoutError());
+      return false;
+    }
+  }
+
+  async function rebaseFromRemote(userId: string, signal: AbortSignal): Promise<boolean> {
+    const remote = await readRemoteSnapshot(userId, () => !signal.aborted, signal);
     if (!remote.ok) {
       setState(remote.offline ? 'offline' : 'failed', remote.error);
-      await enqueueEnvelopePersistence();
+      await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
       return false;
     }
     if (envelope === null || envelope.userId !== userId) return false;
 
     const mutationVersion = envelopeMutationVersion;
     let candidate = rebaseEnvelope(envelope, remote.body, createId, now);
-    if (!await enqueuePersistence(candidate)) return false;
+    if (!await awaitFlushPersistence(enqueuePersistence(candidate), signal)) return false;
     if (envelope === null || envelope.userId !== userId) return false;
     if (envelopeMutationVersion !== mutationVersion) {
       candidate = rebaseEnvelope(envelope, remote.body, createId, now);
-      if (!await enqueuePersistence(candidate)) return false;
+      if (!await awaitFlushPersistence(enqueuePersistence(candidate), signal)) return false;
     }
     envelope = candidate;
     envelopeMutationVersion += 1;
@@ -565,6 +713,7 @@ export function createSimpleChatSyncCoordinator(
   async function readRemoteSnapshot(
     userId: string,
     isCurrent: () => boolean = () => true,
+    signal?: AbortSignal,
   ): Promise<
     | { ok: true; body: SyncReadBody }
     | { ok: false; offline: boolean; error: SimpleChatSyncError }
@@ -582,24 +731,27 @@ export function createSimpleChatSyncCoordinator(
     }
     let transientRetries = 0;
     while (true) {
-      if (!isCurrent()) return staleReadResult();
-      const requestController = new AbortController();
-      activeRequestController = requestController;
+      if (!isCurrent() || signal?.aborted) return staleReadResult();
+      const requestController = createLinkedAbortController(signal === undefined ? [] : [signal]);
+      activeRequestControllers.add(requestController.controller);
       let response: Response;
       try {
-        response = await withUserNetworkLock(userId, () => abortableFetch(
+        response = await withUserNetworkLock(userId, requestController.controller.signal, () => abortableFetch(
           fetchImpl(`${SIMPLE_CHAT_SYNC_URL}?key=${SIMPLE_CHAT_SYNC_KEY}`, {
             method: 'GET',
             credentials: 'include',
-            signal: requestController.signal,
+            signal: requestController.controller.signal,
           }),
-          requestController.signal,
+          requestController.controller.signal,
         ));
       } catch {
-        if (activeRequestController === requestController) activeRequestController = null;
-        if (!isCurrent()) return staleReadResult();
+        if (!isCurrent() || signal?.aborted) return staleReadResult();
         if (!isOffline() && !lifecycleTimedOut && transientRetries < MAX_TRANSIENT_RETRIES) {
-          await waitForRetry(transientRetries++);
+          try {
+            await waitForRetry(transientRetries++, signal);
+          } catch {
+            return staleReadResult();
+          }
           continue;
         }
         return {
@@ -608,13 +760,24 @@ export function createSimpleChatSyncCoordinator(
           error: lifecycleTimedOut ? lifecycleTimeoutError() : networkError(),
         };
       } finally {
-        if (activeRequestController === requestController) activeRequestController = null;
+        activeRequestControllers.delete(requestController.controller);
+        requestController.cleanup();
       }
-      if (!isCurrent()) return staleReadResult();
-      const parsed = await parseJson(response);
-      if (!isCurrent()) return staleReadResult();
+      if (!isCurrent() || signal?.aborted) return staleReadResult();
+      let parsed: Awaited<ReturnType<typeof parseJson>>;
+      try {
+        parsed = await waitWithSignal(parseJson(response), signal);
+      } catch {
+        if (signal?.aborted) void response.body?.cancel().catch(() => undefined);
+        return staleReadResult();
+      }
+      if (!isCurrent() || signal?.aborted) return staleReadResult();
       if (RETRYABLE_STATUSES.has(response.status) && transientRetries < MAX_TRANSIENT_RETRIES) {
-        await waitForRetry(transientRetries++);
+        try {
+          await waitForRetry(transientRetries++, signal);
+        } catch {
+          return staleReadResult();
+        }
         continue;
       }
       if (!parsed.ok || !response.ok || !isReadSuccess(parsed.value)) {
@@ -630,9 +793,12 @@ export function createSimpleChatSyncCoordinator(
     }
   }
 
-  async function waitForRetry(retryIndex: number): Promise<void> {
+  async function waitForRetry(retryIndex: number, signal?: AbortSignal): Promise<void> {
     const jitterMilliseconds = Math.max(0, Math.floor(jitter() * RETRY_BASE_MILLISECONDS));
-    await sleep(RETRY_BASE_MILLISECONDS * (2 ** retryIndex) + jitterMilliseconds);
+    await waitWithSignal(
+      sleep(RETRY_BASE_MILLISECONDS * (2 ** retryIndex) + jitterMilliseconds),
+      signal,
+    );
   }
 
   async function handleOnline(): Promise<void> {
@@ -667,8 +833,8 @@ export function createSimpleChatSyncCoordinator(
   async function dispose(): Promise<void> {
     if (disposed) return;
     clearDebounce();
+    initializeController?.abort(createAbortError('Simple chat sync coordinator was disposed'));
     await queueFlush('dispose');
-    await enqueueEnvelopePersistence();
     disposed = true;
     listeners.clear();
   }
@@ -678,7 +844,9 @@ export function createSimpleChatSyncCoordinator(
     lifecycleTimedOut = false;
     lifecycleTimeout = setTimeout(() => {
       lifecycleTimedOut = true;
-      activeRequestController?.abort();
+      const reason = createAbortError('Simple chat sync lifecycle flush timed out');
+      flushDrainController?.abort(reason);
+      for (const controller of activeRequestControllers) controller.abort(reason);
     }, lifecycleTimeoutMs);
   }
 
@@ -761,20 +929,20 @@ function rebaseEnvelope(
   };
 }
 
-function strongerFlushReason(
-  current: InternalFlushReason | null,
+function mergeFlushCapabilities(
+  current: FlushCapabilities | null,
   next: InternalFlushReason,
-): InternalFlushReason {
-  if (current === null) return next;
-  const priority: Record<InternalFlushReason, number> = {
-    debounce: 0,
-    manual: 1,
-    pagehide: 2,
-    'user-switch': 3,
-    logout: 4,
-    dispose: 5,
+): FlushCapabilities {
+  const nextCapabilities: FlushCapabilities = {
+    keepalive: next === 'pagehide',
+    lifecycle: next === 'logout' || next === 'dispose',
   };
-  return priority[next] > priority[current] ? next : current;
+  return current === null
+    ? nextCapabilities
+    : {
+      keepalive: current.keepalive || nextCapabilities.keepalive,
+      lifecycle: current.lifecycle || nextCapabilities.lifecycle,
+    };
 }
 
 function canRetryPost(
@@ -795,6 +963,51 @@ async function abortableFetch(request: Promise<Response>, signal: AbortSignal): 
       signal.removeEventListener('abort', onAbort);
     });
   });
+}
+
+async function waitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  throwIfAborted(signal);
+  if (signal === undefined) return await promise;
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason ?? createAbortError('Operation aborted'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    void promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', onAbort);
+    });
+  });
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason ?? createAbortError('Operation aborted');
+}
+
+function createLinkedAbortController(signals: AbortSignal[]): {
+  controller: AbortController;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  const listeners: Array<{ signal: AbortSignal; listener: () => void }> = [];
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    const listener = (): void => controller.abort(signal.reason);
+    signal.addEventListener('abort', listener, { once: true });
+    listeners.push({ signal, listener });
+  }
+  return {
+    controller,
+    cleanup: () => {
+      for (const { signal, listener } of listeners) {
+        signal.removeEventListener('abort', listener);
+      }
+    },
+  };
+}
+
+function createAbortError(message: string): DOMException {
+  return new DOMException(message, 'AbortError');
 }
 
 function staleReadResult(): { ok: false; offline: false; error: SimpleChatSyncError } {
