@@ -117,6 +117,34 @@ describe('simple chat user data sync route', () => {
     expect(mocks.dbGetUserData).not.toHaveBeenCalled();
   });
 
+  it('returns a stable audited error when the chat snapshot read fails', async () => {
+    mocks.readSimpleChatSnapshot.mockRejectedValue(new Error('postgres password leaked'));
+    const response = await GET(getRequest({ 'x-request-id': 'req_read_failure' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get('x-request-id')).toBe('req_read_failure');
+    expect(body).toMatchObject({
+      success: false,
+      code: 'CHAT_SYNC_READ_FAILED',
+      message: 'Failed to read simple chat projects',
+      requestId: 'req_read_failure',
+      retryable: false,
+    });
+    expect(JSON.stringify(body)).not.toContain('postgres password leaked');
+    expect(mocks.logOperation).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'simple_chat_sync_read',
+      responseStatus: 500,
+      requestData: {
+        revision: 0,
+        operationCount: 0,
+        status: 'error',
+        errorCode: 'CHAT_SYNC_READ_FAILED',
+      },
+    }));
+    expect(JSON.stringify(mocks.logOperation.mock.calls)).not.toContain('postgres password leaked');
+  });
+
   it('writes with CAS and returns only the server revision contract', async () => {
     const response = await POST(postJson({
       key: CHAT_KEY,
@@ -133,6 +161,38 @@ describe('simple chat user data sync route', () => {
       projects: validProjects,
       expectedRevision: 7,
     });
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('returns a stable audited error when the chat snapshot write fails', async () => {
+    mocks.compareAndSetSimpleChatSnapshot.mockRejectedValue(new Error('database host leaked'));
+    const response = await POST(postJson(
+      { key: CHAT_KEY, value: validProjects, expectedRevision: 7 },
+      { 'x-request-id': 'req_write_failure' },
+    ));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get('x-request-id')).toBe('req_write_failure');
+    expect(body).toMatchObject({
+      success: false,
+      code: 'CHAT_SYNC_WRITE_FAILED',
+      message: 'Failed to write simple chat projects',
+      requestId: 'req_write_failure',
+      retryable: false,
+    });
+    expect(JSON.stringify(body)).not.toContain('database host leaked');
+    expect(mocks.logOperation).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'simple_chat_sync_write',
+      responseStatus: 500,
+      requestData: {
+        revision: 7,
+        operationCount: 1,
+        status: 'error',
+        errorCode: 'CHAT_SYNC_WRITE_FAILED',
+      },
+    }));
+    expect(JSON.stringify(mocks.logOperation.mock.calls)).not.toContain('database host leaked');
     expect(mocks.dbSetUserData).not.toHaveBeenCalled();
   });
 
@@ -226,9 +286,42 @@ describe('simple chat user data sync route', () => {
     expect(mocks.compareAndSetSimpleChatSnapshot).toHaveBeenCalledOnce();
   });
 
+  it('recognizes the chat key when it is not the first top-level field', async () => {
+    const response = await POST(postText(JSON.stringify({
+      metadata: { source: 'client' },
+      value: [],
+      key: CHAT_KEY,
+      expectedRevision: 7,
+    })));
+
+    expect(response.status).toBe(200);
+    expect(mocks.compareAndSetSimpleChatSnapshot).toHaveBeenCalledOnce();
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('recognizes escaped chat key names and values', async () => {
+    const response = await POST(postText(
+      String.raw`{"\u006bey":"chat_simple_project\u0073","value":[],"expectedRevision":7}`,
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.compareAndSetSimpleChatSnapshot).toHaveBeenCalledOnce();
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('recognizes the chat key across stream chunk boundaries', async () => {
+    const body = JSON.stringify({ key: CHAT_KEY, value: [], expectedRevision: 7 });
+    const chunks = [...new TextEncoder().encode(body)].map(byte => new Uint8Array([byte]));
+    const response = await POST(streamingRequest(chunks));
+
+    expect(response.status).toBe(200);
+    expect(mocks.compareAndSetSimpleChatSnapshot).toHaveBeenCalledOnce();
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
   it('cancels immediately after a streamed body exceeds 20 MiB regardless of Content-Length', async () => {
     const cancel = vi.fn();
-    const first = new Uint8Array(SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES);
+    const first = new TextEncoder().encode(exactSizeChatBody(SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES));
     const response = await POST(streamingRequest(
       [first, new Uint8Array([1]), new Uint8Array([2])],
       { cancel, contentLength: '1' },

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES } from '@/lib/simple-chat-project-sync';
 
 const mocks = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
@@ -172,8 +173,56 @@ describe('user-data asset graph sync route', () => {
     }));
 
     expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ success: false, error: 'Failed to write user data' });
     expect(mocks.executeCanvasProjectSync).not.toHaveBeenCalled();
     expect(mocks.executeLegacyCanvasProjectSync).not.toHaveBeenCalled();
+  });
+
+  it('keeps the legacy contract for a non-chat payload larger than 20 MiB', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        key: 'settings_large_payload',
+        value: 'x'.repeat(SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES),
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ success: true, key: 'settings_large_payload' });
+    expect(body).not.toHaveProperty('code', 'CHAT_SYNC_PAYLOAD_TOO_LARGE');
+    expect(mocks.dbSetUserData).toHaveBeenCalledWith(
+      'user-1',
+      'settings_large_payload',
+      expect.stringMatching(/^x+$/),
+    );
+    expect(mocks.readSimpleChatSnapshot).not.toHaveBeenCalled();
+    expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('ignores nested and string-embedded chat keys when routing a large legacy payload', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        metadata: { key: 'chat_simple_projects' },
+        note: '{"key":"chat_simple_projects"}',
+        key: 'settings_large_payload',
+        value: 'x'.repeat(SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES),
+      }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ success: true, key: 'settings_large_payload' });
+    expect(body).not.toHaveProperty('code', 'CHAT_SYNC_PAYLOAD_TOO_LARGE');
+    expect(mocks.dbSetUserData).toHaveBeenCalledWith(
+      'user-1',
+      'settings_large_payload',
+      expect.stringMatching(/^x+$/),
+    );
+    expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
   });
 
   it('uses asset graph placements for production GET hydration only in asset-v3 mode', async () => {

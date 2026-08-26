@@ -54,20 +54,163 @@ class ChatSyncRequestError extends Error {
   }
 }
 
-async function readBoundedChatSyncBody(request: NextRequest): Promise<UserDataSyncBody> {
+type SyncBodyKind = 'chat' | 'legacy';
+
+// Identify only the top-level key while retaining one copy of the raw stream.
+// Fetch JSON parsing still owns the full parse after routing is known.
+class SyncBodyKeySniffer {
+  private depth = 0;
+  private inString = false;
+  private escaped = false;
+  private stringRole: 'property' | 'key-value' | 'other' = 'other';
+  private stringBytes: number[] = [];
+  private stringOverflow = false;
+  private expectProperty = false;
+  private expectColon = false;
+  private expectKeyValue = false;
+  private pendingProperty: string | null = null;
+  private resolved: SyncBodyKind | undefined;
+
+  feed(chunk: Uint8Array): SyncBodyKind | undefined {
+    for (const byte of chunk) {
+      if (this.resolved) break;
+      this.consume(byte);
+    }
+    return this.resolved;
+  }
+
+  private consume(byte: number): void {
+    if (this.inString) {
+      if (this.stringRole !== 'other' && !this.stringOverflow) {
+        if (this.stringBytes.length < 128) this.stringBytes.push(byte);
+        else this.stringOverflow = true;
+      }
+      if (this.escaped) {
+        this.escaped = false;
+      } else if (byte === 0x5c) {
+        this.escaped = true;
+      } else if (byte === 0x22) {
+        this.closeString();
+      }
+      return;
+    }
+
+    if (byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d) return;
+
+    if (this.depth === 0) {
+      if (byte === 0x7b) {
+        this.depth = 1;
+        this.expectProperty = true;
+      } else {
+        this.resolved = 'legacy';
+      }
+      return;
+    }
+
+    if (this.depth === 1 && this.expectProperty) {
+      if (byte === 0x7d) {
+        this.resolved = 'legacy';
+      } else if (byte === 0x22) {
+        this.openString('property');
+        this.expectProperty = false;
+      } else {
+        this.resolved = 'legacy';
+      }
+      return;
+    }
+
+    if (this.depth === 1 && this.expectColon) {
+      if (byte !== 0x3a) {
+        this.resolved = 'legacy';
+        return;
+      }
+      this.expectColon = false;
+      this.expectKeyValue = this.pendingProperty === 'key';
+      return;
+    }
+
+    if (this.depth === 1 && this.expectKeyValue) {
+      if (byte === 0x22) this.openString('key-value');
+      else this.resolved = 'legacy';
+      this.expectKeyValue = false;
+      return;
+    }
+
+    if (byte === 0x22) {
+      this.openString('other');
+    } else if (byte === 0x7b || byte === 0x5b) {
+      this.depth++;
+    } else if (byte === 0x7d || byte === 0x5d) {
+      if (this.depth === 1) this.resolved = 'legacy';
+      else this.depth--;
+    } else if (byte === 0x2c && this.depth === 1) {
+      this.expectProperty = true;
+      this.pendingProperty = null;
+    }
+  }
+
+  private openString(role: 'property' | 'key-value' | 'other'): void {
+    this.inString = true;
+    this.escaped = false;
+    this.stringRole = role;
+    this.stringBytes = [];
+    this.stringOverflow = false;
+  }
+
+  private closeString(): void {
+    this.inString = false;
+    if (this.stringRole === 'other') return;
+
+    const rawBytes = this.stringBytes.slice(0, -1);
+    let value: string | null = null;
+    if (!this.stringOverflow) {
+      try {
+        const raw = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(rawBytes));
+        value = JSON.parse(`"${raw}"`) as string;
+      } catch {
+        value = null;
+      }
+    }
+
+    if (this.stringRole === 'property') {
+      this.pendingProperty = value;
+      this.expectColon = true;
+    } else {
+      this.resolved = value === SIMPLE_CHAT_PROJECTS_KEY ? 'chat' : 'legacy';
+    }
+  }
+}
+
+async function parseBufferedJson(chunks: Uint8Array[]): Promise<UserDataSyncBody> {
+  let chunkIndex = 0;
+  const replay = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const chunk = chunks[chunkIndex++];
+      if (chunk) controller.enqueue(chunk);
+      else controller.close();
+    },
+  });
+  return await new Response(replay).json() as UserDataSyncBody;
+}
+
+async function readSyncBody(request: NextRequest): Promise<UserDataSyncBody> {
   if (!request.body) {
     throw new ChatSyncRequestError(400, 'CHAT_SYNC_INVALID_REQUEST', 'Request body is required');
   }
 
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
+  const keySniffer = new SyncBodyKeySniffer();
+  let bodyKind: SyncBodyKind | undefined;
   let totalBytes = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       totalBytes += value.byteLength;
-      if (totalBytes > SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES) {
+      chunks.push(value);
+      bodyKind ??= keySniffer.feed(value);
+      if (bodyKind === 'chat' && totalBytes > SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES) {
         try {
           await reader.cancel();
         } catch {
@@ -79,29 +222,24 @@ async function readBoundedChatSyncBody(request: NextRequest): Promise<UserDataSy
           'Simple chat sync payload exceeds 20 MiB',
         );
       }
-      chunks.push(value);
     }
   } catch (error) {
     if (error instanceof ChatSyncRequestError) throw error;
+    if (bodyKind === 'legacy') throw error;
     throw new ChatSyncRequestError(400, 'CHAT_SYNC_INVALID_REQUEST', 'Unable to read request body');
   } finally {
     reader.releaseLock();
   }
 
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
   try {
-    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    const parsed: unknown = JSON.parse(decoded);
+    const parsed: unknown = await parseBufferedJson(chunks);
+    if (bodyKind === 'legacy') return parsed as UserDataSyncBody;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('Request body must be an object');
     }
     return parsed as UserDataSyncBody;
-  } catch {
+  } catch (error) {
+    if (bodyKind === 'legacy') throw error;
     throw new ChatSyncRequestError(400, 'CHAT_SYNC_INVALID_REQUEST', 'Request body must be valid JSON');
   }
 }
@@ -283,7 +421,30 @@ export async function GET(request: NextRequest) {
     if (key === SIMPLE_CHAT_PROJECTS_KEY) {
       const startedAt = Date.now();
       const requestId = getRequestId(request);
-      const snapshot = await readSimpleChatSnapshot(sessionUser.id);
+      let snapshot;
+      try {
+        snapshot = await readSimpleChatSnapshot(sessionUser.id);
+      } catch {
+        const errorCode = 'CHAT_SYNC_READ_FAILED';
+        auditSimpleChatSync({
+          userId: sessionUser.id,
+          userName: sessionUser.name,
+          action: 'read',
+          revision: 0,
+          operationCount: 0,
+          durationMs: Math.max(0, Date.now() - startedAt),
+          responseStatus: 500,
+          status: 'error',
+          errorCode,
+        });
+        return errorResponse(
+          500,
+          errorCode,
+          'Failed to read simple chat projects',
+          requestId,
+          false,
+        );
+      }
       auditSimpleChatSync({
         userId: sessionUser.id,
         userName: sessionUser.name,
@@ -371,7 +532,7 @@ export async function POST(request: NextRequest) {
 
     let body: UserDataSyncBody;
     try {
-      body = await readBoundedChatSyncBody(request);
+      body = await readSyncBody(request);
     } catch (error) {
       if (error instanceof ChatSyncRequestError) {
         return errorResponse(error.status, error.code, error.message, requestId, false);
@@ -461,7 +622,25 @@ export async function POST(request: NextRequest) {
             { currentRevision: error.currentRevision },
           );
         }
-        throw error;
+        const errorCode = 'CHAT_SYNC_WRITE_FAILED';
+        auditSimpleChatSync({
+          userId: sessionUser.id,
+          userName: sessionUser.name,
+          action: 'write',
+          revision: Number(body.expectedRevision),
+          operationCount,
+          durationMs: Math.max(0, Date.now() - startedAt),
+          responseStatus: 500,
+          status: 'error',
+          errorCode,
+        });
+        return errorResponse(
+          500,
+          errorCode,
+          'Failed to write simple chat projects',
+          requestId,
+          false,
+        );
       }
     }
 
