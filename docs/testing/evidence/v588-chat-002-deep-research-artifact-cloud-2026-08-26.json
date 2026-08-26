@@ -1,0 +1,62 @@
+{
+  "testId": "V588-CHAT-002-deep-research-artifact-cloud",
+  "recordedAt": "2026-08-26T11:54:44+08:00",
+  "browser": "Google Chrome user profile 用户1",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5001.dev.coze.site/",
+  "cloudRuntime": {
+    "workspace": "/workspace/projects/worktrees/main-fix",
+    "branch": "main-fix",
+    "head": "1572a222863063c44c079be89bbdc27182768b63",
+    "containsFix": "90772d4257c13e495b3884329a7801168db972ac",
+    "buildExitCode": 0,
+    "healthHttpStatus": 200
+  },
+  "protectedBranches": {
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableTouched": false,
+    "v588DonorTouched": false
+  },
+  "provider": {
+    "name": "APImartLLM",
+    "providerId": "api_1778428130626_2qpg71v",
+    "model": "deepseek-v4-flash"
+  },
+  "target": {
+    "projectId": "s3zk7z3gmsoo15gz",
+    "taskId": "11tvkeffmt9jnh88",
+    "marker": "V588_DEEP_ARTIFACT_1787715515221",
+    "assistantMessageId": "msg_1787715525319",
+    "assistantStatus": "completed",
+    "assistantContentLength": 1437,
+    "messageCount": 2
+  },
+  "artifact": {
+    "id": "msg_1787715525319-research",
+    "title": "研究: 请进行简短深度研究：总结人工智能图像生成平台在任务状态持久化",
+    "type": "document",
+    "contentLength": 1437,
+    "uiCountBeforeRefresh": 1,
+    "serverCountBeforeRefresh": 1,
+    "uiCountAfterRefresh": 1,
+    "serverCountAfterRefresh": 1,
+    "sameArtifactIdAfterRefresh": true
+  },
+  "browserHealth": {
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "nativeDialogBeforeRefresh": false,
+    "nativeDialogAfterRefresh": false
+  },
+  "governance": {
+    "exactSourceAuthorizations": 4,
+    "authorizationTest": "7/7 PASS",
+    "protectedFeatureIds": "38/38 PASS",
+    "protectedBaselineWarnings": 0,
+    "directoryWideAuthorizationAdded": false
+  },
+  "screenshots": [
+    "docs/testing/evidence/v588-chat-002-deep-research-artifact-cloud-pre-refresh-2026-08-26.png",
+    "docs/testing/evidence/v588-chat-002-deep-research-artifact-cloud-post-refresh-2026-08-26.png"
+  ],
+  "result": "PASS"
+}

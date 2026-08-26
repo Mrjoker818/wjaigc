@@ -2581,5 +2581,6 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | `main@90772d42` 删除游离局部状态，面板从消息派生；`citations` 以 `${assistantMessageId}-research` 在精确助手消息中幂等更新一个 `ChatArtifact`，保留项目、任务、创建时间与版本。未修改供应商、模型、消息 ID、积分、数据库结构或 `stable`。 |
 | 本地回归 | 目标文件 `19/19`；全仓 `541 passed / 20 skipped files`、`3536 passed / 117 skipped tests`；TypeScript 通过，ESLint `0 errors / 967 historical warnings`，Next.js 生产构建通过并生成 116 个静态页面。117 项 PostgreSQL 隔离测试继续不计为通过。 |
 | 同场联网验证 | 任务 `kmvx7l7gmt9h7o60` 离线首次失败后只有 1 个失败卡和 1 个重试按钮；恢复在线后只发送 1 个重试请求，复用相同消息 ID、APImart 模型配对和幂等键，HTTP 200 后服务器仍为各 1 条用户/助手消息，助手 `completed`。联网原位重试子项通过。 |
-| 当前阻塞 | 修复已推送 `main@90772d42`，但 Coze 沙箱公开访问返回 `instance_not_found`，尚未拉取和运行候选；不得把本地结果写成云端关闭。 |
-| 状态 | **本地已修复 / 云端候选待部署。** 只有刷新前后 UI 与服务器都严格保持同一个 Artifact，且 Console/原生弹窗为 0，才关闭本项和 `V588-CHAT-002`。证据：`docs/testing/evidence/v588-chat-002-deep-research-artifact-candidate-2026-08-26.json`。 |
+| 云端复验 | Coze `main-fix@1572a222` 已包含运行时修复 `90772d42`。Google Chrome“用户1”在任务 `11tvkeffmt9jnh88` 使用 APImart `deepseek-v4-flash` 完成研究；服务器同一助手消息 `msg_1787715525319` 为 `completed`，刷新前后 UI 与服务器均严格为 1 个 Artifact，稳定 ID 为 `msg_1787715525319-research`。 |
+| 浏览器健康 | 刷新前后 Console error/warning 均为 0，原生弹窗为 0；同一 `projectId + taskId` URL 未变化。 |
+| 状态 | **已修复 / Coze 云端关闭。** 关闭范围为 Deep Research 完成报告的单一 Artifact 创建、消息级持久化及刷新恢复；不扩大为第三方供应商严格 exactly-once 保证。证据：`docs/testing/evidence/v588-chat-002-deep-research-artifact-cloud-2026-08-26.json` 与两张同名前后缀 PNG。 |

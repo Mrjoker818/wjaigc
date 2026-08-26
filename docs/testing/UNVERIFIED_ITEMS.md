@@ -1334,8 +1334,8 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 普通用户管理员入口命名 | P3 待优化 | 点击“用户管理”只返回普通项目仪表盘，没有越权；后续 UI 阶段应改为不误导的入口名称或按角色隐藏。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | 既有 `20 files / 117 tests` 仍需完整隔离 `POSTGRES_TEST_DATABASE_URL` 才能执行；本轮云端只读计数不能替代并发/退款专项。 |
 | V588-PROVIDER-001 | 已云端验证 | 精确映射、最长匹配、管理员名称优先、本地全量门禁和 Coze 普通用户图像/视频目录均已取得证据。 |
-| V588-CHAT-001 | 菜单已云端验证 / 三入口待验 | 模型菜单已在 1440、412、375、320 四档关闭遮挡、裁切、滚动和点选问题；三入口已共用严格 SSE 解析器，但仍需 Coze 真实普通对话、CanvasEditor 修图、Deep Research 及错误态证据。 |
-| V588-CHAT-002 | 本地已实现 / 云端待验 | 已建立统一状态、冻结上下文、刷新收敛和原位重试；仍需 Coze 故障注入证明同消息、同请求快照、无重复 Artifact/版本。 |
+| V588-CHAT-001 | 已云端验证 | 模型菜单在 1440、412、375、320 四档关闭遮挡、裁切、滚动和点选问题；普通对话、CanvasEditor 与 Deep Research 三入口的 APImart 真实链路已通过。 |
+| V588-CHAT-002 | 已云端验证 | 普通/联网原位重试、CanvasEditor 单版本、刷新精确任务恢复、服务器终态和 Deep Research 单 Artifact 均已闭环；第三方 exactly-once 仅保留为供应商能力边界。 |
 | V588-CHAT-003 | 部分现有能力 / 未吸收 | 当前已有服务器同步和 800ms 防抖，但远端权威按 ID 合并、离页/切换用户冲刷和可诊断失败尚未闭环。 |
 | V588-CHAT-004 | 部分现有能力 / 未吸收 | 无限画布已有更安全的 `AssetVersion -> /api/assets/transfer` 链路；来源追踪和发送到节点模式仍缺失，禁止复制 donor 的原始 URL `localStorage` 桥接。 |
 
@@ -1400,14 +1400,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 精确任务恢复 | 已在 `da1f5c4` 云端验证 | 新建对话 URL 包含 `projectId + taskId`；流式刷新后仍显示同一任务和测试标记，没有回到项目第一条旧对话。 |
 | 中断终态持久化 | 已云端验证 | 历史遗留任务与新建 APImart 流式任务的服务器快照均为 `failed`，不再保留 `streaming`。 |
 | 消息唯一性 | 已云端验证 | 新任务服务器快照严格为 1 条用户消息和 1 条助手消息；刷新未新增重复消息。第三方 exactly-once 仍不作保证。 |
-| Deep Research 单 Artifact | 仍未关闭 | 需取得报告 `done`、单一持久化助手消息、单一 Artifact 与请求快照；此前部分正文不能作为完成证据。 |
+| Deep Research 单 Artifact | 已云端验证 | APImart 报告完成后，刷新前后 UI 与服务器均严格为同一个 Artifact；助手消息为 `completed`，无重复消息或重复 Artifact。 |
 
 ## 2026-08-26 V588-CHAT-002 最新未验证边界
 
 | 项目 | 最新状态 | 关闭条件 |
 |---|---|---|
 | 联网模式原位重试 | 已云端验证 | 离线失败、单一重试、冻结 APImart 配对与幂等键、HTTP 200、单一完成消息和浏览器健康均已取证。 |
-| Deep Research Artifact | 本地候选通过 / 云端未验证 | Coze 精确运行 `90772d42`；报告 `done` 后刷新前后均只显示 1 个 Artifact，服务器同一助手消息也只保存 1 个。 |
-| Coze 沙箱 | 外部环境阻塞 | 当前公开访问返回 `instance_not_found`；重启并拉取候选后才能继续交互验收。 |
+| Deep Research Artifact | 已云端验证 | Coze `main-fix@1572a222` 包含 `90772d42`；报告完成后刷新前后 UI 与服务器均只显示并保存同一个 Artifact。 |
+| Coze 沙箱 | 已恢复 | 5001 主修复预览入口 HTTP 200，本轮 Google Chrome 验收完成。 |
 | 第三方 exactly-once | 能力相关 / 不保证 | 应用已复用幂等键；只有供应商明确支持并有独立审计证据时才可声明供应商侧严格去重。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 缺少隔离测试库，继续不计为通过。 |

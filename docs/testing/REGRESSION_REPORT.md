@@ -1789,3 +1789,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 同场 Deep Research 任务 `m210yfr7mt9gvgiy` 已真实 `completed`，服务器只有一组消息且正文长度 1733，但 Artifacts 面板在刷新前已经显示“暂无 Artifacts”。这不是刷新丢失，而是 Artifact 从未进入消息持久状态。
 - 按 RED -> 最小修复，`90772d42` 统一以 `messages[].artifacts` 为唯一来源，并在精确助手消息上幂等写入稳定研究 Artifact。目标 `19/19`、全仓 `3536` 项已执行测试、TypeScript、零错误 Lint 和 `116` 页生产构建通过；117 项 PostgreSQL 隔离测试仍跳过。
 - **回归结论：联网模式通过；Deep Research Artifact 本地通过 / 云端待验。** Coze 当前返回 `instance_not_found`，候选尚未运行；刷新前后单一 Artifact 与服务器快照未取得前，V588-CHAT-002 仍不关闭。
+
+## 2026-08-26 V588-CHAT-002 Deep Research 单 Artifact 云端关闭
+
+- Coze `main-fix@1572a222863063c44c079be89bbdc27182768b63` 已包含最小运行时修复 `90772d4257c13e495b3884329a7801168db972ac`，生产构建退出码为 0，5001 入口健康检查为 HTTP 200；`stable@52f7c601` 与 V5.8.8 donor 未变化。
+- Google Chrome“用户1”在同一任务 `11tvkeffmt9jnh88` 使用 APImart `deepseek-v4-flash` 完成研究报告。服务器权威快照只有 2 条消息，助手消息 `msg_1787715525319` 为 `completed`，正文长度 1437。
+- 刷新前 Artifacts 面板与服务器均严格为 1 条；刷新同一 `projectId + taskId` 后仍严格为 1 条，Artifact ID 始终为 `msg_1787715525319-research`，没有重复消息或重复 Artifact。
+- 刷新前后 Console error/warning 为 `0/0`，原生弹窗为 0。**回归结论：V588-CHAT-002-BUG-004 云端关闭，V588-CHAT-002 应用侧验收完成。** 第三方文本供应商是否严格支持幂等键仍是能力边界，不作为应用完成态的虚假保证。
+- 发布保护门禁补齐 4 个已审实现的精确路径与真实来源提交；来源校验 `7/7`、保护特征 `38/38`、警告 0。未增加目录级授权。
+- 机器证据：`docs/testing/evidence/v588-chat-002-deep-research-artifact-cloud-2026-08-26.json`、`v588-chat-002-deep-research-artifact-cloud-pre-refresh-2026-08-26.png`、`v588-chat-002-deep-research-artifact-cloud-post-refresh-2026-08-26.png`。

@@ -1446,3 +1446,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Deep Research 完成态真实暴露“正文完成但 Artifact 为 0”的 P1 缺陷；`main@90772d42` 已按 RED/GREEN 最小修复，并通过全量测试、TypeScript、零错误 Lint 和生产构建。
 - Coze 沙箱现为 `instance_not_found`，未运行 `90772d42`。因此不能用本地通过替代刷新前后单一 Artifact 的云端证据。
 - **专项判定：候选代码本地有条件通过，V588-CHAT-002 与全平台仍为有条件通过。** 云端恢复后必须精确部署 `90772d42` 并完成同任务刷新前后 UI、服务器 Artifact 数量及浏览器健康复验。
+
+## 2026-08-26 V588-CHAT-002 Deep Research Artifact 最终发布判断
+
+- Coze `main-fix@1572a222` 已包含 `90772d42`，构建与 5001 健康检查通过；`stable@52f7c601` 和 V5.8.8 donor 保持只读。
+- APImart `deepseek-v4-flash` 的真实 Deep Research 报告已进入 `completed`；刷新前后 UI 与服务器均只保存同一个 `msg_1787715525319-research` Artifact，消息数量保持 2，Console error/warning 和原生弹窗均为 0。
+- 4 个 Simple Chat 受保护源码路径已用各自真实实现提交完成精确来源登记；来源校验 `7/7`，保护门禁 `38/38` 且 0 warning，没有目录级放行。
+- **专项判定：V588-CHAT-002 应用侧通过，允许按吸收清单进入 V588-CHAT-003。全平台仍为有条件通过。** PostgreSQL 隔离测试的 117 项跳过、部署期旧 chunk 和其他既有未关闭项不因本专项通过而自动关闭；第三方供应商 exactly-once 仅在供应商明确支持时才能声明。
