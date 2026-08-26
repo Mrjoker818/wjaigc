@@ -413,6 +413,94 @@ describe('simple chat synchronization integration', () => {
     expect(mocks.globalFetch).not.toHaveBeenCalled();
   });
 
+  it('persists only the current account pre-ready candidate while initialization is pending', async () => {
+    const accountAProject = createProject({ id: 'account-a-project', name: 'A private project' });
+    const first = createCoordinatorHarness(createSnapshot('synced', [accountAProject]));
+    let resolveSecond!: (snapshot: SimpleChatSyncSnapshot) => void;
+    const secondInitialize = new Promise<SimpleChatSyncSnapshot>(resolve => {
+      resolveSecond = resolve;
+    });
+    const second = createCoordinatorHarness(secondInitialize);
+    mocks.fetchSessionPayload.mockResolvedValue({
+      success: true,
+      user: { id: 'account-a', name: 'Account A', createdAt: 1, updatedAt: 1 },
+    });
+    mocks.coordinatorFactory
+      .mockReturnValueOnce(first.coordinator)
+      .mockReturnValueOnce(second.coordinator);
+
+    render(<SimpleChatPage />);
+    await waitFor(() => expect(mocks.chatAreaProps?.project?.id).toBe('account-a-project'));
+    fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+    await screen.findByRole('button', { name: '登录测试用户' });
+
+    mocks.loginUser = { id: 'account-b', name: 'Account B', createdAt: 1, updatedAt: 1 };
+    fireEvent.click(screen.getByRole('button', { name: '登录测试用户' }));
+    await screen.findByTestId('chat-area');
+    fireEvent.click(screen.getByRole('button', { name: '创建测试项目' }));
+    await waitFor(() => expect(mocks.chatAreaProps?.project?.name).toBe('默认项目'));
+    const candidateProject = mocks.chatAreaProps?.project;
+    const candidateTask = mocks.chatAreaProps?.task;
+    if (!candidateProject || !candidateTask) throw new Error('Expected account B pre-ready candidate');
+
+    await act(async () => {
+      await mocks.chatAreaProps?.onPersistTask({ ...candidateTask, name: 'B persisted task' });
+    });
+    await act(async () => {
+      resolveSecond(createSnapshot('synced', []));
+      await secondInitialize;
+    });
+
+    expect(second.update).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: candidateProject.id,
+        tasks: [expect.objectContaining({ id: candidateTask.id, name: 'B persisted task' })],
+      }),
+    ]);
+    expect(second.update).not.toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: 'account-a-project' }),
+    ]));
+    expect(second.flush).toHaveBeenCalledWith('manual');
+  });
+
+  it('logs out with only the current account pre-ready candidate after initialization fails', async () => {
+    const accountAProject = createProject({ id: 'account-a-project', name: 'A private project' });
+    const first = createCoordinatorHarness(createSnapshot('synced', [accountAProject]));
+    const second = createCoordinatorHarness(createSnapshot('failed', []));
+    mocks.fetchSessionPayload.mockResolvedValue({
+      success: true,
+      user: { id: 'account-a', name: 'Account A', createdAt: 1, updatedAt: 1 },
+    });
+    mocks.coordinatorFactory
+      .mockReturnValueOnce(first.coordinator)
+      .mockReturnValueOnce(second.coordinator);
+
+    render(<SimpleChatPage />);
+    await waitFor(() => expect(mocks.chatAreaProps?.project?.id).toBe('account-a-project'));
+    fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+    await screen.findByRole('button', { name: '登录测试用户' });
+
+    mocks.loginUser = { id: 'account-b', name: 'Account B', createdAt: 1, updatedAt: 1 };
+    fireEvent.click(screen.getByRole('button', { name: '登录测试用户' }));
+    await screen.findByTestId('chat-area');
+    await waitFor(() => expect(second.initialize).toHaveBeenCalledWith('account-b'));
+    fireEvent.click(screen.getByRole('button', { name: '创建测试项目' }));
+    await waitFor(() => expect(mocks.chatAreaProps?.project?.name).toBe('默认项目'));
+    const candidateProjectId = mocks.chatAreaProps?.project?.id;
+    expect(candidateProjectId).toBeTruthy();
+    mocks.logoutSimpleChatSession.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+    await waitFor(() => expect(mocks.logoutSimpleChatSession).toHaveBeenCalledOnce());
+
+    expect(mocks.logoutSimpleChatSession).toHaveBeenCalledWith({
+      projects: [expect.objectContaining({ id: candidateProjectId })],
+    });
+    expect(mocks.logoutSimpleChatSession).not.toHaveBeenCalledWith({
+      projects: expect.arrayContaining([expect.objectContaining({ id: 'account-a-project' })]),
+    });
+  });
+
   it('keeps ChatArea mounted with the authenticated user and model-bearing chat task props', async () => {
     const project = createProject();
     const harness = createCoordinatorHarness(createSnapshot('synced', [project]));

@@ -99,15 +99,16 @@ export default function SimpleChatPage() {
     ? activeTaskId
     : null;
 
+  const getCurrentUserProjects = useCallback((userId: string): Project[] => {
+    if (dataOwnerUserIdRef.current === userId) return projectsRef.current;
+    const candidate = preReadyCandidateRef.current;
+    return candidate?.userId === userId ? candidate.projects : [];
+  }, []);
+
   const commitProjects = useCallback((updater: ProjectUpdater): Project[] => {
     const userId = user?.id;
     if (!userId) return [];
-    const candidate = preReadyCandidateRef.current;
-    const current = dataOwnerUserIdRef.current === userId
-      ? projectsRef.current
-      : candidate?.userId === userId
-        ? candidate.projects
-        : [];
+    const current = getCurrentUserProjects(userId);
     const next = typeof updater === 'function' ? updater(current) : updater;
     if (coordinatorReadyRef.current && coordinatorUserIdRef.current === userId) {
       projectsRef.current = next;
@@ -119,7 +120,7 @@ export default function SimpleChatPage() {
       setPreReadyCandidate(nextCandidate);
     }
     return next;
-  }, [user?.id]);
+  }, [getCurrentUserProjects, user?.id]);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -309,7 +310,9 @@ export default function SimpleChatPage() {
   }, [commitProjects]);
 
   const handlePersistTask = useCallback(async (task: Task) => {
-    const next = projectsRef.current.map(project => ({
+    const userId = user?.id;
+    if (!userId) return;
+    const next = getCurrentUserProjects(userId).map(project => ({
       ...project,
       tasks: project.tasks.map(current => current.id === task.id
         ? { ...task, updatedAt: Date.now() }
@@ -318,14 +321,14 @@ export default function SimpleChatPage() {
     }));
     commitProjects(next);
     await coordinatorRef.current?.flush('manual');
-  }, [commitProjects]);
+  }, [commitProjects, getCurrentUserProjects, user?.id]);
 
   const handleLogout = useCallback(async () => {
     if (logoutInFlight.current) return;
     logoutInFlight.current = true;
     setLogoutError(null);
 
-    const snapshot = projectsRef.current;
+    const snapshot = user?.id ? getCurrentUserProjects(user.id) : [];
     saveProjects(snapshot);
     try {
       const result = await logoutSimpleChatSession({ projects: snapshot });
@@ -338,7 +341,7 @@ export default function SimpleChatPage() {
     } finally {
       logoutInFlight.current = false;
     }
-  }, []);
+  }, [getCurrentUserProjects, user?.id]);
 
   // Agent ops
   const handleCreateAgent = useCallback((projectId: string, agent: SimpleChatAgent) => {
