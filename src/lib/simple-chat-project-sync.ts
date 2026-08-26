@@ -296,7 +296,10 @@ interface LocalReferenceClosure {
   retryContext?: LocalRetryReferenceClosureSources;
 }
 
-type ReplayReferenceOrigin = SimpleChatConflictReferenceOrigin | 'both-converged' | 'unchanged';
+type ReplayReferenceOrigin = SimpleChatConflictReferenceOrigin
+  | 'both-converged'
+  | 'unchanged'
+  | 'conflict';
 
 interface ReplayRetryReferenceOrigins {
   projectId?: ReplayReferenceOrigin;
@@ -1341,6 +1344,7 @@ function createConflictCopy(
         resolveProjectId(context, operation.projectId),
         resolvedTaskId ?? '',
         timestamp,
+        current?.entity,
       );
       const targetProjectId = resolveProjectId(context, operation.projectId);
       const project = findProject(context.entityIndex, targetProjectId);
@@ -1354,7 +1358,7 @@ function createConflictCopy(
     }
     case 'agent': {
       const project = ensureConflictProject(context, operation, timestamp);
-      const agentCopy = cloneConflictAgent(context, inputValue, operation, timestamp);
+      const agentCopy = cloneConflictAgent(context, inputValue, operation, timestamp, current?.entity);
       const after = current?.entityType === 'agent' && current.project.id === project.id
         ? current
         : undefined;
@@ -1364,7 +1368,14 @@ function createConflictCopy(
     }
     case 'knowledge-item': {
       const project = ensureConflictProject(context, operation, timestamp);
-      const knowledgeCopy = cloneConflictKnowledgeItem(context, inputValue, operation, project.id, timestamp);
+      const knowledgeCopy = cloneConflictKnowledgeItem(
+        context,
+        inputValue,
+        operation,
+        project.id,
+        timestamp,
+        current?.entity,
+      );
       const after = current?.entityType === 'knowledge-item' && current.project.id === project.id
         ? current
         : undefined;
@@ -1605,12 +1616,16 @@ function cloneConflictProject(
   const copyId = context.createId();
   context.remaps.projects.set(originalProjectId, copyId);
   reserveProjectGraphIds(context, source, originalProjectId);
+  const remoteAgentsById = recordArrayById(remoteValue, 'agents');
+  const remoteKnowledgeItemsById = recordArrayById(remoteValue, 'knowledgeItems');
+  const remoteTasksById = recordArrayById(remoteValue, 'tasks');
 
   const agents = source.agents.map(agent => cloneConflictAgent(
     context,
     agent as unknown as Record<string, unknown>,
     operationForDescendant(operation, 'agent', originalProjectId, undefined, undefined, agent.id),
     timestamp,
+    remoteAgentsById.get(agent.id),
   ));
   const knowledgeItems = source.knowledgeItems.map(item => cloneConflictKnowledgeItem(
     context,
@@ -1618,13 +1633,8 @@ function cloneConflictProject(
     operationForDescendant(operation, 'knowledge-item', originalProjectId, undefined, undefined, item.id),
     copyId,
     timestamp,
+    remoteKnowledgeItemsById.get(item.id),
   ));
-  const remoteTasksById = new Map<string, unknown>();
-  if (isRecord(remoteValue) && Array.isArray(remoteValue.tasks)) {
-    for (const item of remoteValue.tasks) {
-      if (isRecord(item) && typeof item.id === 'string') remoteTasksById.set(item.id, item);
-    }
-  }
   const tasks = source.tasks.map(item => cloneConflictTask(
     context,
     item as unknown as Record<string, unknown>,
@@ -1659,6 +1669,7 @@ function cloneConflictTask(
   const originalTaskId = readString(value.id) ?? operation.taskId ?? operation.entityId;
   reserveTaskGraphIds(context, source, operation.projectId, originalTaskId);
   const copyId = context.remaps.tasks.get(taskMapKey(operation.projectId, originalTaskId))!;
+  const remoteMessagesById = recordArrayById(remoteValue, 'messages');
   const messages = source.messages.map(item => cloneConflictMessage(
     context,
     item as unknown as Record<string, unknown>,
@@ -1666,6 +1677,7 @@ function cloneConflictTask(
     targetProjectId,
     copyId,
     timestamp,
+    remoteMessagesById.get(item.id),
   ));
 
   const activeAgentId = remapAgentReference(
@@ -1701,6 +1713,7 @@ function cloneConflictMessage(
   targetProjectId: string,
   targetTaskId: string,
   timestamp: number,
+  remoteValue?: unknown,
 ): SimpleChatMessage {
   const source = materializeMessage(value);
   const originalMessageId = readString(value.id) ?? operation.messageId ?? operation.entityId;
@@ -1708,6 +1721,7 @@ function cloneConflictMessage(
   const copyId = context.remaps.messages.get(
     messageMapKey(operation.projectId, operation.taskId, originalMessageId),
   )!;
+  const remoteArtifactsById = recordArrayById(remoteValue, 'artifacts');
   const artifacts = (source.artifacts ?? []).map(item => cloneConflictArtifact(
     context,
     item as unknown as Record<string, unknown>,
@@ -1722,6 +1736,7 @@ function cloneConflictMessage(
     targetProjectId,
     targetTaskId,
     timestamp,
+    remoteArtifactsById.get(item.id),
   ));
   const parentMessageId = remapMessageReference(
     context,
@@ -1738,6 +1753,9 @@ function cloneConflictMessage(
     operation.taskId,
     targetProjectId,
     targetTaskId,
+    undefined,
+    undefined,
+    'local',
   );
   const messageCopy: SimpleChatMessage = {
     ...source,
@@ -1773,6 +1791,7 @@ function cloneConflictArtifact(
   targetProjectId: string,
   targetTaskId: string,
   timestamp: number,
+  remoteValue?: unknown,
 ): ChatArtifact {
   const source = value as unknown as ChatArtifact;
   const originalId = readString(value.id) ?? operation.entityId;
@@ -1785,7 +1804,7 @@ function cloneConflictArtifact(
     projectId: targetProjectId,
     taskId: targetTaskId,
     title: withConflictSuffix(readString(value.title) ?? '未命名产物'),
-    updatedAt: timestamp,
+    updatedAt: maximumFiniteUpdatedAt(source, remoteValue) ?? timestamp,
   };
   tagConflictEntity(artifactCopy, metadataFor(operation, 'artifact', originalId, timestamp));
   return artifactCopy;
@@ -1796,6 +1815,7 @@ function cloneConflictAgent(
   value: Record<string, unknown>,
   operation: SimpleChatSyncOperation,
   timestamp: number,
+  remoteValue?: unknown,
 ): SimpleChatAgent {
   const source = value as unknown as SimpleChatAgent;
   const originalId = readString(value.id) ?? operation.entityId;
@@ -1806,7 +1826,7 @@ function cloneConflictAgent(
     ...cloneUnknown(source),
     id: copyId,
     name: withConflictSuffix(readString(value.name) ?? '未命名智能体'),
-    updatedAt: timestamp,
+    updatedAt: maximumFiniteUpdatedAt(source, remoteValue) ?? timestamp,
   };
   tagConflictEntity(agentCopy, metadataFor(operation, 'agent', originalId, timestamp));
   return agentCopy;
@@ -1818,6 +1838,7 @@ function cloneConflictKnowledgeItem(
   operation: SimpleChatSyncOperation,
   targetProjectId: string,
   timestamp: number,
+  remoteValue?: unknown,
 ): ProjectKnowledgeItem {
   const source = value as unknown as ProjectKnowledgeItem;
   const originalId = readString(value.id) ?? operation.entityId;
@@ -1829,7 +1850,7 @@ function cloneConflictKnowledgeItem(
     id: copyId,
     projectId: targetProjectId,
     name: withConflictSuffix(readString(value.name) ?? '未命名知识'),
-    updatedAt: timestamp,
+    updatedAt: maximumFiniteUpdatedAt(source, remoteValue) ?? timestamp,
   };
   tagConflictEntity(knowledgeCopy, metadataFor(operation, 'knowledge-item', originalId, timestamp));
   return knowledgeCopy;
@@ -1936,7 +1957,7 @@ function preserveReplayUpdatedAt(
   entityType: SimpleChatEntityType,
 ): void {
   if (
-    (entityType !== 'project' && entityType !== 'task')
+    entityType === 'message'
     || !isRecord(target)
     || !isRecord(remoteValue)
     || !isRecord(localValue)
@@ -1952,6 +1973,15 @@ function maximumFiniteUpdatedAt(...values: unknown[]): number | undefined {
       : []
   ));
   return timestamps.length === 0 ? undefined : Math.max(...timestamps);
+}
+
+function recordArrayById(value: unknown, key: string): Map<string, unknown> {
+  const records = new Map<string, unknown>();
+  if (!isRecord(value) || !Array.isArray(value[key])) return records;
+  for (const item of value[key]) {
+    if (isRecord(item) && typeof item.id === 'string') records.set(item.id, item);
+  }
+  return records;
 }
 
 function preserveConflictPresentation(reference: EntityReference): void {
@@ -2019,6 +2049,9 @@ function sanitizeConflictEntityReferences(
       original.taskId,
       resolved.projectId,
       resolved.taskId,
+      undefined,
+      undefined,
+      'local',
     );
     if (remapped.value === undefined) delete entity.retryContext;
     else entity.retryContext = remapped.value;
@@ -2063,9 +2096,11 @@ function closeTaskConflictReference(
   const sourceOrigins = readConflictSourceReferenceOrigins(task);
   const activeAgentId = task.activeAgentId ?? readString(sourceReferences?.activeAgentId);
   if (activeAgentId === undefined) return;
+  const activeAgentOrigin = sourceOrigins?.activeAgentId;
+  if (!isConflictReferenceOrigin(activeAgentOrigin)) return;
   const remapped = resolveConflictAgentReference(
     context,
-    sourceOrigins?.activeAgentId ?? 'local',
+    activeAgentOrigin,
     source.sourceProjectId,
     targetProjectId,
     activeAgentId,
@@ -2090,9 +2125,11 @@ function closeMessageConflictReferences(
   const sourceOrigins = readConflictSourceReferenceOrigins(chatMessage);
   const parentMessageId = chatMessage.parentMessageId ?? readString(sourceReferences?.parentMessageId);
   if (parentMessageId !== undefined) {
+    const parentOrigin = sourceOrigins?.parentMessageId;
+    if (!isConflictReferenceOrigin(parentOrigin)) return;
     const remapped = resolveConflictMessageReference(
       context,
-      sourceOrigins?.parentMessageId ?? 'local',
+      parentOrigin,
       source.sourceProjectId,
       source.sourceTaskId,
       targetProjectId,
@@ -2114,6 +2151,7 @@ function closeMessageConflictReferences(
     sourceReferences?.retryContext,
   );
   if (retryContext === undefined) return;
+  if (!hasCompleteConflictRetryReferenceOrigins(sourceOrigins?.retryContext, retryContext)) return;
   const remappedRetryContext = remapRetryContext(
     context,
     retryContext,
@@ -2193,6 +2231,24 @@ function isLocallyRemappableReference(origin: ReplayReferenceOrigin | undefined)
   return origin === 'local' || origin === 'self';
 }
 
+function isConflictReferenceOrigin(value: unknown): value is SimpleChatConflictReferenceOrigin {
+  return value === 'local' || value === 'remote' || value === 'self';
+}
+
+function hasCompleteConflictRetryReferenceOrigins(
+  origins: ReplayRetryReferenceOrigins | undefined,
+  retryContext: SimpleChatMessage['retryContext'],
+): boolean {
+  if (!origins || !isRecord(retryContext)) return false;
+  for (const key of ['projectId', 'taskId', 'userMessageId', 'assistantMessageId'] as const) {
+    if (!isConflictReferenceOrigin(origins[key])) return false;
+  }
+  return Array.isArray(retryContext.historyMessageIds)
+    && Array.isArray(origins.historyMessageIds)
+    && origins.historyMessageIds.length === retryContext.historyMessageIds.length
+    && origins.historyMessageIds.every(isConflictReferenceOrigin);
+}
+
 function preserveRemoteConflictReferences(
   entity: object,
   operation: SimpleChatSyncOperation,
@@ -2208,16 +2264,26 @@ function preserveRemoteConflictReferences(
     'activeAgentId',
   )) {
     const activeAgentId = readString(remoteValue.activeAgentId);
-    if (activeAgentId === undefined) delete value.activeAgentId;
-    else value.activeAgentId = activeAgentId;
-    origins.activeAgentId = 'remote';
+    if (activeAgentId === undefined) {
+      delete value.activeAgentId;
+      clearConflictSourceReferences(entity, ['activeAgentId']);
+      clearConflictSourceReferenceOrigins(entity, ['activeAgentId']);
+    } else {
+      value.activeAgentId = activeAgentId;
+      origins.activeAgentId = 'remote';
+    }
   }
   if (operation.entityType === 'message') {
     if (fieldComesOnlyFromBranch(operation.baseValue, remoteValue, operation.value, 'parentMessageId')) {
       const parentMessageId = readString(remoteValue.parentMessageId);
-      if (parentMessageId === undefined) delete value.parentMessageId;
-      else value.parentMessageId = parentMessageId;
-      origins.parentMessageId = referenceOrigin(parentMessageId, operation.entityId, 'remote');
+      if (parentMessageId === undefined) {
+        delete value.parentMessageId;
+        clearConflictSourceReferences(entity, ['parentMessageId']);
+        clearConflictSourceReferenceOrigins(entity, ['parentMessageId']);
+      } else {
+        value.parentMessageId = parentMessageId;
+        origins.parentMessageId = referenceOrigin(parentMessageId, operation.entityId, 'remote');
+      }
     }
     const retrySources = referenceSourcesFromBranch(
       operation.baseValue.retryContext,
@@ -2263,13 +2329,16 @@ function mergedReferenceOrigin(
   remote: unknown,
   selfId?: string,
 ): ReplayReferenceOrigin {
-  if (selfId !== undefined && local === selfId) return 'self';
   if (jsonEqual(local, remote)) {
     return jsonEqual(local, base) ? 'unchanged' : 'both-converged';
   }
-  if (!jsonEqual(local, base) && jsonEqual(remote, base)) return 'local';
-  if (jsonEqual(local, base) && !jsonEqual(remote, base)) return 'remote';
-  return 'local';
+  const localChanged = !jsonEqual(local, base);
+  const remoteChanged = !jsonEqual(remote, base);
+  if (localChanged && !remoteChanged) {
+    return selfId !== undefined && local === selfId ? 'self' : 'local';
+  }
+  if (!localChanged && remoteChanged) return 'remote';
+  return 'conflict';
 }
 
 function referenceSourcesFromBranch(
@@ -2749,6 +2818,8 @@ function remapKnownMessage(
       targetProjectId,
       targetTaskId,
       sourceOrigins?.retryContext,
+      undefined,
+      'local',
     );
     if (retryContext.value !== undefined) value.retryContext = retryContext.value;
   }
@@ -2871,7 +2942,7 @@ function remapMessageReference(
 
 function resolveConflictMessageReference(
   context: ReplayContext,
-  source: ConflictReferenceSource,
+  source: ConflictReferenceSource | undefined,
   originalProjectId: string,
   originalTaskId: string | undefined,
   targetProjectId: string,
@@ -2880,6 +2951,7 @@ function resolveConflictMessageReference(
   self?: { originalId: string; copyId: string },
 ): string | undefined {
   if (messageId === undefined) return undefined;
+  if (source === undefined) return undefined;
   if (source === 'self') return self?.copyId;
   if (source === 'local') {
     return remapMessageReference(
@@ -2905,28 +2977,37 @@ function remapRetryContext(
   targetTaskId: string | undefined,
   sourceOrigins?: ReplayRetryReferenceOrigins,
   self?: { originalId: string; copyId: string },
+  missingOrigin?: ConflictReferenceSource,
 ): RemappedRetryContext {
   if (input === undefined) return {};
   if (!isRecord(input)) {
     return { value: cloneUnknown(input) as SimpleChatMessage['retryContext'] };
   }
   const value = cloneUnknown(input) as Record<string, unknown>;
-  if (sourceOrigins?.projectId === 'remote') {
+  const projectOrigin = sourceOrigins?.projectId ?? missingOrigin;
+  if (projectOrigin === undefined) {
+    return { danglingSource: cloneUnknown(input) as unknown as SimpleChatMessage['retryContext'] };
+  }
+  if (projectOrigin === 'remote') {
     const projectId = readString(value.projectId);
     if (projectId === undefined || !findProject(context.entityIndex, projectId)) {
       return { danglingSource: cloneUnknown(input) as unknown as SimpleChatMessage['retryContext'] };
     }
-  } else if (sourceOrigins?.projectId === 'self') {
+  } else if (projectOrigin === 'self') {
     value.projectId = targetProjectId;
   } else if (value.projectId === originalProjectId) {
     value.projectId = targetProjectId;
   }
-  if (sourceOrigins?.taskId === 'remote') {
+  const taskOrigin = sourceOrigins?.taskId ?? missingOrigin;
+  if (taskOrigin === undefined) {
+    return { danglingSource: cloneUnknown(input) as unknown as SimpleChatMessage['retryContext'] };
+  }
+  if (taskOrigin === 'remote') {
     const taskId = readString(value.taskId);
     if (taskId === undefined || !findTask(context.entityIndex, targetProjectId, taskId)) {
       return { danglingSource: cloneUnknown(input) as unknown as SimpleChatMessage['retryContext'] };
     }
-  } else if (sourceOrigins?.taskId === 'self') {
+  } else if (taskOrigin === 'self') {
     value.taskId = targetTaskId;
   } else if (value.taskId === originalTaskId && targetTaskId !== undefined) {
     value.taskId = targetTaskId;
@@ -2935,7 +3016,7 @@ function remapRetryContext(
     const messageId = readString(value[key]);
     const remapped = resolveConflictMessageReference(
       context,
-      sourceOrigins?.[key] ?? 'local',
+      sourceOrigins?.[key] ?? missingOrigin,
       originalProjectId,
       originalTaskId,
       targetProjectId,
@@ -2957,7 +3038,7 @@ function remapRetryContext(
       if (messageId === undefined) return [cloneUnknown(item)];
       const remapped = resolveConflictMessageReference(
         context,
-        sourceOrigins?.historyMessageIds?.[index] ?? 'local',
+        sourceOrigins?.historyMessageIds?.[index] ?? missingOrigin,
         originalProjectId,
         originalTaskId,
         targetProjectId,
@@ -3452,6 +3533,18 @@ function clearConflictSourceReferences(
   }
 }
 
+function clearConflictSourceReferenceOrigins(
+  entity: object,
+  keys: Array<keyof SimpleChatConflictSourceReferenceOrigins>,
+): void {
+  const value = entity as Record<string, unknown>;
+  if (!isRecord(value.syncConflict) || !isRecord(value.syncConflict.sourceReferenceOrigins)) return;
+  for (const key of keys) delete value.syncConflict.sourceReferenceOrigins[key];
+  if (Object.keys(value.syncConflict.sourceReferenceOrigins).length === 0) {
+    delete value.syncConflict.sourceReferenceOrigins;
+  }
+}
+
 function resolveProjectId(context: ReplayContext, projectId: string): string {
   return context.remaps.projects.get(projectId) ?? projectId;
 }
@@ -3865,54 +3958,77 @@ function validateConflictSourceReferenceOrigins(
   carrier: Record<string, unknown>,
   sourceReferences?: Record<string, unknown>,
 ): SimpleChatProjectValidationResult | undefined {
-  if (value === undefined) return undefined;
-  if (!isRecord(value)) return invalidValidation('value');
   const allowed = ['local', 'remote', 'self'] as const;
-  let retryResult: SimpleChatProjectValidationResult | undefined;
-  if (value.retryContext !== undefined) {
-    if (!isRecord(value.retryContext)) return invalidValidation('value');
-    retryResult = firstValidation(
-      validateOptionalEnum(value.retryContext, 'projectId', allowed),
-      validateOptionalEnum(value.retryContext, 'taskId', allowed),
-      validateOptionalEnum(value.retryContext, 'userMessageId', allowed),
-      validateOptionalEnum(value.retryContext, 'assistantMessageId', allowed),
-      value.retryContext.historyMessageIds === undefined
-        ? undefined
-        : validateRequiredEnumArray(value.retryContext, 'historyMessageIds', allowed),
-    );
-  }
-  const shapeResult = firstValidation(
-    validateOptionalEnum(value, 'activeAgentId', allowed),
-    validateOptionalEnum(value, 'parentMessageId', allowed),
-    retryResult,
-  );
-  if (shapeResult) return shapeResult;
-  const referenceShapeResult = validateConflictReferenceFields(value, sourceEntityType);
-  if (referenceShapeResult) return referenceShapeResult;
-
-  if (value.activeAgentId !== undefined) {
-    const auditedAgentId = readString(sourceReferences?.activeAgentId) ?? readString(carrier.activeAgentId);
-    if (auditedAgentId === undefined) return invalidValidation('value');
-  }
-  if (value.parentMessageId !== undefined) {
-    const auditedParentId = readString(sourceReferences?.parentMessageId) ?? readString(carrier.parentMessageId);
-    if (auditedParentId === undefined) return invalidValidation('value');
-  }
-  if (value.retryContext !== undefined) {
-    const auditedRetryContext = sourceReferences?.retryContext !== undefined
-      ? sourceReferences.retryContext
-      : carrier.retryContext;
-    if (!isRecord(auditedRetryContext)) return invalidValidation('value');
-    const historyOrigins = isRecord(value.retryContext) ? value.retryContext.historyMessageIds : undefined;
-    if (historyOrigins !== undefined) {
-      if (
-        !Array.isArray(historyOrigins)
-        || !Array.isArray(auditedRetryContext.historyMessageIds)
-        || historyOrigins.length !== auditedRetryContext.historyMessageIds.length
-      ) return invalidValidation('value');
+  if (sourceEntityType === 'task') {
+    const auditedAgentId = readString(carrier.activeAgentId)
+      ?? readString(sourceReferences?.activeAgentId);
+    if (auditedAgentId === undefined) {
+      return value === undefined ? undefined : invalidValidation('value');
     }
+    if (!isRecord(value) || !hasExactObjectKeys(value, ['activeAgentId'])) {
+      return invalidValidation('value');
+    }
+    return validateRequiredEnum(value, 'activeAgentId', allowed);
   }
-  return undefined;
+
+  if (sourceEntityType !== 'message') {
+    return value === undefined ? undefined : invalidValidation('value');
+  }
+
+  const auditedParentId = readString(carrier.parentMessageId)
+    ?? readString(sourceReferences?.parentMessageId);
+  const auditedRetryContext = mergeAuditedRetryReferenceFields(
+    carrier.retryContext,
+    sourceReferences?.retryContext,
+  );
+  const expectedKeys: string[] = [];
+  if (auditedParentId !== undefined) expectedKeys.push('parentMessageId');
+  if (auditedRetryContext !== undefined) expectedKeys.push('retryContext');
+  if (expectedKeys.length === 0) {
+    return value === undefined ? undefined : invalidValidation('value');
+  }
+  if (!isRecord(value) || !hasExactObjectKeys(value, expectedKeys)) {
+    return invalidValidation('value');
+  }
+
+  if (auditedParentId !== undefined) {
+    const parentResult = validateRequiredEnum(value, 'parentMessageId', allowed);
+    if (parentResult) return parentResult;
+  }
+  if (auditedRetryContext === undefined) return undefined;
+  if (!isRecord(auditedRetryContext) || !isRecord(value.retryContext)) {
+    return invalidValidation('value');
+  }
+  const retryOriginKeys = [
+    'projectId',
+    'taskId',
+    'userMessageId',
+    'assistantMessageId',
+    'historyMessageIds',
+  ];
+  if (!hasExactObjectKeys(value.retryContext, retryOriginKeys)) {
+    return invalidValidation('value');
+  }
+  const retryResult = firstValidation(
+    validateRequiredEnum(value.retryContext, 'projectId', allowed),
+    validateRequiredEnum(value.retryContext, 'taskId', allowed),
+    validateRequiredEnum(value.retryContext, 'userMessageId', allowed),
+    validateRequiredEnum(value.retryContext, 'assistantMessageId', allowed),
+    validateRequiredEnumArray(value.retryContext, 'historyMessageIds', allowed),
+  );
+  if (retryResult) return retryResult;
+  return Array.isArray(auditedRetryContext.historyMessageIds)
+    && Array.isArray(value.retryContext.historyMessageIds)
+    && value.retryContext.historyMessageIds.length === auditedRetryContext.historyMessageIds.length
+    ? undefined
+    : invalidValidation('value');
+}
+
+function hasExactObjectKeys(value: Record<string, unknown>, expected: string[]): boolean {
+  const actual = Object.keys(value);
+  if (actual.length !== expected.length) return false;
+  const expectedKeys = new Set(expected);
+  return actual.every(key => expectedKeys.has(key));
 }
 
 function validateRequiredId(
