@@ -10,9 +10,14 @@ import {
   compactSimpleChatOperations,
   diffSimpleChatProjects,
   replaySimpleChatOperations,
+  SIMPLE_CHAT_SYNC_LIMITS,
+  SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES,
   validateSimpleChatProjects,
 } from '@/lib/simple-chat-project-sync';
-import type { SimpleChatSyncOperation } from '@/lib/simple-chat-project-sync';
+import type {
+  SimpleChatSyncedProject,
+  SimpleChatSyncOperation,
+} from '@/lib/simple-chat-project-sync';
 import {
   op,
   project,
@@ -21,7 +26,7 @@ import {
 } from '@/__tests__/fixtures/simple-chat-sync';
 
 const MIB = 1024 * 1024;
-const MAX_REQUEST_BYTES = 20 * MIB;
+const MAX_REQUEST_BYTES = SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES;
 
 interface ConflictTagged {
   syncConflict?: {
@@ -97,22 +102,6 @@ function minimalMessages(count: number): SimpleChatMessage[] {
 
 function minimalTasks(count: number): SimpleChatTask[] {
   return Array.from({ length: count }, (_, index) => task(`t-${index}`));
-}
-
-function projectWithEntityCount(total: number): SimpleChatProject[] {
-  const taskCount = 100;
-  let messagesRemaining = total - 1 - taskCount;
-  const tasks = Array.from({ length: taskCount }, (_, taskIndex) => {
-    const messageCount = Math.min(1_000, messagesRemaining);
-    messagesRemaining -= messageCount;
-    const nextTask = task(`t-${taskIndex}`);
-    nextTask.messages = minimalMessages(messageCount);
-    return nextTask;
-  });
-  const value = project('p-total', tasks);
-  value.agents = [];
-  value.knowledgeItems = [];
-  return [value];
 }
 
 function nestedObject(depth: number): unknown {
@@ -252,6 +241,61 @@ describe('simple chat project synchronization', () => {
     });
   });
 
+  it('remaps every internal reference in a copied conflict project graph', () => {
+    const local = graph();
+    local.name = '本地项目';
+    local.tasks[0].activeAgentId = local.agents[0].id;
+    const userMessage = local.tasks[0].messages[0];
+    const assistantMessage = message('m2', '本地回答');
+    assistantMessage.role = 'assistant';
+    assistantMessage.parentMessageId = userMessage.id;
+    assistantMessage.retryContext = {
+      version: 1,
+      kind: 'chat',
+      projectId: local.id,
+      taskId: local.tasks[0].id,
+      userMessageId: userMessage.id,
+      assistantMessageId: assistantMessage.id,
+      idempotencyKey: 'retry-key',
+      modelId: 'chat-model',
+      providerId: 'provider-id',
+      webSearch: false,
+      sourceVersionIds: [],
+      selectedEntityIds: [],
+      historyMessageIds: [userMessage.id, assistantMessage.id],
+      systemMessages: [],
+      knowledgeItems: [],
+      memories: [],
+    };
+    local.tasks[0].messages.push(assistantMessage);
+    const remote = cloneProject(local);
+    remote.name = '远端项目';
+
+    const result = replaySimpleChatOperations(
+      [remote],
+      diffSimpleChatProjects([], [local], 1),
+      { createId: idFactory(...Array.from({ length: 16 }, (_, index) => `copy-${index + 1}`)) },
+    );
+    const copiedProject = result.projects.find(item => item.id !== local.id);
+    if (!copiedProject) throw new Error('Expected a conflict project copy');
+    const copiedTask = copiedProject.tasks[0];
+    const copiedUser = copiedTask.messages.find(item => item.role === 'user');
+    const copiedAssistant = copiedTask.messages.find(item => item.role === 'assistant');
+    if (!copiedUser || !copiedAssistant?.retryContext) {
+      throw new Error('Expected copied messages with retry context');
+    }
+
+    expect(copiedTask.activeAgentId).toBe(copiedProject.agents[0].id);
+    expect(copiedAssistant.parentMessageId).toBe(copiedUser.id);
+    expect(copiedAssistant.retryContext).toMatchObject({
+      projectId: copiedProject.id,
+      taskId: copiedTask.id,
+      userMessageId: copiedUser.id,
+      assistantMessageId: copiedAssistant.id,
+      historyMessageIds: [copiedUser.id, copiedAssistant.id],
+    });
+  });
+
   it('persists conflict source and time and visibly marks message copies', () => {
     const beforeProject = graph();
     const currentProject = cloneProject(beforeProject);
@@ -286,6 +330,56 @@ describe('simple chat project synchronization', () => {
       now: () => 400,
     });
 
+    expect(validateSimpleChatProjects(result.projects)).toEqual({ success: true });
+  });
+
+  it('preserves public conflict metadata while redundant child upserts replay', () => {
+    const local = graph();
+    local.name = '本地项目';
+    const remote = cloneProject(local);
+    remote.name = '远端项目';
+
+    const result = replaySimpleChatOperations(
+      [remote],
+      diffSimpleChatProjects([], [local], 1),
+      { createId: idFactory(...Array.from({ length: 12 }, (_, index) => `conflict-${index + 1}`)) },
+    );
+    const copy: SimpleChatSyncedProject | undefined = result.projects.find(item => item.id !== local.id);
+    if (!copy) throw new Error('Expected a conflict project copy');
+
+    expect(copy.syncConflict?.sourceEntityType).toBe('project');
+    expect(copy.tasks[0].syncConflict?.sourceEntityType).toBe('task');
+    expect(copy.tasks[0].messages[0].syncConflict?.sourceEntityType).toBe('message');
+    expect(copy.tasks[0].messages[0].artifacts?.[0].syncConflict?.sourceEntityType).toBe('artifact');
+    expect(copy.agents[0].syncConflict?.sourceEntityType).toBe('agent');
+    expect(copy.knowledgeItems[0].syncConflict?.sourceEntityType).toBe('knowledge-item');
+  });
+
+  it('keeps every visible conflict marker within the validated string limits', () => {
+    const local = graph();
+    local.name = 'p'.repeat(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+    local.tasks[0].name = 't'.repeat(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+    local.tasks[0].messages[0].content = 'm'.repeat(SIMPLE_CHAT_SYNC_LIMITS.messageContentBytes);
+    local.tasks[0].messages[0].artifacts![0].title = 'a'.repeat(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+    local.agents[0].name = 'g'.repeat(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+    local.knowledgeItems[0].name = 'k'.repeat(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+    const remote = cloneProject(local);
+    remote.name = 'r'.repeat(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+
+    const result = replaySimpleChatOperations(
+      [remote],
+      diffSimpleChatProjects([], [local], 1),
+      { createId: idFactory(...Array.from({ length: 12 }, (_, index) => `bounded-${index + 1}`)) },
+    );
+    const copy = result.projects.find(item => item.id !== local.id);
+    if (!copy) throw new Error('Expected a conflict project copy');
+
+    expect(copy.name).toContain('冲突副本');
+    expect(copy.tasks[0].name).toContain('冲突副本');
+    expect(copy.tasks[0].messages[0].content).toContain('冲突副本');
+    expect(copy.tasks[0].messages[0].artifacts?.[0].title).toContain('冲突副本');
+    expect(copy.agents[0].name).toContain('冲突副本');
+    expect(copy.knowledgeItems[0].name).toContain('冲突副本');
     expect(validateSimpleChatProjects(result.projects)).toEqual({ success: true });
   });
 
@@ -356,6 +450,47 @@ describe('simple chat project synchronization', () => {
     const operations = [op('op-1', 1), op('op-2', 2)];
     expect(acknowledgeSimpleChatOperations(operations, ['op-1']))
       .toEqual([operations[1]]);
+  });
+
+  it('uses injected UUIDs for globally unique bounded operation ids', () => {
+    const operationIds = [
+      '10000000-0000-4000-8000-000000000001',
+      '10000000-0000-4000-8000-000000000002',
+      '10000000-0000-4000-8000-000000000003',
+    ];
+    let operationIndex = 0;
+
+    const operations = diffSimpleChatProjects([], [project('p-uuid')], 1, {
+      createOperationId: () => operationIds[operationIndex++],
+    });
+
+    expect(operations.map(item => item.operationId)).toEqual(operationIds);
+    expect(new Set(operations.map(item => item.operationId)).size).toBe(operations.length);
+    expect(operations.every(item => item.operationId.length <= SIMPLE_CHAT_SYNC_LIMITS.idCharacters)).toBe(true);
+  });
+
+  it('keeps colon-bearing entity paths distinct during compaction', () => {
+    const first: SimpleChatSyncOperation = {
+      operationId: '20000000-0000-4000-8000-000000000001',
+      sequence: 1,
+      kind: 'upsert',
+      entityType: 'artifact',
+      projectId: 'a:b',
+      taskId: 'c',
+      messageId: 'd',
+      entityId: 'e',
+      value: { id: 'e', title: 'first' },
+    };
+    const second: SimpleChatSyncOperation = {
+      ...first,
+      operationId: '20000000-0000-4000-8000-000000000002',
+      sequence: 2,
+      projectId: 'a',
+      taskId: 'b:c',
+      value: { id: 'e', title: 'second' },
+    };
+
+    expect(compactSimpleChatOperations([first, second])).toEqual([first, second]);
   });
 
   it.each([
@@ -436,13 +571,37 @@ describe('simple chat project synchronization', () => {
     };
 
     expect(compactSimpleChatOperations([first, interleaved, finalDelete])).toEqual([
-      interleaved,
       {
         ...finalDelete,
         baseValue: first.baseValue,
       },
+      interleaved,
     ]);
   }, 1_000);
+
+  it('keeps a compacted parent upsert before its dependent child upserts', () => {
+    const added = graph();
+    const operations = diffSimpleChatProjects([], [added], 1);
+    const firstProjectUpsert = operations.find(item => item.entityType === 'project');
+    if (!firstProjectUpsert) throw new Error('Expected a project upsert');
+    const finalProjectUpsert: SimpleChatSyncOperation = {
+      ...firstProjectUpsert,
+      operationId: 'final-project-upsert',
+      sequence: Math.max(...operations.map(item => item.sequence)) + 1,
+      baseValue: firstProjectUpsert.value,
+      value: {
+        ...(firstProjectUpsert.value as SimpleChatProject),
+        name: '最终项目名',
+      },
+    };
+
+    const result = replaySimpleChatOperations([], [...operations, finalProjectUpsert]);
+
+    expect(result.conflicts).toEqual([]);
+    expect(result.projects).toHaveLength(1);
+    expect(result.projects[0]).toMatchObject({ id: 'p1', name: '最终项目名' });
+    expect(result.projects[0].tasks[0].id).toBe('t1');
+  });
 
   it('remaps fixture artifact ownership to the containing project', () => {
     const value = project('p-fixture', [taskWithMessages('t-fixture', 1)]);
@@ -454,6 +613,25 @@ describe('simple chat project synchronization', () => {
 });
 
 describe('simple chat sync payload validation', () => {
+  it('leaves the exact request-body byte gate to the raw stream layer', () => {
+    const projects = payloadAtJsonBytes(MAX_REQUEST_BYTES + 1);
+
+    expect(new TextEncoder().encode(JSON.stringify(projects)).byteLength).toBeGreaterThan(MAX_REQUEST_BYTES);
+    expect(validateSimpleChatProjects(projects)).toEqual({ success: true });
+  });
+
+  it('does not impose an aggregate entity cap beyond the categorized limits', () => {
+    const tasks = Array.from({ length: 101 }, (_, taskIndex) => {
+      const value = task(`task-${taskIndex}`);
+      value.messages = Array.from({ length: 1_000 }, (_, messageIndex) => (
+        message(`message-${taskIndex}-${messageIndex}`, '')
+      ));
+      return value;
+    });
+
+    expect(validateSimpleChatProjects([project('p-many', tasks)])).toEqual({ success: true });
+  });
+
   it.each([
     ['projects', () => Array.from({ length: 500 }, (_, index) => project(`p-${index}`))],
     ['tasks', () => [project('p1', minimalTasks(1_000))]],
@@ -521,13 +699,11 @@ describe('simple chat sync payload validation', () => {
       value.messages = [message('m1', '', [exactArtifact])];
       return [project('p1', [value])];
     }],
-    ['total entities', () => projectWithEntityCount(100_000)],
     ['JSON depth', () => {
       const value = project('p1');
       (value as unknown as Record<string, unknown>).metadata = nestedObject(14);
       return [value];
     }],
-    ['request bytes', () => payloadAtJsonBytes(MAX_REQUEST_BYTES)],
   ])('accepts the exact $0 boundary', (_name, createValue) => {
     expect(validateSimpleChatProjects(createValue())).toEqual({ success: true });
   });
@@ -599,13 +775,11 @@ describe('simple chat sync payload validation', () => {
       value.messages = [message('m1', '', [oversizedArtifact])];
       return [project('p1', [value])];
     }],
-    ['entities', () => projectWithEntityCount(100_001)],
     ['depth', () => {
       const value = project('p1');
       (value as unknown as Record<string, unknown>).metadata = nestedObject(15);
       return [value];
     }],
-    ['requestBytes', () => payloadAtJsonBytes(MAX_REQUEST_BYTES + 1)],
   ])('rejects the first value above the $0 boundary', (field, createValue) => {
     expect(validateSimpleChatProjects(createValue())).toMatchObject(validationFailure(field));
   });
