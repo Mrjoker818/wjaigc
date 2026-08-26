@@ -88,7 +88,18 @@ export function project(id: string, tasks: SimpleChatTask[] = []): SimpleChatPro
     name: `项目-${projectId}`,
     createdAt: 1,
     updatedAt: 1,
-    tasks: tasks.map(item => ({ ...item, projectId })),
+    tasks: tasks.map(item => ({
+      ...item,
+      projectId,
+      messages: item.messages.map(message => ({
+        ...message,
+        artifacts: message.artifacts?.map(artifact => ({
+          ...artifact,
+          projectId,
+          taskId: item.id,
+        })),
+      })),
+    })),
     agents: [defaultAgent(projectId)],
     knowledgeItems: [defaultKnowledgeItem(projectId)],
     instructions: {
