@@ -1397,7 +1397,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 | 项目 | 最新状态 | 关闭条件 |
 |---|---|---|
-| 精确任务恢复 | 旧云端失败 / 本地完整门禁通过 | 新建第二条及以后对话时 URL 必须包含 `projectId + taskId`；刷新后仍显示同一任务，而非项目第一条旧对话。 |
-| 中断终态持久化 | 旧云端失败 / 新提交待验 | 流式中刷新后，同一助手消息须在服务器快照中收敛为可重试 `failed` 或合法完成态，不得继续为 `streaming`。 |
-| 消息与请求唯一性 | 待新云端复验 | UI 与数据库均只有 1 条用户消息、1 条助手消息、1 次 `/api/simple-chat/chat`；重试不新增第二组消息或 Artifact。 |
+| 精确任务恢复 | 已在 `da1f5c4` 云端验证 | 新建对话 URL 包含 `projectId + taskId`；流式刷新后仍显示同一任务和测试标记，没有回到项目第一条旧对话。 |
+| 中断终态持久化 | 首次新云端失败 / 第二轮本地修复待部署 | `da1f5c4` 的 UI 已显示可重试失败，但 PostgreSQL 仍为 `streaming`；部署项目装载归一化修复后，服务器快照必须为 `failed` 或合法 `completed`。 |
+| 消息与请求唯一性 | 首次新云端通过 / 第二轮需保持 | PostgreSQL 已证明 1 条用户消息、1 条助手消息、1 次 `/api/simple-chat/chat`；第二轮部署不得破坏该结果。 |
 | Deep Research 单 Artifact | 仍未关闭 | 需取得报告 `done`、单一持久化助手消息、单一 Artifact 与请求快照；此前部分正文不能作为完成证据。 |

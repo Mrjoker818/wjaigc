@@ -2561,8 +2561,9 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 发现环境 | Coze Build ID `5v4rvNIC6-MWnYjJ5HWaz`，Google Chrome“用户1”，普通账号 `canvas-user`，APIMart `deepseek-v4-flash`。 |
 | 稳定复现 | 新建对话，提交唯一标记，看到输入清空和发送控件禁用后立即刷新同一标签页。刷新后标记可见数为 0，页面回到项目第一条旧对话；约 238 秒后数据库仍为 `streaming`。 |
 | 请求与数据证据 | `wujie_audit_log` 只有 1 条 `/api/simple-chat/chat`、HTTP 200；`chat_simple_projects` 中目标任务存在且只有 2 条消息，说明不是消息丢失或重复提交，而是恢复时选错任务。 |
-| 根因 | `/simple-chat` URL 只保存 `projectId`；`selectInitialSimpleChatProject()` 无条件选择该项目第一条任务。真正中断的任务没有重新挂载，已有 `recoverInterruptedSimpleChatMessages()` 因而没有机会把它收敛为可重试 `failed`。 |
-| RED | `simple-chat-project-selection.test.ts` 新增精确 `taskId` 恢复与 URL 接线合同；旧实现稳定得到 `2 failed / 2 passed`，实际选中 `task-b-old` 而非 `task-b-active`。 |
-| 最小修复 | URL 同步精确 `projectId + taskId`；初始化按两者恢复任务。没有修改供应商、模型、消息 ID、幂等键、积分、数据库结构或 `stable`。 |
-| 本地回归 | RED 后目标文件 `4/4` 通过；Simple Chat 关联 `5 files / 33 tests` 通过；全仓 `541 passed / 20 skipped files`、`3535 passed / 117 skipped tests`；TypeScript、ESLint `0 errors / 967 historical warnings`、Next.js `116/116` 构建、证据清单与空白检查通过。跳过项仍为缺少隔离 PostgreSQL 测试库，不计为通过。 |
-| 状态 | **旧云端确认失败 / 本地已修复 / 新提交云端待验。** 证据：`docs/testing/evidence/v588-chat-002-refresh-interruption-cloud-2026-08-26.json` 与同名 PNG。 |
+| 根因 | 第一层：`/simple-chat` URL 只保存 `projectId`，初始化固定选择项目第一条任务。第二层：服务器项目以 `streaming` 原样进入父状态，子组件只在展示状态调用 `recoverInterruptedSimpleChatMessages()`；父状态随后仍可把旧中间态同步回 PostgreSQL。 |
+| RED | 第一轮精确任务测试得到 `2 failed / 2 passed`。首次新云端复验又证明 UI 已收敛但数据库仍为 `streaming`；随后新增“项目装载前归一化”测试，旧实现按预期 `1 failed / 4 passed`，失败原因为缺少 `recoverInterruptedSimpleChatProjects()`。 |
+| 最小修复 | URL 同步精确 `projectId + taskId`；项目装载边界在写入父状态前统一恢复所有任务消息，确保后续服务器同步持久化 `failed`。没有修改供应商、模型、消息 ID、幂等键、积分、数据库结构或 `stable`。 |
+| 本地回归 | 第二轮目标 `12/12`、Simple Chat 全套 `18 files / 122 tests`、全仓 `541 passed / 20 skipped files`、`3536 passed / 117 skipped tests`；TypeScript 通过，ESLint `0 errors / 967 historical warnings`，Next.js `116/116` 构建通过。117 项跳过仍为缺少隔离 PostgreSQL 测试库，不计为通过。 |
+| 首次新云端复验 | `da1f5c4` 的代码树已精确部署。刷新前后 URL 均保持同一 `projectId + taskId`，UI 只有一组消息并显示“上次请求中断，可重试”；审计只有 1 次聊天请求。但 PostgreSQL 仍保存助手 `status=streaming`，因此该候选只部分通过。 |
+| 状态 | **精确任务恢复云端通过 / 终态持久化本地已修复 / 第二次云端待验。** 证据：`docs/testing/evidence/v588-chat-002-refresh-recovery-fixed-cloud-2026-08-26.json` 与同名 PNG。 |

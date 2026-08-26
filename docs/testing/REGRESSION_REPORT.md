@@ -1764,3 +1764,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 根因是 URL 只持久化 `projectId`，初始化函数固定选择项目第一条任务。按 TDD 新增精确任务恢复与 URL 接线测试，旧代码 `2 failed / 2 passed`；最小接入 `taskId` 后目标 `4/4`、关联 `5 files / 33 tests` 通过。
 - 完整本地门禁为：`541` 个测试文件、`3535` 项已执行测试全部通过；`20` 个文件、`117` 项 PostgreSQL 专项因缺少隔离库跳过；TypeScript、ESLint `0 errors / 967 historical warnings`、Next.js `116/116` 构建、证据清单和空白检查通过。
 - **回归结论：旧云端失败 / 本地修复和完整门禁通过 / 新云端复验待完成。** 本轮不能关闭 V588-CHAT-002；机器证据见 `docs/testing/evidence/v588-chat-002-refresh-interruption-cloud-2026-08-26.json`。
+
+## 2026-08-26 V588-CHAT-002 刷新中断首次新云端复验与第二轮修复
+
+- Coze 运行树与 `origin/main@da1f5c4` 完全一致，Build ID `tHz1tu9I_gsWmHxNeCb6J`；`stable@52f7c601` 未触碰。
+- Google Chrome 在任务 `58r009tjmt9e9yqn` 只提交一次标记 `V588_REFRESH_RECOVERY_FIXED_1787706573819`，响应开始后 5 秒刷新同一标签页。刷新前后 URL 均精确保留 `projectId + taskId`，标记仍可见，页面显示唯一“上次请求中断，可重试”和一个重试按钮。
+- PostgreSQL 与审计证明只有 1 条用户消息、1 条助手消息、1 次 `/api/simple-chat/chat`，HTTP 200、268ms；但权威 `chat_simple_projects` 中助手状态仍为 `streaming`。因此精确任务恢复通过，数据库终态持久化失败。
+- 根因是装载边界仍把服务器项目的原始 `streaming` 写入父状态，恢复逻辑只作用于 ChatArea 展示状态。按 TDD 新增项目树装载归一化测试，旧实现 `1 failed / 4 passed`；最小新增 `recoverInterruptedSimpleChatProjects()` 并在状态写入前调用。
+- 第二轮本地门禁：目标 `12/12`，Simple Chat `18 files / 122 tests`，全仓 `541 files / 3536 tests` 全部已执行项通过；`20 files / 117 tests` 因缺少隔离 PostgreSQL 测试库跳过。TypeScript、ESLint `0 errors / 967 historical warnings` 与 Next.js `116/116` 构建通过。
+- **回归结论：首次新云端部分失败 / 第二轮本地修复通过 / 新部署待验。** 未取得 PostgreSQL `failed` 或合法 `completed` 前不得关闭 V588-CHAT-002-BUG-003。机器证据见 `docs/testing/evidence/v588-chat-002-refresh-recovery-fixed-cloud-2026-08-26.json`。

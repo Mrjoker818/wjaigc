@@ -8,7 +8,7 @@ import { LoginPanel } from "@/components/dashboard/login-panel";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent,
   loadProjects, saveProjects, SimpleChatProject as Project, SimpleChatTask as Task,
-  PRESET_SKILLS, PresetSkill
+  PRESET_SKILLS, PresetSkill, recoverInterruptedSimpleChatProjects,
 } from "@/components/simple-chat/simple-chat-types";
 import { selectInitialSimpleChatProject } from "@/components/simple-chat/simple-chat-types";
 import { User } from "@/lib/user-types";
@@ -108,6 +108,7 @@ export default function SimpleChatPage() {
         loaded = serverProjects;
       }
       if (loaded.length === 0) loaded = [createDefaultProject()];
+      loaded = recoverInterruptedSimpleChatProjects(loaded);
       const requestedProjectId = new URLSearchParams(window.location.search).get('projectId');
       const requestedTaskId = new URLSearchParams(window.location.search).get('taskId');
       const initial = selectInitialSimpleChatProject(loaded, requestedProjectId, requestedTaskId);

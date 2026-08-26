@@ -384,3 +384,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 已按 RED -> 最小接入增加 `taskId` URL 身份，目标测试从 `2 failed / 2 passed` 转为 `4/4`，关联 Simple Chat `33/33` 通过。未改动 `stable`、V5.8.8 donor、供应商、模型、积分或数据库结构。
 - 完整本地门禁已通过：全仓 `541` 个文件、`3535` 项已执行测试全部通过；`20` 个文件、`117` 项 PostgreSQL 专项因缺少隔离测试库明确跳过且不计为通过；TypeScript、ESLint `0 errors / 967 historical warnings`、Next.js `116/116` 生产构建、证据清单与空白检查通过。
 - **当前状态：本地修复与完整门禁通过 / Coze 复验待完成，V588-CHAT-002 仍未关闭。** 只有同一任务刷新后出现单一可重试失败或合法完成终态，且数据库不再保留 `streaming`，才允许进入 `V588-CHAT-003`。
+
+## 2026-08-26 V588-CHAT-002 刷新恢复第二轮检查点
+
+- `origin/main@da1f5c4` 已在 Coze 以完全相同代码树运行，Google Chrome 真实刷新证明 URL 能恢复精确 `projectId + taskId`，同一测试标记、单一消息组和单一请求均保留。
+- 权威 PostgreSQL 仍记录助手 `status=streaming`，说明第一轮修复只关闭“回到旧任务”，没有关闭“服务器终态持久化”。这项真实失败没有被 UI 的可重试提示掩盖。
+- 根因限定在当前线项目装载边界，不属于 donor 吸收偏移。第二轮按 RED -> 最小修复新增项目树恢复函数，确保服务器/本地项目在进入父状态和后续同步前已把遗留 `streaming` 收敛为 `failed`。
+- 本地新结果：目标 `12/12`、Simple Chat `122/122`、全仓 `3536` 项已执行测试通过；`117` 项 PostgreSQL 隔离测试继续跳过；TypeScript、ESLint `0 errors / 967 historical warnings` 和 Next.js `116/116` 构建通过。
+- **当前状态：首次新云端部分失败 / 第二轮本地通过 / 待提交和再次云端验收。** 仍停留在 `V588-CHAT-002`，不得进入 `V588-CHAT-003`；`stable` 与 V5.8.8 donor 均未触碰。

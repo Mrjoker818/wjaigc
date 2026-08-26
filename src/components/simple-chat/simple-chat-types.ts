@@ -7,6 +7,7 @@ import type {
   SimpleChatMessageStatus,
   SimpleChatRetryContextV1,
 } from '@/lib/simple-chat-retry';
+import { recoverInterruptedSimpleChatMessages } from '@/lib/simple-chat-retry';
 
 export type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 
@@ -122,6 +123,18 @@ export interface ChatAttachment {
   placementId?: string;
   textContent?: string;
   summary?: string;
+}
+
+export function recoverInterruptedSimpleChatProjects(
+  projects: SimpleChatProject[],
+): SimpleChatProject[] {
+  return projects.map(project => ({
+    ...project,
+    tasks: project.tasks.map(task => ({
+      ...task,
+      messages: recoverInterruptedSimpleChatMessages(task.messages || []),
+    })),
+  }));
 }
 
 export function selectInitialSimpleChatProject<T extends { id: string; tasks: Array<{ id: string }> }>(

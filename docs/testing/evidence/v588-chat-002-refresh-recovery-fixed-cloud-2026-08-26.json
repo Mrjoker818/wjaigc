@@ -1,0 +1,58 @@
+{
+  "testId": "V588-CHAT-002-BUG-003-cloud-recheck-1",
+  "testedAt": "2026-08-26T01:09:33.828Z",
+  "browser": "Google Chrome user profile 用户1",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "githubMain": "da1f5c4df8181dffeaa7d39d36a6cf6b32446c79",
+  "githubStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cozeHead": "e1b3d8210d5946f4fcec4aee1d82106eb68aa7bc",
+  "cozeTree": "77de12455d7d54b06535861c314bdb9146e298f2",
+  "githubMainTree": "77de12455d7d54b06535861c314bdb9146e298f2",
+  "buildId": "tHz1tu9I_gsWmHxNeCb6J",
+  "servicePid": 1192,
+  "account": "canvas-user",
+  "provider": "APImartLLM",
+  "model": "deepseek-v4-flash",
+  "projectId": "s3zk7z3gmsoo15gz",
+  "taskId": "58r009tjmt9e9yqn",
+  "marker": "V588_REFRESH_RECOVERY_FIXED_1787706573819",
+  "urlBeforeRefresh": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat?projectId=s3zk7z3gmsoo15gz&taskId=58r009tjmt9e9yqn",
+  "urlAfterRefresh": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat?projectId=s3zk7z3gmsoo15gz&taskId=58r009tjmt9e9yqn",
+  "refreshDelayMs": 5000,
+  "uiBeforeRefresh": {
+    "markerVisible": true,
+    "assistantStartedStreaming": true
+  },
+  "uiAfterRefresh": {
+    "sameProject": true,
+    "sameTask": true,
+    "markerVisible": true,
+    "duplicateMessageVisible": false,
+    "terminalLabel": "上次请求中断，可重试。",
+    "retryButtonVisible": true
+  },
+  "database": {
+    "updatedAt": 1787706580804,
+    "messageCount": 2,
+    "userMessages": 1,
+    "assistantMessages": 1,
+    "assistantStatus": "streaming",
+    "assistantContentLength": 0,
+    "retryableContextPersisted": true,
+    "auditChatRequestCount": 1,
+    "auditResponseStatus": 200,
+    "auditDurationMs": 268,
+    "auditPath": "/api/simple-chat/chat"
+  },
+  "result": "PARTIAL_FAIL",
+  "passed": [
+    "URL preserves projectId and taskId",
+    "refresh restores the exact task instead of the project first task",
+    "UI converts the interrupted assistant to one retryable failure",
+    "only one user message, one assistant message and one chat request exist"
+  ],
+  "failed": [
+    "authoritative chat_simple_projects still persists assistant status=streaming"
+  ],
+  "nextGate": "Deploy the project-hydration normalization fix and repeat the same refresh plus PostgreSQL probe; assistant status must persist as failed or completed."
+}
