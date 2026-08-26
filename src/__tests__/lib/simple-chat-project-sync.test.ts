@@ -278,18 +278,30 @@ describe('simple chat project synchronization', () => {
 
   it('keeps updatedAt in complete operation values for real project and task edits', () => {
     const beforeProject = graph();
+    const timestampOnlyProject = cloneProject(beforeProject);
+    timestampOnlyProject.updatedAt = 11;
+    timestampOnlyProject.tasks[0].updatedAt = 12;
+    expect(diffSimpleChatProjects([beforeProject], [timestampOnlyProject], 1)).toEqual([]);
+
     const currentProject = cloneProject(beforeProject);
     currentProject.name = '本地项目';
     currentProject.updatedAt = 21;
     currentProject.tasks[0].name = '本地对话';
-    currentProject.tasks[0].updatedAt = 22;
+    currentProject.tasks[0].updatedAt = 42;
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.updatedAt = 31;
+    remoteProject.tasks[0].updatedAt = 32;
 
     const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
     const projectOperation = operations.find(operation => operation.entityType === 'project');
     const taskOperation = operations.find(operation => operation.entityType === 'task');
+    const result = replaySimpleChatOperations([remoteProject], operations);
 
     expect(projectOperation?.value).toMatchObject({ updatedAt: 21 });
-    expect(taskOperation?.value).toMatchObject({ updatedAt: 22 });
+    expect(taskOperation?.value).toMatchObject({ updatedAt: 42 });
+    expect(result.conflicts).toEqual([]);
+    expect(result.projects[0]).toMatchObject({ name: '本地项目', updatedAt: 31 });
+    expect(result.projects[0].tasks[0]).toMatchObject({ name: '本地对话', updatedAt: 42 });
   });
 
   it('preserves the remote entity and creates a local conflict copy only for the same-field conflict', () => {
@@ -781,6 +793,97 @@ describe('simple chat project synchronization', () => {
     const idsAfterFirstReplay = createdIds;
     const second = replaySimpleChatOperations(first.projects, operations, options);
 
+    expect(second.projects).toEqual(first.projects);
+    expect(second.conflicts).toEqual(first.conflicts);
+    expect(createdIds).toBe(idsAfterFirstReplay);
+  });
+
+  it('persists a remote task Agent reference across repeated replay', () => {
+    const beforeProject = project('p1', [task('t1', '基线对话')]);
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].name = '本地对话';
+    currentProject.agents[0].name = '本地 Agent';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].name = '远端对话';
+    remoteProject.tasks[0].activeAgentId = remoteProject.agents[0].id;
+    remoteProject.agents[0].name = '远端 Agent';
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+    let createdIds = 0;
+    const options = {
+      createId: () => ['copy-task', 'copy-agent'][createdIds++] ?? `unexpected-${createdIds}`,
+      now: () => 305,
+    };
+
+    const first = replaySimpleChatOperations([remoteProject], operations, options);
+    const idsAfterFirstReplay = createdIds;
+    const firstTaskCopy = first.projects[0].tasks.find(item => item.id === 'copy-task');
+    const second = replaySimpleChatOperations(first.projects, operations, options);
+
+    expect(firstTaskCopy?.activeAgentId).toBe(remoteProject.agents[0].id);
+    expect(firstTaskCopy?.syncConflict?.sourceReferenceOrigins).toMatchObject({
+      activeAgentId: 'remote',
+    });
+    expect(validateSimpleChatProjects(first.projects)).toEqual({ success: true });
+    expect(second.projects).toEqual(first.projects);
+    expect(second.conflicts).toEqual(first.conflicts);
+    expect(createdIds).toBe(idsAfterFirstReplay);
+  });
+
+  it('persists remote parent and retry sources across repeated replay', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    const childMessage = message('m-child', '基线回答');
+    childMessage.role = 'assistant';
+    childMessage.parentMessageId = 'm-local-parent';
+    childMessage.retryContext = retryContext('m-local-parent', childMessage.id, [
+      'm-local-parent',
+      childMessage.id,
+    ]);
+    beforeProject.tasks[0].messages = [
+      childMessage,
+      message('m-local-parent', '本地父消息'),
+      message('m-remote-parent', '远端父消息'),
+    ];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].content = '本地回答';
+    currentProject.tasks[0].messages[2].content = '本地目标父消息';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages[0].content = '远端回答';
+    remoteProject.tasks[0].messages[0].parentMessageId = 'm-remote-parent';
+    remoteProject.tasks[0].messages[0].retryContext = retryContext(
+      'm-remote-parent',
+      childMessage.id,
+      ['m-remote-parent', childMessage.id],
+    );
+    remoteProject.tasks[0].messages[2].content = '远端目标父消息';
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+    let createdIds = 0;
+    const options = {
+      createId: () => ['copy-child', 'copy-parent'][createdIds++] ?? `unexpected-${createdIds}`,
+      now: () => 306,
+    };
+
+    const first = replaySimpleChatOperations([remoteProject], operations, options);
+    const idsAfterFirstReplay = createdIds;
+    const firstChildCopy = first.projects[0].tasks[0].messages.find(item => item.id === 'copy-child');
+    const second = replaySimpleChatOperations(first.projects, operations, options);
+
+    expect(firstChildCopy?.parentMessageId).toBe('m-remote-parent');
+    expect(firstChildCopy?.retryContext).toMatchObject({
+      userMessageId: 'm-remote-parent',
+      assistantMessageId: 'copy-child',
+      historyMessageIds: ['m-remote-parent', 'copy-child'],
+    });
+    expect(firstChildCopy?.syncConflict?.sourceReferenceOrigins).toMatchObject({
+      parentMessageId: 'remote',
+      retryContext: {
+        projectId: 'local',
+        taskId: 'local',
+        userMessageId: 'remote',
+        assistantMessageId: 'self',
+        historyMessageIds: ['remote', 'self'],
+      },
+    });
+    expect(validateSimpleChatProjects(first.projects)).toEqual({ success: true });
     expect(second.projects).toEqual(first.projects);
     expect(second.conflicts).toEqual(first.conflicts);
     expect(createdIds).toBe(idsAfterFirstReplay);
@@ -1330,6 +1433,106 @@ describe('simple chat project synchronization', () => {
       .toEqual(['m-user', 'missing-remote-history', 'm-child']);
   });
 
+  it('restores history-only audit entries when a referenced message is added later', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    const userMessage = message('m-user', '提问');
+    const childMessage = message('m-child', '基线回答', [artifact('a-child')]);
+    childMessage.role = 'assistant';
+    childMessage.retryContext = retryContext(userMessage.id, childMessage.id, [
+      userMessage.id,
+      'm-added',
+      childMessage.id,
+    ]);
+    beforeProject.tasks[0].messages = [userMessage, childMessage];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[1].artifacts![0].title = '本地 Artifact';
+    currentProject.tasks[0].messages.push(message('m-added', '后序新增消息'));
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages = [remoteProject.tasks[0].messages[0]];
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+
+    expect(operations.map(operation => operation.entityId)).toEqual(['a-child', 'm-added']);
+    const result = replaySimpleChatOperations([remoteProject], operations, {
+      createId: idFactory('copy-child', 'copy-artifact'),
+      localProjects: [currentProject],
+    });
+    const copiedChild = result.projects[0].tasks[0].messages.find(item => item.id === 'copy-child');
+
+    expect(copiedChild?.retryContext?.historyMessageIds)
+      .toEqual(['m-user', 'm-added', 'copy-child']);
+    expect(copiedChild?.syncConflict?.sourceReferences).toBeUndefined();
+  });
+
+  it('restores history-only audit entries when a referenced message is copied later', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    const userMessage = message('m-user', '提问');
+    const childMessage = message('m-child', '基线回答', [artifact('a-child')]);
+    childMessage.role = 'assistant';
+    childMessage.retryContext = retryContext(userMessage.id, childMessage.id, [
+      userMessage.id,
+      'm-target',
+      childMessage.id,
+    ]);
+    beforeProject.tasks[0].messages = [
+      userMessage,
+      childMessage,
+      message('m-target', '基线目标'),
+    ];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[1].artifacts![0].title = '本地 Artifact';
+    currentProject.tasks[0].messages[2].content = '本地目标';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages = [remoteProject.tasks[0].messages[0]];
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+
+    expect(operations.map(operation => operation.entityId)).toEqual(['a-child', 'm-target']);
+    const result = replaySimpleChatOperations([remoteProject], operations, {
+      createId: idFactory('copy-child', 'copy-artifact', 'copy-target'),
+      localProjects: [currentProject],
+    });
+    const copiedChild = result.projects[0].tasks[0].messages.find(item => item.id === 'copy-child');
+
+    expect(copiedChild?.retryContext?.historyMessageIds)
+      .toEqual(['m-user', 'copy-target', 'copy-child']);
+    expect(copiedChild?.syncConflict?.sourceReferences).toBeUndefined();
+  });
+
+  it('retains a complete history-only audit while any original entry remains dangling', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    const userMessage = message('m-user', '提问');
+    const childMessage = message('m-child', '基线回答', [artifact('a-child')]);
+    childMessage.role = 'assistant';
+    childMessage.retryContext = retryContext(userMessage.id, childMessage.id, [
+      userMessage.id,
+      'm-still-missing',
+      childMessage.id,
+    ]);
+    beforeProject.tasks[0].messages = [userMessage, childMessage];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[1].artifacts![0].title = '本地 Artifact';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages = [remoteProject.tasks[0].messages[0]];
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+    let createdIds = 0;
+    const options = {
+      createId: () => ['copy-child', 'copy-artifact'][createdIds++] ?? `unexpected-${createdIds}`,
+      localProjects: [currentProject],
+    };
+
+    const first = replaySimpleChatOperations([remoteProject], operations, options);
+    const idsAfterFirstReplay = createdIds;
+    const copiedChild = first.projects[0].tasks[0].messages.find(item => item.id === 'copy-child');
+    const second = replaySimpleChatOperations(first.projects, operations, options);
+
+    expect(copiedChild?.retryContext?.historyMessageIds).toEqual(['m-user', 'copy-child']);
+    expect(copiedChild?.syncConflict?.sourceReferences?.retryContext?.historyMessageIds)
+      .toEqual(['m-user', 'm-still-missing', 'm-child']);
+    expect(validateSimpleChatProjects(first.projects)).toEqual({ success: true });
+    expect(second.projects).toEqual(first.projects);
+    expect(second.conflicts).toEqual(first.conflicts);
+    expect(createdIds).toBe(idsAfterFirstReplay);
+  });
+
   it('persists conflict source and time and visibly marks message copies', () => {
     const beforeProject = graph();
     const currentProject = cloneProject(beforeProject);
@@ -1768,6 +1971,25 @@ describe('simple chat project synchronization', () => {
 });
 
 describe('simple chat sync payload validation', () => {
+  it.each([
+    ['task source', { activeAgentId: 'network' }],
+    ['retry source', { retryContext: { userMessageId: 'network' } }],
+    ['retry history sources', { retryContext: { historyMessageIds: ['remote', 'network'] } }],
+  ])('rejects invalid persisted conflict reference origin metadata for $0', (_name, origins) => {
+    const value = project('p1', [task('t1')]);
+    (value.tasks[0] as unknown as Record<string, unknown>).syncConflict = {
+      operationId: 'op-conflict',
+      sourceEntityType: 'task',
+      sourceEntityId: 't1',
+      sourceProjectId: 'p1',
+      sourceTaskId: 't1',
+      sourceReferenceOrigins: origins,
+      conflictedAt: 1,
+    };
+
+    expect(validateSimpleChatProjects([value])).toMatchObject(invalidValue());
+  });
+
   it.each([
     {
       name: 'project globally',

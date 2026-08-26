@@ -59,6 +59,22 @@ export interface SimpleChatConflictSourceReferences {
   retryContext?: SimpleChatMessage['retryContext'];
 }
 
+export type SimpleChatConflictReferenceOrigin = 'local' | 'remote' | 'self';
+
+export interface SimpleChatConflictRetryReferenceOrigins {
+  projectId?: SimpleChatConflictReferenceOrigin;
+  taskId?: SimpleChatConflictReferenceOrigin;
+  userMessageId?: SimpleChatConflictReferenceOrigin;
+  assistantMessageId?: SimpleChatConflictReferenceOrigin;
+  historyMessageIds?: SimpleChatConflictReferenceOrigin[];
+}
+
+export interface SimpleChatConflictSourceReferenceOrigins {
+  activeAgentId?: SimpleChatConflictReferenceOrigin;
+  parentMessageId?: SimpleChatConflictReferenceOrigin;
+  retryContext?: SimpleChatConflictRetryReferenceOrigins;
+}
+
 export interface SimpleChatConflictMetadata {
   operationId: string;
   sourceEntityType: SimpleChatEntityType;
@@ -67,6 +83,7 @@ export interface SimpleChatConflictMetadata {
   sourceTaskId?: string;
   sourceMessageId?: string;
   sourceReferences?: SimpleChatConflictSourceReferences;
+  sourceReferenceOrigins?: SimpleChatConflictSourceReferenceOrigins;
   conflictedAt: number;
 }
 
@@ -200,7 +217,6 @@ interface ReplayContext {
   existingConflictCopies: Map<string, string>;
   localProjectsById: Map<string, SimpleChatProject>;
   localReferenceClosures: LocalReferenceClosure[];
-  remoteReferencePreservations: WeakMap<object, RemoteReferencePreservation>;
 }
 
 interface MergeResult {
@@ -242,16 +258,7 @@ interface LocalReferenceClosure {
   retryContext?: LocalRetryReferenceSources;
 }
 
-interface RemoteReferencePreservation {
-  activeAgentId?: { value?: string };
-  parentMessageId?: { value?: string };
-  retryContext?: {
-    value: Record<string, unknown>;
-    sources: LocalRetryReferenceSources;
-  };
-}
-
-type ConflictReferenceSource = 'local' | 'remote';
+type ConflictReferenceSource = SimpleChatConflictReferenceOrigin;
 
 const EMPTY_INSTRUCTIONS: ProjectInstructions = {
   projectBackground: '',
@@ -449,7 +456,6 @@ export function replaySimpleChatOperations(
       (options?.localProjects ?? []).map(project => [project.id, project]),
     ),
     localReferenceClosures: [],
-    remoteReferencePreservations: new WeakMap(),
   };
   indexExistingReplayConflicts(context, compactedOperations);
 
@@ -481,7 +487,11 @@ export function replaySimpleChatOperations(
     }
 
     if (belongsToConflictBranch) {
-      replaceProjectedEntity(current, comparableEntityValue(operation.entityType, localValue));
+      replaceProjectedEntity(
+        current,
+        comparableEntityValue(operation.entityType, localValue),
+        localValue,
+      );
       preserveConflictPresentation(current);
       sanitizeConflictEntityReferences(context, current, originalOperation, operation);
       continue;
@@ -502,7 +512,7 @@ export function replaySimpleChatOperations(
     );
 
     if (!merge.conflict) {
-      replaceProjectedEntity(current, merge.value);
+      replaceProjectedEntity(current, merge.value, localValue);
       trackLocallyMergedReferences(
         context,
         current.collection[current.index],
@@ -910,7 +920,7 @@ function createConflictCopy(
     case 'task': {
       const project = ensureConflictProject(context, operation, timestamp);
       const taskCopy = cloneConflictTask(context, inputValue, operation, project.id, timestamp);
-      preserveRemoteConflictReferences(context, taskCopy, operation, current?.entity);
+      preserveRemoteConflictReferences(taskCopy, operation, current?.entity);
       const insertAt = current?.entityType === 'task' && current.project.id === project.id
         ? current.index + 1
         : project.tasks.length;
@@ -921,7 +931,7 @@ function createConflictCopy(
     case 'message': {
       const task = ensureConflictTask(context, operation, timestamp);
       const messageCopy = cloneConflictMessage(context, inputValue, operation, task.projectId, task.id, timestamp);
-      preserveRemoteConflictReferences(context, messageCopy, operation, current?.entity);
+      preserveRemoteConflictReferences(messageCopy, operation, current?.entity);
       const insertAt = current?.entityType === 'message' && current.task?.id === task.id
         ? current.index + 1
         : task.messages.length;
@@ -1264,6 +1274,9 @@ function cloneConflictTask(
   };
   if (activeAgentId === undefined) delete taskCopy.activeAgentId;
   tagConflictEntity(taskCopy, metadataFor(operation, 'task', originalTaskId, timestamp));
+  if (source.activeAgentId !== undefined) {
+    retainConflictSourceReferenceOrigins(taskCopy, { activeAgentId: 'local' });
+  }
   if (source.activeAgentId !== undefined && activeAgentId === undefined) {
     retainConflictSourceReferences(taskCopy, { activeAgentId: source.activeAgentId });
   }
@@ -1327,6 +1340,10 @@ function cloneConflictMessage(
   if (parentMessageId === undefined) delete messageCopy.parentMessageId;
   if (remappedRetryContext.value === undefined) delete messageCopy.retryContext;
   tagConflictEntity(messageCopy, metadataFor(operation, 'message', originalMessageId, timestamp));
+  retainConflictSourceReferenceOrigins(
+    messageCopy,
+    localMessageReferenceOrigins(source, originalMessageId),
+  );
   const danglingReferences: SimpleChatConflictSourceReferences = {};
   if (source.parentMessageId !== undefined && parentMessageId === undefined) {
     danglingReferences.parentMessageId = source.parentMessageId;
@@ -1466,12 +1483,35 @@ function applyNewUpsert(
   }
 }
 
-function replaceProjectedEntity(reference: EntityReference, projection: unknown): void {
+function replaceProjectedEntity(
+  reference: EntityReference,
+  projection: unknown,
+  operationValue?: unknown,
+): void {
   const nextValue = applyProjectionToValue(reference.entity, projection, reference.entityType);
+  preserveReplayUpdatedAt(nextValue, reference.entity, operationValue, reference.entityType);
   reference.collection[reference.index] = nextValue;
   if (reference.entityType === 'artifact' && reference.message) {
     reference.message.artifacts = reference.collection as ChatArtifact[];
   }
+}
+
+function preserveReplayUpdatedAt(
+  target: unknown,
+  remoteValue: unknown,
+  localValue: unknown,
+  entityType: SimpleChatEntityType,
+): void {
+  if (
+    (entityType !== 'project' && entityType !== 'task')
+    || !isRecord(target)
+    || !isRecord(remoteValue)
+    || !isRecord(localValue)
+  ) return;
+  const timestamps = [remoteValue.updatedAt, localValue.updatedAt].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  );
+  if (timestamps.length > 0) target.updatedAt = Math.max(...timestamps);
 }
 
 function preserveConflictPresentation(reference: EntityReference): void {
@@ -1573,34 +1613,13 @@ function closeTaskConflictReference(
   targetProjectId: string,
   source: SimpleChatConflictMetadata,
 ): void {
-  const remoteReference = context.remoteReferencePreservations.get(task)?.activeAgentId;
-  if (remoteReference) {
-    const remoteAgentId = remoteReference.value;
-    const resolved = resolveConflictAgentReference(
-      context,
-      'remote',
-      source.sourceProjectId,
-      targetProjectId,
-      remoteAgentId,
-    );
-    if (remoteAgentId !== undefined && resolved === undefined) {
-      delete task.activeAgentId;
-      retainConflictSourceReferences(task, { activeAgentId: remoteAgentId });
-    } else if (resolved === undefined) {
-      delete task.activeAgentId;
-      clearConflictSourceReferences(task, ['activeAgentId']);
-    } else {
-      task.activeAgentId = resolved;
-      clearConflictSourceReferences(task, ['activeAgentId']);
-    }
-    return;
-  }
   const sourceReferences = readConflictSourceReferences(task);
+  const sourceOrigins = readConflictSourceReferenceOrigins(task);
   const activeAgentId = task.activeAgentId ?? readString(sourceReferences?.activeAgentId);
   if (activeAgentId === undefined) return;
   const remapped = resolveConflictAgentReference(
     context,
-    'local',
+    sourceOrigins?.activeAgentId ?? 'local',
     source.sourceProjectId,
     targetProjectId,
     activeAgentId,
@@ -1621,35 +1640,13 @@ function closeMessageConflictReferences(
   targetTaskId: string,
   source: SimpleChatConflictMetadata,
 ): void {
-  const remoteReferences = context.remoteReferencePreservations.get(chatMessage);
   const sourceReferences = readConflictSourceReferences(chatMessage);
+  const sourceOrigins = readConflictSourceReferenceOrigins(chatMessage);
   const parentMessageId = chatMessage.parentMessageId ?? readString(sourceReferences?.parentMessageId);
-  if (remoteReferences?.parentMessageId) {
-    const remoteParentMessageId = remoteReferences.parentMessageId.value;
-    const resolved = resolveConflictMessageReference(
-      context,
-      'remote',
-      source.sourceProjectId,
-      source.sourceTaskId,
-      targetProjectId,
-      targetTaskId,
-      remoteParentMessageId,
-      { originalId: source.sourceEntityId, copyId: chatMessage.id },
-    );
-    if (remoteParentMessageId !== undefined && resolved === undefined) {
-      delete chatMessage.parentMessageId;
-      retainConflictSourceReferences(chatMessage, { parentMessageId: remoteParentMessageId });
-    } else if (resolved === undefined) {
-      delete chatMessage.parentMessageId;
-      clearConflictSourceReferences(chatMessage, ['parentMessageId']);
-    } else {
-      chatMessage.parentMessageId = resolved;
-      clearConflictSourceReferences(chatMessage, ['parentMessageId']);
-    }
-  } else if (parentMessageId !== undefined) {
+  if (parentMessageId !== undefined) {
     const remapped = resolveConflictMessageReference(
       context,
-      'local',
+      sourceOrigins?.parentMessageId ?? 'local',
       source.sourceProjectId,
       source.sourceTaskId,
       targetProjectId,
@@ -1666,9 +1663,9 @@ function closeMessageConflictReferences(
     }
   }
 
-  const retryContext = mergeRemoteRetryReferenceFields(
-    chatMessage.retryContext ?? sourceReferences?.retryContext,
-    remoteReferences?.retryContext,
+  const retryContext = mergeAuditedRetryReferenceFields(
+    chatMessage.retryContext,
+    sourceReferences?.retryContext,
   );
   if (retryContext === undefined) return;
   const remappedRetryContext = remapRetryContext(
@@ -1678,7 +1675,7 @@ function closeMessageConflictReferences(
     source.sourceTaskId,
     targetProjectId,
     targetTaskId,
-    remoteReferences?.retryContext?.sources,
+    sourceOrigins?.retryContext,
     { originalId: source.sourceEntityId, copyId: chatMessage.id },
   );
   if (remappedRetryContext.value === undefined) delete chatMessage.retryContext;
@@ -1735,24 +1732,30 @@ function trackLocallyMergedReferences(
 }
 
 function preserveRemoteConflictReferences(
-  context: ReplayContext,
   entity: object,
   operation: SimpleChatSyncOperation,
   remoteValue: unknown,
 ): void {
   if (!isRecord(operation.baseValue) || !isRecord(operation.value) || !isRecord(remoteValue)) return;
-  const preservation: RemoteReferencePreservation = {};
+  const value = entity as Record<string, unknown>;
+  const origins: SimpleChatConflictSourceReferenceOrigins = {};
   if (operation.entityType === 'task' && fieldComesOnlyFromBranch(
     operation.baseValue,
     remoteValue,
     operation.value,
     'activeAgentId',
   )) {
-    preservation.activeAgentId = { value: readString(remoteValue.activeAgentId) };
+    const activeAgentId = readString(remoteValue.activeAgentId);
+    if (activeAgentId === undefined) delete value.activeAgentId;
+    else value.activeAgentId = activeAgentId;
+    origins.activeAgentId = 'remote';
   }
   if (operation.entityType === 'message') {
     if (fieldComesOnlyFromBranch(operation.baseValue, remoteValue, operation.value, 'parentMessageId')) {
-      preservation.parentMessageId = { value: readString(remoteValue.parentMessageId) };
+      const parentMessageId = readString(remoteValue.parentMessageId);
+      if (parentMessageId === undefined) delete value.parentMessageId;
+      else value.parentMessageId = parentMessageId;
+      origins.parentMessageId = referenceOrigin(parentMessageId, operation.entityId, 'remote');
     }
     const retrySources = referenceSourcesFromBranch(
       operation.baseValue.retryContext,
@@ -1760,15 +1763,24 @@ function preserveRemoteConflictReferences(
       operation.value.retryContext,
     );
     if (retrySources && isRecord(remoteValue.retryContext)) {
-      preservation.retryContext = {
-        value: cloneUnknown(remoteValue.retryContext),
-        sources: retrySources,
-      };
+      const sourceReferences = readConflictSourceReferences(entity);
+      const retryContext = mergeRemoteRetryReferenceFields(
+        sourceReferences?.retryContext ?? value.retryContext,
+        remoteValue.retryContext,
+        retrySources,
+      );
+      value.retryContext = retryContext;
+      if (sourceReferences?.retryContext !== undefined) {
+        retainConflictSourceReferences(entity, { retryContext });
+      }
+      origins.retryContext = remoteRetryReferenceOrigins(
+        remoteValue.retryContext,
+        retrySources,
+        operation.entityId,
+      );
     }
   }
-  if (Object.keys(preservation).length > 0) {
-    context.remoteReferencePreservations.set(entity, preservation);
-  }
+  retainConflictSourceReferenceOrigins(entity, origins);
 }
 
 function fieldComesOnlyFromBranch(
@@ -1799,6 +1811,74 @@ function referenceSourcesFromBranch(
     if (fieldComesOnlyFromBranch(base, branch, other, key)) sources[key] = true;
   }
   return Object.keys(sources).length === 0 ? undefined : sources;
+}
+
+function localMessageReferenceOrigins(
+  chatMessage: SimpleChatMessage,
+  originalMessageId: string,
+): SimpleChatConflictSourceReferenceOrigins {
+  const origins: SimpleChatConflictSourceReferenceOrigins = {};
+  if (chatMessage.parentMessageId !== undefined) {
+    origins.parentMessageId = referenceOrigin(chatMessage.parentMessageId, originalMessageId, 'local');
+  }
+  if (isRecord(chatMessage.retryContext)) {
+    origins.retryContext = retryReferenceOrigins(
+      chatMessage.retryContext,
+      originalMessageId,
+      'local',
+    );
+  }
+  return origins;
+}
+
+function remoteRetryReferenceOrigins(
+  retryContext: Record<string, unknown>,
+  remoteSources: LocalRetryReferenceSources,
+  originalMessageId: string,
+): SimpleChatConflictRetryReferenceOrigins {
+  const origins: SimpleChatConflictRetryReferenceOrigins = {};
+  for (const key of ['projectId', 'taskId'] as const) {
+    if (remoteSources[key]) origins[key] = 'remote';
+  }
+  for (const key of ['userMessageId', 'assistantMessageId'] as const) {
+    if (!remoteSources[key]) continue;
+    origins[key] = referenceOrigin(readString(retryContext[key]), originalMessageId, 'remote');
+  }
+  if (remoteSources.historyMessageIds && Array.isArray(retryContext.historyMessageIds)) {
+    origins.historyMessageIds = retryContext.historyMessageIds.map(item => (
+      referenceOrigin(readString(item), originalMessageId, 'remote')
+    ));
+  }
+  return origins;
+}
+
+function retryReferenceOrigins(
+  retryContext: Record<string, unknown>,
+  originalMessageId: string,
+  branch: 'local' | 'remote',
+): SimpleChatConflictRetryReferenceOrigins {
+  const origins: SimpleChatConflictRetryReferenceOrigins = {};
+  for (const key of ['projectId', 'taskId'] as const) {
+    if (Object.prototype.hasOwnProperty.call(retryContext, key)) origins[key] = branch;
+  }
+  for (const key of ['userMessageId', 'assistantMessageId'] as const) {
+    if (!Object.prototype.hasOwnProperty.call(retryContext, key)) continue;
+    origins[key] = referenceOrigin(readString(retryContext[key]), originalMessageId, branch);
+  }
+  if (Array.isArray(retryContext.historyMessageIds)) {
+    origins.historyMessageIds = retryContext.historyMessageIds.map(item => (
+      referenceOrigin(readString(item), originalMessageId, branch)
+    ));
+  }
+  return origins;
+}
+
+function referenceOrigin(
+  referenceId: string | undefined,
+  originalMessageId: string,
+  branch: 'local' | 'remote',
+): SimpleChatConflictReferenceOrigin {
+  return referenceId === originalMessageId ? 'self' : branch;
 }
 
 function closeLocallyMergedReferences(context: ReplayContext): void {
@@ -1862,16 +1942,12 @@ function closeLocallyMergedRetryContext(
 
 function mergeRemoteRetryReferenceFields(
   current: unknown,
-  preservation: RemoteReferencePreservation['retryContext'],
-): SimpleChatMessage['retryContext'] | undefined {
-  if (!preservation) {
-    return current === undefined
-      ? undefined
-      : cloneUnknown(current) as SimpleChatMessage['retryContext'];
-  }
+  remoteValue: Record<string, unknown>,
+  remoteSources: LocalRetryReferenceSources,
+): SimpleChatMessage['retryContext'] {
   const retryContext = isRecord(current)
     ? cloneUnknown(current) as unknown as Record<string, unknown>
-    : cloneUnknown(preservation.value);
+    : cloneUnknown(remoteValue);
   for (const key of [
     'projectId',
     'taskId',
@@ -1879,9 +1955,38 @@ function mergeRemoteRetryReferenceFields(
     'assistantMessageId',
     'historyMessageIds',
   ] as const) {
-    if (!preservation.sources[key]) continue;
-    if (Object.prototype.hasOwnProperty.call(preservation.value, key)) {
-      retryContext[key] = cloneUnknown(preservation.value[key]);
+    if (!remoteSources[key]) continue;
+    if (Object.prototype.hasOwnProperty.call(remoteValue, key)) {
+      retryContext[key] = cloneUnknown(remoteValue[key]);
+    } else {
+      delete retryContext[key];
+    }
+  }
+  return retryContext as unknown as SimpleChatMessage['retryContext'];
+}
+
+function mergeAuditedRetryReferenceFields(
+  current: unknown,
+  audited: unknown,
+): SimpleChatMessage['retryContext'] | undefined {
+  if (audited === undefined) {
+    return current === undefined
+      ? undefined
+      : cloneUnknown(current) as SimpleChatMessage['retryContext'];
+  }
+  if (!isRecord(audited)) return cloneUnknown(audited) as SimpleChatMessage['retryContext'];
+  const retryContext = isRecord(current)
+    ? cloneUnknown(current) as Record<string, unknown>
+    : cloneUnknown(audited);
+  for (const key of [
+    'projectId',
+    'taskId',
+    'userMessageId',
+    'assistantMessageId',
+    'historyMessageIds',
+  ] as const) {
+    if (Object.prototype.hasOwnProperty.call(audited, key)) {
+      retryContext[key] = cloneUnknown(audited[key]);
     } else {
       delete retryContext[key];
     }
@@ -1893,6 +1998,15 @@ function readConflictSourceReferences(entity: object): Record<string, unknown> |
   const value = entity as Record<string, unknown>;
   return isRecord(value.syncConflict) && isRecord(value.syncConflict.sourceReferences)
     ? value.syncConflict.sourceReferences
+    : undefined;
+}
+
+function readConflictSourceReferenceOrigins(
+  entity: object,
+): SimpleChatConflictSourceReferenceOrigins | undefined {
+  const value = entity as Record<string, unknown>;
+  return isRecord(value.syncConflict) && isRecord(value.syncConflict.sourceReferenceOrigins)
+    ? value.syncConflict.sourceReferenceOrigins as unknown as SimpleChatConflictSourceReferenceOrigins
     : undefined;
 }
 
@@ -2205,7 +2319,7 @@ function resolveConflictMessageReference(
   self?: { originalId: string; copyId: string },
 ): string | undefined {
   if (messageId === undefined) return undefined;
-  if (self && messageId === self.originalId) return self.copyId;
+  if (source === 'self') return self?.copyId;
   if (source === 'local') {
     return remapMessageReference(
       context,
@@ -2228,7 +2342,7 @@ function remapRetryContext(
   originalTaskId: string | undefined,
   targetProjectId: string,
   targetTaskId: string | undefined,
-  remoteSources?: LocalRetryReferenceSources,
+  sourceOrigins?: SimpleChatConflictRetryReferenceOrigins,
   self?: { originalId: string; copyId: string },
 ): RemappedRetryContext {
   if (input === undefined) return {};
@@ -2236,19 +2350,23 @@ function remapRetryContext(
     return { value: cloneUnknown(input) as SimpleChatMessage['retryContext'] };
   }
   const value = cloneUnknown(input) as Record<string, unknown>;
-  if (remoteSources?.projectId) {
+  if (sourceOrigins?.projectId === 'remote') {
     const projectId = readString(value.projectId);
     if (projectId === undefined || !context.projects.some(project => project.id === projectId)) {
       return { danglingSource: cloneUnknown(input) as unknown as SimpleChatMessage['retryContext'] };
     }
+  } else if (sourceOrigins?.projectId === 'self') {
+    value.projectId = targetProjectId;
   } else if (value.projectId === originalProjectId) {
     value.projectId = targetProjectId;
   }
-  if (remoteSources?.taskId) {
+  if (sourceOrigins?.taskId === 'remote') {
     const taskId = readString(value.taskId);
     if (taskId === undefined || !findTask(context.projects, targetProjectId, taskId)) {
       return { danglingSource: cloneUnknown(input) as unknown as SimpleChatMessage['retryContext'] };
     }
+  } else if (sourceOrigins?.taskId === 'self') {
+    value.taskId = targetTaskId;
   } else if (value.taskId === originalTaskId && targetTaskId !== undefined) {
     value.taskId = targetTaskId;
   }
@@ -2256,7 +2374,7 @@ function remapRetryContext(
     const messageId = readString(value[key]);
     const remapped = resolveConflictMessageReference(
       context,
-      remoteSources?.[key] ? 'remote' : 'local',
+      sourceOrigins?.[key] ?? 'local',
       originalProjectId,
       originalTaskId,
       targetProjectId,
@@ -2273,12 +2391,12 @@ function remapRetryContext(
   }
   let removedHistoryReference = false;
   if (Array.isArray(value.historyMessageIds)) {
-    value.historyMessageIds = value.historyMessageIds.flatMap(item => {
+    value.historyMessageIds = value.historyMessageIds.flatMap((item, index) => {
       const messageId = readString(item);
       if (messageId === undefined) return [cloneUnknown(item)];
       const remapped = resolveConflictMessageReference(
         context,
-        remoteSources?.historyMessageIds ? 'remote' : 'local',
+        sourceOrigins?.historyMessageIds?.[index] ?? 'local',
         originalProjectId,
         originalTaskId,
         targetProjectId,
@@ -2780,6 +2898,27 @@ function retainConflictSourceReferences(
   value.syncConflict.sourceReferences = { ...existing, ...cloneUnknown(references) };
 }
 
+function retainConflictSourceReferenceOrigins(
+  entity: object,
+  origins: SimpleChatConflictSourceReferenceOrigins,
+): void {
+  if (Object.keys(origins).length === 0) return;
+  const value = entity as Record<string, unknown>;
+  if (!isRecord(value.syncConflict)) return;
+  const existing = isRecord(value.syncConflict.sourceReferenceOrigins)
+    ? value.syncConflict.sourceReferenceOrigins
+    : {};
+  const existingRetryContext = isRecord(existing.retryContext) ? existing.retryContext : {};
+  const retryContext = origins.retryContext === undefined
+    ? existing.retryContext
+    : { ...existingRetryContext, ...cloneUnknown(origins.retryContext) };
+  value.syncConflict.sourceReferenceOrigins = {
+    ...existing,
+    ...cloneUnknown(origins),
+    ...(retryContext === undefined ? {} : { retryContext }),
+  };
+}
+
 function clearConflictSourceReferences(
   entity: object,
   keys: Array<keyof SimpleChatConflictSourceReferences>,
@@ -3117,6 +3256,7 @@ function validateConflictMetadata(value: unknown): SimpleChatProjectValidationRe
       validateRetryContext(references.retryContext),
     );
   }
+  const originsResult = validateConflictSourceReferenceOrigins(value.sourceReferenceOrigins);
   return firstValidation(
     validateRequiredId(value, 'operationId'),
     validateRequiredEnum(value, 'sourceEntityType', [
@@ -3128,6 +3268,33 @@ function validateConflictMetadata(value: unknown): SimpleChatProjectValidationRe
     validateOptionalId(value, 'sourceMessageId'),
     validateRequiredNumber(value, 'conflictedAt'),
     referencesResult,
+    originsResult,
+  );
+}
+
+function validateConflictSourceReferenceOrigins(
+  value: unknown,
+): SimpleChatProjectValidationResult | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return invalidValidation('value');
+  const allowed = ['local', 'remote', 'self'] as const;
+  let retryResult: SimpleChatProjectValidationResult | undefined;
+  if (value.retryContext !== undefined) {
+    if (!isRecord(value.retryContext)) return invalidValidation('value');
+    retryResult = firstValidation(
+      validateOptionalEnum(value.retryContext, 'projectId', allowed),
+      validateOptionalEnum(value.retryContext, 'taskId', allowed),
+      validateOptionalEnum(value.retryContext, 'userMessageId', allowed),
+      validateOptionalEnum(value.retryContext, 'assistantMessageId', allowed),
+      value.retryContext.historyMessageIds === undefined
+        ? undefined
+        : validateRequiredEnumArray(value.retryContext, 'historyMessageIds', allowed),
+    );
+  }
+  return firstValidation(
+    validateOptionalEnum(value, 'activeAgentId', allowed),
+    validateOptionalEnum(value, 'parentMessageId', allowed),
+    retryResult,
   );
 }
 
