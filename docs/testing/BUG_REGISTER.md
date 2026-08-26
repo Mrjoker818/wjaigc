@@ -2569,3 +2569,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 第二次云端复验 | `origin/main@3ecd2f9b` 对应代码树 `eb205aae` 已在 Coze 构建运行。历史任务刷新后权威数据由 `streaming` 收敛为 `failed`；随后新建任务 `j1ek6ayjmt9gip4e`，APImart `deepseek-v4-flash` 已真实流出标记与正文，5 秒刷新前后 URL 精确保留同一 `projectId + taskId`。刷新后 UI 只有一个重试入口，服务器快照只有 1 条用户消息与 1 条助手消息，助手为 `failed`、错误 `retryable=true`，部分正文保留。Console error/warning 和原生弹窗均为 0。 |
 | 供应商对照 | APImart `Gemini 3.1 Flash Lite Preview` 同场先返回 `get_channel_failed` 和真实 request id；前端按明确失败持久化。该次不计入流式刷新通过，也不误判为产品刷新缺陷。 |
 | 状态 | **已修复 / Coze 云端关闭。** 关闭范围仅为精确任务恢复与中断终态持久化；Deep Research 单 Artifact、联网模式和第三方 exactly-once 仍属于 V588-CHAT-002 的独立未关闭项。证据：`docs/testing/evidence/v588-chat-002-refresh-recovery-second-candidate-cloud-2026-08-26.json` 与同名 PNG。 |
+
+### V588-CHAT-002-BUG-004 - Deep Research 完成报告未创建持久 Artifact（2026-08-26）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：研究报告已完成但 Artifacts 面板为空，刷新后无法从任务恢复研究产物。 |
+| 真实复现 | Google Chrome“用户1”在 Coze 使用 APImart `deepseek-v4-flash` 完成任务 `m210yfr7mt9gvgiy`。服务器权威快照严格为 1 条用户消息、1 条 `completed` 助手消息，正文长度 1733 且冻结重试上下文完整；但面板显示“暂无 Artifacts”，数量为 0。 |
+| 根因 | Deep Research `citations` 事件只写组件局部 `artifacts` 状态；面板和任务持久化却读取 `messages[].artifacts`。两套状态源断开，结果既不显示也不入库。 |
+| RED | 成功研究组件测试新增“同一助手消息必须持有 1 个稳定 Artifact，面板不得为空”断言；旧实现稳定得到 `1 failed / 18 skipped`。 |
+| 最小修复 | `main@90772d42` 删除游离局部状态，面板从消息派生；`citations` 以 `${assistantMessageId}-research` 在精确助手消息中幂等更新一个 `ChatArtifact`，保留项目、任务、创建时间与版本。未修改供应商、模型、消息 ID、积分、数据库结构或 `stable`。 |
+| 本地回归 | 目标文件 `19/19`；全仓 `541 passed / 20 skipped files`、`3536 passed / 117 skipped tests`；TypeScript 通过，ESLint `0 errors / 967 historical warnings`，Next.js 生产构建通过并生成 116 个静态页面。117 项 PostgreSQL 隔离测试继续不计为通过。 |
+| 同场联网验证 | 任务 `kmvx7l7gmt9h7o60` 离线首次失败后只有 1 个失败卡和 1 个重试按钮；恢复在线后只发送 1 个重试请求，复用相同消息 ID、APImart 模型配对和幂等键，HTTP 200 后服务器仍为各 1 条用户/助手消息，助手 `completed`。联网原位重试子项通过。 |
+| 当前阻塞 | 修复已推送 `main@90772d42`，但 Coze 沙箱公开访问返回 `instance_not_found`，尚未拉取和运行候选；不得把本地结果写成云端关闭。 |
+| 状态 | **本地已修复 / 云端候选待部署。** 只有刷新前后 UI 与服务器都严格保持同一个 Artifact，且 Console/原生弹窗为 0，才关闭本项和 `V588-CHAT-002`。证据：`docs/testing/evidence/v588-chat-002-deep-research-artifact-candidate-2026-08-26.json`。 |

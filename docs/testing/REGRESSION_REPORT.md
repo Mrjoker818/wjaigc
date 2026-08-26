@@ -1781,3 +1781,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 再新建任务 `j1ek6ayjmt9gip4e`，选择 APImart `deepseek-v4-flash`，响应真实流出标记 `V588_REFRESH_RECOVERY_FRESH_1787710278255` 与正文后 5 秒刷新。刷新前后 URL 的 `projectId + taskId` 完全一致；刷新后部分正文保留，只出现一个重试入口，服务器仍严格为 1 条用户消息与 1 条助手消息，助手终态 `failed`。
 - 浏览器 Console error/warning 为 `0/0`，原生弹窗为 0。作为供应商对照，APImart Gemini 通道的 `get_channel_failed` 被明确展示并持久化为失败，没有被当成刷新恢复产品缺陷。
 - **回归结论：V588-CHAT-002-BUG-003 云端关闭。** 本结论不扩大到第三方 exactly-once、联网模式或 Deep Research 单 Artifact；V588-CHAT-002 整项仍为部分通过。机器证据见 `docs/testing/evidence/v588-chat-002-refresh-recovery-second-candidate-cloud-2026-08-26.json` 与 PNG。
+
+## 2026-08-26 V588-CHAT-002 联网重试关闭与 Deep Research Artifact 候选
+
+- Google Chrome“用户1”对联网任务 `kmvx7l7gmt9h7o60` 执行标签级离线故障注入。首次请求得到明确 `Failed to fetch`，界面只有 1 张失败卡和 1 个“重试”按钮；恢复在线后只点击一次重试。
+- 初始与重试正文保持同一消息、APImart `api_1778428130626_2qpg71v + deepseek-v4-flash`、`webSearch=true` 和幂等键。重试 HTTP 200；服务器快照严格为 1 条用户消息、1 条搜索消息、1 条 `completed` 助手消息。Console error/warning 与原生弹窗为 0。**联网原位重试子项关闭。**
+- 同场 Deep Research 任务 `m210yfr7mt9gvgiy` 已真实 `completed`，服务器只有一组消息且正文长度 1733，但 Artifacts 面板在刷新前已经显示“暂无 Artifacts”。这不是刷新丢失，而是 Artifact 从未进入消息持久状态。
+- 按 RED -> 最小修复，`90772d42` 统一以 `messages[].artifacts` 为唯一来源，并在精确助手消息上幂等写入稳定研究 Artifact。目标 `19/19`、全仓 `3536` 项已执行测试、TypeScript、零错误 Lint 和 `116` 页生产构建通过；117 项 PostgreSQL 隔离测试仍跳过。
+- **回归结论：联网模式通过；Deep Research Artifact 本地通过 / 云端待验。** Coze 当前返回 `instance_not_found`，候选尚未运行；刷新前后单一 Artifact 与服务器快照未取得前，V588-CHAT-002 仍不关闭。

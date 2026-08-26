@@ -399,3 +399,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 历史任务和新建 APImart `deepseek-v4-flash` 流式任务均在刷新后恢复精确 `projectId + taskId`；新任务刷新前已真实流出标记和正文，刷新后部分正文与单一重试入口保留。
 - 服务器权威快照严格为 1 条用户消息、1 条助手消息，助手 `status=failed`、`retryable=true`；Console error/warning 与原生弹窗均为 0。Gemini 通道的 `get_channel_failed` 作为供应商对照保留，不计作产品刷新缺陷。
 - **当前状态：V588-CHAT-002-BUG-003 已云端关闭 / V588-CHAT-002 整项仍为部分通过。** 下一步仍先关闭联网模式与 Deep Research 单 Artifact，不得跳到 `V588-CHAT-003`；第三方 exactly-once 不作无证据承诺。
+
+## 2026-08-26 V588-CHAT-002 联网重试与 Artifact 检查点
+
+- 联网模式已用 Google Chrome 对 APImart `deepseek-v4-flash` 完成真实离线失败和在线原位重试：同一消息、同一模型配对、`webSearch=true`、同一幂等键、单一 HTTP 200 请求和单一完成消息均有证据，联网子项关闭。
+- Deep Research 同场完成后服务器已有单一 `completed` 助手消息，但 Artifacts 面板为 0，确认当前线局部状态与消息持久状态断开。该缺陷按 RED -> 最小接入修复为消息级单一 Artifact，没有吸收 donor 会话、同步或原始 URL 桥接。
+- `main@90772d42` 已推送；目标 `19/19`、全仓 `3536` 项已执行测试、TypeScript、ESLint `0 errors / 967 historical warnings` 和 Next.js 生产构建通过。`stable@52f7c601` 与只读 V5.8.8 donor 未改动。
+- **当前状态：联网模式已关闭 / Deep Research Artifact 本地候选通过、Coze 待验。** 沙箱当前返回 `instance_not_found`；恢复后唯一动作是部署 `90772d42` 并验证刷新前后单一 Artifact。完成前不进入 `V588-CHAT-003`，也不重复已关闭的刷新恢复或联网重试。

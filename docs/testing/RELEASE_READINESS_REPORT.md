@@ -1439,3 +1439,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `origin/main@3ecd2f9b` 的代码树 `eb205aae` 已在 Coze 生产构建运行，健康路由与 12 个静态资源全部通过；`stable@52f7c601` 未变化。
 - 历史遗留任务和全新 APImart `deepseek-v4-flash` 流式任务都证明：同一任务身份在刷新后保留，服务器权威助手状态收敛到 `failed`，错误可重试，部分正文、单一用户消息和单一助手消息均可恢复。
 - **专项判定：V588-CHAT-002-BUG-003 通过。全平台仍为有条件通过。** V588-CHAT-002 尚有 Deep Research 单 Artifact、联网重试和第三方 exactly-once 能力边界，不能因刷新缺陷关闭而整体宣布完成；PostgreSQL 隔离测试的 117 项跳过及部署期旧 chunk 门禁也继续保留。
+
+## 2026-08-26 V588-CHAT-002 最新发布判断
+
+- 联网模式的真实离线失败、单一原位重试、冻结模型配对、相同幂等键、HTTP 200 完成终态和消息唯一性已经由 Google Chrome 与服务器权威快照证明，联网子项可关闭。
+- Deep Research 完成态真实暴露“正文完成但 Artifact 为 0”的 P1 缺陷；`main@90772d42` 已按 RED/GREEN 最小修复，并通过全量测试、TypeScript、零错误 Lint 和生产构建。
+- Coze 沙箱现为 `instance_not_found`，未运行 `90772d42`。因此不能用本地通过替代刷新前后单一 Artifact 的云端证据。
+- **专项判定：候选代码本地有条件通过，V588-CHAT-002 与全平台仍为有条件通过。** 云端恢复后必须精确部署 `90772d42` 并完成同任务刷新前后 UI、服务器 Artifact 数量及浏览器健康复验。

@@ -1,0 +1,82 @@
+{
+  "testId": "V588-CHAT-002-deep-research-artifact-candidate",
+  "recordedAt": "2026-08-26T11:18:04.6155673+08:00",
+  "browser": "Google Chrome user profile 用户1",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "cloudSourceBeforeFix": {
+    "cozeHeadShort": "2dd7d4ea",
+    "githubSourceCommit": "3ecd2f9b3b5c1efaafc6be67f2783252315f3d6d",
+    "githubSourceTree": "eb205aae0dedfd9f40c2d0bef1d9092f5e1737ab"
+  },
+  "githubFix": {
+    "main": "90772d42",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableTouched": false
+  },
+  "provider": {
+    "name": "APImartLLM",
+    "providerId": "api_1778428130626_2qpg71v",
+    "model": "deepseek-v4-flash"
+  },
+  "deepResearchFailureProof": {
+    "projectId": "s3zk7z3gmsoo15gz",
+    "taskId": "m210yfr7mt9gvgiy",
+    "marker": "V588_DEEP_RESEARCH_DONE_1787710862153",
+    "uiReportCompleted": true,
+    "serverUserMessages": 1,
+    "serverAssistantMessages": 1,
+    "serverAssistantStatus": "completed",
+    "serverAssistantContentLength": 1733,
+    "serverRetryContextFrozen": true,
+    "uiArtifactCount": 0,
+    "uiEmptyState": "暂无 Artifacts",
+    "result": "FAIL"
+  },
+  "internetSearchRetryProof": {
+    "projectId": "s3zk7z3gmsoo15gz",
+    "taskId": "kmvx7l7gmt9h7o60",
+    "marker": "V588_WEB_RETRY_1787711419946",
+    "initialFailure": "Failed to fetch",
+    "failureCards": 1,
+    "retryButtons": 1,
+    "retryRequests": 1,
+    "retryHttpStatus": 200,
+    "userMessages": 1,
+    "assistantMessages": 1,
+    "assistantStatus": "completed",
+    "responseMessageId": "fk1fd5ab",
+    "idempotencyKey": "simple-chat-retry:kmvx7l7gmt9h7o60:fk1fd5ab",
+    "frozenProviderAndModel": true,
+    "result": "PASS"
+  },
+  "rootCause": "Deep Research citations updated a component-local artifacts state while the panel and persistence source read message.artifacts, so the completed report never created a visible or persistent Artifact.",
+  "minimalFix": "Derive the panel list from message.artifacts and upsert one stable assistant-message Artifact on citations; preserve project/task ownership, creation time and version semantics.",
+  "localVerification": {
+    "red": "1 failed / 18 skipped",
+    "focusedGreen": "19 passed",
+    "fullTestFiles": "541 passed / 20 skipped",
+    "fullTests": "3536 passed / 117 skipped",
+    "typecheck": "PASS",
+    "lint": "0 errors / 967 historical warnings",
+    "build": "PASS / 116 static pages",
+    "postgresBoundary": "117 tests skipped because no isolated PostgreSQL test database was configured"
+  },
+  "browserHealth": {
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "nativeDialog": false
+  },
+  "cloudRetest": {
+    "status": "BLOCKED_BY_SANDBOX_OFFLINE",
+    "errorCode": "instance_not_found",
+    "candidateCommit": "90772d42",
+    "required": [
+      "Coze pulls and runs exactly 90772d42",
+      "one completed Deep Research message contains exactly one Artifact before refresh",
+      "the same task still contains exactly one Artifact after refresh",
+      "server authoritative snapshot contains the same single Artifact",
+      "console error/warning and native dialog remain zero"
+    ]
+  },
+  "result": "LOCAL_FIX_PASS_CLOUD_RETEST_PENDING"
+}
