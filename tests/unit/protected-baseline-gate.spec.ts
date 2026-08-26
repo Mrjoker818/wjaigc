@@ -123,6 +123,11 @@ const historicalSourceAuthorizations = [
   ['src/lib/server-api-config.ts', '89fd45d7'],
   ['src/lib/server-auth.ts', '6102572b'],
   ['src/lib/simple-chat-logout.ts', 'b0cd946f'],
+  ['src/components/simple-chat/simple-chat-sync-status.tsx', '37fb6d12'],
+  ['src/lib/simple-chat-project-sync.ts', '6a5e7baa'],
+  ['src/lib/simple-chat-sync-client.ts', '0ce9f539'],
+  ['src/lib/simple-chat-sync-server.ts', 'ceac3db8'],
+  ['src/lib/simple-chat-sync-storage.ts', '7b465597'],
   ['src/lib/simple-chat-retry.ts', '3773f66c'],
   ['src/lib/task-core/candidate-model-admission.ts', '80b6be0a'],
   ['src/lib/task-core/descriptor-image-request-fields.ts', '80b6be0a'],
@@ -210,6 +215,13 @@ describe('protected baseline release gate', () => {
       sourceCommits.map((sourceCommit, index) => [sourceCommit, resolvedSourceCommits[index]]),
     );
     const authorizedPaths = historicalSourceAuthorizations.map(([path]) => path);
+    const task8ProtectedPaths = [
+      'src/components/simple-chat/simple-chat-sync-status.tsx',
+      'src/lib/simple-chat-project-sync.ts',
+      'src/lib/simple-chat-sync-client.ts',
+      'src/lib/simple-chat-sync-server.ts',
+      'src/lib/simple-chat-sync-storage.ts',
+    ];
     const provenanceOutput = execFileSync(
       'git',
       [
@@ -241,6 +253,13 @@ describe('protected baseline release gate', () => {
       expect(allowedPaths).toContain(path);
       expect(provenance.authorizations).toContainEqual({ path, sourceCommit });
       expect(pathsByCommit.get(fullSourceCommits.get(sourceCommit)!)).toContain(path);
+    }
+    expect(allowedPaths.some(path => path.includes('*'))).toBe(false);
+    expect(provenance.authorizations.some(({ path }) => path.includes('*'))).toBe(false);
+    for (const path of task8ProtectedPaths) {
+      expect(allowedPaths).toContain(path);
+      expect(authorizedPaths).toContain(path);
+      expect(path.endsWith('/')).toBe(false);
     }
 
     for (const broadPath of [

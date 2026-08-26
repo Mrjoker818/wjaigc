@@ -6,7 +6,7 @@
  * 它们不代表真实供应商成功，也绝不能作为云端验收依据。
  */
 
-import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
 
 import { collectBrowserEvidence, saveBrowserEvidence } from '../helpers/evidence';
 
@@ -59,6 +59,11 @@ type ModelFixture = {
 
 type ChatProjectsSnapshot = {
   value: unknown;
+  syncRevision: number;
+};
+
+type SeedChatProjectsOptions = {
+  blockBrowserWrites?: boolean;
 };
 
 function credentialsFor(workerIndex: number): RealCredentials {
@@ -88,6 +93,15 @@ function credentialsFor(workerIndex: number): RealCredentials {
 /** 保持 donor 的硬门禁语义：没有真实账号时测试失败，绝不 skip。 */
 function requireRealEnvironment(workerIndex: number): RealCredentials {
   return credentialsFor(workerIndex);
+}
+
+function requireSecondaryRealEnvironment(): RealCredentials {
+  const username = process.env.E2E_TEST_USERNAME_1?.trim();
+  const password = process.env.E2E_TEST_PASSWORD_1?.trim();
+  if (!username || !password) {
+    throw new Error('账号隔离门禁必须提供独立的 E2E_TEST_USERNAME_1 / E2E_TEST_PASSWORD_1 真实账号。');
+  }
+  return { username, password };
 }
 
 function createProject(
@@ -138,8 +152,11 @@ function modelFixtures(kind: 'chat' | 'image', count: number): ModelFixture[] {
   }));
 }
 
-async function login(page: Page, testInfo: TestInfo): Promise<void> {
-  const credentials = requireRealEnvironment(testInfo.workerIndex);
+async function login(
+  page: Page,
+  testInfo: TestInfo,
+  credentials: RealCredentials = requireRealEnvironment(testInfo.workerIndex),
+): Promise<void> {
   await page.context().clearCookies();
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => {
@@ -165,29 +182,41 @@ async function login(page: Page, testInfo: TestInfo): Promise<void> {
 async function readChatProjectsSnapshot(page: Page): Promise<ChatProjectsSnapshot> {
   const current = await page.request.get(`/api/user-data/sync?key=${CHAT_PROJECTS_SYNC_KEY}`);
   expect(current.ok(), `读取 chat fixture 返回 HTTP ${current.status()}`).toBe(true);
-  const payload = await current.json() as { value?: unknown };
-  return { value: structuredClone(payload.value ?? null) };
+  const payload = await current.json() as { value?: unknown; syncRevision?: unknown };
+  expect(Number.isSafeInteger(payload.syncRevision), 'chat fixture GET must return a safe syncRevision').toBe(true);
+  return {
+    value: structuredClone(payload.value ?? null),
+    syncRevision: payload.syncRevision as number,
+  };
 }
 
 async function blockBrowserChatProjectWrites(page: Page): Promise<void> {
+  let blockedRevision = 0;
   await page.route('**/api/user-data/sync', async route => {
     const request = route.request();
     if (request.method() !== 'POST') {
       await route.continue();
       return;
     }
-    let payload: { key?: unknown } | null = null;
+    let payload: { key?: unknown; expectedRevision?: unknown } | null = null;
     try {
       const parsed = request.postDataJSON();
       payload = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as { key?: unknown }
+        ? parsed as { key?: unknown; expectedRevision?: unknown }
         : null;
     } catch {}
     if (payload?.key === CHAT_PROJECTS_SYNC_KEY) {
+      blockedRevision = Number.isSafeInteger(payload.expectedRevision)
+        ? (payload.expectedRevision as number) + 1
+        : blockedRevision + 1;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, code: 'CHAT_PROJECT_WRITE_BLOCKED_FOR_E2E' }),
+        body: JSON.stringify({
+          success: true,
+          code: 'CHAT_PROJECT_WRITE_BLOCKED_FOR_E2E',
+          syncRevision: blockedRevision,
+        }),
       });
       return;
     }
@@ -199,29 +228,75 @@ async function seedChatProjects(
   page: Page,
   testInfo: TestInfo,
   fixtures: ChatProjectFixture[],
+  options: SeedChatProjectsOptions = {},
 ): Promise<void> {
   if (chatProjectSnapshotsByTest.has(testInfo.testId)) {
     throw new Error('Each Stage 5 gate may seed chat projects only once so its exact original value can be restored.');
   }
-  await blockBrowserChatProjectWrites(page);
-  const snapshot = await readChatProjectsSnapshot(page);
-  chatProjectSnapshotsByTest.set(testInfo.testId, snapshot);
-  const existing = Array.isArray(snapshot.value) ? snapshot.value as Array<{ id?: unknown }> : [];
+  const { blockBrowserWrites = true } = options;
+  if (blockBrowserWrites) await blockBrowserChatProjectWrites(page);
+  const before = await readChatProjectsSnapshot(page);
+  chatProjectSnapshotsByTest.set(testInfo.testId, before);
+  const existing = Array.isArray(before.value) ? before.value as Array<{ id?: unknown }> : [];
   const fixtureIds = new Set(fixtures.map(project => project.id));
   const merged = [...existing.filter(project => typeof project?.id !== 'string' || !fixtureIds.has(project.id)), ...fixtures];
   const persisted = await page.request.post('/api/user-data/sync', {
-    data: { key: CHAT_PROJECTS_SYNC_KEY, value: merged },
+    data: {
+      key: CHAT_PROJECTS_SYNC_KEY,
+      value: merged,
+      expectedRevision: before.syncRevision,
+    },
   });
   expect(persisted.ok(), `写入 chat fixture 返回 HTTP ${persisted.status()}`).toBe(true);
+  const persistedBody = await persisted.json() as { syncRevision?: unknown };
+  expect(persistedBody.syncRevision).toBe(before.syncRevision + 1);
 }
 
 async function restoreChatProjectsSnapshot(page: Page, snapshot: ChatProjectsSnapshot): Promise<void> {
+  const current = await readChatProjectsSnapshot(page);
   const restored = await page.request.post('/api/user-data/sync', {
-    data: { key: CHAT_PROJECTS_SYNC_KEY, value: snapshot.value },
+    data: {
+      key: CHAT_PROJECTS_SYNC_KEY,
+      value: snapshot.value,
+      expectedRevision: current.syncRevision,
+    },
   });
   expect(restored.ok(), `恢复 chat fixture 返回 HTTP ${restored.status()}`).toBe(true);
   const verified = await readChatProjectsSnapshot(page);
   expect(verified.value, 'chat fixture cleanup must restore the exact original value and ordering').toEqual(snapshot.value);
+}
+
+function isChatProjectsSyncPost(response: { url(): string; request(): { method(): string } }): boolean {
+  return new URL(response.url()).pathname === '/api/user-data/sync'
+    && response.request().method() === 'POST';
+}
+
+function isChatProjectsSyncRoute(route: Route): boolean {
+  const request = route.request();
+  if (request.method() !== 'POST') return false;
+  try {
+    const payload = request.postDataJSON() as { key?: unknown } | null;
+    return payload?.key === CHAT_PROJECTS_SYNC_KEY;
+  } catch {
+    return false;
+  }
+}
+
+async function expectSimpleChatSyncStatus(page: Page, label: string): Promise<void> {
+  await expect(page.getByTestId('simple-chat-sync-status')).toContainText(label, { timeout: 30_000 });
+}
+
+function projectRow(page: Page, projectName: string): Locator {
+  return page.getByText(projectName, { exact: true }).locator('..').locator('..');
+}
+
+async function renameProject(page: Page, before: string, after: string): Promise<void> {
+  const row = projectRow(page, before);
+  await row.hover();
+  await row.getByTitle('重命名').click();
+  const renameInput = row.locator('input');
+  await renameInput.fill(after);
+  await renameInput.press('Enter');
 }
 
 async function openFixtureProject(page: Page, projectId: string): Promise<void> {
@@ -515,6 +590,198 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
     expect(serializedMessages).toContain('历史文字仍应保留');
     expect(serializedMessages).toContain('新的纯文字消息');
     expect(serializedMessages).not.toContain('data:image/png;base64,broken');
+  });
+
+  test('remote deletion is not resurrected by a stale second tab', async ({ page }, testInfo) => {
+    await login(page, testInfo);
+    const runTag = `delete-${Date.now()}`;
+    const fixture = createProject(runTag, 'project', `删除验证-${runTag}`, [
+      { name: '原始对话', messages: numberedMessages(runTag, 2) },
+    ]);
+    await seedChatProjects(page, testInfo, [fixture], { blockBrowserWrites: false });
+    await openFixtureProject(page, fixture.id);
+    const second = await page.context().newPage();
+    try {
+      await openFixtureProject(second, fixture.id);
+      await expectSimpleChatSyncStatus(page, '已同步');
+      await expectSimpleChatSyncStatus(second, '已同步');
+
+      const deleteResponse = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+      const row = projectRow(page, fixture.name);
+      await row.hover();
+      await row.getByTitle('删除').click();
+      await deleteResponse;
+      await expectSimpleChatSyncStatus(page, '已同步');
+
+      await second.reload({ waitUntil: 'domcontentloaded' });
+      await expect(second.getByText(fixture.name, { exact: true })).toHaveCount(0);
+      await expectSimpleChatSyncStatus(second, '已同步');
+    } finally {
+      if (!second.isClosed()) await second.close();
+    }
+  });
+
+  test('offline edits resume without losing completed messages', async ({ page, context }, testInfo) => {
+    await login(page, testInfo);
+    const runTag = `offline-${Date.now()}`;
+    const fixture = createProject(runTag, 'project', `离线验证-${runTag}`, [
+      { name: '保留消息', messages: numberedMessages(runTag, 4) },
+    ]);
+    await seedChatProjects(page, testInfo, [fixture], { blockBrowserWrites: false });
+    await openFixtureProject(page, fixture.id);
+    await expectSimpleChatSyncStatus(page, '已同步');
+    await context.setOffline(true);
+
+    const renamed = `${fixture.name}-已修改`;
+    await renameProject(page, fixture.name, renamed);
+    await expectSimpleChatSyncStatus(page, '离线，修改将在联网后同步');
+
+    const resumedResponse = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+    await context.setOffline(false);
+    await resumedResponse;
+    await expectSimpleChatSyncStatus(page, '已同步');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(renamed, { exact: true })).toBeVisible();
+    await expect(page.getByText(`消息 4：阶段5门禁载荷 ${runTag}`, { exact: true })).toBeVisible();
+  });
+
+  test('refresh restores persisted projects and completed messages', async ({ page }, testInfo) => {
+    await login(page, testInfo);
+    const runTag = `refresh-${Date.now()}`;
+    const fixture = createProject(runTag, 'project', `刷新恢复-${runTag}`, [
+      { name: '刷新前已完成', messages: numberedMessages(runTag, 3) },
+    ]);
+    await seedChatProjects(page, testInfo, [fixture], { blockBrowserWrites: false });
+    await openFixtureProject(page, fixture.id);
+
+    const renamed = `${fixture.name}-持久化`;
+    const persisted = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+    await renameProject(page, fixture.name, renamed);
+    await persisted;
+    await expectSimpleChatSyncStatus(page, '已同步');
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(renamed, { exact: true })).toBeVisible();
+    await expect(page.getByText(`消息 3：阶段5门禁载荷 ${runTag}`, { exact: true })).toBeVisible();
+    await expectSimpleChatSyncStatus(page, '已同步');
+  });
+
+  test('concurrent tabs preserve a conflict copy instead of overwriting remote edits', async ({ page }, testInfo) => {
+    await login(page, testInfo);
+    const runTag = `conflict-${Date.now()}`;
+    const fixture = createProject(runTag, 'project', `并发冲突-${runTag}`, [
+      { name: '并发原始消息', messages: numberedMessages(runTag, 2) },
+    ]);
+    await seedChatProjects(page, testInfo, [fixture], { blockBrowserWrites: false });
+    await openFixtureProject(page, fixture.id);
+    const second = await page.context().newPage();
+    try {
+      await openFixtureProject(second, fixture.id);
+      await expectSimpleChatSyncStatus(page, '已同步');
+      await expectSimpleChatSyncStatus(second, '已同步');
+
+      const remoteName = `${fixture.name}-远端`;
+      const remotePersisted = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+      await renameProject(page, fixture.name, remoteName);
+      await remotePersisted;
+      await expectSimpleChatSyncStatus(page, '已同步');
+
+      const localName = `${fixture.name}-本地`;
+      const replayPersisted = second.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+      await renameProject(second, fixture.name, localName);
+      await replayPersisted;
+      await expectSimpleChatSyncStatus(second, '已同步');
+      await expect(second.getByText(remoteName, { exact: true })).toBeVisible();
+      await expect(second.getByText(`${localName}（冲突副本）`, { exact: true })).toBeVisible();
+
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.getByText(remoteName, { exact: true })).toBeVisible();
+      await expect(page.getByText(`${localName}（冲突副本）`, { exact: true })).toBeVisible();
+    } finally {
+      if (!second.isClosed()) await second.close();
+    }
+  });
+
+  test("account isolation never exposes another account's projects", async ({ page, browser }, testInfo) => {
+    await login(page, testInfo);
+    const runTag = `isolation-${Date.now()}`;
+    const fixture = createProject(runTag, 'project', `账号A专属-${runTag}`, [
+      { name: '账号A消息', messages: numberedMessages(runTag, 2) },
+    ]);
+    await seedChatProjects(page, testInfo, [fixture], { blockBrowserWrites: false });
+    await openFixtureProject(page, fixture.id);
+    await expect(page.getByText(fixture.name, { exact: true })).toBeVisible();
+
+    const secondaryContext = await browser.newContext();
+    try {
+      const secondaryPage = await secondaryContext.newPage();
+      await login(secondaryPage, testInfo, requireSecondaryRealEnvironment());
+      await secondaryPage.goto(`${BASE_URL}/simple-chat`, { waitUntil: 'domcontentloaded' });
+      await expectSimpleChatSyncStatus(secondaryPage, '已同步');
+      await expect(secondaryPage.getByText(fixture.name, { exact: true })).toHaveCount(0);
+    } finally {
+      await secondaryContext.close();
+    }
+  });
+
+  test('sync status UI reports offline, syncing, conflict, and synced states', async ({ page, context }, testInfo) => {
+    await login(page, testInfo);
+    const runTag = `status-${Date.now()}`;
+    const fixture = createProject(runTag, 'project', `状态验证-${runTag}`, [
+      { name: '状态消息', messages: numberedMessages(runTag, 2) },
+    ]);
+    await seedChatProjects(page, testInfo, [fixture], { blockBrowserWrites: false });
+    await openFixtureProject(page, fixture.id);
+    await expectSimpleChatSyncStatus(page, '已同步');
+
+    await context.setOffline(true);
+    const offlineName = `${fixture.name}-离线`;
+    await renameProject(page, fixture.name, offlineName);
+    await expectSimpleChatSyncStatus(page, '离线，修改将在联网后同步');
+
+    let releaseDelayedPost: () => void = () => {};
+    let markDelayedPostSeen: () => void = () => {};
+    const delayedPostRelease = new Promise<void>(resolve => { releaseDelayedPost = resolve; });
+    const delayedPostSeen = new Promise<void>(resolve => { markDelayedPostSeen = resolve; });
+    const delayedSyncHandler = async (route: Route): Promise<void> => {
+      if (!isChatProjectsSyncRoute(route)) {
+        await route.continue();
+        return;
+      }
+      markDelayedPostSeen();
+      await delayedPostRelease;
+      await route.continue();
+    };
+    await page.route('**/api/user-data/sync', delayedSyncHandler);
+    const resumedResponse = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+    await context.setOffline(false);
+    await delayedPostSeen;
+    await expectSimpleChatSyncStatus(page, '正在同步');
+    releaseDelayedPost();
+    await resumedResponse;
+    await expectSimpleChatSyncStatus(page, '已同步');
+    await page.unroute('**/api/user-data/sync', delayedSyncHandler);
+
+    const conflictSyncHandler = async (route: Route): Promise<void> => {
+      if (!isChatProjectsSyncRoute(route)) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, code: 'CHAT_SYNC_CONFLICT', currentRevision: 999 }),
+      });
+    };
+    await page.route('**/api/user-data/sync', conflictSyncHandler);
+    await renameProject(page, offlineName, `${offlineName}-冲突`);
+    await expectSimpleChatSyncStatus(page, '同步冲突，点击重试');
+    await page.unroute('**/api/user-data/sync', conflictSyncHandler);
+
+    const retryResponse = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+    await page.getByRole('button', { name: '重试同步' }).click();
+    await retryResponse;
+    await expectSimpleChatSyncStatus(page, '已同步');
   });
 
   test('desktop long conversation keeps chat and image menus interactive above bubbles', async ({ page }, testInfo) => {
