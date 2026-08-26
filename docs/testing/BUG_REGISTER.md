@@ -2552,3 +2552,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 本地回归 | 聚焦 `3 files / 6 tests`；全仓 `541 passed / 20 skipped files`、`3532 passed / 117 skipped tests`；TypeScript、ESLint、Next.js `116/116` 构建与空白检查通过。117 项跳过仍为缺少隔离 PostgreSQL 测试库。 |
 | 云端回归 | Coze 合并提交 `8096833c` 包含 `origin/main@7bf1cc3c`，构建退出码 0、Build ID `tdM5XK103XE0zLAP7oe4X`、PID `1218`，三个健康路由均为 200。离线时间窗只有 1 次聊天、1 次审计和 1 次用户同步尝试，`/api/client-error=0`，Console error/warning=`0/0`；界面得到唯一失败卡和“重试”入口。 |
 | 状态 | **已修复 / Coze 云端关闭。** 该结论只关闭遥测递归；普通重试完成态、Deep Research、CanvasEditor 和刷新中断仍属于 V588-CHAT-002-BUG-001 的未完成验收。机器证据：`docs/testing/evidence/v588-chat-002-7bf1cc3c-cloud-2026-08-25.json`。 |
+
+### V588-CHAT-002-BUG-003 - 刷新后回到旧任务并遗留永久 streaming（2026-08-26）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：用户刷新后看不到刚提交的会话，数据库中的助手消息长期停在 `streaming`，无法看到失败原因或重试入口。 |
+| 发现环境 | Coze Build ID `5v4rvNIC6-MWnYjJ5HWaz`，Google Chrome“用户1”，普通账号 `canvas-user`，APIMart `deepseek-v4-flash`。 |
+| 稳定复现 | 新建对话，提交唯一标记，看到输入清空和发送控件禁用后立即刷新同一标签页。刷新后标记可见数为 0，页面回到项目第一条旧对话；约 238 秒后数据库仍为 `streaming`。 |
+| 请求与数据证据 | `wujie_audit_log` 只有 1 条 `/api/simple-chat/chat`、HTTP 200；`chat_simple_projects` 中目标任务存在且只有 2 条消息，说明不是消息丢失或重复提交，而是恢复时选错任务。 |
+| 根因 | `/simple-chat` URL 只保存 `projectId`；`selectInitialSimpleChatProject()` 无条件选择该项目第一条任务。真正中断的任务没有重新挂载，已有 `recoverInterruptedSimpleChatMessages()` 因而没有机会把它收敛为可重试 `failed`。 |
+| RED | `simple-chat-project-selection.test.ts` 新增精确 `taskId` 恢复与 URL 接线合同；旧实现稳定得到 `2 failed / 2 passed`，实际选中 `task-b-old` 而非 `task-b-active`。 |
+| 最小修复 | URL 同步精确 `projectId + taskId`；初始化按两者恢复任务。没有修改供应商、模型、消息 ID、幂等键、积分、数据库结构或 `stable`。 |
+| 本地回归 | RED 后目标文件 `4/4` 通过；Simple Chat 关联 `5 files / 33 tests` 通过；全仓 `541 passed / 20 skipped files`、`3535 passed / 117 skipped tests`；TypeScript、ESLint `0 errors / 967 historical warnings`、Next.js `116/116` 构建、证据清单与空白检查通过。跳过项仍为缺少隔离 PostgreSQL 测试库，不计为通过。 |
+| 状态 | **旧云端确认失败 / 本地已修复 / 新提交云端待验。** 证据：`docs/testing/evidence/v588-chat-002-refresh-interruption-cloud-2026-08-26.json` 与同名 PNG。 |

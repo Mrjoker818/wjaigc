@@ -1,0 +1,65 @@
+{
+  "testId": "V588-CHAT-002-REFRESH-INTERRUPTION",
+  "testedAt": "2026-08-26T08:13:16+08:00",
+  "browser": "Google Chrome 用户1",
+  "account": "canvas-user",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat?projectId=s3zk7z3gmsoo15gz",
+  "githubMainAtTest": "7b6f43876afc884d77e0b44b4bfc65f5bee7a145",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "buildId": "5v4rvNIC6-MWnYjJ5HWaz",
+  "serverPid": 2266,
+  "request": {
+    "marker": "V588_REFRESH_RECOVERY_1787699148730",
+    "submittedAt": "2026-08-26T08:13:16.026+08:00",
+    "reloadTriggeredAt": "2026-08-26T08:13:22.636+08:00",
+    "endpoint": "/api/simple-chat/chat",
+    "matchingAuditRows": 1,
+    "auditId": "audit_1787703197130_iz0tnf",
+    "responseStatus": 200,
+    "auditDurationMs": 232,
+    "providerId": "api_1778428130626_2qpg71v",
+    "modelId": "deepseek-v4-flash",
+    "networkBoundary": "刷新后 CDP 环形缓冲已截断提交事件；请求次数由同一用户、同一时间窗的权威审计表确认，不伪造当前请求 Header。"
+  },
+  "persistedState": {
+    "projectId": "s3zk7z3gmsoo15gz",
+    "taskId": "8a7tt0hnmt99wij1",
+    "taskName": "新对话",
+    "messageCount": 2,
+    "userMessageId": "noducte0",
+    "assistantMessageId": "yh09um3p",
+    "assistantStatusAtFinalProbe": "streaming",
+    "assistantContentLength": 169,
+    "retryableContextPresent": true,
+    "idempotencyKey": "simple-chat-retry:8a7tt0hnmt99wij1:yh09um3p",
+    "taskUpdatedAt": 1787703203364,
+    "finalProbeAt": 1787703441156,
+    "stuckForAtLeastMs": 238000
+  },
+  "browserAfterReload": {
+    "markerVisibleCount": 0,
+    "permanentLoadingIndicatorVisible": false,
+    "selectedConversation": "该项目的第一条旧对话",
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "nativeDialogObserved": false
+  },
+  "rootCause": {
+    "summary": "刷新 URL 只保存 projectId，不保存 activeTaskId；初始化始终选择项目第一条任务，因此真正中断的任务未被重新挂载，现有 recoverInterruptedSimpleChatMessages 无法运行并持久化 failed 终态。",
+    "files": [
+      "src/app/simple-chat/page.tsx",
+      "src/components/simple-chat/simple-chat-types.ts"
+    ]
+  },
+  "localTdd": {
+    "red": "simple-chat-project-selection.test.ts: 2 failed / 2 passed",
+    "green": "simple-chat-project-selection.test.ts: 4/4 passed",
+    "relatedRegression": "5 files / 33 tests passed",
+    "cloudRetestRequired": true
+  },
+  "artifacts": {
+    "screenshot": "docs/testing/evidence/v588-chat-002-refresh-interruption-cloud-2026-08-26.png"
+  },
+  "verdict": "fail",
+  "evidenceBoundary": "本证据确认旧云端构建的刷新恢复失败，并确认请求只有一次且消息未丢失；本地修复尚未部署，不能标记为云端通过。"
+}

@@ -109,7 +109,8 @@ export default function SimpleChatPage() {
       }
       if (loaded.length === 0) loaded = [createDefaultProject()];
       const requestedProjectId = new URLSearchParams(window.location.search).get('projectId');
-      const initial = selectInitialSimpleChatProject(loaded, requestedProjectId);
+      const requestedTaskId = new URLSearchParams(window.location.search).get('taskId');
+      const initial = selectInitialSimpleChatProject(loaded, requestedProjectId, requestedTaskId);
       setProjects(loaded);
       setActiveProjectId(initial?.projectId ?? null);
       setActiveTaskId(initial?.taskId ?? null);
@@ -128,6 +129,14 @@ export default function SimpleChatPage() {
 
   const activeProject = projects.find(p => p.id === activeProjectId) ?? null;
   const activeTask = activeProject?.tasks.find(t => t.id === activeTaskId) ?? null;
+
+  useEffect(() => {
+    if (!activeProjectId || !activeTaskId || !activeTask) return;
+    const current = new URL(window.location.href);
+    current.searchParams.set('projectId', activeProjectId);
+    current.searchParams.set('taskId', activeTaskId);
+    window.history.replaceState(null, '', `${current.pathname}${current.search}${current.hash}`);
+  }, [activeProject, activeProjectId, activeTask, activeTaskId]);
 
   // Project ops
   const handleCreateProject = useCallback(() => {

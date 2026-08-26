@@ -376,3 +376,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 按 RED -> 最小修复新增选区提示合同，提交 `e0ec998d28a2bad0fc27981220bff42fb9a390d7`。全文编辑行为、会话所有权、模型选择、幂等键、`stable` 和 V5.8.8 donor 均未改动。
 - 专项 `39/39`、全仓 `3533` 项业务断言、TypeScript、零错误 Lint 和 `116/116` 构建通过；`117` 项 PostgreSQL 测试仍因缺少隔离库跳过。保护门禁的 4 个既有未批准漂移继续单列，不静默加入白名单。
 - **状态：CanvasEditor 重试机制云端通过 / 选区输出修复待 Coze 验收。** 在精确替换、单版本和浏览器健康再次取得真实证据前，不把 V588-CHAT-002 标记为完整吸收，也不进入下一吸收项。
+
+## 2026-08-26 V588-CHAT-002 刷新恢复检查点
+
+- CanvasEditor 精确选区替换已在云端真实通过；刷新中断随后暴露新的当前线任务身份缺陷，不是 donor 迁移偏移。
+- 旧云端只保存 `projectId`，刷新固定选中第一条任务；真实中断任务虽然已入库并带冻结上下文，仍长期保持 `streaming` 且用户看不到。
+- 已按 RED -> 最小接入增加 `taskId` URL 身份，目标测试从 `2 failed / 2 passed` 转为 `4/4`，关联 Simple Chat `33/33` 通过。未改动 `stable`、V5.8.8 donor、供应商、模型、积分或数据库结构。
+- 完整本地门禁已通过：全仓 `541` 个文件、`3535` 项已执行测试全部通过；`20` 个文件、`117` 项 PostgreSQL 专项因缺少隔离测试库明确跳过且不计为通过；TypeScript、ESLint `0 errors / 967 historical warnings`、Next.js `116/116` 生产构建、证据清单与空白检查通过。
+- **当前状态：本地修复与完整门禁通过 / Coze 复验待完成，V588-CHAT-002 仍未关闭。** 只有同一任务刷新后出现单一可重试失败或合法完成终态，且数据库不再保留 `streaming`，才允许进入 `V588-CHAT-003`。

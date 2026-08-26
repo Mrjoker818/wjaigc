@@ -1755,3 +1755,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 公网 `/` 与 `/simple-chat` 均返回 HTTP `200`。`/simple-chat` 加载的 17 个脚本中，`/_next/static/chunks/app/simple-chat/page-d9e8ae829a1f734c.js` 精确包含“只输出修改后的选中文本片段”，证明 `e0ec998d` 的契约修复已进入真实云端构建。
 - Chrome 扩展、浏览器进程和本地通信清单均正常，但沙箱重启后现有预览标签的页面级控制连续超时；因此本轮没有再次提交模型请求，也没有把部署资源证据冒充为交互通过。
 - **回归结论：部署内容通过 / 认证交互仍待验。** 仍需在同一 Google Chrome 预览标签恢复控制后，证明选区结果精确为“前缀 + 新片段 + 后缀”，并完成刷新中断恢复；在此之前 V588-CHAT-002 不关闭。
+
+## 2026-08-26 V588-CHAT-002 刷新中断真实失败与本地修复
+
+- Google Chrome“用户1”在新对话中选择 `Deepseek V4 Flash · APImartLLM`，只提交一次标记 `V588_REFRESH_RECOVERY_1787699148730`；输入清空且发送控件进入禁用状态后约 6.6 秒刷新同一标签页。
+- 刷新后没有永久加载，但页面回到了该项目第一条旧对话，目标标记可见数为 0。数据库证明目标任务并未丢失：只有 1 条用户消息和 1 条助手消息，助手带完整冻结上下文和幂等键，但在最终探针时仍为 `streaming`。
+- 审计表只有 1 条 `/api/simple-chat/chat`、HTTP 200、232ms；Console error/warning 为 `0/0`，原生弹窗为 0。因此失败不来自重复请求或供应商模型不可用，而是前端任务身份恢复错误。
+- 根因是 URL 只持久化 `projectId`，初始化函数固定选择项目第一条任务。按 TDD 新增精确任务恢复与 URL 接线测试，旧代码 `2 failed / 2 passed`；最小接入 `taskId` 后目标 `4/4`、关联 `5 files / 33 tests` 通过。
+- 完整本地门禁为：`541` 个测试文件、`3535` 项已执行测试全部通过；`20` 个文件、`117` 项 PostgreSQL 专项因缺少隔离库跳过；TypeScript、ESLint `0 errors / 967 historical warnings`、Next.js `116/116` 构建、证据清单和空白检查通过。
+- **回归结论：旧云端失败 / 本地修复和完整门禁通过 / 新云端复验待完成。** 本轮不能关闭 V588-CHAT-002；机器证据见 `docs/testing/evidence/v588-chat-002-refresh-interruption-cloud-2026-08-26.json`。

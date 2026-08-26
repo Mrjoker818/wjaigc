@@ -127,9 +127,12 @@ export interface ChatAttachment {
 export function selectInitialSimpleChatProject<T extends { id: string; tasks: Array<{ id: string }> }>(
   projects: T[],
   requestedProjectId: string | null | undefined,
+  requestedTaskId?: string | null,
 ): { projectId: string; taskId: string | null } | null {
   const project = projects.find(candidate => candidate.id === requestedProjectId) || projects[0];
-  return project ? { projectId: project.id, taskId: project.tasks[0]?.id ?? null } : null;
+  if (!project) return null;
+  const task = project.tasks.find(candidate => candidate.id === requestedTaskId) || project.tasks[0];
+  return { projectId: project.id, taskId: task?.id ?? null };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

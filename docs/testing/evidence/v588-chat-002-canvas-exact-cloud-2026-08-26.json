@@ -1,0 +1,61 @@
+{
+  "testId": "V588-CHAT-002-CANVAS-EXACT",
+  "testedAt": "2026-08-26T07:01:11+08:00",
+  "browser": "Google Chrome 用户1",
+  "account": "canvas-user",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat?projectId=s3zk7z3gmsoo15gz",
+  "githubMainAtEvidenceWrite": "7b6f43876afc884d77e0b44b4bfc65f5bee7a145",
+  "deployedImplementationCommit": "e0ec998d28a2bad0fc27981220bff42fb9a390d7",
+  "deployedSourceEvidenceCommit": "2c508bad71e423b18bfa503d6277156e344c1b36",
+  "cozeMergeCommit": "05f1d7e73cec190827852f3300a00871bce9a475",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "buildId": "5v4rvNIC6-MWnYjJ5HWaz",
+  "serverPid": 2266,
+  "selection": {
+    "before": "前缀原文后缀",
+    "start": 2,
+    "end": 4,
+    "selectedText": "原文",
+    "instruction": "仅将选中内容替换为 V588_CANVAS_DEPLOY_OK_1787698604741，不要修改其他文字。"
+  },
+  "result": {
+    "marker": "V588_CANVAS_DEPLOY_OK_1787698604741",
+    "expected": "前缀V588_CANVAS_DEPLOY_OK_1787698604741后缀",
+    "actual": "前缀V588_CANVAS_DEPLOY_OK_1787698604741后缀",
+    "oldFragmentRetained": false,
+    "versionBefore": 1,
+    "versionAfter": 2,
+    "singleSuccessfulVersion": true,
+    "startedAt": "2026-08-26T07:01:07.558+08:00",
+    "terminalAt": "2026-08-26T07:01:11.716+08:00",
+    "durationMs": 4158,
+    "failureUiObserved": false
+  },
+  "requestEvidence": {
+    "auditWindowMinutes": 10,
+    "matchingAuditRows": 1,
+    "auditId": "audit_1787698868691_m529tw",
+    "endpoint": "/api/simple-chat/chat",
+    "method": "POST",
+    "responseStatus": 200,
+    "auditDurationMs": 276,
+    "userId": "user_1784777366175_f40u6h",
+    "taskId": "2p7wgmygmsoo15gz",
+    "providerId": "api_1778428130626_2qpg71v",
+    "modelId": "deepseek-v4-flash",
+    "providerModelSource": "chat_simple_projects 权威持久化任务快照",
+    "idempotencyKeyObserved": false,
+    "idempotencyKeyBoundary": "本次连接在提交后才启用 CDP，未伪造当前请求的幂等键；此前重试链和本地路由测试已证明该字段透传。"
+  },
+  "browserHealth": {
+    "consoleWindowStartedAt": "2026-08-26T07:01:07.558+08:00",
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "nativeDialogObserved": false
+  },
+  "artifacts": {
+    "screenshot": "docs/testing/evidence/v588-chat-002-canvas-exact-cloud-2026-08-26.png"
+  },
+  "verdict": "pass",
+  "evidenceBoundary": "该证据关闭 CanvasEditor 新提示词契约的精确选区替换缺口；刷新中断恢复与 Deep Research 完整终态仍需单独验收。"
+}
