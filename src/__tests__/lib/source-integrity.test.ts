@@ -40,4 +40,15 @@ describe('repository source integrity', () => {
     expect(gitignore).not.toMatch(/^models\/$/m);
     expect(gitignore).not.toMatch(/^upscayl-models\/$/m);
   });
+
+  it('keeps nested deployment worktrees out of Git and TypeScript builds', () => {
+    const gitignore = readFileSync(resolve(projectRoot, '.gitignore'), 'utf8');
+    const tsconfig = JSON.parse(readFileSync(resolve(projectRoot, 'tsconfig.json'), 'utf8')) as {
+      exclude?: string[];
+    };
+
+    expect(gitignore).toMatch(/^\/worktrees\/$/m);
+    expect(tsconfig.exclude).toContain('.worktrees/**/*');
+    expect(tsconfig.exclude).toContain('worktrees/**/*');
+  });
 });

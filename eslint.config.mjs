@@ -46,6 +46,7 @@ const eslintConfig = defineConfig([
     'dist/**',
     // Nested checkouts are independent repositories and may contain their own build output.
     '.worktrees/**',
+    'worktrees/**',
     '_refs-*/**',
     // Generated Playwright reports and captured evidence contain third-party bundled code.
     '.playwright-cli/**',

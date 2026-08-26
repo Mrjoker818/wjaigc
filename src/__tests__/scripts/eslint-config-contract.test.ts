@@ -8,6 +8,7 @@ describe('ESLint repository boundaries', () => {
     const config = readFileSync(resolve(process.cwd(), 'eslint.config.mjs'), 'utf8');
     for (const ignoredPath of [
       '.worktrees/**',
+      'worktrees/**',
       '.playwright-cli/**',
       '.playwright-output/**',
       'output/**',

@@ -3,6 +3,7 @@
 # Dependencies
 node_modules/
 .worktrees/
+/worktrees/
 .pnp
 .pnp.js
 

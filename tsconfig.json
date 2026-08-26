@@ -38,6 +38,8 @@
     "assets/**/*.ts",
     "assets/**/*.tsx",
     ".playwright-cli/**/*",
+    ".worktrees/**/*",
+    "worktrees/**/*",
     "_refs-*/**/*"
   ]
 }

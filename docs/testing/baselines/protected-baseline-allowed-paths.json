@@ -1,4 +1,5 @@
 [
+  ".gitignore",
   ".env.example",
   ".github/workflows/quality.yml",
   ".superpowers/sdd/progress.md",
