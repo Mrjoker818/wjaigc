@@ -111,6 +111,41 @@ export const SIMPLE_CHAT_SYNC_LIMITS = {
   jsonDepth: 16,
 } as const;
 
+export interface SimpleChatDuplicateIdentityDetails {
+  code: 'CHAT_SYNC_DUPLICATE_ID';
+  field: string;
+  entityType: SimpleChatEntityType;
+  entityId: string;
+  projectId?: string;
+  taskId?: string;
+  messageId?: string;
+}
+
+export class SimpleChatSyncDomainError extends Error {
+  readonly code: SimpleChatDuplicateIdentityDetails['code'];
+  readonly field: string;
+  readonly entityType: SimpleChatEntityType;
+  readonly entityId: string;
+  readonly projectId?: string;
+  readonly taskId?: string;
+  readonly messageId?: string;
+
+  constructor(
+    details: SimpleChatDuplicateIdentityDetails,
+    readonly snapshot: 'base' | 'current',
+  ) {
+    super(`Duplicate ${details.entityType} id ${details.entityId} in ${snapshot} projects`);
+    this.name = 'SimpleChatSyncDomainError';
+    this.code = details.code;
+    this.field = details.field;
+    this.entityType = details.entityType;
+    this.entityId = details.entityId;
+    this.projectId = details.projectId;
+    this.taskId = details.taskId;
+    this.messageId = details.messageId;
+  }
+}
+
 export type SimpleChatProjectValidationResult =
   | { success: true }
   | {
@@ -119,7 +154,8 @@ export type SimpleChatProjectValidationResult =
     field: string;
     limit?: number;
     actual?: number;
-  };
+  }
+  | ({ success: false } & SimpleChatDuplicateIdentityDetails);
 
 interface FlatEntity {
   entityType: SimpleChatEntityType;
@@ -155,6 +191,8 @@ interface ReplayContext {
   createId: () => string;
   now: () => number;
   remaps: ReplayIdRemaps;
+  localReferenceClosures: LocalReferenceClosure[];
+  remoteReferencePreservations: WeakMap<object, RemoteReferencePreservation>;
 }
 
 interface MergeResult {
@@ -178,6 +216,33 @@ interface RemappedRetryContext {
   danglingSource?: SimpleChatMessage['retryContext'];
 }
 
+interface LocalRetryReferenceSources {
+  projectId?: true;
+  taskId?: true;
+  userMessageId?: true;
+  assistantMessageId?: true;
+  historyMessageIds?: true;
+}
+
+interface LocalReferenceClosure {
+  entity: Record<string, unknown>;
+  entityType: 'task' | 'message';
+  projectId: string;
+  taskId?: string;
+  activeAgentId?: true;
+  parentMessageId?: true;
+  retryContext?: LocalRetryReferenceSources;
+}
+
+interface RemoteReferencePreservation {
+  activeAgentId?: string;
+  parentMessageId?: string;
+  retryContext?: {
+    value: Record<string, unknown>;
+    sources: LocalRetryReferenceSources;
+  };
+}
+
 const EMPTY_INSTRUCTIONS: ProjectInstructions = {
   projectBackground: '',
   userPreference: '',
@@ -199,6 +264,8 @@ export function diffSimpleChatProjects(
   sequenceStart: number,
   options?: SimpleChatDiffOptions,
 ): SimpleChatSyncOperation[] {
+  assertUniqueSimpleChatIdentities(base, 'base');
+  assertUniqueSimpleChatIdentities(current, 'current');
   const baseEntities = flattenSimpleChatProjects(base);
   const currentEntities = flattenSimpleChatProjects(current);
   const baseMap = new Map(baseEntities.map(entity => [entityIdentity(entity), entity]));
@@ -244,7 +311,115 @@ export function compactSimpleChatOperations(
     compacted.set(identity, cloneUnknown(operation));
   }
 
-  return [...compacted.values()];
+  return stableSortSimpleChatOperations([...compacted.values()]);
+}
+
+function stableSortSimpleChatOperations(
+  operations: SimpleChatSyncOperation[],
+): SimpleChatSyncOperation[] {
+  if (operations.length < 2) return operations;
+
+  const projectOperations = new Map<string, number>();
+  const taskOperations = new Map<string, number>();
+  const messageOperations = new Map<string, number>();
+  operations.forEach((operation, index) => {
+    switch (operation.entityType) {
+      case 'project':
+        projectOperations.set(operation.projectId, index);
+        break;
+      case 'task':
+        taskOperations.set(taskMapKey(operation.projectId, operation.entityId), index);
+        break;
+      case 'message':
+        messageOperations.set(
+          messageMapKey(operation.projectId, operation.taskId, operation.entityId),
+          index,
+        );
+        break;
+      default:
+        break;
+    }
+  });
+
+  const indegrees = new Array<number>(operations.length).fill(0);
+  const dependents = Array.from({ length: operations.length }, () => [] as number[]);
+  operations.forEach((operation, index) => {
+    const dependencies = new Set<number>();
+    if (operation.entityType !== 'project') {
+      addOperationDependency(dependencies, projectOperations.get(operation.projectId), index);
+    }
+    if (operation.entityType === 'message' || operation.entityType === 'artifact') {
+      if (operation.taskId !== undefined) {
+        addOperationDependency(
+          dependencies,
+          taskOperations.get(taskMapKey(operation.projectId, operation.taskId)),
+          index,
+        );
+      }
+    }
+    if (operation.entityType === 'artifact' && operation.messageId !== undefined) {
+      addOperationDependency(
+        dependencies,
+        messageOperations.get(messageMapKey(operation.projectId, operation.taskId, operation.messageId)),
+        index,
+      );
+    }
+    indegrees[index] = dependencies.size;
+    for (const dependency of dependencies) dependents[dependency].push(index);
+  });
+
+  const ready: number[] = [];
+  indegrees.forEach((indegree, index) => {
+    if (indegree === 0) pushMinHeap(ready, index);
+  });
+  const sorted: SimpleChatSyncOperation[] = [];
+  while (ready.length > 0) {
+    const index = popMinHeap(ready);
+    sorted.push(operations[index]);
+    for (const dependent of dependents[index]) {
+      indegrees[dependent] -= 1;
+      if (indegrees[dependent] === 0) pushMinHeap(ready, dependent);
+    }
+  }
+  return sorted;
+}
+
+function addOperationDependency(
+  dependencies: Set<number>,
+  dependency: number | undefined,
+  operationIndex: number,
+): void {
+  if (dependency !== undefined && dependency !== operationIndex) dependencies.add(dependency);
+}
+
+function pushMinHeap(heap: number[], value: number): void {
+  let index = heap.length;
+  heap.push(value);
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (heap[parent] <= value) break;
+    heap[index] = heap[parent];
+    index = parent;
+  }
+  heap[index] = value;
+}
+
+function popMinHeap(heap: number[]): number {
+  const first = heap[0];
+  const last = heap.pop()!;
+  if (heap.length === 0) return first;
+  let index = 0;
+  while (true) {
+    const left = index * 2 + 1;
+    if (left >= heap.length) break;
+    const right = left + 1;
+    const child = right < heap.length && heap[right] < heap[left] ? right : left;
+    if (heap[child] >= last) break;
+    heap[index] = heap[child];
+    index = child;
+  }
+  heap[index] = last;
+  return first;
 }
 
 export function replaySimpleChatOperations(
@@ -258,6 +433,8 @@ export function replaySimpleChatOperations(
     createId: options?.createId ?? (() => crypto.randomUUID()),
     now: options?.now ?? (() => Date.now()),
     remaps: createReplayIdRemaps(),
+    localReferenceClosures: [],
+    remoteReferencePreservations: new WeakMap(),
   };
   const compactedOperations = compactSimpleChatOperations(operations);
 
@@ -305,6 +482,12 @@ export function replaySimpleChatOperations(
 
     if (!merge.conflict) {
       replaceProjectedEntity(current, merge.value);
+      trackLocallyMergedReferences(
+        context,
+        current.collection[current.index],
+        originalOperation,
+        current.entity,
+      );
       continue;
     }
 
@@ -314,6 +497,7 @@ export function replaySimpleChatOperations(
   }
 
   closeConflictEntityReferences(context, compactedOperations);
+  closeLocallyMergedReferences(context);
   return { projects: context.projects, conflicts: context.conflicts };
 }
 
@@ -333,6 +517,8 @@ export function validateSimpleChatProjects(
   if (projects.length > SIMPLE_CHAT_SYNC_LIMITS.projects) {
     return limitValidation('projects', SIMPLE_CHAT_SYNC_LIMITS.projects, projects.length);
   }
+  const duplicate = findDuplicateSimpleChatIdentity(projects);
+  if (duplicate) return { success: false, ...duplicate };
 
   for (const project of projects) {
     if (!isRecord(project)) return invalidValidation('projects');
@@ -517,6 +703,7 @@ function createConflictCopy(
     case 'task': {
       const project = ensureConflictProject(context, operation, timestamp);
       const taskCopy = cloneConflictTask(context, inputValue, operation, project.id, timestamp);
+      preserveRemoteConflictReferences(context, taskCopy, operation, current?.entity);
       const insertAt = current?.entityType === 'task' && current.project.id === project.id
         ? current.index + 1
         : project.tasks.length;
@@ -527,6 +714,7 @@ function createConflictCopy(
     case 'message': {
       const task = ensureConflictTask(context, operation, timestamp);
       const messageCopy = cloneConflictMessage(context, inputValue, operation, task.projectId, task.id, timestamp);
+      preserveRemoteConflictReferences(context, messageCopy, operation, current?.entity);
       const insertAt = current?.entityType === 'message' && current.task?.id === task.id
         ? current.index + 1
         : task.messages.length;
@@ -1067,6 +1255,11 @@ function closeTaskConflictReference(
   targetProjectId: string,
   operation: SimpleChatSyncOperation,
 ): void {
+  const remoteReference = context.remoteReferencePreservations.get(task)?.activeAgentId;
+  if (remoteReference !== undefined) {
+    task.activeAgentId = remoteReference;
+    return;
+  }
   const sourceReferences = readConflictSourceReferences(task);
   const activeAgentId = task.activeAgentId ?? readString(sourceReferences?.activeAgentId);
   if (activeAgentId === undefined) return;
@@ -1087,23 +1280,28 @@ function closeMessageConflictReferences(
   targetTaskId: string,
   operation: SimpleChatSyncOperation,
 ): void {
+  const remoteReferences = context.remoteReferencePreservations.get(chatMessage);
   const sourceReferences = readConflictSourceReferences(chatMessage);
   const parentMessageId = chatMessage.parentMessageId ?? readString(sourceReferences?.parentMessageId);
   if (parentMessageId !== undefined) {
-    const remapped = remapMessageReference(
-      context,
-      operation.projectId,
-      operation.taskId,
-      targetProjectId,
-      targetTaskId,
-      parentMessageId,
-    );
-    if (remapped === undefined) {
-      delete chatMessage.parentMessageId;
-      retainConflictSourceReferences(chatMessage, { parentMessageId });
+    if (remoteReferences?.parentMessageId !== undefined) {
+      chatMessage.parentMessageId = remoteReferences.parentMessageId;
     } else {
-      chatMessage.parentMessageId = remapped;
-      clearConflictSourceReferences(chatMessage, ['parentMessageId']);
+      const remapped = remapMessageReference(
+        context,
+        operation.projectId,
+        operation.taskId,
+        targetProjectId,
+        targetTaskId,
+        parentMessageId,
+      );
+      if (remapped === undefined) {
+        delete chatMessage.parentMessageId;
+        retainConflictSourceReferences(chatMessage, { parentMessageId });
+      } else {
+        chatMessage.parentMessageId = remapped;
+        clearConflictSourceReferences(chatMessage, ['parentMessageId']);
+      }
     }
   }
 
@@ -1125,6 +1323,213 @@ function closeMessageConflictReferences(
     });
   } else {
     clearConflictSourceReferences(chatMessage, ['retryContext']);
+  }
+  restoreRemoteRetryReferenceFields(
+    chatMessage,
+    remoteReferences?.retryContext,
+    operation.entityId,
+  );
+}
+
+function trackLocallyMergedReferences(
+  context: ReplayContext,
+  mergedEntity: unknown,
+  operation: SimpleChatSyncOperation,
+  remoteValue: unknown,
+): void {
+  if (!isRecord(mergedEntity) || !isRecord(operation.baseValue) || !isRecord(operation.value)) return;
+
+  if (operation.entityType === 'task') {
+    if (!fieldComesOnlyFromBranch(operation.baseValue, operation.value, remoteValue, 'activeAgentId')) return;
+    context.localReferenceClosures.push({
+      entity: mergedEntity,
+      entityType: 'task',
+      projectId: operation.projectId,
+      activeAgentId: true,
+    });
+    return;
+  }
+  if (operation.entityType !== 'message') return;
+
+  const retryContext = referenceSourcesFromBranch(
+    operation.baseValue.retryContext,
+    operation.value.retryContext,
+    isRecord(remoteValue) ? remoteValue.retryContext : MISSING,
+  );
+  const parentMessageId = fieldComesOnlyFromBranch(
+    operation.baseValue,
+    operation.value,
+    remoteValue,
+    'parentMessageId',
+  );
+  if (!parentMessageId && retryContext === undefined) return;
+  context.localReferenceClosures.push({
+    entity: mergedEntity,
+    entityType: 'message',
+    projectId: operation.projectId,
+    taskId: operation.taskId,
+    ...(parentMessageId ? { parentMessageId: true } : {}),
+    ...(retryContext === undefined ? {} : { retryContext }),
+  });
+}
+
+function preserveRemoteConflictReferences(
+  context: ReplayContext,
+  entity: object,
+  operation: SimpleChatSyncOperation,
+  remoteValue: unknown,
+): void {
+  if (!isRecord(operation.baseValue) || !isRecord(operation.value) || !isRecord(remoteValue)) return;
+  const preservation: RemoteReferencePreservation = {};
+  if (operation.entityType === 'task' && fieldComesOnlyFromBranch(
+    operation.baseValue,
+    remoteValue,
+    operation.value,
+    'activeAgentId',
+  )) {
+    preservation.activeAgentId = readString(remoteValue.activeAgentId);
+  }
+  if (operation.entityType === 'message') {
+    if (fieldComesOnlyFromBranch(operation.baseValue, remoteValue, operation.value, 'parentMessageId')) {
+      preservation.parentMessageId = readString(remoteValue.parentMessageId);
+    }
+    const retrySources = referenceSourcesFromBranch(
+      operation.baseValue.retryContext,
+      remoteValue.retryContext,
+      operation.value.retryContext,
+    );
+    if (retrySources && isRecord(remoteValue.retryContext)) {
+      preservation.retryContext = {
+        value: cloneUnknown(remoteValue.retryContext),
+        sources: retrySources,
+      };
+    }
+  }
+  if (Object.keys(preservation).length > 0) {
+    context.remoteReferencePreservations.set(entity, preservation);
+  }
+}
+
+function fieldComesOnlyFromBranch(
+  base: unknown,
+  branch: unknown,
+  other: unknown,
+  key: string,
+): boolean {
+  const baseValue = isRecord(base) ? ownValue(base, key) : MISSING;
+  const branchValue = isRecord(branch) ? ownValue(branch, key) : MISSING;
+  const otherValue = isRecord(other) ? ownValue(other, key) : MISSING;
+  return !jsonEqual(branchValue, baseValue) && jsonEqual(otherValue, baseValue);
+}
+
+function referenceSourcesFromBranch(
+  base: unknown,
+  branch: unknown,
+  other: unknown,
+): LocalRetryReferenceSources | undefined {
+  const sources: LocalRetryReferenceSources = {};
+  for (const key of [
+    'projectId',
+    'taskId',
+    'userMessageId',
+    'assistantMessageId',
+    'historyMessageIds',
+  ] as const) {
+    if (fieldComesOnlyFromBranch(base, branch, other, key)) sources[key] = true;
+  }
+  return Object.keys(sources).length === 0 ? undefined : sources;
+}
+
+function closeLocallyMergedReferences(context: ReplayContext): void {
+  for (const closure of context.localReferenceClosures) {
+    if (closure.entityType === 'task') {
+      const activeAgentId = readString(closure.entity.activeAgentId);
+      const remapped = activeAgentId === undefined
+        ? undefined
+        : context.remaps.agents.get(projectEntityMapKey(closure.projectId, activeAgentId));
+      if (remapped !== undefined) closure.entity.activeAgentId = remapped;
+      continue;
+    }
+
+    if (closure.parentMessageId) {
+      const parentMessageId = readString(closure.entity.parentMessageId);
+      const remapped = parentMessageId === undefined
+        ? undefined
+        : context.remaps.messages.get(messageMapKey(closure.projectId, closure.taskId, parentMessageId));
+      if (remapped !== undefined) closure.entity.parentMessageId = remapped;
+    }
+    closeLocallyMergedRetryContext(context, closure);
+  }
+}
+
+function closeLocallyMergedRetryContext(
+  context: ReplayContext,
+  closure: LocalReferenceClosure,
+): void {
+  const sources = closure.retryContext;
+  const retryContext = closure.entity.retryContext;
+  if (!sources || !isRecord(retryContext)) return;
+
+  if (sources.projectId) {
+    const projectId = readString(retryContext.projectId);
+    const remapped = projectId === undefined ? undefined : context.remaps.projects.get(projectId);
+    if (remapped !== undefined) retryContext.projectId = remapped;
+  }
+  if (sources.taskId) {
+    const taskId = readString(retryContext.taskId);
+    const remapped = taskId === undefined
+      ? undefined
+      : context.remaps.tasks.get(taskMapKey(closure.projectId, taskId));
+    if (remapped !== undefined) retryContext.taskId = remapped;
+  }
+  for (const key of ['userMessageId', 'assistantMessageId'] as const) {
+    if (!sources[key]) continue;
+    const messageId = readString(retryContext[key]);
+    const remapped = messageId === undefined
+      ? undefined
+      : context.remaps.messages.get(messageMapKey(closure.projectId, closure.taskId, messageId));
+    if (remapped !== undefined) retryContext[key] = remapped;
+  }
+  if (sources.historyMessageIds && Array.isArray(retryContext.historyMessageIds)) {
+    retryContext.historyMessageIds = retryContext.historyMessageIds.map(messageId => (
+      typeof messageId === 'string'
+        ? context.remaps.messages.get(messageMapKey(closure.projectId, closure.taskId, messageId)) ?? messageId
+        : messageId
+    ));
+  }
+}
+
+function restoreRemoteRetryReferenceFields(
+  chatMessage: SimpleChatMessage,
+  preservation: RemoteReferencePreservation['retryContext'],
+  originalMessageId: string,
+): void {
+  if (!preservation) return;
+  if (!isRecord(chatMessage.retryContext)) return;
+  const retryContext = chatMessage.retryContext as unknown as Record<string, unknown>;
+  for (const key of [
+    'projectId',
+    'taskId',
+    'userMessageId',
+    'assistantMessageId',
+    'historyMessageIds',
+  ] as const) {
+    if (!preservation.sources[key]) continue;
+    if (Object.prototype.hasOwnProperty.call(preservation.value, key)) {
+      const remoteValue = preservation.value[key];
+      if ((key === 'userMessageId' || key === 'assistantMessageId')
+        && remoteValue === originalMessageId) {
+        retryContext[key] = chatMessage.id;
+      } else if (key === 'historyMessageIds' && Array.isArray(remoteValue)) {
+        retryContext[key] = remoteValue.map(value => (
+          value === originalMessageId ? chatMessage.id : cloneUnknown(value)
+        ));
+      } else {
+        retryContext[key] = cloneUnknown(remoteValue);
+      }
+    } else {
+      delete retryContext[key];
+    }
   }
 }
 
@@ -1505,6 +1910,124 @@ function hasRequiredParent(projects: SimpleChatProject[], operation: SimpleChatS
   }
 }
 
+function assertUniqueSimpleChatIdentities(
+  projects: SimpleChatProject[],
+  snapshot: 'base' | 'current',
+): void {
+  const duplicate = findDuplicateSimpleChatIdentity(projects);
+  if (duplicate) throw new SimpleChatSyncDomainError(duplicate, snapshot);
+}
+
+function findDuplicateSimpleChatIdentity(
+  projects: SimpleChatProject[],
+): SimpleChatDuplicateIdentityDetails | undefined {
+  const projectIds = new Set<string>();
+  for (const project of projects) {
+    if (!isRecord(project)) continue;
+    const projectId = readString(project.id);
+    if (projectId !== undefined) {
+      if (projectIds.has(projectId)) {
+        return duplicateIdentityDetails('projects', 'project', projectId);
+      }
+      projectIds.add(projectId);
+    }
+
+    const taskIds = new Set<string>();
+    if (Array.isArray(project.tasks)) {
+      for (const task of project.tasks) {
+        if (!isRecord(task)) continue;
+        const taskId = readString(task.id);
+        if (taskId !== undefined) {
+          if (taskIds.has(taskId)) {
+            return duplicateIdentityDetails('tasks', 'task', taskId, { projectId });
+          }
+          taskIds.add(taskId);
+        }
+
+        const messageIds = new Set<string>();
+        if (!Array.isArray(task.messages)) continue;
+        for (const chatMessage of task.messages) {
+          if (!isRecord(chatMessage)) continue;
+          const messageId = readString(chatMessage.id);
+          if (messageId !== undefined) {
+            if (messageIds.has(messageId)) {
+              return duplicateIdentityDetails('messages', 'message', messageId, {
+                projectId,
+                taskId,
+              });
+            }
+            messageIds.add(messageId);
+          }
+
+          const artifactIds = new Set<string>();
+          if (!Array.isArray(chatMessage.artifacts)) continue;
+          for (const artifact of chatMessage.artifacts) {
+            if (!isRecord(artifact)) continue;
+            const artifactId = readString(artifact.id);
+            if (artifactId === undefined) continue;
+            if (artifactIds.has(artifactId)) {
+              return duplicateIdentityDetails('artifacts', 'artifact', artifactId, {
+                projectId,
+                taskId,
+                messageId,
+              });
+            }
+            artifactIds.add(artifactId);
+          }
+        }
+      }
+    }
+
+    const agentDuplicate = findDuplicateProjectEntityId(project.agents, 'agents', 'agent', projectId);
+    if (agentDuplicate) return agentDuplicate;
+    const knowledgeDuplicate = findDuplicateProjectEntityId(
+      project.knowledgeItems,
+      'knowledgeItems',
+      'knowledge-item',
+      projectId,
+    );
+    if (knowledgeDuplicate) return knowledgeDuplicate;
+  }
+  return undefined;
+}
+
+function findDuplicateProjectEntityId(
+  collection: unknown,
+  field: 'agents' | 'knowledgeItems',
+  entityType: 'agent' | 'knowledge-item',
+  projectId: string | undefined,
+): SimpleChatDuplicateIdentityDetails | undefined {
+  if (!Array.isArray(collection)) return undefined;
+  const ids = new Set<string>();
+  for (const entity of collection) {
+    if (!isRecord(entity)) continue;
+    const entityId = readString(entity.id);
+    if (entityId === undefined) continue;
+    if (ids.has(entityId)) {
+      return duplicateIdentityDetails(field, entityType, entityId, { projectId });
+    }
+    ids.add(entityId);
+  }
+  return undefined;
+}
+
+function duplicateIdentityDetails(
+  field: string,
+  entityType: SimpleChatEntityType,
+  entityId: string,
+  scope: { projectId?: string; taskId?: string; messageId?: string } = {},
+): SimpleChatDuplicateIdentityDetails {
+  return {
+    code: 'CHAT_SYNC_DUPLICATE_ID',
+    field,
+    entityType,
+    entityId,
+    ...(scope.projectId === undefined ? {} : { projectId: scope.projectId }),
+    ...(scope.taskId === undefined ? {} : { taskId: scope.taskId }),
+    ...(scope.messageId === undefined ? {} : { messageId: scope.messageId }),
+  };
+}
+
 function flattenSimpleChatProjects(projects: SimpleChatProject[]): FlatEntity[] {
   const entities: FlatEntity[] = [];
 
@@ -1544,9 +2067,9 @@ function comparableEntityValue(entityType: SimpleChatEntityType, value: unknown)
   if (!isRecord(value)) return cloneUnknown(value);
   switch (entityType) {
     case 'project':
-      return omitKeys(value, ['tasks', 'agents', 'knowledgeItems']);
+      return omitKeys(value, ['tasks', 'agents', 'knowledgeItems', 'updatedAt']);
     case 'task':
-      return omitKeys(value, ['messages']);
+      return omitKeys(value, ['messages', 'updatedAt']);
     case 'message':
       return omitKeys(value, ['artifacts']);
     default:
