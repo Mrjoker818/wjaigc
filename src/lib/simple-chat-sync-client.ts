@@ -5,6 +5,7 @@ import {
   compactSimpleChatOperations,
   diffSimpleChatProjects,
   replaySimpleChatOperations,
+  validateSimpleChatProjects,
   type SimpleChatSyncEnvelopeV1,
   type SimpleChatSyncOperation,
   type SimpleChatSyncedProject,
@@ -108,6 +109,54 @@ interface UserNetworkLock {
 
 const userNetworkLocks = new Map<string, UserNetworkLock>();
 const userPersistenceLocks = new Map<string, UserNetworkLock>();
+
+export interface SimpleChatDashboardProjectsOptions {
+  userId: string;
+  store: SimpleChatEnvelopeStore;
+  fetchImpl?: typeof fetch;
+}
+
+export async function loadSimpleChatDashboardProjects(
+  options: SimpleChatDashboardProjectsOptions,
+): Promise<SimpleChatProject[]> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  let shouldReadLocal = false;
+
+  try {
+    const response = await fetchImpl(`${SIMPLE_CHAT_SYNC_URL}?key=${SIMPLE_CHAT_SYNC_KEY}`, {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+    });
+    if (response.status === 401 || response.status === 403) return [];
+    if (response.status >= 500) {
+      shouldReadLocal = true;
+    } else if (!response.ok) {
+      return [];
+    } else {
+      const body: unknown = await response.json();
+      if (isReadSuccess(body) && validateSimpleChatProjects(body.value).success) {
+        return cloneValue(body.value);
+      }
+      shouldReadLocal = true;
+    }
+  } catch {
+    shouldReadLocal = true;
+  }
+
+  if (!shouldReadLocal) return [];
+  try {
+    const envelope = await options.store.get(options.userId);
+    if (
+      envelope === null
+      || envelope.userId !== options.userId
+      || !validateSimpleChatProjects(envelope.currentProjects).success
+    ) return [];
+    return cloneValue(envelope.currentProjects);
+  } catch {
+    return [];
+  }
+}
 
 async function withUserLock<T>(
   locks: Map<string, UserNetworkLock>,

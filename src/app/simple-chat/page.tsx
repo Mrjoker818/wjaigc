@@ -8,7 +8,7 @@ import { SimpleChatSyncStatusView } from "@/components/simple-chat/simple-chat-s
 import { LoginPanel } from "@/components/dashboard/login-panel";
 import {
   SimpleChatAgent,
-  saveProjects, SimpleChatProject as Project, SimpleChatTask as Task,
+  SimpleChatProject as Project, SimpleChatTask as Task,
   PresetSkill,
 } from "@/components/simple-chat/simple-chat-types";
 import { selectInitialSimpleChatProject } from "@/components/simple-chat/simple-chat-types";
@@ -74,6 +74,8 @@ export default function SimpleChatPage() {
   const coordinatorRef = useRef<SimpleChatSyncCoordinator | null>(null);
   const coordinatorUserIdRef = useRef<string | null>(null);
   const coordinatorReadyRef = useRef(false);
+  const latestUserIdRef = useRef<string | null>(user?.id ?? null);
+  latestUserIdRef.current = user?.id ?? null;
   const [syncSnapshot, setSyncSnapshot] = useState<SimpleChatSyncSnapshot>({
     status: 'loading',
     projects: [],
@@ -130,6 +132,28 @@ export default function SimpleChatPage() {
     activeTaskIdRef.current = activeTaskId;
   }, [activeTaskId]);
 
+  useEffect(() => {
+    const handlePageHide = (): void => {
+      void coordinatorRef.current?.flush('pagehide');
+    };
+    const handleOnline = (): void => {
+      void coordinatorRef.current?.handleOnline();
+    };
+    const handleOffline = (): void => {
+      const coordinator = coordinatorRef.current;
+      if (!coordinator || !coordinatorReadyRef.current) return;
+      coordinator.update(coordinator.snapshot().projects);
+    };
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Auth
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +187,12 @@ export default function SimpleChatPage() {
     if (!userId) return;
 
     let cancelled = false;
+    const previousCoordinator = coordinatorRef.current;
+    if (previousCoordinator && coordinatorUserIdRef.current !== userId) {
+      coordinatorRef.current = null;
+      coordinatorUserIdRef.current = null;
+      void previousCoordinator.dispose({ flush: false });
+    }
     if (preReadyCandidateRef.current?.userId !== userId) {
       preReadyCandidateRef.current = null;
       setPreReadyCandidate(null);
@@ -229,9 +259,15 @@ export default function SimpleChatPage() {
       cancelled = true;
       coordinatorReadyRef.current = false;
       unsubscribe();
-      if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
+      const ownsCoordinator = coordinatorRef.current === coordinator;
+      if (ownsCoordinator) coordinatorRef.current = null;
       if (coordinatorUserIdRef.current === userId) coordinatorUserIdRef.current = null;
-      void coordinator.dispose({ flush: false });
+      if (ownsCoordinator && latestUserIdRef.current === userId) {
+        void coordinator.flush('user-switch');
+        void coordinator.dispose();
+      } else {
+        void coordinator.dispose({ flush: false });
+      }
     };
   }, [user?.id]);
 
@@ -328,11 +364,34 @@ export default function SimpleChatPage() {
     logoutInFlight.current = true;
     setLogoutError(null);
 
-    const snapshot = user?.id ? getCurrentUserProjects(user.id) : [];
-    saveProjects(snapshot);
+    const userId = user?.id;
+    const coordinator = userId && coordinatorUserIdRef.current === userId
+      ? coordinatorRef.current
+      : null;
+    if (!coordinator) {
+      logoutInFlight.current = false;
+      setLogoutError('同步尚未就绪，请稍后重试');
+      return;
+    }
     try {
-      const result = await logoutSimpleChatSession({ projects: snapshot });
+      const result = await logoutSimpleChatSession({
+        flush: () => coordinator.flush('logout'),
+      });
       if (result.loggedOut) {
+        await coordinator.dispose({ flush: false });
+        if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
+        if (coordinatorUserIdRef.current === userId) coordinatorUserIdRef.current = null;
+        coordinatorReadyRef.current = false;
+        projectsRef.current = [];
+        dataOwnerUserIdRef.current = null;
+        preReadyCandidateRef.current = null;
+        activeProjectIdRef.current = null;
+        activeTaskIdRef.current = null;
+        setProjects([]);
+        setDataOwnerUserId(null);
+        setPreReadyCandidate(null);
+        setActiveProjectId(null);
+        setActiveTaskId(null);
         setUser(null);
         setShowLogin(true);
       } else {
@@ -341,7 +400,7 @@ export default function SimpleChatPage() {
     } finally {
       logoutInFlight.current = false;
     }
-  }, [getCurrentUserProjects, user?.id]);
+  }, [user?.id]);
 
   // Agent ops
   const handleCreateAgent = useCallback((projectId: string, agent: SimpleChatAgent) => {

@@ -36,7 +36,8 @@ import {
   resolveModelAuthorizationNamespace,
 } from '@/lib/model-type-classification';
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { loadProjects as loadSimpleChatProjects } from '@/components/simple-chat/simple-chat-types';
+import { loadSimpleChatDashboardProjects } from '@/lib/simple-chat-sync-client';
+import { createIndexedDbSimpleChatEnvelopeStore } from '@/lib/simple-chat-sync-storage';
 import { reconcileImageBatchDeletion } from '@/lib/asset-core/batch-placement-delete';
 import {
   buildCapabilityEditorModels,
@@ -1105,28 +1106,32 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     finally { setProductionReadinessLoading(false); }
   }, []);
 
-  // Keep the dashboard and simple-chat page on one storage contract.
-  const loadChatProjects = useCallback(() => {
-    try {
-      const projects = loadSimpleChatProjects();
-      setChatProjects(projects.map((project) => ({
+  const loadChatProjects = useCallback(async () => {
+    const projects = await loadSimpleChatDashboardProjects({
+      userId: user.id,
+      store: createIndexedDbSimpleChatEnvelopeStore(),
+    });
+    return projects.map((project) => ({
         id: project.id,
         name: project.name,
         emoji: project.emoji || '💬',
         taskCount: Array.isArray(project.tasks) ? project.tasks.length : 0,
         updatedAt: project.updatedAt || 0,
-      })));
-    } catch { setChatProjects([]); }
-  }, []);
+      }));
+  }, [user.id]);
 
   useEffect(() => {
     if (activeTab !== 'chat') return;
-    loadChatProjects();
-    window.addEventListener('focus', loadChatProjects);
-    window.addEventListener('storage', loadChatProjects);
+    let cancelled = false;
+    const refresh = async (): Promise<void> => {
+      const loaded = await loadChatProjects();
+      if (!cancelled) setChatProjects(loaded);
+    };
+    void refresh();
+    window.addEventListener('focus', refresh);
     return () => {
-      window.removeEventListener('focus', loadChatProjects);
-      window.removeEventListener('storage', loadChatProjects);
+      cancelled = true;
+      window.removeEventListener('focus', refresh);
     };
   }, [activeTab, loadChatProjects]);
 

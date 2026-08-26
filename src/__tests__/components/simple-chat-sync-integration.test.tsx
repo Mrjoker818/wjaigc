@@ -364,7 +364,8 @@ describe('simple chat synchronization integration', () => {
     });
 
     expect(harness.unsubscribe).toHaveBeenCalledOnce();
-    expect(harness.dispose).toHaveBeenCalledWith({ flush: false });
+    expect(harness.flush).toHaveBeenCalledWith('user-switch');
+    expect(harness.dispose).toHaveBeenCalledWith();
     expect(harness.update).not.toHaveBeenCalled();
   });
 
@@ -463,7 +464,7 @@ describe('simple chat synchronization integration', () => {
     expect(second.flush).toHaveBeenCalledWith('manual');
   });
 
-  it('logs out with only the current account pre-ready candidate after initialization fails', async () => {
+  it('logs out through only the current account coordinator after initialization fails', async () => {
     const accountAProject = createProject({ id: 'account-a-project', name: 'A private project' });
     const first = createCoordinatorHarness(createSnapshot('synced', [accountAProject]));
     const second = createCoordinatorHarness(createSnapshot('failed', []));
@@ -486,19 +487,73 @@ describe('simple chat synchronization integration', () => {
     await waitFor(() => expect(second.initialize).toHaveBeenCalledWith('account-b'));
     fireEvent.click(screen.getByRole('button', { name: '创建测试项目' }));
     await waitFor(() => expect(mocks.chatAreaProps?.project?.name).toBe('默认项目'));
-    const candidateProjectId = mocks.chatAreaProps?.project?.id;
-    expect(candidateProjectId).toBeTruthy();
     mocks.logoutSimpleChatSession.mockClear();
+    mocks.logoutSimpleChatSession.mockImplementation(async (options: { flush: () => Promise<void> }) => {
+      await options.flush();
+      return { loggedOut: true, sync: 'completed' };
+    });
 
     fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
     await waitFor(() => expect(mocks.logoutSimpleChatSession).toHaveBeenCalledOnce());
 
     expect(mocks.logoutSimpleChatSession).toHaveBeenCalledWith({
-      projects: [expect.objectContaining({ id: candidateProjectId })],
+      flush: expect.any(Function),
     });
-    expect(mocks.logoutSimpleChatSession).not.toHaveBeenCalledWith({
-      projects: expect.arrayContaining([expect.objectContaining({ id: 'account-a-project' })]),
+    expect(second.flush).toHaveBeenCalledWith('logout');
+    expect(first.flush).not.toHaveBeenCalledWith('logout');
+    expect(mocks.globalFetch).not.toHaveBeenCalled();
+  });
+
+  it('routes browser lifecycle events to the active coordinator and removes listeners on unmount', async () => {
+    const project = createProject();
+    const harness = createCoordinatorHarness(createSnapshot('synced', [project]));
+    mocks.fetchSessionPayload.mockResolvedValue({
+      success: true,
+      user: { id: 'user-1', name: 'Test User', createdAt: 1, updatedAt: 1 },
     });
+    mocks.coordinatorFactory.mockReturnValue(harness.coordinator);
+    vi.mocked(harness.coordinator.snapshot).mockReturnValue(createSnapshot('synced', [project]));
+    const rendered = render(<SimpleChatPage />);
+    await waitFor(() => expect(harness.initialize).toHaveBeenCalledWith('user-1'));
+    harness.flush.mockClear();
+    harness.handleOnline.mockClear();
+    harness.update.mockClear();
+
+    window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(new Event('online'));
+    window.dispatchEvent(new Event('offline'));
+
+    expect(harness.flush).toHaveBeenCalledWith('pagehide');
+    expect(harness.handleOnline).toHaveBeenCalledOnce();
+    expect(harness.update).toHaveBeenCalledWith([project]);
+
+    rendered.unmount();
+    harness.flush.mockClear();
+    harness.handleOnline.mockClear();
+    harness.update.mockClear();
+    window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(new Event('online'));
+    window.dispatchEvent(new Event('offline'));
+    expect(harness.flush).not.toHaveBeenCalled();
+    expect(harness.handleOnline).not.toHaveBeenCalled();
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it('does not user-switch flush again after logout changes the session cookie', async () => {
+    const harness = createCoordinatorHarness(createSnapshot('synced', [createProject()]));
+    mocks.logoutSimpleChatSession.mockImplementation(async (options: { flush: () => Promise<void> }) => {
+      await options.flush();
+      return { loggedOut: true, sync: 'completed' };
+    });
+    await renderAuthenticatedPage(harness);
+
+    fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+    await screen.findByRole('button', { name: '登录测试用户' });
+
+    expect(harness.flush).toHaveBeenCalledTimes(1);
+    expect(harness.flush).toHaveBeenCalledWith('logout');
+    expect(harness.flush).not.toHaveBeenCalledWith('user-switch');
+    expect(harness.dispose).toHaveBeenCalledWith({ flush: false });
   });
 
   it('keeps ChatArea mounted with the authenticated user and model-bearing chat task props', async () => {

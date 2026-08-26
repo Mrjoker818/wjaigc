@@ -1,7 +1,7 @@
 export type SimpleChatLogoutSyncStatus = 'completed' | 'failed' | 'timed-out' | 'skipped';
 
-interface SimpleChatLogoutOptions {
-  projects: unknown[];
+export interface SimpleChatLogoutOptions {
+  flush: () => Promise<void>;
   fetchImpl?: typeof fetch;
   syncTimeoutMs?: number;
 }
@@ -19,33 +19,19 @@ async function consumeResponse(response: Response): Promise<void> {
   }
 }
 
-async function syncProjectsWithTimeout(
-  projects: unknown[],
-  fetchImpl: typeof fetch,
+async function flushWithTimeout(
+  flush: () => Promise<void>,
   timeoutMs: number,
 ): Promise<SimpleChatLogoutSyncStatus> {
-  if (projects.length === 0) return 'skipped';
-
-  const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const request = Promise.resolve()
-    .then(() => fetchImpl('/api/user-data/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      signal: controller.signal,
-      body: JSON.stringify({ key: 'chat_simple_projects', value: projects }),
-    }))
-    .then(async (response) => {
-      await consumeResponse(response);
-      return response.ok ? 'completed' : 'failed';
-    })
+    .then(flush)
+    .then((): SimpleChatLogoutSyncStatus => 'completed')
     .catch((): SimpleChatLogoutSyncStatus => 'failed');
   const deadline = new Promise<SimpleChatLogoutSyncStatus>((resolve) => {
     timeout = setTimeout(() => {
-      controller.abort();
       resolve('timed-out');
-    }, timeoutMs);
+    }, Math.max(0, timeoutMs));
   });
 
   try {
@@ -75,9 +61,8 @@ export async function logoutSimpleChatSession(
   options: SimpleChatLogoutOptions,
 ): Promise<SimpleChatLogoutResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const sync = await syncProjectsWithTimeout(
-    options.projects,
-    fetchImpl,
+  const sync = await flushWithTimeout(
+    options.flush,
     options.syncTimeoutMs ?? 5_000,
   );
 
