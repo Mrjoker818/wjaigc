@@ -7,6 +7,10 @@ import type {
   SimpleChatProject,
   SimpleChatTask,
 } from '@/components/simple-chat/simple-chat-types';
+import {
+  normalizeReasoningEffort,
+  normalizeResponseSpeed,
+} from '@/lib/chat-generation-controls';
 
 export type SimpleChatEntityType =
   | 'project'
@@ -255,8 +259,9 @@ export function replaySimpleChatOperations(
     now: options?.now ?? (() => Date.now()),
     remaps: createReplayIdRemaps(),
   };
+  const compactedOperations = compactSimpleChatOperations(operations);
 
-  for (const originalOperation of compactSimpleChatOperations(operations)) {
+  for (const originalOperation of compactedOperations) {
     const operation = resolveOperation(context, originalOperation);
     if (operation.kind === 'delete') {
       replayDelete(context.projects, operation);
@@ -308,6 +313,7 @@ export function replaySimpleChatOperations(
     if (conflict) context.conflicts.push(conflict);
   }
 
+  closeConflictEntityReferences(context, compactedOperations);
   return { projects: context.projects, conflicts: context.conflicts };
 }
 
@@ -1030,6 +1036,105 @@ function sanitizeConflictEntityReferences(
   }
 }
 
+function closeConflictEntityReferences(
+  context: ReplayContext,
+  operations: SimpleChatSyncOperation[],
+): void {
+  const operationsById = new Map(operations.map(operation => [operation.operationId, operation]));
+  for (const project of context.projects) {
+    for (const task of project.tasks) {
+      const taskMetadata = (task as SimpleChatTask & SimpleChatConflictTagged).syncConflict;
+      const taskOperation = taskMetadata ? operationsById.get(taskMetadata.operationId) : undefined;
+      if (taskOperation?.entityType === 'task' && isRecord(taskOperation.value)) {
+        closeTaskConflictReference(context, task, project.id, taskOperation);
+      }
+      for (const chatMessage of task.messages) {
+        const messageMetadata = (chatMessage as SimpleChatMessage & SimpleChatConflictTagged).syncConflict;
+        const messageOperation = messageMetadata
+          ? operationsById.get(messageMetadata.operationId)
+          : undefined;
+        if (messageOperation?.entityType === 'message' && isRecord(messageOperation.value)) {
+          closeMessageConflictReferences(context, chatMessage, project.id, task.id, messageOperation);
+        }
+      }
+    }
+  }
+}
+
+function closeTaskConflictReference(
+  context: ReplayContext,
+  task: SimpleChatTask,
+  targetProjectId: string,
+  operation: SimpleChatSyncOperation,
+): void {
+  const sourceReferences = readConflictSourceReferences(task);
+  const activeAgentId = task.activeAgentId ?? readString(sourceReferences?.activeAgentId);
+  if (activeAgentId === undefined) return;
+  const remapped = remapAgentReference(context, operation.projectId, targetProjectId, activeAgentId);
+  if (remapped === undefined) {
+    delete task.activeAgentId;
+    retainConflictSourceReferences(task, { activeAgentId });
+    return;
+  }
+  task.activeAgentId = remapped;
+  clearConflictSourceReferences(task, ['activeAgentId']);
+}
+
+function closeMessageConflictReferences(
+  context: ReplayContext,
+  chatMessage: SimpleChatMessage,
+  targetProjectId: string,
+  targetTaskId: string,
+  operation: SimpleChatSyncOperation,
+): void {
+  const sourceReferences = readConflictSourceReferences(chatMessage);
+  const parentMessageId = chatMessage.parentMessageId ?? readString(sourceReferences?.parentMessageId);
+  if (parentMessageId !== undefined) {
+    const remapped = remapMessageReference(
+      context,
+      operation.projectId,
+      operation.taskId,
+      targetProjectId,
+      targetTaskId,
+      parentMessageId,
+    );
+    if (remapped === undefined) {
+      delete chatMessage.parentMessageId;
+      retainConflictSourceReferences(chatMessage, { parentMessageId });
+    } else {
+      chatMessage.parentMessageId = remapped;
+      clearConflictSourceReferences(chatMessage, ['parentMessageId']);
+    }
+  }
+
+  const retryContext = chatMessage.retryContext ?? sourceReferences?.retryContext;
+  if (retryContext === undefined) return;
+  const remappedRetryContext = remapRetryContext(
+    context,
+    retryContext,
+    operation.projectId,
+    operation.taskId,
+    targetProjectId,
+    targetTaskId,
+  );
+  if (remappedRetryContext.value === undefined) delete chatMessage.retryContext;
+  else chatMessage.retryContext = remappedRetryContext.value;
+  if (remappedRetryContext.danglingSource !== undefined) {
+    retainConflictSourceReferences(chatMessage, {
+      retryContext: remappedRetryContext.danglingSource,
+    });
+  } else {
+    clearConflictSourceReferences(chatMessage, ['retryContext']);
+  }
+}
+
+function readConflictSourceReferences(entity: object): Record<string, unknown> | undefined {
+  const value = entity as Record<string, unknown>;
+  return isRecord(value.syncConflict) && isRecord(value.syncConflict.sourceReferences)
+    ? value.syncConflict.sourceReferences
+    : undefined;
+}
+
 function applyProjectionToValue(
   fullValue: unknown,
   projection: unknown,
@@ -1706,6 +1811,18 @@ function retainConflictSourceReferences(
   value.syncConflict.sourceReferences = { ...existing, ...cloneUnknown(references) };
 }
 
+function clearConflictSourceReferences(
+  entity: object,
+  keys: Array<keyof SimpleChatConflictSourceReferences>,
+): void {
+  const value = entity as Record<string, unknown>;
+  if (!isRecord(value.syncConflict) || !isRecord(value.syncConflict.sourceReferences)) return;
+  for (const key of keys) delete value.syncConflict.sourceReferences[key];
+  if (Object.keys(value.syncConflict.sourceReferences).length === 0) {
+    delete value.syncConflict.sourceReferences;
+  }
+}
+
 function resolveProjectId(context: ReplayContext, projectId: string): string {
   return context.remaps.projects.get(projectId) ?? projectId;
 }
@@ -1776,12 +1893,12 @@ function validateTaskEntity(value: Record<string, unknown>): SimpleChatProjectVa
     validateRequiredString(value, 'providerId'),
     validateOptionalString(value, 'imageModel'),
     validateOptionalId(value, 'imageProviderId'),
-    validateOptionalString(value, 'reasoningEffort'),
-    validateOptionalString(value, 'responseSpeed'),
+    validateOptionalReasoningEffort(value, 'reasoningEffort'),
+    validateOptionalResponseSpeed(value, 'responseSpeed'),
     validateOptionalId(value, 'activeAgentId'),
     validateRequiredNumber(value, 'createdAt'),
     validateRequiredNumber(value, 'updatedAt'),
-    validateOptionalRecord(value, 'appliedChatControls'),
+    validateAppliedChatControls(value.appliedChatControls),
     validateConflictMetadata(value.syncConflict),
   );
 }
@@ -1798,7 +1915,7 @@ function validateMessageEntity(value: Record<string, unknown>): SimpleChatProjec
     validateRequiredEnum(value, 'role', ['user', 'assistant', 'system', 'search']),
     validateRequiredNumber(value, 'createdAt'),
     validateOptionalStringArray(value, 'images'),
-    validateOptionalRecordArray(value, 'imageRefs'),
+    validateImageReferences(value.imageRefs),
     validateOptionalString(value, 'model'),
     validateOptionalId(value, 'providerId'),
     validateOptionalId(value, 'parentMessageId'),
@@ -1808,6 +1925,35 @@ function validateMessageEntity(value: Record<string, unknown>): SimpleChatProjec
     validateMessageFailure(value.error),
     validateRetryContext(value.retryContext),
     validateConflictMetadata(value.syncConflict),
+  );
+}
+
+function validateImageReferences(value: unknown): SimpleChatProjectValidationResult | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return invalidValidation('value');
+  for (const reference of value) {
+    if (!isRecord(reference)) return invalidValidation('value');
+    const result = firstValidation(
+      validateRequiredString(reference, 'url'),
+      validateOptionalName(reference, 'name'),
+      validateOptionalId(reference, 'assetId'),
+      validateOptionalId(reference, 'assetVersionId'),
+      validateOptionalId(reference, 'placementId'),
+      validateOptionalId(reference, 'entityId'),
+    );
+    if (result) return result;
+  }
+  return undefined;
+}
+
+function validateAppliedChatControls(value: unknown): SimpleChatProjectValidationResult | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return invalidValidation('value');
+  return firstValidation(
+    validateRequiredReasoningEffort(value, 'appliedReasoningEffort', true),
+    validateRequiredResponseSpeed(value, 'appliedResponseSpeed', true),
+    validateRequiredBoolean(value, 'degraded'),
+    validateRequiredStringArray(value, 'notices'),
   );
 }
 
@@ -2042,6 +2188,13 @@ function validateRequiredName(
   return validateStringLimit(value[key] as string, 'name', SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
 }
 
+function validateOptionalName(
+  value: Record<string, unknown>,
+  key: string,
+): SimpleChatProjectValidationResult | undefined {
+  return value[key] === undefined ? undefined : validateRequiredName(value, key);
+}
+
 function validateRequiredString(
   value: Record<string, unknown>,
   key: string,
@@ -2054,6 +2207,44 @@ function validateOptionalString(
   key: string,
 ): SimpleChatProjectValidationResult | undefined {
   return value[key] === undefined ? undefined : validateRequiredString(value, key);
+}
+
+function validateRequiredReasoningEffort(
+  value: Record<string, unknown>,
+  key: string,
+  allowModelDefault = false,
+): SimpleChatProjectValidationResult | undefined {
+  const candidate = value[key];
+  return candidate === 'model-default' && allowModelDefault
+    || typeof candidate === 'string' && normalizeReasoningEffort(candidate) === candidate
+    ? undefined
+    : invalidValidation('value');
+}
+
+function validateOptionalReasoningEffort(
+  value: Record<string, unknown>,
+  key: string,
+): SimpleChatProjectValidationResult | undefined {
+  return value[key] === undefined ? undefined : validateRequiredReasoningEffort(value, key);
+}
+
+function validateRequiredResponseSpeed(
+  value: Record<string, unknown>,
+  key: string,
+  allowModelDefault = false,
+): SimpleChatProjectValidationResult | undefined {
+  const candidate = value[key];
+  return candidate === 'model-default' && allowModelDefault
+    || typeof candidate === 'string' && normalizeResponseSpeed(candidate) === candidate
+    ? undefined
+    : invalidValidation('value');
+}
+
+function validateOptionalResponseSpeed(
+  value: Record<string, unknown>,
+  key: string,
+): SimpleChatProjectValidationResult | undefined {
+  return value[key] === undefined ? undefined : validateRequiredResponseSpeed(value, key);
 }
 
 function validateRequiredNumber(
@@ -2135,23 +2326,6 @@ function validateRequiredEnumArray(
     && value[key].every(item => typeof item === 'string' && allowed.includes(item))
     ? undefined
     : invalidValidation('value');
-}
-
-function validateOptionalRecordArray(
-  value: Record<string, unknown>,
-  key: string,
-): SimpleChatProjectValidationResult | undefined {
-  return value[key] === undefined
-    || (Array.isArray(value[key]) && value[key].every(item => isRecord(item)))
-    ? undefined
-    : invalidValidation('value');
-}
-
-function validateOptionalRecord(
-  value: Record<string, unknown>,
-  key: string,
-): SimpleChatProjectValidationResult | undefined {
-  return value[key] === undefined || isRecord(value[key]) ? undefined : invalidValidation('value');
 }
 
 function validateStringLimit(
