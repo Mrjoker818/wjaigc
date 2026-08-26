@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import type {
   ChatArtifact,
   SimpleChatMessage,
@@ -16,6 +16,7 @@ import {
 } from '@/lib/simple-chat-project-sync';
 import type {
   SimpleChatSyncedProject,
+  SimpleChatSyncEnvelopeV1,
   SimpleChatSyncOperation,
 } from '@/lib/simple-chat-project-sync';
 import {
@@ -62,6 +63,31 @@ function message(
     content,
     artifacts,
     createdAt: 1,
+  };
+}
+
+function retryContext(
+  userMessageId: string,
+  assistantMessageId: string,
+  historyMessageIds: string[],
+): NonNullable<SimpleChatMessage['retryContext']> {
+  return {
+    version: 1,
+    kind: 'chat',
+    projectId: 'p1',
+    taskId: 't1',
+    userMessageId,
+    assistantMessageId,
+    idempotencyKey: 'retry-key',
+    modelId: 'chat-model',
+    providerId: 'provider-id',
+    webSearch: false,
+    sourceVersionIds: [],
+    selectedEntityIds: [],
+    historyMessageIds,
+    systemMessages: [],
+    knowledgeItems: [],
+    memories: [],
   };
 }
 
@@ -296,6 +322,68 @@ describe('simple chat project synchronization', () => {
     });
   });
 
+  it('remaps available leaf-conflict references and clears dangling ones while retaining their source ids', () => {
+    const beforeProject = graph();
+    const sourceTask = beforeProject.tasks[0];
+    sourceTask.activeAgentId = 'missing-agent';
+    const userMessage = sourceTask.messages[0];
+    userMessage.parentMessageId = 'missing-parent';
+    userMessage.retryContext = retryContext('missing-user', 'missing-assistant', ['missing-history']);
+    const assistantMessage = message('m2', '本地回答');
+    assistantMessage.role = 'assistant';
+    assistantMessage.parentMessageId = userMessage.id;
+    assistantMessage.retryContext = retryContext(
+      userMessage.id,
+      assistantMessage.id,
+      [userMessage.id, assistantMessage.id],
+    );
+    sourceTask.messages.push(assistantMessage);
+
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].name = '本地标题';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].name = '远端标题';
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+
+    const result = replaySimpleChatOperations(
+      [remoteProject],
+      operations,
+      {
+        createId: idFactory('copy-task', 'copy-user', 'copy-artifact', 'copy-assistant'),
+        now: () => 250,
+      },
+    );
+    const copiedTask = result.projects[0].tasks.find(item => item.id === 'copy-task');
+    if (!copiedTask) throw new Error('Expected a copied conflict task');
+    const copiedUser = copiedTask.messages.find(item => item.id === 'copy-user');
+    const copiedAssistant = copiedTask.messages.find(item => item.id === 'copy-assistant');
+    if (!copiedUser || !copiedAssistant?.retryContext) {
+      throw new Error('Expected copied leaf-conflict messages');
+    }
+
+    expect(copiedTask).not.toHaveProperty('activeAgentId');
+    expect(copiedTask.syncConflict?.sourceReferences?.activeAgentId).toBe('missing-agent');
+    expect(copiedUser).not.toHaveProperty('parentMessageId');
+    expect(copiedUser).not.toHaveProperty('retryContext');
+    expect(copiedUser.syncConflict?.sourceReferences).toMatchObject({
+      parentMessageId: 'missing-parent',
+      retryContext: {
+        userMessageId: 'missing-user',
+        assistantMessageId: 'missing-assistant',
+        historyMessageIds: ['missing-history'],
+      },
+    });
+    expect(copiedAssistant.parentMessageId).toBe(copiedUser.id);
+    expect(copiedAssistant.retryContext).toMatchObject({
+      projectId: 'p1',
+      taskId: copiedTask.id,
+      userMessageId: copiedUser.id,
+      assistantMessageId: copiedAssistant.id,
+      historyMessageIds: [copiedUser.id, copiedAssistant.id],
+    });
+    expect(validateSimpleChatProjects(result.projects)).toEqual({ success: true });
+  });
+
   it('persists conflict source and time and visibly marks message copies', () => {
     const beforeProject = graph();
     const currentProject = cloneProject(beforeProject);
@@ -381,6 +469,32 @@ describe('simple chat project synchronization', () => {
     expect(copy.agents[0].name).toContain('冲突副本');
     expect(copy.knowledgeItems[0].name).toContain('冲突副本');
     expect(validateSimpleChatProjects(result.projects)).toEqual({ success: true });
+  });
+
+  it('truncates conflict names by Unicode code point while retaining the visible marker', () => {
+    const local = graph();
+    local.name = '😀'.repeat(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+    const remote = cloneProject(local);
+    remote.name = '😁'.repeat(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+
+    const result = replaySimpleChatOperations(
+      [remote],
+      diffSimpleChatProjects([], [local], 1),
+      { createId: idFactory(...Array.from({ length: 12 }, (_, index) => `emoji-${index + 1}`)) },
+    );
+    const copy = result.projects.find(item => item.id !== local.id);
+    if (!copy) throw new Error('Expected an emoji-named conflict project copy');
+
+    expect(Array.from(copy.name)).toHaveLength(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+    expect(copy.name).toBe(`${'😀'.repeat(506)}（冲突副本）`);
+    expect(validateSimpleChatProjects(result.projects)).toEqual({ success: true });
+  });
+
+  it('exposes synchronized conflict metadata through the envelope project type', () => {
+    expectTypeOf<SimpleChatSyncEnvelopeV1['baseProjects'][number]>()
+      .toEqualTypeOf<SimpleChatSyncedProject>();
+    expectTypeOf<SimpleChatSyncEnvelopeV1['currentProjects'][number]>()
+      .toEqualTypeOf<SimpleChatSyncedProject>();
   });
 
   it.each([
@@ -613,6 +727,86 @@ describe('simple chat project synchronization', () => {
 });
 
 describe('simple chat sync payload validation', () => {
+  it('returns a bounded depth failure for a 20,000-level value without overflowing the stack', () => {
+    const value = project('p-deep');
+    (value as unknown as Record<string, unknown>).metadata = nestedObject(20_000);
+
+    expect(() => validateSimpleChatProjects([value])).not.toThrow();
+    expect(validateSimpleChatProjects([value])).toMatchObject(validationFailure('depth'));
+  });
+
+  it.each([
+    ['project id', (value: SimpleChatProject) => { (value as unknown as Record<string, unknown>).id = 1; }],
+    ['project name', (value: SimpleChatProject) => { (value as unknown as Record<string, unknown>).name = false; }],
+    ['task id', (value: SimpleChatProject) => { (value.tasks[0] as unknown as Record<string, unknown>).id = 1; }],
+    ['task name', (value: SimpleChatProject) => { (value.tasks[0] as unknown as Record<string, unknown>).name = false; }],
+    ['message id', (value: SimpleChatProject) => { (value.tasks[0].messages[0] as unknown as Record<string, unknown>).id = 1; }],
+    ['message content', (value: SimpleChatProject) => { (value.tasks[0].messages[0] as unknown as Record<string, unknown>).content = false; }],
+    ['artifact id', (value: SimpleChatProject) => { (value.tasks[0].messages[0].artifacts![0] as unknown as Record<string, unknown>).id = 1; }],
+    ['artifact title', (value: SimpleChatProject) => { (value.tasks[0].messages[0].artifacts![0] as unknown as Record<string, unknown>).title = false; }],
+    ['artifact content', (value: SimpleChatProject) => { (value.tasks[0].messages[0].artifacts![0] as unknown as Record<string, unknown>).content = false; }],
+    ['agent id', (value: SimpleChatProject) => { (value.agents[0] as unknown as Record<string, unknown>).id = 1; }],
+    ['agent name', (value: SimpleChatProject) => { (value.agents[0] as unknown as Record<string, unknown>).name = false; }],
+    ['knowledge item id', (value: SimpleChatProject) => { (value.knowledgeItems[0] as unknown as Record<string, unknown>).id = 1; }],
+    ['knowledge item name', (value: SimpleChatProject) => { (value.knowledgeItems[0] as unknown as Record<string, unknown>).name = false; }],
+  ])('rejects an invalid required $0 scalar type', (_name, mutate) => {
+    const value = graph();
+    mutate(value);
+    expect(validateSimpleChatProjects([value])).toMatchObject(invalidValue());
+  });
+
+  it.each([
+    ['project timestamp', (value: SimpleChatProject) => { (value as unknown as Record<string, unknown>).createdAt = '1'; }],
+    ['task model', (value: SimpleChatProject) => { (value.tasks[0] as unknown as Record<string, unknown>).model = 1; }],
+    ['message role', (value: SimpleChatProject) => { (value.tasks[0].messages[0] as unknown as Record<string, unknown>).role = 1; }],
+    ['artifact version', (value: SimpleChatProject) => { (value.tasks[0].messages[0].artifacts![0] as unknown as Record<string, unknown>).version = '1'; }],
+    ['agent tools', (value: SimpleChatProject) => { (value.agents[0] as unknown as Record<string, unknown>).tools = 'web_search'; }],
+    ['knowledge tags', (value: SimpleChatProject) => { (value.knowledgeItems[0] as unknown as Record<string, unknown>).tags = 'tag'; }],
+    ['attachment mime type', (value: SimpleChatProject) => {
+      value.tasks[0].messages[0].attachments = [{
+        id: 'attachment-1',
+        type: 'file',
+        name: 'file',
+        mimeType: 'text/plain',
+      }];
+      (value.tasks[0].messages[0].attachments[0] as unknown as Record<string, unknown>).mimeType = 1;
+    }],
+    ['retry context boolean', (value: SimpleChatProject) => {
+      value.tasks[0].messages[0].retryContext = retryContext('m1', 'm1', ['m1']);
+      (value.tasks[0].messages[0].retryContext as unknown as Record<string, unknown>).webSearch = 'false';
+    }],
+    ['retry history element', (value: SimpleChatProject) => {
+      value.tasks[0].messages[0].retryContext = retryContext('m1', 'm1', ['m1']);
+      (value.tasks[0].messages[0].retryContext!.historyMessageIds as unknown[])[0] = 1;
+    }],
+  ])('rejects an invalid nested $0 type', (_name, mutate) => {
+    const value = graph();
+    mutate(value);
+    expect(validateSimpleChatProjects([value])).toMatchObject(invalidValue());
+  });
+
+  it('validates every identifier-array element against the ID code-point limit', () => {
+    const value = graph();
+    value.tasks[0].messages[0].retryContext = retryContext(
+      'm1',
+      'm1',
+      ['😀'.repeat(SIMPLE_CHAT_SYNC_LIMITS.idCharacters + 1)],
+    );
+
+    expect(validateSimpleChatProjects([value])).toMatchObject(validationFailure('id'));
+  });
+
+  it('counts ID and name limits by Unicode code point', () => {
+    const exact = project('p-exact');
+    exact.id = '😀'.repeat(SIMPLE_CHAT_SYNC_LIMITS.idCharacters);
+    exact.name = '😀'.repeat(SIMPLE_CHAT_SYNC_LIMITS.nameCharacters);
+    const oversized = project('p-oversized');
+    oversized.id = '😀'.repeat(SIMPLE_CHAT_SYNC_LIMITS.idCharacters + 1);
+
+    expect(validateSimpleChatProjects([exact])).toEqual({ success: true });
+    expect(validateSimpleChatProjects([oversized])).toMatchObject(validationFailure('id'));
+  });
+
   it('leaves the exact request-body byte gate to the raw stream layer', () => {
     const projects = payloadAtJsonBytes(MAX_REQUEST_BYTES + 1);
 
