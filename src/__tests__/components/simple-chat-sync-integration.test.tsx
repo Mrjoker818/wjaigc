@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type ChatArea from '@/components/simple-chat/chat-area';
 import type { SimpleChatProject, SimpleChatTask } from '@/components/simple-chat/simple-chat-types';
+import {
+  createMemorySimpleChatEnvelopeStore,
+  jsonResponse,
+  sequenceFetch,
+} from '@/__tests__/fixtures/simple-chat-sync';
 import type { SimpleChatSyncCoordinator, SimpleChatSyncSnapshot } from '@/lib/simple-chat-sync-client';
+import type { SimpleChatLogoutSyncStatus } from '@/lib/simple-chat-logout';
 import type { User } from '@/lib/user-types';
 
 const mocks = vi.hoisted(() => ({
@@ -141,10 +147,16 @@ function createCoordinatorHarness(
 ): CoordinatorHarness {
   const listeners = new Set<(snapshot: SimpleChatSyncSnapshot) => void>();
   const unsubscribe = vi.fn();
-  const initialize = vi.fn(() => Promise.resolve(initializeResult));
+  let currentSnapshot = createSnapshot('loading', []);
+  const initialize = vi.fn(async () => {
+    currentSnapshot = await Promise.resolve(initializeResult);
+    return currentSnapshot;
+  });
   const update = vi.fn();
   const stageLocalProjectsForRecovery = vi.fn().mockResolvedValue(undefined);
-  const flush = vi.fn().mockResolvedValue(undefined);
+  const flush = vi.fn(async () => {
+    currentSnapshot = createSnapshot('synced', currentSnapshot.projects);
+  });
   const handleOnline = vi.fn().mockResolvedValue(undefined);
   const dispose = vi.fn().mockResolvedValue(undefined);
   const coordinator: SimpleChatSyncCoordinator = {
@@ -153,7 +165,7 @@ function createCoordinatorHarness(
     stageLocalProjectsForRecovery,
     flush,
     handleOnline,
-    snapshot: vi.fn(() => createSnapshot('loading', [])),
+    snapshot: vi.fn(() => currentSnapshot),
     subscribe: vi.fn(listener => {
       listeners.add(listener);
       return () => {
@@ -174,6 +186,7 @@ function createCoordinatorHarness(
     unsubscribe,
     dispose,
     emit: snapshot => {
+      currentSnapshot = snapshot;
       for (const listener of listeners) listener(snapshot);
     },
   };
@@ -560,6 +573,57 @@ describe('simple chat synchronization integration', () => {
       expect(screen.getByRole('button', { name: '登录测试用户' })).toBeTruthy();
     },
   );
+
+  it('maps a resolved real coordinator 503 failure to failed and shows the recovery notice', async () => {
+    const syncClient = await vi.importActual<typeof import('@/lib/simple-chat-sync-client')>(
+      '@/lib/simple-chat-sync-client',
+    );
+    const logout = await vi.importActual<typeof import('@/lib/simple-chat-logout')>(
+      '@/lib/simple-chat-logout',
+    );
+    const store = createMemorySimpleChatEnvelopeStore();
+    const coordinator = syncClient.createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: sequenceFetch(
+        jsonResponse(200, { success: true, value: [createProject()], syncRevision: 0 }),
+        jsonResponse(503, { success: false, code: 'SERVICE_UNAVAILABLE' }),
+        jsonResponse(503, { success: false, code: 'SERVICE_UNAVAILABLE' }),
+        jsonResponse(503, { success: false, code: 'SERVICE_UNAVAILABLE' }),
+        jsonResponse(503, { success: false, code: 'SERVICE_UNAVAILABLE' }),
+      ),
+      sleep: vi.fn().mockResolvedValue(undefined),
+      jitter: () => 0,
+    });
+    let helperSync: SimpleChatLogoutSyncStatus | null = null;
+    mocks.fetchSessionPayload.mockResolvedValue({
+      success: true,
+      user: { id: 'user-1', name: 'Test User', createdAt: 1, updatedAt: 1 },
+    });
+    mocks.coordinatorFactory.mockReturnValue(coordinator);
+    mocks.globalFetch.mockResolvedValue(new Response(null, { status: 200 }));
+    mocks.logoutSimpleChatSession.mockImplementation(async options => {
+      const result = await logout.logoutSimpleChatSession({
+        ...options,
+        fetchImpl: mocks.globalFetch,
+      });
+      helperSync = result.sync;
+      return result;
+    });
+
+    render(<SimpleChatPage />);
+    await screen.findByTestId('chat-area');
+    await waitFor(() => expect(coordinator.snapshot().status).toBe('synced'));
+    fireEvent.click(screen.getByRole('button', { name: '创建测试项目' }));
+    await waitFor(() => expect(coordinator.snapshot().pendingOperations.length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+
+    expect(await screen.findByText('同步未完成，将在下次登录继续同步')).toBeTruthy();
+    expect(helperSync).toBe('failed');
+    expect(coordinator.snapshot().status).toBe('failed');
+    expect(coordinator.snapshot().pendingOperations.length).toBeGreaterThan(0);
+    expect((await store.get('user-1'))?.pendingOperations.length).toBeGreaterThan(0);
+  });
 
   it('still flushes and retains the candidate when logout staging fails', async () => {
     const first = createCoordinatorHarness(createSnapshot('failed', []));

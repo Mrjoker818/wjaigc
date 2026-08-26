@@ -397,6 +397,13 @@ export default function SimpleChatPage() {
             throw stagingError ?? error;
           }
           if (stagingError !== null) throw stagingError;
+          const syncSnapshot = coordinator.snapshot();
+          if (
+            syncSnapshot.status !== 'synced'
+            || syncSnapshot.pendingOperations.length !== 0
+          ) {
+            throw new Error('Simple chat logout sync did not complete');
+          }
         },
       });
       if (result.loggedOut) {
