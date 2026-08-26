@@ -22,6 +22,8 @@ import {
 } from "@/lib/simple-chat-sync-client";
 import { createIndexedDbSimpleChatEnvelopeStore } from "@/lib/simple-chat-sync-storage";
 
+type ProjectUpdater = Project[] | ((current: Project[]) => Project[]);
+
 function generateId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 
 function createDefaultProject(): Project {
@@ -52,7 +54,6 @@ export default function SimpleChatPage() {
   const projectsRef = useRef<Project[]>([]);
   const coordinatorRef = useRef<SimpleChatSyncCoordinator | null>(null);
   const coordinatorReadyRef = useRef(false);
-  const applyingSyncSnapshotRef = useRef(false);
   const [syncSnapshot, setSyncSnapshot] = useState<SimpleChatSyncSnapshot>({
     status: 'loading',
     projects: [],
@@ -61,30 +62,31 @@ export default function SimpleChatPage() {
   });
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const activeProjectIdRef = useRef<string | null>(null);
+  const activeTaskIdRef = useRef<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  const commitProjects = useCallback((updater: ProjectUpdater): Project[] => {
+    const next = typeof updater === 'function' ? updater(projectsRef.current) : updater;
+    projectsRef.current = next;
+    setProjects(next);
+    if (coordinatorReadyRef.current) coordinatorRef.current?.update(next);
+    return next;
+  }, []);
+
   useEffect(() => {
-    projectsRef.current = projects;
-    if (!coordinatorReadyRef.current) return;
-    if (applyingSyncSnapshotRef.current) {
-      applyingSyncSnapshotRef.current = false;
-      return;
-    }
-    coordinatorRef.current?.update(projects);
-  }, [projects]);
+    activeProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    activeTaskIdRef.current = activeTaskId;
+  }, [activeTaskId]);
 
   // Auth
   useEffect(() => {
     let cancelled = false;
-    let unsubscribe: (() => void) | null = null;
 
-    const applyProjects = (nextProjects: Project[]) => {
-      projectsRef.current = nextProjects;
-      applyingSyncSnapshotRef.current = true;
-      setProjects(nextProjects);
-    };
-
-    const initialize = async () => {
+    const loadSession = async () => {
       try {
         const data = await fetchSessionPayload();
         if (cancelled) return;
@@ -95,36 +97,6 @@ export default function SimpleChatPage() {
 
         setUser(data.user);
         setShowLogin(false);
-
-        const coordinator = coordinatorRef.current ?? createSimpleChatSyncCoordinator({
-          store: createIndexedDbSimpleChatEnvelopeStore(),
-        });
-        coordinatorRef.current = coordinator;
-        unsubscribe = coordinator.subscribe(nextSnapshot => {
-          if (cancelled) return;
-          setSyncSnapshot(nextSnapshot);
-          if (coordinatorReadyRef.current) applyProjects(nextSnapshot.projects);
-        });
-
-        const initialized = await coordinator.initialize(data.user.id);
-        if (cancelled) return;
-        coordinatorReadyRef.current = true;
-        setSyncSnapshot(initialized);
-
-        let loaded = initialized.projects;
-        if (
-          loaded.length === 0
-          && (initialized.status === 'synced' || initialized.status === 'syncing')
-        ) {
-          loaded = [createDefaultProject()];
-          coordinator.update(loaded);
-        }
-        applyProjects(loaded);
-        const requestedProjectId = new URLSearchParams(window.location.search).get('projectId');
-        const requestedTaskId = new URLSearchParams(window.location.search).get('taskId');
-        const initial = selectInitialSimpleChatProject(loaded, requestedProjectId, requestedTaskId);
-        setActiveProjectId(initial?.projectId ?? null);
-        setActiveTaskId(initial?.taskId ?? null);
       } catch {
         if (!cancelled) setShowLogin(true);
       } finally {
@@ -132,13 +104,75 @@ export default function SimpleChatPage() {
       }
     };
 
+    void loadSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) return;
+
+    let cancelled = false;
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createIndexedDbSimpleChatEnvelopeStore(),
+    });
+    coordinatorRef.current = coordinator;
+    coordinatorReadyRef.current = false;
+    setSyncSnapshot({ status: 'loading', projects: [], pendingOperations: [], error: null });
+
+    const applyProjects = (loaded: Project[]): void => {
+      projectsRef.current = loaded;
+      setProjects(loaded);
+
+      const currentProject = loaded.find(project => project.id === activeProjectIdRef.current);
+      const currentTaskExists = currentProject?.tasks.some(task => task.id === activeTaskIdRef.current) ?? false;
+      if (currentProject && currentTaskExists) return;
+
+      const requestedProjectId = new URLSearchParams(window.location.search).get('projectId');
+      const requestedTaskId = new URLSearchParams(window.location.search).get('taskId');
+      const initial = selectInitialSimpleChatProject(loaded, requestedProjectId, requestedTaskId);
+      activeProjectIdRef.current = initial?.projectId ?? null;
+      activeTaskIdRef.current = initial?.taskId ?? null;
+      setActiveProjectId(initial?.projectId ?? null);
+      setActiveTaskId(initial?.taskId ?? null);
+    };
+
+    const applySnapshot = (nextSnapshot: SimpleChatSyncSnapshot): void => {
+      if (cancelled) return;
+      setSyncSnapshot(nextSnapshot);
+      if (nextSnapshot.status === 'synced' || nextSnapshot.status === 'syncing') {
+        coordinatorReadyRef.current = true;
+      }
+      if (coordinatorReadyRef.current) applyProjects(nextSnapshot.projects);
+    };
+
+    const unsubscribe = coordinator.subscribe(applySnapshot);
+    const initialize = async (): Promise<void> => {
+      const initialized = await coordinator.initialize(userId);
+      if (cancelled) return;
+      setSyncSnapshot(initialized);
+      if (initialized.status !== 'synced' && initialized.status !== 'syncing') return;
+
+      coordinatorReadyRef.current = true;
+      let loaded = initialized.projects;
+      if (loaded.length === 0) {
+        loaded = [createDefaultProject()];
+        coordinator.update(loaded);
+      }
+      applyProjects(loaded);
+    };
+
     void initialize();
     return () => {
       cancelled = true;
       coordinatorReadyRef.current = false;
-      unsubscribe?.();
+      unsubscribe();
+      if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
+      void coordinator.dispose();
     };
-  }, []);
+  }, [user?.id]);
 
   const activeProject = projects.find(p => p.id === activeProjectId) ?? null;
   const activeTask = activeProject?.tasks.find(t => t.id === activeTaskId) ?? null;
@@ -154,17 +188,17 @@ export default function SimpleChatPage() {
   // Project ops
   const handleCreateProject = useCallback(() => {
     const p = createDefaultProject();
-    setProjects(prev => [...prev, p]);
+    commitProjects(prev => [...prev, p]);
     setActiveProjectId(p.id);
     setActiveTaskId(p.tasks[0].id);
-  }, []);
+  }, [commitProjects]);
 
   const handleUpdateProject = useCallback((project: Project) => {
-    setProjects(prev => prev.map(p => p.id === project.id ? { ...project, updatedAt: Date.now() } : p));
-  }, []);
+    commitProjects(prev => prev.map(p => p.id === project.id ? { ...project, updatedAt: Date.now() } : p));
+  }, [commitProjects]);
 
   const handleDeleteProject = useCallback((id: string) => {
-    setProjects(prev => {
+    commitProjects(prev => {
       const remaining = prev.filter(p => p.id !== id);
       if (activeProjectId === id) {
         const next = remaining[0];
@@ -173,11 +207,11 @@ export default function SimpleChatPage() {
       }
       return remaining;
     });
-  }, [activeProjectId]);
+  }, [activeProjectId, commitProjects]);
 
   const handleRenameProject = useCallback((id: string, name: string) => {
-    setProjects(prev => prev.map(p => p.id === id ? { ...p, name, updatedAt: Date.now() } : p));
-  }, []);
+    commitProjects(prev => prev.map(p => p.id === id ? { ...p, name, updatedAt: Date.now() } : p));
+  }, [commitProjects]);
 
   // Task ops
   const handleCreateTask = useCallback((projectId: string, initialTask?: Partial<Task>) => {
@@ -186,33 +220,33 @@ export default function SimpleChatPage() {
       messages: initialTask?.messages || [], model: initialTask?.model || '', providerId: initialTask?.providerId || '',
       createdAt: Date.now(), updatedAt: Date.now()
     };
-    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, tasks: [...p.tasks, task], updatedAt: Date.now() } : p));
+    commitProjects(prev => prev.map(p => p.id === projectId ? { ...p, tasks: [...p.tasks, task], updatedAt: Date.now() } : p));
     setActiveTaskId(task.id);
-  }, []);
+  }, [commitProjects]);
 
   const handleDeleteTask = useCallback((projectId: string, taskId: string) => {
-    setProjects(prev => prev.map(p => {
+    commitProjects(prev => prev.map(p => {
       if (p.id !== projectId) return p;
       const remaining = p.tasks.filter(t => t.id !== taskId);
       if (activeTaskId === taskId) setActiveTaskId(remaining[0]?.id ?? null);
       return { ...p, tasks: remaining, updatedAt: Date.now() };
     }));
-  }, [activeTaskId]);
+  }, [activeTaskId, commitProjects]);
 
   const handleRenameTask = useCallback((projectId: string, taskId: string, name: string) => {
-    setProjects(prev => prev.map(p => p.id === projectId ? {
+    commitProjects(prev => prev.map(p => p.id === projectId ? {
       ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, name, updatedAt: Date.now() } : t),
       updatedAt: Date.now()
     } : p));
-  }, []);
+  }, [commitProjects]);
 
   const handleUpdateTask = useCallback((task: Task) => {
-    setProjects(prev => prev.map(p => ({
+    commitProjects(prev => prev.map(p => ({
       ...p,
       tasks: p.tasks.map(t => t.id === task.id ? { ...task, updatedAt: Date.now() } : t),
       updatedAt: p.id === task.projectId ? Date.now() : p.updatedAt
     })));
-  }, []);
+  }, [commitProjects]);
 
   const handlePersistTask = useCallback(async (task: Task) => {
     const next = projectsRef.current.map(project => ({
@@ -222,11 +256,9 @@ export default function SimpleChatPage() {
         : current),
       updatedAt: project.id === task.projectId ? Date.now() : project.updatedAt,
     }));
-    projectsRef.current = next;
-    setProjects(next);
-    coordinatorRef.current?.update(next);
+    commitProjects(next);
     await coordinatorRef.current?.flush('manual');
-  }, []);
+  }, [commitProjects]);
 
   const handleLogout = useCallback(async () => {
     if (logoutInFlight.current) return;
@@ -250,22 +282,22 @@ export default function SimpleChatPage() {
 
   // Agent ops
   const handleCreateAgent = useCallback((projectId: string, agent: SimpleChatAgent) => {
-    setProjects(prev => prev.map(p => p.id === projectId ? {
+    commitProjects(prev => prev.map(p => p.id === projectId ? {
       ...p, agents: [...p.agents, agent], updatedAt: Date.now()
     } : p));
-  }, []);
+  }, [commitProjects]);
 
   const handleUpdateAgent = useCallback((projectId: string, agent: SimpleChatAgent) => {
-    setProjects(prev => prev.map(p => p.id === projectId ? {
+    commitProjects(prev => prev.map(p => p.id === projectId ? {
       ...p, agents: p.agents.map(a => a.id === agent.id ? agent : a), updatedAt: Date.now()
     } : p));
-  }, []);
+  }, [commitProjects]);
 
   const handleDeleteAgent = useCallback((projectId: string, agentId: string) => {
-    setProjects(prev => prev.map(p => p.id === projectId ? {
+    commitProjects(prev => prev.map(p => p.id === projectId ? {
       ...p, agents: p.agents.filter(a => a.id !== agentId), updatedAt: Date.now()
     } : p));
-  }, []);
+  }, [commitProjects]);
 
   // Skill → Agent
   const handleSkillToAgent = useCallback((projectId: string, skill: PresetSkill) => {
@@ -328,7 +360,7 @@ export default function SimpleChatPage() {
           <SimpleChatSyncStatusView
             status={syncSnapshot.status}
             error={syncSnapshot.error}
-            onRetry={() => void coordinatorRef.current?.flush('manual')}
+            onRetry={() => void coordinatorRef.current?.handleOnline()}
           />
         </div>
         <ChatArea

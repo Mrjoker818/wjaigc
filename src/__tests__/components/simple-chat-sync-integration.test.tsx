@@ -1,37 +1,343 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
 
-const pageSource = readFileSync(
-  resolve(process.cwd(), 'src/app/simple-chat/page.tsx'),
-  'utf8',
-);
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ComponentProps } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type ChatArea from '@/components/simple-chat/chat-area';
+import type { SimpleChatProject, SimpleChatTask } from '@/components/simple-chat/simple-chat-types';
+import type { SimpleChatSyncCoordinator, SimpleChatSyncSnapshot } from '@/lib/simple-chat-sync-client';
+import type { User } from '@/lib/user-types';
+
+const mocks = vi.hoisted(() => ({
+  chatAreaProps: null as ComponentProps<typeof ChatArea> | null,
+  coordinatorFactory: vi.fn(),
+  fetchSessionPayload: vi.fn(),
+  globalFetch: vi.fn(),
+  loginUser: { id: 'user-login', name: 'Login User', createdAt: 1, updatedAt: 1 } as User,
+  logoutSimpleChatSession: vi.fn(),
+  routerReplace: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: mocks.routerReplace }),
+}));
+
+vi.mock('@/lib/auth-session', () => ({ fetchSessionPayload: mocks.fetchSessionPayload }));
+
+vi.mock('@/lib/simple-chat-sync-client', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/simple-chat-sync-client')>();
+  return { ...actual, createSimpleChatSyncCoordinator: mocks.coordinatorFactory };
+});
+
+vi.mock('@/lib/simple-chat-sync-storage', () => ({
+  createIndexedDbSimpleChatEnvelopeStore: vi.fn(() => ({ kind: 'mock-store' })),
+}));
+
+vi.mock('@/lib/simple-chat-logout', () => ({
+  logoutSimpleChatSession: mocks.logoutSimpleChatSession,
+}));
+
+vi.mock('@/components/dashboard/login-panel', () => ({
+  LoginPanel: ({ onLogin }: { onLogin: (user: User) => Promise<void> }) => (
+    <button type="button" onClick={() => void onLogin(mocks.loginUser)}>登录测试用户</button>
+  ),
+}));
+
+vi.mock('@/components/simple-chat/sidebar', () => ({
+  default: ({
+    onCreateProject,
+    onLogout,
+  }: {
+    onCreateProject: () => void;
+    onLogout: () => void;
+  }) => (
+    <div>
+      <button type="button" onClick={onCreateProject}>创建测试项目</button>
+      <button type="button" onClick={onLogout}>退出测试用户</button>
+    </div>
+  ),
+}));
+
+vi.mock('@/components/simple-chat/chat-area', () => ({
+  default: (props: ComponentProps<typeof ChatArea>) => {
+    mocks.chatAreaProps = props;
+    return <div data-testid="chat-area">聊天区域</div>;
+  },
+}));
+
+import SimpleChatPage from '@/app/simple-chat/page';
+
+interface CoordinatorHarness {
+  coordinator: SimpleChatSyncCoordinator;
+  emit: (snapshot: SimpleChatSyncSnapshot) => void;
+  initialize: ReturnType<typeof vi.fn>;
+  update: ReturnType<typeof vi.fn>;
+  flush: ReturnType<typeof vi.fn>;
+  handleOnline: ReturnType<typeof vi.fn>;
+  unsubscribe: ReturnType<typeof vi.fn>;
+  dispose: ReturnType<typeof vi.fn>;
+}
+
+function createTask(overrides: Partial<SimpleChatTask> = {}): SimpleChatTask {
+  return {
+    id: 'task-1',
+    projectId: 'project-1',
+    name: '保留的对话',
+    messages: [{ id: 'message-1', role: 'user', content: '不要丢失', createdAt: 1 }],
+    model: 'gpt-5.5',
+    providerId: 'provider-openai',
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+function createProject(overrides: Partial<SimpleChatProject> = {}): SimpleChatProject {
+  return {
+    id: 'project-1',
+    name: '同步项目',
+    emoji: 'C',
+    description: '',
+    tasks: [createTask()],
+    agents: [],
+    knowledgeItems: [],
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+function createSnapshot(
+  status: SimpleChatSyncSnapshot['status'],
+  projects: SimpleChatProject[],
+): SimpleChatSyncSnapshot {
+  return {
+    status,
+    projects,
+    pendingOperations: [],
+    error: status === 'failed'
+      ? { code: 'NETWORK_ERROR', message: '同步失败', retryable: true }
+      : null,
+  };
+}
+
+function createCoordinatorHarness(
+  initializeResult: SimpleChatSyncSnapshot | Promise<SimpleChatSyncSnapshot>,
+): CoordinatorHarness {
+  const listeners = new Set<(snapshot: SimpleChatSyncSnapshot) => void>();
+  const unsubscribe = vi.fn();
+  const initialize = vi.fn(() => Promise.resolve(initializeResult));
+  const update = vi.fn();
+  const flush = vi.fn().mockResolvedValue(undefined);
+  const handleOnline = vi.fn().mockResolvedValue(undefined);
+  const dispose = vi.fn().mockResolvedValue(undefined);
+  const coordinator: SimpleChatSyncCoordinator = {
+    initialize,
+    update,
+    flush,
+    handleOnline,
+    snapshot: vi.fn(() => createSnapshot('loading', [])),
+    subscribe: vi.fn(listener => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+        unsubscribe();
+      };
+    }),
+    dispose,
+  };
+
+  return {
+    coordinator,
+    initialize,
+    update,
+    flush,
+    handleOnline,
+    unsubscribe,
+    dispose,
+    emit: snapshot => {
+      for (const listener of listeners) listener(snapshot);
+    },
+  };
+}
+
+async function renderAuthenticatedPage(harness: CoordinatorHarness): Promise<void> {
+  mocks.fetchSessionPayload.mockResolvedValue({
+    success: true,
+    user: { id: 'user-1', name: 'Test User', createdAt: 1, updatedAt: 1 },
+  });
+  mocks.coordinatorFactory.mockReturnValue(harness.coordinator);
+
+  render(<SimpleChatPage />);
+
+  await screen.findByTestId('chat-area');
+  await waitFor(() => expect(harness.initialize).toHaveBeenCalledWith('user-1'));
+}
 
 describe('simple chat synchronization integration', () => {
-  it('does not call the legacy blind sync path', () => {
-    expect(pageSource).not.toContain('scheduleChatProjectsSync');
-    expect(pageSource).not.toContain('saveProjects(projects)');
-    expect(pageSource).toContain('createSimpleChatSyncCoordinator');
-    expect(pageSource).toContain("flush('manual')");
+  beforeEach(() => {
+    mocks.coordinatorFactory.mockReset();
+    mocks.fetchSessionPayload.mockReset();
+    mocks.globalFetch.mockReset();
+    mocks.logoutSimpleChatSession.mockReset();
+    mocks.routerReplace.mockReset();
+    mocks.chatAreaProps = null;
+    mocks.loginUser = { id: 'user-login', name: 'Login User', createdAt: 1, updatedAt: 1 };
+    mocks.logoutSimpleChatSession.mockResolvedValue({ loggedOut: true });
+    vi.stubGlobal('fetch', mocks.globalFetch);
+    window.history.replaceState(null, '', '/simple-chat');
   });
 
-  it('creates and initializes one coordinator after session authentication', () => {
-    expect(pageSource.match(/createSimpleChatSyncCoordinator\(/gu)).toHaveLength(1);
-    expect(pageSource).toContain('createIndexedDbSimpleChatEnvelopeStore()');
-    expect(pageSource).toContain('coordinator.initialize(data.user.id)');
-    expect(pageSource).toContain('coordinator.subscribe');
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it('routes project changes and explicit task persistence through the coordinator', () => {
-    expect(pageSource).toContain('coordinatorRef.current?.update(projects)');
-    expect(pageSource).toContain('coordinatorRef.current?.update(next)');
-    expect(pageSource).toContain("await coordinatorRef.current?.flush('manual')");
-    expect(pageSource).not.toContain("fetch('/api/user-data/sync', {");
+  it('retries a failed authoritative initialization with handleOnline and restores the conversation', async () => {
+    const project = createProject();
+    const harness = createCoordinatorHarness(createSnapshot('failed', []));
+    harness.handleOnline.mockImplementation(async () => {
+      harness.emit(createSnapshot('synced', [project]));
+    });
+
+    await renderAuthenticatedPage(harness);
+
+    expect(screen.getByText('同步失败，点击重试')).toBeTruthy();
+    expect(harness.update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '创建测试项目' }));
+    await act(async () => Promise.resolve());
+    expect(harness.update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重试同步' }));
+
+    await waitFor(() => expect(harness.handleOnline).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mocks.chatAreaProps?.task?.messages[0]?.content).toBe('不要丢失'));
+    expect(mocks.chatAreaProps?.project?.id).toBe('project-1');
+    expect(harness.flush).not.toHaveBeenCalled();
   });
 
-  it('renders synchronization state without replacing the chat surface', () => {
-    expect(pageSource).toContain('<SimpleChatSyncStatusView');
-    expect(pageSource).toContain('status={syncSnapshot.status}');
-    expect(pageSource).toContain('<ChatArea');
+  it('initializes after in-page login and initializes again after logout and login', async () => {
+    const first = createCoordinatorHarness(createSnapshot('synced', [createProject()]));
+    const secondProject = createProject({
+      id: 'project-2',
+      tasks: [createTask({ id: 'task-2', projectId: 'project-2' })],
+    });
+    const second = createCoordinatorHarness(createSnapshot('synced', [secondProject]));
+    mocks.fetchSessionPayload.mockResolvedValue({ success: false, user: null });
+    mocks.coordinatorFactory
+      .mockReturnValueOnce(first.coordinator)
+      .mockReturnValueOnce(second.coordinator);
+
+    render(<SimpleChatPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '登录测试用户' }));
+    await waitFor(() => expect(first.initialize).toHaveBeenCalledWith('user-login'));
+    expect(await screen.findByTestId('chat-area')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '登录测试用户' })).toBeTruthy());
+    await waitFor(() => expect(first.dispose).toHaveBeenCalledOnce());
+
+    mocks.loginUser = {
+      id: 'user-login-again',
+      name: 'Login User Again',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    fireEvent.click(screen.getByRole('button', { name: '登录测试用户' }));
+
+    await waitFor(() => expect(second.initialize).toHaveBeenCalledWith('user-login-again'));
+    await waitFor(() => expect(mocks.chatAreaProps?.project?.id).toBe('project-2'));
+  });
+
+  it('unsubscribes and ignores a late initialize result after unmount', async () => {
+    let resolveInitialize!: (snapshot: SimpleChatSyncSnapshot) => void;
+    const deferred = new Promise<SimpleChatSyncSnapshot>(resolve => {
+      resolveInitialize = resolve;
+    });
+    const harness = createCoordinatorHarness(deferred);
+    mocks.fetchSessionPayload.mockResolvedValue({
+      success: true,
+      user: { id: 'user-1', name: 'Test User', createdAt: 1, updatedAt: 1 },
+    });
+    mocks.coordinatorFactory.mockReturnValue(harness.coordinator);
+    const { unmount } = render(<SimpleChatPage />);
+    await waitFor(() => expect(harness.initialize).toHaveBeenCalledWith('user-1'));
+
+    unmount();
+    await act(async () => {
+      resolveInitialize(createSnapshot('synced', []));
+      await deferred;
+    });
+
+    expect(harness.unsubscribe).toHaveBeenCalledOnce();
+    expect(harness.dispose).toHaveBeenCalledOnce();
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it('commits a local project change immediately after a snapshot without losing it', async () => {
+    const project = createProject();
+    const harness = createCoordinatorHarness(createSnapshot('synced', [project]));
+    await renderAuthenticatedPage(harness);
+
+    const staleProject = { ...project, name: '远端旧名称', updatedAt: 2 };
+    const localProject = { ...project, name: '本地新名称', updatedAt: 3 };
+    act(() => {
+      harness.emit(createSnapshot('syncing', [staleProject]));
+      mocks.chatAreaProps?.onUpdateProject(localProject);
+    });
+
+    expect(harness.update).toHaveBeenCalledOnce();
+    expect(harness.update).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'project-1', name: '本地新名称' }),
+    ]);
+    expect(mocks.chatAreaProps?.project?.name).toBe('本地新名称');
+  });
+
+  it('persists a task through update plus manual flush without an independent fetch', async () => {
+    const project = createProject();
+    const harness = createCoordinatorHarness(createSnapshot('synced', [project]));
+    await renderAuthenticatedPage(harness);
+    const editedTask = createTask({
+      messages: [
+        ...project.tasks[0].messages,
+        { id: 'message-2', role: 'assistant', content: '已回复', createdAt: 2 },
+      ],
+    });
+
+    await act(async () => {
+      await mocks.chatAreaProps?.onPersistTask(editedTask);
+    });
+
+    expect(harness.update).toHaveBeenCalledWith([
+      expect.objectContaining({
+        tasks: [expect.objectContaining({ messages: expect.arrayContaining([
+          expect.objectContaining({ id: 'message-2', content: '已回复' }),
+        ]) })],
+      }),
+    ]);
+    expect(harness.flush).toHaveBeenCalledWith('manual');
+    expect(mocks.globalFetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps ChatArea mounted with the authenticated user and model-bearing chat task props', async () => {
+    const project = createProject();
+    const harness = createCoordinatorHarness(createSnapshot('synced', [project]));
+    await renderAuthenticatedPage(harness);
+
+    expect(screen.getByTestId('chat-area')).toBeTruthy();
+    expect(mocks.chatAreaProps).toMatchObject({
+      user: { id: 'user-1' },
+      project: { id: 'project-1' },
+      task: {
+        id: 'task-1',
+        model: 'gpt-5.5',
+        providerId: 'provider-openai',
+        messages: [expect.objectContaining({ content: '不要丢失' })],
+      },
+      sidebarOpen: true,
+    });
+    expect(mocks.chatAreaProps?.onUpdateTask).toEqual(expect.any(Function));
+    expect(mocks.chatAreaProps?.onPersistTask).toEqual(expect.any(Function));
+    expect(mocks.chatAreaProps?.onUpdateProject).toEqual(expect.any(Function));
   });
 });
