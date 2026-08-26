@@ -1336,7 +1336,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | V588-PROVIDER-001 | 已云端验证 | 精确映射、最长匹配、管理员名称优先、本地全量门禁和 Coze 普通用户图像/视频目录均已取得证据。 |
 | V588-CHAT-001 | 已云端验证 | 模型菜单在 1440、412、375、320 四档关闭遮挡、裁切、滚动和点选问题；普通对话、CanvasEditor 与 Deep Research 三入口的 APImart 真实链路已通过。 |
 | V588-CHAT-002 | 已云端验证 | 普通/联网原位重试、CanvasEditor 单版本、刷新精确任务恢复、服务器终态和 Deep Research 单 Artifact 均已闭环；第三方 exactly-once 仅保留为供应商能力边界。 |
-| V588-CHAT-003 | 部分现有能力 / 未吸收 | 当前已有服务器同步和 800ms 防抖，但远端权威按 ID 合并、离页/切换用户冲刷和可诊断失败尚未闭环。 |
+| V588-CHAT-003 | 本地候选完成 / 云端待验 / 未吸收 | `4f638d816033acd6bf457f609a4e4236fc9a20cb` 已完成版本化同步、远端基线重放、冲突副本、删除不复活、生命周期冲刷、用户隔离和可诊断失败；真实浏览器、跨账号、PostgreSQL 并发与 Coze 矩阵仍未验证。 |
 | V588-CHAT-004 | 部分现有能力 / 未吸收 | 无限画布已有更安全的 `AssetVersion -> /api/assets/transfer` 链路；来源追踪和发送到节点模式仍缺失，禁止复制 donor 的原始 URL `localStorage` 桥接。 |
 
 ## 2026-08-25 Simple Chat 本地加固后的云端待验项
@@ -1367,7 +1367,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | V588-CHAT-001 成功链路 | 已云端验证 | APImart 普通对话、CanvasEditor 局部替换、Deep Research 均精确模型配对、单请求、SSE `done`；Console 和原生弹窗为 0。 |
 | V588-CHAT-001 真实供应商失败注入 | 未执行 / 非关闭阻塞 | 本轮供应商三次均成功；`type:error` 保真与迟到流所有权已有本地 RED/GREEN 覆盖，但没有把它描述成云端故障注入。 |
 | V588-CHAT-002 | 本地已实现 / 云端待验 | 普通/联网、Deep Research 与 CanvasEditor 自动化已通过；下一步是 Coze 真实失败、原位重试、刷新恢复和浏览器健康证据。 |
-| V588-CHAT-003 | 未开始 | 远端权威按 ID 合并、离页/切换用户冲刷和可诊断同步失败仍待处理。 |
+| V588-CHAT-003 | 本地候选完成 / 云端待验 / 未吸收 | 候选 `4f638d816033acd6bf457f609a4e4236fc9a20cb` 已通过本地自动化与独立复审；仍须完成 Coze 精确 SHA、真实多标签/离线/跨账号与 PostgreSQL 并发矩阵。 |
 | V588-CHAT-004 | 未开始 | 保留安全 `AssetVersion -> /api/assets/transfer` 链路，补充来源追踪与发送到节点模式，禁止复制 donor 原始 URL `localStorage` 桥接。 |
 | 部署期旧 chunk | 仍未关闭 | 首次加载连续通过与旧静态资源保留/原子切换仍需独立发布证据。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 需要独立 `POSTGRES_TEST_DATABASE_URL`，不得计为通过。 |
@@ -1411,3 +1411,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Coze 沙箱 | 已恢复 | 5001 主修复预览入口 HTTP 200，本轮 Google Chrome 验收完成。 |
 | 第三方 exactly-once | 能力相关 / 不保证 | 应用已复用幂等键；只有供应商明确支持并有独立审计证据时才可声明供应商侧严格去重。 |
 | PostgreSQL 全仓专项 | 环境阻塞 | `20 files / 117 tests` 缺少隔离测试库，继续不计为通过。 |
+
+## 2026-08-27 V588-CHAT-003 候选未验证边界
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| 候选身份 | 本地已确认 | 基线 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，候选 `4f638d816033acd6bf457f609a4e4236fc9a20cb`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。 |
+| 本地自动化 | 已通过 / 含明确跳过 | 全仓 `3906 passed / 118 skipped / 0 failed`，API `765 passed / 3 skipped / 0 failed`，回归 `2887 passed / 10 skipped / 0 failed`，构建完成 `116` 个静态页面/路由；skipped 不计为通过。 |
+| 复审后聚焦门禁 | 已通过 | 合同 `13/13`、保护基线 `38/38`、TypeScript、目标 ESLint 通过；Task 8 独立复审为 Spec COMPLIANT、Task quality APPROVED，问题 `0/0/0`。 |
+| Playwright | 仅发现 / 未执行 | 五项目共发现 `70` 项，分别为 `chromium`、`chromium-1080p`、`firefox`、`webkit`、`mobile-chromium`；缺少真实浏览器账号凭据，不能计为浏览器通过。 |
+| 跨账号隔离 | `UNVERIFIED` | 缺少专用次账号；必须使用互不相同的真实主/次账号验证缓存与服务器数据隔离。 |
+| PostgreSQL 并发 | `UNVERIFIED` | 未配置 `POSTGRES_TEST_DATABASE_URL`；原子 CAS 唯一 winner、冲突重放与最终 revision 仍需隔离 PostgreSQL 实测。 |
+| Coze 云端矩阵 | 待验 | Coze 尚未拉取并运行精确候选；项目/任务 CRUD、普通对话与 Artifact 恢复、多标签合并/冲突、删除不复活、离线恢复、仪表盘计数、退出同步、浏览器健康和最终数据库快照均需真实证据。 |
+| 发布与吸收状态 | 有条件通过 / 未吸收 | `V588-CHAT-003` 仅本地候选完成，不是云端通过；云端矩阵全部关闭前不得进入 `V588-CHAT-004`，其他既有未验证项继续有效。 |

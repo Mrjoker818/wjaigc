@@ -1453,3 +1453,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - APImart `deepseek-v4-flash` 的真实 Deep Research 报告已进入 `completed`；刷新前后 UI 与服务器均只保存同一个 `msg_1787715525319-research` Artifact，消息数量保持 2，Console error/warning 和原生弹窗均为 0。
 - 4 个 Simple Chat 受保护源码路径已用各自真实实现提交完成精确来源登记；来源校验 `7/7`，保护门禁 `38/38` 且 0 warning，没有目录级放行。
 - **专项判定：V588-CHAT-002 应用侧通过，允许按吸收清单进入 V588-CHAT-003。全平台仍为有条件通过。** PostgreSQL 隔离测试的 117 项跳过、部署期旧 chunk 和其他既有未关闭项不因本专项通过而自动关闭；第三方供应商 exactly-once 仅在供应商明确支持时才能声明。
+
+## 2026-08-27 V588-CHAT-003 本地候选发布判断
+
+- 任务基线为 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，本地实现候选为 `4f638d816033acd6bf457f609a4e4236fc9a20cb`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。
+- 本地完整门禁通过：全仓 Vitest `3906 passed / 118 skipped / 0 failed`，API `765 passed / 3 skipped / 0 failed`，回归 `2887 passed / 10 skipped / 0 failed`，Next.js 构建完成 `116` 个静态页面/路由。跳过测试没有被计为通过。
+- 独立 Task 8 复审为 Spec COMPLIANT、Task quality APPROVED，Critical/Important/Minor `0/0/0`；复审后聚焦合同 `13/13`、保护基线 `38/38`、TypeScript 与目标 ESLint 通过。
+- Playwright 仅发现五项目共 `70` 项，没有真实执行。由于缺少本地真实浏览器凭据、专用次账号和 `POSTGRES_TEST_DATABASE_URL`，真实浏览器矩阵、跨账号隔离与 PostgreSQL 并发保持 `UNVERIFIED`。
+- **专项判定：V588-CHAT-003 本地候选完成 / 云端待验 / 未吸收；全平台仍为有条件通过。** Coze 尚未拉取和运行精确候选，真实项目/任务操作、多标签冲突、删除不复活、离线恢复、账号隔离、退出前同步及 PostgreSQL 最终快照均无云端证据。不得据此宣称云端通过，也不得提前进入 `V588-CHAT-004`；其他既有未关闭项继续保留。

@@ -53,7 +53,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | 复用当前安全媒体解析器，只吸收回退策略和预算思想；禁止引入任意本地路径读取 | 路径穿越、SSRF、MIME/字节/像素上限、VLM 超时、回退一致性 | P0 |
 | V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **本地已吸收 / 云端待验。** 三条流式链路已接入共享严格解析器；同时修正 CanvasEditor 参数错位和正文事件名不匹配。未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、关联与全仓回归已通过；Coze 三入口真实流式、错误态、Console 与网络证据待验 | P1 |
 | V588-CHAT-002 | 失败消息状态与原位确定性重试 | **已吸收 / 云端通过。** 普通与联网原位重试、CanvasEditor 精确选区、刷新精确任务恢复、服务器终态持久化及 Deep Research 单 Artifact 均取得 Coze 证据 | `main-fix@1572a222` 的 Deep Research 任务刷新前后 UI 与服务器均严格保持同一个 `msg_1787715525319-research` Artifact；Console/原生弹窗为 0。第三方 exactly-once 仅保留为供应商能力边界 | P1 |
-| V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **待吸收。** 以远端同 ID 数据为权威合并本地项目/任务，补齐离页与用户切换前同步；保留当前登录、注销和用户数据 API，不复制 donor 存储所有权 | 多标签页、跨设备、离页、切换用户、同步失败、恢复后继续编辑和用户数据隔离 | P1 |
+| V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **本地候选完成 / 云端待验 / 未吸收。** 已实现版本化快照、远端基线重放、冲突副本、删除不复活、用户隔离、离页/切换用户冲刷和可诊断同步状态；保留当前登录、注销和用户数据 API，不复制 donor 存储所有权 | 多标签页、跨设备、离页、切换用户、同步失败、恢复后继续编辑和用户数据隔离 | P1 |
 | V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **待吸收且必须适配当前架构。** 保留当前 `AssetVersion -> /api/assets/transfer` 画布链路；补齐消息、项目、模型、供应商和任务来源，以及文本/图片发送到工作流节点。禁止复制 donor 的原始 URL `localStorage` 桥接 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
 | V588-AUTH-001 | 数据库唯一/数据库加文件两种持久化模式 | **本地候选已完成。** 只吸收显式持久化模式与启动诊断；继续使用当前认证密钥和密码校验，拒绝 donor 弱口令恢复 | 真实 PostgreSQL、普通用户/管理员多浏览器会话、退出后数据隔离和全量门禁已通过；Coze 精确 SHA 待验 | P1 |
 | V588-ADMIN-004 | 用户积分、项目数和最后活动时间的真实投影 | 接入当前管理员查询和统一用户身份，不复制 donor 用户存储 | 新增用户、删除用户、批量操作、积分、项目、聊天记录与统计一致性 | P1 |
@@ -413,3 +413,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - APImart `deepseek-v4-flash` 研究任务 `11tvkeffmt9jnh88` 完成后，刷新前后 UI 与服务器都严格保持一个稳定 Artifact；助手消息状态为 `completed`，消息与 Artifact 均无重复，Console error/warning 与原生弹窗为 0。
 - 保护门禁仅登记 4 个已审源码的精确路径与来源提交，来源测试 `7/7`、特征门禁 `38/38`、警告 0；没有目录级授权。
 - **当前状态：V588-CHAT-002 已吸收。** 下一唯一吸收项为 `V588-CHAT-003`，继续执行 RED -> 最小接入 -> 全量回归 -> Coze 云端验证；不重复已关闭的 V588-CHAT-002 子项。
+
+## 2026-08-27 V588-CHAT-003 本地候选检查点
+
+- 任务分支基于 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，本地实现候选为 `4f638d816033acd6bf457f609a4e4236fc9a20cb`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 donor `J:\无界云端0820` 均未修改。
+- 本地完整门禁：全仓 Vitest `3906 passed / 118 skipped / 0 failed`，API `765 passed / 3 skipped / 0 failed`，回归 `2887 passed / 10 skipped / 0 failed`；Next.js 构建完成 `116` 个静态页面/路由。跳过项不计为通过。
+- 最终复审后的聚焦合同为 `13/13`；Playwright 仅完成五项目发现，共 `70` 项（`chromium`、`chromium-1080p`、`firefox`、`webkit`、`mobile-chromium` 各 `14` 项），没有把发现数量写成浏览器执行通过。保护基线 `38/38`、TypeScript 与目标 ESLint 通过。
+- Task 8 独立复审结论为 Spec COMPLIANT、Task quality APPROVED，Critical/Important/Minor 为 `0/0/0`。
+- **当前状态：本地候选完成 / 云端待验 / 未吸收。** 本机缺少真实浏览器主账号凭据、专用次账号和 `POSTGRES_TEST_DATABASE_URL`，因此真实浏览器矩阵、跨账号隔离与 PostgreSQL 并发均为 `UNVERIFIED`；Coze 尚未拉取并运行该精确候选，也没有云端业务或证据文件。全平台继续为有条件通过，云端矩阵全部通过前不得进入 `V588-CHAT-004`。

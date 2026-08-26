@@ -1798,3 +1798,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 刷新前后 Console error/warning 为 `0/0`，原生弹窗为 0。**回归结论：V588-CHAT-002-BUG-004 云端关闭，V588-CHAT-002 应用侧验收完成。** 第三方文本供应商是否严格支持幂等键仍是能力边界，不作为应用完成态的虚假保证。
 - 发布保护门禁补齐 4 个已审实现的精确路径与真实来源提交；来源校验 `7/7`、保护特征 `38/38`、警告 0。未增加目录级授权。
 - 机器证据：`docs/testing/evidence/v588-chat-002-deep-research-artifact-cloud-2026-08-26.json`、`v588-chat-002-deep-research-artifact-cloud-pre-refresh-2026-08-26.png`、`v588-chat-002-deep-research-artifact-cloud-post-refresh-2026-08-26.png`。
+
+## 2026-08-27 V588-CHAT-003 本地候选回归
+
+- 基线为 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，候选为 `4f638d816033acd6bf457f609a4e4236fc9a20cb`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读且未变化。
+- 全仓 Vitest 为 `3906 passed / 118 skipped / 0 failed`；API 为 `765 passed / 3 skipped / 0 failed`；回归为 `2887 passed / 10 skipped / 0 failed`。这些是三套门禁各自的结果，不相加为新的测试总数；跳过项不计为通过。
+- Next.js 构建完成 `116` 个静态页面/路由。复审后聚焦合同 `13/13`、保护基线 `38/38`、TypeScript 与目标 ESLint 通过。
+- Playwright 仅执行发现：五个项目合计 `70` 项，`chromium`、`chromium-1080p`、`firefox`、`webkit`、`mobile-chromium` 各 `14` 项；未执行真实浏览器场景。
+- Task 8 独立复审结论：Spec COMPLIANT、Task quality APPROVED，Critical/Important/Minor `0/0/0`。
+- **回归结论：本地候选完成 / 云端待验 / 未吸收。** 由于缺少真实浏览器凭据、专用次账号与 `POSTGRES_TEST_DATABASE_URL`，真实浏览器、跨账号隔离和 PostgreSQL 并发保持 `UNVERIFIED`。Coze 未运行精确候选，故不得将本地结果扩大为云端通过或 `V588-CHAT-003` 已吸收；全平台继续为有条件通过。
