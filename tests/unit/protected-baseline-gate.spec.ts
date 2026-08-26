@@ -43,7 +43,31 @@ const baselineFeatures: Feature[] = [
   },
 ];
 
+const exactAgentRuntimeAuthorizations = [
+  ['src/app/api/agent-runs/[runId]/events/route.ts', '0c5c1adf'],
+  ['src/app/api/agent-runs/[runId]/route.ts', '0c5c1adf'],
+  ['src/app/api/agent-runs/route.ts', 'ae8d4608'],
+  ['src/lib/agent-runtime/admission-gate.ts', 'b1bcf2d8'],
+  ['src/lib/agent-runtime/context-adapters.ts', 'd619ec21'],
+  ['src/lib/agent-runtime/downstream-operations.ts', 'ee60a0d3'],
+  ['src/lib/agent-runtime/event-reducer.ts', '0c5c1adf'],
+  ['src/lib/agent-runtime/event-storage.ts', 'd84ba085'],
+  ['src/lib/agent-runtime/generate-image-adapter.ts', '3f93aa34'],
+  ['src/lib/agent-runtime/legacy-observer.ts', '571ba587'],
+  ['src/lib/agent-runtime/mode.ts', '12327887'],
+  ['src/lib/agent-runtime/model-capability-set.ts', 'b1bcf2d8'],
+  ['src/lib/agent-runtime/provider-submission.ts', '2175b4f4'],
+  ['src/lib/agent-runtime/same-task-adapter.ts', 'b1bcf2d8'],
+  ['src/lib/agent-runtime/service.ts', 'b1bcf2d8'],
+  ['src/lib/agent-runtime/surface-dispatch.ts', '3f93aa34'],
+  ['src/lib/agent-runtime/surface-requests.ts', '14adbf0c'],
+  ['src/lib/agent-runtime/tool-registry.ts', 'b1bcf2d8'],
+  ['src/lib/agent-runtime/types.ts', '0c5c1adf'],
+  ['src/lib/agent-runtime/workspace-results.ts', '2557d67c'],
+] as const;
+
 const historicalSourceAuthorizations = [
+  ...exactAgentRuntimeAuthorizations,
   ['migrations/20260821_v588_admin_thumbnail_variants.sql', 'd941384'],
   ['migrations/20260821_wj_stable_s4_historical_media_remediations.sql', 'bc74b89'],
   ['scripts/coze-deploy-build.sh', '172f38c'],
@@ -165,7 +189,11 @@ describe('protected baseline release gate', () => {
     expect(allowedPaths).toContain('src/lib/simple-chat-request-context.ts');
     expect(allowedPaths).toContain('migrations/20260816_wj_stable_s4_agent_events.sql');
     expect(allowedPaths).toContain('scripts/run-migrations.mjs');
-    expect(allowedPaths).toContain('src/app/api/agent-runs/');
+    expect(allowedPaths).not.toContain('src/app/api/agent-runs/');
+    expect(allowedPaths).not.toContain('src/lib/agent-runtime/');
+    for (const [path] of exactAgentRuntimeAuthorizations) {
+      expect(allowedPaths).toContain(path);
+    }
     expect(allowedPaths).not.toContain('src/app/api/');
     expect(allowedPaths).not.toContain('src/components/workflow/');
     for (const path of [
@@ -254,8 +282,14 @@ describe('protected baseline release gate', () => {
       expect(provenance.authorizations).toContainEqual({ path, sourceCommit });
       expect(pathsByCommit.get(fullSourceCommits.get(sourceCommit)!)).toContain(path);
     }
-    expect(allowedPaths.some(path => path.includes('*'))).toBe(false);
-    expect(provenance.authorizations.some(({ path }) => path.includes('*'))).toBe(false);
+    for (const path of allowedPaths.filter(path => path.startsWith('src/'))) {
+      expect(path.includes('*'), `${path} must not use a wildcard`).toBe(false);
+      expect(path.endsWith('/'), `${path} must authorize an exact production file`).toBe(false);
+    }
+    for (const { path } of provenance.authorizations.filter(({ path }) => path.startsWith('src/'))) {
+      expect(path.includes('*'), `${path} provenance must not use a wildcard`).toBe(false);
+      expect(path.endsWith('/'), `${path} provenance must name an exact production file`).toBe(false);
+    }
     for (const path of task8ProtectedPaths) {
       expect(allowedPaths).toContain(path);
       expect(authorizedPaths).toContain(path);

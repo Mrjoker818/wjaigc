@@ -6,7 +6,7 @@
  * 它们不代表真实供应商成功，也绝不能作为云端验收依据。
  */
 
-import { expect, test, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Response, type Route, type TestInfo } from '@playwright/test';
 
 import { collectBrowserEvidence, saveBrowserEvidence } from '../helpers/evidence';
 
@@ -66,12 +66,12 @@ type SeedChatProjectsOptions = {
   blockBrowserWrites?: boolean;
 };
 
-function credentialsFor(workerIndex: number): RealCredentials {
-  const workerUsername = process.env[`E2E_TEST_USERNAME_${workerIndex}`]?.trim();
-  const workerPassword = process.env[`E2E_TEST_PASSWORD_${workerIndex}`]?.trim();
+function credentialsFor(parallelIndex: number): RealCredentials {
+  const workerUsername = process.env[`E2E_TEST_USERNAME_${parallelIndex}`]?.trim();
+  const workerPassword = process.env[`E2E_TEST_PASSWORD_${parallelIndex}`]?.trim();
   if (workerUsername || workerPassword) {
     if (!workerUsername || !workerPassword) {
-      throw new Error(`E2E worker ${workerIndex} requires both E2E_TEST_USERNAME_${workerIndex} and E2E_TEST_PASSWORD_${workerIndex}.`);
+      throw new Error(`E2E parallel slot ${parallelIndex} requires both E2E_TEST_USERNAME_${parallelIndex} and E2E_TEST_PASSWORD_${parallelIndex}.`);
     }
     return { username: workerUsername, password: workerPassword };
   }
@@ -91,15 +91,19 @@ function credentialsFor(workerIndex: number): RealCredentials {
 }
 
 /** 保持 donor 的硬门禁语义：没有真实账号时测试失败，绝不 skip。 */
-function requireRealEnvironment(workerIndex: number): RealCredentials {
-  return credentialsFor(workerIndex);
+function requireRealEnvironment(parallelIndex: number): RealCredentials {
+  return credentialsFor(parallelIndex);
 }
 
-function requireSecondaryRealEnvironment(): RealCredentials {
-  const username = process.env.E2E_TEST_USERNAME_1?.trim();
-  const password = process.env.E2E_TEST_PASSWORD_1?.trim();
+function dedicatedSecondaryCredentials(primary: RealCredentials): RealCredentials | null {
+  const username = process.env.E2E_TEST_SECONDARY_USERNAME?.trim();
+  const password = process.env.E2E_TEST_SECONDARY_PASSWORD?.trim();
+  if (!username && !password) return null;
   if (!username || !password) {
-    throw new Error('账号隔离门禁必须提供独立的 E2E_TEST_USERNAME_1 / E2E_TEST_PASSWORD_1 真实账号。');
+    throw new Error('E2E_TEST_SECONDARY_USERNAME and E2E_TEST_SECONDARY_PASSWORD must be provided together.');
+  }
+  if (username.toLocaleLowerCase() === primary.username.toLocaleLowerCase()) {
+    throw new Error('PRIMARY_AND_SECONDARY_E2E_ACCOUNTS_MUST_DIFFER');
   }
   return { username, password };
 }
@@ -155,7 +159,7 @@ function modelFixtures(kind: 'chat' | 'image', count: number): ModelFixture[] {
 async function login(
   page: Page,
   testInfo: TestInfo,
-  credentials: RealCredentials = requireRealEnvironment(testInfo.workerIndex),
+  credentials: RealCredentials = requireRealEnvironment(testInfo.parallelIndex),
 ): Promise<void> {
   await page.context().clearCookies();
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -266,9 +270,25 @@ async function restoreChatProjectsSnapshot(page: Page, snapshot: ChatProjectsSna
   expect(verified.value, 'chat fixture cleanup must restore the exact original value and ordering').toEqual(snapshot.value);
 }
 
-function isChatProjectsSyncPost(response: { url(): string; request(): { method(): string } }): boolean {
-  return new URL(response.url()).pathname === '/api/user-data/sync'
-    && response.request().method() === 'POST';
+async function waitForChatProjectsSync(page: Page): Promise<Response> {
+  return page.waitForResponse(response => {
+    if (
+      new URL(response.url()).pathname !== '/api/user-data/sync'
+      || response.request().method() !== 'POST'
+      || !response.ok()
+    ) {
+      return false;
+    }
+    try {
+      const parsed = response.request().postDataJSON();
+      const payload = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as { key?: unknown }
+        : null;
+      return payload?.key === CHAT_PROJECTS_SYNC_KEY;
+    } catch {
+      return false;
+    }
+  });
 }
 
 function isChatProjectsSyncRoute(route: Route): boolean {
@@ -418,7 +438,7 @@ test.describe.configure({ timeout: 120_000 });
 
 test.beforeEach(({ page }, testInfo) => {
   evidenceByTest.set(testInfo.testId, collectBrowserEvidence(page));
-  requireRealEnvironment(testInfo.workerIndex);
+  requireRealEnvironment(testInfo.parallelIndex);
 });
 
 test.afterEach(async ({ page }, testInfo) => {
@@ -606,7 +626,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
       await expectSimpleChatSyncStatus(page, '已同步');
       await expectSimpleChatSyncStatus(second, '已同步');
 
-      const deleteResponse = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+      const deleteResponse = waitForChatProjectsSync(page);
       const row = projectRow(page, fixture.name);
       await row.hover();
       await row.getByTitle('删除').click();
@@ -636,7 +656,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
     await renameProject(page, fixture.name, renamed);
     await expectSimpleChatSyncStatus(page, '离线，修改将在联网后同步');
 
-    const resumedResponse = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+    const resumedResponse = waitForChatProjectsSync(page);
     await context.setOffline(false);
     await resumedResponse;
     await expectSimpleChatSyncStatus(page, '已同步');
@@ -655,7 +675,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
     await openFixtureProject(page, fixture.id);
 
     const renamed = `${fixture.name}-持久化`;
-    const persisted = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+    const persisted = waitForChatProjectsSync(page);
     await renameProject(page, fixture.name, renamed);
     await persisted;
     await expectSimpleChatSyncStatus(page, '已同步');
@@ -681,13 +701,13 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
       await expectSimpleChatSyncStatus(second, '已同步');
 
       const remoteName = `${fixture.name}-远端`;
-      const remotePersisted = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+      const remotePersisted = waitForChatProjectsSync(page);
       await renameProject(page, fixture.name, remoteName);
       await remotePersisted;
       await expectSimpleChatSyncStatus(page, '已同步');
 
       const localName = `${fixture.name}-本地`;
-      const replayPersisted = second.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+      const replayPersisted = waitForChatProjectsSync(second);
       await renameProject(second, fixture.name, localName);
       await replayPersisted;
       await expectSimpleChatSyncStatus(second, '已同步');
@@ -703,7 +723,14 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
   });
 
   test("account isolation never exposes another account's projects", async ({ page, browser }, testInfo) => {
-    await login(page, testInfo);
+    const primaryCredentials = requireRealEnvironment(testInfo.parallelIndex);
+    const secondaryCredentials = dedicatedSecondaryCredentials(primaryCredentials);
+    test.skip(
+      secondaryCredentials === null,
+      'UNVERIFIED: dedicated secondary E2E account is not configured',
+    );
+    if (!secondaryCredentials) return;
+    await login(page, testInfo, primaryCredentials);
     const runTag = `isolation-${Date.now()}`;
     const fixture = createProject(runTag, 'project', `账号A专属-${runTag}`, [
       { name: '账号A消息', messages: numberedMessages(runTag, 2) },
@@ -715,7 +742,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
     const secondaryContext = await browser.newContext();
     try {
       const secondaryPage = await secondaryContext.newPage();
-      await login(secondaryPage, testInfo, requireSecondaryRealEnvironment());
+      await login(secondaryPage, testInfo, secondaryCredentials);
       await secondaryPage.goto(`${BASE_URL}/simple-chat`, { waitUntil: 'domcontentloaded' });
       await expectSimpleChatSyncStatus(secondaryPage, '已同步');
       await expect(secondaryPage.getByText(fixture.name, { exact: true })).toHaveCount(0);
@@ -753,7 +780,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
       await route.continue();
     };
     await page.route('**/api/user-data/sync', delayedSyncHandler);
-    const resumedResponse = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+    const resumedResponse = waitForChatProjectsSync(page);
     await context.setOffline(false);
     await delayedPostSeen;
     await expectSimpleChatSyncStatus(page, '正在同步');
@@ -778,7 +805,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
     await expectSimpleChatSyncStatus(page, '同步冲突，点击重试');
     await page.unroute('**/api/user-data/sync', conflictSyncHandler);
 
-    const retryResponse = page.waitForResponse(response => isChatProjectsSyncPost(response) && response.ok());
+    const retryResponse = waitForChatProjectsSync(page);
     await page.getByRole('button', { name: '重试同步' }).click();
     await retryResponse;
     await expectSimpleChatSyncStatus(page, '已同步');

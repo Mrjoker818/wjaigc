@@ -41,4 +41,25 @@ describe('stage5 simple-chat browser gate contract', () => {
     expect(source).toContain('{ blockBrowserWrites: false }');
     expect(source).toContain('syncRevision: blockedRevision');
   });
+
+  it('accepts only successful chat-project sync responses with the matching request key', () => {
+    const helperStart = source.indexOf('async function waitForChatProjectsSync');
+    const helperEnd = source.indexOf('function isChatProjectsSyncRoute', helperStart);
+    expect(helperStart).toBeGreaterThanOrEqual(0);
+    expect(helperEnd).toBeGreaterThan(helperStart);
+    const helperSource = source.slice(helperStart, helperEnd);
+    expect(helperSource).toContain('response.ok()');
+    expect(helperSource).toContain('response.request().postDataJSON()');
+    expect(helperSource).toContain('payload?.key === CHAT_PROJECTS_SYNC_KEY');
+  });
+
+  it('keeps primary and dedicated secondary credentials deterministic and distinct', () => {
+    expect(source).toContain('requireRealEnvironment(testInfo.parallelIndex)');
+    expect(source).not.toContain('requireRealEnvironment(testInfo.workerIndex)');
+    expect(source).toContain('E2E_TEST_SECONDARY_USERNAME');
+    expect(source).toContain('E2E_TEST_SECONDARY_PASSWORD');
+    expect(source).not.toContain('E2E_TEST_USERNAME_1');
+    expect(source).toContain('PRIMARY_AND_SECONDARY_E2E_ACCOUNTS_MUST_DIFFER');
+    expect(source).toContain('UNVERIFIED: dedicated secondary E2E account is not configured');
+  });
 });
