@@ -97,6 +97,45 @@ function graph(): SimpleChatProject {
   return project('p1', [chatTask]);
 }
 
+function completeConflictGraph(): SimpleChatProject {
+  const primaryTask = task('t-primary', '完整对话');
+  primaryTask.model = 'configured-model';
+  primaryTask.providerId = 'configured-provider';
+  primaryTask.imageModel = 'configured-image-model';
+  primaryTask.imageProviderId = 'configured-image-provider';
+  primaryTask.reasoningEffort = 'high';
+  primaryTask.responseSpeed = 'quality';
+  primaryTask.activeAgentId = 'agent-p-complete';
+  const editedMessage = message('m-edited', '编辑前', [artifact('a-edited', 'p-complete', 't-primary')]);
+  editedMessage.attachments = [{
+    id: 'attachment-edited',
+    type: 'file',
+    name: 'brief.txt',
+    mimeType: 'text/plain',
+    textContent: 'attachment body',
+  }];
+  const siblingMessage = message(
+    'm-sibling',
+    '未编辑兄弟消息',
+    [artifact('a-sibling', 'p-complete', 't-primary')],
+  );
+  primaryTask.messages = [editedMessage, siblingMessage];
+
+  const siblingTask = task('t-sibling', '未编辑兄弟任务');
+  siblingTask.messages = [message('m-other', '兄弟任务消息')];
+  const value = project('p-complete', [primaryTask, siblingTask]);
+  value.description = '完整项目描述';
+  value.instructions = {
+    projectBackground: '完整背景',
+    userPreference: '保留偏好',
+    outputFormat: 'markdown',
+    styleRules: '简洁',
+    forbiddenRules: '不得丢失',
+    language: 'zh-CN',
+  };
+  return value;
+}
+
 function cloneProject(value: SimpleChatProject): SimpleChatProject {
   return structuredClone(value);
 }
@@ -137,6 +176,20 @@ function minimalMessages(count: number): SimpleChatMessage[] {
 
 function minimalTasks(count: number): SimpleChatTask[] {
   return Array.from({ length: count }, (_, index) => task(`t-${index}`));
+}
+
+function unreadCollection<T>(length: number): { values: T[]; reads: () => number } {
+  let readCount = 0;
+  const values = new Array<T>(length);
+  Object.defineProperty(values, 0, {
+    configurable: true,
+    enumerable: true,
+    get: () => {
+      readCount += 1;
+      return undefined as T;
+    },
+  });
+  return { values, reads: () => readCount };
 }
 
 function nestedObject(depth: number): unknown {
@@ -307,6 +360,132 @@ describe('simple chat project synchronization', () => {
       projectId: 'p1',
       taskId: 'conflict-task',
     });
+  });
+
+  it('restores one complete local project graph when a message edit loses its remote project', () => {
+    const beforeProject = completeConflictGraph();
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].content = '本地叶子编辑';
+
+    const result = replaySimpleChatOperations(
+      [],
+      diffSimpleChatProjects([beforeProject], [currentProject], 1),
+      { createId: idFactory(...Array.from({ length: 16 }, (_, index) => `project-copy-${index + 1}`)) },
+    );
+
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.projects).toHaveLength(1);
+    const copiedProject = result.projects[0];
+    const copiedPrimaryTask = copiedProject.tasks.find(item => item.name.startsWith('完整对话'));
+    const copiedSiblingTask = copiedProject.tasks.find(item => item.name.startsWith('未编辑兄弟任务'));
+    if (!copiedPrimaryTask || !copiedSiblingTask) throw new Error('Expected the complete copied task graph');
+    const copiedEditedMessage = copiedPrimaryTask.messages.find(item => item.content.includes('本地叶子编辑'));
+    const copiedSiblingMessage = copiedPrimaryTask.messages.find(item => item.content.includes('未编辑兄弟消息'));
+
+    expect(copiedProject).toMatchObject({
+      description: '完整项目描述',
+      instructions: beforeProject.instructions,
+    });
+    expect(copiedProject.id).not.toBe(beforeProject.id);
+    expect(copiedProject.tasks).toHaveLength(2);
+    expect(copiedProject.agents).toHaveLength(1);
+    expect(copiedProject.knowledgeItems).toHaveLength(1);
+    expect(copiedPrimaryTask).toMatchObject({
+      model: 'configured-model',
+      providerId: 'configured-provider',
+      imageModel: 'configured-image-model',
+      imageProviderId: 'configured-image-provider',
+      reasoningEffort: 'high',
+      responseSpeed: 'quality',
+      activeAgentId: copiedProject.agents[0].id,
+    });
+    expect(copiedPrimaryTask.messages).toHaveLength(2);
+    expect(copiedEditedMessage?.attachments?.[0]).toMatchObject({
+      id: 'attachment-edited',
+      textContent: 'attachment body',
+    });
+    expect(copiedEditedMessage?.artifacts).toHaveLength(1);
+    expect(copiedSiblingMessage?.artifacts).toHaveLength(1);
+    expect(copiedSiblingTask.messages).toHaveLength(1);
+    expect(new Set(copiedProject.tasks.map(item => item.id)).size).toBe(2);
+    expect(validateSimpleChatProjects(result.projects)).toEqual({ success: true });
+  });
+
+  it('restores one complete local task graph when a message edit loses its remote task', () => {
+    const beforeProject = completeConflictGraph();
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].content = '本地叶子编辑';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks = [remoteProject.tasks[1]];
+
+    const result = replaySimpleChatOperations(
+      [remoteProject],
+      diffSimpleChatProjects([beforeProject], [currentProject], 1),
+      { createId: idFactory(...Array.from({ length: 8 }, (_, index) => `task-copy-${index + 1}`)) },
+    );
+
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.projects).toHaveLength(1);
+    expect(result.projects[0].tasks).toHaveLength(2);
+    const copiedTask = result.projects[0].tasks.find(item => item.name.startsWith('完整对话'));
+    if (!copiedTask) throw new Error('Expected a complete copied task');
+    expect(copiedTask.id).not.toBe('t-primary');
+    expect(copiedTask).toMatchObject({
+      model: 'configured-model',
+      providerId: 'configured-provider',
+      imageModel: 'configured-image-model',
+      imageProviderId: 'configured-image-provider',
+      reasoningEffort: 'high',
+      responseSpeed: 'quality',
+    });
+    expect(copiedTask.messages).toHaveLength(2);
+    expect(copiedTask.messages.find(item => item.content.includes('本地叶子编辑'))?.attachments)
+      .toHaveLength(1);
+    expect(copiedTask.messages.find(item => item.content.includes('未编辑兄弟消息'))?.artifacts)
+      .toHaveLength(1);
+    expect(validateSimpleChatProjects(result.projects)).toEqual({ success: true });
+  });
+
+  it('restores one complete local message graph when an artifact edit loses its remote message', () => {
+    const beforeProject = completeConflictGraph();
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].artifacts![0].title = '本地 Artifact 编辑';
+    currentProject.tasks[0].messages[0].artifacts!.push(
+      artifact('a-unedited', 'p-complete', 't-primary'),
+    );
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages = [remoteProject.tasks[0].messages[1]];
+
+    const result = replaySimpleChatOperations(
+      [remoteProject],
+      diffSimpleChatProjects([beforeProject], [currentProject], 1),
+      { createId: idFactory('message-copy', 'artifact-copy-1', 'artifact-copy-2') },
+    );
+
+    expect(result.conflicts).toHaveLength(1);
+    const replayedMessages = result.projects[0].tasks[0].messages;
+    expect(replayedMessages).toHaveLength(2);
+    const copiedMessage = replayedMessages.find(item => item.id === 'message-copy');
+    expect(copiedMessage).toMatchObject({
+      content: expect.stringContaining('编辑前'),
+      attachments: [{
+        id: 'attachment-edited',
+        type: 'file',
+        name: 'brief.txt',
+        mimeType: 'text/plain',
+        textContent: 'attachment body',
+      }],
+    });
+    expect(copiedMessage?.artifacts).toHaveLength(2);
+    expect(copiedMessage?.artifacts?.map(item => item.title)).toEqual(expect.arrayContaining([
+      expect.stringContaining('本地 Artifact 编辑'),
+      expect.stringContaining('Artifact a-unedited'),
+    ]));
+    expect(new Set(copiedMessage?.artifacts?.map(item => item.id))).toHaveProperty('size', 2);
+    expect(copiedMessage?.artifacts?.every(item => (
+      item.projectId === 'p-complete' && item.taskId === 't-primary'
+    ))).toBe(true);
+    expect(validateSimpleChatProjects(result.projects)).toEqual({ success: true });
   });
 
   it('remaps every internal reference in a copied conflict project graph', () => {
@@ -754,6 +933,137 @@ describe('simple chat project synchronization', () => {
       assistantMessageId: copiedChild?.id,
       historyMessageIds: [remoteParent.id, copiedChild?.id],
     });
+  });
+
+  it('source-aware conflict references drop a dangling remote agent', () => {
+    const beforeProject = project('p1', [task('t1', '基线对话')]);
+    beforeProject.tasks[0].activeAgentId = beforeProject.agents[0].id;
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].name = '本地对话';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].name = '远端对话';
+    remoteProject.tasks[0].activeAgentId = 'missing-remote-agent';
+
+    const result = replaySimpleChatOperations(
+      [remoteProject],
+      diffSimpleChatProjects([beforeProject], [currentProject], 1),
+      { createId: idFactory('copy-task') },
+    );
+    const copiedTask = result.projects[0].tasks.find(item => item.id === 'copy-task');
+
+    expect(copiedTask).not.toHaveProperty('activeAgentId');
+    expect(copiedTask?.syncConflict?.sourceReferences?.activeAgentId)
+      .toBe('missing-remote-agent');
+  });
+
+  it('source-aware conflict references remap remote message self references', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    const parentMessage = message('m-parent', '父消息');
+    const childMessage = message('m-child', '基线回答');
+    childMessage.role = 'assistant';
+    childMessage.parentMessageId = parentMessage.id;
+    childMessage.retryContext = retryContext(parentMessage.id, childMessage.id, [
+      parentMessage.id,
+      childMessage.id,
+    ]);
+    beforeProject.tasks[0].messages = [parentMessage, childMessage];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[1].content = '本地回答';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages[1].content = '远端回答';
+    remoteProject.tasks[0].messages[1].parentMessageId = childMessage.id;
+    remoteProject.tasks[0].messages[1].retryContext = retryContext(
+      childMessage.id,
+      childMessage.id,
+      [childMessage.id],
+    );
+
+    const result = replaySimpleChatOperations(
+      [remoteProject],
+      diffSimpleChatProjects([beforeProject], [currentProject], 1),
+      { createId: idFactory('copy-child') },
+    );
+    const copiedChild = result.projects[0].tasks[0].messages.find(item => item.id === 'copy-child');
+
+    expect(copiedChild?.parentMessageId).toBe('copy-child');
+    expect(copiedChild?.retryContext).toMatchObject({
+      userMessageId: 'copy-child',
+      assistantMessageId: 'copy-child',
+      historyMessageIds: ['copy-child'],
+    });
+  });
+
+  it('source-aware conflict references drop dangling remote parent and required retry references', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    const userMessage = message('m-user', '提问');
+    const childMessage = message('m-child', '基线回答');
+    childMessage.role = 'assistant';
+    childMessage.parentMessageId = userMessage.id;
+    childMessage.retryContext = retryContext(userMessage.id, childMessage.id, [
+      userMessage.id,
+      childMessage.id,
+    ]);
+    beforeProject.tasks[0].messages = [userMessage, childMessage];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[1].content = '本地回答';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages[1].content = '远端回答';
+    remoteProject.tasks[0].messages[1].parentMessageId = 'missing-remote-parent';
+    remoteProject.tasks[0].messages[1].retryContext = retryContext(
+      'missing-remote-user',
+      'missing-remote-assistant',
+      ['missing-remote-history'],
+    );
+
+    const result = replaySimpleChatOperations(
+      [remoteProject],
+      diffSimpleChatProjects([beforeProject], [currentProject], 1),
+      { createId: idFactory('copy-child') },
+    );
+    const copiedChild = result.projects[0].tasks[0].messages.find(item => item.id === 'copy-child');
+
+    expect(copiedChild).not.toHaveProperty('parentMessageId');
+    expect(copiedChild).not.toHaveProperty('retryContext');
+    expect(copiedChild?.syncConflict?.sourceReferences).toMatchObject({
+      parentMessageId: 'missing-remote-parent',
+      retryContext: {
+        userMessageId: 'missing-remote-user',
+        assistantMessageId: 'missing-remote-assistant',
+        historyMessageIds: ['missing-remote-history'],
+      },
+    });
+  });
+
+  it('source-aware conflict references filter dangling remote retry history', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    const userMessage = message('m-user', '提问');
+    const childMessage = message('m-child', '基线回答');
+    childMessage.role = 'assistant';
+    childMessage.retryContext = retryContext(userMessage.id, childMessage.id, [
+      userMessage.id,
+      childMessage.id,
+    ]);
+    beforeProject.tasks[0].messages = [userMessage, childMessage];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[1].content = '本地回答';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages[1].content = '远端回答';
+    remoteProject.tasks[0].messages[1].retryContext = retryContext(
+      userMessage.id,
+      childMessage.id,
+      [userMessage.id, 'missing-remote-history', childMessage.id],
+    );
+
+    const result = replaySimpleChatOperations(
+      [remoteProject],
+      diffSimpleChatProjects([beforeProject], [currentProject], 1),
+      { createId: idFactory('copy-child') },
+    );
+    const copiedChild = result.projects[0].tasks[0].messages.find(item => item.id === 'copy-child');
+
+    expect(copiedChild?.retryContext?.historyMessageIds).toEqual(['m-user', 'copy-child']);
+    expect(copiedChild?.syncConflict?.sourceReferences?.retryContext?.historyMessageIds)
+      .toEqual(['m-user', 'missing-remote-history', 'm-child']);
   });
 
   it('persists conflict source and time and visibly marks message copies', () => {
@@ -1443,6 +1753,58 @@ describe('simple chat sync payload validation', () => {
     });
 
     expect(validateSimpleChatProjects([project('p-many', tasks)])).toEqual({ success: true });
+  });
+
+  it.each([
+    ['tasks', () => {
+      const value = project('p1');
+      const unread = unreadCollection<SimpleChatTask>(SIMPLE_CHAT_SYNC_LIMITS.tasksPerProject + 1);
+      value.tasks = unread.values;
+      return { projects: [value], reads: unread.reads };
+    }],
+    ['messages', () => {
+      const value = project('p1', [task('t1')]);
+      const unread = unreadCollection<SimpleChatMessage>(SIMPLE_CHAT_SYNC_LIMITS.messagesPerTask + 1);
+      value.tasks[0].messages = unread.values;
+      return { projects: [value], reads: unread.reads };
+    }],
+    ['artifacts', () => {
+      const value = project('p1', [task('t1')]);
+      value.tasks[0].messages = [message('m1')];
+      const unread = unreadCollection<ChatArtifact>(SIMPLE_CHAT_SYNC_LIMITS.artifactsPerMessage + 1);
+      value.tasks[0].messages[0].artifacts = unread.values;
+      return { projects: [value], reads: unread.reads };
+    }],
+    ['attachments', () => {
+      const value = project('p1', [task('t1')]);
+      value.tasks[0].messages = [message('m1')];
+      const unread = unreadCollection<NonNullable<SimpleChatMessage['attachments']>[number]>(
+        SIMPLE_CHAT_SYNC_LIMITS.attachmentsPerMessage + 1,
+      );
+      value.tasks[0].messages[0].attachments = unread.values;
+      return { projects: [value], reads: unread.reads };
+    }],
+    ['agents', () => {
+      const value = project('p1');
+      const unread = unreadCollection<SimpleChatProject['agents'][number]>(
+        SIMPLE_CHAT_SYNC_LIMITS.agentsPerProject + 1,
+      );
+      value.agents = unread.values;
+      return { projects: [value], reads: unread.reads };
+    }],
+    ['knowledgeItems', () => {
+      const value = project('p1');
+      const unread = unreadCollection<SimpleChatProject['knowledgeItems'][number]>(
+        SIMPLE_CHAT_SYNC_LIMITS.knowledgeItemsPerProject + 1,
+      );
+      value.knowledgeItems = unread.values;
+      return { projects: [value], reads: unread.reads };
+    }],
+  ])('short-circuits category limits for $0 before duplicate or field traversal', (field, createValue) => {
+    const { projects, reads } = createValue();
+
+    expect(validateSimpleChatProjects(projects)).toMatchObject(validationFailure(field));
+    expect(reads()).toBe(0);
   });
 
   it.each([
