@@ -64,11 +64,18 @@ function exactSizeChatBody(size: number): string {
 
 function streamingRequest(
   chunks: Uint8Array[],
-  options?: { cancel?: ReturnType<typeof vi.fn>; contentLength?: string; errorAfter?: number },
+  options?: {
+    cancel?: ReturnType<typeof vi.fn>;
+    contentLength?: string;
+    errorAfter?: number;
+    highWaterMark?: number;
+    onPull?: (index: number) => void;
+  },
 ): NextRequest {
   let index = 0;
   const stream = new ReadableStream<Uint8Array>({
     pull(controller) {
+      options?.onPull?.(index);
       if (options?.errorAfter === index) {
         controller.error(new Error('stream exploded'));
         return;
@@ -78,7 +85,7 @@ function streamingRequest(
       else controller.close();
     },
     cancel: options?.cancel,
-  });
+  }, options?.highWaterMark === undefined ? undefined : { highWaterMark: options.highWaterMark });
   return new NextRequest('http://localhost/api/user-data/sync', {
     method: 'POST',
     body: stream,
@@ -363,6 +370,72 @@ describe('simple chat user data sync route', () => {
     });
     expect(cancel).toHaveBeenCalledOnce();
     expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('cancels an open chat root at the byte that crosses 20 MiB without reading its trailing chunk', async () => {
+    const cancel = vi.fn();
+    const onPull = vi.fn();
+    const openRoot = new TextEncoder().encode(`{"key":"${CHAT_KEY}",`);
+    const paddingPrefix = new TextEncoder().encode('"padding":"');
+    const toLimit = new Uint8Array(
+      SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES - openRoot.byteLength - paddingPrefix.byteLength,
+    ).fill(0x78);
+    const response = await POST(streamingRequest(
+      [
+        openRoot,
+        paddingPrefix,
+        toLimit,
+        new Uint8Array([0x78]),
+        new TextEncoder().encode('","value":[],"expectedRevision":0}'),
+      ],
+      { cancel, highWaterMark: 0, onPull },
+    ));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      code: 'CHAT_SYNC_PAYLOAD_TOO_LARGE',
+      retryable: false,
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(onPull.mock.calls.map(([index]) => index)).toEqual([0, 1, 2, 3]);
+    expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('cancels an open BOM-prefixed chat root at the byte that crosses 20 MiB without reading its trailing chunk', async () => {
+    const cancel = vi.fn();
+    const onPull = vi.fn();
+    const openRoot = new TextEncoder().encode(`{"key":"${CHAT_KEY}",`);
+    const paddingPrefix = new TextEncoder().encode('"padding":"');
+    const bomBytes = 3;
+    const toLimit = new Uint8Array(
+      SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES - bomBytes - openRoot.byteLength - paddingPrefix.byteLength,
+    ).fill(0x78);
+    const response = await POST(streamingRequest(
+      [
+        new Uint8Array([0xef]),
+        new Uint8Array([0xbb]),
+        new Uint8Array([0xbf]),
+        openRoot,
+        paddingPrefix,
+        toLimit,
+        new Uint8Array([0x78]),
+        new TextEncoder().encode('","value":[],"expectedRevision":0}'),
+      ],
+      { cancel, highWaterMark: 0, onPull },
+    ));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      code: 'CHAT_SYNC_PAYLOAD_TOO_LARGE',
+      retryable: false,
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(onPull.mock.calls.map(([index]) => index)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
   });
 
   it('does not echo an overlong or malicious request id', async () => {

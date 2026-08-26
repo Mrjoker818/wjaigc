@@ -58,6 +58,11 @@ class DuplicateSyncKeyError extends Error {}
 
 type SyncBodyKind = 'chat' | 'legacy' | 'ambiguous';
 
+interface SyncBodyClassification {
+  sizeGateKind?: SyncBodyKind;
+  routingKind?: SyncBodyKind;
+}
+
 // Identify only the top-level key while retaining one copy of the raw stream.
 // Fetch JSON parsing still owns the full parse after routing is known.
 class SyncBodyKeySniffer {
@@ -74,14 +79,16 @@ class SyncBodyKeySniffer {
   private keyCount = 0;
   private keyKind: Exclude<SyncBodyKind, 'ambiguous'> = 'legacy';
   private preambleState: 'start' | 'bom-ef' | 'bom-ef-bb' | 'done' = 'start';
-  private resolved: SyncBodyKind | undefined;
+  // Size gating may classify the first key early; routing waits for a duplicate-safe root close.
+  private sizeGateKind: SyncBodyKind | undefined;
+  private routingKind: SyncBodyKind | undefined;
 
-  feed(chunk: Uint8Array): SyncBodyKind | undefined {
+  feed(chunk: Uint8Array): SyncBodyClassification {
     for (const byte of chunk) {
-      if (this.resolved) break;
+      if (this.routingKind) break;
       this.consume(byte);
     }
-    return this.resolved;
+    return { sizeGateKind: this.sizeGateKind, routingKind: this.routingKind };
   }
 
   private consume(byte: number): void {
@@ -111,7 +118,7 @@ class SyncBodyKeySniffer {
         this.depth = 1;
         this.expectProperty = true;
       } else {
-        this.resolved = 'legacy';
+        this.routingKind = 'legacy';
       }
       return;
     }
@@ -123,14 +130,14 @@ class SyncBodyKeySniffer {
         this.openString('property');
         this.expectProperty = false;
       } else {
-        this.resolved = 'legacy';
+        this.routingKind = 'legacy';
       }
       return;
     }
 
     if (this.depth === 1 && this.expectColon) {
       if (byte !== 0x3a) {
-        this.resolved = 'legacy';
+        this.routingKind = 'legacy';
         return;
       }
       this.expectColon = false;
@@ -140,7 +147,10 @@ class SyncBodyKeySniffer {
 
     if (this.depth === 1 && this.expectKeyValue) {
       if (byte === 0x22) this.openString('key-value');
-      else this.keyKind = 'legacy';
+      else {
+        this.keyKind = 'legacy';
+        this.sizeGateKind = 'legacy';
+      }
       this.expectKeyValue = false;
       return;
     }
@@ -175,12 +185,12 @@ class SyncBodyKeySniffer {
       this.preambleState = 'done';
       return true;
     }
-    this.resolved = 'legacy';
+    this.routingKind = 'legacy';
     return true;
   }
 
   private resolveKeyKind(): void {
-    this.resolved = this.keyCount > 1 ? 'ambiguous' : this.keyKind;
+    this.routingKind = this.keyCount > 1 ? 'ambiguous' : this.keyKind;
   }
 
   private openString(role: 'property' | 'key-value' | 'other'): void {
@@ -208,10 +218,17 @@ class SyncBodyKeySniffer {
 
     if (this.stringRole === 'property') {
       this.pendingProperty = value;
-      if (value === 'key') this.keyCount++;
+      if (value === 'key') {
+        this.keyCount++;
+        if (this.keyCount > 1) {
+          this.sizeGateKind = 'ambiguous';
+          this.routingKind = 'ambiguous';
+        }
+      }
       this.expectColon = true;
     } else {
       this.keyKind = value === SIMPLE_CHAT_PROJECTS_KEY ? 'chat' : 'legacy';
+      this.sizeGateKind = this.keyKind;
     }
   }
 }
@@ -236,6 +253,7 @@ async function readSyncBody(request: NextRequest): Promise<UserDataSyncBody> {
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   const keySniffer = new SyncBodyKeySniffer();
+  let sizeGateKind: SyncBodyKind | undefined;
   let bodyKind: SyncBodyKind | undefined;
   let totalBytes = 0;
   try {
@@ -244,8 +262,10 @@ async function readSyncBody(request: NextRequest): Promise<UserDataSyncBody> {
       if (done) break;
       totalBytes += value.byteLength;
       chunks.push(value);
-      bodyKind ??= keySniffer.feed(value);
-      if (bodyKind === 'chat' && totalBytes > SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES) {
+      const classification = keySniffer.feed(value);
+      sizeGateKind = classification.sizeGateKind;
+      bodyKind = classification.routingKind;
+      if (sizeGateKind === 'chat' && totalBytes > SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES) {
         try {
           await reader.cancel();
         } catch {
