@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   readCanvasProjectRevision: vi.fn(),
   readAssetV3Projects: vi.fn(),
   persistResultImage: vi.fn(),
+  readSimpleChatSnapshot: vi.fn(),
+  compareAndSetSimpleChatSnapshot: vi.fn(),
   CanvasProjectSyncConflictError: class CanvasProjectSyncConflictError extends Error {
     readonly currentRevision: number;
     constructor(currentRevision: number) {
@@ -36,6 +38,11 @@ vi.mock('@/lib/asset-core/canvas-project-sync', () => ({
   readAssetV3Projects: mocks.readAssetV3Projects,
 }));
 vi.mock('@/lib/persist-result-image', () => ({ persistResultImage: mocks.persistResultImage }));
+vi.mock('@/lib/simple-chat-sync-server', () => ({
+  readSimpleChatSnapshot: mocks.readSimpleChatSnapshot,
+  compareAndSetSimpleChatSnapshot: mocks.compareAndSetSimpleChatSnapshot,
+  SimpleChatSyncConflictError: class SimpleChatSyncConflictError extends Error {},
+}));
 
 import { GET, POST } from '@/app/api/user-data/sync/route';
 
@@ -131,6 +138,8 @@ describe('user-data asset graph sync route', () => {
     }));
     expect(mocks.executeCanvasProjectSync).not.toHaveBeenCalled();
     expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+    expect(mocks.readSimpleChatSnapshot).not.toHaveBeenCalled();
+    expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
   });
 
   it('returns the current revision when legacy CAS rejects a stale canvas snapshot', async () => {

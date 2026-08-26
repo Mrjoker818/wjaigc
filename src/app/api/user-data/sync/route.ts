@@ -18,11 +18,134 @@ import type { AssetGraphMode } from '@/lib/asset-core/types';
 import type { LegacyMediaPersistenceInput, LegacyMediaPersistenceResult } from '@/lib/asset-core/legacy-migration';
 import { resolveCanvasKernelMode } from '@/lib/canvas-kernel/mode';
 import { resolveDeliveredWorkflowRendererMode } from '@/lib/workflow-renderer/mode';
+import {
+  SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES,
+  validateSimpleChatProjects,
+} from '@/lib/simple-chat-project-sync';
+import {
+  compareAndSetSimpleChatSnapshot,
+  readSimpleChatSnapshot,
+  SimpleChatSyncConflictError,
+} from '@/lib/simple-chat-sync-server';
+import type { SimpleChatProject } from '@/components/simple-chat/simple-chat-types';
+import { errorResponse, getRequestId, withRequestId } from '@/lib/request-id';
+import { logOperation } from '@/lib/op-log';
 
 export const dynamic = 'force-dynamic';
 
 // Allowed key prefixes for user data sync (prevent overwriting system data)
 const ALLOWED_KEY_PREFIXES = ['projects', 'favorites', 'brand_', 'font_', 'canvas_', 'workflow_', 'settings_', 'theme_', 'custom_', 'chat_'];
+const SIMPLE_CHAT_PROJECTS_KEY = 'chat_simple_projects';
+
+interface UserDataSyncBody {
+  key?: string;
+  value?: unknown;
+  projectRevision?: unknown;
+  expectedRevision?: unknown;
+}
+
+class ChatSyncRequestError extends Error {
+  constructor(
+    readonly status: 400 | 413,
+    readonly code: 'CHAT_SYNC_INVALID_REQUEST' | 'CHAT_SYNC_PAYLOAD_TOO_LARGE',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+async function readBoundedChatSyncBody(request: NextRequest): Promise<UserDataSyncBody> {
+  if (!request.body) {
+    throw new ChatSyncRequestError(400, 'CHAT_SYNC_INVALID_REQUEST', 'Request body is required');
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The payload result must not depend on stream cancellation support.
+        }
+        throw new ChatSyncRequestError(
+          413,
+          'CHAT_SYNC_PAYLOAD_TOO_LARGE',
+          'Simple chat sync payload exceeds 20 MiB',
+        );
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof ChatSyncRequestError) throw error;
+    throw new ChatSyncRequestError(400, 'CHAT_SYNC_INVALID_REQUEST', 'Unable to read request body');
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const parsed: unknown = JSON.parse(decoded);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Request body must be an object');
+    }
+    return parsed as UserDataSyncBody;
+  } catch {
+    throw new ChatSyncRequestError(400, 'CHAT_SYNC_INVALID_REQUEST', 'Request body must be valid JSON');
+  }
+}
+
+function auditSimpleChatSync(input: {
+  userId: string;
+  userName?: string;
+  action: 'read' | 'write' | 'conflict';
+  revision: number;
+  operationCount: number;
+  durationMs: number;
+  responseStatus: number;
+  status: 'success' | 'conflict' | 'error';
+  errorCode?: string;
+}): void {
+  try {
+    logOperation({
+      userId: input.userId,
+      userName: input.userName,
+      action: `simple_chat_sync_${input.action}`,
+      targetType: 'simple_chat_projects',
+      level: input.status === 'success' ? 'info' : 'warn',
+      responseStatus: input.responseStatus,
+      durationMs: input.durationMs,
+      requestData: {
+        revision: input.revision,
+        operationCount: input.operationCount,
+        status: input.status,
+        ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+      },
+    });
+  } catch {
+    // Auditing is best-effort and cannot change the sync result.
+  }
+}
+
+function invalidChatSyncResponse(
+  requestId: string,
+  code: string,
+  message: string,
+  extra?: Record<string, unknown>,
+): NextResponse {
+  return errorResponse(400, code, message, requestId, false, extra);
+}
 
 function isKeyAllowed(key: string): boolean {
   return ALLOWED_KEY_PREFIXES.some(prefix => key.startsWith(prefix));
@@ -157,6 +280,28 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Key not allowed' }, { status: 403 });
     }
 
+    if (key === SIMPLE_CHAT_PROJECTS_KEY) {
+      const startedAt = Date.now();
+      const requestId = getRequestId(request);
+      const snapshot = await readSimpleChatSnapshot(sessionUser.id);
+      auditSimpleChatSync({
+        userId: sessionUser.id,
+        userName: sessionUser.name,
+        action: 'read',
+        revision: snapshot.revision,
+        operationCount: 0,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        responseStatus: 200,
+        status: 'success',
+      });
+      return withRequestId(NextResponse.json({
+        success: true,
+        key,
+        value: snapshot.projects,
+        syncRevision: snapshot.revision,
+      }), requestId);
+    }
+
     let assetGraphMode: AssetGraphMode | undefined;
     const canvasKernelMode = resolveCanvasKernelMode(process.env.WUJIE_CANVAS_KERNEL_MODE);
     // Stage 4 Task 3 only rolls out the read-only shadow. React Flow v2 remains disabled.
@@ -216,19 +361,108 @@ export async function GET(request: NextRequest) {
  * Body: { key: string, value: any }
  */
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request);
+  const startedAt = Date.now();
   try {
     const sessionUser = await getSessionUser(request);
     if (!sessionUser) {
       return NextResponse.json({ success: false, error: 'Login required' }, { status: 401 });
     }
 
-    const body = await request.json() as { key?: string; value?: unknown; projectRevision?: unknown };
+    let body: UserDataSyncBody;
+    try {
+      body = await readBoundedChatSyncBody(request);
+    } catch (error) {
+      if (error instanceof ChatSyncRequestError) {
+        return errorResponse(error.status, error.code, error.message, requestId, false);
+      }
+      throw error;
+    }
     const key = body.key;
     if (!key) {
       return NextResponse.json({ success: false, error: 'Missing key parameter' }, { status: 400 });
     }
     if (!isKeyAllowed(key)) {
       return NextResponse.json({ success: false, error: 'Key not allowed' }, { status: 403 });
+    }
+
+    if (key === SIMPLE_CHAT_PROJECTS_KEY) {
+      const operationCount = Array.isArray(body.value) ? body.value.length : 0;
+      if (
+        !Number.isSafeInteger(body.expectedRevision)
+        || Number(body.expectedRevision) < 0
+        || Number(body.expectedRevision) >= Number.MAX_SAFE_INTEGER
+      ) {
+        return invalidChatSyncResponse(
+          requestId,
+          'CHAT_SYNC_INVALID_REVISION',
+          'A safe non-negative expectedRevision is required',
+        );
+      }
+
+      const validation = validateSimpleChatProjects(body.value as SimpleChatProject[]);
+      if (!validation.success) {
+        return invalidChatSyncResponse(
+          requestId,
+          validation.code,
+          'Invalid simple chat projects',
+          {
+            field: validation.field,
+            ...('limit' in validation && validation.limit !== undefined
+              ? { limit: validation.limit }
+              : {}),
+            ...('actual' in validation && validation.actual !== undefined
+              ? { actual: validation.actual }
+              : {}),
+          },
+        );
+      }
+
+      try {
+        const snapshot = await compareAndSetSimpleChatSnapshot({
+          userId: sessionUser.id,
+          expectedRevision: Number(body.expectedRevision),
+          projects: body.value as SimpleChatProject[],
+        });
+        auditSimpleChatSync({
+          userId: sessionUser.id,
+          userName: sessionUser.name,
+          action: 'write',
+          revision: snapshot.revision,
+          operationCount,
+          durationMs: Math.max(0, Date.now() - startedAt),
+          responseStatus: 200,
+          status: 'success',
+        });
+        return withRequestId(NextResponse.json({
+          success: true,
+          key,
+          syncRevision: snapshot.revision,
+        }), requestId);
+      } catch (error) {
+        if (error instanceof SimpleChatSyncConflictError) {
+          auditSimpleChatSync({
+            userId: sessionUser.id,
+            userName: sessionUser.name,
+            action: 'conflict',
+            revision: error.currentRevision,
+            operationCount,
+            durationMs: Math.max(0, Date.now() - startedAt),
+            responseStatus: 409,
+            status: 'conflict',
+            errorCode: error.code,
+          });
+          return errorResponse(
+            409,
+            error.code,
+            error.message,
+            requestId,
+            true,
+            { currentRevision: error.currentRevision },
+          );
+        }
+        throw error;
+      }
     }
 
     let value: unknown = body.value ?? null;
