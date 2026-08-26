@@ -11,6 +11,11 @@ import type { User } from '@/lib/user-types';
 
 const mocks = vi.hoisted(() => ({
   chatAreaProps: null as ComponentProps<typeof ChatArea> | null,
+  sidebarProps: null as {
+    projects: SimpleChatProject[];
+    activeProjectId: string | null;
+    activeTaskId: string | null;
+  } | null,
   coordinatorFactory: vi.fn(),
   fetchSessionPayload: vi.fn(),
   globalFetch: vi.fn(),
@@ -45,18 +50,24 @@ vi.mock('@/components/dashboard/login-panel', () => ({
 }));
 
 vi.mock('@/components/simple-chat/sidebar', () => ({
-  default: ({
-    onCreateProject,
-    onLogout,
-  }: {
+  default: (props: {
+    projects: SimpleChatProject[];
+    activeProjectId: string | null;
+    activeTaskId: string | null;
     onCreateProject: () => void;
     onLogout: () => void;
-  }) => (
-    <div>
-      <button type="button" onClick={onCreateProject}>创建测试项目</button>
-      <button type="button" onClick={onLogout}>退出测试用户</button>
-    </div>
-  ),
+  }) => {
+    mocks.sidebarProps = props;
+    return (
+      <div>
+        <div data-testid="sidebar-projects">{props.projects.map(project => project.id).join(',')}</div>
+        <div data-testid="sidebar-active-project">{props.activeProjectId ?? ''}</div>
+        <div data-testid="sidebar-active-task">{props.activeTaskId ?? ''}</div>
+        <button type="button" onClick={props.onCreateProject}>创建测试项目</button>
+        <button type="button" onClick={props.onLogout}>退出测试用户</button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('@/components/simple-chat/chat-area', () => ({
@@ -183,6 +194,7 @@ describe('simple chat synchronization integration', () => {
     mocks.logoutSimpleChatSession.mockReset();
     mocks.routerReplace.mockReset();
     mocks.chatAreaProps = null;
+    mocks.sidebarProps = null;
     mocks.loginUser = { id: 'user-login', name: 'Login User', createdAt: 1, updatedAt: 1 };
     mocks.logoutSimpleChatSession.mockResolvedValue({ loggedOut: true });
     vi.stubGlobal('fetch', mocks.globalFetch);
@@ -193,7 +205,7 @@ describe('simple chat synchronization integration', () => {
     vi.unstubAllGlobals();
   });
 
-  it('retries a failed authoritative initialization with handleOnline and restores the conversation', async () => {
+  it('merges a failed-state local project with the first successful online snapshot', async () => {
     const project = createProject();
     const harness = createCoordinatorHarness(createSnapshot('failed', []));
     harness.handleOnline.mockImplementation(async () => {
@@ -210,9 +222,47 @@ describe('simple chat synchronization integration', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试同步' }));
 
     await waitFor(() => expect(harness.handleOnline).toHaveBeenCalledOnce());
-    await waitFor(() => expect(mocks.chatAreaProps?.task?.messages[0]?.content).toBe('不要丢失'));
-    expect(mocks.chatAreaProps?.project?.id).toBe('project-1');
+    await waitFor(() => expect(harness.update).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: 'project-1' }),
+      expect.objectContaining({ name: '默认项目' }),
+    ])));
+    expect(mocks.sidebarProps?.projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'project-1' }),
+      expect.objectContaining({ name: '默认项目' }),
+    ]));
     expect(harness.flush).not.toHaveBeenCalled();
+  });
+
+  it('merges a loading-state local project before publishing the initialized snapshot', async () => {
+    let resolveInitialize!: (snapshot: SimpleChatSyncSnapshot) => void;
+    const deferred = new Promise<SimpleChatSyncSnapshot>(resolve => {
+      resolveInitialize = resolve;
+    });
+    const harness = createCoordinatorHarness(deferred);
+    await renderAuthenticatedPage(harness);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建测试项目' }));
+    expect(harness.update).not.toHaveBeenCalled();
+    const localProjectId = mocks.sidebarProps?.projects[0]?.id;
+    expect(localProjectId).toBeTruthy();
+    if (!localProjectId) throw new Error('Expected a pre-ready local project');
+    const remoteSameId = createProject({ id: localProjectId, name: '远端旧名称' });
+    const remoteOnly = createProject({
+      id: 'remote-only',
+      name: '远端唯一项目',
+      tasks: [createTask({ id: 'remote-task', projectId: 'remote-only' })],
+    });
+
+    await act(async () => {
+      resolveInitialize(createSnapshot('synced', [remoteSameId, remoteOnly]));
+      await deferred;
+    });
+
+    expect(harness.update).toHaveBeenCalledWith([
+      expect.objectContaining({ id: localProjectId, name: '默认项目' }),
+      expect.objectContaining({ id: 'remote-only', name: '远端唯一项目' }),
+    ]);
+    expect(mocks.sidebarProps?.projects).toHaveLength(2);
   });
 
   it('initializes after in-page login and initializes again after logout and login', async () => {
@@ -235,7 +285,7 @@ describe('simple chat synchronization integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '登录测试用户' })).toBeTruthy());
-    await waitFor(() => expect(first.dispose).toHaveBeenCalledOnce());
+    await waitFor(() => expect(first.dispose).toHaveBeenCalledWith({ flush: false }));
 
     mocks.loginUser = {
       id: 'user-login-again',
@@ -247,6 +297,50 @@ describe('simple chat synchronization integration', () => {
 
     await waitFor(() => expect(second.initialize).toHaveBeenCalledWith('user-login-again'));
     await waitFor(() => expect(mocks.chatAreaProps?.project?.id).toBe('project-2'));
+  });
+
+  it('hides the previous account on the first next-user frame and ignores late old snapshots', async () => {
+    const accountAProject = createProject({ id: 'account-a-project', name: 'A 私有项目' });
+    const first = createCoordinatorHarness(createSnapshot('synced', [accountAProject]));
+    let resolveSecond!: (snapshot: SimpleChatSyncSnapshot) => void;
+    const secondInitialize = new Promise<SimpleChatSyncSnapshot>(resolve => {
+      resolveSecond = resolve;
+    });
+    const second = createCoordinatorHarness(secondInitialize);
+    mocks.fetchSessionPayload.mockResolvedValue({
+      success: true,
+      user: { id: 'account-a', name: 'Account A', createdAt: 1, updatedAt: 1 },
+    });
+    mocks.coordinatorFactory
+      .mockReturnValueOnce(first.coordinator)
+      .mockReturnValueOnce(second.coordinator);
+
+    render(<SimpleChatPage />);
+    await waitFor(() => expect(mocks.chatAreaProps?.project?.id).toBe('account-a-project'));
+    fireEvent.click(screen.getByRole('button', { name: '退出测试用户' }));
+    await screen.findByRole('button', { name: '登录测试用户' });
+
+    mocks.loginUser = { id: 'account-b', name: 'Account B', createdAt: 1, updatedAt: 1 };
+    fireEvent.click(screen.getByRole('button', { name: '登录测试用户' }));
+
+    expect(await screen.findByTestId('chat-area')).toBeTruthy();
+    expect(mocks.sidebarProps?.projects).toEqual([]);
+    expect(mocks.sidebarProps?.activeProjectId).toBeNull();
+    expect(mocks.sidebarProps?.activeTaskId).toBeNull();
+    expect(mocks.chatAreaProps?.project).toBeNull();
+    expect(mocks.chatAreaProps?.task).toBeNull();
+    expect(first.dispose).toHaveBeenCalledWith({ flush: false });
+
+    act(() => first.emit(createSnapshot('synced', [createProject({ id: 'late-a' })])));
+    expect(mocks.sidebarProps?.projects).toEqual([]);
+    expect(mocks.chatAreaProps?.project).toBeNull();
+
+    await act(async () => {
+      resolveSecond(createSnapshot('failed', []));
+      await secondInitialize;
+    });
+    expect(mocks.sidebarProps?.projects).toEqual([]);
+    expect(mocks.chatAreaProps?.project).toBeNull();
   });
 
   it('unsubscribes and ignores a late initialize result after unmount', async () => {
@@ -270,7 +364,7 @@ describe('simple chat synchronization integration', () => {
     });
 
     expect(harness.unsubscribe).toHaveBeenCalledOnce();
-    expect(harness.dispose).toHaveBeenCalledOnce();
+    expect(harness.dispose).toHaveBeenCalledWith({ flush: false });
     expect(harness.update).not.toHaveBeenCalled();
   });
 

@@ -870,6 +870,140 @@ describe('simple chat sync coordinator', () => {
     },
   );
 
+  it('disposes without flushing, aborts active work, and never posts the queued debounce batch', async () => {
+    const activePost = deferred<Response>();
+    let requestSignal: AbortSignal | undefined;
+    let postCount = 0;
+    const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+      if (requestMethod(init) === 'GET') {
+        return jsonResponse(200, { success: true, value: [], syncRevision: 0 });
+      }
+      postCount += 1;
+      requestSignal = init?.signal ?? undefined;
+      return await activePost.promise;
+    });
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+    await coordinator.initialize('user-a');
+    coordinator.update([project('first')]);
+    const activeFlush = coordinator.flush('manual');
+    await vi.waitFor(() => expect(postCount).toBe(1));
+    coordinator.update([project('first'), project('queued')]);
+
+    let settled = false;
+    const disposal = coordinator.dispose({ flush: false }).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    const settledImmediately = settled;
+    const abortedImmediately = requestSignal?.aborted;
+    activePost.resolve(jsonResponse(200, { success: true, syncRevision: 1 }));
+    await Promise.all([activeFlush, disposal]);
+
+    expect(settledImmediately).toBe(true);
+    expect(abortedImmediately).toBe(true);
+    expect(postCount).toBe(1);
+    expect(coordinator.snapshot().pendingOperations).not.toHaveLength(0);
+  });
+
+  it('disposes without flushing while initialize is hanging', async () => {
+    const initializeRead = deferred<Response>();
+    let initializeSignal: AbortSignal | undefined;
+    const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+      initializeSignal = init?.signal ?? undefined;
+      return await initializeRead.promise;
+    });
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+    const initialization = coordinator.initialize('user-a');
+    await vi.waitFor(() => expect(initializeSignal).toBeDefined());
+
+    await coordinator.dispose({ flush: false });
+
+    expect(initializeSignal?.aborted).toBe(true);
+    expect(countPostRequests(fetchImpl)).toBe(0);
+    await initialization;
+    initializeRead.resolve(jsonResponse(200, { success: true, value: [], syncRevision: 0 }));
+  });
+
+  it('returns from no-flush disposal without waiting for pending persistence', async () => {
+    const pendingPut = deferred<void>();
+    const memoryStore = createMemorySimpleChatEnvelopeStore();
+    const store: SimpleChatEnvelopeStore = {
+      get: userId => memoryStore.get(userId),
+      put: async value => {
+        if (value.pendingOperations.length > 0) await pendingPut.promise;
+        await memoryStore.put(value);
+      },
+      delete: userId => memoryStore.delete(userId),
+    };
+    const coordinator = createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: sequenceFetch(
+        jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+      ),
+    });
+    await coordinator.initialize('user-a');
+    coordinator.update([project('pending')]);
+
+    let settled = false;
+    const disposal = coordinator.dispose({ flush: false }).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    const settledImmediately = settled;
+    pendingPut.resolve();
+    await disposal;
+
+    expect(settledImmediately).toBe(true);
+    expect(coordinator.snapshot().pendingOperations).not.toHaveLength(0);
+  });
+
+  it('cancels a no-flush disposal waiting on another coordinator user lock', async () => {
+    const firstPost = deferred<Response>();
+    let postCount = 0;
+    const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+      if (requestMethod(init) === 'GET') {
+        return jsonResponse(200, { success: true, value: [], syncRevision: 0 });
+      }
+      postCount += 1;
+      return postCount === 1
+        ? await firstPost.promise
+        : jsonResponse(200, { success: true, syncRevision: 1 });
+    });
+    const first = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+    const second = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+    await Promise.all([first.initialize('shared-user'), second.initialize('shared-user')]);
+    first.update([project('first')]);
+    second.update([project('second')]);
+    const firstFlush = first.flush('manual');
+    await vi.waitFor(() => expect(postCount).toBe(1));
+    const secondFlush = second.flush('manual');
+
+    let settled = false;
+    const disposal = second.dispose({ flush: false }).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    const settledImmediately = settled;
+    firstPost.resolve(jsonResponse(200, { success: true, syncRevision: 1 }));
+    await Promise.all([firstFlush, secondFlush, disposal]);
+
+    expect(settledImmediately).toBe(true);
+    expect(postCount).toBe(1);
+    expect(second.snapshot().pendingOperations).not.toHaveLength(0);
+  });
+
   it('bounds lifecycle waiting behind another coordinator mutex without posting', async () => {
     vi.useFakeTimers();
     const firstPost = deferred<Response>();

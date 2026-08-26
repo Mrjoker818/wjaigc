@@ -49,7 +49,7 @@ export interface SimpleChatSyncCoordinator {
   handleOnline(): Promise<void>;
   snapshot(): SimpleChatSyncSnapshot;
   subscribe(listener: (snapshot: SimpleChatSyncSnapshot) => void): () => void;
-  dispose(): Promise<void>;
+  dispose(options?: { flush?: boolean }): Promise<void>;
 }
 
 export type SimpleChatSyncFlushReason =
@@ -830,10 +830,21 @@ export function createSimpleChatSyncCoordinator(
     };
   }
 
-  async function dispose(): Promise<void> {
+  async function dispose(disposeOptions: { flush?: boolean } = {}): Promise<void> {
     if (disposed) return;
     clearDebounce();
-    initializeController?.abort(createAbortError('Simple chat sync coordinator was disposed'));
+    const reason = createAbortError('Simple chat sync coordinator was disposed');
+    initializeController?.abort(reason);
+    if (disposeOptions.flush === false) {
+      disposed = true;
+      queuedFlush = null;
+      flushDrainController?.abort(reason);
+      for (const controller of activeRequestControllers) controller.abort(reason);
+      stopLifecycleTimeout();
+      listeners.clear();
+      if (envelope !== null) void enqueuePersistence(envelope, () => false);
+      return;
+    }
     await queueFlush('dispose');
     disposed = true;
     listeners.clear();

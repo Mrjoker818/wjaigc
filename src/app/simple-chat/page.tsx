@@ -24,6 +24,12 @@ import { createIndexedDbSimpleChatEnvelopeStore } from "@/lib/simple-chat-sync-s
 
 type ProjectUpdater = Project[] | ((current: Project[]) => Project[]);
 
+interface PreReadyProjectCandidate {
+  userId: string;
+  projects: Project[];
+  dirty: boolean;
+}
+
 function generateId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 
 function createDefaultProject(): Project {
@@ -42,6 +48,15 @@ function createDefaultProject(): Project {
   return project;
 }
 
+function mergeProjects(remote: Project[], local: Project[]): Project[] {
+  const localById = new Map(local.map(project => [project.id, project]));
+  const remoteIds = new Set(remote.map(project => project.id));
+  return [
+    ...remote.map(project => localById.get(project.id) ?? project),
+    ...local.filter(project => !remoteIds.has(project.id)),
+  ];
+}
+
 export default function SimpleChatPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -52,7 +67,12 @@ export default function SimpleChatPage() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const projectsRef = useRef<Project[]>([]);
+  const [dataOwnerUserId, setDataOwnerUserId] = useState<string | null>(null);
+  const dataOwnerUserIdRef = useRef<string | null>(null);
+  const [preReadyCandidate, setPreReadyCandidate] = useState<PreReadyProjectCandidate | null>(null);
+  const preReadyCandidateRef = useRef<PreReadyProjectCandidate | null>(null);
   const coordinatorRef = useRef<SimpleChatSyncCoordinator | null>(null);
+  const coordinatorUserIdRef = useRef<string | null>(null);
   const coordinatorReadyRef = useRef(false);
   const [syncSnapshot, setSyncSnapshot] = useState<SimpleChatSyncSnapshot>({
     status: 'loading',
@@ -66,13 +86,40 @@ export default function SimpleChatPage() {
   const activeTaskIdRef = useRef<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  const visibleProjects = user && dataOwnerUserId === user.id
+    ? projects
+    : user && preReadyCandidate?.userId === user.id
+      ? preReadyCandidate.projects
+      : [];
+  const visibleActiveProjectId = visibleProjects.some(project => project.id === activeProjectId)
+    ? activeProjectId
+    : null;
+  const visibleActiveProject = visibleProjects.find(project => project.id === visibleActiveProjectId) ?? null;
+  const visibleActiveTaskId = visibleActiveProject?.tasks.some(task => task.id === activeTaskId)
+    ? activeTaskId
+    : null;
+
   const commitProjects = useCallback((updater: ProjectUpdater): Project[] => {
-    const next = typeof updater === 'function' ? updater(projectsRef.current) : updater;
-    projectsRef.current = next;
-    setProjects(next);
-    if (coordinatorReadyRef.current) coordinatorRef.current?.update(next);
+    const userId = user?.id;
+    if (!userId) return [];
+    const candidate = preReadyCandidateRef.current;
+    const current = dataOwnerUserIdRef.current === userId
+      ? projectsRef.current
+      : candidate?.userId === userId
+        ? candidate.projects
+        : [];
+    const next = typeof updater === 'function' ? updater(current) : updater;
+    if (coordinatorReadyRef.current && coordinatorUserIdRef.current === userId) {
+      projectsRef.current = next;
+      setProjects(next);
+      coordinatorRef.current?.update(next);
+    } else {
+      const nextCandidate = { userId, projects: next, dirty: true };
+      preReadyCandidateRef.current = nextCandidate;
+      setPreReadyCandidate(nextCandidate);
+    }
     return next;
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -115,16 +162,23 @@ export default function SimpleChatPage() {
     if (!userId) return;
 
     let cancelled = false;
+    if (preReadyCandidateRef.current?.userId !== userId) {
+      preReadyCandidateRef.current = null;
+      setPreReadyCandidate(null);
+    }
     const coordinator = createSimpleChatSyncCoordinator({
       store: createIndexedDbSimpleChatEnvelopeStore(),
     });
     coordinatorRef.current = coordinator;
+    coordinatorUserIdRef.current = userId;
     coordinatorReadyRef.current = false;
     setSyncSnapshot({ status: 'loading', projects: [], pendingOperations: [], error: null });
 
-    const applyProjects = (loaded: Project[]): void => {
+    const publishProjects = (loaded: Project[]): void => {
       projectsRef.current = loaded;
       setProjects(loaded);
+      dataOwnerUserIdRef.current = userId;
+      setDataOwnerUserId(userId);
 
       const currentProject = loaded.find(project => project.id === activeProjectIdRef.current);
       const currentTaskExists = currentProject?.tasks.some(task => task.id === activeTaskIdRef.current) ?? false;
@@ -142,26 +196,31 @@ export default function SimpleChatPage() {
     const applySnapshot = (nextSnapshot: SimpleChatSyncSnapshot): void => {
       if (cancelled) return;
       setSyncSnapshot(nextSnapshot);
-      if (nextSnapshot.status === 'synced' || nextSnapshot.status === 'syncing') {
-        coordinatorReadyRef.current = true;
+      if (nextSnapshot.status !== 'synced' && nextSnapshot.status !== 'syncing') return;
+
+      coordinatorReadyRef.current = true;
+      const candidate = preReadyCandidateRef.current?.userId === userId
+        ? preReadyCandidateRef.current
+        : null;
+      let loaded = candidate?.dirty
+        ? mergeProjects(nextSnapshot.projects, candidate.projects)
+        : nextSnapshot.projects;
+      let shouldUpdate = candidate?.dirty === true;
+      if (loaded.length === 0) {
+        loaded = [createDefaultProject()];
+        shouldUpdate = true;
       }
-      if (coordinatorReadyRef.current) applyProjects(nextSnapshot.projects);
+      preReadyCandidateRef.current = null;
+      setPreReadyCandidate(null);
+      if (shouldUpdate) coordinator.update(loaded);
+      publishProjects(loaded);
     };
 
     const unsubscribe = coordinator.subscribe(applySnapshot);
     const initialize = async (): Promise<void> => {
       const initialized = await coordinator.initialize(userId);
       if (cancelled) return;
-      setSyncSnapshot(initialized);
-      if (initialized.status !== 'synced' && initialized.status !== 'syncing') return;
-
-      coordinatorReadyRef.current = true;
-      let loaded = initialized.projects;
-      if (loaded.length === 0) {
-        loaded = [createDefaultProject()];
-        coordinator.update(loaded);
-      }
-      applyProjects(loaded);
+      applySnapshot(initialized);
     };
 
     void initialize();
@@ -170,12 +229,13 @@ export default function SimpleChatPage() {
       coordinatorReadyRef.current = false;
       unsubscribe();
       if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
-      void coordinator.dispose();
+      if (coordinatorUserIdRef.current === userId) coordinatorUserIdRef.current = null;
+      void coordinator.dispose({ flush: false });
     };
   }, [user?.id]);
 
-  const activeProject = projects.find(p => p.id === activeProjectId) ?? null;
-  const activeTask = activeProject?.tasks.find(t => t.id === activeTaskId) ?? null;
+  const activeProject = visibleActiveProject;
+  const activeTask = activeProject?.tasks.find(t => t.id === visibleActiveTaskId) ?? null;
 
   useEffect(() => {
     if (!activeProjectId || !activeTaskId || !activeTask) return;
@@ -340,12 +400,12 @@ export default function SimpleChatPage() {
       )}
       <Sidebar
         user={user}
-        projects={projects}
-        activeProjectId={activeProjectId}
-        activeTaskId={activeTaskId}
+        projects={visibleProjects}
+        activeProjectId={visibleActiveProjectId}
+        activeTaskId={visibleActiveTaskId}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        onSelectProject={id => { setActiveProjectId(id); const p = projects.find(x => x.id === id); setActiveTaskId(p?.tasks[0]?.id ?? null); }}
+        onSelectProject={id => { setActiveProjectId(id); const p = visibleProjects.find(x => x.id === id); setActiveTaskId(p?.tasks[0]?.id ?? null); }}
         onSelectTask={id => setActiveTaskId(id)}
         onCreateProject={handleCreateProject}
         onDeleteProject={handleDeleteProject}
