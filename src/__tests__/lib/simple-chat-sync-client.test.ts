@@ -404,6 +404,7 @@ describe('simple chat sync coordinator', () => {
       store,
       fetchImpl: sequenceFetch(
         jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+        jsonResponse(200, { success: true, syncRevision: 1 }),
         jsonResponse(200, { success: true, value: [project('remote-b')], syncRevision: 4 }),
       ),
     });
@@ -418,12 +419,13 @@ describe('simple chat sync coordinator', () => {
     expect((await store.get('user-b'))?.userId).toBe('user-b');
   });
 
-  it('dispose persists pending work and stops later mutations', async () => {
+  it('dispose flushes pending work and stops later mutations', async () => {
     const store = createMemorySimpleChatEnvelopeStore();
     const coordinator = createSimpleChatSyncCoordinator({
       store,
       fetchImpl: sequenceFetch(
         jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+        jsonResponse(200, { success: true, syncRevision: 1 }),
       ),
     });
     await coordinator.initialize('user-a');
@@ -431,7 +433,7 @@ describe('simple chat sync coordinator', () => {
     await coordinator.dispose();
 
     expect((await store.get('user-a'))?.currentProjects).toEqual([project('before-dispose')]);
-    expect((await store.get('user-a'))?.pendingOperations).not.toHaveLength(0);
+    expect((await store.get('user-a'))?.pendingOperations).toHaveLength(0);
     expect(() => coordinator.update([project('after-dispose')])).toThrow('disposed');
   });
 
@@ -549,5 +551,340 @@ describe('simple chat sync coordinator', () => {
       status: 'failed',
       error: { code: 'CHAT_SYNC_LOCAL_STORAGE_FAILED', retryable: false },
     });
+  });
+
+  it('does not let an older initialize completion replace the latest user', async () => {
+    const userAResponse = deferred<Response>();
+    let getCount = 0;
+    const fetchImpl: typeof fetch = vi.fn(async () => {
+      getCount += 1;
+      return getCount === 1
+        ? await userAResponse.promise
+        : jsonResponse(200, { success: true, value: [project('remote-b')], syncRevision: 2 });
+    });
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+
+    const initializeA = coordinator.initialize('user-a');
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    const initializeB = coordinator.initialize('user-b');
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+    await initializeB;
+    coordinator.update([project('private-b')]);
+    userAResponse.resolve(
+      jsonResponse(200, { success: true, value: [project('remote-a')], syncRevision: 1 }),
+    );
+    await initializeA;
+
+    expect(coordinator.snapshot()).toMatchObject({
+      status: 'syncing',
+      projects: [project('private-b')],
+    });
+  });
+
+  it('serializes network requests across coordinators for the same user', async () => {
+    const firstPost = deferred<Response>();
+    let activeRequests = 0;
+    let maximumActiveRequests = 0;
+    let postCount = 0;
+    const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+      activeRequests += 1;
+      maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
+      try {
+        if (requestMethod(init) === 'GET') {
+          return jsonResponse(200, { success: true, value: [], syncRevision: 0 });
+        }
+        postCount += 1;
+        return postCount === 1
+          ? await firstPost.promise
+          : jsonResponse(200, { success: true, syncRevision: 1 });
+      } finally {
+        activeRequests -= 1;
+      }
+    });
+    const first = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+    const second = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+    await Promise.all([first.initialize('shared-user'), second.initialize('shared-user')]);
+    first.update([project('first')]);
+    second.update([project('second')]);
+
+    const firstFlush = first.flush('manual');
+    const secondFlush = second.flush('manual');
+    await vi.waitFor(() => expect(postCount).toBe(1));
+    expect(maximumActiveRequests).toBe(1);
+    firstPost.resolve(jsonResponse(200, { success: true, syncRevision: 1 }));
+    await Promise.all([firstFlush, secondFlush]);
+
+    expect(postCount).toBe(2);
+    expect(maximumActiveRequests).toBe(1);
+  });
+
+  it('limits a mixed conflict recovery flow to three total POST requests', async () => {
+    const fetchImpl = sequenceFetch(
+      jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+      jsonResponse(409, { code: 'CHAT_SYNC_CONFLICT', currentRevision: 1 }),
+      jsonResponse(200, { success: true, value: [], syncRevision: 1 }),
+      jsonResponse(503, { code: 'SERVICE_UNAVAILABLE' }),
+      jsonResponse(503, { code: 'SERVICE_UNAVAILABLE' }),
+      jsonResponse(200, { success: true, syncRevision: 2 }),
+    );
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      jitter: () => 0,
+    });
+    await coordinator.initialize('user-a');
+    coordinator.update([project('local')]);
+
+    await coordinator.flush('manual');
+
+    expect(countPostRequests(fetchImpl)).toBe(3);
+    expect(coordinator.snapshot()).toMatchObject({ status: 'failed' });
+    expect(coordinator.snapshot().pendingOperations).not.toHaveLength(0);
+  });
+
+  it.each([429, 500, 502, 503, 504, 'network'])(
+    'retries initialize GET failures for %s up to three times',
+    async failure => {
+      const sleep = vi.fn().mockResolvedValue(undefined);
+      const failedRead = failure === 'network'
+        ? () => Promise.reject(new Error('network unavailable'))
+        : () => Promise.resolve(jsonResponse(Number(failure), { code: 'RETRYABLE' }));
+      let attempts = 0;
+      const fetchImpl: typeof fetch = vi.fn(async () => {
+        attempts += 1;
+        if (attempts <= 3) return await failedRead();
+        return jsonResponse(200, { success: true, value: [project('remote')], syncRevision: 1 });
+      });
+      const coordinator = createSimpleChatSyncCoordinator({
+        store: createMemorySimpleChatEnvelopeStore(),
+        fetchImpl,
+        sleep,
+        jitter: () => 0,
+      });
+
+      await coordinator.initialize('user-a');
+
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
+      expect(sleep.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([250, 500, 1_000]);
+      expect(coordinator.snapshot()).toMatchObject({ status: 'synced', projects: [project('remote')] });
+    },
+  );
+
+  it('retries a conflict rebase GET before replaying the pending batch', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const fetchImpl = sequenceFetch(
+      jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+      jsonResponse(409, { code: 'CHAT_SYNC_CONFLICT', currentRevision: 1 }),
+      jsonResponse(503, { code: 'SERVICE_UNAVAILABLE' }),
+      jsonResponse(502, { code: 'BAD_GATEWAY' }),
+      jsonResponse(200, { success: true, value: [], syncRevision: 1 }),
+      jsonResponse(200, { success: true, syncRevision: 2 }),
+    );
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+      sleep,
+      jitter: () => 0,
+    });
+    await coordinator.initialize('user-a');
+    coordinator.update([project('local')]);
+
+    await coordinator.flush('manual');
+
+    expect(sleep.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([250, 500]);
+    expect(coordinator.snapshot()).toMatchObject({ status: 'synced', pendingOperations: [] });
+  });
+
+  it('retries a failed authoritative initialize read through handleOnline without pending work', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    let attempts = 0;
+    const fetchImpl: typeof fetch = vi.fn(async () => {
+      attempts += 1;
+      if (attempts <= 4) return jsonResponse(503, { code: 'SERVICE_UNAVAILABLE' });
+      return jsonResponse(200, { success: true, value: [project('recovered')], syncRevision: 3 });
+    });
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+      sleep,
+      jitter: () => 0,
+    });
+    await coordinator.initialize('user-a');
+    expect(coordinator.snapshot()).toMatchObject({ status: 'failed', projects: [] });
+
+    await coordinator.handleOnline();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
+    expect(coordinator.snapshot()).toMatchObject({
+      status: 'synced',
+      projects: [project('recovered')],
+    });
+  });
+
+  it('restores the acknowledged in-memory envelope when the atomic store write fails', async () => {
+    let stored: SimpleChatSyncEnvelopeV1 | null = null;
+    let rejectAcknowledgement = true;
+    const store: SimpleChatEnvelopeStore = {
+      get: async () => structuredClone(stored),
+      put: async value => {
+        if (
+          rejectAcknowledgement
+          && value.baseRevision === 1
+          && value.pendingOperations.length === 0
+        ) {
+          rejectAcknowledgement = false;
+          throw new Error('atomic transaction rejected');
+        }
+        stored = structuredClone(value);
+      },
+      delete: async () => undefined,
+    };
+    const fetchImpl = sequenceFetch(
+      jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+      jsonResponse(200, { success: true, syncRevision: 1 }),
+      jsonResponse(409, { code: 'CHAT_SYNC_CONFLICT', currentRevision: 1 }),
+      jsonResponse(200, { success: true, value: [project('local')], syncRevision: 1 }),
+    );
+    const coordinator = createSimpleChatSyncCoordinator({ store, fetchImpl });
+    await coordinator.initialize('user-a');
+    coordinator.update([project('local')]);
+
+    await coordinator.flush('manual');
+
+    expect(coordinator.snapshot()).toMatchObject({
+      status: 'failed',
+      projects: [project('local')],
+    });
+    expect(coordinator.snapshot().pendingOperations).not.toHaveLength(0);
+    expect((stored as SimpleChatSyncEnvelopeV1 | null)?.pendingOperations).not.toHaveLength(0);
+
+    await coordinator.flush('manual');
+    expect(coordinator.snapshot()).toMatchObject({ status: 'synced', pendingOperations: [] });
+  });
+
+  it('keeps the active envelope when the next user store read fails', async () => {
+    const memoryStore = createMemorySimpleChatEnvelopeStore();
+    const store: SimpleChatEnvelopeStore = {
+      get: async userId => {
+        if (userId === 'user-b') throw new Error('indexeddb unavailable');
+        return await memoryStore.get(userId);
+      },
+      put: value => memoryStore.put(value),
+      delete: userId => memoryStore.delete(userId),
+    };
+    const coordinator = createSimpleChatSyncCoordinator({
+      store,
+      fetchImpl: sequenceFetch(
+        jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+      ),
+      sleep: vi.fn().mockResolvedValue(undefined),
+    });
+    await coordinator.initialize('user-a');
+    coordinator.update([project('private-a')]);
+
+    const failedSwitch = await coordinator.initialize('user-b');
+
+    expect(failedSwitch).toMatchObject({
+      status: 'failed',
+      projects: [project('private-a')],
+    });
+    expect(failedSwitch.pendingOperations).not.toHaveLength(0);
+    expect(await memoryStore.get('user-b')).toBeNull();
+  });
+
+  it('queues pagehide work added during an active flush and preserves keepalive', async () => {
+    const firstPost = deferred<Response>();
+    const postCalls: RequestInit[] = [];
+    const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+      if (requestMethod(init) === 'GET') {
+        return jsonResponse(200, { success: true, value: [], syncRevision: 0 });
+      }
+      postCalls.push(init ?? {});
+      return postCalls.length === 1
+        ? await firstPost.promise
+        : jsonResponse(200, { success: true, syncRevision: 2 });
+    });
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl,
+    });
+    await coordinator.initialize('user-a');
+    coordinator.update([project('first')]);
+    const manualFlush = coordinator.flush('manual');
+    await vi.waitFor(() => expect(postCalls).toHaveLength(1));
+    coordinator.update([project('first'), project('second')]);
+    const pagehideFlush = coordinator.flush('pagehide');
+
+    firstPost.resolve(jsonResponse(200, { success: true, syncRevision: 1 }));
+    await Promise.all([manualFlush, pagehideFlush]);
+
+    expect(postCalls).toHaveLength(2);
+    expect(postCalls[1]?.keepalive).toBe(true);
+    expect(coordinator.snapshot().pendingOperations).toHaveLength(0);
+  });
+
+  it.each(['logout', 'dispose'] as const)(
+    'bounds %s network waiting, aborts fetch, and keeps pending operations',
+    async lifecycle => {
+      vi.useFakeTimers();
+      try {
+        let requestSignal: AbortSignal | undefined;
+        const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+          if (requestMethod(init) === 'GET') {
+            return jsonResponse(200, { success: true, value: [], syncRevision: 0 });
+          }
+          requestSignal = init?.signal ?? undefined;
+          return await new Promise<Response>((_resolve, reject) => {
+            requestSignal?.addEventListener('abort', () => reject(requestSignal?.reason), { once: true });
+          });
+        });
+        const coordinator = createSimpleChatSyncCoordinator({
+          store: createMemorySimpleChatEnvelopeStore(),
+          fetchImpl,
+        });
+        await coordinator.initialize('user-a');
+        coordinator.update([project('pending')]);
+
+        const lifecyclePromise = lifecycle === 'logout'
+          ? coordinator.flush('logout')
+          : coordinator.dispose();
+        await vi.waitFor(() => expect(requestSignal).toBeDefined());
+        await vi.advanceTimersByTimeAsync(5_000);
+        await lifecyclePromise;
+
+        expect(requestSignal?.aborted).toBe(true);
+        expect(coordinator.snapshot().pendingOperations).not.toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('isolates mutable snapshots between subscribers', async () => {
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl: sequenceFetch(
+        jsonResponse(200, { success: true, value: [], syncRevision: 0 }),
+      ),
+    });
+    coordinator.subscribe(next => {
+      next.projects.push(project('listener-mutation'));
+    });
+    const secondListener = vi.fn<(snapshot: SimpleChatSyncSnapshot) => void>();
+    coordinator.subscribe(secondListener);
+
+    await coordinator.initialize('user-a');
+
+    expect(secondListener).toHaveBeenLastCalledWith(expect.objectContaining({ projects: [] }));
   });
 });
