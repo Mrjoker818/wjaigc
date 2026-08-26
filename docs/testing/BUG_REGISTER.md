@@ -2590,9 +2590,12 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 字段 | 内容 |
 |---|---|
 | 范围 | 独立智能对话项目、任务、消息、Artifact、Agent 与知识项的版本化同步；覆盖远端基线重放、同实体冲突副本、删除不复活、离线恢复、生命周期冲刷、用户隔离和同步状态。 |
-| 基线与候选 | 任务基线 `9e05cf0881d0d64af4ba96311837885ac77b3c33`；实现候选 `4f638d816033acd6bf457f609a4e4236fc9a20cb`；保护分支 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。 |
-| 本地完整门禁 | 全仓 Vitest `3906 passed / 118 skipped / 0 failed`；API `765 passed / 3 skipped / 0 failed`；回归 `2887 passed / 10 skipped / 0 failed`；Next.js 构建完成 `116` 个静态页面/路由。所有 skipped 均保留为未执行，不计入通过。 |
+| 基线与候选 | 任务基线 `9e05cf0881d0d64af4ba96311837885ac77b3c33`；最终复审修复后的实现候选 `5663441a30c279d5a696235020dae5d47cc0703d`；保护分支 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。 |
+| 阶段完整门禁 | 修复前候选的全仓 Vitest `3906 passed / 118 skipped / 0 failed`；API `765 passed / 3 skipped / 0 failed`；回归 `2887 passed / 10 skipped / 0 failed`；Next.js 构建完成 `116` 个静态页面/路由。所有 skipped 均保留为未执行，不计入通过。 |
 | 复审后聚焦门禁 | 合同 `13/13`、保护基线 `38/38`、TypeScript 与目标 ESLint 通过；Playwright 只发现 `70` 项，分布于 `chromium`、`chromium-1080p`、`firefox`、`webkit`、`mobile-chromium`，不代表真实浏览器已执行。 |
-| 独立复审 | Task 8 复审为 Spec COMPLIANT、Task quality APPROVED，Critical/Important/Minor `0/0/0`。 |
-| 未验证 | 本机缺少真实浏览器凭据、专用次账号和 `POSTGRES_TEST_DATABASE_URL`；真实浏览器、跨账号隔离和 PostgreSQL 并发为 `UNVERIFIED`。Coze 尚未拉取候选，未生成云端证据。 |
+| 全分支终审缺陷 | 终审发现 1 个 Critical 旧服务端存储键迁移缺陷：新 helper 使用新命名空间后看不到历史 `data_key='chat_simple_projects'` 行。 |
+| 最小修复 | `5663441a` 继续使用历史 `chat_simple_projects` 数据键，保留按用户区分的 advisory lock；历史数组仍解析为 revision `0`，并由 `expectedRevision=0` CAS 在同一行原地升级为 revision `1`，不创建第二命名空间。 |
+| 修复专项证据 | RED `2 failed / 10 passed`；GREEN 单元 `12/12`、Simple Chat API `28/28`；`ts-check`、目标 ESLint、保护基线 `38/38` 和 `git diff --check` 通过。 |
+| 窄范围复审 | Ready to merge: Yes；Critical/Important/Minor `0/0/0`。 |
+| 未验证 | `POSTGRES_TEST_DATABASE_URL` 缺失，迁移与并发测试 `2/2 skipped`，不得计为通过；真实浏览器、跨账号隔离和 PostgreSQL 行为仍为 `UNVERIFIED`。Coze 尚未拉取候选，未生成云端证据。 |
 | 状态 | **本地候选完成 / 云端待验 / 未吸收。** 本记录不是云端关闭，不改变全平台“有条件通过”及其他未关闭项；真实云端矩阵全部通过前不得标记 `V588-CHAT-003` 已吸收。 |

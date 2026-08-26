@@ -1456,8 +1456,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 
 ## 2026-08-27 V588-CHAT-003 本地候选发布判断
 
-- 任务基线为 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，本地实现候选为 `4f638d816033acd6bf457f609a4e4236fc9a20cb`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。
-- 本地完整门禁通过：全仓 Vitest `3906 passed / 118 skipped / 0 failed`，API `765 passed / 3 skipped / 0 failed`，回归 `2887 passed / 10 skipped / 0 failed`，Next.js 构建完成 `116` 个静态页面/路由。跳过测试没有被计为通过。
+- 任务基线为 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，最终复审修复后的本地实现候选为 `5663441a30c279d5a696235020dae5d47cc0703d`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。
+- 修复前阶段完整门禁通过：全仓 Vitest `3906 passed / 118 skipped / 0 failed`，API `765 passed / 3 skipped / 0 failed`，回归 `2887 passed / 10 skipped / 0 failed`，Next.js 构建完成 `116` 个静态页面/路由。跳过测试没有被计为通过。
 - 独立 Task 8 复审为 Spec COMPLIANT、Task quality APPROVED，Critical/Important/Minor `0/0/0`；复审后聚焦合同 `13/13`、保护基线 `38/38`、TypeScript 与目标 ESLint 通过。
 - Playwright 仅发现五项目共 `70` 项，没有真实执行。由于缺少本地真实浏览器凭据、专用次账号和 `POSTGRES_TEST_DATABASE_URL`，真实浏览器矩阵、跨账号隔离与 PostgreSQL 并发保持 `UNVERIFIED`。
+- 全分支终审发现 1 个 Critical 旧服务端存储键迁移缺陷；`5663441a` 保留历史 `data_key='chat_simple_projects'` 和按用户 advisory lock，并把旧数组 revision `0` 在原行升级为 revision `1`。
+- 修复专项 RED `2 failed / 10 passed`；GREEN 单元 `12/12`、Simple Chat API `28/28`，`ts-check`、目标 ESLint、保护基线 `38/38` 与 `git diff --check` 通过。PostgreSQL 迁移和并发测试 `2/2 skipped`，原因是缺少 `POSTGRES_TEST_DATABASE_URL`，不得宣称通过。
+- 窄范围复审为 Ready to merge: Yes，Critical/Important/Minor `0/0/0`。
 - **专项判定：V588-CHAT-003 本地候选完成 / 云端待验 / 未吸收；全平台仍为有条件通过。** Coze 尚未拉取和运行精确候选，真实项目/任务操作、多标签冲突、删除不复活、离线恢复、账号隔离、退出前同步及 PostgreSQL 最终快照均无云端证据。不得据此宣称云端通过，也不得提前进入 `V588-CHAT-004`；其他既有未关闭项继续保留。

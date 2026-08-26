@@ -1801,9 +1801,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 
 ## 2026-08-27 V588-CHAT-003 本地候选回归
 
-- 基线为 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，候选为 `4f638d816033acd6bf457f609a4e4236fc9a20cb`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读且未变化。
-- 全仓 Vitest 为 `3906 passed / 118 skipped / 0 failed`；API 为 `765 passed / 3 skipped / 0 failed`；回归为 `2887 passed / 10 skipped / 0 failed`。这些是三套门禁各自的结果，不相加为新的测试总数；跳过项不计为通过。
+- 基线为 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，最终复审修复后的候选为 `5663441a30c279d5a696235020dae5d47cc0703d`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读且未变化。
+- 修复前阶段完整门禁中，全仓 Vitest 为 `3906 passed / 118 skipped / 0 failed`；API 为 `765 passed / 3 skipped / 0 failed`；回归为 `2887 passed / 10 skipped / 0 failed`。这些是三套门禁各自的结果，不相加为新的测试总数；跳过项不计为通过。
 - Next.js 构建完成 `116` 个静态页面/路由。复审后聚焦合同 `13/13`、保护基线 `38/38`、TypeScript 与目标 ESLint 通过。
 - Playwright 仅执行发现：五个项目合计 `70` 项，`chromium`、`chromium-1080p`、`firefox`、`webkit`、`mobile-chromium` 各 `14` 项；未执行真实浏览器场景。
-- Task 8 独立复审结论：Spec COMPLIANT、Task quality APPROVED，Critical/Important/Minor `0/0/0`。
-- **回归结论：本地候选完成 / 云端待验 / 未吸收。** 由于缺少真实浏览器凭据、专用次账号与 `POSTGRES_TEST_DATABASE_URL`，真实浏览器、跨账号隔离和 PostgreSQL 并发保持 `UNVERIFIED`。Coze 未运行精确候选，故不得将本地结果扩大为云端通过或 `V588-CHAT-003` 已吸收；全平台继续为有条件通过。
+- 全分支终审发现 1 个 Critical 旧服务端存储键迁移缺陷；`5663441a` 保留历史 `data_key='chat_simple_projects'`、按用户 advisory lock，并将旧数组 revision `0` 在原行升级为 revision `1`。
+- 修复专项 RED 为 `2 failed / 10 passed`；GREEN 后单元 `12/12`、Simple Chat API `28/28`，`ts-check`、目标 ESLint、保护基线 `38/38` 与 `git diff --check` 通过。PostgreSQL 迁移和并发测试因缺少 `POSTGRES_TEST_DATABASE_URL` 为 `2/2 skipped`，不计为通过。
+- 窄范围复审为 Ready to merge: Yes，Critical/Important/Minor `0/0/0`。
+- **回归结论：本地候选完成 / 云端待验 / 未吸收。** 真实浏览器、跨账号隔离、PostgreSQL 迁移和并发保持 `UNVERIFIED`。Coze 未运行精确候选，故不得将本地结果扩大为云端通过或 `V588-CHAT-003` 已吸收；全平台继续为有条件通过。

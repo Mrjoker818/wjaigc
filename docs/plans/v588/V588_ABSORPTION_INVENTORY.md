@@ -416,8 +416,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 
 ## 2026-08-27 V588-CHAT-003 本地候选检查点
 
-- 任务分支基于 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，本地实现候选为 `4f638d816033acd6bf457f609a4e4236fc9a20cb`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 donor `J:\无界云端0820` 均未修改。
-- 本地完整门禁：全仓 Vitest `3906 passed / 118 skipped / 0 failed`，API `765 passed / 3 skipped / 0 failed`，回归 `2887 passed / 10 skipped / 0 failed`；Next.js 构建完成 `116` 个静态页面/路由。跳过项不计为通过。
+- 任务分支基于 `9e05cf0881d0d64af4ba96311837885ac77b3c33`，最终复审修复后的本地实现候选为 `5663441a30c279d5a696235020dae5d47cc0703d`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 donor `J:\无界云端0820` 均未修改。
+- 修复前阶段完整门禁：全仓 Vitest `3906 passed / 118 skipped / 0 failed`，API `765 passed / 3 skipped / 0 failed`，回归 `2887 passed / 10 skipped / 0 failed`；Next.js 构建完成 `116` 个静态页面/路由。跳过项不计为通过。
 - 最终复审后的聚焦合同为 `13/13`；Playwright 仅完成五项目发现，共 `70` 项（`chromium`、`chromium-1080p`、`firefox`、`webkit`、`mobile-chromium` 各 `14` 项），没有把发现数量写成浏览器执行通过。保护基线 `38/38`、TypeScript 与目标 ESLint 通过。
-- Task 8 独立复审结论为 Spec COMPLIANT、Task quality APPROVED，Critical/Important/Minor 为 `0/0/0`。
-- **当前状态：本地候选完成 / 云端待验 / 未吸收。** 本机缺少真实浏览器主账号凭据、专用次账号和 `POSTGRES_TEST_DATABASE_URL`，因此真实浏览器矩阵、跨账号隔离与 PostgreSQL 并发均为 `UNVERIFIED`；Coze 尚未拉取并运行该精确候选，也没有云端业务或证据文件。全平台继续为有条件通过，云端矩阵全部通过前不得进入 `V588-CHAT-004`。
+- 全分支终审随后发现 1 个 Critical 旧服务端存储键迁移缺陷：新 helper 曾使用新命名空间，导致历史 `data_key='chat_simple_projects'` 行不可见。修复提交 `5663441a` 保留历史数据键、保留按用户 advisory lock，并让旧数组 revision `0` 在原行升级为 revision `1`。
+- 修复专项先得到 RED `2 failed / 10 passed`，GREEN 后服务端单元 `12/12`、Simple Chat API `28/28`、`ts-check`、目标 ESLint、保护基线 `38/38` 与 `git diff --check` 通过。PostgreSQL 迁移和并发测试因缺少 `POSTGRES_TEST_DATABASE_URL` 为 `2/2 skipped`，不计为通过。
+- 窄范围复审结论为 Ready to merge: Yes，Critical/Important/Minor `0/0/0`。
+- **当前状态：本地候选完成 / 云端待验 / 未吸收。** 真实浏览器矩阵、跨账号隔离、PostgreSQL 迁移与并发均为 `UNVERIFIED`；Coze 尚未拉取并运行该精确候选，也没有云端业务或证据文件。全平台继续为有条件通过，云端矩阵全部通过前不得进入 `V588-CHAT-004`。
