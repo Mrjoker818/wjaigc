@@ -4,16 +4,23 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/simple-chat/sidebar";
 import ChatArea from "@/components/simple-chat/chat-area";
+import { SimpleChatSyncStatusView } from "@/components/simple-chat/simple-chat-sync-status";
 import { LoginPanel } from "@/components/dashboard/login-panel";
 import {
-  SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent,
-  loadProjects, saveProjects, SimpleChatProject as Project, SimpleChatTask as Task,
-  PRESET_SKILLS, PresetSkill, recoverInterruptedSimpleChatProjects,
+  SimpleChatAgent,
+  saveProjects, SimpleChatProject as Project, SimpleChatTask as Task,
+  PresetSkill,
 } from "@/components/simple-chat/simple-chat-types";
 import { selectInitialSimpleChatProject } from "@/components/simple-chat/simple-chat-types";
 import { User } from "@/lib/user-types";
 import { fetchSessionPayload } from "@/lib/auth-session";
 import { logoutSimpleChatSession } from "@/lib/simple-chat-logout";
+import {
+  createSimpleChatSyncCoordinator,
+  type SimpleChatSyncCoordinator,
+  type SimpleChatSyncSnapshot,
+} from "@/lib/simple-chat-sync-client";
+import { createIndexedDbSimpleChatEnvelopeStore } from "@/lib/simple-chat-sync-storage";
 
 function generateId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 
@@ -43,90 +50,95 @@ export default function SimpleChatPage() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const projectsRef = useRef<Project[]>([]);
+  const coordinatorRef = useRef<SimpleChatSyncCoordinator | null>(null);
+  const coordinatorReadyRef = useRef(false);
+  const applyingSyncSnapshotRef = useRef(false);
+  const [syncSnapshot, setSyncSnapshot] = useState<SimpleChatSyncSnapshot>({
+    status: 'loading',
+    projects: [],
+    pendingOperations: [],
+    error: null,
+  });
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     projectsRef.current = projects;
-  }, [projects]);
-
-  // ===== 项目数据跨设备持久化（服务器同步，避免换电脑/换浏览器后数据丢失） =====
-  const PROJECTS_SYNC_KEY = 'chat_simple_projects';
-  const chatProjectsSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const loadChatProjectsFromServer = useCallback(async (): Promise<Project[] | null> => {
-    try {
-      const res = await fetch(`/api/user-data/sync?key=${PROJECTS_SYNC_KEY}`);
-      const data = await res.json();
-      if (data?.success && Array.isArray(data.value) && data.value.length > 0) {
-        return data.value as Project[];
-      }
-      return null;
-    } catch {
-      return null;
+    if (!coordinatorReadyRef.current) return;
+    if (applyingSyncSnapshotRef.current) {
+      applyingSyncSnapshotRef.current = false;
+      return;
     }
-  }, []);
-
-  const scheduleChatProjectsSync = useCallback((value: Project[]) => {
-    if (chatProjectsSyncTimer.current) clearTimeout(chatProjectsSyncTimer.current);
-    chatProjectsSyncTimer.current = setTimeout(() => {
-      void (async () => {
-        try {
-          await fetch('/api/user-data/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: PROJECTS_SYNC_KEY, value }),
-          });
-        } catch {
-          // localStorage 仍是兜底，静默失败
-        }
-      })();
-    }, 800);
-  }, []);
+    coordinatorRef.current?.update(projects);
+  }, [projects]);
 
   // Auth
   useEffect(() => {
-    fetchSessionPayload().then(data => {
-      if (data.success && data.user) {
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+
+    const applyProjects = (nextProjects: Project[]) => {
+      projectsRef.current = nextProjects;
+      applyingSyncSnapshotRef.current = true;
+      setProjects(nextProjects);
+    };
+
+    const initialize = async () => {
+      try {
+        const data = await fetchSessionPayload();
+        if (cancelled) return;
+        if (!data.success || !data.user) {
+          setShowLogin(true);
+          return;
+        }
+
         setUser(data.user);
         setShowLogin(false);
-      } else { setShowLogin(true); }
-    }).catch(() => setShowLogin(true)).finally(() => setAuthLoading(false));
-  }, []);
 
-  // Load projects（优先服务器，localStorage 兜底）
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    const init = async () => {
-      let loaded = loadProjects();
-      // 已登录用户从服务器拉取最新项目（服务器为权威），本地无数据或服务器有更新时覆盖
-      const serverProjects = await loadChatProjectsFromServer();
-      if (cancelled) return;
-      if (serverProjects && serverProjects.length > 0) {
-        loaded = serverProjects;
+        const coordinator = coordinatorRef.current ?? createSimpleChatSyncCoordinator({
+          store: createIndexedDbSimpleChatEnvelopeStore(),
+        });
+        coordinatorRef.current = coordinator;
+        unsubscribe = coordinator.subscribe(nextSnapshot => {
+          if (cancelled) return;
+          setSyncSnapshot(nextSnapshot);
+          if (coordinatorReadyRef.current) applyProjects(nextSnapshot.projects);
+        });
+
+        const initialized = await coordinator.initialize(data.user.id);
+        if (cancelled) return;
+        coordinatorReadyRef.current = true;
+        setSyncSnapshot(initialized);
+
+        let loaded = initialized.projects;
+        if (
+          loaded.length === 0
+          && (initialized.status === 'synced' || initialized.status === 'syncing')
+        ) {
+          loaded = [createDefaultProject()];
+          coordinator.update(loaded);
+        }
+        applyProjects(loaded);
+        const requestedProjectId = new URLSearchParams(window.location.search).get('projectId');
+        const requestedTaskId = new URLSearchParams(window.location.search).get('taskId');
+        const initial = selectInitialSimpleChatProject(loaded, requestedProjectId, requestedTaskId);
+        setActiveProjectId(initial?.projectId ?? null);
+        setActiveTaskId(initial?.taskId ?? null);
+      } catch {
+        if (!cancelled) setShowLogin(true);
+      } finally {
+        if (!cancelled) setAuthLoading(false);
       }
-      if (loaded.length === 0) loaded = [createDefaultProject()];
-      loaded = recoverInterruptedSimpleChatProjects(loaded);
-      const requestedProjectId = new URLSearchParams(window.location.search).get('projectId');
-      const requestedTaskId = new URLSearchParams(window.location.search).get('taskId');
-      const initial = selectInitialSimpleChatProject(loaded, requestedProjectId, requestedTaskId);
-      setProjects(loaded);
-      setActiveProjectId(initial?.projectId ?? null);
-      setActiveTaskId(initial?.taskId ?? null);
     };
-    init();
-    return () => { cancelled = true; };
-  }, [user, loadChatProjectsFromServer]);
 
-  // Persist（双写：localStorage + 服务器防抖同步）
-  useEffect(() => {
-    if (projects.length > 0) {
-      saveProjects(projects);
-      scheduleChatProjectsSync(projects);
-    }
-  }, [projects, scheduleChatProjectsSync]);
+    void initialize();
+    return () => {
+      cancelled = true;
+      coordinatorReadyRef.current = false;
+      unsubscribe?.();
+    };
+  }, []);
 
   const activeProject = projects.find(p => p.id === activeProjectId) ?? null;
   const activeTask = activeProject?.tasks.find(t => t.id === activeTaskId) ?? null;
@@ -212,23 +224,14 @@ export default function SimpleChatPage() {
     }));
     projectsRef.current = next;
     setProjects(next);
-    saveProjects(next);
-    const response = await fetch('/api/user-data/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: PROJECTS_SYNC_KEY, value: next }),
-    });
-    if (!response.ok) throw new Error(`Chat task persistence failed (${response.status})`);
+    coordinatorRef.current?.update(next);
+    await coordinatorRef.current?.flush('manual');
   }, []);
 
   const handleLogout = useCallback(async () => {
     if (logoutInFlight.current) return;
     logoutInFlight.current = true;
     setLogoutError(null);
-    if (chatProjectsSyncTimer.current) {
-      clearTimeout(chatProjectsSyncTimer.current);
-      chatProjectsSyncTimer.current = null;
-    }
 
     const snapshot = projectsRef.current;
     saveProjects(snapshot);
@@ -321,6 +324,13 @@ export default function SimpleChatPage() {
         onLogout={() => { void handleLogout(); }}
       />
       <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex h-7 shrink-0 items-center justify-end border-b border-border/60 px-3">
+          <SimpleChatSyncStatusView
+            status={syncSnapshot.status}
+            error={syncSnapshot.error}
+            onRetry={() => void coordinatorRef.current?.flush('manual')}
+          />
+        </div>
         <ChatArea
           user={user}
           project={activeProject}
