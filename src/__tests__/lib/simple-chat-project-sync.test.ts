@@ -15,6 +15,7 @@ import {
   validateSimpleChatProjects,
 } from '@/lib/simple-chat-project-sync';
 import type {
+  SimpleChatReplayOptions,
   SimpleChatSyncedProject,
   SimpleChatSyncEnvelopeV1,
   SimpleChatSyncOperation,
@@ -138,6 +139,10 @@ function completeConflictGraph(): SimpleChatProject {
 
 function cloneProject(value: SimpleChatProject): SimpleChatProject {
   return structuredClone(value);
+}
+
+function serializedBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
 function captureError(action: () => void): unknown {
@@ -324,6 +329,7 @@ describe('simple chat project synchronization', () => {
       diffSimpleChatProjects(before, current, 1),
       {
         createId: idFactory('conflict-project', 'conflict-task'),
+        localProjects: current,
         now: () => 100,
       },
     );
@@ -347,6 +353,7 @@ describe('simple chat project synchronization', () => {
       diffSimpleChatProjects([beforeProject], [currentProject], 1),
       {
         createId: idFactory('conflict-task', 'conflict-message', 'conflict-artifact'),
+        localProjects: [currentProject],
         now: () => 200,
       },
     );
@@ -370,7 +377,10 @@ describe('simple chat project synchronization', () => {
     const result = replaySimpleChatOperations(
       [],
       diffSimpleChatProjects([beforeProject], [currentProject], 1),
-      { createId: idFactory(...Array.from({ length: 16 }, (_, index) => `project-copy-${index + 1}`)) },
+      {
+        createId: idFactory(...Array.from({ length: 16 }, (_, index) => `project-copy-${index + 1}`)),
+        localProjects: [currentProject],
+      },
     );
 
     expect(result.conflicts).toHaveLength(1);
@@ -421,7 +431,10 @@ describe('simple chat project synchronization', () => {
     const result = replaySimpleChatOperations(
       [remoteProject],
       diffSimpleChatProjects([beforeProject], [currentProject], 1),
-      { createId: idFactory(...Array.from({ length: 8 }, (_, index) => `task-copy-${index + 1}`)) },
+      {
+        createId: idFactory(...Array.from({ length: 8 }, (_, index) => `task-copy-${index + 1}`)),
+        localProjects: [currentProject],
+      },
     );
 
     expect(result.conflicts).toHaveLength(1);
@@ -459,7 +472,10 @@ describe('simple chat project synchronization', () => {
     const result = replaySimpleChatOperations(
       [remoteProject],
       diffSimpleChatProjects([beforeProject], [currentProject], 1),
-      { createId: idFactory('message-copy', 'artifact-copy-1', 'artifact-copy-2') },
+      {
+        createId: idFactory('message-copy', 'artifact-copy-1', 'artifact-copy-2'),
+        localProjects: [currentProject],
+      },
     );
 
     expect(result.conflicts).toHaveLength(1);
@@ -664,6 +680,254 @@ describe('simple chat project synchronization', () => {
       assistantMessageId: copiedChild?.id,
       historyMessageIds: [copiedParent?.id, copiedChild?.id],
     });
+  });
+
+  it('closes a message-restored task reference when its agent is added later', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    const addedAgent = {
+      ...beforeProject.agents[0],
+      id: 'agent-added',
+      name: '新增 Agent',
+    };
+    beforeProject.tasks[0].activeAgentId = addedAgent.id;
+    beforeProject.tasks[0].messages = [message('m-child', '基线消息')];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].content = '本地消息';
+    currentProject.agents.push(addedAgent);
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks = [];
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+
+    expect(operations.map(operation => operation.entityType)).toEqual(['message', 'agent']);
+    const result = replaySimpleChatOperations([remoteProject], operations, {
+      createId: idFactory('copy-task', 'copy-message'),
+      localProjects: [currentProject],
+    });
+    const copiedTask = result.projects[0].tasks.find(item => item.id === 'copy-task');
+
+    expect(copiedTask?.activeAgentId).toBe(addedAgent.id);
+    expect(copiedTask?.syncConflict?.sourceReferences).toBeUndefined();
+  });
+
+  it('closes a message-restored task reference when its agent conflict is copied later', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    beforeProject.tasks[0].activeAgentId = beforeProject.agents[0].id;
+    beforeProject.tasks[0].messages = [message('m-child', '基线消息')];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].content = '本地消息';
+    currentProject.agents[0].name = '本地 Agent';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks = [];
+    remoteProject.agents[0].name = '远端 Agent';
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+
+    expect(operations.map(operation => operation.entityType)).toEqual(['message', 'agent']);
+    const result = replaySimpleChatOperations([remoteProject], operations, {
+      createId: idFactory('copy-task', 'copy-message', 'copy-agent'),
+      localProjects: [currentProject],
+    });
+    const copiedTask = result.projects[0].tasks.find(item => item.id === 'copy-task');
+
+    expect(copiedTask?.activeAgentId).toBe('copy-agent');
+    expect(copiedTask?.syncConflict?.sourceReferences).toBeUndefined();
+  });
+
+  it('closes every artifact-restored message reference when its parent conflict is copied later', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    const childMessage = message('m-child', '基线回答', [artifact('a-child')]);
+    childMessage.role = 'assistant';
+    childMessage.parentMessageId = 'm-parent';
+    childMessage.retryContext = retryContext('m-parent', childMessage.id, [
+      'm-parent',
+      childMessage.id,
+    ]);
+    beforeProject.tasks[0].messages = [childMessage, message('m-parent', '基线提问')];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].artifacts![0].title = '本地 Artifact';
+    currentProject.tasks[0].messages[1].content = '本地提问';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages = [remoteProject.tasks[0].messages[1]];
+    remoteProject.tasks[0].messages[0].content = '远端提问';
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+
+    expect(operations.map(operation => operation.entityType)).toEqual(['artifact', 'message']);
+    const result = replaySimpleChatOperations([remoteProject], operations, {
+      createId: idFactory('copy-child', 'copy-artifact', 'copy-parent'),
+      localProjects: [currentProject],
+    });
+    const copiedChild = result.projects[0].tasks[0].messages.find(item => item.id === 'copy-child');
+
+    expect(copiedChild?.parentMessageId).toBe('copy-parent');
+    expect(copiedChild?.retryContext).toMatchObject({
+      userMessageId: 'copy-parent',
+      assistantMessageId: copiedChild?.id,
+      historyMessageIds: ['copy-parent', copiedChild?.id],
+    });
+    expect(copiedChild?.syncConflict?.sourceReferences).toBeUndefined();
+  });
+
+  it('replays an ordinary field conflict idempotently without consuming another id', () => {
+    const before = [project('p1', [task('t1', '基线')])];
+    const current = [project('p1', [task('t1', '本地修改')])];
+    const remote = [project('p1', [task('t1', '远端修改')])];
+    const operations = diffSimpleChatProjects(before, current, 1);
+    let createdIds = 0;
+    const options = {
+      createId: () => `ordinary-copy-${++createdIds}`,
+      now: () => 300,
+    };
+
+    const first = replaySimpleChatOperations(remote, operations, options);
+    const idsAfterFirstReplay = createdIds;
+    const second = replaySimpleChatOperations(first.projects, operations, options);
+
+    expect(second.projects).toEqual(first.projects);
+    expect(second.conflicts).toEqual(first.conflicts);
+    expect(createdIds).toBe(idsAfterFirstReplay);
+  });
+
+  it('replays a leaf-restored deleted project idempotently within its complete source scope', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    beforeProject.tasks[0].messages = [message('m1', '基线消息')];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].content = '本地消息';
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+    let createdIds = 0;
+    const options = {
+      createId: () => `project-copy-${++createdIds}`,
+      localProjects: [currentProject],
+      now: () => 310,
+    };
+
+    const first = replaySimpleChatOperations([], operations, options);
+    const idsAfterFirstReplay = createdIds;
+    const second = replaySimpleChatOperations(first.projects, operations, options);
+
+    expect(first.projects[0].syncConflict).toMatchObject({
+      operationId: operations[0].operationId,
+      sourceEntityType: 'project',
+      sourceEntityId: 'p1',
+      sourceProjectId: 'p1',
+      sourceTaskId: 't1',
+      sourceMessageId: 'm1',
+    });
+    expect(second.projects).toEqual(first.projects);
+    expect(second.conflicts).toEqual(first.conflicts);
+    expect(createdIds).toBe(idsAfterFirstReplay);
+  });
+
+  it('replays a leaf-restored deleted task idempotently within its complete source scope', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    beforeProject.tasks[0].messages = [message('m1', '基线消息')];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].content = '本地消息';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks = [];
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+    let createdIds = 0;
+    const options = {
+      createId: () => `task-copy-${++createdIds}`,
+      localProjects: [currentProject],
+      now: () => 320,
+    };
+
+    const first = replaySimpleChatOperations([remoteProject], operations, options);
+    const idsAfterFirstReplay = createdIds;
+    const second = replaySimpleChatOperations(first.projects, operations, options);
+
+    expect(first.projects[0].tasks[0].syncConflict).toMatchObject({
+      operationId: operations[0].operationId,
+      sourceEntityType: 'task',
+      sourceEntityId: 't1',
+      sourceProjectId: 'p1',
+      sourceTaskId: 't1',
+    });
+    expect(first.projects[0].tasks[0].syncConflict).not.toHaveProperty('sourceMessageId');
+    expect(second.projects).toEqual(first.projects);
+    expect(second.conflicts).toEqual(first.conflicts);
+    expect(createdIds).toBe(idsAfterFirstReplay);
+  });
+
+  it('replays a leaf-restored deleted message idempotently within its complete source scope', () => {
+    const beforeProject = project('p1', [task('t1')]);
+    beforeProject.tasks[0].messages = [message('m1', '基线消息', [artifact('a1')])];
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages[0].artifacts![0].title = '本地 Artifact';
+    const remoteProject = cloneProject(beforeProject);
+    remoteProject.tasks[0].messages = [];
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+    let createdIds = 0;
+    const options = {
+      createId: () => `message-copy-${++createdIds}`,
+      localProjects: [currentProject],
+      now: () => 330,
+    };
+
+    const first = replaySimpleChatOperations([remoteProject], operations, options);
+    const idsAfterFirstReplay = createdIds;
+    const second = replaySimpleChatOperations(first.projects, operations, options);
+
+    expect(first.projects[0].tasks[0].messages[0].syncConflict).toMatchObject({
+      operationId: operations[0].operationId,
+      sourceEntityType: 'message',
+      sourceEntityId: 'm1',
+      sourceProjectId: 'p1',
+      sourceTaskId: 't1',
+      sourceMessageId: 'm1',
+    });
+    expect(second.projects).toEqual(first.projects);
+    expect(second.conflicts).toEqual(first.conflicts);
+    expect(createdIds).toBe(idsAfterFirstReplay);
+  });
+
+  it('keeps deduplicated ancestor context out of every serialized operation', () => {
+    const beforeProject = project('p1', [taskWithMessages('t1', 3)]);
+    const currentProject = cloneProject(beforeProject);
+    currentProject.tasks[0].messages.forEach((chatMessage, index) => {
+      chatMessage.content = `本地消息 ${index}`;
+    });
+
+    const operations = diffSimpleChatProjects([beforeProject], [currentProject], 1);
+
+    expect(operations).toHaveLength(3);
+    expect(operations.every(operation => !('localProject' in operation))).toBe(true);
+  });
+
+  it('serializes many leaf edits as one project context plus linear operations', () => {
+    const batch = (projectDescription: string): {
+      currentProjects: SimpleChatProject[];
+      pendingOperations: SimpleChatSyncOperation[];
+    } => {
+      const beforeProject = project('p1', [taskWithMessages('t1', 12)]);
+      beforeProject.description = projectDescription;
+      const currentProject = cloneProject(beforeProject);
+      currentProject.tasks[0].messages.forEach((chatMessage, index) => {
+        chatMessage.content = `本地叶子 ${index}`;
+      });
+      let operationIndex = 0;
+      const pendingOperations = diffSimpleChatProjects(
+        [beforeProject],
+        [currentProject],
+        1,
+        {
+          createOperationId: () => (
+            `30000000-0000-4000-8000-${String(++operationIndex).padStart(12, '0')}`
+          ),
+        },
+      );
+      return { currentProjects: [currentProject], pendingOperations };
+    };
+    const smallBatch = batch('');
+    const largeBatch = batch('x'.repeat(32 * 1024));
+
+    expect(largeBatch.pendingOperations).toHaveLength(12);
+    expect(
+      serializedBytes(largeBatch.pendingOperations)
+      - serializedBytes(smallBatch.pendingOperations),
+    ).toBe(0);
+    expect(serializedBytes(largeBatch) - serializedBytes(smallBatch)).toBe(
+      serializedBytes(largeBatch.currentProjects) - serializedBytes(smallBatch.currentProjects),
+    );
   });
 
   it('remaps a locally selected agent on an ordinary merged task when that agent is copied later', () => {
@@ -1097,6 +1361,7 @@ describe('simple chat project synchronization', () => {
     const current = [project('p1', [task('t1', '本地标题')])];
     const result = replaySimpleChatOperations([], diffSimpleChatProjects(before, current, 1), {
       createId: idFactory('conflict-project', 'conflict-task'),
+      localProjects: current,
       now: () => 400,
     });
 
@@ -1177,6 +1442,8 @@ describe('simple chat project synchronization', () => {
       .toEqualTypeOf<SimpleChatSyncedProject>();
     expectTypeOf<SimpleChatSyncEnvelopeV1['currentProjects'][number]>()
       .toEqualTypeOf<SimpleChatSyncedProject>();
+    expectTypeOf<SimpleChatReplayOptions['localProjects']>()
+      .toEqualTypeOf<SimpleChatProject[] | undefined>();
   });
 
   it.each([
