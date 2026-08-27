@@ -1531,3 +1531,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 解析接口返回 `images=[]` 与 `UNMANAGED_IMAGE_SKIPPED`，响应、目标工作流和目标项目均不含外部 URL；服务端解析器不存在远程下载调用。
 - 重复转交与刷新没有重复节点，测试数据已清理；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
 - **专项判定：V588-CHAT-004 通过并完成吸收，允许进入清单中的下一独立叶项。全平台发布结论仍为“有条件通过”**，因为 `NODE-003` 及其他既有未关闭项不会随本项自动关闭。机器证据：`docs/testing/evidence/v588-chat-004-final-cloud-matrix-2026-08-27.json`。
+## 2026-08-28 V588-STABILITY-002 发布判断
+
+- 本地候选完成：受控媒体、用户级模型授权、显式模型不回退、45 秒总截止、严格输出、持久幂等、数据库终态结算和客户端单付费请求均已进入当前主线架构。
+- 本地自动化与生产构建无失败；本次文件没有新增 ESLint 警告。
+- 真实 PostgreSQL 并发门禁未执行，因为没有配置专用 `POSTGRES_TEST_DATABASE_URL`；生产数据库不会被冒充为测试库。
+- Coze 尚未拉取精确候选，未取得真实 PearAPI/APIMART 视觉调用、同键复用、积分变化、失败退款和 PSD 下载文件证据。
+- **专项结论：有条件通过 / 本地候选完成 / 云端未吸收。** 云端矩阵关闭前不得将 `V588-STABILITY-002` 标为“已吸收”，也不得提前开始 `V588-ADMIN-004`。
+- 全平台总发布结论继续为：**有条件通过**。

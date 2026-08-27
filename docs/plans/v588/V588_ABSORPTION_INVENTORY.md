@@ -50,7 +50,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | ID | 归档能力 | 调整后的吸收结论 | 强制门禁 | 优先级 |
 |---|---|---|---|---|
 | V588-STABILITY-001 | SVG/WASM 像素预算与超大输入保护 | 在当前 `/api/svg-trace` 架构内重实现预算门禁；不得复制旧路由控制器 | 边界像素、压缩炸弹、内存上限、失败终态、全仓与云端大图验证 | P0 |
-| V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | 复用当前安全媒体解析器，只吸收回退策略和预算思想；禁止引入任意本地路径读取 | 路径穿越、SSRF、MIME/字节/像素上限、VLM 超时、回退一致性 | P0 |
+| V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | **本地候选已完成 / 云端待验。** 已在当前架构内实现受控媒体、授权 VLM、45 秒总截止、严格输出、持久幂等与一次性账务结算，并删除客户端第二条付费回退；未复制 donor 路由或任意本地路径读取 | 本地 RED/GREEN、专项 `100/100`、全仓 `4046/4046`、TypeScript、目标零警告 ESLint 和生产构建通过；真实 PostgreSQL 并发、Coze 精确 SHA、真实扣费/退款与 PSD 导出仍待验 | P0 |
 | V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **已吸收 / Coze 云端验证通过。** 三条流式链路共用严格解析器，并已关闭 CanvasEditor 参数错位与正文事件名不匹配；未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、三入口真实 APImart 流式终态及零 Console/原生弹窗证据 | P1 |
 | V588-CHAT-002 | 失败消息状态与原位确定性重试 | **已吸收 / 云端通过。** 普通与联网原位重试、CanvasEditor 精确选区、刷新精确任务恢复、服务器终态持久化及 Deep Research 单 Artifact 均取得 Coze 证据 | `main-fix@1572a222` 的 Deep Research 任务刷新前后 UI 与服务器均严格保持同一个 `msg_1787715525319-research` Artifact；Console/原生弹窗为 0。第三方 exactly-once 仅保留为供应商能力边界 | P1 |
 | V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **已吸收 / Coze Google Chrome 云端验证通过。** 版本化快照、CAS 冲突重放、冲突副本、删除不复活、用户隔离、离页冲刷和可诊断同步状态均已闭环；保留当前登录、注销、用户数据 API 和前台流式生成边界 | 真实 PostgreSQL `4030/4030`、Coze 冷启动、项目/任务 CRUD、刷新恢复、双标签合并/冲突副本、离页、账号切换、布局及浏览器健康证据 | P1 |

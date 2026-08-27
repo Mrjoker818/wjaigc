@@ -1896,3 +1896,16 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 解析 API 实测 HTTP 200、178 ms、`images=[]`、`warnings=[UNMANAGED_IMAGE_SKIPPED]`，响应不含外部 URL；解析器没有远程读取路径。
 - 重复转交并刷新后仍为 2 节点、0 图片；测试对话项目已以 revision 28 -> 29 的 CAS 写入清理，复查剩余 0 项。
 - **回归结论：V588-CHAT-004 的 11 项云端矩阵全部通过并完成吸收。** `NODE-003` 仍是独立 P2，不因本项关闭而自动修复；全平台总发布状态继续“有条件通过”。证据：`docs/testing/evidence/v588-chat-004-final-cloud-matrix-2026-08-27.json`。
+## 2026-08-28 V588-STABILITY-002 本地回归
+
+| 门禁 | 结果 | 证据 |
+|---|---|---|
+| PSD 专项与关联安全/账务测试 | 通过 | `10` 个文件、`100` 项通过；PostgreSQL 并发专项 `1` 项因缺少隔离库明确跳过 |
+| TypeScript | 通过 | `next typegen && tsc -p tsconfig.json` 退出码 0 |
+| 全仓 ESLint | 有条件通过 | `0 errors / 963 warnings`；均为历史存量 |
+| 本次 13 个修改/新增文件 ESLint | 通过 | `--max-warnings 0`，零错误、零警告 |
+| 全仓 Vitest | 通过 | `565` 文件通过、`21` 跳过；`4046` 项通过、`119` 跳过；零失败 |
+| 生产构建 | 通过 | Next.js 16.2.11 webpack 编译、TypeScript、117 个静态页生成和构建追踪完成 |
+| 差异完整性 | 通过 | `git diff --check` 无空白错误；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化 |
+
+回归范围覆盖请求流体积、非法字段、幂等键、data URL、跨用户资产、符号链接逃逸、MIME/字节/像素、模型授权、显式不回退、自动候选去重、总截止、JSON/SSE 预算、持久任务复用、终态重放、失败结算、鉴权顺序、错误码和客户端单请求。当前不能把本地结果扩大为真实 PostgreSQL 或 Coze 通过。

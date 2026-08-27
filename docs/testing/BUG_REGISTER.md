@@ -2662,3 +2662,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 白盒根因 | `node-editor.tsx` 的按钮切换 `sidebarTab` 为 `presets`，但左侧面板渲染始终直接输出 `groupedTemplates` 节点库，没有任何 `sidebarTab === 'presets'` 的渲染分支。 |
 | 影响边界 | 本轮使用 JSON 编辑器建立 2 节点、1 连线的受控工作流，CHAT-004 追加与持久化仍可继续验证；预设功能本身不得标记通过。 |
 | 状态 | **未修复 / 已登记。** 当前目标只关闭 CHAT-004 云端剩余边界；后续应先新增可见预设列表 RED 测试，再做最小接线修复，避免在本轮扩大范围。 |
+## 2026-08-28 V588-STABILITY-002 PSD 分析安全与账务缺陷
+
+### V588-STABILITY-002-BUG-001：PSD 分析可产生重复付费调用并伪造成功结果
+
+- 严重等级：P0
+- 模块：Pro/Studio PSD 导出、`POST /api/analyze-psd`
+- 发现基线：`main@7cb6e2fbae59c6a0a141ec3a3510fc29a486de6b`
+- 状态：本地已修复 / 云端与真实 PostgreSQL 待验
+- 稳定复现：旧客户端在专用接口失败或 12 秒超时后再次调用 `/api/chat`；旧路由在模型返回非法 JSON 时制造默认图层并返回成功，且扣费/退款不使用持久任务原子终态。
+- 根因：专用路由直接读取不受控媒体并硬编码视觉模型；客户端拥有第二条独立付费回退；请求、模型授权、输出预算、幂等任务和账务终态没有统一边界。
+- 修复文件：`src/lib/psd-analysis/*`、`src/lib/safe-image-input.ts`、`src/app/api/analyze-psd/route.ts`、`src/lib/psd-export.ts`。
+- 修复内容：28 MiB 请求预算；20 MiB/4000 万像素图片门禁；资产归属与 `realpath` 防逃逸；精确 provider/model 授权；自动候选最多 3 个；45 秒共享截止；256 KiB 严格 JSON 输出；`cloud_tasks` 原子幂等与一次性失败结算；单次客户端付费请求。
+- 永久回归：新增合同、媒体、模型路由、持久服务、API 路由和浏览器客户端 6 组测试。
+- 本地结果：专项 `100 passed / 1 PostgreSQL skipped`；全仓 `565 files passed / 21 skipped`、`4046 tests passed / 119 skipped`；TypeScript、目标 ESLint、生产构建通过。
+- 未关闭证据：缺少隔离 `POSTGRES_TEST_DATABASE_URL`，尚未取得 Coze 真实并发同键、真实积分前后、失败一次退款和最终 PSD 文件证据。

@@ -1516,3 +1516,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | V588-CHAT-004 | 已吸收 | 11 项云端矩阵全部通过，不再包含未验证阻断。证据：`docs/testing/evidence/v588-chat-004-final-cloud-matrix-2026-08-27.json`。 |
 
 其余全平台未验证项继续有效；本节只关闭 `V588-CHAT-004`，不把 `NODE-003`、Firefox/WebKit、第三方供应商 exactly-once 或其他业务模块自动标记为通过。
+## 2026-08-28 V588-STABILITY-002 剩余验证点
+
+| 项目 | 状态 | 关闭条件 |
+|---|---|---|
+| PostgreSQL 并发幂等 | `UNVERIFIED` | 在隔离库并发提交同一 `userId + Idempotency-Key`，证明唯一 taskId、唯一上游调用和唯一扣费；同键不同摘要必须 409 |
+| PostgreSQL 终态与退款竞争 | `UNVERIFIED` | 让 completed、timeout、cancelled、failed 竞争，证明只保留一个终态，迟到完成不能覆盖，失败只退款一次 |
+| Coze 精确 SHA 与启动 | `UNVERIFIED` | 推送 `main` 后由 Coze 拉取精确 SHA，完成构建、启动、健康路由与静态资源检查 |
+| 真实 PSD 分析成功链路 | `UNVERIFIED` | Google Chrome 使用 PearAPI 或 APIMART 已授权 VLM 完成一次 Pro PSD 导出，记录 provider/model、taskId、requestId、积分和下载文件 |
+| 真实同键重放 | `UNVERIFIED` | 同一请求摘要与幂等键重复提交，返回同一 taskId，不产生第二次调用或扣费 |
+| 真实失败退款 | `UNVERIFIED` | 触发可控提供商失败或总超时，证明任务终态、一次退款和可理解错误提示 |
+| `V588-STABILITY-002` | 本地候选完成 | 上述云端与数据库证据全部关闭后才可标为已吸收并进入 `V588-ADMIN-004` |
+
+其余全平台未验证项继续有效；本节只描述 PSD 分析专项，不覆盖 AI PSD 独立生成器、Pear 分层、元素拆解或 PSD 合成质量。
