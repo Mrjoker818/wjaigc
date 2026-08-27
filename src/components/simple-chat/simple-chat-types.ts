@@ -442,7 +442,10 @@ export function canTransferSimpleChatMedia(
 ): boolean {
   return images.length > 0
     && images.length === imageRefs.length
-    && imageRefs.every(reference => hasManagedAssetIdentity(reference));
+    && imageRefs.every((reference, index) => (
+      reference.url === images[index]
+      && hasManagedAssetIdentity(reference)
+    ));
 }
 
 export async function consumeSimpleChatCanvasBridge(input: {

@@ -221,6 +221,17 @@ export function SimpleChatWorkspaceActionEntry({
   ...props
 }: SimpleChatWorkspaceActionEntryProps) {
   if (!shouldRenderSimpleChatWorkspaceActions(props.message, isStreaming)) return null;
+  if (!hasSimpleChatAssistantOperationPayload(props.message)) {
+    return (
+      <div
+        data-testid="simple-chat-empty-workspace-actions"
+        className="flex items-center gap-1.5 mt-1 px-1 flex-wrap"
+      >
+        <SimpleChatWorkspaceActions {...props} />
+        <span className="text-[11px] text-muted-foreground">没有可发送内容</span>
+      </div>
+    );
+  }
   return <SimpleChatWorkspaceActions {...props} />;
 }
 
@@ -2240,18 +2251,16 @@ export default function ChatArea({
                   </div>
                 )}
                 {shouldRenderSimpleChatWorkspaceActions(msg, isStreaming) && !hasSimpleChatAssistantOperationPayload(msg) && (
-                  <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity flex-wrap">
-                    <SimpleChatWorkspaceActionEntry
-                      message={msg}
-                      project={project}
-                      task={task}
-                      isStreaming={isStreaming}
-                      selectedCanvasProjectId={selectedCanvasProjectId}
-                      canvasTransferPending={canvasTransferMessageId === msg.id}
-                      onSendToCanvas={(message) => { void sendImagesToCanvas(message); }}
-                      onNotice={setControlNotice}
-                    />
-                  </div>
+                  <SimpleChatWorkspaceActionEntry
+                    message={msg}
+                    project={project}
+                    task={task}
+                    isStreaming={isStreaming}
+                    selectedCanvasProjectId={selectedCanvasProjectId}
+                    canvasTransferPending={canvasTransferMessageId === msg.id}
+                    onSendToCanvas={(message) => { void sendImagesToCanvas(message); }}
+                    onNotice={setControlNotice}
+                  />
                 )}
                 {/* User Message Operations */}
                 {msg.role === 'user' && !isStreaming && editingMessageId !== msg.id && (

@@ -126,6 +126,10 @@ describe('Simple Chat workspace entry', () => {
     const nodeAction = screen.getByRole('button', { name: '发送到节点模式' }) as HTMLButtonElement;
     expect(nodeAction.disabled).toBe(true);
     expect(nodeAction.title).toBe('仅非空文本或已登记图片可发送到节点模式');
+    const emptyActionRow = nodeAction.closest('[data-testid="simple-chat-empty-workspace-actions"]');
+    expect(emptyActionRow).not.toBeNull();
+    expect(emptyActionRow?.className).not.toContain('opacity-0');
+    expect(screen.getByText('没有可发送内容').textContent).toBe('没有可发送内容');
     expect(screen.queryByTitle('添加到画布')).toBeNull();
   });
 

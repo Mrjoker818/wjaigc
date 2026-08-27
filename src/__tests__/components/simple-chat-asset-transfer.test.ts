@@ -528,6 +528,35 @@ describe('standalone simple-chat asset transfer', () => {
     }])).toBe(true);
   });
 
+  it('I1 rejects a stale managed reference whose URL does not match its visible image slot', async () => {
+    const canTransfer = canTransferMedia();
+    const send = sendMediaToCanvas();
+    expect(canTransfer).toBeTypeOf('function');
+    expect(send).toBeTypeOf('function');
+    if (!canTransfer || !send) return;
+
+    const images = ['/visible.png'];
+    const imageRefs = [{
+      url: '/stale.png',
+      assetVersionId: 'stale-version',
+      placementId: 'stale-placement',
+    }];
+    const transfer = vi.fn();
+    const writeBridge = vi.fn();
+
+    expect(canTransfer(images, imageRefs)).toBe(false);
+    await expect(send({
+      images,
+      imageRefs,
+      targetProjectId: 'canvas-a',
+      sourceTrace: sourceTraceFixture,
+      transfer,
+      writeBridge,
+    })).resolves.toEqual({ ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' });
+    expect(transfer).not.toHaveBeenCalled();
+    expect(writeBridge).not.toHaveBeenCalled();
+  });
+
   it('I2 binds equal URLs to their version by index instead of searching by URL', async () => {
     const send = sendMediaToCanvas();
     expect(send).toBeTypeOf('function');
