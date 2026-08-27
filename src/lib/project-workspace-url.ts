@@ -1,7 +1,18 @@
+import { useSyncExternalStore } from 'react';
+
 export interface BrowserLocationLike {
   pathname: string;
   search: string;
   hash: string;
+}
+
+export const WORKSPACE_LOCATION_CHANGE_EVENT = 'workspace-location-change';
+
+export interface WorkspaceHistoryWindow extends EventTarget {
+  history: {
+    replaceState: (data: unknown, unused: string, url?: string | URL | null) => void;
+  };
+  location: BrowserLocationLike;
 }
 
 export type InitialWorkspaceMode = 'canvas' | 'node' | 'workflow-hub' | 'dashboard';
@@ -24,12 +35,45 @@ export function clearSimpleChatWorkspaceHandoffParams(value: string): string {
   return `${url.pathname}${query ? `?${query}` : ''}${url.hash}`;
 }
 
+export function replaceWorkspaceHistoryState(
+  target: WorkspaceHistoryWindow,
+  url: string,
+): void {
+  target.history.replaceState(null, '', url);
+  target.dispatchEvent(new Event(WORKSPACE_LOCATION_CHANGE_EVENT));
+}
+
+function subscribeWorkspaceLocationChange(onStoreChange: () => void): () => void {
+  if (typeof window === 'undefined') return () => undefined;
+  window.addEventListener('popstate', onStoreChange);
+  window.addEventListener(WORKSPACE_LOCATION_CHANGE_EVENT, onStoreChange);
+  return () => {
+    window.removeEventListener('popstate', onStoreChange);
+    window.removeEventListener(WORKSPACE_LOCATION_CHANGE_EVENT, onStoreChange);
+  };
+}
+
+function getWorkspaceLocationSearch(): string {
+  return typeof window === 'undefined' ? '' : window.location.search;
+}
+
+export function useWorkspaceLocationSearch(): string {
+  return useSyncExternalStore(
+    subscribeWorkspaceLocationChange,
+    getWorkspaceLocationSearch,
+    () => '',
+  );
+}
+
 export function buildProjectWorkspaceUrl(
   location: BrowserLocationLike,
   projectId: string,
 ): string {
   const params = new URLSearchParams(location.search);
   params.delete('view');
+  params.delete('chatProjectId');
+  params.delete('chatTaskId');
+  params.delete('chatMessageId');
   params.set('projectId', projectId);
 
   const query = params.toString();

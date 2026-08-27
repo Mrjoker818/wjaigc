@@ -24,4 +24,15 @@ describe('workspace handoff URL state', () => {
       '/?projectId=canvas-1&mode=node&chatProjectId=chat-1&chatTaskId=task-1&chatMessageId=message-1&e2e=keep#node',
     )).toBe('/?projectId=canvas-1&mode=node&e2e=keep#node');
   });
+
+  it('drops an existing chat handoff when the user explicitly switches projects', () => {
+    expect(buildProjectWorkspaceUrl(
+      {
+        pathname: '/',
+        search: '?projectId=canvas-1&mode=node&chatProjectId=chat-1&chatTaskId=task-1&chatMessageId=message-1&e2e=keep',
+        hash: '#node',
+      },
+      'canvas-2',
+    )).toBe('/?projectId=canvas-2&mode=node&e2e=keep#node');
+  });
 });

@@ -33,6 +33,14 @@ describe('simple-chat workspace return contract', () => {
       'return getInitialWorkspaceModeFromSearch(window.location.search);',
     );
     expect(canvasWorkspace).toContain('useState<WorkspaceMode>(getInitialWorkspaceMode)');
+    expect(canvasWorkspace).toContain('const workspaceLocationSearch = useWorkspaceLocationSearch();');
+    expect(canvasWorkspace).toContain(
+      'const intent = parseSimpleChatWorkspaceHandoffIntent(workspaceLocationSearch);',
+    );
+    expect(canvasWorkspace).toContain(
+      '[currentProject?.id, handoffRetryRevision, persistNodeWorkflow, workspaceLocationSearch]',
+    );
+    expect(canvasWorkspace).toContain('cleanUrl: () => replaceWorkspaceHistoryState(');
   });
 
   it('derives the initial workspace mode through the shared search parser', () => {

@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { useEffect, useRef } from 'react';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   consumeSimpleChatWorkspaceHandoffForProject,
@@ -7,7 +11,17 @@ import {
   getSimpleChatWorkspaceHandoffIdentity,
   shouldConsumeSimpleChatWorkspaceHandoff,
 } from '@/lib/simple-chat-workspace-handoff-client';
+import { parseSimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
+import {
+  buildProjectWorkspaceUrl,
+  replaceWorkspaceHistoryState,
+  useWorkspaceLocationSearch,
+} from '@/lib/project-workspace-url';
 import { createEmptyWorkflow } from '@/lib/workflow-engine';
+
+afterEach(() => {
+  window.history.replaceState(null, '', '/');
+});
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -42,6 +56,68 @@ const intent = {
 };
 
 describe('simple chat workspace consumer guard', () => {
+  it('consumes each same-project handoff after custom history and popstate location changes', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/?projectId=canvas-1&mode=node&chatProjectId=chat-1&chatTaskId=task-1&chatMessageId=message-a',
+    );
+    const persisted: string[] = [];
+
+    renderHook(() => {
+      const search = useWorkspaceLocationSearch();
+      const workflowRef = useRef(createEmptyWorkflow('canvas-1'));
+      const guardRef = useRef(createSimpleChatWorkspaceHandoffRunGuard());
+      const queueRef = useRef(createSimpleChatWorkspaceHandoffProjectQueue());
+
+      useEffect(() => {
+        const handoffIntent = parseSimpleChatWorkspaceHandoffIntent(search);
+        const currentProjectId = new URLSearchParams(search).get('projectId');
+        void consumeSimpleChatWorkspaceHandoffForProject({
+          intent: handoffIntent,
+          currentProjectId,
+          getCurrentWorkflow: () => workflowRef.current,
+          guard: guardRef.current,
+          queue: queueRef.current,
+          resolve: async current => handoffFor(current.chatMessageId),
+          transfer: async () => { throw new Error('unexpected transfer'); },
+          persist: async workflow => {
+            persisted.push((workflow.nodes.at(-1)?.config.sourceTrace as { messageId: string }).messageId);
+          },
+          applyWorkflow: workflow => { workflowRef.current = workflow; },
+          cleanUrl: () => undefined,
+          now: () => 1000,
+        });
+      }, [search]);
+    });
+
+    await waitFor(() => expect(persisted).toEqual(['message-a']));
+
+    act(() => {
+      replaceWorkspaceHistoryState(
+        window,
+        '/?projectId=canvas-1&mode=node&chatProjectId=chat-1&chatTaskId=task-1&chatMessageId=message-b',
+      );
+    });
+    await waitFor(() => expect(persisted).toEqual(['message-a', 'message-b']));
+
+    act(() => {
+      window.history.replaceState(
+        null,
+        '',
+        '/?projectId=canvas-1&mode=node&chatProjectId=chat-1&chatTaskId=task-1&chatMessageId=message-c',
+      );
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await waitFor(() => expect(persisted).toEqual(['message-a', 'message-b', 'message-c']));
+
+    act(() => {
+      replaceWorkspaceHistoryState(window, buildProjectWorkspaceUrl(window.location, 'canvas-2'));
+    });
+    await waitFor(() => expect(persisted).toEqual(['message-a', 'message-b', 'message-c']));
+    expect(window.location.search).toBe('?projectId=canvas-2&mode=node');
+  });
+
   it('consumes only a handoff for the current project', () => {
     expect(shouldConsumeSimpleChatWorkspaceHandoff(intent, 'canvas-1')).toBe(true);
     expect(shouldConsumeSimpleChatWorkspaceHandoff(intent, 'canvas-2')).toBe(false);

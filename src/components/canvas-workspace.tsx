@@ -150,6 +150,8 @@ import {
   buildProjectWorkspaceUrl,
   clearSimpleChatWorkspaceHandoffParams,
   getInitialWorkspaceModeFromSearch,
+  replaceWorkspaceHistoryState,
+  useWorkspaceLocationSearch,
 } from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
@@ -884,9 +886,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           targetProject.id,
           hydratedTargetImages,
         );
-        window.history.replaceState(
-          null,
-          '',
+        replaceWorkspaceHistoryState(
+          window,
           buildProjectWorkspaceUrl(window.location, targetProject.id),
         );
         setCurrentProject(targetProject);
@@ -5675,6 +5676,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const nodeWorkflowRef = useRef(nodeWorkflow);
   nodeWorkflowRef.current = nodeWorkflow;
   const [handoffRetryRevision, setHandoffRetryRevision] = useState(0);
+  const workspaceLocationSearch = useWorkspaceLocationSearch();
 
   const persistNodeWorkflow = useCallback(async (
     workflow: Workflow,
@@ -5706,7 +5708,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   useEffect(() => {
     if (!currentProject?.id) return;
     const retryRevision = handoffRetryRevision;
-    const intent = parseSimpleChatWorkspaceHandoffIntent(window.location.search);
+    const intent = parseSimpleChatWorkspaceHandoffIntent(workspaceLocationSearch);
     const guard = handoffRunGuardRef.current;
     const expectedProjectId = currentProject.id;
 
@@ -5729,9 +5731,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         nodeWorkflowRef.current = workflow;
         setNodeWorkflow(workflow);
       },
-      cleanUrl: () => window.history.replaceState(
-        null,
-        '',
+      cleanUrl: () => replaceWorkspaceHistoryState(
+        window,
         clearSimpleChatWorkspaceHandoffParams(window.location.href),
       ),
       now: Date.now,
@@ -5753,7 +5754,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         },
       });
     });
-  }, [currentProject?.id, handoffRetryRevision, persistNodeWorkflow]);
+  }, [currentProject?.id, handoffRetryRevision, persistNodeWorkflow, workspaceLocationSearch]);
 
   const handleCanvasImageAssetReferenceAdopted = useCallback((
     imageId: string,
