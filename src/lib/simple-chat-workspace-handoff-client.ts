@@ -38,6 +38,77 @@ export interface ExecuteSimpleChatWorkspaceHandoffResult {
   warnings: SimpleChatWorkspaceHandoff['warnings'];
 }
 
+export interface SimpleChatWorkspaceHandoffRunGuard {
+  begin: (identity: string) => boolean;
+  complete: (identity: string) => void;
+  fail: (identity: string) => void;
+}
+
+export function getSimpleChatWorkspaceHandoffIdentity(
+  intent: SimpleChatWorkspaceHandoffIntent,
+): string {
+  return JSON.stringify([
+    intent.targetProjectId,
+    intent.chatProjectId,
+    intent.chatTaskId,
+    intent.chatMessageId,
+  ]);
+}
+
+export function shouldConsumeSimpleChatWorkspaceHandoff(
+  intent: SimpleChatWorkspaceHandoffIntent | null,
+  currentProjectId: string | null | undefined,
+): intent is SimpleChatWorkspaceHandoffIntent {
+  return Boolean(intent && currentProjectId && intent.targetProjectId === currentProjectId);
+}
+
+export function createSimpleChatWorkspaceHandoffRunGuard(): SimpleChatWorkspaceHandoffRunGuard {
+  let runningIdentity: string | null = null;
+  const release = (identity: string): void => {
+    if (runningIdentity === identity) runningIdentity = null;
+  };
+  return {
+    begin: identity => {
+      if (runningIdentity === identity) return false;
+      runningIdentity = identity;
+      return true;
+    },
+    complete: release,
+    fail: release,
+  };
+}
+
+export interface ConsumeSimpleChatWorkspaceHandoffForProjectInput
+  extends Omit<ExecuteSimpleChatWorkspaceHandoffInput, 'intent'> {
+  intent: SimpleChatWorkspaceHandoffIntent | null;
+  currentProjectId: string | null | undefined;
+  guard: SimpleChatWorkspaceHandoffRunGuard;
+}
+
+export async function consumeSimpleChatWorkspaceHandoffForProject(
+  input: ConsumeSimpleChatWorkspaceHandoffForProjectInput,
+): Promise<ExecuteSimpleChatWorkspaceHandoffResult | null> {
+  if (!shouldConsumeSimpleChatWorkspaceHandoff(input.intent, input.currentProjectId)) return null;
+  const identity = getSimpleChatWorkspaceHandoffIdentity(input.intent);
+  if (!input.guard.begin(identity)) return null;
+  try {
+    const result = await executeSimpleChatWorkspaceHandoff({
+      intent: input.intent,
+      currentWorkflow: input.currentWorkflow,
+      resolve: input.resolve,
+      transfer: input.transfer,
+      persist: input.persist,
+      cleanUrl: input.cleanUrl,
+      now: input.now,
+    });
+    input.guard.complete(identity);
+    return result;
+  } catch (error) {
+    input.guard.fail(identity);
+    throw error;
+  }
+}
+
 function buildTransferIdempotencyKey(
   intent: SimpleChatWorkspaceHandoffIntent,
   workflowId: string,

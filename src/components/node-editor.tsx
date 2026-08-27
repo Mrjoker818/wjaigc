@@ -39,6 +39,7 @@ import {
   type TaskModelDescriptor,
 } from '@/lib/task-core/model-capability-contract';
 import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
+import { WorkspaceSourceTraceDetails } from '@/components/workspace-source-trace';
 import { getPromptTemplates, addPromptTemplate, type PromptTemplate } from '@/lib/prompt-templates';
 import {
   getVisibleWorkflowNodeIds,
@@ -4296,6 +4297,8 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, onUpdat
         </div>
         <span className="text-xs text-muted-foreground">{NODE_CATEGORY_LABELS[cat]}</span>
       </div>
+
+      <WorkspaceSourceTraceDetails sourceTrace={node.config.sourceTrace} />
 
       {/* 属性字段 — 与原型对齐: 逐字段垂直排列, px-4 py-2 间距 */}
       {fields.map(field => (

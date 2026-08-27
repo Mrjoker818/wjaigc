@@ -25,6 +25,7 @@ import {
 } from '@/lib/asset-core/canvas-adapter';
 import type { MediaAvailability } from '@/lib/asset-core/types';
 import type { WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
+import { CanvasSourceTraceBadge } from '@/components/workspace-source-trace';
 import {
   getCanvasMediaRecoveryIdentityState,
   recoverCanvasMediaUntilTerminal,
@@ -12332,7 +12333,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                     }
                     return '';
                   })();
-                  return (displayModelName || displayApiProvider) && !image.isProcessingPlaceholder ? (
+                  return (displayModelName || displayApiProvider || image.sourceTrace) && !image.isProcessingPlaceholder ? (
                   <div className="absolute bottom-1 left-1 z-20 pointer-events-none flex flex-col gap-0.5"
                     style={{ fontSize: `${Math.max(8, 9 / zoom)}px` }}>
                     {displayModelName && (
@@ -12359,6 +12360,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                         请求: {routeAudit?.requested.providerName} / {routeAudit?.requested.modelName}
                       </span>
                     )}
+                    <CanvasSourceTraceBadge sourceTrace={image.sourceTrace} />
                   </div>
                 ) : null;
                 })()}

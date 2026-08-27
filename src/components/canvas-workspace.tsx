@@ -83,6 +83,16 @@ import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell } from 'lucide-react';
 import { type Workflow, type WorkspaceAssetReference } from '@/lib/workflow-engine';
+import {
+  parseSimpleChatWorkspaceHandoffIntent,
+  type SimpleChatWorkspaceHandoff,
+  type SimpleChatWorkspaceHandoffIntent,
+} from '@/lib/simple-chat-workspace-handoff';
+import {
+  consumeSimpleChatWorkspaceHandoffForProject,
+  createSimpleChatWorkspaceHandoffRunGuard,
+  type SimpleChatWorkflowTransferRequest,
+} from '@/lib/simple-chat-workspace-handoff-client';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
@@ -134,7 +144,11 @@ import {
   reconcileSelectedImageAfterBatchDeletion,
 } from '@/lib/asset-core/batch-placement-delete';
 import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
-import { buildProjectWorkspaceUrl } from '@/lib/project-workspace-url';
+import {
+  buildProjectWorkspaceUrl,
+  clearSimpleChatWorkspaceHandoffParams,
+  getInitialWorkspaceModeFromSearch,
+} from '@/lib/project-workspace-url';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
@@ -234,11 +248,58 @@ type WorkspaceMode = 'canvas' | 'node' | 'workflow-hub' | 'dashboard';
 
 function getInitialWorkspaceMode(): WorkspaceMode {
   if (typeof window === 'undefined') return 'dashboard';
-  const params = new URLSearchParams(window.location.search);
-  if (params.get('view') === 'dashboard') return 'dashboard';
-  if (params.has('projectId')) return 'canvas';
-  if (params.get('loginMode') === 'canvas' && !params.has('error')) return 'canvas';
-  return 'dashboard';
+  return getInitialWorkspaceModeFromSearch(window.location.search);
+}
+
+async function resolveSimpleChatWorkspaceHandoffFromApi(
+  intent: SimpleChatWorkspaceHandoffIntent,
+): Promise<SimpleChatWorkspaceHandoff> {
+  const response = await fetch('/api/simple-chat/workspace-handoff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(intent),
+  });
+  const payload = await response.json().catch(() => null) as {
+    success?: boolean;
+    code?: string;
+    handoff?: SimpleChatWorkspaceHandoff;
+  } | null;
+  if (!response.ok || !payload?.success || !payload.handoff) {
+    throw new Error(payload?.code || `HANDOFF_RESOLVE_FAILED_${response.status}`);
+  }
+  return payload.handoff;
+}
+
+async function transferSimpleChatImageToWorkflow(
+  request: SimpleChatWorkflowTransferRequest,
+): Promise<WorkspaceAssetReference> {
+  const response = await fetch('/api/assets/transfer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json().catch(() => null) as (WorkspaceAssetReference & { error?: string }) | null;
+  if (!response.ok || !payload?.url) {
+    throw new Error(payload?.error || `ASSET_TRANSFER_FAILED_${response.status}`);
+  }
+  return payload;
+}
+
+function toSimpleChatHandoffMessage(error: unknown): string {
+  const code = error instanceof Error ? error.message : '';
+  const messages: Record<string, string> = {
+    UNAUTHORIZED: '登录状态已失效，请重新登录后再试',
+    INVALID_HANDOFF: '智能对话发送信息不完整，请返回对话重新发送',
+    FORBIDDEN: '无权读取该对话或写入当前项目',
+    HANDOFF_SOURCE_NOT_FOUND: '原智能对话消息已不存在',
+    NO_MANAGED_MEDIA: '该消息没有可导入的托管内容',
+    SOURCE_PROJECT_FORBIDDEN: '无权读取该智能对话项目',
+    TARGET_PROJECT_FORBIDDEN: '无权写入当前画布项目',
+    CHAT_MESSAGE_NOT_FOUND: '原智能对话消息已不存在',
+    ASSET_NOT_FOUND: '对话中的图片素材已不存在',
+    ASSET_TRANSFER_FAILED: '图片素材导入失败，请稍后重试',
+  };
+  return messages[code] || (code.includes('保存') ? code : '智能对话内容导入失败，请刷新页面重试');
 }
 
 function normalizeQuickCreateModels(data: QuickCreateModelsResponse): QuickCreateModelCandidate[] {
@@ -5606,6 +5667,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
+  const [handoffRetryRevision, setHandoffRetryRevision] = useState(0);
 
   const persistNodeWorkflow = useCallback(async (workflow: Workflow): Promise<void> => {
     const project = currentProjectRef.current;
@@ -5623,6 +5685,50 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     setCurrentProject(updatedProject);
     await manager.flushProjectsToServerWithConflictRecovery();
   }, [canvasPersistenceScheduler]);
+
+  const handoffRunGuardRef = useRef(createSimpleChatWorkspaceHandoffRunGuard());
+  useEffect(() => {
+    if (!currentProject?.id) return;
+    const retryRevision = handoffRetryRevision;
+    const intent = parseSimpleChatWorkspaceHandoffIntent(window.location.search);
+    const guard = handoffRunGuardRef.current;
+
+    void consumeSimpleChatWorkspaceHandoffForProject({
+      intent,
+      currentProjectId: currentProject.id,
+      currentWorkflow: nodeWorkflow,
+      guard,
+      resolve: resolveSimpleChatWorkspaceHandoffFromApi,
+      transfer: transferSimpleChatImageToWorkflow,
+      persist: async workflow => {
+        setNodeWorkflow(workflow);
+        await persistNodeWorkflow(workflow);
+      },
+      cleanUrl: () => window.history.replaceState(
+        null,
+        '',
+        clearSimpleChatWorkspaceHandoffParams(window.location.href),
+      ),
+      now: Date.now,
+    }).then(result => {
+      if (!result) return;
+      if (result.warnings.includes('UNMANAGED_IMAGE_SKIPPED')) {
+        toast.warning('部分图片未导入', {
+          description: '未完成素材托管的图片已跳过，其余内容已保存到节点模式。',
+        });
+      } else {
+        toast.success('智能对话内容已导入节点模式');
+      }
+    }).catch(error => {
+      console.error('智能对话内容导入失败:', { error, retryRevision });
+      toast.error(toSimpleChatHandoffMessage(error), {
+        action: {
+          label: '重试',
+          onClick: () => setHandoffRetryRevision(revision => revision + 1),
+        },
+      });
+    });
+  }, [currentProject?.id, handoffRetryRevision, nodeWorkflow, persistNodeWorkflow]);
 
   const handleCanvasImageAssetReferenceAdopted = useCallback((
     imageId: string,
