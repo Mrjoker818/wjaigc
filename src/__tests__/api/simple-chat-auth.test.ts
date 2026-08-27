@@ -166,12 +166,13 @@ describe('POST /api/simple-chat/chat', () => {
     });
     mocks.createVersionWithPlacement.mockImplementation(async (input: {
       resolveFile: () => Promise<{ url: string }>;
+      placement: { metadata?: Record<string, unknown> };
     }) => {
       const file = await input.resolveFile();
       return {
         asset: { id: 'asset-a' },
         version: { id: 'version-a', assetId: 'asset-a', file },
-        placement: { id: 'chat-placement-a' },
+        placement: { id: 'chat-placement-a', metadata: input.placement.metadata },
         reused: false,
       };
     });
@@ -319,6 +320,47 @@ describe('POST /api/simple-chat/chat', () => {
     );
   });
 
+  it('records returned generate provider and model instead of the requested pair for direct output', async () => {
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider',
+      apiKey: 'chat-key',
+      baseUrl: 'https://chat.example/v1',
+      advancedParams: {},
+    });
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async input => {
+      const url = String(input);
+      if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
+      if (url === 'http://127.0.0.1:5000/api/generate') {
+        return jsonResponse({
+          success: true,
+          directImageUrls: ['/api/serve-upload/direct.png'],
+          model: 'actual-image-model',
+          providerId: 'actual-image-provider',
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }));
+
+    const response = await POST(imageToolRequest('http://localhost', {
+      projectId: 'chat-project',
+      taskId: 'chat-task',
+      responseMessageId: 'assistant-message',
+      assetProjectId: 'canvas-project-a',
+    }));
+    await response.text();
+
+    expect(mocks.createVersionWithPlacement).toHaveBeenCalledWith(expect.objectContaining({
+      placement: expect.objectContaining({
+        metadata: expect.objectContaining({
+          sourceTrace: expect.objectContaining({
+            modelId: 'actual-image-model',
+            providerId: 'actual-image-provider',
+          }),
+        }),
+      }),
+    }));
+  });
+
   it('C1 sends async generate_image polling with internal auth only to getInternalApiUrl', async () => {
     vi.useFakeTimers();
     mocks.findProviderForModel.mockResolvedValue({
@@ -370,7 +412,12 @@ describe('POST /api/simple-chat/chat', () => {
       const url = String(input);
       if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
       if (url === 'http://127.0.0.1:5000/api/generate') {
-        return jsonResponse({ success: true, taskIds: ['task-async-1'] });
+        return jsonResponse({
+          success: true,
+          taskIds: ['task-async-1'],
+          model: 'actual-async-model',
+          providerId: 'actual-async-provider',
+        });
       }
       if (url === 'http://127.0.0.1:5000/api/poll-task') {
         return jsonResponse({ status: 'completed', imageUrl: '/api/serve-upload/async.png' });
@@ -399,6 +446,10 @@ describe('POST /api/simple-chat/chat', () => {
     expect(events).toContain('"assetVersionId":"version-generated"');
     expect(events).toContain('"placementId":"chat-placement-generated"');
     expect(events).toContain('"entityId":"assistant-message:0"');
+    expect(events).toContain('"modelId":"actual-async-model"');
+    expect(events).toContain('"providerId":"actual-async-provider"');
+    expect(events).not.toContain('"modelId":"image-model"');
+    expect(events).not.toContain('"providerId":"image-provider"');
   });
 
   it('I4 derives a stable registration digest from original data content, not persisted URLs', async () => {

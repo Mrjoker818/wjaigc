@@ -22,6 +22,7 @@ import {
   ProjectInstructions, ProjectKnowledgeItem,
   PRESET_SKILLS, PresetSkill, alignSimpleChatMediaSlots, canTransferSimpleChatMedia,
   mergeSimpleChatCanvasBridgeReferences, parseSimpleChatCanvasBridgePayload,
+  readSimpleChatStreamAssetReference,
   sendSimpleChatMediaToCanvas, type WorkspaceAssetReference
 } from "./simple-chat-types";
 import { User } from "@/lib/user-types";
@@ -109,7 +110,7 @@ function AgentRunMessageProgress({ runId }: { runId: string }) {
 }
 
 function readWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | null {
-  return parseSimpleChatCanvasBridgePayload([value])[0] ?? null;
+  return readSimpleChatStreamAssetReference(value);
 }
 interface ChatAreaProps {
   user: User;
@@ -1620,7 +1621,7 @@ export default function ChatArea({
         images: message.images || [],
         imageRefs: message.imageRefs || [],
         targetProjectId,
-        transfer: async ({ sourceVersionId, targetProjectId: transferProjectId, index }) => {
+        transfer: async ({ sourceVersionId, targetProjectId: transferProjectId, index, sourceTrace }) => {
           const transferResponse = await fetch('/api/assets/transfer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1631,7 +1632,12 @@ export default function ChatArea({
               entityType: 'canvas-image',
               entityId: `simple-chat:${task.id}:${message.id}:${index}`,
               idempotencyKey: `simple-chat-canvas:${transferProjectId}:${task.id}:${message.id}:${index}:${sourceVersionId}`,
-              metadata: { source: 'standalone-chat', messageId: message.id, imageIndex: index },
+              metadata: {
+                source: 'standalone-chat',
+                messageId: message.id,
+                imageIndex: index,
+                ...(sourceTrace ? { sourceTrace } : {}),
+              },
             }),
           });
           if (!transferResponse.ok) throw new Error('Asset transfer failed');

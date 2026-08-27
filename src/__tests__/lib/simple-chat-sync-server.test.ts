@@ -1,6 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { project } from '@/__tests__/fixtures/simple-chat-sync';
+import { project, taskWithMessages } from '@/__tests__/fixtures/simple-chat-sync';
+
+const sourceTrace = {
+  source: 'simple-chat' as const,
+  chatProjectId: 'chat-project-a',
+  chatTaskId: 'chat-task-a',
+  messageId: 'message-a',
+  modelId: 'actual-model',
+  providerId: 'actual-provider',
+  createdAt: '2026-08-27T08:00:00.000Z',
+};
+
+function projectWithSourceTrace(trace: unknown) {
+  const value = project('trace-project', [taskWithMessages('trace-task', 1)]);
+  value.tasks[0].messages[0].imageRefs = [{
+    url: '/managed.png',
+    assetId: 'asset-a',
+    assetVersionId: 'version-a',
+    placementId: 'placement-a',
+    sourceTrace: trace as never,
+  }];
+  return value;
+}
 
 const mocks = vi.hoisted(() => ({
   getPool: vi.fn(),
@@ -50,6 +72,41 @@ describe('simple chat server snapshots', () => {
   it('reads a valid versioned snapshot', () => {
     const stored = { schemaVersion: 1, revision: 7, projects: [project('versioned')] };
     expect(parseStoredSimpleChatSnapshot(stored)).toEqual(stored);
+  });
+
+  it('sanitizes image source traces when reading stored snapshots', () => {
+    const validProject = projectWithSourceTrace({ ...sourceTrace, privateValue: 'drop-me' });
+    const invalidProject = projectWithSourceTrace({ ...sourceTrace, source: 'forged' });
+
+    const valid = parseStoredSimpleChatSnapshot({
+      schemaVersion: 1,
+      revision: 7,
+      projects: [validProject],
+    });
+    const invalid = parseStoredSimpleChatSnapshot({
+      schemaVersion: 1,
+      revision: 8,
+      projects: [invalidProject],
+    });
+
+    expect(valid.projects[0]).toMatchObject({
+      id: validProject.id,
+      tasks: [{
+        id: validProject.tasks[0].id,
+        messages: [{
+          id: validProject.tasks[0].messages[0].id,
+          imageRefs: [{
+            url: '/managed.png',
+            assetId: 'asset-a',
+            sourceTrace,
+          }],
+        }],
+      }],
+    });
+    expect(valid.projects[0].tasks[0].messages[0].imageRefs?.[0]?.sourceTrace)
+      .toEqual(sourceTrace);
+    expect(invalid.projects[0].tasks[0].messages[0].imageRefs?.[0])
+      .not.toHaveProperty('sourceTrace');
   });
 
   it.each([
@@ -121,6 +178,29 @@ describe('simple chat server snapshots', () => {
     ]);
     expect(mocks.getPool().query).not.toHaveBeenCalled();
     expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('sanitizes image source traces before writing and returning a snapshot', async () => {
+    const value = projectWithSourceTrace({ ...sourceTrace, privateValue: 'drop-me' });
+    let storedSnapshot: unknown;
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes('SELECT data_value')) return { rows: [], rowCount: 0 };
+      if (sql.includes('INSERT INTO')) storedSnapshot = JSON.parse(String(params?.[2]));
+      return { rows: [], rowCount: 0 };
+    });
+    useClient(query);
+
+    const result = await compareAndSetSimpleChatSnapshot({
+      userId: 'user-a',
+      expectedRevision: 0,
+      projects: [value],
+    });
+
+    expect(result.projects[0].tasks[0].messages[0].imageRefs?.[0]?.sourceTrace)
+      .toEqual(sourceTrace);
+    expect(storedSnapshot).toMatchObject({
+      projects: [{ tasks: [{ messages: [{ imageRefs: [{ sourceTrace }] }] }] }],
+    });
   });
 
   it('reports the current revision on a compare-and-set conflict', async () => {

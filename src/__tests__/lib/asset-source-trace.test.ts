@@ -76,11 +76,13 @@ describe('asset source trace propagation', () => {
       'utf8',
     );
 
-    expect(routeSource).toContain("parseWorkspaceSourceTrace(body.metadata?.sourceTrace)");
+    expect(routeSource).toContain('parseWorkspaceSourceTrace(metadata.sourceTrace)');
+    expect(routeSource).toMatch(/sendVersionToWorkspace\([\s\S]*?\.\.\.\(metadata\s*\?\s*\{ metadata \}\s*:\s*\{\}\)/);
     expect(routeSource).toMatch(/\.\.\.\(sourceTrace\s*\?\s*\{ sourceTrace \}\s*:\s*\{\}\)/);
+    const responseTraceIndex = routeSource.lastIndexOf('const sourceTrace = parseWorkspaceSourceTrace');
     const successResponse = routeSource.slice(
-      routeSource.indexOf('const sourceTrace = parseWorkspaceSourceTrace'),
-      routeSource.indexOf('\n  } catch (error)', routeSource.indexOf('const sourceTrace = parseWorkspaceSourceTrace')),
+      responseTraceIndex,
+      routeSource.indexOf('\n  } catch (error)', responseTraceIndex),
     );
     expect(successResponse).not.toMatch(/metadata\s*:/);
   });

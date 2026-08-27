@@ -105,6 +105,17 @@ function requestDigest(input: TransferRequestBody): string {
     .digest('hex');
 }
 
+function sanitizeTransferMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!metadata) return undefined;
+  const sanitized = { ...metadata };
+  const sourceTrace = parseWorkspaceSourceTrace(metadata.sourceTrace);
+  if (sourceTrace) sanitized.sourceTrace = sourceTrace;
+  else delete sanitized.sourceTrace;
+  return sanitized;
+}
+
 function serviceErrorResponse(error: unknown): NextResponse {
   if (error instanceof AssetServiceError) {
     if (error.code === 'ASSET_NOT_FOUND') {
@@ -130,6 +141,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const body = parseBody(rawBody);
   if (!body) return NextResponse.json({ error: 'ASSET_REQUEST_INVALID' }, { status: 400 });
+  const metadata = sanitizeTransferMetadata(body.metadata);
+  const sanitizedBody: TransferRequestBody = {
+    ...body,
+    ...(metadata ? { metadata } : {}),
+  };
 
   try {
     const result = await createAssetService().sendVersionToWorkspace({
@@ -140,14 +156,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       entityType: body.entityType,
       entityId: body.entityId,
       idempotencyKey: body.idempotencyKey,
-      requestDigest: requestDigest(body),
+      requestDigest: requestDigest(sanitizedBody),
       ...(body.transform ? { transform: body.transform } : {}),
-      ...(body.metadata ? { metadata: body.metadata } : {}),
+      ...(metadata ? { metadata } : {}),
     });
-    const name = body.metadata && typeof body.metadata.name === 'string'
-      ? body.metadata.name
+    const name = metadata && typeof metadata.name === 'string'
+      ? metadata.name
       : undefined;
-    const sourceTrace = parseWorkspaceSourceTrace(body.metadata?.sourceTrace);
+    const sourceTrace = parseWorkspaceSourceTrace(metadata?.sourceTrace);
     return NextResponse.json({
       assetId: result.version.assetId,
       assetVersionId: result.version.id,

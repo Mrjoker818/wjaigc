@@ -84,6 +84,7 @@ type SendMediaToCanvas = (input: {
     sourceVersionId: string;
     targetProjectId: string;
     index: number;
+    sourceTrace?: WorkspaceSourceTrace;
   }) => Promise<AssetReference>;
   writeBridge: (references: AssetReference[]) => void;
 }) => Promise<{ ok: boolean; references: AssetReference[]; reason?: string }>;
@@ -212,7 +213,14 @@ describe('standalone simple-chat asset transfer', () => {
         sourceTrace: { ...sourceTraceFixture, source: 'untrusted-source' },
       }],
     })[0]).not.toHaveProperty('sourceTrace');
-    expect(chatAreaSource).toMatch(/parseSimpleChatCanvasBridgePayload\(\[value\]\)\[0\]/);
+    expect(chatAreaSource).toMatch(/readSimpleChatStreamAssetReference\(value\)/);
+  });
+
+  it('rejects a string imageRef at the SSE object boundary', () => {
+    expect(simpleChatTypes.readSimpleChatStreamAssetReference('/legacy-string.png')).toBeNull();
+    expect(simpleChatTypes.readSimpleChatStreamAssetReference({ url: '/object.png' })).toEqual({
+      url: '/object.png',
+    });
   });
 
   it('keeps the authoritative canvas entity id through both standalone-chat bridge parsers', () => {
@@ -232,7 +240,7 @@ describe('standalone simple-chat asset transfer', () => {
     })).toEqual([expect.objectContaining({
       entityId: 'simple-chat:task-a:message-a:0',
     })]);
-    expect(chatAreaSource).toMatch(/parseSimpleChatCanvasBridgePayload\(\[value\]\)\[0\]/);
+    expect(chatAreaSource).toMatch(/readSimpleChatStreamAssetReference\(value\)/);
   });
 
   it('persists imageRefs through the existing project storage round trip', () => {
@@ -337,6 +345,69 @@ describe('standalone simple-chat asset transfer', () => {
     expect(chatAreaSource).not.toMatch(/transferred\.assetVersionId\s*!==/);
     expect(chatAreaSource).toMatch(/targetProject:\s*transferProjectId/);
     expect(chatAreaSource).toMatch(/entityType:\s*['"]canvas-image['"]/);
+    expect(chatAreaSource).toMatch(/sourceTrace\s*\?\s*\{ sourceTrace \}/);
+  });
+
+  it('passes each validated message reference trace into the canvas transfer metadata', async () => {
+    const send = sendMediaToCanvas();
+    expect(send).toBeTypeOf('function');
+    if (!send) return;
+    const transfer = vi.fn(async () => ({
+      url: '/canvas.png',
+      assetVersionId: 'canvas-version',
+      placementId: 'canvas-placement',
+      sourceTrace: sourceTraceFixture,
+    }));
+
+    await send({
+      images: ['/managed.png'],
+      imageRefs: [{
+        url: '/managed.png',
+        assetVersionId: 'version-a',
+        placementId: 'chat-placement-a',
+        sourceTrace: sourceTraceFixture,
+      }],
+      targetProjectId: 'canvas-a',
+      transfer,
+      writeBridge: vi.fn(),
+    });
+
+    expect(transfer).toHaveBeenCalledWith({
+      sourceVersionId: 'version-a',
+      targetProjectId: 'canvas-a',
+      index: 0,
+      sourceTrace: sourceTraceFixture,
+    });
+  });
+
+  it('omits an invalid message reference trace from canvas transfer metadata', async () => {
+    const send = sendMediaToCanvas();
+    expect(send).toBeTypeOf('function');
+    if (!send) return;
+    const transfer = vi.fn(async () => ({
+      url: '/canvas.png',
+      assetVersionId: 'canvas-version',
+      placementId: 'canvas-placement',
+    }));
+
+    await send({
+      images: ['/managed.png'],
+      imageRefs: [{
+        url: '/managed.png',
+        assetVersionId: 'version-a',
+        placementId: 'chat-placement-a',
+        sourceTrace: { ...sourceTraceFixture, source: 'forged' } as unknown as WorkspaceSourceTrace,
+      }],
+      targetProjectId: 'canvas-a',
+      transfer,
+      writeBridge: vi.fn(),
+    });
+
+    expect(transfer).toHaveBeenCalledWith({
+      sourceVersionId: 'version-a',
+      targetProjectId: 'canvas-a',
+      index: 0,
+    });
   });
 
   it('creates chat placements before exposing managed references and never migrates URL-only history on read', () => {

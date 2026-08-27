@@ -534,6 +534,8 @@ export async function POST(request: NextRequest) {
         prompt: string,
         authoritativeTaskId?: string,
         authoritativeResult?: unknown,
+        actualModelId?: string,
+        actualProviderId?: string,
       ): Promise<void> => {
         const outputIndex = generatedOutputIndex++;
         let imageRef: WorkspaceAssetReference | undefined;
@@ -543,8 +545,8 @@ export async function POST(request: NextRequest) {
             chatProjectId: body.projectId,
             chatTaskId: body.taskId,
             messageId: body.responseMessageId,
-            modelId: imageModel,
-            providerId: imageProviderId,
+            modelId: actualModelId || imageModel,
+            providerId: actualProviderId || imageProviderId,
             ...(authoritativeTaskId ? { generationTaskIds: [authoritativeTaskId] } : {}),
             createdAt: new Date().toISOString(),
           };
@@ -812,12 +814,32 @@ export async function POST(request: NextRequest) {
                     admit: admitGeneration,
                   })
                 : await admitGeneration();
-              const imgData = await imgRes.json() as { success?: boolean; taskIds?: string[]; imageUrls?: string[]; directImageUrls?: string[] };
+              const imgData = await imgRes.json() as {
+                success?: boolean;
+                taskIds?: string[];
+                imageUrls?: string[];
+                directImageUrls?: string[];
+                model?: string;
+                providerId?: string;
+              };
+              const actualModelId = typeof imgData.model === 'string' && imgData.model
+                ? imgData.model
+                : undefined;
+              const actualProviderId = typeof imgData.providerId === 'string' && imgData.providerId
+                ? imgData.providerId
+                : undefined;
 
               // 直接返回图片的情况（同步提供商）
               const directUrls = imgData.directImageUrls || imgData.imageUrls;
               if (imgData.success && directUrls?.length && !imgData.taskIds?.length) {
-                await sendGeneratedImage(directUrls[0], imgPrompt);
+                await sendGeneratedImage(
+                  directUrls[0],
+                  imgPrompt,
+                  undefined,
+                  undefined,
+                  actualModelId,
+                  actualProviderId,
+                );
               } else if (imgData.success && imgData.taskIds?.length) {
                 const taskId = imgData.taskIds[0];
                 const pollExistingTask = async (): Promise<void> => {
@@ -837,7 +859,14 @@ export async function POST(request: NextRequest) {
                     };
 
                     if (pollData.status === 'completed' && pollData.imageUrl) {
-                      await sendGeneratedImage(pollData.imageUrl, imgPrompt, taskId, pollData);
+                      await sendGeneratedImage(
+                        pollData.imageUrl,
+                        imgPrompt,
+                        taskId,
+                        pollData,
+                        actualModelId,
+                        actualProviderId,
+                      );
                       break;
                     }
                     if (pollData.status === 'failed' || pollData.status === 'cancelled') {

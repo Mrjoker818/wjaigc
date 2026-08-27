@@ -181,6 +181,13 @@ export function parseSimpleChatCanvasBridgePayload(value: unknown): WorkspaceAss
     .filter((reference): reference is WorkspaceAssetReference => reference !== null);
 }
 
+export function readSimpleChatStreamAssetReference(
+  value: unknown,
+): WorkspaceAssetReference | null {
+  if (!isRecord(value)) return null;
+  return toWorkspaceAssetReference(value);
+}
+
 function bridgeReferenceIdentity(reference: WorkspaceAssetReference): string {
   if (reference.placementId) return `placement:${reference.placementId}`;
   if (reference.entityId) return `entity:${reference.entityId}`;
@@ -303,6 +310,7 @@ export async function sendSimpleChatMediaToCanvas(input: {
     sourceVersionId: string;
     targetProjectId: string;
     index: number;
+    sourceTrace?: WorkspaceAssetReference['sourceTrace'];
   }) => Promise<WorkspaceAssetReference>;
   writeBridge: (references: WorkspaceAssetReference[]) => void;
 }): Promise<{
@@ -319,10 +327,12 @@ export async function sendSimpleChatMediaToCanvas(input: {
     if (!hasManagedAssetIdentity(reference)) {
       return { ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' };
     }
+    const sourceTrace = parseWorkspaceSourceTrace(reference.sourceTrace);
     const transferred = await input.transfer({
       sourceVersionId: reference.assetVersionId,
       targetProjectId: input.targetProjectId,
       index,
+      ...(sourceTrace ? { sourceTrace } : {}),
     });
     if (!hasManagedAssetIdentity(transferred)) {
       throw new Error('ASSET_TRANSFER_INVALID');

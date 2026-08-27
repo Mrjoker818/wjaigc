@@ -20,13 +20,19 @@ describe('simple chat generated image source trace', () => {
     expect(sendGeneratedImage).toMatch(/chatProjectId:\s*body\.projectId/);
     expect(sendGeneratedImage).toMatch(/chatTaskId:\s*body\.taskId/);
     expect(sendGeneratedImage).toMatch(/messageId:\s*body\.responseMessageId/);
-    expect(sendGeneratedImage).toMatch(/modelId:\s*imageModel/);
-    expect(sendGeneratedImage).toMatch(/providerId:\s*imageProviderId/);
+    expect(sendGeneratedImage).toMatch(/modelId:\s*actualModelId\s*\|\|\s*imageModel/);
+    expect(sendGeneratedImage).toMatch(/providerId:\s*actualProviderId\s*\|\|\s*imageProviderId/);
     expect(sendGeneratedImage).toMatch(/authoritativeTaskId\s*\?\s*\{ generationTaskIds:\s*\[authoritativeTaskId\] \}/);
     expect(sendGeneratedImage).toMatch(/createdAt:\s*new Date\(\)\.toISOString\(\)/);
     expect(sendGeneratedImage).toMatch(/registerStandaloneChatAsset\([\s\S]*?sourceTrace/);
     expect(sendGeneratedImage).toMatch(/imageRef\s*=\s*\{[\s\S]*?\.\.\.reference,[\s\S]*?sourceTrace/);
     expect(sendGeneratedImage).toMatch(/type:\s*['"]image['"][\s\S]*?imageRef/);
+  });
+
+  it('passes the normalized generate response identity into direct and projected sends', () => {
+    expect(routeSource).toMatch(/model\?:\s*string;[\s\S]*?providerId\?:\s*string;/);
+    expect(routeSource).toMatch(/sendGeneratedImage\([\s\S]*?directUrls\[0\][\s\S]*?actualModelId,[\s\S]*?actualProviderId/);
+    expect(routeSource).toMatch(/sendGeneratedImage\([\s\S]*?pollData\.imageUrl[\s\S]*?actualModelId,[\s\S]*?actualProviderId/);
   });
 
   it('stores generated provenance only under placement sourceTrace metadata', () => {

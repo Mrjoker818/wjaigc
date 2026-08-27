@@ -31,6 +31,16 @@ const baseBody = {
   metadata: { label: 'reference', source: 'canvas' },
 };
 
+const sourceTrace = {
+  source: 'simple-chat',
+  chatProjectId: 'chat-project-a',
+  chatTaskId: 'chat-task-a',
+  messageId: 'message-a',
+  modelId: 'actual-model',
+  providerId: 'actual-provider',
+  createdAt: '2026-08-27T08:00:00.000Z',
+};
+
 function transferRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost/api/assets/transfer', {
     method: 'POST',
@@ -113,6 +123,46 @@ describe('POST /api/assets/transfer', () => {
       url: '/api/serve-upload/source.png',
       reused: false,
     });
+  });
+
+  it('persists and returns only a sanitized source trace while preserving unrelated metadata', async () => {
+    const response = await POST(transferRequest({
+      ...baseBody,
+      metadata: {
+        ...baseBody.metadata,
+        imageIndex: 2,
+        sourceTrace: { ...sourceTrace, privateValue: 'drop-me' },
+      },
+    }));
+
+    expect(mocks.sendVersionToWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: {
+        ...baseBody.metadata,
+        imageIndex: 2,
+        sourceTrace,
+      },
+    }));
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({ sourceTrace }));
+  });
+
+  it('omits an invalid source trace before persistence and from the response', async () => {
+    const response = await POST(transferRequest({
+      ...baseBody,
+      metadata: {
+        ...baseBody.metadata,
+        imageIndex: 3,
+        sourceTrace: { ...sourceTrace, source: 'forged' },
+      },
+    }));
+
+    expect(mocks.sendVersionToWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: {
+        ...baseBody.metadata,
+        imageIndex: 3,
+      },
+    }));
+    const payload = await response.json();
+    expect(payload).not.toHaveProperty('sourceTrace');
   });
 
   it('returns 409 when the same key is reused with a different canonical digest', async () => {

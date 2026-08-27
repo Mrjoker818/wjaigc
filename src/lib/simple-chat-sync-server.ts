@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { SimpleChatProject } from '@/components/simple-chat/simple-chat-types';
 import { getPool } from '@/lib/db-client';
+import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import { validateSimpleChatProjects } from '@/lib/simple-chat-project-sync';
 
 export interface SimpleChatStoredSnapshot {
@@ -48,10 +49,26 @@ function assertExpectedRevision(revision: number): void {
   }
 }
 
+function sanitizeSnapshotProjects(projects: SimpleChatProject[]): SimpleChatProject[] {
+  const sanitized = structuredClone(projects);
+  for (const project of sanitized) {
+    for (const task of project.tasks) {
+      for (const message of task.messages) {
+        for (const reference of message.imageRefs ?? []) {
+          const sourceTrace = parseWorkspaceSourceTrace(reference.sourceTrace);
+          if (sourceTrace) reference.sourceTrace = sourceTrace;
+          else delete reference.sourceTrace;
+        }
+      }
+    }
+  }
+  return sanitized;
+}
+
 export function parseStoredSimpleChatSnapshot(value: unknown): SimpleChatStoredSnapshot {
   if (Array.isArray(value)) {
     assertValidProjects(value);
-    return { schemaVersion: 1, revision: 0, projects: value };
+    return { schemaVersion: 1, revision: 0, projects: sanitizeSnapshotProjects(value) };
   }
 
   if (
@@ -66,7 +83,7 @@ export function parseStoredSimpleChatSnapshot(value: unknown): SimpleChatStoredS
   return {
     schemaVersion: 1,
     revision: value.revision as number,
-    projects: value.projects,
+    projects: sanitizeSnapshotProjects(value.projects),
   };
 }
 
@@ -92,6 +109,7 @@ export async function compareAndSetSimpleChatSnapshot(input: {
 }): Promise<SimpleChatStoredSnapshot> {
   assertExpectedRevision(input.expectedRevision);
   assertValidProjects(input.projects, 'Invalid simple chat projects');
+  const projects = sanitizeSnapshotProjects(input.projects);
 
   const lockIdentity = lockIdentityForUser(input.userId);
   const client = await getPool().connect();
@@ -119,7 +137,7 @@ export async function compareAndSetSimpleChatSnapshot(input: {
     const snapshot: SimpleChatStoredSnapshot = {
       schemaVersion: 1,
       revision: input.expectedRevision + 1,
-      projects: input.projects,
+      projects,
     };
     const params = [
       input.userId,
