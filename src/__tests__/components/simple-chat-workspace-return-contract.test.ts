@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { getInitialWorkspaceModeFromSearch } from '@/lib/project-workspace-url';
 
 const simpleChatPage = readFileSync(
   resolve(process.cwd(), 'src/app/simple-chat/page.tsx'),
@@ -27,8 +28,18 @@ describe('simple-chat workspace return contract', () => {
     expect(homePage).toContain("searchParams.get('view') === 'dashboard'");
     expect(homePage).toContain('useState(!returningToDashboard)');
 
-    expect(canvasWorkspace).toContain("params.get('view') === 'dashboard'");
+    expect(canvasWorkspace).toContain('getInitialWorkspaceModeFromSearch,');
+    expect(canvasWorkspace).toContain(
+      'return getInitialWorkspaceModeFromSearch(window.location.search);',
+    );
     expect(canvasWorkspace).toContain('useState<WorkspaceMode>(getInitialWorkspaceMode)');
+  });
+
+  it('derives the initial workspace mode through the shared search parser', () => {
+    expect(getInitialWorkspaceModeFromSearch('?view=dashboard')).toBe('dashboard');
+    expect(getInitialWorkspaceModeFromSearch('?projectId=canvas-1&mode=node')).toBe('node');
+    expect(getInitialWorkspaceModeFromSearch('?projectId=canvas-1')).toBe('canvas');
+    expect(getInitialWorkspaceModeFromSearch('')).toBe('dashboard');
   });
 
   it('opens the explicitly selected canvas project without routing through login or bare Canvas', () => {
