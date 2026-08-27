@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-27T22:37:24.6496009+08:00",
+  "environment": {
+    "browser": "Google Chrome 用户1",
+    "cozeProjectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewOrigin": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+    "gitCommit": "3f0564429ae100448d17343b5d18ccf58b933e9d",
+    "originMain": "3f0564429ae100448d17343b5d18ccf58b933e9d",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableTouched": false,
+    "buildResult": "PASS",
+    "servicePort": 5000,
+    "authenticatedUser": "Mr.joker",
+    "authenticatedRole": "管理员"
+  },
+  "matrix": [
+    {
+      "id": "CHAT-004-CLOUD-01",
+      "name": "纯文本发送到空工作流",
+      "status": "PASS",
+      "evidence": "同标签页进入节点模式；工作流名为智能对话导入；1 节点、0 连线；交接参数完成后从 URL 清除；刷新后仍为 1 节点。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-02",
+      "name": "托管图片发送到空工作流",
+      "status": "PASS",
+      "evidence": "历史托管图片消息包含文本和图片，导入后形成 2 节点、0 连线；图片真实显示；刷新后仍为 2 节点。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-03",
+      "name": "混合文本/图片追加到已有工作流",
+      "status": "PARTIAL",
+      "evidence": "已创建的智能对话导入工作流从 1 节点追加到 3 节点，名称保持，刷新后仍为 3 节点。尚未在带既有连线和自定义视口的普通工作流上证明连线及视口完全不变。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-04",
+      "name": "同一用户跨项目转交",
+      "status": "PASS",
+      "evidence": "同一 Simple Chat 项目分别向 project_1787554497012_u855erzdr 与 project_1787549625844_nfmso3ts9 转交成功，节点及素材各自保存在目标项目。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-05",
+      "name": "普通用户成功与他人项目拒绝",
+      "status": "UNVERIFIED",
+      "evidence": "当前仅有已登录管理员会话；未创建或重置测试账号，也未伪造他人项目数据。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-06A",
+      "name": "畸形交接参数拒绝",
+      "status": "PASS",
+      "evidence": "chatMessageId=bad%20id 未触发 /api/simple-chat/workspace-handoff 或 /api/assets/transfer；已有 3 节点工作流保持不变；无 Console error/warning。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-06B",
+      "name": "URL-only 未托管媒体拒绝且不远程读取",
+      "status": "UNVERIFIED",
+      "evidence": "当前真实会话没有可操作的 URL-only 历史媒体样本；未向数据库注入模拟数据。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-07",
+      "name": "重复点击与刷新恢复不重复",
+      "status": "PASS",
+      "evidence": "同一文本消息重复转交后仍为 1 节点；图片工作流与已有工作流刷新后分别稳定为 2 和 3 节点。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-08",
+      "name": "来源追踪刷新恢复",
+      "status": "PASS",
+      "evidence": "节点属性和无限画布均显示来源：智能对话、chat project、model、provider、时间；无限画布刷新并重新选中图片后来源徽标仍存在。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-09",
+      "name": "既有添加到画布回归",
+      "status": "PASS",
+      "evidence": "添加到画布提示已添加 1 张图片；目标画布真实出现杯子图片；刷新后图片与来源徽标保持。"
+    },
+    {
+      "id": "CHAT-004-CLOUD-10",
+      "name": "Console 与导航 URL 安全",
+      "status": "PASS",
+      "evidence": "本轮各已执行流程 Console error/warning 为 0；完成后的节点模式 URL 仅保留 projectId 与 mode，画布 URL 仅保留 projectId，未泄露原始媒体 URL。"
+    }
+  ],
+  "screenshots": [
+    "v588-chat-004-text-empty-workflow-cloud-2026-08-27.png",
+    "v588-chat-004-managed-image-empty-workflow-cloud-2026-08-27.png",
+    "v588-chat-004-existing-workflow-append-cloud-2026-08-27.png",
+    "v588-chat-004-source-trace-cloud-2026-08-27.png",
+    "v588-chat-004-existing-canvas-transfer-cloud-2026-08-27.png",
+    "v588-chat-004-canvas-source-refresh-cloud-2026-08-27.png"
+  ],
+  "summary": {
+    "pass": 8,
+    "partial": 1,
+    "unverified": 2,
+    "fail": 0,
+    "absorptionStatus": "本地候选完成 / 云端部分通过 / 未吸收",
+    "releaseDecision": "有条件通过"
+  }
+}
