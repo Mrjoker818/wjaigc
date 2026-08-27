@@ -4,7 +4,9 @@ import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import {
   executeSimpleChatWorkspaceHandoff,
   type ExecuteSimpleChatWorkspaceHandoffInput,
+  type SimpleChatWorkflowTransferRequest,
 } from '@/lib/simple-chat-workspace-handoff-client';
+import { createEmptyWorkflow, createWorkflowNode, type Workflow } from '@/lib/workflow-engine';
 
 const intent = {
   targetProjectId: 'canvas-project-1',
@@ -61,6 +63,7 @@ function createDependencies(): ExecuteSimpleChatWorkspaceHandoffInput {
 describe('simple chat workspace handoff client', () => {
   it('transfers canonical image references before persisting and cleaning the URL', async () => {
     const events: string[] = [];
+    let persistedWorkflow: Workflow | undefined;
     const transfer = vi.fn(async (request: Parameters<ExecuteSimpleChatWorkspaceHandoffInput['transfer']>[0]) => {
       events.push('transfer');
       return { ...managedReference, entityId: request.entityId };
@@ -68,7 +71,10 @@ describe('simple chat workspace handoff client', () => {
     const result = await executeSimpleChatWorkspaceHandoff({
       ...createDependencies(),
       transfer,
-      persist: async () => { events.push('persist'); },
+      persist: async workflow => {
+        persistedWorkflow = workflow;
+        events.push('persist');
+      },
       cleanUrl: () => { events.push('clean'); },
     });
 
@@ -88,6 +94,13 @@ describe('simple chat workspace handoff client', () => {
       },
     });
     expect(result.workflow.nodes[1].config).toMatchObject({
+      imageUrl: '/canonical-workflow.png',
+      assetId: 'asset-1',
+      assetVersionId: 'version-1',
+      placementId: 'workflow-placement-1',
+      sourceTrace,
+    });
+    expect(persistedWorkflow?.nodes[1].config).toMatchObject({
       imageUrl: '/canonical-workflow.png',
       assetId: 'asset-1',
       assetVersionId: 'version-1',
@@ -121,20 +134,58 @@ describe('simple chat workspace handoff client', () => {
     expect(cleanUrl).not.toHaveBeenCalled();
   });
 
-  it('reuses deterministic nodes and transfers on repeated consumption', async () => {
-    const transfer = vi.fn(createDependencies().transfer);
-    const dependencies = { ...createDependencies(), transfer };
-    const first = await executeSimpleChatWorkspaceHandoff(dependencies);
-    const firstRequest = transfer.mock.calls[0][0];
-    const second = await executeSimpleChatWorkspaceHandoff({
-      ...dependencies,
-      currentWorkflow: first.workflow,
-    });
+  it('retries a failed persistence from the original workflow with stable nodes and transfers', async () => {
+    const originalWorkflow = createEmptyWorkflow('已有工作流');
+    originalWorkflow.nodes = [{
+      ...createWorkflowNode('input-text', 20, 40, '已有节点'),
+      id: 'existing-node',
+      config: { text: '不得覆盖' },
+    }];
+    const events: string[] = [];
+    const transferRequests: SimpleChatWorkflowTransferRequest[] = [];
+    const persistedWorkflows: Workflow[] = [];
+    const cleanUrl = vi.fn(() => { events.push('clean'); });
+    let persistAttempt = 0;
+    const dependencies: ExecuteSimpleChatWorkspaceHandoffInput = {
+      ...createDependencies(),
+      currentWorkflow: originalWorkflow,
+      transfer: async request => {
+        transferRequests.push(request);
+        events.push('transfer');
+        return { ...managedReference, entityId: request.entityId };
+      },
+      persist: async workflow => {
+        persistedWorkflows.push(workflow);
+        persistAttempt += 1;
+        events.push(`persist-${persistAttempt}`);
+        if (persistAttempt === 1) throw new Error('save failed');
+      },
+      cleanUrl,
+    };
 
-    expect(second.addedNodeIds).toEqual([]);
-    expect(second.workflow.nodes).toHaveLength(first.workflow.nodes.length);
-    expect(transfer).toHaveBeenCalledTimes(1);
-    expect(firstRequest.idempotencyKey).toEqual(expect.any(String));
+    await expect(executeSimpleChatWorkspaceHandoff(dependencies)).rejects.toThrow('save failed');
+    expect(cleanUrl).not.toHaveBeenCalled();
+
+    const recovered = await executeSimpleChatWorkspaceHandoff(dependencies);
+
+    expect(events).toEqual(['transfer', 'persist-1', 'transfer', 'persist-2', 'clean']);
+    expect(persistedWorkflows).toHaveLength(2);
+    expect(persistedWorkflows[1].nodes.map(node => node.id))
+      .toEqual(persistedWorkflows[0].nodes.map(node => node.id));
+    expect(persistedWorkflows[1].nodes).toHaveLength(persistedWorkflows[0].nodes.length);
+    expect(originalWorkflow.nodes).toHaveLength(1);
+    expect(recovered.workflow.nodes).toHaveLength(3);
+    expect(transferRequests).toHaveLength(2);
+    expect(transferRequests[1]).toEqual(transferRequests[0]);
+    expect(transferRequests[0].idempotencyKey).toEqual(expect.any(String));
+    expect(persistedWorkflows[1].nodes[2].config).toMatchObject({
+      imageUrl: '/canonical-workflow.png',
+      assetId: 'asset-1',
+      assetVersionId: 'version-1',
+      placementId: 'workflow-placement-1',
+      sourceTrace,
+    });
+    expect(cleanUrl).toHaveBeenCalledOnce();
   });
 
   it('returns partial-success when the resolver skipped unmanaged images', async () => {
