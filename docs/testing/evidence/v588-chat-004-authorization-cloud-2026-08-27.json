@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-27T23:05:19.5433465+08:00",
+  "environment": {
+    "browser": "Google Chrome 用户1",
+    "previewOrigin": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+    "runtimeGitCommit": "3f0564429ae100448d17343b5d18ccf58b933e9d",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableTouched": false
+  },
+  "ordinaryUserOwnProject": {
+    "username": "canvas-user",
+    "targetProjectId": "project_1787842745990_5xjlt4q7h",
+    "browserResult": "PASS",
+    "workflowNodes": 1,
+    "workflowEdges": 0
+  },
+  "crossUserTarget": {
+    "actor": "canvas-user",
+    "targetOwner": "Mr.joker",
+    "targetProjectId": "project_1786500304299_8vix1z45f",
+    "loginStatus": 200,
+    "handoffStatus": 403,
+    "response": {
+      "success": false,
+      "code": "FORBIDDEN"
+    },
+    "targetContentExposed": false,
+    "targetMutationObserved": false,
+    "result": "PASS"
+  }
+}

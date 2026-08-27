@@ -1,18 +1,21 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-08-27T22:37:24.6496009+08:00",
+  "capturedAt": "2026-08-27T23:05:19.5433465+08:00",
   "environment": {
     "browser": "Google Chrome 用户1",
     "cozeProjectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
     "previewOrigin": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
     "gitCommit": "3f0564429ae100448d17343b5d18ccf58b933e9d",
-    "originMain": "3f0564429ae100448d17343b5d18ccf58b933e9d",
+    "originMain": "9458984046a48fad8b1ea9050192aa96ec6c16b3",
+    "runtimeCodeEquivalentToOriginMain": true,
     "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
     "stableTouched": false,
     "buildResult": "PASS",
     "servicePort": 5000,
     "authenticatedUser": "Mr.joker",
-    "authenticatedRole": "管理员"
+    "authenticatedRole": "管理员",
+    "additionalAuthenticatedUser": "canvas-user",
+    "additionalAuthenticatedRole": "用户"
   },
   "matrix": [
     {
@@ -42,8 +45,8 @@
     {
       "id": "CHAT-004-CLOUD-05",
       "name": "普通用户成功与他人项目拒绝",
-      "status": "UNVERIFIED",
-      "evidence": "当前仅有已登录管理员会话；未创建或重置测试账号，也未伪造他人项目数据。"
+      "status": "PASS",
+      "evidence": "Google Chrome 真实登录 canvas-user，新建并同步自有项目 project_1787842745990_5xjlt4q7h；文本消息转交后形成 1 节点、0 连线。相同普通账号向管理员项目 project_1786500304299_8vix1z45f 发起真实云端交接 API，请求返回 HTTP 403 与 FORBIDDEN；管理员项目内容未暴露、未写入。"
     },
     {
       "id": "CHAT-004-CLOUD-06A",
@@ -89,12 +92,17 @@
     "v588-chat-004-linked-workflow-preserved-cloud-2026-08-27.png",
     "v588-chat-004-source-trace-cloud-2026-08-27.png",
     "v588-chat-004-existing-canvas-transfer-cloud-2026-08-27.png",
-    "v588-chat-004-canvas-source-refresh-cloud-2026-08-27.png"
+    "v588-chat-004-canvas-source-refresh-cloud-2026-08-27.png",
+    "v588-chat-004-ordinary-user-own-workflow-cloud-2026-08-27.png",
+    "v588-chat-004-cross-user-denied-cloud-2026-08-27.png"
+  ],
+  "supplementalEvidence": [
+    "v588-chat-004-authorization-cloud-2026-08-27.json"
   ],
   "summary": {
-    "pass": 9,
+    "pass": 10,
     "partial": 0,
-    "unverified": 2,
+    "unverified": 1,
     "fail": 0,
     "absorptionStatus": "本地候选完成 / 云端部分通过 / 未吸收",
     "releaseDecision": "有条件通过"

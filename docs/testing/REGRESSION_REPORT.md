@@ -1885,5 +1885,6 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 文本空工作流为 `1` 节点，重复转交和刷新后仍为 `1`；托管图片消息导入后为 `2` 节点，刷新后仍为 `2`；已有工作流从 `1` 节点追加到 `3`，刷新后仍为 `3`。
 - 节点图片真实显示，节点属性包含 chat project、model、provider 与时间；“添加到画布”真实出现目标图片，刷新并重新选中后来源徽标仍存在。
 - 受控普通工作流基线为“新工作流、2 节点、1 连线、80%”；转交后为 4 节点、1 连线、80%，两个 `CHAT004` 基线节点和名称均保留，刷新后完全一致。
+- 普通账号 `canvas-user` 新建并同步自有画布后，文本消息转交得到 1 节点、0 连线；对管理员项目的真实云端交接 API 返回 HTTP 403 与 `FORBIDDEN`，未暴露或修改管理员项目。
 - 畸形交接参数未触发工作区解析或素材转移请求，已有工作流不变。本轮已执行流程的 Console error/warning 为 `0`，完成后的 URL 不含原始媒体地址。
-- **回归结论：CHAT-004 已执行项通过，整项仍未吸收。** 未验证项仅剩普通用户/他人项目授权和 URL-only 未托管历史媒体。另发现独立 `NODE-003` 预设入口失效，不归入 CHAT-004 已通过链路。证据见 `docs/testing/evidence/v588-chat-004-cloud-matrix-partial-2026-08-27.json`。
+- **回归结论：CHAT-004 已执行项通过，整项仍未吸收。** 未验证项仅剩 URL-only 未托管历史媒体。另发现独立 `NODE-003` 预设入口失效，不归入 CHAT-004 已通过链路。证据见 `docs/testing/evidence/v588-chat-004-cloud-matrix-partial-2026-08-27.json`。
