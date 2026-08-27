@@ -54,7 +54,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **已吸收 / Coze 云端验证通过。** 三条流式链路共用严格解析器，并已关闭 CanvasEditor 参数错位与正文事件名不匹配；未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、三入口真实 APImart 流式终态及零 Console/原生弹窗证据 | P1 |
 | V588-CHAT-002 | 失败消息状态与原位确定性重试 | **已吸收 / 云端通过。** 普通与联网原位重试、CanvasEditor 精确选区、刷新精确任务恢复、服务器终态持久化及 Deep Research 单 Artifact 均取得 Coze 证据 | `main-fix@1572a222` 的 Deep Research 任务刷新前后 UI 与服务器均严格保持同一个 `msg_1787715525319-research` Artifact；Console/原生弹窗为 0。第三方 exactly-once 仅保留为供应商能力边界 | P1 |
 | V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **已吸收 / Coze Google Chrome 云端验证通过。** 版本化快照、CAS 冲突重放、冲突副本、删除不复活、用户隔离、离页冲刷和可诊断同步状态均已闭环；保留当前登录、注销、用户数据 API 和前台流式生成边界 | 真实 PostgreSQL `4030/4030`、Coze 冷启动、项目/任务 CRUD、刷新恢复、双标签合并/冲突副本、离页、账号切换、布局及浏览器健康证据 | P1 |
-| V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **本地候选完成 / 云端部分通过 / 未吸收。** 已保留 `AssetVersion -> /api/assets/transfer` 安全链路并补齐节点模式转交与来源追踪；普通用户/他人项目授权、URL-only 未托管媒体、带既有连线和自定义视口的工作流仍待真实云端闭环 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
+| V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **本地候选完成 / 云端部分通过 / 未吸收。** 已保留 `AssetVersion -> /api/assets/transfer` 安全链路并补齐节点模式转交与来源追踪；普通用户/他人项目授权和 URL-only 未托管媒体仍待真实云端闭环 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
 | V588-AUTH-001 | 数据库唯一/数据库加文件两种持久化模式 | **本地候选已完成。** 只吸收显式持久化模式与启动诊断；继续使用当前认证密钥和密码校验，拒绝 donor 弱口令恢复 | 真实 PostgreSQL、普通用户/管理员多浏览器会话、退出后数据隔离和全量门禁已通过；Coze 精确 SHA 待验 | P1 |
 | V588-ADMIN-004 | 用户积分、项目数和最后活动时间的真实投影 | 接入当前管理员查询和统一用户身份，不复制 donor 用户存储 | 新增用户、删除用户、批量操作、积分、项目、聊天记录与统计一致性 | P1 |
 | V588-PROVIDER-005 | 图像比例/尺寸/质量与视频时长/模式能力矩阵 | **已吸收 / Coze Google Chrome 云端验证通过。** 保留 `providerId + modelId` 精确目录；管理员持久化、普通用户五入口、真实透明双图、真实视频和非法能力前置拒绝均已闭环 | 本地自动化、真实 PostgreSQL 专项、Coze exact SHA、Pear/APIMART 五入口、透明 Alpha、逐张回填、视频终态与零任务/零扣费拒绝证据均已保存；供应商后台独立计数未在本轮 Chrome 标签中直接读取 | P1 |
@@ -484,5 +484,6 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Coze 已精确运行 `main@3f0564429ae100448d17343b5d18ccf58b933e9d`；Google Chrome 复用既有项目页和预览页完成构建、重启与验收，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
 - 纯文本到空工作流、托管图片到空工作流、同一用户跨项目、向已有“智能对话导入”工作流追加、重复消费、刷新恢复、节点/画布来源追踪及既有“添加到画布”链路均通过；已执行流程没有 Console error/warning，完成后的导航 URL 不含原始媒体地址。
 - 畸形 `chatMessageId` 未触发工作区交接或素材转移请求，已有工作流未变化。
-- 仍未取得普通用户成功与他人项目拒绝、URL-only 未托管历史媒体、带既有连线及自定义视口工作流的完整云端证据。
-- **当前状态：本地候选完成 / 云端部分通过 / 未吸收。** 机器证据：`docs/testing/evidence/v588-chat-004-cloud-matrix-partial-2026-08-27.json`。下一步只关闭上述三个剩余边界，不重复已通过矩阵，不进入下一 V5.8.8 吸收项。
+- 已额外建立“新工作流、2 节点、1 连线、80%”受控基线；转交后为 4 节点、1 连线、80%，名称和原节点不变，刷新后完全保持。已有连线/视图边界关闭。
+- 仍未取得普通用户成功与他人项目拒绝、URL-only 未托管历史媒体的完整云端证据。
+- **当前状态：本地候选完成 / 云端部分通过 / 未吸收。** 机器证据：`docs/testing/evidence/v588-chat-004-cloud-matrix-partial-2026-08-27.json`。下一步只关闭授权和 URL-only 两组剩余边界，不重复已通过矩阵，不进入下一 V5.8.8 吸收项。

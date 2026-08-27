@@ -2651,3 +2651,14 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 本地回归 | 聚焦 `5/5`；Simple Chat `26 files / 493 tests` 全部通过，2 项 PostgreSQL 测试按无隔离库环境显式跳过；全仓非 PostgreSQL 运行 `549 files / 3912 tests` 通过、`21 files / 119 tests` 显式跳过。此前同候选真实 PostgreSQL 全仓 `570/570 files / 4030/4030 tests` 为 0 跳过。TypeScript、零错误 Lint、生产构建 `116/116`、保护基线 `38/38` 通过。 |
 | 云端回归 | Coze 精确运行 `main@483ee0cedfc45b57dbdd752d6f26bbed1dc8909c`，Build ID `lCTy9XVZ3fyjuefbZ08XN`、PID `3043`；三个健康路由与 11 个静态资源全部 200。Google Chrome 强制刷新后根容器为 `clientHeight=863`、`scrollHeight=863`、`scrollTop=0`，输入框聚焦后仍为 0；两个关闭菜单均为 `display:none`、高度与滚动高度均为 0。聊天模型菜单打开高度 248px；图像模型菜单可视高度 382px、内容滚动高度 1290px，二者均保持根容器 `scrollTop=0`。Console 无应用 error/warning，无原生弹窗。 |
 | 状态 | **已修复 / Coze 云端关闭。** 修复前后截图分别为 `docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-before-2026-08-27.png` 与 `docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-after-2026-08-27.png`。关闭范围仅为页面完整布局与两个模型菜单展示边界，不自动关闭多标签、跨账号或离页后助手任务续跑。 |
+
+### NODE-003 - 节点模式“预设工作流”按钮无可见结果（2026-08-27）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2：节点模式仍可手工编辑和保存，但预设工作流入口不可用。 |
+| 发现环境 | Coze `main@3f0564429ae100448d17343b5d18ccf58b933e9d`，Google Chrome“用户1”，节点模式。 |
+| 稳定复现 | 打开任意项目节点模式，点击顶部“预设”按钮；按钮获得焦点，但左侧仍显示节点分类和“搜索节点...”，没有出现预设模板列表；强制点击与 `Ctrl+P` 结果相同。 |
+| 白盒根因 | `node-editor.tsx` 的按钮切换 `sidebarTab` 为 `presets`，但左侧面板渲染始终直接输出 `groupedTemplates` 节点库，没有任何 `sidebarTab === 'presets'` 的渲染分支。 |
+| 影响边界 | 本轮使用 JSON 编辑器建立 2 节点、1 连线的受控工作流，CHAT-004 追加与持久化仍可继续验证；预设功能本身不得标记通过。 |
+| 状态 | **未修复 / 已登记。** 当前目标只关闭 CHAT-004 云端剩余边界；后续应先新增可见预设列表 RED 测试，再做最小接线修复，避免在本轮扩大范围。 |

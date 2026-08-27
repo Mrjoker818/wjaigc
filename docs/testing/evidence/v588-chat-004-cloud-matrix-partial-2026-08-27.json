@@ -30,8 +30,8 @@
     {
       "id": "CHAT-004-CLOUD-03",
       "name": "混合文本/图片追加到已有工作流",
-      "status": "PARTIAL",
-      "evidence": "已创建的智能对话导入工作流从 1 节点追加到 3 节点，名称保持，刷新后仍为 3 节点。尚未在带既有连线和自定义视口的普通工作流上证明连线及视口完全不变。"
+      "status": "PASS",
+      "evidence": "先建立新工作流基线：2 节点、1 连线、80% 视图，含 CHAT004 基线文本和 CHAT004 基线生成节点。追加托管图片消息后为 4 节点、1 连线、80%，名称及两个基线节点保持；刷新后仍完全一致。"
     },
     {
       "id": "CHAT-004-CLOUD-04",
@@ -86,13 +86,14 @@
     "v588-chat-004-text-empty-workflow-cloud-2026-08-27.png",
     "v588-chat-004-managed-image-empty-workflow-cloud-2026-08-27.png",
     "v588-chat-004-existing-workflow-append-cloud-2026-08-27.png",
+    "v588-chat-004-linked-workflow-preserved-cloud-2026-08-27.png",
     "v588-chat-004-source-trace-cloud-2026-08-27.png",
     "v588-chat-004-existing-canvas-transfer-cloud-2026-08-27.png",
     "v588-chat-004-canvas-source-refresh-cloud-2026-08-27.png"
   ],
   "summary": {
-    "pass": 8,
-    "partial": 1,
+    "pass": 9,
+    "partial": 0,
     "unverified": 2,
     "fail": 0,
     "absorptionStatus": "本地候选完成 / 云端部分通过 / 未吸收",
