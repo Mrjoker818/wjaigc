@@ -1,14 +1,18 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  claimCloudTaskLease,
   completeCloudTask,
   getCloudTaskForUser,
   type CloudTask,
+  type CloudTaskLease,
+  type CompleteCloudTaskOptions,
 } from '@/lib/cloud-task-storage';
 import { getOtherOperationCredits, InsufficientCreditsError } from '@/lib/credits';
 import {
   createPsdAnalysisRequestDigest,
   parsePsdAnalysisOutput,
+  PSD_ANALYSIS_DEADLINE_MS,
   PsdAnalysisError,
   type PsdAnalysisRequest,
   type PsdAnalysisResult,
@@ -37,8 +41,10 @@ import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import type { User } from '@/lib/user-types';
 
-const PSD_ANALYSIS_DEADLINE_MS = 45_000;
 const PSD_ANALYSIS_REUSE_POLL_MS = 150;
+const PSD_ANALYSIS_SETTLEMENT_BUDGET_MS = 1_000;
+const PSD_ANALYSIS_SETTLEMENT_ATTEMPT_TIMEOUT_MS = 900;
+const PSD_ANALYSIS_SETTLEMENT_RETRY_DELAYS_MS = [0, 100, 500] as const;
 
 const PSD_ANALYSIS_PROMPT = `Analyze this image for editable PSD decomposition. Return only one JSON object with:
 - backgroundColor: [r,g,b]
@@ -65,6 +71,9 @@ export interface PsdAnalysisTaskRecord {
   requestDigest?: string;
   providerId?: string;
   model?: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: number;
+  attemptCount?: number;
 }
 
 export interface PsdAnalysisExecutionResult {
@@ -87,10 +96,21 @@ export interface PsdAnalysisServiceDependencies {
   invokeVision: (input: InvokePsdVisionCandidatesInput) => Promise<PsdVisionInvocationResult>;
   createTask: (input: CreateBillableTaskInput) => Promise<CreateBillableTaskResult>;
   getTask: (taskId: string, userId: string) => Promise<PsdAnalysisTaskRecord | null>;
-  completeTask: (taskId: string, result: Record<string, unknown>) => Promise<boolean>;
+  completeTask: (
+    taskId: string,
+    result: Record<string, unknown>,
+    options?: CompleteCloudTaskOptions,
+  ) => Promise<boolean>;
+  claimLease: (
+    taskId: string,
+    owner: string,
+    ttlMs: number,
+    now?: number,
+  ) => Promise<CloudTaskLease | null>;
   settleFailed: (input: SettleFailedTaskInput) => Promise<SettleFailedTaskResult>;
   creditCost: number;
   createTaskId: () => string;
+  createLeaseOwner: () => string;
   now: () => number;
   wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   platformModel?: string;
@@ -100,7 +120,9 @@ export interface ExecutePsdAnalysisInput {
   request: PsdAnalysisRequest;
   user: User;
   requestId: string;
+  scheduleBackground: (work: () => Promise<void>) => void;
   requestSignal?: AbortSignal;
+  deadlineAt?: number;
   dependencies?: Partial<PsdAnalysisServiceDependencies>;
 }
 
@@ -140,37 +162,89 @@ function defaultDependencies(): PsdAnalysisServiceDependencies {
     createTask: createBillableTask,
     getTask: getCloudTaskForUser,
     completeTask: completeCloudTask,
+    claimLease: claimCloudTaskLease,
     settleFailed: settleFailedTask,
     creditCost: getOtherOperationCredits('segment'),
     createTaskId: () => `psd_analysis_${randomUUID()}`,
+    createLeaseOwner: () => `psd-analysis-worker-${randomUUID()}`,
     now: Date.now,
     wait: waitWithAbort,
-    platformModel: process.env.PSD_ANALYSIS_PLATFORM_MODEL?.trim() || undefined,
   };
 }
 
-function createLinkedDeadline(source?: AbortSignal): {
-  signal: AbortSignal;
+function createLinkedDeadline(source?: AbortSignal, requestedDeadlineAt?: number): {
+  workSignal: AbortSignal;
+  totalSignal: AbortSignal;
   timedOut: () => boolean;
+  workDeadlineAt: number;
+  totalDeadlineAt: number;
   dispose: () => void;
 } {
-  const linked = new AbortController();
-  let deadlineExpired = false;
-  const timer = setTimeout(() => {
-    deadlineExpired = true;
-    linked.abort(new Error('PSD_ANALYSIS_DEADLINE'));
-  }, PSD_ANALYSIS_DEADLINE_MS);
-  const onSourceAbort = () => linked.abort(source?.reason);
+  const total = new AbortController();
+  const work = new AbortController();
+  let workDeadlineExpired = false;
+  const totalDeadlineAt = requestedDeadlineAt ?? Date.now() + PSD_ANALYSIS_DEADLINE_MS;
+  const workDeadlineAt = Math.max(
+    Date.now(),
+    totalDeadlineAt - PSD_ANALYSIS_SETTLEMENT_BUDGET_MS,
+  );
+  const totalTimer = setTimeout(() => {
+    total.abort(new PsdAnalysisError(
+      'PSD_ANALYSIS_TIMEOUT',
+      'PSD 分析超过 45 秒总截止时间',
+      504,
+      true,
+    ));
+  }, Math.max(0, totalDeadlineAt - Date.now()));
+  const workTimer = setTimeout(() => {
+    workDeadlineExpired = true;
+    work.abort(new Error('PSD_ANALYSIS_WORK_DEADLINE'));
+  }, Math.max(0, workDeadlineAt - Date.now()));
+  const onTotalAbort = () => {
+    if (!work.signal.aborted) work.abort(total.signal.reason);
+  };
+  const onSourceAbort = () => {
+    if (!total.signal.aborted) total.abort(source?.reason);
+  };
+  total.signal.addEventListener('abort', onTotalAbort, { once: true });
   source?.addEventListener('abort', onSourceAbort, { once: true });
   if (source?.aborted) onSourceAbort();
   return {
-    signal: linked.signal,
-    timedOut: () => deadlineExpired,
+    workSignal: work.signal,
+    totalSignal: total.signal,
+    timedOut: () => workDeadlineExpired || (
+      total.signal.reason instanceof PsdAnalysisError
+      && total.signal.reason.code === 'PSD_ANALYSIS_TIMEOUT'
+    ),
+    workDeadlineAt,
+    totalDeadlineAt,
     dispose: () => {
-      clearTimeout(timer);
+      clearTimeout(workTimer);
+      clearTimeout(totalTimer);
+      total.signal.removeEventListener('abort', onTotalAbort);
       source?.removeEventListener('abort', onSourceAbort);
     },
   };
+}
+
+function awaitWithSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => reject(signal.reason);
+    signal.addEventListener('abort', aborted, { once: true });
+    operation.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', aborted);
+    });
+  });
+}
+
+function awaitWithTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('PSD_ANALYSIS_SETTLEMENT_ATTEMPT_TIMEOUT'));
+    }, timeoutMs);
+    operation.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -195,9 +269,14 @@ function terminalError(task: PsdAnalysisTaskRecord): PsdAnalysisError {
         : 502;
   return new PsdAnalysisError(
     code,
-    task.error || 'PSD 分析任务失败',
+    task.status === 'timeout'
+      ? 'PSD 分析超过 45 秒总截止时间'
+      : task.status === 'cancelled'
+        ? 'PSD 分析请求已取消'
+        : 'PSD 分析任务失败',
     status,
     result.errorRetryable === true,
+    { taskId: task.id },
   );
 }
 
@@ -208,6 +287,7 @@ function replayCompletedTask(task: PsdAnalysisTaskRecord): PsdAnalysisExecutionR
       'PSD 分析任务结果损坏或不完整',
       502,
       false,
+      { taskId: task.id },
     );
   }
   const providerId = typeof task.result.providerId === 'string' ? task.result.providerId : '';
@@ -219,9 +299,24 @@ function replayCompletedTask(task: PsdAnalysisTaskRecord): PsdAnalysisExecutionR
       'PSD 分析任务缺少执行身份',
       502,
       false,
+      { taskId: task.id },
     );
   }
-  const analysis = parsePsdAnalysisOutput(JSON.stringify(task.result.analysis));
+  let analysis: PsdAnalysisResult;
+  try {
+    analysis = parsePsdAnalysisOutput(JSON.stringify(task.result.analysis));
+  } catch (error) {
+    const normalized = error instanceof PsdAnalysisError
+      ? error
+      : new PsdAnalysisError(
+          'PSD_ANALYSIS_TASK_RESULT_INVALID',
+          'PSD 分析任务结果无法解析',
+          502,
+          false,
+          { cause: error },
+        );
+    throw withTaskId(normalized, task.id);
+  }
   const fallbackReason = typeof task.result.fallbackReason === 'string'
     ? task.result.fallbackReason
     : undefined;
@@ -245,10 +340,17 @@ function replayTerminalTask(task: PsdAnalysisTaskRecord): PsdAnalysisExecutionRe
     `PSD 分析任务处于不可重放状态：${task.status}`,
     409,
     true,
+    { taskId: task.id },
   );
 }
 
 function abortError(timedOut: boolean, cause?: unknown): PsdAnalysisError {
+  if (
+    cause instanceof PsdAnalysisError
+    && (cause.code === 'PSD_ANALYSIS_TIMEOUT' || cause.code === 'PSD_ANALYSIS_CANCELLED')
+  ) {
+    return cause;
+  }
   return timedOut
     ? new PsdAnalysisError(
         'PSD_ANALYSIS_TIMEOUT',
@@ -275,49 +377,193 @@ function normalizeExecutionError(
   if (error instanceof PsdAnalysisError) return error;
   return new PsdAnalysisError(
     'PSD_ANALYSIS_FAILED',
-    error instanceof Error ? error.message : 'PSD 分析执行失败',
+    'PSD 分析执行失败',
     500,
-    false,
+    true,
     { cause: error },
   );
 }
 
-async function waitForTerminalTask(
+function withTaskId(error: PsdAnalysisError, taskId: string): PsdAnalysisError {
+  if (error.taskId === taskId) return error;
+  return new PsdAnalysisError(
+    error.code,
+    error.message,
+    error.status,
+    error.retryable,
+    { cause: error, taskId },
+  );
+}
+
+type ReusedTaskResolution =
+  | { kind: 'terminal'; result: PsdAnalysisExecutionResult }
+  | { kind: 'owner'; task: PsdAnalysisTaskRecord; lease: CloudTaskLease };
+
+function isActiveTask(task: PsdAnalysisTaskRecord): boolean {
+  return task.status === 'created'
+    || task.status === 'queued'
+    || task.status === 'pending'
+    || task.status === 'submitting'
+    || task.status === 'processing'
+    || task.status === 'uploading';
+}
+
+async function resolveReusedTask(
   task: PsdAnalysisTaskRecord,
   userId: string,
+  leaseOwner: string,
+  workDeadlineAt: number,
+  requestId: string,
+  requestDigest: string,
+  scheduleBackground: ExecutePsdAnalysisInput['scheduleBackground'],
   signal: AbortSignal,
   timedOut: () => boolean,
   dependencies: PsdAnalysisServiceDependencies,
-): Promise<PsdAnalysisExecutionResult> {
+): Promise<ReusedTaskResolution> {
   let current = task;
-  while (
-    current.status === 'created'
-    || current.status === 'queued'
-    || current.status === 'pending'
-    || current.status === 'submitting'
-    || current.status === 'processing'
-    || current.status === 'uploading'
-  ) {
-    if (signal.aborted) throw abortError(timedOut(), signal.reason);
-    await dependencies.wait(PSD_ANALYSIS_REUSE_POLL_MS, signal);
-    const refreshed = await dependencies.getTask(current.id, userId);
+  while (isActiveTask(current)) {
+    if (signal.aborted) throw withTaskId(abortError(timedOut(), signal.reason), current.id);
+    const leaseOperation = dependencies.claimLease(
+      current.id,
+      leaseOwner,
+      Math.max(1_000, workDeadlineAt - Date.now()),
+    );
+    let lease: CloudTaskLease | null;
+    try {
+      lease = await awaitWithSignal(
+        leaseOperation,
+        signal,
+      );
+    } catch (error) {
+      const interrupted = withTaskId(
+        normalizeExecutionError(error, signal, timedOut()),
+        current.id,
+      );
+      if (signal.aborted) {
+        const delayedTaskId = current.id;
+        scheduleBackground(async () => {
+          try {
+            const delayedLease = await leaseOperation;
+            if (!delayedLease) return;
+            await retryFailedSettlement(
+              dependencies,
+              buildFailureSettlementInput({
+                taskId: delayedTaskId,
+                leaseOwner: delayedLease.owner,
+                error: interrupted,
+                requestId,
+                requestDigest,
+              }),
+            );
+          } catch (cleanupError) {
+            console.error('[psd-analysis] delayed lease cleanup failed', {
+              taskId: delayedTaskId,
+              error: cleanupError instanceof Error ? cleanupError.name : 'UnknownError',
+            });
+          }
+        });
+      }
+      throw interrupted;
+    }
+    if (lease) {
+      return {
+        kind: 'owner',
+        task: {
+          ...current,
+          leaseOwner: lease.owner,
+          leaseExpiresAt: lease.expiresAt,
+          attemptCount: lease.attemptCount,
+        },
+        lease,
+      };
+    }
+    try {
+      await dependencies.wait(PSD_ANALYSIS_REUSE_POLL_MS, signal);
+    } catch (error) {
+      throw withTaskId(
+        normalizeExecutionError(error, signal, timedOut()),
+        current.id,
+      );
+    }
+    let refreshed: PsdAnalysisTaskRecord | null;
+    try {
+      refreshed = await awaitWithSignal(dependencies.getTask(current.id, userId), signal);
+    } catch (error) {
+      const normalized = normalizeExecutionError(error, signal, timedOut());
+      throw withTaskId(normalized, current.id);
+    }
     if (!refreshed) {
       throw new PsdAnalysisError(
         'PSD_ANALYSIS_TASK_NOT_FOUND',
         'PSD 分析持久任务不存在',
         404,
         false,
+        { taskId: current.id },
       );
     }
     current = refreshed;
   }
-  return replayTerminalTask(current);
+  return { kind: 'terminal', result: replayTerminalTask(current) };
 }
 
 function failureStatus(error: PsdAnalysisError): 'failed' | 'timeout' | 'cancelled' {
   if (error.code === 'PSD_ANALYSIS_TIMEOUT') return 'timeout';
   if (error.code === 'PSD_ANALYSIS_CANCELLED') return 'cancelled';
   return 'failed';
+}
+
+function buildFailureSettlementInput(input: {
+  taskId: string;
+  leaseOwner: string;
+  error: PsdAnalysisError;
+  requestId: string;
+  requestDigest: string;
+}): SettleFailedTaskInput {
+  const status = failureStatus(input.error);
+  return {
+    taskId: input.taskId,
+    status,
+    leaseOwner: input.leaseOwner,
+    lockTimeoutMs: 750,
+    statementTimeoutMs: PSD_ANALYSIS_SETTLEMENT_ATTEMPT_TIMEOUT_MS,
+    error: {
+      code: input.error.code,
+      message: input.error.message,
+      retryable: input.error.retryable,
+    },
+    result: {
+      requestId: input.requestId,
+      errorCode: input.error.code,
+      errorStatus: input.error.status,
+      errorRetryable: input.error.retryable,
+    },
+    terminalIdentity: {
+      eventId: `${input.taskId}:${status}:${input.requestDigest.slice(0, 16)}`,
+      requestDigest: input.requestDigest,
+      eventType: `psd-analysis.${status}`,
+    },
+  };
+}
+
+async function retryFailedSettlement(
+  dependencies: PsdAnalysisServiceDependencies,
+  input: SettleFailedTaskInput,
+): Promise<SettleFailedTaskResult> {
+  let lastError: unknown;
+  for (const delayMs of PSD_ANALYSIS_SETTLEMENT_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+    try {
+      return await awaitWithTimeout(
+        dependencies.settleFailed(input),
+        PSD_ANALYSIS_SETTLEMENT_ATTEMPT_TIMEOUT_MS,
+      );
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 export async function executePsdAnalysis(
@@ -328,24 +574,17 @@ export async function executePsdAnalysis(
     ...defaults,
     ...input.dependencies,
   };
-  const deadline = createLinkedDeadline(input.requestSignal);
+  const deadline = createLinkedDeadline(input.requestSignal, input.deadlineAt);
   let ownerTask: PsdAnalysisTaskRecord | null = null;
+  let ownerLease = '';
   let requestDigest = '';
 
   try {
-    const media = await dependencies.resolveMedia({
-      request: input.request,
-      actorUserId: input.user.id,
-      signal: deadline.signal,
-    });
-    const providers = await dependencies.loadProviders();
-    const candidates = dependencies.buildCandidates({
-      user: input.user,
-      providers,
-      providerId: input.request.providerId,
-      model: input.request.model,
-      platformModel: dependencies.platformModel,
-    });
+    const media = await awaitWithSignal(dependencies.resolveMedia({
+        request: input.request,
+        actorUserId: input.user.id,
+        signal: deadline.workSignal,
+      }), deadline.workSignal);
     requestDigest = createPsdAnalysisRequestDigest({
       imageSha256: media.sha256,
       sourceVersionId: media.sourceVersionId,
@@ -353,18 +592,23 @@ export async function executePsdAnalysis(
       model: input.request.model,
     });
     const now = dependencies.now();
-    const claim = await dependencies.createTask({
+    const taskId = dependencies.createTaskId();
+    const initialLeaseOwner = dependencies.createLeaseOwner();
+    const createOperation = dependencies.createTask({
       userId: input.user.id,
       idempotencyKey: input.request.idempotencyKey,
       requestDigest,
       creditCost: dependencies.creditCost,
       task: {
-        id: dependencies.createTaskId(),
+        id: taskId,
         type: 'psd-analysis',
         status: 'processing',
         progress: 5,
-        providerId: candidates[0]?.providerId,
-        model: candidates[0]?.model,
+        providerId: input.request.providerId,
+        model: input.request.model,
+        leaseOwner: initialLeaseOwner,
+        leaseExpiresAt: deadline.workDeadlineAt,
+        attemptCount: 1,
         result: {
           schema: 'psd-analysis-task.v1',
           imageSha256: media.sha256,
@@ -374,26 +618,92 @@ export async function executePsdAnalysis(
         updatedAt: now,
       },
     });
+    let claim: CreateBillableTaskResult;
+    try {
+      claim = await awaitWithSignal(createOperation, deadline.workSignal);
+    } catch (error) {
+      if (deadline.workSignal.aborted) {
+        const interrupted = normalizeExecutionError(
+          error,
+          deadline.workSignal,
+          deadline.timedOut(),
+        );
+        input.scheduleBackground(async () => {
+          try {
+            const outcome = await createOperation;
+            if (outcome.reused) return;
+            await retryFailedSettlement(
+              dependencies,
+              buildFailureSettlementInput({
+                taskId: outcome.task.id,
+                leaseOwner: initialLeaseOwner,
+                error: interrupted,
+                requestId: input.requestId,
+                requestDigest,
+              }),
+            );
+          } catch (cleanupError) {
+            console.error('[psd-analysis] delayed admission cleanup failed', {
+              taskId,
+              error: cleanupError instanceof Error ? cleanupError.name : 'UnknownError',
+            });
+          }
+        });
+        throw interrupted;
+      }
+      throw error;
+    }
 
     if (claim.reused) {
-      return await waitForTerminalTask(
+      if (
+        claim.task.status === 'completed'
+        || claim.task.status === 'failed'
+        || claim.task.status === 'timeout'
+        || claim.task.status === 'cancelled'
+      ) {
+        return replayTerminalTask(claim.task);
+      }
+      const reused = await resolveReusedTask(
         claim.task,
         input.user.id,
-        deadline.signal,
+        initialLeaseOwner,
+        deadline.workDeadlineAt,
+        input.requestId,
+        requestDigest,
+        input.scheduleBackground,
+        deadline.workSignal,
         deadline.timedOut,
         dependencies,
       );
+      if (reused.kind === 'terminal') {
+        return reused.result;
+      }
+      ownerLease = reused.lease.owner;
+      ownerTask = reused.task;
+    } else {
+      ownerTask = claim.task;
+      ownerLease = initialLeaseOwner;
     }
 
-    ownerTask = claim.task;
-    const invocation = await dependencies.invokeVision({
+    const providers = await awaitWithSignal(dependencies.loadProviders(), deadline.workSignal);
+    const candidates = dependencies.buildCandidates({
+      user: input.user,
+      providers,
+      providerId: input.request.providerId,
+      model: input.request.model,
+      platformModel: dependencies.platformModel,
+    });
+    const invocation = await awaitWithSignal(dependencies.invokeVision({
       candidates,
       exactSelection: Boolean(input.request.providerId && input.request.model),
       dataUrl: media.dataUrl,
       prompt: PSD_ANALYSIS_PROMPT,
-      signal: deadline.signal,
-      deadlineMs: PSD_ANALYSIS_DEADLINE_MS,
-    });
+      signal: deadline.workSignal,
+      deadlineMs: Math.max(1, deadline.workDeadlineAt - Date.now()),
+    }), deadline.workSignal);
+    if (deadline.workSignal.aborted) {
+      throw abortError(deadline.timedOut(), deadline.workSignal.reason);
+    }
     const parsed = parsePsdAnalysisOutput(invocation.content);
     const persisted: PersistedPsdAnalysisResult = {
       schema: 'psd-analysis-result.v1',
@@ -404,15 +714,22 @@ export async function executePsdAnalysis(
       ...(invocation.fallbackReason ? { fallbackReason: invocation.fallbackReason } : {}),
       analysis: parsed,
     };
-    const committed = await dependencies.completeTask(ownerTask.id, persisted);
+    const committed = await awaitWithSignal(dependencies.completeTask(ownerTask.id, persisted, {
+      leaseOwner: ownerLease,
+      deadlineAt: deadline.workDeadlineAt,
+    }), deadline.workSignal);
     if (!committed) {
-      const winner = await dependencies.getTask(ownerTask.id, input.user.id);
+      const winner = await awaitWithSignal(
+        dependencies.getTask(ownerTask.id, input.user.id),
+        deadline.workSignal,
+      );
       if (!winner) {
         throw new PsdAnalysisError(
           'PSD_ANALYSIS_TASK_NOT_FOUND',
           'PSD 分析任务完成时持久记录不存在',
           500,
           false,
+          { taskId: ownerTask.id },
         );
       }
       return replayTerminalTask(winner);
@@ -432,33 +749,89 @@ export async function executePsdAnalysis(
     ) {
       throw error;
     }
-    const normalized = normalizeExecutionError(
+    let normalized = normalizeExecutionError(
       error,
-      deadline.signal,
+      deadline.workSignal,
       deadline.timedOut(),
     );
     if (ownerTask) {
-      const status = failureStatus(normalized);
-      await dependencies.settleFailed({
+      normalized = withTaskId(normalized, ownerTask.id);
+      const settlementInput = buildFailureSettlementInput({
         taskId: ownerTask.id,
-        status,
-        error: {
-          code: normalized.code,
-          message: normalized.message,
-          retryable: normalized.retryable,
-        },
-        result: {
-          requestId: input.requestId,
-          errorCode: normalized.code,
-          errorStatus: normalized.status,
-          errorRetryable: normalized.retryable,
-        },
-        terminalIdentity: {
-          eventId: `${ownerTask.id}:${status}:${requestDigest.slice(0, 16)}`,
-          requestDigest,
-          eventType: `psd-analysis.${status}`,
-        },
+        leaseOwner: ownerLease,
+        error: normalized,
+        requestId: input.requestId,
+        requestDigest,
       });
+      const settlementOperation = dependencies.settleFailed(settlementInput);
+      let settlement: SettleFailedTaskResult | null = null;
+      try {
+        settlement = await awaitWithSignal(settlementOperation, deadline.totalSignal);
+      } catch (settlementError) {
+        if (deadline.totalSignal.aborted) {
+          input.scheduleBackground(async () => {
+            try {
+              await awaitWithTimeout(
+                settlementOperation,
+                PSD_ANALYSIS_SETTLEMENT_ATTEMPT_TIMEOUT_MS,
+              );
+            } catch {
+              try {
+                await retryFailedSettlement(dependencies, settlementInput);
+              } catch (retryError) {
+                console.error('[psd-analysis] background settlement failed', {
+                  taskId: ownerTask?.id,
+                  error: retryError instanceof Error ? retryError.name : 'UnknownError',
+                });
+              }
+            }
+          });
+          throw normalized;
+        }
+        input.scheduleBackground(async () => {
+          try {
+            await retryFailedSettlement(dependencies, settlementInput);
+          } catch (retryError) {
+            console.error('[psd-analysis] settlement retry failed', {
+              taskId: ownerTask?.id,
+              error: retryError instanceof Error ? retryError.name : 'UnknownError',
+            });
+          }
+        });
+        throw new PsdAnalysisError(
+          'PSD_ANALYSIS_SETTLEMENT_FAILED',
+          'PSD 分析任务结算失败，请使用任务编号重试查询',
+          503,
+          true,
+          { cause: settlementError, taskId: ownerTask.id },
+        );
+      }
+      if (settlement && !settlement.transitioned) {
+        let winner: PsdAnalysisTaskRecord | null;
+        try {
+          winner = await awaitWithSignal(
+            dependencies.getTask(ownerTask.id, input.user.id),
+            deadline.totalSignal,
+          );
+        } catch (winnerError) {
+          throw withTaskId(
+            normalizeExecutionError(
+              winnerError,
+              deadline.totalSignal,
+              deadline.timedOut(),
+            ),
+            ownerTask.id,
+          );
+        }
+        if (winner && (
+          winner.status === 'completed'
+          || winner.status === 'failed'
+          || winner.status === 'timeout'
+          || winner.status === 'cancelled'
+        )) {
+          return replayTerminalTask(winner);
+        }
+      }
     }
     throw normalized;
   } finally {

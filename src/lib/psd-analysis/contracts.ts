@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 export const PSD_ANALYSIS_MAX_BODY_BYTES = 28 * 1024 * 1024;
 export const PSD_ANALYSIS_MAX_RESPONSE_BYTES = 256 * 1024;
+export const PSD_ANALYSIS_DEADLINE_MS = 45_000;
 
 const REQUEST_FIELDS = new Set([
   'image',
@@ -66,15 +67,18 @@ export interface PsdAnalysisRequestDigestInput {
 }
 
 export class PsdAnalysisError extends Error {
+  readonly taskId?: string;
+
   constructor(
     readonly code: string,
     message: string,
     readonly status: number,
     readonly retryable = false,
-    options?: ErrorOptions,
+    options?: ErrorOptions & { taskId?: string },
   ) {
     super(message, options);
     this.name = 'PsdAnalysisError';
+    this.taskId = options?.taskId;
   }
 }
 
@@ -98,7 +102,33 @@ function optionalString(
   return normalized;
 }
 
-async function readLimitedRequestBody(request: Request): Promise<Uint8Array> {
+function abortReason(signal: AbortSignal): PsdAnalysisError {
+  if (signal.reason instanceof PsdAnalysisError) return signal.reason;
+  return new PsdAnalysisError(
+    'PSD_ANALYSIS_CANCELLED',
+    'PSD 分析请求已取消',
+    499,
+    false,
+    { cause: signal.reason },
+  );
+}
+
+function readWithAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => reject(abortReason(signal));
+    signal.addEventListener('abort', aborted, { once: true });
+    operation.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', aborted);
+    });
+  });
+}
+
+async function readLimitedRequestBody(
+  request: Request,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
   const declaredLength = Number(request.headers.get('content-length') || 0);
   if (Number.isFinite(declaredLength) && declaredLength > PSD_ANALYSIS_MAX_BODY_BYTES) {
     throw new PsdAnalysisError(
@@ -115,7 +145,7 @@ async function readLimitedRequestBody(request: Request): Promise<Uint8Array> {
   let totalBytes = 0;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithAbort(reader.read(), signal);
       if (done) break;
       totalBytes += value.byteLength;
       if (totalBytes > PSD_ANALYSIS_MAX_BODY_BYTES) {
@@ -130,6 +160,7 @@ async function readLimitedRequestBody(request: Request): Promise<Uint8Array> {
       chunks.push(value);
     }
   } finally {
+    if (signal?.aborted) await reader.cancel(signal.reason).catch(() => undefined);
     reader.releaseLock();
   }
 
@@ -142,7 +173,10 @@ async function readLimitedRequestBody(request: Request): Promise<Uint8Array> {
   return bytes;
 }
 
-export async function readPsdAnalysisRequest(request: Request): Promise<PsdAnalysisRequest> {
+export async function readPsdAnalysisRequest(
+  request: Request,
+  signal?: AbortSignal,
+): Promise<PsdAnalysisRequest> {
   const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? '';
   if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
     throw new PsdAnalysisError(
@@ -153,7 +187,7 @@ export async function readPsdAnalysisRequest(request: Request): Promise<PsdAnaly
     );
   }
 
-  const bytes = await readLimitedRequestBody(request);
+  const bytes = await readLimitedRequestBody(request, signal);
   let value: unknown;
   try {
     value = JSON.parse(new TextDecoder().decode(bytes)) as unknown;

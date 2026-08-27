@@ -7,6 +7,7 @@ vi.mock('@/lib/db-client', () => ({ execSql }));
 import {
   chargeCloudTaskCredits,
   claimCloudTaskLease,
+  completeCloudTask,
   createCloudTask,
   deferCloudTaskRecovery,
   getCloudTaskById,
@@ -559,6 +560,25 @@ describe('cloud-task-storage', () => {
     expect(update?.[0]).toContain('lease_expires_at < $');
     expect(update?.[1]).toEqual(expect.arrayContaining(['task-lease', 'worker-a', 5000, 1000]));
     expect(lease).toEqual({ taskId: 'task-lease', owner: 'worker-a', expiresAt: 5000, attemptCount: 2 });
+  });
+
+  it('guards completion with the active lease and database wall-clock deadline', async () => {
+    execSql.mockResolvedValueOnce({ rows: [{ id: 'task-guarded' }], rowCount: 1 });
+
+    await expect(completeCloudTask('task-guarded', { done: true }, {
+      leaseOwner: 'worker-a',
+      deadlineAt: 50_000,
+    })).resolves.toBe(true);
+
+    const update = execSql.mock.calls.find(([sql]) => String(sql).includes("status = 'processing'"));
+    expect(update?.[0]).toContain('lease_owner = $4');
+    expect(update?.[0]).toContain('clock_timestamp()');
+    expect(update?.[0]).toContain('lease_expires_at');
+    expect(update?.[1]).toEqual(expect.arrayContaining([
+      'task-guarded',
+      'worker-a',
+      50_000,
+    ]));
   });
 
   it('does not claim a task when another worker holds a live lease', async () => {

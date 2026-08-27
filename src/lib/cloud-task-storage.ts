@@ -181,6 +181,14 @@ export interface SettleFailedCloudTaskInput {
   result?: Record<string, unknown>;
   expectedRevision?: number;
   terminalIdentity?: TaskTerminalIdentity;
+  leaseOwner?: string;
+  lockTimeoutMs?: number;
+  statementTimeoutMs?: number;
+}
+
+export interface CompleteCloudTaskOptions {
+  leaseOwner?: string;
+  deadlineAt?: number;
 }
 
 export interface SettleFailedCloudTaskResult {
@@ -499,6 +507,20 @@ export async function settleFailedCloudTask(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (input.lockTimeoutMs !== undefined) {
+      const timeoutMs = Math.max(1, Math.min(60_000, Math.floor(input.lockTimeoutMs)));
+      await client.query(
+        "SELECT set_config('lock_timeout', $1, true)",
+        [`${timeoutMs}ms`],
+      );
+    }
+    if (input.statementTimeoutMs !== undefined) {
+      const timeoutMs = Math.max(1, Math.min(60_000, Math.floor(input.statementTimeoutMs)));
+      await client.query(
+        "SELECT set_config('statement_timeout', $1, true)",
+        [`${timeoutMs}ms`],
+      );
+    }
     const selected = await client.query(
       'SELECT * FROM cloud_tasks WHERE id = $1 FOR UPDATE',
       [input.taskId],
@@ -509,6 +531,14 @@ export async function settleFailedCloudTask(
     }
 
     const currentStatus = normalizeDurableTaskStatus(String(row.status));
+    if (input.leaseOwner && String(row.lease_owner || '') !== input.leaseOwner) {
+      await client.query('COMMIT');
+      return {
+        task: rowToPersistedCloudTask(row),
+        transitioned: false,
+        refunded: false,
+      };
+    }
     if (
       input.expectedRevision !== undefined
       && Number(row.revision || 0) !== input.expectedRevision
@@ -797,9 +827,12 @@ export async function transitionCloudTaskStatus(
 export async function completeCloudTask(
   taskId: string,
   result: Record<string, unknown>,
-  leaseOwner?: string,
+  leaseOwnerOrOptions?: string | CompleteCloudTaskOptions,
 ): Promise<boolean> {
   await ensureCloudTaskTables();
+  const options = typeof leaseOwnerOrOptions === 'string'
+    ? { leaseOwner: leaseOwnerOrOptions }
+    : leaseOwnerOrOptions ?? {};
   const completed = await execSql(`
     UPDATE cloud_tasks
     SET status = 'completed',
@@ -813,8 +846,21 @@ export async function completeCloudTask(
         updated_at = $3
     WHERE id = $1 AND status = 'processing'
       AND ($4::text IS NULL OR lease_owner = $4)
+      AND (
+        $5::bigint IS NULL
+        OR (
+          (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint <= $5
+          AND lease_expires_at >= (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint
+        )
+      )
     RETURNING id
-  `, [taskId, JSON.stringify(result), Date.now(), leaseOwner || null]);
+  `, [
+    taskId,
+    JSON.stringify(result),
+    Date.now(),
+    options.leaseOwner || null,
+    options.deadlineAt ?? null,
+  ]);
   return (completed.rowCount ?? completed.rows.length) > 0;
 }
 

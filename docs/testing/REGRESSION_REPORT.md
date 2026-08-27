@@ -1900,12 +1900,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 
 | 门禁 | 结果 | 证据 |
 |---|---|---|
-| PSD 专项与关联安全/账务测试 | 通过 | `10` 个文件、`100` 项通过；PostgreSQL 并发专项 `1` 项因缺少隔离库明确跳过 |
+| PSD 专项与关联安全/账务测试 | 通过 | `8` 个核心文件、`131` 项通过；PostgreSQL 并发专项因缺少隔离库明确跳过 |
 | TypeScript | 通过 | `next typegen && tsc -p tsconfig.json` 退出码 0 |
-| 全仓 ESLint | 有条件通过 | `0 errors / 963 warnings`；均为历史存量 |
-| 本次 13 个修改/新增文件 ESLint | 通过 | `--max-warnings 0`，零错误、零警告 |
-| 全仓 Vitest | 通过 | `565` 文件通过、`21` 跳过；`4046` 项通过、`119` 跳过；零失败 |
+| 全仓 ESLint | 有条件通过 | `0 errors / 964 warnings`；均为历史存量 |
+| 本次修改/新增 TypeScript 文件 ESLint | 通过 | `--max-warnings 0`，零错误、零警告 |
+| 全仓 Vitest | 通过 | `565` 文件通过、`21` 跳过；`4068` 项通过、`119` 跳过；零失败 |
 | 生产构建 | 通过 | Next.js 16.2.11 webpack 编译、TypeScript、117 个静态页生成和构建追踪完成 |
 | 差异完整性 | 通过 | `git diff --check` 无空白错误；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化 |
 
-回归范围覆盖请求流体积、非法字段、幂等键、data URL、跨用户资产、符号链接逃逸、MIME/字节/像素、模型授权、显式不回退、自动候选去重、总截止、JSON/SSE 预算、持久任务复用、终态重放、失败结算、鉴权顺序、错误码和客户端单请求。当前不能把本地结果扩大为真实 PostgreSQL 或 Coze 通过。
+回归范围覆盖请求流体积、非法字段、幂等键、data URL、跨用户资产、符号链接逃逸、MIME/字节/像素、模型授权、显式不回退、自动候选去重、总截止、JSON/SSE 预算、持久任务复用、租约过期接管、晚到租约清理、终态重放、结算重试、鉴权顺序、错误码和客户端单请求。八轮独立复审最终无 Critical/Important。当前不能把本地结果扩大为真实 PostgreSQL 或 Coze 通过。

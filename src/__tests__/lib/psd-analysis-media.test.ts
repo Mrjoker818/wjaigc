@@ -13,6 +13,7 @@ vi.mock('node:fs/promises', () => ({
 }));
 
 import { resolvePsdAnalysisMedia } from '@/lib/psd-analysis/media';
+import { AssetServiceError } from '@/lib/asset-core/service';
 import { loadSafeImageInput } from '@/lib/safe-image-input';
 
 const PNG_1X1 = Buffer.from(
@@ -87,7 +88,9 @@ describe('PSD analysis media boundary', () => {
   });
 
   it('maps a missing or cross-user asset reference to a stable forbidden error', async () => {
-    const resolveAssetReference = vi.fn().mockRejectedValue(new Error('ASSET_NOT_FOUND'));
+    const resolveAssetReference = vi.fn().mockRejectedValue(
+      new AssetServiceError('ASSET_NOT_FOUND'),
+    );
 
     await expect(resolvePsdAnalysisMedia({
       request: {
@@ -103,6 +106,30 @@ describe('PSD analysis media boundary', () => {
     })).rejects.toMatchObject({
       code: 'PSD_ANALYSIS_MEDIA_FORBIDDEN',
       status: 403,
+    });
+  });
+
+  it('keeps asset storage failures retryable instead of disguising them as authorization failures', async () => {
+    const resolveAssetReference = vi.fn().mockRejectedValue(
+      new Error('database connection reset by peer'),
+    );
+
+    await expect(resolvePsdAnalysisMedia({
+      request: {
+        projectId: 'project-a',
+        sourceVersionId: 'version-a',
+        idempotencyKey: 'psd-analysis-request-1',
+      },
+      actorUserId: 'user-a',
+      dependencies: {
+        resolveAssetReference,
+        loadImage: vi.fn(),
+      },
+    })).rejects.toMatchObject({
+      code: 'PSD_ANALYSIS_MEDIA_UNAVAILABLE',
+      status: 503,
+      retryable: true,
+      message: 'PSD 分析资产服务暂时不可用',
     });
   });
 

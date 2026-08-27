@@ -45,6 +45,9 @@ export interface SettleFailedTaskInput {
   result?: Record<string, unknown>;
   expectedRevision?: number;
   terminalIdentity?: TaskTerminalIdentity;
+  leaseOwner?: string;
+  lockTimeoutMs?: number;
+  statementTimeoutMs?: number;
 }
 
 export interface SettleFailedTaskResult {

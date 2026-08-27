@@ -170,6 +170,8 @@ describe('task billing service', () => {
       error: { code: 'MODEL_TIMEOUT', message: 'Provider timed out' },
       expectedRevision: 0,
       terminalIdentity,
+      lockTimeoutMs: 750,
+      statementTimeoutMs: 900,
     })).resolves.toEqual({ transitioned: true, refunded: true });
     await expect(settleFailedTask({
       taskId: 'task-owner',
@@ -183,6 +185,8 @@ describe('task billing service', () => {
       error: { code: 'MODEL_TIMEOUT', message: 'Provider timed out' },
       expectedRevision: 0,
       terminalIdentity,
+      lockTimeoutMs: 750,
+      statementTimeoutMs: 900,
     });
 
     expect(registry.updateTaskProgress).toHaveBeenCalledTimes(1);
@@ -230,6 +234,10 @@ describe('task billing service', () => {
     expect(storageSource).toContain("client.query('BEGIN')");
     expect(storageSource).toContain("client.query('COMMIT')");
     expect(storageSource).toContain("client.query('ROLLBACK')");
+    expect(storageSource).toContain("set_config('lock_timeout'");
+    expect(storageSource).toContain("set_config('statement_timeout'");
+    expect(storageSource).toContain('input.lockTimeoutMs');
+    expect(storageSource).toContain('input.statementTimeoutMs');
     expect(storageSource).toContain('pg_advisory_xact_lock');
     expect(storageSource).toContain('FOR UPDATE');
     expect(storageSource).toContain('request_digest');

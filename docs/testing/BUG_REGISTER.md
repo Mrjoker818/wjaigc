@@ -2673,7 +2673,7 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - 稳定复现：旧客户端在专用接口失败或 12 秒超时后再次调用 `/api/chat`；旧路由在模型返回非法 JSON 时制造默认图层并返回成功，且扣费/退款不使用持久任务原子终态。
 - 根因：专用路由直接读取不受控媒体并硬编码视觉模型；客户端拥有第二条独立付费回退；请求、模型授权、输出预算、幂等任务和账务终态没有统一边界。
 - 修复文件：`src/lib/psd-analysis/*`、`src/lib/safe-image-input.ts`、`src/app/api/analyze-psd/route.ts`、`src/lib/psd-export.ts`。
-- 修复内容：28 MiB 请求预算；20 MiB/4000 万像素图片门禁；资产归属与 `realpath` 防逃逸；精确 provider/model 授权；自动候选最多 3 个；45 秒共享截止；256 KiB 严格 JSON 输出；`cloud_tasks` 原子幂等与一次性失败结算；单次客户端付费请求。
-- 永久回归：新增合同、媒体、模型路由、持久服务、API 路由和浏览器客户端 6 组测试。
-- 本地结果：专项 `100 passed / 1 PostgreSQL skipped`；全仓 `565 files passed / 21 skipped`、`4046 tests passed / 119 skipped`；TypeScript、目标 ESLint、生产构建通过。
+- 修复内容：28 MiB 请求预算；20 MiB/4000 万像素图片门禁；资产归属与 `realpath` 防逃逸；精确 provider/model 授权；自动候选最多 3 个；45 秒总截止与 1 秒结算预算；256 KiB 严格 JSON 输出；`cloud_tasks` 原子幂等、租约过期接管、数据库条件终态和一次性退款；延迟入账、晚到租约和结算重试由 Next.js `after()` 托管；仅 PSD 结算启用 750ms 锁等待与 900ms 语句超时；单次客户端付费请求。
+- 永久回归：新增合同、媒体、模型路由、持久服务、API 路由、浏览器客户端、共享账务选项与租约/终态竞态测试。
+- 本地结果：专项 `131/131`；全仓 `565 files passed / 21 skipped`、`4068 tests passed / 119 skipped`；TypeScript、目标文件 ESLint 零警告、全仓 ESLint `0 errors / 964 historical warnings`、生产构建通过；独立复审最终无 Critical/Important。
 - 未关闭证据：缺少隔离 `POSTGRES_TEST_DATABASE_URL`，尚未取得 Coze 真实并发同键、真实积分前后、失败一次退款和最终 PSD 文件证据。

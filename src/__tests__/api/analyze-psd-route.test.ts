@@ -43,7 +43,7 @@ const user = {
   updatedAt: 1,
 };
 
-function request(): NextRequest {
+function request(signal?: AbortSignal): NextRequest {
   return new NextRequest('http://localhost/api/analyze-psd', {
     method: 'POST',
     headers: {
@@ -51,6 +51,7 @@ function request(): NextRequest {
       'Idempotency-Key': 'psd-analysis-request-1',
     },
     body: JSON.stringify({ image: 'data:image/png;base64,aW1hZ2U=' }),
+    signal,
   });
 }
 
@@ -89,6 +90,95 @@ describe('POST /api/analyze-psd', () => {
     const response = await POST(request());
 
     expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      code: 'AUTH_REQUIRED',
+      requestId: expect.stringMatching(/^req_/),
+      retryable: false,
+    });
+    expect(mocks.readPsdAnalysisRequest).not.toHaveBeenCalled();
+    expect(mocks.executePsdAnalysis).not.toHaveBeenCalled();
+  });
+
+  it('returns the durable task id when execution fails after billing admission', async () => {
+    mocks.executePsdAnalysis.mockRejectedValue(
+      new PsdAnalysisError(
+        'PSD_ANALYSIS_TIMEOUT',
+        'PSD 分析超过 45 秒总截止时间',
+        504,
+        true,
+        { taskId: 'task-admitted' },
+      ),
+    );
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(504);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      code: 'PSD_ANALYSIS_TIMEOUT',
+      taskId: 'task-admitted',
+      requestId: expect.stringMatching(/^req_/),
+    });
+  });
+
+  it('links caller disconnects into the same request-body and service signal', async () => {
+    const caller = new AbortController();
+    mocks.readPsdAnalysisRequest.mockImplementation((_request, signal?: AbortSignal) => (
+      new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        setTimeout(() => reject(new Error('caller signal was not linked')), 10);
+      })
+    ));
+
+    const incoming = request();
+    Object.defineProperty(incoming, 'signal', { value: caller.signal });
+    const pending = POST(incoming);
+    caller.abort(new PsdAnalysisError(
+      'PSD_ANALYSIS_CANCELLED',
+      'PSD 分析请求已取消',
+      499,
+      false,
+    ));
+    const response = await pending;
+
+    expect(response.status).toBe(499);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      code: 'PSD_ANALYSIS_CANCELLED',
+    });
+    expect(mocks.executePsdAnalysis).not.toHaveBeenCalled();
+  });
+
+  it('stops a delayed authentication lookup when the caller disconnects', async () => {
+    const caller = new AbortController();
+    const authenticated = {
+      authenticated: true,
+      userId: user.id,
+      userRole: 'user',
+      user,
+      source: 'cookie',
+    };
+    mocks.requireApiAuthOrReject.mockImplementation(() => (
+      new Promise(resolve => setTimeout(() => resolve(authenticated), 10))
+    ));
+    const incoming = request();
+    Object.defineProperty(incoming, 'signal', { value: caller.signal });
+
+    const pending = POST(incoming);
+    caller.abort(new PsdAnalysisError(
+      'PSD_ANALYSIS_CANCELLED',
+      'PSD 分析请求已取消',
+      499,
+      false,
+    ));
+    const response = await pending;
+
+    expect(response.status).toBe(499);
     expect(mocks.readPsdAnalysisRequest).not.toHaveBeenCalled();
     expect(mocks.executePsdAnalysis).not.toHaveBeenCalled();
   });
@@ -125,10 +215,13 @@ describe('POST /api/analyze-psd', () => {
       model: 'gpt-4o',
     });
     expect(mocks.readPsdAnalysisRequest).toHaveBeenCalledTimes(1);
+    const requestSignal = mocks.readPsdAnalysisRequest.mock.calls[0][1];
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
     expect(mocks.executePsdAnalysis).toHaveBeenCalledWith(expect.objectContaining({
       user,
       requestId: expect.stringMatching(/^req_/),
-      requestSignal: expect.any(AbortSignal),
+      requestSignal,
+      deadlineAt: expect.any(Number),
     }));
   });
 

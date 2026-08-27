@@ -1529,3 +1529,5 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | `V588-STABILITY-002` | 本地候选完成 | 上述云端与数据库证据全部关闭后才可标为已吸收并进入 `V588-ADMIN-004` |
 
 其余全平台未验证项继续有效；本节只描述 PSD 分析专项，不覆盖 AI PSD 独立生成器、Pear 分层、元素拆解或 PSD 合成质量。
+
+本地终审补充：专项 `131/131`、全仓 `4068/4068` 已执行项、TypeScript、目标零警告 ESLint、生产构建和空白检查均通过；独立复审无 Critical/Important。以上仍不能替代本表列出的真实 PostgreSQL 与 Coze 证据。

@@ -77,6 +77,24 @@ describe('PSD analysis request contract', () => {
       .rejects.toMatchObject({ code: 'PSD_ANALYSIS_IDEMPOTENCY_INVALID', status: 400 });
   });
 
+  it('cancels a stalled streaming body through the shared request signal', async () => {
+    const controller = new AbortController();
+    const request = new Request('http://localhost/api/analyze-psd', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': 'psd-analysis-request-1' },
+      body: new ReadableStream<Uint8Array>({ start() {} }),
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' });
+
+    const pending = readPsdAnalysisRequest(request, controller.signal);
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'PSD_ANALYSIS_CANCELLED',
+      status: 499,
+    });
+  });
+
   it('accepts exactly one supported media source', async () => {
     await expect(readPsdAnalysisRequest(requestWith({
       image: 'data:image/png;base64,AAAA',

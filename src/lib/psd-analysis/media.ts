@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { createAssetService } from '@/lib/asset-core/service';
+import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import {
   PsdAnalysisError,
   type PsdAnalysisRequest,
@@ -58,13 +58,14 @@ function mediaError(
   code: string,
   message: string,
   status: number,
+  retryable: boolean,
   cause?: unknown,
 ): PsdAnalysisError {
   return new PsdAnalysisError(
     code,
     message,
     status,
-    false,
+    retryable,
     cause === undefined ? undefined : { cause },
   );
 }
@@ -85,6 +86,7 @@ export async function resolvePsdAnalysisMedia(
         'PSD_ANALYSIS_MEDIA_INVALID',
         'PSD 分析只接受受控图片 data URL 或当前用户资产版本',
         400,
+        false,
       );
     }
     source = input.request.image;
@@ -97,10 +99,20 @@ export async function resolvePsdAnalysisMedia(
       });
       source = reference.url;
     } catch (error) {
+      if (!(error instanceof AssetServiceError) || error.code !== 'ASSET_NOT_FOUND') {
+        throw mediaError(
+          'PSD_ANALYSIS_MEDIA_UNAVAILABLE',
+          'PSD 分析资产服务暂时不可用',
+          503,
+          true,
+          error,
+        );
+      }
       throw mediaError(
         'PSD_ANALYSIS_MEDIA_FORBIDDEN',
         '当前用户无权访问该 PSD 分析来源',
         403,
+        false,
         error,
       );
     }
@@ -119,6 +131,7 @@ export async function resolvePsdAnalysisMedia(
       'PSD_ANALYSIS_MEDIA_INVALID',
       'PSD 分析图片未通过格式、体积或像素安全校验',
       400,
+      false,
       error,
     );
   }
