@@ -1,3 +1,5 @@
+import type { WorkspaceSourceTrace } from './source-trace';
+
 export type AssetKind =
   | 'image'
   | 'video'
@@ -78,6 +80,7 @@ export interface WorkspaceAssetReference {
   entityId?: string;
   url: string;
   name?: string;
+  sourceTrace?: WorkspaceSourceTrace;
 }
 
 export type WorkspacePlacement = {
