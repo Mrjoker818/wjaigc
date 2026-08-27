@@ -59,6 +59,17 @@ const snapshotFixture = {
   projects: [projectFixture],
 };
 
+const authorizedMediaDependencies = {
+  resolveVersionProject: async (_userId: string, assetVersionId: string) => (
+    assetVersionId === 'version-1' ? 'source-project-1' : null
+  ),
+  findPlacement: async (_userId: string, projectId: string, placementId: string) => (
+    projectId === 'source-project-1' && placementId === 'placement-1'
+      ? { assetVersionId: 'version-1', status: 'active' as const }
+      : null
+  ),
+};
+
 describe('resolveSimpleChatWorkspaceHandoff', () => {
   it('returns only the actor-owned message and managed index-aligned images', async () => {
     const projectExists = vi.fn().mockResolvedValue(true);
@@ -67,6 +78,7 @@ describe('resolveSimpleChatWorkspaceHandoff', () => {
     const result = await resolveSimpleChatWorkspaceHandoff(input, {
       projectExists,
       readSnapshot,
+      ...authorizedMediaDependencies,
     });
 
     expect(projectExists).toHaveBeenCalledWith('user-1', 'canvas-1');
@@ -98,12 +110,56 @@ describe('resolveSimpleChatWorkspaceHandoff', () => {
     expect(result.warnings).toContain('UNMANAGED_IMAGE_SKIPPED');
   });
 
+  it('skips a forged asset version while preserving an authorized image index', async () => {
+    const project = structuredClone(projectFixture);
+    const message = project.tasks[0].messages[0];
+    message.images = ['/forged.png', '/managed.png'];
+    message.imageRefs = [
+      {
+        url: '/forged.png',
+        assetVersionId: 'version-other-user',
+        placementId: 'placement-forged',
+      },
+      {
+        url: '/managed.png',
+        assetVersionId: 'version-1',
+        placementId: 'placement-1',
+      },
+    ];
+    const resolveVersionProject = vi.fn(async (_userId: string, versionId: string) => (
+      versionId === 'version-1' ? 'source-project-1' : null
+    ));
+    const findPlacement = vi.fn(async (_userId: string, projectId: string, placementId: string) => (
+      projectId === 'source-project-1' && placementId === 'placement-1'
+        ? { assetVersionId: 'version-1', status: 'active' as const }
+        : null
+    ));
+
+    const result = await resolveSimpleChatWorkspaceHandoff(input, {
+      projectExists: async () => true,
+      readSnapshot: async () => ({ schemaVersion: 1, revision: 2, projects: [project] }),
+      resolveVersionProject,
+      findPlacement,
+    });
+
+    expect(result.images).toHaveLength(1);
+    expect(result.images[0]).toMatchObject({
+      imageIndex: 1,
+      assetRef: { assetVersionId: 'version-1', placementId: 'placement-1' },
+    });
+    expect(result.warnings).toEqual(['UNMANAGED_IMAGE_SKIPPED']);
+    expect(resolveVersionProject).toHaveBeenCalledWith('user-1', 'version-other-user');
+    expect(findPlacement).not.toHaveBeenCalledWith('user-1', expect.any(String), 'placement-forged');
+    expect(findPlacement).toHaveBeenCalledWith('user-1', 'source-project-1', 'placement-1');
+  });
+
   it('rejects a target project not owned by the actor before reading chat data', async () => {
     const readSnapshot = vi.fn().mockResolvedValue(snapshotFixture);
 
     await expect(resolveSimpleChatWorkspaceHandoff(input, {
       projectExists: async () => false,
       readSnapshot,
+      ...authorizedMediaDependencies,
     })).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 });
     expect(readSnapshot).not.toHaveBeenCalled();
   });
@@ -116,6 +172,7 @@ describe('resolveSimpleChatWorkspaceHandoff', () => {
         revision: 2,
         projects: actorUserId === 'user-1' ? [] : [projectFixture],
       }),
+      ...authorizedMediaDependencies,
     })).rejects.toMatchObject({ code: 'HANDOFF_SOURCE_NOT_FOUND', status: 404 });
   });
 
@@ -132,6 +189,35 @@ describe('resolveSimpleChatWorkspaceHandoff', () => {
         revision: 2,
         projects: [unmanagedProject],
       }),
+      ...authorizedMediaDependencies,
+    })).rejects.toMatchObject({ code: 'NO_MANAGED_MEDIA', status: 422 });
+  });
+
+  it('rejects image-only messages when placements mismatch the version or are inactive', async () => {
+    const project = structuredClone(projectFixture);
+    const message = project.tasks[0].messages[0];
+    message.content = '   ';
+    message.images = ['/mismatch.png', '/trashed.png'];
+    message.imageRefs = [
+      {
+        url: '/mismatch.png',
+        assetVersionId: 'version-1',
+        placementId: 'placement-mismatch',
+      },
+      {
+        url: '/trashed.png',
+        assetVersionId: 'version-2',
+        placementId: 'placement-trashed',
+      },
+    ];
+
+    await expect(resolveSimpleChatWorkspaceHandoff(input, {
+      projectExists: async () => true,
+      readSnapshot: async () => ({ schemaVersion: 1, revision: 3, projects: [project] }),
+      resolveVersionProject: async () => 'source-project-1',
+      findPlacement: async (_userId, _projectId, placementId) => placementId === 'placement-mismatch'
+        ? { assetVersionId: 'different-version', status: 'active' as const }
+        : { assetVersionId: 'version-2', status: 'trashed' as const },
     })).rejects.toMatchObject({ code: 'NO_MANAGED_MEDIA', status: 422 });
   });
 });

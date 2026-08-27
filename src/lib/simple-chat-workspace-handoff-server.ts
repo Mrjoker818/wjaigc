@@ -7,6 +7,7 @@ import type {
 } from '@/components/simple-chat/simple-chat-types';
 import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
+import type { WorkspacePlacement } from '@/lib/asset-core/types';
 import type { SimpleChatStoredSnapshot } from '@/lib/simple-chat-sync-server';
 import { readSimpleChatSnapshot } from '@/lib/simple-chat-sync-server';
 import type {
@@ -22,6 +23,12 @@ export interface ResolveSimpleChatWorkspaceHandoffInput extends SimpleChatWorksp
 export interface ResolverDependencies {
   projectExists(userId: string, projectId: string): Promise<boolean>;
   readSnapshot(userId: string): Promise<SimpleChatStoredSnapshot>;
+  resolveVersionProject(userId: string, assetVersionId: string): Promise<string | null>;
+  findPlacement(
+    userId: string,
+    projectId: string,
+    placementId: string,
+  ): Promise<Pick<WorkspacePlacement, 'assetVersionId' | 'status'> | null>;
 }
 
 export type SimpleChatWorkspaceHandoffErrorCode =
@@ -44,6 +51,12 @@ const defaultDependencies: ResolverDependencies = {
     transaction => transaction.findProject(userId, projectId),
   ),
   readSnapshot: readSimpleChatSnapshot,
+  resolveVersionProject: (userId, assetVersionId) => createPostgresAssetStorage().read(
+    transaction => transaction.resolveVersionProject(userId, assetVersionId),
+  ),
+  findPlacement: (userId, projectId, placementId) => createPostgresAssetStorage().read(
+    transaction => transaction.findPlacement(userId, projectId, placementId),
+  ),
 };
 
 function buildWorkspaceSourceTrace(
@@ -65,15 +78,26 @@ function buildWorkspaceSourceTrace(
   return sourceTrace;
 }
 
-function alignManagedMessageImages(
+async function alignManagedMessageImages(
   message: SimpleChatMessage,
   sourceTrace: WorkspaceSourceTrace,
-): SimpleChatWorkspaceHandoffImage[] {
-  return (message.images || []).flatMap((_, imageIndex) => {
+  actorUserId: string,
+  dependencies: ResolverDependencies,
+): Promise<SimpleChatWorkspaceHandoffImage[]> {
+  const images = await Promise.all((message.images || []).map(async (_, imageIndex) => {
     const assetRef = message.imageRefs?.[imageIndex];
-    if (!assetRef?.assetVersionId || !assetRef.placementId) return [];
-    return [{ imageIndex, assetRef, sourceTrace }];
-  });
+    if (!assetRef?.assetVersionId || !assetRef.placementId) return null;
+
+    const projectId = await dependencies.resolveVersionProject(actorUserId, assetRef.assetVersionId);
+    if (!projectId) return null;
+
+    const placement = await dependencies.findPlacement(actorUserId, projectId, assetRef.placementId);
+    if (placement?.status !== 'active' || placement.assetVersionId !== assetRef.assetVersionId) {
+      return null;
+    }
+    return { imageIndex, assetRef, sourceTrace };
+  }));
+  return images.filter((image): image is SimpleChatWorkspaceHandoffImage => image !== null);
 }
 
 export async function resolveSimpleChatWorkspaceHandoff(
@@ -93,7 +117,12 @@ export async function resolveSimpleChatWorkspaceHandoff(
   }
 
   const sourceTrace = buildWorkspaceSourceTrace(project, task, message);
-  const images = alignManagedMessageImages(message, sourceTrace);
+  const images = await alignManagedMessageImages(
+    message,
+    sourceTrace,
+    input.actorUserId,
+    dependencies,
+  );
   const text = message.content.trim() || null;
   if (!text && images.length === 0) {
     throw new SimpleChatWorkspaceHandoffError('NO_MANAGED_MEDIA', 422);

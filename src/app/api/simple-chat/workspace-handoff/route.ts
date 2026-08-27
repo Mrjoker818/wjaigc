@@ -7,18 +7,18 @@ import {
 import { parseSimpleChatWorkspaceHandoffBody } from '@/lib/simple-chat-workspace-handoff';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const user = await getSessionUser(request);
-  if (!user) {
-    return NextResponse.json({ success: false, code: 'UNAUTHORIZED' }, { status: 401 });
-  }
-
-  const body = await request.json().catch(() => null);
-  const intent = parseSimpleChatWorkspaceHandoffBody(body);
-  if (!intent) {
-    return NextResponse.json({ success: false, code: 'INVALID_HANDOFF' }, { status: 400 });
-  }
-
   try {
+    const user = await getSessionUser(request);
+    if (!user) {
+      return NextResponse.json({ success: false, code: 'UNAUTHORIZED' }, { status: 401 });
+    }
+
+    const body = await request.json().catch(() => null);
+    const intent = parseSimpleChatWorkspaceHandoffBody(body);
+    if (!intent) {
+      return NextResponse.json({ success: false, code: 'INVALID_HANDOFF' }, { status: 400 });
+    }
+
     const handoff = await resolveSimpleChatWorkspaceHandoff({ actorUserId: user.id, ...intent });
     return NextResponse.json({ success: true, handoff });
   } catch (error) {

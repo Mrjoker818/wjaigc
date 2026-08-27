@@ -75,6 +75,19 @@ describe('POST /api/simple-chat/workspace-handoff', () => {
     expect(mocks.resolveSimpleChatWorkspaceHandoff).not.toHaveBeenCalled();
   });
 
+  it('returns structured JSON when the auth dependency rejects', async () => {
+    mocks.getSessionUser.mockRejectedValue(new Error('session backend unavailable'));
+
+    const response = await POST(request(body));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      code: 'HANDOFF_RESOLVE_FAILED',
+    });
+    expect(mocks.resolveSimpleChatWorkspaceHandoff).not.toHaveBeenCalled();
+  });
+
   it('returns 400 for malformed identifiers', async () => {
     const response = await POST(request({ ...body, chatMessageId: 'invalid id' }));
 
