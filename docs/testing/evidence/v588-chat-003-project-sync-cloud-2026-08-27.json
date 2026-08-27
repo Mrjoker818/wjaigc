@@ -34,10 +34,24 @@
     ],
     "result": "FAIL_INITIAL_BADGE_LAZY_LOAD"
   },
+  "postFixVerification": {
+    "recordedAt": "2026-08-27T09:22:00+08:00",
+    "githubCandidate": "b92998dafd289a433232eb72cddacef32a53ea28",
+    "initialChatBadgeBeforeOpeningTab": 2,
+    "chatProjectCountAfterOpeningTab": 2,
+    "projects": [
+      { "name": "默认项目", "taskCount": 16 },
+      { "name": "V588-CHAT-003-CLOUD-20260827", "taskCount": 2 }
+    ],
+    "consoleErrorWarningCount": 0,
+    "nativeDialogCount": 0,
+    "screenshot": "v588-chat-003-dashboard-count-cloud-postfix-2026-08-27.png",
+    "result": "PASS"
+  },
   "evidence": {
     "preRefreshScreenshot": "v588-chat-003-project-sync-cloud-pre-refresh-2026-08-27.png",
     "postRefreshScreenshot": "v588-chat-003-project-sync-cloud-post-refresh-2026-08-27.png",
     "dashboardScreenshot": "v588-chat-003-project-sync-cloud-dashboard-2026-08-27.png"
   },
-  "decision": "CLOUD_PARTIAL_PASS_LOCAL_FIX_PENDING_DEPLOYMENT"
+  "decision": "CLOUD_REGRESSION_PASS_REMAINING_MATRIX_UNVERIFIED"
 }

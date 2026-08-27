@@ -443,4 +443,5 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Google Chrome 已证明专用项目/任务创建、项目与任务重命名、普通 APImart 对话、助手唯一完成标记、`已同步`、刷新后精确 `projectId + taskId` 恢复和任务名称持久化；Console error/warning 与原生弹窗均为 0。
 - 同轮真实发现 `V588-CHAT-003-BUG-001`：工作台初始侧栏显示“智能对话 0”，进入页签后才加载并显示真实 `2` 个项目。根因是仪表盘把聊天项目加载错误绑定到页签激活。
 - 按 RED -> 最小修复新增双产品用户初始徽标合同；聚焦 `10/10`、Simple Chat 同步 `348/348`、全仓 `3910 passed / 119 skipped / 0 failed`、TypeScript、零错误 Lint、保护门禁 `38/38` 与构建 `116/116` 通过。
-- **当前状态：普通对话、刷新恢复和重命名云端通过；仪表盘初始计数本地修复、Coze 待验；删除不复活、多标签冲突、跨账号隔离、离页冲刷和 PostgreSQL 并发仍未关闭。`V588-CHAT-003` 保持未吸收。**
+- `b92998dafd289a433232eb72cddacef32a53ea28` 部署后，Google Chrome 在未点击聊天页签前已直接显示“智能对话 2”，进入页签后仍为 `2` 个项目，Console 与原生弹窗均为 0；`V588-CHAT-003-BUG-001` 云端关闭。
+- **当前状态：普通对话、刷新恢复、重命名和仪表盘初始计数云端通过；删除不复活、多标签冲突、跨账号隔离、离页冲刷和 PostgreSQL 并发仍未关闭。`V588-CHAT-003` 保持未吸收。**

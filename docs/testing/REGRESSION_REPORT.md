@@ -1829,3 +1829,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 云端真实失败为工作台初始“智能对话 0”；点击页签后数据源正确返回 `2` 个项目，证明失败位于仪表盘加载时机，不在同步 API 或数据库数据内容。
 - `V588-CHAT-003-BUG-001` RED 为 `1 failed / 9 passed`，GREEN 为 `10/10`；相关同步 `348/348`、全仓 `3910 passed / 119 skipped / 0 failed`，TypeScript、零错误 Lint、保护门禁 `38/38` 和生产构建 `116/116` 通过。
 - **回归结论：普通对话、刷新恢复、项目/任务重命名通过；仪表盘计数候选本地通过、云端待验。** 多标签、删除、跨账号、离线及 PostgreSQL 仍不得标记通过。
+
+### 仪表盘计数修复云端复验
+
+- `b92998dafd289a433232eb72cddacef32a53ea28` 部署后，在既有 Google Chrome 业务标签页强制刷新；未进入“智能对话”页签前，侧栏首次渲染已直接显示“智能对话 2”。
+- 进入页签后仍显示 `2 个对话项目`：默认项目 `16` 个对话，`V588-CHAT-003-CLOUD-20260827` 为 `2` 个对话；前后计数一致。
+- Console error/warning 为 `0`，浏览器原生弹窗为 `0`；截图为 `docs/testing/evidence/v588-chat-003-dashboard-count-cloud-postfix-2026-08-27.png`。
+- **回归结论：`V588-CHAT-003-BUG-001` 云端关闭。** 此结论只覆盖仪表盘初始计数；删除不复活、多标签、跨账号与 PostgreSQL 并发仍保持未验证。

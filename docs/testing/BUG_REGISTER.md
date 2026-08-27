@@ -2623,4 +2623,4 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | RED | 新增双产品用户合同：未点击聊天页签也必须显示“智能对话 2”；修复前聚焦测试为 `1 failed / 9 passed`。 |
 | 最小修复 | 仅调整仪表盘加载门槛：具有 `chat` 产品权限的用户在仪表盘挂载和窗口重新聚焦时加载聊天项目；保留账号切换取消迟到响应、远端优先和当前用户 IDB 降级逻辑。 |
 | 本地回归 | 聚焦 `10/10`；Simple Chat 同步相关 `348/348`；全仓 `3910 passed / 119 skipped / 0 failed`；TypeScript、零错误 Lint、保护门禁 `38/38`、生产构建 `116/116`。PostgreSQL 跳过项不计为通过。 |
-| 状态 | **本地已修复 / Coze 待部署复验。** 新候选部署后必须在不点击聊天页签的情况下直接显示正确数量，再进入页签核对项目和任务计数。 |
+| 状态 | **已关闭。** `b92998dafd289a433232eb72cddacef32a53ea28` 部署后的 Google Chrome 真实回归中，无需点击聊天页签，工作台首次渲染即显示“智能对话 2”；进入页签后仍为 `2` 个项目，任务数分别为 `16` 和 `2`。Console error/warning 与原生弹窗均为 0，证据见 `docs/testing/evidence/v588-chat-003-dashboard-count-cloud-postfix-2026-08-27.png`。 |
