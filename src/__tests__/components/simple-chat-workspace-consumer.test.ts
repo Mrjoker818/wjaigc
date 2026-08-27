@@ -43,6 +43,31 @@ describe('simple chat workspace consumer guard', () => {
     expect(guard.begin(second)).toBe(false);
   });
 
+  it('tracks each running identity when the same handoff begins after another handoff', () => {
+    const guard = createSimpleChatWorkspaceHandoffRunGuard();
+    const first = getSimpleChatWorkspaceHandoffIdentity(intent);
+    const second = getSimpleChatWorkspaceHandoffIdentity({ ...intent, chatMessageId: 'message-2' });
+
+    expect(guard.begin(first)).toBe(true);
+    expect(guard.begin(second)).toBe(true);
+    expect(guard.begin(first)).toBe(false);
+  });
+
+  it('releases only the matching identity on completion or failure', () => {
+    const guard = createSimpleChatWorkspaceHandoffRunGuard();
+    const first = getSimpleChatWorkspaceHandoffIdentity(intent);
+    const second = getSimpleChatWorkspaceHandoffIdentity({ ...intent, chatMessageId: 'message-2' });
+
+    expect(guard.begin(first)).toBe(true);
+    expect(guard.begin(second)).toBe(true);
+    guard.complete(first);
+    expect(guard.begin(first)).toBe(true);
+    expect(guard.begin(second)).toBe(false);
+    guard.fail(first);
+    expect(guard.begin(first)).toBe(true);
+    expect(guard.begin(second)).toBe(false);
+  });
+
   it('runs the existing executor only for the matching project and releases failures for retry', async () => {
     const guard = createSimpleChatWorkspaceHandoffRunGuard();
     const events: string[] = [];

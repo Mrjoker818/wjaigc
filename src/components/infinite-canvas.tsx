@@ -12333,7 +12333,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                     }
                     return '';
                   })();
-                  return (displayModelName || displayApiProvider || image.sourceTrace) && !image.isProcessingPlaceholder ? (
+                  return (displayModelName || displayApiProvider || (isSelected && image.sourceTrace)) && !image.isProcessingPlaceholder ? (
                   <div className="absolute bottom-1 left-1 z-20 pointer-events-none flex flex-col gap-0.5"
                     style={{ fontSize: `${Math.max(8, 9 / zoom)}px` }}>
                     {displayModelName && (
@@ -12360,7 +12360,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                         请求: {routeAudit?.requested.providerName} / {routeAudit?.requested.modelName}
                       </span>
                     )}
-                    <CanvasSourceTraceBadge sourceTrace={image.sourceTrace} />
+                    <CanvasSourceTraceBadge sourceTrace={image.sourceTrace} isSelected={isSelected} />
                   </div>
                 ) : null;
                 })()}

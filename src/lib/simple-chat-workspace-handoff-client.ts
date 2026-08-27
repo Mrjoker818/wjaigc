@@ -63,14 +63,14 @@ export function shouldConsumeSimpleChatWorkspaceHandoff(
 }
 
 export function createSimpleChatWorkspaceHandoffRunGuard(): SimpleChatWorkspaceHandoffRunGuard {
-  let runningIdentity: string | null = null;
+  const runningIdentities = new Set<string>();
   const release = (identity: string): void => {
-    if (runningIdentity === identity) runningIdentity = null;
+    runningIdentities.delete(identity);
   };
   return {
     begin: identity => {
-      if (runningIdentity === identity) return false;
-      runningIdentity = identity;
+      if (runningIdentities.has(identity)) return false;
+      runningIdentities.add(identity);
       return true;
     },
     complete: release,

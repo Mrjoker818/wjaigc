@@ -9,6 +9,10 @@ interface WorkspaceSourceTraceProps {
   sourceTrace: unknown;
 }
 
+interface CanvasSourceTraceBadgeProps extends WorkspaceSourceTraceProps {
+  isSelected: boolean;
+}
+
 function formatSourceTime(createdAt: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric',
@@ -45,7 +49,11 @@ export function WorkspaceSourceTraceDetails({ sourceTrace }: WorkspaceSourceTrac
   );
 }
 
-export function CanvasSourceTraceBadge({ sourceTrace }: WorkspaceSourceTraceProps): ReactElement | null {
+export function CanvasSourceTraceBadge({
+  sourceTrace,
+  isSelected,
+}: CanvasSourceTraceBadgeProps): ReactElement | null {
+  if (!isSelected) return null;
   const trace = parseWorkspaceSourceTrace(sourceTrace);
   if (!trace) return null;
   return (

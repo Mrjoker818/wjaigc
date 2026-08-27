@@ -34,15 +34,24 @@ describe('workspace source trace UI', () => {
     expect(markup).not.toContain('private prompt');
   });
 
-  it('renders a compact canvas badge only for a valid trace', () => {
-    const markup = renderToStaticMarkup(React.createElement(CanvasSourceTraceBadge, { sourceTrace: trace }));
+  it('renders a compact canvas badge only for a selected image with a valid trace', () => {
+    const markup = renderToStaticMarkup(React.createElement(CanvasSourceTraceBadge, {
+      sourceTrace: trace,
+      isSelected: true,
+    }));
+    const unselectedMarkup = renderToStaticMarkup(React.createElement(CanvasSourceTraceBadge, {
+      sourceTrace: trace,
+      isSelected: false,
+    }));
     const invalidMarkup = renderToStaticMarkup(React.createElement(CanvasSourceTraceBadge, {
       sourceTrace: { ...trace, source: 'forged' },
+      isSelected: true,
     }));
 
     expect(markup).toContain('智能对话');
     expect(markup).toContain('title=');
     expect(markup).not.toContain('secret-key');
+    expect(unselectedMarkup).toBe('');
     expect(invalidMarkup).toBe('');
   });
 });
