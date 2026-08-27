@@ -34,6 +34,11 @@ describe('simple-chat model selector contract', () => {
     expect(modelSelectorSource).not.toContain('absolute right-0 top-full');
   });
 
+  it('removes closed model menus from layout flow', () => {
+    expect(modelSelectorSource.match(/: 'hidden'/g) ?? []).toHaveLength(2);
+    expect(modelSelectorSource).not.toContain('opacity-0 invisible pointer-events-none');
+  });
+
   it('applies the image model and provider before closing the selected menu', () => {
     expect(source).toContain('setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); setOpenModelMenu(null);');
   });

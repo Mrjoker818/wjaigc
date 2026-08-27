@@ -33,5 +33,50 @@
     "protectedBaseline": "passed_38_of_38",
     "diffCheck": "passed"
   },
-  "cloudStatus": "unverified_exact_sha_not_deployed"
+  "cloud": {
+    "deployedCommit": "4793f602161d389eaf28bd8ecbc98ddbeb8df7d8",
+    "deployedTree": "035017ebe6f8cca1a7aab06c926447428885f35c",
+    "buildId": "ff5BAPW-3ycPVraxauIYN",
+    "servicePid": 2939,
+    "migration": "project_managed_migrations_passed",
+    "health": {
+      "root": 200,
+      "simpleChat": 200,
+      "authMe": 200,
+      "staticAssetsTotal": 11,
+      "staticAssetsFailed": 0
+    },
+    "browser": {
+      "browser": "Google Chrome 用户1",
+      "projectId": "sodi90k3mtaqb72j",
+      "taskId": "b4h25r5tmtaqckwr",
+      "markerExactCount": 1,
+      "syncStatus": "已同步",
+      "model": "Deepseek V4 Flash",
+      "dashboardChatProjects": 2,
+      "nativeDialogs": 0,
+      "newConsoleErrors": 0,
+      "newConsoleWarningsAfterInitialNavigation": 0
+    },
+    "boundaries": {
+      "deletedTaskId": "dx41teo2mtaqb72j",
+      "deleteNoResurrection": "passed",
+      "pagehideMarker": "V588_CHAT_003_PAGEHIDE_20260827_C",
+      "pagehideUserMessageExactCount": 1,
+      "pagehideUserWriteFlush": "passed",
+      "assistantGenerationAfterImmediateLeave": "unverified_no_reply_observed"
+    },
+    "layoutRegression": {
+      "status": "local_fixed_cloud_pending",
+      "rootClientHeight": 863,
+      "rootScrollHeight": 2484,
+      "rootScrollTop": 518,
+      "closedImageMenuHeightApprox": 2415,
+      "rootCause": "关闭的绝对定位模型菜单仅使用 visibility 和 opacity 隐藏，仍扩大根容器滚动范围",
+      "fix": "两个关闭态模型菜单使用 display none 对应的 Tailwind hidden",
+      "beforeScreenshot": "docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-before-2026-08-27.png"
+    },
+    "observation": "服务重启后的首次工作台返回记录一次 syncToServer HTTP 502 警告；后续项目列表、专用项目和精确任务恢复均未复现，数据未丢失。"
+  },
+  "cloudStatus": "verified_exact_sha_with_single_nonreproduced_post_restart_sync_warning"
 }

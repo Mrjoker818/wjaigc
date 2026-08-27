@@ -2636,4 +2636,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | RED | 迁移顺序测试新增“认证增量迁移前必须存在核心用户表”断言，旧实现为 `1 failed`；Simple Chat 两个隔离 schema 用例旧实现为 `1 passed / 1 failed`。 |
 | 最小修复 | 提交 `f923b98fd51088c68ad2390052634f2d013fbdc6` 新增前置迁移 `20260809_wj_core_users.sql`；保留已发布 `20260823` 迁移原文和校验和不变；核心表初始化缓存改为按当前数据库 URL 区分。测试夹具改用真实 `chat-completions` 能力，并在 Canvas Shadow PostgreSQL 用例前运行迁移。 |
 | 最终回归 | 聚焦迁移依赖矩阵 `12 files / 97 tests` 全部通过。完整真实 PostgreSQL 全仓为 `570/570` 文件、`4030/4030` 测试通过，`0` 失败、`0` 跳过；`pnpm doctor`、`pnpm ts-check`、`pnpm lint:build`、Next.js `116/116` 构建、保护基线 `38/38` 和 `git diff --check` 均通过。 |
-| 状态 | **本地已关闭 / GitHub 与 Coze 精确 SHA 待验。** 本地隔离数据库已证明迁移、Simple Chat 同步和并发门禁可执行；在 Coze 拉取包含该提交的 `main` 并完成冷启动、认证及项目恢复前，不宣称云端关闭。机器证据：`docs/testing/evidence/v588-chat-003-postgres-local-2026-08-27.json`。 |
+| 状态 | **本地与 Coze 精确 SHA 冷启动已关闭。** `main@4793f602161d389eaf28bd8ecbc98ddbeb8df7d8` 在 Coze 执行项目管理迁移、生产构建和 5000 启动；Build ID `ff5BAPW-3ycPVraxauIYN`，`/`、`/simple-chat`、`/api/auth/me` 及 11 个静态资源全部 200。Google Chrome 恢复专用项目/任务、唯一标记、模型和“已同步”状态；仪表盘首次显示 `智能对话 2`。首次返回工作台记录 1 次同步 502 警告，后续两次恢复未复现且无数据丢失，作为观察项保留。该结论不关闭删除、多标签、跨账号或未同步离页边界。机器证据：`docs/testing/evidence/v588-chat-003-postgres-local-2026-08-27.json`。 |
+
+### V588-CHAT-003-BUG-003 - 关闭的模型菜单撑高页面并隐藏智能对话内容（2026-08-27）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2：数据和控件仍在 DOM 中，但侧栏、顶部栏和历史消息会被推到可视区外，页面看起来像“加载不完整”。 |
+| 发现环境 | Coze `main@4793f602161d389eaf28bd8ecbc98ddbeb8df7d8`，Google Chrome“用户1”，`/simple-chat` 专用任务深链。 |
+| 稳定复现 | 页面根容器 `clientHeight=863`、`scrollHeight=2484`、`scrollTop=518`，且 `overflow=hidden`；侧栏和消息的实际 y 坐标为负。关闭的图像模型列表实际高度约 `2415px`，输入框聚焦后浏览器把隐藏根容器自动滚动。Console error/warning 为 0，因此不是数据加载或 JavaScript 崩溃。 |
+| 根因 | 两个绝对定位的模型列表在关闭时只使用 `opacity-0 invisible pointer-events-none`。`visibility:hidden` 不移除元素尺寸；关闭时 `modelMenuLayout` 又是 `undefined`，列表没有 `maxHeight`，大量模型条目继续扩大根容器滚动范围。 |
+| RED | `simple-chat-model-selector-contract.test.ts` 新增“关闭菜单必须脱离布局”契约；旧实现为 `1 failed / 4 passed`，明确得到实际 `0`、期望 `2` 个关闭态 `hidden`。 |
+| 最小修复 | 仅把聊天模型和图像模型列表的关闭态改为 Tailwind `hidden`。打开态继续使用现有 `modelMenuStyle`、`z-[100]`、有界高度与内部滚动；模型、供应商、消息、同步和积分逻辑均未修改。 |
+| 本地回归 | 聚焦 `5/5`；Simple Chat `26 files / 493 tests` 全部通过，2 项 PostgreSQL 测试按无隔离库环境显式跳过；全仓非 PostgreSQL 运行 `549 files / 3912 tests` 通过、`21 files / 119 tests` 显式跳过。此前同候选真实 PostgreSQL 全仓 `570/570 files / 4030/4030 tests` 为 0 跳过。TypeScript、零错误 Lint、生产构建 `116/116`、保护基线 `38/38` 通过。 |
+| 状态 | **本地修复完成 / 云端待验。** 修复前截图：`docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-before-2026-08-27.png`。部署精确候选后必须证明关闭菜单时根容器不再产生巨型滚动范围，侧栏、顶部栏和历史消息完整可见，同时两个菜单打开后仍在对话内容上方且可滚动选择。 |
