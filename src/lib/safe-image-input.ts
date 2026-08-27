@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import sharp, { type Sharp } from 'sharp';
@@ -256,7 +256,20 @@ async function loadManagedMedia(
     const candidate = path.resolve(root, relativePath);
     if (candidate === root || !candidate.startsWith(`${root}${path.sep}`)) continue;
     try {
-      const buffer = await readFile(candidate);
+      const [resolvedRoot, resolvedCandidate] = await Promise.all([
+        realpath(root),
+        realpath(candidate),
+      ]);
+      const relativeCandidate = path.relative(resolvedRoot, resolvedCandidate);
+      if (
+        !relativeCandidate
+        || relativeCandidate === '..'
+        || relativeCandidate.startsWith(`..${path.sep}`)
+        || path.isAbsolute(relativeCandidate)
+      ) {
+        throw new SafeImageInputError('Managed image resolves outside the allowed media root');
+      }
+      const buffer = await readFile(resolvedCandidate);
       if (buffer.byteLength === 0 || buffer.byteLength > maxBytes) {
         throw new SafeImageInputError('Managed image exceeds the size limit');
       }
