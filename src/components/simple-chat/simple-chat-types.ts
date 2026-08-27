@@ -533,8 +533,8 @@ export async function consumeSimpleChatCanvasBridge(input: {
       }
       continue;
     }
-    if (candidate.assetId || candidate.assetVersionId || candidate.placementId) continue;
-    references.push({ url: candidate.url });
+    // Legacy URL-only entries are parseable for cleanup, but are never trusted as
+    // canvas media. Only server-resolved managed references may reach merge.
   }
 
   const uniqueReferences = mergeSimpleChatCanvasBridgeReferences([], references);

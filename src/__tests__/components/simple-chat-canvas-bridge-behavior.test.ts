@@ -85,8 +85,9 @@ describe('standalone chat Canvas bridge behavior', () => {
       remove,
     });
 
-    expect(matched).toEqual({ status: 'consumed', references: [{ url: '/legacy.png' }] });
-    expect(merged).toEqual([{ url: '/old-project-image.png' }, { url: '/legacy.png' }]);
+    expect(matched).toEqual({ status: 'consumed', references: [] });
+    expect(merged).toEqual([{ url: '/old-project-image.png' }]);
+    expect(resolveReference).not.toHaveBeenCalled();
     expect(remove).toHaveBeenCalledTimes(1);
   });
 
@@ -196,7 +197,12 @@ describe('standalone chat Canvas bridge behavior', () => {
     expect(merge).toHaveBeenCalledWith(result.references);
   });
 
-  it('I6 imports legacy URLs without resolving or granting managed identity', async () => {
+  it.each([
+    ['/legacy-array.png'],
+    ['https://example.invalid/tracker.png'],
+    ['data:image/png;base64,AAAA'],
+    ['blob:https://example.test/legacy-image'],
+  ])('I6 drops URL-only legacy media without resolving or merging %s', async legacyUrl => {
     const consume = consumeBridge();
     expect(consume).toBeTypeOf('function');
     if (!consume) return;
@@ -204,17 +210,16 @@ describe('standalone chat Canvas bridge behavior', () => {
     const merge = vi.fn();
 
     const result = await consume({
-      payload: ['/legacy-array.png'],
+      payload: [legacyUrl],
       currentProjectId: 'canvas-a',
       resolveReference,
       merge,
       remove: vi.fn(),
     });
 
-    expect(result.references).toEqual([{ url: '/legacy-array.png' }]);
-    expect(result.references[0]).not.toHaveProperty('assetVersionId');
+    expect(result.references).toEqual([]);
     expect(resolveReference).not.toHaveBeenCalled();
-    expect(merge).toHaveBeenCalledWith([{ url: '/legacy-array.png' }]);
+    expect(merge).toHaveBeenCalledWith([]);
   });
 
   it.each([

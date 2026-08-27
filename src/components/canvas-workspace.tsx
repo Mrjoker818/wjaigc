@@ -84,6 +84,7 @@ import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell } from 'lucide-react';
 import { type Workflow, type WorkspaceAssetReference } from '@/lib/workflow-engine';
 import {
+  createSimpleChatImportWorkflow,
   parseSimpleChatWorkspaceHandoffIntent,
   type SimpleChatWorkspaceHandoff,
   type SimpleChatWorkspaceHandoffIntent,
@@ -5656,10 +5657,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
-  const nodeWorkflowRef = useRef(nodeWorkflow);
-  nodeWorkflowRef.current = nodeWorkflow;
-  const [handoffRetryRevision, setHandoffRetryRevision] = useState(0);
   const workspaceLocationSearch = useWorkspaceLocationSearch();
+  const handoffBootstrapWorkflow = useMemo(() => {
+    if (nodeWorkflow || !currentProject?.id) return null;
+    const intent = parseSimpleChatWorkspaceHandoffIntent(workspaceLocationSearch);
+    if (!intent || intent.targetProjectId !== currentProject.id) return null;
+    return createSimpleChatImportWorkflow(currentProject.id, Date.now());
+  }, [currentProject?.id, nodeWorkflow, workspaceLocationSearch]);
+  const nodeEditorWorkflow = nodeWorkflow ?? handoffBootstrapWorkflow;
+  const nodeWorkflowRef = useRef(nodeEditorWorkflow);
+  nodeWorkflowRef.current = nodeEditorWorkflow;
+  const [handoffRetryRevision, setHandoffRetryRevision] = useState(0);
 
   const persistNodeWorkflow = useCallback(async (
     workflow: Workflow,
@@ -5789,7 +5797,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         taskModelCatalog={taskModelCatalog}
         taskModelOptions={catalogModels}
         catalogStatus={catalogStatus}
-        workflow={nodeWorkflow}
+        workflow={nodeEditorWorkflow}
         userId={currentUser?.id}
         projectId={currentProject?.id}
         onBack={() => setAppMode('canvas')}

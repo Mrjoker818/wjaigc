@@ -17,6 +17,7 @@ import {
   replaceWorkspaceHistoryState,
   useWorkspaceLocationSearch,
 } from '@/lib/project-workspace-url';
+import { stableChatImportWorkflowId } from '@/lib/simple-chat-workspace-handoff';
 import { createEmptyWorkflow } from '@/lib/workflow-engine';
 
 afterEach(() => {
@@ -48,6 +49,22 @@ function handoffFor(messageId: string, text = messageId) {
   };
 }
 
+function handoffWithManagedImage(messageId: string) {
+  const handoff = handoffFor(messageId);
+  return {
+    ...handoff,
+    images: [{
+      imageIndex: 0,
+      assetRef: {
+        url: '/source.png',
+        assetVersionId: 'version-1',
+        placementId: 'placement-1',
+      },
+      sourceTrace: handoff.sourceTrace,
+    }],
+  };
+}
+
 const intent = {
   targetProjectId: 'canvas-1',
   chatProjectId: 'chat-1',
@@ -56,6 +73,94 @@ const intent = {
 };
 
 describe('simple chat workspace consumer guard', () => {
+  it('keeps the stable import workflow when a delayed resolver overlaps the empty NodeEditor bootstrap', async () => {
+    const resolverEntered = deferred();
+    const releaseResolver = deferred<ReturnType<typeof handoffFor>>();
+    let workflow = null as ReturnType<typeof createEmptyWorkflow> | null;
+    const persisted: ReturnType<typeof createEmptyWorkflow>[] = [];
+
+    const running = consumeSimpleChatWorkspaceHandoffForProject({
+      intent,
+      currentProjectId: 'canvas-1',
+      currentWorkflow: workflow,
+      getCurrentWorkflow: () => workflow,
+      guard: createSimpleChatWorkspaceHandoffRunGuard(),
+      resolve: async () => {
+        resolverEntered.resolve();
+        return releaseResolver.promise;
+      },
+      transfer: async () => { throw new Error('unexpected transfer'); },
+      persist: async next => { persisted.push(next); },
+      applyWorkflow: next => { workflow = next; },
+      cleanUrl: () => undefined,
+      now: () => 1000,
+    });
+
+    await resolverEntered.promise;
+    workflow = createEmptyWorkflow('新工作流');
+    releaseResolver.resolve(handoffFor('message-1'));
+    await running;
+
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({
+      id: stableChatImportWorkflowId('canvas-1'),
+      name: '智能对话导入',
+    });
+    expect(workflow).toMatchObject({
+      id: stableChatImportWorkflowId('canvas-1'),
+      name: '智能对话导入',
+    });
+  });
+
+  it('gives concurrent first consumers the same stable workflow identity', async () => {
+    const releaseResolvers = [
+      deferred<ReturnType<typeof handoffWithManagedImage>>(),
+      deferred<ReturnType<typeof handoffWithManagedImage>>(),
+    ];
+    const entered = [deferred(), deferred()];
+    const workflows: Array<ReturnType<typeof createEmptyWorkflow> | null> = [null, null];
+    const persistedIds: string[] = [];
+    const transferWorkspaces: string[] = [];
+    const transferKeys: string[] = [];
+
+    const runs = workflows.map((_, index) => consumeSimpleChatWorkspaceHandoffForProject({
+      intent,
+      currentProjectId: 'canvas-1',
+      currentWorkflow: workflows[index],
+      getCurrentWorkflow: () => workflows[index],
+      guard: createSimpleChatWorkspaceHandoffRunGuard(),
+      resolve: async () => {
+        entered[index].resolve();
+        return releaseResolvers[index].promise;
+      },
+      transfer: async request => {
+        transferWorkspaces.push(request.targetWorkspace);
+        transferKeys.push(request.idempotencyKey);
+        return {
+          url: '/canonical.png',
+          assetVersionId: 'version-1',
+          placementId: 'target-placement-1',
+        };
+      },
+      persist: async next => { persistedIds.push(next.id); },
+      applyWorkflow: next => { workflows[index] = next; },
+      cleanUrl: () => undefined,
+      now: () => 1000,
+    }));
+
+    await Promise.all(entered.map(item => item.promise));
+    workflows[0] = createEmptyWorkflow('新工作流');
+    workflows[1] = createEmptyWorkflow('新工作流');
+    releaseResolvers[0].resolve(handoffWithManagedImage('message-1'));
+    releaseResolvers[1].resolve(handoffWithManagedImage('message-1'));
+    await Promise.all(runs);
+
+    expect(new Set(persistedIds)).toEqual(new Set([stableChatImportWorkflowId('canvas-1')]));
+    expect(new Set(transferWorkspaces)).toEqual(new Set([stableChatImportWorkflowId('canvas-1')]));
+    expect(new Set(transferKeys)).toHaveLength(1);
+    expect(workflows.every(item => item?.name === '智能对话导入')).toBe(true);
+  });
+
   it('consumes each same-project handoff after custom history and popstate location changes', async () => {
     window.history.replaceState(
       null,

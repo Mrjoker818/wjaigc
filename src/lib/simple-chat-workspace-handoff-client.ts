@@ -1,6 +1,7 @@
 import type { WorkspaceAssetReference } from './asset-core/types';
 import {
   appendSimpleChatHandoffToWorkflow,
+  stabilizeSimpleChatImportWorkflow,
   type PendingSimpleChatHandoffImage,
   type SimpleChatWorkspaceHandoff,
   type SimpleChatWorkspaceHandoffIntent,
@@ -272,10 +273,17 @@ export function applyTransferredImageReference(
 export async function executeSimpleChatWorkspaceHandoff(
   input: ExecuteSimpleChatWorkspaceHandoffInput,
 ): Promise<ExecuteSimpleChatWorkspaceHandoffResult> {
+  const startedWithoutWorkflow = input.currentWorkflow === null;
   const handoff = await input.resolve(input.intent);
   const now = input.now();
+  const currentWorkflow = (): Workflow | null => {
+    const latest = input.getCurrentWorkflow?.() ?? input.currentWorkflow;
+    return startedWithoutWorkflow
+      ? stabilizeSimpleChatImportWorkflow(latest, input.intent.targetProjectId, now)
+      : latest;
+  };
   const planned = appendSimpleChatHandoffToWorkflow(
-    input.getCurrentWorkflow?.() ?? input.currentWorkflow,
+    currentWorkflow(),
     input.intent.targetProjectId,
     handoff,
     now,
@@ -304,9 +312,9 @@ export async function executeSimpleChatWorkspaceHandoff(
     return next;
   };
 
-  const persistedWorkflow = applyPatch(input.getCurrentWorkflow?.() ?? input.currentWorkflow);
+  const persistedWorkflow = applyPatch(currentWorkflow());
   await input.persist(persistedWorkflow);
-  const workflow = applyPatch(input.getCurrentWorkflow?.() ?? persistedWorkflow);
+  const workflow = applyPatch(input.getCurrentWorkflow ? currentWorkflow() : persistedWorkflow);
   input.cleanUrl();
   return {
     status: handoff.warnings.length > 0 ? 'partial-success' : 'success',

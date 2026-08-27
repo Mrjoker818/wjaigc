@@ -117,12 +117,25 @@ export function stableChatImportNodeId(
   return `node-chat-${stableHash(JSON.stringify([intent.chatProjectId, intent.chatTaskId, intent.chatMessageId, kind, index]))}`;
 }
 
-function createImportWorkflow(projectId: string, now: number): Workflow {
+export function createSimpleChatImportWorkflow(projectId: string, now: number): Workflow {
   return {
     ...createEmptyWorkflow(IMPORT_WORKFLOW_NAME),
     id: stableChatImportWorkflowId(projectId),
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+export function stabilizeSimpleChatImportWorkflow(
+  workflow: Workflow | null,
+  projectId: string,
+  now: number,
+): Workflow {
+  if (!workflow) return createSimpleChatImportWorkflow(projectId, now);
+  return {
+    ...workflow,
+    id: stableChatImportWorkflowId(projectId),
+    name: IMPORT_WORKFLOW_NAME,
   };
 }
 
@@ -146,7 +159,7 @@ export function appendSimpleChatHandoffToWorkflow(
     chatTaskId: handoff.sourceTrace.chatTaskId,
     chatMessageId: handoff.sourceTrace.messageId,
   };
-  const baseWorkflow = currentWorkflow ?? createImportWorkflow(targetProjectId, now);
+  const baseWorkflow = currentWorkflow ?? createSimpleChatImportWorkflow(targetProjectId, now);
   const existingIds = new Set(baseWorkflow.nodes.map(node => node.id));
   const origin = getAppendOrigin(baseWorkflow.nodes);
   const candidates: Array<{ node: WorkflowNode; pendingImage?: PendingSimpleChatHandoffImage }> = [];
