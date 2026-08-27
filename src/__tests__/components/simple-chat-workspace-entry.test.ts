@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+
+import { createElement } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -9,6 +13,7 @@ import {
   type SimpleChatProject,
   type SimpleChatTask,
 } from '@/components/simple-chat/simple-chat-types';
+import { SimpleChatWorkspaceActions } from '@/components/simple-chat/chat-area';
 import { buildSimpleChatWorkspaceHandoffUrl } from '@/lib/simple-chat-workspace-handoff';
 
 const chatAreaSource = readFileSync(
@@ -48,12 +53,37 @@ function message(overrides: Partial<SimpleChatMessage> = {}): SimpleChatMessage 
 }
 
 describe('Simple Chat workspace entry', () => {
-  it('enables node-mode handoff only for non-empty text or a managed image', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('requires an actual image aligned with its managed reference', () => {
     expect(canSendSimpleChatMessageToNodeMode(message({ content: '  ' }))).toBe(false);
     expect(canSendSimpleChatMessageToNodeMode(message({ content: '可发送文本' }))).toBe(true);
     expect(canSendSimpleChatMessageToNodeMode(message({
       images: ['/legacy.png'],
       imageRefs: [{ url: '/legacy.png' }],
+    }))).toBe(false);
+    expect(canSendSimpleChatMessageToNodeMode(message({
+      images: ['/actual.png'],
+      imageRefs: [
+        { url: '/orphan.png' },
+        {
+          url: '/managed-but-orphaned.png',
+          assetVersionId: 'version-orphaned',
+          placementId: 'placement-orphaned',
+        },
+      ],
+    }))).toBe(false);
+    expect(canSendSimpleChatMessageToNodeMode(message({
+      images: ['/actual.png'],
+      imageRefs: [
+        {
+          url: '/wrong-image.png',
+          assetVersionId: 'version-wrong',
+          placementId: 'placement-wrong',
+        },
+      ],
     }))).toBe(false);
     expect(canSendSimpleChatMessageToNodeMode(message({
       images: ['/managed.png'],
@@ -63,6 +93,75 @@ describe('Simple Chat workspace entry', () => {
         placementId: 'placement-a',
       }],
     }))).toBe(true);
+  });
+
+  it('renders the node action beside Canvas and guides empty or targetless messages', () => {
+    const onNotice = vi.fn();
+    const { rerender } = render(createElement(SimpleChatWorkspaceActions, {
+      message: message({
+        images: ['/managed.png'],
+        imageRefs: [{
+          url: '/managed.png',
+          assetVersionId: 'version-a',
+          placementId: 'placement-a',
+        }],
+      }),
+      project,
+      task,
+      selectedCanvasProjectId: '',
+      canvasTransferPending: false,
+      onSendToCanvas: vi.fn(),
+      onNotice,
+      navigate: vi.fn(),
+    }));
+
+    const actions = screen.getByTestId('simple-chat-workspace-actions');
+    expect(actions.children[0]).toBe(screen.getByTitle('添加到画布'));
+    expect(actions.children[1]).toBe(screen.getByRole('button', { name: '发送到节点模式' }));
+    fireEvent.click(screen.getByRole('button', { name: '发送到节点模式' }));
+    expect(onNotice).toHaveBeenCalledWith('请先选择目标画布项目');
+
+    rerender(createElement(SimpleChatWorkspaceActions, {
+      message: message({ content: '  ' }),
+      project,
+      task,
+      selectedCanvasProjectId: 'canvas-project-a',
+      canvasTransferPending: false,
+      onSendToCanvas: vi.fn(),
+      onNotice,
+      navigate: vi.fn(),
+    }));
+    const emptyAction = screen.getByRole('button', { name: '发送到节点模式' }) as HTMLButtonElement;
+    expect(emptyAction.disabled).toBe(true);
+    expect(emptyAction.getAttribute('title')).toBe('仅非空文本或已登记图片可发送到节点模式');
+  });
+
+  it('clicks through the selected target with an identifier-only URL', () => {
+    const navigate = vi.fn();
+    render(createElement(SimpleChatWorkspaceActions, {
+      message: message({ content: '可发送文本' }),
+      project,
+      task,
+      selectedCanvasProjectId: 'canvas-selected-only',
+      canvasTransferPending: false,
+      onSendToCanvas: vi.fn(),
+      onNotice: vi.fn(),
+      navigate,
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: '发送到节点模式' }));
+
+    expect(navigate).toHaveBeenCalledOnce();
+    const url = new URL(String(navigate.mock.calls[0]?.[0]), 'https://example.test');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      projectId: 'canvas-selected-only',
+      mode: 'node',
+      chatProjectId: project.id,
+      chatTaskId: task.id,
+      chatMessageId: 'message-a',
+    });
+    expect(url.toString()).not.toContain('可发送文本');
+    expect(url.toString()).not.toContain('/managed.png');
   });
 
   it('builds a validated message-level source trace from chat identifiers', () => {
@@ -119,7 +218,7 @@ describe('Simple Chat workspace entry', () => {
     expect(url).not.toContain('可发送文本');
   });
 
-  it('wires the action to same-tab navigation without a node bridge side channel', () => {
+  it('defaults production navigation to same-tab assign without a node bridge side channel', () => {
     expect(chatAreaSource).toContain('buildSimpleChatWorkspaceHandoffUrl');
     expect(chatAreaSource).toContain('发送到节点模式');
     expect(chatAreaSource).toMatch(/window\.location\.assign\(/);

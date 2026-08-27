@@ -87,6 +87,7 @@ import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
 import {
+  buildSimpleChatCanvasBridgeImages,
   consumeSimpleChatCanvasBridge,
   resolveSimpleChatCanvasReference,
 } from '@/components/simple-chat/simple-chat-types';
@@ -1392,28 +1393,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               (!reference.placementId || !existingPlacementIds.has(reference.placementId))
               && (!reference.entityId || !existingEntityIds.has(reference.entityId))
             ));
-            const newImages: CanvasImage[] = uniqueReferences.map((reference, idx) => ({
-            id: canvasEntityIdForTransferredReference(reference, `chat-bridge-${timestamp}-${idx}`),
-            url: reference.url,
-            prompt: reference.name || '',
-            model: '',
-            quality: 'standard',
-            aspectRatio: '1:1',
-            stylePreset: '',
-            category: 'general',
-            size: '1024x1024',
-            x: 200 + (idx % 5) * 220,
-            y: 200 + Math.floor(idx / 5) * 220,
-            width: 512,
-            height: 512,
-            originalWidth: 1024,
-            originalHeight: 1024,
-            isAiGenerated: true,
-            ...(reference.assetId ? { assetId: reference.assetId } : {}),
-            ...(reference.assetVersionId ? { assetVersionId: reference.assetVersionId } : {}),
-            ...(reference.placementId ? { placementId: reference.placementId } : {}),
-            sourceTrace: reference.sourceTrace,
-            }));
+            const newImages: CanvasImage[] = buildSimpleChatCanvasBridgeImages(
+              uniqueReferences,
+              timestamp,
+            );
       // ★ 修复：使用 setImages 包装器而非直接 setImagesRaw，确保 prevImagesRef 同步更新
       // 之前直接调用 setImagesRaw 导致 prevImagesRef 过期，后续 setImages 调用会使用过期的基准计算 diff
             return [...prev, ...newImages];

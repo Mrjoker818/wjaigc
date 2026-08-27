@@ -218,8 +218,67 @@ export function hasManagedAssetIdentity(
 export function canSendSimpleChatMessageToNodeMode(message: SimpleChatMessage): boolean {
   return Boolean(
     message.content.trim()
-    || message.imageRefs?.some(reference => hasManagedAssetIdentity(reference)),
+    || message.images?.some((imageUrl, index) => {
+      const reference = message.imageRefs?.[index];
+      return Boolean(
+        imageUrl
+        && reference?.url === imageUrl
+        && hasManagedAssetIdentity(reference),
+      );
+    }),
   );
+}
+
+export function buildSimpleChatCanvasBridgeImages(
+  references: WorkspaceAssetReference[],
+  timestamp: number,
+): Array<{
+  id: string;
+  url: string;
+  prompt: string;
+  model: string;
+  quality: string;
+  aspectRatio: string;
+  stylePreset: string;
+  category: string;
+  size: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  originalWidth: number;
+  originalHeight: number;
+  isAiGenerated: boolean;
+  assetId?: string;
+  assetVersionId?: string;
+  placementId?: string;
+  sourceTrace?: WorkspaceSourceTrace;
+}> {
+  return references.map((reference, index) => {
+    const sourceTrace = parseWorkspaceSourceTrace(reference.sourceTrace);
+    return {
+      id: reference.entityId || `chat-bridge-${timestamp}-${index}`,
+      url: reference.url,
+      prompt: reference.name || '',
+      model: '',
+      quality: 'standard',
+      aspectRatio: '1:1',
+      stylePreset: '',
+      category: 'general',
+      size: '1024x1024',
+      x: 200 + (index % 5) * 220,
+      y: 200 + Math.floor(index / 5) * 220,
+      width: 512,
+      height: 512,
+      originalWidth: 1024,
+      originalHeight: 1024,
+      isAiGenerated: true,
+      ...(reference.assetId ? { assetId: reference.assetId } : {}),
+      ...(reference.assetVersionId ? { assetVersionId: reference.assetVersionId } : {}),
+      ...(reference.placementId ? { placementId: reference.placementId } : {}),
+      ...(sourceTrace ? { sourceTrace } : {}),
+    };
+  });
 }
 
 export function buildSimpleChatMessageSourceTrace(input: {

@@ -132,6 +132,75 @@ interface ChatAreaProps {
   onToggleSidebar: () => void;
 }
 
+interface SimpleChatWorkspaceActionsProps {
+  message: SimpleChatMessage;
+  project: SimpleChatProject | null;
+  task: SimpleChatTask | null;
+  selectedCanvasProjectId: string;
+  canvasTransferPending: boolean;
+  onSendToCanvas: (message: SimpleChatMessage) => void;
+  onNotice: (notice: string) => void;
+  navigate?: (url: string) => void;
+}
+
+export function SimpleChatWorkspaceActions({
+  message,
+  project,
+  task,
+  selectedCanvasProjectId,
+  canvasTransferPending,
+  onSendToCanvas,
+  onNotice,
+  navigate = url => window.location.assign(url),
+}: SimpleChatWorkspaceActionsProps) {
+  const canSendToNodeMode = canSendSimpleChatMessageToNodeMode(message);
+  const canSendToCanvas = canTransferSimpleChatMedia(message.images || [], message.imageRefs || []);
+  const sendToNodeMode = () => {
+    if (!selectedCanvasProjectId || !project || !task) {
+      onNotice('请先选择目标画布项目');
+      return;
+    }
+    if (!canSendToNodeMode) {
+      onNotice('仅非空文本或已登记图片可发送到节点模式');
+      return;
+    }
+    navigate(buildSimpleChatWorkspaceHandoffUrl({
+      targetProjectId: selectedCanvasProjectId,
+      chatProjectId: project.id,
+      chatTaskId: task.id,
+      chatMessageId: message.id,
+    }));
+  };
+
+  return (
+    <div data-testid="simple-chat-workspace-actions" className="inline-flex gap-0.5">
+      {Boolean(message.images?.length) && (
+        <button
+          onClick={() => onSendToCanvas(message)}
+          disabled={canvasTransferPending || !canSendToCanvas}
+          className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
+          title={canSendToCanvas ? '添加到画布' : '历史图片或登记失败的图片不可转移'}
+        >
+          <Send className="w-3 h-3" />
+        </button>
+      )}
+      <button
+        onClick={sendToNodeMode}
+        disabled={!canSendToNodeMode}
+        className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        title={!selectedCanvasProjectId || !project || !task
+          ? '请先选择目标画布项目'
+          : canSendToNodeMode
+            ? '发送到节点模式'
+            : '仅非空文本或已登记图片可发送到节点模式'}
+        aria-label="发送到节点模式"
+      >
+        <GitBranch className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
 const MODEL_TAGS: Record<string, string[]> = {
   'gpt-4o': ['多模态', '128K'],
   'gpt-4o-mini': ['快速', '128K'],
@@ -1700,24 +1769,6 @@ export default function ChatArea({
     }
   }, [canvasTransferMessageId, project, selectedCanvasProjectId, task]);
 
-  const sendMessageToNodeMode = useCallback((message: SimpleChatMessage) => {
-    if (!selectedCanvasProjectId || !project || !task) {
-      setControlNotice('请先选择目标画布项目');
-      return;
-    }
-    if (!canSendSimpleChatMessageToNodeMode(message)) {
-      setControlNotice('仅非空文本或已登记图片可发送到节点模式');
-      return;
-    }
-    const url = buildSimpleChatWorkspaceHandoffUrl({
-      targetProjectId: selectedCanvasProjectId,
-      chatProjectId: project.id,
-      chatTaskId: task.id,
-      chatMessageId: message.id,
-    });
-    window.location.assign(url);
-  }, [project, selectedCanvasProjectId, task]);
-
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
   const retryFailedMessage = useCallback(async (messageId: string) => {
@@ -2092,7 +2143,7 @@ export default function ChatArea({
                   )}
                 </div>
                 {/* Message Operations */}
-                {msg.role === 'assistant' && msg.content && !isStreaming && msg.status !== 'failed' && (
+                {msg.role === 'assistant' && (msg.content || Boolean(msg.images?.length)) && !isStreaming && msg.status !== 'failed' && (
                   <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity flex-wrap">
                     <button onClick={() => copyMessage(msg.content)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
                     <button onClick={regenerateLast} className="p-1 rounded hover:bg-muted text-muted-foreground" title="重新生成"><RefreshCw className="w-3 h-3" /></button>
@@ -2138,31 +2189,15 @@ export default function ChatArea({
                         <Download className="w-3 h-3" />
                       </button>
                     )}
-                    {msg.images && msg.images.length > 0 && (
-                      <button
-                        onClick={() => { void sendImagesToCanvas(msg); }}
-                        disabled={canvasTransferMessageId === msg.id || !canTransferSimpleChatMedia(msg.images, msg.imageRefs || [])}
-                        className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                        title={canTransferSimpleChatMedia(msg.images, msg.imageRefs || [])
-                          ? '添加到画布'
-                          : '历史图片或登记失败的图片不可转移'}
-                      >
-                        <Send className="w-3 h-3" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => sendMessageToNodeMode(msg)}
-                      disabled={!canSendSimpleChatMessageToNodeMode(msg)}
-                      className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                      title={!selectedCanvasProjectId || !project || !task
-                        ? '请先选择目标画布项目'
-                        : canSendSimpleChatMessageToNodeMode(msg)
-                          ? '发送到节点模式'
-                          : '仅非空文本或已登记图片可发送到节点模式'}
-                      aria-label="发送到节点模式"
-                    >
-                      <GitBranch className="w-3 h-3" />
-                    </button>
+                    <SimpleChatWorkspaceActions
+                      message={msg}
+                      project={project}
+                      task={task}
+                      selectedCanvasProjectId={selectedCanvasProjectId}
+                      canvasTransferPending={canvasTransferMessageId === msg.id}
+                      onSendToCanvas={(message) => { void sendImagesToCanvas(message); }}
+                      onNotice={setControlNotice}
+                    />
                     {/* 回复评分 */}
                     <span className="w-px h-4 bg-border mx-0.5 self-center" />
                     <button onClick={() => handleRateMessage(msg.id, 'up')}

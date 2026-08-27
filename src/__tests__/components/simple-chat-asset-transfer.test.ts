@@ -92,6 +92,11 @@ type SendMediaToCanvas = (input: {
 
 type CanTransferMedia = (images: string[], references: AssetReference[]) => boolean;
 
+type BuildCanvasBridgeImages = (
+  references: AssetReference[],
+  timestamp: number,
+) => Array<{ id: string; url: string; sourceTrace?: WorkspaceSourceTrace }>;
+
 function bridgeReader(): BridgeReader | undefined {
   return (simpleChatTypes as unknown as { parseSimpleChatCanvasBridgePayload?: BridgeReader })
     .parseSimpleChatCanvasBridgePayload;
@@ -110,6 +115,12 @@ function sendMediaToCanvas(): SendMediaToCanvas | undefined {
 function canTransferMedia(): CanTransferMedia | undefined {
   return (simpleChatTypes as unknown as { canTransferSimpleChatMedia?: CanTransferMedia })
     .canTransferSimpleChatMedia;
+}
+
+function buildCanvasBridgeImages(): BuildCanvasBridgeImages | undefined {
+  return (simpleChatTypes as unknown as {
+    buildSimpleChatCanvasBridgeImages?: BuildCanvasBridgeImages;
+  }).buildSimpleChatCanvasBridgeImages;
 }
 
 describe('standalone simple-chat asset transfer', () => {
@@ -383,7 +394,27 @@ describe('standalone simple-chat asset transfer', () => {
     expect(writeBridge).toHaveBeenCalledWith([
       expect.objectContaining({ sourceTrace: sourceTraceFixture }),
     ]);
-    expect(canvasWorkspaceSource).toContain('sourceTrace: reference.sourceTrace');
+  });
+
+  it('builds inserted Canvas images with the sanitized server-returned source trace', () => {
+    const buildImages = buildCanvasBridgeImages();
+    expect(buildImages).toBeTypeOf('function');
+    if (!buildImages) return;
+
+    expect(buildImages([{
+      url: '/canonical-canvas.png',
+      assetVersionId: 'canvas-version',
+      placementId: 'canvas-placement',
+      entityId: 'simple-chat:task-a:message-a:0',
+      sourceTrace: sourceTraceFixture,
+    }], 42)).toEqual([
+      expect.objectContaining({
+        id: 'simple-chat:task-a:message-a:0',
+        url: '/canonical-canvas.png',
+        sourceTrace: sourceTraceFixture,
+      }),
+    ]);
+    expect(canvasWorkspaceSource).toContain('buildSimpleChatCanvasBridgeImages');
   });
 
   it('omits an invalid message reference trace from canvas transfer metadata', async () => {
