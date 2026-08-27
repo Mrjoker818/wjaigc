@@ -996,7 +996,7 @@ async function tryExternalLayerSplit(
  * Call the AI vision API to analyze the image and get semantic layer structure.
  * Uses the existing chat API with a vision-capable model.
  */
-async function analyzeImageWithAI(
+export async function analyzeImageWithAIForTest(
   imageUrl: string,
   onProgress?: (stage: string, progress: number) => void
 ): Promise<AIAnalysisResult | null> {
@@ -1017,122 +1017,67 @@ async function analyzeImageWithAI(
       });
     }
 
-    // Try the dedicated PSD analysis endpoint first
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      controller.abort(new DOMException('PSD analysis timeout', 'TimeoutError'));
+    }, 50_000);
+    const randomPart = typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
     try {
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 12000);
       const analysisResponse = await fetch('/api/analyze-psd', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `psd-analysis-${randomPart}`,
+        },
         body: JSON.stringify({ image: base64Data }),
         signal: controller.signal,
       });
-      window.clearTimeout(timeoutId);
-
-      if (analysisResponse.ok) {
-        const result = await analysisResponse.json();
-        if (result.success && result.analysis) {
-          const analysis = result.analysis as {
-            backgroundColor?: number[];
-            backgroundMode?: string;
-            layers?: Array<{
-              name: string;
-              role: string;
-              description: string;
-              approximatePosition?: string;
-            }>;
-          };
-
-          if (analysis.layers && analysis.layers.length > 0) {
-            // Convert the analysis endpoint response to AIAnalysisResult format
-            const bgColor: [number, number, number] = Array.isArray(analysis.backgroundColor) && analysis.backgroundColor.length >= 3
-              ? [analysis.backgroundColor[0], analysis.backgroundColor[1], analysis.backgroundColor[2]]
-              : [255, 255, 255];
-
-            return {
-              description: 'AI-analyzed image',
-              bgType: (analysis.backgroundMode === 'white' || analysis.backgroundMode === 'white-preserve')
-                ? 'white' as const
-                : (analysis.backgroundMode === 'none' ? 'complex' as const : 'colored' as const),
-              dominantColors: [],
-              layers: analysis.layers.map(l => ({
-                name: l.name,
-                role: (l.role === 'bg' ? 'background' : l.role === 'fx' ? 'deco' : l.role) as 'background' | 'subject' | 'text' | 'deco',
-                description: l.description,
-                approximatePosition: l.approximatePosition || 'center',
-              })),
-              bgColor,
-              backgroundMode: analysis.backgroundMode || 'white',
-            };
-          }
-        }
+      if (!analysisResponse.ok) {
+        console.warn('PSD analysis endpoint failed:', analysisResponse.status);
+        return null;
       }
-    } catch {
-      // Fall through to chat-based analysis
+
+      const result = await analysisResponse.json() as {
+        success?: boolean;
+        analysis?: {
+          backgroundColor?: number[];
+          backgroundMode?: string;
+          layers?: Array<{
+            name: string;
+            role: string;
+            description: string;
+            approximatePosition?: string;
+          }>;
+        };
+      };
+      const analysis = result.success ? result.analysis : undefined;
+      if (!analysis?.layers?.length) return null;
+
+      const bgColor: [number, number, number] = Array.isArray(analysis.backgroundColor)
+        && analysis.backgroundColor.length >= 3
+        ? [analysis.backgroundColor[0], analysis.backgroundColor[1], analysis.backgroundColor[2]]
+        : [255, 255, 255];
+      return {
+        description: 'AI-analyzed image',
+        bgType: (analysis.backgroundMode === 'white' || analysis.backgroundMode === 'white-preserve')
+          ? 'white'
+          : (analysis.backgroundMode === 'none' ? 'complex' : 'colored'),
+        dominantColors: [],
+        layers: analysis.layers.map(layer => ({
+          name: layer.name,
+          role: (layer.role === 'bg' ? 'background' : layer.role === 'fx' ? 'deco' : layer.role) as 'background' | 'subject' | 'text' | 'deco',
+          description: layer.description,
+          approximatePosition: layer.approximatePosition || 'center',
+        })),
+        bgColor,
+        backgroundMode: analysis.backgroundMode || 'white',
+      };
+    } finally {
+      window.clearTimeout(timeoutId);
     }
-
-    // Fallback: use the server-side chat endpoint with the configured vision model
-    const prompt = `Analyze this image for PSD layer decomposition. Return a JSON object with:
-1. "description": brief image description
-2. "bgType": one of "white", "light", "dark", "colored", "complex"  
-3. "dominantColors": array of up to 5 hex color codes
-4. "layers": array of objects, each with:
-   - "name": short English name for the layer
-   - "role": one of "background", "subject", "text", "deco"
-   - "description": what this element is
-   - "approximatePosition": "center", "top", "bottom", "left", "right", "top-left", etc.
-
-Identify 2-6 meaningful visual layers. Background should be listed first.
-Focus on SEMANTIC elements (whole objects, text blocks, distinct areas), NOT color regions.
-Each layer should represent a COMPLETE visual element.
-
-Return ONLY valid JSON, no markdown.`;
-
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 12000);
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: 'google/gemini-2.0-flash-001',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: base64Data } },
-            ],
-          },
-        ],
-        stream: false,
-      }),
-    });
-    window.clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      console.warn('AI vision API failed:', response.status);
-      return null;
-    }
-
-    const result = await response.json();
-    let content = '';
-
-    if (result.choices && result.choices[0]?.message?.content) {
-      content = result.choices[0].message.content;
-    } else if (result.content) {
-      content = result.content;
-    }
-
-    // Extract JSON from the response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.warn('Could not parse AI response as JSON');
-      return null;
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]) as AIAnalysisResult;
-    return parsed;
   } catch (e) {
     console.warn('AI vision analysis failed:', e);
     return null;
@@ -1951,7 +1896,7 @@ export async function buildV4Scene(
 
   // Step 1: Try AI vision analysis
   onProgress?.('ai_analyzing', 10);
-  const aiAnalysis = await withTimeout(analyzeImageWithAI(imageUrl, onProgress), 15000, null);
+  const aiAnalysis = await withTimeout(analyzeImageWithAIForTest(imageUrl, onProgress), 55_000, null);
 
   // Step 2: Detect background using corner sampling + AI guidance
   onProgress?.('detecting_background', 20);
