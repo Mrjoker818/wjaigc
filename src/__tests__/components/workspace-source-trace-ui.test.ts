@@ -1,5 +1,6 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -53,5 +54,15 @@ describe('workspace source trace UI', () => {
     expect(markup).not.toContain('secret-key');
     expect(unselectedMarkup).toBe('');
     expect(invalidMarkup).toBe('');
+  });
+
+  it('keeps source trace details wired into their owning production parents', () => {
+    const nodeEditorSource = readFileSync('src/components/node-editor.tsx', 'utf8');
+    const infiniteCanvasSource = readFileSync('src/components/infinite-canvas.tsx', 'utf8');
+
+    expect(nodeEditorSource).toContain("import { WorkspaceSourceTraceDetails } from '@/components/workspace-source-trace'");
+    expect(nodeEditorSource).toContain('<WorkspaceSourceTraceDetails sourceTrace={node.config.sourceTrace} />');
+    expect(infiniteCanvasSource).toContain("import { CanvasSourceTraceBadge } from '@/components/workspace-source-trace'");
+    expect(infiniteCanvasSource).toContain('<CanvasSourceTraceBadge sourceTrace={image.sourceTrace} isSelected={isSelected} />');
   });
 });

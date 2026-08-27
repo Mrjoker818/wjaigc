@@ -111,17 +111,23 @@ export interface ConsumeSimpleChatWorkspaceHandoffForProjectInput
   applyWorkflow?: (workflow: Workflow) => void;
 }
 
-function assertSimpleChatHandoffScope(
+function assertSimpleChatHandoffProjectScope(
   input: ConsumeSimpleChatWorkspaceHandoffForProjectInput,
   expectedProjectId: string,
-  expectedIdentity: string,
 ): void {
   const projectMatches = !input.getCurrentProjectId
     || input.getCurrentProjectId() === expectedProjectId;
-  const identityMatches = !input.getCurrentIdentity
-    || input.getCurrentIdentity() === expectedIdentity;
-  if (!projectMatches || !identityMatches) {
-    throw new Error('智能对话导入已取消：当前项目或导入链接已发生变化');
+  if (!projectMatches) {
+    throw new Error('智能对话导入已取消：当前项目已发生变化');
+  }
+}
+
+function assertSimpleChatHandoffIdentity(
+  input: ConsumeSimpleChatWorkspaceHandoffForProjectInput,
+  expectedIdentity: string,
+): void {
+  if (input.getCurrentIdentity && input.getCurrentIdentity() !== expectedIdentity) {
+    throw new Error('智能对话导入已取消：当前导入链接已发生变化');
   }
 }
 
@@ -134,7 +140,8 @@ export async function consumeSimpleChatWorkspaceHandoffForProject(
   if (!input.guard.begin(identity)) return null;
   try {
     const run = async (): Promise<ExecuteSimpleChatWorkspaceHandoffResult> => {
-      assertSimpleChatHandoffScope(input, intent.targetProjectId, identity);
+      assertSimpleChatHandoffProjectScope(input, intent.targetProjectId);
+      assertSimpleChatHandoffIdentity(input, identity);
       return executeSimpleChatWorkspaceHandoff({
         intent,
         currentWorkflow: input.getCurrentWorkflow
@@ -143,13 +150,15 @@ export async function consumeSimpleChatWorkspaceHandoffForProject(
         resolve: input.resolve,
         transfer: input.transfer,
         persist: async workflow => {
-          assertSimpleChatHandoffScope(input, intent.targetProjectId, identity);
+          assertSimpleChatHandoffProjectScope(input, intent.targetProjectId);
+          assertSimpleChatHandoffIdentity(input, identity);
           await input.persist(workflow);
-          assertSimpleChatHandoffScope(input, intent.targetProjectId, identity);
+          assertSimpleChatHandoffProjectScope(input, intent.targetProjectId);
           input.applyWorkflow?.(workflow);
         },
         cleanUrl: () => {
-          assertSimpleChatHandoffScope(input, intent.targetProjectId, identity);
+          assertSimpleChatHandoffProjectScope(input, intent.targetProjectId);
+          if (input.getCurrentIdentity && input.getCurrentIdentity() !== identity) return;
           input.cleanUrl();
         },
         now: input.now,

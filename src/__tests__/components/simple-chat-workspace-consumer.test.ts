@@ -177,22 +177,24 @@ describe('simple chat workspace consumer guard', () => {
     expect(cleanCount).toBe(0);
   });
 
-  it('serializes handoffs per project and reads the latest workflow when each starts', async () => {
+  it('cancels A before persistence when the shared browser URL changes to B', async () => {
     const queue = createSimpleChatWorkspaceHandoffProjectQueue();
     const guard = createSimpleChatWorkspaceHandoffRunGuard();
     const firstIntent = intent;
     const secondIntent = { ...intent, chatMessageId: 'message-2' };
     const firstResolved = deferred<ReturnType<typeof handoffFor>>();
     const firstStarted = deferred();
+    let currentIdentity = getSimpleChatWorkspaceHandoffIdentity(firstIntent);
     let workflow = createEmptyWorkflow('W');
     const starts: string[] = [];
+    const persisted: string[] = [];
 
     const run = (handoffIntent: typeof intent, barrier?: typeof firstResolved) => (
       consumeSimpleChatWorkspaceHandoffForProject({
         intent: handoffIntent,
         currentProjectId: 'canvas-1',
         getCurrentProjectId: () => 'canvas-1',
-        getCurrentIdentity: () => getSimpleChatWorkspaceHandoffIdentity(handoffIntent),
+        getCurrentIdentity: () => currentIdentity,
         getCurrentWorkflow: () => workflow,
         queue,
         guard,
@@ -202,7 +204,9 @@ describe('simple chat workspace consumer guard', () => {
           return barrier ? barrier.promise : handoffFor(handoffIntent.chatMessageId);
         },
         transfer: async () => { throw new Error('unexpected transfer'); },
-        persist: async next => { workflow = next; },
+        persist: async next => {
+          persisted.push((next.nodes.at(-1)?.config.sourceTrace as { messageId: string }).messageId);
+        },
         applyWorkflow: next => { workflow = next; },
         cleanUrl: () => undefined,
         now: () => 1000,
@@ -210,18 +214,115 @@ describe('simple chat workspace consumer guard', () => {
     );
 
     const first = run(firstIntent, firstResolved);
-    const second = run(secondIntent);
     await firstStarted.promise;
     expect(starts).toEqual(['message-1']);
 
+    currentIdentity = getSimpleChatWorkspaceHandoffIdentity(secondIntent);
+    const second = run(secondIntent);
     firstResolved.resolve(handoffFor('message-1'));
-    await first;
+    await expect(first).rejects.toThrow('导入已取消');
     await second;
 
     expect(starts).toEqual(['message-1', 'message-2']);
+    expect(persisted).toEqual(['message-2']);
+    expect(workflow.nodes.filter(node => node.config.sourceTrace).map(node => (
+      node.config.sourceTrace as { messageId: string }
+    ).messageId)).toEqual(['message-2']);
+  });
+
+  it('applies a successfully persisted A before queued B plans from the latest workflow', async () => {
+    const queue = createSimpleChatWorkspaceHandoffProjectQueue();
+    const guard = createSimpleChatWorkspaceHandoffRunGuard();
+    const firstIntent = intent;
+    const secondIntent = { ...intent, chatMessageId: 'message-2' };
+    const firstPersistEntered = deferred();
+    const releaseFirstPersist = deferred();
+    let currentIdentity = getSimpleChatWorkspaceHandoffIdentity(firstIntent);
+    let workflow = createEmptyWorkflow('W');
+    const persisted: string[][] = [];
+    const cleanedIdentities: string[] = [];
+
+    const run = (handoffIntent: typeof intent) => consumeSimpleChatWorkspaceHandoffForProject({
+      intent: handoffIntent,
+      currentProjectId: 'canvas-1',
+      getCurrentProjectId: () => 'canvas-1',
+      getCurrentIdentity: () => currentIdentity,
+      getCurrentWorkflow: () => workflow,
+      queue,
+      guard,
+      resolve: async () => handoffFor(handoffIntent.chatMessageId),
+      transfer: async () => { throw new Error('unexpected transfer'); },
+      persist: async next => {
+        if (handoffIntent.chatMessageId === 'message-1') {
+          firstPersistEntered.resolve();
+          await releaseFirstPersist.promise;
+        }
+        persisted.push(next.nodes.filter(node => node.config.sourceTrace).map(node => (
+          node.config.sourceTrace as { messageId: string }
+        ).messageId));
+      },
+      applyWorkflow: next => { workflow = next; },
+      cleanUrl: () => { cleanedIdentities.push(currentIdentity); },
+      now: () => 1000,
+    });
+
+    const first = run(firstIntent);
+    await firstPersistEntered.promise;
+    currentIdentity = getSimpleChatWorkspaceHandoffIdentity(secondIntent);
+    const second = run(secondIntent);
+    releaseFirstPersist.resolve();
+
+    await expect(first).resolves.toMatchObject({ status: 'success' });
+    await expect(second).resolves.toMatchObject({ status: 'success' });
+    expect(persisted).toEqual([['message-1'], ['message-1', 'message-2']]);
     expect(workflow.nodes.filter(node => node.config.sourceTrace).map(node => (
       node.config.sourceTrace as { messageId: string }
     ).messageId)).toEqual(['message-1', 'message-2']);
+    expect(cleanedIdentities).toEqual([getSimpleChatWorkspaceHandoffIdentity(secondIntent)]);
+  });
+
+  it('does not make project B wait for a blocked project A queue', async () => {
+    const queue = createSimpleChatWorkspaceHandoffProjectQueue();
+    const guard = createSimpleChatWorkspaceHandoffRunGuard();
+    const projectAStarted = deferred();
+    const releaseProjectA = deferred<ReturnType<typeof handoffFor>>();
+    const projectBCompleted = deferred();
+    const projectBIntent = { ...intent, targetProjectId: 'canvas-2', chatMessageId: 'message-b' };
+
+    const projectA = consumeSimpleChatWorkspaceHandoffForProject({
+      intent,
+      currentProjectId: 'canvas-1',
+      currentWorkflow: createEmptyWorkflow('A'),
+      queue,
+      guard,
+      resolve: async () => {
+        projectAStarted.resolve();
+        return releaseProjectA.promise;
+      },
+      transfer: async () => { throw new Error('unexpected transfer'); },
+      persist: async () => undefined,
+      cleanUrl: () => undefined,
+      now: () => 1000,
+    });
+    await projectAStarted.promise;
+
+    const projectB = consumeSimpleChatWorkspaceHandoffForProject({
+      intent: projectBIntent,
+      currentProjectId: 'canvas-2',
+      currentWorkflow: createEmptyWorkflow('B'),
+      queue,
+      guard,
+      resolve: async () => handoffFor('message-b'),
+      transfer: async () => { throw new Error('unexpected transfer'); },
+      persist: async () => { projectBCompleted.resolve(); },
+      cleanUrl: () => undefined,
+      now: () => 1000,
+    });
+
+    await projectBCompleted.promise;
+    await expect(projectB).resolves.toMatchObject({ status: 'success' });
+    releaseProjectA.resolve(handoffFor('message-1'));
+    await expect(projectA).resolves.toMatchObject({ status: 'success' });
   });
 
   it('continues the project queue after a failure and releases the failed identity for retry', async () => {
@@ -263,6 +364,7 @@ describe('simple chat workspace consumer guard', () => {
     const queue = createSimpleChatWorkspaceHandoffProjectQueue();
     let currentIdentity = getSimpleChatWorkspaceHandoffIdentity(intent);
     let cleanCount = 0;
+    let applyCount = 0;
     const workflow = createEmptyWorkflow('W');
 
     await expect(consumeSimpleChatWorkspaceHandoffForProject({
@@ -276,10 +378,11 @@ describe('simple chat workspace consumer guard', () => {
       resolve: async () => handoffFor('message-1'),
       transfer: async () => { throw new Error('unexpected transfer'); },
       persist: async () => { currentIdentity = 'later-navigation'; },
-      applyWorkflow: () => undefined,
+      applyWorkflow: () => { applyCount += 1; },
       cleanUrl: () => { cleanCount += 1; },
       now: () => 1000,
-    })).rejects.toThrow('导入已取消');
+    })).resolves.toMatchObject({ status: 'success' });
+    expect(applyCount).toBe(1);
     expect(cleanCount).toBe(0);
   });
 });
