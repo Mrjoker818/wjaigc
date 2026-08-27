@@ -1870,3 +1870,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `main@483ee0ce` 已在 Coze 构建并启动。Chrome 强制刷新后页面根容器为 `863/863/0`（clientHeight/scrollHeight/scrollTop），输入框聚焦后不变；两个关闭菜单高度为 0。聊天菜单正常展开，图像菜单有界显示并内部滚动，侧栏、顶部栏和历史消息全程可见。
 - 修复后截图为 `docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-after-2026-08-27.png`；Console 无应用 error/warning，原生弹窗为 0。
 - **回归结论：删除不复活、未同步用户写入离页冲刷和页面完整性缺陷均已云端通过。** 多标签、跨账号和离页后助手任务续跑仍未关闭。
+
+### 双标签冲突、账号隔离与中断终态最终回归
+
+- 原始 `V588-CHAT-003` 规格不包含后台聊天任务队列。严格离页后的助手消息按既有恢复合同收敛为单一 `failed + retryable`，标记 `V588_CHAT_003_PAGEHIDE_20260827_C`、唯一重试按钮和“已同步”在刷新后保持；该项通过，不再误列为“后台续跑待验”。
+- 未新建 Chrome 标签页，而是临时复用现有 Coze 项目标签作为第二业务标签。两标签同版本并发新增不同任务，刷新后均得到 `3` 个任务；同一任务并发重命名后，两端一致显示 `V588-TASK-CONFLICT-B` 与 `V588-TASK-CONFLICT-A（冲突副本）`，总任务数为 `4`。
+- 同一 Chrome 标签从 `canvas-user` 切换为真实管理员 `Mr.joker` 后，普通用户两个专用项目均不可见，管理员只读取到自己的 1 个默认项目，且同步状态为“已同步”。
+- 两个业务标签应用 Console error/warning 均为 `0/0`，无原生错误弹窗；项目标签随后恢复到 Coze 项目页。
+- **回归结论：V588-CHAT-003 云端矩阵通过并完成吸收。** 证据为 `docs/testing/evidence/v588-chat-003-final-cloud-matrix-2026-08-27.json` 及同目录两张新增 PNG。下一项进入 `V588-CHAT-004`，不重复 Stage 4 或 CHAT-003。

@@ -1506,3 +1506,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 两处关闭态改为 `hidden` 的最小修复已通过 RED/GREEN、Simple Chat `493/493`、全仓已执行项 `3912/3912`、TypeScript、零错误 Lint、`116/116` 构建和 `38/38` 保护门禁。
 - `main@483ee0ce` 已在 Coze 精确构建运行；Chrome 证明关闭菜单时根容器 `scrollHeight=clientHeight=863`、`scrollTop=0`，输入框聚焦不再偏移。两个菜单打开后仍位于消息上方，图像菜单内部滚动有效。Console 无应用 error/warning，原生弹窗为 0。
 - **专项判定：页面完整性缺陷已云端关闭，全平台仍为有条件通过。** `V588-CHAT-003` 尚有多标签、跨账号和离页后助手任务续跑边界未验证；不得把本次布局通过扩大解释为整项吸收，`stable` 保持只读。
+
+### V588-CHAT-003 最终云端发布判断
+
+- 原始同步规格不要求后台聊天任务队列。离页中断的前台流式助手消息在刷新后收敛为唯一 `failed + retryable`，用户消息仍唯一且已同步，符合既有恢复合同；该行为不再被误写为未验证的后台续跑能力。
+- 复用两个现有 Google Chrome 标签完成真实并发：不同任务自动合并，同一任务并发修改保留远端版本并生成明确“冲突副本”，两端刷新后的任务集合和同步状态完全一致。
+- 从普通用户 `canvas-user` 切换到真实管理员 `Mr.joker` 后，普通用户专用项目均不可见；管理员只读取自己的项目。应用 Console error/warning 为 `0/0`，没有原生错误弹窗。
+- 本项此前已通过真实 PostgreSQL 全仓 `570/570 files / 4030/4030 tests`、Coze 精确冷启动、项目/任务 CRUD、刷新恢复、删除不复活、离页冲刷和页面完整性门禁。
+- **专项判定：V588-CHAT-003 通过并完成吸收，允许进入 V588-CHAT-004。全平台总发布结论仍为“有条件通过”**，因为其他清单项、部署旧 chunk 及非本项未验证能力不随本项关闭而自动通过。机器证据：`docs/testing/evidence/v588-chat-003-final-cloud-matrix-2026-08-27.json`。

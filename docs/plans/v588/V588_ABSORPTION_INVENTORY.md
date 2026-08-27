@@ -51,9 +51,9 @@ These are the only authorized first absorption targets. Every row remains unimpl
 |---|---|---|---|---|
 | V588-STABILITY-001 | SVG/WASM 像素预算与超大输入保护 | 在当前 `/api/svg-trace` 架构内重实现预算门禁；不得复制旧路由控制器 | 边界像素、压缩炸弹、内存上限、失败终态、全仓与云端大图验证 | P0 |
 | V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | 复用当前安全媒体解析器，只吸收回退策略和预算思想；禁止引入任意本地路径读取 | 路径穿越、SSRF、MIME/字节/像素上限、VLM 超时、回退一致性 | P0 |
-| V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **本地已吸收 / 云端待验。** 三条流式链路已接入共享严格解析器；同时修正 CanvasEditor 参数错位和正文事件名不匹配。未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、关联与全仓回归已通过；Coze 三入口真实流式、错误态、Console 与网络证据待验 | P1 |
+| V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **已吸收 / Coze 云端验证通过。** 三条流式链路共用严格解析器，并已关闭 CanvasEditor 参数错位与正文事件名不匹配；未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、三入口真实 APImart 流式终态及零 Console/原生弹窗证据 | P1 |
 | V588-CHAT-002 | 失败消息状态与原位确定性重试 | **已吸收 / 云端通过。** 普通与联网原位重试、CanvasEditor 精确选区、刷新精确任务恢复、服务器终态持久化及 Deep Research 单 Artifact 均取得 Coze 证据 | `main-fix@1572a222` 的 Deep Research 任务刷新前后 UI 与服务器均严格保持同一个 `msg_1787715525319-research` Artifact；Console/原生弹窗为 0。第三方 exactly-once 仅保留为供应商能力边界 | P1 |
-| V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **本地候选完成 / 云端待验 / 未吸收。** 已实现版本化快照、远端基线重放、冲突副本、删除不复活、用户隔离、离页/切换用户冲刷和可诊断同步状态；保留当前登录、注销和用户数据 API，不复制 donor 存储所有权 | 多标签页、跨设备、离页、切换用户、同步失败、恢复后继续编辑和用户数据隔离 | P1 |
+| V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **已吸收 / Coze Google Chrome 云端验证通过。** 版本化快照、CAS 冲突重放、冲突副本、删除不复活、用户隔离、离页冲刷和可诊断同步状态均已闭环；保留当前登录、注销、用户数据 API 和前台流式生成边界 | 真实 PostgreSQL `4030/4030`、Coze 冷启动、项目/任务 CRUD、刷新恢复、双标签合并/冲突副本、离页、账号切换、布局及浏览器健康证据 | P1 |
 | V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **待吸收且必须适配当前架构。** 保留当前 `AssetVersion -> /api/assets/transfer` 画布链路；补齐消息、项目、模型、供应商和任务来源，以及文本/图片发送到工作流节点。禁止复制 donor 的原始 URL `localStorage` 桥接 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
 | V588-AUTH-001 | 数据库唯一/数据库加文件两种持久化模式 | **本地候选已完成。** 只吸收显式持久化模式与启动诊断；继续使用当前认证密钥和密码校验，拒绝 donor 弱口令恢复 | 真实 PostgreSQL、普通用户/管理员多浏览器会话、退出后数据隔离和全量门禁已通过；Coze 精确 SHA 待验 | P1 |
 | V588-ADMIN-004 | 用户积分、项目数和最后活动时间的真实投影 | 接入当前管理员查询和统一用户身份，不复制 donor 用户存储 | 新增用户、删除用户、批量操作、积分、项目、聊天记录与统计一致性 | P1 |
@@ -468,3 +468,13 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 按 RED -> 最小修复只把两个关闭菜单改为 `hidden`；聚焦 `5/5`、Simple Chat `493/493`、全仓已执行项 `3912/3912`、TypeScript、零错误 Lint、构建 `116/116`、保护门禁 `38/38` 通过。
 - `main@483ee0ce` 已在 Coze 完成构建和启动；Chrome 强制刷新后页面根容器 `clientHeight=scrollHeight=863`、`scrollTop=0`，输入框聚焦不再偏移。关闭菜单高度为 0，两个打开菜单仍正确覆盖对话，图像菜单内部滚动有效。
 - **当前状态：页面完整性缺陷已云端关闭，V588-CHAT-003 仍未吸收。** 下一步只处理既有的多标签、跨账号和离页后助手任务续跑边界；不重复删除、离页用户写入或布局测试，不进入 `V588-CHAT-004`，`stable` 不触碰。
+
+## 2026-08-27 V588-CHAT-003 最终云端吸收闭环
+
+- 原始设计将“重构聊天生成、供应商调用或计费链路”列为非目标；既有确定性重试设计也明确拒绝在本项引入数据库聊天任务队列。因此，普通流式对话离页中断后的合法终态是同一助手消息收敛为 `failed + retryable`，不是无依据扩张为后台续跑。
+- Google Chrome 中的标记 `V588_CHAT_003_PAGEHIDE_20260827_C` 刷新后仍严格保留 1 条，助手消息显示唯一“上次请求中断，可重试”和 1 个重试按钮，同步状态为“已同步”。该边界与本地 `recoverInterruptedSimpleChatProjects` 永久回归一致。
+- 未创建新标签页。复用现有预览标签和 Coze 项目标签，从同一服务器版本同时在项目 `ocw2ssbvmtb987wq` 新增两个任务；冲突重放后，两标签刷新均得到初始任务加两个新任务，共 `3` 个任务。
+- 随后两标签同时把同一任务分别改为 `V588-TASK-CONFLICT-A` 与 `V588-TASK-CONFLICT-B`。服务器保留 `V588-TASK-CONFLICT-B`，并生成 `V588-TASK-CONFLICT-A（冲突副本）`；两标签刷新后均得到完全一致的 `4` 个任务和“已同步”状态。
+- 在同一预览标签从普通用户 `canvas-user` 退出并登录真实管理员 `Mr.joker`；管理员侧只显示自己的 1 个默认项目，普通用户的 `V588-CHAT-003-CLOUD-20260827` 与 `V588-CHAT-003-MULTITAB-20260827` 均为 0 次可见，证明浏览器缓存与服务器数据没有跨账号串入。
+- 两个业务标签的应用 Console error/warning 均为 `0/0`；没有原生错误弹窗。Coze 项目标签完成双标签测试后已恢复到原项目页。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- **状态：V588-CHAT-003 已吸收。** 机器证据：`docs/testing/evidence/v588-chat-003-final-cloud-matrix-2026-08-27.json`；截图：`v588-chat-003-multitab-conflict-cloud-2026-08-27.png`、`v588-chat-003-cross-account-isolation-cloud-2026-08-27.png` 及既有中断恢复截图。下一唯一项为 `V588-CHAT-004`，必须重新从 RED 开始，不得重复 Stage 4 或已关闭的 CHAT-003。

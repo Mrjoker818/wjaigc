@@ -1,0 +1,67 @@
+{
+  "evidenceId": "v588-chat-003-final-cloud-matrix-2026-08-27",
+  "testedAt": "2026-08-27T16:24:30+08:00",
+  "cloudUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "browser": "Google Chrome",
+  "profile": "用户1",
+  "workspaceCommit": "64b02f2358e6bdb65e218e83296ddd0c54f0b3e8",
+  "runtimeBusinessCommit": "483ee0cedfc45b57dbdd752d6f26bbed1dc8909c",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "assistantInterruption": {
+    "productContract": "interrupted_stream_converges_to_failed_retryable",
+    "backgroundQueueRequiredByV588Chat003": false,
+    "userMarker": "V588_CHAT_003_PAGEHIDE_20260827_C",
+    "userMarkerCountAfterReload": 1,
+    "assistantUiStatus": "failed",
+    "retryButtonCount": 1,
+    "syncStatus": "synced",
+    "result": "passed"
+  },
+  "multiTab": {
+    "newTabsCreated": 0,
+    "reusedTabIds": [
+      "1727123755",
+      "1727123747"
+    ],
+    "projectId": "ocw2ssbvmtb987wq",
+    "projectName": "V588-CHAT-003-MULTITAB-20260827",
+    "differentEntityMerge": {
+      "tabATaskId": "brlmwnpqmtb99fub",
+      "tabBTaskId": "izq4oevnmtb99g31",
+      "taskCountAfterReload": 3,
+      "visibleInBothTabs": true
+    },
+    "sameEntityConflict": {
+      "remoteName": "V588-TASK-CONFLICT-B",
+      "localConflictCopyName": "V588-TASK-CONFLICT-A（冲突副本）",
+      "taskCountAfterReload": 4,
+      "visibleInBothTabs": true
+    },
+    "tabASyncStatus": "synced",
+    "tabBSyncStatus": "synced",
+    "applicationConsoleErrors": 0,
+    "applicationConsoleWarnings": 0,
+    "result": "passed"
+  },
+  "crossAccount": {
+    "sourceAccount": "canvas-user",
+    "targetAccount": "Mr.joker",
+    "targetRole": "admin",
+    "sourceProjectNamesChecked": [
+      "V588-CHAT-003-CLOUD-20260827",
+      "V588-CHAT-003-MULTITAB-20260827"
+    ],
+    "sourceProjectNamesVisibleAfterSwitch": 0,
+    "targetProjectCountVisible": 1,
+    "targetSyncStatus": "synced",
+    "applicationConsoleErrors": 0,
+    "applicationConsoleWarnings": 0,
+    "result": "passed"
+  },
+  "screenshots": [
+    "docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-after-2026-08-27.png",
+    "docs/testing/evidence/v588-chat-003-multitab-conflict-cloud-2026-08-27.png",
+    "docs/testing/evidence/v588-chat-003-cross-account-isolation-cloud-2026-08-27.png"
+  ],
+  "conclusion": "V588-CHAT-003 cloud acceptance matrix passed. No new Chrome tab was created and stable was not modified."
+}
