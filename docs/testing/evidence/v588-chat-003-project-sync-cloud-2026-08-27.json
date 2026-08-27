@@ -48,10 +48,26 @@
     "screenshot": "v588-chat-003-dashboard-count-cloud-postfix-2026-08-27.png",
     "result": "PASS"
   },
+  "navigationRecovery": {
+    "recordedAt": "2026-08-27T09:30:00+08:00",
+    "projectId": "sodi90k3mtaqb72j",
+    "taskId": "b4h25r5tmtaqckwr",
+    "assistantMarkerCount": 1,
+    "syncStatus": "已同步",
+    "returnToDashboardUrlSequence": [
+      "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/simple-chat?projectId=sodi90k3mtaqb72j&taskId=b4h25r5tmtaqckwr",
+      "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?view=dashboard"
+    ],
+    "visitedLoginOrCanvasRoute": false,
+    "nativeDialogCount": 0,
+    "screenshot": "v588-chat-003-task-restore-cloud-2026-08-27.jpg",
+    "result": "PASS"
+  },
   "evidence": {
     "preRefreshScreenshot": "v588-chat-003-project-sync-cloud-pre-refresh-2026-08-27.png",
     "postRefreshScreenshot": "v588-chat-003-project-sync-cloud-post-refresh-2026-08-27.png",
-    "dashboardScreenshot": "v588-chat-003-project-sync-cloud-dashboard-2026-08-27.png"
+    "dashboardScreenshot": "v588-chat-003-project-sync-cloud-dashboard-2026-08-27.png",
+    "taskRestoreScreenshot": "v588-chat-003-task-restore-cloud-2026-08-27.jpg"
   },
   "decision": "CLOUD_REGRESSION_PASS_REMAINING_MATRIX_UNVERIFIED"
 }

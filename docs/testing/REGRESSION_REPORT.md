@@ -1836,3 +1836,9 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 进入页签后仍显示 `2 个对话项目`：默认项目 `16` 个对话，`V588-CHAT-003-CLOUD-20260827` 为 `2` 个对话；前后计数一致。
 - Console error/warning 为 `0`，浏览器原生弹窗为 `0`；截图为 `docs/testing/evidence/v588-chat-003-dashboard-count-cloud-postfix-2026-08-27.png`。
 - **回归结论：`V588-CHAT-003-BUG-001` 云端关闭。** 此结论只覆盖仪表盘初始计数；删除不复活、多标签、跨账号与 PostgreSQL 并发仍保持未验证。
+
+### 专用任务恢复与返回工作台路径复验
+
+- 直接恢复 `projectId=sodi90k3mtaqb72j&taskId=b4h25r5tmtaqckwr` 后，APImart `Deepseek V4 Flash`、同步状态“已同步”和唯一助手标记均正确恢复；标记可见计数为 `1`。
+- 点击“工作台”期间以 50 ms 采样 URL，唯一地址仅为当前 `simple-chat` 和最终 `/?view=dashboard`，未经过登录页或无限画布；最终仪表盘继续显示“智能对话 2”，且无原生弹窗。
+- 证据为 `docs/testing/evidence/v588-chat-003-task-restore-cloud-2026-08-27.jpg`。此项关闭的是已同步任务恢复和返回路径，不能代替“存在未同步写入时离页冲刷”的专项测试。
