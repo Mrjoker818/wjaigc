@@ -1,0 +1,37 @@
+{
+  "evidenceId": "v588-chat-003-postgres-local-2026-08-27",
+  "date": "2026-08-27",
+  "scope": "V588-CHAT-003 全新 PostgreSQL 迁移、同步和并发门禁",
+  "candidateCommit": "f923b98fd51088c68ad2390052634f2d013fbdc6",
+  "protectedStableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "database": {
+    "engine": "PostgreSQL 18.4",
+    "host": "127.0.0.1",
+    "port": 55436,
+    "database": "wujie_test",
+    "ephemeral": true
+  },
+  "red": {
+    "filesPassed": 558,
+    "filesFailed": 12,
+    "testsPassed": 3935,
+    "testsFailed": 87,
+    "testsSkipped": 7,
+    "primaryFailure": "认证增量迁移执行时核心 wujie_users 表尚不存在，迁移事务回滚"
+  },
+  "green": {
+    "focusedFilesPassed": 12,
+    "focusedTestsPassed": 97,
+    "fullFilesPassed": 570,
+    "fullTestsPassed": 4030,
+    "failed": 0,
+    "skipped": 0,
+    "doctor": "passed",
+    "typecheck": "passed",
+    "lintBuild": "passed_with_non_error_large_file_advisory",
+    "build": "passed_116_of_116",
+    "protectedBaseline": "passed_38_of_38",
+    "diffCheck": "passed"
+  },
+  "cloudStatus": "unverified_exact_sha_not_deployed"
+}

@@ -1842,3 +1842,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 直接恢复 `projectId=sodi90k3mtaqb72j&taskId=b4h25r5tmtaqckwr` 后，APImart `Deepseek V4 Flash`、同步状态“已同步”和唯一助手标记均正确恢复；标记可见计数为 `1`。
 - 点击“工作台”期间以 50 ms 采样 URL，唯一地址仅为当前 `simple-chat` 和最终 `/?view=dashboard`，未经过登录页或无限画布；最终仪表盘继续显示“智能对话 2”，且无原生弹窗。
 - 证据为 `docs/testing/evidence/v588-chat-003-task-restore-cloud-2026-08-27.jpg`。此项关闭的是已同步任务恢复和返回路径，不能代替“存在未同步写入时离页冲刷”的专项测试。
+
+## 2026-08-27 V588-CHAT-003 全新 PostgreSQL 迁移与全仓回归
+
+- 在一次性 PostgreSQL 18.4 隔离集群上启用全部数据库测试变量。首次完整执行稳定复现 `12` 个测试文件失败：`558/570` 文件通过，`3935/4029` 项通过，另有 `87` 项失败、`7` 项跳过。
+- 根因不是 V588-CHAT-003 业务同步算法本身，而是全新库缺少 `wujie_users` 前置迁移，导致后续认证增量迁移回滚；同时发现核心表初始化 Promise 未按数据库 URL 隔离，以及两组 PostgreSQL 测试夹具没有遵循当前迁移/聊天模型合同。
+- `f923b98fd51088c68ad2390052634f2d013fbdc6` 增加最早核心用户表迁移，保持已发布迁移不可变；初始化缓存按数据库 URL 绑定。生产 Agent 授权与数据所有权逻辑未放宽。
+- 修复后迁移相关专项 `12 files / 97 tests` 全部通过；完整真实 PostgreSQL 全仓 `570/570` 文件、`4030/4030` 测试通过，失败与跳过均为 `0`。
+- `pnpm doctor`、`pnpm ts-check`、`pnpm lint:build`、Next.js 生产构建 `116/116`、保护基线 `38/38` 和空白检查通过。Lint 仅输出大文件转译提示，没有错误。
+- **回归结论：V588-CHAT-003 的本地 PostgreSQL 迁移与并发阻塞已关闭。** Coze 尚未运行包含该提交的精确 `main`，因此云端冷启动迁移、认证和历史项目恢复继续待验；删除、未同步离页、多标签与跨账号边界也未因此自动关闭。

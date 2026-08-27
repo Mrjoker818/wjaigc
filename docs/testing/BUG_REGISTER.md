@@ -2624,3 +2624,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | 仅调整仪表盘加载门槛：具有 `chat` 产品权限的用户在仪表盘挂载和窗口重新聚焦时加载聊天项目；保留账号切换取消迟到响应、远端优先和当前用户 IDB 降级逻辑。 |
 | 本地回归 | 聚焦 `10/10`；Simple Chat 同步相关 `348/348`；全仓 `3910 passed / 119 skipped / 0 failed`；TypeScript、零错误 Lint、保护门禁 `38/38`、生产构建 `116/116`。PostgreSQL 跳过项不计为通过。 |
 | 状态 | **已关闭。** `b92998dafd289a433232eb72cddacef32a53ea28` 部署后的 Google Chrome 真实回归中，无需点击聊天页签，工作台首次渲染即显示“智能对话 2”；进入页签后仍为 `2` 个项目，任务数分别为 `16` 和 `2`。Console error/warning 与原生弹窗均为 0，证据见 `docs/testing/evidence/v588-chat-003-dashboard-count-cloud-postfix-2026-08-27.png`。 |
+
+### V588-CHAT-003-BUG-002 - 全新 PostgreSQL 数据库迁移链断裂（2026-08-27）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：全新环境执行迁移时，认证增量迁移先于核心用户表运行，事务整体回滚，部署后可出现认证、项目和同步表缺失。 |
+| 发现环境 | Windows 本地隔离 PostgreSQL 18.4，`127.0.0.1:55436/wujie_test`，候选分支 `codex/v588-chat-003-project-sync`。 |
+| 稳定复现 | 使用全新数据库运行完整测试。首轮结果为 `570` 个文件中 `558` 通过、`12` 失败；`4029` 项中 `3935` 通过、`87` 失败、`7` 跳过。首个数据库错误为 `20260823_v588_auth_credentials.sql` 对不存在的 `wujie_users` 执行 `ALTER TABLE`，迁移事务回滚。 |
+| 关联缺陷 | `ensureCoreTables()` 只缓存一个全局 Promise；测试切换数据库连接串后仍复用旧初始化结果，第二个隔离 schema 报 `relation \"wujie_user_data\" does not exist`。Agent PostgreSQL 测试仍用图像模型模拟聊天编排器；Canvas Shadow 测试未先执行迁移。这两项属于测试前置和夹具漂移，未通过削弱生产授权逻辑解决。 |
+| RED | 迁移顺序测试新增“认证增量迁移前必须存在核心用户表”断言，旧实现为 `1 failed`；Simple Chat 两个隔离 schema 用例旧实现为 `1 passed / 1 failed`。 |
+| 最小修复 | 提交 `f923b98fd51088c68ad2390052634f2d013fbdc6` 新增前置迁移 `20260809_wj_core_users.sql`；保留已发布 `20260823` 迁移原文和校验和不变；核心表初始化缓存改为按当前数据库 URL 区分。测试夹具改用真实 `chat-completions` 能力，并在 Canvas Shadow PostgreSQL 用例前运行迁移。 |
+| 最终回归 | 聚焦迁移依赖矩阵 `12 files / 97 tests` 全部通过。完整真实 PostgreSQL 全仓为 `570/570` 文件、`4030/4030` 测试通过，`0` 失败、`0` 跳过；`pnpm doctor`、`pnpm ts-check`、`pnpm lint:build`、Next.js `116/116` 构建、保护基线 `38/38` 和 `git diff --check` 均通过。 |
+| 状态 | **本地已关闭 / GitHub 与 Coze 精确 SHA 待验。** 本地隔离数据库已证明迁移、Simple Chat 同步和并发门禁可执行；在 Coze 拉取包含该提交的 `main` 并完成冷启动、认证及项目恢复前，不宣称云端关闭。机器证据：`docs/testing/evidence/v588-chat-003-postgres-local-2026-08-27.json`。 |
