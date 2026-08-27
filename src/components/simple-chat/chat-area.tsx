@@ -143,6 +143,17 @@ interface SimpleChatWorkspaceActionsProps {
   navigate?: (url: string) => void;
 }
 
+export function hasSimpleChatAssistantOperationPayload(message: SimpleChatMessage): boolean {
+  return Boolean(message.content || message.images?.length);
+}
+
+export function shouldRenderSimpleChatWorkspaceActions(
+  message: SimpleChatMessage,
+  isStreaming: boolean,
+): boolean {
+  return message.role === 'assistant' && !isStreaming && message.status !== 'failed';
+}
+
 export function SimpleChatWorkspaceActions({
   message,
   project,
@@ -199,6 +210,18 @@ export function SimpleChatWorkspaceActions({
       </button>
     </div>
   );
+}
+
+interface SimpleChatWorkspaceActionEntryProps extends SimpleChatWorkspaceActionsProps {
+  isStreaming: boolean;
+}
+
+export function SimpleChatWorkspaceActionEntry({
+  isStreaming,
+  ...props
+}: SimpleChatWorkspaceActionEntryProps) {
+  if (!shouldRenderSimpleChatWorkspaceActions(props.message, isStreaming)) return null;
+  return <SimpleChatWorkspaceActions {...props} />;
 }
 
 const MODEL_TAGS: Record<string, string[]> = {
@@ -2143,7 +2166,7 @@ export default function ChatArea({
                   )}
                 </div>
                 {/* Message Operations */}
-                {msg.role === 'assistant' && (msg.content || Boolean(msg.images?.length)) && !isStreaming && msg.status !== 'failed' && (
+                {shouldRenderSimpleChatWorkspaceActions(msg, isStreaming) && hasSimpleChatAssistantOperationPayload(msg) && (
                   <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity flex-wrap">
                     <button onClick={() => copyMessage(msg.content)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
                     <button onClick={regenerateLast} className="p-1 rounded hover:bg-muted text-muted-foreground" title="重新生成"><RefreshCw className="w-3 h-3" /></button>
@@ -2189,10 +2212,11 @@ export default function ChatArea({
                         <Download className="w-3 h-3" />
                       </button>
                     )}
-                    <SimpleChatWorkspaceActions
+                    <SimpleChatWorkspaceActionEntry
                       message={msg}
                       project={project}
                       task={task}
+                      isStreaming={isStreaming}
                       selectedCanvasProjectId={selectedCanvasProjectId}
                       canvasTransferPending={canvasTransferMessageId === msg.id}
                       onSendToCanvas={(message) => { void sendImagesToCanvas(message); }}
@@ -2213,6 +2237,20 @@ export default function ChatArea({
                       className="p-1 rounded hover:bg-primary/10 text-primary transition-colors" title="在 Canvas 中编辑">
                       <PenSquare className="w-3 h-3" />
                     </button>
+                  </div>
+                )}
+                {shouldRenderSimpleChatWorkspaceActions(msg, isStreaming) && !hasSimpleChatAssistantOperationPayload(msg) && (
+                  <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity flex-wrap">
+                    <SimpleChatWorkspaceActionEntry
+                      message={msg}
+                      project={project}
+                      task={task}
+                      isStreaming={isStreaming}
+                      selectedCanvasProjectId={selectedCanvasProjectId}
+                      canvasTransferPending={canvasTransferMessageId === msg.id}
+                      onSendToCanvas={(message) => { void sendImagesToCanvas(message); }}
+                      onNotice={setControlNotice}
+                    />
                   </div>
                 )}
                 {/* User Message Operations */}

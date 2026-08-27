@@ -13,7 +13,12 @@ import {
   type SimpleChatProject,
   type SimpleChatTask,
 } from '@/components/simple-chat/simple-chat-types';
-import { SimpleChatWorkspaceActions } from '@/components/simple-chat/chat-area';
+import {
+  hasSimpleChatAssistantOperationPayload,
+  shouldRenderSimpleChatWorkspaceActions,
+  SimpleChatWorkspaceActionEntry,
+  SimpleChatWorkspaceActions,
+} from '@/components/simple-chat/chat-area';
 import { buildSimpleChatWorkspaceHandoffUrl } from '@/lib/simple-chat-workspace-handoff';
 
 const chatAreaSource = readFileSync(
@@ -93,6 +98,35 @@ describe('Simple Chat workspace entry', () => {
         placementId: 'placement-a',
       }],
     }))).toBe(true);
+  });
+
+  it('keeps the workspace guidance reachable for a completed empty assistant message', () => {
+    const emptyCompletedMessage = message({
+      content: '',
+      images: undefined,
+      imageRefs: undefined,
+      status: 'completed',
+    });
+
+    expect(shouldRenderSimpleChatWorkspaceActions(emptyCompletedMessage, false)).toBe(true);
+    expect(hasSimpleChatAssistantOperationPayload(emptyCompletedMessage)).toBe(false);
+
+    render(createElement(SimpleChatWorkspaceActionEntry, {
+      message: emptyCompletedMessage,
+      project,
+      task,
+      isStreaming: false,
+      selectedCanvasProjectId: 'canvas-project-a',
+      canvasTransferPending: false,
+      onSendToCanvas: vi.fn(),
+      onNotice: vi.fn(),
+      navigate: vi.fn(),
+    }));
+
+    const nodeAction = screen.getByRole('button', { name: '发送到节点模式' }) as HTMLButtonElement;
+    expect(nodeAction.disabled).toBe(true);
+    expect(nodeAction.title).toBe('仅非空文本或已登记图片可发送到节点模式');
+    expect(screen.queryByTitle('添加到画布')).toBeNull();
   });
 
   it('renders the node action beside Canvas and guides empty or targetless messages', () => {
