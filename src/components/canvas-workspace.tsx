@@ -1412,6 +1412,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             ...(reference.assetId ? { assetId: reference.assetId } : {}),
             ...(reference.assetVersionId ? { assetVersionId: reference.assetVersionId } : {}),
             ...(reference.placementId ? { placementId: reference.placementId } : {}),
+            sourceTrace: reference.sourceTrace,
             }));
       // ★ 修复：使用 setImages 包装器而非直接 setImagesRaw，确保 prevImagesRef 同步更新
       // 之前直接调用 setImagesRaw 导致 prevImagesRef 过期，后续 setImages 调用会使用过期的基准计算 diff

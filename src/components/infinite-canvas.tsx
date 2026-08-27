@@ -24,6 +24,7 @@ import {
   handleCanvasMediaElementFailure,
 } from '@/lib/asset-core/canvas-adapter';
 import type { MediaAvailability } from '@/lib/asset-core/types';
+import type { WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import {
   getCanvasMediaRecoveryIdentityState,
   recoverCanvasMediaUntilTerminal,
@@ -297,6 +298,7 @@ export interface CanvasImage {
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
+  sourceTrace?: WorkspaceSourceTrace;
   generationTaskId?: string;
   taskProjection?: {
     taskId: string;

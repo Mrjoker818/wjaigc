@@ -2,6 +2,7 @@
 
 import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
 import type { MediaAvailability } from '@/lib/asset-core/types';
+import type { WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import type { VideoRetryPayload } from '@/lib/video-processing-state';
 
@@ -115,6 +116,7 @@ export interface CanvasImage {
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
+  sourceTrace?: WorkspaceSourceTrace;
   generationTaskId?: string;
   // AI 模型与提供商信息
   modelName?: string;

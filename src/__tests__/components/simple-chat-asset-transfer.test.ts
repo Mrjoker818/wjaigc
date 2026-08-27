@@ -80,6 +80,7 @@ type SendMediaToCanvas = (input: {
   images: string[];
   imageRefs: AssetReference[];
   targetProjectId: string;
+  sourceTrace: WorkspaceSourceTrace;
   transfer: (input: {
     sourceVersionId: string;
     targetProjectId: string;
@@ -358,6 +359,7 @@ describe('standalone simple-chat asset transfer', () => {
       placementId: 'canvas-placement',
       sourceTrace: sourceTraceFixture,
     }));
+    const writeBridge = vi.fn();
 
     await send({
       images: ['/managed.png'],
@@ -365,11 +367,11 @@ describe('standalone simple-chat asset transfer', () => {
         url: '/managed.png',
         assetVersionId: 'version-a',
         placementId: 'chat-placement-a',
-        sourceTrace: sourceTraceFixture,
       }],
       targetProjectId: 'canvas-a',
+      sourceTrace: sourceTraceFixture,
       transfer,
-      writeBridge: vi.fn(),
+      writeBridge,
     });
 
     expect(transfer).toHaveBeenCalledWith({
@@ -378,6 +380,10 @@ describe('standalone simple-chat asset transfer', () => {
       index: 0,
       sourceTrace: sourceTraceFixture,
     });
+    expect(writeBridge).toHaveBeenCalledWith([
+      expect.objectContaining({ sourceTrace: sourceTraceFixture }),
+    ]);
+    expect(canvasWorkspaceSource).toContain('sourceTrace: reference.sourceTrace');
   });
 
   it('omits an invalid message reference trace from canvas transfer metadata', async () => {
@@ -396,9 +402,9 @@ describe('standalone simple-chat asset transfer', () => {
         url: '/managed.png',
         assetVersionId: 'version-a',
         placementId: 'chat-placement-a',
-        sourceTrace: { ...sourceTraceFixture, source: 'forged' } as unknown as WorkspaceSourceTrace,
       }],
       targetProjectId: 'canvas-a',
+      sourceTrace: { ...sourceTraceFixture, source: 'forged' } as unknown as WorkspaceSourceTrace,
       transfer,
       writeBridge: vi.fn(),
     });
@@ -448,6 +454,7 @@ describe('standalone simple-chat asset transfer', () => {
       images: slots.images,
       imageRefs: slots.imageRefs,
       targetProjectId: 'canvas-a',
+      sourceTrace: sourceTraceFixture,
       transfer,
       writeBridge,
     })).resolves.toEqual({ ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' });
@@ -466,6 +473,7 @@ describe('standalone simple-chat asset transfer', () => {
       images: ['/historical.png'],
       imageRefs: [{ url: '/historical.png' }],
       targetProjectId: 'canvas-a',
+      sourceTrace: sourceTraceFixture,
       transfer,
       writeBridge,
     });
@@ -508,13 +516,14 @@ describe('standalone simple-chat asset transfer', () => {
         { url: '/same.png', assetVersionId: 'version-2', placementId: 'chat-2' },
       ],
       targetProjectId: 'canvas-a',
+      sourceTrace: sourceTraceFixture,
       transfer,
       writeBridge,
     });
 
     expect(transfer.mock.calls.map(([input]) => input)).toEqual([
-      { sourceVersionId: 'version-1', targetProjectId: 'canvas-a', index: 0 },
-      { sourceVersionId: 'version-2', targetProjectId: 'canvas-a', index: 1 },
+      { sourceVersionId: 'version-1', targetProjectId: 'canvas-a', index: 0, sourceTrace: sourceTraceFixture },
+      { sourceVersionId: 'version-2', targetProjectId: 'canvas-a', index: 1, sourceTrace: sourceTraceFixture },
     ]);
     expect(result.references.map(reference => reference.assetVersionId)).toEqual(['version-1', 'version-2']);
     expect(writeBridge).toHaveBeenCalledWith(result.references);
@@ -529,6 +538,7 @@ describe('standalone simple-chat asset transfer', () => {
       images: ['/source.png'],
       imageRefs: [{ url: '/source.png', assetVersionId: 'source-version', placementId: 'chat-placement' }],
       targetProjectId: 'source-project',
+      sourceTrace: sourceTraceFixture,
       transfer: vi.fn(async () => ({
         url: '/source.png',
         assetVersionId: 'source-version',
@@ -540,6 +550,7 @@ describe('standalone simple-chat asset transfer', () => {
       images: ['/source.png'],
       imageRefs: [{ url: '/source.png', assetVersionId: 'source-version', placementId: 'chat-placement' }],
       targetProjectId: 'target-project',
+      sourceTrace: sourceTraceFixture,
       transfer: vi.fn(async () => ({
         url: '/canonical-copy.png',
         assetId: 'target-asset',

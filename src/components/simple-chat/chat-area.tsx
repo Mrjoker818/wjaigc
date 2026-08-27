@@ -20,7 +20,8 @@ import { UsageStats } from "./usage-stats";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
-  PRESET_SKILLS, PresetSkill, alignSimpleChatMediaSlots, canTransferSimpleChatMedia,
+  PRESET_SKILLS, PresetSkill, alignSimpleChatMediaSlots, buildSimpleChatMessageSourceTrace,
+  canSendSimpleChatMessageToNodeMode, canTransferSimpleChatMedia,
   mergeSimpleChatCanvasBridgeReferences, parseSimpleChatCanvasBridgePayload,
   readSimpleChatStreamAssetReference,
   sendSimpleChatMediaToCanvas, type WorkspaceAssetReference
@@ -59,6 +60,7 @@ import {
   recoverInterruptedSimpleChatMessages,
   type SimpleChatRetryContextV1,
 } from '@/lib/simple-chat-retry';
+import { buildSimpleChatWorkspaceHandoffUrl } from '@/lib/simple-chat-workspace-handoff';
 
 type ChatModelInfo = {
   id: string;
@@ -1610,8 +1612,13 @@ export default function ChatArea({
 
   const sendImagesToCanvas = useCallback(async (message: SimpleChatMessage) => {
     const targetProjectId = selectedCanvasProjectId;
-    if (!targetProjectId || !task) {
+    if (!targetProjectId || !project || !task) {
       setControlNotice('请先选择目标画布项目');
+      return;
+    }
+    const sourceTrace = buildSimpleChatMessageSourceTrace({ project, task, message });
+    if (!sourceTrace) {
+      setControlNotice('当前消息缺少有效来源信息，无法发送到画布');
       return;
     }
     if (canvasTransferMessageId === message.id) return;
@@ -1621,6 +1628,7 @@ export default function ChatArea({
         images: message.images || [],
         imageRefs: message.imageRefs || [],
         targetProjectId,
+        sourceTrace,
         transfer: async ({ sourceVersionId, targetProjectId: transferProjectId, index, sourceTrace }) => {
           const transferResponse = await fetch('/api/assets/transfer', {
             method: 'POST',
@@ -1690,7 +1698,25 @@ export default function ChatArea({
     } finally {
       setCanvasTransferMessageId((current) => current === message.id ? null : current);
     }
-  }, [canvasTransferMessageId, selectedCanvasProjectId, task]);
+  }, [canvasTransferMessageId, project, selectedCanvasProjectId, task]);
+
+  const sendMessageToNodeMode = useCallback((message: SimpleChatMessage) => {
+    if (!selectedCanvasProjectId || !project || !task) {
+      setControlNotice('请先选择目标画布项目');
+      return;
+    }
+    if (!canSendSimpleChatMessageToNodeMode(message)) {
+      setControlNotice('仅非空文本或已登记图片可发送到节点模式');
+      return;
+    }
+    const url = buildSimpleChatWorkspaceHandoffUrl({
+      targetProjectId: selectedCanvasProjectId,
+      chatProjectId: project.id,
+      chatTaskId: task.id,
+      chatMessageId: message.id,
+    });
+    window.location.assign(url);
+  }, [project, selectedCanvasProjectId, task]);
 
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
@@ -2124,6 +2150,19 @@ export default function ChatArea({
                         <Send className="w-3 h-3" />
                       </button>
                     )}
+                    <button
+                      onClick={() => sendMessageToNodeMode(msg)}
+                      disabled={!canSendSimpleChatMessageToNodeMode(msg)}
+                      className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                      title={!selectedCanvasProjectId || !project || !task
+                        ? '请先选择目标画布项目'
+                        : canSendSimpleChatMessageToNodeMode(msg)
+                          ? '发送到节点模式'
+                          : '仅非空文本或已登记图片可发送到节点模式'}
+                      aria-label="发送到节点模式"
+                    >
+                      <GitBranch className="w-3 h-3" />
+                    </button>
                     {/* 回复评分 */}
                     <span className="w-px h-4 bg-border mx-0.5 self-center" />
                     <button onClick={() => handleRateMessage(msg.id, 'up')}

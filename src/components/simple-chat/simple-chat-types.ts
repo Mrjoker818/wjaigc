@@ -2,7 +2,10 @@
 
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from '@/lib/chat-generation-controls';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
-import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
+import {
+  parseWorkspaceSourceTrace,
+  type WorkspaceSourceTrace,
+} from '@/lib/asset-core/source-trace';
 import type {
   SimpleChatFailure,
   SimpleChatMessageStatus,
@@ -212,6 +215,36 @@ export function hasManagedAssetIdentity(
   return Boolean(reference?.assetVersionId && reference.placementId);
 }
 
+export function canSendSimpleChatMessageToNodeMode(message: SimpleChatMessage): boolean {
+  return Boolean(
+    message.content.trim()
+    || message.imageRefs?.some(reference => hasManagedAssetIdentity(reference)),
+  );
+}
+
+export function buildSimpleChatMessageSourceTrace(input: {
+  project: SimpleChatProject;
+  task: SimpleChatTask;
+  message: SimpleChatMessage;
+}): WorkspaceSourceTrace | undefined {
+  const generationTaskIds = [...new Set(
+    (input.message.imageRefs || []).flatMap(reference => (
+      parseWorkspaceSourceTrace(reference.sourceTrace)?.generationTaskIds || []
+    )),
+  )].slice(0, 16);
+  return parseWorkspaceSourceTrace({
+    source: 'simple-chat',
+    chatProjectId: input.project.id,
+    chatTaskId: input.task.id,
+    messageId: input.message.id,
+    modelId: input.message.model || input.task.model || undefined,
+    providerId: input.message.providerId || input.task.providerId || undefined,
+    generationTaskIds,
+    agentRunId: input.message.agentRunId,
+    createdAt: new Date(input.message.createdAt).toISOString(),
+  });
+}
+
 function bridgeReferenceError(message: string, status?: number, code?: string): Error {
   return Object.assign(new Error(message), {
     ...(status === undefined ? {} : { status }),
@@ -306,6 +339,7 @@ export async function sendSimpleChatMediaToCanvas(input: {
   images: string[];
   imageRefs: WorkspaceAssetReference[];
   targetProjectId: string;
+  sourceTrace: WorkspaceSourceTrace;
   transfer: (input: {
     sourceVersionId: string;
     targetProjectId: string;
@@ -323,11 +357,11 @@ export async function sendSimpleChatMediaToCanvas(input: {
   }
 
   const references: WorkspaceAssetReference[] = [];
+  const sourceTrace = parseWorkspaceSourceTrace(input.sourceTrace);
   for (const [index, reference] of input.imageRefs.entries()) {
     if (!hasManagedAssetIdentity(reference)) {
       return { ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' };
     }
-    const sourceTrace = parseWorkspaceSourceTrace(reference.sourceTrace);
     const transferred = await input.transfer({
       sourceVersionId: reference.assetVersionId,
       targetProjectId: input.targetProjectId,
