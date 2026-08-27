@@ -44,6 +44,26 @@ export interface SimpleChatWorkspaceHandoffRunGuard {
   fail: (identity: string) => void;
 }
 
+export interface SimpleChatWorkspaceHandoffProjectQueue {
+  enqueue: <T>(projectId: string, task: () => Promise<T>) => Promise<T>;
+}
+
+export function createSimpleChatWorkspaceHandoffProjectQueue(): SimpleChatWorkspaceHandoffProjectQueue {
+  const tails = new Map<string, Promise<void>>();
+  return {
+    enqueue: <T>(projectId: string, task: () => Promise<T>): Promise<T> => {
+      const previous = tails.get(projectId) ?? Promise.resolve();
+      const result = previous.catch(() => undefined).then(task);
+      const tail = result.then(() => undefined, () => undefined);
+      tails.set(projectId, tail);
+      void tail.finally(() => {
+        if (tails.get(projectId) === tail) tails.delete(projectId);
+      });
+      return result;
+    },
+  };
+}
+
 export function getSimpleChatWorkspaceHandoffIdentity(
   intent: SimpleChatWorkspaceHandoffIntent,
 ): string {
@@ -79,28 +99,65 @@ export function createSimpleChatWorkspaceHandoffRunGuard(): SimpleChatWorkspaceH
 }
 
 export interface ConsumeSimpleChatWorkspaceHandoffForProjectInput
-  extends Omit<ExecuteSimpleChatWorkspaceHandoffInput, 'intent'> {
+  extends Omit<ExecuteSimpleChatWorkspaceHandoffInput, 'intent' | 'currentWorkflow'> {
   intent: SimpleChatWorkspaceHandoffIntent | null;
   currentProjectId: string | null | undefined;
+  currentWorkflow?: Workflow | null;
   guard: SimpleChatWorkspaceHandoffRunGuard;
+  queue?: SimpleChatWorkspaceHandoffProjectQueue;
+  getCurrentProjectId?: () => string | null | undefined;
+  getCurrentIdentity?: () => string | null;
+  getCurrentWorkflow?: () => Workflow | null;
+  applyWorkflow?: (workflow: Workflow) => void;
+}
+
+function assertSimpleChatHandoffScope(
+  input: ConsumeSimpleChatWorkspaceHandoffForProjectInput,
+  expectedProjectId: string,
+  expectedIdentity: string,
+): void {
+  const projectMatches = !input.getCurrentProjectId
+    || input.getCurrentProjectId() === expectedProjectId;
+  const identityMatches = !input.getCurrentIdentity
+    || input.getCurrentIdentity() === expectedIdentity;
+  if (!projectMatches || !identityMatches) {
+    throw new Error('智能对话导入已取消：当前项目或导入链接已发生变化');
+  }
 }
 
 export async function consumeSimpleChatWorkspaceHandoffForProject(
   input: ConsumeSimpleChatWorkspaceHandoffForProjectInput,
 ): Promise<ExecuteSimpleChatWorkspaceHandoffResult | null> {
   if (!shouldConsumeSimpleChatWorkspaceHandoff(input.intent, input.currentProjectId)) return null;
-  const identity = getSimpleChatWorkspaceHandoffIdentity(input.intent);
+  const intent = input.intent;
+  const identity = getSimpleChatWorkspaceHandoffIdentity(intent);
   if (!input.guard.begin(identity)) return null;
   try {
-    const result = await executeSimpleChatWorkspaceHandoff({
-      intent: input.intent,
-      currentWorkflow: input.currentWorkflow,
-      resolve: input.resolve,
-      transfer: input.transfer,
-      persist: input.persist,
-      cleanUrl: input.cleanUrl,
-      now: input.now,
-    });
+    const run = async (): Promise<ExecuteSimpleChatWorkspaceHandoffResult> => {
+      assertSimpleChatHandoffScope(input, intent.targetProjectId, identity);
+      return executeSimpleChatWorkspaceHandoff({
+        intent,
+        currentWorkflow: input.getCurrentWorkflow
+          ? input.getCurrentWorkflow()
+          : input.currentWorkflow ?? null,
+        resolve: input.resolve,
+        transfer: input.transfer,
+        persist: async workflow => {
+          assertSimpleChatHandoffScope(input, intent.targetProjectId, identity);
+          await input.persist(workflow);
+          assertSimpleChatHandoffScope(input, intent.targetProjectId, identity);
+          input.applyWorkflow?.(workflow);
+        },
+        cleanUrl: () => {
+          assertSimpleChatHandoffScope(input, intent.targetProjectId, identity);
+          input.cleanUrl();
+        },
+        now: input.now,
+      });
+    };
+    const result = input.queue
+      ? await input.queue.enqueue(intent.targetProjectId, run)
+      : await run();
     input.guard.complete(identity);
     return result;
   } catch (error) {

@@ -90,7 +90,9 @@ import {
 } from '@/lib/simple-chat-workspace-handoff';
 import {
   consumeSimpleChatWorkspaceHandoffForProject,
+  createSimpleChatWorkspaceHandoffProjectQueue,
   createSimpleChatWorkspaceHandoffRunGuard,
+  getSimpleChatWorkspaceHandoffIdentity,
   type SimpleChatWorkflowTransferRequest,
 } from '@/lib/simple-chat-workspace-handoff-client';
 import { taskEventsClient } from '@/lib/task-events-client';
@@ -299,7 +301,10 @@ function toSimpleChatHandoffMessage(error: unknown): string {
     ASSET_NOT_FOUND: '对话中的图片素材已不存在',
     ASSET_TRANSFER_FAILED: '图片素材导入失败，请稍后重试',
   };
-  return messages[code] || (code.includes('保存') ? code : '智能对话内容导入失败，请刷新页面重试');
+  return messages[code]
+    || (code.includes('保存') || code.includes('已取消')
+      ? code
+      : '智能对话内容导入失败，请刷新页面重试');
 }
 
 function normalizeQuickCreateModels(data: QuickCreateModelsResponse): QuickCreateModelCandidate[] {
@@ -5667,42 +5672,62 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
+  const nodeWorkflowRef = useRef(nodeWorkflow);
+  nodeWorkflowRef.current = nodeWorkflow;
   const [handoffRetryRevision, setHandoffRetryRevision] = useState(0);
 
-  const persistNodeWorkflow = useCallback(async (workflow: Workflow): Promise<void> => {
-    const project = currentProjectRef.current;
-    if (!project) throw new Error('当前项目不存在，无法保存工作流');
+  const persistNodeWorkflow = useCallback(async (
+    workflow: Workflow,
+    expectedProjectId = currentProjectRef.current?.id,
+  ): Promise<void> => {
+    if (!expectedProjectId || currentProjectRef.current?.id !== expectedProjectId) {
+      throw new Error('工作流保存已取消：当前项目已发生变化');
+    }
 
     await canvasPersistenceScheduler.flush('immediate');
+    if (currentProjectRef.current?.id !== expectedProjectId) {
+      throw new Error('工作流保存已取消：当前项目已发生变化');
+    }
     const manager = UserManagerCore.getInstance();
-    const latestProject = manager.getProject(project.id) || project;
-    const updatedProject = manager.updateProjectInMemory(project.id, {
+    const latestProject = manager.getProject(expectedProjectId) || currentProjectRef.current;
+    const updatedProject = manager.updateProjectInMemory(expectedProjectId, {
       metadata: mergeWorkflowIntoProjectMetadata(latestProject.metadata, workflow),
     });
     if (!updatedProject) throw new Error('当前项目不存在，无法绑定工作流');
 
+    await manager.flushProjectsToServerWithConflictRecovery();
+    if (currentProjectRef.current?.id !== expectedProjectId) return;
     currentProjectRef.current = updatedProject;
     setCurrentProject(updatedProject);
-    await manager.flushProjectsToServerWithConflictRecovery();
   }, [canvasPersistenceScheduler]);
 
   const handoffRunGuardRef = useRef(createSimpleChatWorkspaceHandoffRunGuard());
+  const handoffProjectQueueRef = useRef(createSimpleChatWorkspaceHandoffProjectQueue());
   useEffect(() => {
     if (!currentProject?.id) return;
     const retryRevision = handoffRetryRevision;
     const intent = parseSimpleChatWorkspaceHandoffIntent(window.location.search);
     const guard = handoffRunGuardRef.current;
+    const expectedProjectId = currentProject.id;
 
     void consumeSimpleChatWorkspaceHandoffForProject({
       intent,
-      currentProjectId: currentProject.id,
-      currentWorkflow: nodeWorkflow,
+      currentProjectId: expectedProjectId,
+      currentWorkflow: nodeWorkflowRef.current,
+      getCurrentProjectId: () => currentProjectRef.current?.id,
+      getCurrentIdentity: () => {
+        const currentIntent = parseSimpleChatWorkspaceHandoffIntent(window.location.search);
+        return currentIntent ? getSimpleChatWorkspaceHandoffIdentity(currentIntent) : null;
+      },
+      getCurrentWorkflow: () => nodeWorkflowRef.current,
       guard,
+      queue: handoffProjectQueueRef.current,
       resolve: resolveSimpleChatWorkspaceHandoffFromApi,
       transfer: transferSimpleChatImageToWorkflow,
-      persist: async workflow => {
+      persist: workflow => persistNodeWorkflow(workflow, expectedProjectId),
+      applyWorkflow: workflow => {
+        nodeWorkflowRef.current = workflow;
         setNodeWorkflow(workflow);
-        await persistNodeWorkflow(workflow);
       },
       cleanUrl: () => window.history.replaceState(
         null,
@@ -5728,7 +5753,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         },
       });
     });
-  }, [currentProject?.id, handoffRetryRevision, nodeWorkflow, persistNodeWorkflow]);
+  }, [currentProject?.id, handoffRetryRevision, persistNodeWorkflow]);
 
   const handleCanvasImageAssetReferenceAdopted = useCallback((
     imageId: string,
