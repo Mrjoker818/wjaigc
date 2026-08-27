@@ -14,7 +14,9 @@ describe('Agent runtime surface boundaries', () => {
     const editor = source('src/components/agent-editor.tsx');
 
     expect(canvas).not.toContain("window.location.href = '/simple-chat'");
-    expect(standalone).toMatch(/window\.open\(\s*`\/\?projectId=\$\{encodeURIComponent\(targetProjectId\)\}`/);
+    expect(standalone).toContain("buildSimpleChatWorkspaceHandoffUrl");
+    expect(standalone).toContain("navigate = url => window.location.assign(url)");
+    expect(standalone).not.toContain('window.open(');
     expect(editor).not.toMatch(/API\s*Key.*(?:配置|设置)|配置.*API\s*Key/);
   });
 
