@@ -1867,4 +1867,6 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 立即离页后该标记没有助手回复，说明用户消息持久化通过，但供应商生成任务不会在离页后续跑。该行为单列为待定义/待验边界，不能被误写成“助手任务恢复通过”。
 - 云端页面不完整稳定定位为关闭的模型列表仍贡献约 `2415px` 高度，使根容器从 `863px` 撑到 `2484px` 并自动滚动 `518px`。TDD 修复仅把两处关闭态改为 `hidden`；RED `1 failed / 4 passed`，GREEN `5/5`。
 - 修复后本地 Simple Chat 为 `493/493`，全仓非 PostgreSQL运行 `3912/3912` 已执行项通过；TypeScript、零错误 Lint、生产构建 `116/116` 和保护基线 `38/38` 通过。119 项数据库专项跳过没有计为通过，同候选先前真实 PostgreSQL `4030/4030` 证据继续有效。
-- **回归结论：删除不复活与未同步用户写入离页冲刷已云端通过；页面完整性修复本地通过、云端待验。** 多标签、跨账号和离页后助手任务续跑仍未关闭。
+- `main@483ee0ce` 已在 Coze 构建并启动。Chrome 强制刷新后页面根容器为 `863/863/0`（clientHeight/scrollHeight/scrollTop），输入框聚焦后不变；两个关闭菜单高度为 0。聊天菜单正常展开，图像菜单有界显示并内部滚动，侧栏、顶部栏和历史消息全程可见。
+- 修复后截图为 `docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-after-2026-08-27.png`；Console 无应用 error/warning，原生弹窗为 0。
+- **回归结论：删除不复活、未同步用户写入离页冲刷和页面完整性缺陷均已云端通过。** 多标签、跨账号和离页后助手任务续跑仍未关闭。

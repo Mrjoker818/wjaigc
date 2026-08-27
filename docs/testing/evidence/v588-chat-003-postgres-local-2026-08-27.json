@@ -67,16 +67,42 @@
       "assistantGenerationAfterImmediateLeave": "unverified_no_reply_observed"
     },
     "layoutRegression": {
-      "status": "local_fixed_cloud_pending",
+      "status": "cloud_verified",
+      "deployedCommit": "483ee0cedfc45b57dbdd752d6f26bbed1dc8909c",
+      "deployedTree": "9405db33c0c104ca6d546694de8463b0f466f7a1",
+      "buildId": "lCTy9XVZ3fyjuefbZ08XN",
+      "servicePid": 3043,
       "rootClientHeight": 863,
-      "rootScrollHeight": 2484,
-      "rootScrollTop": 518,
+      "rootScrollHeightBefore": 2484,
+      "rootScrollTopBefore": 518,
+      "rootScrollHeightAfter": 863,
+      "rootScrollTopAfter": 0,
+      "rootScrollTopAfterComposerFocus": 0,
       "closedImageMenuHeightApprox": 2415,
+      "closedMenusAfter": {
+        "count": 2,
+        "display": "none",
+        "height": 0,
+        "scrollHeight": 0
+      },
+      "chatMenuAfter": {
+        "height": 248,
+        "rootScrollTop": 0
+      },
+      "imageMenuAfter": {
+        "clientHeight": 382,
+        "scrollHeight": 1290,
+        "rootScrollTop": 0
+      },
       "rootCause": "关闭的绝对定位模型菜单仅使用 visibility 和 opacity 隐藏，仍扩大根容器滚动范围",
       "fix": "两个关闭态模型菜单使用 display none 对应的 Tailwind hidden",
-      "beforeScreenshot": "docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-before-2026-08-27.png"
+      "beforeScreenshot": "docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-before-2026-08-27.png",
+      "afterScreenshot": "docs/testing/evidence/v588-chat-003-simple-chat-hidden-menu-overflow-cloud-after-2026-08-27.png",
+      "applicationConsoleErrors": 0,
+      "applicationConsoleWarnings": 0,
+      "nativeDialogs": 0
     },
     "observation": "服务重启后的首次工作台返回记录一次 syncToServer HTTP 502 警告；后续项目列表、专用项目和精确任务恢复均未复现，数据未丢失。"
   },
-  "cloudStatus": "verified_exact_sha_with_single_nonreproduced_post_restart_sync_warning"
+  "cloudStatus": "verified_exact_sha_boundaries_and_layout_with_single_nonreproduced_post_restart_sync_warning"
 }

@@ -1504,4 +1504,5 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 严格离页没有恢复助手生成，当前只能证明“用户写入不丢失”，不能证明“供应商任务离页续跑”；多标签和跨账号仍受现有环境约束未验证。
 - 新发现 `V588-CHAT-003-BUG-003`：关闭的图像模型列表仍占约 `2415px` 几何高度，导致隐藏滚动容器自动滚动 `518px`，侧栏、顶部栏和历史消息离开可视区。数据没有缺失，Console 也没有报错。
 - 两处关闭态改为 `hidden` 的最小修复已通过 RED/GREEN、Simple Chat `493/493`、全仓已执行项 `3912/3912`、TypeScript、零错误 Lint、`116/116` 构建和 `38/38` 保护门禁。
-- **专项判定：仍为有条件通过。** 必须先把页面完整性修复推送 `main`、由 Coze 精确部署并用现有 Google Chrome 标签页验证完整布局与两个模型菜单，再决定 `V588-CHAT-003` 是否可关闭；`stable` 不得修改。
+- `main@483ee0ce` 已在 Coze 精确构建运行；Chrome 证明关闭菜单时根容器 `scrollHeight=clientHeight=863`、`scrollTop=0`，输入框聚焦不再偏移。两个菜单打开后仍位于消息上方，图像菜单内部滚动有效。Console 无应用 error/warning，原生弹窗为 0。
+- **专项判定：页面完整性缺陷已云端关闭，全平台仍为有条件通过。** `V588-CHAT-003` 尚有多标签、跨账号和离页后助手任务续跑边界未验证；不得把本次布局通过扩大解释为整项吸收，`stable` 保持只读。
