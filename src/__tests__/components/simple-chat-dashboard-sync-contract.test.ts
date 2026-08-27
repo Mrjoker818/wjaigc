@@ -135,4 +135,33 @@ describe('simple chat dashboard synchronization contract', () => {
     expect(screen.queryByText('user-a-project')).toBeNull();
     expect(screen.getByText('1 个对话项目')).toBeTruthy();
   });
+
+  it('loads the chat project badge before a canvas-and-chat user opens the chat tab', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+      clear: () => storage.clear(),
+      key: (index: number) => [...storage.keys()][index] ?? null,
+      get length() { return storage.size; },
+    });
+    vi.spyOn(syncClient, 'loadSimpleChatDashboardProjects').mockResolvedValue([
+      project('chat-project-a'),
+      project('chat-project-b'),
+    ]);
+    const { default: DashboardView } = await import('@/components/dashboard/dashboard-view');
+    const user: User = {
+      id: 'user-a', name: 'user-a', productType: 'canvas,chat', createdAt: 1, updatedAt: 1,
+    };
+
+    render(createElement(DashboardView, {
+      user, onOpenProject: vi.fn(), onNewProject: vi.fn(),
+    }));
+
+    expect(await screen.findByRole('button', { name: '智能对话 2' })).toBeTruthy();
+    expect(syncClient.loadSimpleChatDashboardProjects).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'user-a',
+    }));
+  });
 });

@@ -1816,3 +1816,16 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 通过本地嵌套同名脚本夹具稳定复现目录边界，再按 RED -> 最小修复统一隔离 Git、TypeScript 和 ESLint 的 `.worktrees/`、`worktrees/`。
 - 修复提交 `11abb548` 的目标契约 `6/6`、TypeScript、零错误 Lint、保护门禁 `38/38`、带嵌套夹具的生产构建 `116/116` 通过；全仓为 `3909 passed / 119 skipped / 0 failed`，PostgreSQL 跳过项不计为通过。
 - **回归结论：构建根因本地关闭 / Coze 待复验。** 在 GitHub 推送、Coze 精确拉取、构建和 5000 健康完成前，V588-CHAT-003 的浏览器业务矩阵仍未开始，状态保持未吸收。
+
+## 2026-08-27 V588-CHAT-003 Coze 构建关闭
+
+- GitHub 与本地候选均为 `48c2ad3fd262d933ac08ab18f389e320e192d634`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- Coze 清理无关嵌套工作树后，生产构建退出码 `0`，Build ID `8Iztiwokck9HEnxplOf78`；根页、Simple Chat、认证健康接口和 12 个静态资源均为 HTTP 200。
+- **回归结论：V588-CHAT-003-BUILD-001 已关闭。** 这只解除构建前置条件，不代表 `V588-CHAT-003` 业务矩阵通过；真实项目同步、冲突、删除、账号隔离、离页冲刷及 PostgreSQL 证据继续保持未验证。
+
+## 2026-08-27 V588-CHAT-003 首轮云端业务回归
+
+- 专用项目 `sodi90k3mtaqb72j`、任务 `b4h25r5tmtaqckwr` 使用 APImart `Deepseek V4 Flash` 完成普通对话；助手唯一标记刷新前后均为 `1`，同步状态均为“已同步”，任务重命名刷新后保留。
+- 云端真实失败为工作台初始“智能对话 0”；点击页签后数据源正确返回 `2` 个项目，证明失败位于仪表盘加载时机，不在同步 API 或数据库数据内容。
+- `V588-CHAT-003-BUG-001` RED 为 `1 failed / 9 passed`，GREEN 为 `10/10`；相关同步 `348/348`、全仓 `3910 passed / 119 skipped / 0 failed`，TypeScript、零错误 Lint、保护门禁 `38/38` 和生产构建 `116/116` 通过。
+- **回归结论：普通对话、刷新恢复、项目/任务重命名通过；仪表盘计数候选本地通过、云端待验。** 多标签、删除、跨账号、离线及 PostgreSQL 仍不得标记通过。

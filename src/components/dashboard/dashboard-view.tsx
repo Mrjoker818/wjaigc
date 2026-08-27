@@ -1121,7 +1121,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, [user.id]);
 
   useEffect(() => {
-    if (activeTab !== 'chat') return;
+    if (!user.productType?.includes('chat')) return;
     let cancelled = false;
     const refresh = async (): Promise<void> => {
       const loaded = await loadChatProjects();
@@ -1133,7 +1133,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       cancelled = true;
       window.removeEventListener('focus', refresh);
     };
-  }, [activeTab, loadChatProjects]);
+  }, [loadChatProjects, user.productType]);
 
   // ─── Filtered providers for API management ───
   const filteredProviders = useMemo(() => {

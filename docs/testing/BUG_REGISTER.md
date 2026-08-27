@@ -2610,4 +2610,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | RED | 配置契约先得到 `2 failed / 4 passed`，分别证明 TypeScript 与 ESLint 缺少两种工作树目录边界。 |
 | 最小修复 | `11abb5482128aeba8c7008c9d5bbe159b0a6b8df` 根锚定忽略 `/worktrees/`，并让 TypeScript、ESLint 同时排除 `.worktrees` 与 `worktrees`；没有删除云端工作树、修改业务源码、数据库、账号、供应商或 `stable`。 |
 | 本地回归 | 在仓库内放置同名嵌套脚本夹具后，契约 `6/6`、TypeScript、零错误 Lint、保护门禁 `38/38` 与生产构建 `116/116` 通过；全仓 Vitest `3909 passed / 119 skipped / 0 failed`，跳过项均为缺少隔离 PostgreSQL 的显式门禁。独立复审 Critical/Important/Minor 为 `0/0/2`，无阻断项。 |
-| 状态 | **本地已修复 / GitHub 与 Coze 待更新复验。** 必须证明 Coze 在保留 `worktrees/main-fix` 的情况下构建成功、5000 健康且静态资源无失败，才能关闭。 |
+| 状态 | **已关闭。** `origin/main@48c2ad3f` 已在 Coze 完成生产构建（Build ID `8Iztiwokck9HEnxplOf78`），`/`、`/simple-chat`、`/api/auth/me` 和 HTML 引用的 12 个静态资源均为 HTTP 200。无关嵌套工作树已在保留备份分支后移除；本地嵌套夹具继续永久覆盖“目录重新出现时也不得进入构建”的回归边界。`stable@52f7c601` 未改动。 |
+
+### V588-CHAT-003-BUG-001 - 仪表盘智能对话数量首次进入显示 0（2026-08-27）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2（数据已保存且进入页签后可恢复，但仪表盘初始统计错误） |
+| 发现环境 | Coze `origin/main@48c2ad3f`，Google Chrome，账号 `canvas-user` |
+| 稳定复现 | Simple Chat 已保存 `2` 个项目；从独立智能对话点击“工作台”，侧栏初始显示“智能对话 0”；点击该页签后同一页面立即显示 `2` 个项目，分别为 `16` 与 `2` 个对话。Console error/warning 与原生弹窗均为 0。 |
+| 根因 | `DashboardView` 只在 `activeTab === 'chat'` 时调用 `loadSimpleChatDashboardProjects()`，但侧栏徽标在所有页签都会渲染 `chatProjects.length`，因此画布+聊天用户首次进入工作台时必然先显示 0。服务端同步数据本身正常。 |
+| RED | 新增双产品用户合同：未点击聊天页签也必须显示“智能对话 2”；修复前聚焦测试为 `1 failed / 9 passed`。 |
+| 最小修复 | 仅调整仪表盘加载门槛：具有 `chat` 产品权限的用户在仪表盘挂载和窗口重新聚焦时加载聊天项目；保留账号切换取消迟到响应、远端优先和当前用户 IDB 降级逻辑。 |
+| 本地回归 | 聚焦 `10/10`；Simple Chat 同步相关 `348/348`；全仓 `3910 passed / 119 skipped / 0 failed`；TypeScript、零错误 Lint、保护门禁 `38/38`、生产构建 `116/116`。PostgreSQL 跳过项不计为通过。 |
+| 状态 | **本地已修复 / Coze 待部署复验。** 新候选部署后必须在不点击聊天页签的情况下直接显示正确数量，再进入页签核对项目和任务计数。 |

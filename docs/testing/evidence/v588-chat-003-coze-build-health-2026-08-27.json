@@ -1,0 +1,33 @@
+{
+  "recordedAt": "2026-08-27T00:00:00+08:00",
+  "scope": "V588-CHAT-003 Coze build and service health prerequisite",
+  "github": {
+    "branch": "main",
+    "commit": "48c2ad3fd262d933ac08ab18f389e320e192d634",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableModified": false
+  },
+  "coze": {
+    "buildExitCode": 0,
+    "buildId": "8Iztiwokck9HEnxplOf78",
+    "processId": 4417,
+    "postgresConfigured": true,
+    "health": {
+      "/": 200,
+      "/simple-chat": 200,
+      "/api/auth/me": 200,
+      "htmlStaticAssetsChecked": 12,
+      "htmlStaticAssetsPassed": 12
+    },
+    "nestedMainFixPresentAfterCleanup": false,
+    "platformMetadataCommit": "f65dcfd6",
+    "platformMetadataTreeMatchesOriginMain": true
+  },
+  "deploymentSyncPolicy": {
+    "commandModel": "git fetch origin main, then controlled git reset --hard origin/main",
+    "gitPullFfOnlyIsCanonical": false,
+    "gitCleanAllowed": false,
+    "runtimeDataMustRemainExternalOrUntracked": true
+  },
+  "decision": "BUILD_PREREQUISITE_PASSED_BUSINESS_MATRIX_PENDING"
+}

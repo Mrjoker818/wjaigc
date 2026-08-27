@@ -430,3 +430,17 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - `11abb548` 只增加两类工作树目录的 Git/TypeScript/ESLint 隔离和永久契约测试，未修改 Simple Chat 业务逻辑、数据库、供应商、积分、`stable` 或 donor。
 - 本地门禁：目标 `6/6`、全仓 `3909 passed / 119 skipped / 0 failed`、TypeScript、零错误 Lint、保护门禁 `38/38`、嵌套夹具生产构建 `116/116`；独立复审无阻断项。
 - **当前状态：构建修复本地完成 / GitHub 与 Coze 待复验 / V588-CHAT-003 仍未吸收。** 云端构建和业务矩阵关闭前不得进入 `V588-CHAT-004`。
+
+## 2026-08-27 V588-CHAT-003 Coze 构建关闭与目标重定锚
+
+- `origin/main@48c2ad3fd262d933ac08ab18f389e320e192d634` 已由 Coze 重新对齐；无关的嵌套 `worktrees/main-fix` 在保留备份分支后从当前升级沙箱移除，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未改动。
+- Coze 生产构建退出码为 `0`，Build ID 为 `8Iztiwokck9HEnxplOf78`；`/`、`/simple-chat`、`/api/auth/me` 与 HTML 引用的 `12` 个静态资源均返回 HTTP `200`，PostgreSQL 配置存在。
+- Coze 会在对话操作后生成仅含平台元数据的本地提交；本轮本地 `HEAD` 虽显示为 `f65dcfd6`，但 `HEAD^{tree}` 与 `origin/main^{tree}` 一致。后续同步固定使用 `git fetch origin main` 后受控 `git reset --hard origin/main`，禁止用 `git pull --ff-only` 判断源码污染，也禁止 `git clean` 删除运行数据。
+- **阶段边界已重新确认：Stage 4 于 2026-08-21 验收、能力目录专项于 2026-08-25 关闭，不再重复执行。当前唯一进行项为 `V588-CHAT-003` 云端业务矩阵；构建阻断已关闭，但项目/任务 CRUD、刷新恢复、冲突、删除不复活、账号隔离、退出冲刷和 PostgreSQL 最终快照仍未全部取证，因此本项仍为未吸收。**
+
+## 2026-08-27 V588-CHAT-003 首轮业务矩阵与仪表盘计数修复
+
+- Google Chrome 已证明专用项目/任务创建、项目与任务重命名、普通 APImart 对话、助手唯一完成标记、`已同步`、刷新后精确 `projectId + taskId` 恢复和任务名称持久化；Console error/warning 与原生弹窗均为 0。
+- 同轮真实发现 `V588-CHAT-003-BUG-001`：工作台初始侧栏显示“智能对话 0”，进入页签后才加载并显示真实 `2` 个项目。根因是仪表盘把聊天项目加载错误绑定到页签激活。
+- 按 RED -> 最小修复新增双产品用户初始徽标合同；聚焦 `10/10`、Simple Chat 同步 `348/348`、全仓 `3910 passed / 119 skipped / 0 failed`、TypeScript、零错误 Lint、保护门禁 `38/38` 与构建 `116/116` 通过。
+- **当前状态：普通对话、刷新恢复和重命名云端通过；仪表盘初始计数本地修复、Coze 待验；删除不复活、多标签冲突、跨账号隔离、离页冲刷和 PostgreSQL 并发仍未关闭。`V588-CHAT-003` 保持未吸收。**

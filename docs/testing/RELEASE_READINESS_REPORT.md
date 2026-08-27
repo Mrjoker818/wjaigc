@@ -1470,3 +1470,15 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `e64edbbe` 在 Coze 真实构建失败，原因是云端嵌套工作树被 TypeScript 重复纳入；因此该 SHA 不具备 Coze 可部署性，不能进入业务验收。
 - `11abb548` 已用真实目录形态夹具证明 TypeScript、ESLint 和 Git 边界隔离，完整本地门禁通过且无业务源码改动。
 - **专项判定：本地构建候选通过，云端发布仍为有条件通过。** 必须先完成 GitHub/Coze 精确 SHA、构建、启动、健康与静态资源复验，再执行 V588-CHAT-003 业务矩阵；`stable` 保持只读。
+
+## 2026-08-27 V588-CHAT-003 Coze 构建关闭后的发布判断
+
+- `origin/main@48c2ad3f` 已完成 Coze 生产构建与启动，Build ID `8Iztiwokck9HEnxplOf78`；`/`、`/simple-chat`、`/api/auth/me` 与 12 个静态资源均为 HTTP 200，数据库配置存在。
+- Coze 平台生成的本地元数据提交与 `origin/main` 代码树一致，不进入 GitHub；后续部署同步使用 `fetch + reset --hard origin/main`，不触碰 `stable`，也不使用 `git clean` 清理运行数据。
+- **专项判定：构建阻断关闭，允许继续 `V588-CHAT-003` 云端业务矩阵。Stage 4 已验收且不再作为进行项；全平台仍为有条件通过，不能把构建健康扩大解释为项目同步、并发冲突或 PostgreSQL 已通过。**
+
+## 2026-08-27 V588-CHAT-003 首轮业务矩阵发布判断
+
+- 普通对话完成、同步状态、刷新恢复、项目与任务重命名已取得真实 Chrome 证据，且没有 Console error/warning 或原生弹窗。
+- `V588-CHAT-003-BUG-001` 证明仪表盘初始聊天项目徽标为错误的 `0`；最小本地修复已完成全量回归和生产构建，但尚未部署。
+- **专项判定：云端部分通过 / 新候选本地通过 / 仍未吸收。** 先推送并在 Coze 验证初始徽标，再继续删除不复活、离页冲刷和可执行的单标签矩阵；禁止跳入 `V588-CHAT-004`，`stable` 继续只读。
