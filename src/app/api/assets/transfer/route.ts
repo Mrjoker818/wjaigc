@@ -6,6 +6,7 @@ import {
   AssetServiceError,
   createAssetService,
 } from '@/lib/asset-core/service';
+import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { WorkspaceEntityType } from '@/lib/asset-core/types';
 import { getSessionUser } from '@/lib/server-auth';
 
@@ -146,6 +147,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const name = body.metadata && typeof body.metadata.name === 'string'
       ? body.metadata.name
       : undefined;
+    const sourceTrace = parseWorkspaceSourceTrace(body.metadata?.sourceTrace);
     return NextResponse.json({
       assetId: result.version.assetId,
       assetVersionId: result.version.id,
@@ -153,6 +155,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       entityId: result.placement.entityId,
       url: result.version.file.url,
       ...(name ? { name } : {}),
+      ...(sourceTrace ? { sourceTrace } : {}),
       reused: result.reused,
     });
   } catch (error) {

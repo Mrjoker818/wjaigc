@@ -109,17 +109,7 @@ function AgentRunMessageProgress({ runId }: { runId: string }) {
 }
 
 function readWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | null {
-  if (!value || typeof value !== 'object') return null;
-  const candidate = value as Record<string, unknown>;
-  if (typeof candidate.url !== 'string' || !candidate.url) return null;
-  return {
-    url: candidate.url,
-    ...(typeof candidate.name === 'string' ? { name: candidate.name } : {}),
-    ...(typeof candidate.assetId === 'string' ? { assetId: candidate.assetId } : {}),
-    ...(typeof candidate.assetVersionId === 'string' ? { assetVersionId: candidate.assetVersionId } : {}),
-    ...(typeof candidate.placementId === 'string' ? { placementId: candidate.placementId } : {}),
-    ...(typeof candidate.entityId === 'string' ? { entityId: candidate.entityId } : {}),
-  };
+  return parseSimpleChatCanvasBridgePayload([value])[0] ?? null;
 }
 interface ChatAreaProps {
   user: User;

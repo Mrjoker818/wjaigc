@@ -9,6 +9,7 @@ import { fetchWithTimeout, getInternalApiUrl } from '@/lib/api-helpers';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
+import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { getSafeImageTypeFromDataUrl, getSafeMediaTypeFromResponse } from '@/lib/media-validation';
 import {
@@ -63,6 +64,7 @@ interface AssetRegistrationRequest {
     name?: string;
     mimeType?: string;
   };
+  sourceTrace?: WorkspaceSourceTrace;
 }
 
 const REGISTRATION_LIMITS = {
@@ -240,15 +242,18 @@ async function registerStandaloneChatAsset(
       metadata: {
         source: 'standalone-chat',
         ...(input.image.name ? { name: input.image.name } : {}),
+        ...(input.sourceTrace ? { sourceTrace: input.sourceTrace } : {}),
       },
     },
   });
+  const sourceTrace = parseWorkspaceSourceTrace(created.placement.metadata?.sourceTrace);
   return {
     assetId: created.version.assetId,
     assetVersionId: created.version.id,
     placementId: created.placement.id,
     url: created.version.file.url,
     ...(input.image.name ? { name: input.image.name } : {}),
+    ...(sourceTrace ? { sourceTrace } : {}),
   };
 }
 
@@ -533,6 +538,16 @@ export async function POST(request: NextRequest) {
         const outputIndex = generatedOutputIndex++;
         let imageRef: WorkspaceAssetReference | undefined;
         if (body.assetProjectId && body.projectId && body.taskId && body.responseMessageId) {
+          const sourceTrace: WorkspaceSourceTrace = {
+            source: 'simple-chat',
+            chatProjectId: body.projectId,
+            chatTaskId: body.taskId,
+            messageId: body.responseMessageId,
+            modelId: imageModel,
+            providerId: imageProviderId,
+            ...(authoritativeTaskId ? { generationTaskIds: [authoritativeTaskId] } : {}),
+            createdAt: new Date().toISOString(),
+          };
           try {
             if (authoritativeTaskId) {
               const workspaceId = `standalone-chat:${body.projectId}`;
@@ -560,6 +575,7 @@ export async function POST(request: NextRequest) {
               if (reference) imageRef = {
                 ...reference,
                 name: prompt.slice(0, 120) || 'Generated image',
+                sourceTrace,
               };
             } else {
               imageRef = await registerStandaloneChatAsset(user, {
@@ -569,6 +585,7 @@ export async function POST(request: NextRequest) {
                 entityId: `${body.responseMessageId}:${outputIndex}`,
                 idempotencyKey: `simple-chat-result:${body.taskId}:${body.responseMessageId}:${outputIndex}`,
                 image: { url: imageUrl, name: prompt.slice(0, 120) || 'Generated image' },
+                sourceTrace,
               });
             }
           } catch {

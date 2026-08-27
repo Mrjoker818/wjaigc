@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import * as simpleChatTypes from '@/components/simple-chat/simple-chat-types';
+import {
+  diffSimpleChatProjects,
+  replaySimpleChatOperations,
+  validateSimpleChatProjects,
+} from '@/lib/simple-chat-project-sync';
+import type { WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 
 const typesSource = readFileSync(
   resolve(process.cwd(), 'src/components/simple-chat/simple-chat-types.ts'),
@@ -27,6 +33,7 @@ type BridgeReader = (value: unknown) => Array<{
   assetVersionId?: string;
   placementId?: string;
   entityId?: string;
+  sourceTrace?: WorkspaceSourceTrace;
 }>;
 
 type AssetReference = {
@@ -35,6 +42,18 @@ type AssetReference = {
   assetVersionId?: string;
   placementId?: string;
   entityId?: string;
+  sourceTrace?: WorkspaceSourceTrace;
+};
+
+const sourceTraceFixture: WorkspaceSourceTrace = {
+  source: 'simple-chat',
+  chatProjectId: 'chat-project-a',
+  chatTaskId: 'task-a',
+  messageId: 'message-a',
+  modelId: 'image-model-a',
+  providerId: 'image-provider-a',
+  generationTaskIds: ['generation-task-a'],
+  createdAt: '2026-08-27T08:00:00.000Z',
 };
 
 type Attachment = {
@@ -174,6 +193,28 @@ describe('standalone simple-chat asset transfer', () => {
     }]);
   });
 
+  it('preserves only validated sourceTrace through the canvas and SSE bridge parsers', () => {
+    const parse = bridgeReader();
+    expect(parse).toBeTypeOf('function');
+    if (!parse) return;
+
+    expect(parse({
+      images: [{
+        url: '/managed.png',
+        assetVersionId: 'version-1',
+        placementId: 'placement-1',
+        sourceTrace: { ...sourceTraceFixture, privatePlacementValue: 'do-not-return' },
+      }],
+    })[0]?.sourceTrace).toEqual(sourceTraceFixture);
+    expect(parse({
+      images: [{
+        url: '/invalid.png',
+        sourceTrace: { ...sourceTraceFixture, source: 'untrusted-source' },
+      }],
+    })[0]).not.toHaveProperty('sourceTrace');
+    expect(chatAreaSource).toMatch(/parseSimpleChatCanvasBridgePayload\(\[value\]\)\[0\]/);
+  });
+
   it('keeps the authoritative canvas entity id through both standalone-chat bridge parsers', () => {
     const parse = bridgeReader();
     expect(parse).toBeTypeOf('function');
@@ -191,7 +232,7 @@ describe('standalone simple-chat asset transfer', () => {
     })).toEqual([expect.objectContaining({
       entityId: 'simple-chat:task-a:message-a:0',
     })]);
-    expect(chatAreaSource).toMatch(/typeof candidate\.entityId === ['"]string['"]/);
+    expect(chatAreaSource).toMatch(/parseSimpleChatCanvasBridgePayload\(\[value\]\)\[0\]/);
   });
 
   it('persists imageRefs through the existing project storage round trip', () => {
@@ -240,6 +281,51 @@ describe('standalone simple-chat asset transfer', () => {
         placementId: 'chat-placement-a',
       }),
     ]);
+  });
+
+  it('preserves sourceTrace through validated persisted snapshot replay', () => {
+    const projects = [{
+      id: 'chat-project-a',
+      name: 'Chat',
+      createdAt: 1,
+      updatedAt: 1,
+      agents: [],
+      knowledgeItems: [],
+      tasks: [{
+        id: 'task-a',
+        projectId: 'chat-project-a',
+        name: 'Task',
+        model: 'chat-model-a',
+        providerId: 'chat-provider-a',
+        createdAt: 1,
+        updatedAt: 1,
+        messages: [{
+          id: 'message-a',
+          role: 'assistant' as const,
+          content: 'image',
+          images: ['/managed.png'],
+          imageRefs: [{
+            url: '/managed.png',
+            assetId: 'asset-a',
+            assetVersionId: 'version-a',
+            placementId: 'chat-placement-a',
+            sourceTrace: sourceTraceFixture,
+          }],
+          createdAt: 1,
+        }],
+      }],
+    }];
+    const serialized = JSON.parse(JSON.stringify({ schemaVersion: 1, revision: 1, projects }));
+
+    expect(validateSimpleChatProjects(serialized.projects)).toEqual({ success: true });
+    let operationIndex = 0;
+    const operations = diffSimpleChatProjects([], serialized.projects, 1, {
+      createOperationId: () => `00000000-0000-4000-8000-${String(++operationIndex).padStart(12, '0')}`,
+    });
+    const replayed = replaySimpleChatOperations([], operations);
+
+    expect(replayed.projects[0]?.tasks[0]?.messages[0]?.imageRefs?.[0]?.sourceTrace)
+      .toEqual(sourceTraceFixture);
   });
 
   it('uses authorized resolve and Task 5 transfer without re-uploading managed media', () => {

@@ -2,6 +2,7 @@
 
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from '@/lib/chat-generation-controls';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type {
   SimpleChatFailure,
   SimpleChatMessageStatus,
@@ -157,6 +158,7 @@ function toWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | nu
     return value ? { url: value } : null;
   }
   if (!isRecord(value) || typeof value.url !== 'string' || !value.url) return null;
+  const sourceTrace = parseWorkspaceSourceTrace(value.sourceTrace);
   return {
     url: value.url,
     ...(typeof value.name === 'string' ? { name: value.name } : {}),
@@ -164,6 +166,7 @@ function toWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | nu
     ...(typeof value.assetVersionId === 'string' ? { assetVersionId: value.assetVersionId } : {}),
     ...(typeof value.placementId === 'string' ? { placementId: value.placementId } : {}),
     ...(typeof value.entityId === 'string' ? { entityId: value.entityId } : {}),
+    ...(sourceTrace ? { sourceTrace } : {}),
   };
 }
 

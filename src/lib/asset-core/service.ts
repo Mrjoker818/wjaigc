@@ -6,6 +6,7 @@ import {
   type AssetStorage,
   type StoredTransfer,
 } from './storage';
+import { parseWorkspaceSourceTrace } from './source-trace';
 import {
   assertWorkspaceEntityType,
   type Asset,
@@ -198,6 +199,7 @@ export class AssetService {
       const name = placement?.metadata && typeof placement.metadata.name === 'string'
         ? placement.metadata.name
         : undefined;
+      const sourceTrace = parseWorkspaceSourceTrace(placement?.metadata?.sourceTrace);
       return {
         assetId: version.assetId,
         assetVersionId: version.id,
@@ -205,6 +207,7 @@ export class AssetService {
         ...(placement ? { entityId: placement.entityId } : {}),
         url: version.file.url,
         ...(name ? { name } : {}),
+        ...(sourceTrace ? { sourceTrace } : {}),
       };
     });
   }
