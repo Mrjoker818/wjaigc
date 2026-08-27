@@ -245,7 +245,9 @@ describe('task result asset projection wiring', () => {
     expect(route).toContain("from '@/lib/agent-runtime/workspace-results'");
     expect(route).toContain('await projectAgentResultToWorkspace({');
     expect(route).toContain('agentWorkspaceProjectionIdempotencyKey({');
-    expect(route).toMatch(/sendGeneratedImage\(pollData\.imageUrl,\s*imgPrompt,\s*taskId,\s*pollData\)/);
+    expect(route).toMatch(
+      /sendGeneratedImage\(\s*pollData\.imageUrl,\s*imgPrompt,\s*taskId,\s*pollData,\s*actualModelId,\s*actualProviderId,\s*\)/,
+    );
     expect(route).toContain("const workspaceId = `standalone-chat:${body.projectId}`");
     expect(route).toContain('sourceEntityId: body.responseMessageId');
     expect(route).not.toContain('sourceEntityId: `${body.responseMessageId}:${authoritativeTaskId}`');
