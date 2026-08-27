@@ -5,7 +5,11 @@ import type {
   SimpleChatProject,
   SimpleChatTask,
 } from '@/components/simple-chat/simple-chat-types';
-import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
+import {
+  bindWorkspaceSourceTraceToChat,
+  parseWorkspaceSourceTrace,
+  type WorkspaceSourceTrace,
+} from '@/lib/asset-core/source-trace';
 import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
 import type { WorkspacePlacement } from '@/lib/asset-core/types';
 import type { SimpleChatStoredSnapshot } from '@/lib/simple-chat-sync-server';
@@ -84,9 +88,11 @@ async function alignManagedMessageImages(
   actorUserId: string,
   dependencies: ResolverDependencies,
 ): Promise<SimpleChatWorkspaceHandoffImage[]> {
-  const images = await Promise.all((message.images || []).map(async (_, imageIndex) => {
+  const images = await Promise.all((message.images || []).map(async (imageUrl, imageIndex) => {
     const assetRef = message.imageRefs?.[imageIndex];
-    if (!assetRef?.assetVersionId || !assetRef.placementId) return null;
+    if (!imageUrl || !assetRef?.assetVersionId || !assetRef.placementId || assetRef.url !== imageUrl) {
+      return null;
+    }
 
     const projectId = await dependencies.resolveVersionProject(actorUserId, assetRef.assetVersionId);
     if (!projectId) return null;
@@ -95,7 +101,9 @@ async function alignManagedMessageImages(
     if (placement?.status !== 'active' || placement.assetVersionId !== assetRef.assetVersionId) {
       return null;
     }
-    return { imageIndex, assetRef, sourceTrace };
+    const imageSourceTrace = bindWorkspaceSourceTraceToChat(assetRef.sourceTrace, sourceTrace);
+    if (!imageSourceTrace) return null;
+    return { imageIndex, assetRef, sourceTrace: imageSourceTrace };
   }));
   return images.filter((image): image is SimpleChatWorkspaceHandoffImage => image !== null);
 }

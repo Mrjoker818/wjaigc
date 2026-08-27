@@ -24,6 +24,7 @@ export interface SimpleChatWorkflowTransferRequest {
 export interface ExecuteSimpleChatWorkspaceHandoffInput {
   intent: SimpleChatWorkspaceHandoffIntent;
   currentWorkflow: Workflow | null;
+  getCurrentWorkflow?: () => Workflow | null;
   resolve: (intent: SimpleChatWorkspaceHandoffIntent) => Promise<SimpleChatWorkspaceHandoff>;
   transfer: (request: SimpleChatWorkflowTransferRequest) => Promise<WorkspaceAssetReference>;
   persist: (workflow: Workflow) => Promise<void>;
@@ -36,6 +37,30 @@ export interface ExecuteSimpleChatWorkspaceHandoffResult {
   workflow: Workflow;
   addedNodeIds: string[];
   warnings: SimpleChatWorkspaceHandoff['warnings'];
+}
+
+export function toSimpleChatHandoffMessage(error: unknown): string {
+  const code = error && typeof error === 'object' && 'code' in error
+    && typeof error.code === 'string'
+    ? error.code
+    : error instanceof Error ? error.message : '';
+  const messages: Record<string, string> = {
+    UNAUTHORIZED: '登录状态已失效，请重新登录后再试',
+    INVALID_HANDOFF: '智能对话发送信息不完整，请返回对话重新发送',
+    FORBIDDEN: '无权读取该对话或写入当前项目',
+    HANDOFF_SOURCE_NOT_FOUND: '原智能对话消息已不存在',
+    NO_MANAGED_MEDIA: '该消息没有可导入的托管内容',
+    SOURCE_PROJECT_FORBIDDEN: '无权读取该智能对话项目',
+    TARGET_PROJECT_FORBIDDEN: '无权写入当前画布项目',
+    CHAT_MESSAGE_NOT_FOUND: '原智能对话消息已不存在',
+    ASSET_NOT_FOUND: '对话中的图片素材已不存在',
+    ASSET_TRANSFER_FAILED: '图片素材导入失败，请稍后重试',
+    ASSET_IDEMPOTENCY_CONFLICT: '导入请求与已有记录冲突，已停止且链接保留；请刷新或检查目标后重试',
+  };
+  return messages[code]
+    || (code.includes('保存') || code.includes('已取消')
+      ? code
+      : '智能对话内容导入失败，请刷新页面重试');
 }
 
 export interface SimpleChatWorkspaceHandoffRunGuard {
@@ -149,12 +174,12 @@ export async function consumeSimpleChatWorkspaceHandoffForProject(
           : input.currentWorkflow ?? null,
         resolve: input.resolve,
         transfer: input.transfer,
+        getCurrentWorkflow: input.getCurrentWorkflow,
         persist: async workflow => {
           assertSimpleChatHandoffProjectScope(input, intent.targetProjectId);
           assertSimpleChatHandoffIdentity(input, identity);
           await input.persist(workflow);
           assertSimpleChatHandoffProjectScope(input, intent.targetProjectId);
-          input.applyWorkflow?.(workflow);
         },
         cleanUrl: () => {
           assertSimpleChatHandoffProjectScope(input, intent.targetProjectId);
@@ -162,6 +187,10 @@ export async function consumeSimpleChatWorkspaceHandoffForProject(
           input.cleanUrl();
         },
         now: input.now,
+      }).then(result => {
+        assertSimpleChatHandoffProjectScope(input, intent.targetProjectId);
+        input.applyWorkflow?.(result.workflow);
+        return result;
       });
     };
     const result = input.queue
@@ -244,22 +273,40 @@ export async function executeSimpleChatWorkspaceHandoff(
   input: ExecuteSimpleChatWorkspaceHandoffInput,
 ): Promise<ExecuteSimpleChatWorkspaceHandoffResult> {
   const handoff = await input.resolve(input.intent);
+  const now = input.now();
   const planned = appendSimpleChatHandoffToWorkflow(
-    input.currentWorkflow,
+    input.getCurrentWorkflow?.() ?? input.currentWorkflow,
     input.intent.targetProjectId,
     handoff,
-    input.now(),
+    now,
   );
-  let workflow = planned.workflow;
+  const transferred = new Map<string, WorkspaceAssetReference>();
   for (const pending of planned.pendingImages) {
     const reference = await input.transfer(buildSimpleChatWorkflowTransfer(
       input.intent,
-      workflow.id,
+      planned.workflow.id,
       pending,
     ));
-    workflow = applyTransferredImageReference(workflow, pending.nodeId, reference);
+    transferred.set(pending.nodeId, reference);
   }
-  await input.persist(workflow);
+
+  const applyPatch = (base: Workflow | null): Workflow => {
+    const appended = appendSimpleChatHandoffToWorkflow(
+      base,
+      input.intent.targetProjectId,
+      handoff,
+      now,
+    );
+    let next = appended.workflow;
+    for (const [nodeId, reference] of transferred) {
+      next = applyTransferredImageReference(next, nodeId, reference);
+    }
+    return next;
+  };
+
+  const persistedWorkflow = applyPatch(input.getCurrentWorkflow?.() ?? input.currentWorkflow);
+  await input.persist(persistedWorkflow);
+  const workflow = applyPatch(input.getCurrentWorkflow?.() ?? persistedWorkflow);
   input.cleanUrl();
   return {
     status: handoff.warnings.length > 0 ? 'partial-success' : 'success',

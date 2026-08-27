@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AssetService } from '@/lib/asset-core/service';
 import type { AssetStorage, AssetStorageTransaction } from '@/lib/asset-core/storage';
 import type { WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
+import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 
 const sourceTraceFixture: WorkspaceSourceTrace = {
   source: 'simple-chat',
@@ -19,6 +20,26 @@ const sourceTraceFixture: WorkspaceSourceTrace = {
 };
 
 describe('asset source trace propagation', () => {
+  it('accepts bounded slash model IDs and rejects control characters', () => {
+    const parsed = parseWorkspaceSourceTrace({
+      ...sourceTraceFixture,
+      modelId: 'vendor/image/model-v2',
+      providerId: 'provider\rforged',
+    });
+    expect(parsed).toMatchObject({
+      source: 'simple-chat',
+      chatProjectId: sourceTraceFixture.chatProjectId,
+      chatTaskId: sourceTraceFixture.chatTaskId,
+      messageId: sourceTraceFixture.messageId,
+      modelId: 'vendor/image/model-v2',
+    });
+    expect(parsed).not.toHaveProperty('providerId');
+    expect(parseWorkspaceSourceTrace({
+      ...sourceTraceFixture,
+      modelId: 'x'.repeat(201),
+    })).not.toHaveProperty('modelId');
+  });
+
   it('returns only a validated sourceTrace from placement metadata', async () => {
     const transaction = {
       findProject: vi.fn().mockResolvedValue(true),

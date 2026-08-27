@@ -35,7 +35,8 @@ describe('simple chat workspace handoff contracts', () => {
       chatProjectId: 'chat-project-1',
       chatTaskId: 'task-1',
       messageId: 'message-1',
-      modelId: 'invalid model id',
+      modelId: 'openai/gpt-image-1',
+      providerId: 'provider\nforged',
       generationTaskIds: Array.from({ length: 20 }, (_, index) => `generation-${index}`),
       createdAt: '2026-08-27T08:00:00+08:00',
       secret: 'must-not-leak',
@@ -45,6 +46,7 @@ describe('simple chat workspace handoff contracts', () => {
       chatProjectId: 'chat-project-1',
       chatTaskId: 'task-1',
       messageId: 'message-1',
+      modelId: 'openai/gpt-image-1',
       generationTaskIds: Array.from({ length: 16 }, (_, index) => `generation-${index}`),
       createdAt: '2026-08-27T00:00:00.000Z',
     });
@@ -55,6 +57,8 @@ describe('simple chat workspace handoff contracts', () => {
     expect(stableChatImportWorkflowId('canvas-project-1')).not.toBe(stableChatImportWorkflowId('canvas-project-2'));
     expect(stableChatImportNodeId(intent, 'text', 0)).toBe(stableChatImportNodeId(intent, 'text', 0));
     expect(stableChatImportNodeId(intent, 'image', 0)).not.toBe(stableChatImportNodeId(intent, 'image', 1));
+    expect(stableChatImportWorkflowId('canvas-project-1')).toMatch(/^wf-chat-import-[a-z0-9]{25,}$/);
+    expect(stableChatImportNodeId(intent, 'text', 0)).toMatch(/^node-chat-[a-z0-9]{25,}$/);
   });
 
   it('creates a named workflow when absent and only appends to an existing workflow', () => {

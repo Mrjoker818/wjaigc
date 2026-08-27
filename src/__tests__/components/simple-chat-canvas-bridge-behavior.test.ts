@@ -160,6 +160,42 @@ describe('standalone chat Canvas bridge behavior', () => {
     expect(JSON.stringify(result.references)).not.toContain('partial-secret');
   });
 
+  it('consumes an ID-only bridge by resolving its canonical reference', async () => {
+    const consume = consumeBridge();
+    expect(consume).toBeTypeOf('function');
+    if (!consume) return;
+    const resolveReference = vi.fn().mockResolvedValue({
+      url: '/canonical.png',
+      assetVersionId: 'owned-version',
+      placementId: 'owned-placement',
+      entityId: 'entity-1',
+    });
+    const merge = vi.fn();
+
+    const result = await consume({
+      payload: {
+        projectId: 'canvas-a',
+        images: [{
+          assetVersionId: 'owned-version',
+          placementId: 'owned-placement',
+          entityId: 'entity-1',
+        }],
+      },
+      currentProjectId: 'canvas-a',
+      resolveReference,
+      merge,
+      remove: vi.fn(),
+    });
+
+    expect(resolveReference).toHaveBeenCalledWith({
+      projectId: 'canvas-a',
+      assetVersionId: 'owned-version',
+      placementId: 'owned-placement',
+    });
+    expect(result.references).toEqual([expect.objectContaining({ url: '/canonical.png' })]);
+    expect(merge).toHaveBeenCalledWith(result.references);
+  });
+
   it('I6 imports legacy URLs without resolving or granting managed identity', async () => {
     const consume = consumeBridge();
     expect(consume).toBeTypeOf('function');

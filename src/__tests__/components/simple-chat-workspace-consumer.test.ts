@@ -461,4 +461,60 @@ describe('simple chat workspace consumer guard', () => {
     expect(applyCount).toBe(1);
     expect(cleanCount).toBe(0);
   });
+
+  it('serializes an ordinary workflow save with handoff and preserves both updates', async () => {
+    const queue = createSimpleChatWorkspaceHandoffProjectQueue();
+    const ordinarySaveEntered = deferred();
+    const releaseOrdinarySave = deferred();
+    let workflow = createEmptyWorkflow('W');
+    const persisted: string[][] = [];
+
+    const ordinarySave = queue.enqueue('canvas-1', async () => {
+      ordinarySaveEntered.resolve();
+      await releaseOrdinarySave.promise;
+      workflow = {
+        ...workflow,
+        nodes: [{
+          ...workflow.nodes[0],
+          id: 'ordinary-save-node',
+          type: 'input-text',
+          label: '普通保存节点',
+          x: 20,
+          y: 20,
+          width: 200,
+          height: 120,
+          ports: [],
+          config: { text: '普通保存' },
+        }],
+      };
+      persisted.push(workflow.nodes.map(node => node.id));
+    });
+    await ordinarySaveEntered.promise;
+
+    const handoff = consumeSimpleChatWorkspaceHandoffForProject({
+      intent,
+      currentProjectId: 'canvas-1',
+      getCurrentProjectId: () => 'canvas-1',
+      getCurrentWorkflow: () => workflow,
+      queue,
+      guard: createSimpleChatWorkspaceHandoffRunGuard(),
+      resolve: async () => handoffFor('message-1'),
+      transfer: async () => { throw new Error('unexpected transfer'); },
+      persist: async next => { persisted.push(next.nodes.map(node => node.id)); },
+      applyWorkflow: next => { workflow = next; },
+      cleanUrl: () => undefined,
+      now: () => 1000,
+    });
+
+    expect(persisted).toEqual([]);
+    releaseOrdinarySave.resolve();
+    await Promise.all([ordinarySave, handoff]);
+
+    expect(persisted).toHaveLength(2);
+    expect(persisted[1]).toContain('ordinary-save-node');
+    expect(workflow.nodes.map(node => node.id)).toContain('ordinary-save-node');
+    expect(workflow.nodes.some(node => (
+      node.config.sourceTrace as { messageId?: string } | undefined
+    )?.messageId === 'message-1')).toBe(true);
+  });
 });

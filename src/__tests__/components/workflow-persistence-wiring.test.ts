@@ -26,7 +26,10 @@ describe('workflow persistence wiring', () => {
   it('persists an explicitly saved workflow back into the current project', () => {
     expect(editorSource).toContain('onWorkflowSaved?: (wf: WorkflowData) => Promise<void>');
     expect(editorSource).toContain('await onWorkflowSaved?.(savedWorkflow)');
-    expect(workspaceSource).toContain('onWorkflowSaved={persistNodeWorkflow}');
+    expect(editorSource).toContain('onWorkflowSaveRequest?: (wf: WorkflowData) => Promise<void>');
+    expect(workspaceSource).toContain('onWorkflowSaveRequest={saveNodeWorkflowForProject}');
+    expect(workspaceSource).toContain('handoffProjectQueueRef.current.enqueue');
+    expect(workspaceSource).toContain('nodeWorkflowRef.current = workflow');
     expect(workspaceSource).toContain('mergeWorkflowIntoProjectMetadata');
     expect(workspaceSource).toContain('flushProjectsToServerWithConflictRecovery');
   });

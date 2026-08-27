@@ -153,6 +153,92 @@ describe('resolveSimpleChatWorkspaceHandoff', () => {
     expect(findPlacement).toHaveBeenCalledWith('user-1', 'source-project-1', 'placement-1');
   });
 
+  it('uses each image reference actual generation trace instead of the message chat model', async () => {
+    const project = structuredClone(projectFixture);
+    const message = project.tasks[0].messages[0];
+    message.images = ['/first.png', '/second.png'];
+    message.imageRefs = [
+      {
+        url: '/first.png',
+        assetVersionId: 'version-1',
+        placementId: 'placement-1',
+        sourceTrace: {
+          source: 'simple-chat',
+          chatProjectId: 'legacy-chat',
+          chatTaskId: 'legacy-task',
+          messageId: 'legacy-message',
+          modelId: 'vendor/image/model-one',
+          providerId: 'image-provider-one',
+          generationTaskIds: ['generation-one'],
+          createdAt: '2026-08-26T00:00:00.000Z',
+        },
+      },
+      {
+        url: '/second.png',
+        assetVersionId: 'version-2',
+        placementId: 'placement-2',
+        sourceTrace: {
+          source: 'simple-chat',
+          chatProjectId: 'legacy-chat',
+          chatTaskId: 'legacy-task',
+          messageId: 'legacy-message',
+          modelId: 'other/image-model',
+          providerId: 'image-provider-two',
+          generationTaskIds: ['generation-two'],
+          createdAt: '2026-08-26T01:00:00.000Z',
+        },
+      },
+    ];
+
+    const result = await resolveSimpleChatWorkspaceHandoff(input, {
+      projectExists: async () => true,
+      readSnapshot: async () => ({ schemaVersion: 1, revision: 4, projects: [project] }),
+      resolveVersionProject: async () => 'source-project-1',
+      findPlacement: async (_userId, _projectId, placementId) => ({
+        assetVersionId: placementId === 'placement-1' ? 'version-1' : 'version-2',
+        status: 'active' as const,
+      }),
+    });
+
+    expect(result.sourceTrace).toMatchObject({ modelId: 'message-model-1', providerId: 'message-provider-1' });
+    expect(result.images.map(image => image.sourceTrace)).toEqual([
+      expect.objectContaining({
+        chatProjectId: 'chat-1', chatTaskId: 'task-1', messageId: 'message-1',
+        modelId: 'vendor/image/model-one', providerId: 'image-provider-one',
+        generationTaskIds: ['generation-one'],
+      }),
+      expect.objectContaining({
+        chatProjectId: 'chat-1', chatTaskId: 'task-1', messageId: 'message-1',
+        modelId: 'other/image-model', providerId: 'image-provider-two',
+        generationTaskIds: ['generation-two'],
+      }),
+    ]);
+  });
+
+  it('skips an authorized reference when its URL does not match the visible image slot', async () => {
+    const project = structuredClone(projectFixture);
+    const message = project.tasks[0].messages[0];
+    message.content = '   ';
+    message.images = ['/visible.png'];
+    message.imageRefs = [{
+      url: '/different-managed.png',
+      assetVersionId: 'version-1',
+      placementId: 'placement-1',
+    }];
+    const findPlacement = vi.fn().mockResolvedValue({
+      assetVersionId: 'version-1',
+      status: 'active' as const,
+    });
+
+    await expect(resolveSimpleChatWorkspaceHandoff(input, {
+      projectExists: async () => true,
+      readSnapshot: async () => ({ schemaVersion: 1, revision: 5, projects: [project] }),
+      resolveVersionProject: async () => 'source-project-1',
+      findPlacement,
+    })).rejects.toMatchObject({ code: 'NO_MANAGED_MEDIA', status: 422 });
+    expect(findPlacement).not.toHaveBeenCalled();
+  });
+
   it('rejects a target project not owned by the actor before reading chat data', async () => {
     const readSnapshot = vi.fn().mockResolvedValue(snapshotFixture);
 

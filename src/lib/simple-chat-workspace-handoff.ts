@@ -45,12 +45,16 @@ const EMPTY_WORKFLOW_X = 80;
 const EMPTY_WORKFLOW_Y = 120;
 
 function stableHash(value: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(36);
+  const seeds = [0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35];
+  return seeds.map((seed, seedIndex) => {
+    let hash = seed;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index) + Math.imul(seedIndex + 1, 0x9e37);
+      hash = Math.imul(hash, 0x01000193);
+      hash ^= hash >>> 13;
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  }).join('');
 }
 
 function parseHandoffIds(value: Record<string, unknown>): SimpleChatWorkspaceHandoffIntent | null {

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import {
   executeSimpleChatWorkspaceHandoff,
+  toSimpleChatHandoffMessage,
   type ExecuteSimpleChatWorkspaceHandoffInput,
   type SimpleChatWorkflowTransferRequest,
 } from '@/lib/simple-chat-workspace-handoff-client';
@@ -60,7 +61,40 @@ function createDependencies(): ExecuteSimpleChatWorkspaceHandoffInput {
   };
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('simple chat workspace handoff client', () => {
+  it('maps idempotency conflicts without implying the handoff URL was cleaned', () => {
+    const conflict = Object.assign(new Error('generic transfer failure'), {
+      code: 'ASSET_IDEMPOTENCY_CONFLICT',
+    });
+    expect(toSimpleChatHandoffMessage(conflict)).toBe(
+      '导入请求与已有记录冲突，已停止且链接保留；请刷新或检查目标后重试',
+    );
+  });
+
+  it('keeps the handoff URL when a 409 idempotency conflict stops transfer', async () => {
+    const cleanUrl = vi.fn();
+    const conflict = Object.assign(new Error('transfer conflict'), {
+      code: 'ASSET_IDEMPOTENCY_CONFLICT',
+      status: 409,
+    });
+
+    await expect(executeSimpleChatWorkspaceHandoff({
+      ...createDependencies(),
+      transfer: async () => { throw conflict; },
+      cleanUrl,
+    })).rejects.toBe(conflict);
+    expect(cleanUrl).not.toHaveBeenCalled();
+    expect(toSimpleChatHandoffMessage(conflict)).toContain('链接保留');
+  });
+
   it('transfers canonical image references before persisting and cleaning the URL', async () => {
     const events: string[] = [];
     let persistedWorkflow: Workflow | undefined;
@@ -199,5 +233,94 @@ describe('simple chat workspace handoff client', () => {
 
     expect(result.status).toBe('partial-success');
     expect(result.warnings).toEqual(['UNMANAGED_IMAGE_SKIPPED']);
+  });
+
+  it('rebases the deterministic handoff patch onto edits made while transfer is pending', async () => {
+    const transferEntered = deferred();
+    const releaseTransfer = deferred<WorkspaceAssetReference>();
+    let currentWorkflow = createEmptyWorkflow('用户工作流');
+    currentWorkflow.nodes = [{
+      ...createWorkflowNode('input-text', 20, 30, '待编辑节点'),
+      id: 'user-existing-node',
+      config: { text: '编辑前' },
+    }];
+    const persisted: Workflow[] = [];
+
+    const running = executeSimpleChatWorkspaceHandoff({
+      ...createDependencies(),
+      currentWorkflow,
+      getCurrentWorkflow: () => currentWorkflow,
+      transfer: async () => {
+        transferEntered.resolve();
+        return releaseTransfer.promise;
+      },
+      persist: async workflow => { persisted.push(workflow); },
+    } as ExecuteSimpleChatWorkspaceHandoffInput);
+
+    await transferEntered.promise;
+    const editedNode = {
+      ...createWorkflowNode('input-text', 640, 320, '用户新增'),
+      id: 'user-added-during-transfer',
+      config: { text: '必须保留' },
+    };
+    currentWorkflow = {
+      ...currentWorkflow,
+      name: '用户重命名',
+      nodes: [
+        { ...currentWorkflow.nodes[0], x: 240, y: 180, config: { text: '编辑后' } },
+        editedNode,
+      ],
+    };
+    releaseTransfer.resolve(managedReference);
+
+    const result = await running;
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({ name: '用户重命名' });
+    expect(persisted[0].nodes).toContainEqual(expect.objectContaining({
+      id: 'user-existing-node', x: 240, y: 180, config: { text: '编辑后' },
+    }));
+    expect(persisted[0].nodes.map(node => node.id)).toContain(editedNode.id);
+    expect(persisted[0].nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: result.addedNodeIds[0] }),
+      expect.objectContaining({
+        id: result.addedNodeIds[1],
+        config: expect.objectContaining({ imageUrl: managedReference.url }),
+      }),
+    ]));
+    expect(result.workflow.nodes.map(node => node.id)).toContain(editedNode.id);
+  });
+
+  it('rebases the applied workflow onto edits made while persistence is pending', async () => {
+    const persistEntered = deferred();
+    const releasePersist = deferred();
+    let currentWorkflow = createEmptyWorkflow('用户工作流');
+
+    const running = executeSimpleChatWorkspaceHandoff({
+      ...createDependencies(),
+      currentWorkflow,
+      getCurrentWorkflow: () => currentWorkflow,
+      persist: async () => {
+        persistEntered.resolve();
+        await releasePersist.promise;
+      },
+    } as ExecuteSimpleChatWorkspaceHandoffInput);
+
+    await persistEntered.promise;
+    currentWorkflow = {
+      ...currentWorkflow,
+      nodes: [{
+        ...createWorkflowNode('input-text', 700, 360, '持久化期间编辑'),
+        id: 'user-added-during-persist',
+        config: { text: '不能被 apply 覆盖' },
+      }],
+    };
+    releasePersist.resolve();
+
+    const result = await running;
+    expect(result.workflow.nodes.map(node => node.id)).toContain('user-added-during-persist');
+    expect(result.workflow.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ config: expect.objectContaining({ text: handoffFixture.text }) }),
+      expect.objectContaining({ config: expect.objectContaining({ imageUrl: managedReference.url }) }),
+    ]));
   });
 });

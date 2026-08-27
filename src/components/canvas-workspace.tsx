@@ -93,6 +93,7 @@ import {
   createSimpleChatWorkspaceHandoffProjectQueue,
   createSimpleChatWorkspaceHandoffRunGuard,
   getSimpleChatWorkspaceHandoffIdentity,
+  toSimpleChatHandoffMessage,
   type SimpleChatWorkflowTransferRequest,
 } from '@/lib/simple-chat-workspace-handoff-client';
 import { taskEventsClient } from '@/lib/task-events-client';
@@ -269,7 +270,8 @@ async function resolveSimpleChatWorkspaceHandoffFromApi(
     handoff?: SimpleChatWorkspaceHandoff;
   } | null;
   if (!response.ok || !payload?.success || !payload.handoff) {
-    throw new Error(payload?.code || `HANDOFF_RESOLVE_FAILED_${response.status}`);
+    const code = payload?.code || `HANDOFF_RESOLVE_FAILED_${response.status}`;
+    throw Object.assign(new Error(code), { code, status: response.status });
   }
   return payload.handoff;
 }
@@ -284,29 +286,10 @@ async function transferSimpleChatImageToWorkflow(
   });
   const payload = await response.json().catch(() => null) as (WorkspaceAssetReference & { error?: string }) | null;
   if (!response.ok || !payload?.url) {
-    throw new Error(payload?.error || `ASSET_TRANSFER_FAILED_${response.status}`);
+    const code = payload?.error || `ASSET_TRANSFER_FAILED_${response.status}`;
+    throw Object.assign(new Error(code), { code, status: response.status });
   }
   return payload;
-}
-
-function toSimpleChatHandoffMessage(error: unknown): string {
-  const code = error instanceof Error ? error.message : '';
-  const messages: Record<string, string> = {
-    UNAUTHORIZED: '登录状态已失效，请重新登录后再试',
-    INVALID_HANDOFF: '智能对话发送信息不完整，请返回对话重新发送',
-    FORBIDDEN: '无权读取该对话或写入当前项目',
-    HANDOFF_SOURCE_NOT_FOUND: '原智能对话消息已不存在',
-    NO_MANAGED_MEDIA: '该消息没有可导入的托管内容',
-    SOURCE_PROJECT_FORBIDDEN: '无权读取该智能对话项目',
-    TARGET_PROJECT_FORBIDDEN: '无权写入当前画布项目',
-    CHAT_MESSAGE_NOT_FOUND: '原智能对话消息已不存在',
-    ASSET_NOT_FOUND: '对话中的图片素材已不存在',
-    ASSET_TRANSFER_FAILED: '图片素材导入失败，请稍后重试',
-  };
-  return messages[code]
-    || (code.includes('保存') || code.includes('已取消')
-      ? code
-      : '智能对话内容导入失败，请刷新页面重试');
 }
 
 function normalizeQuickCreateModels(data: QuickCreateModelsResponse): QuickCreateModelCandidate[] {
@@ -5705,6 +5688,26 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   const handoffRunGuardRef = useRef(createSimpleChatWorkspaceHandoffRunGuard());
   const handoffProjectQueueRef = useRef(createSimpleChatWorkspaceHandoffProjectQueue());
+  const saveNodeWorkflowForProject = useCallback(async (requestedWorkflow: Workflow): Promise<void> => {
+    const expectedProjectId = currentProjectRef.current?.id;
+    if (!expectedProjectId) throw new Error('当前项目不存在，无法保存工作流');
+    await handoffProjectQueueRef.current.enqueue(expectedProjectId, async () => {
+      if (currentProjectRef.current?.id !== expectedProjectId) {
+        throw new Error('工作流保存已取消：当前项目已发生变化');
+      }
+      const workflow = {
+        ...(nodeWorkflowRef.current ?? requestedWorkflow),
+        updatedAt: requestedWorkflow.updatedAt,
+      };
+      const response = await fetch('/api/workflow/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser?.id, workflow }),
+      });
+      if (!response.ok) throw new Error('工作流保存失败');
+      await persistNodeWorkflow(workflow, expectedProjectId);
+    });
+  }, [currentUser?.id, persistNodeWorkflow]);
   useEffect(() => {
     if (!currentProject?.id) return;
     const retryRevision = handoffRetryRevision;
@@ -5790,8 +5793,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         userId={currentUser?.id}
         projectId={currentProject?.id}
         onBack={() => setAppMode('canvas')}
-        onWorkflowChange={setNodeWorkflow}
-        onWorkflowSaved={persistNodeWorkflow}
+        onWorkflowChange={workflow => {
+          nodeWorkflowRef.current = workflow;
+          setNodeWorkflow(workflow);
+        }}
+        onWorkflowSaveRequest={saveNodeWorkflowForProject}
         onBeforeWorkflowChatNavigation={() => canvasPersistenceScheduler.flush('immediate')}
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
         canvasImages={images.map(img => ({

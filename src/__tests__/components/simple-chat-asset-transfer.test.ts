@@ -38,6 +38,7 @@ type BridgeReader = (value: unknown) => Array<{
 
 type AssetReference = {
   url: string;
+  name?: string;
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
@@ -97,6 +98,11 @@ type BuildCanvasBridgeImages = (
   timestamp: number,
 ) => Array<{ id: string; url: string; sourceTrace?: WorkspaceSourceTrace }>;
 
+type SerializeCanvasBridgePayload = (
+  projectId: string,
+  references: AssetReference[],
+) => unknown;
+
 function bridgeReader(): BridgeReader | undefined {
   return (simpleChatTypes as unknown as { parseSimpleChatCanvasBridgePayload?: BridgeReader })
     .parseSimpleChatCanvasBridgePayload;
@@ -121,6 +127,12 @@ function buildCanvasBridgeImages(): BuildCanvasBridgeImages | undefined {
   return (simpleChatTypes as unknown as {
     buildSimpleChatCanvasBridgeImages?: BuildCanvasBridgeImages;
   }).buildSimpleChatCanvasBridgeImages;
+}
+
+function serializeCanvasBridgePayload(): SerializeCanvasBridgePayload | undefined {
+  return (simpleChatTypes as unknown as {
+    serializeSimpleChatCanvasBridgePayload?: SerializeCanvasBridgePayload;
+  }).serializeSimpleChatCanvasBridgePayload;
 }
 
 describe('standalone simple-chat asset transfer', () => {
@@ -204,6 +216,33 @@ describe('standalone simple-chat asset transfer', () => {
       assetVersionId: 'version-a',
       placementId: 'canvas-placement-a',
     }]);
+  });
+
+  it('serializes every new Canvas bridge write as bounded IDs only', () => {
+    const serialize = serializeCanvasBridgePayload();
+    expect(serialize).toBeTypeOf('function');
+    if (!serialize) return;
+
+    const json = JSON.stringify(serialize('canvas-a', [{
+      url: 'https://media.example/secret.png',
+      name: 'private name',
+      assetId: 'asset-a',
+      assetVersionId: 'version-a',
+      placementId: 'placement-a',
+      entityId: 'simple-chat:task-a:message-a:0',
+      sourceTrace: sourceTraceFixture,
+    }]));
+
+    expect(JSON.parse(json)).toEqual({
+      projectId: 'canvas-a',
+      images: [{
+        assetVersionId: 'version-a',
+        placementId: 'placement-a',
+        entityId: 'simple-chat:task-a:message-a:0',
+      }],
+    });
+    expect(json).not.toMatch(/https?:|data:|blob:|prompt|name|url|sourceTrace/);
+    expect(chatAreaSource).toContain('serializeSimpleChatCanvasBridgePayload(');
   });
 
   it('preserves only validated sourceTrace through the canvas and SSE bridge parsers', () => {
@@ -394,6 +433,41 @@ describe('standalone simple-chat asset transfer', () => {
     expect(writeBridge).toHaveBeenCalledWith([
       expect.objectContaining({ sourceTrace: sourceTraceFixture }),
     ]);
+  });
+
+  it('passes distinct actual image traces for each Canvas transfer', async () => {
+    const send = sendMediaToCanvas();
+    expect(send).toBeTypeOf('function');
+    if (!send) return;
+    const firstTrace = { ...sourceTraceFixture, modelId: 'vendor/image-one', providerId: 'provider-one' };
+    const secondTrace = {
+      ...sourceTraceFixture,
+      modelId: 'vendor/image-two',
+      providerId: 'provider-two',
+      generationTaskIds: ['generation-task-two'],
+    };
+    const transfer = vi.fn(async ({ index }: {
+      index: number;
+      sourceTrace?: WorkspaceSourceTrace;
+    }) => ({
+      url: `/canvas-${index}.png`,
+      assetVersionId: `canvas-version-${index}`,
+      placementId: `canvas-placement-${index}`,
+    }));
+
+    await send({
+      images: ['/first.png', '/second.png'],
+      imageRefs: [
+        { url: '/first.png', assetVersionId: 'version-1', placementId: 'placement-1', sourceTrace: firstTrace },
+        { url: '/second.png', assetVersionId: 'version-2', placementId: 'placement-2', sourceTrace: secondTrace },
+      ],
+      targetProjectId: 'canvas-a',
+      sourceTrace: sourceTraceFixture,
+      transfer,
+      writeBridge: vi.fn(),
+    });
+
+    expect(transfer.mock.calls.map(([value]) => value.sourceTrace)).toEqual([firstTrace, secondTrace]);
   });
 
   it('builds inserted Canvas images with the sanitized server-returned source trace', () => {

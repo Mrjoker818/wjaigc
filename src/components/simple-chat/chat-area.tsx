@@ -24,7 +24,8 @@ import {
   canSendSimpleChatMessageToNodeMode, canTransferSimpleChatMedia,
   mergeSimpleChatCanvasBridgeReferences, parseSimpleChatCanvasBridgePayload,
   readSimpleChatStreamAssetReference,
-  sendSimpleChatMediaToCanvas, type WorkspaceAssetReference
+  sendSimpleChatMediaToCanvas, serializeSimpleChatCanvasBridgePayload,
+  type WorkspaceAssetReference
 } from "./simple-chat-types";
 import { User } from "@/lib/user-types";
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from "@/lib/chat-generation-controls";
@@ -1769,10 +1770,12 @@ export default function ChatArea({
           const existingImages = !existingProjectId || existingProjectId === targetProjectId
             ? parseSimpleChatCanvasBridgePayload(existingPayload)
             : [];
-          localStorage.setItem('wujie_canvas_bridge', JSON.stringify({
-            projectId: targetProjectId,
-            images: mergeSimpleChatCanvasBridgeReferences(existingImages, transferredImages),
-          }));
+          localStorage.setItem('wujie_canvas_bridge', JSON.stringify(
+            serializeSimpleChatCanvasBridgePayload(
+              targetProjectId,
+              mergeSimpleChatCanvasBridgeReferences(existingImages, transferredImages),
+            ),
+          ));
         },
       });
       if (!transferResult.ok) {
@@ -1791,7 +1794,7 @@ export default function ChatArea({
       toast.appendChild(span1);
       toast.appendChild(span2);
       toast.onclick = () => {
-        window.open(`/?projectId=${encodeURIComponent(targetProjectId)}`, '_blank');
+        window.location.assign(`/?projectId=${encodeURIComponent(targetProjectId)}`);
         toast.remove();
       };
       document.body.appendChild(toast);

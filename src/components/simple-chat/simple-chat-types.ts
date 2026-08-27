@@ -3,6 +3,7 @@
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from '@/lib/chat-generation-controls';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import {
+  bindWorkspaceSourceTraceToChat,
   parseWorkspaceSourceTrace,
   type WorkspaceSourceTrace,
 } from '@/lib/asset-core/source-trace';
@@ -160,16 +161,47 @@ function toWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | nu
   if (typeof value === 'string') {
     return value ? { url: value } : null;
   }
-  if (!isRecord(value) || typeof value.url !== 'string' || !value.url) return null;
+  if (!isRecord(value)) return null;
+  const url = typeof value.url === 'string' ? value.url : '';
+  const hasManagedPointer = typeof value.assetVersionId === 'string'
+    && typeof value.placementId === 'string';
+  if (!url && !hasManagedPointer) return null;
   const sourceTrace = parseWorkspaceSourceTrace(value.sourceTrace);
   return {
-    url: value.url,
+    url,
     ...(typeof value.name === 'string' ? { name: value.name } : {}),
     ...(typeof value.assetId === 'string' ? { assetId: value.assetId } : {}),
     ...(typeof value.assetVersionId === 'string' ? { assetVersionId: value.assetVersionId } : {}),
     ...(typeof value.placementId === 'string' ? { placementId: value.placementId } : {}),
     ...(typeof value.entityId === 'string' ? { entityId: value.entityId } : {}),
     ...(sourceTrace ? { sourceTrace } : {}),
+  };
+}
+
+const CANVAS_BRIDGE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
+
+export function serializeSimpleChatCanvasBridgePayload(
+  projectId: string,
+  references: WorkspaceAssetReference[],
+): {
+  projectId: string;
+  images: Array<{ assetVersionId: string; placementId: string; entityId?: string }>;
+} {
+  if (!CANVAS_BRIDGE_ID.test(projectId)) throw new Error('CANVAS_BRIDGE_PROJECT_INVALID');
+  return {
+    projectId,
+    images: references.flatMap(reference => {
+      if (
+        !reference.assetVersionId || !CANVAS_BRIDGE_ID.test(reference.assetVersionId)
+        || !reference.placementId || !CANVAS_BRIDGE_ID.test(reference.placementId)
+        || (reference.entityId !== undefined && !CANVAS_BRIDGE_ID.test(reference.entityId))
+      ) return [];
+      return [{
+        assetVersionId: reference.assetVersionId,
+        placementId: reference.placementId,
+        ...(reference.entityId ? { entityId: reference.entityId } : {}),
+      }];
+    }),
   };
 }
 
@@ -421,11 +453,14 @@ export async function sendSimpleChatMediaToCanvas(input: {
     if (!hasManagedAssetIdentity(reference)) {
       return { ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' };
     }
+    const imageSourceTrace = sourceTrace
+      ? bindWorkspaceSourceTraceToChat(reference.sourceTrace, sourceTrace)
+      : undefined;
     const transferred = await input.transfer({
       sourceVersionId: reference.assetVersionId,
       targetProjectId: input.targetProjectId,
       index,
-      ...(sourceTrace ? { sourceTrace } : {}),
+      ...(imageSourceTrace ? { sourceTrace: imageSourceTrace } : {}),
     });
     if (!hasManagedAssetIdentity(transferred)) {
       throw new Error('ASSET_TRANSFER_INVALID');
