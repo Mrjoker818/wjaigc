@@ -137,6 +137,7 @@
   "src/lib/canvas-edit-image-source.ts",
   "src/app/api/svg-trace/route.ts",
   "src/app/api/svg-trace/wasm-budget.ts",
+  "migrations/20260809_wj_core_users.sql",
   "migrations/20260823_v588_auth_credentials.sql",
   "scripts/collect-v588-auth-artifacts.ts",
   "scripts/v588-auth-fixture.mjs",

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool, type PoolClient } from 'pg';
@@ -129,6 +131,20 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
   }
 
   beforeAll(async () => {
+    const migration = spawnSync(
+      process.execPath,
+      [resolve(process.cwd(), 'scripts/run-migrations.mjs')],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DATABASE_URL: databaseUrl,
+          PGDATABASE_URL: databaseUrl,
+        },
+      },
+    );
+    expect(migration.status, migration.stderr || migration.stdout).toBe(0);
     process.env.PGDATABASE_URL = databaseUrl;
     ({
       migrateLegacyProjectOnWriteInTransaction,

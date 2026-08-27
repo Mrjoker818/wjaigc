@@ -66,16 +66,24 @@ interface DbApiProvider {
 
 // ─── Core Tables Initialization (for new deployments) ─────────────────────────
 
-let coreTablesInitialization: Promise<void> | null = null;
+let coreTablesInitialization: {
+  databaseKey: string;
+  promise: Promise<void>;
+} | null = null;
 
 export function ensureCoreTables(): Promise<void> {
-  if (!coreTablesInitialization) {
-    coreTablesInitialization = initializeCoreTables().catch((error) => {
-      coreTablesInitialization = null;
+  const databaseKey = process.env.DATABASE_URL || process.env.PGDATABASE_URL || '';
+  if (coreTablesInitialization?.databaseKey !== databaseKey) {
+    const promise = initializeCoreTables().catch((error) => {
+      if (coreTablesInitialization?.promise === promise) {
+        coreTablesInitialization = null;
+      }
       throw error;
     });
+    coreTablesInitialization = { databaseKey, promise };
+    return promise;
   }
-  return coreTablesInitialization;
+  return coreTablesInitialization.promise;
 }
 
 async function initializeCoreTables(): Promise<void> {

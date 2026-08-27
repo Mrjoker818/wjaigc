@@ -48,4 +48,14 @@ describe('migration runner connection contract', () => {
     expect(normalized).not.toMatch(/\b(?:DROP|RENAME|UPDATE|DELETE)\b/i);
     expect(normalized).not.toContain('password_hash');
   });
+
+  it('bootstraps the core user table before applying credential migrations', async () => {
+    const runner = await import('../../../scripts/run-migrations.mjs');
+    const migrations = await runner.listMigrationFiles();
+    const coreUsersIndex = migrations.indexOf('20260809_wj_core_users.sql');
+    const credentialIndex = migrations.indexOf('20260823_v588_auth_credentials.sql');
+
+    expect(coreUsersIndex).toBeGreaterThanOrEqual(0);
+    expect(credentialIndex).toBeGreaterThan(coreUsersIndex);
+  });
 });
