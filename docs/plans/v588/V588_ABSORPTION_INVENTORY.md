@@ -54,7 +54,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **已吸收 / Coze 云端验证通过。** 三条流式链路共用严格解析器，并已关闭 CanvasEditor 参数错位与正文事件名不匹配；未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、三入口真实 APImart 流式终态及零 Console/原生弹窗证据 | P1 |
 | V588-CHAT-002 | 失败消息状态与原位确定性重试 | **已吸收 / 云端通过。** 普通与联网原位重试、CanvasEditor 精确选区、刷新精确任务恢复、服务器终态持久化及 Deep Research 单 Artifact 均取得 Coze 证据 | `main-fix@1572a222` 的 Deep Research 任务刷新前后 UI 与服务器均严格保持同一个 `msg_1787715525319-research` Artifact；Console/原生弹窗为 0。第三方 exactly-once 仅保留为供应商能力边界 | P1 |
 | V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **已吸收 / Coze Google Chrome 云端验证通过。** 版本化快照、CAS 冲突重放、冲突副本、删除不复活、用户隔离、离页冲刷和可诊断同步状态均已闭环；保留当前登录、注销、用户数据 API 和前台流式生成边界 | 真实 PostgreSQL `4030/4030`、Coze 冷启动、项目/任务 CRUD、刷新恢复、双标签合并/冲突副本、离页、账号切换、布局及浏览器健康证据 | P1 |
-| V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **本地候选完成 / 云端部分通过 / 未吸收。** 已保留 `AssetVersion -> /api/assets/transfer` 安全链路并补齐节点模式转交与来源追踪；普通用户正向转交和跨用户 403 拒绝已闭环，仅 URL-only 未托管媒体仍待真实云端验证 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
+| V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **已吸收 / Coze Google Chrome 云端验证通过。** 已保留 `AssetVersion -> /api/assets/transfer` 安全链路并补齐节点模式转交与来源追踪；普通用户正向、跨用户 403、URL-only 未托管媒体跳过、不远程读取、重复消费与刷新恢复均已闭环 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
 | V588-AUTH-001 | 数据库唯一/数据库加文件两种持久化模式 | **本地候选已完成。** 只吸收显式持久化模式与启动诊断；继续使用当前认证密钥和密码校验，拒绝 donor 弱口令恢复 | 真实 PostgreSQL、普通用户/管理员多浏览器会话、退出后数据隔离和全量门禁已通过；Coze 精确 SHA 待验 | P1 |
 | V588-ADMIN-004 | 用户积分、项目数和最后活动时间的真实投影 | 接入当前管理员查询和统一用户身份，不复制 donor 用户存储 | 新增用户、删除用户、批量操作、积分、项目、聊天记录与统计一致性 | P1 |
 | V588-PROVIDER-005 | 图像比例/尺寸/质量与视频时长/模式能力矩阵 | **已吸收 / Coze Google Chrome 云端验证通过。** 保留 `providerId + modelId` 精确目录；管理员持久化、普通用户五入口、真实透明双图、真实视频和非法能力前置拒绝均已闭环 | 本地自动化、真实 PostgreSQL 专项、Coze exact SHA、Pear/APIMART 五入口、透明 Alpha、逐张回填、视频终态与零任务/零扣费拒绝证据均已保存；供应商后台独立计数未在本轮 Chrome 标签中直接读取 | P1 |
@@ -488,3 +488,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 普通测试账号 `canvas-user` 已真实登录并创建自有项目；文本消息转交后得到 1 节点、0 连线。相同账号向管理员项目发起真实云端交接 API，返回 HTTP 403 与 `FORBIDDEN`，未读取或写入管理员项目。
 - 仍未取得 URL-only 未托管历史媒体的完整云端证据。
 - **当前状态：本地候选完成 / 云端部分通过 / 未吸收。** 机器证据：`docs/testing/evidence/v588-chat-004-cloud-matrix-partial-2026-08-27.json`。下一步只关闭 URL-only 剩余边界，不重复已通过矩阵，不进入下一 V5.8.8 吸收项。
+
+## 2026-08-27 V588-CHAT-004 URL-only 边界关闭
+
+- 通过正式 `/api/user-data/sync` 版本化 CAS 接口建立单一旧格式历史样本，内容包含非托管 `.invalid` 图片 URL 且不包含 `imageRefs`；没有直接修改数据库，也没有使用 Mock。
+- Google Chrome 用户1真实打开该消息：“添加到画布”入口禁用并显示“历史图片或登记失败的图片不可转移”；“发送到节点模式”可用且只增加一个 `input-text` 节点。目标项目从 1 个文本节点变为 2 个文本节点，画布图片保持 0，工作流与项目持久化内容均不含该外部 URL。
+- `/api/simple-chat/workspace-handoff` 返回 HTTP 200、`images=[]`、`UNMANAGED_IMAGE_SKIPPED`，响应不含外部 URL；解析器只查询当前用户的 AssetVersion 与 Placement，不存在远程图片下载调用。
+- 相同消息重复转交并刷新后仍为 2 节点、0 图片；测试对话项目已通过当前 revision 的 CAS 写入删除，复查剩余数量为 0。
+- **状态：V588-CHAT-004 已吸收 / Coze Google Chrome 云端验证通过。** 最终机器矩阵：`docs/testing/evidence/v588-chat-004-final-cloud-matrix-2026-08-27.json`，URL-only 明细：`docs/testing/evidence/v588-chat-004-url-only-cloud-2026-08-27.json`。下一项必须按清单顺序重新从 RED 开始，不重复 Stage 4、CHAT-003 或 CHAT-004。

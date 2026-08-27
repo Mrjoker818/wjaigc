@@ -1511,6 +1511,8 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 管理员文本、托管图片与同用户跨项目转交 | 已云端验证 | 空工作流、已有导入工作流、重复转交、刷新恢复、来源追踪和既有画布转移均通过。 |
 | 普通用户转交成功 | 已云端验证 | `canvas-user` 新建并同步自有项目后，文本消息真实转交为 1 节点、0 连线。 |
 | 他人项目拒绝 | 已云端验证 | `canvas-user` 向 `Mr.joker` 项目发起真实交接 API，返回 HTTP 403 与 `FORBIDDEN`；没有读取或写入目标项目。 |
-| URL-only 未托管历史媒体 | `UNVERIFIED` | 当前会话没有可操作的真实 URL-only 历史消息；需准备受控历史样本并证明跳过且不发起远程下载。 |
+| URL-only 未托管历史媒体 | 已云端验证 | 正式 CAS 同步建立隔离旧格式样本；Chrome 真实禁用画布入口，节点模式只导入文本；API 返回 `images=[]` 与 `UNMANAGED_IMAGE_SKIPPED`，项目不含外部 URL，重复/刷新幂等，样本已清理。 |
 | 带连线和自定义视口的已有工作流保持 | 已云端验证 | 受控基线为 2 节点、1 连线、80%；转交后为 4 节点、1 连线、80%，名称和基线节点不变，刷新后完全保持。 |
-| V588-CHAT-004 | 本地候选完成 / 云端部分通过 / 未吸收 | 证据：`docs/testing/evidence/v588-chat-004-cloud-matrix-partial-2026-08-27.json`。只继续关闭 URL-only 媒体，不重复已通过项目。 |
+| V588-CHAT-004 | 已吸收 | 11 项云端矩阵全部通过，不再包含未验证阻断。证据：`docs/testing/evidence/v588-chat-004-final-cloud-matrix-2026-08-27.json`。 |
+
+其余全平台未验证项继续有效；本节只关闭 `V588-CHAT-004`，不把 `NODE-003`、Firefox/WebKit、第三方供应商 exactly-once 或其他业务模块自动标记为通过。

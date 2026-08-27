@@ -1888,3 +1888,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 普通账号 `canvas-user` 新建并同步自有画布后，文本消息转交得到 1 节点、0 连线；对管理员项目的真实云端交接 API 返回 HTTP 403 与 `FORBIDDEN`，未暴露或修改管理员项目。
 - 畸形交接参数未触发工作区解析或素材转移请求，已有工作流不变。本轮已执行流程的 Console error/warning 为 `0`，完成后的 URL 不含原始媒体地址。
 - **回归结论：CHAT-004 已执行项通过，整项仍未吸收。** 未验证项仅剩 URL-only 未托管历史媒体。另发现独立 `NODE-003` 预设入口失效，不归入 CHAT-004 已通过链路。证据见 `docs/testing/evidence/v588-chat-004-cloud-matrix-partial-2026-08-27.json`。
+
+## 2026-08-27 V588-CHAT-004 URL-only 最终云端回归
+
+- 通过正式 `chat_simple_projects` CAS 同步接口创建单一 URL-only 旧格式消息，没有直接数据库注入或 Mock；Google Chrome 用户1真实显示禁用的“添加到画布”和可用的“发送到节点模式”。
+- 目标项目基线为 1 节点、0 连线、0 图片；首次转交后为 2 个 `input-text` 节点、0 连线、0 图片，项目数据不含测试外部 URL。
+- 解析 API 实测 HTTP 200、178 ms、`images=[]`、`warnings=[UNMANAGED_IMAGE_SKIPPED]`，响应不含外部 URL；解析器没有远程读取路径。
+- 重复转交并刷新后仍为 2 节点、0 图片；测试对话项目已以 revision 28 -> 29 的 CAS 写入清理，复查剩余 0 项。
+- **回归结论：V588-CHAT-004 的 11 项云端矩阵全部通过并完成吸收。** `NODE-003` 仍是独立 P2，不因本项关闭而自动修复；全平台总发布状态继续“有条件通过”。证据：`docs/testing/evidence/v588-chat-004-final-cloud-matrix-2026-08-27.json`。

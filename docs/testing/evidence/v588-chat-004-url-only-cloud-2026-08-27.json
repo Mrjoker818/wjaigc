@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-27T23:23:45.6916902+08:00",
+  "environment": {
+    "browser": "Google Chrome 用户1",
+    "previewOrigin": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+    "runtimeGitCommit": "3f0564429ae100448d17343b5d18ccf58b933e9d",
+    "originMainAtStart": "b1c34deeefdc57e8d9943743c1c632d5868db649",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableTouched": false,
+    "authenticatedUser": "canvas-user",
+    "authenticatedRole": "用户"
+  },
+  "fixture": {
+    "creationPath": "POST /api/user-data/sync with key chat_simple_projects and expectedRevision",
+    "directDatabaseMutation": false,
+    "mockUsed": false,
+    "projectId": "v588-chat004-urlonly-1787843558051",
+    "taskId": "v588-chat004-urlonly-task-1787843558051",
+    "messageId": "v588-chat004-urlonly-msg-1787843558051",
+    "unmanagedUrl": "https://v588-chat004-unmanaged.invalid/historical-image.png",
+    "syncRevisionBeforeCreate": 26,
+    "syncRevisionAfterCreate": 27
+  },
+  "browserVerification": {
+    "messageVisible": true,
+    "addToCanvasActionDisabled": true,
+    "disabledActionLabel": "历史图片或登记失败的图片不可转移",
+    "sendToNodeModeActionEnabled": true,
+    "sameTabNavigation": true,
+    "targetProjectId": "project_1787842745990_5xjlt4q7h",
+    "baseline": {
+      "canvasImages": 0,
+      "workflowNodes": 1,
+      "workflowConnections": 0
+    },
+    "afterFirstTransfer": {
+      "canvasImages": 0,
+      "workflowNodes": 2,
+      "workflowConnections": 0,
+      "nodeTypes": [
+        "input-text",
+        "input-text"
+      ],
+      "containsUnmanagedUrl": false,
+      "consoleErrorsOrWarnings": 0
+    },
+    "afterDuplicateTransferAndRefresh": {
+      "canvasImages": 0,
+      "workflowNodes": 2,
+      "workflowConnections": 0,
+      "sourceMessageIds": [
+        "g6kusvnp",
+        "v588-chat004-urlonly-msg-1787843558051"
+      ],
+      "containsUnmanagedUrl": false
+    }
+  },
+  "resolverVerification": {
+    "method": "POST /api/simple-chat/workspace-handoff",
+    "status": 200,
+    "durationMs": 178,
+    "success": true,
+    "returnedImageCount": 0,
+    "warnings": [
+      "UNMANAGED_IMAGE_SKIPPED"
+    ],
+    "responseContainsUnmanagedUrl": false,
+    "remoteReadPathPresentInResolver": false,
+    "resolverRule": "只有与 imageRefs 对齐且通过 AssetVersion 与 Placement 所有权验证的托管媒体才进入转交结果"
+  },
+  "cleanup": {
+    "path": "POST /api/user-data/sync with current expectedRevision",
+    "status": 200,
+    "syncRevisionBeforeCleanup": 28,
+    "syncRevisionAfterCleanup": 29,
+    "fixtureProjectsRemaining": 0,
+    "targetCanvasImages": 0,
+    "targetWorkflowNodes": 2,
+    "targetContainsUnmanagedUrl": false
+  },
+  "result": "PASS"
+}
