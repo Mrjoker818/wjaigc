@@ -6,7 +6,9 @@ import { buildSceneFromEditableLayerAssets, downloadEditedPSD } from '@/lib/psd-
 import type { DesignLayer, PSDExportMode, SceneBuildResult } from '@/lib/psd-export';
 import {
   cancelLayerDecomposition,
+  createLayerIdempotencyKey,
   getLayerPhasePresentation,
+  LayerClientError,
   runLayerDecomposition,
 } from '@/lib/layer-decomposition-client';
 import type { LayerDecompositionResult, LayerEngineMode, LayerTaskPhase } from '@/lib/layer-decomposition/types';
@@ -26,6 +28,62 @@ interface PsdLayerEditorProps {
 }
 
 type EditorStage = 'choosing' | 'loading' | 'cancelling' | 'editing' | 'exporting' | 'done' | 'error';
+type LayerErrorAction = 'layering' | 'cancelling' | 'terminal';
+
+interface LayerAttemptSnapshot {
+  imageUrl: string;
+  engine: LayerEngineMode;
+  providerId?: string;
+  modelId?: string;
+  idempotencyKey: string;
+  defaultTargetResolution: 'unresolved' | 'resolved' | 'none';
+}
+
+const DETACHED_CANCEL_ATTEMPTS = 3;
+
+function isUncertainLayerResponse(error: unknown): boolean {
+  if (!(error instanceof LayerClientError)) return true;
+  if (error.status === undefined || error.retryable) return true;
+  return error.status !== 400 && error.status !== 422;
+}
+
+async function cancelLayerTaskAfterUnmount(taskId: string): Promise<boolean> {
+  for (let attempt = 0; attempt < DETACHED_CANCEL_ATTEMPTS; attempt += 1) {
+    try {
+      const task = await cancelLayerDecomposition(taskId, { keepalive: true });
+      if (['cancelled', 'completed', 'failed', 'timeout'].includes(task.status)) return true;
+    } catch {
+      // A later attempt may recover a transient transport failure.
+    }
+  }
+  return false;
+}
+
+async function recoverLayerCancellationAfterUnmount(
+  snapshot: LayerAttemptSnapshot,
+): Promise<void> {
+  for (let attempt = 0; attempt < DETACHED_CANCEL_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    let taskRegistered = false;
+    try {
+      await runLayerDecomposition({
+        ...snapshot,
+        keepalive: true,
+        skipDefaultTargetResolution: snapshot.defaultTargetResolution === 'none',
+        signal: controller.signal,
+        onTaskId: async (taskId) => {
+          taskRegistered = true;
+          if (await cancelLayerTaskAfterUnmount(taskId)) {
+            controller.abort(new Error('图片分层任务已在卸载后终结'));
+          }
+        },
+      });
+      return;
+    } catch (error) {
+      if (taskRegistered || controller.signal.aborted || !isUncertainLayerResponse(error)) return;
+    }
+  }
+}
 
 export function layerEditorPhaseLabel(phase?: LayerTaskPhase): string {
   return getLayerPhasePresentation(phase).label;
@@ -97,12 +155,34 @@ export default function PsdLayerEditor({
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [errorAction, setErrorAction] = useState<LayerErrorAction>('layering');
   const [qualityWarnings, setQualityWarnings] = useState<string[]>([]);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
   const [showInspector, setShowInspector] = useState(true);
   const taskIdRef = useRef<string | null>(null);
   const taskControllerRef = useRef<AbortController | null>(null);
   const layeringInFlightRef = useRef(false);
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const cancelIntentRef = useRef(false);
+  const closeAfterCancelRef = useRef(false);
+  const cancelPromiseRef = useRef<Promise<void> | null>(null);
+  const attemptSnapshotRef = useRef<LayerAttemptSnapshot | null>(null);
+  const mountedRef = useRef(true);
+
+  const startDetachedCancellation = useCallback((taskId: string): Promise<void> => {
+    if (cancelPromiseRef.current) return cancelPromiseRef.current;
+    const promise = cancelLayerTaskAfterUnmount(taskId)
+      .then((cancelled) => {
+        if (cancelled) {
+          taskControllerRef.current?.abort(new Error('图片分层任务已在卸载后终结'));
+        }
+      })
+      .finally(() => {
+        if (cancelPromiseRef.current === promise) cancelPromiseRef.current = null;
+      });
+    cancelPromiseRef.current = promise;
+    return promise;
+  }, []);
 
   const applyLayerResult = useCallback((result: LayerDecompositionResult) => {
     const scene = buildSceneFromEditableLayerAssets(result);
@@ -141,8 +221,26 @@ export default function PsdLayerEditor({
   }, []);
 
   useEffect(() => {
-    return () => taskControllerRef.current?.abort();
-  }, []);
+    mountedRef.current = true;
+    if (
+      !layeringInFlightRef.current
+      && !taskIdRef.current
+      && !attemptSnapshotRef.current
+    ) {
+      cancelIntentRef.current = false;
+      closeAfterCancelRef.current = false;
+    }
+    return () => {
+      mountedRef.current = false;
+      cancelIntentRef.current = true;
+      const taskId = taskIdRef.current;
+      if (taskId) {
+        void startDetachedCancellation(taskId);
+      } else if (!layeringInFlightRef.current) {
+        taskControllerRef.current?.abort();
+      }
+    };
+  }, [startDetachedCancellation]);
 
   useEffect(() => {
     window.localStorage.setItem('wujie-layer-engine', layerEngine);
@@ -172,68 +270,238 @@ export default function PsdLayerEditor({
     };
   }, [isDragging]);
 
-  const startLayering = useCallback(async () => {
+  const finishLayerCancellation = useCallback(() => {
+    const shouldClose = closeAfterCancelRef.current;
+    taskIdRef.current = null;
+    idempotencyKeyRef.current = null;
+    attemptSnapshotRef.current = null;
+    cancelIntentRef.current = false;
+    closeAfterCancelRef.current = false;
+    cancelPromiseRef.current = null;
+    if (!mountedRef.current) return;
+    setProgress(0);
+    setProgressMessage('');
+    setErrorMessage('');
+    if (shouldClose) {
+      onClose();
+      return;
+    }
+    setStage('choosing');
+  }, [onClose]);
+
+  const cancelRegisteredTask = useCallback((taskId: string): Promise<void> => {
+    if (cancelPromiseRef.current) return cancelPromiseRef.current;
+
+    const promise = cancelLayerDecomposition(taskId)
+      .then((task) => {
+        if (task.status !== 'cancelled') {
+          if (['completed', 'failed', 'timeout'].includes(task.status)) {
+            const shouldClose = closeAfterCancelRef.current;
+            taskControllerRef.current?.abort(new Error('图片分层任务已进入终态'));
+            taskIdRef.current = null;
+            idempotencyKeyRef.current = null;
+            attemptSnapshotRef.current = null;
+            cancelIntentRef.current = false;
+            closeAfterCancelRef.current = false;
+            cancelPromiseRef.current = null;
+            if (!mountedRef.current) return;
+            if (shouldClose) {
+              onClose();
+              return;
+            }
+            setErrorAction('terminal');
+            setErrorMessage(task.status === 'completed'
+              ? '图片分层任务已完成，无法确认取消。'
+              : `图片分层任务已${task.status === 'timeout' ? '超时' : '失败'}，无需再次取消。`);
+            setStage('error');
+            return;
+          }
+          throw new LayerClientError(
+            'LAYER_CANCEL_NOT_CONFIRMED',
+            `图片分层任务尚未确认取消（${task.status}），请重试。`,
+            { retryable: true },
+          );
+        }
+        taskControllerRef.current?.abort(new Error('用户取消图片分层'));
+        finishLayerCancellation();
+      })
+      .catch((error: unknown) => {
+        cancelPromiseRef.current = null;
+        if (!mountedRef.current) return startDetachedCancellation(taskId);
+        taskControllerRef.current?.abort(new Error('图片分层取消请求失败'));
+        setErrorAction('cancelling');
+        setErrorMessage(error instanceof Error ? error.message : '取消图片分层任务失败');
+        setStage('error');
+      });
+    cancelPromiseRef.current = promise;
+    return promise;
+  }, [finishLayerCancellation, onClose, startDetachedCancellation]);
+
+  const startLayering = useCallback(async (options: {
+    cancellationRecovery?: boolean;
+    idempotencyKey?: string;
+  } = {}) => {
     if (layeringInFlightRef.current) return;
+    const cancellationRecovery = options.cancellationRecovery === true;
+    const snapshot: LayerAttemptSnapshot | null = cancellationRecovery
+      ? attemptSnapshotRef.current
+      : {
+        imageUrl,
+        engine: layerEngine,
+        providerId,
+        modelId,
+        idempotencyKey: options.idempotencyKey || createLayerIdempotencyKey(),
+        defaultTargetResolution: providerId && modelId
+          ? 'resolved'
+          : layerEngine === 'local' ? 'none' : 'unresolved',
+      };
+    if (!snapshot) {
+      finishLayerCancellation();
+      return;
+    }
     layeringInFlightRef.current = true;
     taskControllerRef.current?.abort();
     const controller = new AbortController();
     taskControllerRef.current = controller;
     taskIdRef.current = null;
-    setStage('loading');
+    cancelPromiseRef.current = null;
+
+    if (!cancellationRecovery) {
+      cancelIntentRef.current = false;
+      closeAfterCancelRef.current = false;
+    }
+    attemptSnapshotRef.current = snapshot;
+    idempotencyKeyRef.current = snapshot.idempotencyKey;
+
+    setStage(cancellationRecovery ? 'cancelling' : 'loading');
     setProgress(0);
-    setProgressMessage('正在准备图片分层');
+    setProgressMessage(cancellationRecovery ? '正在确认并取消图片分层任务' : '正在准备图片分层');
     setErrorMessage('');
+    setErrorAction(cancellationRecovery ? 'cancelling' : 'layering');
     setQualityWarnings([]);
     try {
       const result = await runLayerDecomposition({
-        imageUrl,
-        engine: layerEngine,
-        providerId,
-        modelId,
+        ...snapshot,
         signal: controller.signal,
-        onTaskId: (taskId) => { taskIdRef.current = taskId; },
+        skipDefaultTargetResolution: snapshot.defaultTargetResolution === 'none',
+        onResolvedSubmissionTarget: (target) => {
+          if (attemptSnapshotRef.current?.idempotencyKey === snapshot.idempotencyKey) {
+            attemptSnapshotRef.current.providerId = target?.providerId;
+            attemptSnapshotRef.current.modelId = target?.modelId;
+            attemptSnapshotRef.current.defaultTargetResolution = target ? 'resolved' : 'none';
+          }
+        },
+        onTaskId: async (taskId) => {
+          taskIdRef.current = taskId;
+          if (!cancelIntentRef.current) return;
+          if (!mountedRef.current) {
+            await startDetachedCancellation(taskId);
+            return;
+          }
+          await cancelRegisteredTask(taskId);
+        },
         onProgress: (_task, presentation) => {
+          if (cancelIntentRef.current) return;
           setProgress(presentation.progress);
           setProgressMessage(presentation.label);
         },
       });
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || cancelIntentRef.current) return;
+      taskIdRef.current = null;
+      idempotencyKeyRef.current = null;
+      attemptSnapshotRef.current = null;
       applyLayerResult(result);
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (cancelIntentRef.current) {
+        if (!mountedRef.current) {
+          if (taskIdRef.current) {
+            await startDetachedCancellation(taskIdRef.current);
+          } else if (isUncertainLayerResponse(error)) {
+            void recoverLayerCancellationAfterUnmount(snapshot);
+          }
+          return;
+        }
+        if (taskIdRef.current) {
+          await cancelRegisteredTask(taskIdRef.current);
+          return;
+        }
+        if (isUncertainLayerResponse(error)) {
+          setErrorAction('cancelling');
+          setErrorMessage('无法确认服务端分层任务状态，请重试取消。');
+          setStage('error');
+          return;
+        }
+        finishLayerCancellation();
+        return;
+      }
+      taskIdRef.current = null;
+      idempotencyKeyRef.current = null;
+      attemptSnapshotRef.current = null;
+      setErrorAction('layering');
       setErrorMessage(error instanceof Error ? error.message : '图像分层失败');
       setStage('error');
     } finally {
       layeringInFlightRef.current = false;
       if (taskControllerRef.current === controller) taskControllerRef.current = null;
     }
-  }, [applyLayerResult, imageUrl, layerEngine, modelId, providerId]);
+  }, [
+    applyLayerResult,
+    cancelRegisteredTask,
+    finishLayerCancellation,
+    imageUrl,
+    layerEngine,
+    modelId,
+    providerId,
+    startDetachedCancellation,
+  ]);
 
   const handleCancelLayering = useCallback(async () => {
-    const taskId = taskIdRef.current;
+    cancelIntentRef.current = true;
     setStage('cancelling');
-    taskControllerRef.current?.abort(new Error('用户取消图片分层'));
-    try {
-      if (taskId) await cancelLayerDecomposition(taskId);
-      taskIdRef.current = null;
-      setProgress(0);
-      setProgressMessage('');
-      setStage('choosing');
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '取消图片分层任务失败');
-      setStage('error');
-    }
-  }, []);
-
-  const handleClose = useCallback(() => {
+    setProgressMessage('正在取消图片分层任务');
     const taskId = taskIdRef.current;
-    taskControllerRef.current?.abort(new Error('图片分层窗口已关闭'));
-    if (taskId) {
-      void cancelLayerDecomposition(taskId).finally(onClose);
+    if (taskId) await cancelRegisteredTask(taskId);
+  }, [cancelRegisteredTask]);
+
+  const retryLayerAction = useCallback(() => {
+    if (errorAction !== 'cancelling') {
+      void startLayering();
       return;
     }
+    const taskId = taskIdRef.current;
+    if (taskId) {
+      void handleCancelLayering();
+      return;
+    }
+    const idempotencyKey = idempotencyKeyRef.current;
+    if (!idempotencyKey) {
+      finishLayerCancellation();
+      return;
+    }
+    cancelIntentRef.current = true;
+    void startLayering({ cancellationRecovery: true, idempotencyKey });
+  }, [errorAction, finishLayerCancellation, handleCancelLayering, startLayering]);
+
+  const handleClose = useCallback(() => {
+    if (layeringInFlightRef.current || cancelIntentRef.current) {
+      closeAfterCancelRef.current = true;
+      cancelIntentRef.current = true;
+      setStage('cancelling');
+      const taskId = taskIdRef.current;
+      if (taskId) {
+        void cancelRegisteredTask(taskId);
+        return;
+      }
+      const idempotencyKey = idempotencyKeyRef.current;
+      if (!layeringInFlightRef.current && idempotencyKey) {
+        void startLayering({ cancellationRecovery: true, idempotencyKey });
+      }
+      return;
+    }
+    taskControllerRef.current?.abort(new Error('图片分层窗口已关闭'));
     onClose();
-  }, [onClose]);
+  }, [cancelRegisteredTask, onClose, startLayering]);
 
   const handleLayerMove = useCallback((id: string, x: number, y: number) => {
     setLayers(prev => prev.map(layer => layer.id === id ? { ...layer, offsetX: x, offsetY: y } : layer));
@@ -453,15 +721,17 @@ export default function PsdLayerEditor({
                 <div className="max-w-sm rounded-xl bg-neutral-800 p-6 text-center">
                   <p className="mb-5 text-sm text-red-300">{errorMessage}</p>
                   <div className="flex justify-center gap-3">
-                    <button
-                      type="button"
-                      data-testid="layer-retry"
-                      onClick={() => void startLayering()}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-semibold text-neutral-950 hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
-                    >
-                      <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                      重试
-                    </button>
+                    {errorAction !== 'terminal' && (
+                      <button
+                        type="button"
+                        data-testid="layer-retry"
+                        onClick={retryLayerAction}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-semibold text-neutral-950 hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                      >
+                        <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                        重试
+                      </button>
+                    )}
                     <button type="button" onClick={handleClose} className="h-9 rounded-lg bg-neutral-700 px-4 text-sm text-white hover:bg-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
                       关闭
                     </button>

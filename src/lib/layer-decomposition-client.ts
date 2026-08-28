@@ -20,6 +20,8 @@ export interface RunLayerDecompositionOptions {
   modelId?: string;
   idempotencyKey?: string;
   resumeTaskId?: string;
+  keepalive?: boolean;
+  skipDefaultTargetResolution?: boolean;
   signal?: AbortSignal;
   fetcher?: FetchLike;
   wait?: WaitLike;
@@ -27,6 +29,9 @@ export interface RunLayerDecompositionOptions {
     | { providerId: string; modelId: string }
     | void
     | Promise<{ providerId: string; modelId: string } | void>;
+  onResolvedSubmissionTarget?: (
+    target: { providerId: string; modelId: string } | null,
+  ) => void | Promise<void>;
   onTaskId?: (taskId: string) => void | Promise<void>;
   onProgress?: (task: LayerTaskResponse, presentation: LayerPhasePresentation) => void;
 }
@@ -134,7 +139,7 @@ function defaultWait(milliseconds: number, signal?: AbortSignal): Promise<void> 
   });
 }
 
-function createIdempotencyKey(): string {
+export function createLayerIdempotencyKey(): string {
   const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -200,11 +205,11 @@ async function resolveDefaultLayerTarget(
 
 export async function cancelLayerDecomposition(
   taskId: string,
-  options: { fetcher?: FetchLike; signal?: AbortSignal } = {},
+  options: { fetcher?: FetchLike; signal?: AbortSignal; keepalive?: boolean } = {},
 ): Promise<LayerTaskResponse> {
   const fetcher = options.fetcher || fetch;
   const response = await fetcher(`/api/layered-decompose?taskId=${encodeURIComponent(taskId)}`, {
-    method: 'DELETE', signal: options.signal,
+    method: 'DELETE', signal: options.signal, keepalive: options.keepalive,
   });
   return parseTaskResponse(response, await readJson(response));
 }
@@ -227,7 +232,11 @@ export async function runLayerDecomposition(
   } else {
     let providerId = options.providerId?.trim();
     let modelId = options.modelId?.trim();
-    if (options.engine !== 'local' && (!providerId || !modelId)) {
+    if (
+      options.engine !== 'local'
+      && (!providerId || !modelId)
+      && !options.skipDefaultTargetResolution
+    ) {
       const target = await resolveDefaultLayerTarget(fetcher, options.signal).catch((error) => {
         if (options.engine === 'cloud') throw error;
         return null;
@@ -245,13 +254,17 @@ export async function runLayerDecomposition(
         modelId = authoritativeTarget.modelId;
       }
     }
+    await options.onResolvedSubmissionTarget?.(
+      providerId && modelId ? { providerId, modelId } : null,
+    );
 
     const response = await fetcher('/api/layered-decompose', {
       method: 'POST',
       signal: options.signal,
+      keepalive: options.keepalive,
       headers: {
         'content-type': 'application/json',
-        'idempotency-key': options.idempotencyKey || createIdempotencyKey(),
+        'idempotency-key': options.idempotencyKey || createLayerIdempotencyKey(),
       },
       body: JSON.stringify({
         imageUrl: normalizeLayerImageUrlForSubmission(
