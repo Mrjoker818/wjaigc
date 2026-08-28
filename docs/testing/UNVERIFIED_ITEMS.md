@@ -1641,3 +1641,17 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 显式取消退款 | `UNVERIFIED` | 处理中取消只产生唯一取消终态和一次退款，迟到完成不得覆盖。 |
 
 本轮没有再次提交付费任务。部署后可先用自然失败验证结构化诊断，无需为验证错误字段故意破坏供应商配置。
+
+## 2026-08-28 ca356477 部署后的最新剩余项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| Coze 精确 SHA、构建与健康 | 已验证 | `HEAD=origin/main=ca3564779685be52f1dc13b8f0106f27095647f9`；专项 `23/23`、build 0、三个 HTTP 200、静态资源 `11/11`。 |
+| Chrome 干净刷新 | 已验证 | 已登录节点项目和工作流工具栏恢复；刷新后 Console error/warning `0/0`。 |
+| 真实结构化供应商错误 | `UNVERIFIED` | 等待下一次自然 Pear 失败，确认最终任务结果保留受限长度的 `providerError.code/type/param/message` 与 `fallbackReason`；禁止改坏供应商配置制造失败。 |
+| 远程 ZIP Range 与主 PSD | `UNVERIFIED` | 供应商成功返回 ZIP 后，证明 1 MiB Range、稳定 validator、非 `_depth.psd` 主文件选择与 `8BPS` 解析。 |
+| 远程可编辑图层 | `UNVERIFIED` | 最终 PSD 至少包含 2 个来自远程制品的可编辑图层；本地回退不计。 |
+| 云端同键重放 | `UNVERIFIED` | 相同摘要与幂等键返回同一应用 taskId，供应商任务和扣费不增加。 |
+| 显式取消退款 | `UNVERIFIED` | 处理中取消只产生唯一 `cancelled` 终态和一次退款，迟到完成不得覆盖。 |
+
+证据：`docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json`。本节覆盖此前“待部署”状态，但不覆盖任何真实供应商成功、重放或取消结论。

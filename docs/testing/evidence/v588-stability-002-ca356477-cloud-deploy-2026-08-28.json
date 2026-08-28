@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-08-28",
+  "environment": "Coze development sandbox",
+  "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_1787549625844_nfmso3ts9&mode=node",
+  "browser": {
+    "family": "Google Chrome",
+    "profile": "用户1",
+    "reusedExistingTabs": true,
+    "createdNewTab": false
+  },
+  "git": {
+    "branch": "main",
+    "head": "ca3564779685be52f1dc13b8f0106f27095647f9",
+    "headTree": "2e6030b31c1b1a4399275bf51919daa28b0eae53",
+    "originMain": "ca3564779685be52f1dc13b8f0106f27095647f9",
+    "originMainTree": "2e6030b31c1b1a4399275bf51919daa28b0eae53",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "status": "clean",
+    "stableTouched": false
+  },
+  "focusedTests": {
+    "command": "pnpm exec vitest run src/__tests__/lib/pear-layer-adapter.test.ts src/__tests__/api/layered-decompose-concurrency.test.ts",
+    "passed": 23,
+    "failed": 0,
+    "realProviderTaskTriggered": false
+  },
+  "build": {
+    "exitCode": 0,
+    "buildId": "xzK65dcSQKxZk2kJiNVk0",
+    "startCommand": "scripts/coze-start.sh",
+    "port": 5000,
+    "pid": 4260
+  },
+  "health": {
+    "root": 200,
+    "simpleChat": 200,
+    "authMe": 200,
+    "staticAssetTotal": 11,
+    "staticAssetFailed": 0,
+    "postgresEnvironmentConfigured": true
+  },
+  "chromeRefresh": {
+    "mode": "node",
+    "projectId": "project_1787549625844_nfmso3ts9",
+    "workflowToolbarVisible": true,
+    "authenticatedProjectRestored": true,
+    "postRefreshConsoleErrors": 0,
+    "postRefreshConsoleWarnings": 0,
+    "observationStartUtc": "2026-08-28T12:19:48.127Z",
+    "screenshot": "v588-stability-002-ca356477-cloud-refresh-2026-08-28.png"
+  },
+  "transientRestartObservation": {
+    "projectSync502ObservedDuringRestart": true,
+    "subsequentProjectSyncSucceeded": true,
+    "presentAfterCleanRefresh": false
+  },
+  "closedByThisEvidence": [
+    "Coze exact main SHA and tree",
+    "stable immutability",
+    "focused non-paid Pear diagnostic regression",
+    "production build and single service startup",
+    "health routes and static assets",
+    "authenticated Chrome refresh without console warning or error"
+  ],
+  "notProven": [
+    "real Pear structured provider error in a new natural failure",
+    "real Pear ZIP Range download",
+    "primary non-depth PSD extraction",
+    "remote editable PSD layers",
+    "cloud same-key replay without duplicate provider task or charge",
+    "explicit cancellation with exactly-once refund"
+  ]
+}

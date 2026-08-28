@@ -1597,3 +1597,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 新候选会保留供应商 `error.code/type/param/message`，并在智能回退完成后继续保留诊断；敏感响应体、密钥和图片内容不会进入任务结果。
 - 本地全仓非 PostgreSQL 4099 项、TypeScript、ESLint 和 8 GiB 堆 `117/117` 生产构建通过；默认约 4 GiB 构建 OOM 的资源约束仍保留。
 - **发布结论继续为“有条件通过”。** 该补丁可以提升部署后的故障归因，但不能替代远程 ZIP/PSD 成功、同键重放和显式取消退款的真实云端证据；`V588-STABILITY-002` 仍未吸收。
+
+## 2026-08-28 ca356477 云端发布增量
+
+- Coze 已精确运行 `main@ca3564779685be52f1dc13b8f0106f27095647f9`；代码树与 `origin/main` 一致，`stable` 与 V5.8.8 donor 未触碰。
+- 两组 Pear 非付费专项 `23/23`、生产构建、单服务启动、三个健康路由和 `11/11` 静态资源通过。Google Chrome 干净刷新后登录项目恢复且 Console error/warning 为 `0/0`。
+- 本次部署没有提交真实 Pear 任务。结构化错误只能在下一次自然供应商失败时确认；远程 ZIP Range、非 depth 主 PSD、远程图层、同键重放和显式取消退款仍缺真实证据。
+- **发布结论继续为“有条件通过”。** `V588-STABILITY-002` 仍未达到吸收完成条件，不能开始 `V588-ADMIN-004`。
+- 机器证据：`docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json`。

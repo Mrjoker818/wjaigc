@@ -2773,3 +2773,14 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 下载文件 | `25,495,074` 字节，SHA-256 `73731e7aa62dca88001c72c03159936496569dfd35b6ae450b0d9c9feffdb711`；`8BPS` 可解析，`3504 x 2336`，5 个顶层项、共 11 个组/图层。该文件来自本地智能回退，不能作为远程 Pear PSD 通过证据。 |
 | 判定 | **失败回退与一次退款通过；远程 ZIP/PSD 成功路径未验证。** 本次供应商失败不归因于 Range 下载补丁，也不得据此关闭 BUG-004 或进入 `V588-ADMIN-004`。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-ac8e826b-cloud-deploy-2026-08-28.json`。 |
+
+### V588-STABILITY-002-BUG-005 ca356477 云端部署增量（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 云端版本 | Coze `HEAD=origin/main=ca3564779685be52f1dc13b8f0106f27095647f9`，tree 均为 `2e6030b31c1b1a4399275bf51919daa28b0eae53`，工作区干净；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 非付费回归 | `pear-layer-adapter` 与 `layered-decompose-concurrency` 共 `23/23` 通过，未创建真实 Pear 任务。 |
+| 构建与运行 | `pnpm build` 退出码 `0`，Build ID `xzK65dcSQKxZk2kJiNVk0`，5000 PID `4260`；根路由、Simple Chat、鉴权和 `11/11` 静态资源成功。 |
+| Chrome 结果 | 复用 Google Chrome 用户1既有标签，强制刷新后已登录节点项目和工作流工具栏恢复；新刷新窗口 Console error/warning `0/0`。重启窗口的同步 502 已恢复，干净刷新未复现。 |
+| 状态 | **部署门禁已关闭，真实错误字段观察仍未关闭。** 只有下一次自然供应商失败响应保留 `code/type/param/message`，才能把 BUG-005 从“部署完成”更新为“真实云端关闭”；不得为此故意破坏供应商配置。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json` 与同名前缀 PNG。 |

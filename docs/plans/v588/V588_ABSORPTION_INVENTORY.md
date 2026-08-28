@@ -550,3 +550,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 已按 TDD 最小修复：结构化字段经过长度约束后写入 `providerError`，同时保留兼容的文本错误；智能回退原子退款和最终本地完成均保留 `providerError + fallbackReason`。没有修改供应商请求、计费价格、退款条件或任务终态转换。
 - 聚焦分层矩阵 `55/55`，全仓非 PostgreSQL `566 files / 4099 passed / 122 skipped / 0 failed`，TypeScript 与 ESLint 通过；默认约 4 GiB 堆构建 OOM，8 GiB 堆完成 `117/117` 页面生产构建。
 - **状态：失败诊断本地已关闭 / V588-STABILITY-002 仍未吸收。** 推送并部署新 `main` 后可在下一次自然供应商失败中直接读取结构化错误；真实 ZIP Range、主 PSD、远程图层、同键重放和显式取消退款仍维持 `UNVERIFIED`，不得因此进入 `V588-ADMIN-004`。
+
+## 2026-08-28 V588-STABILITY-002 ca356477 云端部署检查点
+
+- Coze 已精确运行 `main@ca3564779685be52f1dc13b8f0106f27095647f9`，`HEAD` 与 `origin/main` 的 tree 均为 `2e6030b31c1b1a4399275bf51919daa28b0eae53`；工作区干净。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 和只读 V5.8.8 donor 均未修改。
+- Pear 失败诊断与分层并发两组非付费专项共 `23/23` 通过，没有触发真实供应商任务。生产构建退出码 `0`，Build ID `xzK65dcSQKxZk2kJiNVk0`，单一 5000 服务 PID `4260`；`/`、`/simple-chat`、`/api/auth/me` 与 `11/11` 静态资源成功。
+- Google Chrome“用户1”复用既有项目页和预览页，未新建标签。强制刷新后已登录节点项目恢复，工作流工具栏可见；以 `2026-08-28T12:19:48.127Z` 为界的新页面日志中 Console error/warning 为 `0/0`。服务重启窗口曾出现项目同步 502，随后同步成功，干净刷新后未复现。
+- **状态：失败诊断候选已部署并通过非付费云端门禁 / V588-STABILITY-002 仍未吸收。** 下一次自然 Pear 失败才可验证真实 `providerError`；远程 ZIP Range、主 PSD、远程图层、同键重放和显式取消退款仍为 `UNVERIFIED`，不得进入 `V588-ADMIN-004`。
+- 证据：`docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json`、`docs/testing/evidence/v588-stability-002-ca356477-cloud-refresh-2026-08-28.png`。

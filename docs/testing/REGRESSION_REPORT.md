@@ -1999,3 +1999,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 分层全矩阵 `5 files / 55 tests` 通过；全仓非 PostgreSQL `566 files / 4099 passed / 122 skipped / 0 failed`。跳过项均因本轮未配置隔离 `POSTGRES_TEST_DATABASE_URL`，不计作通过；此前同日真实 PostgreSQL 全仓证据继续有效，但不由本次运行重复声明。
 - `pnpm ts-check`、`pnpm lint` 均通过。默认约 4 GiB Node 堆在 webpack 优化阶段 OOM；`NODE_OPTIONS=--max-old-space-size=8192` 后编译约 12.7 分钟，TypeScript 和 `117/117` 页面生成完成。
 - **回归判定：Pear 失败诊断本地 PASS；远程成功路径仍 UNVERIFIED。** 本修复仅提升错误归因，不把供应商失败改写为应用失败，也不关闭 ZIP Range、主 PSD、远程图层、同键重放或取消退款门禁。
+
+## 2026-08-28 ca356477 Coze 云端回归增量
+
+- Coze 精确对齐 `main@ca3564779685be52f1dc13b8f0106f27095647f9`，tree 为 `2e6030b31c1b1a4399275bf51919daa28b0eae53`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- 云端非付费专项 `23/23` 通过；生产构建退出码 `0`，Build ID `xzK65dcSQKxZk2kJiNVk0`，三个健康路由和 `11/11` 静态资源通过。
+- Google Chrome 强制刷新后节点项目恢复，工作流工具栏可见；新刷新窗口 Console error/warning `0/0`。重启过程短暂项目同步 502 已在后续同步成功并经干净刷新排除为当前持续故障。
+- **结论：`ca356477` 部署和非付费诊断门禁通过。** 本轮未触发真实 Pear 任务，不证明真实结构化错误、ZIP Range、主 PSD、远程图层、同键重放或显式取消退款。
+- 证据：`docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json`、`docs/testing/evidence/v588-stability-002-ca356477-cloud-refresh-2026-08-28.png`。
