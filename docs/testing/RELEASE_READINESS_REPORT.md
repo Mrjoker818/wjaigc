@@ -1641,3 +1641,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 这关闭了 BUG-007 的云端质量误拒绝：真实 ZIP/主 PSD 已能越过质量门禁并形成实际可操作图层，不再停在 `LAYER_QUALITY_FAILED`。
 - 同时发现 P2 BUG-008：完成任务对象强制保持元素拆解浮层可见。该问题已按 RED -> 最小修复完成本地 `64/64` 专项回归；全仓 `4154 passed / 122 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误 ESLint 和 `117/117` 生产构建通过，但尚未部署。
 - **发布结论保持“有条件通过”。** 尚缺成功任务的数据库一次扣费且不退款证据、PSD 导出、图层拖动和 BUG-008 云端回归；这些边界关闭前不把整个 `V588-STABILITY-002` 扩大为完整发布通过。
+
+## 2026-08-29 Pear 成功结论纠正增量
+
+- 管理员云任务与账务数据确认，所谓成功任务实际是 `failed/LAYER_QUALITY_FAILED/refunded`；先前显示的 5 层不能再归因于该 Pear 任务。
+- ZIP 下载、主 PSD 选择和 PSD 解析已通过，但 Pear 将 `3504x2336` 输入输出为 `1280x1280`，生产质量门禁正确拒绝，远程完整还原尚未通过。
+- 已定位并最小修复旧 `psdEditorInitialResult` 串用问题；专项 `8/8`、分层聚焦矩阵 `44/44`、全仓 `4155 passed / 122 PostgreSQL-gated skipped / 0 failed`，TypeScript、零错误 ESLint 与 `117/117` 生产构建均通过。云端回归仍未完成。
+- **发布结论仍为“有条件通过”，V588-STABILITY-002 不得关闭，也不得进入 V588-ADMIN-004。**

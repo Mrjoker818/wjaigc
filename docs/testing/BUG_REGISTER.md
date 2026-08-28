@@ -2856,3 +2856,23 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | 面板渲染条件改为 `showDisplayDecomposePanel`；保留 `elementDecomposeTask`，不清除分支进度、重试、取消或 PSD 初始结果。 |
 | 本地回归 | 单文件 `7/7`；Pear/分层相关 6 文件 `64/64`；全仓 `572 files / 4154 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 通过；ESLint `0 errors / 961 historical warnings`；8 GiB 生产构建 `117/117`。 |
 | 状态 | **本地已修复 / 云端待验。** 需部署后证明完成态关闭按钮可隐藏浮层，重新打开仍能读取任务状态，PSD 编辑器不被遮挡。 |
+
+#### BUG-007 云端成功证据纠正（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 纠正原因 | 管理员只读云任务接口给出了此前缺失的应用 taskId、远端 taskId、终态与账务字段，权威数据与浏览器表象冲突。 |
+| 权威终态 | `layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85` / Pear `18659220-883d-45ce-aa59-cee9d356e2ff` 最终为 `failed · checking-quality · 86%`，错误 `LAYER_QUALITY_FAILED`，积分 `refunded / 15`。 |
+| 离线复现 | 同一 ZIP 和源图经生产代码复现：源图 `3504x2336`，主 PSD `1280x1280`、6 层，`reconstructionMae=0.7853434784673393`，质量门禁正确拒绝。 |
+| 结论 | 图层顺序修复本身保留，但“真实 Pear 成功、5 个远程图层、成功账务”结论撤销；ZIP/主 PSD 解析通过，远程成功终态仍未验证。 |
+
+### V588-STABILITY-002-BUG-009：PSD 编辑器可串用上一任务的分层结果（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：用户可能把旧本地分层误认为当前 Pear 云端结果，并在错误图片上继续编辑或导出。 |
+| 稳定复现 | 先让 PSD 编辑器持有一份 `initialResult`，再通过全局工具切换隐藏编辑器，随后从另一张图片直接打开“编辑元素”；旧结果仍会作为新图片的初始图层传入。 |
+| 根因 | `closeCanvasToolPanels()` 只执行 `setShowPsdEditor(false)`；`handleEditElements()` 只替换图片 URL，二者都未清空 `psdEditorInitialResult`。 |
+| RED | `element-decomposition-ui.test.ts` 精确截取两个回调块，修复前 `1 failed / 7 passed`，同时证明关闭和重新打开两个边界缺少清理。 |
+| 最小修复 | 全局关闭 PSD 编辑器以及直接打开“编辑元素”时分别执行 `setPsdEditorInitialResult(null)`；完成的元素拆解分支仍可显式设置新结果，不改变 Pear、积分、任务或导出逻辑。 |
+| 当前状态 | **本地已关闭 / Coze 云端待验。** 专项 `8/8`，分层聚焦矩阵 `44/44`，全仓 `4155 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 ESLint 和 `117/117` 生产构建通过。 |

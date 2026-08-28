@@ -50,7 +50,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | ID | 归档能力 | 调整后的吸收结论 | 强制门禁 | 优先级 |
 |---|---|---|---|---|
 | V588-STABILITY-001 | SVG/WASM 像素预算与超大输入保护 | 在当前 `/api/svg-trace` 架构内重实现预算门禁；不得复制旧路由控制器 | 边界像素、压缩炸弹、内存上限、失败终态、全仓与云端大图验证 | P0 |
-| V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | **远程 Pear 分层成功 / 剩余云端交互与成功账务门禁。** 当前架构已实现受控媒体、授权 VLM、总截止、持久幂等、数据库租约接管、托管结算和一次性账务终态；`940a0b7f` 云端真实任务已完成并打开 5 个可独立选择/显隐的远程图层，未复制 donor 路由或任意本地路径读取 | 已关闭真实异步提交、ZIP/主 PSD 消费、远程图层质量、失败退款、同键重放和 PostgreSQL 并发；仍须在 Coze 精确部署 `2be6eff7`，验证完成浮层关闭、图层移动/保存/刷新、PSD 导出及成功任务恰好一笔 `-15` 且无退款 | P0 |
+| V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | **真实 ZIP/主 PSD 消费已确认，远程成功终态未通过。** 当前架构已实现受控媒体、授权 VLM、总截止、持久幂等、数据库租约接管、托管结算和一次性账务终态；只读云任务审计证明 `layer_be958ed4...` 最终为 `failed/refunded`，此前看到的 5 层来自本地回退或旧编辑器状态，不能作为 Pear 成功证据 | 已关闭异步提交、ZIP/主 PSD 消费、失败退款、同键重放和 PostgreSQL 并发；仍须处理/明确 Pear 将 `3504x2336` 输入变为 `1280x1280` 的能力边界，部署旧 PSD 状态清理修复，并重新验证远程成功、导出、保存和一次成功扣费 | P0 |
 | V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **已吸收 / Coze 云端验证通过。** 三条流式链路共用严格解析器，并已关闭 CanvasEditor 参数错位与正文事件名不匹配；未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、三入口真实 APImart 流式终态及零 Console/原生弹窗证据 | P1 |
 | V588-CHAT-002 | 失败消息状态与原位确定性重试 | **已吸收 / 云端通过。** 普通与联网原位重试、CanvasEditor 精确选区、刷新精确任务恢复、服务器终态持久化及 Deep Research 单 Artifact 均取得 Coze 证据 | `main-fix@1572a222` 的 Deep Research 任务刷新前后 UI 与服务器均严格保持同一个 `msg_1787715525319-research` Artifact；Console/原生弹窗为 0。第三方 exactly-once 仅保留为供应商能力边界 | P1 |
 | V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **已吸收 / Coze Google Chrome 云端验证通过。** 版本化快照、CAS 冲突重放、冲突副本、删除不复活、用户隔离、离页冲刷和可诊断同步状态均已闭环；保留当前登录、注销、用户数据 API 和前台流式生成边界 | 真实 PostgreSQL `4030/4030`、Coze 冷启动、项目/任务 CRUD、刷新恢复、双标签合并/冲突副本、离页、账号切换、布局及浏览器健康证据 | P1 |
@@ -583,3 +583,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 修复已随 `main@2be6eff7d65a90a4b07aefff24a5f9b36db7e294` 推送。完整本地门禁为 `572` 个测试文件、`4154` 项通过、`122` 项本轮 PostgreSQL 环境门禁明确跳过、`0` 失败；TypeScript、ESLint `0 errors / 961 historical warnings`、8 GiB 生产构建及 `117/117` 静态页面通过。
 - **状态：远程 Pear 成功路径已关闭，V588-STABILITY-002 仍为有条件未吸收。** 下一唯一动作是让 Coze 精确拉取 `2be6eff7`，在现有 Google Chrome 标签验证完成浮层可关闭且任务结果不丢失；随后完成真实图层移动/保存/刷新、PSD 导出文件 `8BPS`/图层校验，并以只读数据库证据确认该成功任务恰好扣除一次 15 积分、无退款且记录应用 taskId。以上关闭前不开始 `V588-ADMIN-004`，不重复 Stage 4 或已通过的 Pear 任务。
 - 机器证据：`docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json`。
+
+## 2026-08-29 V588-STABILITY-002 云端审计纠正检查点
+
+- 管理员“云端任务监控”只读响应确认，先前声称成功的应用任务实际为 `layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85`，远端任务为 `18659220-883d-45ce-aa59-cee9d356e2ff`；最终状态 `failed`、阶段 `checking-quality`、错误 `LAYER_QUALITY_FAILED`，唯一扣费 `ctx_1787931983358_3f21y708` 已由唯一退款 `ctx_1787932271727_2h0c8apc` 抵消。
+- 真实 ZIP 可下载，包含主 PSD `Image-Layered_00002.psd` 和 `_depth.psd`；主 PSD `8BPS` 可解析且包含 6 个像素图层。因此 ZIP MIME、安全下载、解压和主 PSD 选择不是本次失败点。
+- 离线使用生产提取、精修和质量门禁复现：源图 `3504x2336`，Pear PSD 画布 `1280x1280`，重建 MAE `0.7853434784673393`、得分 `21`，正确触发 `RECONSTRUCTION_ERROR_HIGH`。Pear 当前文档的 Image-Layered 示例仅要求 `model + image`，没有证据证明可强制保持原尺寸；不得通过放宽门禁把变形结果标为完整还原。
+- 同时确认前端状态污染：全局关闭 PSD 编辑器未清空 `psdEditorInitialResult`，从另一张图片直接打开“编辑元素”也会沿用旧分层结果。RED 后仅在这两个边界清空旧结果，专项 `8/8` 转绿。
+- **状态：撤销“远程 Pear 成功路径已关闭”的结论。** V588-STABILITY-002 继续未吸收；下一步是完成本地全量门禁、推送 `main`、Coze 精确部署并验证旧结果不串用。新的付费 Pear 成功测试必须使用可证明保持尺寸/比例的输入或先取得供应商能力说明，不能重复消费积分碰运气。
+- 机器证据：`docs/testing/evidence/v588-stability-002-pear-audit-correction-2026-08-29.json`。

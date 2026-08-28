@@ -2049,3 +2049,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 最终本地门禁：全仓 `572 files / 4154 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 通过；ESLint `0 errors / 961 historical warnings`；8 GiB 生产构建完成 `117/117` 页面。
 - **回归判定：Pear ZIP 到 5 个可编辑图层的云端成功路径通过；BUG-008 本地通过、云端待验。** PSD 下载、真实图层拖动和数据库一次扣费/零退款仍未验证。
 - 机器证据：`docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json`。
+
+## 2026-08-29 Pear 云端终态纠正与旧 PSD 状态回归
+
+- 管理员云任务响应推翻了上一节的“远程成功”判断：对应任务 `layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85` 实际为 `failed/checking-quality`，扣除 15 后唯一退款，净积分为 0；上一节仅保留为当时的 UI 观察记录，不再作为通过证据。
+- 同一制品的 ZIP、非 `_depth` 主 PSD、`8BPS` 解析和 6 个像素图层均通过，说明 ZIP 链路可用。生产质量门禁离线复现为：源图 `3504x2336`、PSD `1280x1280`、MAE `0.7853434784673393`、得分 `21`，失败来自供应商改变尺寸/比例，不是解压或图层顺序。
+- 新增 BUG-009 RED：全局关闭和直接重新打开 PSD 编辑器时会残留旧 `initialResult`。仅补两处清理后单文件 `8/8`、分层聚焦矩阵 `44/44`、全仓 `4155 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 ESLint 和 `117/117` 生产构建通过。
+- **回归判定：Pear ZIP/主 PSD 消费 PASS；远程完成、图层编辑、成功扣费 FAIL/UNVERIFIED；旧结果串用本地 GREEN、云端待验。**
+- 机器证据：`docs/testing/evidence/v588-stability-002-pear-audit-correction-2026-08-29.json`。

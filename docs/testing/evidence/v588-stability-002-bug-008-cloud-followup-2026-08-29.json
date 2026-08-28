@@ -1,0 +1,53 @@
+{
+  "recordedAt": "2026-08-29T06:31:26.5761982+08:00",
+  "environment": "Coze development sandbox",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "browser": "Google Chrome profile 用户1",
+  "git": {
+    "localHead": "7ad13f219f8099a10e79c88536b464102cf5879b",
+    "originMain": "7ad13f219f8099a10e79c88536b464102cf5879b",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "cozeRuntimeHeadVerified": false
+  },
+  "evidence": {
+    "beforeScreenshot": "docs/testing/evidence/v588-stability-002-bug-008-before-2026-08-29.png",
+    "afterScreenshot": "docs/testing/evidence/v588-stability-002-bug-008-after-2026-08-29.png",
+    "existingCompletedTaskVisibleBeforeRefresh": true,
+    "existingCompletedTaskLayerCount": 5,
+    "existingCompletedTaskPanelCouldCloseBeforeRefresh": false,
+    "previewReloaded": true,
+    "authenticatedProjectRestored": true,
+    "panelOpenedFromCurrentImageAfterRefresh": true,
+    "ordinaryPanelCloseStayedClosedForSeconds": 8,
+    "completedTaskObjectPresentDuringPostRefreshClose": false,
+    "completedTaskCloseRegressionVerified": false
+  },
+  "consoleAfterRefresh": {
+    "timestamp": "2026-08-28T22:16:31.164Z",
+    "messages": [
+      "[Sync] loadProjectsFromServer: server returned 404",
+      "[Sync] loadProjectsFromServer: server returned 502"
+    ],
+    "classification": "sandbox transition evidence; not treated as a product root cause without request-level proof"
+  },
+  "sandbox": {
+    "healthBeforeLoss": {
+      "root": 200,
+      "creativeHealth": 200,
+      "imageHealth": 200
+    },
+    "terminalProbe": {
+      "status": "instance_not_found",
+      "errorCode": "instance_not_found",
+      "observedAt": "2026-08-29T06:31:26.5761982+08:00"
+    },
+    "chromeProjectTabResponsive": false,
+    "chromePreviewTabResponsive": false
+  },
+  "paidActions": {
+    "newPearTaskSubmitted": false,
+    "additionalCreditsConsumed": 0
+  },
+  "decision": "UNVERIFIED",
+  "reason": "The post-refresh close check had no completed elementDecomposeTask object, so it would also pass on the old implementation. Exact Coze runtime SHA, completed-task close behavior, PSD movement/export, and billing audit remain unproven."
+}

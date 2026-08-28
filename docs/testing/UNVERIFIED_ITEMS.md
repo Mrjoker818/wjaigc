@@ -1705,6 +1705,28 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 机器证据：`docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json`。
 
+### 2026-08-29 权威最新状态（覆盖本文件此前所有 Pear 成功表述）
+
+- 管理员云任务与账务记录是最终依据：`layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85` 实际为 `failed / checking-quality / refunded`，不是远程成功任务。
+- ZIP 下载、非 `_depth` 主 PSD 选择、`8BPS` 解析和 6 个像素图层已验证；Pear 将 `3504x2336` 输入变为 `1280x1280`，质量门禁得到 `MAE=0.7853434784673393`、得分 `21` 并正确拒绝。
+- BUG-009 旧 `initialResult` 串用已完成本地专项 `8/8`、分层聚焦 `44/44`、全仓 `4155 passed / 122 PostgreSQL-gated skipped / 0 failed`，TypeScript、零错误 ESLint 和 `117/117` 生产构建通过。
+- **仍未验证：** 精确部署本次 `main` 后的 BUG-009 云端回归、Pear 保持源图尺寸/比例的真实成功终态、远程图层编辑/保存/PSD 导出及成功任务一次扣费且不退款。完成前不得关闭 `V588-STABILITY-002`，不得进入 `V588-ADMIN-004`。
+- 权威机器证据：`docs/testing/evidence/v588-stability-002-pear-audit-correction-2026-08-29.json`。
+
+### 2026-08-29 Pear 审计纠正后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| ZIP 下载与主 PSD 提取 | 已验证 | 真实 ZIP 可下载，正确选择非 `_depth.psd` 主文件并解析 6 个像素图层。 |
+| Pear 尺寸/比例保持能力 | `UNVERIFIED / BLOCKED BY PROVIDER OUTPUT` | 官方确认 Image-Layered 是否支持 `size`/`aspect_ratio` 并能保持源图比例；或用天然 `1:1` 源图取得不变形成功结果。 |
+| Pear 成功终态 | `UNVERIFIED` | 应用任务必须真实达到 `completed/ready`，`result.decomposition.engine=pear`，不得使用本地 fallback 或旧编辑器状态。 |
+| 成功账务 | `UNVERIFIED` | 同一成功任务恰好一笔 `-15` 且无退款；记录应用 taskId、Pear taskId 和交易 ID。 |
+| 远程图层编辑/保存/导出 | `UNVERIFIED` | 至少 2 个 `source=pear-psd` 图层可移动、显隐、保存刷新恢复；导出文件存在、`8BPS` 且图层数正确。 |
+| BUG-009 旧结果串用 | 本地专项通过 / 云端未验 | 全量门禁后部署精确 `main`，依次打开两张图片证明第二张不继承第一张 `initialResult`。 |
+| BUG-008 完成浮层关闭 | `UNVERIFIED` | 必须在真实完成父任务对象仍存在时关闭浮层并保持关闭；普通空任务面板关闭不能代替。 |
+
+机器证据：`docs/testing/evidence/v588-stability-002-pear-audit-correction-2026-08-29.json`。
+
 ### `940a0b7f` 真实 Pear 成功后的收敛状态
 
 | 项目 | 最新状态 | 说明 / 关闭条件 |
@@ -1717,3 +1739,9 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | BUG-008 云端修复 | `UNVERIFIED` | 本地 `64/64` 通过；部署后确认完成态浮层可关闭且任务状态仍可恢复。 |
 
 机器证据：`docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json`。
+
+### 文档最终裁决：Pear 远程成功结论已撤销
+
+本节位于文件末尾并覆盖上方所有历史检查点。管理员云任务确认 `layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85` 的权威终态为 `failed / checking-quality / refunded`；此前 UI 显示的 5 层不能归因于该任务。当前仅可确认 ZIP、主 PSD 与图层解析通过，Pear 远程成功、远程图层编辑、成功账务仍为 `UNVERIFIED`。本地 BUG-009 修复已通过 `4155` 项全仓测试、TypeScript、零错误 ESLint 和 `117/117` 生产构建，云端部署回归仍待执行。
+
+最终机器证据：`docs/testing/evidence/v588-stability-002-pear-audit-correction-2026-08-29.json`。

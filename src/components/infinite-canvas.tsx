@@ -2280,6 +2280,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     setShowCanvasGenerator(false);
     setShowVideoExtractPanel(false);
     setShowPsdEditor(false);
+    setPsdEditorInitialResult(null);
     setShowRemoveBgPicker(false);
     setShow3DModal(false);
     setShow3DViewer(false);
@@ -9577,6 +9578,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     if (!activateCanvasToolSession('edit-elements', 'image-toolbar', [img.id])) return;
     // Directly open the PSD layer editor with AI semantic analysis
     setPsdEditorImageUrl(img.url);
+    setPsdEditorInitialResult(null);
     setPsdEditorMode('studio');
     setShowPsdEditor(true);
   }, [activateCanvasToolSession, getActiveImageData]);

@@ -43,6 +43,20 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(canvasSource).toContain('initialResult={psdEditorInitialResult || undefined}');
   });
 
+  it('clears a previous decomposition before hiding or directly reopening the PSD editor', () => {
+    const closeStart = canvasSource.indexOf('const closeCanvasToolPanels = useCallback');
+    const closeEnd = canvasSource.indexOf('const activateCanvasToolSession = useCallback', closeStart);
+    const closeBlock = canvasSource.slice(closeStart, closeEnd);
+    const openStart = canvasSource.indexOf('const handleEditElements = useCallback');
+    const openEnd = canvasSource.indexOf('const handleOpen3D = useCallback', openStart);
+    const openBlock = canvasSource.slice(openStart, openEnd);
+
+    expect(closeBlock).toMatch(/setShowPsdEditor\(false\);\s*setPsdEditorInitialResult\(null\);/);
+    expect(openBlock).toMatch(
+      /setPsdEditorImageUrl\(img\.url\);\s*setPsdEditorInitialResult\(null\);\s*setPsdEditorMode\('studio'\);/,
+    );
+  });
+
   it('consumes a retried board result and opens retried layers from the frozen source', () => {
     expect(canvasSource).toContain('completeElementBoardResult(finalTask, branch)');
     expect(canvasSource).toContain('setPsdEditorImageUrl(elementDecomposeTask.source.managedUrl');

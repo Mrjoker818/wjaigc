@@ -1,0 +1,62 @@
+{
+  "recordedAt": "2026-08-29T07:08:49+08:00",
+  "environment": {
+    "cloudUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "browser": "Google Chrome profile 用户1",
+    "localHead": "7ad13f219f8099a10e79c88536b464102cf5879b",
+    "cloudExactSha": "not re-confirmed because the Coze project conversation remained unresponsive"
+  },
+  "authoritativeCloudTask": {
+    "applicationTaskId": "layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85",
+    "pearTaskId": "18659220-883d-45ce-aa59-cee9d356e2ff",
+    "requestId": "38ad1fd0-d62c-9273-8194-034f1047d9b4",
+    "status": "failed",
+    "phase": "checking-quality",
+    "progress": 86,
+    "error": "LAYER_QUALITY_FAILED: Pear 分层结果未通过重建质量门禁",
+    "creditStatus": "refunded",
+    "creditCost": 15,
+    "chargedTransactionId": "ctx_1787931983358_3f21y708",
+    "refundedTransactionId": "ctx_1787932271727_2h0c8apc",
+    "artifactUrl": "https://cdn.pearapi.ai/apiservers/cache/files/2026-08-28/dace480c-ef53-4ec2-b96c-179baee0e814.zip"
+  },
+  "artifactAudit": {
+    "zipBytes": 7640773,
+    "zipSha256": "6A3A79D8081DECEB60CED18EE18AB50D443626101CCF64C1446D0B2156A09E69",
+    "entries": [
+      "Image-Layered_00002.psd",
+      "Image-Layered_00002_depth.psd"
+    ],
+    "primaryPsd": "Image-Layered_00002.psd",
+    "primaryPsdBytes": 17782306,
+    "primaryPsdSha256": "83FD6C3373C7A5E60DDB9D122199EBFA2BA5F68B357CEC35DED856BCB7626539",
+    "sourceSha256": "33CD720FB1A69652A81163BB383831CAF0CC5E7742DB8D865F613A849949D091",
+    "sourceDimensions": "3504x2336",
+    "psdDimensions": "1280x1280",
+    "pixelLayerCount": 6,
+    "reconstructionMae": 0.7853434784673393,
+    "qualityScore": 21,
+    "qualityStatus": "fail",
+    "qualityWarnings": ["RECONSTRUCTION_ERROR_HIGH"]
+  },
+  "conclusions": {
+    "zipDownload": "passed",
+    "primaryPsdSelection": "passed",
+    "psdParsing": "passed",
+    "remoteSuccessfulCompletion": "failed",
+    "successfulChargeWithoutRefund": "not applicable because the task failed",
+    "previousFiveLayerUiAttribution": "invalidated; the five layers were not proven to originate from this failed Pear task",
+    "rootCause": "Pear returned a 1280x1280 PSD for a 3504x2336 source, so exact reconstruction was impossible and the quality gate correctly rejected it"
+  },
+  "localRegression": {
+    "bugId": "V588-STABILITY-002-BUG-009",
+    "red": "1 failed / 7 passed",
+    "green": "8 passed / 0 failed",
+    "fix": "clear stale psdEditorInitialResult when globally hiding the PSD editor and before direct edit-elements open",
+    "focusedSuite": "6 files / 44 passed / 0 failed",
+    "fullSuite": "572 files / 4155 passed / 122 PostgreSQL-gated skipped / 0 failed",
+    "typeScript": "passed",
+    "eslint": "0 errors",
+    "productionBuild": "passed; 117/117 pages generated; exit code 0"
+  }
+}
