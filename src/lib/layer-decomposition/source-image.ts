@@ -404,6 +404,7 @@ export async function downloadPearPsd(
     const downloaded = await (options.download || downloadPublicImage)(artifactUrl, {
       maxBytes: MAX_ARTIFACT_BYTES,
       timeoutMs: 60_000,
+      rangeChunkBytes: 1024 * 1024,
       signal: options.signal,
       allowedMimeTypes: LAYER_ARTIFACT_MIME_TYPES,
     });

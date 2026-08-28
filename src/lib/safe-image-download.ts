@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { request as httpRequest } from 'node:http';
+import type { IncomingHttpHeaders } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 
@@ -36,6 +37,14 @@ export class SafeImageDownloadError extends Error {
 export interface DownloadedPublicImage {
   buffer: Buffer;
   mimeType: string;
+}
+
+export interface DownloadPublicImageOptions {
+  maxBytes?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  allowedMimeTypes?: readonly string[];
+  rangeChunkBytes?: number;
 }
 
 export function isAllowedRemoteMimeType(
@@ -139,12 +148,7 @@ export function selectAllowedRemoteAddress<T extends RemoteLookupAddress>(
 
 export async function downloadPublicImage(
   input: string | URL,
-  options: {
-    maxBytes?: number;
-    timeoutMs?: number;
-    signal?: AbortSignal;
-    allowedMimeTypes?: readonly string[];
-  } = {},
+  options: DownloadPublicImageOptions = {},
 ): Promise<DownloadedPublicImage> {
   options.signal?.throwIfAborted();
   const url = input instanceof URL ? input : new URL(input);
@@ -178,13 +182,41 @@ export async function downloadPublicImage(
     throw new SafeImageDownloadError('No supported remote asset MIME types were requested');
   }
 
-  return new Promise<DownloadedPublicImage>((resolve, reject) => {
+  const requestOnce = (
+    headers: Record<string, string> = {},
+    rangeResponseLimit = maxBytes,
+    expectedStatus?: number,
+  ): Promise<DownloadedPublicImage & {
+    statusCode: number;
+    headers: IncomingHttpHeaders;
+  }> => new Promise((resolve, reject) => {
+    let settled = false;
+    let abortRequest = () => {};
+    const cleanup = () => {
+      options.signal?.removeEventListener('abort', abortRequest);
+    };
+    const rejectOnce = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const resolveOnce = (downloaded: DownloadedPublicImage & {
+      statusCode: number;
+      headers: IncomingHttpHeaders;
+    }) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(downloaded);
+    };
     const requestFn = url.protocol === 'https:' ? httpsRequest : httpRequest;
     const req = requestFn(url, {
       method: 'GET',
       headers: {
         Accept: acceptedMimeTypes.join(','),
         'User-Agent': 'WujieAI-SafeImageDownloader/1.0',
+        ...headers,
       },
       lookup: (_hostname, lookupOptions, callback) => {
         if (lookupOptions.all) {
@@ -196,14 +228,21 @@ export async function downloadPublicImage(
       ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
     }, (response) => {
       const status = response.statusCode || 0;
+      if (expectedStatus !== undefined && status !== expectedStatus) {
+        response.destroy();
+        rejectOnce(new SafeImageDownloadError(
+          `Remote range request returned HTTP ${status} instead of ${expectedStatus}`,
+        ));
+        return;
+      }
       if (status >= 300 && status < 400) {
         response.resume();
-        reject(new SafeImageDownloadError('Remote image redirects are not allowed'));
+        rejectOnce(new SafeImageDownloadError('Remote image redirects are not allowed'));
         return;
       }
       if (status < 200 || status >= 300) {
         response.resume();
-        reject(new SafeImageDownloadError(`Remote image returned HTTP ${status}`));
+        rejectOnce(new SafeImageDownloadError(`Remote image returned HTTP ${status}`));
         return;
       }
       const mimeType = (response.headers['content-type'] || '')
@@ -212,39 +251,64 @@ export async function downloadPublicImage(
         .toLowerCase();
       if (!isAllowedRemoteMimeType(mimeType, acceptedMimeTypes)) {
         response.resume();
-        reject(new SafeImageDownloadError('Remote response is not an allowed image type'));
+        rejectOnce(new SafeImageDownloadError('Remote response is not an allowed image type'));
         return;
       }
       const declaredBytes = Number(response.headers['content-length'] || 0);
-      if (declaredBytes > maxBytes) {
+      const responseLimit = status === 206 ? rangeResponseLimit : maxBytes;
+      if (declaredBytes > responseLimit) {
         response.resume();
-        reject(new SafeImageDownloadError('Remote image exceeds the size limit'));
+        rejectOnce(new SafeImageDownloadError('Remote image exceeds the size limit'));
         return;
       }
 
       const chunks: Buffer[] = [];
       let receivedBytes = 0;
+      const rejectInterrupted = (cause?: Error) => {
+        rejectOnce(new SafeImageDownloadError(
+          'Remote image download was interrupted',
+          cause ? { cause } : undefined,
+        ));
+      };
       response.on('data', (chunk: Buffer) => {
         receivedBytes += chunk.byteLength;
-        if (receivedBytes > maxBytes) {
-          req.destroy(new SafeImageDownloadError('Remote image exceeds the size limit'));
+        if (receivedBytes > responseLimit) {
+          const error = new SafeImageDownloadError('Remote image exceeds the size limit');
+          rejectOnce(error);
+          req.destroy(error);
           return;
         }
         chunks.push(chunk);
       });
+      response.on('aborted', () => rejectInterrupted());
+      response.on('error', (error) => rejectInterrupted(error));
+      response.on('close', () => {
+        if (!response.complete && !response.readableEnded) rejectInterrupted();
+      });
       response.on('end', () => {
-        if (receivedBytes === 0) {
-          reject(new SafeImageDownloadError('Remote image is empty'));
+        if (declaredBytes > 0 && receivedBytes !== declaredBytes) {
+          rejectInterrupted();
           return;
         }
-        resolve({ buffer: Buffer.concat(chunks), mimeType });
+        if (receivedBytes === 0) {
+          rejectOnce(new SafeImageDownloadError('Remote image is empty'));
+          return;
+        }
+        resolveOnce({
+          buffer: Buffer.concat(chunks),
+          mimeType,
+          statusCode: status,
+          headers: response.headers,
+        });
       });
     });
 
-    const abortRequest = () => {
-      req.destroy(options.signal?.reason instanceof Error
+    abortRequest = () => {
+      const error = options.signal?.reason instanceof Error
         ? options.signal.reason
-        : new SafeImageDownloadError('Remote image download was aborted'));
+        : new SafeImageDownloadError('Remote image download was aborted');
+      rejectOnce(error);
+      req.destroy(error);
     };
     options.signal?.addEventListener('abort', abortRequest, { once: true });
     if (options.signal?.aborted) {
@@ -256,14 +320,90 @@ export async function downloadPublicImage(
       req.destroy(new SafeImageDownloadError('Remote image download timed out'));
     });
     req.on('error', (error) => {
-      options.signal?.removeEventListener('abort', abortRequest);
-      reject(error instanceof SafeImageDownloadError
+      rejectOnce(error instanceof SafeImageDownloadError
         ? error
         : new SafeImageDownloadError('Remote image download failed', { cause: error }));
     });
-    req.on('close', () => {
-      options.signal?.removeEventListener('abort', abortRequest);
-    });
+    req.on('close', cleanup);
     req.end();
   });
+
+  if (options.rangeChunkBytes === undefined) {
+    const downloaded = await requestOnce();
+    return { buffer: downloaded.buffer, mimeType: downloaded.mimeType };
+  }
+
+  const rangeChunkBytes = options.rangeChunkBytes;
+  if (!Number.isSafeInteger(rangeChunkBytes) || rangeChunkBytes <= 0) {
+    throw new SafeImageDownloadError('Range chunk size must be a positive integer');
+  }
+
+  let offset = 0;
+  let totalBytes: number | undefined;
+  let output: Buffer | undefined;
+  let mimeType: string | undefined;
+  let validator: string | undefined;
+  while (totalBytes === undefined || offset < totalBytes) {
+    options.signal?.throwIfAborted();
+    const requestedEnd = Math.min(offset + rangeChunkBytes - 1, maxBytes - 1);
+    const headers: Record<string, string> = {
+      Range: `bytes=${offset}-${requestedEnd}`,
+    };
+    if (validator) headers['If-Range'] = validator;
+    const downloaded = await requestOnce(headers, rangeChunkBytes, 206);
+
+    const contentRange = String(downloaded.headers['content-range'] || '');
+    const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(contentRange);
+    if (!match) {
+      throw new SafeImageDownloadError('Remote range response has an invalid Content-Range');
+    }
+    const responseStart = Number(match[1]);
+    const responseEnd = Number(match[2]);
+    const responseTotal = Number(match[3]);
+    const responseBytes = responseEnd - responseStart + 1;
+    const expectedResponseEnd = Math.min(requestedEnd, responseTotal - 1);
+    if (
+      responseStart !== offset
+      || responseEnd < responseStart
+      || responseEnd !== expectedResponseEnd
+      || responseEnd >= responseTotal
+      || responseBytes !== downloaded.buffer.length
+    ) {
+      throw new SafeImageDownloadError('Remote range response does not match the requested bytes');
+    }
+    if (!Number.isSafeInteger(responseTotal) || responseTotal <= 0 || responseTotal > maxBytes) {
+      throw new SafeImageDownloadError('Remote image exceeds the size limit');
+    }
+
+    const responseEtag = Array.isArray(downloaded.headers.etag)
+      ? downloaded.headers.etag[0]
+      : downloaded.headers.etag;
+    const responseLastModified = Array.isArray(downloaded.headers['last-modified'])
+      ? downloaded.headers['last-modified'][0]
+      : downloaded.headers['last-modified'];
+    const responseValidator = responseEtag && !responseEtag.startsWith('W/')
+      ? responseEtag
+      : responseLastModified;
+
+    if (totalBytes === undefined) {
+      totalBytes = responseTotal;
+      output = Buffer.allocUnsafe(totalBytes);
+      mimeType = downloaded.mimeType;
+      validator = responseValidator;
+      if (responseEnd + 1 < totalBytes && !validator) {
+        throw new SafeImageDownloadError('Remote range response has no stable validator');
+      }
+    } else if (
+      responseTotal !== totalBytes
+      || downloaded.mimeType !== mimeType
+      || responseValidator !== validator
+    ) {
+      throw new SafeImageDownloadError('Remote asset changed during range download');
+    }
+
+    downloaded.buffer.copy(output as Buffer, responseStart);
+    offset = responseEnd + 1;
+  }
+
+  return { buffer: output as Buffer, mimeType: mimeType as string };
 }

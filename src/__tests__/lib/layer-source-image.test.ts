@@ -114,7 +114,10 @@ describe('layer source image loading', () => {
     )).resolves.toMatchObject({ buffer: psd });
     expect(download).toHaveBeenCalledWith(
       'https://cdn.example.com/result.psd',
-      expect.objectContaining({ maxBytes: 128 * 1024 * 1024 }),
+      expect.objectContaining({
+        maxBytes: 128 * 1024 * 1024,
+        rangeChunkBytes: 1024 * 1024,
+      }),
     );
   });
 
