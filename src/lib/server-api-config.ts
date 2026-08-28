@@ -305,7 +305,11 @@ function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: 
   }).filter((m): m is ModelInfo => m !== null && m.id !== '');
 }
 
-async function readConfig(): Promise<StoredApiConfig> {
+interface ReadConfigOptions {
+  migrateFileProviders?: boolean;
+}
+
+async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiConfig> {
   // Try database first (persistent across deployments)
   try {
     const dbProviderRows = await dbGetApiProviders();
@@ -349,7 +353,7 @@ async function readConfig(): Promise<StoredApiConfig> {
       updatedAt: parsed.updatedAt || Date.now(),
     };
     // Migrate file data to database if DB is available
-    if (config.providers.length > 0) {
+    if (options.migrateFileProviders !== false && config.providers.length > 0) {
       migrateProvidersToDb(config.providers).catch(() => {});
     }
     return config;
@@ -415,8 +419,8 @@ async function writeConfig(config: StoredApiConfig): Promise<void> {
   await writeConfigBackup(config);
 }
 
-export async function getApiProviders(): Promise<ApiProvider[]> {
-  const providers = (await readConfig()).providers;
+export async function getApiProviders(options: ReadConfigOptions = {}): Promise<ApiProvider[]> {
+  const providers = (await readConfig(options)).providers;
   // Ensure sortOrder is assigned and sort by it
   providers.forEach((p, i) => { if (p.sortOrder == null) p.sortOrder = i; });
   providers.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
@@ -429,7 +433,7 @@ export async function getApiProvider(id: string): Promise<ApiProvider | null> {
 }
 
 export async function getPublicApiProviders(): Promise<PublicApiProvider[]> {
-  return sanitizeProviders(await getApiProviders());
+  return sanitizeProviders(await getApiProviders({ migrateFileProviders: false }));
 }
 
 export async function discoverModelsForCredentials(
@@ -1012,7 +1016,7 @@ export interface PublicModelCatalogSnapshot {
 }
 
 export async function getPublicModelCatalogSnapshot(): Promise<PublicModelCatalogSnapshot> {
-  const configuredProviders = await getApiProviders();
+  const configuredProviders = await getApiProviders({ migrateFileProviders: false });
   return {
     configuredProviders,
     providers: sanitizeProviders(configuredProviders),
@@ -1021,5 +1025,8 @@ export async function getPublicModelCatalogSnapshot(): Promise<PublicModelCatalo
 }
 
 export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]> {
-  return getPublicModelsFromProviders(await getApiProviders(), modelType);
+  return getPublicModelsFromProviders(
+    await getApiProviders({ migrateFileProviders: false }),
+    modelType,
+  );
 }
