@@ -34,6 +34,114 @@ async function rgba(mutator?: (pixels: Buffer) => void): Promise<Buffer> {
 }
 
 describe('evaluateAndCorrectReconstruction', () => {
+  it('renders Pear PSD layers in reverse Photoshop stack order', async () => {
+    const background = await sharp({
+      create: { width: 8, height: 8, channels: 4, background: '#ffffff' },
+    }).png().toBuffer();
+    const subject = await sharp({
+      create: { width: 4, height: 4, channels: 4, background: '#dc281e' },
+    }).png().toBuffer();
+    const source = await sharp(background)
+      .composite([{ input: subject, left: 2, top: 2 }])
+      .png()
+      .toBuffer();
+    const pearLayers: EditableLayerAsset[] = [
+      {
+        ...layer('/subject.png'),
+        id: 'subject',
+        width: 4,
+        height: 4,
+        offsetX: 2,
+        offsetY: 2,
+        source: 'pear-psd',
+      },
+      {
+        ...layer('/background.png'),
+        id: 'background',
+        name: 'background',
+        role: 'background',
+        source: 'pear-psd',
+      },
+    ];
+    const persistLayer = vi.fn();
+
+    const report = await evaluateAndCorrectReconstruction({
+      source,
+      layers: pearLayers,
+      loadLayer: async (asset) => (
+        asset.id === 'subject' ? subject : background
+      ),
+      persistLayer,
+    });
+
+    expect(report.native).toMatchObject({ rgbMae: 0, alphaMae: 0, mismatchedPixelRatio: 0 });
+    expect(report.correctionApplied).toBe(false);
+    expect(persistLayer).not.toHaveBeenCalled();
+  });
+
+  it('keeps Pear stack order when a local reconstruction layer is appended', async () => {
+    const background = await sharp({
+      create: { width: 8, height: 8, channels: 4, background: '#ffffff' },
+    }).png().toBuffer();
+    const subject = await sharp({
+      create: { width: 4, height: 4, channels: 4, background: '#dc281e' },
+    }).png().toBuffer();
+    const correction = await sharp({
+      create: { width: 2, height: 2, channels: 4, background: '#1e64dc' },
+    }).png().toBuffer();
+    const source = await sharp(background)
+      .composite([
+        { input: subject, left: 2, top: 2 },
+        { input: correction, left: 0, top: 0 },
+      ])
+      .png()
+      .toBuffer();
+    const layers: EditableLayerAsset[] = [
+      {
+        ...layer('/subject.png'),
+        id: 'subject',
+        width: 4,
+        height: 4,
+        offsetX: 2,
+        offsetY: 2,
+        source: 'pear-psd',
+      },
+      {
+        ...layer('/background.png'),
+        id: 'background',
+        name: 'background',
+        role: 'background',
+        source: 'pear-psd',
+      },
+      {
+        ...layer('/correction.png'),
+        id: 'correction',
+        name: 'reconstruction/correction',
+        role: 'reconstruction-correction',
+        width: 2,
+        height: 2,
+        source: 'local-enhanced',
+      },
+    ];
+    const buffers = new Map([
+      ['subject', subject],
+      ['background', background],
+      ['correction', correction],
+    ]);
+    const persistLayer = vi.fn();
+
+    const report = await evaluateAndCorrectReconstruction({
+      source,
+      layers,
+      loadLayer: async (asset) => buffers.get(asset.id)!,
+      persistLayer,
+    });
+
+    expect(report.native).toMatchObject({ rgbMae: 0, alphaMae: 0, mismatchedPixelRatio: 0 });
+    expect(report.correctionApplied).toBe(false);
+    expect(persistLayer).not.toHaveBeenCalled();
+  });
+
   it('reports an exact native reconstruction without creating correction assets', async () => {
     const source = await rgba();
     const persistLayer = vi.fn();

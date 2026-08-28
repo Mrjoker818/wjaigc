@@ -1,0 +1,83 @@
+{
+  "recordedAt": "2026-08-29T00:35:00+08:00",
+  "baseline": {
+    "localMain": "3bdfe334c3479812e42426a4e1e488d896b636bb",
+    "originMain": "3bdfe334c3479812e42426a4e1e488d896b636bb",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "cloudCommit": "3bdfe334c3479812e42426a4e1e488d896b636bb"
+  },
+  "cloudCancellationRun": {
+    "applicationTaskId": "layer_bc4b0371-956c-40b7-8c0d-00b726c9e666",
+    "terminalStatus": "cancelled",
+    "terminalPhase": "waiting-for-pear",
+    "errorCode": "LAYER_TASK_CANCELLED",
+    "creditsBefore": 403,
+    "creditsAfter": 403,
+    "totalUsedBefore": 3917,
+    "totalUsedAfter": 3917,
+    "result": "verified-after-task-id-cancel-and-refund"
+  },
+  "cloudArtifactRun": {
+    "applicationTaskId": "layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85",
+    "observedPhases": ["waiting-for-pear", "downloading-psd", "checking-quality"],
+    "terminalStatus": "failed",
+    "terminalPhase": "checking-quality",
+    "errorCode": "LAYER_QUALITY_FAILED",
+    "creditsBefore": 403,
+    "creditsAfter": 403,
+    "totalUsedBefore": 3917,
+    "totalUsedAfter": 3917,
+    "proves": [
+      "asynchronous application submission",
+      "real Pear ZIP artifact download",
+      "primary non-depth PSD extraction",
+      "PSD decoding reached the reconstruction quality gate",
+      "failed run refund returned to baseline"
+    ],
+    "doesNotProve": [
+      "quality gate success",
+      "editor opened with at least two editable layers",
+      "successful run charged exactly once"
+    ]
+  },
+  "rootCause": {
+    "libraryContract": "ag-psd children are ordered from top to bottom and must be painted in reverse order",
+    "defect": "quality and reconstruction renderers painted Pear PSD layers in top-to-bottom order, allowing lower background layers to overwrite upper subject layers",
+    "scope": "Pear PSD layers only; local-enhanced layer order remains unchanged"
+  },
+  "tdd": {
+    "red": {
+      "files": 2,
+      "failed": 2,
+      "passed": 4,
+      "observedMismatchRatio": 0.25,
+      "observedRgbMae": 0.15522875816993464
+    },
+    "green": { "files": 3, "passed": 9 },
+    "reviewFollowUp": {
+      "finding": "mixed Pear and local reconstruction layers could lose Photoshop paint order",
+      "redMismatchRatio": 0.25,
+      "resolution": "reverse Pear layers, preserve local layer order, and paint reconstruction correction/reference layers last"
+    }
+  },
+  "localValidation": {
+    "layerFocused": { "files": 11, "passed": 75 },
+    "fullVitest": {
+      "filesPassed": 572,
+      "filesSkipped": 22,
+      "testsPassed": 4154,
+      "testsSkipped": 122,
+      "skipReason": "POSTGRES_TEST_DATABASE_URL is not configured"
+    },
+    "typecheck": "passed",
+    "lint": { "errors": 0, "historicalWarnings": 961 },
+    "build": {
+      "defaultHeap": "failed with JavaScript heap out of memory",
+      "heapMiB": 8192,
+      "result": "passed",
+      "webpackCompileMinutes": 15.8,
+      "staticPages": "117/117"
+    }
+  },
+  "status": "local-fix-verified-cloud-retest-required"
+}

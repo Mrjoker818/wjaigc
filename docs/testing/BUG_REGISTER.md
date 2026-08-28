@@ -2806,3 +2806,18 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 自动化证据 | 组件/客户端 `26/26`；完整分层与安全下载矩阵 `168 passed / 2 PostgreSQL-gated skipped / 0 failed`；全仓 `4117 passed / 122 skipped / 0 failed`。 |
 | 工程门禁 | TypeScript 通过；ESLint `0 errors / 964 historical warnings`；8 GiB 生产构建退出码 0，webpack 13.6 分钟，`117/117` 页面生成；独立复审 Critical 0、Important 0。 |
 | 当前状态 | **本地代码与回归已关闭，云端仍未关闭。** 仍需 Coze exact-SHA 下真实执行“提交后立即取消/关闭、重复取消、一次扣费与最多一次退款、迟到完成不覆盖取消”。 |
+
+### V588-STABILITY-002-BUG-007 Pear PSD 图层顺序导致质量门禁误拒绝（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：Pear 已成功返回 ZIP 且主 PSD 可解析，但应用在打开可编辑图层前错误终止。 |
+| 发现环境 | Coze `main@3bdfe334c3479812e42426a4e1e488d896b636bb`，已登录 Google Chrome，真实 `3504 x 2336` 蓝色杯子图片。 |
+| 稳定复现 | 云端任务 `layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85` 依次进入 `waiting-for-pear`、`downloading-psd`、`checking-quality`，最终 `failed/LAYER_QUALITY_FAILED`。余额和累计使用均回到 `403/3917`。 |
+| 排除项 | 失败不是 Pear 默认 ZIP 格式本身导致：任务已越过 ZIP 下载和主 PSD 提取，进入重建质量门禁。 |
+| 根因 | `ag-psd` 的 `children` 是 Photoshop 从上到下顺序，绘制时必须反向；质量门禁和像素重建却按原顺序绘制，导致底层背景最后覆盖上层主体。 |
+| RED | 两个回归稳定失败：质量门禁得到 `warning`；重建报告显示 `mismatchedPixelRatio=0.25`、`rgbMae=0.15522875816993464`，并会错误创建整图校正层。 |
+| 最小修复 | 新增共享绘制顺序函数；Pear 原始层按 Photoshop 语义反转，本地普通层保持原顺序，重建修正/参考层最后绘制。质量门禁与后续像素重建共用同一规则。 |
+| 本地回归 | 首轮新增测试 GREEN `6/6`；独立复审发现混合来源边界后再以 RED 复现 `mismatchedPixelRatio=0.25`，修复并扩展为绘制顺序专项 `9/9`。分层矩阵 `11 files / 75 tests`；全仓 `572 files / 4154 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 通过；ESLint `0 errors / 961 historical warnings`；8 GiB 构建 `117/117` 通过。 |
+| 状态 | **本地已修复 / 云端待验。** 必须部署新提交后再次取得真实 Pear ZIP，证明任务进入 `completed/ready`、编辑器至少显示 2 个可独立操作图层且成功仅扣费一次。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-pear-layer-order-local-2026-08-29.json` |

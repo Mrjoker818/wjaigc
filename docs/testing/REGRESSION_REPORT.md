@@ -2023,3 +2023,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 最终专项 `26/26`，分层与安全下载矩阵 `168 passed / 2 skipped`，全仓 `4117 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、目标 ESLint、`git diff --check` 和 8 GiB 生产构建通过，构建生成 `117/117` 页面。
 - 并行 Range 加固三部分已在 `ac8e826b` 进入当前 main，且是 `a50fcbeb` 的祖先，不再重复合并。其他并行候选均落后当前 main 或缺少 PostgreSQL/Coze/真实供应商证据，本轮不合并。
 - **回归判定：本地方案 C PASS，云端显式取消与退款仍 UNVERIFIED。** 不以本地 mock 或构建替代 Coze 真实任务、账务和远程 ZIP 证据。
+
+## 2026-08-29 Pear ZIP、取消退款与图层顺序回归
+
+- Coze 精确运行 `3bdfe334` 后，任务 `layer_bc4b0371-956c-40b7-8c0d-00b726c9e666` 在取得应用 taskId 后立即取消，最终唯一 `cancelled/LAYER_TASK_CANCELLED`；余额和累计使用在前后均为 `403/3917`。该证据关闭“取得 taskId 后立即取消与退款”，不扩大为响应前关闭/卸载。
+- 第二个真实任务 `layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85` 快速返回应用 taskId，并越过供应商等待、ZIP 下载和主 PSD 提取，进入 `checking-quality`；最终因 `LAYER_QUALITY_FAILED` 退款回基线。由此确认 ZIP 默认输出已被处理，编辑器失败点位于应用重建质量门禁。
+- `ag-psd` 明确规定图层为 Photoshop 从上到下顺序、绘制需反向。首轮两个 RED 分别复现质量门禁误判和 25% 像素被背景覆盖；独立复审又以第三个 RED 复现 Pear 与本地重建层混合时的同类覆盖。最终规则反转 Pear 原始层、保持本地普通层顺序，并让重建修正/参考层最后绘制。
+- 绘制顺序专项 `9/9`，覆盖纯 Pear、Pear 与本地修正层混合、隐藏 Pear 层，以及纯本地图层顺序保持。
+- 最终分层矩阵 `75/75`；全仓 `4154 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 ESLint 通过。8 GiB 构建在 webpack `15.8` 分钟后完成 TypeScript、`117/117` 静态页面和追踪。
+- **回归结论：ZIP 下载与主 PSD 提取已取得真实证据，图层顺序修复仅本地通过。** 在 Coze 部署新提交并打开至少 2 个可编辑远程图层前，Pear 成功终态和 `V588-STABILITY-002` 继续为未关闭。

@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 
+import { getVisibleLayersInPaintOrder } from '@/lib/layer-decomposition/layer-stack-order';
 import type {
   EditableLayerAsset,
   ReconstructionMetrics,
@@ -38,7 +39,7 @@ async function renderLayers(
   const canvas = Buffer.alloc(width * height * 4);
   let aggregatePixels = 0;
 
-  for (const layer of layers.filter((item) => item.visible)) {
+  for (const layer of getVisibleLayersInPaintOrder(layers)) {
     const decoded = await decodeRgba(await loadLayer(layer));
     aggregatePixels += decoded.width * decoded.height;
     if (aggregatePixels > MAX_AGGREGATE_PIXELS) {

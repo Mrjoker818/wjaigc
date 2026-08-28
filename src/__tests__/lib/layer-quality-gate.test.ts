@@ -5,6 +5,58 @@ import { evaluateLayerQuality } from '@/lib/layer-decomposition/quality-gate';
 import type { EditableLayerAsset } from '@/lib/layer-decomposition/types';
 
 describe('layer reconstruction quality gate', () => {
+  it('reconstructs Pear PSD layers from Photoshop top-to-bottom order', async () => {
+    const background = await sharp({
+      create: { width: 8, height: 8, channels: 4, background: '#ffffff' },
+    }).png().toBuffer();
+    const subject = await sharp({
+      create: { width: 4, height: 4, channels: 4, background: '#ef1f1f' },
+    }).png().toBuffer();
+    const source = await sharp(background)
+      .composite([{ input: subject, left: 2, top: 2 }])
+      .png()
+      .toBuffer();
+    const layers: EditableLayerAsset[] = [
+      {
+        id: 'subject',
+        name: '产品主体',
+        role: 'subject',
+        imageUrl: '/subject.png',
+        width: 4,
+        height: 4,
+        offsetX: 2,
+        offsetY: 2,
+        opacity: 1,
+        blendMode: 'normal',
+        visible: true,
+        source: 'pear-psd',
+      },
+      {
+        id: 'background',
+        name: '背景',
+        role: 'background',
+        imageUrl: '/background.png',
+        width: 8,
+        height: 8,
+        offsetX: 0,
+        offsetY: 0,
+        opacity: 1,
+        blendMode: 'normal',
+        visible: true,
+        source: 'pear-psd',
+      },
+    ];
+
+    const quality = await evaluateLayerQuality(source, layers, {
+      loadLayer: async (layer) => (
+        layer.id === 'subject' ? subject : background
+      ),
+    });
+
+    expect(quality.status).toBe('pass');
+    expect(quality.metrics.reconstructionMae).toBe(0);
+  });
+
   it('fails when recomposition differs materially from the source', async () => {
     const source = await sharp({
       create: { width: 8, height: 8, channels: 4, background: '#ef1f1f' },

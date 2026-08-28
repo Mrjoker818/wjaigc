@@ -1620,3 +1620,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 本地质量门禁：全仓 `4117/4239` 通过、`122` 项因缺隔离 PostgreSQL 测试库跳过、`0` 失败；ESLint 0 error、TypeScript 通过、最终生产构建退出码 0、`117/117` 页面完成；独立代码复审 Critical/Important 均为 0。
 - `origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。Range 三项并行加固已经在祖先提交 `ac8e826b` 中，无需再次合并；其余四个旧候选分支不满足直接合并条件。
 - **发布结论保持“有条件通过”。** 当前提交适合作为 Coze 验收候选，但在 exact-SHA、真实提交后立即取消/关闭、单次扣费与最多一次退款、远程 ZIP/PSD 成功前，`V588-STABILITY-002` 仍不得标记已吸收。
+
+## 2026-08-29 Pear 图层顺序候选发布结论
+
+- Pear 默认 ZIP 不是本次最终失败根因：真实任务已进入 `downloading-psd` 后的 `checking-quality`，证明 ZIP 与主 PSD 解析链路已经运行。
+- 云端取得 taskId 后立即取消已收敛为唯一 `cancelled`，积分净变化为 0；真实 ZIP 任务的质量失败也退款回基线。
+- 本地已修正 Pear PSD 从上到下堆栈被错误正向绘制的问题；独立复审发现的混合来源边界也已通过新增 RED/GREEN 关闭，本地分层顺序保持不变。全仓 `4154` 项通过、`122` 项 PostgreSQL 环境门禁跳过、0 失败；8 GiB 生产构建完成 `117/117`。
+- **发布结论仍为“有条件通过”。** 候选可推送 `main` 并进入 Coze 验收，但在真实任务 `completed/ready`、至少 2 个远程可编辑图层、一次成功扣费和刷新恢复通过前，不得把 Pear 分层或 `V588-STABILITY-002` 标为已吸收。

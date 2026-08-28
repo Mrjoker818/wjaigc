@@ -1679,3 +1679,17 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 取消账务 | `UNVERIFIED` | 只扣费一次、最多退款一次；迟到 `completed` 不得覆盖 `cancelled`。 |
 | 远程 ZIP/PSD 成功 | `UNVERIFIED` | 仍需 Pear 成功返回真实 ZIP，验证 Range、主 PSD、`8BPS` 与至少 2 个远程可编辑图层。 |
 | PostgreSQL 本轮重跑 | `UNVERIFIED` | 本轮本机没有 `POSTGRES_TEST_DATABASE_URL`，122 项明确跳过；不得把历史证据写成本轮通过。 |
+
+## 2026-08-29 Pear 图层顺序修复后的最新剩余项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| Pear 异步提交 | 已验证 | 真实应用 POST 快速返回 taskId，任务进入供应商等待；未再出现 4 分 30 秒同步请求导致的 `Failed to fetch`。 |
+| ZIP 下载与主 PSD 提取 | 已验证到质量门禁 | 真实任务越过 `downloading-psd` 并进入 `checking-quality`；这证明 ZIP 与主 PSD 已被消费，但不证明最终图层质量通过。 |
+| 取得 taskId 后立即取消与退款 | 已验证 | `layer_bc4b0371-956c-40b7-8c0d-00b726c9e666` 最终唯一 `cancelled`，余额和累计使用恢复到基线。 |
+| 提交响应前关闭/路由离开 | `UNVERIFIED` | 仍需证明未知 taskId 窗口经同键恢复后只取消一次，不遗留 processing 任务。 |
+| 修复后 Coze exact-SHA | `UNVERIFIED` | 推送本次 Pear 图层顺序候选后，Coze 必须精确拉取并完成构建、启动和强制刷新。 |
+| Pear 成功终态与可编辑图层 | `UNVERIFIED` | 真实任务达到 `completed/ready`；编辑器至少显示 2 个远程图层，可独立显隐/移动/保存，且没有整图校正层覆盖实际图层。 |
+| 成功账务 | `UNVERIFIED` | 成功任务只扣费一次，不退款；同键重放仍返回同一任务且不产生第二次供应商任务或扣费。 |
+| PostgreSQL 本轮重跑 | `UNVERIFIED` | 本轮 122 项因未配置隔离 `POSTGRES_TEST_DATABASE_URL` 跳过；历史真实数据库证据不冒充本轮运行。 |
+| Firefox / WebKit | `UNVERIFIED` | 在不触发重复付费的条件下完成登录、任务恢复、编辑器和保存回归。 |

@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 
+import { getVisibleLayersInPaintOrder } from '@/lib/layer-decomposition/layer-stack-order';
 import type { EditableLayerAsset } from '@/lib/layer-decomposition/types';
 
 const MAX_PIXELS = 67_108_864;
@@ -57,7 +58,7 @@ export async function evaluateLayerQuality(
   const signatures = new Set<string>();
   const warnings: string[] = [];
 
-  for (const layer of layers.filter((item) => item.visible)) {
+  for (const layer of getVisibleLayersInPaintOrder(layers)) {
     const decoded = await sharp(await options.loadLayer(layer), {
       failOn: 'error',
       limitInputPixels: MAX_PIXELS,
