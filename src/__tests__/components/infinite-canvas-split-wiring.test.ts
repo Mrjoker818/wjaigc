@@ -36,4 +36,9 @@ describe('infinite canvas component boundaries', () => {
     expect(zoomClusterSource).not.toContain('activateCanvasToolSession');
     expect(zoomClusterSource).not.toContain('closeCanvasToolPanels');
   });
+
+  it('opens the workspace image preview when a canvas image is double-clicked', () => {
+    expect(canvasSource).toContain('onPreviewImage,');
+    expect(canvasSource).toContain('onPreviewImage(image);');
+  });
 });
