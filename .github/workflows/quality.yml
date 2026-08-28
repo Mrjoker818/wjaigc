@@ -104,6 +104,7 @@ jobs:
           pnpm exec vitest run
           src/__tests__/api/layered-decompose-postgres-concurrency.test.ts
           src/__tests__/lib/annotation-postgres-concurrency.test.ts
+          src/__tests__/lib/psd-analysis-postgres-concurrency.test.ts
           --pool=forks --poolOptions.forks.singleFork=true
 
   stage-3-canvas-kernel:

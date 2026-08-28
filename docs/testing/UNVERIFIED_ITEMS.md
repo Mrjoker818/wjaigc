@@ -1543,3 +1543,32 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | PSD 入口连续性 | `UNVERIFIED` | 图片预览打开后可见 Pro/Studio PSD 入口；付费分析仍须独立动作时确认并记录供应商、模型、taskId、requestId、积分和下载文件 |
 
 当前 Chrome 扩展能发现正确的 Coze 项目页和预览页，但页面级操作持续超时；此项属于验证环境阻塞，不计为产品通过或失败。
+
+## 2026-08-28 V588-STABILITY-002 图片预览入口最新状态（覆盖上一节）
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| Coze 精确候选 | 已验证 | Coze 运行 `main@2e1e21e2856e91e6bf1ed1af83aed68610d35c8c`，包含 `6bea240f` 修复；代码树、构建、启动、健康路由和静态资源已确认，`stable` 未变。 |
+| 单击与双击图片 | 已云端验证 | 真实 `3504 x 2336` 图片单击只选择，双击一次严格打开 1 个预览，关闭后严格归零。 |
+| 浏览器健康 | 已云端验证 | 本轮 Console error/warning `0/0`，无原生错误弹窗。 |
+| PSD Pro 入口 | 已云端验证 | 预览 `PSD` 按钮可见，源码固定调用 `downloadPSD(..., 'pro')`；本专项明确不调整导出 UI。 |
+| 拖动隔离 | 已云端验证 | 真实拖动 `24 x 16px` 未误开预览，随后 `Ctrl+Z` 精确恢复原坐标，Console 无错误。 |
+| 视频/占位框与编辑/批注隔离 | `UNVERIFIED` | 需要相应真实对象和模式；不得用普通图片双击结果替代。 |
+| 真实付费 Pro PSD | `UNVERIFIED` | 使用授权 PearAPI/APIMART VLM，记录 provider/model、taskId、requestId、积分变化和下载文件。 |
+| 同键重放、失败退款与 PostgreSQL 竞争 | `UNVERIFIED` | 仍按上一节主矩阵执行；本次 UI 通过不自动关闭账务与并发门禁。 |
+
+证据：`docs/testing/evidence/v588-stability-002-image-preview-cloud-2026-08-28.json` 与同名 PNG。
+
+## 2026-08-28 V588-STABILITY-002 最新剩余项（覆盖数据库旧状态）
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| PostgreSQL 并发幂等 | 已本地验证 | 全新 PostgreSQL 18.4 隔离库证明唯一任务、唯一执行器、唯一扣费及同键异摘要冲突；已进入 CI。 |
+| PostgreSQL 终态与退款竞争 | 已本地验证 | `completed / failed / timeout / cancelled` 只有一个赢家，迟到终态被拒绝，退款最多一次，余额一致。 |
+| 云端真实 Pro PSD | 等待动作时确认 | Google Chrome 已停在真实图片预览的 `PSD` 按钮前；点击预计扣除 15 积分并把图片提交给管理员已配置的 VLM。当前尚未点击、未扣费。 |
+| 云端同键重放 | `UNVERIFIED` | 需在同一真实任务上下文复用相同摘要与幂等键，证明返回同一 taskId，且供应商与扣费均不重复。 |
+| 云端失败退款 | `UNVERIFIED` | 需使用可控失败或超时，不得故意改坏生产配置；证明唯一失败终态、一次退款和可理解提示。 |
+| 最终 PSD 文件 | `UNVERIFIED` | 需验证下载文件存在、可解析、图层数量与结构合理，并记录 provider/model、taskId、requestId 与积分前后值。 |
+| 视频/占位框及编辑/批注双击隔离 | `UNVERIFIED` | 普通图片拖动隔离已通过，但这些对象和模式尚无本轮真实云端样本。 |
+
+本地机器证据：`docs/testing/evidence/v588-stability-002-postgres-local-2026-08-28.json`。本节只覆盖数据库旧状态，不关闭云端付费、供应商或文件质量门禁。

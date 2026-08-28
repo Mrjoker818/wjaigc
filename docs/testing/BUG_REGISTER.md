@@ -2691,3 +2691,24 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - 永久回归：新增同图双击、超时、跨图、超位移和组件接线合同；修复前 RED，修复后聚焦 `16/16` 通过。
 - 本地结果：全仓 `565` 个文件通过、`21` 个文件跳过，`4071` 项通过、`119` 项跳过、零失败；TypeScript、生产构建 `117/117` 通过；改动文件 ESLint 零错误（大型画布文件保留 18 条历史 warning）。
 - 未关闭证据：Coze 尚未拉取并运行精确 `6bea240f`；必须在现有 Chrome 预览标签强制刷新后证明双击一次即打开图片预览、Console 无新增 error/warning，再继续付费 PSD 分析验收。
+### V588-STABILITY-002-BUG-002 云端关闭增量（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 发现环境 | Coze `main@2e1e21e2856e91e6bf1ed1af83aed68610d35c8c`，Google Chrome，项目 `project_1787549625844_nfmso3ts9`。 |
+| 真实样本 | 画布 1 张已完整解码图片，原始尺寸 `3504 x 2336`、显示尺寸 `512 x 512`。 |
+| 云端回归 | 单击只选择且预览数保持 0；双击一次后“复制链接”预览标识严格为 1；关闭后严格归零。真实拖动 `24 x 16px` 未误开预览，`Ctrl+Z` 精确恢复原坐标。预览展示 PNG、SVG、PSD，其中 PSD 走既有 `pro` 导出路径。 |
+| 健康结果 | Console error/warning `0/0`，无原生错误弹窗。 |
+| 状态 | **已关闭。** 图片预览入口不再阻断 `V588-STABILITY-002` 的付费 Pro PSD 验收。普通图片拖动隔离已通过；视频/占位框及编辑/批注模式隔离尚未由本轮云端动作证明，继续留在未验证表，不扩大本缺陷的关闭范围。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-image-preview-cloud-2026-08-28.json`、`docs/testing/evidence/v588-stability-002-image-preview-cloud-2026-08-28.png`。 |
+
+### V588-STABILITY-002-BUG-001 PostgreSQL 关闭增量（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 测试环境 | 全新本地 PostgreSQL 18.4 隔离集群，`127.0.0.1:55437/wujie_psd_stability`；未连接或修改生产数据库。 |
+| RED | 新增测试首次为 `1 passed / 2 failed`，原因是测试把 PostgreSQL `INTEGER` 结果错误断言为字符串；生产逻辑无失败。修正测试类型后 `3/3` 通过。CI 契约随后以 `11 passed / 1 failed` 证明质量工作流遗漏该专项。 |
+| 最小修复 | 仅新增真实 PostgreSQL 并发回归，并把该文件加入现有 `postgres-concurrency` CI 任务；没有修改 PSD、积分、任务、供应商或画布业务代码。 |
+| 已关闭边界 | 同请求并发复用唯一任务、唯一执行器、唯一扣费；同键异摘要冲突；四类终态竞争只保留一个赢家；迟到完成/失败被拒绝；退款最多一次且余额与终态一致。 |
+| 回归 | 聚焦 `11 files / 92 tests`；带数据库全仓 `587 files / 4193 tests`，失败与跳过均为 0；TypeScript 和零错误 ESLint 通过。生产构建默认约 4 GiB 堆 OOM，8 GiB 堆复验通过 `117/117`，资源风险未隐藏。 |
+| 状态 | **本地 PostgreSQL 子项已关闭，整项仍未关闭。** 云端真实供应商调用、一次扣费、同键重放、失败退款和最终 PSD 下载文件仍需真实证据。机器结果：`docs/testing/evidence/v588-stability-002-postgres-local-2026-08-28.json`。 |

@@ -82,6 +82,7 @@ describe('quality workflow contract', () => {
     expect(workflow).toContain('TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/wujie_test');
     expect(workflow).toContain('src/__tests__/api/layered-decompose-postgres-concurrency.test.ts');
     expect(workflow).toContain('src/__tests__/lib/annotation-postgres-concurrency.test.ts');
+    expect(workflow).toContain('src/__tests__/lib/psd-analysis-postgres-concurrency.test.ts');
   });
 
   it('does not require paid browser secrets for untrusted pull requests', () => {

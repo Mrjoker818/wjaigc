@@ -511,3 +511,19 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 按 RED -> 最小修复新增同图/时间/距离序列 helper，并把识别边界移动到完整 pointer-up；聚焦 `16/16`、全仓 `4071/4071` 已执行项、TypeScript、零错误 Lint 和 `117/117` 构建通过。
 - 修复已推送为 `main@6bea240f34dcbd3176ab1e63a8ccb43d32a54797`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 未改动。
 - **状态：本地已关闭 / Coze UI 待验 / V588-STABILITY-002 仍未吸收。** Chrome 页面控制恢复后，唯一动作是 Coze 精确对齐 `6bea240f` 并验证双击预览；完成前不进入 `V588-ADMIN-004`，也不重复已关闭的 Simple Chat 或 Stage 4 历史矩阵。
+
+## 2026-08-28 V588-STABILITY-002 图片预览入口云端关闭
+
+- Coze 已运行包含 `6bea240f` 修复的 `main@2e1e21e2856e91e6bf1ed1af83aed68610d35c8c`，代码树为 `9647c2951b8d128e3cdd20d29b5202472bbd29f7`；生产构建、启动、健康路由与静态资源此前已通过，`stable@52f7c601` 未改动。
+- Google Chrome 在项目 `project_1787549625844_nfmso3ts9` 加载 1 张真实图片，原始尺寸 `3504 x 2336`。单击只进入选中态；双击一次打开且只打开 1 个图片预览；关闭后预览数量归零。真实拖动 `24 x 16px` 未误开预览，随后 `Ctrl+Z` 精确恢复原坐标。
+- 预览中 `PSD` 按钮可见且当前实现明确调用 `downloadPSD(..., 'pro')`。专项规格明确“不调整 PSD 导出 UI”，因此不把缺少单独的 Studio 按钮误报为本项缺陷；Studio 继续由既有 PSD 编辑器导出模式承担。
+- 全程 Console error/warning 为 `0/0`，无原生错误弹窗。证据为 `docs/testing/evidence/v588-stability-002-image-preview-cloud-2026-08-28.json` 与同名 PNG。
+- **当前状态：图片预览入口云端已关闭 / V588-STABILITY-002 仍未吸收。** 真实付费 Pro PSD、同键重放、一次扣费/退款及 PostgreSQL 并发终态仍未验证；下一步不得进入 `V588-ADMIN-004`。
+
+## 2026-08-28 V588-STABILITY-002 PostgreSQL 并发与账务本地关闭
+
+- 在全新 loopback PostgreSQL 18.4 隔离库 `wujie_psd_stability` 中新增 PSD 专项并发测试。两个相同请求并发时复用同一 `taskId`、只调用一次执行器并只扣费一次；相同幂等键对应不同规范化摘要时明确冲突。
+- `completed / failed / timeout / cancelled` 并发竞争只允许一个数据库终态获胜；迟到完成与迟到失败均被拒绝，退款最多一次，余额与最终终态一致。该测试已加入 `.github/workflows/quality.yml` 的 PostgreSQL 质量任务，避免后续只在开发机执行。
+- 聚焦 PostgreSQL 与 PSD 关联矩阵 `11 files / 92 tests` 全部通过；启用全部数据库变量后的全仓结果为 `587/587 files`、`4193/4193 tests`，失败和跳过均为 `0`。TypeScript 与零错误 ESLint 通过。
+- 默认约 4 GiB Node 堆的本地生产构建在 webpack 编译阶段 OOM；以 `NODE_OPTIONS=--max-old-space-size=8192` 复验后完成编译、TypeScript、`117/117` 静态页面和构建追踪。此资源风险保留，不把 8 GiB 结果误写为默认堆通过。
+- **当前状态：真实 PostgreSQL 并发/终态/退款门禁已在本地关闭，V588-STABILITY-002 仍未吸收。** 云端 Pro PSD 已停在真实付费按钮前，未扣积分；仍需动作时确认后验证供应商、任务身份、一次扣费、同键重放、失败退款及最终文件。机器证据：`docs/testing/evidence/v588-stability-002-postgres-local-2026-08-28.json`。

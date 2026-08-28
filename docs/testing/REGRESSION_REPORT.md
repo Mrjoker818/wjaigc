@@ -1923,3 +1923,24 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 | 分支边界 | 通过 | `main@6bea240f` 已推送；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化 |
 
 本轮只修复图片预览入口的跨重渲染双击识别，不改 PSD 分析、供应商、积分、任务或导出逻辑。Coze 精确 SHA、真实双击 UI 和后续付费 PSD 链路仍待云端证据。
+## 2026-08-28 V588-STABILITY-002 图片预览云端回归
+
+- Coze 运行 `main@2e1e21e2856e91e6bf1ed1af83aed68610d35c8c`；该提交包含 `6bea240f` 双击修复，代码树为 `9647c2951b8d128e3cdd20d29b5202472bbd29f7`，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
+- Google Chrome 复用现有预览标签，在轻量项目加载 1 张 `3504 x 2336` 真实图片。单击只选择；双击一次打开且只打开一个图片预览；关闭后预览消失。真实拖动 `24 x 16px` 未误开预览，`Ctrl+Z` 后坐标差恢复为 `0 x 0`。
+- 预览可见 `PNG / SVG / PSD` 导出入口。当前 `PSD` 按钮调用既有 Pro 导出；本专项规格不调整导出 UI，因此没有把 Studio 独立按钮作为本轮通过条件。
+- 浏览器 Console error/warning `0/0`，原生弹窗为 0。截图和机器结果保存在 `docs/testing/evidence/v588-stability-002-image-preview-cloud-2026-08-28.*`。
+- **回归判定：图片预览入口 PASS；V588-STABILITY-002 整项仍为 CONDITIONAL。** 付费 Pro PSD、同键重放、账务和 PostgreSQL 竞争仍未执行。
+
+## 2026-08-28 V588-STABILITY-002 PostgreSQL 并发回归
+
+| 门禁 | 结果 | 证据 |
+|---|---|---|
+| PSD PostgreSQL 专项 | 通过 | 全新隔离库中 `3/3`：相同请求并发、同键异摘要、四终态竞争与退款一致性 |
+| 关联数据库矩阵 | 通过 | PSD、批注、Pear 分层、元素拆解、服务与路由共 `11 files / 92 tests`，0 失败、0 跳过 |
+| 全仓真实 PostgreSQL | 通过 | `587/587 files`、`4193/4193 tests`，0 失败、0 跳过，495.37 秒 |
+| CI 永久门禁 | 通过 | 工作流契约先 RED `11/12`，加入 PSD 数据库测试后 GREEN `12/12` |
+| TypeScript | 通过 | `pnpm ts-check` 退出码 0 |
+| ESLint | 通过 | `pnpm lint:build` 退出码 0；没有新增 error |
+| 生产构建 | 有条件通过 | 默认约 4 GiB Node 堆 OOM；8 GiB 堆完成编译、TypeScript、`117/117` 静态页面和构建追踪 |
+
+数据库证据关闭了“本地没有真实 PostgreSQL”的旧缺口，但不代表云端第三方供应商或生产账务已经通过。真实 Pro PSD、同键重放、失败退款和最终文件仍保留为云端门禁。机器证据：`docs/testing/evidence/v588-stability-002-postgres-local-2026-08-28.json`。
