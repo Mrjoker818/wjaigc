@@ -8,6 +8,11 @@ export interface PersistedModelCandidate {
   providerId: string;
 }
 
+export interface ExactModelKey {
+  providerId: string;
+  modelId: string;
+}
+
 export type PersistedModelSelectionResolution =
   | {
       status: 'exact' | 'migrated';
@@ -63,15 +68,23 @@ export function isModelAssignedToUser(
   return allowedModels.includes(modelId) || allowedModels.includes(`${providerId}::${modelId}`);
 }
 
+export function parseExactModelKey(selection: string): ExactModelKey | null {
+  const separatorIndex = selection.indexOf('::');
+  if (separatorIndex <= 0) return null;
+
+  const providerId = selection.slice(0, separatorIndex);
+  const modelId = selection.slice(separatorIndex + 2);
+  return modelId ? { providerId, modelId } : null;
+}
+
 export function resolvePersistedModelSelection(
   persistedSelection: string,
   candidates: PersistedModelCandidate[],
 ): PersistedModelSelectionResolution {
   const selection = persistedSelection.trim();
-  const separatorIndex = selection.indexOf('::');
-  if (separatorIndex >= 0) {
-    const providerId = selection.slice(0, separatorIndex);
-    const modelId = selection.slice(separatorIndex + 2);
+  const exactKey = parseExactModelKey(selection);
+  if (exactKey) {
+    const { providerId, modelId } = exactKey;
     const exact = candidates.some(candidate => (
       candidate.providerId === providerId && candidate.id === modelId
     ));

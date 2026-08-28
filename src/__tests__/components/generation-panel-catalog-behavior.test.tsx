@@ -92,9 +92,8 @@ describe('GenerationPanel exact catalog behavior', () => {
       : undefined;
   }
 
-  it('does not select or rewrite either provider for an ambiguous persisted bare model id', async () => {
-    persistUserSelection('shared-image');
-    catalogState.current = {
+  function sharedProviderCatalog() {
+    return {
       models: [
         {
           id: 'shared-image',
@@ -102,6 +101,7 @@ describe('GenerationPanel exact catalog behavior', () => {
           providerId: 'provider-a',
           providerName: 'Provider A',
           type: 'image',
+          isDefault: true,
         },
         {
           id: 'shared-image',
@@ -109,6 +109,7 @@ describe('GenerationPanel exact catalog behavior', () => {
           providerId: 'provider-b',
           providerName: 'Provider B',
           type: 'image',
+          isDefault: false,
         },
       ],
       descriptorsByKey: new Map([
@@ -119,6 +120,11 @@ describe('GenerationPanel exact catalog behavior', () => {
       error: null,
       reload: vi.fn(),
     };
+  }
+
+  it('does not select or rewrite either provider for an ambiguous persisted bare model id', async () => {
+    persistUserSelection('shared-image');
+    catalogState.current = sharedProviderCatalog();
 
     render(<GenerationPanel onGenerate={vi.fn()} />);
 
@@ -127,6 +133,71 @@ describe('GenerationPanel exact catalog behavior', () => {
     expect(select.value).toBe('');
     expect(readPersistedUserSelection()).toBe('shared-image');
     expect(localStorage.getItem('wujie_selected_model')).toBeNull();
+  });
+
+  it.each([
+    ['provider-b::shared-image', 'provider-b::shared-image'],
+    ['shared-image', ''],
+    ['missing-image', ''],
+  ])('keeps persisted selection %s stable across async catalog load and reload', async (
+    persistedSelection,
+    expectedSelection,
+  ) => {
+    persistUserSelection(persistedSelection);
+    catalogState.current = {
+      models: [],
+      descriptorsByKey: new Map(),
+      loading: true,
+      error: null,
+      reload: vi.fn(),
+    };
+    const onGenerate = vi.fn();
+    const view = render(<GenerationPanel onGenerate={onGenerate} />);
+
+    catalogState.current = sharedProviderCatalog();
+    view.rerender(<GenerationPanel onGenerate={onGenerate} />);
+    await waitFor(() => expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value)
+      .toBe(expectedSelection));
+
+    catalogState.current = sharedProviderCatalog();
+    view.rerender(<GenerationPanel onGenerate={onGenerate} />);
+    await waitFor(() => expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value)
+      .toBe(expectedSelection));
+    expect(readPersistedUserSelection()).toBe(persistedSelection);
+    if (!expectedSelection) expect(localStorage.getItem('wujie_selected_model')).toBeNull();
+  });
+
+  it('waits for the catalog before consuming an exact favorite model selection', async () => {
+    catalogState.current = {
+      models: [],
+      descriptorsByKey: new Map(),
+      loading: true,
+      error: null,
+      reload: vi.fn(),
+    };
+    const onFavoriteParamsApplied = vi.fn();
+    const favorite = { model: 'provider-b::shared-image' };
+    const view = render(
+      <GenerationPanel
+        onGenerate={vi.fn()}
+        applyFavoriteParams={favorite}
+        onFavoriteParamsApplied={onFavoriteParamsApplied}
+      />,
+    );
+
+    expect(onFavoriteParamsApplied).not.toHaveBeenCalled();
+    catalogState.current = sharedProviderCatalog();
+    view.rerender(
+      <GenerationPanel
+        onGenerate={vi.fn()}
+        applyFavoriteParams={favorite}
+        onFavoriteParamsApplied={onFavoriteParamsApplied}
+      />,
+    );
+
+    await waitFor(() => expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value)
+      .toBe('provider-b::shared-image'));
+    expect(onFavoriteParamsApplied).toHaveBeenCalledTimes(1);
   });
 
   it('migrates and writes back a persisted bare model id with one visible provider', async () => {
@@ -151,6 +222,46 @@ describe('GenerationPanel exact catalog behavior', () => {
     await waitFor(() => expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value)
       .toBe('pear::gpt-image-2'));
     expect(readPersistedUserSelection()).toBe('pear::gpt-image-2');
+  });
+
+  it('preserves a namespaced model id through selection, persistence and generation', async () => {
+    const onGenerate = vi.fn();
+    persistUserSelection('provider-a::vendor::image-v2');
+    catalogState.current = {
+      models: [{
+        id: 'vendor::image-v2',
+        name: 'Vendor Image V2',
+        providerId: 'provider-a',
+        providerName: 'Provider A',
+        type: 'image',
+        isDefault: true,
+      }],
+      descriptorsByKey: new Map([['provider-a::vendor::image-v2', {
+        ...descriptor,
+        providerId: 'provider-a',
+        modelId: 'vendor::image-v2',
+      }]]),
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+    };
+
+    render(<GenerationPanel onGenerate={onGenerate} />);
+
+    await waitFor(() => expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value)
+      .toBe('provider-a::vendor::image-v2'));
+    expect(JSON.parse(localStorage.getItem('wujie_selected_model') || 'null')).toMatchObject({
+      model: 'vendor::image-v2',
+      providerId: 'provider-a',
+      compositeKey: 'provider-a::vendor::image-v2',
+    });
+
+    fireEvent.change(screen.getByLabelText('创意描述'), { target: { value: '命名空间模型' } });
+    act(() => document.dispatchEvent(new Event('trigger-generate')));
+    expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'vendor::image-v2',
+      providerId: 'provider-a',
+    }));
   });
 
   it('does not write back a persisted bare model id with no visible provider', async () => {

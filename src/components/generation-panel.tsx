@@ -9,7 +9,7 @@ import { ApiProvider } from '@/lib/universal-api-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { resolvePersistedModelSelection, selectInitialModel } from '@/lib/model-defaults';
+import { parseExactModelKey, resolvePersistedModelSelection, selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
 import { isResolutionTier, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
 import { GenerationBackgroundControl } from '@/components/generation-background-control';
@@ -294,34 +294,6 @@ export function GenerationPanel(
         }
     }, [externalPrompt, externalPromptApplied, onExternalPromptConsumed]);
 
-    // Apply favorite params (prompt, model, aspectRatio, quality)
-    useEffect(() => {
-        if (applyFavoriteParams) {
-            if (applyFavoriteParams.prompt) setPrompt(applyFavoriteParams.prompt);
-            if (applyFavoriteParams.model) {
-                const favoriteModelId = applyFavoriteParams.model;
-                let resolution = resolvePersistedModelSelection(favoriteModelId, discoveredModels);
-                if (!resolution.compositeKey && !favoriteModelId.includes('::')) {
-                    try {
-                        const saved = JSON.parse(localStorage.getItem('wujie_selected_model') || 'null');
-                        const savedKey = saved?.compositeKey
-                            || (saved?.providerId && saved?.model ? `${saved.providerId}::${saved.model}` : '');
-                        const savedResolution = resolvePersistedModelSelection(savedKey, discoveredModels);
-                        if (savedResolution.modelId === favoriteModelId) resolution = savedResolution;
-                    } catch {}
-                }
-                setModel(resolution.compositeKey || '');
-                onModelChange?.(resolution.compositeKey ? resolution.modelId : '');
-            }
-            if (applyFavoriteParams.aspectRatio) setAspectRatio(applyFavoriteParams.aspectRatio);
-            if (applyFavoriteParams.quality) setQuality(applyFavoriteParams.quality);
-            // negativePrompt is stored in CanvasImage but not directly applicable
-            // in generation panel (used in img2img panel). It's included in the
-            // data for future use and for the "copy keywords" feature.
-            onFavoriteParamsApplied?.();
-        }
-    }, [applyFavoriteParams, discoveredModels, onFavoriteParamsApplied, onModelChange]);
-
     // Sync external reference image from canvas right-click "发送参考图"
     useEffect(() => {
         if (externalReferenceImage && !externalRefImgApplied) {
@@ -379,6 +351,40 @@ export function GenerationPanel(
         loading: catalogLoading,
         error: catalogError,
     } = useTaskModelCatalog('image');
+    const [pendingModelMigration, setPendingModelMigration] = useState<string | null>(null);
+    const pendingModelMigrationRef = useRef<string | null>(null);
+    const automaticSelectionBlockedRef = useRef(false);
+
+    // Apply favorite params only after the visible server catalog is authoritative.
+    useEffect(() => {
+        if (!applyFavoriteParams || catalogLoading) return;
+
+        if (applyFavoriteParams.prompt) setPrompt(applyFavoriteParams.prompt);
+        if (applyFavoriteParams.model) {
+            const candidates = catalogModels.map(entry => ({
+                id: entry.id,
+                providerId: entry.providerId,
+            }));
+            const favoriteModelId = applyFavoriteParams.model;
+            let resolution = resolvePersistedModelSelection(favoriteModelId, candidates);
+            if (!resolution.compositeKey && !parseExactModelKey(favoriteModelId)) {
+                try {
+                    const saved = JSON.parse(localStorage.getItem('wujie_selected_model') || 'null');
+                    const savedKey = saved?.compositeKey
+                        || (saved?.providerId && saved?.model ? `${saved.providerId}::${saved.model}` : '');
+                    const savedResolution = resolvePersistedModelSelection(savedKey, candidates);
+                    if (savedResolution.modelId === favoriteModelId) resolution = savedResolution;
+                } catch {}
+            }
+            automaticSelectionBlockedRef.current = !resolution.compositeKey;
+            setModel(resolution.compositeKey || '');
+            onModelChange?.(resolution.compositeKey ? resolution.modelId : '');
+        }
+        if (applyFavoriteParams.aspectRatio) setAspectRatio(applyFavoriteParams.aspectRatio);
+        if (applyFavoriteParams.quality) setQuality(applyFavoriteParams.quality);
+        // negativePrompt is stored in CanvasImage but is consumed by img2img, not this panel.
+        onFavoriteParamsApplied?.();
+    }, [applyFavoriteParams, catalogLoading, catalogModels, onFavoriteParamsApplied, onModelChange]);
     const [showThirdPartyDialog, setShowThirdPartyDialog] = useState(false);
     const [thirdPartyDefaultType, setThirdPartyDefaultType] = useState<'image' | 'chat'>('image');
     const [universalApiName, setUniversalApiName] = useState('');
@@ -395,10 +401,11 @@ export function GenerationPanel(
     const promptDragRef = useRef<{ startY: number; startH: number } | null>(null);
 
     const persistSelectedModel = useCallback((compositeKey: string) => {
-        if (typeof window === 'undefined' || !compositeKey.includes('::')) return;
+        if (typeof window === 'undefined') return;
 
-        const pureId = compositeKey.split('::').pop()!;
-        const providerId = compositeKey.split('::')[0] || '';
+        const parsedKey = parseExactModelKey(compositeKey);
+        if (!parsedKey) return;
+        const { modelId: pureId, providerId } = parsedKey;
         const modelEntry = discoveredModels.find(
             entry => entry.id === pureId && entry.providerId === providerId,
         );
@@ -441,9 +448,6 @@ export function GenerationPanel(
     }, []);
 
     // Load initial model selection from localStorage
-    const [pendingModelMigration, setPendingModelMigration] = useState<string | null>(null);
-    const pendingModelMigrationRef = useRef<string | null>(null);
-
     useEffect(() => {
         if (typeof window !== 'undefined' && !model) {
             try {
@@ -454,28 +458,9 @@ export function GenerationPanel(
                         const data = JSON.parse(stored);
                         const saved = data?.userData?.[currentUserId]?.selectedModel;
                         if (saved) {
-                            if (!saved.includes('::')) {
-                                // 旧版纯 modelId，需等 discoveredModels 加载后迁移为复合键
-                                pendingModelMigrationRef.current = saved;
-                                setPendingModelMigration(saved);
-                            } else {
-                                setModel(saved);
-                                // 同步写入 wujie_selected_model
-                                try {
-                                    const pureId = saved.includes('::') ? saved.split('::').pop()! : saved;
-                                    const providerId = saved.includes('::') ? saved.split('::')[0] : '';
-                                    const dm = discoveredModels.find(m => m.id === pureId && m.providerId === providerId);
-                                    localStorage.setItem('wujie_selected_model', JSON.stringify({
-                                        model: pureId,
-                                        providerId: providerId,
-                                        compositeKey: saved,
-                                        apiDisplayName: dm?.apiDisplayName || dm?.displayLabel || '',
-                                        providerName: dm?.providerName || '',
-                                        quality: quality,
-                                        aspectRatio: aspectRatio,
-                                    }));
-                                } catch {}
-                            }
+                            // Exact and legacy keys both wait for the visible catalog before use.
+                            pendingModelMigrationRef.current = saved;
+                            setPendingModelMigration(saved);
                         }
                     }
                 }
@@ -486,7 +471,7 @@ export function GenerationPanel(
     // 通知父组件当前模型变化（API Key由服务端管理，无需传递）
     // 传递纯 modelId（从复合键 providerId::modelId 中拆解）
     useEffect(() => {
-        const pureModelId = model ? (model.includes('::') ? model.split('::').pop()! : model) : '';
+        const pureModelId = parseExactModelKey(model)?.modelId || '';
         onModelChange?.(pureModelId);
     }, [model, onModelChange]);
 
@@ -497,7 +482,7 @@ export function GenerationPanel(
         persistSelectedModel(model);
     }, [model, discoveredModels, persistSelectedModel]);
 
-    const pureModelId = model ? (model.includes('::') ? model.split('::').pop()! : model) : '';
+    const pureModelId = parseExactModelKey(model)?.modelId || '';
     const selectedDescriptor = descriptorsByKey.get(model);
     const supportedRatios = useMemo(
         () => selectedDescriptor?.allowedRatios ?? [],
@@ -570,8 +555,9 @@ export function GenerationPanel(
         const fullPrompt = [resolvedPrompt, ...selectedTags].filter(Boolean).join(", ");
         
         // 从复合键 providerId::modelId 中拆解出纯 modelId 和 providerId
-        const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
-        let compositeProviderId = model.includes('::') ? model.split('::')[0] : undefined;
+        const parsedModelKey = parseExactModelKey(model);
+        const pureModelId = parsedModelKey?.modelId || '';
+        let compositeProviderId = parsedModelKey?.providerId;
         
         // ★ 修复：当 model 不含 :: 时（如 applyFavoriteParams 传入的纯 modelId），
         // 尝试从 localStorage 或 discoveredModels 回填 providerId，避免多提供商同名模型选错
@@ -798,18 +784,19 @@ export function GenerationPanel(
         : "bg-transparent";
 
     // 万能API相关函数
-  // 迁移旧版纯 modelId → 复合键 providerId::modelId
+  // Resolve persisted exact/legacy keys only against the authoritative visible catalog.
     useEffect(() => {
-        if (pendingModelMigration && discoveredModels.length > 0) {
+        if (pendingModelMigration && !catalogLoading) {
             const resolution = resolvePersistedModelSelection(
                 pendingModelMigration,
-                discoveredModels,
+                catalogModels.map(entry => ({ id: entry.id, providerId: entry.providerId })),
             );
-            if (resolution.compositeKey) setModel(resolution.compositeKey);
+            automaticSelectionBlockedRef.current = !resolution.compositeKey;
+            setModel(resolution.compositeKey || '');
             pendingModelMigrationRef.current = null;
             setPendingModelMigration(null);
         }
-    }, [pendingModelMigration, discoveredModels]);
+    }, [pendingModelMigration, catalogLoading, catalogModels]);
 
     // 3D模型名称友好标签映射
     const get3DModelLabel = (modelId: string): string => {
@@ -846,13 +833,15 @@ export function GenerationPanel(
             };
         });
         setDiscoveredModels(serverModels);
-        if (!pendingModelMigrationRef.current) {
+        if (!catalogLoading
+            && !pendingModelMigrationRef.current
+            && !automaticSelectionBlockedRef.current) {
             setModel(prev => selectInitialModel(prev, serverModels.map(entry => ({
                 id: `${entry.providerId}::${entry.id}`,
                 isDefault: entry.isDefault,
             }))));
         }
-    }, [catalogModels]);
+    }, [catalogLoading, catalogModels]);
 
     const handleAddUniversalApi = async () => {
         if (!universalApiManager || !universalApiName.trim() || !universalApiUrl.trim() || !universalApiKey.trim()) {
@@ -1021,36 +1010,11 @@ export function GenerationPanel(
                         value={model}
                         onChange={(e) => {
                             const compositeKey = e.target.value;
+                            automaticSelectionBlockedRef.current = false;
+                            pendingModelMigrationRef.current = null;
+                            setPendingModelMigration(null);
                             setModel(compositeKey);
-                            // Save selected model (composite key) to localStorage for canvas tools
-                            try {
-                              const currentUserId = localStorage.getItem('unbounded_ai_current_user');
-                              if (currentUserId) {
-                                const stored = localStorage.getItem('unbounded_ai_user_data');
-                                const data = stored ? JSON.parse(stored) : { userData: {} };
-                                if (!data.userData) data.userData = {};
-                                if (!data.userData[currentUserId]) data.userData[currentUserId] = {};
-                                data.userData[currentUserId].selectedModel = compositeKey;
-                                localStorage.setItem('unbounded_ai_user_data', JSON.stringify(data));
-                              }
-                            } catch (err) {
-                              console.error('Failed to save selected model:', err);
-                            }
-                            // 同步写入 wujie_selected_model 供画布工具读取
-                            try {
-                              const newPureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
-                              const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : '';
-                              const dm = discoveredModels.find(m => m.id === newPureModelId && m.providerId === providerId);
-                              localStorage.setItem('wujie_selected_model', JSON.stringify({
-                                model: newPureModelId,
-                                providerId: providerId,
-                                compositeKey: compositeKey,
-                                apiDisplayName: dm?.apiDisplayName || dm?.displayLabel || '',
-                                providerName: dm?.providerName || '',
-                                quality: quality,
-                                aspectRatio: aspectRatio,
-                              }));
-                            } catch {}
+                            persistSelectedModel(compositeKey);
                         }}
                         className={`${inputStl} appearance-none cursor-pointer`}
                     >
@@ -1070,7 +1034,7 @@ export function GenerationPanel(
                                 return (
                                 <optgroup key={providerName} label={label}>
                                     {models.map(dm => {
-                                        // Use composite key (modelId::providerId) to distinguish same-name models from different providers
+                                        // Use composite key (providerId::modelId) to distinguish same-name models from different providers
                                         const compositeValue = `${dm.providerId}::${dm.id}`;
                                         return (
                                         <option key={compositeValue} value={compositeValue} className={mc ? "bg-white text-gray-900" : "bg-[#1a1d26] text-text-bright"}>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isModelAssignedToUser,
+  parseExactModelKey,
   resolvePersistedModelSelection,
   resolveQuickCreateModel,
   selectInitialModel,
@@ -37,6 +38,13 @@ describe('persisted model selection resolution', () => {
       compositeKey: 'provider-b::shared-model',
       modelId: 'shared-model',
       providerId: 'provider-b',
+    });
+  });
+
+  it('parses an exact key at the first separator without truncating a namespaced model id', () => {
+    expect(parseExactModelKey('provider-a::vendor::shared-model')).toEqual({
+      providerId: 'provider-a',
+      modelId: 'vendor::shared-model',
     });
   });
 
