@@ -39,6 +39,10 @@ describe('infinite canvas component boundaries', () => {
 
   it('opens the workspace image preview when a canvas image is double-clicked', () => {
     expect(canvasSource).toContain('onPreviewImage,');
+    expect(canvasSource).toContain('if (e.detail >= 2)');
+    expect(canvasSource.indexOf('if (e.detail >= 2)')).toBeLessThan(
+      canvasSource.indexOf('if (suppressSelectionClickRef.current)'),
+    );
     expect(canvasSource).toContain('onPreviewImage(image);');
   });
 });

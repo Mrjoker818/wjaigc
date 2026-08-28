@@ -11741,6 +11741,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (e.detail >= 2) {
+                    suppressSelectionClickRef.current = false;
+                    if (image.isProcessingPlaceholder || image.mediaType === 'video') return;
+                    if (editMode !== 'none' || annotationMode) return;
+                    onPreviewImage(image);
+                    return;
+                  }
                   if (suppressSelectionClickRef.current) {
                     suppressSelectionClickRef.current = false;
                     return;
@@ -11751,12 +11758,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                   if (e.altKey || e.ctrlKey || e.metaKey) return;
                   selectSelectionHit(image.id, 'replace');
                   selectImage(image.id);
-                }}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  if (image.isProcessingPlaceholder || image.mediaType === 'video') return;
-                  if (editMode !== 'none' || annotationMode) return;
-                  onPreviewImage(image);
                 }}
               >
                 {image.isProcessingPlaceholder && image.processing ? (
