@@ -2712,3 +2712,28 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 已关闭边界 | 同请求并发复用唯一任务、唯一执行器、唯一扣费；同键异摘要冲突；四类终态竞争只保留一个赢家；迟到完成/失败被拒绝；退款最多一次且余额与终态一致。 |
 | 回归 | 聚焦 `11 files / 92 tests`；带数据库全仓 `587 files / 4193 tests`，失败与跳过均为 0；TypeScript 和零错误 ESLint 通过。生产构建默认约 4 GiB 堆 OOM，8 GiB 堆复验通过 `117/117`，资源风险未隐藏。 |
 | 状态 | **本地 PostgreSQL 子项已关闭，整项仍未关闭。** 云端真实供应商调用、一次扣费、同键重放、失败退款和最终 PSD 下载文件仍需真实证据。机器结果：`docs/testing/evidence/v588-stability-002-postgres-local-2026-08-28.json`。 |
+
+### V588-STABILITY-002-BUG-004 - 图片预览 Pro PSD 绕过异步幂等客户端（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：Pro PSD 无法进入真实供应商分层任务，界面却静默输出本地回退文件，形成错误成功认知。 |
+| 发现环境 | Coze `main@28a722b337a642e90f707e708b06c1b80a3155be`，Google Chrome 152，项目 `project_1787549625844_nfmso3ts9`。 |
+| 稳定复现 | 双击真实 `3504 x 2336` 图片打开预览并点击 `PSD`。`POST /api/layered-decompose` 未携带 `idempotency-key`，返回 HTTP 400 与 `LAYER_IDEMPOTENCY_INVALID`；旧 `/api/design/layer-split` 随后返回 501。 |
+| 实际结果 | 前端仍下载 `Image_pro.psd`，但这是本地算法回退，不是 Pear/API 供应商成功。该文件 `23,415,572` 字节、SHA-256 `c3ffd41d...f159d5bd`、`8BPS` 有效，解析到 9 个组/图层；本次没有供应商 taskId，也没有可证明的扣费。 |
+| 根因 | `psd-export.ts` 保留旧同步裸 `fetch`，绕过已有 `runLayerDecomposition()`；即使补上 Header，旧代码也不能消费 HTTP 202 + 轮询任务。此外两处 15 秒包装会提前放弃最长 10 分钟的持久任务，供应商完成后结果仍会被忽略。异步结果只有图层 URL，若不加载为 Canvas，PSD 组装器又会漏写远端图层。 |
+| RED | 新增 `psd-export-layer-decomposition.test.ts`；首轮 `2/2 failed`，分别证明缺少持久客户端和仍存在 15 秒包装；后续 RED 分别锁定 URL 图层未物化、裁剪图层被错误拉伸为全画布，以及共享客户端失败后仍可能发起第二个远程任务。 |
+| 最小修复 | 预览 Pro PSD 改为复用 `runLayerDecomposition({ engine: 'smart' })`，由共享客户端负责合法幂等键、模型选择、HTTP 202、状态轮询和服务器智能回退；移除两处 15 秒任务截断；按远端图层原始宽高加载 Canvas 并保留 `offsetX/offsetY` 后再组装 PSD。共享客户端失败后直接进入既有本地 PSD 算法，不再调用第二条远程分层接口。 |
+| 本地回归 | 专项 `34/34`；真实 PostgreSQL 幂等/终态 `5/5`；全仓真实数据库 `588 files / 4195 tests`，失败与跳过均为 0；TypeScript、零错误 ESLint、8 GiB 堆生产构建 `117/117` 通过。 |
+| 状态 | **本地已修复 / 云端待验。** 修复提交部署后必须重新记录合法 Header、应用 taskId、供应商阶段、真实积分变化和最终 PSD 图层；不得用本次回退文件关闭付费门禁。证据：`docs/testing/evidence/v588-stability-002-psd-pro-cloud-prefix-2026-08-28.json`。 |
+
+### V588-STABILITY-002-BUG-004 本地终审增量（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 耐久提交边界 | 每张源图使用独立的 `wujie:psd-layer-resume:v3:<sourceKey>` 恢复记录；幂等键绑定源摘要与单调代次。浏览器缺少 WebCrypto、localStorage 或 Web Locks 时禁止发起可计费远程分层，直接回到既有本地 PSD 算法。 |
+| 并发与恢复 | 首次目标 provider/model 在提交前持久化并在该代冻结；`taskId` 接受后立即持久化，页面或模块重载时直接按同一任务查询，不重新提交。跨标签状态更新在 Web Lock 内比较代次和幂等键，旧标签不能清除或覆盖新任务；模糊响应保留同一代、同一键和同一目标。 |
+| PSD 保真 | 远程裁剪图层按真实源宽高物化并只应用一次 `offsetX/offsetY`；编辑器命中测试、检查器和最终 ag-psd 组装使用同一边界。Studio 远程结果继续保留阴影估算与效果分组。 |
+| RED/GREEN | 持久客户端、无 WebCrypto/无存储失败关闭、模块重载直连恢复、跨标签同键、旧代防覆盖、目标冻结、独立源记录、负偏移命中和 Studio 阴影均先得到失败回归，再完成最小修复。最终聚焦 `10 files / 80 tests` 全部通过。 |
+| 最终本地门禁 | 全新 PostgreSQL 18.4 隔离库参与全仓运行：`588/588 files`、`4213/4213 tests`，失败 `0`、跳过 `0`；`pnpm lint:build` 与 `pnpm ts-check` 均以 `0` 退出。生产构建结果以同日发布报告的最终记录为准。 |
+| 状态 | **本地实现与并发恢复门禁已关闭；云端真实供应商链路仍未关闭。** 必须部署精确 `main` 提交后证明快速返回应用 taskId、不中断恢复同一任务、真实远程图层写入 PSD、一次扣费、同键重放不重复扣费及失败只退款一次。 |

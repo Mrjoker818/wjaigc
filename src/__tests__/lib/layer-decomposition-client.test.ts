@@ -41,6 +41,7 @@ describe('layer decomposition client', () => {
 
   it('submits once and polls until persisted layers are completed', async () => {
     const calls: Array<{ url: string; method: string }> = [];
+    const targetEvents: string[] = [];
     const responses = [
       { success: true, taskId: 'layer-1', status: 'processing', phase: 'waiting-for-pear', progress: 15 },
       { success: true, taskId: 'layer-1', status: 'processing', phase: 'refining-layers', progress: 75 },
@@ -55,6 +56,7 @@ describe('layer decomposition client', () => {
     ];
     const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({ url: String(input), method: init?.method || 'GET' });
+      if (init?.method === 'POST') targetEvents.push('post');
       return new Response(JSON.stringify(responses.shift()), {
         status: calls.length === 1 ? 202 : 200,
         headers: { 'content-type': 'application/json' },
@@ -69,11 +71,93 @@ describe('layer decomposition client', () => {
       fetcher,
       wait: async () => {},
       idempotencyKey: 'layer-request-123',
+      onResolvedTarget: async ({ providerId, modelId }: { providerId: string; modelId: string }) => {
+        targetEvents.push(`${providerId}/${modelId}`);
+      },
+    } as Parameters<typeof runLayerDecomposition>[0] & {
+      onResolvedTarget: (target: { providerId: string; modelId: string }) => Promise<void>;
     });
 
     expect(result.engine).toBe('pear');
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
     expect(calls.filter((call) => call.method === 'GET')).toHaveLength(2);
+    expect(targetEvents).toEqual(['pear-provider/Image-Layered', 'post']);
+  });
+
+  it('resumes an accepted task directly without another submit', async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method || 'GET' });
+      return new Response(JSON.stringify({
+        success: true,
+        taskId: 'layer-resume-1',
+        status: 'completed',
+        phase: 'ready',
+        progress: 100,
+        result: {
+          width: 8,
+          height: 8,
+          layers: [],
+          engine: 'pear',
+          quality: { status: 'pass', score: 99, warnings: [] },
+        },
+      }), { headers: { 'content-type': 'application/json' } });
+    };
+
+    await runLayerDecomposition({
+      imageUrl: '/source.png',
+      engine: 'smart',
+      resumeTaskId: 'layer-resume-1',
+      fetcher,
+      wait: async () => {},
+      idempotencyKey: 'layer-request-resume-1',
+    });
+
+    expect(calls).toEqual([{
+      url: '/api/layered-decompose?taskId=layer-resume-1',
+      method: 'GET',
+    }]);
+  });
+
+  it('uses the authoritative persisted target returned before POST', async () => {
+    let submittedBody: Record<string, unknown> | undefined;
+    const fetcher = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      submittedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        success: true,
+        taskId: 'authoritative-target-task',
+        status: 'completed',
+        phase: 'ready',
+        progress: 100,
+        result: {
+          width: 8,
+          height: 8,
+          layers: [],
+          engine: 'pear',
+          quality: { status: 'pass', score: 99, warnings: [] },
+        },
+      }), { headers: { 'content-type': 'application/json' } });
+    };
+
+    await runLayerDecomposition({
+      imageUrl: '/source.png',
+      engine: 'cloud',
+      providerId: 'new-provider',
+      modelId: 'new-model',
+      fetcher,
+      idempotencyKey: 'authoritative-target-key',
+      onResolvedTarget: async () => ({
+        providerId: 'persisted-provider',
+        modelId: 'persisted-model',
+      }),
+    } as Parameters<typeof runLayerDecomposition>[0] & {
+      onResolvedTarget: () => Promise<{ providerId: string; modelId: string }>;
+    });
+
+    expect(submittedBody).toMatchObject({
+      providerId: 'persisted-provider',
+      modelId: 'persisted-model',
+    });
   });
 
   it('does not silently run local when cloud mode has no authorized model', async () => {

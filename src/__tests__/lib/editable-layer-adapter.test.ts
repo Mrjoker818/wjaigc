@@ -30,6 +30,8 @@ describe('editable layer adapter', () => {
       parentId: 'group-product',
       offsetX: 120,
       offsetY: 75,
+      sourceWidth: 640,
+      sourceHeight: 480,
       opacity: 0.65,
       blendMode: 'multiply',
       imageDataUrl: '/api/serve-upload/layer.png',

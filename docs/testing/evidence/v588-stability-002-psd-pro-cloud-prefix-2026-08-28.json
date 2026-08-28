@@ -1,0 +1,72 @@
+{
+  "schema": "wujie.cloud-evidence.v1",
+  "recordedAt": "2026-08-28T13:54:55+08:00",
+  "environment": {
+    "browser": "Google Chrome 152",
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "gitCommit": "28a722b337a642e90f707e708b06c1b80a3155be",
+    "projectId": "project_1787549625844_nfmso3ts9"
+  },
+  "sourceImage": {
+    "managedUrl": "/api/serve-upload/uploads/gen-1786507598285-t9qt60.png",
+    "width": 3504,
+    "height": 2336
+  },
+  "network": {
+    "primaryRequest": {
+      "method": "POST",
+      "path": "/api/layered-decompose",
+      "requestId": "21556.16724",
+      "status": 400,
+      "requestBody": {
+        "imageUrl": "/api/serve-upload/uploads/gen-1786507598285-t9qt60.png",
+        "prompt": "Image",
+        "layers": 4,
+        "resolution": 640
+      },
+      "idempotencyHeaderPresent": false,
+      "response": {
+        "success": false,
+        "code": "LAYER_IDEMPOTENCY_INVALID",
+        "message": "idempotency key must be 8-128 URL-safe characters",
+        "retryable": false
+      }
+    },
+    "legacyFallbackRequest": {
+      "method": "POST",
+      "path": "/api/design/layer-split",
+      "requestId": "21556.16726",
+      "status": 501,
+      "responseCode": "LAYER_SPLIT_ENDPOINT_NOT_CONFIGURED"
+    },
+    "billableTaskCreated": false,
+    "providerSubmissionObserved": false
+  },
+  "downloadedFallbackPsd": {
+    "path": "C:/Users/Administrator/Downloads/Image_pro.psd",
+    "bytes": 23415572,
+    "sha256": "c3ffd41dd8ca08f5bb08903f12071dbd14ee00cd707b7fc31d2ad5f9f159d5bd",
+    "signature": "8BPS",
+    "width": 3504,
+    "height": 2336,
+    "parsedLayerCount": 9,
+    "layerNames": [
+      "00_White_Background",
+      "group/background",
+      "bg/main",
+      "group/subjects",
+      "subject/01/main_subject",
+      "group/text",
+      "text/01/untitled",
+      "group/source",
+      "00_Original"
+    ],
+    "classification": "local-fallback-not-provider-success"
+  },
+  "verdict": "failed-before-provider-submission",
+  "creditDelta": "not-verified",
+  "notes": [
+    "The downloaded PSD is structurally valid but was produced after both cloud decomposition requests failed.",
+    "No provider taskId or provider/model evidence exists for this attempt, so it cannot close the paid Pro PSD gate."
+  ]
+}

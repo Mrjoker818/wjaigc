@@ -1944,3 +1944,27 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 | 生产构建 | 有条件通过 | 默认约 4 GiB Node 堆 OOM；8 GiB 堆完成编译、TypeScript、`117/117` 静态页面和构建追踪 |
 
 数据库证据关闭了“本地没有真实 PostgreSQL”的旧缺口，但不代表云端第三方供应商或生产账务已经通过。真实 Pro PSD、同键重放、失败退款和最终文件仍保留为云端门禁。机器证据：`docs/testing/evidence/v588-stability-002-postgres-local-2026-08-28.json`。
+
+## 2026-08-28 Pro PSD 异步分层客户端回归
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| 云端旧链路复现 | 失败已确认 | `/api/layered-decompose` HTTP 400 `LAYER_IDEMPOTENCY_INVALID`；旧回退 HTTP 501；无供应商 taskId |
+| 下载文件辨识 | 通过但仅属回退 | `Image_pro.psd` 为有效 `8BPS`，`3504 x 2336`、9 个组/图层；不得记为供应商成功 |
+| TDD RED/GREEN | 通过 | RED 覆盖持久客户端、15 秒截断、URL 图层物化、裁剪图层尺寸/偏移和禁止第二远程任务；GREEN 专项矩阵 `34/34` |
+| PostgreSQL 账务竞态 | 通过 | 隔离 PostgreSQL 18.4 下 `5/5`，无跳过 |
+| 全仓测试 | 通过 | `588/588 files`、`4195/4195 tests`、0 失败、0 跳过，耗时 `617.98s` |
+| TypeScript / ESLint | 通过 | `pnpm ts-check`、`pnpm lint:build` 均为退出码 0 |
+| 生产构建 | 通过（资源条件） | `NODE_OPTIONS=--max-old-space-size=8192 pnpm build`，117/117 路由；编译约 14.4 分钟 |
+
+本轮只证明修复候选在本地完整通过。Coze 尚未拉取该候选，因此真实供应商任务、一次扣费、进度阶段与最终远端图层 PSD 仍需部署后重测。
+
+## 2026-08-28 Pro PSD 耐久客户端终审回归
+
+- 入口已统一到共享异步分层客户端；不再保留裸请求、15 秒截断或第二条远程付费回退。
+- 浏览器可计费提交要求 WebCrypto、localStorage 与 Web Locks 同时可用。每张源图维护独立恢复记录，幂等键按代次稳定生成；模糊响应沿用原键，成功或明确终态才推进下一代。
+- provider/model 在首次提交前冻结；服务器返回 taskId 后立即持久化。模块重载直接恢复该 taskId，跨标签旧代写入不能覆盖新任务。
+- 远程裁剪图层的源尺寸与绝对偏移贯穿适配器、Canvas 命中、检查器和最终 PSD 组装，避免双重偏移或拉伸；Studio 路径保留阴影与效果组。
+- 聚焦矩阵 `10 files / 80 tests` 通过；全仓在全新 PostgreSQL 18.4 隔离库下为 `588 files / 4213 tests` 全部通过，失败与跳过均为 0；`pnpm lint:build`、`pnpm ts-check` 均退出 0。
+- 8 GiB 堆生产构建以 `0` 退出：webpack 编译约 `13.7min`，TypeScript 完成，静态页面 `117/117` 生成；约 4 GiB 默认堆的既有 OOM 资源约束仍保留。
+- **回归结论：本地代码、真实数据库并发和恢复合同通过；云端仍为未吸收。** 旧云端 400 + 本地回退证据继续有效，不能替代部署后真实 provider task、一次扣费、同键重放、失败退款和最终 PSD 图层证据。

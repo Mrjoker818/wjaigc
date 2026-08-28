@@ -7,6 +7,27 @@ export interface PsdCanvasSurfaceContext {
   fillRect(x: number, y: number, width: number, height: number): void;
 }
 
+interface PositionedPsdLayer {
+  offsetX?: number;
+  offsetY?: number;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  boundingBox?: { x?: number; y?: number; width: number; height: number };
+}
+
+export function resolvePsdLayerBounds(
+  layer: PositionedPsdLayer,
+  fallbackWidth: number,
+  fallbackHeight: number,
+): { x: number; y: number; width: number; height: number } {
+  return {
+    x: Math.round(layer.offsetX ?? 0),
+    y: Math.round(layer.offsetY ?? 0),
+    width: layer.sourceWidth ?? (fallbackWidth > 0 ? fallbackWidth : (layer.boundingBox?.width ?? 0)),
+    height: layer.sourceHeight ?? (fallbackHeight > 0 ? fallbackHeight : (layer.boundingBox?.height ?? 0)),
+  };
+}
+
 export function drawPsdCanvasSurface(
   context: PsdCanvasSurfaceContext,
   width: number,

@@ -2,6 +2,10 @@
 
 import type { DesignScene, DesignSceneLayer } from '@/types/psdLayer';
 import { editableLayerAssetsToDesignLayers } from '@/lib/editable-layer-adapter';
+import {
+  LayerClientError,
+  runLayerDecomposition,
+} from '@/lib/layer-decomposition-client';
 import type { LayerDecompositionResult } from '@/lib/layer-decomposition/types';
 
 /**
@@ -108,6 +112,8 @@ export interface DesignLayer {
   locked?: boolean;
   offsetX?: number;
   offsetY?: number;
+  sourceWidth?: number;
+  sourceHeight?: number;
   score?: number;
   fallbackReason?: string;
   canvas?: HTMLCanvasElement;
@@ -572,32 +578,6 @@ interface AIAnalysisResult {
   backgroundMode?: string;
 }
 
-interface ExternalLayerSplitLayer {
-  id?: string;
-  name?: string;
-  role?: string;
-  text?: string;
-  textContent?: string;
-  content?: string;
-  fontSize?: number;
-  color?: string | [number, number, number];
-  imageUrl?: string;
-  dataUrl?: string;
-  url?: string;
-  bbox?: [number, number, number, number] | { x: number; y: number; width: number; height: number };
-  opacity?: number;
-  blendMode?: string;
-}
-
-interface ExternalLayerSplitResult {
-  success: boolean;
-  engine?: string;
-  width?: number;
-  height?: number;
-  layers?: ExternalLayerSplitLayer[];
-  error?: string;
-}
-
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise(resolve => {
     const timer = window.setTimeout(() => resolve(fallback), ms);
@@ -611,57 +591,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
         resolve(fallback);
       });
   });
-}
-
-function normalizeLayerRole(role?: string): LayerRole {
-  const value = (role || '').toLowerCase();
-  if (value.includes('bg') || value.includes('background')) return 'background';
-  if (value.includes('text') || value.includes('ocr')) return 'text';
-  if (value.includes('shadow') || value.includes('fx') || value.includes('effect')) return 'shadow';
-  if (value.includes('deco') || value.includes('prop') || value.includes('asset')) return 'deco';
-  if (value.includes('original')) return 'original';
-  return 'subject';
-}
-
-function bboxFromExternal(
-  bbox: ExternalLayerSplitLayer['bbox'] | undefined,
-  width: number,
-  height: number
-): BBox {
-  if (Array.isArray(bbox) && bbox.length >= 4) {
-    const [x1, y1, x2, y2] = bbox;
-    return { x: x1, y: y1, width: Math.max(1, x2 - x1), height: Math.max(1, y2 - y1) };
-  }
-  if (bbox && typeof bbox === 'object' && !Array.isArray(bbox)) {
-    return {
-      x: bbox.x || 0,
-      y: bbox.y || 0,
-      width: Math.max(1, bbox.width || width),
-      height: Math.max(1, bbox.height || height),
-    };
-  }
-  return { x: 0, y: 0, width, height };
-}
-
-function normalizeExternalText(item: ExternalLayerSplitLayer): string | undefined {
-  const text = item.textContent || item.text || item.content;
-  if (!text || typeof text !== 'string') return undefined;
-  const cleaned = text.trim();
-  return cleaned.length > 0 ? cleaned : undefined;
-}
-
-function normalizeExternalTextColor(color: ExternalLayerSplitLayer['color']): [number, number, number] | undefined {
-  if (Array.isArray(color) && color.length >= 3) {
-    return [Number(color[0]) || 0, Number(color[1]) || 0, Number(color[2]) || 0];
-  }
-  if (typeof color !== 'string') return undefined;
-  const hex = color.trim().replace(/^#/, '');
-  if (!/^[0-9a-f]{6}$/i.test(hex)) return undefined;
-  return [
-    parseInt(hex.slice(0, 2), 16),
-    parseInt(hex.slice(2, 4), 16),
-    parseInt(hex.slice(4, 6), 16),
-  ];
 }
 
 async function canvasFromImageUrl(url: string, width: number, height: number): Promise<HTMLCanvasElement> {
@@ -680,314 +609,16 @@ async function canvasFromImageUrl(url: string, width: number, height: number): P
   return canvas;
 }
 
-function layerArea(layer: DesignLayer): number {
-  const box = layer.boundingBox;
-  return box ? box.width * box.height : 0;
-}
-
-function unionBoxes(boxes: Array<BBox | undefined>, width: number, height: number): BBox {
-  const valid = boxes.filter(Boolean) as BBox[];
-  if (valid.length === 0) return { x: 0, y: 0, width, height };
-  const minX = Math.min(...valid.map(box => box.x));
-  const minY = Math.min(...valid.map(box => box.y));
-  const maxX = Math.max(...valid.map(box => box.x + box.width));
-  const maxY = Math.max(...valid.map(box => box.y + box.height));
-  return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
-}
-
-function mergeDesignLayers(
-  id: string,
-  role: LayerRole,
-  name: string,
-  sourceLayers: DesignLayer[],
-  width: number,
-  height: number,
-  warning: string
-): DesignLayer | null {
-  const drawable = sourceLayers.filter(layer => layer.canvas);
-  if (drawable.length === 0) return null;
-
-  const mergedCanvas = document.createElement('canvas');
-  mergedCanvas.width = width;
-  mergedCanvas.height = height;
-  const ctx = mergedCanvas.getContext('2d')!;
-  for (const layer of drawable) {
-    if (!layer.canvas) continue;
-    ctx.globalAlpha = layer.opacity;
-    ctx.drawImage(layer.canvas, 0, 0);
-  }
-  ctx.globalAlpha = 1;
-
-  const box = unionBoxes(drawable.map(layer => layer.boundingBox), width, height);
-  const avgMaskScore = drawable.reduce((sum, layer) => sum + layer.maskScore, 0) / drawable.length;
-  const avgEdgeScore = drawable.reduce((sum, layer) => sum + layer.edgeScore, 0) / drawable.length;
-
-  return {
-    id,
-    role,
-    name,
-    visible: true,
-    opacity: 1,
-    blendMode: role === 'shadow' ? 'multiply' : 'normal',
-    canvas: mergedCanvas,
-    imageDataUrl: mergedCanvas.toDataURL('image/png'),
-    boundingBox: box,
-    bbox: [box.x, box.y, box.x + box.width, box.y + box.height],
-    maskScore: Math.min(0.95, avgMaskScore + 0.02),
-    edgeScore: Math.min(0.95, avgEdgeScore + 0.02),
-    semanticLabel: role === 'background' ? 'background' : role === 'deco' ? 'decorative_element' : 'main_subject',
-    reconstructMode: 'raster-safe',
-    source: 'original',
-    warnings: [warning],
-  };
-}
-
-function consolidateExternalLayers(
-  layers: DesignLayer[],
-  width: number,
-  height: number,
-  engine: string
-): DesignLayer[] {
-  const original = layers.filter(layer => layer.role === 'original');
-  const background = layers.filter(layer => layer.role === 'background');
-  const text = layers.filter(layer => layer.role === 'text');
-  const subject = layers.filter(layer => layer.role === 'subject');
-  const deco = layers.filter(layer => layer.role === 'deco' || layer.role === 'shadow');
-  const output: DesignLayer[] = [...original];
-
-  const mergedBg = background.length > 1
-    ? mergeDesignLayers('split_bg_main', 'background', v4LayerName('background', 0, 'main'), background, width, height, `Background regions from ${engine} were merged into one PSD layer.`)
-    : background[0];
-  if (mergedBg) output.push(mergedBg);
-
-  const textWithContent = text.filter(layer => layer.textContent || layer.editableText);
-  const textWithoutContent = text.filter(layer => !layer.textContent && !layer.editableText);
-  output.push(...textWithContent.map((layer, index) => ({
-    ...layer,
-    id: `split_text_${index + 1}`,
-    name: layer.textContent
-      ? `text/${String(index + 1).padStart(2, '0')}/${layer.textContent.slice(0, 12)}`
-      : layer.name,
-    reconstructMode: layer.textContent ? 'editable-experimental' as const : layer.reconstructMode,
-    warnings: [
-      ...(layer.warnings ?? []),
-      layer.textContent ? 'Editable Photoshop text layer will be written beside the raster reference.' : '',
-    ].filter(Boolean),
-  })));
-
-  const mergedRasterText = textWithoutContent.length > 1
-    ? mergeDesignLayers('split_text_raster', 'text', v4LayerName('text', 0, 'raster_text_blocks'), textWithoutContent, width, height, `Raster text fragments from ${engine} were consolidated into one text reference layer.`)
-    : textWithoutContent[0];
-  if (mergedRasterText) output.push(mergedRasterText);
-
-  const subjectsByArea = [...subject].sort((a, b) => layerArea(b) - layerArea(a));
-  const keepSubjects = subjectsByArea.slice(0, 2);
-  const extraSubjects = subjectsByArea.slice(2);
-  output.push(...keepSubjects.map((layer, index) => ({
-    ...layer,
-    id: `split_subject_${index + 1}`,
-    name: v4LayerName('subject', index, index === 0 ? 'main_subject' : 'secondary_subject'),
-  })));
-
-  const mergedDetails = mergeDesignLayers(
-    'split_deco_details',
-    'deco',
-    v4LayerName('deco', 0, 'integrated_details'),
-    [...extraSubjects, ...deco],
-    width,
-    height,
-    `Small details, effects, and repeated fragments from ${engine} were merged to avoid fragmented PSD layers.`
-  );
-  if (mergedDetails) output.push(mergedDetails);
-
-  return output;
-}
-
 async function tryExternalLayerSplit(
   imageUrl: string,
-  prompt: string,
-  mode: PSDExportMode,
-  width: number,
-  height: number,
   onProgress?: (stage: string, progress: number) => void
 ): Promise<SceneBuildResult | null> {
-  // ── Try Qwen-Image-Layered first (high-quality RGBA layer decomposition) ──
+  // The shared client owns idempotency, provider selection, polling and server-side fallback.
   try {
     onProgress?.('layer_split_service', 10);
-    const qwenResp = await fetch('/api/layered-decompose', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageUrl,
-        prompt,
-        layers: mode === 'studio' ? 6 : mode === 'pro' ? 4 : 3,
-        resolution: 640,
-      }),
-    });
-
-    if (qwenResp.ok) {
-      const qwenResult = await qwenResp.json() as { success?: boolean; layers?: Array<{ id?: string; name?: string; imageUrl?: string; dataUrl?: string; url?: string; role?: string; opacity?: number; blendMode?: string }>; width?: number; height?: number; engine?: string };
-      if (qwenResult.success && Array.isArray(qwenResult.layers) && qwenResult.layers.length > 0) {
-        onProgress?.('building_rgba_layers', 40);
-        const sceneWidth = qwenResult.width || width;
-        const sceneHeight = qwenResult.height || height;
-        const layers: DesignLayer[] = [];
-
-        for (let i = 0; i < qwenResult.layers.length; i++) {
-          const item = qwenResult.layers[i];
-          const layerUrl = item.dataUrl || item.imageUrl || item.url;
-          if (!layerUrl) continue;
-          const role = i === 0 ? 'background' as LayerRole : i === qwenResult.layers.length - 1 ? 'subject' as LayerRole : 'subject' as LayerRole;
-          const canvas = await canvasFromImageUrl(layerUrl, sceneWidth, sceneHeight);
-          const box = { x: 0, y: 0, width: sceneWidth, height: sceneHeight };
-          layers.push({
-            id: item.id || `qwen_layer_${i}`,
-            role,
-            name: item.name || v4LayerName(role, i, role === 'background' ? 'main' : `layer_${i + 1}`),
-            visible: true,
-            opacity: item.opacity ?? 1,
-            blendMode: item.blendMode || 'normal',
-            canvas,
-            imageDataUrl: layerUrl,
-            boundingBox: box,
-            bbox: [box.x, box.y, box.x + box.width, box.y + box.height],
-            maskScore: 0.95,
-            edgeScore: 0.93,
-            semanticLabel: role === 'background' ? 'background' : 'main_subject',
-            reconstructMode: 'raster-safe',
-            source: 'original',
-            warnings: [`Layer decomposed by Qwen-Image-Layered (${qwenResult.engine || 'RGBA decomposition'}).`],
-          });
-        }
-
-        if (layers.length > 0) {
-          const groups: DesignGroup[] = [];
-          const bgLayerIds = layers.filter(l => l.role === 'background').map(l => l.id);
-          const subjectLayerIds = layers.filter(l => l.role !== 'background').map(l => l.id);
-          if (bgLayerIds.length > 0) groups.push({ id: 'group_qwen_bg', name: 'group/background', role: 'background', layerIds: bgLayerIds, visible: true });
-          if (subjectLayerIds.length > 0) groups.push({ id: 'group_qwen_subjects', name: 'group/subjects', role: 'subject', layerIds: subjectLayerIds, visible: true });
-
-          const qualityMetrics: QualityMetrics = {
-            maskBoundary: 0.93, ocr: 0.78, fontMatch: 0.7,
-            inpaint: 0.92, layerConsistency: 0.95, openability: 0.96,
-          };
-          for (const layer of layers) {
-            if (layer.canvas && !layer.imageDataUrl) {
-              try { layer.imageDataUrl = layer.canvas.toDataURL('image/png'); } catch { /* skip */ }
-            }
-          }
-          return {
-            layers,
-            groups,
-            fallbacks: [{ stage: 'layer_split', reason: 'Qwen-Image-Layered available', action: 'Used Qwen-Image-Layered RGBA decomposition' }],
-            qualityMetrics,
-            exportNotes: [{ level: 'info', message: `Qwen-Image-Layered decomposition: ${layers.length} RGBA layers` }],
-            width: sceneWidth,
-            height: sceneHeight,
-          };
-        }
-      }
-    }
+    return await requestExternalPsdScene(imageUrl, onProgress);
   } catch (e) {
-    console.warn('[tryExternalLayerSplit] Qwen-Image-Layered failed, falling back:', e instanceof Error ? e.message : e);
-  }
-
-  // ── Fallback: legacy layer-split endpoint ──
-  try {
-    onProgress?.('layer_split_service', 12);
-    const response = await fetch('/api/design/layer-split', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageUrl,
-        prompt,
-        layers: mode === 'studio' ? 6 : 4,
-        mode,
-      }),
-    });
-
-    if (!response.ok) return null;
-    const result = await response.json() as ExternalLayerSplitResult;
-    if (!result.success || !Array.isArray(result.layers) || result.layers.length === 0) return null;
-
-    onProgress?.('building_rgba_layers', 45);
-    const sceneWidth = result.width || width;
-    const sceneHeight = result.height || height;
-    const layers: DesignLayer[] = [];
-
-    for (let i = 0; i < result.layers.length; i++) {
-      const item = result.layers[i];
-      const layerUrl = item.dataUrl || item.imageUrl || item.url;
-      if (!layerUrl) continue;
-      const role = normalizeLayerRole(item.role);
-      const textContent = normalizeExternalText(item);
-      const textColor = normalizeExternalTextColor(item.color);
-      const canvas = await canvasFromImageUrl(layerUrl, sceneWidth, sceneHeight);
-      const box = bboxFromExternal(item.bbox, sceneWidth, sceneHeight);
-      layers.push({
-        id: item.id || `split_layer_${i}`,
-        role,
-        name: item.name || v4LayerName(role, i, role),
-        visible: true,
-        opacity: item.opacity ?? 1,
-        blendMode: item.blendMode || 'normal',
-        canvas,
-        imageDataUrl: layerUrl,
-        boundingBox: box,
-        bbox: [box.x, box.y, box.x + box.width, box.y + box.height],
-        maskScore: 0.92,
-        edgeScore: 0.9,
-        semanticLabel: role === 'background' ? 'background' : role === 'text' ? 'text' : role === 'deco' ? 'decorative_element' : 'main_subject',
-        textContent,
-        editableText: textContent,
-        ocrConfidence: textContent ? 0.95 : undefined,
-        fontSize: item.fontSize,
-        textColor,
-        reconstructMode: textContent ? 'editable-experimental' : 'raster-safe',
-        source: 'original',
-        warnings: [`Layer imported from ${result.engine || 'external RGBA layer split service'}.`],
-      });
-    }
-
-    if (layers.length === 0) return null;
-    const engine = result.engine || 'external layer split service';
-    const consolidatedLayers = consolidateExternalLayers(layers, sceneWidth, sceneHeight, engine);
-
-    const groups: DesignGroup[] = [];
-    const bgLayerIds = consolidatedLayers.filter(l => l.role === 'background').map(l => l.id);
-    const subjectLayerIds = consolidatedLayers.filter(l => l.role === 'subject').map(l => l.id);
-    const decoLayerIds = consolidatedLayers.filter(l => l.role === 'deco' || l.role === 'shadow').map(l => l.id);
-    const textLayerIds = consolidatedLayers.filter(l => l.role === 'text').map(l => l.id);
-    if (bgLayerIds.length > 0) groups.push({ id: 'group_split_bg', name: 'group/background', role: 'background', layerIds: bgLayerIds, visible: true });
-    if (subjectLayerIds.length > 0) groups.push({ id: 'group_split_subjects', name: 'group/subjects', role: 'subject', layerIds: subjectLayerIds, visible: true });
-    if (decoLayerIds.length > 0) groups.push({ id: 'group_split_details', name: 'group/integrated-details', role: 'deco', layerIds: decoLayerIds, visible: true });
-    if (textLayerIds.length > 0) groups.push({ id: 'group_split_text', name: 'group/editable-text', role: 'text', layerIds: textLayerIds, visible: true });
-    const qualityMetrics: QualityMetrics = {
-      maskBoundary: 0.9,
-      ocr: consolidatedLayers.some(layer => layer.textContent) ? 0.95 : 0.78,
-      fontMatch: consolidatedLayers.some(layer => layer.textContent) ? 0.82 : 0.62,
-      inpaint: 0.86,
-      layerConsistency: 0.96,
-      openability: 0.98,
-    };
-    const exportNotes: ExportNote[] = [{
-      level: 'info',
-      message: `Imported ${layers.length} RGBA layers from ${engine} and consolidated them into ${consolidatedLayers.length} semantic PSD layers.`,
-      stage: 'layer_split',
-    }];
-
-    onProgress?.('generating_previews', 90);
-    return {
-      layers: consolidatedLayers,
-      groups,
-      fallbacks: [],
-      qualityMetrics,
-      exportNotes,
-      width: sceneWidth,
-      height: sceneHeight,
-    };
-  } catch (error) {
-    console.warn('External layer split unavailable:', error);
+    console.warn('[tryExternalLayerSplit] Durable layer decomposition failed, falling back:', e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -1460,6 +1091,321 @@ export function buildSceneFromEditableLayerAssets(
   };
 }
 
+const PSD_LAYER_RESUME_STORAGE_PREFIX = 'wujie:psd-layer-resume:v3:';
+
+interface PsdLayerResumeState {
+  sourceKey: string;
+  idempotencyKey: string;
+  taskId?: string;
+  generation?: number;
+  providerId?: string;
+  modelId?: string;
+}
+
+const psdLayerResumeMemory = new Map<string, PsdLayerResumeState>();
+
+function getPsdLayerResumeStorage(): Storage | undefined {
+  if (typeof window !== 'undefined') {
+    try {
+      return window.localStorage;
+    } catch {
+      return undefined;
+    }
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  return descriptor && 'value' in descriptor ? descriptor.value as Storage : undefined;
+}
+
+function psdLayerResumeStorageKey(sourceKey: string): string {
+  return `${PSD_LAYER_RESUME_STORAGE_PREFIX}${sourceKey}`;
+}
+
+function isPsdLayerResumeState(item: unknown): item is PsdLayerResumeState {
+  if (!item || typeof item !== 'object') return false;
+  const state = item as Partial<PsdLayerResumeState>;
+  return typeof state.sourceKey === 'string'
+    && /^[a-f0-9]{64}$/.test(state.sourceKey)
+    && typeof state.idempotencyKey === 'string'
+    && /^[A-Za-z0-9_-]{8,128}$/.test(state.idempotencyKey)
+    && (state.taskId === undefined || typeof state.taskId === 'string')
+    && (state.generation === undefined
+      || (Number.isSafeInteger(state.generation) && state.generation >= 0))
+    && ((state.providerId === undefined && state.modelId === undefined)
+      || (typeof state.providerId === 'string'
+        && state.providerId.length > 0
+        && state.providerId.length <= 200
+        && typeof state.modelId === 'string'
+        && state.modelId.length > 0
+        && state.modelId.length <= 200));
+}
+
+function readPsdLayerResumeState(sourceKey: string): PsdLayerResumeState | undefined {
+  try {
+    const value = getPsdLayerResumeStorage()?.getItem(psdLayerResumeStorageKey(sourceKey));
+    const parsed = value ? JSON.parse(value) as unknown : undefined;
+    return isPsdLayerResumeState(parsed) && parsed.sourceKey === sourceKey ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writePsdLayerResumeState(state: PsdLayerResumeState): boolean {
+  try {
+    const storage = getPsdLayerResumeStorage();
+    if (!storage) return typeof window === 'undefined';
+    storage.setItem(
+      psdLayerResumeStorageKey(state.sourceKey),
+      JSON.stringify(state),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requirePsdLayerRecoveryEnvironment(): void {
+  if (typeof window === 'undefined') return;
+  if (!getPsdLayerResumeStorage()) {
+    throw new Error('PSD layer recovery storage is required before starting a billable task.');
+  }
+  if (typeof navigator === 'undefined' || !navigator.locks) {
+    throw new Error('Web Locks are required before starting a billable PSD layer task.');
+  }
+}
+
+async function withPsdLayerResumeLock<T>(
+  sourceKey: string,
+  action: () => T | Promise<T>,
+): Promise<T> {
+  const lockManager = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  if (!lockManager) return action();
+  return lockManager.request(`wujie:psd-layer:${sourceKey}`, action);
+}
+
+function getLatestPsdLayerResumeState(sourceKey: string): PsdLayerResumeState | undefined {
+  const memory = psdLayerResumeMemory.get(sourceKey);
+  const stored = readPsdLayerResumeState(sourceKey);
+  if (!memory) return stored;
+  if (!stored) return memory;
+  const memoryGeneration = memory.generation ?? 0;
+  const storedGeneration = stored.generation ?? 0;
+  if (storedGeneration > memoryGeneration) return stored;
+  if (memoryGeneration > storedGeneration) return memory;
+  if (stored.taskId && !memory.taskId) return stored;
+  if (stored.providerId && stored.modelId && (!memory.providerId || !memory.modelId)) return stored;
+  return memory;
+}
+
+function persistPsdLayerResumeState(state: PsdLayerResumeState): void {
+  psdLayerResumeMemory.set(state.sourceKey, state);
+  if (!writePsdLayerResumeState(state)) {
+    throw new Error('PSD layer recovery storage could not be updated safely.');
+  }
+}
+
+function createPsdLayerIdempotencyKey(sourceKey: string, generation: number): string {
+  return `psd-layer-${sourceKey}-${generation.toString(36)}`;
+}
+
+async function fingerprintPsdLayerSource(source: string): Promise<string> {
+  const bytes = new TextEncoder().encode(source);
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('WebCrypto is required before starting a billable PSD layer task.');
+  }
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes));
+  return Array.from(digest, (value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+async function getPsdLayerResumeState(source: string): Promise<PsdLayerResumeState> {
+  const sourceKey = await fingerprintPsdLayerSource(source);
+  requirePsdLayerRecoveryEnvironment();
+  return withPsdLayerResumeLock(sourceKey, () => {
+    const current = getLatestPsdLayerResumeState(sourceKey);
+    if (current) {
+      psdLayerResumeMemory.set(sourceKey, current);
+      return current;
+    }
+    const state: PsdLayerResumeState = {
+      sourceKey,
+      idempotencyKey: createPsdLayerIdempotencyKey(sourceKey, 0),
+      generation: 0,
+    };
+    persistPsdLayerResumeState(state);
+    return state;
+  });
+}
+
+async function updatePsdLayerResolvedTarget(
+  state: PsdLayerResumeState,
+  target: { providerId: string; modelId: string },
+): Promise<{ providerId: string; modelId: string }> {
+  return withPsdLayerResumeLock(state.sourceKey, () => {
+    const current = getLatestPsdLayerResumeState(state.sourceKey) || state;
+    if ((current.generation ?? 0) !== (state.generation ?? 0)
+      || current.idempotencyKey !== state.idempotencyKey) {
+      throw new Error('PSD layer operation generation changed before provider submission.');
+    }
+    if (current.providerId && current.modelId) {
+      return { providerId: current.providerId, modelId: current.modelId };
+    }
+    persistPsdLayerResumeState({ ...current, ...target });
+    return target;
+  });
+}
+
+async function updatePsdLayerResumeState(
+  state: PsdLayerResumeState,
+  taskId: string,
+): Promise<void> {
+  await withPsdLayerResumeLock(state.sourceKey, () => {
+    const current = getLatestPsdLayerResumeState(state.sourceKey) || state;
+    if ((current.generation ?? 0) !== (state.generation ?? 0)
+      || current.idempotencyKey !== state.idempotencyKey) return;
+    persistPsdLayerResumeState({ ...current, taskId });
+  });
+}
+
+async function advancePsdLayerResumeState(state: PsdLayerResumeState): Promise<void> {
+  await withPsdLayerResumeLock(state.sourceKey, () => {
+    const current = getLatestPsdLayerResumeState(state.sourceKey) || state;
+    if ((current.generation ?? 0) !== (state.generation ?? 0)
+      || current.idempotencyKey !== state.idempotencyKey) return;
+    const generation = (state.generation ?? 0) + 1;
+    persistPsdLayerResumeState({
+      sourceKey: state.sourceKey,
+      idempotencyKey: createPsdLayerIdempotencyKey(state.sourceKey, generation),
+      generation,
+    });
+  });
+}
+
+export async function requestExternalPsdScene(
+  imageUrl: string,
+  onProgress?: (stage: string, progress: number) => void,
+  loadLayerCanvas: (
+    imageUrl: string,
+    width: number,
+    height: number,
+  ) => Promise<HTMLCanvasElement> = canvasFromImageUrl,
+): Promise<SceneBuildResult> {
+  const resume = await getPsdLayerResumeState(imageUrl);
+  let terminalStatus: string | undefined;
+  try {
+    const result = await runLayerDecomposition({
+      imageUrl,
+      engine: 'smart',
+      idempotencyKey: resume.idempotencyKey,
+      resumeTaskId: resume.taskId,
+      providerId: resume.providerId,
+      modelId: resume.modelId,
+      onResolvedTarget: (target) => updatePsdLayerResolvedTarget(resume, target),
+      onTaskId: (taskId) => updatePsdLayerResumeState(resume, taskId),
+      onProgress: (task, presentation) => {
+        if (task.status !== 'pending' && task.status !== 'processing') {
+          terminalStatus = task.status;
+        }
+        onProgress?.(task.phase || 'layer_split_service', presentation.progress);
+      },
+    });
+    const scene = buildSceneFromEditableLayerAssets(result);
+    const assetsById = new Map(result.layers.map((asset) => [asset.id, asset]));
+    for (const layer of scene.layers) {
+      if (layer.imageDataUrl && !layer.canvas) {
+        const asset = assetsById.get(layer.id);
+        layer.canvas = await loadLayerCanvas(
+          layer.imageDataUrl,
+          asset?.width ?? scene.width,
+          asset?.height ?? scene.height,
+        );
+      }
+    }
+    await advancePsdLayerResumeState(resume);
+    return scene;
+  } catch (error) {
+    if (
+      (terminalStatus && terminalStatus !== 'completed')
+      || (error instanceof LayerClientError
+        && !error.retryable
+        && error.code !== 'LAYER_IDEMPOTENCY_CONFLICT')
+    ) {
+      await advancePsdLayerResumeState(resume);
+    }
+    throw error;
+  }
+}
+
+function addStudioShadowToExternalScene(scene: SceneBuildResult): void {
+  if (scene.layers.some((layer) => layer.role === 'shadow')) return;
+  const subject = scene.layers
+    .filter((layer) => layer.role === 'subject' && layer.canvas)
+    .sort((left, right) => (
+      (right.canvas?.width || 0) * (right.canvas?.height || 0)
+      - (left.canvas?.width || 0) * (left.canvas?.height || 0)
+    ))[0];
+  if (!subject?.canvas) return;
+
+  const source = subject.canvas;
+  const pixels = source.getContext('2d')?.getImageData(0, 0, source.width, source.height);
+  if (!pixels) return;
+  const mask = new Uint8Array(scene.width * scene.height);
+  const offsetX = Math.round(subject.offsetX ?? 0);
+  const offsetY = Math.round(subject.offsetY ?? 0);
+  for (let y = 0; y < source.height; y++) {
+    const targetY = offsetY + y;
+    if (targetY < 0 || targetY >= scene.height) continue;
+    for (let x = 0; x < source.width; x++) {
+      const targetX = offsetX + x;
+      if (targetX < 0 || targetX >= scene.width) continue;
+      if (pixels.data[(y * source.width + x) * 4 + 3] > 8) {
+        mask[targetY * scene.width + targetX] = 1;
+      }
+    }
+  }
+  if (countMask(mask) === 0) return;
+
+  const box = bboxFromMask(mask, scene.width, scene.height)
+    || { x: 0, y: 0, width: scene.width, height: scene.height };
+  const shadowId = 'layer_shadow_external_01';
+  scene.layers.push({
+    id: shadowId,
+    role: 'shadow',
+    name: v4LayerName('shadow', 0, 'main_subject'),
+    visible: true,
+    opacity: 0.25,
+    blendMode: 'multiply',
+    canvas: estimateShadowCanvas(new ImageData(scene.width, scene.height), mask),
+    boundingBox: box,
+    bbox: [box.x, box.y, box.x + box.width, box.y + box.height],
+    maskScore: 0.45,
+    edgeScore: 0.3,
+    semanticLabel: 'ambient_shadow',
+    reconstructMode: 'raster-safe',
+    derivedFrom: subject.id,
+    source: 'estimated',
+    warnings: ['Estimated Studio shadow from the remote subject alpha.'],
+  });
+  const effects = scene.groups.find((group) => group.role === 'shadow');
+  if (effects) {
+    effects.layerIds.push(shadowId);
+  } else {
+    const effectGroup = {
+      id: 'group_fx',
+      name: 'group/effects',
+      role: 'shadow',
+      layerIds: [shadowId],
+      visible: true,
+    };
+    const subjectGroupIndex = scene.groups.findIndex((group) => group.role === 'subject');
+    if (subjectGroupIndex >= 0) scene.groups.splice(subjectGroupIndex, 0, effectGroup);
+    else scene.groups.push(effectGroup);
+  }
+  scene.exportNotes.push({
+    level: 'info',
+    stage: 'studio_shadow',
+    message: 'Studio shadow estimated from the accepted remote subject layer.',
+  });
+}
+
 async function buildPhotoshopEditableScene(
   imageUrl: string,
   prompt: string,
@@ -1527,12 +1473,12 @@ async function buildPhotoshopEditableScene(
     return { layers, groups, fallbacks, qualityMetrics, exportNotes, width: canvas.width, height: canvas.height };
   }
 
-  const externalScene = await withTimeout(
-    tryExternalLayerSplit(imageUrl, prompt, mode, canvas.width, canvas.height, onProgress),
-    15000,
-    null
+  const externalScene = await tryExternalLayerSplit(
+    imageUrl,
+    onProgress,
   );
   if (externalScene) {
+    if (mode === 'studio') addStudioShadowToExternalScene(externalScene);
     externalScene.layers.unshift(layers[0]);
     externalScene.groups.push({ id: 'group_source', name: 'group/source', role: 'notes', layerIds: [originalLayerId], visible: true });
     return externalScene;
@@ -1883,12 +1829,12 @@ export async function buildV4Scene(
 
   // === Pro & Studio: Background Removal + Component Analysis ===
 
-  const externalScene = await withTimeout(
-    tryExternalLayerSplit(imageUrl, prompt, mode, canvas.width, canvas.height, onProgress),
-    15000,
-    null
+  const externalScene = await tryExternalLayerSplit(
+    imageUrl,
+    onProgress,
   );
   if (externalScene) {
+    if (mode === 'studio') addStudioShadowToExternalScene(externalScene);
     externalScene.layers.unshift(layers[0]);
     externalScene.groups.push({ id: 'group_source', name: 'group/source', role: 'notes', layerIds: ['layer_original'], visible: true });
     return externalScene;
@@ -2496,6 +2442,8 @@ function assemblePSD(
         groupLayers.push({
           name: editableTextLayer ? `${dl.name}/raster-reference` : dl.name,
           canvas: dl.canvas,
+          left: Math.round(dl.offsetX ?? 0),
+          top: Math.round(dl.offsetY ?? 0),
           opacity: dl.opacity,
           blendMode: blendModeToAgPs(dl.blendMode),
           hidden: !dl.visible || (dl.role === 'text' && !!editableTextLayer && !!dl.textContent && !!(dl.ocrConfidence && dl.ocrConfidence >= 0.94)),
@@ -2521,6 +2469,8 @@ function assemblePSD(
       agLayers.push({
         name: editableTextLayer ? `${dl.name}/raster-reference` : dl.name,
         canvas: dl.canvas,
+        left: Math.round(dl.offsetX ?? 0),
+        top: Math.round(dl.offsetY ?? 0),
         opacity: dl.opacity,
         blendMode: blendModeToAgPs(dl.blendMode),
         hidden: !dl.visible || (dl.role === 'text' && !!editableTextLayer && !!dl.textContent && !!(dl.ocrConfidence && dl.ocrConfidence >= 0.94)),
@@ -2556,22 +2506,8 @@ async function imageUrlToCanvas(imageUrl: string): Promise<HTMLCanvasElement> {
   return canvas;
 }
 
-async function layerToExportCanvas(layer: DesignLayer, width: number, height: number): Promise<HTMLCanvasElement | undefined> {
-  const source = layer.canvas ?? (layer.imageDataUrl ? await imageUrlToCanvas(layer.imageDataUrl) : undefined);
-  if (!source) return undefined;
-
-  const offsetX = Math.round(layer.offsetX ?? 0);
-  const offsetY = Math.round(layer.offsetY ?? 0);
-  if (offsetX === 0 && offsetY === 0 && source.width === width && source.height === height) {
-    return source;
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(source, offsetX, offsetY);
-  return canvas;
+async function layerToExportCanvas(layer: DesignLayer): Promise<HTMLCanvasElement | undefined> {
+  return layer.canvas ?? (layer.imageDataUrl ? imageUrlToCanvas(layer.imageDataUrl) : undefined);
 }
 
 function buildFlatGroups(layers: DesignLayer[]): DesignGroup[] {
@@ -2589,18 +2525,11 @@ export async function exportEditedLayersAsPSD(
   const exportLayers: DesignLayer[] = [];
 
   for (const layer of layers) {
-    const canvas = await layerToExportCanvas(layer, width, height);
+    const canvas = await layerToExportCanvas(layer);
     if (!canvas) continue;
     const dx = Math.round(layer.offsetX ?? 0);
     const dy = Math.round(layer.offsetY ?? 0);
-    const box = layer.boundingBox
-      ? {
-          x: layer.boundingBox.x + dx,
-          y: layer.boundingBox.y + dy,
-          width: layer.boundingBox.width,
-          height: layer.boundingBox.height,
-        }
-      : { x: dx, y: dy, width, height };
+    const box = { x: dx, y: dy, width: canvas.width, height: canvas.height };
 
     exportLayers.push({
       ...layer,

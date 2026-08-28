@@ -19,10 +19,15 @@ export interface RunLayerDecompositionOptions {
   providerId?: string;
   modelId?: string;
   idempotencyKey?: string;
+  resumeTaskId?: string;
   signal?: AbortSignal;
   fetcher?: FetchLike;
   wait?: WaitLike;
-  onTaskId?: (taskId: string) => void;
+  onResolvedTarget?: (target: { providerId: string; modelId: string }) =>
+    | { providerId: string; modelId: string }
+    | void
+    | Promise<{ providerId: string; modelId: string } | void>;
+  onTaskId?: (taskId: string) => void | Promise<void>;
   onProgress?: (task: LayerTaskResponse, presentation: LayerPhasePresentation) => void;
 }
 
@@ -211,38 +216,55 @@ export async function runLayerDecomposition(
   const wait = options.wait || defaultWait;
   options.signal?.throwIfAborted();
 
-  let providerId = options.providerId?.trim();
-  let modelId = options.modelId?.trim();
-  if (options.engine !== 'local' && (!providerId || !modelId)) {
-    const target = await resolveDefaultLayerTarget(fetcher, options.signal).catch((error) => {
-      if (options.engine === 'cloud') throw error;
-      return null;
-    });
-    providerId = target?.providerId;
-    modelId = target?.modelId;
-  }
-  if (options.engine === 'cloud' && (!providerId || !modelId)) {
-    throw new LayerClientError('LAYER_PROVIDER_REQUIRED');
-  }
+  let task: LayerTaskResponse;
+  const resumeTaskId = options.resumeTaskId?.trim();
+  if (resumeTaskId) {
+    const response = await fetcher(
+      `/api/layered-decompose?taskId=${encodeURIComponent(resumeTaskId)}`,
+      { method: 'GET', signal: options.signal, cache: 'no-store' },
+    );
+    task = parseTaskResponse(response, await readJson(response));
+  } else {
+    let providerId = options.providerId?.trim();
+    let modelId = options.modelId?.trim();
+    if (options.engine !== 'local' && (!providerId || !modelId)) {
+      const target = await resolveDefaultLayerTarget(fetcher, options.signal).catch((error) => {
+        if (options.engine === 'cloud') throw error;
+        return null;
+      });
+      providerId = target?.providerId;
+      modelId = target?.modelId;
+    }
+    if (options.engine === 'cloud' && (!providerId || !modelId)) {
+      throw new LayerClientError('LAYER_PROVIDER_REQUIRED');
+    }
+    if (providerId && modelId) {
+      const authoritativeTarget = await options.onResolvedTarget?.({ providerId, modelId });
+      if (authoritativeTarget) {
+        providerId = authoritativeTarget.providerId;
+        modelId = authoritativeTarget.modelId;
+      }
+    }
 
-  const response = await fetcher('/api/layered-decompose', {
-    method: 'POST',
-    signal: options.signal,
-    headers: {
-      'content-type': 'application/json',
-      'idempotency-key': options.idempotencyKey || createIdempotencyKey(),
-    },
-    body: JSON.stringify({
-      imageUrl: normalizeLayerImageUrlForSubmission(
-        options.imageUrl,
-        typeof window !== 'undefined' ? window.location.origin : undefined,
-      ),
-      engine: options.engine,
-      ...(providerId && modelId ? { providerId, modelId } : {}),
-    }),
-  });
-  let task = parseTaskResponse(response, await readJson(response));
-  options.onTaskId?.(task.taskId);
+    const response = await fetcher('/api/layered-decompose', {
+      method: 'POST',
+      signal: options.signal,
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': options.idempotencyKey || createIdempotencyKey(),
+      },
+      body: JSON.stringify({
+        imageUrl: normalizeLayerImageUrlForSubmission(
+          options.imageUrl,
+          typeof window !== 'undefined' ? window.location.origin : undefined,
+        ),
+        engine: options.engine,
+        ...(providerId && modelId ? { providerId, modelId } : {}),
+      }),
+    });
+    task = parseTaskResponse(response, await readJson(response));
+  }
+  await options.onTaskId?.(task.taskId);
   let previousPhase = task.phase;
   let delayMs = 800;
   const startedAt = Date.now();

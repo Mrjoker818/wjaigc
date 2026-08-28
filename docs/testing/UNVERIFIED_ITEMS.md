@@ -1572,3 +1572,31 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 视频/占位框及编辑/批注双击隔离 | `UNVERIFIED` | 普通图片拖动隔离已通过，但这些对象和模式尚无本轮真实云端样本。 |
 
 本地机器证据：`docs/testing/evidence/v588-stability-002-postgres-local-2026-08-28.json`。本节只覆盖数据库旧状态，不关闭云端付费、供应商或文件质量门禁。
+
+## 2026-08-28 Pro PSD 修复后的最新待验项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| 旧云端 Pro PSD | 已验证失败 | `main@28a722b3` 缺少幂等 Header，HTTP 400；下载文件仅为本地回退，不能算真实供应商通过。 |
+| 修复候选 | 本地通过 | 共享异步客户端、轮询、合法幂等、图层 URL 物化已通过全仓 `4195/4195` 与真实 PostgreSQL。 |
+| 修复后 Coze 精确 SHA | `UNVERIFIED` | Coze 拉取即将推送的新提交后，确认运行 SHA、构建、启动、健康路由与静态资源。 |
+| 真实供应商成功 | `UNVERIFIED` | POST 必须快速返回应用 taskId，阶段至少出现供应商等待和 PSD 下载/解析；最终下载 PSD 包含真实远端图层。 |
+| 一次扣费 | `UNVERIFIED` | 记录提交前后积分、taskId、provider/model 与唯一账务记录；本次 400 尝试不能证明扣费。 |
+| 同键重放 | `UNVERIFIED` | 使用完全相同的幂等键和请求摘要返回同一 taskId，供应商调用与扣费均不得增加。 |
+| 失败退款 | `UNVERIFIED` | 受控失败或超时收敛到唯一终态并只退款一次，不修改生产供应商配置制造故障。 |
+
+机器证据：`docs/testing/evidence/v588-stability-002-psd-pro-cloud-prefix-2026-08-28.json`。
+
+## 2026-08-28 Pro PSD 本地终审后的云端剩余项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| 本地持久提交合同 | 已验证 | 按源独立 v3 记录、WebCrypto 摘要、Web Locks、代次防旧写、目标冻结、taskId 直连恢复与失败关闭均有自动化证据。 |
+| 本地 PSD 几何与 Studio 保真 | 已验证 | 裁剪层源尺寸、负偏移命中、单次绝对偏移、检查器尺寸及 Studio 阴影/效果组已覆盖。 |
+| 本地完整门禁 | 已验证 | 真实 PostgreSQL 全仓 `588/588 files`、`4213/4213 tests`，失败与跳过均为 0；Lint、TypeScript 与 8 GiB 堆生产构建退出 0，静态页面 `117/117`。 |
+| 修复后 Coze 精确 SHA | `UNVERIFIED` | Coze 拉取待推送的新 `main`，确认 SHA、构建、启动、健康路由和静态资源。 |
+| 真实远程分层终态 | `UNVERIFIED` | Pro PSD 必须快速取得应用 taskId，跨刷新恢复同一任务并经历供应商等待、制品下载/解析，最终 PSD 含真实远程图层。 |
+| 云端一次扣费与同键重放 | `UNVERIFIED` | 记录积分、taskId、provider/model；同摘要同键重放必须返回同一任务且无第二次供应商调用或扣费。 |
+| 云端失败退款 | `UNVERIFIED` | 使用安全可控的供应商失败或总超时，证明唯一失败终态、一次退款和可理解提示，不改坏生产配置。 |
+
+旧云端 `main@28a722b3` 的 400 与本地 PSD 回退只证明修复前失败，不能作为上述任何新云端项的通过证据。

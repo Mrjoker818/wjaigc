@@ -2,7 +2,10 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import type { DesignLayer } from '@/lib/psd-export';
-import { drawPsdCanvasSurface } from '@/lib/psd-canvas-surface';
+import {
+  drawPsdCanvasSurface,
+  resolvePsdLayerBounds,
+} from '@/lib/psd-canvas-surface';
 
 interface PsdCanvasProps {
   layers: DesignLayer[];
@@ -158,10 +161,12 @@ export function PsdCanvas({
       const selLayer = layers.find((l) => l.id === selectedLayerId);
       const selState = layerStates.get(selectedLayerId);
       if (selLayer && selState) {
-        const bx = (selLayer.boundingBox?.x ?? 0) + selState.x;
-        const by = (selLayer.boundingBox?.y ?? 0) + selState.y;
-        const bw = selLayer.boundingBox?.width ?? width;
-        const bh = selLayer.boundingBox?.height ?? height;
+        const bounds = resolvePsdLayerBounds(
+          { ...selLayer, offsetX: selState.x, offsetY: selState.y },
+          selState.image?.naturalWidth || selState.image?.width || 0,
+          selState.image?.naturalHeight || selState.image?.height || 0,
+        );
+        const { x: bx, y: by, width: bw, height: bh } = bounds;
 
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 2 / scale;
@@ -221,10 +226,12 @@ export function PsdCanvas({
       const state = layerStates.get(layer.id);
       if (!state || !state.visible) continue;
 
-      const bx = (layer.boundingBox?.x ?? 0) + state.x;
-      const by = (layer.boundingBox?.y ?? 0) + state.y;
-      const bw = layer.boundingBox?.width ?? 0;
-      const bh = layer.boundingBox?.height ?? 0;
+      const bounds = resolvePsdLayerBounds(
+        { ...layer, offsetX: state.x, offsetY: state.y },
+        state.image?.naturalWidth || state.image?.width || 0,
+        state.image?.naturalHeight || state.image?.height || 0,
+      );
+      const { x: bx, y: by, width: bw, height: bh } = bounds;
 
       if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
         if (!layer.locked) {

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import type { DesignLayer } from '@/lib/psd-export';
+import { resolvePsdLayerBounds } from '@/lib/psd-canvas-surface';
 
 interface LayerInspectorProps {
   layer: DesignLayer;
@@ -23,8 +24,7 @@ function roleLabel(role: string): string {
 
 export function LayerInspector({ layer }: LayerInspectorProps) {
   const box = layer.boundingBox;
-  const x = Math.round((box?.x ?? 0) + (layer.offsetX ?? 0));
-  const y = Math.round((box?.y ?? 0) + (layer.offsetY ?? 0));
+  const { x, y, width, height } = resolvePsdLayerBounds(layer, box?.width ?? 0, box?.height ?? 0);
 
   return (
     <div className="p-2.5 space-y-2">
@@ -56,7 +56,7 @@ export function LayerInspector({ layer }: LayerInspectorProps) {
         {box && (
           <div className="flex justify-between">
             <span className="text-neutral-400">尺寸</span>
-            <span className="text-neutral-300">{box.width}x{box.height}</span>
+            <span className="text-neutral-300">{width}x{height}</span>
           </div>
         )}
         <div className="flex justify-between">

@@ -49,6 +49,8 @@ export function editableLayerAssetsToDesignLayers(
       blendMode: asset.blendMode || 'normal',
       offsetX,
       offsetY,
+      sourceWidth: assetWidth,
+      sourceHeight: assetHeight,
       imageDataUrl: asset.imageUrl,
       boundingBox: { x: left, y: top, width, height },
       bbox: [left, top, right, bottom] as [number, number, number, number],
