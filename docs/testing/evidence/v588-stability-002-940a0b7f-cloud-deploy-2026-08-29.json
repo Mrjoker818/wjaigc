@@ -1,0 +1,102 @@
+{
+  "recordedAt": "2026-08-29T01:21:54.8566039+08:00",
+  "environment": "Coze development sandbox",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "browser": "Google Chrome",
+  "git": {
+    "head": "940a0b7fdabd9327b75d3b8963c5eee4ec3b0f8c",
+    "headTree": "671817ee823aeb690c8ed8067372090f71d65583",
+    "originMain": "940a0b7fdabd9327b75d3b8963c5eee4ec3b0f8c",
+    "originMainTree": "671817ee823aeb690c8ed8067372090f71d65583",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "worktreeClean": true
+  },
+  "focusedRegression": {
+    "files": [
+      "src/__tests__/lib/layer-stack-order.test.ts",
+      "src/__tests__/lib/layer-quality-gate.test.ts",
+      "src/__tests__/lib/layer-reconstruction.test.ts",
+      "src/__tests__/lib/pear-layer-adapter.test.ts",
+      "src/__tests__/lib/layer-source-image.test.ts",
+      "src/__tests__/lib/pear-psd-extractor.test.ts",
+      "src/__tests__/api/layered-decompose-concurrency.test.ts"
+    ],
+    "passed": 53,
+    "failed": 0,
+    "realPearTaskTriggered": true
+  },
+  "build": {
+    "exitCode": 0,
+    "buildId": "TUepofVA2ahBpz5Izw2Fj",
+    "servicePid": 4332,
+    "startCommand": "scripts/coze-start.sh"
+  },
+  "health": {
+    "root": 200,
+    "simpleChat": 200,
+    "authMe": 200,
+    "staticAssetsReferenced": 11,
+    "staticAssetsFailed": 0,
+    "postgresConfigured": true
+  },
+  "browserRefresh": {
+    "existingTabReused": true,
+    "newTabCreated": false,
+    "authenticatedWorkspaceRestored": true,
+    "canvasImageSource": "/api/serve-upload/uploads/gen-1786507598285-t9qt60.png",
+    "pearEditableLayerEntryOpened": true
+  },
+  "realPearLayerTask": {
+    "explicitCreditAuthorization": 15,
+    "submittedExactlyOnce": true,
+    "sourceImage": "/api/serve-upload/uploads/gen-1786507598285-t9qt60.png",
+    "provider": "Pear",
+    "model": "Image-Layered",
+    "engine": "cloud",
+    "initialProgress": 5,
+    "terminalStatus": "completed",
+    "terminalProgress": 100,
+    "editorOpened": true,
+    "layerCount": 5,
+    "layerNames": [
+      "reconstruction/correction",
+      "元素 2",
+      "元素 1",
+      "主体",
+      "背景"
+    ],
+    "independentSelectionVerified": true,
+    "independentVisibilityVerified": true,
+    "correctionLayerIsolationVerified": true,
+    "correctionLayerIsolationObservation": "Hiding reconstruction/correction still left the reconstructed cup image visible from underlying layers.",
+    "layerMoveVerified": false,
+    "psdExportVerified": false,
+    "databaseBillingAuditVerified": false,
+    "taskIdCaptured": false
+  },
+  "newDefect": {
+    "id": "V588-STABILITY-002-BUG-008",
+    "severity": "P2",
+    "title": "Completed element decomposition panel cannot be closed",
+    "cloudReproduced": true,
+    "rootCause": "The panel render condition used showDisplayDecomposePanel || elementDecomposeTask while the close button only cleared showDisplayDecomposePanel.",
+    "localFix": "Render the panel only from showDisplayDecomposePanel while preserving elementDecomposeTask for status, retry, and PSD editor state.",
+    "focusedRegressionPassed": 64,
+    "cloudFixVerified": false
+  },
+  "localPostFixGate": {
+    "focusedLayerTestsPassed": 64,
+    "focusedLayerTestsFailed": 0,
+    "fullTestFilesPassed": 572,
+    "fullTestsPassed": 4154,
+    "postgresGatedTestsSkipped": 122,
+    "fullTestsFailed": 0,
+    "typescriptPassed": true,
+    "eslintErrors": 0,
+    "eslintHistoricalWarnings": 961,
+    "productionBuildExitCode": 0,
+    "staticPagesGenerated": 117
+  },
+  "releaseDecision": "conditional",
+  "remainingGate": "Pear completed and exposed five independently selectable/visible cloud layers. Remaining gates are PSD export, real layer movement, database proof of exactly one successful charge with no refund, and cloud verification of BUG-008."
+}

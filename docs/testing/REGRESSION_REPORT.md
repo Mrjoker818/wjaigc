@@ -2032,3 +2032,20 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 绘制顺序专项 `9/9`，覆盖纯 Pear、Pear 与本地修正层混合、隐藏 Pear 层，以及纯本地图层顺序保持。
 - 最终分层矩阵 `75/75`；全仓 `4154 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 ESLint 通过。8 GiB 构建在 webpack `15.8` 分钟后完成 TypeScript、`117/117` 静态页面和追踪。
 - **回归结论：ZIP 下载与主 PSD 提取已取得真实证据，图层顺序修复仅本地通过。** 在 Coze 部署新提交并打开至少 2 个可编辑远程图层前，Pear 成功终态和 `V588-STABILITY-002` 继续为未关闭。
+
+## 2026-08-29 `940a0b7f` Coze 部署与非付费回归
+
+- Coze 已精确对齐 `HEAD=origin/main=940a0b7fdabd9327b75d3b8963c5eee4ec3b0f8c`，tree 均为 `671817ee823aeb690c8ed8067372090f71d65583`；工作区干净，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- 7 个 Pear 分层专项文件共 `53/53` 通过，未触发真实供应商任务。生产构建退出码 `0`，Build ID `TUepofVA2ahBpz5Izw2Fj`，5000 PID `4332`；三个健康端点和 `11/11` HTML 引用静态资源均成功。
+- Google Chrome 复用既有预览标签刷新后保持管理员登录，工作区、画布图片和“元素拆解 → 可编辑图层”入口均可访问；没有新建标签，也未使用 360 浏览器。
+- **回归判定：exact-SHA 部署 PASS，Pear 成功链路仍 UNVERIFIED。** 只有一次经明确扣费授权的真实任务达到 `completed/ready`、打开至少 2 个远程可编辑图层并通过账务审计后，才关闭本项。
+- 机器证据：`docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json`。
+
+## 2026-08-29 `940a0b7f` 真实 Pear 成功与浮层关闭回归
+
+- 经 15 积分明确授权，Google Chrome 在既有标签只提交一次 `Pear / Image-Layered / cloud` 任务；状态由 `processing · 5%` 收敛到 `completed · 100%`，PSD 编辑器自动打开。
+- 编辑器显示 5 个云端图层：校正层、两个元素层、主体和背景。主体/背景可独立选择，主体可独立显隐；隐藏 `reconstruction/correction` 后杯子画面仍由底层图层呈现，排除了“只有整图覆盖层”的伪成功。
+- 同一流程稳定复现完成后元素拆解浮层无法关闭。RED 契约测试先得到 `1 failed / 6 passed`；将显示条件从任务对象解耦后 `7/7` 通过，扩展 Pear/分层矩阵 `64/64` 通过。
+- 最终本地门禁：全仓 `572 files / 4154 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 通过；ESLint `0 errors / 961 historical warnings`；8 GiB 生产构建完成 `117/117` 页面。
+- **回归判定：Pear ZIP 到 5 个可编辑图层的云端成功路径通过；BUG-008 本地通过、云端待验。** PSD 下载、真实图层拖动和数据库一次扣费/零退款仍未验证。
+- 机器证据：`docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json`。

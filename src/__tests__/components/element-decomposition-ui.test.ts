@@ -27,8 +27,9 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(canvasSource).toContain("retryElementDecompositionBranch(elementDecomposeTask.taskId, branch)");
   });
 
-  it('keeps branch progress, retry, and cancel controls visible after submission', () => {
-    expect(canvasSource).toContain('{(showDisplayDecomposePanel || elementDecomposeTask) && (');
+  it('keeps task controls in the panel without forcing a completed panel to stay open', () => {
+    expect(canvasSource).toContain('{showDisplayDecomposePanel && (');
+    expect(canvasSource).not.toContain('{(showDisplayDecomposePanel || elementDecomposeTask) && (');
     expect(canvasSource).toContain('{elementDecomposeTask && (');
   });
 

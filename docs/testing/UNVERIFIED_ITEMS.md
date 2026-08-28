@@ -1693,3 +1693,27 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 成功账务 | `UNVERIFIED` | 成功任务只扣费一次，不退款；同键重放仍返回同一任务且不产生第二次供应商任务或扣费。 |
 | PostgreSQL 本轮重跑 | `UNVERIFIED` | 本轮 122 项因未配置隔离 `POSTGRES_TEST_DATABASE_URL` 跳过；历史真实数据库证据不冒充本轮运行。 |
 | Firefox / WebKit | `UNVERIFIED` | 在不触发重复付费的条件下完成登录、任务恢复、编辑器和保存回归。 |
+
+### `940a0b7f` 部署后的收敛状态
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| Coze exact-SHA、构建与健康 | 已验证 | `HEAD=origin/main=940a0b7f...`；`53/53` 专项、build 0、Build ID `TUepofVA2ahBpz5Izw2Fj`、PID `4332`、三个 HTTP 200、静态资源 `11/11`。 |
+| Chrome 登录与入口 | 已验证 | 既有 Google Chrome 标签刷新后保持管理员登录，画布图片可选，“可编辑图层”入口可打开；未新建标签。 |
+| Pear 成功终态与远程图层 | `UNVERIFIED` | 等待一次明确授权的真实扣费任务达到 `completed/ready`，打开至少 2 个可独立显隐、移动和保存的远程图层。 |
+| 成功账务与同键零重复 | `UNVERIFIED` | 成功只扣费一次且不退款；同键重放返回同一 taskId，不新增供应商任务或积分流水。 |
+
+机器证据：`docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json`。
+
+### `940a0b7f` 真实 Pear 成功后的收敛状态
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| Pear 成功终态与远程图层 | 已验证 | UI `completed/100%`；PSD 编辑器显示 5 层，主体/背景可独立选择与显隐；隐藏校正层后底层仍能重建画面。 |
+| ZIP 与非 depth 主 PSD | 已验证到编辑器 | 真实云端任务已越过质量门禁并打开 5 层编辑器；不是本地回退 PSD。 |
+| 成功账务 | `UNVERIFIED` | 仍需只读数据库核对：恰好一笔 `-15`、无退款、无重复供应商任务，并记录应用 taskId。 |
+| PSD 导出 | `UNVERIFIED` | 需点击导出并验证下载文件存在、`8BPS` 签名、图层数及无错误弹窗。 |
+| 图层移动与保存 | `UNVERIFIED` | 需真实拖动独立图层并验证位置变化、保存/刷新恢复；当前只完成选择与显隐。 |
+| BUG-008 云端修复 | `UNVERIFIED` | 本地 `64/64` 通过；部署后确认完成态浮层可关闭且任务状态仍可恢复。 |
+
+机器证据：`docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json`。

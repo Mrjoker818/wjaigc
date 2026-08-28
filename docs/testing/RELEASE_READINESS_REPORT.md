@@ -1627,3 +1627,17 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 云端取得 taskId 后立即取消已收敛为唯一 `cancelled`，积分净变化为 0；真实 ZIP 任务的质量失败也退款回基线。
 - 本地已修正 Pear PSD 从上到下堆栈被错误正向绘制的问题；独立复审发现的混合来源边界也已通过新增 RED/GREEN 关闭，本地分层顺序保持不变。全仓 `4154` 项通过、`122` 项 PostgreSQL 环境门禁跳过、0 失败；8 GiB 生产构建完成 `117/117`。
 - **发布结论仍为“有条件通过”。** 候选可推送 `main` 并进入 Coze 验收，但在真实任务 `completed/ready`、至少 2 个远程可编辑图层、一次成功扣费和刷新恢复通过前，不得把 Pear 分层或 `V588-STABILITY-002` 标为已吸收。
+
+## 2026-08-29 `940a0b7f` 云端运行门禁
+
+- Coze、GitHub 与本地 `main` 已精确一致为 `940a0b7fdabd9327b75d3b8963c5eee4ec3b0f8c`；生产构建、单实例启动、三个 HTTP 健康端点、`11/11` 静态资源和 `53/53` 非付费分层专项通过。
+- 现有 Google Chrome 标签刷新后保持登录并可进入 Pear 可编辑图层入口；本轮没有创建真实 Pear 任务，没有扣费或退款。
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 均未变化。
+- **发布结论仍为“有条件通过”。** exact-SHA 阻塞已解除，但远程成功终态、2+ 可编辑图层、成功账务和同键零重复仍缺真实证据；`V588-ADMIN-004` 暂不启动。
+
+## 2026-08-29 Pear 远程图层成功增量
+
+- `main@940a0b7f` 的真实 Pear `Image-Layered` 任务已从 5% 进入 UI `completed/100%`，并打开包含 5 个图层的 PSD 编辑器。独立选择、显隐和隐藏校正层后仍保留底层重建画面的验证通过。
+- 这关闭了 BUG-007 的云端质量误拒绝：真实 ZIP/主 PSD 已能越过质量门禁并形成实际可操作图层，不再停在 `LAYER_QUALITY_FAILED`。
+- 同时发现 P2 BUG-008：完成任务对象强制保持元素拆解浮层可见。该问题已按 RED -> 最小修复完成本地 `64/64` 专项回归；全仓 `4154 passed / 122 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误 ESLint 和 `117/117` 生产构建通过，但尚未部署。
+- **发布结论保持“有条件通过”。** 尚缺成功任务的数据库一次扣费且不退款证据、PSD 导出、图层拖动和 BUG-008 云端回归；这些边界关闭前不把整个 `V588-STABILITY-002` 扩大为完整发布通过。

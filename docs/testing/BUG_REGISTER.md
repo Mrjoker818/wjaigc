@@ -2821,3 +2821,38 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 本地回归 | 首轮新增测试 GREEN `6/6`；独立复审发现混合来源边界后再以 RED 复现 `mismatchedPixelRatio=0.25`，修复并扩展为绘制顺序专项 `9/9`。分层矩阵 `11 files / 75 tests`；全仓 `572 files / 4154 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 通过；ESLint `0 errors / 961 historical warnings`；8 GiB 构建 `117/117` 通过。 |
 | 状态 | **本地已修复 / 云端待验。** 必须部署新提交后再次取得真实 Pear ZIP，证明任务进入 `completed/ready`、编辑器至少显示 2 个可独立操作图层且成功仅扣费一次。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-pear-layer-order-local-2026-08-29.json` |
+
+#### `940a0b7f` Coze 部署增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 精确版本 | Coze `HEAD=origin/main=940a0b7fdabd9327b75d3b8963c5eee4ec3b0f8c`，tree 均为 `671817ee823aeb690c8ed8067372090f71d65583`；工作区干净。 |
+| 分支保护 | `origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 非付费回归 | 7 个分层文件、`53/53` 项通过，没有创建真实 Pear 任务。 |
+| 构建与运行 | `pnpm build` 退出码 `0`，Build ID `TUepofVA2ahBpz5Izw2Fj`，5000 PID `4332`；根路由、`/simple-chat`、`/api/auth/me` 和 `11/11` 静态资源成功。 |
+| Chrome 状态 | 复用现有 Google Chrome 预览标签，刷新后管理员登录态与工作区恢复；现有受控图片可选择，“元素拆解 → 可编辑图层”入口可打开。 |
+| 当前判定 | **部署与非付费门禁已关闭，BUG-007 仍未关闭。** 尚未执行本次真实扣费任务，不能把入口可打开或 ZIP 历史证据扩大为远程编辑器成功。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json` |
+
+#### `940a0b7f` 真实 Pear 成功增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 真实动作 | 经 15 积分明确授权，在既有 Google Chrome 预览标签对 `/api/serve-upload/uploads/gen-1786507598285-t9qt60.png` 提交一次 `Pear / Image-Layered / cloud` 可编辑图层任务；没有重复点击。 |
+| UI 终态 | 初始 `processing · 5%`，约 30 秒后进入 `completed · 100%`，PSD 分层编辑器自动打开。 |
+| 远程图层 | 编辑器显示 5 个图层：`reconstruction/correction`、`元素 2`、`元素 1`、`主体`、`背景`。主体与背景可独立选择，主体显隐可独立切换；隐藏整图校正层后，底层图层仍能重建杯子画面。 |
+| 判定 | **BUG-007 的图层顺序与质量误拒绝已取得云端成功证据。** 真实 ZIP 结果不再停在 `LAYER_QUALITY_FAILED`，且不是只显示整图校正层的伪分层。 |
+| 未闭环 | 本轮未取得应用 taskId、数据库 `credit_status` 与积分流水；PSD 导出下载和图层拖动也未完成。因此“成功只扣一次且不退款”、导出和移动仍不得标记通过。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-940a0b7f-cloud-deploy-2026-08-29.json`。 |
+
+### V588-STABILITY-002-BUG-008：元素拆解完成后浮层无法关闭（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2：不破坏远程图层结果，但元素拆解浮层持续遮挡 PSD 编辑器。 |
+| 云端复现 | 真实 Pear 任务完成并打开 PSD 编辑器后点击元素拆解浮层关闭按钮，浮层仍保持显示。 |
+| 根因 | 面板渲染条件为 `showDisplayDecomposePanel || elementDecomposeTask`，关闭按钮只执行 `setShowDisplayDecomposePanel(false)`；完成任务对象仍存在，导致面板被强制重新渲染。 |
+| RED | 更新既有 UI 契约测试，要求面板可见性只由 `showDisplayDecomposePanel` 控制。修复前 `1 failed / 6 passed`，失败原因与云端现象一致。 |
+| 最小修复 | 面板渲染条件改为 `showDisplayDecomposePanel`；保留 `elementDecomposeTask`，不清除分支进度、重试、取消或 PSD 初始结果。 |
+| 本地回归 | 单文件 `7/7`；Pear/分层相关 6 文件 `64/64`；全仓 `572 files / 4154 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 通过；ESLint `0 errors / 961 historical warnings`；8 GiB 生产构建 `117/117`。 |
+| 状态 | **本地已修复 / 云端待验。** 需部署后证明完成态关闭按钮可隐藏浮层，重新打开仍能读取任务状态，PSD 编辑器不被遮挡。 |
