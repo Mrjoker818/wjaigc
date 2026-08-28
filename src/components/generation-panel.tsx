@@ -9,7 +9,7 @@ import { ApiProvider } from '@/lib/universal-api-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { selectInitialModel } from '@/lib/model-defaults';
+import { resolvePersistedModelSelection, selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
 import { isResolutionTier, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
 import { GenerationBackgroundControl } from '@/components/generation-background-control';
@@ -278,6 +278,7 @@ export function GenerationPanel(
     const [selectedTemplateIndex, setSelectedTemplateIndex] = useState(0);
     const [hoveredTemplateId, setHoveredTemplateId] = useState<string | null>(null);
     const [thumbnailRect, setThumbnailRect] = useState<DOMRect | null>(null);
+    const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[]>([]);
     const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
     const templatePopupRef = useRef<HTMLDivElement>(null);
 
@@ -298,28 +299,19 @@ export function GenerationPanel(
         if (applyFavoriteParams) {
             if (applyFavoriteParams.prompt) setPrompt(applyFavoriteParams.prompt);
             if (applyFavoriteParams.model) {
-                // ★ 修复：当传入纯 modelId 时，尝试解析为复合键（providerId::modelId）
-                let resolvedModel = applyFavoriteParams.model;
-                if (!resolvedModel.includes('::')) {
-                  // 从 discoveredModels 查找匹配的复合键
-                  const matched = discoveredModels.find(m => m.id === resolvedModel);
-                  if (matched?.providerId) {
-                    resolvedModel = `${matched.providerId}::${matched.id}`;
-                  } else {
-                    // 从 localStorage 读取当前选择的提供商
+                const favoriteModelId = applyFavoriteParams.model;
+                let resolution = resolvePersistedModelSelection(favoriteModelId, discoveredModels);
+                if (!resolution.compositeKey && !favoriteModelId.includes('::')) {
                     try {
-                      const wsmStr = localStorage.getItem('wujie_selected_model');
-                      if (wsmStr) {
-                        const wsm = JSON.parse(wsmStr);
-                        if (wsm.providerId && wsm.model === resolvedModel) {
-                          resolvedModel = `${wsm.providerId}::${wsm.model}`;
-                        }
-                      }
+                        const saved = JSON.parse(localStorage.getItem('wujie_selected_model') || 'null');
+                        const savedKey = saved?.compositeKey
+                            || (saved?.providerId && saved?.model ? `${saved.providerId}::${saved.model}` : '');
+                        const savedResolution = resolvePersistedModelSelection(savedKey, discoveredModels);
+                        if (savedResolution.modelId === favoriteModelId) resolution = savedResolution;
                     } catch {}
-                  }
                 }
-                setModel(resolvedModel);
-                onModelChange?.(resolvedModel.includes('::') ? resolvedModel.split('::').pop()! : resolvedModel);
+                setModel(resolution.compositeKey || '');
+                onModelChange?.(resolution.compositeKey ? resolution.modelId : '');
             }
             if (applyFavoriteParams.aspectRatio) setAspectRatio(applyFavoriteParams.aspectRatio);
             if (applyFavoriteParams.quality) setQuality(applyFavoriteParams.quality);
@@ -328,7 +320,7 @@ export function GenerationPanel(
             // data for future use and for the "copy keywords" feature.
             onFavoriteParamsApplied?.();
         }
-    }, [applyFavoriteParams, onFavoriteParamsApplied, onModelChange]);
+    }, [applyFavoriteParams, discoveredModels, onFavoriteParamsApplied, onModelChange]);
 
     // Sync external reference image from canvas right-click "发送参考图"
     useEffect(() => {
@@ -381,7 +373,6 @@ export function GenerationPanel(
     const [productCategory, setProductCategory] = useState("none");
     const [designType, setDesignType] = useState("none");
     const [model, setModel] = useState("");
-    const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[]>([]);
     const {
         models: catalogModels,
         descriptorsByKey,
@@ -451,6 +442,7 @@ export function GenerationPanel(
 
     // Load initial model selection from localStorage
     const [pendingModelMigration, setPendingModelMigration] = useState<string | null>(null);
+    const pendingModelMigrationRef = useRef<string | null>(null);
 
     useEffect(() => {
         if (typeof window !== 'undefined' && !model) {
@@ -464,6 +456,7 @@ export function GenerationPanel(
                         if (saved) {
                             if (!saved.includes('::')) {
                                 // 旧版纯 modelId，需等 discoveredModels 加载后迁移为复合键
+                                pendingModelMigrationRef.current = saved;
                                 setPendingModelMigration(saved);
                             } else {
                                 setModel(saved);
@@ -576,9 +569,6 @@ export function GenerationPanel(
         
         const fullPrompt = [resolvedPrompt, ...selectedTags].filter(Boolean).join(", ");
         
-        // Check if model is from a universal provider
-        const universalModel = discoveredModels.find(m => m.id === model);
-        
         // 从复合键 providerId::modelId 中拆解出纯 modelId 和 providerId
         const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
         let compositeProviderId = model.includes('::') ? model.split('::')[0] : undefined;
@@ -591,19 +581,23 @@ export function GenerationPanel(
             const wsmStr = localStorage.getItem('wujie_selected_model');
             if (wsmStr) {
               const wsm = JSON.parse(wsmStr);
-              if (wsm.providerId && wsm.model === pureModelId) {
-                compositeProviderId = wsm.providerId;
+              const savedKey = wsm.compositeKey
+                || (wsm.providerId && wsm.model ? `${wsm.providerId}::${wsm.model}` : '');
+              const savedResolution = resolvePersistedModelSelection(savedKey, discoveredModels);
+              if (savedResolution.modelId === pureModelId) {
+                compositeProviderId = savedResolution.providerId || undefined;
               }
             }
           } catch {}
-          // 2. 如果 localStorage 没有，从 discoveredModels 查找第一个匹配的提供商
+          // 2. 旧裸 ID 仅在当前目录中唯一时才能迁移；重复 ID 必须保持未解析
           if (!compositeProviderId) {
-            const matchedModel = discoveredModels.find(m => m.id === pureModelId);
-            if (matchedModel?.providerId) {
-              compositeProviderId = matchedModel.providerId;
-            }
+            const resolution = resolvePersistedModelSelection(pureModelId, discoveredModels);
+            compositeProviderId = resolution.providerId || undefined;
           }
         }
+        const universalModel = compositeProviderId
+          ? discoveredModels.find(m => m.id === pureModelId && m.providerId === compositeProviderId)
+          : undefined;
         
         const selectedResolution = isResolutionTier(selectedSize)
             ? selectedSize.toUpperCase()
@@ -807,41 +801,12 @@ export function GenerationPanel(
   // 迁移旧版纯 modelId → 复合键 providerId::modelId
     useEffect(() => {
         if (pendingModelMigration && discoveredModels.length > 0) {
-            // 当多个提供商有同名模型时，优先选择第一个匹配的（按 sort_order 排序）
-            const matches = discoveredModels.filter(dm => dm.id === pendingModelMigration);
-            const match = matches.length > 0 ? matches[0] : undefined;
-            if (match) {
-                const compositeKey = `${match.providerId}::${match.id}`;
-                setModel(compositeKey);
-                try {
-                    const currentUserId = localStorage.getItem('unbounded_ai_current_user');
-                    if (currentUserId) {
-                        const stored = localStorage.getItem('unbounded_ai_user_data');
-                        if (stored) {
-                            const data = JSON.parse(stored);
-                            if (data?.userData?.[currentUserId]) {
-                                data.userData[currentUserId].selectedModel = compositeKey;
-                                localStorage.setItem('unbounded_ai_user_data', JSON.stringify(data));
-                            }
-                        }
-                    }
-                } catch {}
-                // 同步写入 wujie_selected_model
-                try {
-                    const pureId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
-                    const providerId = compositeKey.includes('::') ? compositeKey.split('::')[0] : '';
-                    const dm = discoveredModels.find(m => m.id === pureId && m.providerId === providerId);
-                    localStorage.setItem('wujie_selected_model', JSON.stringify({
-                        model: pureId,
-                        providerId: providerId,
-                        compositeKey: compositeKey,
-                        apiDisplayName: dm?.apiDisplayName || dm?.displayLabel || '',
-                        providerName: dm?.providerName || '',
-                        quality: quality,
-                        aspectRatio: aspectRatio,
-                    }));
-                } catch {}
-            }
+            const resolution = resolvePersistedModelSelection(
+                pendingModelMigration,
+                discoveredModels,
+            );
+            if (resolution.compositeKey) setModel(resolution.compositeKey);
+            pendingModelMigrationRef.current = null;
             setPendingModelMigration(null);
         }
     }, [pendingModelMigration, discoveredModels]);
@@ -881,10 +846,12 @@ export function GenerationPanel(
             };
         });
         setDiscoveredModels(serverModels);
-        setModel(prev => selectInitialModel(prev, serverModels.map(entry => ({
-            id: `${entry.providerId}::${entry.id}`,
-            isDefault: entry.isDefault,
-        }))));
+        if (!pendingModelMigrationRef.current) {
+            setModel(prev => selectInitialModel(prev, serverModels.map(entry => ({
+                id: `${entry.providerId}::${entry.id}`,
+                isDefault: entry.isDefault,
+            }))));
+        }
     }, [catalogModels]);
 
     const handleAddUniversalApi = async () => {
@@ -1087,6 +1054,7 @@ export function GenerationPanel(
                         }}
                         className={`${inputStl} appearance-none cursor-pointer`}
                     >
+                        {!model ? <option value="">请选择模型</option> : null}
                         {/* 管理员/第三方模型 */}
                         {(() => {
                             // Group discovered models by provider name
@@ -1118,7 +1086,7 @@ export function GenerationPanel(
                     {(() => {
                         const discoveredModel = discoveredModels.find(dm => {
                             const compositeKey = `${dm.providerId}::${dm.id}`;
-                            return compositeKey === model || dm.id === model;
+                            return compositeKey === model;
                         });
                         if (discoveredModel) return <p className={`text-xs mt-0.5 ${mc ? 'text-gray-400' : 'text-gold-muted/70'}`}>{discoveredModel.is3DProvider ? `${discoveredModel.displayLabel || discoveredModel.apiDisplayName || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}` : `${discoveredModel.apiDisplayName || getModelDisplayName(discoveredModel.id)} · 来自 ${discoveredModel.providerName}`}</p>;
                         return null;

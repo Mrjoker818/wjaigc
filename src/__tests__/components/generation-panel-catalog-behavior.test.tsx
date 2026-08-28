@@ -76,6 +76,95 @@ describe('GenerationPanel exact catalog behavior', () => {
     vi.unstubAllGlobals();
   });
 
+  function persistUserSelection(selection: string) {
+    localStorage.setItem('unbounded_ai_current_user', 'user-1');
+    localStorage.setItem('unbounded_ai_user_data', JSON.stringify({
+      userData: {
+        'user-1': { selectedModel: selection },
+      },
+    }));
+  }
+
+  function readPersistedUserSelection(): string | undefined {
+    const stored = localStorage.getItem('unbounded_ai_user_data');
+    return stored
+      ? JSON.parse(stored)?.userData?.['user-1']?.selectedModel
+      : undefined;
+  }
+
+  it('does not select or rewrite either provider for an ambiguous persisted bare model id', async () => {
+    persistUserSelection('shared-image');
+    catalogState.current = {
+      models: [
+        {
+          id: 'shared-image',
+          name: 'Shared Image A',
+          providerId: 'provider-a',
+          providerName: 'Provider A',
+          type: 'image',
+        },
+        {
+          id: 'shared-image',
+          name: 'Shared Image B',
+          providerId: 'provider-b',
+          providerName: 'Provider B',
+          type: 'image',
+        },
+      ],
+      descriptorsByKey: new Map([
+        ['provider-a::shared-image', { ...descriptor, providerId: 'provider-a', modelId: 'shared-image' }],
+        ['provider-b::shared-image', { ...descriptor, providerId: 'provider-b', modelId: 'shared-image' }],
+      ]),
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+    };
+
+    render(<GenerationPanel onGenerate={vi.fn()} />);
+
+    const select = screen.getByLabelText('图像模型') as HTMLSelectElement;
+    await waitFor(() => expect(select.options).toHaveLength(3));
+    expect(select.value).toBe('');
+    expect(readPersistedUserSelection()).toBe('shared-image');
+    expect(localStorage.getItem('wujie_selected_model')).toBeNull();
+  });
+
+  it('migrates and writes back a persisted bare model id with one visible provider', async () => {
+    persistUserSelection('gpt-image-2');
+
+    render(<GenerationPanel onGenerate={vi.fn()} />);
+
+    await waitFor(() => expect(readPersistedUserSelection()).toBe('pear::gpt-image-2'));
+    expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value).toBe('pear::gpt-image-2');
+    expect(JSON.parse(localStorage.getItem('wujie_selected_model') || 'null')).toMatchObject({
+      model: 'gpt-image-2',
+      providerId: 'pear',
+      compositeKey: 'pear::gpt-image-2',
+    });
+  });
+
+  it('preserves a valid persisted exact provider key', async () => {
+    persistUserSelection('pear::gpt-image-2');
+
+    render(<GenerationPanel onGenerate={vi.fn()} />);
+
+    await waitFor(() => expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value)
+      .toBe('pear::gpt-image-2'));
+    expect(readPersistedUserSelection()).toBe('pear::gpt-image-2');
+  });
+
+  it('does not write back a persisted bare model id with no visible provider', async () => {
+    persistUserSelection('missing-image');
+
+    render(<GenerationPanel onGenerate={vi.fn()} />);
+
+    const select = screen.getByLabelText('图像模型') as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(1));
+    expect(select.value).toBe('');
+    expect(readPersistedUserSelection()).toBe('missing-image');
+    expect(localStorage.getItem('wujie_selected_model')).toBeNull();
+  });
+
   it('shows only the selected provider/model descriptor values', async () => {
     render(<GenerationPanel onGenerate={vi.fn()} />);
 

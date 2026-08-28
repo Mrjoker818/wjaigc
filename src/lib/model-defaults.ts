@@ -3,6 +3,25 @@ export interface DefaultableModel {
   isDefault?: boolean;
 }
 
+export interface PersistedModelCandidate {
+  id: string;
+  providerId: string;
+}
+
+export type PersistedModelSelectionResolution =
+  | {
+      status: 'exact' | 'migrated';
+      compositeKey: string;
+      modelId: string;
+      providerId: string;
+    }
+  | {
+      status: 'ambiguous' | 'not-found';
+      compositeKey: null;
+      modelId: string;
+      providerId: null;
+    };
+
 export interface QuickCreateModelCandidate extends DefaultableModel {
   providerId: string;
   modelId: string;
@@ -42,6 +61,45 @@ export function isModelAssignedToUser(
   // state. Only a non-empty list acts as a per-user restriction.
   if (!allowedModels?.length) return true;
   return allowedModels.includes(modelId) || allowedModels.includes(`${providerId}::${modelId}`);
+}
+
+export function resolvePersistedModelSelection(
+  persistedSelection: string,
+  candidates: PersistedModelCandidate[],
+): PersistedModelSelectionResolution {
+  const selection = persistedSelection.trim();
+  const separatorIndex = selection.indexOf('::');
+  if (separatorIndex >= 0) {
+    const providerId = selection.slice(0, separatorIndex);
+    const modelId = selection.slice(separatorIndex + 2);
+    const exact = candidates.some(candidate => (
+      candidate.providerId === providerId && candidate.id === modelId
+    ));
+    return exact
+      ? { status: 'exact', compositeKey: `${providerId}::${modelId}`, modelId, providerId }
+      : { status: 'not-found', compositeKey: null, modelId, providerId: null };
+  }
+
+  const matches = new Map(
+    candidates
+      .filter(candidate => candidate.id === selection)
+      .map(candidate => [`${candidate.providerId}::${candidate.id}`, candidate]),
+  );
+  if (matches.size === 1) {
+    const [compositeKey, candidate] = matches.entries().next().value!;
+    return {
+      status: 'migrated',
+      compositeKey,
+      modelId: candidate.id,
+      providerId: candidate.providerId,
+    };
+  }
+  return {
+    status: matches.size > 1 ? 'ambiguous' : 'not-found',
+    compositeKey: null,
+    modelId: selection,
+    providerId: null,
+  };
 }
 
 export function selectInitialModel(currentModel: string, models: DefaultableModel[]): string {

@@ -1,9 +1,54 @@
 import { describe, expect, it } from 'vitest';
 import {
   isModelAssignedToUser,
+  resolvePersistedModelSelection,
   resolveQuickCreateModel,
   selectInitialModel,
 } from '@/lib/model-defaults';
+
+describe('persisted model selection resolution', () => {
+  const candidates = [
+    { id: 'shared-model', providerId: 'provider-a' },
+    { id: 'shared-model', providerId: 'provider-b' },
+    { id: 'unique-model', providerId: 'provider-c' },
+  ];
+
+  it('rejects an ambiguous legacy bare id without selecting a provider', () => {
+    expect(resolvePersistedModelSelection('shared-model', candidates)).toEqual({
+      status: 'ambiguous',
+      compositeKey: null,
+      modelId: 'shared-model',
+      providerId: null,
+    });
+  });
+
+  it('migrates a legacy bare id only when exactly one provider candidate is visible', () => {
+    expect(resolvePersistedModelSelection('unique-model', candidates)).toEqual({
+      status: 'migrated',
+      compositeKey: 'provider-c::unique-model',
+      modelId: 'unique-model',
+      providerId: 'provider-c',
+    });
+  });
+
+  it('preserves a valid exact provider and model key', () => {
+    expect(resolvePersistedModelSelection('provider-b::shared-model', candidates)).toEqual({
+      status: 'exact',
+      compositeKey: 'provider-b::shared-model',
+      modelId: 'shared-model',
+      providerId: 'provider-b',
+    });
+  });
+
+  it('does not write back a bare id with no visible provider candidate', () => {
+    expect(resolvePersistedModelSelection('missing-model', candidates)).toEqual({
+      status: 'not-found',
+      compositeKey: null,
+      modelId: 'missing-model',
+      providerId: null,
+    });
+  });
+});
 
 describe('initial model selection', () => {
   const models = [
