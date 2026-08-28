@@ -2007,3 +2007,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Google Chrome 强制刷新后节点项目恢复，工作流工具栏可见；新刷新窗口 Console error/warning `0/0`。重启过程短暂项目同步 502 已在后续同步成功并经干净刷新排除为当前持续故障。
 - **结论：`ca356477` 部署和非付费诊断门禁通过。** 本轮未触发真实 Pear 任务，不证明真实结构化错误、ZIP Range、主 PSD、远程图层、同键重放或显式取消退款。
 - 证据：`docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json`、`docs/testing/evidence/v588-stability-002-ca356477-cloud-refresh-2026-08-28.png`。
+
+## 2026-08-28 ca356477 云端同键重放回归
+
+- Google Chrome 复用现有已登录预览标签，以完全相同的请求体、请求摘要和幂等键重放图片分层。HTTP `202` 返回同一应用任务 `layer_bde7c937-ecdb-4fee-b901-54c834aeb1f0`，没有进入新的供应商等待阶段。
+- 重放后只读审计证明：同键任务数仍为 `1`，用户余额仍为 `403`，扣费与退款流水各仍为 `1`，交易 ID 和 Pear 远端 taskId 均未变化。
+- **回归判定：云端应用侧同键重放 PASS。** 远程 ZIP Range、主 PSD、远程可编辑图层、自然失败结构化错误和显式取消退款仍为 `UNVERIFIED`；专项整体继续有条件通过。
+- 机器证据：`docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json`。

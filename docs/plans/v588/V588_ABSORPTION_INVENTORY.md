@@ -558,3 +558,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Google Chrome“用户1”复用既有项目页和预览页，未新建标签。强制刷新后已登录节点项目恢复，工作流工具栏可见；以 `2026-08-28T12:19:48.127Z` 为界的新页面日志中 Console error/warning 为 `0/0`。服务重启窗口曾出现项目同步 502，随后同步成功，干净刷新后未复现。
 - **状态：失败诊断候选已部署并通过非付费云端门禁 / V588-STABILITY-002 仍未吸收。** 下一次自然 Pear 失败才可验证真实 `providerError`；远程 ZIP Range、主 PSD、远程图层、同键重放和显式取消退款仍为 `UNVERIFIED`，不得进入 `V588-ADMIN-004`。
 - 证据：`docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json`、`docs/testing/evidence/v588-stability-002-ca356477-cloud-refresh-2026-08-28.png`。
+
+## 2026-08-28 V588-STABILITY-002 云端同键重放关闭
+
+- 在已登录 Google Chrome 现有预览标签内，以历史任务的原始请求摘要和幂等键重放 `POST /api/layered-decompose`。接口返回 HTTP `202`，直接复用应用任务 `layer_bde7c937-ecdb-4fee-b901-54c834aeb1f0` 及其既有 `completed/ready` 结果，没有等待新供应商任务。
+- 重放前后只读 PostgreSQL 审计一致：同用户同键任务数始终为 `1`，余额始终为 `403`；唯一扣费流水仍为 `ctx_1787915813431_ze8j8rz3`，唯一退款流水仍为 `ctx_1787915898711_4upz06jc`，Pear 远端任务仍为 `6bbcd3f8-1d11-41be-8866-40fba1bfb479`。
+- **状态：云端同键重放子项已关闭 / V588-STABILITY-002 仍未吸收。** 远程 ZIP Range、非 `_depth` 主 PSD、远程可编辑图层、真实结构化自然失败及显式取消退款仍未关闭；不得进入 `V588-ADMIN-004`。
+- 机器证据：`docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json`。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 未修改。

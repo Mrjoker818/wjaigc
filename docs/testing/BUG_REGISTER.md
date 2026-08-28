@@ -2784,3 +2784,13 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Chrome 结果 | 复用 Google Chrome 用户1既有标签，强制刷新后已登录节点项目和工作流工具栏恢复；新刷新窗口 Console error/warning `0/0`。重启窗口的同步 502 已恢复，干净刷新未复现。 |
 | 状态 | **部署门禁已关闭，真实错误字段观察仍未关闭。** 只有下一次自然供应商失败响应保留 `code/type/param/message`，才能把 BUG-005 从“部署完成”更新为“真实云端关闭”；不得为此故意破坏供应商配置。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json` 与同名前缀 PNG。 |
+
+### V588-STABILITY-002-BUG-004 云端同键重放关闭增量（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 复现动作 | 在已登录 Chrome 预览页使用历史任务原始摘要与 `Idempotency-Key` 重放一次 `POST /api/layered-decompose`。 |
+| 接口结果 | HTTP `202`，返回同一 `taskId=layer_bde7c937-ecdb-4fee-b901-54c834aeb1f0`、`completed/ready` 和既有本地回退结果。 |
+| 数据库结果 | 同键任务数 `1`；余额 `403`；扣费/退款流水各 `1` 条且 ID 未变；`remoteTaskId=6bbcd3f8-1d11-41be-8866-40fba1bfb479` 未变。 |
+| 状态 | **云端同键重放已关闭。** 未产生第二个供应商任务、第二次扣费或第二次退款。该证据不关闭 Pear 远程 ZIP/PSD 成功和显式取消退款。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json` |

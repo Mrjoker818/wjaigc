@@ -1605,3 +1605,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 本次部署没有提交真实 Pear 任务。结构化错误只能在下一次自然供应商失败时确认；远程 ZIP Range、非 depth 主 PSD、远程图层、同键重放和显式取消退款仍缺真实证据。
 - **发布结论继续为“有条件通过”。** `V588-STABILITY-002` 仍未达到吸收完成条件，不能开始 `V588-ADMIN-004`。
 - 机器证据：`docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json`。
+
+## 2026-08-28 ca356477 云端同键重放发布增量
+
+- 历史失败回退任务以相同摘要和幂等键重放后返回同一应用 taskId；同键数据库记录仍仅 `1` 条。
+- 重放前后余额 `403` 不变，唯一扣费/退款流水及 Pear 远端 taskId 均不变，未观察到重复供应商任务或重复账务。
+- **发布结论继续为“有条件通过”。** 云端同键重放门禁已关闭，但远程 ZIP/PSD 成功、至少 2 个远程可编辑图层、真实结构化自然失败与显式取消一次退款仍未满足，因此 `V588-STABILITY-002` 仍未吸收，不能开始 `V588-ADMIN-004`。
+- 机器证据：`docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json`。

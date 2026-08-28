@@ -1655,3 +1655,15 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 显式取消退款 | `UNVERIFIED` | 处理中取消只产生唯一 `cancelled` 终态和一次退款，迟到完成不得覆盖。 |
 
 证据：`docs/testing/evidence/v588-stability-002-ca356477-cloud-deploy-2026-08-28.json`。本节覆盖此前“待部署”状态，但不覆盖任何真实供应商成功、重放或取消结论。
+
+## 2026-08-28 ca356477 同键重放后的最新剩余项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| 云端同键重放 | 已验证 | 相同摘要和幂等键返回同一应用 taskId；同键任务数、余额、扣费/退款流水和 Pear taskId 均未变化。 |
+| 真实结构化供应商错误 | `UNVERIFIED` | 等待自然 Pear 失败，确认最终结果保留受限长度的 `providerError.code/type/param/message`；不得破坏配置制造失败。 |
+| 远程 ZIP Range 与主 PSD | `UNVERIFIED` | 供应商成功返回 ZIP 后验证分段下载、稳定 validator、非 `_depth.psd` 主文件和 `8BPS` 解析。 |
+| 远程可编辑图层 | `UNVERIFIED` | 最终 PSD 至少包含 2 个来自远程制品的可编辑图层；本地回退不计。 |
+| 显式取消退款 | `UNVERIFIED` | 处理中取消只产生唯一 `cancelled` 终态和一次退款，迟到完成不得覆盖。 |
+
+机器证据：`docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json`。本节仅覆盖此前“云端同键重放未验证”状态，不扩大为远程成功或取消通过。

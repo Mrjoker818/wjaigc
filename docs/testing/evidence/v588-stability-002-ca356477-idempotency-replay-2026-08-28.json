@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-08-28",
+  "capturedAt": "2026-08-28T20:32:03.9094294+08:00",
+  "environment": "Coze development sandbox",
+  "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_1787549625844_nfmso3ts9&mode=node",
+  "browser": {
+    "family": "Google Chrome",
+    "profile": "用户1",
+    "reusedExistingTabs": true,
+    "createdNewTab": false
+  },
+  "git": {
+    "runtimeCommit": "ca3564779685be52f1dc13b8f0106f27095647f9",
+    "runtimeTree": "2e6030b31c1b1a4399275bf51919daa28b0eae53",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableTouched": false
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/layered-decompose",
+    "idempotencyKey": "psd-layer-ea4afed25f4b87ee23c278c01954bce7955fe63eb2d2d25a0a3125d0a1450567-2",
+    "requestHash": "8d326303fbaca02dc7d3eafe232c81c62fa4223a56e9097f81321b1e58fae7b9",
+    "requestId": "v588-stability-002-replay-20260828",
+    "body": {
+      "engine": "smart",
+      "modelId": "Image-Layered",
+      "imageUrl": "/api/serve-upload/uploads/gen-1786507598285-t9qt60.png",
+      "providerId": "api_1785190544435_1heimk6",
+      "requireTransparentSubject": false
+    }
+  },
+  "response": {
+    "httpStatus": 202,
+    "ok": true,
+    "responseRequestId": "7040b59a-1c6f-9811-ac9e-38df58d5d301",
+    "success": true,
+    "taskId": "layer_bde7c937-ecdb-4fee-b901-54c834aeb1f0",
+    "status": "completed",
+    "phase": "ready",
+    "progress": 100,
+    "engine": "local",
+    "fallbackReason": "任务处理失败，请稍后重试"
+  },
+  "baseline": {
+    "sameKeyTaskCount": 1,
+    "creditBalance": 403,
+    "chargedTransactionId": "ctx_1787915813431_ze8j8rz3",
+    "refundedTransactionId": "ctx_1787915898711_4upz06jc",
+    "remoteTaskId": "6bbcd3f8-1d11-41be-8866-40fba1bfb479"
+  },
+  "postReplayAudit": {
+    "taskId": "layer_bde7c937-ecdb-4fee-b901-54c834aeb1f0",
+    "sameKeyTaskCount": 1,
+    "userId": "admin_mr_joker",
+    "creditBalance": 403,
+    "chargedTransactionId": "ctx_1787915813431_ze8j8rz3",
+    "refundedTransactionId": "ctx_1787915898711_4upz06jc",
+    "chargedTransactionCount": 1,
+    "refundedTransactionCount": 1,
+    "remoteTaskId": "6bbcd3f8-1d11-41be-8866-40fba1bfb479",
+    "status": "completed",
+    "engine": "local",
+    "updatedAt": 1787915904110
+  },
+  "assertions": {
+    "sameTaskReturned": true,
+    "sameKeyTaskCountUnchanged": true,
+    "creditBalanceUnchanged": true,
+    "chargeTransactionUnchanged": true,
+    "refundTransactionUnchanged": true,
+    "remoteTaskIdUnchanged": true,
+    "duplicateProviderTaskObserved": false,
+    "duplicateChargeObserved": false,
+    "duplicateRefundObserved": false
+  },
+  "result": "passed",
+  "scope": "历史失败回退任务的云端同摘要同幂等键重放；不证明远程 ZIP/PSD 成功或显式取消退款"
+}
