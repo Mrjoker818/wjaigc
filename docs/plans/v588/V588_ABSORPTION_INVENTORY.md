@@ -504,3 +504,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 最终专项 `131/131`，全仓 `565` 个文件、`4068` 项测试通过；`21` 个文件、`119` 项 PostgreSQL 相关测试因缺少隔离库明确跳过。TypeScript、目标文件零警告 ESLint、全仓 `0 errors`、生产构建 `117/117` 和 `git diff --check` 通过。
 - 八轮独立复审最终无 Critical/Important。该结论仅证明本地候选，不证明真实 PostgreSQL 并发、Coze 精确 SHA、PearAPI/APIMART 调用、一次扣费/退款或最终 PSD 文件。
 - **状态：本地候选完成 / 云端待验 / 未吸收。** 下一步只能先推送 `main` 并关闭 `UNVERIFIED_ITEMS.md` 中的数据库与云端矩阵；完成前不得进入 `V588-ADMIN-004`，不得重复 Stage 4，绝不触碰 `stable`。
+
+## 2026-08-28 V588-STABILITY-002 图片预览入口检查点
+
+- Coze `main@4c7dc72d` 的真实 Google Chrome 复现表明，首次选中图片触发 DOM 目标重渲染，旧 `MouseEvent.detail` 双击判断只完成选择，未打开图片预览，因而阻断后续 Pro/Studio PSD 验收。
+- 按 RED -> 最小修复新增同图/时间/距离序列 helper，并把识别边界移动到完整 pointer-up；聚焦 `16/16`、全仓 `4071/4071` 已执行项、TypeScript、零错误 Lint 和 `117/117` 构建通过。
+- 修复已推送为 `main@6bea240f34dcbd3176ab1e63a8ccb43d32a54797`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 未改动。
+- **状态：本地已关闭 / Coze UI 待验 / V588-STABILITY-002 仍未吸收。** Chrome 页面控制恢复后，唯一动作是 Coze 精确对齐 `6bea240f` 并验证双击预览；完成前不进入 `V588-ADMIN-004`，也不重复已关闭的 Simple Chat 或 Stage 4 历史矩阵。

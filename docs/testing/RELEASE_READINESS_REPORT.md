@@ -1539,3 +1539,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Coze 尚未拉取精确候选，未取得真实 PearAPI/APIMART 视觉调用、同键复用、积分变化、失败退款和 PSD 下载文件证据。
 - **专项结论：有条件通过 / 本地候选完成 / 云端未吸收。** 云端矩阵关闭前不得将 `V588-STABILITY-002` 标为“已吸收”，也不得提前开始 `V588-ADMIN-004`。
 - 全平台总发布结论继续为：**有条件通过**。
+
+## 2026-08-28 V588-STABILITY-002 图片预览入口发布增量
+
+- 真实 Coze Chrome 复现表明：`4c7dc72d` 首次选中图片时 DOM 目标切换，旧 `MouseEvent.detail` 双击判断无法打开图片预览，阻断 Pro/Studio PSD 入口。
+- `main@6bea240f` 已以 pointer-up 序列识别完成最小修复；聚焦 `16/16`、全仓 `4071 passed / 119 skipped / 0 failed`、TypeScript 和 `117/117` 构建通过。
+- 当前 Google Chrome 扩展可以发现 Coze 项目页和预览页，但页面级读取与操作持续超时，因此尚未让 Coze 拉取精确提交，也没有真实双击后的预览弹窗证据。
+- **专项结论保持：有条件通过 / 云端未吸收。** 不得用本地回归替代 Coze UI，也不得在图片预览入口未关闭前执行付费 PSD 分析并宣称全链路通过。

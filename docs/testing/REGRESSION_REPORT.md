@@ -1909,3 +1909,17 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 | 差异完整性 | 通过 | `git diff --check` 无空白错误；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化 |
 
 回归范围覆盖请求流体积、非法字段、幂等键、data URL、跨用户资产、符号链接逃逸、MIME/字节/像素、模型授权、显式不回退、自动候选去重、总截止、JSON/SSE 预算、持久任务复用、租约过期接管、晚到租约清理、终态重放、结算重试、鉴权顺序、错误码和客户端单请求。八轮独立复审最终无 Critical/Important。当前不能把本地结果扩大为真实 PostgreSQL 或 Coze 通过。
+
+## 2026-08-28 V588-STABILITY-002 图片双击入口本地回归
+
+| 门禁 | 结果 | 证据 |
+|---|---|---|
+| 失败复现 | 通过 | Coze `4c7dc72d` 中首次选中导致 DOM 目标切换，真实 Chrome 双击只选中、不打开预览；新增 helper 合同修复前 RED |
+| 聚焦回归 | 通过 | `canvas-selection` 与画布接线合同共 `16/16` 通过 |
+| TypeScript | 通过 | `pnpm ts-check` 退出码 0 |
+| 改动文件 ESLint | 有条件通过 | 0 errors；`infinite-canvas.tsx` 保留 18 条历史 warning，无新增 warning |
+| 全仓 Vitest | 通过 | `565` 文件通过、`21` 跳过；`4071` 项通过、`119` 跳过；零失败 |
+| 生产构建 | 通过 | Next.js 生产构建及 `117/117` 静态页面/路由通过 |
+| 分支边界 | 通过 | `main@6bea240f` 已推送；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化 |
+
+本轮只修复图片预览入口的跨重渲染双击识别，不改 PSD 分析、供应商、积分、任务或导出逻辑。Coze 精确 SHA、真实双击 UI 和后续付费 PSD 链路仍待云端证据。

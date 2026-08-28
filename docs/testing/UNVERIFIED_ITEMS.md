@@ -1531,3 +1531,15 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 其余全平台未验证项继续有效；本节只描述 PSD 分析专项，不覆盖 AI PSD 独立生成器、Pear 分层、元素拆解或 PSD 合成质量。
 
 本地终审补充：专项 `131/131`、全仓 `4068/4068` 已执行项、TypeScript、目标零警告 ESLint、生产构建和空白检查均通过；独立复审无 Critical/Important。以上仍不能替代本表列出的真实 PostgreSQL 与 Coze 证据。
+
+## 2026-08-28 V588-STABILITY-002 图片预览入口剩余验证
+
+| 项目 | 状态 | 关闭条件 |
+|---|---|---|
+| Coze 精确候选 | `UNVERIFIED` | Coze 受控对齐 `origin/main@6bea240f34dcbd3176ab1e63a8ccb43d32a54797`，证明代码树一致、构建/启动/健康路由及静态资源通过 |
+| 画布双击图片 | 本地已修复 / 云端待验 | 在现有 Google Chrome 预览标签中选择真实已加载图片，双击一次即打开图片预览，不要求第三次点击 |
+| 交互隔离 | `UNVERIFIED` | 云端证明单击仍只选择、拖动不误开预览、视频/占位框不误开、编辑和批注模式不被双击抢占 |
+| 浏览器健康 | `UNVERIFIED` | 双击与关闭预览全程无新增 Console error/warning、无原生错误弹窗 |
+| PSD 入口连续性 | `UNVERIFIED` | 图片预览打开后可见 Pro/Studio PSD 入口；付费分析仍须独立动作时确认并记录供应商、模型、taskId、requestId、积分和下载文件 |
+
+当前 Chrome 扩展能发现正确的 Coze 项目页和预览页，但页面级操作持续超时；此项属于验证环境阻塞，不计为产品通过或失败。

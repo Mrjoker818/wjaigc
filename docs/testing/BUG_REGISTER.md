@@ -2677,3 +2677,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - 永久回归：新增合同、媒体、模型路由、持久服务、API 路由、浏览器客户端、共享账务选项与租约/终态竞态测试。
 - 本地结果：专项 `131/131`；全仓 `565 files passed / 21 skipped`、`4068 tests passed / 119 skipped`；TypeScript、目标文件 ESLint 零警告、全仓 ESLint `0 errors / 964 historical warnings`、生产构建通过；独立复审最终无 Critical/Important。
 - 未关闭证据：缺少隔离 `POSTGRES_TEST_DATABASE_URL`，尚未取得 Coze 真实并发同键、真实积分前后、失败一次退款和最终 PSD 文件证据。
+
+### V588-STABILITY-002-BUG-002：画布图片首次选中重渲染会使双击预览失效
+
+- 严重等级：P1
+- 模块：无限画布、图片预览、Pro/Studio PSD 导出入口
+- 发现基线：Coze `main@4c7dc72d38a09d2ad6cd97b1a0793283fc8adebb`
+- 状态：本地已修复并推送 `main@6bea240f34dcbd3176ab1e63a8ccb43d32a54797` / Coze 精确 SHA 与真实 UI 待验
+- 稳定复现：在真实已登录 Google Chrome 中打开含图片项目并切换到画布模式；首次双击图片只完成选择，未打开图片预览，因此无法继续进入 Pro/Studio PSD 导出。
+- 根因：首次点击后图片节点由原始 `img` 重渲染为选中态覆盖层，浏览器把两次点击分配给不同 DOM 目标，原先依赖 `MouseEvent.detail >= 2` 的处理不会收到稳定双击序列。
+- 修复文件：`src/lib/canvas-kernel/selection.ts`、`src/components/infinite-canvas.tsx`、`src/__tests__/lib/canvas-selection.test.ts`、`src/__tests__/components/infinite-canvas-split-wiring.test.ts`。
+- 修复内容：在画布图片的完整 pointer-up 序列中按同一图片、500ms 时间窗和 8px 位移阈值识别双击；排除拖动、修饰键、占位框、视频和编辑/批注模式，并消费紧随 pointer-up 的 click，避免选中逻辑重复触发。
+- 永久回归：新增同图双击、超时、跨图、超位移和组件接线合同；修复前 RED，修复后聚焦 `16/16` 通过。
+- 本地结果：全仓 `565` 个文件通过、`21` 个文件跳过，`4071` 项通过、`119` 项跳过、零失败；TypeScript、生产构建 `117/117` 通过；改动文件 ESLint 零错误（大型画布文件保留 18 条历史 warning）。
+- 未关闭证据：Coze 尚未拉取并运行精确 `6bea240f`；必须在现有 Chrome 预览标签强制刷新后证明双击一次即打开图片预览、Console 无新增 error/warning，再继续付费 PSD 分析验收。
