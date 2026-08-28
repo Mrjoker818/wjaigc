@@ -67,8 +67,8 @@ vi.mock('@/lib/edit-task-store', () => ({
   setEditTask: vi.fn(),
   failEditTask: vi.fn(),
 }));
-vi.mock('@/app/api/refine-engine/route', () => ({ getRefineResult: vi.fn() }));
-vi.mock('@/app/api/brand-ecommerce/route', () => ({ getBrandResult: vi.fn() }));
+vi.mock('@/app/api/refine-engine/result-store', () => ({ getRefineResult: vi.fn() }));
+vi.mock('@/app/api/brand-ecommerce/result-store', () => ({ getBrandResult: vi.fn() }));
 vi.mock('@/lib/font-design-task-store', () => ({ getFontDesignResult: vi.fn() }));
 vi.mock('@/lib/quality-enhance', () => ({ enhanceViaAI: vi.fn() }));
 vi.mock('@/lib/layer-decomposition/service', () => ({ getLayerTaskStatus: vi.fn() }));

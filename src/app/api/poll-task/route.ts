@@ -25,8 +25,8 @@ import {
 import { translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { getRefineResult } from '@/app/api/refine-engine/route';
-import { getBrandResult } from '@/app/api/brand-ecommerce/route';
+import { getRefineResult } from '@/app/api/refine-engine/result-store';
+import { getBrandResult } from '@/app/api/brand-ecommerce/result-store';
 import { getFontDesignResult } from '@/lib/font-design-task-store';
 import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
 import { isPendingLocalAsyncGenerateTask, isRecoverableSubmitOnlySubmission, shouldPollRemoteAsyncGenerateTask } from '@/lib/async-generate-task';
