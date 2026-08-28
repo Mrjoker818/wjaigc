@@ -565,3 +565,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 重放前后只读 PostgreSQL 审计一致：同用户同键任务数始终为 `1`，余额始终为 `403`；唯一扣费流水仍为 `ctx_1787915813431_ze8j8rz3`，唯一退款流水仍为 `ctx_1787915898711_4upz06jc`，Pear 远端任务仍为 `6bbcd3f8-1d11-41be-8866-40fba1bfb479`。
 - **状态：云端同键重放子项已关闭 / V588-STABILITY-002 仍未吸收。** 远程 ZIP Range、非 `_depth` 主 PSD、远程可编辑图层、真实结构化自然失败及显式取消退款仍未关闭；不得进入 `V588-ADMIN-004`。
 - 机器证据：`docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json`。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 未修改。
+
+## 2026-08-28 V588-STABILITY-002 方案 C 本地检查点
+
+- 方案 C 实现提交：`a50fcbeb73803b9886bab2ec82327c1e8f5bb209`。修复任务提交响应前取消/关闭的注册竞态，并冻结同一幂等键对应的最终请求目标，包括“云端目标”和“智能模式空目标”。
+- 取消、关闭、外部卸载统一复用一次操作级状态与取消 Promise；已注册任务执行精确 DELETE，取消成功后停止轮询，失败与终态竞争保留真实状态。
+- 本地最终门禁：分层矩阵 `168 passed / 2 skipped`，全仓 `4117 passed / 122 PostgreSQL-gated skipped / 0 failed`，TypeScript、零错误 ESLint、空白检查和 8 GiB `117/117` 生产构建通过；独立复审 Critical 0、Important 0。
+- 并行 Range 三部分已经是当前 main 的祖先，不重复合并。`V588-PROVIDER-002/003` 必须重基到最新 main 后再评估；`V588-COLLAB-004` 与 `V588-ADMIN-004` 缺少前置和真实环境证据，本轮不合并。
+- **状态：方案 C 本地关闭 / V588-STABILITY-002 仍未吸收。** 下一唯一动作是推送 main、Coze exact-SHA 拉取，并在 Google Chrome 真实验证取消、关闭、账务和迟到终态；不开始 ADMIN-004。

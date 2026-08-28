@@ -1667,3 +1667,15 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 显式取消退款 | `UNVERIFIED` | 处理中取消只产生唯一 `cancelled` 终态和一次退款，迟到完成不得覆盖。 |
 
 机器证据：`docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json`。本节仅覆盖此前“云端同键重放未验证”状态，不扩大为远程成功或取消通过。
+
+## 2026-08-28 a50fcbeb 方案 C 后剩余项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| 客户端取消注册竞态 | 本地已验证 | 16 条组件状态测试与 10 条客户端测试通过；云端行为仍需单独验收。 |
+| Coze exact-SHA | `UNVERIFIED` | Coze 拉取后必须证明运行提交精确等于 `a50fcbeb73803b9886bab2ec82327c1e8f5bb209` 或其纯文档后继。 |
+| 提交响应前立即取消 | `UNVERIFIED` | 真实 Pear 任务返回同一 taskId，只产生一个取消请求，最终唯一 `cancelled`。 |
+| 提交响应前立即关闭/路由离开 | `UNVERIFIED` | 窗口或页面离开后 keepalive 取消仍完成，不遗留 processing 任务。 |
+| 取消账务 | `UNVERIFIED` | 只扣费一次、最多退款一次；迟到 `completed` 不得覆盖 `cancelled`。 |
+| 远程 ZIP/PSD 成功 | `UNVERIFIED` | 仍需 Pear 成功返回真实 ZIP，验证 Range、主 PSD、`8BPS` 与至少 2 个远程可编辑图层。 |
+| PostgreSQL 本轮重跑 | `UNVERIFIED` | 本轮本机没有 `POSTGRES_TEST_DATABASE_URL`，122 项明确跳过；不得把历史证据写成本轮通过。 |

@@ -2794,3 +2794,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 数据库结果 | 同键任务数 `1`；余额 `403`；扣费/退款流水各 `1` 条且 ID 未变；`remoteTaskId=6bbcd3f8-1d11-41be-8866-40fba1bfb479` 未变。 |
 | 状态 | **云端同键重放已关闭。** 未产生第二个供应商任务、第二次扣费或第二次退款。该证据不关闭 Pear 远程 ZIP/PSD 成功和显式取消退款。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json` |
+
+### V588-STABILITY-002-BUG-006 PSD 分层取消注册竞态（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：用户在提交响应返回前取消、关闭或离开页面时，服务端任务可能继续执行并产生孤儿任务/扣费。 |
+| 稳定复现 | 初始 POST 已到达服务端但尚未返回 `taskId` 时取消；旧实现先 abort 浏览器请求且没有任务标识，无法发送精确 DELETE。 |
+| 根因 | 取消意图、任务注册、幂等键、最终 provider/model 解析和组件卸载各自独立；响应不确定恢复可能改变请求体，前台取消与卸载取消也可能并发。 |
+| 修复提交 | `a50fcbeb73803b9886bab2ec82327c1e8f5bb209`。每次操作固定幂等键与规范化请求快照；成功目标和空目标都冻结；拿到 taskId 后取消；取消 Promise 去重；卸载使用 keepalive 并停止原轮询；终态与取消失败不伪装成功。 |
+| 自动化证据 | 组件/客户端 `26/26`；完整分层与安全下载矩阵 `168 passed / 2 PostgreSQL-gated skipped / 0 failed`；全仓 `4117 passed / 122 skipped / 0 failed`。 |
+| 工程门禁 | TypeScript 通过；ESLint `0 errors / 964 historical warnings`；8 GiB 生产构建退出码 0，webpack 13.6 分钟，`117/117` 页面生成；独立复审 Critical 0、Important 0。 |
+| 当前状态 | **本地代码与回归已关闭，云端仍未关闭。** 仍需 Coze exact-SHA 下真实执行“提交后立即取消/关闭、重复取消、一次扣费与最多一次退款、迟到完成不覆盖取消”。 |

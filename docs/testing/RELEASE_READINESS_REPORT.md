@@ -1612,3 +1612,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 重放前后余额 `403` 不变，唯一扣费/退款流水及 Pear 远端 taskId 均不变，未观察到重复供应商任务或重复账务。
 - **发布结论继续为“有条件通过”。** 云端同键重放门禁已关闭，但远程 ZIP/PSD 成功、至少 2 个远程可编辑图层、真实结构化自然失败与显式取消一次退款仍未满足，因此 `V588-STABILITY-002` 仍未吸收，不能开始 `V588-ADMIN-004`。
 - 机器证据：`docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json`。
+
+## 2026-08-28 a50fcbeb 取消竞态发布增量
+
+- `a50fcbeb73803b9886bab2ec82327c1e8f5bb209` 已关闭客户端任务注册窗口：取消不再抢先中止未知 taskId 的提交；响应不确定时复用原幂等键、图片、引擎及冻结后的 provider/model（含空目标）。
+- 外部卸载与前台取消复用同一 Promise；只在取消失败后串行 keepalive 重试，成功后主动 abort 原轮询。`completed/failed/timeout` 不再伪装为 `cancelled`。
+- 本地质量门禁：全仓 `4117/4239` 通过、`122` 项因缺隔离 PostgreSQL 测试库跳过、`0` 失败；ESLint 0 error、TypeScript 通过、最终生产构建退出码 0、`117/117` 页面完成；独立代码复审 Critical/Important 均为 0。
+- `origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。Range 三项并行加固已经在祖先提交 `ac8e826b` 中，无需再次合并；其余四个旧候选分支不满足直接合并条件。
+- **发布结论保持“有条件通过”。** 当前提交适合作为 Coze 验收候选，但在 exact-SHA、真实提交后立即取消/关闭、单次扣费与最多一次退款、远程 ZIP/PSD 成功前，`V588-STABILITY-002` 仍不得标记已吸收。

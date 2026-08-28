@@ -2014,3 +2014,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 重放后只读审计证明：同键任务数仍为 `1`，用户余额仍为 `403`，扣费与退款流水各仍为 `1`，交易 ID 和 Pear 远端 taskId 均未变化。
 - **回归判定：云端应用侧同键重放 PASS。** 远程 ZIP Range、主 PSD、远程可编辑图层、自然失败结构化错误和显式取消退款仍为 `UNVERIFIED`；专项整体继续有条件通过。
 - 机器证据：`docs/testing/evidence/v588-stability-002-ca356477-idempotency-replay-2026-08-28.json`。
+
+## 2026-08-28 a50fcbeb 方案 C 本地回归
+
+- 以 `main@bd6cb16a` 为基线按 RED → GREEN 修复 PSD 分层提交注册与取消竞态，形成实现提交 `a50fcbeb73803b9886bab2ec82327c1e8f5bb209`。
+- 16 条真实组件状态测试覆盖：taskId 返回前取消/关闭、重复点击、前台取消期间卸载、taskId 前后卸载、网络响应丢失、401/409 恢复、成功目标与空目标冻结、终态竞争、取消失败重试和 keepalive。
+- 最终 provider/model 解析结果连同“已解析为空”状态进入冻结快照；挂载和卸载恢复均复用同一幂等键与同一请求体。取消 Promise 在关闭、重复点击和外部卸载之间共享，避免并发重复 DELETE。
+- 最终专项 `26/26`，分层与安全下载矩阵 `168 passed / 2 skipped`，全仓 `4117 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、目标 ESLint、`git diff --check` 和 8 GiB 生产构建通过，构建生成 `117/117` 页面。
+- 并行 Range 加固三部分已在 `ac8e826b` 进入当前 main，且是 `a50fcbeb` 的祖先，不再重复合并。其他并行候选均落后当前 main 或缺少 PostgreSQL/Coze/真实供应商证据，本轮不合并。
+- **回归判定：本地方案 C PASS，云端显式取消与退款仍 UNVERIFIED。** 不以本地 mock 或构建替代 Coze 真实任务、账务和远程 ZIP 证据。
