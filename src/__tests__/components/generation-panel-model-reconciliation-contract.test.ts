@@ -12,7 +12,10 @@ describe('generation panel server model reconciliation contract', () => {
   it('reconciles a persisted stale model against the refreshed provider catalog', () => {
     const catalogStart = source.indexOf("useTaskModelCatalog('image')");
     const discoveredModelsUpdate = source.indexOf('setDiscoveredModels(serverModels);', catalogStart);
-    const nextEffect = source.indexOf('}, [catalogModels]);', discoveredModelsUpdate);
+    const nextEffect = source.indexOf(
+      '}, [catalogError, catalogLoading, catalogModels]);',
+      discoveredModelsUpdate,
+    );
     const loadModelsBlock = source.slice(discoveredModelsUpdate, nextEffect);
 
     expect(catalogStart).toBeGreaterThan(-1);
