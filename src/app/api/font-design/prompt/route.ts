@@ -4,7 +4,7 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
 import {
   buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt,
   SCENE_MAP,
-} from '../plan/route';
+} from '../plan/constants';
 
 export const dynamic = 'force-dynamic';
 
