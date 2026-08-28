@@ -88,9 +88,14 @@ export function resolvePersistedModelSelection(
     const exact = candidates.some(candidate => (
       candidate.providerId === providerId && candidate.id === modelId
     ));
-    return exact
-      ? { status: 'exact', compositeKey: `${providerId}::${modelId}`, modelId, providerId }
-      : { status: 'not-found', compositeKey: null, modelId, providerId: null };
+    if (exact) {
+      return {
+        status: 'exact',
+        compositeKey: `${providerId}::${modelId}`,
+        modelId,
+        providerId,
+      };
+    }
   }
 
   const matches = new Map(
@@ -110,7 +115,7 @@ export function resolvePersistedModelSelection(
   return {
     status: matches.size > 1 ? 'ambiguous' : 'not-found',
     compositeKey: null,
-    modelId: selection,
+    modelId: matches.size > 0 || !exactKey ? selection : exactKey.modelId,
     providerId: null,
   };
 }

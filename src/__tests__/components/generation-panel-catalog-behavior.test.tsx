@@ -200,6 +200,72 @@ describe('GenerationPanel exact catalog behavior', () => {
     expect(onFavoriteParamsApplied).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['provider-b::shared-image', 'provider-b::shared-image'],
+    ['shared-image', ''],
+  ])('keeps pending persisted selection %s across a catalog error and successful reload', async (
+    persistedSelection,
+    expectedSelection,
+  ) => {
+    persistUserSelection(persistedSelection);
+    catalogState.current = {
+      models: [],
+      descriptorsByKey: new Map(),
+      loading: true,
+      error: null,
+      reload: vi.fn(),
+    };
+    const view = render(<GenerationPanel onGenerate={vi.fn()} />);
+
+    catalogState.current = {
+      models: [],
+      descriptorsByKey: new Map(),
+      loading: false,
+      error: 'catalog unavailable',
+      reload: vi.fn(),
+    };
+    view.rerender(<GenerationPanel onGenerate={vi.fn()} />);
+    expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value).toBe('');
+
+    catalogState.current = sharedProviderCatalog();
+    view.rerender(<GenerationPanel onGenerate={vi.fn()} />);
+    await waitFor(() => expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value)
+      .toBe(expectedSelection));
+    expect(readPersistedUserSelection()).toBe(persistedSelection);
+  });
+
+  it('does not consume favorite params on a catalog error and retries after reload', async () => {
+    const onFavoriteParamsApplied = vi.fn();
+    const favorite = { model: 'provider-b::shared-image' };
+    catalogState.current = {
+      models: [],
+      descriptorsByKey: new Map(),
+      loading: false,
+      error: 'catalog unavailable',
+      reload: vi.fn(),
+    };
+    const view = render(
+      <GenerationPanel
+        onGenerate={vi.fn()}
+        applyFavoriteParams={favorite}
+        onFavoriteParamsApplied={onFavoriteParamsApplied}
+      />,
+    );
+
+    expect(onFavoriteParamsApplied).not.toHaveBeenCalled();
+    catalogState.current = sharedProviderCatalog();
+    view.rerender(
+      <GenerationPanel
+        onGenerate={vi.fn()}
+        applyFavoriteParams={favorite}
+        onFavoriteParamsApplied={onFavoriteParamsApplied}
+      />,
+    );
+    await waitFor(() => expect((screen.getByLabelText('图像模型') as HTMLSelectElement).value)
+      .toBe('provider-b::shared-image'));
+    expect(onFavoriteParamsApplied).toHaveBeenCalledTimes(1);
+  });
+
   it('migrates and writes back a persisted bare model id with one visible provider', async () => {
     persistUserSelection('gpt-image-2');
 

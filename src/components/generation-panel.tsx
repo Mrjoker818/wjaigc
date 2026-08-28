@@ -357,7 +357,7 @@ export function GenerationPanel(
 
     // Apply favorite params only after the visible server catalog is authoritative.
     useEffect(() => {
-        if (!applyFavoriteParams || catalogLoading) return;
+        if (!applyFavoriteParams || catalogLoading || catalogError) return;
 
         if (applyFavoriteParams.prompt) setPrompt(applyFavoriteParams.prompt);
         if (applyFavoriteParams.model) {
@@ -384,7 +384,7 @@ export function GenerationPanel(
         if (applyFavoriteParams.quality) setQuality(applyFavoriteParams.quality);
         // negativePrompt is stored in CanvasImage but is consumed by img2img, not this panel.
         onFavoriteParamsApplied?.();
-    }, [applyFavoriteParams, catalogLoading, catalogModels, onFavoriteParamsApplied, onModelChange]);
+    }, [applyFavoriteParams, catalogError, catalogLoading, catalogModels, onFavoriteParamsApplied, onModelChange]);
     const [showThirdPartyDialog, setShowThirdPartyDialog] = useState(false);
     const [thirdPartyDefaultType, setThirdPartyDefaultType] = useState<'image' | 'chat'>('image');
     const [universalApiName, setUniversalApiName] = useState('');
@@ -786,7 +786,7 @@ export function GenerationPanel(
     // 万能API相关函数
   // Resolve persisted exact/legacy keys only against the authoritative visible catalog.
     useEffect(() => {
-        if (pendingModelMigration && !catalogLoading) {
+        if (pendingModelMigration && !catalogLoading && !catalogError) {
             const resolution = resolvePersistedModelSelection(
                 pendingModelMigration,
                 catalogModels.map(entry => ({ id: entry.id, providerId: entry.providerId })),
@@ -796,7 +796,7 @@ export function GenerationPanel(
             pendingModelMigrationRef.current = null;
             setPendingModelMigration(null);
         }
-    }, [pendingModelMigration, catalogLoading, catalogModels]);
+    }, [pendingModelMigration, catalogError, catalogLoading, catalogModels]);
 
     // 3D模型名称友好标签映射
     const get3DModelLabel = (modelId: string): string => {
@@ -834,6 +834,7 @@ export function GenerationPanel(
         });
         setDiscoveredModels(serverModels);
         if (!catalogLoading
+            && !catalogError
             && !pendingModelMigrationRef.current
             && !automaticSelectionBlockedRef.current) {
             setModel(prev => selectInitialModel(prev, serverModels.map(entry => ({
@@ -841,7 +842,7 @@ export function GenerationPanel(
                 isDefault: entry.isDefault,
             }))));
         }
-    }, [catalogLoading, catalogModels]);
+    }, [catalogError, catalogLoading, catalogModels]);
 
     const handleAddUniversalApi = async () => {
         if (!universalApiManager || !universalApiName.trim() || !universalApiUrl.trim() || !universalApiKey.trim()) {

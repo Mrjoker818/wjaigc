@@ -48,6 +48,29 @@ describe('persisted model selection resolution', () => {
     });
   });
 
+  it('migrates a unique legacy bare model id that itself contains separators', () => {
+    expect(resolvePersistedModelSelection('vendor::shared-model', [
+      { id: 'vendor::shared-model', providerId: 'provider-a' },
+    ])).toEqual({
+      status: 'migrated',
+      compositeKey: 'provider-a::vendor::shared-model',
+      modelId: 'vendor::shared-model',
+      providerId: 'provider-a',
+    });
+  });
+
+  it('rejects an ambiguous legacy bare namespaced model id', () => {
+    expect(resolvePersistedModelSelection('vendor::shared-model', [
+      { id: 'vendor::shared-model', providerId: 'provider-a' },
+      { id: 'vendor::shared-model', providerId: 'provider-b' },
+    ])).toEqual({
+      status: 'ambiguous',
+      compositeKey: null,
+      modelId: 'vendor::shared-model',
+      providerId: null,
+    });
+  });
+
   it('does not write back a bare id with no visible provider candidate', () => {
     expect(resolvePersistedModelSelection('missing-model', candidates)).toEqual({
       status: 'not-found',
