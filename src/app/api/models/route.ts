@@ -61,11 +61,15 @@ export async function GET(request: NextRequest) {
     };
   });
   const availableModelIds = new Set(responseModels.map(model => `${model.providerId}::${model.id}`));
+  const availableProviderIds = new Set(responseModels.map(model => model.providerId));
+  const responseProviders = user && user.role !== 'admin'
+    ? snapshot.providers.filter(provider => availableProviderIds.has(provider.id))
+    : snapshot.providers;
 
   return NextResponse.json({
     success: true,
     capabilityCatalogVersion: CAPABILITY_CATALOG_VERSION,
-    providers: snapshot.providers,
+    providers: responseProviders,
     models: responseModels,
     taskModelCatalog: catalogResult.taskModelCatalog.filter(model => {
       const key = taskModelKey(model.providerId, model.modelId);

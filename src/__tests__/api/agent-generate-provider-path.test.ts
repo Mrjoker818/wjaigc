@@ -73,10 +73,12 @@ vi.mock('@/lib/cloud-task-storage', () => ({
 
 import { POST as generate } from '@/app/api/generate/route';
 import { submitStrictAgentGeneration } from '@/lib/agent-runtime/generate-image-adapter';
+import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
 
 describe('real Agent generate_image provider path', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    persistence.provider.selectedModels = ['Exact::Model'];
     persistence.consumeCredits.mockResolvedValue({ success: true, cost: 0 });
     persistence.resolveTaskModelForUser.mockImplementation(async (
       providerId: string,
@@ -132,6 +134,46 @@ describe('real Agent generate_image provider path', () => {
         modelId: 'Exact::Model',
         field: 'aspectRatio',
       },
+    });
+    expect(persistence.consumeCredits).not.toHaveBeenCalled();
+    expect(persistence.recordImageTaskSubmitted).not.toHaveBeenCalled();
+    expect(persistence.registerTask).not.toHaveBeenCalled();
+    expect(externalSubmit).not.toHaveBeenCalled();
+  });
+
+  it('rejects an ambiguous bare authorization before billing or durable task persistence', async () => {
+    persistence.provider.selectedModels = ['shared-model'];
+    persistence.requireApiAuthOrReject.mockResolvedValue({
+      authenticated: true,
+      userId: 'user-1',
+      userRole: 'user',
+      source: 'session',
+      user: { id: 'user-1', role: 'user', imageModels: ['shared-model'] },
+    });
+    persistence.resolveTaskModelForUser.mockRejectedValue(new ModelCapabilityError(
+      'MODEL_NOT_AUTHORIZED',
+      'Model authorization migration required for shared-model: ambiguous',
+      { providerId: 'provider-exact', modelId: 'shared-model', reason: 'ambiguous' },
+    ));
+    const externalSubmit = vi.fn();
+    vi.stubGlobal('fetch', externalSubmit);
+
+    const response = await generate(new Request('http://localhost/api/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        prompt: 'Must reject ambiguous legacy authorization',
+        aspectRatio: '1:1',
+        model: 'shared-model',
+        providerId: 'provider-exact',
+      }),
+    }) as never);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      code: 'MODEL_NOT_AUTHORIZED',
+      retryable: false,
     });
     expect(persistence.consumeCredits).not.toHaveBeenCalled();
     expect(persistence.recordImageTaskSubmitted).not.toHaveBeenCalled();

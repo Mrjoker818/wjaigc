@@ -186,6 +186,26 @@ describe('task model catalog', () => {
         ],
       }),
       createProvider({
+        id: 'disabled-provider',
+        type: 'image',
+        isEnabled: false,
+        selectedModels: ['unique-image', 'disabled-only'],
+        discoveredModels: [
+          {
+            id: 'unique-image',
+            name: 'Disabled Duplicate',
+            providerId: 'disabled-provider',
+            type: 'image',
+          },
+          {
+            id: 'disabled-only',
+            name: 'Disabled Only',
+            providerId: 'disabled-provider',
+            type: 'image',
+          },
+        ],
+      }),
+      createProvider({
         id: 'audio-provider',
         type: 'audio',
         selectedModels: ['speech-1'],
@@ -495,6 +515,36 @@ describe('task model catalog', () => {
     )).resolves.toMatchObject({
       providerId: 'unique-provider',
       modelId: 'unique-image',
+    });
+  });
+
+  it('excludes disabled providers from exact resolution, catalogs, and migration candidates', async () => {
+    await expect(resolveTaskModel(
+      'disabled-provider',
+      'disabled-only',
+      'admin-a',
+    )).rejects.toThrow('not configured');
+
+    const result = await resolveTaskModelCatalogResult([], createUser({
+      id: 'disabled-provider-user',
+      imageModels: ['unique-image', 'disabled-only'],
+    }));
+
+    expect(result.authorizedModelKeys.has('unique-provider::unique-image')).toBe(true);
+    expect([...result.authorizedModelKeys].some(key => key.startsWith('disabled-provider::')))
+      .toBe(false);
+    expect(result.taskModelCatalog.some(model => model.providerId === 'disabled-provider'))
+      .toBe(false);
+    expect(result.modelAuthorizationMigration).toEqual({
+      resolved: [{
+        legacyModelId: 'unique-image',
+        exactModelId: 'unique-provider::unique-image',
+      }],
+      required: [{
+        legacyModelId: 'disabled-only',
+        reason: 'not-visible',
+        candidates: [],
+      }],
     });
   });
 

@@ -34,6 +34,7 @@ interface ProviderRowOptions {
   modelId: string;
   discoveredType: string;
   name?: string;
+  isEnabled?: boolean;
 }
 
 function providerRow(options: ProviderRowOptions) {
@@ -43,7 +44,7 @@ function providerRow(options: ProviderRowOptions) {
     display_name: options.name || options.id,
     base_url: 'https://api.example.com/v1',
     api_key: 'server-secret',
-    is_enabled: true,
+    is_enabled: options.isEnabled ?? true,
     type: options.modelType,
     model_type: options.modelType,
     request_style: 'auto',
@@ -256,6 +257,58 @@ describe('configured task model catalog APIs', () => {
       }],
       required: [],
     });
+  });
+
+  it('limits regular-user provider metadata to visible models while preserving the admin snapshot', async () => {
+    mocks.dbGetApiProviders.mockResolvedValue([
+      providerRow({
+        id: 'provider-a',
+        modelType: 'image',
+        modelId: 'image-a',
+        discoveredType: 'image',
+      }),
+      providerRow({
+        id: 'provider-b',
+        modelType: 'image',
+        modelId: 'image-b',
+        discoveredType: 'image',
+      }),
+      providerRow({
+        id: 'provider-disabled',
+        modelType: 'image',
+        modelId: 'disabled-image',
+        discoveredType: 'image',
+        isEnabled: false,
+      }),
+    ]);
+    mocks.getSessionUser.mockResolvedValue({
+      id: 'user-1',
+      role: 'user',
+      imageModels: [
+        'provider-a::image-a',
+        'provider-disabled::disabled-image',
+      ],
+      apiPermissions: userPermissions(),
+    });
+
+    const regularData = await (
+      await getModels(new NextRequest('http://localhost/api/models?type=image'))
+    ).json();
+
+    expect(regularData.models.map((model: { providerId: string }) => model.providerId))
+      .toEqual(['provider-a']);
+    expect(regularData.providers.map((provider: { id: string }) => provider.id))
+      .toEqual(['provider-a']);
+    expect(mocks.dbUpsertApiProvider).not.toHaveBeenCalled();
+
+    mocks.getSessionUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    const adminData = await (
+      await getModels(new NextRequest('http://localhost/api/models?type=image'))
+    ).json();
+
+    expect(adminData.providers.map((provider: { id: string }) => provider.id))
+      .toEqual(['provider-a', 'provider-b', 'provider-disabled']);
+    expect(mocks.dbUpsertApiProvider).not.toHaveBeenCalled();
   });
 
   it('applies descriptor-null audio permission before exposing legacy model fields', async () => {
