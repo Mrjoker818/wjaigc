@@ -80,6 +80,13 @@ export interface LayerDecompositionResult {
   reconstruction?: ReconstructionReport;
 }
 
+export interface LayerUpstreamError {
+  code?: string | number;
+  message: string;
+  type?: string;
+  param?: string;
+}
+
 export interface LayerTaskResponse {
   success: boolean;
   taskId: string;
@@ -88,4 +95,6 @@ export interface LayerTaskResponse {
   progress: number;
   result?: LayerDecompositionResult;
   error?: { code: string; message: string; retryable: boolean };
+  providerError?: LayerUpstreamError;
+  fallbackReason?: string;
 }

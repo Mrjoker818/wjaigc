@@ -1,3 +1,5 @@
+import type { LayerUpstreamError } from '@/lib/layer-decomposition/types';
+
 const EDITS_PATH = '/v1/images/edits';
 const GENERATIONS_PATH = '/v1/images/generations';
 const TASKS_PATH = '/v1/images/tasks';
@@ -60,7 +62,12 @@ export type PearSubmitResult =
 export type PearPollResult =
   | { status: 'queued' | 'running'; progress: number }
   | { status: 'completed'; progress: 100; artifactUrl: string }
-  | { status: 'failed' | 'cancelled' | 'timeout'; progress: number; error: string };
+  | {
+    status: 'failed' | 'cancelled' | 'timeout';
+    progress: number;
+    error: string;
+    providerError: LayerUpstreamError;
+  };
 
 interface ParsedResponse {
   body: Record<string, unknown>;
@@ -121,6 +128,13 @@ function firstString(...values: unknown[]): string | undefined {
   return values.find((value): value is string => (
     typeof value === 'string' && value.trim().length > 0
   ))?.trim();
+}
+
+function errorCode(value: unknown): string | number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized ? normalized.slice(0, 256) : undefined;
 }
 
 function extractRemoteTaskId(body: Record<string, unknown>): string | undefined {
@@ -397,5 +411,19 @@ export async function pollPearLayerTask(
     errorRecord?.message,
     parsed.body.message,
   ) || `Pear task ended as ${status}`;
-  return { status, progress, error: error.slice(0, 1_000) };
+  const message = error.slice(0, 1_000);
+  const code = errorCode(errorRecord?.code);
+  const type = firstString(errorRecord?.type)?.slice(0, 256);
+  const param = firstString(errorRecord?.param)?.slice(0, 256);
+  return {
+    status,
+    progress,
+    error: message,
+    providerError: {
+      ...(code !== undefined ? { code } : {}),
+      message,
+      ...(type ? { type } : {}),
+      ...(param ? { param } : {}),
+    },
+  };
 }

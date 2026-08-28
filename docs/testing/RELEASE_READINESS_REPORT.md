@@ -1575,3 +1575,25 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 最终聚焦回归 `10 files / 80 tests`；全仓真实 PostgreSQL 为 `588/588 files`、`4213/4213 tests`，失败与跳过均为 0；发布级 Lint 与 TypeScript 检查均退出 0。8 GiB 堆生产构建以 `0` 退出，webpack 编译约 `13.7min`，静态页面 `117/117` 生成；约 4 GiB 默认堆的既有 OOM 资源约束仍保留。
 - 独立代码复审未发现 P0/P1 阻断，但这不是云端供应商成功证据。
 - **发布结论保持“有条件通过 / 未吸收”。** 只有 Coze 拉取精确新 SHA 后，真实 Pro PSD 证明应用 taskId、同任务恢复、供应商阶段、最终图层、一次扣费、同键重放和失败退款，才能关闭本项。
+
+## 2026-08-28 ac8e826b 云端部署准备度增量
+
+- Coze 已精确运行 `main@ac8e826b34f91649c47cefd504d9d6664ee12eb8`，代码树与 `origin/main` 一致；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 生产构建退出码 `0`，Build ID `VALgz1-sdVe-tiy5Jz8yU`；5000 PID `4372`。根路由、Simple Chat、鉴权及 11 个静态资源均通过。
+- Google Chrome 已登录预览可恢复节点模式和画布，真实图片双击预览与 `PSD` 入口已走到付费提交前。元素拆解“可编辑图层”只作探索，不作为本项付费验收入口。重启窗口的同步 502 后续已恢复，不存在当前持续错误证据。
+- **发布结论仍为有条件通过。** 远程 ZIP Range、PSD 提取、远程图层、一次扣费、同键重放和失败一次退款仍未执行；V588-STABILITY-002 不得标记已吸收，也不得进入 `V588-ADMIN-004`。
+- 机器证据：`docs/testing/evidence/v588-stability-002-ac8e826b-cloud-deploy-2026-08-28.json`。
+
+## 2026-08-28 Pear 真实失败回退后的发布结论
+
+- 真实付费任务已证明：应用任务可建立、远端 taskId 可持久化、供应商失败可收敛到本地回退、PSD 可下载、一次扣费与一次退款一致。
+- 本次 Pear 没有返回制品 URL，故 `ac8e826b` 的 1 MiB Range 下载、ZIP 主 PSD 选择、远程图层提取仍未获得云端成功证据。
+- 下载到的 `Image_pro (3).psd` 是可解析的本地回退文件，不是远程 Pear 制品；不得用它把 V588-STABILITY-002 标记为已吸收。
+- **发布结论保持“有条件通过”。** 当前不是代码回归失败证据，而是供应商本次任务失败导致成功路径仍未闭环；在真实 ZIP 成功前不进入 `V588-ADMIN-004`。
+
+## 2026-08-28 Pear 失败诊断发布增量
+
+- 当前 Pear `image-layered` 请求和轮询协议已与官方文档逐项核对，没有通过改端点或重试来掩盖供应商失败。
+- 新候选会保留供应商 `error.code/type/param/message`，并在智能回退完成后继续保留诊断；敏感响应体、密钥和图片内容不会进入任务结果。
+- 本地全仓非 PostgreSQL 4099 项、TypeScript、ESLint 和 8 GiB 堆 `117/117` 生产构建通过；默认约 4 GiB 构建 OOM 的资源约束仍保留。
+- **发布结论继续为“有条件通过”。** 该补丁可以提升部署后的故障归因，但不能替代远程 ZIP/PSD 成功、同键重放和显式取消退款的真实云端证据；`V588-STABILITY-002` 仍未吸收。

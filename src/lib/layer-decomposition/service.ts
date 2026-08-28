@@ -39,6 +39,7 @@ import {
 import type {
   LayerDecompositionRequest,
   LayerDecompositionResult,
+  LayerUpstreamError,
   LayerTaskPhase,
   LayerTaskResponse,
 } from '@/lib/layer-decomposition/types';
@@ -155,7 +156,12 @@ function parseTaskError(task: CloudTask): LayerTaskResponse['error'] | undefined
 }
 
 function toTaskResponse(task: CloudTask): LayerTaskResponse {
-  const result = resultObject(task).decomposition as LayerDecompositionResult | undefined;
+  const storedResult = resultObject(task);
+  const result = storedResult.decomposition as LayerDecompositionResult | undefined;
+  const providerError = storedResult.providerError as LayerUpstreamError | undefined;
+  const fallbackReason = typeof storedResult.fallbackReason === 'string'
+    ? storedResult.fallbackReason
+    : undefined;
   return {
     success: task.status !== 'failed',
     taskId: task.id,
@@ -163,6 +169,8 @@ function toTaskResponse(task: CloudTask): LayerTaskResponse {
     phase: phaseFromTask(task),
     progress: task.progress,
     ...(result ? { result } : {}),
+    ...(providerError ? { providerError } : {}),
+    ...(fallbackReason ? { fallbackReason } : {}),
     ...(parseTaskError(task) ? { error: parseTaskError(task) } : {}),
   };
 }
@@ -567,9 +575,16 @@ async function runLocalAndComplete(
         },
         reconstruction,
       };
+      const storedResult = resultObject(task);
       committed = await completeCloudTask(task.id, {
         phase: 'ready',
         decomposition,
+        ...(typeof storedResult.fallbackReason === 'string'
+          ? { fallbackReason: storedResult.fallbackReason }
+          : {}),
+        ...(storedResult.providerError
+          ? { providerError: storedResult.providerError }
+          : {}),
       }, leaseOwner);
       if (!committed) {
         throw new LayerServiceError(
@@ -594,6 +609,7 @@ async function fallbackToLocal(
   reason: string,
   signal: AbortSignal,
   leaseOwner: string,
+  providerError?: LayerUpstreamError,
 ): Promise<void> {
   const latest = await assertTaskActive(task.id, task.userId, signal, leaseOwner);
   const transitioned = await transitionCloudTaskToLocalFallbackAndRefund(
@@ -602,6 +618,7 @@ async function fallbackToLocal(
       ...resultObject(latest),
       phase: 'running-local-fallback',
       fallbackReason: reason,
+      ...(providerError ? { providerError } : {}),
     },
     `Pear 图片分层失败退款: ${reason}`,
     leaseOwner,
@@ -878,8 +895,21 @@ async function advanceLiveTask(
   }
   const terminalError = 'error' in polled ? polled.error : 'Pear task ended unexpectedly';
   if (request.engine === 'smart') {
-    await fallbackToLocal(task, request, terminalError, signal, attemptId);
+    await fallbackToLocal(
+      task,
+      request,
+      terminalError,
+      signal,
+      attemptId,
+      'providerError' in polled ? polled.providerError : undefined,
+    );
   } else {
+    if ('providerError' in polled) {
+      await updateTaskState(task, {
+        patch: { providerError: polled.providerError },
+        leaseOwner: attemptId,
+      });
+    }
     await failTask(
       task.id,
       `PEAR_TASK_${polled.status.toUpperCase()}`,

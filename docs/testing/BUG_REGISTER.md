@@ -2737,3 +2737,39 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | RED/GREEN | 持久客户端、无 WebCrypto/无存储失败关闭、模块重载直连恢复、跨标签同键、旧代防覆盖、目标冻结、独立源记录、负偏移命中和 Studio 阴影均先得到失败回归，再完成最小修复。最终聚焦 `10 files / 80 tests` 全部通过。 |
 | 最终本地门禁 | 全新 PostgreSQL 18.4 隔离库参与全仓运行：`588/588 files`、`4213/4213 tests`，失败 `0`、跳过 `0`；`pnpm lint:build` 与 `pnpm ts-check` 均以 `0` 退出。生产构建结果以同日发布报告的最终记录为准。 |
 | 状态 | **本地实现与并发恢复门禁已关闭；云端真实供应商链路仍未关闭。** 必须部署精确 `main` 提交后证明快速返回应用 taskId、不中断恢复同一任务、真实远程图层写入 PSD、一次扣费、同键重放不重复扣费及失败只退款一次。 |
+
+### V588-STABILITY-002-BUG-005 - Pear 失败结构化信息丢失（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2：不改变任务或账务结果，但会把供应商、模型、参数和应用故障压成同一句泛化提示，阻碍真实故障归因。 |
+| 稳定复现 | Pear 任务返回 `status=failed` 且 `error={code,message,type,param}` 时，旧 `pollPearLayerTask()` 只返回 `message`；智能模式完成本地回退后，最终任务结果不再包含该上游诊断。 |
+| 根因 | 适配器只解析文本消息；`runLocalAndComplete()` 最终提交仅写入 `phase + decomposition`，覆盖了回退阶段结果中的诊断字段。 |
+| RED | 适配器与并发服务新增 2 项回归，首轮为 `2 failed / 21 passed`，分别证明结构化字段缺失及完成后诊断丢失。 |
+| 最小修复 | 新增受长度约束的 `LayerUpstreamError`；保留 `code/type/param/message`，智能回退与最终本地结果持久化 `providerError + fallbackReason`；纯云端失败也在终态前保存结构化诊断。 |
+| 安全边界 | 不保存响应体、API Key、Token 或图片内容；不改变 Pear 请求协议、扣费、退款、租约或终态竞争逻辑。 |
+| 回归 | 分层 `55/55`；全仓 `566 files / 4099 passed / 122 skipped / 0 failed`；TypeScript、ESLint 通过；8 GiB 堆生产构建 `117/117`。 |
+| 状态 | **本地已修复 / 待部署观察。** 已有 `ac8e826b` 付费失败只能证明旧版泛化错误；部署后下一次真实失败需确认 API 任务响应保留结构化字段。 |
+
+### V588-STABILITY-002-BUG-004 云端部署前缀增量（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 云端版本 | Coze `HEAD` 与 `origin/main` 均为 `ac8e826b34f91649c47cefd504d9d6664ee12eb8`，代码树均为 `b05448edae7126ac0833c28f2ee552c9c200c320`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 构建与启动 | `pnpm build` 退出码 `0`，Build ID `VALgz1-sdVe-tiy5Jz8yU`；`scripts/coze-start.sh` 启动单一 5000 服务，PID `4372`。根路由、`/simple-chat`、`/api/auth/me` 均为 HTTP 200，HTML 引用的 11 个 JS/CSS 资源失败数为 0。 |
+| Chrome 前缀验收 | Google Chrome“用户1”复用现有标签并强制刷新，已登录节点模式与画布数据恢复；项目 `project_1787549625844_nfmso3ts9` 可见 1 张 `1024 x 1024` 图片。双击已打开图片预览，`PSD` 按钮可见。元素拆解“可编辑图层”只做了探索，不作为本项付费入口。 |
+| 运行日志 | 服务重启窗口出现过项目同步 502 警告；随后项目读取与同步连续恢复成功，最新刷新窗口没有应用 Console Error 或原生错误弹窗。该短暂 502 不计为业务通过，也不误报为持久故障。 |
+| 付费边界 | 已停在图片预览 `PSD` 按钮前，未点击、未创建 Pear 任务、未扣积分。仍缺远程 ZIP Range 下载、主 PSD 提取、真实远程图层、一次扣费、同键重放及失败一次退款证据。 |
+| 状态 | **云端精确 SHA、构建、启动与付费前 UI 前缀已关闭；真实供应商终态仍未关闭。** 机器证据：`docs/testing/evidence/v588-stability-002-ac8e826b-cloud-deploy-2026-08-28.json`。 |
+
+### V588-STABILITY-002-BUG-004 真实付费失败回退增量（2026-08-28）
+
+| 字段 | 内容 |
+|---|---|
+| 真实动作 | Google Chrome 复用现有预览标签，在图片预览点击 `PSD`。19:16:53 提交，约 95 秒后下载 `Image_pro (3).psd`。 |
+| 任务身份 | 应用任务 `layer_bde7c937-ecdb-4fee-b901-54c834aeb1f0`；Pear 远端任务 `6bbcd3f8-1d11-41be-8866-40fba1bfb479`。 |
+| 数据库终态 | `status=completed`、`phase=ready`、`credit_status=refunded`、`remoteArtifactUrl=null`，`fallbackReason=任务处理失败，请稍后重试`。Pear 在返回制品前失败，新 Range 下载器没有被本次调用覆盖。 |
+| 账务 | 19:16 唯一扣除 15 积分；19:18 唯一退回 15 积分。没有第二次扣费或重复退款。 |
+| 下载文件 | `25,495,074` 字节，SHA-256 `73731e7aa62dca88001c72c03159936496569dfd35b6ae450b0d9c9feffdb711`；`8BPS` 可解析，`3504 x 2336`，5 个顶层项、共 11 个组/图层。该文件来自本地智能回退，不能作为远程 Pear PSD 通过证据。 |
+| 判定 | **失败回退与一次退款通过；远程 ZIP/PSD 成功路径未验证。** 本次供应商失败不归因于 Range 下载补丁，也不得据此关闭 BUG-004 或进入 `V588-ADMIN-004`。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-ac8e826b-cloud-deploy-2026-08-28.json`。 |

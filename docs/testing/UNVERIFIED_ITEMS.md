@@ -1600,3 +1600,44 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 云端失败退款 | `UNVERIFIED` | 使用安全可控的供应商失败或总超时，证明唯一失败终态、一次退款和可理解提示，不改坏生产配置。 |
 
 旧云端 `main@28a722b3` 的 400 与本地 PSD 回退只证明修复前失败，不能作为上述任何新云端项的通过证据。
+
+## 2026-08-28 ac8e826b 部署后剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| Coze 精确 SHA / tree | 已验证 | `HEAD=origin/main=ac8e826b34f91649c47cefd504d9d6664ee12eb8`，tree 一致，`stable` 未变 |
+| 构建、启动、健康与静态资源 | 已验证 | build 0、Build ID `VALgz1-sdVe-tiy5Jz8yU`、PID `4372`、三个 HTTP 200、11/11 静态资源成功 |
+| Chrome 登录态与 Pro PSD 入口 | 已验证到提交前 | 现有标签恢复项目，双击图片打开预览，`PSD` 按钮可见且可用；30 秒健康窗口 error/warning `0/0` |
+| Pear 真实远程任务 | `UNVERIFIED` | 操作时确认后点击真实提交，快速返回应用 taskId，并经历 `submitting-pear`、`waiting-for-pear`、制品下载/解析阶段 |
+| ZIP Range 下载与 PSD 提取 | `UNVERIFIED` | 真实 Pear ZIP 经 1 MiB Range 下载，提取非 `_depth` 主 PSD，编辑器展示至少 2 个可编辑远程图层 |
+| 一次扣费与同键重放 | `UNVERIFIED` | 记录积分与账务；同请求同键返回同一 taskId，不增加供应商任务或扣费 |
+| 失败/取消退款 | `UNVERIFIED` | 安全受控失败或取消只产生一个数据库终态与一次退款，迟到完成不得覆盖 |
+
+部署证据：`docs/testing/evidence/v588-stability-002-ac8e826b-cloud-deploy-2026-08-28.json`。当前阻塞仅是付费动作时确认及其后的真实运行时间，不得把提交前状态写成通过。
+
+## 2026-08-28 一次真实付费后的剩余项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| Pear 应用任务快速建立 | 已验证 | 应用任务 `layer_bde7c937-ecdb-4fee-b901-54c834aeb1f0` 与远端任务 `6bbcd3f8-1d11-41be-8866-40fba1bfb479` 已建立，浏览器未出现同步超时。 |
+| 供应商失败回退 | 已验证 | Pear 在制品前失败；任务原子进入本地回退并最终 `completed/ready`，下载 PSD 可解析。 |
+| 一次扣费与一次退款 | 已验证 | 19:16 `-15`、19:18 `+15`，`credit_status=refunded`，净变化 0。 |
+| 远程 ZIP Range 下载 | `UNVERIFIED` | 本次 `remoteArtifactUrl=null`，没有调用 Range 下载器；需 Pear 成功返回 ZIP 后验证 1 MiB 分段与稳定 validator。 |
+| 主 PSD 提取与远程图层 | `UNVERIFIED` | 需从真实 ZIP 选择非 `_depth.psd` 主文件，并证明最终 PSD 含至少 2 个远程可编辑图层。 |
+| 同键重放 | `UNVERIFIED` | 需复用同一幂等键与摘要返回同一 taskId，且不增加供应商任务或扣费。 |
+| 显式取消退款 | `UNVERIFIED` | 需安全取消处理中任务，证明唯一取消终态、一次退款与迟到完成拒绝。 |
+
+本次下载文件属于本地智能回退，不能替代上述远程成功路径。下一次付费动作仍需单独动作时确认。
+
+## 2026-08-28 Pear 失败诊断修复后的剩余项
+
+| 项目 | 最新状态 | 说明 / 关闭条件 |
+|---|---|---|
+| 结构化供应商错误 | 本地已验证 | 自动化证明 `code/type/param/message` 在轮询、智能回退和最终任务结果中保留；待部署后观察一次真实失败响应。 |
+| 请求协议 | 已复核 | 当前字段与 Pear 官方图片编辑、异步任务查询契约一致；除非取得新的官方证据，不调整端点或重复提交。 |
+| 远程 ZIP Range 与主 PSD | `UNVERIFIED` | 仍需供应商成功返回真实 ZIP，验证 Range 下载、非 `_depth` 主 PSD 选择和 `8BPS` 解析。 |
+| 远程可编辑图层 | `UNVERIFIED` | 最终 PSD 必须包含至少 2 个来自远端制品的可编辑图层；本地回退图层不计。 |
+| 同键重放 | `UNVERIFIED` | 同一摘要与幂等键返回同一应用 taskId，供应商任务和扣费均不得增加。 |
+| 显式取消退款 | `UNVERIFIED` | 处理中取消只产生唯一取消终态和一次退款，迟到完成不得覆盖。 |
+
+本轮没有再次提交付费任务。部署后可先用自然失败验证结构化诊断，无需为验证错误字段故意破坏供应商配置。

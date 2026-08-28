@@ -527,3 +527,26 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 聚焦 PostgreSQL 与 PSD 关联矩阵 `11 files / 92 tests` 全部通过；启用全部数据库变量后的全仓结果为 `587/587 files`、`4193/4193 tests`，失败和跳过均为 `0`。TypeScript 与零错误 ESLint 通过。
 - 默认约 4 GiB Node 堆的本地生产构建在 webpack 编译阶段 OOM；以 `NODE_OPTIONS=--max-old-space-size=8192` 复验后完成编译、TypeScript、`117/117` 静态页面和构建追踪。此资源风险保留，不把 8 GiB 结果误写为默认堆通过。
 - **当前状态：真实 PostgreSQL 并发/终态/退款门禁已在本地关闭，V588-STABILITY-002 仍未吸收。** 云端 Pro PSD 已停在真实付费按钮前，未扣积分；仍需动作时确认后验证供应商、任务身份、一次扣费、同键重放、失败退款及最终文件。机器证据：`docs/testing/evidence/v588-stability-002-postgres-local-2026-08-28.json`。
+
+## 2026-08-28 V588-STABILITY-002 ac8e826b 云端部署检查点
+
+- `main@ac8e826b34f91649c47cefd504d9d6664ee12eb8` 已推送并在 Coze 精确对齐；`HEAD`/`origin/main` tree 均为 `b05448edae7126ac0833c28f2ee552c9c200c320`。 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与只读 V5.8.8 donor 未修改。
+- Coze 构建退出码 `0`，Build ID `VALgz1-sdVe-tiy5Jz8yU`，单一 5000 服务 PID `4372`；`/`、`/simple-chat`、`/api/auth/me` 与 11 个静态资源全部成功。
+- Google Chrome“用户1”复用现有标签强制刷新后恢复节点模式与画布；真实图片可双击打开预览，`PSD` 按钮可见。元素拆解“可编辑图层”只作探索，不作为本项付费验收入口。服务重启窗口的同步 502 已在后续连续同步成功中恢复。
+- 真实付费按钮尚未点击，因此 Pear 任务、Range ZIP 下载、主 PSD 提取、远程图层、一次扣费、同键重放和失败一次退款仍为 `UNVERIFIED`。
+- **状态：部署前缀已通过 / V588-STABILITY-002 仍未吸收。** 取得付费动作时确认后只关闭上述剩余矩阵；完成前不进入 `V588-ADMIN-004`，不重复 Stage 4 其他已关闭项目。证据：`docs/testing/evidence/v588-stability-002-ac8e826b-cloud-deploy-2026-08-28.json`。
+
+## 2026-08-28 V588-STABILITY-002 真实付费失败回退检查点
+
+- 已在 Google Chrome 真实点击 Pro PSD，应用任务 `layer_bde7c937-ecdb-4fee-b901-54c834aeb1f0` 与 Pear 任务 `6bbcd3f8-1d11-41be-8866-40fba1bfb479` 建立成功；没有旧版同步阻塞或浏览器超时。
+- Pear 本次在产出制品前返回“任务处理失败，请稍后重试”，`remoteArtifactUrl=null`，所以 `ac8e826b` 的 Range ZIP 下载补丁没有被真实调用，不能据此判定补丁失败或通过。
+- 本地智能回退完成并下载可解析 PSD；账务唯一扣除 15 分并唯一退回 15 分，净变化 0。失败回退与退款子项关闭。
+- **V588-STABILITY-002 继续未吸收。** 仍需真实 Pear ZIP 成功、主 PSD 提取、远程可编辑图层、同键重放与显式取消退款；完成前不进入 `V588-ADMIN-004`。`stable` 和只读 V5.8.8 donor 均未触碰。
+
+## 2026-08-28 V588-STABILITY-002 Pear 失败可观测性检查点
+
+- 对照 Pear 官方图片编辑与任务查询文档后，当前 `image-layered` 请求的 `/v1/images/edits`、`image`、非空 `prompt`、`task_type=async`、`response_format=url` 及 `/v1/images/tasks/{id}` 均与官方契约一致；没有证据支持通过改接口或重复提交规避本次供应商失败。
+- 发现独立可观测性缺陷：轮询适配器只保留 `error.message`，丢弃官方响应中的 `error.code/type/param`；智能本地回退完成时又会覆盖回退诊断，导致供应商故障与应用故障难以精确区分。
+- 已按 TDD 最小修复：结构化字段经过长度约束后写入 `providerError`，同时保留兼容的文本错误；智能回退原子退款和最终本地完成均保留 `providerError + fallbackReason`。没有修改供应商请求、计费价格、退款条件或任务终态转换。
+- 聚焦分层矩阵 `55/55`，全仓非 PostgreSQL `566 files / 4099 passed / 122 skipped / 0 failed`，TypeScript 与 ESLint 通过；默认约 4 GiB 堆构建 OOM，8 GiB 堆完成 `117/117` 页面生产构建。
+- **状态：失败诊断本地已关闭 / V588-STABILITY-002 仍未吸收。** 推送并部署新 `main` 后可在下一次自然供应商失败中直接读取结构化错误；真实 ZIP Range、主 PSD、远程图层、同键重放和显式取消退款仍维持 `UNVERIFIED`，不得因此进入 `V588-ADMIN-004`。

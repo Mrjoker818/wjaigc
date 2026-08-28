@@ -1968,3 +1968,34 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 聚焦矩阵 `10 files / 80 tests` 通过；全仓在全新 PostgreSQL 18.4 隔离库下为 `588 files / 4213 tests` 全部通过，失败与跳过均为 0；`pnpm lint:build`、`pnpm ts-check` 均退出 0。
 - 8 GiB 堆生产构建以 `0` 退出：webpack 编译约 `13.7min`，TypeScript 完成，静态页面 `117/117` 生成；约 4 GiB 默认堆的既有 OOM 资源约束仍保留。
 - **回归结论：本地代码、真实数据库并发和恢复合同通过；云端仍为未吸收。** 旧云端 400 + 本地回退证据继续有效，不能替代部署后真实 provider task、一次扣费、同键重放、失败退款和最终 PSD 图层证据。
+
+## 2026-08-28 ac8e826b 云端部署与付费前回归
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| Git 精确对齐 | 通过 | `HEAD=origin/main=ac8e826b34f91649c47cefd504d9d6664ee12eb8`；tree 均为 `b05448edae7126ac0833c28f2ee552c9c200c320`；`stable@52f7c601` 未变 |
+| Coze 生产构建 | 通过 | 退出码 0，Build ID `VALgz1-sdVe-tiy5Jz8yU` |
+| 单服务启动 | 通过 | `scripts/coze-start.sh`，5000 PID `4372` |
+| 路由与静态资源 | 通过 | `/`、`/simple-chat`、`/api/auth/me` 均 200；11 个 JS/CSS 失败 0 |
+| 已登录预览恢复 | 通过 | Chrome 现有标签恢复节点模式、画布与项目数据，真实图片可选择 |
+| Pro PSD 入口 | 通过到提交前 | 双击真实图片打开预览，`PSD` 按钮可见且可用；30 秒静置窗口项目同步成功，新增 Console error/warning `0/0`；未点击付费按钮 |
+| 重启瞬时同步 502 | 已观察并恢复 | 重启窗口产生警告，随后读取与同步连续成功；最新窗口无应用 Error |
+| Pear ZIP/PSD 终态 | 未执行 | 等待付费动作时确认，不能标记通过 |
+
+本次机器证据为 `docs/testing/evidence/v588-stability-002-ac8e826b-cloud-deploy-2026-08-28.json`。回归结论仍为“有条件通过”：部署前缀已关闭，但真实 Pear 远程图层、同键重放和云端账务终态尚未关闭。
+
+## 2026-08-28 ac8e826b 真实 Pear 失败回退回归
+
+- 真实 Pro PSD 点击已执行，应用任务 `layer_bde7c937-ecdb-4fee-b901-54c834aeb1f0` 快速建立并绑定 Pear 任务 `6bbcd3f8-1d11-41be-8866-40fba1bfb479`；浏览器没有同步请求超时或原生错误弹窗。
+- Pear 本次在制品生成前返回“任务处理失败，请稍后重试”，数据库没有 `remoteArtifactUrl`，因此没有进入 ZIP Range 下载与主 PSD 提取阶段。
+- `smart` 模式原子切换到本地回退并完成：唯一扣费 `-15`、唯一退款 `+15`，最终余额净变化为 0；任务为 `completed/ready/refunded`。
+- 本地回退下载文件 `25,495,074` 字节，SHA-256 `73731e7a...ffdb711`，`8BPS` 可解析，尺寸 `3504 x 2336`，5 个顶层项、共 11 个组/图层。
+- **回归判定：失败回退 PASS，远程 Pear 成功路径 UNVERIFIED。** 不能把可打开的本地 PSD 当作 ZIP 下载修复通过证据；仍需一次供应商真实产出 ZIP 的独立验收。
+
+## 2026-08-28 Pear 失败可观测性本地回归
+
+- 官方接口复核确认当前提交与轮询协议正确；本次真实失败更符合供应商任务终态，不应猜测性切换接口或制造第二次付费提交。
+- 两项回归先稳定 RED：官方 `error.code/type/param` 被适配器丢弃；智能回退完成后诊断被最终结果覆盖。最小实现后两项转绿，既有 21 项并发与适配器回归未回退。
+- 分层全矩阵 `5 files / 55 tests` 通过；全仓非 PostgreSQL `566 files / 4099 passed / 122 skipped / 0 failed`。跳过项均因本轮未配置隔离 `POSTGRES_TEST_DATABASE_URL`，不计作通过；此前同日真实 PostgreSQL 全仓证据继续有效，但不由本次运行重复声明。
+- `pnpm ts-check`、`pnpm lint` 均通过。默认约 4 GiB Node 堆在 webpack 优化阶段 OOM；`NODE_OPTIONS=--max-old-space-size=8192` 后编译约 12.7 分钟，TypeScript 和 `117/117` 页面生成完成。
+- **回归判定：Pear 失败诊断本地 PASS；远程成功路径仍 UNVERIFIED。** 本修复仅提升错误归因，不把供应商失败改写为应用失败，也不关闭 ZIP Range、主 PSD、远程图层、同键重放或取消退款门禁。

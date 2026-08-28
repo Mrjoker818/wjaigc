@@ -154,4 +154,32 @@ describe('Pear layered image adapter', () => {
     expect(fetchMock.mock.calls[0][0])
       .toBe('https://api.pearapi.ai/v1/images/tasks/pear%20%2F%201');
   });
+
+  it('preserves structured Pear error metadata for a failed task', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      status: 'failed',
+      progress: 73,
+      error: {
+        code: 'upstream_timeout',
+        message: 'The layered image worker timed out',
+        type: 'api_error',
+        param: 'image',
+      },
+    }));
+
+    await expect(pollPearLayerTask({
+      ...input,
+      remoteTaskId: 'pear-1',
+    })).resolves.toEqual({
+      status: 'failed',
+      progress: 73,
+      error: 'The layered image worker timed out',
+      providerError: {
+        code: 'upstream_timeout',
+        message: 'The layered image worker timed out',
+        type: 'api_error',
+        param: 'image',
+      },
+    });
+  });
 });

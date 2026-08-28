@@ -692,6 +692,68 @@ describe('layer decomposition service concurrency', () => {
     expect(mocks.releaseCloudTaskLease).toHaveBeenCalledWith('layer-task-1', 'worker-1');
   });
 
+  it('preserves Pear failure diagnostics after smart fallback completes', async () => {
+    const providerError = {
+      code: 'upstream_timeout',
+      message: 'The layered image worker timed out',
+      type: 'api_error',
+      param: 'image',
+    };
+    mocks.task = createTask({
+      status: 'processing',
+      creditStatus: 'pending',
+      creditCost: 5,
+      remoteTaskId: 'pear-task-1',
+      result: {
+        requestHash: 'hash',
+        request,
+        phase: 'waiting-for-pear',
+      },
+    });
+    mocks.pollPearLayerTask.mockResolvedValue({
+      status: 'failed',
+      progress: 73,
+      error: providerError.message,
+      providerError,
+    });
+    mocks.runLocalLayerPipeline.mockResolvedValue({
+      width: 4,
+      height: 4,
+      layers: [{ ...layer, source: 'local-enhanced' }],
+      buffers: new Map([[layer.id, Buffer.from('layer')]]),
+      quality: { status: 'warning', score: 82, warnings: [], metrics: {} },
+    });
+    mocks.evaluateAndCorrectReconstruction.mockResolvedValue({
+      native: {
+        widthMatches: true, heightMatches: true, alphaMae: 0, rgbMae: 0,
+        maxChannelError: 0, mismatchedPixelRatio: 0, ssim: 1,
+      },
+      corrected: {
+        widthMatches: true, heightMatches: true, alphaMae: 0, rgbMae: 0,
+        maxChannelError: 0, mismatchedPixelRatio: 0, ssim: 1,
+      },
+      correctionApplied: false,
+    });
+
+    const status = await getLayerTaskStatus({
+      taskId: 'layer-task-1', userId: 'user-1', userRole: 'user',
+    });
+
+    expect(status.status).toBe('completed');
+    expect(status.providerError).toEqual(providerError);
+    expect(status.fallbackReason).toBe(providerError.message);
+    expect(mocks.transitionCloudTaskToLocalFallbackAndRefund).toHaveBeenCalledTimes(1);
+    expect(mocks.completeCloudTask).toHaveBeenCalledWith(
+      'layer-task-1',
+      expect.objectContaining({
+        providerError,
+        fallbackReason: providerError.message,
+      }),
+      'worker-1',
+    );
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+  });
+
   it('attaches reconstruction metrics and correction assets to a completed Pear result', async () => {
     const correctionLayer: EditableLayerAsset = {
       ...layer,
