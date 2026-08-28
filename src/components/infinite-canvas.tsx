@@ -139,8 +139,10 @@ import {
   resolveBoxSelectionHitIds,
   resolveBlankCanvasGesture,
   resolveCanvasGesturePriority,
+  resolveImageClickSequence,
   resolveImagePointerIntent,
   resolveTopmostHit,
+  type CanvasImageClick,
 } from '@/lib/canvas-kernel/selection';
 import {
   canvasSnapshotToNodes,
@@ -1291,6 +1293,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const imageDragPointerIdRef = useRef<number | null>(null);
   const historyTransactionRef = useRef<{ pointerId: number; id: string } | null>(null);
   const suppressSelectionClickRef = useRef(false);
+  const lastImageClickRef = useRef<CanvasImageClick | null>(null);
   const dragRafRef = useRef<number | null>(null);
   const snapGuidesRef = useRef<SnapGuide[]>([]);
   const hoveredGenGroupIdRef = useRef<string | null>(null);
@@ -4983,7 +4986,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     const activeDragTarget = dragTargetRef.current;
     if (activeDragTarget) {
       const finalDragOffset = dragOffsetRef.current;
-      if (imageDragReadyRef.current && (finalDragOffset.x !== 0 || finalDragOffset.y !== 0)) {
+      const imageMoved = finalDragOffset.x !== 0 || finalDragOffset.y !== 0;
+      if (imageDragReadyRef.current && imageMoved) {
         const committedIds = new Set(getSelectionState().ids);
         const currentImages = imagesRef.current;
         const updatedImages = applyCanvasCommand(currentImages, {
@@ -5053,6 +5057,36 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
             }
           }
         }
+      }
+      if (
+        e.pointerType === 'mouse'
+        && e.button === 0
+        && !imageMoved
+        && !e.altKey
+        && !e.ctrlKey
+        && !e.metaKey
+      ) {
+        const clickSequence = resolveImageClickSequence(lastImageClickRef.current, {
+          imageId: activeDragTarget,
+          timestamp: e.timeStamp,
+          point: { x: e.clientX, y: e.clientY },
+        });
+        lastImageClickRef.current = clickSequence.nextClick;
+        if (clickSequence.openPreview) {
+          const previewImage = imagesRef.current.find((image) => image.id === activeDragTarget);
+          if (
+            previewImage
+            && !previewImage.isProcessingPlaceholder
+            && previewImage.mediaType !== 'video'
+            && editMode === 'none'
+            && !annotationMode
+          ) {
+            suppressSelectionClickRef.current = true;
+            onPreviewImage(previewImage);
+          }
+        }
+      } else {
+        lastImageClickRef.current = null;
       }
       cancelImageDragPreview();
       finishCanvasPointerGesture(e.pointerId);
@@ -5141,7 +5175,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
     commitHistoryTransaction(e.pointerId);
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, zoom, viewOffset.x, viewOffset.y, commitViewportPan, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, clearBlankCanvasLongPress, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage, commitHistoryTransaction]);
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, onPreviewImage, zoom, viewOffset.x, viewOffset.y, commitViewportPan, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, clearBlankCanvasLongPress, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage, commitHistoryTransaction]);
 
   const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     clearBlankCanvasLongPress(e.pointerId);
@@ -11741,13 +11775,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (e.detail >= 2) {
-                    suppressSelectionClickRef.current = false;
-                    if (image.isProcessingPlaceholder || image.mediaType === 'video') return;
-                    if (editMode !== 'none' || annotationMode) return;
-                    onPreviewImage(image);
-                    return;
-                  }
                   if (suppressSelectionClickRef.current) {
                     suppressSelectionClickRef.current = false;
                     return;

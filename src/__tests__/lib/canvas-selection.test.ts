@@ -11,6 +11,7 @@ import {
   resolveBoxSelectionHitIds,
   resolveBlankCanvasGesture,
   resolveCanvasGesturePriority,
+  resolveImageClickSequence,
   resolveImagePointerIntent,
   resolveTopmostHit,
   selectHit,
@@ -19,6 +20,41 @@ import {
 } from '@/lib/canvas-kernel/selection';
 
 describe('canvas selection controller', () => {
+  it('recognizes two completed clicks on the same image across a rerendered DOM target', () => {
+    const first = resolveImageClickSequence(null, {
+      imageId: 'image-1',
+      timestamp: 1_000,
+      point: { x: 240, y: 180 },
+    });
+    const second = resolveImageClickSequence(first.nextClick, {
+      imageId: 'image-1',
+      timestamp: 1_280,
+      point: { x: 242, y: 181 },
+    });
+
+    expect(first.openPreview).toBe(false);
+    expect(second).toEqual({ openPreview: true, nextClick: null });
+  });
+
+  it('does not combine clicks from another image or beyond the double-click radius', () => {
+    const first = {
+      imageId: 'image-1',
+      timestamp: 1_000,
+      point: { x: 240, y: 180 },
+    };
+
+    expect(resolveImageClickSequence(first, {
+      imageId: 'image-2',
+      timestamp: 1_200,
+      point: { x: 240, y: 180 },
+    }).openPreview).toBe(false);
+    expect(resolveImageClickSequence(first, {
+      imageId: 'image-1',
+      timestamp: 1_200,
+      point: { x: 260, y: 180 },
+    }).openPreview).toBe(false);
+  });
+
   it('selects the topmost overlapping hit and preserves deterministic z order', () => {
     const topmost = resolveTopmostHit([
       { id: 'lower', zIndex: 2, order: 1 },

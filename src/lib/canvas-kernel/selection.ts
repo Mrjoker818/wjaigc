@@ -27,6 +27,17 @@ export interface CanvasHitCandidate {
   order: number;
 }
 
+export interface CanvasImageClick {
+  imageId: string;
+  timestamp: number;
+  point: CanvasPoint;
+}
+
+export interface CanvasImageClickSequenceResult {
+  openPreview: boolean;
+  nextClick: CanvasImageClick | null;
+}
+
 export interface CanvasBoxSelectionBounds {
   left: number;
   top: number;
@@ -45,6 +56,8 @@ interface CanvasSelectableRect {
 }
 
 const DEFAULT_DRAG_THRESHOLD = 5;
+const DEFAULT_DOUBLE_CLICK_INTERVAL = 500;
+const DEFAULT_DOUBLE_CLICK_DISTANCE = 8;
 
 function uniqueIds(ids: Iterable<string>): string[] {
   return [...new Set([...ids].filter(Boolean))];
@@ -116,6 +129,30 @@ export function hasExceededDragThreshold(
   threshold = DEFAULT_DRAG_THRESHOLD,
 ): boolean {
   return Math.hypot(current.x - start.x, current.y - start.y) > threshold;
+}
+
+export function resolveImageClickSequence(
+  previous: CanvasImageClick | null,
+  current: CanvasImageClick,
+  options: { maxInterval?: number; maxDistance?: number } = {},
+): CanvasImageClickSequenceResult {
+  const maxInterval = options.maxInterval ?? DEFAULT_DOUBLE_CLICK_INTERVAL;
+  const maxDistance = options.maxDistance ?? DEFAULT_DOUBLE_CLICK_DISTANCE;
+  const elapsed = previous ? current.timestamp - previous.timestamp : Number.POSITIVE_INFINITY;
+  const distance = previous
+    ? Math.hypot(current.point.x - previous.point.x, current.point.y - previous.point.y)
+    : Number.POSITIVE_INFINITY;
+  const isDoubleClick = Boolean(
+    previous
+    && previous.imageId === current.imageId
+    && elapsed >= 0
+    && elapsed <= maxInterval
+    && distance <= maxDistance,
+  );
+
+  return isDoubleClick
+    ? { openPreview: true, nextClick: null }
+    : { openPreview: false, nextClick: current };
 }
 
 export function beginBoxSelection(
