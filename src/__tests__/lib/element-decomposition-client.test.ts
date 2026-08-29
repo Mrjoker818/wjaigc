@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   cancelElementDecomposition,
   createElementDecompositionRequest,
+  createResolvedElementDecompositionRequest,
   pollElementDecomposition,
   retryElementDecompositionBranch,
   submitElementDecomposition,
@@ -69,6 +70,53 @@ describe('element decomposition client', () => {
       providerId: 'pear-provider',
       modelId: 'Image-Layered',
       requireTransparentSubject: false,
+    });
+  });
+
+  it('resolves the authorized Pear layer provider before building a layer request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      success: true,
+      models: [
+        {
+          id: 'Image-Layered',
+          name: 'Image Layered',
+          providerId: 'pear-layer-provider',
+          type: 'layer',
+        },
+      ],
+    }));
+
+    const request = await createResolvedElementDecompositionRequest(source, {
+      outputMode: 'layers',
+      aspectRatio: '1:1',
+      engine: 'smart',
+    }, { fetcher: fetchMock });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith('/api/workflow/models?type=layer', expect.objectContaining({
+      method: 'GET',
+      cache: 'no-store',
+    }));
+    expect(request.layers).toMatchObject({
+      engine: 'smart',
+      providerId: 'pear-layer-provider',
+      modelId: 'Image-Layered',
+    });
+  });
+
+  it('preserves the smart local fallback when the layer catalog is temporarily unavailable', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('network unavailable'));
+
+    await expect(createResolvedElementDecompositionRequest(source, {
+      outputMode: 'layers',
+      aspectRatio: '1:1',
+      engine: 'smart',
+    }, { fetcher: fetchMock })).resolves.toMatchObject({
+      layers: {
+        engine: 'smart',
+        providerId: undefined,
+        modelId: undefined,
+      },
     });
   });
 

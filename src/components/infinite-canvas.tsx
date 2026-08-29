@@ -185,7 +185,7 @@ import { type AspectRecomposeRatio } from '@/lib/aspect-recompose';
 import { AspectRecomposePanel } from '@/components/aspect-recompose-panel';
 import {
   cancelElementDecomposition,
-  createElementDecompositionRequest,
+  createResolvedElementDecompositionRequest,
   pollElementDecomposition,
   retryElementDecompositionBranch,
   submitElementDecomposition,
@@ -9052,14 +9052,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       height: img.originalHeight || Math.round(img.height),
     });
     const modelInfo = getCurrentModel();
-    const elementRequest = createElementDecompositionRequest(sourceSnapshot, {
-      outputMode: elementDecomposeOutputMode,
-      aspectRatio: displayDecomposeRatio,
-      background: displayDecomposeAutoRemoveBg ? 'transparent' : 'light-gray',
-      engine: 'smart',
-      boardProviderId: modelInfo.providerId || getCurrentProviderId() || undefined,
-      boardModelId: modelInfo.model || undefined,
-    });
     const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -9080,6 +9072,14 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     setElementDecomposeTask(null);
 
     try {
+      const elementRequest = await createResolvedElementDecompositionRequest(sourceSnapshot, {
+        outputMode: elementDecomposeOutputMode,
+        aspectRatio: displayDecomposeRatio,
+        background: displayDecomposeAutoRemoveBg ? 'transparent' : 'light-gray',
+        engine: 'smart',
+        boardProviderId: modelInfo.providerId || getCurrentProviderId() || undefined,
+        boardModelId: modelInfo.model || undefined,
+      }, { signal: controller.signal });
       const parent = await submitElementDecomposition(elementRequest, idempotencyKey, controller.signal);
       setElementDecomposeTask(parent);
       const finalTask = await pollElementDecomposition(parent.taskId, (task) => {

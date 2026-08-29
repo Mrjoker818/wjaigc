@@ -5,7 +5,7 @@ import type {
   LayerTaskResponse,
 } from '@/lib/layer-decomposition/types';
 
-type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type LayerFetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type WaitLike = (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 
 export interface LayerPhasePresentation {
@@ -23,7 +23,7 @@ export interface RunLayerDecompositionOptions {
   keepalive?: boolean;
   skipDefaultTargetResolution?: boolean;
   signal?: AbortSignal;
-  fetcher?: FetchLike;
+  fetcher?: LayerFetchLike;
   wait?: WaitLike;
   onResolvedTarget?: (target: { providerId: string; modelId: string }) =>
     | { providerId: string; modelId: string }
@@ -184,8 +184,8 @@ function normalizeLayerModel(value: string): string {
   return value.trim().toLowerCase().replace(/_/g, '-');
 }
 
-async function resolveDefaultLayerTarget(
-  fetcher: FetchLike,
+export async function resolveDefaultLayerTarget(
+  fetcher: LayerFetchLike,
   signal?: AbortSignal,
 ): Promise<{ providerId: string; modelId: string } | null> {
   const response = await fetcher('/api/workflow/models?type=layer', {
@@ -205,7 +205,7 @@ async function resolveDefaultLayerTarget(
 
 export async function cancelLayerDecomposition(
   taskId: string,
-  options: { fetcher?: FetchLike; signal?: AbortSignal; keepalive?: boolean } = {},
+  options: { fetcher?: LayerFetchLike; signal?: AbortSignal; keepalive?: boolean } = {},
 ): Promise<LayerTaskResponse> {
   const fetcher = options.fetcher || fetch;
   const response = await fetcher(`/api/layered-decompose?taskId=${encodeURIComponent(taskId)}`, {

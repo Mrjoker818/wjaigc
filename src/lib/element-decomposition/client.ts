@@ -3,6 +3,10 @@ import type {
   ElementDecomposeOutputMode,
   ElementDecomposeRequest,
 } from '@/lib/element-decomposition/types';
+import {
+  resolveDefaultLayerTarget,
+  type LayerFetchLike,
+} from '@/lib/layer-decomposition-client';
 
 type ElementBranch = 'board' | 'layers';
 
@@ -88,6 +92,30 @@ export function createElementDecompositionRequest(
       requireTransparentSubject: (options.background ?? 'light-gray') === 'transparent',
     },
   };
+}
+
+export async function createResolvedElementDecompositionRequest(
+  source: ElementDecomposeSourceInput,
+  options: ElementDecomposeRequestOptions,
+  runtime: { fetcher?: LayerFetchLike; signal?: AbortSignal } = {},
+): Promise<ElementDecomposeRequest> {
+  const outputMode = options.outputMode ?? 'both';
+  const needsLayerTarget = outputMode !== 'board'
+    && options.engine !== 'local'
+    && (!options.layerProviderId || !options.layerModelId);
+  if (!needsLayerTarget) return createElementDecompositionRequest(source, options);
+
+  let target: { providerId: string; modelId: string } | null = null;
+  try {
+    target = await resolveDefaultLayerTarget(runtime.fetcher || fetch, runtime.signal);
+  } catch (error) {
+    if (runtime.signal?.aborted || options.engine === 'cloud') throw error;
+  }
+  return createElementDecompositionRequest(source, target ? {
+    ...options,
+    layerProviderId: target.providerId,
+    layerModelId: target.modelId,
+  } : options);
 }
 
 async function parseResponse(response: Response): Promise<ElementDecomposeTaskResponse> {

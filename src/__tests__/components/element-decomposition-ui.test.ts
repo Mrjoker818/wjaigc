@@ -15,6 +15,7 @@ describe('dual-output element decomposition canvas wiring', () => {
   });
 
   it('submits through the parent API client and shows independent branch progress', () => {
+    expect(canvasSource).toContain('await createResolvedElementDecompositionRequest(sourceSnapshot');
     expect(canvasSource).toContain('submitElementDecomposition(elementRequest, idempotencyKey, controller.signal)');
     expect(canvasSource).toContain('pollElementDecomposition(parent.taskId');
     expect(canvasSource).toContain("{(['board', 'layers'] as const).map((branch) => {");
