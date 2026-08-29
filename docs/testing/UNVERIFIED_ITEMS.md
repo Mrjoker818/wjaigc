@@ -1798,3 +1798,10 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - `pnpm check:protected-baseline` 当前仍阻止 41 个既有业务文件。每个文件需按实际来源、测试证据和发布边界单独审计；不得批量加入宽泛白名单。
 - `122` 项 PostgreSQL 专项在本轮本机环境因缺少隔离测试库跳过，继续保持未验证；不得指向生产数据库补跑。
 - Pear 远程成功终态、真实图层编辑/保存/刷新、PSD 导出、一次扣费及失败/取消一次退款仍未关闭。
+
+## 2026-08-29 `bf8d8623` 精确授权后的剩余验证
+
+- 原 41 个保护基线漂移已在本地逐项审计并关闭，不再列为本地阻断；仍需 Coze 对最终提交执行 `pnpm check:protected-baseline`，证明干净检出也为 `0` 个未授权漂移。
+- Coze 最终提交尚未完成全量 Vitest、生产构建、单实例 5000 启动、`/`、`/simple-chat`、`/api/auth/me` 与静态资源健康检查。
+- `122` 项 PostgreSQL 专项仍因缺少 `POSTGRES_TEST_DATABASE_URL` 隔离库未执行；禁止使用生产数据库代替。
+- Pear 远程成功终态、真实图层编辑/保存/刷新、PSD 导出、一次扣费及失败/取消一次退款继续保持未验证。

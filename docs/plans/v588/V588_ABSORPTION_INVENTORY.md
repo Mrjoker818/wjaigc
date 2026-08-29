@@ -648,3 +648,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 本地聚焦门禁 `7/7`，全仓 `4159` 项通过、`122` 项 PostgreSQL 专项明确跳过、`0` 失败，TypeScript 与构建版 Lint 通过。
 - `check:protected-baseline` 仍阻止 41 个既有未授权业务文件，保持发布阻断；不得把本次来源可达修复解释成这些业务漂移已获准。
 - **状态：BUG-012 本地关闭 / 云端待验；V588-STABILITY-002 仍未整体吸收。** 下一步先完成 Coze 干净检出零失败回归，再继续 Pear 远程与账务闭环；不进入 `V588-ADMIN-004`。
+
+## 2026-08-29 V588-STABILITY-002 保护基线精确授权检查点
+
+- 在来源提交已可从 `main` 追溯后，独立 `check:protected-baseline` 仍准确识别 41 个历史生产源码漂移；本轮没有绕过脚本，而是逐文件完成来源与内容核验。
+- `main@bf8d86230f6a4fc41c3ed788f633aa3ab5ed1b6f` 为 41 个路径建立精确授权：来源提交均在 `HEAD` 祖先链，均修改对应路径，且来源 blob 与当前 blob 相同；验证 `41/41`、失败 `0`。
+- 本地聚焦门禁 `16/16`，保护基线未授权漂移 `0`、警告 `0`；全仓 `4160` 项通过、`122` 项 PostgreSQL 专项明确跳过、`0` 失败，TypeScript 与构建版 Lint 通过。业务源码与 `stable` 均未修改。
+- **状态：BUG-012/013 本地关闭 / Coze 最终提交待验；V588-STABILITY-002 仍未整体吸收。** 下一步只做 Coze 干净检出全量回归、生产构建和健康检查，随后继续 Pear 远程与账务闭环；不进入 `V588-ADMIN-004`。

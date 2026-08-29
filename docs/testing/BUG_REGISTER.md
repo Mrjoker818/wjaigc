@@ -2954,3 +2954,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 独立阻断 | `pnpm check:protected-baseline` 仍按既有发布政策阻止 41 个未加入精确授权表的业务文件。该结果不是本次修复新增，也未通过扩大白名单隐藏。 |
 | 提交与状态 | `main@128ec13bf9e24b46a7d3dcfc1c2bfeba81adea38`，tree `73fbe6056296852cf815f3871b8dc3a1e0a3ca96`；**本地已修复 / Coze 干净检出待复验**。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-128ec13b-provenance-main-reachability-2026-08-29.json`。 |
+
+### V588-STABILITY-002-BUG-013：受保护基线存在 41 个未审计生产源码漂移（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1（发布门禁）：业务代码可运行，但独立保护基线脚本拒绝发布。 |
+| 稳定复现 | `pnpm check:protected-baseline` 在 `main@5108b552` 稳定报告 41 个未授权生产源码路径。 |
+| RED | 新增“每个相对固定基线发生变化的生产源码都必须具有精确路径授权”测试，修复前返回完整 41 项差集。 |
+| 审计方式 | 对 41 个路径逐一定位 `main` 祖先链上的来源提交，并验证来源提交修改了该路径、来源 blob 与当前 `HEAD` blob 完全一致；结果 `41/41`，失败 `0`。 |
+| 最小修复 | 仅把 41 个精确路径及其来源提交加入保护基线授权文件；未使用目录或通配授权，未修改生产源码、数据库、账号、模型、积分或供应商配置。 |
+| 回归 | 聚焦门禁 `16/16`；`check:protected-baseline` 为 38 个特征 ID 完整、未授权漂移 `0`、警告 `0`；TypeScript、构建版 Lint 通过；全仓 `572 files / 4160 passed / 122 PostgreSQL-gated skipped / 0 failed`。 |
+| 提交与状态 | `main@bf8d86230f6a4fc41c3ed788f633aa3ab5ed1b6f`，tree `0c1df7274f650e672904d22d549fcadb5133ce3e`；**本地已关闭 / Coze 干净检出待复验**。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-bf8d8623-protected-baseline-authorizations-2026-08-29.json`。 |

@@ -1701,3 +1701,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 本地全量测试恢复为 `4159 passed / 122 PostgreSQL-gated skipped / 0 failed`，TypeScript 与 Lint 通过；Coze 仍需精确拉取该提交并证明干净检出全量零失败。
 - 独立的受保护基线发布脚本仍阻止 41 个未授权业务文件；它们不能因来源可达性修复而自动获准。
 - **发布结论保持“有条件通过”。** 在 Coze 干净检出回归、41 条业务漂移审计、Pear 远程编辑/保存/导出和真实账务矩阵完成前，不关闭 `V588-STABILITY-002`，不进入 `V588-ADMIN-004`。
+
+## 2026-08-29 `bf8d8623` 保护基线关闭增量
+
+- 此前阻断发布的 41 个生产源码漂移已逐文件完成来源与 blob 审计，并以精确路径授权；没有扩大到目录、通配符或未来文件。
+- 本地 `check:protected-baseline` 已从 41 个阻断恢复为未授权漂移 `0`、警告 `0`；聚焦测试 `16/16`，全量测试 `4160 passed / 122 PostgreSQL-gated skipped / 0 failed`，TypeScript 与 Lint 通过。
+- 业务源码树未变化，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- **发布结论仍为“有条件通过”。** 保护基线本地阻断已关闭，但 Coze 必须对最终提交完成干净检出、全量测试、生产构建和健康检查；隔离 PostgreSQL 专项及 Pear 远程编辑/保存/导出和真实账务矩阵仍未关闭。

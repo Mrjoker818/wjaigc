@@ -2118,3 +2118,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 聚焦回归共 10 文件 `98/98`；全仓 `572` 个文件、`4159` 项通过、`122` 项因缺少隔离 PostgreSQL 测试库跳过、`0` 失败；TypeScript 和构建版 Lint 通过。
 - 8 GiB 首轮在工作集约 `8.17 GB` 时未完成；使用 12 GiB Node 堆重新执行同一 `pnpm build` 后，webpack `16.9` 分钟编译成功，TypeScript 通过，静态页面 `117/117`，Build ID `BEGTUtSa2MLS18fd4_yW6`。**本地功能与生产构建 PASS；云端行为 PENDING。**
 - 云端验收必须在同一次操作中区分：请求目标路由、Pear 异步任务、ZIP/主 PSD、编辑器图层和账务；本地两层 fallback 不得冒充 Pear 成功。
+
+## 2026-08-29 `bf8d8623` 保护基线精确授权回归
+
+- RED 测试先从固定保护基线到 `HEAD` 枚举生产源码漂移，稳定返回 41 个未授权路径。
+- 每个路径均完成四项核验：来源提交属于 `main` 祖先链、来源提交修改该路径、来源 blob 等于当前 blob、授权为单一精确路径；结果 `41/41`、失败 `0`。
+- GREEN 后聚焦 V5.8.8 门禁 `16/16`；`pnpm check:protected-baseline` 确认 38 个特征 ID 保留、未授权源码漂移 `0`、警告 `0`。
+- TypeScript 与构建版 Lint 通过；全量 Vitest 为 `572` 个文件、`4160` 项通过、`122` 项 PostgreSQL 专项因缺少隔离测试库明确跳过、`0` 失败。
+- 本次没有生产源码变化，因此复用此前相同业务源码树的本地与 Coze 构建证据；最终发布提交仍必须在 Coze 干净检出中重新执行生产构建和健康检查。
+- **本地发布门禁 PASS；Coze 最终提交 PENDING。**
