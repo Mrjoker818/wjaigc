@@ -2094,3 +2094,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `beforeEach` 隔离宿主域名后，同一命令 `37/37` 通过；专用公网域名与 Secure Cookie 用例仍通过，没有修改登录路由、凭据、Cookie 或会话逻辑。
 - 仓库回归：Vitest `572` 个文件、`4157` 项通过、`122` 项 PostgreSQL 专项跳过；TypeScript、构建版 Lint、`git diff --check` 通过。
 - 生产构建第一次在约 4 GB Node 堆上限 OOM；8 GB 重试在约 7.74 GB 工作集仍未完成并被人工终止。**本地测试合同判定 PASS；生产构建与 Coze 原生环境复验仍 PENDING。**
+
+## 2026-08-29 `4d0ee0d7` Coze 域名测试合同云端回归
+
+- Coze `HEAD=origin/main=4d0ee0d7178a7d8c1326e1834fe4d62ee86326d5`，工作树干净；`origin/stable=52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- 在 Coze 原生公开域名环境执行登录契约测试，`37/37` 通过；TypeScript、构建版 Lint 和 8 GB 生产构建均以退出码 0 完成，Build ID `aSKtExrAPjz-iBkM5RZmg`。
+- 重启后 `/`、`/simple-chat`、`/api/auth/me` 均为 200，HTML 引用静态资源 `11/11`；Google Chrome 现有预览标签刷新完成并显示入口页。
+- **云端判定：PASS。** 此门禁从未验证项移除；机器证据：`docs/testing/evidence/v588-stability-002-4d0ee0d7-auth-domain-cloud-2026-08-29.json`。

@@ -1680,3 +1680,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 已确认失败来自测试继承 `COZE_PROJECT_DOMAIN_DEFAULT`，而不是登录业务退化；测试隔离后，在外部注入 Coze 风格域名的环境中 `37/37` 通过，公网 HTTPS 跳转契约仍保留。
 - 全量测试、TypeScript 和 Lint 通过；本机生产构建受 Node 堆内存限制未取得成功终态，不能表述为完整构建门禁通过。Coze 仍需在自身环境运行该测试后才能关闭部署侧证据。
 - **发布结论保持“有条件通过”。** 该测试修复不需要改变运行时代码，但 `V588-STABILITY-002` 仍受远程 Pear 成功、图层编辑/保存/刷新、PSD 导出与真实账务矩阵阻塞。
+
+## 2026-08-29 `4d0ee0d7` 云端发布判定增量
+
+- Coze 原生环境已证明登录域名契约 `37/37`、TypeScript、Lint、生产构建、健康端点和静态资源全部通过；此前环境域名断言失败不再是发布阻塞。
+- Google Chrome 预览页在新 Build ID 上完成强制刷新；本轮未修改业务源码、数据库、账号、环境变量或供应商配置，也未创建付费任务。
+- **发布结论仍为“有条件通过”。** `V588-STABILITY-002` 还必须取得 Pear 远程 PSD 制品、编辑/保存/刷新、导出文件和真实一次扣费/退款证据，完成前不进入 `V588-ADMIN-004`。

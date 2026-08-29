@@ -1,0 +1,45 @@
+{
+  "evidenceId": "v588-stability-002-4d0ee0d7-auth-domain-cloud-2026-08-29",
+  "capturedAt": "2026-08-29T12:37:58+08:00",
+  "environment": "Coze sandbox and existing Google Chrome profile 用户1",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_1786500304299_8vix1z45f",
+  "git": {
+    "head": "4d0ee0d7178a7d8c1326e1834fe4d62ee86326d5",
+    "tree": "d4bddd7e2f61decb4b1279fcaa80489ff6e11328",
+    "originMain": "4d0ee0d7178a7d8c1326e1834fe4d62ee86326d5",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "status": "clean"
+  },
+  "coze": {
+    "buildId": "aSKtExrAPjz-iBkM5RZmg",
+    "port5000Pid": 4187,
+    "authDomainTests": "37 passed, 0 failed",
+    "typecheck": "passed",
+    "lintBuild": "passed",
+    "productionBuild": "passed",
+    "health": {
+      "/": 200,
+      "/simple-chat": 200,
+      "/api/auth/me": 200,
+      "staticAssets": "11 passed, 0 failed"
+    }
+  },
+  "browser": {
+    "family": "Google Chrome",
+    "profile": "用户1",
+    "previewReloaded": true,
+    "documentReadyState": "complete",
+    "landingContentVisible": true
+  },
+  "safety": {
+    "stableTouched": false,
+    "businessSourceChangedInCoze": false,
+    "environmentChanged": false,
+    "databaseChanged": false,
+    "accountChanged": false,
+    "providerConfigurationChanged": false,
+    "paidTaskCreated": false
+  },
+  "result": "PASS",
+  "closedGate": "Coze auth-login-configuration environment-domain contract"
+}

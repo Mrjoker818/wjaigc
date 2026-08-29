@@ -625,3 +625,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 测试 `beforeEach` 现显式清空该变量，专用公网域名用例继续单独注入并验证 HTTPS 重定向；同一注入环境下由 `3 failed / 34 passed` 恢复为 `37/37`。
 - 全量 Vitest `4157` 项通过、`122` 项 PostgreSQL 专项明确跳过，TypeScript、Lint、`git diff --check` 通过。生产构建在本机 4 GB 堆上限 OOM，8 GB 重试持续占用约 7.74 GB 后为避免系统失稳人工终止，不计为构建通过。
 - **状态：域名测试合同本地关闭、Coze 原生环境复验待执行；V588-STABILITY-002 仍未整体吸收。** 后续仅剩 Coze 测试确认与远程 Pear 编辑/保存/导出及账务矩阵，不进入 `V588-ADMIN-004`。
+
+## 2026-08-29 V588-STABILITY-002 Coze 域名测试合同云端关闭
+
+- Coze 已精确对齐 `HEAD=origin/main=4d0ee0d7178a7d8c1326e1834fe4d62ee86326d5`，tree `d4bddd7e2f61decb4b1279fcaa80489ff6e11328`；`origin/stable=52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- Coze 原生公开域名环境下 `auth-login-configuration` 为 `37/37`，TypeScript、Lint、8 GB 生产构建、`/`、`/simple-chat`、`/api/auth/me` 与 `11/11` 静态资源全部通过；Build ID `aSKtExrAPjz-iBkM5RZmg`。
+- 现有 Google Chrome“用户1”预览标签强制刷新后 `document.readyState=complete`，入口内容完整显示。
+- **状态：Coze 域名测试合同已关闭；V588-STABILITY-002 仍未整体吸收。** 下一步仅执行 Pear 远程完成态、图层编辑/保存/刷新、PSD 导出与成功/失败/取消账务矩阵，不进入 `V588-ADMIN-004`。

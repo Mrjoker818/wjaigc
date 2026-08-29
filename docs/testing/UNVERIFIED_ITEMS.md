@@ -1777,3 +1777,9 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - 保留部署证据：Coze 拉取本提交后，需在其原生环境至少运行登录契约测试并证明不再出现域名断言失败。
 - 保留发布证据：本机生产构建因 4 GB OOM、8 GB 资源异常终止而未完成；仍须由 Coze 构建或具备足够内存的干净环境提供成功终态。
 - Pear 远程 `completed/ready`、图层移动/保存/刷新、PSD 导出、成功一次扣费及失败/取消一次退款继续保持 `UNVERIFIED`。
+
+## 2026-08-29 `4d0ee0d7` Coze 域名合同最终收敛
+
+- Coze 原生环境复验已完成，`auth-login-configuration` `37/37`、构建与三个健康端点通过；该项从未验证表移除。
+- 保留：Pear 远程 `completed/ready` 与真实 ZIP/主 PSD、至少两个远程可编辑图层、图层移动/保存/刷新、PSD 导出 `8BPS` 与图层校验。
+- 保留：成功任务恰好一次扣费且不退款；失败和显式取消任务最多一次退款，迟到完成不得覆盖终态。
