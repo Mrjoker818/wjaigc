@@ -713,3 +713,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 同轮确认管理员预检错误显示 60，而权威任务按 `OTHER_OPERATION_CREDITS.segment=15` 结算。`main@2c25af5937b0c69e91e55d15291378edbb7901ac` 已按 TDD 最小修复计价目录与同宽高比坐标归一，质量阈值未改变。
 - 本地门禁：聚焦 `7 files / 58 tests`、全仓 `572 files / 4163 passed / 122 PostgreSQL-gated skipped / 0 failed`、TypeScript、ESLint `0 error / 961 warnings`；受保护计价路由采用单文件精确来源授权，门禁 `8/8`、未授权漂移 `0`、警告 `0`。
 - `002-C` 的数据库图层文档持久化仅完成规格 `docs/superpowers/specs/2026-08-29-layer-document-persistence-design.md`，尚未实施。**当前状态：应用侧坐标与计价本地修复，Coze 待验证；Pear 远程成功、smart 回退提示、图层保存/刷新与 PSD 导出仍开放，不进入 `V588-ADMIN-004`。**
+
+## 2026-08-29 V588-STABILITY-002 坐标与计价云端关闭检查点
+
+- Coze 已精确运行 `main@c79cd0fea3003d5c97f92957de577fcf41d89b7c`、tree `69d703a6329839bb5bd4b272ce505b2b7a70b931`，12 GiB 构建 Build ID `wj8pRWQN7qQibcQoiHsXy`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 云端专项 `70/70`、保护基线 `0/0`、TypeScript、Lint、5000 单实例、三个健康端点和 `11/11` 静态资源通过。
+- Google Chrome 管理员模型计费表真实显示 `pear分层 / Image-Layered / 每次 / 15`，因此 BUG-014 云端关闭；同提交的坐标归一专项通过，因此 BUG-007 的应用侧越界误报云端关闭。
+- 本轮没有创建第二个付费 Pear 任务。历史 29 层错误制品仍因高 MAE、高重复率和素材语义不匹配而失败；不降低质量阈值，不把本地 fallback 当作远程成功。
+- 稳定刷新有 1 条 `[Sync] syncToServer: server returned 502` warning，保留为独立项目同步可靠性观察。`V588-STABILITY-002` 整体仍开放，下一顺序不变：先解决 smart 回退披露，再实施已批准的图层文档持久化，随后用合适素材验证远程成功/保存/导出与成功账务。

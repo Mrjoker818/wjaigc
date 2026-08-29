@@ -1821,7 +1821,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Pear 远程可编辑成功 | `FAILED / OPEN` | `decomposition.engine` 必须为 `pear`，至少 2 个 `source=pear-psd` 图层通过质量门禁；不得由本地 fallback 代替。 |
 | 本次 1:1 PSD 几何根因 | `PARTIALLY VERIFIED` | 坐标差已定位为 `1254 -> 1280` 未归一；远程内容仍有 `MAE=0.7125`、重复率 `0.8621` 和人物部件层名。下一次付费前确认模型适用素材范围，并为坐标归一化建立 RED。 |
 | 成功账务 | `UNVERIFIED` | 成功任务恰好一次扣费、零退款，provider/model/价格与管理员展示一致。 |
-| 计费价格单一权威源 | `FAILED / OPEN` | 管理员展示、预检、任务 `creditCost` 和流水必须一致；当前为 60 对 15。 |
+| 计费价格单一权威源 | `CLOUD DEFAULT PASS / CUSTOM PENDING` | `c79cd0fe` 已让管理员默认显示价与权威 `segment=15` 结算一致；provider/model 自定义价格仍需在一次远程成功任务中核对展示、预检、`creditCost` 和流水。 |
 | smart 回退终态说明 | `FAILED / OPEN` | UI 明确显示 Pear 失败原因、已退款、实际使用本地引擎，自动化不得把父任务 completed 误判为 Pear 成功。 |
 | 图层编辑文档持久化 | `UNVERIFIED / IMPLEMENTATION GAP` | 使用已批准的数据库专用文档，绑定用户、项目、源图版本与任务；移动、显隐、重命名、顺序跨刷新和设备恢复。 |
 | PSD 导出 | `UNVERIFIED` | 下载文件存在、`8BPS`、图层数/顺序/位置与保存文档一致。 |
@@ -1832,8 +1832,8 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 | 项目 | 最新状态 | 关闭条件 |
 |---|---|---|
-| 管理员 Image-Layered 价格 | `LOCAL PASS / CLOUD PENDING` | Coze 部署候选提交后，管理员页面与 `/api/admin/credits/pricing` 均显示 15 积分/次，并与新任务 `creditCost`、流水一致。 |
-| 源图到 PSD 坐标归一 | `LOCAL PASS / CLOUD PENDING` | 云端质量记录不再因同宽高比 `1254 -> 1280` 产生越界误报；不同宽高比仍不得拉伸放行。 |
+| 管理员 Image-Layered 价格 | `CLOUD UI PASS` | `c79cd0fe` 管理员页面已显示 15 积分/次并与既有权威任务结算一致；后续 provider/model 自定义价格仍需在成功任务矩阵中复核。 |
+| 源图到 PSD 坐标归一 | `CLOUD CODE/TEST PASS` | 云端同提交专项已覆盖 `1254 -> 1280` 同宽高比归一与不同宽高比拒绝拉伸；本轮未再次付费，历史错误制品仍保持失败。 |
 | Pear 远程制品质量 | `FAILED / OPEN` | 获得与源素材匹配、通过既有 MAE/重复层/空层/越界门禁的远程图层；不得降低阈值。 |
 | smart 回退终态说明 | `FAILED / OPEN` | UI 清楚显示远程失败原因、退款与实际本地引擎，父任务 completed 不得被误读为 Pear 成功。 |
 | 图层文档持久化 | `DESIGN ONLY` | 审阅并实施 `docs/superpowers/specs/2026-08-29-layer-document-persistence-design.md`，完成用户/项目/源版本绑定、乐观锁、刷新和跨设备恢复。 |

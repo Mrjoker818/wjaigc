@@ -2163,3 +2163,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 默认约 4 GiB Node 堆按预期 OOM，8 GiB 在高内存回收阶段停止；按仓库既有 12 GiB 基线重跑后 webpack `14.3` 分钟、TypeScript `65` 秒、静态页面 `117/117`、Build ID `WijIlExen98XOqjcSti5T`、退出码 `0`。
 - 受保护计价路由只增加单文件精确来源授权；永久门禁 `8/8`，`pnpm check:protected-baseline` 为未授权漂移 `0`、警告 `0`。
 - **本地判定：应用侧坐标误报与管理员价格不一致 PASS。** 远程 Pear 制品质量仍 FAIL；本轮没有再次创建付费任务，也没有把本地 fallback 当作 Pear 成功。
+
+## 2026-08-29 `c79cd0fe` Pear 坐标与计价云端回归
+
+- Coze 精确运行 `main@c79cd0fea3003d5c97f92957de577fcf41d89b7c`、tree `69d703a6329839bb5bd4b272ce505b2b7a70b931`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 云端分层/保护专项 `70/70`、保护基线 `0` 未授权/`0` 警告、TypeScript、Lint、12 GiB 生产构建和 `11/11` 静态资源通过；Build ID `wj8pRWQN7qQibcQoiHsXy`，5000 PID `4417`，三个健康路由均为 `200`。
+- Google Chrome 管理员页面真实显示 `pear分层 / Image-Layered / 每次 / 15`，关闭管理员目录 60 与权威任务 15 不一致的问题。
+- 坐标归一逻辑已在云端同一提交的专项测试通过；本轮不重复付费，因此只证明应用侧误报已部署，不能把历史 Pear 错误制品改写为远程成功。
+- 稳定刷新后出现 `0` error、`1` 条项目同步 `502` warning，作为独立可靠性观察保留。证据：`docs/testing/evidence/v588-stability-002-c79cd0fe-pricing-coordinate-cloud-2026-08-29.json`。

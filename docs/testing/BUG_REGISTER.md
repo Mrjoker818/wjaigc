@@ -3023,3 +3023,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 不变边界 | 没有降低 MAE、重复层、空层或越界阈值；本次紫色立方体制品在坐标归一后仍因 `MAE=0.7125`、重复率 `0.8621` 和人物部件图层名被拒绝，不能标记 Pear 远程成功。 |
 | 自动化回归 | 分层/计价聚焦 `7 files / 58 tests` 全通过；全仓 Vitest `572 files / 4163 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 与 ESLint 均退出 `0`，ESLint 保留 `961` 条历史 warning、无 error。 |
 | 当前状态 | **BUG-014 本地已修复、BUG-007 的应用坐标误报本地已修复；云端待验证。** BUG-015 仍开放；Pear 供应商返回不匹配素材、远程成功态、成功不退款账务、图层文档保存/刷新和 PSD 导出均未关闭。 |
+
+#### BUG-007/014 Coze 云端关闭增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 精确运行版本 | Coze `HEAD=origin/main=c79cd0fea3003d5c97f92957de577fcf41d89b7c`，tree `69d703a6329839bb5bd4b272ce505b2b7a70b931`；`origin/stable=52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 云端门禁 | 分层/保护专项 `8 files / 70 tests / 0 failed`；保护基线 `0` 未授权漂移、`0` 警告；TypeScript、构建版 Lint、12 GiB 生产构建和 `11/11` 静态资源通过。Build ID `wj8pRWQN7qQibcQoiHsXy`，5000 PID `4417`，`/`、`/simple-chat`、`/api/auth/me` 均为 `200`。 |
+| BUG-014 真实 UI | Google Chrome“用户1”复用现有标签，管理员“积分管理 -> 模型计费”真实显示 `pear分层 / Image-Layered / 每次 / 15`，与权威 `segment=15` 结算一致。 |
+| BUG-007 云端边界 | 云端专项已证明同宽高比源图归一、质量门禁与重建共用归一源图、不同宽高比拒绝拉伸；没有第二次触发 Pear 付费任务，因此只关闭应用侧坐标误报，不改写历史错误制品的远程失败结论。 |
+| 浏览器观察 | 稳定服务后的刷新完整加载画布、工作台与计费表；新时间边界 `0` error、`1` 条 `[Sync] syncToServer: server returned 502` warning，单独保留为项目同步可靠性观察，不归因于本次计费/PSD 修复。 |
+| 状态 | **BUG-014 云端关闭；BUG-007 的应用侧坐标误报云端关闭。** BUG-015、Pear 远程可编辑成功、成功不退款账务、图层文档持久化与 PSD 导出继续开放。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-c79cd0fe-pricing-coordinate-cloud-2026-08-29.json` 与同前缀计费页面 PNG。 |
