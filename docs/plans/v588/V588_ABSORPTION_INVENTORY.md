@@ -599,3 +599,16 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Google Chrome 真实图片入口证明 BUG-009 已关闭：单图项目先复验，随后在 7 图项目依次从 `3504 x 2336` 蓝色杯子切换到 `1254 x 1254` 紫色立方体；两次打开“编辑元素”都只显示“选择分层引擎 / 开始分层”，旧图层计数为 `0`。Console error/warning `0/0`，无原生弹窗，且没有供应商调用或积分变化。
 - 管理员只读任务接口确认数据库已有完成父任务，但刷新后的 UI 不会自动恢复父任务为当前面板状态；空面板关闭不能替代 BUG-008 完成态验收。管理员只读定价显示 Pear `Image-Layered` 和 Pear `gpt-image-2` 当前均为 `60` 积分/图。
 - **状态：BUG-009 云端关闭；BUG-008 继续未验证；V588-STABILITY-002 仍未整体吸收。** 下一步只关闭完成态面板显隐门禁，完成前不进入 `V588-ADMIN-004`，不重复 Stage 4。
+
+## 2026-08-29 V588-STABILITY-002 `805e695d` BUG-008 关闭检查点
+
+- Coze `HEAD=origin/main=805e695d9a621bf1b1f6505cd28e5818416c573b`，tree `2d1fdf737d2e201dc63e56af763a2d1f7af2d1c2`，Build ID `tRbCDehbN-Px9OoY0qHRH`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 现有 Google Chrome 标签真实执行零积分“可编辑图层”：`completed · 100%`，PSD 编辑器显示 `主体/背景` 两层；关闭元素面板后编辑器保持，关闭编辑器后重开元素面板仍保留完成状态。BUG-008 云端关闭。
+- 同轮新增 `V588-STABILITY-002-BUG-010`：重开后的完成态面板被画布媒体遮挡。Coze 全量测试另有 2 项域名环境断言失败，均保留为开放项。
+- **状态：BUG-008 已关闭；V588-STABILITY-002 仍未吸收。** 下一步先关闭 BUG-010 和 Coze 域名测试合同，再继续远程 Pear 成功、编辑/保存/导出与账务矩阵；仍不进入 `V588-ADMIN-004`。
+
+## 2026-08-29 V588-STABILITY-002 BUG-010 本地修复检查点
+
+- 已用失败测试确认元素拆解面板被挂在画布 `overflow-clip` 层叠上下文内，随后最小改为 `createPortal(..., document.body)`；任务、供应商、图层和账务代码未改。
+- 元素拆解专项 `46/46`，全量 `4157` 项通过、`122` 项 PostgreSQL 专项明确跳过、`0` 失败；TypeScript、Lint 与生产构建通过。
+- **状态：本地候选修复完成，尚未计为吸收。** 下一步推送精确 SHA，由 Coze 拉取后在既有 Google Chrome 标签完成无遮挡视觉回归，再处理域名测试合同和远程 Pear 矩阵；不进入 `V588-ADMIN-004`。

@@ -2885,3 +2885,33 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 不采用的伪证据 | 关闭未提交的空面板只能证明普通显隐，不能证明完成态任务对象仍在时面板可关闭，因此不计为 BUG-008 通过。 |
 | 当前成本 | 管理员只读定价接口显示 Pear `Image-Layered` 与 Pear `gpt-image-2` 当前均为 `60` 积分/图；此前 `15` 积分记录不再代表当前配置。 |
 | 状态 | **本地已修复 / 云端完成态仍未验证。** 在取得明确的 60 积分动作许可或可由真实历史任务无副作用恢复 UI 状态前，继续保留为未验证，不发起猜测性付费任务。 |
+
+#### BUG-008 Coze Google Chrome 关闭增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 精确版本 | Coze `HEAD=origin/main=805e695d9a621bf1b1f6505cd28e5818416c573b`，tree `2d1fdf737d2e201dc63e56af763a2d1f7af2d1c2`，Build ID `tRbCDehbN-Px9OoY0qHRH`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 真实回归 | 在既有 Google Chrome 标签选择 `800 x 800` 紫色立方体，执行“元素拆解 -> 可编辑图层”。本地零积分路径达到 `completed · 100%` 并打开 PSD 编辑器，显示 `主体`、`背景` 2 个图层。 |
+| 显隐与重开 | 关闭元素拆解面板后 PSD 编辑器保持；关闭 PSD 编辑器后重新打开元素拆解面板，完整 DOM 仍显示 `可编辑图层 / completed · 100%`。 |
+| 供应商与账务边界 | 本次没有创建真实 Pear 任务，没有扣积分；只关闭完成态面板显隐和任务对象保留，不扩大为 Pear 远程成功或账务通过。 |
+| 状态 | **BUG-008 已关闭。** 机器证据：`docs/testing/evidence/v588-stability-002-805e695d-bug-008-cloud-2026-08-29.json`。 |
+
+### V588-STABILITY-002-BUG-010：重开完成态元素拆解面板被画布媒体遮挡（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2：完成状态与任务数据仍存在，但面板主体被画布图片遮挡，影响阅读和再次操作。 |
+| 发现环境 | Coze `main@805e695d`，既有 Google Chrome 预览标签。 |
+| 稳定复现 | 完成可编辑图层任务，依次关闭元素拆解面板和 PSD 编辑器，再重新打开元素拆解；DOM 仍有完整面板和 `completed · 100%`，视觉截图却只显示窄条与进度条，画布媒体覆盖面板主体。 |
+| 当前判定 | **已复现 / 未修复。** 需先建立完成态重开层级回归，再最小调整浮层挂载或 stacking context；不得通过清空任务状态隐藏问题。 |
+| 证据 | 当前 Chrome 会话已完成视觉复现；结构化记录保存在 `docs/testing/evidence/v588-stability-002-805e695d-bug-008-cloud-2026-08-29.json`。本轮未成功导出本地 PNG，修复验收时必须补齐截图。 |
+
+#### BUG-010 本地修复增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 根因 | 元素拆解面板渲染在 `data-canvas-viewport` 的 `overflow-clip` 与画布层叠上下文内部；即使使用 `fixed z-[200]`，仍可能被画布媒体裁切或覆盖。 |
+| 最小修复 | 仅将元素拆解面板通过 React `createPortal(..., document.body)` 挂载到页面根层；未修改任务状态、供应商路由、图层解析、积分或退款逻辑。 |
+| 永久回归 | `src/__tests__/components/element-decomposition-ui.test.ts` 新增面板必须脱离画布裁剪上下文的结构契约；该文件 `10/10` 通过，元素拆解专项 `46/46` 通过。 |
+| 全量门禁 | `pnpm ts-check`、`pnpm lint:build`、`pnpm build` 通过；`pnpm test` 为 `572` 个文件通过、`4157` 项通过、`122` 项因缺少隔离 PostgreSQL 测试库明确跳过、`0` 失败。 |
+| 状态 | **本地已修复 / 云端视觉待验证。** 新提交部署后必须在既有 Google Chrome 标签重开完成态面板，补齐无遮挡截图、关闭行为与 Console/网络证据，方可最终关闭。 |

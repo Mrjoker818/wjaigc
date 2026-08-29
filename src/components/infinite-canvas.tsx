@@ -16614,7 +16614,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
             />
           )}
         {/* 元素拆解面板 — 独立 fixed 浮层，不依赖 toolbar 条件 */}
-        {showDisplayDecomposePanel && (
+        {showDisplayDecomposePanel && typeof document !== 'undefined' && createPortal(
           <div
             className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-none"
           >
@@ -16752,7 +16752,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 </div>
               )}
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
 
         {showAspectRecomposePanel && (

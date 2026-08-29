@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-08-29T09:49:19+08:00",
+  "environment": "Coze preview / Google Chrome",
+  "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "git": {
+    "head": "805e695d9a621bf1b1f6505cd28e5818416c573b",
+    "originMain": "805e695d9a621bf1b1f6505cd28e5818416c573b",
+    "tree": "2d1fdf737d2e201dc63e56af763a2d1f7af2d1c2",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "buildId": "tRbCDehbN-Px9OoY0qHRH",
+    "port5000Pid": 35053
+  },
+  "cloudGates": {
+    "elementDecompositionFocused": "45/45 passed",
+    "typecheck": "passed",
+    "lintBuild": "passed",
+    "fullTest": "570 passed / 2 failed / 22 skipped",
+    "fullTestFailureScope": "auth-login-configuration environment-domain assertions",
+    "build": "passed",
+    "root": 200,
+    "simpleChat": 200,
+    "authMe": 200,
+    "staticAssets": "11/11 passed"
+  },
+  "browserScenario": {
+    "sourceImage": "退款一致性测试：一个紫色立方体，纯白背景，产品摄影，无文字",
+    "sourceSize": "800 x 800",
+    "mode": "可编辑图层",
+    "supplierTaskCreated": false,
+    "paidCreditsUsed": 0,
+    "firstCompletion": "completed / 100%",
+    "editorLayers": ["主体", "背景"],
+    "closePanelKeepsEditor": true,
+    "closeEditorThenReopenPanelKeepsCompletion": true,
+    "reopenStatus": "可编辑图层 / completed / 100%"
+  },
+  "result": {
+    "bug008": "closed in cloud",
+    "newIssue": "completed-state element decomposition panel can render behind Canvas media after reopen",
+    "newIssueSeverity": "P2"
+  },
+  "screenshots": [],
+  "screenshotNote": "The Chrome session screenshot was visually inspected during the run, but no local artifact was exported; the DOM and machine-readable assertions are retained here."
+}

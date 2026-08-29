@@ -1751,3 +1751,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - `V588-STABILITY-002-BUG-009` 已移出未验证：Coze Google Chrome 已证明新图片“编辑元素”只进入干净初始态，证据见 `docs/testing/evidence/v588-stability-002-90231c70-bug-009-cloud-2026-08-29.json`。
 - `V588-STABILITY-002-BUG-008` 保留：必须使用真实 `completed` 的 `element-decompose-parent` 驱动前端状态，验证关闭后浮层隐藏、父任务仍保留、重新打开仍能查看状态；空面板关闭不算通过。
 - 当前配置成本为 Pear `Image-Layered=60`、Pear `gpt-image-2=60` 积分/图。历史 15 积分授权与当前定价不一致，因此本轮未发起新付费任务。
+
+## 2026-08-29 `805e695d` 未验证项更新
+
+- `V588-STABILITY-002-BUG-008` 已移出未验证：Google Chrome 完成态证明关闭、编辑器保持和重开状态保留均通过。
+- `V588-STABILITY-002-BUG-010` 新增为开放 P2：完成态面板重开后视觉上被画布媒体遮挡，需层级回归和最小修复。
+- Pear 远程 `completed/ready`、成功一次扣费、远程图层移动/保存/刷新和 PSD 导出仍为 `UNVERIFIED`；本次零积分本地两层结果不得替代这些证据。
+- Coze 全量测试的 2 项 `auth-login-configuration` 域名环境断言仍为未通过项；需统一测试环境域名合同后复验。
+
+## 2026-08-29 BUG-010 本地修复后的剩余证据
+
+- 本地代码和自动化门禁已通过；仍需部署新 SHA 后，在既有 Google Chrome 预览标签验证完成态元素拆解面板完整位于画布媒体之上。
+- 云端证据必须包含本地存在的 PNG 截图、面板关闭/重开状态、PSD 编辑器独立关闭行为、Console error/warning 与网络摘要。
+- 此视觉回归不应创建新的供应商任务或扣除积分；远程 Pear 与账务验证仍按独立未验证项处理。

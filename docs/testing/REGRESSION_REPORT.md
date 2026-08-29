@@ -2064,3 +2064,18 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Google Chrome 先在单图项目复验，再进入 7 图项目依次选择 `3504 x 2336` 蓝色杯子和 `1254 x 1254` 紫色立方体。两次打开“编辑元素”均只显示干净初始态，旧图层计数为 `0`；Console error/warning `0/0`，无原生弹窗。BUG-009 云端关闭。
 - 本次未调用供应商、未创建新任务、未扣积分。机器证据：`docs/testing/evidence/v588-stability-002-90231c70-bug-009-cloud-2026-08-29.json` 与同名前缀 PNG。
 - BUG-008 仍未关闭：验收必须由真实完成态父任务驱动；空面板关闭不计。当前 Pear 分层与 Pear GPT Image 2 定价均为 `60` 积分/图。
+
+## 2026-08-29 `805e695d` BUG-008 云端完成态回归
+
+- Coze 精确运行 `main@805e695d9a621bf1b1f6505cd28e5818416c573b`，tree `2d1fdf737d2e201dc63e56af763a2d1f7af2d1c2`，Build ID `tRbCDehbN-Px9OoY0qHRH`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
+- 云端专项 `45/45`、TypeScript、Lint、构建、三个健康端点和 `11/11` 静态资源通过。全量测试为 `570 passed / 2 failed / 22 skipped`；2 项失败属于 Coze 域名环境下的 `auth-login-configuration` 断言，未隐藏也未标为全量通过。
+- Google Chrome 真实执行零积分“可编辑图层”，PSD 编辑器显示 `主体/背景` 两层；关闭元素面板不关闭编辑器，关闭编辑器后重开元素面板仍显示 `completed · 100%`。
+- **回归判定：BUG-008 PASS。** 同轮新增 P2 BUG-010：完成态重开面板视觉上被画布媒体遮挡；数据未丢失，但 UI 不可接受，单独保持开放。
+- 机器证据：`docs/testing/evidence/v588-stability-002-805e695d-bug-008-cloud-2026-08-29.json`。本轮 Chrome 截图已用于视觉判断但未成功导出本地文件，BUG-010 修复验收必须补齐 PNG。
+
+## 2026-08-29 BUG-010 本地回归
+
+- 先以测试稳定复现元素拆解面板仍位于画布裁剪上下文，随后将面板最小改为 `createPortal(..., document.body)`。
+- `element-decomposition-ui`：`10/10`；元素拆解专项：`46/46`；全量 Vitest：`572` 个文件、`4157` 项通过、`122` 项 PostgreSQL 专项明确跳过、`0` 失败。
+- TypeScript、构建版 Lint、生产构建均通过；`git diff --check` 通过。
+- **本地判定：PASS。云端判定：PENDING。** 尚需新 SHA 部署后的 Google Chrome 无遮挡截图、关闭/重开与 Console/网络回归。

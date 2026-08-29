@@ -28,9 +28,20 @@ describe('dual-output element decomposition canvas wiring', () => {
   });
 
   it('keeps task controls in the panel without forcing a completed panel to stay open', () => {
-    expect(canvasSource).toContain('{showDisplayDecomposePanel && (');
+    expect(canvasSource).toContain("{showDisplayDecomposePanel && typeof document !== 'undefined' && createPortal(");
     expect(canvasSource).not.toContain('{(showDisplayDecomposePanel || elementDecomposeTask) && (');
     expect(canvasSource).toContain('{elementDecomposeTask && (');
+  });
+
+  it('portals the panel outside the clipped Canvas viewport stacking context', () => {
+    const panelStart = canvasSource.indexOf('/* 元素拆解面板 — 独立 fixed 浮层，不依赖 toolbar 条件 */');
+    const panelEnd = canvasSource.indexOf('{showAspectRecomposePanel && (', panelStart);
+    const panelBlock = canvasSource.slice(panelStart, panelEnd);
+
+    expect(panelStart).toBeGreaterThanOrEqual(0);
+    expect(panelEnd).toBeGreaterThan(panelStart);
+    expect(panelBlock).toContain("{showDisplayDecomposePanel && typeof document !== 'undefined' && createPortal(");
+    expect(panelBlock).toMatch(/<\/div>,\s*document\.body,\s*\)}/);
   });
 
   it('preserves the latest task when reopening the panel and resets it only for a new submission', () => {
